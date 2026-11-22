@@ -89,11 +89,8 @@ fn rig(k: u32, sinks: u64) -> Executor {
         let n = NodeKey(2 + s);
         ed.insert(n, "sink", Unforkable(Sink::new()));
         ed.spec_mut().connect_events(
-            EventInputPort { node: n, port: 0 },
-            EventEdge::Direct(EventOutputPort {
-                node: NodeKey(1),
-                port: 0,
-            }),
+            EventInputPort::new(n, 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
         );
     }
     ed.commit().expect("commits");

@@ -44,14 +44,8 @@ pub fn off(n: u8) -> Ump {
 /// Wires event output 0 of node `from` to event input 0 of node `to`.
 pub fn connect(ed: &mut Editor, from: u64, to: u64) {
     ed.spec_mut().connect_events(
-        EventInputPort {
-            node: NodeKey(to),
-            port: 0,
-        },
-        EventEdge::Direct(EventOutputPort {
-            node: NodeKey(from),
-            port: 0,
-        }),
+        EventInputPort::new(NodeKey(to), 0),
+        EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
     );
 }
 
@@ -74,10 +68,7 @@ pub fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
         .map(|(&(node, port), id)| {
             ed.open_event_tap(
                 EventTapId::of(id),
-                EventOutputPort {
-                    node: NodeKey(node),
-                    port,
-                },
+                EventOutputPort::new(NodeKey(node), port),
                 EventTapOptions::new(SINK_CAPACITY).align(TapAlign::Raw),
             )
             .expect("the source is in the graph")

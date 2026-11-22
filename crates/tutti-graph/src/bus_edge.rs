@@ -46,13 +46,9 @@ use crate::{Edge, EdgeId, InputPort, NodeKey, OutputPort, PortSink, PortSource, 
 /// [`Shape::buses_out`](crate::Shape::buses_out) (as a source).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeBus {
-    /// The node.
-    pub node: NodeKey,
-    /// Which of its buses on that side, in port order.
-    pub bus: u8,
-    /// Which band of a repeated bus ([`Bus::bands`](crate::Bus::bands)): 0
-    /// for every other bus.
-    pub band: u8,
+    pub(crate) node: NodeKey,
+    pub(crate) bus: u8,
+    pub(crate) band: u8,
 }
 
 impl NodeBus {
@@ -62,10 +58,29 @@ impl NodeBus {
         Self { node, bus, band: 0 }
     }
 
-    /// Band `band` of bus `bus` of `node`.
+    /// This bus at band `band` of a repeated bus.
     #[must_use]
-    pub const fn band(node: NodeKey, bus: u8, band: u8) -> Self {
-        Self { node, bus, band }
+    pub const fn with_band(self, band: u8) -> Self {
+        Self { band, ..self }
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// Which of its buses on that side, in port order.
+    #[must_use]
+    pub const fn bus(self) -> u8 {
+        self.bus
+    }
+
+    /// Which band of a repeated bus ([`Bus::bands`](crate::Bus::bands)): 0
+    /// for every other bus.
+    #[must_use]
+    pub const fn band(self) -> u8 {
+        self.band
     }
 
     /// The topology of one band of this bus in `buses`, and its first port:

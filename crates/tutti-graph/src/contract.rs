@@ -589,10 +589,7 @@ impl Row {
         }
 
         // Schedule the command now, when there is one: the plan is in.
-        let to = EventInputPort {
-            node: rig.node,
-            port: self.event_port(),
-        };
+        let to = EventInputPort::new(rig.node, self.event_port());
         match feed {
             Feed::AtFrame => {
                 rig.ed
@@ -1062,10 +1059,9 @@ impl Row {
             )))));
             g.connect(lat, 0, n, 0);
         }
-        let _ = g.spec_mut().connect_param(
-            ParamIn { node: n, param },
-            EventOutputPort { node: src, port: 0 },
-        );
+        let _ = g
+            .spec_mut()
+            .connect_param(ParamIn { node: n, param }, EventOutputPort::new(src, 0));
         g.connect_output(n, self.output as usize, 0);
         let (ed, exec) = g
             .build(Prepare::new(

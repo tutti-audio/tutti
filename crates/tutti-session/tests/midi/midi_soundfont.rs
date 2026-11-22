@@ -26,7 +26,7 @@ use tutti_fixtures::midi;
 use tutti_graph::{EventCapacity, NodeKey};
 use tutti_midi_runtime::MidiInputNode;
 use tutti_session::Stamp;
-use tutti_session::{EventInputPort, MidiRouteRule, Session};
+use tutti_session::{MidiRouteRule, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_ump::MidiChannel;
@@ -187,7 +187,7 @@ fn routed_level(channel: MidiChannel) -> f32 {
     let (inlet, mut device) = s.graph().open_event_inlet(EventCapacity::of(64));
     let input = s.graph().add(MidiInputNode::new());
     s.graph()
-        .connect(inlet.event_output(0), EventInputPort::new(input, 0))
+        .connect(inlet.event_output(0), input.event_input(0))
         .unwrap();
     let rule = MidiRouteRule::new().channel(channel).to(synth);
     s.midi()

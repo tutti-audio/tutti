@@ -1121,10 +1121,7 @@ mod tests {
     /// behind costs nothing).
     #[test]
     fn a_node_whose_mix_is_not_driven_keeps_the_plain_op() {
-        let from = EventOutputPort {
-            node: NodeKey(1),
-            port: 0,
-        };
+        let from = EventOutputPort::new(NodeKey(1), 0);
         let (cell, mut state) = at(&shape(0), 1.0);
         assert!(state.is_plain(), "never driven");
 
