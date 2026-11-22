@@ -90,7 +90,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         .clock(ExportClock::timeline(timeline))
         .latency(BounceLatency::Keep)
         .tail(BounceTail::None)
-        .stem_with(Stem::buffers(node.erase()));
+        .stem_with(Stem::new(node.erase()));
     let planes = match bounced(&mut session, bounce) {
         Ok(out) => match out.into_parts().1.pop() {
             Some(Produced::Buffers(rendered)) => rendered.into_planes(),

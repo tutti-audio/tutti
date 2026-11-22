@@ -317,8 +317,8 @@ pub use signal_windows::windows_from_signal;
 pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
-    Armed, InFlight, Punch, PunchError, Recorded, Rolling, Take, TakeEnd, TakeError, TakeEvent,
-    TakeFile, TakeId, TakePlacement, TakeTarget, Window,
+    Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
+    TakeEvent, TakeFile, TakeId, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};

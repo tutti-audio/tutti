@@ -572,7 +572,7 @@ fn a_stale_wanted_restart_does_not_replace_a_later_choice() {
     };
     // The host chooses X first (this device-free engine cannot open it, but
     // the choice is made).
-    let _ = live.restart(DeviceRestart::to(DeviceSelector::named("X")));
+    let _ = live.restart(DeviceRestart::new(DeviceSelector::named("X")));
     // The policy's own request, as the event carried it, is stale now.
     let [stale] = wanted
         .into_iter()

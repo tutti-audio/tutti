@@ -3,7 +3,7 @@
 //! commits the edits. Run (needs a sound card):
 //! `cargo run -p tutti --features device --example headless_engine`
 use tutti::graph::ForkByClone;
-use tutti::{Amplitude, Hz, Root, SessionBuilder, SessionEvent};
+use tutti::{Amplitude, Hz, Root, Session, SessionEvent};
 use tutti_nodes::testing::Osc;
 
 /// What `Session::update` found: faults and dropouts (a refused commit, a
@@ -15,7 +15,7 @@ fn report(events: Vec<SessionEvent>) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut live = SessionBuilder::default()
+    let mut live = Session::builder()
         .device(tutti::session::DeviceSelector::Default)
         .build()?;
     let tone = Osc::sine(Hz::new(440.0)).with_amplitude(Amplitude::new(0.2));
