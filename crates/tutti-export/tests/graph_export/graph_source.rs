@@ -189,7 +189,7 @@ fn convolved_at(ir: &[f32], n: usize) -> f64 {
 }
 
 /// Quad VBAP: a source at front-left and one at rear-left, each panned and
-/// summed (by fan-in) into a 4-wide master.
+/// summed (by fan-in) into a 4-wide main output.
 fn quad_vbap() -> GraphBuilder {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::QUAD);
     let sources: Vec<_> = [(45.0, 300.0), (135.0, 500.0)]

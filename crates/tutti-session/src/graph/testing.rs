@@ -148,7 +148,7 @@ impl<F: Float> Testing<'_, F> {
     /// When a node cannot be forked.
     pub fn fork_live(&self) -> Result<AudioSide<F>, tutti_graph::ForkError> {
         let (editor, exec) = self.graph.editor.fork(
-            tutti_graph::ForkTarget::Master,
+            tutti_graph::ForkTarget::MainOutput,
             tutti_graph::ForkMode::Live,
             *self.graph.editor.prepare(),
         )?;

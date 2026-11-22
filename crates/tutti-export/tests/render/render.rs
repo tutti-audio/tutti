@@ -1055,14 +1055,14 @@ fn an_unmeasurable_rate_fails_rather_than_writing_un_normalized_audio() {
     );
 }
 
-/// A master whose channel count is not one of 1/2/4/6/8/12 (3, 5, 7 or 9
+/// A main output whose channel count is not one of 1/2/4/6/8/12 (3, 5, 7 or 9
 /// wide) exports at that width: the width is runtime, and a caller passes
-/// `ChannelLayout::from(master_width)` straight through.
+/// `ChannelLayout::from(main_output_width)` straight through.
 ///
 /// Asserted through the file header and the samples, not the return value: "no
 /// error" would also pass if the export quietly wrote a stereo file.
 #[test]
-fn an_unnamed_master_width_exports_at_that_width() {
+fn an_unnamed_main_output_width_exports_at_that_width() {
     let d = tempfile::tempdir().unwrap();
 
     for width in [3u16, 5, 7, 9] {

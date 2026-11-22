@@ -277,7 +277,7 @@ pub struct Topology {
     /// same rules as [`edges`](Self::edges) (a sink is a sink).
     pub outputs: Vec<Vec<PortSource>>,
     /// The topology's own global input width — [`ChannelLayout::EMPTY`] for a
-    /// master graph, which has none.
+    /// graph with none.
     pub inputs: ChannelLayout,
     /// Copy-out points ("tap these sources"). A closed tap is absent: nothing
     /// is compiled for it. [`validate`](Self::validate) does not check a tap's
@@ -505,8 +505,8 @@ impl TapSpec {
     }
 }
 
-/// An empty graph with **no global inputs** — a master graph before anything is
-/// added to it.
+/// An empty graph with **no global inputs** — before anything is added
+/// to it.
 ///
 /// Hand-written: `ChannelLayout` has no `Default`, so the width is chosen here.
 /// With no global inputs, a stray `PortSource::Global` edge is rejected by

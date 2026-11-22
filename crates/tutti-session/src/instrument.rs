@@ -194,11 +194,11 @@ impl<N: ?Sized> InstrumentHandle<N> {
 
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// Adds `instrument` to the graph, makes it playable and wires its strip
-    /// to the master, so a note sent through its keys is heard. It holds no MPE
+    /// to the main output, so a note sent through its keys is heard. It holds no MPE
     /// zones: classic MPE reaches it already rewritten as per-note messages, by the
     /// session's transforms (`session.mpe()`).
     ///
-    /// A strip is a stereo pair, so a master of another width refuses the wire
+    /// A strip is a stereo pair, so a main output of another width refuses the wire
     /// ([`ConnectError::Width`](crate::ConnectError::Width)): add the instrument
     /// with [`add_instrument_unwired`](Self::add_instrument_unwired) and wire
     /// [`InstrumentHandle::out`] as the mix wants.

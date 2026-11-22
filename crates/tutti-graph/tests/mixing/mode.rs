@@ -1458,7 +1458,11 @@ fn a_fork_copies_the_mode_and_starts_steady() {
     assert_ne!(o[BLOCK - 1], input[BLOCK - 1], "the live graph is mid-fade");
 
     let (fed, mut fexec) = ed
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare(MAX_BLOCK))
+        .fork(
+            ForkTarget::MainOutput,
+            ForkMode::Offline,
+            prepare(MAX_BLOCK),
+        )
         .expect("forks");
     assert_eq!(fed.mode(key(1)), NodeMode::Bypassed);
     let mut f = vec![0.0f32; BLOCK];

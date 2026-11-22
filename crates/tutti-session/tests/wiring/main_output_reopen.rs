@@ -1,5 +1,5 @@
 //! A main output of another width opens again what reads the main output: a tap on it and
-//! the master meter are announced by `SessionEvent::MainOutputReaderReopened` with
+//! the main output meter are announced by `SessionEvent::MainOutputReaderReopened` with
 //! the new topology and claimed with `Session::take_reopened`, the old reader
 //! reads closed, and a reader that has the main output's width is left alone.
 //!
@@ -177,7 +177,7 @@ fn a_declaration_that_keeps_the_width_leaves_the_tap_alone() {
     assert_eq!(frames.len(), 4 * BLOCK * 2);
 }
 
-/// **A meter reopens with the new width**: the master meter a host took
+/// **A meter reopens with the new width**: the main output meter a host took
 /// arrives with the new topology, measuring one channel at 0.25 (the peak and,
 /// the source being constant, the rms); the old handle reads closed.
 #[test]
@@ -397,7 +397,7 @@ fn closing_a_tap_drops_the_reader_held_for_it() {
     assert!(drain(&mut old).1, "the superseded reader ends");
 }
 
-/// **Closing the master meter drops the reader held for it**: the claim is
+/// **Closing the main output meter drops the reader held for it**: the claim is
 /// refused, and the superseded handle reads closed.
 #[test]
 fn closing_the_main_output_meter_drops_the_reader_held_for_it() {

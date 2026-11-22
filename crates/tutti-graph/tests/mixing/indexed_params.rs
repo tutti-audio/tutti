@@ -351,7 +351,7 @@ fn a_fork_starts_from_each_indexs_value() {
     exec.apply_pending();
     assert!(controls.set(BAND1, -33.0));
     let (mut fork_ed, mut fork_exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(64))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
         .expect("forks");
     assert!(controls.set(BAND1, -1.0), "a write after the fork");
     assert!(controls.set(BAND0, -2.0));

@@ -426,9 +426,9 @@ pub struct Graph<F: Float = f32> {
     /// capacity), so [`Taps::reopen_event`] can open it
     /// again.
     event_taps: BTreeMap<EventTapId, (tutti_graph::EventTapSource, tutti_graph::EventTapOptions)>,
-    /// The master meter's reader until a host takes it.
+    /// The main output meter's reader until a host takes it.
     main_output_meter: Option<MeterReader>,
-    /// The master meter's id: the one meter that reads the main output.
+    /// The main output meter's id: the one meter that reads the main output.
     main_output_meter_id: MeterId,
     /// Each open tap on the main output ([`Taps::open_main_output`]) with its capacity and
     /// the width its reader has, so a main output of another width opens it again.
@@ -621,14 +621,14 @@ impl<F: Float> Graph<F> {
         let topology = &mut editor.spec_mut().topology;
         topology.inputs = inputs;
         topology.set_outputs(vec![PortSource::Zero; outputs]);
-        // Declared and on from the start: a host reads the master level
+        // Declared and on from the start: a host reads the main output level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
         let ids = Mint::new();
         let main_output_meter_id = MeterId::mint(&ids);
         let main_output_meter = editor
             .open_meter(main_output_meter_id, MeterSpec::Outputs)
-            .expect("a master meter names no source");
+            .expect("a main output meter names no source");
         main_output_meter.enable();
         Self {
             editor,
@@ -1353,14 +1353,14 @@ impl Graph {
 }
 
 impl<F: Float> Graph<F> {
-    /// The control-thread half of a copy of the master for an offline render
+    /// The control-thread half of a copy of the main output for an offline render
     /// at `rate`, sharing no state with this graph: `Editor::fork_gather`
     /// with `ForkMode::Offline`, prepared as a bounce is
     /// (`RenderGraph::prepare`). [`PendingExport::build`] makes the rest on a
     /// worker.
     ///
     /// The fork renders on the session's render pool unless `serial`, and
-    /// places the master's channels by `main_output`: the session's declared main output, the
+    /// places the main output's channels by `main_output`: the session's declared main output, the
     /// engine's order for the width, or the bounce's own topology.
     ///
     /// # Errors
@@ -1390,7 +1390,7 @@ impl<F: Float> Graph<F> {
         };
         PendingExport::gather(
             &self.editor,
-            tutti_graph::ForkTarget::Master,
+            tutti_graph::ForkTarget::MainOutput,
             rate,
             pool,
             main_output,
@@ -2325,7 +2325,7 @@ impl<F: Float> Graph<F> {
         self.editor.spec().topology.nodes.contains_key(&node) && !self.editor.is_leaving(node)
     }
 
-    /// Whether `node` is in what a bounce of the master forks: an output
+    /// Whether `node` is in what a bounce of the main output forks: an output
     /// reads it, or it feeds one that is read. A bounce's stem names such a
     /// node. A graph whose bus edges do not lower reaches none.
     #[cfg(feature = "export")]

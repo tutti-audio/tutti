@@ -35,7 +35,7 @@ mod support;
 use std::path::{Path, PathBuf};
 
 use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
-use tutti::session::Master;
+use tutti::session::MainOutputKind;
 use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
     SampleRate, Samples, Session, SessionEvent, Written,
@@ -95,14 +95,14 @@ fn load(
 }
 
 /// Plays `plugin` (restored from `state`, if any)
-/// `midi` into the master `master` names (a file or memory, which `M` says
+/// `midi` into the main output `main_output` names (a file or memory, which `M` says
 /// and the result's type follows).
-fn play<M: Master>(
+fn play<M: MainOutputKind>(
     main: tutti::plugin::MainThreadMarker,
     plugin: &Path,
     state: Option<Vec<u8>>,
     midi: &Path,
-    master: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
+    main_output: impl FnOnce(Bounce) -> Bounce<NodeKey, M>,
 ) -> Result<M::Result<f32>, Box<dyn std::error::Error>> {
     let mut s = Session::builder()
         .sample_rate(RATE)
@@ -130,11 +130,11 @@ fn play<M: Master>(
     // Everything else is derived: the clock is the project's tempo map from
     // beat 0, the latency is the plan's, the tail is the plugin's declared
     // one, and the file is as wide as the main output.
-    let job = s.bounce(master(
+    let job = s.bounce(main_output(
         Bounce::new().range(Range::Beats(Beat::new(0.0), end)),
     ))?; // the plugin hears Offline from here
     let bounced = s.apply(tutti_fixtures::block_on(job))?; // and Realtime from the next update
-    Ok(bounced.into_master())
+    Ok(bounced.into_main_output())
 }
 
 /// [`play`] into a 24-bit WAV at `out`.
@@ -146,7 +146,7 @@ fn play_to_file(
     out: &Path,
 ) -> Result<Written, Box<dyn std::error::Error>> {
     play(main, plugin, state, midi, |bounce| {
-        bounce.master(out, Format::Wav(Pcm::Int24))
+        bounce.main_output(out, Format::Wav(Pcm::Int24))
     })
 }
 
@@ -278,7 +278,7 @@ mod tests {
             &plugin,
             Some(state),
             &midi,
-            tutti::Bounce::master_buffers,
+            tutti::Bounce::main_output_buffers,
         )
         .expect("the example runs");
         let left: Vec<i32> = rendered.planes()[0].iter().map(|&s| s as i32).collect();

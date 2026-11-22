@@ -1420,7 +1420,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
 
     let (mut fed, mut fexec) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(1024))),
         )

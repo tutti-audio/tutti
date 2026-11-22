@@ -13,7 +13,7 @@ use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, V
 use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
 
 use crate::common::probe::ProbeUnit;
-use crate::mod_lanes::{frame, master, render, rig, settle};
+use crate::mod_lanes::{frame, main_output, render, rig, settle};
 
 const RATE: f64 = 48_000.0;
 
@@ -27,7 +27,7 @@ fn scene(
     depth: f64,
 ) -> (ParamRef, ModSourceId, ModRouteId) {
     let probe = s.graph().add(ProbeUnit::new(500.0));
-    master(s, &[probe.erase()]);
+    main_output(s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
@@ -433,7 +433,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
 fn an_automation_curve_set_lands_at_the_update_and_the_param_follows_it() {
     let (mut s, _) = rig(1);
     let probe = s.graph().add(ProbeUnit::new(300.0));
-    master(&mut s, &[probe.erase()]);
+    main_output(&mut s, &[probe.erase()]);
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let target = probe.cutoff().automation();
     assert_eq!(

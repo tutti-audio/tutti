@@ -366,7 +366,7 @@ fn an_offline_render_feeds_the_load_and_the_block_counts() {
     assert!(detached.blocks().is_none());
 }
 
-/// A session's master meter is an op in its plan, declared and on from the
+/// A session's main output meter is an op in its plan, declared and on from the
 /// build: [`Session::render`] feeds it as a device callback would, and so does
 /// a detached session's [`Session::render_frame`] (it had no meter while the
 /// engine fed it).
@@ -520,7 +520,7 @@ fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
 }
 
 /// A dropped meter reader is closed by the `Reclaim` phase: the meter's op
-/// leaves the plan at the commit after it, and the master meter's (held by
+/// leaves the plan at the commit after it, and the main output meter's (held by
 /// the session) stays.
 #[test]
 fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
@@ -542,7 +542,7 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
         .open(&[OutPort::new(a, 0)], TapAlign::Raw)
         .expect("the sources exist");
     let _ = s.update();
-    assert_eq!(meters(&s), 2, "the master's and the track's");
+    assert_eq!(meters(&s), 2, "the main output's and the track's");
     drop(track);
     let _ = s.update();
     assert_eq!(
@@ -551,7 +551,7 @@ fn a_dropped_meter_reader_leaves_the_plan_at_the_reclaim_phase() {
         "the reclaim of this update closed it; the plan is the last commit's"
     );
     let _ = s.update();
-    assert_eq!(meters(&s), 1, "the master's stays");
+    assert_eq!(meters(&s), 1, "the main output's stays");
 }
 
 /// Closing a meter takes its op out of the next plan now, with the reader
@@ -578,7 +578,7 @@ fn closing_a_meter_names_one_that_is_not_open() {
         .open(&[OutPort::new(a, 0)], TapAlign::Raw)
         .expect("the sources exist");
     let _ = s.update();
-    assert_eq!(meters(&s), 2, "the master's and the track's");
+    assert_eq!(meters(&s), 2, "the main output's and the track's");
 
     s.graph().meters().close(track.id()).unwrap();
     assert_eq!(

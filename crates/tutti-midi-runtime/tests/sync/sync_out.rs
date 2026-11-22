@@ -409,7 +409,7 @@ fn a_setting_lands_at_the_next_block() {
 #[test]
 fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     use tutti_graph::{ForkMode, ForkTarget};
-    // A fork keeps what reaches the master's output: the sink has one.
+    // A fork keeps what reaches the main output: the sink has one.
     let mut rig = EventRig::new(RATE, BLOCK, 1);
     let controls = rig
         .editor
@@ -425,7 +425,7 @@ fn a_fork_sends_what_the_live_node_sent_at_the_fork() {
     let prepare = *rig.editor.prepare();
     let (_fork, mut exec) = rig
         .editor
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
     exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);
@@ -738,7 +738,7 @@ fn a_fork_states_the_live_nodes_meter() {
     let prepare = *rig.editor.prepare();
     let (_fork, mut exec) = rig
         .editor
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     let mut out = vec![0.0f32; 512];
     exec.process(512, &rolling(Beat::new(0.0)), &[], &mut [&mut out[..]]);

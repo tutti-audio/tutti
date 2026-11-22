@@ -26,7 +26,7 @@ use crate::{EventTapPort, OutPort};
 pub enum MainOutputReader {
     /// A tap on the main output ([`Taps::open_main_output`]).
     Tap(TapId),
-    /// The master meter.
+    /// The main output meter.
     Meter(MeterId),
 }
 
@@ -43,7 +43,7 @@ pub enum MainOutputReader {
 pub enum Reopened<F: Float = f32> {
     /// A tap on the main output, as wide as the main output.
     Tap(TapReader<F>),
-    /// The master meter, measuring the main output as wide as it is. It is on.
+    /// The main output meter, measuring the main output as wide as it is. It is on.
     Meter(MeterReader),
 }
 
@@ -422,7 +422,7 @@ impl<F: Float> Meters<'_, F> {
 }
 
 impl<'g, F: Float> Meters<'g, F> {
-    /// Hands the master meter's reader over
+    /// Hands the main output meter's reader over
     /// ([`Session::take_main_output_meter`](crate::Session::take_main_output_meter)).
     pub(crate) fn take_main_output(&mut self) -> Option<MeterReader> {
         self.graph.main_output_meter.take()
@@ -432,14 +432,14 @@ impl<'g, F: Float> Meters<'g, F> {
 impl<F: Float> Graph<F> {
     /// Opens again each reader of the main output whose width is not the main output's now.
     /// A tap is reopened when its own width differs from the main output's, whatever
-    /// moved the main output; the master meter follows the main output's width as it widens,
+    /// moved the main output; the main output meter follows the main output's width as it widens,
     /// so it is reopened when `resized`, the declaration having changed the
     /// main output's width. No reader keeps a width the main output no longer has.
     ///
     /// The new reader takes the old one's id, so the commit that carries the
     /// change swaps the executor's writer for the new one at that block, and
     /// the old reader ends once that commit is applied
-    /// (`Editor::reopen_heard_tap`). The master meter held by the graph is
+    /// (`Editor::reopen_heard_tap`). The main output meter held by the graph is
     /// replaced in place; one a host took is held under its id to be claimed.
     pub(super) fn reopen_main_output_readers(&mut self, resized: bool) {
         let width = self.outputs();

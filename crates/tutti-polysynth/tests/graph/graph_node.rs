@@ -115,7 +115,7 @@ fn a_forked_graph_plays_the_clip() {
     let (live, _exec) = graph(1_000);
     let prepare = *live.prepare();
     let (fork, fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("a clip and a synth fork");
     let out = render(fork, fork_exec, 2_048);
     assert_eq!(onset(&out), Some(1_000 + lead()));

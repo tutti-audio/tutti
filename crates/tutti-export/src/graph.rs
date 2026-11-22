@@ -164,7 +164,7 @@ impl Setup {
 ///     &mut graph,
 ///     &job,
 ///     &FrozenClock,
-///     Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+///     Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
 ///     &mut Control::none(),
 /// )
 /// .expect("renders")

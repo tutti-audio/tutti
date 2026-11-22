@@ -94,7 +94,7 @@ fn stopped() -> TransportPosition {
 /// The offline fork of `ed`'s graph (what the export takes), applied.
 fn fork(ed: &Editor) -> Executor {
     let (_ed, mut exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare())
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare())
         .expect("forks");
     exec.apply_pending();
     exec

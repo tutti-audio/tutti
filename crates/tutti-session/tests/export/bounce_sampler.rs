@@ -39,16 +39,16 @@ fn constant(frames: usize, level: f32) -> Arc<Wave> {
     Arc::new(wave)
 }
 
-/// The master's frame count of a bounce of the first `seconds`, with the
+/// The main output's frame count of a bounce of the first `seconds`, with the
 /// tail the bounce picks without being asked.
 fn length_of(session: &mut DetachedSession, seconds: f64) -> usize {
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(RATE));
     bounced(session, bounce)
         .expect("the bounce renders")
-        .into_master()
+        .into_main_output()
         .into_planes()[0]
         .len()
 }
@@ -103,13 +103,13 @@ fn a_free_running_voice_rings_out_its_wave() {
         .unfaded();
     let cap = Seconds::new(0.5);
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::Graph { cap });
     let len = bounced(&mut session, bounce)
         .expect("renders")
-        .into_master()
+        .into_main_output()
         .into_planes()[0]
         .len();
     assert_eq!(len, second + (RATE * 0.5) as usize);
@@ -132,13 +132,13 @@ fn a_pool_built_with_its_voices_bounces_them() {
     session.graph().connect(pool, MainOutput).unwrap().unfaded();
 
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);
     let planes = bounced(&mut session, bounce)
         .expect("renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert_eq!(planes[0].len(), RATE as usize / 2);
     assert!(
@@ -168,7 +168,7 @@ fn a_pool_driven_through_its_handle_refuses_the_bounce_by_key() {
         .expect("queued");
 
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(SampleRate::of(RATE))
         .tail(BounceTail::None);

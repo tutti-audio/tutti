@@ -134,7 +134,7 @@ fn to_buffers(mut graph: RenderGraph, cfg: &Case) -> Rendered {
         &mut graph,
         &cfg.job(),
         &FrozenClock,
-        Output::master(cfg.buffer_target()),
+        Output::main_output(cfg.buffer_target()),
         &mut Control::none(),
     )
     .expect("renders")
@@ -154,7 +154,7 @@ fn to_file(
         &mut graph,
         &cfg.job(),
         &FrozenClock,
-        Output::master(cfg.file_target(path, normalize)),
+        Output::main_output(cfg.file_target(path, normalize)),
         &mut Control::none(),
     )
     .expect("writes")

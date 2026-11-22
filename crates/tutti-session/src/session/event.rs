@@ -185,7 +185,7 @@ pub enum SessionEvent {
     Peer(crate::PeerEvent),
     /// A reader of the main output was opened again, because the main output's width is no
     /// longer the one the reader has: a tap from
-    /// [`Taps::open_main_output`](crate::Taps::open_main_output), or the master meter
+    /// [`Taps::open_main_output`](crate::Taps::open_main_output), or the main output meter
     /// once a host took it ([`crate::Session::take_main_output_meter`]). `id` names the new
     /// reader, which the session holds until
     /// [`crate::Session::take_reopened`] claims it (an event left unread loses

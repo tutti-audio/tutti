@@ -46,7 +46,7 @@ fn rolling_state() -> (Transport, AudioCallbackState) {
 }
 
 /// [`rolling_state`], with a graph tap on both outputs when `tap` (the reader
-/// is returned, and must be held), and the master meter declared on the
+/// is returned, and must be held), and the main output meter declared on the
 /// outputs (off until enabled).
 fn rolling_state_with(
     tap: bool,

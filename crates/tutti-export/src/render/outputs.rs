@@ -248,7 +248,7 @@ fn open_lanes<F: FftFloat>(
         };
         let channels = FileChannels { layout, topology };
         let (fold, tap) = match feed {
-            crate::Feed::Master => (channels.fold_from(graph_outputs, main_output)?, None),
+            crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
                 let width = lanes.topology().width();
                 let fold = channels

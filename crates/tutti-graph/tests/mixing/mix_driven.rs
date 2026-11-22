@@ -700,7 +700,7 @@ fn the_mix_cell_is_the_one_writer() {
     knob.store(0.875, Ordering::Release);
     // A fork starts at the base the cell holds.
     let (fed, mut fexec) = ed
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare(BLOCK))
         .expect("forks");
     assert_eq!(fed.mix(key(1)), Mix::new(0.875));
     let o = block(&mut fexec, &input);

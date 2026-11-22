@@ -611,7 +611,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         loop_range: None,
     }));
     let config = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
             Seconds::new(0.0),
@@ -664,7 +664,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     let request = config.clock(ExportClock::timeline(timeline));
     let export = bounced(&mut s, request)
         .expect("the export renders")
-        .into_master();
+        .into_main_output();
     for (c, (l, e)) in live.iter().zip(export.planes()).enumerate() {
         assert!(e.len() >= total, "channel {c}: {} frames", e.len());
         let moving = l.iter().filter(|&&v| v != 0.0).collect::<Vec<_>>();

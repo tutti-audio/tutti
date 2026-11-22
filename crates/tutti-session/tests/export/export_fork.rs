@@ -33,7 +33,7 @@ use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_rt::LockExt;
 use tutti_rt::Param;
-use tutti_session::BufferMaster;
+use tutti_session::BufferMainOutput;
 use tutti_session::SessionNode;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InPort,
@@ -64,9 +64,9 @@ fn session_with_outputs(outputs: usize) -> DetachedSession {
 /// A bounce of the mix into memory for `seconds`: stereo at `rate`, on a
 /// frozen clock, trimming nothing and keeping no tail (what the figures it
 /// does not name come to is each test's to ask for).
-fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMaster> {
+fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
         .channels(ChannelLayout::STEREO)
@@ -75,23 +75,26 @@ fn bounce_at(seconds: f64, rate: f64) -> Bounce<NodeKey, BufferMaster> {
         .tail(tutti_session::BounceTail::None)
 }
 
-fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
+fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
     bounce_at(seconds, RATE)
 }
 
 /// The planes `bounce` renders, run on this thread.
-fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
+) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
-        .into_master()
+        .into_main_output()
         .into_planes()
 }
 
 /// The planes `bounce` renders for each of its stems, in memory, run on this
-/// thread: the master is rendered with them and not returned.
+/// thread: the main output is rendered with them and not returned.
 fn render_stems(
     session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMaster>,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
 ) -> Vec<Vec<Vec<f32>>> {
     let (_, stems) = bounced(session, bounce)
         .expect("the bounce renders")
@@ -113,7 +116,10 @@ fn stem_of(session: &mut DetachedSession, node: NodeKey, seconds: f64) -> Vec<Ve
 }
 
 /// What the session refuses `bounce` with, started and run on this thread.
-fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> BounceError {
+fn refused(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
+) -> BounceError {
     match bounced(session, bounce) {
         Err(e) => e,
         Ok(out) => panic!(
@@ -127,7 +133,7 @@ fn refused(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>)
 // What any export renders
 // ---------------------------------------------------------------------------
 
-/// A saw through a low-pass on channel 0, the raw saw on channel 1: a master
+/// A saw through a low-pass on channel 0, the raw saw on channel 1: a main output
 /// that differs from a node export of the filter on every channel, so the
 /// two cannot pass for each other. Returns the filter's key.
 fn chain(session: &mut DetachedSession) -> NodeKey {
@@ -154,7 +160,7 @@ fn chain(session: &mut DetachedSession) -> NodeKey {
 }
 
 /// [`chain`]'s units wired fresh, with `GraphBuilder`, and rendered in the
-/// export's own blocks for `seconds`: the master (the filter on channel 0,
+/// export's own blocks for `seconds`: the main output (the filter on channel 0,
 /// the saw on channel 1) and the filter alone (the graph's own two channels
 /// both the filter, of which a mono stem is the first). A fork starts reset,
 /// which is what a fresh graph is.
@@ -164,7 +170,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     };
     use tutti_graph::GraphBuilder;
     use tutti_timeline::FrozenClock;
-    let render = |master: bool| {
+    let render = |main_output: bool| {
         let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
         let osc = g.add(Osc::saw(Hz::new(110.0)));
         let (filter, _params) = g.add_with_controls(SvfFilterNode::from(
@@ -173,7 +179,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
                 .q(Q::new(1.0)),
         ));
         g.connect(osc, 0, filter, 0).connect_output(filter, 0, 0);
-        g.connect_output(if master { osc } else { filter }, 0, 1);
+        g.connect_output(if main_output { osc } else { filter }, 0, 1);
         let (editor, executor) = g
             .build(RenderGraph::prepare(SampleRate::of(RATE)))
             .expect("builds");
@@ -190,7 +196,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
             )
             .expect("a render"),
             &FrozenClock,
-            Output::master(BufferTarget::new(ChannelLayout::STEREO)),
+            Output::main_output(BufferTarget::new(ChannelLayout::STEREO)),
             &mut Control::none(),
         )
         .expect("renders")
@@ -202,7 +208,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     (render(true), render(false))
 }
 
-/// **An export renders its graph as wired fresh**, for the master and for
+/// **An export renders its graph as wired fresh**, for the main output and for
 /// one node's stem, on a graph whose live side has not run: bit for bit the same
 /// units in a `GraphBuilder` graph ([`chain_fresh`]).
 ///
@@ -214,13 +220,17 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
 fn exports_render_their_graph_as_wired_fresh() {
     let mut session = session();
     let filter = chain(&mut session);
-    let forked_master = render(&mut session, buffers(0.25));
+    let forked_main_output = render(&mut session, buffers(0.25));
     let forked_node = stem_of(&mut session, filter, 0.25);
-    let (fresh_master, fresh_node) = chain_fresh(0.25);
+    let (fresh_main_output, fresh_node) = chain_fresh(0.25);
     // The stem is the node's own width: one channel, not the main output's two.
     assert_eq!(forked_node.len(), 1, "the stem is the mono node's width");
     for (what, fresh, forked) in [
-        ("master", &fresh_master[..], &forked_master[..]),
+        (
+            "main_output",
+            &fresh_main_output[..],
+            &forked_main_output[..],
+        ),
         ("node", &fresh_node[..1], &forked_node[..]),
     ] {
         assert_eq!(fresh.len(), forked.len(), "{what}: width");
@@ -240,10 +250,10 @@ fn exports_render_their_graph_as_wired_fresh() {
             }
         }
     }
-    // And the stem is the node: the filter, which is the master's channel 0
+    // And the stem is the node: the filter, which is the main output's channel 0
     // and not its channel 1, the raw saw.
-    assert_eq!(forked_node[0], forked_master[0]);
-    assert_ne!(forked_master[1], forked_master[0]);
+    assert_eq!(forked_node[0], forked_main_output[0]);
+    assert_ne!(forked_main_output[1], forked_main_output[0]);
 }
 
 /// A source that steps from 0 to 1 at frame `LATE` and declares `LATE`
@@ -382,7 +392,7 @@ fn a_prepare_hook_that_swaps_the_editor_fails_the_export() {
     );
 }
 
-/// **An export of a graph with no outputs says so**, for the master and for
+/// **An export of a graph with no outputs says so**, for the main output and for
 /// a bounce that also names a stem — not that the stem's node is unheard.
 #[test]
 fn a_graph_with_no_outputs_says_so() {
@@ -470,7 +480,7 @@ fn graph_with_one_node_on() -> (DetachedSession, NodeKey) {
     (session, node.erase())
 }
 
-fn short() -> Bounce<NodeKey, BufferMaster> {
+fn short() -> Bounce<NodeKey, BufferMainOutput> {
     bounce_at(0.05, 44_100.0)
 }
 
@@ -552,9 +562,9 @@ fn the_prepare_hook_sees_the_callers_timeline() {
     );
 }
 
-/// **A master export's `prepare` hook sees the caller's timeline too.**
+/// **A main output export's `prepare` hook sees the caller's timeline too.**
 #[test]
-fn a_master_exports_prepare_hook_sees_the_callers_timeline() {
+fn a_main_output_exports_prepare_hook_sees_the_callers_timeline() {
     use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig};
 
     let (mut session, _node) = graph_with_one_node_on();
@@ -712,11 +722,11 @@ impl Node for Mic {
     fn reset(&mut self) {}
 }
 
-/// **A master export forks what the outputs hear**: an unforkable node no
+/// **A main output export forks what the outputs hear**: an unforkable node no
 /// output reaches (an unrouted mic) does not refuse it, and the render is
 /// the routed node's.
 #[test]
-fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
+fn an_unrouted_unforkable_node_does_not_refuse_a_main_output_export() {
     let mut session = session();
     let _mic = session.graph().add(tutti_graph::Unforkable(Mic));
     let dc = session.graph().add(ForkByClone(Const::mono(0.25)));
@@ -727,7 +737,7 @@ fn an_unrouted_unforkable_node_does_not_refuse_a_master_export() {
 
 /// **A node that cannot be forked refuses the export by its key**, which a
 /// host maps back to whatever it bound to the node; and so does a bounce
-/// whose stem names its sibling, since a stem renders in the master's fork,
+/// whose stem names its sibling, since a stem renders in the main output's fork,
 /// which holds every node an output hears.
 #[test]
 fn an_unforkable_node_refuses_the_export_by_key() {
@@ -978,7 +988,7 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
     let planes = session
         .apply(rendered)
         .expect("the export renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert!(built.load(Ordering::SeqCst), "the build ran");
     assert!(
@@ -1109,7 +1119,7 @@ fn a_main_thread_only_fork_builds_and_drops_on_the_main_thread() {
     let planes = session
         .apply(rendered)
         .expect("the export renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert!(
         planes[1].iter().all(|&s| s == 1.0),
@@ -1263,7 +1273,7 @@ impl Drop for EditWitness {
 
 /// A request for the mix whose `prepare` edit captures an
 /// [`EditWitness`] recording into `drops`.
-fn witnessed(drops: &Arc<Mutex<Vec<ThreadId>>>) -> Bounce<NodeKey, BufferMaster> {
+fn witnessed(drops: &Arc<Mutex<Vec<ThreadId>>>) -> Bounce<NodeKey, BufferMainOutput> {
     let witness = EditWitness(Arc::clone(drops));
     buffers(0.05).edit(Box::new(move |_prepared: PreparedGraph<'_>| {
         let _ = &witness;

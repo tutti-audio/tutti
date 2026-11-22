@@ -43,7 +43,7 @@ fn square(frames: usize) -> Wave {
 /// **A session built offline with no thread of tutti's bounces a clip of a constant to memory as
 /// the range's frames, each at the constant.** One second at the session's rate holds exactly the
 /// second's frames, and the clip's level is the
-/// master's level on every frame.
+/// main output's level on every frame.
 #[wasm_bindgen_test]
 async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() {
     let mut session = session();
@@ -52,14 +52,14 @@ async fn a_bounce_of_a_clip_to_memory_is_the_ranges_frames_at_the_clips_level() 
         .add(Clip::new(Arc::new(wave_of(vec![0.25; 2 * 48_000]))).expect("a placeable wave"));
     session.graph().connect(clip, MainOutput).unwrap().unfaded();
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
         .sample_rate(RATE);
     let rendered = session.bounce(bounce).expect("the bounce starts").await;
     let planes = session
         .apply(rendered)
         .expect("the bounce renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert_eq!(planes[0].len(), 48_000);
     assert!(

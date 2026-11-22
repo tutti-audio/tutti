@@ -12,7 +12,7 @@
 //! The frame width is a runtime value carried by
 //! `Interleaved`, never a `const CH`. A width in the type can only carry one that is a property of the
 //! *code*; the destination width here is a property of the caller's target, so
-//! any positive count renders — 3- and 5-wide masters included.
+//! any positive count renders — 3- and 5-wide main outputs included.
 //!
 //! A fold from the graph's real output width onto a target's
 //! ([`tutti_buffers::Fold`], built once, before the first block) downmixes a

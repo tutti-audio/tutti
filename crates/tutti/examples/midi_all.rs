@@ -110,7 +110,7 @@ fn run() -> Result<Outcome, Box<dyn std::error::Error>> {
     .ok_or("one lower zone")?;
     s.set(s.mpe().to(MpeMode::Zones(zone)))?;
 
-    // A synth as an instrument: its strip is wired to the master.
+    // A synth as an instrument: its strip is wired to the main output.
     let mut synth = s.add_instrument(PolySynth::new(SynthConfig::default()))?;
 
     // A tap on what the instrument's handle plays, read with `drain`.

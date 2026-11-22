@@ -996,7 +996,7 @@ fn every_block_reads_the_cell_at_its_start() {
 // A fork carries the entries.
 // ---------------------------------------------------------------------------
 
-/// A fork of the master sums as the live graph does: the entries of the edges
+/// A fork of the main output sums as the live graph does: the entries of the edges
 /// it keeps ride along, each lane starting at its base (a ramp in flight is
 /// not forked).
 #[test]
@@ -1024,7 +1024,7 @@ fn a_fork_carries_the_edge_gains() {
         .set_edge_gain(output_edge(2), EdgeGain::new(amp(-2.0)));
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert_eq!(got.len(), 1);
@@ -1064,7 +1064,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     knob.store(0.25, std::sync::atomic::Ordering::Release);
     assert_eq!(ed.edge_gain(output_edge(1)), Some(amp(0.25)), "the cell's");
     let (fork_ed, fork_exec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(BLOCK))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(BLOCK))
         .expect("forkable");
     let got = Renderer::new(fork_ed, fork_exec).render(2 * BLOCK);
     assert!(got[0].iter().all(|&x| x == 0.0 + 0.25 * 1.0));

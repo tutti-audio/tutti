@@ -26,7 +26,7 @@ use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, Playback, StreamHandle, StreamReader,
     StreamStart, Voice, VoiceNode, VoiceSource, VoiceWindow,
 };
-use tutti_session::BufferMaster;
+use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session,
     Stem,
@@ -38,9 +38,9 @@ const RATE: f64 = 48_000.0;
 
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
-fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
+fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
@@ -49,19 +49,22 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
+) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
-        .into_master()
+        .into_main_output()
         .into_planes()
 }
 
 /// The planes of `node`'s stem of `bounce`, in memory, rendered beside the
-/// master. A stem is a node the outputs hear, so the node is routed to them
-/// first: the master is then the node alone, and the stem its own output.
+/// main output. A stem is a node the outputs hear, so the node is routed to them
+/// first: the main output is then the node alone, and the stem its own output.
 fn render_stem(
     session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMaster>,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
     session.graph().connect(node, MainOutput).unwrap();
@@ -98,7 +101,7 @@ fn timeline(tempo: f64) -> Arc<OfflineTimeline> {
     }))
 }
 
-fn on(seconds: f64, clock: &Arc<OfflineTimeline>) -> Bounce<NodeKey, BufferMaster> {
+fn on(seconds: f64, clock: &Arc<OfflineTimeline>) -> Bounce<NodeKey, BufferMainOutput> {
     bounce_of(seconds, RATE, ExportClock::timeline(clock.clone()))
 }
 
@@ -242,10 +245,10 @@ fn node_of(source: VoiceSource<f32>) -> VoiceNode<f32> {
 }
 
 /// **A disk-streamed clip exports its file, from the frame its beat falls
-/// on**, as the master and as a node: placed at beat 3 of a 90 BPM render
+/// on**, as the main output and as a node: placed at beat 3 of a 90 BPM render
 /// (frame 96 000), silent before, then the file's own frame `k` on render
 /// frame `96 000 + k`, exactly, on both channels, and silent after its
-/// last. The master is a bare `DiskVoice`; the node a `VoiceNode` holding
+/// last. The main output is a bare `DiskVoice`; the node a `VoiceNode` holding
 /// one, which reads it a frame at a time. **And it is the same clip as a
 /// memory voice**: a node export of the file's frames in memory, placed
 /// the same, renders the same planes bit for bit.
@@ -278,9 +281,9 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
         (graph.add(wrapped).erase(), graph.add(memory).erase())
     };
 
-    let master = render(&mut session, on(3.0, &timeline(90.0)));
+    let main_output = render(&mut session, on(3.0, &timeline(90.0)));
     let disk = render_stem(&mut session, on(3.0, &timeline(90.0)), disk_node);
-    for (what, planes) in [("master", &master), ("node", &disk)] {
+    for (what, planes) in [("main_output", &main_output), ("node", &disk)] {
         assert!(
             planes[0][..AT].iter().all(|&s| s == 0.0),
             "{what}: sounded before beat 3"
@@ -378,7 +381,7 @@ fn a_disk_voice_at_another_rate_exports_resampled() {
 /// **Live disk playback is untouched while its voice exports.** The live
 /// graph renders on its own thread (the streamer stepped between its
 /// blocks, its clock moved after each), from before the export starts
-/// until after it reports, while a master export forks the same voice.
+/// until after it reports, while a main output export forks the same voice.
 /// The live voice plays the file's frames one after another the whole
 /// time: a render that popped its ring, or asked its streamer to seek,
 /// would show as a jump. The export plays the clip from its first frame.

@@ -44,7 +44,7 @@ pub enum RenderError {
     /// A width the render cannot use, which means zero and nothing else.
     ///
     /// The frame width is a runtime `ChannelLayout`, so any positive count
-    /// exports — including the 3- and 5-wide masters a fixed enumeration of
+    /// exports — including the 3- and 5-wide main outputs a fixed enumeration of
     /// widths could not express.
     #[error("Unsupported channel count: 0 (a render needs at least one channel)")]
     UnsupportedChannels,

@@ -75,16 +75,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut session = tone();
     let rendered = block_on(
         session
-            .bounce(first(1.0).master(&path, FORMAT))?
+            .bounce(first(1.0).main_output(&path, FORMAT))?
             .into_future(),
     );
-    let written = session.apply(rendered)?.into_master();
+    let written = session.apply(rendered)?.into_main_output();
     println!("wrote {} ({written:?})", path.display());
 
     // 2. The same project into memory, and a measurement of it.
     let mut session = tone();
-    let rendered = block_on(session.bounce(first(1.0).master_buffers())?.into_future());
-    let rendered = session.apply(rendered)?.into_master();
+    let rendered = block_on(
+        session
+            .bounce(first(1.0).main_output_buffers())?
+            .into_future(),
+    );
+    let rendered = session.apply(rendered)?.into_main_output();
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
@@ -110,7 +114,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .bounce(
                 first(0.5)
                     .channels(ChannelLayout::STEREO)
-                    .master(&mono_path, FORMAT),
+                    .main_output(&mono_path, FORMAT),
             )?
             .into_future(),
     );

@@ -142,7 +142,7 @@ fn the_inlet_refuses_to_fork() {
         })
     }));
     let err = editor
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect_err("a fork through the live inlet is refused");
     assert_eq!(err, ForkError::NotForkable { key: NodeKey(7) });
 }

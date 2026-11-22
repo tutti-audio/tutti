@@ -25,13 +25,13 @@ fn a_session_from_new_bounces_a_node_and_renders() {
     let planes = bounced(
         &mut session,
         Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.05)))
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None),
     )
     .expect("the bounce renders")
-    .into_master()
+    .into_main_output()
     .into_planes();
     assert_eq!(planes.len(), 2);
     assert!(planes.iter().all(|p| !p.is_empty()));

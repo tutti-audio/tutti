@@ -108,7 +108,7 @@ fn export(workers: Workers) -> (Rendered, usize) {
 }
 
 /// [`export`] with a stem for each of `stems` (indices into the branches, and
-/// `BRANCHES` for the sum): the master's planes first and then each stem's,
+/// `BRANCHES` for the sum): the main output's planes first and then each stem's,
 /// and the number of distinct threads that ran a branch.
 fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     let mut session = Session::builder()
@@ -135,7 +135,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     session.graph().connect(sum, MainOutput).unwrap();
 
     let mut bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.5)))
         .sample_rate(RATE)
@@ -144,8 +144,8 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
     for &stem in stems {
         bounce = bounce.stem_with(Stem::new(named[stem]));
     }
-    let (master, stems) = bounced(&mut session, bounce).unwrap().into_parts();
-    let targets = std::iter::once(master)
+    let (main_output, stems) = bounced(&mut session, bounce).unwrap().into_parts();
+    let targets = std::iter::once(main_output)
         .chain(stems.into_iter().map(|p| match p {
             Produced::Buffers(rendered) => rendered,
             other => panic!("the bounce finishes into memory, got {other:?}"),
@@ -189,9 +189,9 @@ fn a_parallel_export_is_bit_identical_to_the_serial_one() {
 }
 
 /// **The stems of an export on four workers are the serial export's, to the
-/// bit**, with the master: a stem is a tap on the pool's fork, read after each
+/// bit**, with the main output: a stem is a tap on the pool's fork, read after each
 /// block, so what a helper thread rendered must be what the caller alone does.
-/// Three stems (two branches and the sum) and the master, compared plane for
+/// Three stems (two branches and the sum) and the main output, compared plane for
 /// plane against the one-worker render, and the render did run on several
 /// threads.
 #[test]
@@ -221,7 +221,7 @@ fn the_stems_of_a_parallel_export_are_bit_identical_to_the_serial_ones() {
             );
         }
     }
-    // The sum's stem is the master's first channel, and a branch's stem is
+    // The sum's stem is the main output's first channel, and a branch's stem is
     // one channel the width of the branch.
     assert_eq!(serial[3].planes()[0], serial[0].planes()[0]);
     assert_eq!(serial[1].channels(), 1);

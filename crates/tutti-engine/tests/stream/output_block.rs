@@ -2,8 +2,8 @@
 //! zero-fill and the stream's width.
 //!
 //! The sample-format conversion is the driver's (`tutti-cpal` tests its
-//! matrix); the master meter's tests (the centre of a wide device, the analytic
-//! level, enabled against disabled) are in `tests/outputs/master_meter.rs`: the
+//! matrix); the main output meter's tests (the centre of a wide device, the analytic
+//! level, enabled against disabled) are in `tests/outputs/main_output_meter.rs`: the
 //! meter is an op in the graph's plan, not this callback's.
 
 use crate::fixtures::{SAMPLE_RATE, dc_state, fan, graph_engine, rolling_state};

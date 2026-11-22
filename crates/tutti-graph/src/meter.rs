@@ -2,7 +2,7 @@
 //!
 //! A meter is declared on the [`Topology`](crate::Topology) as "measure
 //! these sources" ([`MeterSpec`](crate::MeterSpec)): the global outputs
-//! for a master meter (`Outputs`, aligned: each lane is what its output
+//! for a main output meter (`Outputs`, aligned: each lane is what its output
 //! channel carries, at the output's time), any node's output ports for a track
 //! (`Ports { sources, align }`, as they leave their nodes or aligned to the
 //! output time). The compiler emits one [`Op::Meter`](crate::Op::Meter) per
