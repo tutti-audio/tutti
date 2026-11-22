@@ -1067,7 +1067,7 @@ fn an_authored_write_moves_the_base_under_modulation() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    g.spec_mut().set_param_range(at, ParamRange::new(0.0, 10.0));
+    g.param_range(at, ParamRange::new(0.0, 10.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,
@@ -1116,7 +1116,7 @@ fn a_crossed_range_is_survivable() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    g.spec_mut().set_param_range(at, ParamRange::new(4.0, 2.0));
+    g.param_range(at, ParamRange::new(4.0, 2.0));
     let mut r = g
         .renderer(Prepare::new(
             SampleRate::SR_48K,

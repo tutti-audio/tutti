@@ -48,8 +48,8 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, GraphInvalid, Io,
-    Law, Node, ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamSegment, Prepare,
+    CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node,
+    ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare,
     Reference, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -470,8 +470,8 @@ fn render(exec: &mut Executor, ed: &mut Editor, frames: usize, block: usize) -> 
 fn an_unconnected_param_reads_its_base_never_zero() {
     let (cutoff, q) = (Cell::new(440.0), Cell::new(0.7));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
-    ed.spec_mut()
-        .set_param_range(param(PROBE, UnitParam::Cutoff), ParamRange::new(0.0, 100.0));
+    ed.set_param_range(param(PROBE, UnitParam::Cutoff), ParamRange::new(0.0, 100.0))
+        .expect("a range");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 300, 64);
     assert!(out[0].iter().all(|&x| x == 440.0), "the base, unclamped");
@@ -494,8 +494,9 @@ fn an_event_sources_value_is_clamped_to_the_range() {
         let s = ed.spec_mut();
         s.connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
         s.connect_param(param(PROBE, UnitParam::Q), ev(1));
-        s.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5));
     }
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5))
+        .expect("a range");
     ed.commit().expect("commits");
     let out = render(&mut exec, &mut ed, 500, 64);
     #[allow(clippy::needless_range_loop, reason = "three outputs at one frame")]
@@ -687,12 +688,12 @@ fn removing_a_node_drops_its_param_edges() {
     ed.remove(NodeKey(1));
     let params = &ed.spec().params;
     assert_eq!(
-        params[&param(PROBE, UnitParam::Cutoff)].source,
+        params.get(&param(PROBE, UnitParam::Cutoff)).copied(),
         None,
         "the removed node's source is gone"
     );
     assert_eq!(
-        params[&param(PROBE, UnitParam::Q)].source,
+        params.get(&param(PROBE, UnitParam::Q)).copied(),
         Some(ev(2)),
         "the other stays"
     );
@@ -846,8 +847,8 @@ fn an_event_sources_held_value_survives_an_edit_to_its_node() {
         out[0].iter().find(|&&x| x != 500.0)
     );
 
-    ed.spec_mut()
-        .set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5));
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(-0.5, 0.5))
+        .expect("a range");
     ed.commit().expect("a range on Q");
     let out = render(&mut exec, &mut ed, 512, 64);
     assert!(out[0].iter().all(|&x| x == 500.0), "the port holds");
@@ -949,7 +950,7 @@ fn a_second_event_source_replaces_the_first() {
         !ed.spec_mut().disconnect_param(at, ev(2)),
         "node 2 no longer drives the port"
     );
-    assert_eq!(ed.spec().params[&at].source, Some(ev(3)));
+    assert_eq!(ed.spec().params.get(&at).copied(), Some(ev(3)));
     ed.commit().expect("one source");
     let out = render(&mut exec, &mut ed, declick() + 64, 64);
     assert_eq!(*out[0].last().expect("rendered"), 3.0, "the new source");
@@ -1160,8 +1161,8 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     }
 }
 
-/// A NaN bound is refused when the spec is validated, naming the port —
-/// never handed to the audio thread, where `f32::clamp` panics on it.
+/// A NaN bound is refused by `set_param_range`, naming the port and changing
+/// nothing — never handed to the audio thread, where `f32::clamp` panics on it.
 #[test]
 fn a_nan_range_is_refused() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -1173,18 +1174,16 @@ fn a_nan_range_is_refused() {
         ParamRange::new(f64::NAN, 1.0),
         ParamRange::new(0.0, f64::NAN),
     ] {
-        ed.spec_mut().set_param_range(at, range);
-        match ed.commit() {
-            Err(CommitError::Invalid(errs)) => assert!(
-                errs.iter()
-                    .any(|e| matches!(e, GraphInvalid::BadParamRange { at: a, .. } if *a == at)),
-                "{errs:?}"
+        assert!(
+            matches!(
+                ed.set_param_range(at, range),
+                Err(ParamRangeError::InvalidRange { at: a }) if a == at
             ),
-            other => panic!("a NaN range was not refused: {other:?}"),
-        }
+            "a NaN range was not refused"
+        );
     }
-    ed.spec_mut()
-        .set_param_range(at, ParamRange::new(f64::NEG_INFINITY, 1.0));
+    ed.set_param_range(at, ParamRange::new(f64::NEG_INFINITY, 1.0))
+        .expect("a range");
     ed.commit().expect("an infinite bound is no bound");
 }
 
@@ -1200,8 +1199,8 @@ fn removing_a_modulated_target_leaves_the_graph_committable() {
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: 3 }));
     ed.spec_mut()
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
-    ed.spec_mut()
-        .set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(0.0, 1.0));
+    ed.set_param_range(param(PROBE, UnitParam::Q), ParamRange::new(0.0, 1.0))
+        .expect("a range");
     ed.commit().expect("commits");
     let _ = render(&mut exec, &mut ed, 64, 64);
 
@@ -1856,9 +1855,7 @@ fn stepped(x: f32, (lo, hi): (f32, f32)) -> f32 {
 
 /// A range moved with `Editor::set_param_range` sends no commit — the plan
 /// the executor runs is the one it had — and clamps the very next block,
-/// every frame of it, while the block before it ran on the old range. A
-/// range edited through the spec instead lands with a commit that, the edit
-/// being only a range, sends nothing either.
+/// every frame of it, while the block before it ran on the old range.
 #[test]
 fn a_range_move_lands_on_the_next_block_without_a_commit() {
     const SEED: u64 = 23;
@@ -1867,8 +1864,8 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
     ed.insert(NodeKey(1), "sig", Unforkable(Signal { seed: SEED }));
     let at = param(PROBE, UnitParam::Cutoff);
     ed.spec_mut().connect_param(at, ev(1));
-    ed.spec_mut()
-        .set_param_range(at, ParamRange::new(-2.0, 2.0));
+    ed.set_param_range(at, ParamRange::new(-2.0, 2.0))
+        .expect("a range");
     ed.commit().expect("commits");
     let plan = Arc::clone(ed.base().expect("a plan"));
     let mut frame = 0u64;
@@ -1886,7 +1883,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
 
     for _ in 0..2 {
         let out = block(&mut exec, &mut ed, 64);
-        check(&out, &mut frame, (-2.0, 2.0), "the spec's range");
+        check(&out, &mut frame, (-2.0, 2.0), "the first range");
     }
     // The signal reaches past ±0.25 in a block, so the clamp shows.
     ed.set_param_range(at, ParamRange::new(-0.25, 0.25))
@@ -1899,7 +1896,7 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
         (-0.25, 0.25),
         "the next block, every frame",
     );
-    // Crossed bounds are ordered, as the spec's always were.
+    // Crossed bounds are ordered, as they always were.
     ed.set_param_range(at, ParamRange::new(0.5, -0.1))
         .expect("a range");
     let out = block(&mut exec, &mut ed, 64);
@@ -1909,43 +1906,14 @@ fn a_range_move_lands_on_the_next_block_without_a_commit() {
         "no plan was sent for a range move"
     );
     assert_eq!(ed.in_flight(), 0);
-    assert_eq!(
-        ed.spec().params[&at].range,
-        ParamRange::new(0.5, -0.1),
-        "the spec records the move"
-    );
     ed.commit().expect("a commit after a move");
     assert!(
         Arc::ptr_eq(&plan, ed.base().expect("a plan")),
-        "a commit after a move sends nothing: the spec already says it"
-    );
-
-    // Through the spec: the edit waits for the commit, which sends no plan.
-    ed.spec_mut()
-        .set_param_range(at, ParamRange::new(-0.75, 0.0));
-    let out = block(&mut exec, &mut ed, 64);
-    check(
-        &out,
-        &mut frame,
-        (-0.1, 0.5),
-        "a spec edit waits for its commit",
-    );
-    ed.commit().expect("a range-only commit");
-    assert!(
-        Arc::ptr_eq(&plan, ed.base().expect("a plan")),
-        "a range-only commit sends no plan"
-    );
-    assert_eq!(ed.in_flight(), 0, "nor anything else");
-    let out = block(&mut exec, &mut ed, 64);
-    check(
-        &out,
-        &mut frame,
-        (-0.75, 0.0),
-        "the commit's range, next block",
+        "a commit after a move sends nothing"
     );
 
     // A plan the range rode along with: a unit placed by a commit starts
-    // with the spec's range.
+    // with the editor's range.
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe::new(&cutoff, &q)));
     ed.set_param_range(at, ParamRange::new(-0.5, 0.5))
         .expect("a range");
@@ -2054,14 +2022,14 @@ fn a_bad_range_move_is_refused() {
     ] {
         assert!(matches!(
             ed.set_param_range(at, range),
-            Err(GraphInvalid::BadParamRange { at: a, .. }) if a == at
+            Err(ParamRangeError::InvalidRange { at: a }) if a == at
         ));
     }
     assert!(ed.spec().params.is_empty(), "nothing recorded");
     let gone = param(99, UnitParam::Cutoff);
     assert!(matches!(
         ed.set_param_range(gone, ParamRange::new(0.0, 1.0)),
-        Err(GraphInvalid::UnknownParamNode { missing, .. }) if missing == NodeKey(99)
+        Err(ParamRangeError::NoSuchNode { node }) if node == NodeKey(99)
     ));
     assert!(ed.spec().params.is_empty(), "nothing recorded");
     ed.commit().expect("the graph is untouched");
@@ -2427,6 +2395,9 @@ fn run_differential(g: &Gen) {
     ed.spec_mut().topology.set_outputs(outputs.clone());
 
     let width = outputs.len();
+    // The ranges the editor holds, which the reference is handed again after
+    // each graph it switches to.
+    let mut held: BTreeMap<ParamIn, ParamRange> = BTreeMap::new();
     for (step, &n) in g.blocks.iter().enumerate() {
         // This step's edits, to both.
         for e in &g.edges {
@@ -2443,7 +2414,9 @@ fn run_differential(g: &Gen) {
                 // port replaces whichever it had.
                 ed.spec_mut().connect_param(at, from);
                 if let Some((lo, hi)) = e.range {
-                    ed.spec_mut().set_param_range(at, ParamRange::new(lo, hi));
+                    ed.set_param_range(at, ParamRange::new(lo, hi))
+                        .expect("a range");
+                    held.insert(at, ParamRange::new(lo, hi));
                 }
             }
             if e.until == step && e.until > e.when {
@@ -2474,6 +2447,9 @@ fn run_differential(g: &Gen) {
         ed.commit().expect("the generated graph compiles");
         let valid = ed.spec().validate().expect("valid");
         reference.set_graph(&valid, std::mem::take(&mut fresh));
+        for (&at, &range) in &held {
+            reference.set_param_range(at, range);
+        }
         if let Some(plan) = ed.base() {
             for d in plan.delays() {
                 assert_eq!(reference.delay(d.key), d.len, "PDC of {:?}", d.key);
@@ -2489,6 +2465,7 @@ fn run_differential(g: &Gen) {
                 let r = r.map_or(ParamRange::UNBOUNDED, |(lo, hi)| ParamRange::new(lo, hi));
                 ed.set_param_range(at, r).expect("a range");
                 reference.set_param_range(at, r);
+                held.insert(at, r);
             }
         }
 
@@ -2540,7 +2517,7 @@ proptest! {
 /// `Editor::param_range_cell` hands out a read-only view of the very cell
 /// the port clamps to: `set_param_range` is read back through it on the
 /// spot, the next block clamps to it, and a later commit (which rewrites
-/// every cell from the spec) leaves it reading the same range. A param the
+/// every cell from the editor's values) leaves it reading the same range. A param the
 /// node does not declare, or a key no commit has placed, has none.
 ///
 /// The handle is read-only: a store into the cell alone would be undone by
@@ -2578,7 +2555,7 @@ fn a_range_cell_handle_is_the_ports_own() {
         .expect("a range");
     assert_eq!(cell.current(), ParamRange::new(-0.25, 0.25));
     // An unrelated commit (another node joins): the cell is rewritten from
-    // the spec, which holds the same range.
+    // the editor's values, which hold the same range.
     ed.insert(NodeKey(3), "other", Unforkable(Signal { seed: 1 }));
     ed.commit().expect("commits");
     assert_eq!(

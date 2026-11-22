@@ -1230,7 +1230,6 @@ impl Modulation {
                     .spec()
                     .params
                     .get(&at)
-                    .and_then(|m| m.source)
                     .is_some_and(|out| !own.contains(&(at, out.node())));
                 if other {
                     return Err(ReconcileError::PortTaken(target));
@@ -1293,7 +1292,6 @@ impl Modulation {
                     .spec()
                     .params
                     .get(&at)
-                    .and_then(|m| m.source)
                     .is_some_and(|out| !own.contains(&(at, out.node())));
                 if other {
                     return Err(ReconcileError::PortTaken(target));
@@ -1436,10 +1434,8 @@ impl Modulation {
                 }
             }
         }
-        for (at, m) in &spec.params {
-            if let Some(from) = m.source {
-                link(from.node(), at.node);
-            }
+        for (at, from) in &spec.params {
+            link(from.node(), at.node);
         }
         // A lane driving the gain of an edge into a port runs before the
         // node.

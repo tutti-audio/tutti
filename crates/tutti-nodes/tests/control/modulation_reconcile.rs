@@ -1570,7 +1570,10 @@ fn a_range_edit_after_a_steady_state_is_stored() {
         node: key(1),
         param: UnitParam::Cutoff.into(),
     };
-    assert_eq!(r.ed.spec().params[&at].range.max, 2_000.0);
+    assert_eq!(
+        r.ed.param_range_cell(at).expect("a cell").current().max,
+        2_000.0
+    );
 }
 
 /// An automation curve, compared by identity, is republished: a new curve
@@ -1603,7 +1606,7 @@ fn a_rebind_after_a_steady_state_moves_the_lane() {
     };
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     assert_eq!(
-        r.ed.spec().params[&at].source.map(|s| s.node()),
+        r.ed.spec().params.get(&at).map(|s| s.node()),
         Some(lane),
         "the lane drives the new node's port"
     );
@@ -1787,7 +1790,7 @@ fn a_native_target_on_another_node_without_a_knob_moves_the_lane() {
     };
     let lane = r.m.lane(cutoff_of(1)).expect("a lane").0;
     assert_eq!(
-        r.ed.spec().params[&at].source.map(|s| s.node()),
+        r.ed.spec().params.get(&at).map(|s| s.node()),
         Some(lane),
         "the lane drives the new node's port"
     );

@@ -11,8 +11,8 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
 use tutti_graph::{
-    Edge, EdgeGain, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort,
-    PortSink, PortSource, Renderer, TransportPosition, Unforkable,
+    Edge, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort, PortSink,
+    PortSource, Renderer, TransportPosition, Unforkable,
 };
 use tutti_units::{Amplitude, Latency, Samples};
 
@@ -542,9 +542,8 @@ fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_
         from: Edge::Direct(source(2)),
     };
     r.editor_mut()
-        .spec_mut()
-        .gains
-        .insert(weighted, EdgeGain::new(Amplitude::new(0.5)));
+        .set_edge_gain(weighted, Amplitude::new(0.5))
+        .expect("the edge exists");
     r.editor_mut().commit().expect("commits");
     step(&mut r, BLOCK);
     r.editor_mut().spec_mut().gains.remove(&weighted);

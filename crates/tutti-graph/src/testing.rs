@@ -845,11 +845,13 @@ impl<F: Float> Pair<F> {
             live.topology = graph.topology().clone();
             live.gains = graph.gains().clone();
         }
-        // The ranges a unit's cells start with (a node's mix range) are the
-        // editor's spec's.
         if !graph.params().is_empty() || !self.editor.spec_mut().params.is_empty() {
             self.editor.spec_mut().params = graph.params().clone();
         }
+        // A lane the graph no longer has takes its base and range with it.
+        self.editor
+            .values_mut()
+            .retain_edges(|id| graph.gains().contains_key(&id));
         // The node values name nodes of the graph switched to: a node that is
         // gone takes its values with it (`Editor::remove`'s rule), and
         // `set_mode` checks the node against the editor's spec.
@@ -894,6 +896,22 @@ impl<F: Float> Pair<F> {
     /// [`set_mode`](Self::set_mode) that moves a running unit.
     pub fn start_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
         self.editor.values_mut().set_mode(key, mode);
+    }
+
+    /// Sets the base a lane declared by the next switch starts at, in both.
+    pub fn start_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Amplitude) {
+        self.editor.values_mut().set_base(id, base);
+    }
+
+    /// Sets the range a lane declared by the next switch starts with, in both.
+    pub fn start_edge_gain_range(&mut self, id: crate::EdgeId, range: crate::ParamRange) {
+        self.editor.values_mut().set_gain_range(id, range);
+    }
+
+    /// Sets the range a port of a node placed by the next switch starts with,
+    /// in both.
+    pub fn start_param_range(&mut self, at: crate::ParamIn, range: crate::ParamRange) {
+        self.editor.values_mut().set_range(at, range);
     }
 
     /// As [`start_mode`](Self::start_mode), for the mix.

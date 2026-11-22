@@ -66,13 +66,11 @@ use crate::exec::{DEFAULT_EVENT_CAPACITY, Executor, Stager, channels};
 use crate::fork::{ForkHealth, ForkSource};
 use crate::gain::EdgeFade;
 use crate::meter::MeterWriter;
-use crate::mode::NodeMix;
 use crate::node::Prepare;
-use crate::node_values::NodeValues;
-use crate::param::{ParamIn, ParamRange};
 use crate::plan::{Delta, Plan};
 use crate::spec::{EventInputPort, GraphSpec, ValidGraph};
 use crate::tap::TapWriter;
+use crate::values::GraphValues;
 use crate::{EventTapId, MeterId, NodeKey, TapId};
 use tutti_buffers::Float;
 
@@ -256,10 +254,11 @@ pub struct Editor<F: Float = f32> {
     /// [`set_edge_gain`](Self::set_edge_gain), [`set_mode`](Self::set_mode)
     /// ...) at once.
     cells: LiveCells,
-    /// Each node's mode and mix: what a unit placed by a commit starts in, and
-    /// what a fork starts every unit in. Never in the spec, whose commits they
-    /// do not move.
-    values: NodeValues,
+    /// Each node's mode and mix, each port's range, and each gain lane's base
+    /// and range: what a unit placed by a commit starts in, and what a fork
+    /// starts every unit in. Never in the spec, whose commits they do not
+    /// move.
+    values: GraphValues,
     /// [`revision`](Self::revision): moved by every call that can change
     /// what a reader of the editor sees.
     revision: u64,
@@ -287,6 +286,8 @@ pub struct Editor<F: Float = f32> {
 struct Fading {
     /// The old main output's spec and shapes.
     was: lifecycle::Committed,
+    /// The base of each gain lane of `was`'s spec when the crossfade began.
+    bases: BTreeMap<EdgeId, Amplitude>,
     /// The main output generation that fades in.
     main_output: crate::MainOutputId,
     /// The bank the plans carry.
@@ -389,7 +390,7 @@ impl<F: Float> Editor<F> {
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
-            values: NodeValues::default(),
+            values: GraphValues::default(),
             revision: 0,
             stager,
             main_output_fade: None,
@@ -520,16 +521,16 @@ impl<F: Float> Editor<F> {
         &mut self.spec
     }
 
-    /// The node values: each node's mode and mix.
-    #[cfg(feature = "testing")]
-    pub(crate) fn values(&self) -> &NodeValues {
+    /// The values: each node's mode and mix, each port's range, and each gain
+    /// lane's base and range.
+    pub(crate) fn values(&self) -> &GraphValues {
         &self.values
     }
 
-    /// The node values, for a caller that builds the editor whole (a fork) or
+    /// The values, for a caller that builds the editor whole (a fork) or
     /// follows another graph's nodes (the test harness). Moves the
     /// [`revision`](Self::revision).
-    pub(crate) fn values_mut(&mut self) -> &mut NodeValues {
+    pub(crate) fn values_mut(&mut self) -> &mut GraphValues {
         self.touch();
         &mut self.values
     }
@@ -819,23 +820,6 @@ impl<F: Float> Editor<F> {
 /// The weighted lanes a lowering made, by edge: the fold's weight and the fade
 /// the lane runs.
 type BusLanes = BTreeMap<EdgeId, (Amplitude, EdgeFade)>;
-
-/// Param port `at`'s range as `spec` holds it: unbounded without an entry.
-fn range_of(spec: &GraphSpec, at: ParamIn) -> ParamRange {
-    spec.params
-        .get(&at)
-        .map_or(ParamRange::UNBOUNDED, |m| m.range)
-}
-
-/// Node `key`'s mix range as `spec` holds it: the whole blend without an entry.
-fn mix_range_of(spec: &GraphSpec, key: NodeKey) -> ParamRange {
-    spec.params
-        .get(&ParamIn {
-            node: key,
-            param: NodeMix::ADDR,
-        })
-        .map_or(NodeMix::DEFAULT_RANGE, |m| m.range)
-}
 
 /// The crossfades `delta` starts: one per fade that is not a plain swap.
 /// Each is built into the commit and comes back once on the fade-return

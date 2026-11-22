@@ -72,6 +72,32 @@ struct Desc {
     /// the seeds' other choices (and the coverage the generators are held
     /// to) where they were.
     fan: Rng,
+    /// The base of each gain lane: the editor's, not the spec's.
+    bases: BTreeMap<EdgeId, Amplitude>,
+    /// The range of each gain lane.
+    gain_ranges: BTreeMap<EdgeId, tutti_graph::ParamRange>,
+    /// The range of each node's mix port.
+    port_ranges: BTreeMap<tutti_graph::ParamIn, tutti_graph::ParamRange>,
+}
+
+impl Desc {
+    /// Starts `pair`'s lanes and mix ports at the values this description
+    /// holds, for the entries and nodes the spec has.
+    fn start<F: tutti_buffers::Float>(&self, pair: &mut Pair<F>) {
+        for id in self.spec.gains.keys() {
+            if let Some(&base) = self.bases.get(id) {
+                pair.start_edge_gain(*id, base);
+            }
+            if let Some(&range) = self.gain_ranges.get(id) {
+                pair.start_edge_gain_range(*id, range);
+            }
+        }
+        for (&at, &range) in &self.port_ranges {
+            if self.spec.topology.nodes.contains_key(&at.node) {
+                pair.start_param_range(at, range);
+            }
+        }
+    }
 }
 
 fn random_kind(rng: &mut Rng) -> Kind {
@@ -319,6 +345,9 @@ fn random_graph(seed: u64) -> Desc {
         used: BTreeSet::new(),
         recent: Vec::new(),
         fan: Rng::new(seed ^ 0xFA41_1A5E),
+        bases: BTreeMap::new(),
+        gain_ranges: BTreeMap::new(),
+        port_ranges: BTreeMap::new(),
         spec: GraphSpec::new(Topology {
             inputs: ChannelLayout::from_count(1 + u16::try_from(rng.below(3)).expect("below 3")),
             ..Topology::default()
@@ -2265,8 +2294,8 @@ fn weigh(desc: &mut Desc, rng: &mut Rng) {
     for id in ids {
         if rng.chance(33) && !desc.spec.gains.contains_key(&id) {
             let w = WEIGHTS[rng.below(WEIGHTS.len() as u64) as usize];
-            desc.spec
-                .set_edge_gain(id, EdgeGain::new(Amplitude::new(w)));
+            desc.spec.set_edge_gain(id, EdgeGain::default());
+            desc.bases.insert(id, Amplitude::new(w));
         }
     }
 }
@@ -2290,6 +2319,7 @@ proptest! {
             let mut desc = random_graph(seed);
             weigh(&mut desc, &mut gains);
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 900);
             let half = blocks.len() / 2;
@@ -2299,6 +2329,7 @@ proptest! {
                     let mut edited = mutate(&desc, &mut rng);
                     prune_gains(&mut edited);
                     weigh(&mut edited, &mut gains);
+                    edited.start(&mut pair);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2307,7 +2338,7 @@ proptest! {
                 {
                     let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
-                    desc.spec.gains.get_mut(&id).expect("picked").base = w;
+                    desc.bases.insert(id, w);
                 }
                 let input = input_signal(frame, n);
                 let (a, b) = pair.block(n, &input);
@@ -2341,6 +2372,7 @@ proptest! {
             if workers > 1 {
                 pair.exec.set_pool(Some(common::test_pool(workers)));
             }
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let mut frame = 0u64;
             for &n in &schedule(which, seed, 900) {
@@ -2349,7 +2381,7 @@ proptest! {
                 {
                     let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
-                    desc.spec.gains.get_mut(&id).expect("picked").base = w;
+                    desc.bases.insert(id, w);
                 }
                 if draws.chance(20)
                     && let Some((key, mix)) = pick_mix(&desc, &mut draws)
@@ -2379,8 +2411,8 @@ fn the_generator_draws_weighted_lanes() {
             continue;
         }
         with_gains += 1;
-        negative += usize::from(desc.spec.gains.values().any(|g| g.base.get() < 0.0));
-        zero += usize::from(desc.spec.gains.values().any(|g| g.base.get() == 0.0));
+        negative += usize::from(desc.bases.values().any(|b| b.get() < 0.0));
+        zero += usize::from(desc.bases.values().any(|b| b.get() == 0.0));
         let valid = desc.spec.validate().expect("valid");
         let shapes: BTreeMap<NodeKey, tutti_graph::Shape> = desc
             .kinds
@@ -2459,7 +2491,8 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
             )
         });
         let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
-        g.range = tutti_graph::ParamRange::new(min, max);
+        desc.gain_ranges
+            .insert(id, tutti_graph::ParamRange::new(min, max));
     }
 }
 
@@ -2484,6 +2517,7 @@ proptest! {
             weigh(&mut desc, &mut gains);
             drive(&mut desc, &mut lanes);
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 900);
             let half = blocks.len() / 2;
@@ -2494,6 +2528,7 @@ proptest! {
                     prune_gains(&mut edited);
                     weigh(&mut edited, &mut gains);
                     drive(&mut edited, &mut lanes);
+                    edited.start(&mut pair);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2504,14 +2539,14 @@ proptest! {
                     let (min, max) = LANE_RANGES[lanes.below(LANE_RANGES.len() as u64) as usize];
                     let range = tutti_graph::ParamRange::new(min, max);
                     pair.set_edge_gain_range(id, range);
-                    desc.spec.gains.get_mut(&id).expect("picked").range = range;
+                    desc.gain_ranges.insert(id, range);
                 }
                 if lanes.chance(30)
                     && let Some(id) = lanes.pick(&ids)
                 {
                     let w = Amplitude::new(WEIGHTS[lanes.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
-                    desc.spec.gains.get_mut(&id).expect("picked").base = w;
+                    desc.bases.insert(id, w);
                 }
                 let input = input_signal(frame, n);
                 let (a, b) = pair.block(n, &input);
@@ -2598,6 +2633,7 @@ proptest! {
             let mut modes = Rng::new(seed ^ 0x40DE_5EED);
             let mut desc = random_graph(seed);
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 1400);
             let half = blocks.len() / 2;
@@ -2605,6 +2641,7 @@ proptest! {
             for (i, &n) in blocks.iter().enumerate() {
                 if i == half {
                     let edited = mutate(&desc, &mut rng);
+                    edited.start(&mut pair);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2638,6 +2675,7 @@ proptest! {
                 }
             }
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 1400);
             let mut frame = 0u64;
@@ -2696,6 +2734,7 @@ proptest! {
             let mut draws = Rng::new(seed ^ 0x31D5_0F17);
             let mut desc = random_graph(seed);
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 1400);
             let half = blocks.len() / 2;
@@ -2703,6 +2742,7 @@ proptest! {
             for (i, &n) in blocks.iter().enumerate() {
                 if i == half {
                     let edited = mutate(&desc, &mut rng);
+                    edited.start(&mut pair);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2768,13 +2808,13 @@ fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
                 0,
             );
             desc.spec.connect_param(at, from);
-        } else if let Some(m) = desc.spec.params.get_mut(&at) {
-            m.source = None;
+        } else {
+            desc.spec.params.remove(&at);
         }
         if rng.chance(50) {
             let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
-            desc.spec
-                .set_param_range(at, tutti_graph::ParamRange::new(min, max));
+            desc.port_ranges
+                .insert(at, tutti_graph::ParamRange::new(min, max));
         }
     }
 }
@@ -2808,6 +2848,7 @@ proptest! {
             let mut desc = random_graph(seed);
             drive_mixes(&mut desc, &mut lanes);
             let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+            desc.start(&mut pair);
             pair.switch(&desc.spec.validate().expect("generated graphs are valid"), &desc.kinds);
             let blocks = schedule(which, seed, 1400);
             let half = blocks.len() / 2;
@@ -2817,6 +2858,7 @@ proptest! {
                     let mut edited = mutate(&desc, &mut rng);
                     prune_mix_lanes(&mut edited);
                     drive_mixes(&mut edited, &mut lanes);
+                    edited.start(&mut pair);
                     pair.switch(&edited.spec.validate().expect("valid"), &edited.kinds);
                     desc = edited;
                 }
@@ -2831,7 +2873,7 @@ proptest! {
                     let (min, max) = LANE_RANGES[draws.below(LANE_RANGES.len() as u64) as usize];
                     let range = tutti_graph::ParamRange::new(min, max);
                     pair.set_mix_range(key, range);
-                    desc.spec.set_param_range(mix_port(key), range);
+                    desc.port_ranges.insert(mix_port(key), range);
                 }
                 if draws.chance(8)
                     && let Some((key, mode)) = pick_mode(&desc, &mut draws)
@@ -2857,7 +2899,7 @@ fn the_generator_draws_driven_mixes() {
         let mut lanes = Rng::new(seed ^ 0x6D12_17E5);
         let mut desc = random_graph(seed);
         drive_mixes(&mut desc, &mut lanes);
-        if desc.spec.params.values().all(|m| m.source.is_none()) {
+        if desc.spec.params.is_empty() {
             continue;
         }
         let valid = desc.spec.validate().expect("valid");

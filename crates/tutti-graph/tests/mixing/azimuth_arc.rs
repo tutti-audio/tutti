@@ -11,8 +11,8 @@
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::testing as common;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventOutputPort, Executor, FadeLaw, GraphInvalid, Io, Law, Node,
-    NodeKey, ParamEvent, ParamIn, ParamInput, ParamRange, ParamSegment, Prepare, Shape, Status,
+    Cx, Editor, EventOutputPort, Executor, FadeLaw, Io, Law, Node, NodeKey, ParamEvent, ParamIn,
+    ParamInput, ParamRange, ParamRangeError, ParamSegment, Prepare, Shape, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
@@ -109,7 +109,7 @@ fn graph(
         s.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0));
     }
     for &(p, r) in ranges {
-        s.set_param_range(at(p), r);
+        ed.set_param_range(at(p), r).expect("a range");
     }
     (ed, exec)
 }
@@ -245,33 +245,23 @@ fn the_port_holds_a_bearing_to_an_arc_across_180() {
 }
 
 /// Crossed bounds on a circular param read the opposite arc once ordered, so
-/// they are refused; the same on a line is ordered as ever, and `arc` is the
-/// way to bound a bearing.
+/// the editor refuses them and keeps the range it had; the same on a line is
+/// ordered as ever, and `arc` is the way to bound a bearing.
 #[test]
 fn a_crossed_range_on_a_circular_param_is_refused() {
     let (mut ed, _exec) = graph(Vec::new(), &[]);
     let crossed = ParamRange::new(170.0, -170.0);
-    ed.spec_mut()
-        .set_param_range(at(UnitParam::Azimuth), crossed);
-    match ed.commit() {
-        Err(CommitError::Invalid(errs)) => assert!(
-            errs.iter()
-                .any(|e| matches!(e, GraphInvalid::BadParamRange { at: a, .. }
-                if *a == at(UnitParam::Azimuth))),
-            "{errs:?}"
-        ),
-        other => panic!("a crossed arc was not refused: {other:?}"),
-    }
     assert!(matches!(
         ed.set_param_range(at(UnitParam::Azimuth), crossed),
-        Err(GraphInvalid::BadParamRange { .. })
+        Err(ParamRangeError::InvalidRange { at: a }) if a == at(UnitParam::Azimuth)
     ));
-    ed.spec_mut().set_param_range(
+    ed.set_param_range(
         at(UnitParam::Azimuth),
         ParamRange::arc(Azimuth::new(180.0), ArcDegrees::new(10.0)),
-    );
-    ed.spec_mut()
-        .set_param_range(at(UnitParam::Elevation), crossed);
+    )
+    .expect("an arc");
+    ed.set_param_range(at(UnitParam::Elevation), crossed)
+        .expect("a line's crossed bounds");
     ed.commit()
         .expect("an arc, and a line's crossed bounds, commit");
 }

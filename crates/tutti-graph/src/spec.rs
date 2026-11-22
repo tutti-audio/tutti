@@ -25,7 +25,7 @@ use tutti_buffers::BusTopology;
 use tutti_units::Samples;
 
 use crate::node::Resolution;
-use crate::param::{ParamIn, ParamMod, ParamRange};
+use crate::param::ParamIn;
 
 /// An event **input** port of a node.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -174,17 +174,18 @@ pub struct GraphSpec {
     /// [`require_resolution`](Self::require_resolution).
     pub required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
     /// Driven params, keyed on the param port (see
-    /// [`connect_param`](Self::connect_param)): each one's range and event
-    /// source. A port with no entry, or an entry with no source, reads its
-    /// base.
-    pub params: BTreeMap<ParamIn, ParamMod>,
+    /// [`connect_param`](Self::connect_param)): each one's event source. A
+    /// port with no entry reads its base. A port's range is a value the editor
+    /// holds ([`Editor::set_param_range`](crate::Editor::set_param_range)).
+    pub params: BTreeMap<ParamIn, EventOutputPort>,
     /// Edge gains: an entry makes the edge a
     /// **weighted lane** of its sink's sum. An edge with no entry is plain.
     ///
     /// The entry is structural: adding or removing one recompiles, because a
     /// one-edge sink with an entry needs an `Op::Sum` of one addend where a
-    /// plain one aliases. Changing an entry's `base` or `range` does not
-    /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain)). An entry
+    /// plain one aliases. Changing the lane's base or range does not
+    /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain)): they are
+    /// values the editor holds. An entry
     /// whose edge does not exist is refused by [`validate`](Self::validate);
     /// [`disconnect`](Self::disconnect) removes the edge's entry with it.
     pub gains: BTreeMap<EdgeId, EdgeGain>,
@@ -278,11 +279,10 @@ impl GraphSpec {
     /// [`connect_param`](Self::connect_param) drives a param port: the
     /// source **replaces** the base from its first event on (ramps and
     /// segments addressed to [`EdgeGain::ADDR`]), the value is clamped to
-    /// the entry's `range`, a source that changes (or goes) crossfades over
+    /// the lane's range, a source that changes (or goes) crossfades over
     /// [`DECLICK`](crate::DECLICK), an undriven lane reads its
     /// base, and a lane's first block starts at its value. The rules are the
-    /// param port's, stated once in [`param`](crate::ParamMod)'s docs and on
-    /// [`connect_param`](Self::connect_param). The step is the sum's own, so
+    /// param port's, stated once on [`connect_param`](Self::connect_param). The step is the sum's own, so
     /// the lane's values have no slot of their own.
     ///
     /// **PDC.** The source is aligned to the edge's sink: to the sink node's
@@ -290,8 +290,9 @@ impl GraphSpec {
     /// main output channel, to the output time (a later source raises
     /// that). The delay is keyed [`DelayKey::EdgeGain`](crate::DelayKey::EdgeGain).
     ///
-    /// An edge without an entry gets one (base unity, the default range): the
-    /// edge becomes a weighted lane, which is structural. Returns the source
+    /// An edge without an entry gets one (it reads the editor's base and
+    /// range, unity and the default until set): the edge becomes a weighted
+    /// lane, which is structural. Returns the source
     /// it replaced. The edge must exist ([`validate`](Self::validate) refuses
     /// [`GraphInvalid::GainWithoutEdge`]), `from`'s node must be in the graph
     /// ([`GraphInvalid::UnknownGainNode`]), and `from`'s port must be an
@@ -305,8 +306,8 @@ impl GraphSpec {
     }
 
     /// Stops driving edge `id`'s gain from `from`. Returns whether `from`
-    /// was its source. The edge keeps its entry (its base and range, and so
-    /// its place in the sum); with no source it reads its base.
+    /// was its source. The edge keeps its entry (and so its place in the
+    /// sum); with no source it reads its base.
     pub fn disconnect_edge_gain(&mut self, id: EdgeId, from: EventOutputPort) -> bool {
         let Some(g) = self.gains.get_mut(&id) else {
             return false;
@@ -440,8 +441,8 @@ impl GraphSpec {
     /// The port must be one its node declares
     /// ([`Shape::params`](crate::Shape::params)), or `compile` refuses it
     /// ([`CompileError::UnknownParam`](crate::CompileError::UnknownParam)).
-    /// Until a range is set ([`set_param_range`](Self::set_param_range)) the
-    /// value is not clamped.
+    /// Until a range is set ([`Editor::set_param_range`](crate::Editor::set_param_range))
+    /// the value is not clamped.
     ///
     /// # How a driven param is computed
     ///
@@ -509,46 +510,27 @@ impl GraphSpec {
     ///   [`Mix`](tutti_units::Mix), which no node declares: the same rules
     ///   (one source, replaces the base, the declick, PDC), with the mix cell
     ///   (`Editor::set_mix`) as the base and the value clamped to `0..=1`
-    ///   whatever range [`set_param_range`](Self::set_param_range) is given.
+    ///   whatever range [`Editor::set_param_range`](crate::Editor::set_param_range)
+    ///   is given.
     pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> Option<EventOutputPort> {
-        self.params.entry(at).or_default().source.replace(from)
+        self.params.insert(at, from)
     }
 
     /// Stops driving param port `at` from `from`. Returns whether `from`
     /// was its source. The port keeps its range; with no source it reads its
     /// base.
     pub fn disconnect_param(&mut self, at: ParamIn, from: EventOutputPort) -> bool {
-        let Some(m) = self.params.get_mut(&at) else {
-            return false;
-        };
-        if m.source == Some(from) {
-            m.source = None;
+        if self.params.get(&at) == Some(&from) {
+            self.params.remove(&at);
             true
         } else {
             false
         }
     }
 
-    /// Clamps param port `at`'s driven value to `range` — the param's own
-    /// range, so no source drives it past what the node accepts. A NaN bound is refused by [`validate`](Self::validate)
-    /// ([`GraphInvalid::BadParamRange`]).
-    ///
-    /// A range is a control, not plan: the plan carries none, and a commit
-    /// whose only change is a range compiles and sends nothing (it writes
-    /// the range to the running unit, which clamps to it from its next
-    /// block). It does not restart the port's source, and never rewrites
-    /// its base. [`Editor::set_param_range`](crate::Editor::set_param_range)
-    /// does the same without waiting for a commit.
-    pub fn set_param_range(&mut self, at: ParamIn, range: ParamRange) {
-        self.params.entry(at).or_default().range = range;
-    }
-
     /// Whether `self` and `other` compile to the same plan, by value: equal
-    /// but for param ranges (controls, see
-    /// [`set_param_range`](Self::set_param_range)), with a param entry that
-    /// has no source the same as none (as [`validate`](Self::validate)
-    /// treats it).
-    pub(crate) fn same_but_ranges(&self, other: &Self) -> bool {
+    /// but for the declick fades of gain entries, which are controls.
+    pub(crate) fn same_plan(&self, other: &Self) -> bool {
         // Destructured, so a field added later is compared or named here.
         let Self {
             topology,
@@ -562,11 +544,6 @@ impl GraphSpec {
             main_output_id,
             main_output_sources,
         } = self;
-        fn wired(
-            p: &BTreeMap<ParamIn, ParamMod>,
-        ) -> impl Iterator<Item = (&ParamIn, EventOutputPort)> {
-            p.iter().filter_map(|(at, m)| Some((at, m.source?)))
-        }
         *topology == other.topology
             && *events == other.events
             && *bus_edges == other.bus_edges
@@ -575,9 +552,8 @@ impl GraphSpec {
             && *main_output_sources == other.main_output_sources
             && *generations == other.generations
             && *required_resolution == other.required_resolution
-            && wired(params).eq(wired(&other.params))
-            // An entry and its source are structural, its base and range
-            // are not.
+            && *params == other.params
+            // An entry and its source are structural, its fade is not.
             && gains
                 .iter()
                 .map(|(id, g)| (id, g.source))
@@ -637,22 +613,16 @@ impl GraphSpec {
                 errs.push(GraphInvalid::UnknownGeneration { node: key });
             }
         }
-        for (&at, m) in &self.params {
-            for node in std::iter::once(at.node).chain(m.source.map(|s| s.node)) {
+        for (&at, from) in &self.params {
+            for node in [at.node, from.node] {
                 if !nodes.contains_key(&node) {
                     errs.push(GraphInvalid::UnknownParamNode { at, missing: node });
                 }
-            }
-            if m.range.min.is_nan() || m.range.max.is_nan() || !m.range.fits(at.param.param) {
-                errs.push(GraphInvalid::BadParamRange { at, range: m.range });
             }
         }
         for (&id, gain) in &self.gains {
             if !self.has_edge(id) {
                 errs.push(GraphInvalid::GainWithoutEdge { id });
-            }
-            if !gain.is_sound() {
-                errs.push(GraphInvalid::BadEdgeGain { id, gain: *gain });
             }
             if let Some(from) = gain.source
                 && !nodes.contains_key(&from.node)
@@ -682,12 +652,7 @@ impl GraphSpec {
                 events: self.events.clone(),
                 generations: self.generations.clone(),
                 required_resolution: self.required_resolution.clone(),
-                params: self
-                    .params
-                    .iter()
-                    .filter(|(_, m)| m.source.is_some())
-                    .map(|(&at, &m)| (at, m))
-                    .collect(),
+                params: self.params.clone(),
                 gains: self.gains.clone(),
                 main_output_bank: None,
             }),
@@ -739,18 +704,6 @@ pub enum GraphInvalid {
         /// The key that is not there.
         missing: NodeKey,
     },
-    /// A param port's range has crossed bounds on a circular param (an arc
-    /// is written `ParamRange::arc`; ordering `170..-170` would read the
-    /// opposite arc), or a NaN bound. Refused here rather than
-    /// ordered where it is applied: a NaN bound clamps every value to NaN or
-    /// to the other bound, and `f32::clamp` panics on it — on the audio
-    /// thread. An infinite bound is fine (no clamp on that side).
-    BadParamRange {
-        /// The param port.
-        at: ParamIn,
-        /// Its range.
-        range: ParamRange,
-    },
     /// A gain entry names an edge that is not in the graph: a stale entry,
     /// which would otherwise weight nothing, or weight a later edge that
     /// reuses the key. [`GraphSpec::disconnect`] removes the entry with the
@@ -758,16 +711,6 @@ pub enum GraphInvalid {
     GainWithoutEdge {
         /// The edge the entry names.
         id: EdgeId,
-    },
-    /// An edge gain whose base is not finite, or whose range has a NaN
-    /// bound: refused here rather than multiplied into a signal on the audio
-    /// thread (`f32::clamp` panics on a NaN bound, and an infinite weight
-    /// turns a silent addend into NaN).
-    BadEdgeGain {
-        /// The edge.
-        id: EdgeId,
-        /// The entry.
-        gain: EdgeGain,
     },
     /// An edge gain is driven from an event output of a node that is not in
     /// the topology.
@@ -781,13 +724,6 @@ pub enum GraphInvalid {
     /// declared buses, which `validate` (it sees no shapes) cannot read:
     /// [`GraphSpec::lowered`] first, and validate its `spec`.
     BusEdgesUnlowered,
-    /// A gain is set on a lane a bus edge produced: its weight is the
-    /// fold's, not the author's
-    /// ([`Editor::set_edge_gain`](crate::Editor::set_edge_gain)).
-    GainOnBusLane {
-        /// The lane.
-        id: EdgeId,
-    },
 }
 
 /// A [`GraphSpec`] that passed [`validate`](GraphSpec::validate).
@@ -797,7 +733,7 @@ pub struct ValidGraph {
     events: BTreeMap<EventInputPort, Vec<EventEdge>>,
     generations: BTreeMap<NodeKey, u32>,
     required_resolution: BTreeMap<(EventInputPort, EventOutputPort), Resolution>,
-    params: BTreeMap<ParamIn, ParamMod>,
+    params: BTreeMap<ParamIn, EventOutputPort>,
     gains: BTreeMap<EdgeId, EdgeGain>,
     main_output_bank: Option<crate::MainOutputBank>,
 }
@@ -840,8 +776,8 @@ impl ValidGraph {
         &self.required_resolution
     }
 
-    /// The checked driven params: only ports with a source.
-    pub fn params(&self) -> &BTreeMap<ParamIn, ParamMod> {
+    /// The checked driven params: each port's source.
+    pub fn params(&self) -> &BTreeMap<ParamIn, EventOutputPort> {
         &self.params
     }
 
@@ -923,7 +859,7 @@ impl LatencyGraph for ValidGraph {
 /// non-audio sources, as [`LatencyGraph::other_sources`].
 fn driving_nodes<'a>(
     events: &'a BTreeMap<EventInputPort, Vec<EventEdge>>,
-    params: &'a BTreeMap<ParamIn, ParamMod>,
+    params: &'a BTreeMap<ParamIn, EventOutputPort>,
     gains: &'a BTreeMap<EdgeId, EdgeGain>,
     node: NodeKey,
 ) -> impl Iterator<Item = NodeKey> + 'a {
@@ -941,7 +877,7 @@ fn driving_nodes<'a>(
     let param_sources = params
         .iter()
         .filter(move |(at, _)| at.node == node)
-        .filter_map(|(_, m)| m.source.map(|s| s.node));
+        .map(|(_, from)| from.node);
     // The lane that drives the gain of an edge into one of the node's ports
     // is aligned to the node's arrival, as a param's source is.
     let gain_sources = gains
