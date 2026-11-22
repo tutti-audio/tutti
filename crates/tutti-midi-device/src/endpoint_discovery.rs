@@ -28,8 +28,8 @@ use tutti_platform::Instant;
 
 use bitflags::bitflags;
 use tutti_ump::{
-    BlockFilter, BlockSelect, DiscoveryFilter, Field, Message, Protocol, Stream, StreamConfig,
-    StreamTextAssembler, Ump,
+    BlockFilter, BlockSelect, DiscoveryFilter, Field, FunctionBlockSet, Message, Protocol, Stream,
+    StreamConfig, StreamTextAssembler, Ump,
 };
 
 use crate::deadline::Retry;
@@ -100,11 +100,11 @@ bitflags! {
 enum Step {
     Discover(Heard),
     Request(StreamConfig),
-    /// Bit `n` of each: block `n`'s Info, and its Name, have arrived. `infos`
+    /// The blocks whose Info has arrived, and whose Name has. `infos`
     /// is when the last Info came, which starts the [`NAME_GRACE`].
     Blocks {
-        info: u32,
-        name: u32,
+        info: FunctionBlockSet,
+        name: FunctionBlockSet,
         infos: Option<Instant>,
     },
     Done(DiscoveryEnding),
@@ -303,8 +303,8 @@ impl EndpointDiscovery {
             return self.end(DiscoveryEnding::Negotiated);
         }
         self.step = Step::Blocks {
-            info: 0,
-            name: 0,
+            info: FunctionBlockSet::EMPTY,
+            name: FunctionBlockSet::EMPTY,
             infos: None,
         };
         self.send_step(now)
@@ -312,8 +312,8 @@ impl EndpointDiscovery {
 
     fn blocks(
         &mut self,
-        mut info: u32,
-        mut name: u32,
+        mut info: FunctionBlockSet,
+        mut name: FunctionBlockSet,
         mut infos: Option<Instant>,
         stream: Stream,
         now: Instant,
@@ -321,7 +321,7 @@ impl EndpointDiscovery {
         match stream {
             Stream::FunctionBlockInfo(wire) => {
                 if let Some(block) = self.endpoint.read_block(&wire) {
-                    info |= 1 << block.id().get();
+                    info.insert(block.id());
                     self.endpoint.insert_block(block);
                 }
             }
@@ -338,7 +338,7 @@ impl EndpointDiscovery {
                     )
                 {
                     *slot = Some(name_text);
-                    name |= 1 << block.get();
+                    name.insert(block);
                 }
             }
             Stream::StreamConfigurationNotification(config) => {
@@ -346,16 +346,12 @@ impl EndpointDiscovery {
             }
             _ => {}
         }
-        let every = if self.endpoint.declared_blocks.get() >= 32 {
-            u32::MAX
-        } else {
-            (1u32 << self.endpoint.declared_blocks.get()) - 1
-        };
-        if info & every == every && infos.is_none() {
+        let declared = self.endpoint.declared_blocks;
+        if info.covers(declared) && infos.is_none() {
             infos = Some(now);
         }
         self.step = Step::Blocks { info, name, infos };
-        if info & every == every && name & every == every {
+        if info.covers(declared) && name.covers(declared) {
             self.end(DiscoveryEnding::Negotiated)
         } else {
             DiscoveryAction::Wait
