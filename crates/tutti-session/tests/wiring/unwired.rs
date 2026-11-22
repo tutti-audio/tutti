@@ -18,7 +18,7 @@ use tutti_session::{
     BusInputPort, BusWire, ChannelEdge, EventEdge, Feeder, Inlet, InputPort, MainOutput,
     OutputPort, Replacement, Session, SessionEvent,
 };
-use tutti_units::{Amplitude, Samples};
+use tutti_units::{Gain, Samples};
 
 const BLOCK: usize = 64;
 /// The sources' levels, and the gain of the wire that survives.
@@ -129,7 +129,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     // with it (the edge is held already, so only its gain is set).
     g.connect(kept.source(), kept.sink())
         .unwrap()
-        .gain(Amplitude::new(f64::from(GAIN)))
+        .gain(Gain::new(f64::from(GAIN)))
         .unwrap();
     let events = s.update();
     assert!(!refused(&events));
@@ -180,7 +180,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
         .expect("a lane");
     assert_eq!(
         s.get(gain).unwrap(),
-        Amplitude::new(f64::from(GAIN)),
+        Gain::new(f64::from(GAIN)),
         "the surviving edge keeps its gain"
     );
     assert!(

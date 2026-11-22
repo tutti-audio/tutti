@@ -349,7 +349,7 @@ fn lane_to_probe(
 ) {
     ed.insert(NodeKey(probe), "probe", ForkByClone(Probe));
     ed.spec_mut().topology.outputs.push(vec![out(probe, 0)]);
-    ed.set_param_range(cutoff(probe), ParamRange::new(0.0, 1.0))
+    ed.set_param_range(cutoff(probe), ParamRange::of(0.0, 1.0))
         .expect("a probe");
     ed.commit().expect("commits");
     let input = InputLayer {

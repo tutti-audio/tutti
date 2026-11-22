@@ -173,7 +173,7 @@ fn a_lane_drives_the_master_volume_around_its_cell() {
         driven_synth,
         Some(Drive {
             param: UnitParam::Volume,
-            range: ParamRange::new(0.0, 1.0),
+            range: ParamRange::of(0.0, 1.0),
             depth: 0.25,
         }),
     );
@@ -201,7 +201,7 @@ fn a_lane_drives_the_unison_spread() {
         synth(true, 10.0),
         Some(Drive {
             param: UnitParam::StereoSpread,
-            range: ParamRange::new(0.0, 1.0),
+            range: ParamRange::of(0.0, 1.0),
             depth: 1.0,
         }),
     );
@@ -224,7 +224,7 @@ fn a_lane_drives_the_unison_detune() {
         synth(true, 0.0),
         Some(Drive {
             param: UnitParam::Detune,
-            range: ParamRange::new(0.0, 100.0),
+            range: ParamRange::of(0.0, 100.0),
             depth: 0.2,
         }),
     );

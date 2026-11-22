@@ -13,19 +13,19 @@ use std::collections::BTreeMap;
 use crate::mode::{NodeMix, NodeMode};
 use crate::param::{ParamIn, ParamRange};
 use crate::{EdgeFade, EdgeGain, EdgeId, NodeKey};
-use tutti_units::{Amplitude, Mix};
+use tutti_units::{Gain, Mix};
 
 /// The table. A value at its default has no entry, so two tables with the same
 /// values are equal: a node's mode ([`NodeMode::Active`]) and mix
 /// ([`Mix::WET`]), a port's range ([`ParamRange::UNBOUNDED`], the whole blend
-/// for a mix), an edge's base ([`Amplitude::UNITY`]) and range
+/// for a mix), an edge's base ([`Gain::UNITY`]) and range
 /// ([`EdgeGain::DEFAULT_RANGE`]) and fade ([`EdgeFade::None`]).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct GraphValues {
     modes: BTreeMap<NodeKey, NodeMode>,
     mixes: BTreeMap<NodeKey, Mix>,
     ranges: BTreeMap<ParamIn, ParamRange>,
-    bases: BTreeMap<EdgeId, Amplitude>,
+    bases: BTreeMap<EdgeId, Gain>,
     gain_ranges: BTreeMap<EdgeId, ParamRange>,
     fades: BTreeMap<EdgeId, EdgeFade>,
 }
@@ -88,13 +88,13 @@ impl GraphValues {
     }
 
     /// Edge `id`'s base: unity unless one was set.
-    pub(crate) fn base(&self, id: EdgeId) -> Amplitude {
-        self.bases.get(&id).copied().unwrap_or(Amplitude::UNITY)
+    pub(crate) fn base(&self, id: EdgeId) -> Gain {
+        self.bases.get(&id).copied().unwrap_or(Gain::UNITY)
     }
 
     /// Sets edge `id`'s base.
-    pub(crate) fn set_base(&mut self, id: EdgeId, base: Amplitude) {
-        set(&mut self.bases, id, base, Amplitude::UNITY);
+    pub(crate) fn set_base(&mut self, id: EdgeId, base: Gain) {
+        set(&mut self.bases, id, base, Gain::UNITY);
     }
 
     /// Edge `id`'s range: [`EdgeGain::DEFAULT_RANGE`] unless one was set.

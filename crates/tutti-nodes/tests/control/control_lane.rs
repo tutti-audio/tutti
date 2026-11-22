@@ -168,7 +168,7 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
         ed.spec_mut().topology.outputs.push(vec![out(p, 0)]);
     }
     for &p in probes {
-        ed.set_param_range(cutoff(p), ParamRange::new(range.0, range.1))
+        ed.set_param_range(cutoff(p), ParamRange::of(range.0, range.1))
             .expect("a probe");
     }
     ed.commit().expect("commits");
@@ -374,7 +374,7 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
         ForeignLaneConfig::new(
             ParamId::new(9),
             program(Some(flat), vec![]),
-            ParamRange::new(0.0, 2000.0),
+            ParamRange::of(0.0, 2000.0),
         )
         .knob(1000.0),
     );
@@ -415,7 +415,7 @@ fn automation_replaces_the_knob_and_the_clamp_is_per_frame() {
     let plugin = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(9),
         program(Some(ramp()), vec![]),
-        ParamRange::new(0.0, f64::from(BOUND)),
+        ParamRange::of(0.0, f64::from(BOUND)),
     ));
     wire_sink(&mut ed, 3, plugin, 4);
     ed.commit().expect("commits");
@@ -555,7 +555,7 @@ fn an_export_is_the_live_render_bit_for_bit() {
         &mut ed,
         300,
         ControlLaneNode::from(
-            ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::new(0.0, 1.0)).knob(0.5),
+            ForeignLaneConfig::new(ParamId::new(5), foreign, ParamRange::of(0.0, 1.0)).knob(0.5),
         ),
         301,
     );
@@ -761,7 +761,7 @@ fn a_range_edit_rescales_on_the_next_block() {
         host.roll(&mut ed, &mut exec, 100, &mut all);
     }
     assert!(all[0].iter().all(|&v| v == 600.0));
-    ed.set_param_range(cutoff(2), ParamRange::new(100.0, 700.0))
+    ed.set_param_range(cutoff(2), ParamRange::of(100.0, 700.0))
         .expect("a probe");
     let edit = all[0].len();
     assert_ne!(edit % STEP, 0, "the edit lands off the grid");
@@ -852,7 +852,7 @@ fn a_plugin_lane_sends_linear_grid_pieces() {
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(
         ParamId::new(3),
         ControlProgram::from_curve(Arc::clone(&curve)),
-        ParamRange::new(0.0, 1.0),
+        ParamRange::of(0.0, 1.0),
     ));
     wire_sink(&mut ed, 1, lane, 2);
     ed.commit().expect("commits");
@@ -1253,7 +1253,7 @@ fn an_unread_source_is_no_point() {
         .build()
         .expect("valid");
     let lane = ControlLaneNode::from(
-        ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::new(0.0, 1.0)).knob(0.25),
+        ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0)).knob(0.25),
     );
     wire_sink(&mut ed, 1, lane, 2);
     let step = |v| ParamSegment::by_id(ParamId::new(99), v, v, Samples::new(0));
@@ -1377,7 +1377,7 @@ fn lane_controls_reach_their_own_cells() {
         ForeignLaneConfig::new(
             ParamId::new(1),
             ControlProgram::default(),
-            ParamRange::new(0.0, 1.0),
+            ParamRange::of(0.0, 1.0),
         )
         .knob(0.25),
     );
@@ -1391,7 +1391,7 @@ fn lane_controls_reach_their_own_cells() {
     assert!(!c.store(1.0), "no knob");
     assert_eq!(c.value(), None);
     assert_eq!(c.range(), (5.0, 50.0));
-    ed.set_param_range(cutoff(2), ParamRange::new(6.0, 60.0))
+    ed.set_param_range(cutoff(2), ParamRange::of(6.0, 60.0))
         .expect("a probe");
     assert_eq!(c.range(), (6.0, 60.0), "the port's own cell");
 }
@@ -1427,7 +1427,7 @@ fn a_constant_layer_is_one_held_value() {
         let (mut ed, mut exec) = probes(128, &[], (0.0, 1.0));
         let p = program(None, layers);
         let lane = ControlLaneNode::from(
-            ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::new(0.0, 1.0)).knob(0.25),
+            ForeignLaneConfig::new(ParamId::new(3), p, ParamRange::of(0.0, 1.0)).knob(0.25),
         );
         wire_sink(&mut ed, 1, lane, 2);
         ed.commit().expect("commits");

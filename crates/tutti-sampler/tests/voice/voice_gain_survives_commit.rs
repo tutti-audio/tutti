@@ -264,7 +264,7 @@ fn a_lane_drives_the_voice_gain_around_its_cell() {
 /// and whose one layer adds a constant `depth` of a 0..1 range, and
 /// commits it.
 fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::ParamCell, depth: f64) {
-    ed.set_param_range(at, ParamRange::new(0.0, 1.0))
+    ed.set_param_range(at, ParamRange::of(0.0, 1.0))
         .expect("the node is placed");
     let range = ed
         .param_range_cell(at)

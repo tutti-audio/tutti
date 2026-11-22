@@ -18,7 +18,7 @@ use tutti_session::{
     ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
     Session,
 };
-use tutti_units::{Amplitude, Bipolar, SampleRate, UnitParam};
+use tutti_units::{Bipolar, Gain, SampleRate, UnitParam};
 
 use common::probe::Pulse;
 
@@ -80,7 +80,7 @@ fn mixer(s: &mut Session) -> ChannelEdge {
         .connect(OutputPort::new(a, 0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
-        .gain(Amplitude::UNITY)
+        .gain(Gain::UNITY)
         .unwrap();
     s.graph()
         .connect(OutputPort::new(b, 0), MainOutput::channel(0))
@@ -108,8 +108,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     assert!(plain.iter().all(|&x| x == A + B), "unity before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
-        .unwrap();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
@@ -131,17 +130,17 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     settle(&mut s);
     figure(&mut s, 0.5, "the macro moved");
 
-    s.set(gain(&s, edge).to(Amplitude::new(-0.25))).unwrap();
+    s.set(gain(&s, edge).to(Gain::new(-0.25))).unwrap();
     settle(&mut s);
     figure(&mut s, -0.75, "the knob moved");
 
     // The range is the route's span too: `-0.25 + 0.25 * -0.5 * 2`.
-    s.set(RangeTarget::of(edge).to(Amplitude::new(-2.0)..Amplitude::new(0.0)))
+    s.set(RangeTarget::of(edge).to(Gain::new(-2.0)..Gain::new(0.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.5, "within the range");
     // Span 2.25: `-0.25 - 0.28125` is below the range's floor.
-    s.set(RangeTarget::of(edge).to(Amplitude::new(-0.25)..Amplitude::new(2.0)))
+    s.set(RangeTarget::of(edge).to(Gain::new(-0.25)..Gain::new(2.0)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, -0.25, "clamped to the range");
@@ -165,7 +164,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     let mut s = offline();
     let edge = mixer(&mut s);
     settle(&mut s);
-    s.set(gain(&s, edge).to(Amplitude::new(0.5))).unwrap();
+    s.set(gain(&s, edge).to(Gain::new(0.5))).unwrap();
     settle(&mut s);
 
     let figure = |s: &mut Session, w: f32, what: &str| {
@@ -178,8 +177,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     figure(&mut s, 0.5, "the base, before any route");
 
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
-        .unwrap();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
         .route(RouteSpec::new(source, edge, Bipolar::of(0.5)))
@@ -187,10 +185,10 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     settle(&mut s);
     figure(&mut s, 1.5, "the base plus the route's offset");
 
-    s.set(gain(&s, edge).to(Amplitude::new(0.25))).unwrap();
+    s.set(gain(&s, edge).to(Gain::new(0.25))).unwrap();
     settle(&mut s);
     figure(&mut s, 1.25, "the base moved while routed");
-    assert_eq!(s.get(gain(&s, edge)).unwrap(), Amplitude::new(0.25));
+    assert_eq!(s.get(gain(&s, edge)).unwrap(), Gain::new(0.25));
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);
@@ -211,8 +209,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
 
     let edge = mixer(&mut s);
     let mut m = s.mods_mut();
-    m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
-        .unwrap();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();

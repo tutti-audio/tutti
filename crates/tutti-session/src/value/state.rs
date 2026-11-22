@@ -287,7 +287,7 @@ impl ValueTable {
 
     /// Gives `edge` a gain target holding `seed`, unless it has one. Control
     /// thread.
-    pub(crate) fn provide_gain(&self, edge: crate::ChannelEdge, seed: tutti_units::Amplitude) {
+    pub(crate) fn provide_gain(&self, edge: crate::ChannelEdge, seed: tutti_units::Gain) {
         let mut params = self.params.lock();
         params.slots.entry(SlotId::Gain(edge)).or_insert_with(|| {
             slot::erase(GainSlot::new(edge, seed, Arc::clone(&self.queue)) as SlotCell<_>)

@@ -757,7 +757,7 @@ fn lanes_200(
         }
     }
     for k in 0..200 {
-        ed.set_param_range(at(k), ParamRange::new(0.0, 1000.0))
+        ed.set_param_range(at(k), ParamRange::of(0.0, 1000.0))
             .expect("a probe");
     }
     ed.commit().expect("commits");
@@ -799,7 +799,7 @@ fn lane_moves(
                 param: PROBE8[k % 8].into(),
             };
             let hi = 800.0 + ((k + block) % 5) as f32 * 100.0;
-            ed.set_param_range(at, ParamRange::new(0.0, f64::from(hi)))
+            ed.set_param_range(at, ParamRange::of(0.0, f64::from(hi)))
                 .expect("a probe");
         }
     }
@@ -1041,7 +1041,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             .topology
             .outputs
             .push(vec![PortSource::Node(OutputPort::new(probe(k), 0))]);
-        ed.set_param_range(cutoff(k), ParamRange::new(0.0, 1.0))
+        ed.set_param_range(cutoff(k), ParamRange::of(0.0, 1.0))
             .expect("a probe");
     }
     ed.commit().expect("commits");

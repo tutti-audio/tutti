@@ -880,8 +880,8 @@ impl Modulation {
         for (id, target) in to_enter {
             let (min, max) = targets[&target];
             editor
-                .set_edge_gain_range(id, ParamRange::new(min, max))
-                .expect("checked: the edge exists, and compile refuses a NaN bound");
+                .set_edge_gain_range(id, declared_range(min, max))
+                .expect("checked: the edge exists");
             if let Some(Bind::Edge { cells, .. }) = binds.get_mut(&target) {
                 *cells = EdgeCells::of(editor, id);
             }
@@ -1030,6 +1030,7 @@ impl Modulation {
         for (target, bind) in binds {
             let program = &compiled.programs[&target];
             let (min, max) = targets[&target];
+            let bounds = declared_range(min, max);
             let range = (min.to_bits(), max.to_bits());
             if let Some(lane) = self.lanes.get_mut(&target) {
                 // Sources the new program reads that the published one did
@@ -1042,7 +1043,7 @@ impl Modulation {
                     applied.republished.push(target);
                 }
                 if lane.range != range {
-                    store_range(editor, &lane.bind, &lane.controls, min, max);
+                    store_range(editor, &lane.bind, &lane.controls, bounds);
                     lane.range = range;
                 }
                 continue;
@@ -1052,8 +1053,8 @@ impl Modulation {
             let lane = match &bind {
                 Bind::Native { at, knob, .. } => {
                     editor
-                        .set_param_range(*at, ParamRange::new(min, max))
-                        .expect("checked: a node, and compile refuses a NaN bound");
+                        .set_param_range(*at, bounds)
+                        .expect("checked: a node, and compile refuses a crossed arc");
                     let cell = editor.param_range_cell(*at);
                     let mut config = UnitLaneConfig::new(at.param, program.clone())
                         .range(cell.expect("a bound param has its range cell from its staging"));
@@ -1069,8 +1070,8 @@ impl Modulation {
                 }
                 Bind::Edge { id, cells } => {
                     editor
-                        .set_edge_gain_range(*id, ParamRange::new(min, max))
-                        .expect("checked: the edge, and compile refuses a NaN bound");
+                        .set_edge_gain_range(*id, bounds)
+                        .expect("checked: the edge");
                     let cells = cells.as_ref().expect("declared above");
                     let node = ControlLaneNode::from(
                         UnitLaneConfig::new(EdgeGain::ADDR, program.clone())
@@ -1085,8 +1086,8 @@ impl Modulation {
                 }
                 Bind::Mix { at, knob, range } => {
                     editor
-                        .set_param_range(*at, ParamRange::new(min, max))
-                        .expect("checked: the node, and compile refuses a NaN bound");
+                        .set_param_range(*at, bounds)
+                        .expect("checked: the node");
                     let node = ControlLaneNode::from(
                         UnitLaneConfig::new(NodeMix::ADDR, program.clone())
                             .knob(knob.clone())
@@ -1099,8 +1100,7 @@ impl Modulation {
                     controls
                 }
                 Bind::Foreign { to, id, knob, .. } => {
-                    let mut config =
-                        ForeignLaneConfig::new(*id, program.clone(), ParamRange::new(min, max));
+                    let mut config = ForeignLaneConfig::new(*id, program.clone(), bounds);
                     if let Some(knob) = *knob {
                         config = config.knob(knob);
                     }
@@ -1506,28 +1506,34 @@ fn owe_resyncs(
     }
 }
 
+/// A declared target's bounds as a [`ParamRange`]: `compile` refuses a NaN
+/// bound (`ProgramCompileError::NanRange`), so a compiled target has none.
+fn declared_range(min: f64, max: f64) -> ParamRange {
+    ParamRange::new(min, max)
+        .expect("a compiled target has no NaN bound: compile refuses it (NanRange)")
+}
+
 /// Stores a range edit: the port's cell for a native lane (a store, no
 /// commit), the lane's own for a plugin lane.
 fn store_range<F: Float>(
     editor: &mut Editor<F>,
     bind: &Bind,
     controls: &LaneControls,
-    min: f64,
-    max: f64,
+    range: ParamRange,
 ) {
     match bind {
         Bind::Native { at, .. } | Bind::Mix { at, .. } => {
             editor
-                .set_param_range(*at, ParamRange::new(min, max))
-                .expect("checked: a node, and compile refuses a NaN bound");
+                .set_param_range(*at, range)
+                .expect("checked: a node, and compile refuses a crossed arc");
         }
         Bind::Edge { id, .. } => {
             editor
-                .set_edge_gain_range(*id, ParamRange::new(min, max))
-                .expect("checked: the edge, and compile refuses a NaN bound");
+                .set_edge_gain_range(*id, range)
+                .expect("checked: the edge");
         }
         Bind::Foreign { .. } => {
-            controls.set_range(min, max);
+            controls.set_range(range);
         }
     }
 }
