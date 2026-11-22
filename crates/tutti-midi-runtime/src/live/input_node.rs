@@ -723,7 +723,7 @@ impl<F: Float> Node<F> for MidiInputNode {
             };
             // Refused past the capacity: counted by the executor.
             let _ = io
-                .event_out(usize::from(port))
+                .event_out(port)
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
         if let (Some(cell), Some(handled)) = (&self.generation, handled_generation) {

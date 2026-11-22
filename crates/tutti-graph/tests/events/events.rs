@@ -92,7 +92,7 @@ impl Node for Recorder {
                     panic!("only MIDI is sent")
                 };
                 let emitted = u64::from(w[1]) | (u64::from(w[2]) << 32);
-                inbox.push((p as u16, w[0], emitted, cx.env.frame_at(e.offset).get()));
+                inbox.push((p, w[0], emitted, cx.env.frame_at(e.offset).get()));
             }
         }
         Status::Silent

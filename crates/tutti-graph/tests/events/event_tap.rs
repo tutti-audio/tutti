@@ -119,7 +119,7 @@ impl Node for Script {
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
         for p in 0..self.ports {
-            let out = io.event_out(usize::from(p));
+            let out = io.event_out(p);
             if p == 0 && self.resync {
                 let _ = out.push(Event::resync(Offset::ZERO));
             }

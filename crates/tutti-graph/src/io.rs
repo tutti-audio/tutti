@@ -627,9 +627,9 @@ impl<'a, F: Float> Io<'a, F> {
         InPlaceMask(shift(self.in_place.0, self.main.inputs))
     }
 
-    /// Number of event input ports.
-    pub fn event_input_count(&self) -> usize {
-        self.events_in.len()
+    /// Number of event input ports (a shape declares at most `u16::MAX`).
+    pub fn event_input_count(&self) -> u16 {
+        u16::try_from(self.events_in.len()).unwrap_or(u16::MAX)
     }
 
     /// Event input port `p`, sorted by offset, every offset inside the block.
@@ -637,13 +637,13 @@ impl<'a, F: Float> Io<'a, F> {
     /// # Panics
     ///
     /// If `p` is not below [`event_input_count`](Self::event_input_count).
-    pub fn events(&self, p: usize) -> SortedEvents<'a> {
-        self.events_in[p]
+    pub fn events(&self, p: u16) -> SortedEvents<'a> {
+        self.events_in[usize::from(p)]
     }
 
-    /// Number of event output ports.
-    pub fn event_output_count(&self) -> usize {
-        self.events_out.len()
+    /// Number of event output ports (a shape declares at most `u16::MAX`).
+    pub fn event_output_count(&self) -> u16 {
+        u16::try_from(self.events_out.len()).unwrap_or(u16::MAX)
     }
 
     /// The writer for event output port `p`.
@@ -651,8 +651,8 @@ impl<'a, F: Float> Io<'a, F> {
     /// # Panics
     ///
     /// If `p` is not below [`event_output_count`](Self::event_output_count).
-    pub fn event_out(&mut self, p: usize) -> &mut EventWriter<'a> {
-        &mut self.events_out[p]
+    pub fn event_out(&mut self, p: u16) -> &mut EventWriter<'a> {
+        &mut self.events_out[usize::from(p)]
     }
 
     /// The block split at event input port `p`'s offsets: `(range, events)`
@@ -677,8 +677,8 @@ impl<'a, F: Float> Io<'a, F> {
     ///     }
     /// }
     /// ```
-    pub fn sub_blocks(&self, p: usize) -> SubBlocks<'a> {
-        self.events_in[p].sub_blocks(Samples::new(self.frames))
+    pub fn sub_blocks(&self, p: u16) -> SubBlocks<'a> {
+        self.events_in[usize::from(p)].sub_blocks(Samples::new(self.frames))
     }
 
     /// What declared param `k` ([`Shape::params`](crate::Shape::params))

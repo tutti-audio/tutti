@@ -936,7 +936,7 @@ impl Row {
         let audio = matches!(self.excite, Excite::Impulse { .. });
         let port = self.event_port();
         let (node, log) = if self.onset_release_silent.is_some() && !audio {
-            let (recorder, log) = Recorder::wrap(node, usize::from(port));
+            let (recorder, log) = Recorder::wrap(node, port);
             (Box::new(recorder) as Box<dyn Node>, Some(log))
         } else {
             (node, None)
@@ -1496,12 +1496,12 @@ type EventLog = std::sync::Arc<std::sync::Mutex<Vec<(u64, EventKind)>>>;
 /// a path can assert what reached a node without a hook inside the node.
 struct Recorder {
     inner: Box<dyn Node>,
-    port: usize,
+    port: u16,
     log: EventLog,
 }
 
 impl Recorder {
-    fn wrap(inner: Box<dyn Node>, port: usize) -> (Self, EventLog) {
+    fn wrap(inner: Box<dyn Node>, port: u16) -> (Self, EventLog) {
         let log = EventLog::default();
         (
             Self {
@@ -2482,8 +2482,8 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// block starts with every port empty). Up to [`HAND_EVENT_CAPACITY`]
     /// per port without allocating. Sorted and inside the next block, or
     /// that block panics.
-    pub fn events(&mut self, port: usize, events: &[Event]) {
-        let list = &mut self.events_in[port];
+    pub fn events(&mut self, port: u16, events: &[Event]) {
+        let list = &mut self.events_in[usize::from(port)];
         list.clear();
         list.extend_from_slice(events);
     }
@@ -2492,21 +2492,21 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
     /// block only, beside its [`events`](Self::events). Up to
     /// [`HAND_EVENT_CAPACITY`] per port without allocating. Sorted and inside
     /// the next block, or that block panics.
-    pub fn param_events(&mut self, port: usize, events: &[ParamEvent]) {
-        let list = &mut self.params_in[port];
+    pub fn param_events(&mut self, port: u16, events: &[ParamEvent]) {
+        let list = &mut self.params_in[usize::from(port)];
         list.clear();
         list.extend_from_slice(events);
     }
 
     /// What the node wrote to event output `port` in the last block.
-    pub fn event_output(&self, port: usize) -> &[Event] {
-        &self.events_out[port]
+    pub fn event_output(&self, port: u16) -> &[Event] {
+        &self.events_out[usize::from(port)]
     }
 
     /// The param events the node wrote to event output `port` in the last
     /// block.
-    pub fn param_events_out(&self, port: usize) -> &[ParamEvent] {
-        &self.params_out[port]
+    pub fn param_events_out(&self, port: u16) -> &[ParamEvent] {
+        &self.params_out[usize::from(port)]
     }
 
     /// The transport of every block from the next one on: its position is

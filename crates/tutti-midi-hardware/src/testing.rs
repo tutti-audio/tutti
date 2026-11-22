@@ -93,7 +93,7 @@ impl Rig {
     }
 
     /// Everything the sink has received, taken.
-    pub(crate) fn take(&self) -> Vec<(usize, u64, Ump)> {
+    pub(crate) fn take(&self) -> Vec<(u16, u64, Ump)> {
         self.rig.take()
     }
 }

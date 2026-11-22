@@ -193,11 +193,8 @@ fn each_event_leaves_on_its_channels_port() {
     let wire = Script::new(vec![vec![note(9, 64, 40), note(0, 60, 10), clock]]);
     let (_ed, mut exec, _c, seen) = input(Input::new(wire), MIDI_INPUT_PORTS, 512);
     block(&mut exec, 512);
-    let got: Vec<(usize, u64)> = seen.lock().unwrap().iter().map(|s| (s.0, s.1)).collect();
-    assert_eq!(
-        got,
-        vec![(0, 10), (9, 40), (usize::from(CHANNELLESS_PORT), 20)]
-    );
+    let got: Vec<(u16, u64)> = seen.lock().unwrap().iter().map(|s| (s.0, s.1)).collect();
+    assert_eq!(got, vec![(0, 10), (9, 40), (CHANNELLESS_PORT, 20)]);
 }
 
 /// **A Group's channels leave on ports of their own** (M2-104 section 2.1.2,
@@ -226,13 +223,13 @@ fn a_groups_channels_leave_on_their_own_ports() {
     ]]);
     let (live, mut exec, _c, seen) = input(Input::new(wire).hearing(ports), ports.count(), 512);
     block(&mut exec, 512);
-    let got: Vec<(usize, u8)> = seen
+    let got: Vec<(u16, u8)> = seen
         .lock()
         .unwrap()
         .iter()
         .map(|s| (s.0, note_of(s.2).unwrap()))
         .collect();
-    assert_eq!(got, vec![(1, 60), (usize::from(MIDI_INPUT_PORTS + 1), 61)]);
+    assert_eq!(got, vec![(1, 60), (MIDI_INPUT_PORTS + 1, 61)]);
     let prepare = *live.prepare();
     assert!(
         live.fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
@@ -519,11 +516,11 @@ fn retiring_lanes(
 }
 
 /// What sink input `lane` received: `(note, is_off)` of each note message.
-fn notes_at(seen: &Seen, lane: usize) -> Vec<(u8, bool)> {
+fn notes_at(seen: &Seen, lane: u64) -> Vec<(u8, bool)> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter(|(port, ..)| *port == lane)
+        .filter(|(port, ..)| u64::from(*port) == lane)
         .filter_map(|(_, _, ump)| {
             let note = note_of(*ump)?;
             Some((
@@ -599,7 +596,7 @@ fn a_retiring_out_node_ends_the_notes_it_passed_on_a_pool() {
     }
     rig.block(512);
     rig.block(512);
-    for lane in 0..LANES as usize {
+    for lane in 0..LANES {
         let note = 40 + lane as u8;
         let passed = notes_at(&rig.seen, lane);
         assert_eq!(passed, [(note, false), (note, true)], "lane {lane}");
@@ -1050,7 +1047,7 @@ fn a_devices_profile_zones_switch_its_rules() {
     // Block 1's frames are 512 to 1023: the Reset All Controllers of the
     // zone's four channels at its first frame, and the device's own (frame 513)
     // ignored.
-    let block_one: Vec<(usize, u64)> = seen
+    let block_one: Vec<(u16, u64)> = seen
         .iter()
         .filter(|s| (512..1024).contains(&s.1) && is_reset(&s.2))
         .map(|s| (s.0, s.1))
@@ -1238,7 +1235,7 @@ fn a_member_bend_range_fans_out_over_the_zones_ports() {
             "channel {channel}"
         );
     }
-    let notes: Vec<(usize, u64)> = seen
+    let notes: Vec<(u16, u64)> = seen
         .iter()
         .filter(|s| matches!(s.2.note_key_event(), Some(NoteKeyEvent::On(_))))
         .map(|s| (s.0, s.1))
