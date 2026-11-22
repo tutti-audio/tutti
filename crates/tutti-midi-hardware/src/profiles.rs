@@ -366,7 +366,7 @@ impl PeerProfiles {
 pub(crate) type Snapshot = Arc<[PeerProfiles]>;
 
 /// A change of one peer's Profiles, once each from
-/// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`]
+/// [`MidiSession::poll`](crate::MidiSession::poll); the [`PeerId`](crate::PeerId)
 /// beside it in [`Polled::Profile`](crate::Polled::Profile) names the peer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
