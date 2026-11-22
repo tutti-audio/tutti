@@ -1,6 +1,6 @@
 //! The nodes' allocation gates: each node's audio-thread path, alone and through
-//! an engine. The binary installs `RtAllocCheck`, so an allocation inside an
-//! `assert_no_alloc` closure aborts.
+//! an engine. The binary installs `RtAllocCheck`, so an allocation inside a node's
+//! `process` run by `Direct` (a realtime `RtScope`) or inside an `assert_no_alloc` closure aborts.
 
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;

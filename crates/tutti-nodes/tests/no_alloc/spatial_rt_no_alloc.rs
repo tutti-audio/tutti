@@ -1,8 +1,8 @@
 //! Regression gate for RT-safety: the panner nodes must not allocate on the
 //! process path.
 //!
-//! The gate lives in the crate that owns the panners: `assert_no_alloc`
-//! installs a global allocator, which only a test binary of that crate may do.
+//! The gate lives in the crate that owns the panners: `RtAllocCheck`
+//! is a global allocator, which only a test binary of that crate may do.
 
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, MaxBlock};
 use tutti_graph::ParamNode;
@@ -126,38 +126,11 @@ const HOSTILE: [f32; 20] = [
 /// grid, so a grid segment is carried across calls.
 const BLOCKS: [usize; 4] = [1, 7, 33, 64];
 
-/// A panner whose `process` runs under `assert_no_alloc`. `Direct` rebuilds the
-/// node's `Shape` each block, which allocates and which an executor does not,
-/// so the window is the node's own `process`.
-struct Gated(VbapPannerNode<f32>);
-
-impl Node for Gated {
-    fn shape(&self) -> tutti_graph::Shape {
-        self.0.shape()
-    }
-    fn prepare(&mut self, p: &tutti_graph::Prepare) {
-        self.0.prepare(p);
-    }
-    fn process(
-        &mut self,
-        cx: &tutti_graph::Cx<'_>,
-        io: tutti_graph::Io<'_>,
-    ) -> tutti_graph::Status {
-        assert_no_alloc::assert_no_alloc(|| self.0.process(cx, io))
-    }
-    fn reset(&mut self) {
-        self.0.reset();
-    }
-    fn param_base(&self, k: usize) -> Option<f64> {
-        self.0.param_base(k)
-    }
-}
-
 /// Frames of a rendered block: finite, the LFE silent, the power sum of the
 /// speakers within the bound a unit-power gain pair gives an input pair of
 /// 0.5 and 0.5, `(|l| + |r|)^2 = 1`. Returns the least power over the block.
 fn check_block(
-    rig: &Direct<Gated>,
+    rig: &Direct<VbapPannerNode<f32>>,
     channels: usize,
     lfe: Option<usize>,
     len: usize,
@@ -209,15 +182,15 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         assert!(channels <= tutti_buffers::MAX_CHANNELS);
         let controls = node.param_set();
         let fork = node.fork_fresh();
-        let mut rig = Direct::new(Gated(node), SampleRate::SR_48K, FRAMES);
-        let mut forked = Direct::new(Gated(fork), SampleRate::SR_48K, FRAMES);
+        let mut rig = Direct::new(node, SampleRate::SR_48K, FRAMES);
+        let mut forked = Direct::new(fork, SampleRate::SR_48K, FRAMES);
         for d in [&mut rig, &mut forked] {
             for c in d.inputs_mut().iter_mut() {
                 let c = c.into_samples_mut();
                 c.fill(0.5);
             }
         }
-        let fork_controls = forked.node.0.param_set();
+        let fork_controls = forked.node.param_set();
         let mut health = (true, false, 0.0f32);
         let mut signal = vec![0.0f32; FRAMES];
 
@@ -244,13 +217,12 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
             rig.set_block_len(len);
             assert_no_alloc::assert_no_alloc(|| {
                 if step % 97 == 96 {
-                    rig.node.0.reset();
+                    rig.node.reset();
                 }
                 if step % 131 == 130 {
                     let rate = [SampleRate::SR_44K1, SampleRate::SR_96K, SampleRate::SR_48K]
                         [step / 131 % 3];
                     rig.node
-                        .0
                         .prepare(&Prepare::new(rate, MaxBlock::of(Samples::new(FRAMES))));
                 }
             });

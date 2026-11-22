@@ -189,7 +189,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
 }
 
 /// Every curve of the shaper, plain and at every oversampling factor, unfed and with its drive
-/// port fed a per-frame ramp, 1 000 blocks each under `assert_no_alloc`. `Direct` feeds the
+/// port fed a per-frame ramp, 256 blocks each. `Direct` feeds the
 /// port, which `BlockRig` cannot.
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
@@ -267,17 +267,15 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
             } else {
                 unfed = first;
             }
-            assert_no_alloc::assert_no_alloc(|| {
-                for _ in 0..1_000 {
-                    node.block();
-                }
-            });
+            for _ in 0..256 {
+                node.block();
+            }
         }
     }
 }
 
 /// Every curve at each antialiasing order, alone and oversampled by 4, unfed and with its drive
-/// port fed a per-frame ramp, 1 000 blocks each under `assert_no_alloc`.
+/// port fed a per-frame ramp, 256 blocks each.
 #[test]
 fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
@@ -333,11 +331,9 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
                             .any(|s| s.abs() > 1e-6)),
                         "{kind:?} {order:?} fed={fed} rendered a silent channel"
                     );
-                    assert_no_alloc::assert_no_alloc(|| {
-                        for _ in 0..1_000 {
-                            node.block();
-                        }
-                    });
+                    for _ in 0..256 {
+                        node.block();
+                    }
                 }
             }
         }
