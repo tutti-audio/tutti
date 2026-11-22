@@ -22,7 +22,7 @@
 //! ```rust
 //! use tutti::modulation::LfoShape;
 //! use tutti::nodes::{LfoConfig, LfoNode};
-//! use tutti::{ChannelLayout, Hz, InterleavedMut, Root, SampleRate, Session};
+//! use tutti::{ChannelLayout, Hz, InterleavedMut, MainOutput, SampleRate, Session};
 //!
 //! let mut session = Session::builder().sample_rate(SampleRate::SR_48K).build().expect("a session builds");
 //!
@@ -31,7 +31,7 @@
 //! let tone = session
 //!     .graph()
 //!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
-//! session.graph().connect(tone, Root).expect("both ends exist");
+//! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
 //! // reports a fault or a dropout as an event.
@@ -58,7 +58,7 @@
 //! ## Where a name lives
 //!
 //! Every item is reachable at one path. What an application names is at the
-//! crate's root, so one `use tutti::{Session, SessionEvent, Root, Samples};`
+//! crate's root, so one `use tutti::{Session, SessionEvent, MainOutput, Samples};`
 //! covers a program. The rest is in a module that groups it by what it is, each
 //! item listed by name:
 //!
@@ -127,7 +127,7 @@
 // --- the application's names, at the root -----------------------------------
 //
 // What an application names, listed here by name, so a program imports from one
-// place: `use tutti::{Session, SessionEvent, Root, Samples};`. There is no
+// place: `use tutti::{Session, SessionEvent, MainOutput, Samples};`. There is no
 // prelude and no glob: this file is the surface. Each group is behind the
 // feature that gates it. A name here is in no module below. `Result`, `Sample`
 // and `Unit` are not here: each would shadow a name a program already has.
@@ -221,9 +221,9 @@ pub use tutti_session::{
 #[cfg(feature = "session")]
 pub use tutti_session::{
     AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InPort, Key,
-    NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
-    SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
-    Workers,
+    MainInput, MainOutput, NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime,
+    Session, SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession,
+    TransportHandle, Workers,
 };
 #[cfg(all(feature = "session", feature = "export"))]
 pub use tutti_session::{

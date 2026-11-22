@@ -15,7 +15,7 @@ use tutti_fixtures::midi;
 use tutti_fixtures::midi::key_of;
 use tutti_graph::{Cx, EventTapOptions, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_graph::{EventCapacity, EventInletNode, EventTapReader, TapAlign, TapEvent};
-use tutti_session::{DetachedSession, Losses, OutPort, Root, Session, Stamp};
+use tutti_session::{DetachedSession, Losses, MainOutput, OutPort, Session, Stamp};
 use tutti_ump::{MidiChannel, U7, Ump};
 use tutti_units::{Frame, SampleRate};
 
@@ -126,7 +126,7 @@ fn an_export_fork_is_accepted_and_silent() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(hear, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(hear, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -158,7 +158,7 @@ fn an_event_edge_is_cut_with_one_commit_and_not_faded() {
         .connect(key.events_out(), hear.events_in())
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(hear, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(hear, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

@@ -15,7 +15,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, DetachedSession, OutPort, Root, Session};
+use tutti_session::{CloseError, DetachedSession, MainOutput, OutPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 /// A detached one-output session playing a constant 0.25.
@@ -26,7 +26,7 @@ fn session() -> DetachedSession {
         .expect("builds");
     let dc = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     s

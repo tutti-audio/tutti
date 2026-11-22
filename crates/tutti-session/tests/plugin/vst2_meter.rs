@@ -8,7 +8,7 @@
 use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_plugin_types::PluginRef;
@@ -67,7 +67,7 @@ fn an_in_process_vst2_plugin_is_given_the_project_meter() {
     let node = s
         .load_plugin_blocking(main, Spec::new(PluginRef::file(vst2_probe())))
         .expect("the in-process VST2 loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     // The meter written above and the wiring take effect at an update.
     let _ = s.update_on(main);
 

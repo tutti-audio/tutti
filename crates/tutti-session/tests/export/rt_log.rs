@@ -6,7 +6,7 @@ use crate::bounced::bounced;
 use tracing::Level;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::ForkByClone;
-use tutti_session::{Bounce, BounceLatency, ExportClock, OutPort, Range, Root, Session};
+use tutti_session::{Bounce, BounceLatency, ExportClock, MainOutput, OutPort, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 #[path = "../support/rt_log.rs"]
@@ -27,7 +27,7 @@ fn a_node_that_logs_in_a_bounce_emits_a_tracing_event_through_the_export_path() 
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(noisy, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();

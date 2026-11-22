@@ -7,7 +7,7 @@ use tutti_buffers::SampleFormat;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
-use tutti_session::{Root, Session};
+use tutti_session::{MainOutput, Session};
 use tutti_units::{Amplitude, SampleRate, Samples};
 
 #[path = "../support/f64_nodes.rs"]
@@ -36,7 +36,7 @@ fn an_f64_device_session_renders_a_figure_f32_rounds_away_to_its_stream() {
         .unwrap()
         .unfaded();
     s.graph()
-        .connect(gain.out(0), Root::output(0))
+        .connect(gain.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -68,7 +68,7 @@ fn an_f64_device_session_switches_to_the_timer_and_keeps_rendering_fine() {
         .expect("an f64 device session builds with no device");
     let dc = live.graph().add(ForkByClone(Dc(FINE)));
     live.graph()
-        .connect(dc.out(0), Root::output(0))
+        .connect(dc.out(0), MainOutput::channel(0))
         .unwrap()
         .unfaded();
     let _ = live.update();

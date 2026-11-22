@@ -9,7 +9,7 @@ use tutti_graph::{
     WiredMask,
 };
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, Root, Session, SessionEvent};
+use tutti_session::{MainOutput, OutPort, Session, SessionEvent};
 
 /// A stereo main bus and a mono aux bus on each side: ports 0 and 1 are the
 /// main bus, port 2 the aux.
@@ -73,7 +73,9 @@ fn a_connect_and_the_loss_of_the_last_source_are_each_reported_once() {
 
     let g = s.graph();
     g.connect(OutPort::new(a, 0), x.input(2)).unwrap().unfaded();
-    g.connect(x.out(2), Root::output(0)).unwrap().unfaded();
+    g.connect(x.out(2), MainOutput::channel(0))
+        .unwrap()
+        .unfaded();
     let events = s.update();
     assert_eq!(
         rewired(&events),

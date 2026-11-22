@@ -13,7 +13,7 @@ use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::Unforkable;
 use tutti_graph::{BusRef, BusSource, Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{OutPort, Reopened, Root, RootReader, Session, SessionEvent};
+use tutti_session::{MainOutput, OutPort, Reopened, RootReader, Session, SessionEvent};
 use tutti_units::{SampleRate, Samples};
 
 const BLOCK: usize = 64;
@@ -29,7 +29,7 @@ fn session() -> Session {
     let node = s.graph().add(ForkByClone(Const::frame(&[0.25, 0.75])));
     for c in 0..2 {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }
@@ -365,7 +365,7 @@ fn a_bus_fed_root_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends() {
         out: BusTopology::unassigned(ChannelLayout::STEREO).unwrap(),
     }));
     s.graph()
-        .connect(BusSource::Node(BusRef::new(src.erase(), 0)), Root)
+        .connect(BusSource::Node(BusRef::new(src.erase(), 0)), MainOutput)
         .expect("folds by index")
         .unfaded();
     let _ = block(&mut s);

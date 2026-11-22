@@ -11,7 +11,7 @@ use tutti_engine::{OutputMap, OutputStrip, RoutingError};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    OutPort, OutputPolicy, OutputPolicyError, Root, Session, SessionBuilder, SetRefusal,
+    MainOutput, OutPort, OutputPolicy, OutputPolicyError, Session, SessionBuilder, SetRefusal,
     ValueError, ValueErrorKind,
 };
 use tutti_units::{Amplitude, SampleRate, Samples};
@@ -31,7 +31,7 @@ fn feed(session: &mut Session, values: &[f32]) {
     for c in 0..values.len() {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

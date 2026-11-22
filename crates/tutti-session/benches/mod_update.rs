@@ -25,7 +25,7 @@ use tutti_platform::Instant;
 use tutti_buffers::ChannelLayout;
 use tutti_modulation::{Follower, Lfo};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_session::{InPort, Key, OutPort, Root, RouteSpec, Session};
+use tutti_session::{InPort, Key, MainOutput, OutPort, RouteSpec, Session};
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Depth, Hz, Q};
 
@@ -52,7 +52,7 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
     }
     let last = *filters.last().expect("n > 0");
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(last, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(last, 0)])
         .unwrap();
     if modulated {
         let mut m = s.mods_mut();

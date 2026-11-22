@@ -7,7 +7,7 @@ use tutti_graph::{
     Cx, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
 use tutti_session::SessionNode;
-use tutti_session::{Losses, Root};
+use tutti_session::{Losses, MainOutput};
 
 /// Output `c` is the constant `c + 1`, whatever it is played.
 #[derive(Clone)]
@@ -71,7 +71,7 @@ fn only_add_instrument_wires_the_strip_to_the_master() {
     let mut rig = Rig::played(session, handle);
     rig.render_to(4 * crate::instrument_support::BLOCK);
     assert_eq!(rig.peak(0..rig.frame()), 0.0, "nothing reaches the root");
-    rig.session.graph().connect(strip, Root).unwrap();
+    rig.session.graph().connect(strip, MainOutput).unwrap();
     rig.render_to(8 * crate::instrument_support::BLOCK);
     let at = rig.frame() - 1;
     assert_eq!((rig.left[at], rig.right[at]), (3.0, 4.0));
@@ -152,9 +152,9 @@ fn a_wide_root_is_fed_from_the_main_pair_not_the_sends() {
         .expect("an instrument");
     session.graph().widen_outputs(5).expect("a wider root");
     let node = handle.node();
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let wrapped: Vec<_> = (0..5)
-        .map(|c| session.graph_ref().sources(Root::output(c)).unwrap())
+        .map(|c| session.graph_ref().sources(MainOutput::channel(c)).unwrap())
         .collect();
     assert_eq!(wrapped[4], [OutPort::new(node, 4)], "the wrap feeds a send");
 
@@ -162,14 +162,14 @@ fn a_wide_root_is_fed_from_the_main_pair_not_the_sends() {
     for c in 0..5 {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(node, main[c % 2])])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, main[c % 2])])
             .unwrap();
     }
     assert_eq!(main, [2, 3]);
     for c in 0..5 {
         let want = 2 + c % 2;
         assert_eq!(
-            session.graph_ref().sources(Root::output(c)).unwrap(),
+            session.graph_ref().sources(MainOutput::channel(c)).unwrap(),
             [OutPort::new(node, want)],
             "channel {c}"
         );

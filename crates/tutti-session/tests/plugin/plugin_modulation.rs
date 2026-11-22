@@ -15,7 +15,7 @@ use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
-use tutti_session::Root;
+use tutti_session::MainOutput;
 use tutti_session::{PluginChange, PluginEvent, Replacement};
 
 use std::time::Duration;
@@ -69,7 +69,7 @@ fn add_probe(s: &mut DetachedSession) -> tutti_session::Key<tutti_session::AnyPl
             Spec::new(PluginRef::file(clap_probe())),
         )
         .expect("the reference CLAP plugin loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     node
 }
 

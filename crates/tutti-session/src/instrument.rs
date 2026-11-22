@@ -42,7 +42,9 @@ use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
 use tutti_units::Amplitude;
 
-use crate::{Feeder, Graph, Key, OutPort, ParamTarget, RemoveError, Root, Session, SessionNode};
+use crate::{
+    Feeder, Graph, Key, MainOutput, OutPort, ParamTarget, RemoveError, Session, SessionNode,
+};
 
 /// The type of an instrument's key when the session was given a node by its
 /// [`NodeKey`] ([`Session::instrument`]), so its type is not known. A [`Key`]
@@ -212,7 +214,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {
         let added = self.add_instrument_unwired(instrument)?;
-        if let Err(e) = self.graph().connect(added.out(), Root) {
+        if let Err(e) = self.graph().connect(added.out(), MainOutput) {
             let node = added.node().erase();
             let handle = self.remove_instrument(added);
             let removed = self.remove(node);

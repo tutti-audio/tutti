@@ -4,7 +4,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 use tutti_session::{InstrumentHandle, Session};
 use tutti_ump::Ump;
 use tutti_units::Moment;
@@ -48,7 +48,7 @@ impl Rig {
     /// A rig over a handle the session already made, its strip wired to the
     /// outputs here.
     pub fn wired<N: ?Sized>(mut session: Session, handle: InstrumentHandle<N>) -> Self {
-        session.graph().connect(handle.out(), Root).unwrap();
+        session.graph().connect(handle.out(), MainOutput).unwrap();
         Self::played(session, handle)
     }
 

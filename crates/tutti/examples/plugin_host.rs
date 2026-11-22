@@ -43,8 +43,9 @@ use tutti::plugin::PresetSupport;
 use tutti::plugin::catalog::{CatalogConfig, PluginDb};
 use tutti::session::Peer as _;
 use tutti::{
-    Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MaxBlock, ParamId, Pcm, PluginEvent,
-    Range, RestoreState, Root, SampleRate, Samples, SaveState, Session, SessionEvent, StateUse,
+    Beat, Bounce, Catalog, Format, LoadPlugin, LoadPreset, MainOutput, MaxBlock, ParamId, Pcm,
+    PluginEvent, Range, RestoreState, SampleRate, Samples, SaveState, Session, SessionEvent,
+    StateUse,
 };
 use tutti_units::Normalized;
 
@@ -118,7 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    `Key<AnyPlugin>`: ports come from it as from any node's key
     //    (`node.out(0)`, `node.events_in()`), and
     //    `node.param(id)` is the reference a route targets.
-    session.graph().connect(node, Root)?;
+    session.graph().connect(node, MainOutput)?;
 
     // 5. Play. An instrument takes a note on its event input: middle C for the
     //    first two beats, as a clip on the project's timeline.

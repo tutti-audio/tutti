@@ -11,7 +11,7 @@
 use crate::bounced::bounced;
 use crate::loading::{LoadPlugin, Spec};
 use crate::support;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use std::sync::Arc;
 
@@ -131,7 +131,7 @@ fn session_with_probe_at(
             Spec::new(PluginRef::file(path)).hosting(hosting),
         )
         .expect("the reference CLAP plugin loads");
-    session.graph().connect(probe, Root).unwrap();
+    session.graph().connect(probe, MainOutput).unwrap();
     let _ = session.update();
     (session, probe.erase(), env)
 }

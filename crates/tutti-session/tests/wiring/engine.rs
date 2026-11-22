@@ -18,7 +18,7 @@ use tutti_graph::{TapAlign, TapOptions};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, MissingSource, OutPort, Root, Session};
+use tutti_session::{CloseError, MainInput, MainOutput, MissingSource, OutPort, Session};
 use tutti_timeline::MotionCommand;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
@@ -80,7 +80,7 @@ fn render_click(frames: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(click, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(click, port)])
             .unwrap()
             .unfaded();
     }
@@ -136,7 +136,7 @@ fn render_click_under(meter: MeterMap, frames: usize) -> Vec<f32> {
     let click = s.click_node().expect("the builder inserts the click");
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(click, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(click, port)])
             .unwrap()
             .unfaded();
     }
@@ -254,7 +254,7 @@ fn render_voice(cents: f64, frames: usize, block: usize) -> Vec<f32> {
     let voice = s.graph().add(tutti_graph::Unforkable(voice(cents)));
     for port in 0..2 {
         s.graph()
-            .set_sources(Root::output(port), [OutPort::new(voice, port)])
+            .set_sources(MainOutput::channel(port), [OutPort::new(voice, port)])
             .unwrap()
             .unfaded();
     }
@@ -376,11 +376,11 @@ fn an_offline_render_feeds_the_master_meter() {
     let mut meter = s.take_master_meter().expect("declared at the build");
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -399,7 +399,7 @@ fn an_offline_render_feeds_the_master_meter() {
     let dc = detached.graph().add(ForkByClone(Const::mono(0.5)));
     detached
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let mut frame = [0.0f32];
@@ -444,7 +444,7 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     assert_eq!(
         s.graph()
             .meters()
-            .open(&[Root::input(0)], TapAlign::Raw)
+            .open(&[MainInput::channel(0)], TapAlign::Raw)
             .err(),
         Some(MissingSource::Global {
             channel: 0,
@@ -455,14 +455,14 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
     // wiring call refuses it and the output tap has nothing to refuse.
     assert_eq!(
         s.graph()
-            .set_sources(Root::output(0), [OutPort::new(a, 5)])
+            .set_sources(MainOutput::channel(0), [OutPort::new(a, 5)])
             .err(),
         Some(tutti_session::ConnectError::NoSuchOutPort(OutPort::new(
             a, 5
         )))
     );
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     s.graph()
@@ -485,7 +485,7 @@ fn a_track_meter_reads_a_nodes_port_and_goes_with_the_node() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     // The meters are the only edit of the second update.
@@ -633,7 +633,7 @@ fn an_offline_render_feeds_an_output_tap() {
     let mut s = offline();
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     // The tap is the only edit of the second update.
@@ -670,7 +670,7 @@ fn an_output_tap_follows_a_rewired_output() {
     let a = s.graph().add(ForkByClone(Const::mono(0.5)));
     let b = s.graph().add(ForkByClone(Const::mono(0.25)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
     let mut tap = s
@@ -682,7 +682,7 @@ fn an_output_tap_follows_a_rewired_output() {
     let mut block = vec![0.0f32; 64 * 2];
     s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(b, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(b, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -742,7 +742,7 @@ fn a_detached_render_feeds_a_tap() {
         .expect("builds");
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let mut tap = s
@@ -809,11 +809,11 @@ fn a_tap_steps_at_a_transport_stop_where_the_output_fades() {
     let mut s = offline();
     let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(gate, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(gate, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(gate, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(gate, 0)])
         .unwrap()
         .unfaded();
     let mut tap = s
@@ -876,11 +876,11 @@ fn the_heard_tap_carries_the_fade_at_a_stop() {
     let mut s = offline();
     let gate = s.graph().add(tutti_graph::Unforkable(Gated));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(gate, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(gate, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(gate, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(gate, 0)])
         .unwrap()
         .unfaded();
     let mut plan = s
@@ -944,11 +944,11 @@ fn render_feeds_the_heard_tap_and_a_fork_does_not() {
     let mut s = offline();
     let dc = s.graph().add(ForkByClone(Const::mono(0.5)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(dc, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(dc, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

@@ -7,7 +7,7 @@ use tutti_session::InPort;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_session::{GeneralMidi, NodeMode, OutPort, Root, Session};
+use tutti_session::{GeneralMidi, MainOutput, NodeMode, OutPort, Session};
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{SoundFontConfig, SoundFontUnit};
 use tutti_units::{SampleRate, Samples, Tail};
@@ -125,7 +125,10 @@ fn the_setup_does_not_take_the_graphs_outputs() {
     session.add_general_midi(unit()).expect("a SoundFont unit");
     for channel in 0..session.graph_ref().outputs() {
         assert_eq!(
-            session.graph_ref().sources(Root::output(channel)).unwrap(),
+            session
+                .graph_ref()
+                .sources(MainOutput::channel(channel))
+                .unwrap(),
             []
         );
     }
@@ -196,11 +199,11 @@ fn a_note_through_the_setup_rings_out_within_the_summed_tails() {
     let mut gm = session.add_general_midi(unit).expect("a SoundFont unit");
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(gm.out(), 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(gm.out(), 0)])
         .unwrap();
     session
         .graph()
-        .set_sources(Root::output(1), [OutPort::new(gm.out(), 1)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(gm.out(), 1)])
         .unwrap();
     let _ = session.update();
     let tail = |node| match session.graph_ref().node_tail(node).unwrap() {
@@ -295,7 +298,7 @@ fn short_release_setup() -> (Session, GeneralMidi<f32>) {
     for c in 0..2 {
         session
             .graph()
-            .set_sources(Root::output(c), [OutPort::new(gm.out(), c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(gm.out(), c)])
             .unwrap();
     }
     let _ = session.update();

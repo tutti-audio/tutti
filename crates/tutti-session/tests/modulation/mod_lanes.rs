@@ -31,10 +31,10 @@ use tutti_modulation::{
 use tutti_nodes::automation::{Breakpoint, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ModDelayConfig, PhaserConfig, ReconcileError};
 use tutti_session::{
-    AudioSide, AutomationTake, DepthTarget, DetachedSession, MixRef, ModInput, ModKeys, ModRefusal,
-    ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort, PHASES, ParamRef,
-    ParamTarget, PhaseCx, Problem, Replacement, Root, RouteSpec, Session, SessionEvent, TargetName,
-    declare_targets,
+    AudioSide, AutomationTake, DepthTarget, DetachedSession, MainOutput, MixRef, ModInput, ModKeys,
+    ModRefusal, ModRouteId, ModSourceId, ModTarget, NoSuchModRoute, NoSuchModSource, OutPort,
+    PHASES, ParamRef, ParamTarget, PhaseCx, Problem, Replacement, RouteSpec, Session, SessionEvent,
+    TargetName, declare_targets,
 };
 use tutti_units::{
     Amplitude, Beat, Bpm, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
@@ -66,7 +66,7 @@ pub(crate) fn rig(outputs: usize) -> (DetachedSession, AudioSide) {
 pub(crate) fn master(s: &mut DetachedSession, nodes: &[NodeKey]) {
     for (c, &n) in nodes.iter().enumerate() {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(n, 0)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(n, 0)])
             .unwrap();
     }
 }
@@ -803,7 +803,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
     let (mut s, mut side) = rig(1);
     settle(&mut s);
     let late = s.graph().add(ForkByClone(Late));
-    s.graph().connect(late, Root).unwrap();
+    s.graph().connect(late, MainOutput).unwrap();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();

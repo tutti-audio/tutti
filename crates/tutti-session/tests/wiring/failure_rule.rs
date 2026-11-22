@@ -6,8 +6,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, ForkByClone, Io, Node, NodeKey, Prepare, SampleRates, Shape, Status};
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InPort, OutPort,
-    ReplaceRefused, Replacement, Root, Session, SetRateError,
+    ConnectError, DetachedSession, EventInPort, EventOutPort, Feeder, InPort, MainOutput, OutPort,
+    ReplaceRefused, Replacement, Session, SetRateError,
 };
 use tutti_units::SampleRate;
 
@@ -64,7 +64,7 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
     let ghost_out = OutPort::new(GHOST, 0);
     let ghost_in = InPort::new(GHOST, 0);
     assert_eq!(
-        g.disconnect(ghost_out, Root::output(0)).err(),
+        g.disconnect(ghost_out, MainOutput::channel(0)).err(),
         Some(ConnectError::NoSuchNode(GHOST))
     );
     assert_eq!(
@@ -102,12 +102,12 @@ fn disconnect_and_sources_refuse_a_node_that_is_not_there() {
 
     // Real ends with no edge between them: absent, not an error.
     assert!(
-        !g.disconnect(a.out(0), Root::output(0))
+        !g.disconnect(a.out(0), MainOutput::channel(0))
             .unwrap()
             .was_connected()
     );
-    assert!(g.set_sources(Root::output(0), []).is_ok());
-    assert_eq!(g.sources(Root::output(0)), Ok(Vec::new()));
+    assert!(g.set_sources(MainOutput::channel(0), []).is_ok());
+    assert_eq!(g.sources(MainOutput::channel(0)), Ok(Vec::new()));
     // A port a real node does not have is a named error too.
     assert_eq!(
         g.sources(InPort::new(a.erase(), 9)),

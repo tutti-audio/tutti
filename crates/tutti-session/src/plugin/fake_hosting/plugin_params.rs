@@ -649,9 +649,9 @@ fn a_hosted_plugin_key_wires_like_a_native_key() {
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
     s.graph()
-        .connect(key.out(0), crate::Root::output(0))
+        .connect(key.out(0), crate::MainOutput::channel(0))
         .unwrap();
-    let sources = s.graph().sources(crate::Root::output(0)).unwrap();
+    let sources = s.graph().sources(crate::MainOutput::channel(0)).unwrap();
     assert_eq!(sources, [key.out(0)]);
 }
 

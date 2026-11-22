@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tutti_fixtures::block_on;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
@@ -64,7 +64,7 @@ fn rig(at: usize) -> Rig {
         handle: Arc::clone(&handle),
     };
     let node = session.graph().add(ForkByClone(node));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     Rig {
         session,
         node: node.erase(),

@@ -11,7 +11,7 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusRef, BusSource, Buses, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_session::{
-    ChannelEdge, Committed, ConnectError, GainTargetError, InPort, OutPort, Root, Session,
+    ChannelEdge, Committed, ConnectError, GainTargetError, InPort, MainOutput, OutPort, Session,
     SessionEvent,
 };
 
@@ -109,7 +109,7 @@ fn rig() -> Rig {
         out: named(1),
     }));
     let sink = g.add(Unforkable(Pass { input: named(1) }));
-    g.set_sources(Root::output(0), [OutPort::new(sink, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(sink, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -330,11 +330,14 @@ fn root_rig() -> (Session, NodeKey) {
 fn a_bus_into_the_declared_root_renders_the_itu_rows() {
     let (mut s, src) = root_rig();
     let g = s.graph();
-    g.connect(BusSource::Node(bus(src)), Root)
+    g.connect(BusSource::Node(bus(src)), MainOutput)
         .expect("5.1 folds to stereo")
         .unfaded();
     assert!(g.has_uncommitted_edits());
-    assert_eq!(g.bus_sources(Root).unwrap(), [BusSource::Node(bus(src))]);
+    assert_eq!(
+        g.bus_sources(MainOutput).unwrap(),
+        [BusSource::Node(bus(src))]
+    );
     let [l, r] = stereo_block(&mut s);
     // The unity lane is a plain addend, the others weighted, in source order.
     let left = ((0.0f32 + 0.5) + f32::MINUS_3_DB * 0.125) + f32::MINUS_3_DB * 0.0625;
@@ -344,13 +347,13 @@ fn a_bus_into_the_declared_root_renders_the_itu_rows() {
 
     let g = s.graph();
     assert!(
-        g.disconnect(BusSource::Node(bus(src)), Root)
+        g.disconnect(BusSource::Node(bus(src)), MainOutput)
             .unwrap()
             .unfaded()
             .was_connected()
     );
     assert!(
-        !g.disconnect(BusSource::Node(bus(src)), Root)
+        !g.disconnect(BusSource::Node(bus(src)), MainOutput)
             .unwrap()
             .unfaded()
             .was_connected()
@@ -368,11 +371,11 @@ fn an_undeclared_root_refuses_a_bus_edge() {
     let mut r = rig();
     let g = r.s.graph();
     assert_eq!(
-        g.connect(BusSource::Node(bus(r.stereo)), Root).err(),
+        g.connect(BusSource::Node(bus(r.stereo)), MainOutput).err(),
         Some(ConnectError::Bus(BusError::RootUndeclared))
     );
     assert!(!g.has_uncommitted_edits());
-    assert!(g.bus_sources(Root).unwrap().is_empty());
+    assert!(g.bus_sources(MainOutput).unwrap().is_empty());
 }
 
 /// A commit the editor refuses is an event of the update that first tried
@@ -387,7 +390,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
         out: named(2),
     }));
     s.graph()
-        .connect(BusSource::Node(bus(src.erase())), Root)
+        .connect(BusSource::Node(bus(src.erase())), MainOutput)
         .unwrap()
         .unfaded();
     let refused = |events: Vec<SessionEvent>| {
@@ -441,7 +444,7 @@ fn a_redeclared_root_relowers_its_edges_and_a_misfit_refuses_the_commit() {
         out: named(2),
     }));
     s.graph()
-        .connect(BusSource::Node(bus(src.erase())), Root)
+        .connect(BusSource::Node(bus(src.erase())), MainOutput)
         .unwrap()
         .unfaded();
     let [l, r] = stereo_block(&mut s);

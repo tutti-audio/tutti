@@ -226,7 +226,7 @@ fn restore_round_trip(hosting: Hosting) {
         .unwrap();
     // Wired to the output, so blocks run the plugin: an in-process plugin takes
     // a host write at the head of its next block.
-    s.graph().connect(node, tutti_session::Root).unwrap();
+    s.graph().connect(node, tutti_session::MainOutput).unwrap();
     let blocks = |s: &mut Session| {
         for _ in 0..4 {
             let _ = s.update();
@@ -327,7 +327,7 @@ struct Rebound {
 fn rebound(layout: u32) -> Rebound {
     use tutti_graph::ForkByClone;
     use tutti_nodes::testing::Const;
-    use tutti_session::Root;
+    use tutti_session::MainOutput;
     probe().set(ClapSwitch::PortLayout, layout);
     probe().set(ClapSwitch::RenderMode, 2);
     let (catalog, _dir) = catalog();
@@ -347,8 +347,8 @@ fn rebound(layout: u32) -> Rebound {
     for (from, to) in [
         (tutti_session::OutPort::new(a, 0), node.input(0)),
         (tutti_session::OutPort::new(b, 0), node.input(1)),
-        (node.out(0), Root::output(0)),
-        (node.out(1), Root::output(1)),
+        (node.out(0), MainOutput::channel(0)),
+        (node.out(1), MainOutput::channel(1)),
     ] {
         g.connect(from, to).unwrap().unfaded();
     }
@@ -760,8 +760,8 @@ fn a_served_plugin_that_grows_its_ports_gets_a_wider_node() {
         )
         .unwrap();
     for (from, to) in [
-        (node.out(0), tutti_session::Root::output(0)),
-        (node.out(1), tutti_session::Root::output(1)),
+        (node.out(0), tutti_session::MainOutput::channel(0)),
+        (node.out(1), tutti_session::MainOutput::channel(1)),
     ] {
         s.graph().connect(from, to).unwrap().unfaded();
     }
@@ -812,8 +812,8 @@ fn an_inserted_served_plugin_that_grows_its_ports_gets_a_wider_node() {
     .expect("the reference plugin loads");
     let node = s.graph().add_plugin(Box::new(client));
     for (from, to) in [
-        (node.out(0), tutti_session::Root::output(0)),
-        (node.out(1), tutti_session::Root::output(1)),
+        (node.out(0), tutti_session::MainOutput::channel(0)),
+        (node.out(1), tutti_session::MainOutput::channel(1)),
     ] {
         s.graph().connect(from, to).unwrap().unfaded();
     }

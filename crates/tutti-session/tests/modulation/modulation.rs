@@ -22,8 +22,8 @@ use tutti_modulation::{
 };
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_session::{
-    ModInput, ModKeys, ModRefusal, OutPort, PHASES, ParamRef, PhaseCx, Problem, Root, RouteError,
-    RouteSpec, Session, SessionEvent, TargetName,
+    MainOutput, ModInput, ModKeys, ModRefusal, OutPort, PHASES, ParamRef, PhaseCx, Problem,
+    RouteError, RouteSpec, Session, SessionEvent, TargetName,
 };
 use tutti_units::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
 use tutti_units::{SampleRate, Samples};
@@ -134,11 +134,11 @@ fn the_8_1_example_renders_its_analytic_values() {
         level: 0.8,
     }));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(filter, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(filter, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(pad, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(pad, 0)])
         .unwrap()
         .unfaded();
 
@@ -565,7 +565,7 @@ fn a_re_apply_that_moves_the_latency_publishes_it() {
 
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(probe, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(probe, 0)])
         .unwrap()
         .unfaded();
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);

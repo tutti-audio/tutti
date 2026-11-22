@@ -10,7 +10,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, IntDepth, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
-use tutti_session::{Bounce, DitherShape, Range, Root, Session};
+use tutti_session::{Bounce, DitherShape, MainOutput, Range, Session};
 use tutti_units::{SampleRate, Seconds};
 
 /// 9830.1 steps of 16 bit: a tenth of a step off a code.
@@ -42,7 +42,7 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");
     let dc = session.graph().add(node);
-    session.graph().connect(dc, Root).unwrap().unfaded();
+    session.graph().connect(dc, MainOutput).unwrap().unfaded();
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("out.wav");
     let bounce = Bounce::new()

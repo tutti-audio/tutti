@@ -14,7 +14,7 @@ use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Osc, Through};
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{Error, InPort, LiveSession, OutPort, Replacement, Root, Session};
+use tutti_session::{Error, InPort, LiveSession, MainOutput, OutPort, Replacement, Session};
 use tutti_timeline::MotionCommand;
 use tutti_units::{At, Db, Frame, Hz, SampleRate, Samples};
 
@@ -54,10 +54,10 @@ fn engine() -> (LiveSession, ManualStream, NodeKey, NodeKey) {
         .set_sources(InPort::new(lim, 0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(osc, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(osc, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(lim, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(lim, 0)])
         .unwrap();
     let _ = s.update();
     (s, stream, osc.erase(), lim.erase())

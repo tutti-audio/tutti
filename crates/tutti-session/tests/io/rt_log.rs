@@ -6,7 +6,7 @@ use tracing::Level;
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStreamDriver, OutputSpec};
 use tutti_graph::ForkByClone;
-use tutti_session::{OutPort, Root, Session};
+use tutti_session::{MainOutput, OutPort, Session};
 use tutti_units::{SampleRate, Samples};
 
 #[path = "../support/rt_log.rs"]
@@ -30,7 +30,7 @@ fn a_node_that_logs_on_the_audio_thread_emits_a_tracing_event_on_the_next_update
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(noisy, 0)])
         .unwrap()
         .unfaded();
 
@@ -86,7 +86,7 @@ fn nothing_is_logged_when_no_subscriber_takes_the_target() {
     let noisy = session.graph().add(ForkByClone(Noisy));
     session
         .graph()
-        .set_sources(Root::output(0), [OutPort::new(noisy, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(noisy, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();
