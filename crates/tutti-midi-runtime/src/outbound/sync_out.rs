@@ -281,9 +281,9 @@ impl<F: Float> Node<F> for SyncOut {
                     }
                 },
             );
-            let refused = self.clock.take_refused();
-            if refused > 0 {
-                self.losses.add(Losses::refused(refused));
+            let refused = self.clock.take_losses();
+            if refused != Losses::NONE {
+                self.losses.add(refused);
             }
             let at = Offset::clamped(base, block_len);
             match messages.mmc {

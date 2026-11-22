@@ -6,6 +6,7 @@ use tutti_ump::{
     Message, Midi1Parser, MidiGroup, SYSEX7_MAX_PAYLOAD, SysexAssembler, SysexMessage, SysexStep,
     Ump, Utility, parse_exact,
 };
+use tutti_units::Losses;
 
 /// MIDI 1.0 System Exclusive bytes read as SysEx7 packets (type 3) on the first
 /// Group: a port is one cable. The input node reassembles the packets.
@@ -54,8 +55,8 @@ pub(in crate::backend) enum Wire<'a> {
 pub(in crate::backend) struct ByteOut {
     midi1_translator: Midi1Translator,
     sysex: SysexAssembler<Box<[u8]>>,
-    /// The messages that had no MIDI 1.0 form.
-    unrepresentable: CounterWriter<u64>,
+    /// The messages that had no MIDI 1.0 form, each one [refused](Losses::refused).
+    unrepresentable: CounterWriter<Losses>,
 }
 
 /// Whether `ump` is the Utility NOOP, which says nothing to send.
@@ -69,7 +70,7 @@ const MAX_MESSAGE: usize = SYSEX7_MAX_PAYLOAD + 2;
 impl ByteOut {
     /// A writer with no message open, and the count of the messages it was
     /// given that have no MIDI 1.0 form.
-    pub(in crate::backend) fn new() -> (Self, Counter<u64>) {
+    pub(in crate::backend) fn new() -> (Self, Counter<Losses>) {
         // One lane, one packet at a time: each message is sent before the next
         // packet is pushed.
         let room = SysexAssembler::<()>::room_for(MAX_MESSAGE, 1, 1);
@@ -110,7 +111,7 @@ impl ByteOut {
                     }
                 });
                 if !made && sent.is_ok() && !is_noop(ump) {
-                    self.unrepresentable.add(1);
+                    self.unrepresentable.add(Losses::refused(1));
                 }
                 sent
             }

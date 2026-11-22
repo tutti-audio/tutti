@@ -197,20 +197,13 @@ pub trait DeviceOut: MidiOut {
     }
 
     /// What the output took and then could not send: a send the device refused
-    /// is [`lost`](Losses::lost), and an event waiting when the sender ended is
-    /// [`refused`](Losses::refused). An output that sends inside `queue` takes
+    /// is [`lost`](Losses::lost); an event waiting when the sender ended, and
+    /// one with no form its wire carries (a message type a MIDI 1.0 byte port
+    /// cannot express), is [`refused`](Losses::refused). An output that sends inside `queue` takes
     /// nothing it does not send (a failure there is the shorter count `queue`
     /// returns), so it loses nothing after taking, which is the default.
     fn losses(&self) -> Losses {
         Losses::NONE
-    }
-
-    /// How many events the output took and never sent because they have no
-    /// form its wire carries: a message type a MIDI 1.0 byte port cannot
-    /// express. An output that sends what it is handed has none, which is the
-    /// default.
-    fn unrepresentable(&self) -> u64 {
-        0
     }
 
     /// How many events this crate's own sender thread has taken and not yet

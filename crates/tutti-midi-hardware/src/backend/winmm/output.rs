@@ -19,8 +19,8 @@ const MAX_PENDING: usize = 8192;
 
 struct Shared {
     mailbox: Mailbox<Ump>,
-    /// The messages the sender had no MIDI 1.0 form for.
-    unrepresentable: Counter<u64>,
+    /// The messages the sender had no MIDI 1.0 form for, each one refused.
+    unrepresentable: Counter<Losses>,
     /// Ends the thread's wait when an earlier event arrives or the output stops.
     wake: TimerWaker,
 }
@@ -75,11 +75,7 @@ impl DeviceOut for WinMmOutput {
     }
 
     fn losses(&self) -> Losses {
-        self.shared.mailbox.losses()
-    }
-
-    fn unrepresentable(&self) -> u64 {
-        self.shared.unrepresentable.get()
+        self.shared.mailbox.losses() + self.shared.unrepresentable.get()
     }
 
     fn pending(&self) -> usize {
