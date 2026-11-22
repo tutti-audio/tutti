@@ -1635,11 +1635,13 @@ fn a_device_id_and_a_slot_keep_the_range_contract() {
 }
 
 /// RP-013 pp.11, 30: a speed's shift is three bits, its mantissa 17, a step's
-/// count six, and an audio track of the bitmap is 1 to 317.
+/// count and a segment count six, and an audio track of the bitmap is 1 to 317.
 #[test]
 fn the_machine_control_fields_keep_the_range_contract() {
     use tutti_fixtures::{RangeContract, check_range_contract};
-    use tutti_midi_protocol::{MmcAudioTrack, MmcMantissa, MmcShift, MmcStepCount};
+    use tutti_midi_protocol::{
+        MmcAudioTrack, MmcMantissa, MmcSegmentCount, MmcShift, MmcStepCount,
+    };
     check_range_contract(&RangeContract {
         new: MmcShift::new,
         get: MmcShift::get,
@@ -1658,6 +1660,13 @@ fn the_machine_control_fields_keep_the_range_contract() {
         new: MmcStepCount::new,
         get: MmcStepCount::get,
         of: Some(MmcStepCount::of),
+        valid: &[0, 63],
+        invalid: &[64, 255],
+    });
+    check_range_contract(&RangeContract {
+        new: MmcSegmentCount::new,
+        get: MmcSegmentCount::get,
+        of: Some(MmcSegmentCount::of),
         valid: &[0, 63],
         invalid: &[64, 255],
     });

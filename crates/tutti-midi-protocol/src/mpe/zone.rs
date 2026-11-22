@@ -381,7 +381,7 @@ impl MpeZoneConfig {
                 side: MpeZone::Lower,
                 ..
             } => 1..=self.member_count.get(),
-            // `member_count <= 15`, so the subtraction cannot wrap.
+            // `MemberCount` holds at most 15, so the subtraction cannot wrap.
             Placement::Side {
                 side: MpeZone::Upper,
                 ..
@@ -438,11 +438,10 @@ impl MpeZoneConfig {
     /// master channel. `None` for any other message.
     ///
     /// A count of `0` is the spec's disable-this-zone value, an
-    /// [`Mcm::Disable`]. A message is rejected, not
-    /// clamped, when RP-053 does not allow it: an MCM goes on Ch1 or Ch16 only,
-    /// and a zone has at most 15 members. Clamping would silently reconfigure
-    /// the zone to something the sender never asked for; `None` lets the caller
-    /// keep the zone it had.
+    /// [`Mcm::Disable`]. A message is rejected, not clamped, when RP-053 does
+    /// not allow it: an MCM goes on Ch1 or Ch16 only, and a zone has at most
+    /// 15 members. Clamping would silently reconfigure the zone to something
+    /// the sender never asked for; `None` lets the caller keep the zone it had.
     #[must_use]
     pub fn from_mcm(ump: &Ump) -> Option<Mcm> {
         let Ok(Message::Midi2(address, Voice2::Registered { bank, index, value })) =
