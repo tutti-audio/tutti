@@ -1,6 +1,7 @@
 //! MPE note allocation: the per-note messages of one Group as MIDI 1.0 channel
 //! messages on the member channels of a zone (M2-104 D.4).
 
+use alloc::boxed::Box;
 use core::cmp::Reverse;
 
 use tutti_ump::{
@@ -42,28 +43,40 @@ const NOTES: usize = 128;
 
 /// One Group's sixteen member channels and the channel of each note, keyed by
 /// the channel the note came from and its number.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct GroupMembers {
     channels: [Member; MidiChannel::COUNT as usize],
     owner: [[Option<MidiChannel>; NOTES]; MidiChannel::COUNT as usize],
 }
 
-/// The channels of every Group.
+impl GroupMembers {
+    const IDLE: Self = Self {
+        channels: [Member::IDLE; MidiChannel::COUNT as usize],
+        owner: [[None; NOTES]; MidiChannel::COUNT as usize],
+    };
+}
+
+/// The channels of every Group, one table each on the heap: built by
+/// [`new`](Self::new) and emptied in place by [`clear`](Self::clear), so a
+/// translator moves a pointer and the audio thread never allocates.
 #[derive(Clone, Debug)]
 pub(super) struct Members {
-    groups: [GroupMembers; MidiGroup::COUNT as usize],
+    groups: Box<[GroupMembers]>,
     tick: u32,
 }
 
 impl Members {
-    pub(super) const fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            groups: [GroupMembers {
-                channels: [Member::IDLE; MidiChannel::COUNT as usize],
-                owner: [[None; NOTES]; MidiChannel::COUNT as usize],
-            }; MidiGroup::COUNT as usize],
+            groups: (0..MidiGroup::COUNT).map(|_| GroupMembers::IDLE).collect(),
             tick: 0,
         }
+    }
+
+    /// Forgets every note, in place.
+    pub(super) fn clear(&mut self) {
+        self.groups.fill(GroupMembers::IDLE);
+        self.tick = 0;
     }
 
     /// Sends `voice` as the MPE messages it stands for, and returns whether it

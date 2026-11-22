@@ -732,6 +732,69 @@ fn mpe_sends_reset_all_controllers_and_all_notes_off_on_the_manager() {
     }
 }
 
+/// **The Pitch Bend range is not sent to Member Channels** (M2-120
+/// section 3.5): Pitch Bend Sensitivity (RPN 0/0) from source Ch6 (index 5)
+/// is Control Changes 101, 100, 6 and 38 on the Manager Channel, Ch1.
+/// Spec: m2-120/3.5#2, m2-120/3.5#5
+#[test]
+fn mpe_sends_the_pitch_bend_range_on_the_manager_only() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    assert_eq!(
+        feed(&mut n, rpn(from, 0, 0, 12 << 25)),
+        [
+            vec![0xB0, 101, 0],
+            vec![0xB0, 100, 0],
+            vec![0xB0, 6, 12],
+            vec![0xB0, 38, 0],
+        ]
+    );
+}
+
+/// **A MIDI 1.0 message in the MPE mode follows the same rules as a MIDI 2.0
+/// one**: a Note On takes a member channel, a Pitch Bend from source Ch6 (index
+/// 5) and an RPN 0 Control Change go on the Manager, and Control Changes 124
+/// to 127 are dropped.
+/// Spec: m2-120/4.7#9, m2-120/4.7#11, m2-120/4.7#13, m2-120/4.7#15, m2-120/3.5#2
+#[test]
+fn mpe_translates_midi1_input_by_the_same_rules() {
+    let mut n = mpe(zone());
+    let from = Address::first(MidiChannel::of(5));
+    let midi1 = |voice: Voice1| Message::Midi1(from, voice);
+    assert_eq!(
+        feed(
+            &mut n,
+            midi1(Voice1::NoteOn {
+                note: NoteNumber::of(60),
+                velocity: U7::of(0x40),
+            })
+        ),
+        [vec![0x91, 60, 0x40]]
+    );
+    assert_eq!(
+        feed(&mut n, midi1(Voice1::PitchBend(tutti_ump::U14::of(0x2000)))),
+        [vec![0xE0, 0x00, 0x40]]
+    );
+    let cc = |controller: u8, value: u8| {
+        midi1(Voice1::ControlChange {
+            controller: CCNumber::of(controller),
+            value: U7::of(value),
+        })
+    };
+    assert_eq!(feed(&mut n, cc(101, 0)), [vec![0xB0, 101, 0]]);
+    for controller in 124..=127 {
+        assert!(
+            feed(&mut n, cc(controller, 0)).is_empty(),
+            "CC {controller}"
+        );
+    }
+    // Without the MPE mode a MIDI 1.0 message passes on its own channel.
+    assert_eq!(
+        feed(&mut Midi1Translator::new(), cc(124, 0)),
+        [vec![0xB5, 124, 0]]
+    );
+}
+
 fn mpe_avoiding() -> Midi1Translator {
     Midi1Translator::with_mode(TranslationMode {
         extremes: ExtremeValues::Avoided,
