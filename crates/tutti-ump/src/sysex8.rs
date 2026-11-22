@@ -5,14 +5,12 @@
 use core::cell::Cell;
 use core::iter::FusedIterator;
 
+use crate::lanes::{Entry, LanePool, Run as LaneRun};
 use crate::{Data128, Message, MessageType, MidiGroup, Sysex8Packet, SysexStatus, Ump};
 
 /// The data bytes one packet carries after the Stream ID: 13 of the 14 bytes
 /// `# of bytes` counts.
 const BYTES_PER_PACKET: usize = 13;
-/// The most Groups a UMP stream has; also the most messages open at once, one
-/// per lane.
-const LANES: usize = 16;
 
 /// A SysEx 8 Stream ID (M2-104 §7.8): the whole byte, `0` to `255`, so every
 /// `u8` is one. A receiver of `N` streams takes `0` to `N - 1`
@@ -461,11 +459,10 @@ enum Run {
     Discarding,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Entry {
-    group: MidiGroup,
-    stream_id: Sysex8StreamId,
-    run: Run,
+impl LaneRun for Run {
+    fn is_assembling(&self) -> bool {
+        matches!(self, Self::Assembling { .. })
+    }
 }
 
 /// Reassembles System Exclusive 8 packets (section 7.8) that
@@ -520,13 +517,10 @@ struct Entry {
 /// ```
 #[derive(Debug)]
 pub struct Sysex8Assembler<B> {
-    buf: B,
-    lanes: usize,
-    max_payload: usize,
-    entries: [Option<Entry>; LANES],
+    /// One lane per open stream, the lane's slot naming the stream.
+    pool: LanePool<B, Entry<Sysex8StreamId, Run>>,
     /// A `Complete` packet's bytes, which have no lane.
     single: [u8; BYTES_PER_PACKET],
-    dropped: u64,
 }
 
 impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
@@ -536,14 +530,9 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
     /// used.
     #[must_use]
     pub fn new(buf: B, max_payload: usize, lanes: usize) -> Self {
-        let fit = buf.as_ref().len().checked_div(max_payload).unwrap_or(0);
         Self {
-            buf,
-            lanes: lanes.min(LANES).min(fit),
-            max_payload,
-            entries: [None; LANES],
+            pool: LanePool::new(buf, max_payload, lanes),
             single: [0; BYTES_PER_PACKET],
-            dropped: 0,
         }
     }
 
@@ -561,22 +550,13 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
     /// found no lane.
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped
+        self.pool.dropped
     }
 
     /// An upstream queue dropped UMPs after the ones just pushed: drop every
     /// open message, counted.
     pub fn lost_tail(&mut self) {
-        for entry in &mut self.entries {
-            if let Some(Entry {
-                run: Run::Assembling { .. },
-                ..
-            }) = entry
-            {
-                self.dropped += 1;
-            }
-            *entry = None;
-        }
+        self.pool.lost_tail();
     }
 
     /// The consumer was reset: drop the open messages (counted).
@@ -589,7 +569,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
         match ump.decode() {
             Ok(Message::Data128(group, Data128::Sysex8(p))) => self.packet(group, &p),
             Ok(Message::Data128(group, Data128::Sysex8Abort { stream_id })) => {
-                self.abort(group, stream_id);
+                self.close(group, stream_id);
                 Sysex8Step::Held
             }
             // Status 0 to 3 of type 5 with a `# of bytes` that is no count.
@@ -603,46 +583,19 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
     }
 
     fn find(&self, group: MidiGroup, stream_id: Sysex8StreamId) -> Option<usize> {
-        (0..self.lanes).find(
-            |&i| matches!(self.entries[i], Some(e) if e.group == group && e.stream_id == stream_id),
-        )
-    }
-
-    fn free(&self) -> Option<usize> {
-        (0..self.lanes).find(|&i| self.entries[i].is_none())
-    }
-
-    fn lane(&mut self, i: usize) -> &mut [u8] {
-        &mut self.buf.as_mut()[i * self.max_payload..][..self.max_payload]
+        self.pool.find_stream(group, stream_id)
     }
 
     fn set(&mut self, i: usize, group: MidiGroup, stream_id: Sysex8StreamId, run: Run) {
-        self.entries[i] = Some(Entry {
-            group,
-            stream_id,
-            run,
-        });
+        self.pool.set_stream(i, group, stream_id, run);
     }
 
     /// The stream's open message ends without its `End`: counted if it was
     /// being collected.
     fn close(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
         if let Some(i) = self.find(group, stream_id) {
-            if matches!(
-                self.entries[i],
-                Some(Entry {
-                    run: Run::Assembling { .. },
-                    ..
-                })
-            ) {
-                self.dropped += 1;
-            }
-            self.entries[i] = None;
+            self.pool.end(i);
         }
-    }
-
-    fn abort(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
-        self.close(group, stream_id);
     }
 
     fn packet(&mut self, group: MidiGroup, p: &Sysex8Packet) -> Sysex8Step<'_> {
@@ -651,8 +604,8 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
         match p.status() {
             SysexStatus::Complete => {
                 self.close(group, stream_id);
-                if bytes.len() > self.max_payload {
-                    self.dropped += 1;
+                if bytes.len() > self.pool.lane_len() {
+                    self.pool.dropped += 1;
                     return Sysex8Step::Held;
                 }
                 self.single[..bytes.len()].copy_from_slice(bytes);
@@ -664,19 +617,11 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
             }
             SysexStatus::Start => {
                 let i = self.find(group, stream_id);
-                if let Some(i) = i
-                    && matches!(
-                        self.entries[i],
-                        Some(Entry {
-                            run: Run::Assembling { .. },
-                            ..
-                        })
-                    )
-                {
-                    self.dropped += 1;
+                if let Some(i) = i {
+                    self.pool.end(i);
                 }
-                let Some(i) = i.or_else(|| self.free()) else {
-                    self.dropped += 1;
+                let Some(i) = i.or_else(|| self.pool.free()) else {
+                    self.pool.dropped += 1;
                     return Sysex8Step::Held;
                 };
                 self.set(i, group, stream_id, Run::Assembling { len: 0 });
@@ -689,7 +634,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
                         if let Some(Entry {
                             run: Run::Assembling { len },
                             ..
-                        }) = self.entries[i]
+                        }) = self.pool.slots[i]
                         {
                             self.extend(i, group, stream_id, len, bytes);
                         }
@@ -700,10 +645,10 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
             }
             SysexStatus::End => {
                 let Some(i) = self.find(group, stream_id) else {
-                    self.dropped += 1;
+                    self.pool.dropped += 1;
                     return Sysex8Step::Held;
                 };
-                match self.entries[i] {
+                match self.pool.slots[i] {
                     Some(Entry {
                         run: Run::Assembling { len },
                         ..
@@ -712,20 +657,20 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
                         let Some(Entry {
                             run: Run::Assembling { len },
                             ..
-                        }) = self.entries[i]
+                        }) = self.pool.slots[i]
                         else {
-                            self.entries[i] = None;
+                            self.pool.slots[i] = None;
                             return Sysex8Step::Held;
                         };
-                        self.entries[i] = None;
+                        self.pool.slots[i] = None;
                         Sysex8Step::Complete(Sysex8Message {
                             group,
                             stream_id,
-                            payload: &self.lane(i)[..len],
+                            payload: &self.pool.lane(i)[..len],
                         })
                     }
                     _ => {
-                        self.entries[i] = None;
+                        self.pool.slots[i] = None;
                         Sysex8Step::Held
                     }
                 }
@@ -736,8 +681,8 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
     /// A `Continue` with no message open: counted, and its stream skipped to
     /// the `End` if a lane is free to remember it.
     fn orphan(&mut self, group: MidiGroup, stream_id: Sysex8StreamId) {
-        self.dropped += 1;
-        if let Some(i) = self.free() {
+        self.pool.dropped += 1;
+        if let Some(i) = self.pool.free() {
             self.set(i, group, stream_id, Run::Discarding);
         }
     }
@@ -752,12 +697,12 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> Sysex8Assembler<B> {
         len: usize,
         bytes: &[u8],
     ) {
-        if len + bytes.len() > self.max_payload {
-            self.dropped += 1;
+        if len + bytes.len() > self.pool.lane_len() {
+            self.pool.dropped += 1;
             self.set(i, group, stream_id, Run::Discarding);
             return;
         }
-        self.lane(i)[len..len + bytes.len()].copy_from_slice(bytes);
+        self.pool.lane_mut(i)[len..len + bytes.len()].copy_from_slice(bytes);
         self.set(
             i,
             group,

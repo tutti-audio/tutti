@@ -75,7 +75,6 @@ impl PePeer {
         .build()
         .unwrap();
         let muid = tutti_midi_ci::Muid::of(0x0012_3457);
-        let room = SysexAssembler::room_for(1024, 1, 16);
         Self {
             device: Endpoint::new(Supports::of(Capabilities {
                 midi1: true,
@@ -83,7 +82,7 @@ impl PePeer {
                 ..Capabilities::default()
             }))
             .block(block),
-            assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 1024, 16),
+            assembler: SysexAssembler::boxed(1024, 1, 16),
             muid,
             responder: ResourceResponder::new(
                 muid,

@@ -3,15 +3,12 @@
 //! in `flex_write`.
 
 use crate::flex_write::BYTES_PER_PACKET;
+use crate::lanes::{LanePool, Run as LaneRun};
 use crate::{Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, Ump};
 
-/// How many Groups there are, so how many messages can be open at once.
-const GROUPS: usize = 16;
-
-/// What the assembler holds for one Group.
+/// What the assembler holds for one Group with a message open.
 #[derive(Clone, Copy, Debug)]
 enum Run {
-    Idle,
     /// A message in `lane`, `len` bytes so far.
     Assembling {
         lane: usize,
@@ -25,6 +22,12 @@ enum Run {
         address: FlexAddress,
         kind: FlexTextKind,
     },
+}
+
+impl LaneRun for Run {
+    fn is_assembling(&self) -> bool {
+        matches!(self, Self::Assembling { .. })
+    }
 }
 
 /// A text message the [`FlexTextAssembler`] completed: where it came from and
@@ -109,13 +112,10 @@ pub enum FlexTextStep<'a> {
 /// ```
 #[derive(Debug)]
 pub struct FlexTextAssembler<B> {
-    buf: B,
-    lanes: usize,
-    max_text: usize,
-    runs: [Run; GROUPS],
+    /// One run slot per Group, each naming its lane.
+    pool: LanePool<B, Run>,
     /// A Complete packet's text, which has no lane.
     single: [u8; BYTES_PER_PACKET],
-    dropped: u64,
     invalid: u64,
 }
 
@@ -126,14 +126,9 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// drops (and counts) every message of more than one packet.
     #[must_use]
     pub fn new(buf: B, max_text: usize, lanes: usize) -> Self {
-        let fit = buf.as_ref().len().checked_div(max_text).unwrap_or(0);
         Self {
-            buf,
-            lanes: lanes.min(GROUPS).min(fit),
-            max_text,
-            runs: [Run::Idle; GROUPS],
+            pool: LanePool::new(buf, max_text, lanes),
             single: [0; BYTES_PER_PACKET],
-            dropped: 0,
             invalid: 0,
         }
     }
@@ -156,28 +151,28 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
             },
         )) = ump.decode()
         else {
-            self.other(ump);
+            self.pool.interrupt(ump);
             return FlexTextStep::NotText;
         };
         let g = group.index();
         let same = |a: FlexAddress, k: FlexTextKind| a == address && k == kind;
         match form {
             Form::Complete => {
-                self.end_run(g);
+                self.pool.end(g);
                 self.complete_single(group, address, kind, &bytes)
             }
             Form::Start => {
-                self.end_run(g);
+                self.pool.end(g);
                 self.start(g, address, kind, &bytes);
                 FlexTextStep::Held
             }
-            Form::Continue | Form::End => match self.runs[g] {
-                Run::Assembling {
+            Form::Continue | Form::End => match self.pool.slots[g] {
+                Some(Run::Assembling {
                     lane,
                     len,
                     address: a,
                     kind: k,
-                } if same(a, k) => {
+                }) if same(a, k) => {
                     if form == Form::Continue {
                         self.extend(g, lane, len, &bytes, false);
                         FlexTextStep::Held
@@ -185,21 +180,21 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
                         self.finish(group, lane, len, &bytes)
                     }
                 }
-                Run::Discarding {
+                Some(Run::Discarding {
                     address: a,
                     kind: k,
-                } if same(a, k) => {
+                }) if same(a, k) => {
                     if form == Form::End {
-                        self.runs[g] = Run::Idle;
+                        self.pool.slots[g] = None;
                     }
                     FlexTextStep::Held
                 }
                 // Another message's packet interrupts the open one.
-                Run::Assembling { .. } | Run::Discarding { .. } => {
-                    self.end_run(g);
+                Some(_) => {
+                    self.pool.end(g);
                     FlexTextStep::Held
                 }
-                Run::Idle => FlexTextStep::Held,
+                None => FlexTextStep::Held,
             },
         }
     }
@@ -207,9 +202,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// An upstream queue dropped packets after the ones just pushed: drop
     /// every open message, counted, so a later packet is not spliced onto one.
     pub fn lost_tail(&mut self) {
-        for g in 0..GROUPS {
-            self.end_run(g);
-        }
+        self.pool.lost_tail();
     }
 
     /// The consumer was reset: drop the open messages (counted).
@@ -222,7 +215,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// [`lost_tail`](Self::lost_tail) or open at a [`reset`](Self::reset).
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped
+        self.pool.dropped
     }
 
     /// Messages refused since this assembler was made for breaking the text
@@ -234,52 +227,28 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
         self.invalid
     }
 
-    /// A UMP that is not a Flex text packet. It ends its Group's open message
-    /// unless it is a System Real Time or a JR Clock message (section 7.5.2).
-    fn other(&mut self, ump: Ump) {
-        let Some(group) = ump.group() else { return };
-        let real_time = ump.is_system_real_time();
-        if !real_time {
-            self.end_run(group.index());
-        }
-    }
-
-    /// The Group's open message ends without its End: counted if it was being
-    /// assembled (a discarded one was counted when it was dropped).
-    fn end_run(&mut self, g: usize) {
-        if matches!(self.runs[g], Run::Assembling { .. }) {
-            self.dropped += 1;
-        }
-        self.runs[g] = Run::Idle;
-    }
-
-    fn free_lane(&self) -> Option<usize> {
-        (0..self.lanes).find(|&lane| {
-            !self
-                .runs
-                .iter()
-                .any(|run| matches!(run, Run::Assembling { lane: l, .. } if *l == lane))
-        })
-    }
-
     fn start(&mut self, g: usize, address: FlexAddress, kind: FlexTextKind, bytes: &[u8; 12]) {
         if bytes.contains(&0) {
             // Zero is the padding, and only an End or a Complete has any.
             self.invalid += 1;
-            self.runs[g] = Run::Discarding { address, kind };
+            self.pool.slots[g] = Some(Run::Discarding { address, kind });
             return;
         }
-        let Some(lane) = self.free_lane() else {
-            self.dropped += 1;
-            self.runs[g] = Run::Discarding { address, kind };
+        let free = self.pool.free_lane(|run| match run {
+            Run::Assembling { lane, .. } => Some(*lane),
+            Run::Discarding { .. } => None,
+        });
+        let Some(lane) = free else {
+            self.pool.dropped += 1;
+            self.pool.slots[g] = Some(Run::Discarding { address, kind });
             return;
         };
-        self.runs[g] = Run::Assembling {
+        self.pool.slots[g] = Some(Run::Assembling {
             lane,
             len: 0,
             address,
             kind,
-        };
+        });
         self.extend(g, lane, 0, bytes, false);
     }
 
@@ -287,27 +256,26 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     /// `len` bytes in `lane`. `last` says the bytes are an End's, whose zeros
     /// are checked by the caller.
     fn extend(&mut self, g: usize, lane: usize, len: usize, bytes: &[u8], last: bool) -> bool {
-        let Run::Assembling { address, kind, .. } = self.runs[g] else {
+        let Some(Run::Assembling { address, kind, .. }) = self.pool.slots[g] else {
             return false;
         };
         if !last && bytes.contains(&0) {
             self.invalid += 1;
-            self.runs[g] = Run::Discarding { address, kind };
+            self.pool.slots[g] = Some(Run::Discarding { address, kind });
             return false;
         }
-        if len + bytes.len() > self.max_text {
-            self.dropped += 1;
-            self.runs[g] = Run::Discarding { address, kind };
+        if len + bytes.len() > self.pool.lane_len() {
+            self.pool.dropped += 1;
+            self.pool.slots[g] = Some(Run::Discarding { address, kind });
             return false;
         }
-        let at = lane * self.max_text + len;
-        self.buf.as_mut()[at..at + bytes.len()].copy_from_slice(bytes);
-        self.runs[g] = Run::Assembling {
+        self.pool.lane_mut(lane)[len..len + bytes.len()].copy_from_slice(bytes);
+        self.pool.slots[g] = Some(Run::Assembling {
             lane,
             len: len + bytes.len(),
             address,
             kind,
-        };
+        });
         true
     }
 
@@ -325,20 +293,20 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
         bytes: &[u8; 12],
     ) -> FlexTextStep<'_> {
         let g = group.index();
-        let Run::Assembling { address, kind, .. } = self.runs[g] else {
+        let Some(Run::Assembling { address, kind, .. }) = self.pool.slots[g] else {
             return FlexTextStep::Held;
         };
         let Some(tail) = Self::padded(bytes) else {
             self.invalid += 1;
-            self.runs[g] = Run::Idle;
+            self.pool.slots[g] = None;
             return FlexTextStep::Held;
         };
         let tail = tail.len();
         if !self.extend(g, lane, len, &bytes[..tail], true) {
-            self.runs[g] = Run::Idle;
+            self.pool.slots[g] = None;
             return FlexTextStep::Held;
         }
-        self.runs[g] = Run::Idle;
+        self.pool.slots[g] = None;
         let total = len + tail;
         self.deliver(group, address, kind, Some(lane), total)
     }
@@ -371,7 +339,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> FlexTextAssembler<B> {
     ) -> FlexTextStep<'_> {
         let bytes = match lane {
             None => &self.single[..len],
-            Some(lane) => &self.buf.as_ref()[lane * self.max_text..][..len],
+            Some(lane) => &self.pool.lane(lane)[..len],
         };
         match core::str::from_utf8(bytes) {
             Ok(text) if crate::flex_write::Text::try_from(text).is_ok() => {

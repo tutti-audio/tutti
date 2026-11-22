@@ -1094,8 +1094,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         CiCategories::empty(),
         MaxSysexSize::of(256),
     );
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let start = Instant::now();
     let mut noticed = false;
     let mut replied = false;
@@ -1249,8 +1248,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         ci_version: CI_VERSION,
         source: peer,
     };
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let start = Instant::now();
     let mut seen = Vec::new();
     let mut set_on = Vec::new();
@@ -1510,7 +1508,6 @@ impl MpePeer {
         .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
-        let room = SysexAssembler::room_for(256, 1, 16);
         Self {
             device: Endpoint::new(Supports::of(Capabilities {
                 midi1: true,
@@ -1518,7 +1515,7 @@ impl MpePeer {
                 ..Capabilities::default()
             }))
             .block(block),
-            assembler: SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16),
+            assembler: SysexAssembler::boxed(256, 1, 16),
             muid: tutti_midi_ci::Muid::of(0x0012_3456),
             switch: Reply::Answer,
             report: Reply::Answer,
@@ -1953,8 +1950,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         controllers: ChannelControllers::CONTROL_CHANGE,
         notes: NoteData::empty(),
     };
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let start = Instant::now();
     let mut seen = Vec::new();
     let mut inquiries = Vec::new();
