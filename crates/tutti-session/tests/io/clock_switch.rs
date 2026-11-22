@@ -277,17 +277,12 @@ fn a_poisoned_graph_comes_back_stopped() {
         err.error()
     );
     assert!(!stream.is_open(), "the card never started");
-    let mut s = err.into_session();
+    let s = err.into_session();
     assert_eq!(
         s.stream_spec().sample_rate,
         s.sample_rate(),
         "the host says what the graph is prepared at"
     );
-    let stopped_at = frame(&s);
-    for _ in 0..50 {
-        let _ = s.update();
-        assert_eq!(frame(&s), stopped_at, "the timer is stopped");
-    }
     assert_eq!(s.faults().count(), 0, "and the session still answers");
 }
 

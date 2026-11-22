@@ -85,7 +85,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     let mut s = offline_48k();
     let edge = mixer(&mut s);
     settle(&mut s);
-    let plain = render(&mut s, 2);
+    let plain = render(&mut s, 2, BLOCK);
     assert!(plain.iter().all(|&x| x == A + B), "unity before any route");
 
     let mut m = s.mods_mut();
@@ -99,7 +99,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
 
     // Past the lane's first block and the connect's declick.
     let figure = |s: &mut Session, w: f32, what: &str| {
-        let got = render(s, 12);
+        let got = render(s, 12, BLOCK);
         let want = (0.0 + w * A) + B;
         for (f, &x) in got.iter().enumerate().skip(512) {
             assert_eq!(x.to_bits(), want.to_bits(), "{what}, frame {f}");
@@ -150,7 +150,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     settle(&mut s);
 
     let figure = |s: &mut Session, w: f32, what: &str| {
-        let got = render(s, 12);
+        let got = render(s, 12, BLOCK);
         let want = (0.0 + w * A) + B;
         for (f, &x) in got.iter().enumerate().skip(512) {
             assert_eq!(x.to_bits(), want.to_bits(), "{what}, frame {f}");
@@ -205,7 +205,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
         plans + 1,
         "one plan for the wire and its lane"
     );
-    let got = render(&mut s, 1);
+    let got = render(&mut s, 1, BLOCK);
     let want = (0.0 + 1.5 * A) + B;
     assert_eq!(got[0].to_bits(), want.to_bits(), "the first frame");
     assert_eq!(got[BLOCK - 1].to_bits(), want.to_bits());

@@ -18,10 +18,10 @@ pub fn session() -> Session {
         .expect("builds")
 }
 
-/// Output channel 0 (the left of the stereo main output) for `blocks` blocks of 128 frames.
-pub fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
+/// Output channel 0 (the left of the stereo main output) for `blocks` blocks of `block` frames.
+pub fn render(s: &mut Session, blocks: usize, block: usize) -> Vec<f32> {
     let mut all = Vec::new();
-    let mut buf = vec![0.0f32; 128 * 2];
+    let mut buf = vec![0.0f32; block * 2];
     for _ in 0..blocks {
         s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
         all.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));

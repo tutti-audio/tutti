@@ -76,7 +76,7 @@ fn blend(m: f32) -> f32 {
 /// Every frame past the lane's first block and the connect's declick is the
 /// blend at `m`.
 fn figure(s: &mut Session, m: f32, what: &str) {
-    let got = render(s, 12);
+    let got = render(s, 12, BLOCK);
     for (f, &x) in got.iter().enumerate().skip(512) {
         assert_eq!(x.to_bits(), blend(m).to_bits(), "{what}, frame {f}");
     }
@@ -176,7 +176,7 @@ fn a_route_onto_the_mix_of_a_node_added_in_the_update_sends_one_plan() {
         plans + 1,
         "one plan for the node and its lane"
     );
-    let got = render(&mut s, 1);
+    let got = render(&mut s, 1, BLOCK);
     assert_eq!(got[0].to_bits(), blend(0.5).to_bits(), "the first frame");
     assert_eq!(got[BLOCK - 1].to_bits(), blend(0.5).to_bits());
 }

@@ -9,8 +9,6 @@
 
 use crate::param_reads::ParamReads as _;
 
-use std::time::Duration;
-
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use tutti_buffers::InterleavedMut;
@@ -65,11 +63,11 @@ fn told(s: &Session, node: tutti_graph::NodeKey) -> Option<f64> {
         .map(Normalized::get)
 }
 
-/// Renders blocks until the plugin's last bypass point is `want`, for at most a
-/// bound that only guards a hang.
+/// Renders blocks until the plugin's last bypass point is `want`, for at most
+/// [`HANG_GUARD`](tutti_fixtures::HANG_GUARD).
 fn until_told(s: &mut Session, node: tutti_graph::NodeKey, want: f64, what: &str) {
     let mut block = vec![0.0f32; BLOCK * 2];
-    tutti_fixtures::wait_until(what, Duration::from_secs(30), || {
+    tutti_fixtures::wait_until(what, tutti_fixtures::HANG_GUARD, || {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
         let _ = s.update();
         told(s, node) == Some(want)

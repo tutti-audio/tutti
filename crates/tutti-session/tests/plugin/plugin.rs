@@ -131,8 +131,11 @@ fn await_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
 }
 
 /// Holds across 20 round trips to the server that the probe's latency reads `want`:
-/// what an announcement that did not happen looks like. The server handles its
-/// messages in order, so an announcement sent before a round trip has landed by it.
+/// what an announcement that did not happen looks like. The session announces a
+/// render mode only from `update` (`tutti_plugin_host::needs_notify`), so a caller
+/// that has not updated since the plugin was added has nothing in flight for the
+/// server to answer; the round trips only give a wrong early announcement the
+/// chance to show.
 fn stays_latency(s: &Session, node: Key<AnyPlugin>, want: Samples, why: &str) {
     for _ in 0..20 {
         round_trip(s, node);
