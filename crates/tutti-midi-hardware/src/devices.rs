@@ -420,8 +420,7 @@ impl Devices {
             info,
             sink: Arc::from(sink),
             wire: Wire::new(described),
-            refused: 0,
-            unrepresentable: 0,
+            refused: Losses::NONE,
             heartbeat: None,
             executor: self.inner.executor.clone(),
         })
@@ -692,11 +691,10 @@ pub struct OpenOutput {
     info: DeviceInfo,
     sink: Arc<dyn DeviceOut>,
     wire: Wire,
-    /// The packets the sink had no room for, for [`losses`](Self::losses).
-    refused: u64,
-    /// The events that became no packet in the device's wire form, for
-    /// [`unrepresentable`](Self::unrepresentable).
-    unrepresentable: u64,
+    /// What this output refused before the sink took it, for
+    /// [`losses`](Self::losses): the packets the sink had no room for, and the
+    /// events that became no packet in the device's wire form.
+    refused: Losses,
     /// What the heartbeat thread belongs to. Declared after `sink`: the sink ends its
     /// sender and frees the port before the last clone of the executor can shut
     /// it down.
@@ -748,23 +746,16 @@ impl OpenOutput {
     }
 
     /// What the output did not send: what the device had no room for when
-    /// [`queue`](Self::queue) offered it (refused), and what the output took
-    /// and then could not send ([`DeviceOut::losses`]).
+    /// [`queue`](Self::queue) offered it, what the output took and then could
+    /// not send ([`DeviceOut::losses`]), and the events that have no form on
+    /// the wire of its device: a JR Timestamp the device does not take, a
+    /// per-note controller for a MIDI 1.0 device, a message a byte port cannot
+    /// carry. The last drop is the spec's (M2-104 Appendix D.2.8, M2-115);
+    /// each such event is [`refused`](Losses::refused), and `queue` still
+    /// answers that the output took it.
     #[must_use]
     pub fn losses(&self) -> Losses {
-        self.sink.losses() + Losses::refused(self.refused)
-    }
-
-    /// How many events the output took as sent that have no form on the wire of
-    /// its device, and so went nowhere: a JR Timestamp the device does not take,
-    /// a per-note controller for a MIDI 1.0 device, a message a byte port cannot
-    /// carry ([`DeviceOut::unrepresentable`]). The drop is the spec's (M2-104
-    /// Appendix D.2.8, M2-115); this is the count of it, apart from
-    /// [`losses`](Self::losses), which counts only what the device had no room
-    /// for.
-    #[must_use]
-    pub fn unrepresentable(&self) -> u64 {
-        self.unrepresentable + self.sink.unrepresentable()
+        self.sink.losses() + self.refused
     }
 
     /// How many events the output has taken and not yet sent; see
@@ -819,7 +810,7 @@ impl OpenOutput {
     /// Queues `events` in the device's wire form, each to go now, and returns
     /// what the device [`Taken`]. An event that has no form on the wire (a JR
     /// Timestamp the device does not take, a per-note controller for MIDI 1.0)
-    /// counts as taken, and is counted in [`unrepresentable`](Self::unrepresentable).
+    /// counts as taken, and is counted in [`losses`](Self::losses) as refused.
     /// What is taken ends between two messages, so a System
     /// Exclusive message goes whole or not at all; what is not taken is
     /// counted in [`losses`](Self::losses). For a control thread: it allocates
@@ -833,7 +824,7 @@ impl OpenOutput {
     /// the event it came from.
     pub fn queue_timed(&mut self, events: &[Outgoing]) -> Taken {
         let (taken, refused) = self.offer(events);
-        self.refused += refused;
+        self.refused += Losses::refused(refused);
         taken
     }
 
@@ -852,13 +843,13 @@ impl OpenOutput {
             heartbeat.sent();
         }
         let accepted = self.wire.accepted(taken, events);
-        self.unrepresentable += self.wire.unrepresentable_in(accepted.packets());
+        self.refused += self.wire.unrepresentable_in(accepted.packets());
         (accepted, refused)
     }
 
     /// Counts `packets` the device had no room for ([`offer`](Self::offer)).
     pub(crate) fn count_refused(&mut self, packets: u64) {
-        self.refused += packets;
+        self.refused += Losses::refused(packets);
     }
 }
 

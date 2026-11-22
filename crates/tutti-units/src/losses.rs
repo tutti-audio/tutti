@@ -12,12 +12,14 @@ use core::ops::{Add, AddAssign};
 /// each one's own getters.
 ///
 /// - [`lost`](Self::lost): gone without a trace, or refused at a full ring on
-///   the way in (the inlet's writer answers `PushError::Full`).
+///   the way in (the inlet's writer answers `PushError::Full`). A message
+///   unreadable on arrival (a SysEx that fails its checksum) is one.
 /// - [`evicted`](Self::evicted): held, then dropped to make room for another.
 ///   A full waiting list or a ring that overwrote its oldest.
 /// - [`refused`](Self::refused): a port or a node declined it: no room at the
 ///   destination, or no destination (a Group with no port). A MIDI-CI message
-///   that an output could not take whole counts as one.
+///   that an output could not take whole counts as one, and so does a MIDI 2.0
+///   only message on a MIDI 1.0 port.
 /// - [`late`](Self::late): found past its frame and delivered at the block's
 ///   first frame. Not a loss of the event, a loss of its time.
 ///
@@ -35,11 +37,13 @@ use core::ops::{Add, AddAssign};
 #[non_exhaustive]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Losses {
-    /// Events lost: refused at a full ring, or gone without a trace.
+    /// Events lost: refused at a full ring, gone without a trace, or
+    /// unreadable on arrival.
     pub lost: u64,
     /// Events dropped from a waiting list or overwritten in a ring for room.
     pub evicted: u64,
-    /// Events a port or node refused, or that had no port to go to.
+    /// Events a port or node refused, or that had no port to go to, including
+    /// a MIDI 2.0 only message on a MIDI 1.0 port.
     pub refused: u64,
     /// Events delivered after their frame.
     pub late: u64,

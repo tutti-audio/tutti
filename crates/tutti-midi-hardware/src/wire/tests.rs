@@ -385,7 +385,11 @@ fn the_events_with_no_wire_form_are_counted_in_the_events_taken() {
     ]);
     wire.convert(&events);
     assert_eq!(wire.batch().len(), 1, "only the note has a form");
-    assert_eq!(wire.unrepresentable_in(3), 2);
-    assert_eq!(wire.unrepresentable_in(1), 1, "the clock, before the note");
-    assert_eq!(wire.unrepresentable_in(0), 0);
+    assert_eq!(wire.unrepresentable_in(3), Losses::refused(2));
+    assert_eq!(
+        wire.unrepresentable_in(1),
+        Losses::refused(1),
+        "the clock, before the note"
+    );
+    assert_eq!(wire.unrepresentable_in(0), Losses::NONE);
 }

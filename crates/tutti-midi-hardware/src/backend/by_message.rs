@@ -8,6 +8,7 @@
 
 use tutti_midi_runtime::{Outgoing, Taken};
 use tutti_ump::PacketSpan;
+use tutti_units::Losses;
 
 /// Why the OS did not take a message, and how much of it went first.
 #[derive(Debug)]
@@ -24,8 +25,8 @@ pub(super) struct Refused<E> {
 pub(super) struct Sent {
     /// What went: whole messages, and the message the OS cut, if one.
     pub(super) taken: Taken,
-    /// The packets of a cut message that did not go.
-    pub(super) lost: u64,
+    /// The packets of a cut message that did not go, as [lost](Losses::lost).
+    pub(super) losses: Losses,
 }
 
 /// Sends the messages of `events` through `send`, in order, until the OS
@@ -46,16 +47,22 @@ pub(super) fn by_message<E: std::error::Error>(
             Err(Refused { error, sent }) => {
                 tracing::debug!("{backend} send: {}", crate::error::chain(&error));
                 if sent == 0 {
-                    return Sent { taken, lost: 0 };
+                    return Sent {
+                        taken,
+                        losses: Losses::NONE,
+                    };
                 }
                 return Sent {
                     taken: taken.through(message),
-                    lost: (message.len() - sent) as u64,
+                    losses: Losses::lost((message.len() - sent) as u64),
                 };
             }
         }
     }
-    Sent { taken, lost: 0 }
+    Sent {
+        taken,
+        losses: Losses::NONE,
+    }
 }
 
 #[cfg(test)]
