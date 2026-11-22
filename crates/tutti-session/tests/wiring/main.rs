@@ -13,6 +13,7 @@ static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 mod block_dates;
 mod build_frame;
 mod bus_edges;
+mod cells_node;
 mod compensation;
 mod connect;
 mod declick;
