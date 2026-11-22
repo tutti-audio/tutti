@@ -30,15 +30,14 @@
 //!   that spawned this process, found by [`host_pid`] from [`HOST_PID_ENV`]): a
 //!   thread the OS wakes when a named process ends, which runs the caller's reply to that, and
 //!   [`terminate_process`], the end that runs no cleanup.
-//! - **What ties a server's life to its host's** ([`own_group`], [`kill_group`],
-//!   [`has_ended`], [`bind_to_host`]): the process group a server leads, whose end reaches the
+//! - **What ties a server's life to its host's** ([`Spawn::Leader`], [`kill_group`]): the process group a server leads, whose end reaches the
 //!   helpers a plugin spawned (unix), and the kill-on-close Job Object the
 //!   kernel ends a server with when the host dies (Windows). And
 //!   [`protect_host_memory`], the host's dumpable flag cleared (Linux), so a
 //!   same-user plugin cannot `ptrace` the host or write its memory.
-//! - **What a spawned helper inherits** ([`inherit_only_stdio`]): descriptors 0, 1 and 2
-//!   only, so plugin code in the helper cannot reach the host's files and sockets (unix only: on Windows the call does nothing yet).
-//! - **The guard on a child process** ([`Reaped`]): a spawned child, killed with its
+//! - **What a spawned helper inherits** ([`spawn()`]): descriptors 0, 1 and 2
+//!   only, so plugin code in the helper cannot reach the host's files and sockets (unix only: on Windows the spawn does not yet limit it).
+//! - **The guard on a child process** ([`Reaped`], over a [`Process`], started by [`spawn()`]): a spawned child, killed with its
 //!   process group and reaped when the guard drops, so no path out of the code that holds
 //!   it leaves a running process or a zombie. It holds no `unsafe` of its own.
 //! - **The OS calls** (`wait_readable`, `wait_readable_either` and `poll_wait`
@@ -67,6 +66,7 @@ mod descriptor;
 mod exit;
 mod harden;
 mod header;
+#[cfg(unix)]
 mod inherit;
 mod lane;
 mod lifetime;
@@ -77,7 +77,9 @@ mod os;
 #[cfg(windows)]
 #[path = "os/windows.rs"]
 mod os;
+mod process;
 mod reaped;
+mod spawn;
 mod wakeups;
 
 pub use exit::ExitWait;
@@ -86,14 +88,16 @@ pub use exit::ExitWait;
 pub use exit::{HOST_PID_ENV, Host, host_pid, watch_host, watch_spawner};
 pub use harden::protect_host_memory;
 pub use header::{Direction, RING_SLOTS, SLAB_HEADER_BYTES, SlabHeader, slot_for};
-pub use inherit::inherit_only_stdio;
 pub use lane::*;
-pub use lifetime::{bind_to_host, has_ended, kill_group, own_group};
+pub(crate) use lifetime::has_ended;
+pub use lifetime::kill_group;
 pub use mapping::{
     Blob, BlobWire, Connection, Lease, MappingWriter, Received, SharedMapping, SlabHandle, SlabWire,
 };
 pub use os::*;
+pub use process::Process;
 pub use reaped::Reaped;
+pub use spawn::{Spawn, SpawnError, spawn};
 pub use wakeups::{FdId, Interest, Ready, Watch};
 
 /// Why a slab or a blob could not be made, opened or trusted.

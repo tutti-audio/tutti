@@ -130,11 +130,7 @@ impl<F: Float + SimdLanes> IntoNode<F> for SoundFontUnit<F> {
 
     fn into_parts(self) -> NodeParts<(), F> {
         let fork = self.fork_template();
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self), (), Some(Box::new(fork)))
     }
 }
 
