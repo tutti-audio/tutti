@@ -16,8 +16,8 @@ use std::marker::PhantomData;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use crate::{
-    Control, Controller, Effect, Event, HostOp, Layout, Loaded, LoadedPlugin, MainThreadMarker,
-    Notice, PluginError, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
+    Control, Controller, Effect, Event, HostOp, Layout, Loaded, MainThreadMarker, Notice,
+    PluginError, PluginWiring, Prepare, Rebuilt, Refused, Reply, SampleRate, State, Stuck, step,
 };
 
 /// The main thread's end of the Processor's trip to the realtime thread.
@@ -222,7 +222,7 @@ impl<L: Loaded> Lifecycle<L> {
         processor: L::Processor,
         controller: L::Controller,
         prepare: Prepare,
-        wiring: &LoadedPlugin,
+        wiring: &PluginWiring,
         hand: &mut Hand<L::Processor>,
     ) -> (Self, State) {
         let mut lifecycle = Self::Active {
@@ -663,8 +663,8 @@ impl<L: Loaded> Lifecycle<L> {
     }
 }
 
-impl From<&LoadedPlugin> for Layout {
-    fn from(wiring: &LoadedPlugin) -> Self {
+impl From<&PluginWiring> for Layout {
+    fn from(wiring: &PluginWiring) -> Self {
         Self {
             inputs: wiring.inputs.clone(),
             outputs: wiring.outputs.clone(),

@@ -27,9 +27,9 @@ use tutti_graph::{
 use tutti_plugin_host::{InProcessClient, NodeControls, PluginNode, load_client};
 use tutti_plugin_types::{
     BusRole, ChannelLayout, ChannelTopology, ContentScale, Control, Controller, EditorError,
-    EditorWindow, Features, InProcess, Loaded, LoadedPlugin, MainThreadMarker, MainWorkHandle,
-    ParameterInfo, PluginBus, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef,
-    PluginResult, PluginTail, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
+    EditorWindow, Features, InProcess, Loaded, MainThreadMarker, MainWorkHandle, ParameterInfo,
+    PluginBus, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginRef, PluginResult,
+    PluginTail, PluginWiring, Prepare, ProcessContext, ProcessOutput, Processor, Refused,
     RenderModeSupport, RestartRules, Samples, Speaker, Stuck, Widths, WindowHandle,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
@@ -146,16 +146,16 @@ macro_rules! rec_control {
             fn render_mode_support(&self, _: MainThreadMarker) -> RenderModeSupport {
                 RenderModeSupport::OnActivation
             }
-            fn wiring(&self, _: MainThreadMarker) -> LoadedPlugin {
+            fn wiring(&self, _: MainThreadMarker) -> PluginWiring {
                 let stereo =
                     ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
-                let mut wiring = LoadedPlugin {
+                let mut wiring = PluginWiring {
                     inputs: vec![
                         PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo.clone())),
                     ],
                     outputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo))],
                     features: self.rig.features,
-                    ..LoadedPlugin::default()
+                    ..PluginWiring::default()
                 };
                 if self.rig.key_bus.load(Ordering::Relaxed) {
                     wiring.inputs.push(

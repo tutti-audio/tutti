@@ -11,7 +11,7 @@ use super::reply::peer_future;
 use super::{PeFailure, PortLink, ResourcePeer, listed_peer};
 use crate::midi_port::InputRequest;
 use crate::peer::sealed::Sealed;
-use crate::{Presence, Resource, ResourceFact, ResourceId, SessionEvent};
+use crate::{PeerResourceId, Presence, Resource, ResourceFact, SessionEvent};
 
 peer_future!(
     /// A Subscription to a peer's Resource in flight: it resolves to the lease
@@ -35,7 +35,7 @@ pub enum SubscriptionCause {
 /// What the lease and the session's record of it share.
 #[derive(Debug)]
 pub(crate) struct Lease {
-    id: ResourceId,
+    id: PeerResourceId,
     presence: Mutex<Presence<SubscriptionCause>>,
 }
 
@@ -105,7 +105,7 @@ impl std::fmt::Debug for Subscription {
 impl Sealed for Subscription {}
 
 impl Resource for Subscription {
-    fn id(&self) -> ResourceId {
+    fn id(&self) -> PeerResourceId {
         self.lease.id
     }
 }
@@ -125,7 +125,7 @@ impl Drop for Subscription {
 
 impl Subscription {
     pub(crate) fn new(
-        id: ResourceId,
+        id: PeerResourceId,
         link: PortLink,
         ask: &PropertyAsk,
         resource: PeResource,

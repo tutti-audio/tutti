@@ -6,9 +6,9 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
-    KeyEvent, KeyUse, Loaded, LoadedPlugin, ModifierConvention, OwnBypass, ParamAccess, ParamEdit,
-    ParamMapping, ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError,
-    PluginPreset, PluginResult, PluginTail, PresetId, RenderModeSupport, Request, RescanScope,
+    KeyEvent, KeyUse, Loaded, ModifierConvention, OwnBypass, ParamAccess, ParamEdit, ParamMapping,
+    ParamWriteError, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginPreset,
+    PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
     Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
 use tutti_units::Normalized;
@@ -263,13 +263,13 @@ impl Control for Vst3Loaded {
     /// plugin is active, which is when VST3 makes the figure valid
     /// (`getLatencySamples` is `[UI-thread & Setup Done]`, read after
     /// `setActive(1)`); a loaded plugin reports none.
-    fn wiring(&self, main: MainThreadMarker) -> LoadedPlugin {
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         let latency_samples = if self.active.is_active() {
             Samples::new(self.latency_samples(main) as usize)
         } else {
             Samples::new(0)
         };
-        LoadedPlugin {
+        PluginWiring {
             inputs: self.buses(main, BusDirection::Input),
             outputs: self.buses(main, BusDirection::Output),
             latency_samples,

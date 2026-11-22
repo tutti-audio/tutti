@@ -13,7 +13,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    DeclarationError, Edge, GainTarget, GainTargetError, InPort, OutPort, Replacement, Root,
+    ChannelEdge, DeclarationError, GainTarget, GainTargetError, InPort, OutPort, Replacement, Root,
     Session, SetRefusal, ValueErrorKind,
 };
 use tutti_units::{Amplitude, Samples};
@@ -78,8 +78,8 @@ fn node(k: NodeKey) -> OutPort {
 }
 
 impl Rig {
-    fn edge_from(&self, from: NodeKey) -> Edge {
-        Edge::new(node(from), InPort::new(self.sink, 0))
+    fn edge_from(&self, from: NodeKey) -> ChannelEdge {
+        ChannelEdge::new(node(from), InPort::new(self.sink, 0))
     }
 
     /// The value of the gain lane of `from`'s edge into the sink.
@@ -307,8 +307,8 @@ fn add_output_source_weighted_weights_the_channel() {
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 2.0 * B));
     r.s.set(weight(&r, b).to(amp(1.0))).unwrap();
     assert!(all_are(&settled(&mut r.s, 1), (0.0 + 0.5 * A) + 1.0 * B));
-    assert!(Edge::new(node(a), Root::output(1)).clear_gain(r.s.graph()));
-    assert!(Edge::new(node(b), Root::output(1)).clear_gain(r.s.graph()));
+    assert!(ChannelEdge::new(node(a), Root::output(1)).clear_gain(r.s.graph()));
+    assert!(ChannelEdge::new(node(b), Root::output(1)).clear_gain(r.s.graph()));
     assert!(all_are(&settled(&mut r.s, 1), A + B));
 }
 
@@ -380,7 +380,10 @@ fn removing_a_source_drops_its_weight() {
         .unfaded();
     assert_eq!(
         r.s.graph_ref().gain_target(node(a), Root::output(1)),
-        Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
+        Err(GainTargetError::NoLane(ChannelEdge::new(
+            node(a),
+            Root::output(1)
+        )))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
     r.s.graph()
@@ -395,7 +398,10 @@ fn removing_a_source_drops_its_weight() {
         .unfaded();
     assert_eq!(
         r.s.graph_ref().gain_target(node(a), Root::output(1)),
-        Err(GainTargetError::NoLane(Edge::new(node(a), Root::output(1))))
+        Err(GainTargetError::NoLane(ChannelEdge::new(
+            node(a),
+            Root::output(1)
+        )))
     );
     assert!(all_are(&settled(&mut r.s, 1), B));
 }

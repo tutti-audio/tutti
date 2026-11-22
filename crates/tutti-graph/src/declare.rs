@@ -1,5 +1,5 @@
 //! A node's params, declared once ([`declare_params!`](crate::declare_params)),
-//! and the typed vocabulary they are declared in: [`ParamUnit`], [`HasParam`].
+//! and the typed vocabulary they are declared in: [`ParamValue`], [`HasParam`].
 //!
 //! A node with params says three things about them: which the graph may
 //! modulate (its [`Shape`](crate::Shape)'s ports), which a host reaches by
@@ -32,7 +32,7 @@ mod sealed {
 /// What a param's value is: a unit tutti defines ([`Scalar`]), or a `bool` for
 /// a switch (`Bypass`, `Solo`, `Freeze`: a cell at or above 0.5 is on). Sealed:
 /// the engine's units are listed, and a new one joins them.
-pub trait ParamUnit: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
+pub trait ParamValue: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
     /// The value as the `f64` the param's cell carries: the unit's raw.
     fn to_cell(self) -> f64;
 
@@ -41,14 +41,14 @@ pub trait ParamUnit: Copy + PartialEq + Send + Sync + 'static + sealed::Sealed {
     fn from_cell(cell: f64) -> Self;
 }
 
-/// A [`ParamUnit`] that is a number in a unit (not a switch): what a range
+/// A [`ParamValue`] that is a number in a unit (not a switch): what a range
 /// (`Mods::range`) is a range of. Sealed.
-pub trait Scalar: ParamUnit + Unit<Raw = f64> {}
+pub trait Scalar: ParamValue + Unit<Raw = f64> {}
 
 macro_rules! scalar_units {
     ($($unit:ty),+ $(,)?) => {$(
         impl sealed::Sealed for $unit {}
-        impl ParamUnit for $unit {
+        impl ParamValue for $unit {
             fn to_cell(self) -> f64 {
                 <$unit as Unit>::to_raw(self)
             }
@@ -91,7 +91,7 @@ scalar_units!(
 );
 
 impl sealed::Sealed for bool {}
-impl ParamUnit for bool {
+impl ParamValue for bool {
     fn to_cell(self) -> f64 {
         f64::from(u8::from(self))
     }
@@ -108,7 +108,7 @@ impl ParamUnit for bool {
 /// cells.
 pub trait HasParam<const P: u16> {
     /// The unit the param's value is in.
-    type Unit: ParamUnit;
+    type Unit: ParamValue;
 }
 
 /// That the node `Self` has several params of the kind `P`, numbered from 0:
@@ -128,7 +128,7 @@ impl<N: HasParams<P>, const P: u16> HasParams<P> for Params<N> {}
 /// `&Arc<AtomicF64>` (`bool` only: 0.0 off, 1.0 on), and for an `Option` of either, where the
 /// node has the param only sometimes.
 #[doc(hidden)]
-pub trait Cells<U: ParamUnit> {
+pub trait Cells<U: ParamValue> {
     /// The cell's value as an `f64`, or `None` where the node has no such
     /// param.
     fn base(&self) -> Option<f64>;
@@ -157,7 +157,7 @@ impl Cells<bool> for &Arc<AtomicF64> {
     }
 }
 
-impl<U: ParamUnit, C: Cells<U>> Cells<U> for Option<C> {
+impl<U: ParamValue, C: Cells<U>> Cells<U> for Option<C> {
     fn base(&self) -> Option<f64> {
         self.as_ref().and_then(Cells::base)
     }
@@ -193,7 +193,7 @@ pub type Visit<'a> = &'a mut dyn FnMut(Row<'_>) -> bool;
 
 /// Visits one declared param of unit `U`.
 #[doc(hidden)]
-pub fn row<U: ParamUnit, C: Cells<U>>(
+pub fn row<U: ParamValue, C: Cells<U>>(
     visit: Visit<'_>,
     addr: UnitAddr,
     port: bool,

@@ -20,7 +20,7 @@ use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{EditorError, MidiEventVec, RateRefusalCause, ServerError, StateError};
 use tutti_plugin_types::{
-    LoadedPlugin, ParameterInfo, PluginDescriptor, PluginFormat, PluginPreset, PluginTail, PresetId,
+    ParameterInfo, PluginDescriptor, PluginFormat, PluginPreset, PluginTail, PluginWiring, PresetId,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -426,7 +426,7 @@ pub enum ControlReply {
         descriptor: Box<PluginDescriptor>,
         /// Engine-wiring data from instantiation (bus widths, latency, f64).
         #[serde(default)]
-        loaded: LoadedPlugin,
+        loaded: PluginWiring,
         /// The sample format actually agreed on, which may differ from the
         /// host's preference.
         negotiated_format: FloatWidth,

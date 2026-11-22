@@ -412,7 +412,7 @@ pub fn presets_listed_in_order<F: Format>() {
 /// Spec: clap.ext.params.get_info, vst3.IEditController.getParameterInfo, vst2.eff.SetBypass, au.prop.BypassEffect
 pub fn own_bypass_is_declared_and_written<F: Format>() {
     let main = main_thread();
-    let site = |wiring: tutti_plugin_types::LoadedPlugin, when: &str| {
+    let site = |wiring: tutti_plugin_types::PluginWiring, when: &str| {
         let site = wiring
             .own_bypass
             .unwrap_or_else(|| panic!("{}: the {when} plugin has its own bypass", F::NAME));

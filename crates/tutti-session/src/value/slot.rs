@@ -21,7 +21,7 @@ use super::state::Params;
 use super::target::{Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
-use crate::{Edge, ModRouteId, ModSourceId, ModTarget};
+use crate::{ChannelEdge, ModRouteId, ModSourceId, ModTarget};
 
 /// Which of the session's own values a slot target names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -80,7 +80,7 @@ pub enum SlotId {
     /// A node's mix.
     Mix(NodeKey),
     /// The gain of an edge.
-    Gain(Edge),
+    Gain(ChannelEdge),
     /// The range declared on a modulation target.
     Range(ModTarget),
     /// The automation mode the host tells a plugin.

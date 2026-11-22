@@ -16,10 +16,10 @@ use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, FourCc, LoadedPlugin, MainThreadMarker, OwnBypass,
-    ParamEdit, ParamFlags, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange,
-    PluginPreset, PluginResult, PluginTail, PluginVersion, PresetId, RenderModeSupport, Request,
+    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, OwnBypass, ParamEdit,
+    ParamFlags, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
+    PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange, PluginPreset,
+    PluginResult, PluginTail, PluginVersion, PluginWiring, PresetId, RenderModeSupport, Request,
     RescanScope, StateUse, WindowHandle, Wraps, taken,
 };
 use tutti_units::Normalized;
@@ -282,8 +282,8 @@ impl Control for AuLoaded {
         self.descriptor()
     }
 
-    fn wiring(&self, _main: MainThreadMarker) -> LoadedPlugin {
-        LoadedPlugin {
+    fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
+        PluginWiring {
             inputs: self.buses(BusDirection::Input),
             outputs: self.buses(BusDirection::Output),
             latency_samples: self.latency_figure(),

@@ -79,12 +79,12 @@ pub use observe::{Meters, NotReopened, Reopened, RootReader, Taps};
 pub use testing::{AudioSide, Testing};
 
 use crate::key::{
-    Bus, BusSink, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
+    BusSink, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet, Removal,
     SetSources, Wire,
 };
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
-    ConnectError, Connection, DeclarationError, Edge, EventInPort, EventOutPort, InPort,
+    ChannelEdge, ConnectError, Connection, DeclarationError, EventInPort, EventOutPort, InPort,
     InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode, SetRateError,
 };
 use tutti_rt::LockExt;
@@ -510,7 +510,7 @@ pub struct Graph<F: Float = f32> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Unwiring {
     pub(crate) node: NodeKey,
-    pub(crate) edges: Vec<Edge>,
+    pub(crate) edges: Vec<ChannelEdge>,
     pub(crate) event_edges: Vec<crate::EventEdge>,
     pub(crate) bus_edges: Vec<(BusSource, BusSink)>,
 }
@@ -1698,7 +1698,7 @@ impl<F: Float> Graph<F> {
         if unwired.is_empty() {
             return;
         }
-        let mut edges: Vec<Edge> = Vec::new();
+        let mut edges: Vec<ChannelEdge> = Vec::new();
         for id in &unwired.edges {
             // A feedback edge is reported as the pair of ports it joins.
             let source = match id.from {
@@ -1709,7 +1709,7 @@ impl<F: Float> Graph<F> {
             let Some(from) = OutPort::of_source(source) else {
                 continue;
             };
-            let edge = Edge::new(from, InPort::of_sink(id.sink));
+            let edge = ChannelEdge::new(from, InPort::of_sink(id.sink));
             if !edges.contains(&edge) {
                 edges.push(edge);
             }
@@ -2438,7 +2438,7 @@ impl<F: Float> Graph<F> {
 
     /// The graph's name for `edge`: a direct one, `None` for an index no
     /// port has.
-    pub(crate) fn edge_id(edge: Edge) -> Option<EdgeId> {
+    pub(crate) fn edge_id(edge: ChannelEdge) -> Option<EdgeId> {
         let sink = match edge.sink().end() {
             InEnd::Node(..) => PortSink::Port(Self::raw_in(edge.sink())?),
             InEnd::Output(channel) => PortSink::Output(u16::try_from(channel).ok()?),
@@ -2507,7 +2507,7 @@ impl<F: Float> Graph<F> {
     pub(crate) fn add_edge(&mut self, from: OutPort, to: InPort) -> Result<bool, ConnectError> {
         self.check_wire(from, to)?;
         let source = Self::raw_source(from).expect("checked: the port fits");
-        let id = Self::edge_id(Edge::new(from, to)).expect("checked: the ports fit");
+        let id = Self::edge_id(ChannelEdge::new(from, to)).expect("checked: the ports fit");
         let leaving = self.fading_out(id);
         let topology = &mut self.editor.spec_mut().topology;
         let added = match to.end() {
@@ -2537,7 +2537,7 @@ impl<F: Float> Graph<F> {
     /// Makes the edge `edge` a plain, unfaded connection: no fade in or out
     /// (and no entry, when the fade was all it carried). The step
     /// [`Connection::unfaded`](crate::Connection::unfaded) takes.
-    pub(crate) fn harden_edge(&mut self, edge: Edge) {
+    pub(crate) fn harden_edge(&mut self, edge: ChannelEdge) {
         let Some(id) = Self::edge_id(edge) else {
             return;
         };
@@ -2566,7 +2566,7 @@ impl<F: Float> Graph<F> {
     /// leaves the spec when the fade ends (`Editor::finish_fades`), and one
     /// already fading out is not there.
     pub(crate) fn remove_edge(&mut self, from: OutPort, to: InPort, hard: bool) -> bool {
-        match Self::edge_id(Edge::new(from, to)) {
+        match Self::edge_id(ChannelEdge::new(from, to)) {
             Some(id) => self.drop_edge(id, hard),
             None => false,
         }
@@ -2729,7 +2729,7 @@ impl<F: Float> Graph<F> {
         for (_, port) in want {
             self.add_edge(port, to)?;
             if hard {
-                self.harden_edge(Edge::new(port, to));
+                self.harden_edge(ChannelEdge::new(port, to));
             }
         }
         Ok(cut)
@@ -2892,7 +2892,7 @@ impl<F: Float> Graph<F> {
     /// # Errors
     ///
     /// [`ConnectError::NoSuchNode`] when the bus's node is not in the graph.
-    pub fn bus_sources(&self, to: impl Inlet<Bus>) -> Result<Vec<BusSource>, ConnectError> {
+    pub fn bus_sources(&self, to: impl Inlet<BusWire>) -> Result<Vec<BusSource>, ConnectError> {
         let to = to.sink();
         if let BusSink::Node(bus) = to
             && !self.contains(bus.node)
@@ -3027,7 +3027,7 @@ impl<F: Float> Graph<F> {
     /// [`GainTarget`]'s.
     pub(crate) fn declare_edge_gain(
         &mut self,
-        edge: Edge,
+        edge: ChannelEdge,
         gain: Amplitude,
     ) -> Result<(), DeclarationError> {
         if !gain.get().is_finite() {
@@ -3051,7 +3051,7 @@ impl<F: Float> Graph<F> {
 
     /// Whether `edge` still has the gain lane its target was made for: it is
     /// in the graph, not fading out, and holds an entry.
-    fn has_gain_lane(&self, edge: Edge) -> bool {
+    fn has_gain_lane(&self, edge: ChannelEdge) -> bool {
         let ends = [edge.source().node(), edge.sink().node()];
         ends.into_iter()
             .flatten()
@@ -3079,7 +3079,7 @@ impl<F: Float> Graph<F> {
     /// [`GainTargetError::NoLane`] when the edge is not in the graph or has
     /// no gain lane, [`GainTargetError::BusLane`] for a lane of a bus edge.
     pub fn gain_target(&self, from: OutPort, to: InPort) -> Result<GainTarget, GainTargetError> {
-        let edge = Edge::new(from, to);
+        let edge = ChannelEdge::new(from, to);
         let id = Self::edge_id(edge).ok_or(GainTargetError::NoLane(edge))?;
         match self.editor.check_gain_edge(id) {
             Ok(()) => {}
@@ -3094,7 +3094,7 @@ impl<F: Float> Graph<F> {
         Ok(GainTarget::new(edge))
     }
 
-    pub(crate) fn clear_edge_gain_of(&mut self, edge: Edge) -> bool {
+    pub(crate) fn clear_edge_gain_of(&mut self, edge: ChannelEdge) -> bool {
         let Some(id) = Self::edge_id(edge) else {
             return false;
         };
@@ -4029,7 +4029,7 @@ pub trait ModKeys {
     /// The edge a target's key names (`TargetKey::Edge`), whose gain the
     /// target modulates. A host with no edge targets leaves the default,
     /// which names none.
-    fn edge(&self, target: u64) -> Option<crate::Edge> {
+    fn edge(&self, target: u64) -> Option<crate::ChannelEdge> {
         let _ = target;
         None
     }

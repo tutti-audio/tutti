@@ -37,7 +37,7 @@ pub(crate) mod wire;
 ///   **version 25** removed `OpenEditor`, `CloseEditor`, `EditorOpened` and
 ///   `EditorClosed`, which nothing sent (the host opens an editor in its own
 ///   process, through its `EditorLoader`).
-/// - A **field's type** is its bytes too: **version 26** made `LoadedPlugin`'s
+/// - A **field's type** is its bytes too: **version 26** made `PluginWiring`'s
 ///   `inputs` and `outputs` lists of `PluginBus` (width, placement, a role
 ///   byte) and dropped the `input_topology` and `output_topology` lists that
 ///   followed `probed`, so a load reply reads differently from its first byte.
@@ -676,7 +676,7 @@ mod tests {
     /// The runtime signal is worth no more than the arm it carries: a
     /// plugin that raises its decay to "unbounded" and a plugin that drops
     /// to no tail at all must not arrive as the same message. This is the
-    /// `LoadedPlugin.tail` wire test one level up, on the *update* path —
+    /// `PluginWiring.tail` wire test one level up, on the *update* path —
     /// the load-time field being round-trip-safe says nothing about a
     /// separately-encoded enum variant.
     #[test]

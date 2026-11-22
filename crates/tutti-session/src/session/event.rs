@@ -6,7 +6,8 @@ use tutti_graph::{BusSource, CommitError, NodeKey, Wired};
 use tutti_units::SampleRate;
 
 use crate::{
-    BusSink, Edge, EventEdge, Problem, ReplaceRefused, ResourceFact, ResourceId, RootReader,
+    BusSink, ChannelEdge, EventEdge, PeerResourceId, Problem, ReplaceRefused, ResourceFact,
+    RootReader,
 };
 
 /// Something an [`update`](crate::Session::update) found for the host.
@@ -50,7 +51,7 @@ pub enum SessionEvent {
     /// commit lands.
     ///
     /// A feedback edge is listed as the pair of ports it joined (its delay
-    /// is not part of an [`Edge`]). A modulation route onto a
+    /// is not part of a [`ChannelEdge`]). A modulation route onto a
     /// dropped edge, or a param or edge-gain lane the node's lost event
     /// outputs drove, is not listed: the route stays declared and reads
     /// unresolved (`Problem::Unresolved`) until its target
@@ -60,7 +61,7 @@ pub enum SessionEvent {
         node: NodeKey,
         /// The audio edges dropped, into or out of the node (a feedback edge
         /// as the pair of ports it joined).
-        edges: Vec<Edge>,
+        edges: Vec<ChannelEdge>,
         /// The event edges dropped, into or out of the node.
         event_edges: Vec<EventEdge>,
         /// The bus edges dropped, into or out of the node, as the app wired
@@ -187,7 +188,7 @@ pub enum SessionEvent {
     /// value.
     ResourceChanged {
         /// The peer's token.
-        id: ResourceId,
+        id: PeerResourceId,
         /// Which of its readings changed.
         fact: ResourceFact,
     },

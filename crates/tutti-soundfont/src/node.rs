@@ -131,7 +131,7 @@ impl<F: Float + SimdLanes> IntoNode<F> for SoundFontUnit<F> {
 
 /// A SoundFont unit is an instrument: MIDI on event input 0, its dry pair on
 /// outputs 0 and 1. The other three outputs are the effect sends.
-impl<F: Float + SimdLanes> tutti_graph::Instrument<F> for SoundFontUnit<F> {
+impl<F: Float + SimdLanes> tutti_graph::InstrumentNode<F> for SoundFontUnit<F> {
     fn main_outputs(&self) -> [u16; 2] {
         [Plane::DryLeft as u16, Plane::DryRight as u16]
     }

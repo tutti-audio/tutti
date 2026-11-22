@@ -208,7 +208,7 @@ pub use tutti_session::{
 #[cfg(all(feature = "session", feature = "analyze"))]
 pub use tutti_session::{
     Analyze, AnalyzeError, Analyzer, AnalyzerError, Analyzing, Audio, AudioContext, AudioInput,
-    BindError,
+    MeterBindError,
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
@@ -220,7 +220,7 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    AppKey, BlockDates, Clock, ConnectError, Edge, EventInPort, EventOutPort, InPort, Key,
+    AppKey, BlockDates, ChannelEdge, Clock, ConnectError, EventInPort, EventOutPort, InPort, Key,
     NoSuchNode, Offline, OfflineSession, OutPort, Playhead, RealTime, Root, Session,
     SessionBuilder, SessionEvent, SessionFloat, SystemClock, SystemSession, TransportHandle,
     Workers,
@@ -470,7 +470,7 @@ pub mod graph {
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, Inputs,
         IntoNode, Io, Node, OutBus, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder,
-        ParamUnit, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
+        ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar,
         Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
@@ -517,7 +517,7 @@ pub mod session {
     };
     pub use tutti_graph::{
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, EventIn, EventOut,
-        ForkError, InletCounts, Instrument, MeterId, ParamIn, PrerollTable, RootError, RootId,
+        ForkError, InletCounts, InstrumentNode, MeterId, ParamIn, PrerollTable, RootError, RootId,
     };
     pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
@@ -531,14 +531,14 @@ pub mod session {
     ))]
     pub use tutti_session::LoadError;
     pub use tutti_session::{
-        BackgroundWork, BlockConfig, Bus, BusSink, Channel, Committed, Connection,
-        DeclarationError, Disconnection, Event, EventEdge, EventTapPort, Fanin, Feeder, Graph,
-        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBus, MainSink, Meters, NodeSlots,
+        BackgroundWork, BlockConfig, BusSink, BusWire, ChannelWire, Committed, Connection,
+        DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
+        HeardTapOpen, Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainSink, Meters, NodeSlots,
         NotReopened, Outlet, OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer,
-        PeerError, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims, Removal,
-        RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, ResourceId,
-        RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError, SessionNode,
-        SetRateError, SetSources, Taps, TempoError, Weighted, Wire, root_width,
+        PeerError, PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer,
+        Reclaims, Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource,
+        ResourceFact, RootDeclaration, RootReader, RootTopologyStatus, SessionHeardTapError,
+        SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted, Wire, root_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
