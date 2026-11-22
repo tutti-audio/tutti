@@ -149,10 +149,7 @@ impl EventRig {
             editor
                 .spec_mut()
                 .topology
-                .set_outputs(vec![PortSource::Node(OutputPort {
-                    node: Self::SINK,
-                    port: 0,
-                })]);
+                .set_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))]);
         }
         Self {
             editor,

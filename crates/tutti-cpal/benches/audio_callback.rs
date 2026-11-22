@@ -38,10 +38,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
     ));
     ed.insert(NodeKey(1), "sine", Osc::sine(Hz::new(440.0)));
     ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        });
+        PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ]);
     let tap = tap_open.then(|| {

@@ -192,19 +192,13 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         .controls;
     for port in 0..inputs {
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: key,
-                port: port as u16,
-            },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: src,
-                port: 0,
-            }))],
+            InputPort::new(key, port as u16),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(src, 0)))],
         );
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;
 

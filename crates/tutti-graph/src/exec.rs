@@ -892,14 +892,11 @@ mod tests {
                 NodeSpec::new("node", shape.audio_in(), shape.audio_out()).with_tail(shape.tail),
             );
         }
-        topology.set_outputs(vec![PortSource::Node(OutputPort { node: g, port: 0 })]);
+        topology.set_outputs(vec![PortSource::Node(OutputPort::new(g, 0))]);
         let mut spec = GraphSpec::new(topology);
         for from in [a, b] {
-            let edge = Edge::Direct(PortSource::Node(OutputPort {
-                node: from,
-                port: 0,
-            }));
-            spec.connect(InputPort { node: g, port: 0 }, edge);
+            let edge = Edge::Direct(PortSource::Node(OutputPort::new(from, 0)));
+            spec.connect(InputPort::new(g, 0), edge);
         }
         let (plan, delta) =
             crate::compile(&spec.validate().expect("valid"), &shapes, &prepare, None)

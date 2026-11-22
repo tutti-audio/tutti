@@ -103,16 +103,10 @@ fn rig(lat: usize, forkable: bool) -> Rig {
     }
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(
-        InputPort {
-            node: PROBE,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: LATENT,
-            port: 0,
-        }))],
+        InputPort::new(PROBE, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0)))],
     );
-    t.set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: PROBE, port })));
+    t.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
     ed.commit().expect("commits");
     let mut reference = Reference::new(prepare(MAX));
     let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();

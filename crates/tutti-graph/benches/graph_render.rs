@@ -217,9 +217,9 @@ fn executor_for(shape: &Topo) -> Executor {
         ed.spec_mut()
             .topology
             .edges
-            .insert(InputPort { node: sink, port }, vec![Edge::Direct(from)]);
+            .insert(InputPort::new(sink, port), vec![Edge::Direct(from)]);
     };
-    let node = |k: NodeKey| PortSource::Node(OutputPort { node: k, port: 0 });
+    let node = |k: NodeKey| PortSource::Node(OutputPort::new(k, 0));
     let last = match *shape {
         Topo::Chain(depth) => {
             let src = NodeKey(0);
@@ -383,23 +383,20 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             let from = if i == 0 {
                 PortSource::MainInput(c)
             } else {
-                PortSource::Node(OutputPort {
-                    node: NodeKey(i as u64 - 1),
-                    port: c,
-                })
+                PortSource::Node(OutputPort::new(NodeKey(i as u64 - 1), c))
             };
             ed.spec_mut()
                 .topology
                 .edges
-                .insert(InputPort { node: k, port: c }, vec![Edge::Direct(from)]);
+                .insert(InputPort::new(k, c), vec![Edge::Direct(from)]);
         }
     }
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(n as u64 - 1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(
+            NodeKey(n as u64 - 1),
+            0,
+        ))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -116,7 +116,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
             ed.insert(key, "stretched", stretched(wave));
         }
         for c in 0..2u16 {
-            let from = PortSource::Node(OutputPort { node: key, port: c });
+            let from = PortSource::Node(OutputPort::new(key, c));
             if bus {
                 // The graph's fan-in: output channel `c` holds every
                 // source's port `c`, and the graph sums them.

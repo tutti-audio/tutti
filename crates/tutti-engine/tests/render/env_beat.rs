@@ -130,14 +130,11 @@ fn wire_clock(ed: &mut Editor, sink: impl IntoNode<Controls = ()>, width: u16) {
     let topology = &mut ed.spec_mut().topology;
     for port in 0..2 {
         topology.edges.insert(
-            InputPort { node: SINK, port },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: CLOCK,
-                port,
-            }))],
+            InputPort::new(SINK, port),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(CLOCK, port)))],
         );
     }
-    topology.set_outputs((0..width).map(|port| PortSource::Node(OutputPort { node: SINK, port })));
+    topology.set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(SINK, port))));
     ed.commit().expect("commits");
 }
 
@@ -347,7 +344,7 @@ fn click_clicks_on_the_model_beats() {
     ed.insert(CLICK, "click", click);
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: CLICK, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))));
     ed.commit().expect("commits");
     let graph = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let m = &transport.motion();
@@ -427,10 +424,7 @@ pub(crate) fn env_graph(max_block: usize, log: &Record<Env>) -> (Editor, Executo
     ed.insert(NodeKey(1), "env", Unforkable(EnvLog(log.clone())));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     (ed, exec)
 }

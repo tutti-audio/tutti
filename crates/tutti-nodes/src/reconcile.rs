@@ -311,7 +311,7 @@ impl Bind {
             Self::Native { at, .. } | Self::Mix { at, .. } => Some(at.node),
             Self::Foreign { to, .. } => Some(to.node),
             Self::Edge { id, .. } => match id.sink {
-                PortSink::Port(at) => Some(at.node),
+                PortSink::Port(at) => Some(at.node()),
                 PortSink::Output(_) => None,
             },
         }
@@ -1448,7 +1448,7 @@ impl Modulation {
         {
             // A feedback edge is a declared cycle, delayed: not a path.
             if let Edge::Direct(PortSource::Node(p)) = edge {
-                link(p.node, at.node);
+                link(p.node(), at.node());
             }
         }
         for (at, sources) in &spec.events {
@@ -1467,7 +1467,7 @@ impl Modulation {
         // node.
         for (id, g) in &spec.gains {
             if let (PortSink::Port(at), Some(from)) = (id.sink, g.source) {
-                link(from.node, at.node);
+                link(from.node, at.node());
             }
         }
         // What this apply wires, by plan: the feed into each source, and
@@ -1579,11 +1579,8 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
             let t = &mut editor.spec_mut().topology;
             for port in 0..width {
                 t.edges.insert(
-                    InputPort { node: key, port },
-                    vec![Edge::Direct(PortSource::Node(OutputPort {
-                        node: from,
-                        port,
-                    }))],
+                    InputPort::new(key, port),
+                    vec![Edge::Direct(PortSource::Node(OutputPort::new(from, port)))],
                 );
             }
         }
@@ -1610,8 +1607,8 @@ fn unwire_feed<F: Float>(
             // wired the port itself since.
             let t = &mut editor.spec_mut().topology;
             for port in 0..width.count() {
-                let at = InputPort { node: key, port };
-                let ours = Edge::Direct(PortSource::Node(OutputPort { node: from, port }));
+                let at = InputPort::new(key, port);
+                let ours = Edge::Direct(PortSource::Node(OutputPort::new(from, port)));
                 t.disconnect(at, ours);
             }
         }

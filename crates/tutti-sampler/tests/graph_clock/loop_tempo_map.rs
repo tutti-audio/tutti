@@ -112,12 +112,9 @@ fn render_with(
                 .expect("room");
         }
     }
-    ed.spec_mut().topology.set_outputs((0..2).map(|port| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let map = TempoMap::new(points.iter().map(|&(beat, bpm)| TempoPoint {

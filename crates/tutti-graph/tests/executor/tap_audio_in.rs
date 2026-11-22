@@ -60,12 +60,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
             at: 0,
         }),
     );
-    let port = |port| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port,
-        })
-    };
+    let port = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
     ed.spec_mut().topology.set_outputs(vec![port(0), port(1)]);
     let reader = ed
         .open_tap(

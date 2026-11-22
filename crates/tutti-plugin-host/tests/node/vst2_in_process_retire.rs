@@ -71,7 +71,7 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))));
     editor.commit().expect("commits");
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];

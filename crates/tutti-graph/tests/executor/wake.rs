@@ -77,7 +77,7 @@ fn one_napper() -> (Editor, Executor, Placements) {
     ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: NAP, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NAP, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -209,7 +209,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     let outputs: Vec<PortSource> = keys
         .iter()
         .chain([&pulse])
-        .map(|&node| PortSource::Node(OutputPort { node, port: 0 }))
+        .map(|&node| PortSource::Node(OutputPort::new(node, 0)))
         .collect();
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

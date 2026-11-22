@@ -72,7 +72,7 @@ impl Rig {
     /// A tap on both channels of `node`, on the outputs' time, committed.
     fn tap(&mut self, id: u64, node: NodeKey) -> TapReader {
         let sources = (0..2)
-            .map(|port| PortSource::Node(OutputPort { node, port }))
+            .map(|port| PortSource::Node(OutputPort::new(node, port)))
             .collect();
         let reader = self
             .editor

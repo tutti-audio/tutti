@@ -2217,20 +2217,12 @@ impl<F: Float> BlockRig<F> {
             ChannelLayout::try_from(ins).expect("asserted within RIG_MAX_CHANNELS above");
         for c in 0..ins {
             topology.connect(
-                crate::InputPort {
-                    node: key,
-                    port: c as u16,
-                },
+                crate::InputPort::new(key, c as u16),
                 crate::Edge::Direct(crate::PortSource::MainInput(c as u16)),
             );
         }
         topology.outputs = (0..outs)
-            .map(|c| {
-                vec![crate::PortSource::Node(OutputPort {
-                    node: key,
-                    port: c as u16,
-                })]
-            })
+            .map(|c| vec![crate::PortSource::Node(OutputPort::new(key, c as u16))])
             .collect();
         editor.commit().expect("a one-node graph commits");
         exec.apply_pending();

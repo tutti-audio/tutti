@@ -142,7 +142,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
     );
     ed.spec_mut().topology.set_outputs(
         (0..4)
-            .map(|port| PortSource::Node(OutputPort { node: NODE, port }))
+            .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
     );
     for &(addr, _) in to {

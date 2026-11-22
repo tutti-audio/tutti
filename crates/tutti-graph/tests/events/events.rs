@@ -169,11 +169,8 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
         Shape::sink_unassigned(ChannelLayout::MONO).with_events(REC_PORTS, 0),
     );
     t.edges.insert(
-        InputPort { node: REC, port: 0 },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: LAG,
-            port: 0,
-        }))],
+        InputPort::new(REC, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0)))],
     );
     let mut g = GraphSpec::new(t);
     for (p, srcs) in ph.edges.iter().enumerate() {
@@ -681,16 +678,13 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
                 NodeSpec::new("t", ts.audio_in(), ts.audio_out()).with_tail(Tail::Unknown),
             );
             t.edges.insert(
-                InputPort { node: tap, port: 0 },
+                InputPort::new(tap, 0),
                 vec![Edge::Feedback(FeedbackFrom::new(
-                    OutputPort {
-                        node: clock,
-                        port: 0,
-                    },
+                    OutputPort::new(clock, 0),
                     Samples::new(DELAY),
                 ))],
             );
-            t.set_outputs(vec![PortSource::Node(OutputPort { node: tap, port: 0 })]);
+            t.set_outputs(vec![PortSource::Node(OutputPort::new(tap, 0))]);
             let mut g = GraphSpec::new(t);
             g.connect_events(
                 EventInputPort { node: tap, port: 0 },
@@ -769,12 +763,9 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
         NodeSpec::new("t", ts.audio_in(), ts.audio_out()).with_tail(Tail::Unknown),
     );
     t.edges.insert(
-        InputPort { node: tap, port: 0 },
+        InputPort::new(tap, 0),
         vec![Edge::Feedback(FeedbackFrom::new(
-            OutputPort {
-                node: clock,
-                port: 0,
-            },
+            OutputPort::new(clock, 0),
             Samples::new(96),
         ))],
     );
@@ -784,7 +775,7 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
     assert_eq!(
         compile(&valid, &shapes, &prepare(128), None).err(),
         Some(tutti_graph::CompileError::FeedbackTooShort {
-            edge: tutti_graph::CycleEdge::Audio(InputPort { node: tap, port: 0 }),
+            edge: tutti_graph::CycleEdge::Audio(InputPort::new(tap, 0)),
             delay: Samples::new(96),
             max_block: Samples::new(128),
         })

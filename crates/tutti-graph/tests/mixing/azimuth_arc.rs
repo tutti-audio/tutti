@@ -103,12 +103,8 @@ fn graph(
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
     let s = ed.spec_mut();
-    s.topology.set_outputs((0..2).map(|c| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(PROBE),
-            port: c,
-        })
-    }));
+    s.topology
+        .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))));
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
         s.connect_param(
             at(p),
@@ -337,12 +333,9 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.spec_mut().topology.set_outputs((0..WIDTH).map(|k| {
-        PortSource::Node(OutputPort {
-            node: probe(k),
-            port: 0,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))));
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
         let mut chans = vec![vec![0.0f32; frames]; WIDTH as usize];

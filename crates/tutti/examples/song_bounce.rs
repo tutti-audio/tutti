@@ -97,11 +97,10 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     s.graph().connect(second, filter)?; // adds: both clips sum into the filter
     s.graph()
         .connect(filter.bus_output(0), reverb.bus_input(0))?;
-    for c in 0..2 {
-        s.graph()
-            .connect(filter.output(c), MainOutput::channel(c))?;
-        s.graph()
-            .connect(reverb.output(c), MainOutput::channel(c))?;
+    for c in 0..2_u16 {
+        let sink = MainOutput::channel(usize::from(c));
+        s.graph().connect(filter.output(c), sink)?;
+        s.graph().connect(reverb.output(c), sink)?;
     }
 
     // An LFO on the cutoff: 1 Hz across 200 Hz to 3 kHz.

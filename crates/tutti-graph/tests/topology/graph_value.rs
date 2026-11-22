@@ -30,11 +30,11 @@ fn spec(kind: &str, ins: u16, outs: u16) -> NodeSpec {
 }
 
 fn at(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 /// `dc -> gain -> output 0`.
@@ -162,12 +162,12 @@ fn validate_reports_every_fault_at_once() {
 
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::SourcePortOutOfRange { from, .. } if from.port == 7)),
+            .any(|e| matches!(e, Invalid::SourcePortOutOfRange { from, .. } if from.port() == 7)),
         "{errs:?}"
     );
     assert!(
         errs.iter()
-            .any(|e| matches!(e, Invalid::SinkPortOutOfRange { at, .. } if at.port == 9)),
+            .any(|e| matches!(e, Invalid::SinkPortOutOfRange { at, .. } if at.port() == 9)),
         "{errs:?}"
     );
     assert!(

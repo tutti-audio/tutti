@@ -110,11 +110,8 @@ fn graph(workers: usize, declared: bool) -> Executor {
             ed.insert(key, "click", Unforkable(Undeclared(click())));
         }
         for c in 0..2u16 {
-            let port = InputPort {
-                node: SUM,
-                port: k as u16 * 2 + c,
-            };
-            let from = PortSource::Node(OutputPort { node: key, port: c });
+            let port = InputPort::new(SUM, k as u16 * 2 + c);
+            let from = PortSource::Node(OutputPort::new(key, c));
             ed.spec_mut()
                 .topology
                 .edges
@@ -123,7 +120,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: SUM, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SUM, port))));
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

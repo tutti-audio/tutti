@@ -290,10 +290,7 @@ impl Node for Probe {
 // ---------------------------------------------------------------- rigs ---
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), port))
 }
 
 fn editor(max: usize) -> (Editor, Executor) {
@@ -307,10 +304,7 @@ fn editor(max: usize) -> (Editor, Executor) {
 fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
     for port in 0..ports {
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(to),
-                port,
-            },
+            InputPort::new(NodeKey(to), port),
             vec![Edge::Direct(out(from, port))],
         );
     }
@@ -864,10 +858,7 @@ fn a_kick_ducks_the_pad_through_a_lane() {
     // the peak is not the first channel.
     for (from, to) in [(0, 1), (1, 0)] {
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(2),
-                port: to,
-            },
+            InputPort::new(NodeKey(2), to),
             vec![Edge::Direct(out(1, from))],
         );
     }

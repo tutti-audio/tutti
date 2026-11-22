@@ -206,8 +206,8 @@ impl Limits {
 /// editor.insert(half, "half", ForkByClone(Half));
 /// let topology = &mut editor.spec_mut().topology;
 /// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InputPort { node: half, port: 0 }, Edge::Direct(PortSource::MainInput(0)));
-/// topology.set_outputs([PortSource::Node(OutputPort { node: half, port: 0 })]);
+/// topology.connect(InputPort::new(half, 0), Edge::Direct(PortSource::MainInput(0)));
+/// topology.set_outputs([PortSource::Node(OutputPort::new(half, 0))]);
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:

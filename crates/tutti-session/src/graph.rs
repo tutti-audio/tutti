@@ -2384,10 +2384,10 @@ impl<F: Float> Graph<F> {
     /// The graph's raw source for an [`OutputPort`].
     fn raw_source(port: OutputPort) -> Option<PortSource> {
         match port.end() {
-            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut {
+            OutEnd::Node(node, index) => Some(PortSource::Node(RawOut::new(
                 node,
-                port: u16::try_from(index).ok()?,
-            })),
+                u16::try_from(index).ok()?,
+            ))),
             OutEnd::Input(index) => Some(PortSource::MainInput(u16::try_from(index).ok()?)),
         }
     }
@@ -2419,10 +2419,7 @@ impl<F: Float> Graph<F> {
     /// channel or an index no port has.
     fn raw_in(port: InputPort) -> Option<RawIn> {
         match port.end() {
-            InEnd::Node(node, index) => Some(RawIn {
-                node,
-                port: u16::try_from(index).ok()?,
-            }),
+            InEnd::Node(node, index) => Some(RawIn::new(node, u16::try_from(index).ok()?)),
             InEnd::Output(_) => None,
         }
     }
@@ -2446,8 +2443,8 @@ impl<F: Float> Graph<F> {
         match source {
             PortSource::Node(p) => self
                 .nodes
-                .contains_key(&p.node)
-                .then(|| OutputPort::new(p.node, usize::from(p.port))),
+                .contains_key(&p.node())
+                .then(|| OutputPort::new(p.node(), usize::from(p.port()))),
             PortSource::MainInput(port) => Some(MainInput::channel(usize::from(port))),
             PortSource::Zero => None,
         }
@@ -4308,10 +4305,10 @@ mod main_output_fade_tests {
         );
         let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
-        g.editor.spec_mut().topology.set_outputs([
-            PortSource::Node(OutputPort { node, port: 0 }),
-            PortSource::Zero,
-        ]);
+        g.editor
+            .spec_mut()
+            .topology
+            .set_outputs([PortSource::Node(OutputPort::new(node, 0)), PortSource::Zero]);
         g.commit();
         (g, node)
     }

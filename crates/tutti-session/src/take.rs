@@ -66,7 +66,7 @@ use tutti_rt::{Bell, Listener, Mint};
 use tutti_tempo::TempoMap;
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
-use crate::{Input, Session, SessionEvent, Start, TakeLatency, Trim};
+use crate::{Input, OutputPort, Session, SessionEvent, Start, TakeLatency, Trim};
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
@@ -1008,7 +1008,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
 
         let (sink, path) = open_target(target, layout, rate)?;
 
-        let ports: Vec<_> = (0..width).map(|channel| node.output(channel)).collect();
+        let ports: Vec<_> = (0..width)
+            .map(|channel| OutputPort::new(node.erase(), channel))
+            .collect();
         // A second of frames: the pump moves what the tap holds each time it wakes.
         let capacity = rate.one_second();
         let reader = self

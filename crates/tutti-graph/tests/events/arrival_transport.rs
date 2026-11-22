@@ -92,16 +92,10 @@ fn encode(t: &TransportPosition) -> [f32; 2] {
 fn topology(ed: &mut Editor) {
     let t = &mut ed.spec_mut().topology;
     t.edges.insert(
-        InputPort {
-            node: PROBE,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: LATENT,
-            port: 0,
-        }))],
+        InputPort::new(PROBE, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0)))],
     );
-    t.set_outputs((0..3).map(|port| PortSource::Node(OutputPort { node: PROBE, port })));
+    t.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
 }
 
 fn units(lat: usize) -> BTreeMap<NodeKey, Box<dyn Node>> {
@@ -466,16 +460,10 @@ fn wide(workers: usize) -> (Editor, Executor) {
         ed.insert(latent, "latent", Unforkable(Latent(lat)));
         ed.insert(probe, "probe", Unforkable(Probe));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: probe,
-                port: 0,
-            },
-            vec![Edge::Direct(PortSource::Node(OutputPort {
-                node: latent,
-                port: 0,
-            }))],
+            InputPort::new(probe, 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(latent, 0)))],
         );
-        outputs.extend((0..3).map(|port| PortSource::Node(OutputPort { node: probe, port })));
+        outputs.extend((0..3).map(|port| PortSource::Node(OutputPort::new(probe, port))));
     }
     ed.spec_mut().topology.set_outputs(outputs);
     ed.commit().expect("commits");

@@ -60,17 +60,17 @@
 //!
 //! let (a, limiter, b, mixer) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4));
 //! let (mono, stereo) = (ChannelLayout::MONO, ChannelLayout::STEREO);
-//! let out = |node| Edge::Direct(PortSource::Node(OutputPort { node, port: 0 }));
+//! let out = |node| Edge::Direct(PortSource::Node(OutputPort::new(node, 0)));
 //!
 //! let mut g = Topology::default();
 //! g.nodes.insert(a, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
 //! g.nodes.insert(b, NodeSpec::new("src", ChannelLayout::EMPTY, mono));
 //! g.nodes.insert(limiter, NodeSpec::new("limiter", mono, mono).with_latency(Samples::new(512)));
 //! g.nodes.insert(mixer, NodeSpec::new("mixer", stereo, mono));
-//! g.connect(InputPort { node: limiter, port: 0 }, out(a));
-//! g.connect(InputPort { node: mixer, port: 0 }, out(limiter));
-//! g.connect(InputPort { node: mixer, port: 1 }, out(b));
-//! g.set_outputs([PortSource::Node(OutputPort { node: mixer, port: 0 })]);
+//! g.connect(InputPort::new(limiter, 0), out(a));
+//! g.connect(InputPort::new(mixer, 0), out(limiter));
+//! g.connect(InputPort::new(mixer, 1), out(b));
+//! g.set_outputs([PortSource::Node(OutputPort::new(mixer, 0))]);
 //!
 //! let d = delays(&g, SampleRate::SR_48K);
 //! // The mixer's port 1 waits 512 frames for the limiter on port 0.

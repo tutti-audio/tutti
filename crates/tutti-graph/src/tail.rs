@@ -198,7 +198,7 @@ impl GraphTail {
     ///     NodeSpec::new("reverb", ChannelLayout::EMPTY, ChannelLayout::MONO)
     ///         .with_tail(Tail::Unbounded),
     /// );
-    /// g.set_outputs([PortSource::Node(OutputPort { node: verb, port: 0 })]);
+    /// g.set_outputs([PortSource::Node(OutputPort::new(verb, 0))]);
     ///
     /// let tail = graph_tail(&g, SampleRate::SR_48K);
     /// assert_eq!(tail.samples(), None); // never decays

@@ -85,10 +85,7 @@ fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNo
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

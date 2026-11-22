@@ -74,22 +74,12 @@ fn rolling_state_with(
         ),
     );
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: filter,
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: source,
-            port: 0,
-        }))],
+        InputPort::new(filter, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
     );
-    ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: filter,
-            port: 0,
-        });
-        2
-    ]);
+    ed.spec_mut()
+        .topology
+        .set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2]);
     let reader = tap.then(|| {
         let sources: Vec<_> = ed
             .spec()

@@ -135,10 +135,7 @@ impl Node for Script {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), 0))
 }
 
 fn port(node: u64, port: u16) -> EventOutputPort {
@@ -175,13 +172,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
     );
     ed.insert(NodeKey(91), "lag", Forkable(Kind::Lag { latency: m }));
     let t = &mut ed.spec_mut().topology;
-    t.connect(
-        InputPort {
-            node: NodeKey(91),
-            port: 0,
-        },
-        Edge::Direct(out(90)),
-    );
+    t.connect(InputPort::new(NodeKey(91), 0), Edge::Direct(out(90)));
     t.set_outputs([out(91)]);
     Rig {
         ed,

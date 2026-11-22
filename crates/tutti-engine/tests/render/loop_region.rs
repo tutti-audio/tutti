@@ -68,10 +68,7 @@ fn engine_logging(transport: &Transport, log: Option<Record<Seen>>) -> (Engine, 
     ed.insert(NodeKey(1), "probe", Unforkable(LoopProbe(log)));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     let engine = Engine::new(transport, &mut ed, exec).expect("within the limits");
     (engine, ed)
