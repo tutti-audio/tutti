@@ -938,7 +938,7 @@ impl<F: Float> Engine<F> {
         mut frames: usize,
         rate: SampleRate,
         mut aim: Option<Frame>,
-        pieces: &mut impl Pieces,
+        pieces: &mut GraphPieces,
     ) -> Walk {
         let Track {
             transport,
@@ -1015,7 +1015,6 @@ impl<F: Float> Engine<F> {
                         ..env
                     });
                     transport.advance(s, &t);
-                    pieces.ran();
                     cursor += s;
                     t = transport.position_after_tempo_change();
                     if let Some(o) = Offset::new(Samples::new(cursor), Samples::new(frames)) {
@@ -1036,7 +1035,6 @@ impl<F: Float> Engine<F> {
                     ..env
                 });
                 transport.advance(at - cursor, &t);
-                pieces.ran();
                 cursor = at;
             }
             let (applied, now) = transport.apply_command(i, late);
@@ -1061,7 +1059,6 @@ impl<F: Float> Engine<F> {
         });
         *crossings = base;
         transport.advance(frames - cursor, &t);
-        pieces.ran();
         walk.frames = frames;
         walk
     }
@@ -1382,32 +1379,23 @@ impl<F: Float> Fader<F> {
     }
 }
 
-/// What a block walk reports as it cuts the block into pieces. A trait, with
-/// one implementation in the engine ([`GraphPieces`]), so a test can wrap it
-/// and stage a control-thread store between pieces deterministically.
-trait Pieces {
-    /// A piece of the block has just run.
-    fn ran(&mut self) {}
-    /// How many more cuts fit in this block.
-    fn free(&self) -> usize;
-    /// Whether another cut fits in this block.
-    fn room(&self) -> bool {
-        self.free() > 0
-    }
-    /// Record the transport changing to `t` at `at`.
-    fn change(&mut self, at: Offset, t: GraphTransport);
-}
-
 /// Collects the cuts for the block's `Env`; the render happens once, after.
 struct GraphPieces {
     changes: TransportChanges,
 }
 
-impl Pieces for GraphPieces {
+impl GraphPieces {
+    /// How many more cuts fit in this block.
     fn free(&self) -> usize {
         tutti_graph::MAX_TRANSPORT_CHANGES - self.changes.len()
     }
 
+    /// Whether another cut fits in this block.
+    fn room(&self) -> bool {
+        self.free() > 0
+    }
+
+    /// Record the transport changing to `t` at `at`.
     fn change(&mut self, at: Offset, t: GraphTransport) {
         // Cannot fail: `free` was checked before the cut, cuts come in time
         // order, and one at the same frame replaces.
@@ -1675,31 +1663,6 @@ mod tests {
         err::<GraphEngineError>();
     }
 
-    /// A graph walk's `Pieces` that stores a new tempo from "the control
-    /// thread" while each piece runs: the store races the walk, staged
-    /// deterministically.
-    struct Racing<'a> {
-        inner: GraphPieces,
-        settings: &'a tutti_timeline::TransportSettings,
-    }
-
-    impl Pieces for Racing<'_> {
-        fn ran(&mut self) {
-            self.inner.ran();
-            self.settings.set_tempo(Bpm::of(200.0));
-        }
-        fn free(&self) -> usize {
-            self.inner.free()
-        }
-        fn change(&mut self, at: Offset, t: GraphTransport) {
-            self.inner.change(at, t);
-        }
-    }
-
-    /// An untimed store racing the walk does not land at a cut: the change a
-    /// timed `Play` records mid-block carries the tempo read at the block's
-    /// start, and only the command's own effect (rolling). The store lands
-    /// at the next block.
     /// **A `Frames` engine ignores the instant a timer says a block was due**:
     /// block 0 is the origin whatever `process_at` is given, and the next is
     /// 512 frames at 48 kHz later (10 666 667 ns, rounded), not the due times'
@@ -1725,8 +1688,12 @@ mod tests {
         assert_eq!(second - first, 10_666_667);
     }
 
+    /// A tempo stored after the walk read it does not land at a cut: the change a
+    /// timed `Play` records mid-block carries the tempo read at the block's
+    /// start, and only the command's own effect (rolling). The store lands
+    /// at the next block.
     #[test]
-    fn an_untimed_store_during_the_walk_waits_for_the_next_block() {
+    fn an_untimed_store_after_the_walk_waits_for_the_next_block() {
         let transport = Transport::new(SampleRate::SR_48K);
         let (mut ed, exec) = Editor::new(Prepare::new(
             SampleRate::SR_48K,
@@ -1737,13 +1704,9 @@ mod tests {
             .motion()
             .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
             .expect("room");
-        let settings = &transport.settings();
         let mut render = engine.graph.borrow_mut();
-        let mut pieces = Racing {
-            inner: GraphPieces {
-                changes: TransportChanges::NONE,
-            },
-            settings,
+        let mut pieces = GraphPieces {
+            changes: TransportChanges::NONE,
         };
         let mut crossings = BeatCrossings::new();
         let walk = engine.walk(
@@ -1757,12 +1720,17 @@ mod tests {
             None,
             &mut pieces,
         );
+        transport.settings().set_tempo(Bpm::of(200.0));
         assert!(!walk.start.playing);
-        let changes = pieces.inner.changes;
+        let changes = pieces.changes;
         let change = changes.as_slice()[0];
         assert_eq!(change.at.index(), 100);
         assert!(change.to.playing, "the command's effect");
-        assert_eq!(change.to.tempo, Bpm::of(120.0), "not the racing store");
+        assert_eq!(
+            change.to.tempo,
+            Bpm::of(120.0),
+            "the tempo read at the block start"
+        );
         // The next block reads it.
         assert_eq!(render.transport.begin_block().tempo, Bpm::of(200.0));
     }

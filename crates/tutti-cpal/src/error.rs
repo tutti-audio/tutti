@@ -1,6 +1,6 @@
 //! Errors from the device layer.
 
-use tutti_engine::StartError;
+use tutti_engine::{BackendErrorKind, StartError};
 
 /// A failure opening, configuring, or running an audio device.
 ///
@@ -154,6 +154,24 @@ pub enum DeviceError {
     /// I/O failure while reading or writing audio data.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl DeviceError {
+    /// How the backend's own error reads, for a variant that carries one
+    /// ([`DeviceNotAvailable`](Self::DeviceNotAvailable),
+    /// [`BuildStream`](Self::BuildStream), [`PlayStream`](Self::PlayStream),
+    /// [`DevicesError`](Self::DevicesError)): the same reading a running stream's
+    /// faults carry.
+    #[must_use]
+    pub fn backend_kind(&self) -> Option<BackendErrorKind> {
+        match self {
+            Self::DeviceNotAvailable(e)
+            | Self::BuildStream(e)
+            | Self::PlayStream(e)
+            | Self::DevicesError(e) => Some(crate::edge::backend_kind(e)),
+            _ => None,
+        }
+    }
 }
 
 impl From<std::convert::Infallible> for DeviceError {

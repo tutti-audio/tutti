@@ -2,9 +2,8 @@
 //! session's executor that sleeps to absolute deadlines, for an app with MIDI and
 //! no sound card.
 //!
-//! `Pacer` is the schedule as a pure function of the time it is told, and
-//! `run` is the task's loop: the pacer over a `Timebase`, the OS clock in the
-//! driver and a scripted one under test.
+//! `Pacer` is the schedule as a pure function of the time it is told; the task's
+//! loop reads the OS clock, polls it, and sleeps to the deadline it answers.
 
 mod pacer;
 
@@ -21,7 +20,6 @@ use crate::callback::OutputBlock;
 use crate::faults::StreamFaults;
 use crate::stream::{OutputQuantum, OutputSpec, RunningStream, StreamDriver};
 
-pub(crate) use pacer::Timebase;
 use pacer::{Due, Pacer};
 
 /// The block a [`TimerDriver`] renders when the spec fixes no
@@ -149,59 +147,25 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
             "tutti-timer",
             Some(PriorityRequest::Highest),
             move || async move {
-                let time = OsTime;
                 // The first block is due now and plays one block from now.
-                let mut pacer = Pacer::new(time.now_ns(), frames, rate);
-                run(
-                    &time,
-                    &mut pacer,
-                    &token,
-                    |os_ns| {
-                        block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
-                        faults.delivered();
-                    },
-                    || faults.record_overrun("the timer fell behind and began its schedule again"),
-                );
+                let mut pacer = Pacer::new(monotonic_ns(), frames, rate);
+                while !token.is_stopped() {
+                    match pacer.poll(monotonic_ns()) {
+                        Due::Wait(until_ns) => sleep_until_ns(until_ns),
+                        Due::Render(os_ns) => {
+                            block.render_at(&mut scratch, os_ns, Some(Duration::ZERO));
+                            faults.delivered();
+                        }
+                        Due::Reanchored => faults
+                            .record_overrun("the timer fell behind and began its schedule again"),
+                    }
+                }
             },
         )?;
         Ok(TimerRunning {
             stop,
             task: Some(task),
         })
-    }
-}
-
-/// The OS monotonic clock and its absolute sleep.
-struct OsTime;
-
-impl Timebase for OsTime {
-    fn now_ns(&self) -> i64 {
-        monotonic_ns()
-    }
-
-    fn sleep_until_ns(&self, deadline_ns: i64) {
-        sleep_until_ns(deadline_ns);
-    }
-}
-
-/// The timer task's loop: `pacer` over `time`, until `stop`.
-///
-/// `render` is called once per block with the block's deadline, in order and
-/// with none skipped between two calls of `overran`; `overran` is called once
-/// each time the pacer re-anchors.
-fn run(
-    time: &impl Timebase,
-    pacer: &mut Pacer,
-    stop: &StopToken,
-    mut render: impl FnMut(i64),
-    mut overran: impl FnMut(),
-) {
-    while !stop.is_stopped() {
-        match pacer.poll(time.now_ns()) {
-            Due::Wait(until_ns) => time.sleep_until_ns(until_ns),
-            Due::Render(os_ns) => render(os_ns),
-            Due::Reanchored => overran(),
-        }
     }
 }
 
