@@ -2,9 +2,8 @@
 //! displays it. Nothing in this crate uses it; it lives here because the
 //! session that writes it and a host that reads it both depend on this crate.
 
-use std::sync::Mutex;
+use tutti_rt::Mutex;
 
-use tutti_rt::LockExt;
 use tutti_units::Samples;
 
 /// The per-channel compensation of the plan sent last, indexed by output
@@ -47,7 +46,7 @@ impl PrerollTable {
     /// Replaces the table with `channels`. Not for the audio thread: it
     /// locks, and allocates when the table grows.
     pub fn set(&self, channels: &[Samples]) {
-        let mut table = self.0.lock_recover();
+        let mut table = self.0.lock();
         table.clear();
         table.extend_from_slice(channels);
     }
@@ -55,18 +54,18 @@ impl PrerollTable {
     /// `channel`'s pre-roll, or `None` past the end of the table (no
     /// compensation needed).
     pub fn preroll(&self, channel: usize) -> Option<Samples> {
-        self.0.lock_recover().get(channel).copied()
+        self.0.lock().get(channel).copied()
     }
 
     /// The whole table, copied.
     pub fn to_vec(&self) -> Vec<Samples> {
-        self.0.lock_recover().clone()
+        self.0.lock().clone()
     }
 
     /// `f` over the table under one lock: a consistent view for a pass over
     /// several channels. Keep `f` short; [`set`](Self::set) waits on it.
     pub fn with<R>(&self, f: impl FnOnce(&[Samples]) -> R) -> R {
-        f(&self.0.lock_recover())
+        f(&self.0.lock())
     }
 }
 

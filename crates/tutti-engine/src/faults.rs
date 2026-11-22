@@ -17,13 +17,13 @@
 //! panic; an overrun only when there is neither.
 
 use std::fmt::{self, Display, Write as _};
+use std::sync::MutexGuard;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use tutti_platform::Instant;
 
 use bytemuck::{Pod, Zeroable};
-use tutti_rt::{AudioThreadCell, Contended, Drained, FaultLatch, LockExt, SeqReader, SeqWriter};
+use tutti_rt::{AudioThreadCell, Contended, Drained, FaultLatch, Mutex, SeqReader, SeqWriter};
 
 /// How long backend errors may arrive with no audio delivered before the
 /// stream counts as gone.
@@ -298,7 +298,7 @@ impl StreamFaults {
     }
 
     fn last_guard(&self) -> MutexGuard<'_, Slots> {
-        self.slots.lock_recover()
+        self.slots.lock()
     }
 
     /// Returns how many faults this stream has reported since the last start.

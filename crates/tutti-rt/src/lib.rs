@@ -97,6 +97,9 @@
 //!
 //! - [`RtScope`] — a per-thread "inside a block" marker that a `Drop` impl
 //!   checks ([`RtScope::check_outside`]), or a [`ControlDrop`] field does.
+//! - [`Mutex`] and [`Condvar`] — the blocking face: each wait first asserts, in a
+//!   debug build, that it is not inside an [`RtScope`], so a lock taken in a block
+//!   fails the realtime tests the way an allocation does.
 //!
 //! **The root is the API.** Every item is re-exported at the root
 //! (`tutti_rt::RtVec`); the modules are private.
@@ -178,6 +181,7 @@ mod parker;
 // `tutti_rt::id!`.
 mod atomic_cell;
 mod bells;
+mod blocking;
 mod id;
 mod job_gate;
 mod last_out;
@@ -206,6 +210,7 @@ pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
 #[cfg(loom)]
 pub use bells::Ticker;
 pub use bells::{Bell, Bells, BellsHandle, Listener};
+pub use blocking::{Condvar, Mutex};
 pub use capped_vec::CappedVec;
 pub use cell::{AudioThreadCell, BorrowGuard, BorrowRef};
 pub use claim_lock::{Claim, ClaimGuard};

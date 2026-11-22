@@ -61,12 +61,12 @@
 //! silent block is the last resort for a device swapped under the session.
 
 use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::{BufferError, Float, Fold, FoldError};
 use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
 use tutti_graph::{MainOutputError, MainOutputId};
-use tutti_rt::{LockExt, Publisher};
+use tutti_rt::{Mutex, Publisher};
 
 /// The widest device an engine can render into without being told
 /// ([`Engine::support_output`](crate::Engine::support_output)).
@@ -422,7 +422,7 @@ impl<F: Float> OutputControl<F> {
         &self,
         edit: impl FnOnce(&mut OutputFolds<F>) -> Result<bool, E>,
     ) -> Result<(), E> {
-        let _writer = self.writer.lock_recover();
+        let _writer = self.writer.lock();
         let mut folds = (*self.cell.current()).clone();
         if edit(&mut folds)? {
             self.cell.publish(folds);
@@ -672,7 +672,7 @@ impl<F: Float> OutputControl<F> {
     /// change never clicks and no fold is swapped. Control side.
     pub fn set_levels(&self, levels: &OutputLevels) {
         let targets = levels.targets();
-        let _writer = self.writer.lock_recover();
+        let _writer = self.writer.lock();
         if *self.stage.current() != targets {
             self.stage.publish(targets);
             self.stage.reclaim();
