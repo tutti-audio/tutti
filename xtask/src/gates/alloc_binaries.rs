@@ -85,10 +85,6 @@ pub(super) const DEBT: &[(&str, &str)] = &[
         "matrix_tail::a_burst_after_a_parked_gap_is_a_fresh_nodes_at_any_block_size: Recording::process, tests/node_contract/matrix_tail.rs:70",
     ),
     (
-        "crates/tutti-sampler/tests/offline/main.rs",
-        "offline_disk_voice::a_fork_follows_a_looping_render_timeline: FileIn::open inside a render, tutti-codec src/decode/read.rs:223 via tutti-sampler src/voice/offline_read.rs:321",
-    ),
-    (
         "crates/tutti-session/tests/io/main.rs",
         "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
     ),
