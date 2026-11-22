@@ -12,7 +12,7 @@ use tutti_units::Latency;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Direction, Elevation, Mix, SampleRate, Samples, Tail};
 
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use crate::spatial::target::AngleSmoother;
 
 // The params an [`HrtfBinauralNode`] lets the graph modulate, in port order.
@@ -142,14 +142,11 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
     fn placement(&mut self, [azimuth, elevation]: [Option<F>; 2]) -> Direction {
         // A driven value is the graph's `F` control signal; the angles are `f64`, so
         // it widens here, once per block.
-        let azimuth = self
-            .good
-            .azimuth
-            .read(azimuth.map_or_else(|| self.azimuth.load().get(), Into::into));
+        let azimuth = self.good.azimuth.block(azimuth, self.azimuth.load().get());
         let elevation = self
             .good
             .elevation
-            .read(elevation.map_or_else(|| self.elevation.load().get(), Into::into));
+            .block(elevation, self.elevation.load().get());
         Direction::new(
             Azimuth::new(azimuth).wrap(),
             Elevation::new_clamped(elevation),
@@ -220,10 +217,10 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
         ]);
         // `Mix::new_clamped` passes a NaN through, so the blend is held too.
         let blend = Mix::new(
-            self.good.blend.read(
+            self.good.blend.block(
                 self.declared_param::<{ UnitParam::Wet as u16 }, _>(&io)
-                    .last_frame()
-                    .map_or_else(|| self.blend.load().get(), Into::into),
+                    .last_frame(),
+                self.blend.load().get(),
             ),
         );
         let size = io.frames();

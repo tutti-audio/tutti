@@ -20,7 +20,7 @@ default = []
 # that can write nothing is no sink); without it this crate is output-only.
 capture = ["dep:tutti-codec", "tutti-codec/encode-wav"]
 
-# The device-free starts a test drives (`TuttiDriver::start_on`).
+# The device-free starts a test drives (`Resolved::supplied`).
 testing = []
 
 # JACK, through cpal's implicitly-featured optional `jack` dependency.

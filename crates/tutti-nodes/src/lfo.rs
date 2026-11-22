@@ -90,7 +90,7 @@ impl core::fmt::Display for LfoClock {
 /// construction and the beat it reads is its block's own; a consumer behind a
 /// latent path is aligned by the compiler, which delays this node's edge into
 /// it like any other source's.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LfoNode {
     wave: Waveform,
     clock: LfoClock,
@@ -372,21 +372,6 @@ impl<F: Float> IntoNode<F> for LfoNode {
 
     fn into_parts(self) -> NodeParts<ParamSet, F> {
         tutti_graph::param_parts(self)
-    }
-}
-
-impl Clone for LfoNode {
-    fn clone(&self) -> Self {
-        Self {
-            wave: self.wave.clone(),
-            clock: self.clock,
-            rate: self.rate.handle(),
-            depth: self.depth.handle(),
-            phase_offset: self.phase_offset,
-            phase: self.phase,
-            cycle: self.cycle,
-            sample_rate: self.sample_rate,
-        }
     }
 }
 

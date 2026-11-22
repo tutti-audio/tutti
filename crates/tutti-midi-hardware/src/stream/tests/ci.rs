@@ -1113,7 +1113,10 @@ fn the_replies_to_profile_inquiry_become_the_peers_profiles_once_the_final_one_a
         panic!("one peer: {peers:?}");
     };
     assert!(held.is_known());
-    assert_eq!((held.group(), held.muid()), (GROUP_0, peer()));
+    assert_eq!(
+        (held.at().peer().group, held.at().peer().muid),
+        (GROUP_0, peer())
+    );
     let listed: Vec<_> = held.listed().collect();
     let [
         Switcher::Channel(one),
@@ -1770,7 +1773,10 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
     let [handle] = &listed[..] else {
         panic!("one reporter: {listed:?}");
     };
-    assert_eq!((handle.group(), handle.muid()), (GROUP_0, peer()));
+    assert_eq!(
+        (handle.at().peer().group, handle.at().peer().muid),
+        (GROUP_0, peer())
+    );
     let _ = received(&wire);
 
     wire.session

@@ -1,6 +1,6 @@
 //! Errors from the device layer.
 
-use tutti_engine::StartError;
+use tutti_engine::{BackendErrorKind, StartError};
 
 /// A failure opening, configuring, or running an audio device.
 ///
@@ -156,6 +156,31 @@ pub enum DeviceError {
     Io(#[from] std::io::Error),
 }
 
+impl DeviceError {
+    /// How the backend's own error reads, for a variant that carries one
+    /// ([`DeviceNotAvailable`](Self::DeviceNotAvailable),
+    /// [`BuildStream`](Self::BuildStream), [`PlayStream`](Self::PlayStream),
+    /// [`DevicesError`](Self::DevicesError)): the same reading a running stream's
+    /// faults carry.
+    ///
+    /// The three-way reading ([`DeviceGone`](BackendErrorKind::DeviceGone),
+    /// [`Survivable`](BackendErrorKind::Survivable),
+    /// [`Other`](BackendErrorKind::Other)) is the whole contract: it is what an
+    /// app acts on (restart, keep playing, report), and the backend's own error
+    /// kinds are not part of this crate's API, so a backend upgrade never
+    /// changes what an app matches.
+    #[must_use]
+    pub fn backend_kind(&self) -> Option<BackendErrorKind> {
+        match self {
+            Self::DeviceNotAvailable(e)
+            | Self::BuildStream(e)
+            | Self::PlayStream(e)
+            | Self::DevicesError(e) => Some(crate::edge::backend_kind(e)),
+            _ => None,
+        }
+    }
+}
+
 impl From<std::convert::Infallible> for DeviceError {
     fn from(never: std::convert::Infallible) -> Self {
         match never {}
@@ -175,3 +200,35 @@ impl<E: std::error::Error + Into<DeviceError> + 'static> From<StartError<E>> for
 
 /// Convenience alias for `Result<T, `[`enum@DeviceError`]`>`.
 pub type Result<T> = core::result::Result<T, DeviceError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each variant that carries a backend error reads as the engine's
+    /// three-way kind: a device gone is `DeviceGone`, a reroute or a denied
+    /// real-time priority is `Survivable`, anything else is `Other`; a variant
+    /// with no backend error reads `None`.
+    #[test]
+    fn backend_kind_reads_the_four_backend_variants() {
+        let of = |kind| cpal::Error::new(kind);
+        let gone = || of(cpal::ErrorKind::DeviceNotAvailable);
+        assert_eq!(
+            DeviceError::DeviceNotAvailable(gone()).backend_kind(),
+            Some(BackendErrorKind::DeviceGone)
+        );
+        assert_eq!(
+            DeviceError::BuildStream(of(cpal::ErrorKind::DeviceChanged)).backend_kind(),
+            Some(BackendErrorKind::Survivable)
+        );
+        assert_eq!(
+            DeviceError::PlayStream(of(cpal::ErrorKind::RealtimeDenied)).backend_kind(),
+            Some(BackendErrorKind::Survivable)
+        );
+        assert_eq!(
+            DeviceError::DevicesError(of(cpal::ErrorKind::DeviceBusy)).backend_kind(),
+            Some(BackendErrorKind::Other)
+        );
+        assert_eq!(DeviceError::AlreadyRunning.backend_kind(), None);
+    }
+}

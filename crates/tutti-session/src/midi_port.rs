@@ -1187,7 +1187,8 @@ impl Ports {
             let Some(enabled) = peer.mpe_zones() else {
                 continue;
             };
-            let held: &mut Option<tutti_midi_protocol::MpeZones> = &mut zones[peer.group().index()];
+            let held: &mut Option<tutti_midi_protocol::MpeZones> =
+                &mut zones[peer.at().peer().group.index()];
             *held = match *held {
                 None => Some(enabled),
                 // A zone that shares a Channel with one held is left out (M2-120

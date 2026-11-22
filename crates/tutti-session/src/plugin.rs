@@ -170,6 +170,7 @@ mod fake_hosting;
 mod inbox;
 mod load;
 mod lost;
+mod op;
 mod opened;
 mod rebind;
 mod scan;
@@ -183,15 +184,16 @@ pub use load::{
     AddPluginError, LoadInProcess, LoadOutOfProcess, LoadPlugin, LoadedPlugin, LoadingPlugin,
     PluginInstance, SwapPluginError,
 };
+pub use op::{AwaitingOp, InProcessOp, Op, OutOfProcessOp, PluginOp};
 pub use opened::{PluginCause, PluginInfo, PluginPorts};
 pub use preset::{
-    LoadPreset, LoadPresetInProcess, LoadPresetOutOfProcess, LoadedPreset,
-    LoadingPresetOutOfProcess, PresetStartError,
+    LoadPreset, LoadPresetInProcess, LoadPresetOp, LoadPresetOutOfProcess, LoadedPreset,
+    PresetStartError,
 };
 pub use state::{
-    PluginApplyError, RestoreState, RestoreStateInProcess, RestoreStateOutOfProcess, RestoredState,
-    RestoringStateOutOfProcess, SaveState, SaveStateInProcess, SaveStateOutOfProcess,
-    SavingStateOutOfProcess, StateStartError,
+    PluginApplyError, RestoreState, RestoreStateInProcess, RestoreStateOp,
+    RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess, SaveStateOp,
+    SaveStateOutOfProcess, StateStartError,
 };
 
 use crate::plugin_diagnostics::Figures;
