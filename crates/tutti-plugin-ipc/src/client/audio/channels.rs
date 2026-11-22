@@ -531,8 +531,8 @@ impl Channels {
     }
 
     /// Wake both lanes' threads to re-check their stop condition (shutdown, a
-    /// crash). Publish the condition first. Real-time safe, like the rings in
-    /// the pushes.
+    /// crash). Publish the condition first. Control and bridge side only, not
+    /// the audio thread: the progress notify takes a lock.
     pub(super) fn wake(&self) {
         self.unparker.unpark();
         self.control_unparker.unpark();

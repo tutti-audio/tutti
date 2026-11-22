@@ -54,6 +54,12 @@ impl LiveCells {
         self.modes.0.remove(&key);
     }
 
+    /// Drops `key`'s mode cell: a node inserted at the key later starts from
+    /// its own values.
+    pub(super) fn forget(&mut self, key: NodeKey) {
+        self.modes.0.remove(&key);
+    }
+
     /// Frees the ranges the audio thread has let go of, in every cell kind;
     /// how many are still held by a block. Control side.
     pub(super) fn reclaim(&self) -> usize {

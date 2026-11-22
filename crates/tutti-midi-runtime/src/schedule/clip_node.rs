@@ -69,7 +69,9 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
-use tutti_ump::{Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, Ump, Voice1, Voice2};
+use tutti_ump::{
+    Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, U7, Ump, Voice1, Voice2,
+};
 use tutti_units::Beat;
 
 use crate::ledger::{Class, NoteLedger, Sending};
@@ -172,9 +174,9 @@ struct Setter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum Chased {
     Program,
-    Registered(u8, u8),
-    Assignable(u8, u8),
-    Control(u8),
+    Registered(U7, U7),
+    Assignable(U7, U7),
+    Control(CCNumber),
     Pressure,
     Bend,
 }
@@ -190,20 +192,16 @@ enum Chased {
 fn held_by(voice: Voice2) -> Option<Chased> {
     Some(match voice {
         Voice2::ProgramChange { .. } => Chased::Program,
-        Voice2::Registered { bank, index, .. } => Chased::Registered(bank.get(), index.get()),
-        Voice2::Assignable { bank, index, .. } => Chased::Assignable(bank.get(), index.get()),
-        Voice2::ControlChange { controller, .. } if controller.get() < FIRST_CHANNEL_MODE => {
-            Chased::Control(controller.get())
+        Voice2::Registered { bank, index, .. } => Chased::Registered(bank, index),
+        Voice2::Assignable { bank, index, .. } => Chased::Assignable(bank, index),
+        Voice2::ControlChange { controller, .. } if controller < CCNumber::ALL_SOUND_OFF => {
+            Chased::Control(controller)
         }
         Voice2::ChannelPressure(_) => Chased::Pressure,
         Voice2::PitchBend(_) => Chased::Bend,
         _ => return None,
     })
 }
-
-/// The first Channel Mode controller (All Sound Off, M1 p.20); 120 to 127
-/// are commands, not state.
-const FIRST_CHANNEL_MODE: u8 = 120;
 
 /// The chase table of `events` (sorted by beat): each state's setting
 /// messages in beat order, the states by group, channel and [`Chased`] order.

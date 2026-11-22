@@ -103,6 +103,10 @@ where
         // the last one seen while it is away). A served plugin has a second cut
         // at its chunk (`Processor::event_input`).
         this.event_input = this.event_bound();
+        // The wait of an out-of-process fork follows the graph's mode on every
+        // prepare, whether or not the Processor is in hand: the node's only
+        // say over it.
+        this.drive_wait(p);
         // A Processor that follows the graph takes its rate, block and
         // quantum live (no restart, no main thread); one that does not is
         // told the rate by the lifecycle.

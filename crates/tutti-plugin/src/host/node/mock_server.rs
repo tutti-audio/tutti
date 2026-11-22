@@ -325,15 +325,35 @@ pub(super) fn tempo(beat: f64) -> TempoReader {
     ))
 }
 
-/// What the new node reads: the generic node over [`Ipc`], offline.
+/// What the new node reads: the generic node over [`Ipc`], a fork prepared
+/// offline.
 pub(super) fn new_node(
     rig: Rig,
     tempo: TempoReader,
 ) -> (Direct<tutti_plugin_host::PluginNode<Ipc>>, Record, Threads) {
-    let (ipc, record, threads) = served(rig);
+    let fork = fork_node(rig, tempo, tutti_graph::RenderMode::Offline);
+    (fork.unit, fork.record, fork.threads)
+}
+
+/// A served fork node, as `ServedFork` builds one: watched, handed its wait's
+/// switch, and prepared in the graph mode `mode`.
+pub(super) struct ForkNode {
+    pub(super) unit: Direct<tutti_plugin_host::PluginNode<Ipc>>,
+    pub(super) record: Record,
+    pub(super) threads: Threads,
+    /// What the pipeline waits on: armed while the node's graph is offline.
+    pub(super) wait: Arc<tutti_plugin_ipc::OfflineWait>,
+    /// The surface the app tells the plugin its render mode through.
+    pub(super) any_thread: Arc<dyn tutti_plugin_types::AnyThread>,
+}
+
+pub(super) fn fork_node(rig: Rig, tempo: TempoReader, mode: tutti_graph::RenderMode) -> ForkNode {
+    let (mut ipc, record, threads) = served(rig);
+    let (wait, switch) = ipc.watch();
     let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"));
     let descriptor = ipc.descriptor().clone();
     let wiring = ipc.loaded().clone();
+    let any_thread: Arc<dyn tutti_plugin_types::AnyThread> = Arc::new(ipc.controller());
     let (processor, controller) = ipc
         .activate_anywhere(prepare)
         .unwrap_or_else(|_| panic!("the served plugin activates"));
@@ -349,7 +369,17 @@ pub(super) fn new_node(
     )
     .expect("the wiring is within a block's width");
     client.go_offline();
-    (Direct::new(client.bind(tempo), SR, CHUNK), record, threads)
+    client.adopt_wait_switch(switch);
+    // The graph's prepare is what makes the served pipeline wait for a chunk.
+    let graph = tutti_graph::Prepare::new(SR, MaxBlock::new(Samples::new(CHUNK)).expect("a block"))
+        .with_render_mode(mode);
+    ForkNode {
+        unit: Direct::with_prepare(client.bind(tempo), &graph),
+        record,
+        threads,
+        wait,
+        any_thread,
+    }
 }
 
 /// The served plugin over the mock server's bridge, not yet activated.
@@ -357,7 +387,7 @@ pub(super) fn served(rig: Rig) -> (Ipc, Record, Threads) {
     let guard = Arc::new(ProcessGuard::for_test());
     let record = Arc::clone(&rig.record);
     let threads = rig.threads;
-    let mut ipc = Ipc::new(IpcParts {
+    let ipc = Ipc::new(IpcParts {
         bridge: rig.bridge,
         guard: Arc::clone(&guard),
         descriptor: rig.descriptor,
@@ -371,7 +401,6 @@ pub(super) fn served(rig: Rig) -> (Ipc, Record, Threads) {
         timeout: Duration::from_secs(5),
         origin: None,
     });
-    let _ = ipc.watch(true);
     (ipc, record, threads)
 }
 

@@ -66,33 +66,39 @@
 //!
 //! A `MidiInputNode` sends each event out of the port of its Group and channel,
 //! and a Group's System, SysEx and Flex messages out of that Group's channelless
-//! port (`CHANNELLESS_PORT` for the first). A Group is a channel space of its own
+//! port (`MidiInputPorts::channelless`). A Group is a channel space of its own
 //! (M2-104 section 2.1.2, Appendix B.1), so each Group the node hears has seventeen
 //! ports; the node hears the first Group unless built with
 //! `MidiInputNode::hearing(MidiInputPorts::through(last))`, so a one-Group device is
-//! `MIDI_INPUT_PORTS` ports and costs nothing more. A message with no Group
+//! seventeen ports and costs nothing more. A message with no Group
 //! (Utility, UMP Stream) leaves the first Group's channelless port. Which node hears
 //! which channel is which ports it takes event edges from: `MidiInputPorts::listening`
 //! names them.
 //!
 //! ```rust
-//! use tutti_midi_runtime::{CHANNELLESS_PORT, MIDI_INPUT_PORTS, MidiInputPorts};
+//! use tutti_graph::NodeKey;
+//! use tutti_midi_runtime::MidiInputPorts;
 //! use tutti_ump::{MidiChannel, MidiGroup};
 //!
+//! let input = NodeKey(1);
 //! let ports = MidiInputPorts::FIRST_GROUP;
 //! // A synth on channel 3 hears port 3 and the channelless port...
-//! let on_three: Vec<u16> = ports
-//!     .listening(Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
+//! let on_three: Vec<_> = ports
+//!     .listening(input, Some(MidiGroup::FIRST), Some(MidiChannel::of(3)))
 //!     .collect();
-//! assert_eq!(on_three, vec![3, CHANNELLESS_PORT]);
+//! let channel_three = ports.channel(input, MidiGroup::FIRST, MidiChannel::of(3));
+//! let channelless = ports.channelless(input, MidiGroup::FIRST);
+//! assert_eq!(on_three, [channel_three.unwrap(), channelless.unwrap()]);
 //! // ...one on every channel hears all of them.
-//! assert_eq!(ports.listening(None, None).count(), usize::from(MIDI_INPUT_PORTS));
+//! assert_eq!(ports.listening(input, None, None).count(), usize::from(ports.count()));
 //! // Group 2's channel 3 is another port, on a node that hears two Groups.
 //! let two = MidiInputPorts::through(MidiGroup::of(1));
-//! let group2: Vec<u16> = two
-//!     .listening(Some(MidiGroup::of(1)), Some(MidiChannel::of(3)))
+//! let group2: Vec<_> = two
+//!     .listening(input, Some(MidiGroup::of(1)), Some(MidiChannel::of(3)))
 //!     .collect();
-//! assert_eq!(group2, vec![MIDI_INPUT_PORTS + 3, MIDI_INPUT_PORTS + CHANNELLESS_PORT]);
+//! let channel = two.channel(input, MidiGroup::of(1), MidiChannel::of(3));
+//! let channelless = two.channelless(input, MidiGroup::of(1));
+//! assert_eq!(group2, [channel.unwrap(), channelless.unwrap()]);
 //! ```
 //!
 //! A set of routing rules compiles to those port sets with `compile_routes`: each
@@ -199,10 +205,10 @@ mod traits;
 
 pub use clock_map::{ClockMap, ClockReading, GAIN, Observed, RESYNC};
 pub use live::{
-    ArrivalClock, CHANNELLESS_PORT, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter,
-    InputId, InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
-    MIDI_INPUT_EVENT_CAPACITY, MIDI_INPUT_PORTS, MidiInputControls, MidiInputNode, MidiInputPorts,
-    MidiKeys, MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
+    ArrivalClock, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter, InputId,
+    InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
+    MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts, MidiKeys,
+    MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
