@@ -3411,6 +3411,7 @@ dependencies = [
  "assert_no_alloc",
  "atomic_float",
  "bytemuck",
+ "criterion",
  "futures-lite",
  "libc",
  "loom",
