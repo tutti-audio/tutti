@@ -151,6 +151,16 @@ fn a_tap_flows_from_the_next_call_and_stops_at_a_close() {
         Samples::new(0),
         "a closed tap gets nothing more"
     );
+    taps.reclaim(); // frees the retired writer, closing it
+    let mut scratch = vec![0.0f32; 128];
+    let tap_layout = tap.layout();
+    assert!(
+        matches!(
+            tap.pull(InterleavedMut::new(&mut scratch, tap_layout).unwrap()),
+            Pull::Ended
+        ),
+        "a closed reader ends once drained"
+    );
     taps.close();
     render(&engine, 64, 2, false);
 
@@ -189,7 +199,13 @@ fn a_second_open_ends_the_first_reader_after_its_drain() {
         ),
         "the drain"
     );
-    assert!(first.writer_gone(), "then it ends: its writer is gone");
+    assert!(
+        matches!(
+            first.pull(InterleavedMut::new(&mut buf, layout).unwrap()),
+            Pull::Ended
+        ),
+        "then it ends"
+    );
     assert!(!second.writer_gone(), "the latest does not end");
 }
 
@@ -220,14 +236,13 @@ fn an_open_while_behind_is_pending_and_the_latest_wins() {
     let mut c = taps.open(layout, Samples::new(256));
     let d = taps.open(layout, Samples::new(256));
     let mut buf = vec![0.0f32; 8];
+    let c_layout = c.layout();
     assert!(
-        c.writer_gone(),
-        "the replaced pending writer was dropped here"
-    );
-    assert_eq!(
-        c.pop_into(InterleavedMut::new(&mut buf, c.layout()).unwrap())
-            .unwrap(),
-        Samples::new(0)
+        matches!(
+            c.pull(InterleavedMut::new(&mut buf, c_layout).unwrap()),
+            Pull::Ended
+        ),
+        "the replaced pending writer was closed here, unwritten"
     );
     assert_eq!(d.available(), Samples::new(0), "nothing before the push");
     render(&engine, 64, 2, false); // takes a and b

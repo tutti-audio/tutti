@@ -22,7 +22,7 @@
 //! **One pending install, latest wins.** [`open`](HeardTaps::open) and
 //! [`close`](HeardTaps::close) always succeed: each sets the one pending
 //! install, replacing the one not yet pushed (a replaced writer is dropped on
-//! the control side, and its reader ends once drained), and then pushes it if
+//! the control side, and its reader ends: [`Pull::Ended`](tutti_buffers::Pull::Ended) once drained), and then pushes it if
 //! the queue has room. With no room (the audio thread is behind) it stays
 //! pending until a later push: [`reclaim`](HeardTaps::reclaim), or another
 //! open or close. Opening while a reader is alive supersedes it: the audio
@@ -108,7 +108,18 @@ pub(crate) fn link<F: Float>() -> (HeardTaps<F>, Hearing<F>) {
 impl<F: Float> HeardTaps<F> {
     /// Frees what the audio thread retired.
     fn free(&mut self) {
-        while self.retired.pop().is_some() {}
+        while let Some(writer) = self.retired.pop() {
+            writer.close();
+        }
+    }
+
+    /// Makes `install` the pending one. A pending writer it replaces was never
+    /// pushed, so it was never written: it is closed here, and its reader ends
+    /// at once.
+    fn replace_pending(&mut self, install: Install<F>) {
+        if let Some(Some(old)) = self.pending.replace(install) {
+            old.close();
+        }
     }
 
     /// Moves the pending install into the queue when it has room; otherwise it
@@ -142,7 +153,8 @@ impl<F: Float> HeardTaps<F> {
     ///
     /// It always opens and returns the reader at once. The writer becomes the
     /// one pending install, replacing a pending install not yet pushed, and
-    /// supersedes the tap that is open: the old reader ends once drained. The
+    /// supersedes the tap that is open: the old reader answers
+    /// [`Pull::Ended`](tutti_buffers::Pull::Ended) once drained. The
     /// writes start at the first render that begins after the install is
     /// pushed, as a plan tap's start at its commit: the push is made by this
     /// call when the audio thread has room for it, else by a later
@@ -155,17 +167,18 @@ impl<F: Float> HeardTaps<F> {
             None => TapReader::pair(width, capacity),
         };
         self.reader = Some(reader.watch());
-        self.pending = Some(Some(Box::new(writer)));
+        self.replace_pending(Some(Box::new(writer)));
         self.push_pending();
         reader
     }
 
     /// Closes the tap: the writes stop from the first render that begins after
-    /// the close is pushed, and the reader keeps what it was written. It
+    /// the close is pushed, and the reader keeps what it was written, then
+    /// answers [`Pull::Ended`](tutti_buffers::Pull::Ended). It
     /// replaces the pending install. With no tap open it does nothing.
     pub fn close(&mut self) {
         if self.reader.take().is_some() {
-            self.pending = Some(None);
+            self.replace_pending(None);
         }
         self.push_pending();
     }
@@ -177,7 +190,7 @@ impl<F: Float> HeardTaps<F> {
     pub fn reclaim(&mut self) {
         if self.reader.as_ref().is_some_and(|r| r.strong_count() == 0) {
             self.reader = None;
-            self.pending = Some(None);
+            self.replace_pending(None);
         }
         self.push_pending();
     }

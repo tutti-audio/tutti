@@ -25,7 +25,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// refuses (silence, whole frames, so a take keeps its timing). An export
     /// forks the graph and renders without the engine, so it never writes to
     /// it. There is one at a time, and the latest open wins: opening again
-    /// ends the earlier reader once it is drained. Its ring holds `capacity`
+    /// ends the earlier reader: it answers `Pull::Ended` once drained. Its ring holds `capacity`
     /// frames and what the reader does not drain in time is dropped and
     /// counted ([`TapReader::take_lost`](tutti_graph::TapReader::take_lost)).
     ///
@@ -57,7 +57,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
 
     /// Closes the tap [`open_heard_tap`](Self::open_heard_tap) opened, now
     /// rather than at the [`Reclaim`](crate::Phase::Reclaim) phase that follows a
-    /// dropped reader. The reader keeps what it was written. With no tap open
+    /// dropped reader. The reader keeps what it was written, then answers `Pull::Ended`. With no tap open
     /// it does nothing. The writes stop from the first render that begins after
     /// the push, as an open's start.
     ///
