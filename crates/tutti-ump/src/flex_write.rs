@@ -5,6 +5,7 @@
 use core::iter::FusedIterator;
 
 use thiserror::Error;
+use tutti_units::TextError;
 
 use crate::iso8601::is_date_with_optional_time;
 use crate::{
@@ -32,6 +33,10 @@ pub enum FlexTextError {
     /// The text is longer than [`FLEX_TEXT_MAX_LEN`] bytes.
     #[error("a Flex text is at most {FLEX_TEXT_MAX_LEN} bytes")]
     TooLong,
+    /// The text starts with a byte order mark, which a Flex text does not
+    /// carry (M2-104 section 7.5.9).
+    #[error("a Flex text does not start with a byte order mark")]
+    Bom,
 }
 
 /// Why an [`Entry`] cannot be made.
@@ -49,27 +54,11 @@ pub enum EntryError {
     Text(#[from] FlexTextError),
 }
 
-/// A text a Flex Data message carries: UTF-8 with no NUL and at most
-/// [`FLEX_TEXT_MAX_LEN`] bytes (M2-104 sections 7.5.1 and 7.5.9).
-#[derive(Clone, Copy, Debug)]
-pub struct Text {
-    bytes: [u8; FLEX_TEXT_MAX_LEN],
-    len: usize,
-}
-
-impl PartialEq for Text {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_bytes() == other.as_bytes()
-    }
-}
-
-impl Eq for Text {}
-
-impl core::hash::Hash for Text {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.as_bytes().hash(state);
-    }
-}
+/// A text a Flex Data message carries: UTF-8 with no NUL, no leading byte
+/// order mark and at most [`FLEX_TEXT_MAX_LEN`] bytes (M2-104 sections 7.5.1
+/// and 7.5.9).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Text(tutti_units::Text<0, FLEX_TEXT_MAX_LEN>);
 
 impl TryFrom<&str> for Text {
     type Error = FlexTextError;
@@ -78,15 +67,18 @@ impl TryFrom<&str> for Text {
     ///
     /// # Errors
     ///
-    /// [`FlexTextError::Nul`] for a NUL, [`FlexTextError::TooLong`] past
-    /// [`FLEX_TEXT_MAX_LEN`] bytes.
+    /// [`FlexTextError::Nul`] for a NUL, [`FlexTextError::Bom`] for a leading
+    /// byte order mark, [`FlexTextError::TooLong`] past [`FLEX_TEXT_MAX_LEN`]
+    /// bytes.
     fn try_from(text: &str) -> Result<Self, FlexTextError> {
-        if text.as_bytes().contains(&0) {
-            return Err(FlexTextError::Nul);
-        }
-        let mut out = Self::empty();
-        out.push(text)?;
-        Ok(out)
+        tutti_units::Text::try_from(text)
+            .map(Self)
+            .map_err(|error| match error {
+                TextError::Nul => FlexTextError::Nul,
+                TextError::Bom => FlexTextError::Bom,
+                // `Text<0, _>` has no minimum, so `TooShort` cannot occur.
+                TextError::TooLong { .. } | TextError::TooShort { .. } => FlexTextError::TooLong,
+            })
     }
 }
 
@@ -109,47 +101,34 @@ impl TryFrom<&[Entry]> for Text {
     /// assert_eq!(composers.as_str(), "John Lennon, Paul McCartney");
     /// ```
     fn try_from(entries: &[Entry]) -> Result<Self, FlexTextError> {
-        let mut out = Self::empty();
+        let mut bytes = [0; FLEX_TEXT_MAX_LEN];
+        let mut len = 0;
         for (i, entry) in entries.iter().enumerate() {
-            if i > 0 {
-                out.push(", ")?;
+            for part in [if i > 0 { ", " } else { "" }, entry.0.as_str()] {
+                let end = len + part.len();
+                bytes
+                    .get_mut(len..end)
+                    .ok_or(FlexTextError::TooLong)?
+                    .copy_from_slice(part.as_bytes());
+                len = end;
             }
-            out.push(entry.0.as_str())?;
         }
-        Ok(out)
+        // The bytes are whole `&str`s, so they are UTF-8.
+        core::str::from_utf8(&bytes[..len])
+            .map_err(|_| FlexTextError::TooLong)
+            .and_then(Self::try_from)
     }
 }
 
 impl Text {
-    const fn empty() -> Self {
-        Self {
-            bytes: [0; FLEX_TEXT_MAX_LEN],
-            len: 0,
-        }
-    }
-
-    fn push(&mut self, part: &str) -> Result<(), FlexTextError> {
-        let end = self.len + part.len();
-        self.bytes
-            .get_mut(self.len..end)
-            .ok_or(FlexTextError::TooLong)?
-            .copy_from_slice(part.as_bytes());
-        self.len = end;
-        Ok(())
-    }
-
     /// The text.
-    ///
-    /// # Panics
-    ///
-    /// Never: the bytes were copied from `&str`s, whole.
     #[must_use]
     pub fn as_str(&self) -> &str {
-        core::str::from_utf8(self.as_bytes()).expect("a Text holds the bytes of whole strs")
+        self.0.as_str()
     }
 
     pub(crate) fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len]
+        self.0.as_str().as_bytes()
     }
 }
 

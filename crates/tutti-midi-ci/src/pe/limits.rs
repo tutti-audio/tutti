@@ -524,6 +524,10 @@ mod tests {
             PeTextError::from(TextError::Nul),
             PeTextError::Character { .. }
         ));
+        assert!(matches!(
+            PeTextError::from(TextError::Bom),
+            PeTextError::Character { .. }
+        ));
     }
 
     /// An ordinary mixed-case suffix is accepted by the types that take one.
