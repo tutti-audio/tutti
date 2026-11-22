@@ -19,6 +19,10 @@ use crate::Quantity;
 /// // Arrivals every 2 ms, from tick 0.
 /// let ticks = (0..4).map(|i| (f64::from(i), Seconds::new(0.002 * f64::from(i))));
 /// assert!((slope(ticks).unwrap() - 0.002).abs() < 1e-15);
+///
+/// // One point, or every point at one x, has no slope.
+/// assert_eq!(slope([(1.0, Seconds::new(0.5))].into_iter()), None);
+/// assert_eq!(slope([(1.0, Seconds::new(0.5)), (1.0, Seconds::new(0.7))].into_iter()), None);
 /// ```
 #[must_use]
 pub fn slope<Y: Quantity>(points: impl Iterator<Item = (f64, Y)> + Clone) -> Option<f64> {
