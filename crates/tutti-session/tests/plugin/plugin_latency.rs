@@ -259,9 +259,7 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     }
     let mut s = offline();
     let outgoing = PluginClient::new(
-        tutti_plugin_ipc::IpcConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        tutti_plugin_ipc::IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
@@ -281,9 +279,7 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     assert_eq!(outgoing_latency, Samples::new(OWN + OFFLINE_EXTRA + BLOCK));
 
     let incoming = PluginClient::new(
-        tutti_plugin_ipc::IpcConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        tutti_plugin_ipc::IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
@@ -348,9 +344,7 @@ fn a_restart_to_another_callback_size_re_declares_a_plugins_latency() {
         .expect("builds with no device");
 
     let client = PluginClient::new(
-        tutti_plugin_ipc::IpcConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        tutti_plugin_ipc::IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),
@@ -403,9 +397,7 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
         .build()
         .expect("builds");
     let client = PluginClient::new(
-        tutti_plugin_ipc::IpcConfig::at(
-            tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
-        ),
+        tutti_plugin_ipc::IpcConfig::new(),
         tutti_fixtures::executor(),
         &tutti_fixtures::detached_work(),
         &Loadable::uncatalogued(PluginRef::file(clap_probe())),

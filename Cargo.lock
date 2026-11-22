@@ -3252,7 +3252,6 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "futures-lite",
- "getrandom",
  "interprocess",
  "parking_lot",
  "postcard",

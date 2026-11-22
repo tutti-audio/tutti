@@ -21,11 +21,9 @@ use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
-pub use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker, socket_name};
+pub use super::sys::{ControlUnparker, ControlWait, Watch, control_unparker};
 use interprocess::local_socket::Stream;
-use interprocess::local_socket::traits::Stream as _;
 use std::io::Read;
-use std::path::Path;
 use std::thread;
 use std::time::Duration;
 use tutti_platform::Instant;
@@ -42,30 +40,6 @@ pub type ControlStream = Stream;
 /// unframed the stream, so the bridge crashes on it. Generous,
 /// because a slow plugin call delays the server's next read by its length.
 pub const SEND_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Connect to the plugin-server's socket, with [`SEND_TIMEOUT`] on writes.
-///
-/// # Errors
-///
-/// The socket name is invalid or nothing is listening on it.
-pub fn connect(socket: &Path) -> IpcResult<ControlStream> {
-    connect_within(socket, SEND_TIMEOUT)
-}
-
-/// [`connect`] with `send_timeout` on writes.
-///
-/// The send deadline is the kernel's (`SO_SNDTIMEO`), armed once for the
-/// connection. Windows has none: `interprocess` refuses a timeout on a named
-/// pipe, as it does for reads, and there a hung server's writes end when the
-/// server is ended (the session's hang verdict kills it, closing the pipe).
-/// Arming is therefore best-effort and its failure is not an error.
-pub(crate) fn connect_within(socket: &Path, send_timeout: Duration) -> IpcResult<ControlStream> {
-    let name = socket_name(socket)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
-    let stream = Stream::connect(name)?;
-    let _ = stream.set_send_timeout(Some(send_timeout));
-    Ok(stream)
-}
 
 /// Write one frame.
 ///
@@ -602,9 +576,8 @@ fn crashed_on_eof(e: std::io::Error) -> IpcError {
 mod tests {
     use super::*;
     use crate::{AudioReply, AudioRequest, ControlFrame, News};
-    use interprocess::local_socket::ListenerOptions;
 
-    /// A connected pair of local sockets, plus the path so it can be cleaned up.
+    /// A connected pair of local sockets.
     ///
     /// A real socket rather than an in-memory fake: the property under test is
     /// how the read loop behaves against a peer that stops mid-frame, and that
@@ -615,7 +588,6 @@ mod tests {
         /// stream has no `try_clone` in scope here and the tests need the two
         /// ends on different threads to interleave a pause with a read.
         peer: Option<ControlStream>,
-        path: std::path::PathBuf,
     }
 
     impl Pair {
@@ -625,26 +597,11 @@ mod tests {
         }
     }
 
-    impl Drop for Pair {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.path);
-        }
-    }
-
     fn pair() -> Pair {
-        use interprocess::local_socket::traits::Listener as _;
-        let path = crate::unique_socket_path().expect("the OS has a random source");
-        let _ = std::fs::remove_file(&path);
-        let name = crate::transport::control::socket_name(&path).unwrap();
-        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-        let connect_path = path.clone();
-        let joiner = std::thread::spawn(move || crate::transport::control::connect(&connect_path));
-        let peer = listener.accept().unwrap();
-        let host = joiner.join().unwrap().unwrap();
+        let (host, peer) = crate::transport::broker_pair();
         Pair {
             host,
             peer: Some(peer),
-            path,
         }
     }
 
@@ -937,43 +894,28 @@ mod tests {
     mod unix_send_bound {
         use super::super::*;
         use crate::ControlRequest;
-        use interprocess::local_socket::ListenerOptions;
+        use interprocess::local_socket::traits::Stream as _;
 
         /// **A send to a peer that reads nothing gives up at the send deadline**, as a `partial`
         /// timeout: the frame may be half on the wire, so the connection cannot go on. Before, the
         /// write blocked until the peer read or died.
         ///
-        /// Unix only: Windows has no send timeout on a named pipe (`connect_within`
-        /// says what ends a hung write there).
+        /// Unix only: Windows has no send timeout on a named pipe (a hung write there ends
+        /// when the server is ended and the pipe closes).
         #[test]
         fn a_send_to_a_peer_that_reads_nothing_is_bounded() {
-            use interprocess::local_socket::traits::Listener as _;
-            let path = crate::unique_socket_path().expect("the OS has a random source");
-            let _ = std::fs::remove_file(&path);
-            let name = socket_name(&path).unwrap();
-            let listener = ListenerOptions::new().name(name).create_sync().unwrap();
-            let connect_path = path.clone();
-            let (done, outcome) = std::sync::mpsc::channel();
-            let _writer = std::thread::spawn(move || {
-                let mut host =
-                    connect_within(&connect_path, Duration::from_millis(200)).expect("connect");
-                let chunk = crate::Request {
-                    id: crate::ReqId::new(1),
-                    body: ControlRequest::GetParameterValueFromText {
-                        param_id: tutti_units::ParamId::new(1),
-                        text: "x".repeat(1 << 20),
-                    },
-                };
-                // Far more than any socket buffer holds: the peer reads nothing.
-                let result = (0..256).try_for_each(|_| send(&mut host, &chunk));
-                let _ = done.send(result);
-            });
-            let _peer = listener.accept().unwrap();
-
-            let result = outcome
-                .recv_timeout(Duration::from_secs(10))
-                .expect("the send never gave up on a peer that reads nothing");
-            let _ = std::fs::remove_file(&path);
+            let (mut host, _peer) = crate::transport::broker_pair();
+            host.set_send_timeout(Some(Duration::from_millis(200)))
+                .expect("a send timeout");
+            let chunk = crate::Request {
+                id: crate::ReqId::new(1),
+                body: ControlRequest::GetParameterValueFromText {
+                    param_id: tutti_units::ParamId::new(1),
+                    text: "x".repeat(1 << 20),
+                },
+            };
+            // Far more than any socket buffer holds: the peer reads nothing.
+            let result = (0..256).try_for_each(|_| send(&mut host, &chunk));
             assert!(
                 matches!(result, Err(IpcError::Timeout { partial: true, .. })),
                 "{result:?}"
