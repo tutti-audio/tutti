@@ -8,8 +8,10 @@
 //! input order. A 2 by 2 matrix is true stereo, an N by M matrix is an ambisonic response
 //! set, and a diagonal one is the per-channel convolution.
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use tutti_buffers::ChannelLayout;
-use tutti_buffers::{Mono, MonoMut, Planes, PlanesMut, Sample};
+use tutti_buffers::{InputOutput, Mono, MonoMut, Sample};
 use tutti_units::Samples;
 
 use super::{Convolver, DEFAULT_BLOCK_SIZE};
@@ -211,24 +213,26 @@ impl<F: FftFloat> MatrixConvolver<F> {
     /// Convolves a block: output channel `o` is the sum over input channels `i` of input
     /// `i` through path `(i, o)`.
     ///
-    /// Input channel `i` of the views feeds row `i`; a row the views are narrower than
-    /// reads as silence, and an output channel the matrix is narrower than is not touched.
-    /// The frames rendered are the fewer of the two views'. The render is the same bits
-    /// for any split of the stream into calls. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
+    /// Input channel `i` of the block feeds row `i`. The render is the same bits for any split
+    /// of the stream into calls. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input is not the matrix's rows wide or its output
+    /// its columns.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
         let (rows, cols) = (
             usize::from(self.inputs.count()),
             usize::from(self.outputs.count()),
         );
+        expect_widths(block, rows, cols)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let mut at = 0;
         while at < frames {
             let n = CHUNK.min(frames - at);
-            for (i, row) in self.heard.iter_mut().enumerate() {
-                match input.get_plane(i) {
-                    Some(src) => row[..n].copy_from_slice(&src.samples()[at..at + n]),
-                    None => row[..n].fill(F::ZERO),
-                }
+            for (i, row) in self.heard.iter_mut().enumerate().take(rows) {
+                row[..n].copy_from_slice(&input.plane(i).samples()[at..at + n]);
             }
             for o in 0..cols {
                 self.sum[..n].fill(F::ZERO);
@@ -241,12 +245,11 @@ impl<F: FftFloat> MatrixConvolver<F> {
                         *s += *p;
                     }
                 }
-                if let Some(mut plane) = output.get_plane_mut(o) {
-                    plane.samples_mut()[at..at + n].copy_from_slice(&self.sum[..n]);
-                }
+                output.plane_mut(o).samples_mut()[at..at + n].copy_from_slice(&self.sum[..n]);
             }
             at += n;
         }
+        Ok(())
     }
 
     /// Zeros every path's running state, keeping the responses.

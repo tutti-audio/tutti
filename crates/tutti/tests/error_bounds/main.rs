@@ -17,8 +17,7 @@ fn types_errors_are_boxable() {
     use tutti::types::{
         BeatsPerCycleOutOfRange, BpmOutOfRange, BusTooWide, DepthOutOfRange, InvalidBeatsPerBar,
         InvalidMaxBlock, InvalidNoteValue, LayoutError, LoopRangeError, MetresOutOfRange,
-        NotOnMidiScale, NoteNumberOutOfRange, SampleRateOutOfRange, SpeedOutOfRange,
-        UnitParamOutOfRange,
+        SampleRateOutOfRange, SpeedOutOfRange, UnitParamOutOfRange,
     };
     err::<BeatsPerCycleOutOfRange>();
     err::<BpmOutOfRange>();
@@ -30,11 +29,16 @@ fn types_errors_are_boxable() {
     err::<LayoutError>();
     err::<LoopRangeError>();
     err::<MetresOutOfRange>();
-    err::<NotOnMidiScale>();
-    err::<NoteNumberOutOfRange>();
     err::<SampleRateOutOfRange>();
     err::<SpeedOutOfRange>();
     err::<UnitParamOutOfRange>();
+}
+
+#[cfg(feature = "midi")]
+fn midi_errors_are_boxable() {
+    use tutti::midi::{NotOnMidiScale, NoteNumberOutOfRange};
+    err::<NotOnMidiScale>();
+    err::<NoteNumberOutOfRange>();
 }
 
 fn buffers_errors_are_boxable() {

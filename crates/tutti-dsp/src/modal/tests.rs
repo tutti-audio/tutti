@@ -1,5 +1,6 @@
 use super::*;
 use core::f64::consts::TAU;
+use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const LN_1000: f64 = 3.0 * core::f64::consts::LN_10;
 const RATE: f64 = 48_000.0;
@@ -37,9 +38,13 @@ fn impulse(b: &mut ModalBank<f64>, len: usize) -> Vec<f64> {
     x[0] = 1.0;
     let mut y = vec![0.0; len];
     b.process(
-        Planes::new(&[&x[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     y
 }
 
@@ -171,9 +176,13 @@ fn a_late_impulse_rings_the_same_response_later_on_every_channel() {
     x1[200] = 1.0;
     let (mut y0, mut y1) = (vec![0.0; 512], vec![0.0; 512]);
     b.process(
-        Planes::new(&[&x0[..], &x1[..]]).unwrap(),
-        PlanesMut::new(&mut [&mut y0[..], &mut y1[..]]).unwrap(),
-    );
+        &mut InputOutput::paired(
+            Planes::new(&[&x0[..], &x1[..]]).unwrap(),
+            PlanesMut::new(&mut [&mut y0[..], &mut y1[..]]).unwrap(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
     let h = impulse(&mut bank(&m), 412);
     assert!(y1[..=200].iter().all(|&v| v == 0.0));
     assert!(y0[..=100].iter().all(|&v| v == 0.0));

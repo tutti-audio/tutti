@@ -20,7 +20,7 @@ static A: ThreadCounting = ThreadCounting;
 /// block (hostile controls among them), after the one `FreeverbBank::new` that sizes it.
 #[test]
 fn freeverb_retargets_and_renders_without_allocating() {
-    use tutti_buffers::{Planes, PlanesMut};
+    use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_dsp::{FreeverbBank, FreeverbControls};
 
     for rate in [44_100.0, 48_000.0, 192_000.0] {
@@ -40,9 +40,13 @@ fn freeverb_retargets_and_renders_without_allocating() {
                 bank.retarget(&mut ramps, &c);
                 bank.process(
                     &mut ramps,
-                    Planes::new(&[&input]).unwrap(),
-                    PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
-                );
+                    &mut InputOutput::paired(
+                        Planes::new(&[&input]).unwrap(),
+                        PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
                 std::hint::black_box(bank.tail_of(&c));
                 std::hint::black_box(bank.tail());
             });
@@ -57,7 +61,7 @@ fn freeverb_retargets_and_renders_without_allocating() {
 /// following blocks, which allocate nothing either.
 #[test]
 fn the_fdn_retargets_and_renders_without_allocating() {
-    use tutti_buffers::{Planes, PlanesMut};
+    use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay};
     use tutti_units::{Db, Depth, Hz, StereoWidth};
 
@@ -89,9 +93,13 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             bank.retarget(&mut ramps, &c);
             bank.process(
                 &mut ramps,
-                Planes::new(&[&input]).unwrap(),
-                PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
-            );
+                &mut InputOutput::paired(
+                    Planes::new(&[&input]).unwrap(),
+                    PlanesMut::new(&mut [&mut left, &mut right]).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
             std::hint::black_box(bank.tail_of(&ramps, &c));
         });
         assert_eq!(n, 0, "the block allocated");

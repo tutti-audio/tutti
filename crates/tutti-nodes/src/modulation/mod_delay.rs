@@ -326,15 +326,15 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        let frames = input.frames().get().min(output.frames().get());
-        if let Some(bank) = &mut self.bank {
-            bank.process(&mut self.delays, &mut self.feedback, input, output);
-        }
+        let frames = block.frames().get();
+        let rendered = match &mut self.bank {
+            Some(bank) => bank.process(&mut self.delays, &mut self.feedback, block),
+            None => Ok(()),
+        };
         self.depth
             .advance(u32::try_from(frames).unwrap_or(u32::MAX));
         self.clock.advance(frames);
-        Ok(())
+        rendered
     }
 
     /// A recirculating line rings for as long as its feedback says: unknown, so the graph

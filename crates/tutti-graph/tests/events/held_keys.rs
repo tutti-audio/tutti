@@ -2116,29 +2116,27 @@ mod no_alloc {
         for _ in 0..8 {
             exec.process(MAX, &t, &[], &mut []);
         }
-        assert_no_alloc::assert_no_alloc(|| {
-            for i in 0..3000u32 {
-                {
-                    let mut m = mail.lock().unwrap();
-                    let key = i % 40;
-                    tog = !tog;
-                    let note = (key + 20) as u8;
-                    // An off that carries velocity 100 as well, as the on does.
-                    let vel = U7::of(100);
-                    let (ch, key) = (MidiChannel::FIRST, NoteNumber::of(note));
-                    m.push((
-                        0,
-                        if tog {
-                            Ump::from(Message::midi1(ch, Voice1::note_on(key, vel)))
-                        } else {
-                            Ump::from(Message::midi1(ch, Voice1::note_off(key, vel)))
-                        }
-                        .0,
-                    ));
-                }
-                exec.process(MAX, &t, &[], &mut []);
+        for i in 0..3000u32 {
+            {
+                let mut m = mail.lock().unwrap();
+                let key = i % 40;
+                tog = !tog;
+                let note = (key + 20) as u8;
+                // An off that carries velocity 100 as well, as the on does.
+                let vel = U7::of(100);
+                let (ch, key) = (MidiChannel::FIRST, NoteNumber::of(note));
+                m.push((
+                    0,
+                    if tog {
+                        Ump::from(Message::midi1(ch, Voice1::note_on(key, vel)))
+                    } else {
+                        Ump::from(Message::midi1(ch, Voice1::note_off(key, vel)))
+                    }
+                    .0,
+                ));
             }
-        });
+            exec.process(MAX, &t, &[], &mut []);
+        }
         assert!(n.load(Ordering::Relaxed) > 5000);
     }
 

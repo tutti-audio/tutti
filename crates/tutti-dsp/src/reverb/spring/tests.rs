@@ -3,6 +3,7 @@ use tutti_rt::SplitMix64;
 use tutti_units::{Feedback, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
+use tutti_buffers::InputOutput;
 
 const NZ2: ChannelLayout = ChannelLayout::STEREO;
 
@@ -14,10 +15,15 @@ fn render(spring: &mut SpringReverb<f64>, x: &[&[f64]]) -> Vec<Vec<f64>> {
     let mut out = vec![vec![0.0; frames]; x.len()];
     {
         let mut planes: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
-        spring.process(
-            Planes::new(x).unwrap(),
-            PlanesMut::new(planes.as_mut_slice()).unwrap(),
-        );
+        spring
+            .process(
+                &mut InputOutput::paired(
+                    Planes::new(x).unwrap(),
+                    PlanesMut::new(planes.as_mut_slice()).unwrap(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
     }
     out
 }

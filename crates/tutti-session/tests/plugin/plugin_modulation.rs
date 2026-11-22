@@ -9,6 +9,7 @@
 //! without it every test here fails, naming that command. They must fail
 //! rather than skip.
 
+use crate::bounced::bounced;
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
@@ -603,7 +604,7 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         sample_rate: RATE,
         loop_range: None,
     }));
-    let config = Bounce::project()
+    let config = Bounce::new()
         .master_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
@@ -655,7 +656,9 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
     }
 
     let request = config.clock(ExportClock::timeline(timeline));
-    let export = s.bounce(request).expect("the export renders").into_master();
+    let export = bounced(&mut s, request)
+        .expect("the export renders")
+        .into_master();
     for (c, (l, e)) in live.iter().zip(export.planes()).enumerate() {
         assert!(e.len() >= total, "channel {c}: {} frames", e.len());
         let moving = l.iter().filter(|&&v| v != 0.0).collect::<Vec<_>>();

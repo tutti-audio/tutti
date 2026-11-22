@@ -2596,6 +2596,7 @@ dependencies = [
 name = "tutti-book"
 version = "0.0.0"
 dependencies = [
+ "futures-lite",
  "tutti",
  "tutti-fixtures",
 ]
@@ -2898,6 +2899,7 @@ dependencies = [
  "tutti-graph",
  "tutti-music",
  "tutti-rt",
+ "tutti-ump",
  "tutti-units",
 ]
 
@@ -3597,6 +3599,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tutti-fixtures",
+ "tutti-music",
  "tutti-units",
  "unicode-normalization",
 ]

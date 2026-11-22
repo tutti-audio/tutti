@@ -6,9 +6,16 @@ use crate::{
     LadderModel, MidSide, OscillatorWave, Polarity, Ramp, RingModulator, SvfBank, SvfCoefficients,
     SvfControls, SvfModel, Tremolo,
 };
+use crate::{
+    DelayBank, DelayLayout, DelayRamps, DelaySignals, EarlyReflections, FreeverbBank,
+    FrequencyShifterBank, GAIN_RAMP, InterpolationMode, KarplusStrongBank, LowestPitch, MaxDelay,
+    PhaserChain, SpringLayout, SpringReverb, Stages, TapSet,
+};
 use core::num::NonZeroUsize;
-use tutti_buffers::{BlockSide, BufferError, ChannelLayout, InputOutput, Planes, PlanesMut};
-use tutti_units::{Feedback, Hz, SampleRate};
+use tutti_buffers::{
+    BlockSide, BufferError, BusTopology, ChannelLayout, InputOutput, Planes, PlanesMut,
+};
+use tutti_units::{Feedback, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 8;
@@ -217,4 +224,106 @@ fn utility_banks_refuse_a_block_of_another_width() {
     assert!(out.iter().flatten().all(|&y| y == UNTOUCHED));
     let (result, _) = run(2, 3, |block| RingModulator::new(RATE).process(block));
     assert!(result.is_err());
+}
+
+/// The delay-line banks (a delay, an early-reflection stage) are built for their widths: the
+/// delay takes its lines' channels on both sides, and the stage the channels its taps feed.
+#[test]
+fn delay_banks_refuse_a_block_of_another_width() {
+    frames_cannot_differ();
+    refuses_another_width(2, |block| {
+        let layout = DelayLayout::new(
+            BusTopology::STEREO,
+            MaxDelay::of(Seconds::new(1.0)),
+            InterpolationMode::Linear,
+        );
+        let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(RATE).get()).unwrap();
+        DelayBank::<f32>::new(&layout, RATE).process(
+            &mut DelayRamps::new(steps),
+            DelaySignals::default(),
+            block,
+        )
+    });
+    // A stage with no taps outputs one channel, whatever the input's width.
+    let stage = EarlyReflections::<f32>::try_from(&TapSet::default()).unwrap();
+    assert_eq!(stage.channels(), 1);
+    let (result, out) = run(2, 2, |block| stage.clone().process(block));
+    assert_eq!(
+        result,
+        Err(BlockMismatch::Width {
+            side: BlockSide::Output,
+            expected: 1,
+            found: 2
+        })
+    );
+    assert!(out.iter().flatten().all(|&y| y == UNTOUCHED));
+    assert_eq!(run(2, 1, |block| stage.clone().process(block)).0, Ok(()));
+}
+
+/// The modulation banks refuse a block of another width: a frequency shifter and a phaser
+/// chain are built for one.
+#[test]
+fn modulation_banks_refuse_a_block_of_another_width() {
+    frames_cannot_differ();
+    refuses_another_width(2, |block| {
+        FrequencyShifterBank::<f32>::new(ChannelLayout::STEREO, RATE).process(block)
+    });
+    refuses_another_width(2, |block| {
+        let mut complements = [Ramp::new(0.5f32), Ramp::new(0.5f32)];
+        PhaserChain::<f32>::new(Stages::of(2), ChannelLayout::STEREO).process(
+            &mut complements,
+            &mut Ramp::new(0.0),
+            block,
+        )
+    });
+}
+
+/// A reverb's wet signal is a pair, or as wide as the spring's channels: another output width
+/// is refused, whatever the input's.
+#[test]
+fn reverb_banks_refuse_a_block_of_another_width() {
+    frames_cannot_differ();
+    for input in [1, 2, 3] {
+        let (result, out) = run(input, 1, |block| {
+            let mut bank = FreeverbBank::<f32>::new(RATE);
+            let mut ramps = bank.ramps();
+            bank.process(&mut ramps, block)
+        });
+        assert_eq!(
+            result,
+            Err(BlockMismatch::Width {
+                side: BlockSide::Output,
+                expected: 2,
+                found: 1
+            })
+        );
+        assert!(out.iter().flatten().all(|&y| y == UNTOUCHED));
+    }
+    assert_eq!(
+        run(3, 2, |block| {
+            let mut bank = FreeverbBank::<f32>::new(RATE);
+            let mut ramps = bank.ramps();
+            bank.process(&mut ramps, block)
+        })
+        .0,
+        Ok(())
+    );
+    refuses_another_width(2, |block| {
+        SpringReverb::<f32>::new(ChannelLayout::STEREO, RATE, SpringLayout::default())
+            .process(block)
+    });
+}
+
+/// The string and mode banks are built for a width and refuse a block of another.
+#[test]
+fn synthesis_banks_refuse_a_block_of_another_width() {
+    frames_cannot_differ();
+    refuses_another_width(2, |block| {
+        KarplusStrongBank::<f32>::new(
+            LowestPitch::new(Hz::new(50.0)).unwrap(),
+            RATE,
+            ChannelLayout::STEREO,
+        )
+        .process(block)
+    });
 }

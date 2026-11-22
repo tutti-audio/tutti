@@ -189,9 +189,7 @@ impl<F: Float> Kernel for DistanceKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        self.distance.process(input, output);
-        Ok(())
+        self.distance.process(block)
     }
 
     /// No latency: the delay is the source's distance, not the node's processing.

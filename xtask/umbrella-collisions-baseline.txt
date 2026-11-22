@@ -15,7 +15,6 @@ crates  Edge  tutti_graph,tutti_session
 crates  Error  tutti_measure,tutti_sampler,tutti_session,tutti_sf2
 crates  Event  tutti_graph,tutti_session
 crates  Instrument  tutti_graph,tutti_sf2
-crates  NoteNumberOutOfRange  tutti_music,tutti_ump
 crates  ParamRange  tutti_graph,tutti_plugin_types
 crates  ParamUnit  tutti_graph,tutti_plugin_types
 crates  Preset  tutti_plugin_types,tutti_sf2

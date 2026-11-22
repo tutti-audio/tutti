@@ -83,12 +83,17 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         .connect(node, Root)
         .expect("both ends exist")
         .unfaded();
+    let rendered = tutti_fixtures::block_on(
+        session
+            .bounce(
+                Bounce::new()
+                    .master_buffers()
+                    .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
+            )
+            .expect("a DC graph starts"),
+    );
     let planes = session
-        .bounce(
-            Bounce::project()
-                .master_buffers()
-                .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
-        )
+        .apply(rendered)
         .expect("a DC graph renders")
         .into_master()
         .into_planes();

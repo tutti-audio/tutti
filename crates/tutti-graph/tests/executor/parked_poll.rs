@@ -1,7 +1,7 @@
 //! `Node::poll_parked`: the executor answers a parked node's handoffs without
 //! rendering it. Called once per block for a parked node, never for a node
 //! that is not parked, and `process` is not called meanwhile. A real recall
-//! (a `tutti_rt` handoff) is answered inside `assert_no_alloc`.
+//! (a `tutti_rt` handoff) is answered under `RtScope`.
 
 use tutti_graph::testing as common;
 
@@ -170,14 +170,12 @@ fn a_recall_is_answered_by_a_parked_node_without_allocating() {
     assert!(r.hand.recall().is_none(), "the node holds it");
     assert_eq!(count(&r.returned), 0);
     let mut out = [0.0f32; BLOCK];
-    assert_no_alloc::assert_no_alloc(|| {
-        r.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [&mut out[..]],
-        );
-    });
+    r.exec.process(
+        BLOCK,
+        &TransportPosition::default(),
+        &[],
+        &mut [&mut out[..]],
+    );
     assert_eq!(count(&r.returned), 1, "stopped once on its way back");
     assert_eq!(r.hand.take(), Some(7), "returned to the control side");
 }

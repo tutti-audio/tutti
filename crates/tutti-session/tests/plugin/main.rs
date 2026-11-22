@@ -75,3 +75,8 @@ mod plugin_diagnostics;
 // session's drop. The reference CLAP bundle and a stand-in `plugin-probe` that hangs.
 #[cfg(all(feature = "clap", unix))]
 mod plugin_scan;
+
+// Starts a bounce, awaits its render and applies it.
+#[cfg(all(feature = "clap", feature = "export"))]
+#[path = "../support/bounced.rs"]
+mod bounced;

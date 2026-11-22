@@ -5,7 +5,7 @@
 //! file's tempo map, and the bounce renders the file's beats (so their length
 //! is the map's, steps included), trims the latency the plan compensated, and
 //! renders the plugin's declared tail. The plugin hears Offline from
-//! `bounce_start` and Realtime from `finish_bounce`.
+//! `bounce` and Realtime from the update after the apply.
 //!
 //! With no arguments it plays a two-bar phrase it writes itself through the
 //! shared reference plugin (`tutti-shared-plugin`, in its `Notes` mode: it
@@ -130,10 +130,10 @@ fn play<M: Master>(
     // Everything else is derived: the clock is the project's tempo map from
     // beat 0, the latency is the plan's, the tail is the plugin's declared
     // one, and the file is as wide as the root.
-    let job = s.bounce_start(master(
-        Bounce::project().range(Range::Beats(Beat::new(0.0), end)),
+    let job = s.bounce(master(
+        Bounce::new().range(Range::Beats(Beat::new(0.0), end)),
     ))?; // the plugin hears Offline from here
-    let bounced = s.finish_bounce(job.run())?; // and Realtime from here
+    let bounced = s.apply(tutti_fixtures::block_on(job))?; // and Realtime from the next update
     Ok(bounced.into_master())
 }
 
