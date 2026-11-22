@@ -18,6 +18,7 @@ use coremidi_sys::{
     kMIDIPropertyName, kMIDIPropertyProtocolID, kMIDIPropertyUniqueID,
 };
 use std::ptr;
+use tutti_ump::{Protocol, read_protocol};
 
 impl UniqueId {
     /// The id of `object`, `None` for the null reference (an endpoint with no
@@ -79,10 +80,11 @@ impl Endpoint {
         string_property(self.reference, display).or_else(|| string_property(self.reference, name))
     }
 
-    /// `kMIDIPropertyProtocolID`: 1 for `kMIDIProtocol_1_0`, 2 for
-    /// `kMIDIProtocol_2_0`; `None` when the endpoint does not report one.
+    /// The Protocol `kMIDIPropertyProtocolID` names: 1 (`kMIDIProtocol_1_0`) is
+    /// MIDI 1.0, 2 (`kMIDIProtocol_2_0`) is MIDI 2.0 and any other value is
+    /// reserved; `None` when the endpoint does not report one.
     #[must_use]
-    pub fn protocol_id(&self) -> Option<i32> {
+    pub fn protocol(&self) -> Option<Protocol> {
         let mut value: i32 = 0;
         // SAFETY: `kMIDIPropertyProtocolID` is a constant CFString CoreMIDI
         // exports and `value` is a valid out-pointer; a stale reference or an
@@ -90,7 +92,7 @@ impl Endpoint {
         let status = unsafe {
             MIDIObjectGetIntegerProperty(self.reference, kMIDIPropertyProtocolID, &mut value)
         };
-        (status == 0).then_some(value)
+        (status == 0).then(|| read_protocol(u8::try_from(value).unwrap_or(u8::MAX)))
     }
 }
 
