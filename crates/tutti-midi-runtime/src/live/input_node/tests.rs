@@ -144,6 +144,14 @@ fn a_group_has_ports_of_its_own() {
     assert_eq!(leaves(two, &note(0, 1)), channel(0, 1));
     assert_eq!(leaves(two, &note(1, 1)), channel(1, 1));
     assert_ne!(channel(0, 1), channel(1, 1), "a port of its own");
+    // The layout: 16 channel ports then the channelless one, per Group.
+    let port = |p: Option<EventOutputPort>| p.map(EventOutputPort::port);
+    assert_eq!(
+        port(two.channel(NODE, MidiGroup::of(1), MidiChannel::of(1))),
+        Some(18)
+    );
+    assert_eq!(port(two.channelless(NODE, MidiGroup::of(0))), Some(16));
+    assert_eq!(port(two.channelless(NODE, MidiGroup::of(1))), Some(33));
     assert_eq!(
         leaves(
             two,
