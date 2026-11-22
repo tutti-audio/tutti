@@ -45,15 +45,6 @@ macro_rules! midi_set {
             }
         }
 
-        impl FromIterator<crate::$item> for $set {
-            fn from_iter<I: IntoIterator<Item = crate::$item>>(items: I) -> Self {
-                let mut set = Self::EMPTY;
-                for item in items {
-                    set.insert(item);
-                }
-                set
-            }
-        }
     };
 }
 
