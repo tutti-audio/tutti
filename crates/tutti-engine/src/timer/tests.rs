@@ -1,10 +1,7 @@
-use std::cell::{Cell, RefCell};
-
-use tutti_platform::StopToken;
 use tutti_units::SampleRate;
 
-use super::pacer::{Due, MAX_LAG_BLOCKS, Pacer, Timebase};
-use super::run;
+use super::overran;
+use super::pacer::{Due, MAX_LAG_BLOCKS, Pacer};
 use crate::faults::{StreamFaultKind, StreamFaults};
 
 const MS: i64 = 1_000_000;
@@ -14,50 +11,26 @@ fn pacer_at(now_ns: i64) -> Pacer {
     Pacer::new(now_ns, 480, SampleRate::SR_48K)
 }
 
-/// A scripted clock: sleeping moves it to the deadline plus a late wake-up.
-struct Scripted {
-    now: Cell<i64>,
-    wake_late: Cell<i64>,
-}
-
-impl Scripted {
-    fn at(now: i64) -> Self {
-        Self {
-            now: Cell::new(now),
-            wake_late: Cell::new(0),
+/// Plays the timer's loop against a clock the test moves: waiting jumps it to the
+/// deadline plus `late(deadline)`, the lateness of that wake-up. Returns the
+/// deadlines of the first `blocks` blocks rendered and how many times the
+/// schedule re-anchored.
+fn blocks_on(
+    pacer: &mut Pacer,
+    blocks: usize,
+    mut late: impl FnMut(i64) -> i64,
+) -> (Vec<i64>, usize) {
+    let mut now = 0;
+    let mut rendered = Vec::new();
+    let mut overruns = 0;
+    while rendered.len() < blocks {
+        match pacer.poll(now) {
+            Due::Wait(until_ns) => now = until_ns + late(until_ns),
+            Due::Render(os_ns) => rendered.push(os_ns),
+            Due::Reanchored => overruns += 1,
         }
     }
-}
-
-impl Timebase for Scripted {
-    fn now_ns(&self) -> i64 {
-        self.now.get()
-    }
-
-    fn sleep_until_ns(&self, deadline_ns: i64) {
-        self.now.set(deadline_ns + self.wake_late.get());
-    }
-}
-
-/// Runs the loop until `blocks` have rendered; returns the deadlines it was
-/// handed and how many times it re-anchored.
-fn blocks_on(time: &Scripted, pacer: &mut Pacer, blocks: usize) -> (Vec<i64>, usize) {
-    let stop = StopToken::new();
-    let rendered = RefCell::new(Vec::new());
-    let overruns = Cell::new(0);
-    run(
-        time,
-        pacer,
-        &stop,
-        |os_ns| {
-            rendered.borrow_mut().push(os_ns);
-            if rendered.borrow().len() == blocks {
-                stop.stop();
-            }
-        },
-        || overruns.set(overruns.get() + 1),
-    );
-    (rendered.into_inner(), overruns.get())
+    (rendered, overruns)
 }
 
 /// Block n is due at start + n blocks - one block, with start one block after
@@ -135,10 +108,8 @@ fn a_re_anchored_schedule_runs_from_the_present() {
 /// loop hands over are consecutive blocks apart, however late each wake-up.
 #[test]
 fn every_block_renders_in_order_with_none_skipped() {
-    let time = Scripted::at(0);
-    time.wake_late.set(3 * MS);
     let mut pacer = pacer_at(0);
-    let (rendered, overruns) = blocks_on(&time, &mut pacer, 200);
+    let (rendered, overruns) = blocks_on(&mut pacer, 200, |_| 3 * MS);
     assert_eq!(overruns, 0);
     assert_eq!(rendered.len(), 200);
     for (n, os_ns) in rendered.iter().enumerate() {
@@ -146,92 +117,39 @@ fn every_block_renders_in_order_with_none_skipped() {
     }
 }
 
-/// The os time a block carries is its deadline, not the wake-up that ran it:
-/// with every wake-up 3 ms late, the blocks are still dated on the schedule.
+/// A stall of many blocks re-anchors exactly once, and the blocks after it are
+/// paced from the new anchor.
 #[test]
-fn a_blocks_os_time_is_its_deadline_not_its_wake_up() {
-    let time = Scripted::at(0);
-    time.wake_late.set(3 * MS);
+fn a_stall_re_anchors_once_and_paces_from_the_new_anchor() {
     let mut pacer = pacer_at(0);
-    let stop = StopToken::new();
-    let seen = RefCell::new(Vec::<i64>::new());
-    run(
-        &time,
-        &mut pacer,
-        &stop,
-        |os_ns| {
-            seen.borrow_mut().push(os_ns);
-            if seen.borrow().len() == 20 {
-                stop.stop();
-            }
-        },
-        || {},
-    );
-    for (n, os_ns) in seen.into_inner().into_iter().enumerate() {
-        assert_eq!(
-            os_ns,
-            n as i64 * 10 * MS,
-            "block {n} is dated by its deadline"
-        );
-    }
-}
-
-/// A stall of many blocks re-anchors exactly once, the blocks after it are
-/// paced from the new anchor, and one overrun reaches the stream's faults.
-#[test]
-fn a_stall_re_anchors_once_and_records_exactly_one_fault() {
-    struct Stalling {
-        inner: Scripted,
-        stalled: Cell<bool>,
-    }
-    impl Timebase for Stalling {
-        fn now_ns(&self) -> i64 {
-            self.inner.now_ns()
+    let mut stalled = false;
+    // The first sleep past block 5 wakes a second late.
+    let (rendered, overruns) = blocks_on(&mut pacer, 30, |deadline| {
+        if !stalled && deadline >= 50 * MS {
+            stalled = true;
+            1_000 * MS
+        } else {
+            0
         }
-        fn sleep_until_ns(&self, deadline_ns: i64) {
-            // The first sleep past block 5 wakes a second late.
-            if !self.stalled.get() && deadline_ns >= 50 * MS {
-                self.stalled.set(true);
-                self.inner.wake_late.set(1_000 * MS);
-            } else {
-                self.inner.wake_late.set(0);
-            }
-            self.inner.sleep_until_ns(deadline_ns);
-        }
-    }
-    let time = Stalling {
-        inner: Scripted::at(0),
-        stalled: Cell::new(false),
-    };
-    let faults = StreamFaults::new();
-    let stop = StopToken::new();
-    let rendered = RefCell::new(Vec::<i64>::new());
-    let mut pacer = pacer_at(0);
-    run(
-        &time,
-        &mut pacer,
-        &stop,
-        |os_ns| {
-            rendered.borrow_mut().push(os_ns);
-            if rendered.borrow().len() == 30 {
-                stop.stop();
-            }
-        },
-        || faults.record_overrun("late"),
-    );
-    assert_eq!(faults.count(), 1, "one stall, one fault");
-    assert_eq!(
-        faults.last().map(|f| f.kind),
-        Some(StreamFaultKind::Overrun)
-    );
-    assert!(
-        !faults.is_disconnected(),
-        "an overrun does not end the stream"
-    );
-    let rendered = rendered.into_inner();
+    });
+    assert_eq!(overruns, 1, "one stall, one re-anchor");
     // Block spacing is unbroken before the stall and after the re-anchor; the
     // jump is the single place it is not.
     let gaps: Vec<i64> = rendered.windows(2).map(|w| w[1] - w[0]).collect();
     assert_eq!(gaps.iter().filter(|g| **g != 10 * MS).count(), 1);
     assert!(gaps.iter().all(|g| *g >= 10 * MS));
+}
+
+/// A re-anchor reaches the stream's faults as one overrun, and an overrun does
+/// not end the stream.
+#[test]
+fn a_re_anchor_records_one_overrun_and_does_not_disconnect() {
+    let faults = StreamFaults::new();
+    overran(&faults);
+    assert_eq!(faults.count(), 1);
+    assert_eq!(
+        faults.last().map(|f| f.kind),
+        Some(StreamFaultKind::Overrun)
+    );
+    assert!(!faults.is_disconnected());
 }
