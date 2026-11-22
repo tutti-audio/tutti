@@ -81,11 +81,7 @@ impl IntoNode for Watched {
         (Box::new(Dc), ())
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts {
-            node: Box::new(Dc),
-            controls: (),
-            fork: Some(Box::new(Fork(self.0))),
-        }
+        NodeParts::new(Box::new(Dc), (), Some(Box::new(Fork(self.0))))
     }
 }
 

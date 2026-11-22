@@ -225,11 +225,7 @@ impl<F: Float> IntoNode<F> for InletNode<F> {
     type Controls = ();
 
     fn into_parts(self) -> NodeParts<(), F> {
-        NodeParts {
-            node: Box::new(self),
-            controls: (),
-            fork: None,
-        }
+        NodeParts::new(Box::new(self), (), None)
     }
 }
 

@@ -590,11 +590,7 @@ impl<F: Float> IntoNode<F> for ClickNode<F> {
     fn into_parts(self) -> NodeParts<Arc<ClickSettings>, F> {
         let controls = Arc::clone(&self.settings);
         let fork = ClickFork::of(&self);
-        NodeParts {
-            node: Box::new(self),
-            controls,
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)))
     }
 }
 
