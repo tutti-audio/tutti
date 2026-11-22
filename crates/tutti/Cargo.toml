@@ -96,6 +96,7 @@ full = [
     "analyze",
     "device",
     "decode-wav",
+    "decode-aiff",
     "decode-flac",
     "decode-mp3",
     "decode-ogg",
@@ -123,6 +124,7 @@ jack = ["device", "tutti-cpal/jack"]
 # The decoder is `tutti-codec`'s, so a format turns on `codec` (below):
 # `read_wave` is in `tutti::codec`; `FileIn` is `tutti-codec`'s.
 decode-wav = ["codec", "tutti-codec/decode-wav"]
+decode-aiff = ["codec", "tutti-codec/decode-aiff"]
 decode-flac = ["codec", "tutti-codec/decode-flac"]
 decode-mp3 = ["codec", "tutti-codec/decode-mp3"]
 decode-ogg = ["codec", "tutti-codec/decode-ogg"]

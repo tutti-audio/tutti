@@ -961,7 +961,7 @@ impl Planner<'_> {
         for a in [
             "-p tutti-shared-plugin --all-targets",
             "-p tutti-export --lib",
-            "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-flac,decode-mp3,decode-ogg --all-targets",
+            "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg --all-targets",
             "-p tutti-plugin -p tutti-plugin-types --features tutti-plugin/clap,tutti-plugin/vst3,tutti-plugin/vst2,tutti-plugin/serde --all-targets",
             "-p tutti-plugin-db --features serde --all-targets",
             "-p tutti-vst2-host --all-targets",

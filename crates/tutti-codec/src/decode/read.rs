@@ -317,7 +317,7 @@ pub(super) fn sample_rate_of(params: &AudioCodecParameters) -> Result<SampleRate
 /// Decodes the first audio track of `src` (a path, or bytes in memory) into
 /// memory, as `S`.
 ///
-/// Requires a decode feature (`decode-wav`, `decode-flac`, `decode-mp3` or
+/// Requires a decode feature (`decode-wav`, `decode-aiff`, `decode-flac`, `decode-mp3` or
 /// `decode-ogg`). Supported formats are whatever those enable; see
 /// [`decodable_extensions`](crate::decodable_extensions). The wave keeps
 /// the file's own sample rate and channel count; nothing is resampled. Its
