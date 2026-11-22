@@ -20,9 +20,26 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, GetProcessHandleCount, GetProcessId, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, GetProcessHandleCount, GetProcessId, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
+
+/// A handle of the test's own to the process `reaped` holds, opened by its id
+/// (which `reaped` keeps from being reused while it lives).
+fn opened(reaped: &Reaped) -> OwnedHandle {
+    // SAFETY: plain scalars; the result is checked before it is owned.
+    let handle = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            reaped.id(),
+        )
+    };
+    assert!(!handle.is_null(), "the process opens by its id");
+    // SAFETY: the open succeeded: the handle is open and owned by no one else.
+    unsafe { OwnedHandle::from_raw_handle(handle) }
+}
 
 /// The variable that makes this binary a child, holding the test it is a child of.
 const CHILD: &str = "TUTTI_SPAWN_CHILD";
@@ -263,7 +280,12 @@ fn the_environment_block_applies_the_commands_changes_in_order() {
         .collect();
     let names: Vec<String> = entries
         .iter()
-        .map(|entry| entry[1..].split('=').next().unwrap_or("").to_uppercase())
+        // A name runs to the first `=` after its first character (a hidden
+        // name starts with one).
+        .map(|entry| {
+            let end = entry[1..].find('=').map_or(entry.len(), |at| at + 1);
+            entry[..end].to_uppercase()
+        })
         .collect();
     assert!(names.is_sorted(), "{names:?}");
     assert_eq!(names.iter().filter(|name| *name == "PATH").count(), 1);
@@ -313,10 +335,10 @@ fn a_leader_is_in_a_job_before_it_runs() {
     });
     let reaped = spawn(child_of(test), Spawn::Leader).expect("the leader spawns");
     let mut inside = 0;
-    // SAFETY: the process handle is borrowed from `reaped`, a null job asks "any
-    // job", and `inside` is a live out-parameter.
-    let asked =
-        unsafe { IsProcessInJob(reaped.process().as_raw_handle(), null_mut(), &mut inside) };
+    let process = opened(&reaped);
+    // SAFETY: `process` is an open process handle, a null job asks "any job",
+    // and `inside` is a live out-parameter.
+    let asked = unsafe { IsProcessInJob(process.as_raw_handle(), null_mut(), &mut inside) };
     assert!(asked != 0 && inside != 0, "the host sees no job");
     assert_eq!(
         exit_code(reaped),
@@ -380,9 +402,10 @@ fn a_held_process_is_a_process() {
         reaped.try_reap().expect("the look").is_none(),
         "it has ended"
     );
-    // SAFETY: the handle is borrowed from `reaped` for the call.
+    let process = opened(&reaped);
+    // SAFETY: `process` is an open process handle, borrowed for the call.
     assert_eq!(reaped.id(), unsafe {
-        GetProcessId(reaped.process().as_raw_handle())
+        GetProcessId(process.as_raw_handle())
     });
     reaped.kill_all().expect("the kill");
     let status = reaped.wait().expect("the wait");
@@ -390,11 +413,7 @@ fn a_held_process_is_a_process() {
     assert_eq!(reaped.try_reap().expect("the look"), Some(status));
 
     let reaped = spawn(child_of(test), Spawn::Helper).expect("the second child spawns");
-    let handle = reaped
-        .process()
-        .as_handle()
-        .try_clone_to_owned()
-        .expect("a second handle");
+    let handle = opened(&reaped);
     drop(reaped);
     // The bound only guards a hang.
     // SAFETY: `handle` is an open process handle, borrowed for the call.

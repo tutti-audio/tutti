@@ -45,12 +45,6 @@ impl Reaped {
         Self { child, group }
     }
 
-    /// The process held, for the spawn's binding of it to the host.
-    #[cfg(windows)]
-    pub(crate) fn process(&self) -> &Process {
-        &self.child
-    }
-
     /// The child's process id.
     #[must_use]
     pub fn id(&self) -> u32 {

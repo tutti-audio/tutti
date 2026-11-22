@@ -111,11 +111,13 @@ pub fn spawn(command: Command, how: Spawn) -> Result<Reaped, SpawnError> {
         Spawn::Helper => Streams::Null,
     };
     let (process, thread) = create(&command, streams).map_err(SpawnError::Start)?;
+    let bound = match how {
+        Spawn::Leader => bind_to_host(&process),
+        Spawn::Helper => Ok(()),
+    };
     // On any refusal below `reaped` drops: killed and reaped, never run.
     let reaped = Reaped::of(process, how == Spawn::Leader);
-    if how == Spawn::Leader {
-        bind_to_host(reaped.process()).map_err(SpawnError::NotBound)?;
-    }
+    bound.map_err(SpawnError::NotBound)?;
     resume(&thread).map_err(SpawnError::Start)?;
     Ok(reaped)
 }

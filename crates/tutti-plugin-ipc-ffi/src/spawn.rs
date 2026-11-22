@@ -162,48 +162,53 @@ mod tests {
         );
     }
 
-    /// What the shell's descriptors 0, 1 and 2 are, as the kernel names them.
-    fn links(how: Spawn, command_with: impl FnMut(&mut Command)) -> Vec<String> {
-        let script = "a=$(readlink /proc/$$/fd/0); b=$(readlink /proc/$$/fd/1); \
-                      c=$(readlink /proc/$$/fd/2); printf '%s\\n%s\\n%s\\n' \"$a\" \"$b\" \"$c\" >\"$1\"";
-        run(script, Some(how), command_with, |_, text| {
-            text.lines().map(str::to_owned).collect()
-        })
-    }
-
-    fn host_link(fd: i32) -> String {
-        std::fs::read_link(Path::new("/proc/self/fd").join(fd.to_string()))
-            .expect("the host's descriptor")
-            .to_string_lossy()
-            .into_owned()
-    }
-
-    /// **The spawn kind, not the command, decides a helper's standard streams**:
-    /// a helper's three are `/dev/null` though the command set pipes, and a
-    /// leader's `stdout` and `stderr` are the host's though the command set
-    /// pipes, while its `stdin` stays the command's own pipe.
+    /// `/proc` names each descriptor's file, which only Linux has.
     #[cfg(target_os = "linux")]
-    #[test]
-    fn the_kind_decides_the_standard_streams() {
-        let pipes = |command: &mut Command| {
-            let (_, a) = pipe().expect("a pipe");
-            let (_, b) = pipe().expect("a pipe");
-            let (c, _) = pipe().expect("a pipe");
-            command.stdin(c).stdout(a).stderr(b);
-        };
-        let helper = links(Spawn::Helper, pipes);
-        assert_eq!(helper, ["/dev/null"; 3]);
+    mod linux {
+        use super::*;
 
-        let (held, _write) = pipe().expect("a pipe");
-        let own = host_link(held.as_raw_fd());
-        let leader = links(Spawn::Leader, |command| {
-            let (_, a) = pipe().expect("a pipe");
-            let (_, b) = pipe().expect("a pipe");
-            command
-                .stdin(held.try_clone().expect("a clone"))
-                .stdout(a)
-                .stderr(b);
-        });
-        assert_eq!(leader, [own, host_link(1), host_link(2)]);
+        /// What the shell's descriptors 0, 1 and 2 are, as the kernel names them.
+        fn links(how: Spawn, command_with: impl FnMut(&mut Command)) -> Vec<String> {
+            let script = "a=$(readlink /proc/$$/fd/0); b=$(readlink /proc/$$/fd/1); \
+                          c=$(readlink /proc/$$/fd/2); printf '%s\\n%s\\n%s\\n' \"$a\" \"$b\" \"$c\" >\"$1\"";
+            run(script, Some(how), command_with, |_, text| {
+                text.lines().map(str::to_owned).collect()
+            })
+        }
+
+        fn host_link(fd: i32) -> String {
+            std::fs::read_link(Path::new("/proc/self/fd").join(fd.to_string()))
+                .expect("the host's descriptor")
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        /// **The spawn kind, not the command, decides a helper's standard streams**:
+        /// a helper's three are `/dev/null` though the command set pipes, and a
+        /// leader's `stdout` and `stderr` are the host's though the command set
+        /// pipes, while its `stdin` stays the command's own pipe.
+        #[test]
+        fn the_kind_decides_the_standard_streams() {
+            let pipes = |command: &mut Command| {
+                let (_, a) = pipe().expect("a pipe");
+                let (_, b) = pipe().expect("a pipe");
+                let (c, _) = pipe().expect("a pipe");
+                command.stdin(c).stdout(a).stderr(b);
+            };
+            let helper = links(Spawn::Helper, pipes);
+            assert_eq!(helper, ["/dev/null"; 3]);
+
+            let (held, _write) = pipe().expect("a pipe");
+            let own = host_link(held.as_raw_fd());
+            let leader = links(Spawn::Leader, |command| {
+                let (_, a) = pipe().expect("a pipe");
+                let (_, b) = pipe().expect("a pipe");
+                command
+                    .stdin(held.try_clone().expect("a clone"))
+                    .stdout(a)
+                    .stderr(b);
+            });
+            assert_eq!(leader, [own, host_link(1), host_link(2)]);
+        }
     }
 }
