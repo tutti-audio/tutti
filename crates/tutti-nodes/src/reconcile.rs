@@ -27,7 +27,7 @@ use tutti_modulation::{
     TargetKey, compile, layer_id,
 };
 use tutti_rt::{Param, ParamCell};
-use tutti_units::{At, Depth, ParamAddr, ParamId};
+use tutti_units::{At, Bipolar, ParamAddr, ParamId};
 
 use crate::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
 use crate::signal::{
@@ -58,7 +58,7 @@ pub trait ModHost {
     /// evaluation, so a depth edit republishes no program. `None`, the
     /// default: the depth the route was declared with is the compiled one.
     /// Only a route into a target (not a depth route) takes a cell.
-    fn depth(&self, route: RouteKey) -> Option<Param<Depth>> {
+    fn depth(&self, route: RouteKey) -> Option<Param<Bipolar>> {
         let _ = route;
         None
     }
@@ -442,7 +442,7 @@ struct SourcePlan {
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
 /// use tutti_graph::NodeKey;
-/// use tutti_units::{Depth, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
+/// use tutti_units::{Bipolar, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples, UnitParam, Q};
 /// use tutti_rt::{Param, ParamCell};
 ///
 /// let (mut editor, _exec) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
@@ -482,7 +482,7 @@ struct SourcePlan {
 ///     RouteDecl {
 ///         source: SourceKey(1),
 ///         to: RouteTarget::Param(cutoff),
-///         depth: Depth::of(0.3),
+///         depth: Bipolar::of(0.3),
 ///         polarity: Polarity::Bipolar,
 ///         curve: Law::Linear,
 ///     },
@@ -497,7 +497,7 @@ struct SourcePlan {
 /// # editor.collect();
 ///
 /// // A depth edit republishes the lane's program: no commit.
-/// routes[0].1.depth = Depth::of(0.5);
+/// routes[0].1.depth = Bipolar::of(0.5);
 /// let decl = Declarations { sources: &sources, routes: &routes, targets: &targets };
 /// let applied = modulation.apply(&decl, &mut editor, &host).expect("applies");
 /// assert!(!applied.commit);
@@ -1604,7 +1604,7 @@ fn attach_depths(
     decl: &Declarations<'_>,
     host: &dyn ModHost,
 ) -> Result<(), ProgramCompileError> {
-    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Depth>)>> = BTreeMap::new();
+    let mut cells: BTreeMap<TargetKey, Vec<(LayerId, Param<Bipolar>)>> = BTreeMap::new();
     for (key, route) in decl.routes {
         if let RouteTarget::Param(target) = route.to
             && let Some(cell) = host.depth(*key)

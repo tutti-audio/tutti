@@ -47,7 +47,7 @@ fn every_control_designs_a_stable_network() {
                 size: Mix::new(x),
                 diffusion: Mix::new(x),
                 pre_delay: Seconds::new(x),
-                modulation: Depth::clamped(x),
+                modulation: Bipolar::clamped(x),
                 rate: Hz::new(x),
                 width: StereoWidth::new(x),
                 wet: Db::new(x),
@@ -221,7 +221,7 @@ fn the_capacity_dominates_where_rounding_matters() {
             size: Mix::new(1.0),
             diffusion: Mix::new(f64::from(k) / 100.0),
             pre_delay: MAX_PRE_DELAY,
-            modulation: Depth::of(1.0),
+            modulation: Bipolar::of(1.0),
             ..FdnControls::DEFAULT
         };
         let tail = design_at(&d, &c, rate).tail(TAIL_FLOOR);

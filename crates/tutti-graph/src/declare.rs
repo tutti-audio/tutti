@@ -15,7 +15,7 @@ use atomic_float::AtomicF64;
 
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{
-    Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Amplitude, Azimuth, Balance, Bipolar, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Drive,
     Elevation, Feedback, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Pan, Q,
     Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
 };
@@ -69,7 +69,7 @@ scalar_units!(
     CentsSpan,
     CompressionRatio,
     Db,
-    Depth,
+    Bipolar,
     Drive,
     Elevation,
     Feedback,

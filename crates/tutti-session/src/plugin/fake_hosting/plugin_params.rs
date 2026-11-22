@@ -611,7 +611,7 @@ fn a_plugin_parameter_targets_a_modulation_route_through_a_param_ref() {
 #[test]
 fn a_plugin_key_names_a_parameter_a_route_targets() {
     use crate::{ParamRef, RouteSpec};
-    use tutti_units::Depth;
+    use tutti_units::Bipolar;
 
     let (mut s, key, _, _) = session_keyed();
     let _ = update(&mut s);
@@ -630,7 +630,7 @@ fn a_plugin_key_names_a_parameter_a_route_targets() {
         let mut m = s.mods_mut();
         m.range_raw(target, 0.0, 1.0).unwrap();
         let source = m.macro_(0.5);
-        m.route(RouteSpec::new(source, target, Depth::of(0.25)))
+        m.route(RouteSpec::new(source, target, Bipolar::of(0.25)))
             .unwrap()
     };
     let routed: Vec<_> = s.mods().routes_to(target).map(|r| r.id).collect();

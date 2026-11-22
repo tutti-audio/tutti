@@ -14,7 +14,7 @@ use tutti_session::{
     ModTarget, PHASES, ParamRef, PhaseCx, Problem, RouteSpec, Session, SessionEvent, SourceName,
     TargetName,
 };
-use tutti_units::{Depth, Hz, Samples, UnitParam};
+use tutti_units::{Bipolar, Hz, Samples, UnitParam};
 
 fn session() -> Session {
     Session::builder()
@@ -44,9 +44,10 @@ fn an_unresolved_target_and_an_unfed_follower_are_named() {
     let mut m = s.mods_mut();
     m.range_raw(ghost, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, ghost, Depth::of(0.5))).unwrap();
+    m.route(RouteSpec::new(lfo, ghost, Bipolar::of(0.5)))
+        .unwrap();
     let follower = m.follower(Follower::default(), NodeKey(404));
-    m.route(RouteSpec::new(follower, ghost, Depth::of(0.5)))
+    m.route(RouteSpec::new(follower, ghost, Bipolar::of(0.5)))
         .unwrap();
 
     let t0 = Instant::now();
@@ -113,7 +114,7 @@ fn no_problems_while_the_declarations_apply() {
     m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
         .unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, lp.cutoff(), Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, lp.cutoff(), Bipolar::of(0.5)))
         .unwrap();
     for _ in 0..4 {
         let _ = s.update();

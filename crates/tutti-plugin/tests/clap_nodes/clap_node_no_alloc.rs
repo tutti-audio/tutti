@@ -35,7 +35,7 @@ use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
 use tutti_nodes::automation::{Breakpoint, ControlLaneNode, ForeignLaneConfig, Law, Trajectory};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
-use tutti_units::{Depth, ParamId, PhaseIncrement};
+use tutti_units::{Bipolar, ParamId, PhaseIncrement};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 
@@ -95,7 +95,7 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
             seed: 0,
         },
         amount: Amount {
-            depth: Depth::of(0.5),
+            depth: Bipolar::of(0.5),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

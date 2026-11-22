@@ -624,10 +624,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
         Polarity, Waveform,
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
-    use tutti_units::{Beat, BeatsPerCycle, Depth, Hz, Phase, PhaseIncrement};
+    use tutti_units::{Beat, BeatsPerCycle, Bipolar, Hz, Phase, PhaseIncrement};
     let depth = 0.05 + 0.01 * f64::from((k as u32 + generation) % 7);
     let amount = Amount {
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
         polarity: Polarity::Bipolar,
         curve: if k.is_multiple_of(3) {
             Law::PowerIn(Exponent::of(2.0))
@@ -705,14 +705,14 @@ fn lane_for(
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
     use tutti_nodes::automation::UnitLaneConfig;
-    use tutti_units::{Db, Depth, Feedback, Hz, Mix, ParamKey, Q};
+    use tutti_units::{Bipolar, Db, Feedback, Hz, Mix, ParamKey, Q};
     let addr = match k % 8 {
         0 => ParamKey::<Hz>::CUTOFF.addr(),
         1 => ParamKey::<Q>::Q.addr(),
         2 => ParamKey::<Db>::GAIN_DB.addr(),
         3 => ParamKey::<Mix>::WET.addr(),
         4 => ParamKey::<Feedback>::FEEDBACK.addr(),
-        5 => ParamKey::<Depth>::DEPTH.addr(),
+        5 => ParamKey::<Bipolar>::DEPTH.addr(),
         6 => ParamKey::<Hz>::RATE.addr(),
         _ => ParamKey::<Db>::THRESHOLD.addr(),
     };
@@ -1025,7 +1025,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     use tutti_nodes::{
         EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
     };
-    use tutti_units::{Amplitude, Depth, Hz, ParamKey, Samples, Seconds, UnitParam};
+    use tutti_units::{Amplitude, Bipolar, Hz, ParamKey, Samples, Seconds, UnitParam};
     let (mut ed, exec) = tutti_graph::Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(max)),
@@ -1098,7 +1098,7 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             id: LayerId(1),
             source: id,
             amount: Amount {
-                depth: Depth::of(if k % 2 == 0 { -0.4 } else { 0.4 }),
+                depth: Bipolar::of(if k % 2 == 0 { -0.4 } else { 0.4 }),
                 polarity: Polarity::Bipolar,
                 curve: Law::Linear,
             },
@@ -1298,7 +1298,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     use tutti_nodes::testing::Osc;
     use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
     use tutti_units::{
-        Beat, Bpm, Depth, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
+        Beat, Bipolar, Bpm, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
     };
 
     struct Host {
@@ -1329,7 +1329,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
         to: RouteTarget::Param(at(p)),
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     };
@@ -1429,7 +1429,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     }
     let mut sounded = false;
     for i in 0..40 {
-        routes[0].1.depth = Depth::of(if i % 2 == 0 { 0.4 } else { 0.1 });
+        routes[0].1.depth = Bipolar::of(if i % 2 == 0 { 0.4 } else { 0.1 });
         let decl = Declarations {
             sources: &sources,
             routes: &routes,

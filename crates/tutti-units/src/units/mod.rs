@@ -15,7 +15,7 @@
 //! named constructors and methods produce (`new_clamped`, `wrapped`,
 //! `wrap`), not what a value built with `new` holds.
 //! The exceptions are range-checked (`new` returns an `Option`): [`Bpm`],
-//! [`Depth`] and [`Bipolar`], which no hand-built value leaves.
+//! [`Bipolar`] and [`Bipolar`], which no hand-built value leaves.
 //!
 //! # Non-finite input
 //!
@@ -53,7 +53,7 @@
 //! # Measurements are not controls
 //!
 //! [`Correlation`], [`StereoBalance`] and [`Confidence`] are values the engine
-//! *reports*; [`Depth`], [`Pan`], [`Balance`] and [`Mix`] are values a user
+//! *reports*; [`Bipolar`], [`Pan`], [`Balance`] and [`Mix`] are values a user
 //! *sets*. The ranges coincide and the meanings do not, so they are distinct types — swapping a reading for a
 //! control is otherwise silent. [`Q`] and [`Resonance`] split on the same line.
 
@@ -77,8 +77,7 @@ mod transport;
 use crate::samples::Samples;
 
 pub use amounts::{
-    Balance, Bipolar, BipolarOutOfRange, BitDepth, Depth, DepthOutOfRange, Drive, Feedback, Mix,
-    Pan, Spread, StereoWidth,
+    Balance, Bipolar, BipolarOutOfRange, BitDepth, Drive, Feedback, Mix, Pan, Spread, StereoWidth,
 };
 pub use angles::{
     ArcDegrees, Azimuth, Direction, Elevation, Phase, PhaseIncrement, PhaseStep, Radians,

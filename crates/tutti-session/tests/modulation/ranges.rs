@@ -11,7 +11,7 @@ use tutti_session::{
     DeclarationError, ParamRef, RangeTarget, RouteError, RouteSpec, Session, SetRefusal,
     ValueErrorKind,
 };
-use tutti_units::{Depth, Hz, Mix, Q, Samples, UnitParam};
+use tutti_units::{Bipolar, Hz, Mix, Q, Samples, UnitParam};
 
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{main_output, render, rig, settle};
@@ -58,7 +58,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
     );
     let src = m.macro_(0.0);
     assert!(matches!(
-        m.route(RouteSpec::new(src, lp.cutoff(), Depth::of(0.5))),
+        m.route(RouteSpec::new(src, lp.cutoff(), Bipolar::of(0.5))),
         Err(RouteError::UndeclaredRange { .. })
     ));
 
@@ -68,7 +68,7 @@ fn a_backwards_or_nan_range_is_refused_and_declares_nothing() {
         Ok(true)
     );
     assert!(
-        m.route(RouteSpec::new(src, lp.cutoff(), Depth::of(0.5)))
+        m.route(RouteSpec::new(src, lp.cutoff(), Bipolar::of(0.5)))
             .is_ok()
     );
 }
@@ -92,7 +92,7 @@ fn a_typed_range_declares_the_target_an_untyped_ref_names() {
     let same = ParamRef::unit(lp.erase(), tutti_units::UnitParam::Cutoff);
     assert_eq!(ParamRef::from(lp.cutoff()), same);
     assert!(
-        m.route(RouteSpec::new(src, same, Depth::of(0.5))).is_ok(),
+        m.route(RouteSpec::new(src, same, Bipolar::of(0.5))).is_ok(),
         "the range is declared"
     );
 
@@ -215,7 +215,7 @@ fn a_narrowed_range_bounds_the_effective_value_and_not_the_base() {
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
         .unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, probe.cutoff(), Depth::of(0.4)))
+    m.route(RouteSpec::new(source, probe.cutoff(), Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
     let tail = |side: &mut _| *render(side, 1_024, 128)[0].last().unwrap();
@@ -256,7 +256,7 @@ fn a_range_write_republishes_no_program() {
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
         .unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, probe.cutoff(), Depth::of(0.4)))
+    m.route(RouteSpec::new(source, probe.cutoff(), Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
     render(&mut side, 1_024, 128);
@@ -294,14 +294,14 @@ fn a_range_and_a_depth_of_a_removed_node_are_refused_at_the_call() {
     m.range(lp.cutoff(), Hz::new(100.0)..Hz::new(4_000.0))
         .unwrap();
     let source = m.macro_(0.0);
-    m.route(RouteSpec::new(source, lp.cutoff(), Depth::of(0.5)))
+    m.route(RouteSpec::new(source, lp.cutoff(), Bipolar::of(0.5)))
         .unwrap();
     let depth = tutti_session::DepthTarget::of(source, lp.cutoff());
-    s.set(depth.to(Depth::of(0.25))).unwrap();
+    s.set(depth.to(Bipolar::of(0.25))).unwrap();
 
     s.remove(lp).unwrap();
     let range = s.set(lp.cutoff().range().to(Hz::new(1.0)..Hz::new(2.0)));
     assert_eq!(range.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
-    let depth = s.set(depth.to(Depth::of(0.1)));
+    let depth = s.set(depth.to(Bipolar::of(0.1)));
     assert_eq!(depth.unwrap_err().kind, ValueErrorKind::NoSuchTarget);
 }

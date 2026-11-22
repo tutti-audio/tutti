@@ -33,7 +33,7 @@ use tutti_nodes::{
 };
 use tutti_ump::NoteVelocity;
 use tutti_units::{
-    Amplitude, Ballistics, Beat, Bpm, Depth, Frame, Hz, ParamId, ParamKey, SampleRate, Samples,
+    Amplitude, Ballistics, Beat, Bipolar, Bpm, Frame, Hz, ParamId, ParamKey, SampleRate, Samples,
     Seconds, UnitParam,
 };
 
@@ -356,7 +356,7 @@ fn lane_to_probe(
         id: LayerId(1),
         source: SourceId::new(ParamId::new(source)),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

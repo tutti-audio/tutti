@@ -10,7 +10,9 @@ use tutti_graph::{
     Env, MAX_NODE_TAIL, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition,
 };
 use tutti_nodes::{PlateReverbConfig, PlateReverbNode};
-use tutti_units::{Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitParam};
+use tutti_units::{
+    Bipolar, Db, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitParam,
+};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
@@ -179,7 +181,7 @@ fn the_output_is_wet_only_and_silent_for_silence() {
 /// A reset node renders as a fresh one, bit for bit.
 #[test]
 fn a_reset_node_renders_as_a_fresh_one() {
-    let c = PlateReverbConfig::new().modulation(Depth::of(0.8));
+    let c = PlateReverbConfig::new().modulation(Bipolar::of(0.8));
     let mut used = node(c);
     for chunk in noise(5, 5_000).chunks(BLOCK) {
         drive(&mut used, SR, Planes::new(&[chunk, chunk]).unwrap(), &[]);

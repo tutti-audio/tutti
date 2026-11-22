@@ -42,7 +42,7 @@ use tutti_modulation::{
 use tutti_nodes::automation::{AutomationRecorder, LaneControls, RecordMode, Trajectory};
 use tutti_nodes::{Feed, ReconcileError};
 use tutti_rt::Param;
-use tutti_units::{Depth, ParamAddr, ParamId, UnitAddr, UnitParam};
+use tutti_units::{Bipolar, ParamAddr, ParamId, UnitAddr, UnitParam};
 
 use crate::ChannelEdge;
 use crate::DeclarationError;
@@ -873,7 +873,7 @@ struct OwnRoute {
     /// The depth in force, in the cell the route's lane reads
     /// ([`DepthTarget`](crate::DepthTarget)): `decl.depth` is the one the
     /// route was declared with.
-    depth: Param<Depth>,
+    depth: Param<Bipolar>,
 }
 
 impl OwnRoute {
@@ -975,7 +975,7 @@ impl OwnMods {
         );
         self.table.provide(
             Self::depth_slot(route),
-            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Depth>,
+            Arc::new(DepthSlot(route.depth.handle())) as crate::value::SlotCell<Bipolar>,
         );
     }
 
@@ -1207,7 +1207,7 @@ impl ModKeys for OwnKeys<'_> {
         })
     }
 
-    fn depth(&self, route: RouteKey) -> Option<Param<Depth>> {
+    fn depth(&self, route: RouteKey) -> Option<Param<Bipolar>> {
         Some(self.0.routes.get(&route)?.depth.handle())
     }
 }
@@ -1316,7 +1316,7 @@ impl ModSession {
 pub struct RouteSpec {
     source: ModSourceId,
     target: ModTarget,
-    depth: Depth,
+    depth: Bipolar,
     polarity: Polarity,
     curve: Law,
 }
@@ -1324,7 +1324,7 @@ pub struct RouteSpec {
 impl RouteSpec {
     /// A route from `source` into `target` at `depth` of its range.
     #[must_use]
-    pub fn new(source: ModSourceId, target: impl Into<ModTarget>, depth: Depth) -> Self {
+    pub fn new(source: ModSourceId, target: impl Into<ModTarget>, depth: Bipolar) -> Self {
         Self {
             source,
             target: target.into(),
@@ -1360,7 +1360,7 @@ pub struct RouteInfo {
     /// What it drives.
     pub target: ModTarget,
     /// Its depth, a fraction of the target's range.
-    pub depth: Depth,
+    pub depth: Bipolar,
     /// How the source's value maps onto the span.
     pub polarity: Polarity,
     /// The law that shapes it.

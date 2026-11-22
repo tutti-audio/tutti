@@ -20,8 +20,8 @@ use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti::modulation::{Follower, Lfo};
 use tutti::nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
-    ChannelLayout, Depth, DepthTarget, Error, Hz, InputPort, InterleavedMut, MainOutput, MaxBlock,
-    OutputPort, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent,
+    Bipolar, ChannelLayout, DepthTarget, Error, Hz, InputPort, InterleavedMut, MainOutput,
+    MaxBlock, OutputPort, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent,
 };
 use tutti_nodes::testing::Osc;
 
@@ -106,9 +106,9 @@ fn main() -> Result<(), Error> {
     m.range(cutoff, Hz::new(100.0)..Hz::new(4_000.0))?;
     m.range(resonance, Q::new(0.5)..Q::new(8.0))?;
     let wobble = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.2)))?;
+    m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.2)))?;
     let hits = m.follower(Follower::default(), kick);
-    m.route(RouteSpec::new(hits, resonance, Depth::of(0.5)))?;
+    m.route(RouteSpec::new(hits, resonance, Bipolar::of(0.5)))?;
 
     // The first update's one plan carries the nodes and their lanes (a target
     // resolves as soon as its node is staged).
@@ -124,7 +124,7 @@ fn main() -> Result<(), Error> {
     // A depth edit: the LFO's lane reads its depth from a cell, so the wave
     // goes on in phase. It edits no wiring, so the graph holds nothing for a
     // commit and no plan is sent.
-    s.set(DepthTarget::of(wobble, cutoff).to(Depth::of(0.45)))
+    s.set(DepthTarget::of(wobble, cutoff).to(Bipolar::of(0.45)))
         .expect("the route is declared");
     assert!(
         !s.graph_ref().has_uncommitted_edits(),

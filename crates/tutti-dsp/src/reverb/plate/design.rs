@@ -28,7 +28,7 @@
 //! late, and a T30 fit reads it 8 to 10% longer at the paper's diffusion.
 //!
 
-use tutti_units::{Amplitude, Depth, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
+use tutti_units::{Amplitude, Bipolar, Gain, Hz, Mix, SampleRate, SampleSpan, Seconds};
 
 use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{
@@ -187,7 +187,7 @@ pub struct PlateControls {
     pub pre_delay: Seconds,
     /// The depth of the modulation of the two decay-diffusion-1 delays, `0..1`: the paper's
     /// excursion of 16 frames at 29761 Hz (scaled to the rate) at 1.
-    pub modulation: Depth,
+    pub modulation: Bipolar,
     /// How diffuse the lattices are, `0..1`: every lattice coefficient is the paper's times
     /// this (decay diffusion 2 after its `c + 0.15` rule), so `1` is table 1's and `0` makes
     /// every lattice a plain delay.
@@ -203,7 +203,7 @@ impl PlateControls {
         damping: Mix::new(0.0005),
         bandwidth: Hz::new(20_000.0),
         pre_delay: Seconds::ZERO,
-        modulation: Depth::of(0.5),
+        modulation: Bipolar::of(0.5),
         diffusion: Mix::new(1.0),
     };
 }
@@ -335,7 +335,7 @@ impl PlateControls {
         let worst = PlateControls {
             decay: MAX_PLATE_DECAY,
             pre_delay: MAX_PRE_DELAY,
-            modulation: Depth::of(1.0),
+            modulation: Bipolar::of(1.0),
             damping: Mix::new(MAX_DAMPING),
             ..Self::DEFAULT
         };

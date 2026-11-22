@@ -18,7 +18,7 @@ use tutti_session::{
     ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
     Session,
 };
-use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
+use tutti_units::{Amplitude, Bipolar, SampleRate, UnitParam};
 
 use common::probe::Pulse;
 
@@ -112,7 +112,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
         .unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
 
@@ -182,7 +182,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
         .unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.5)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 1.5, "the base plus the route's offset");
@@ -214,7 +214,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
     m.range(edge, Amplitude::new(-2.0)..Amplitude::new(2.0))
         .unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, edge, Depth::of(0.25)))
+    m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
 
     let _ = s.update();

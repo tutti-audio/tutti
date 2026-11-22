@@ -7,7 +7,7 @@
 //! bits at equal times, which is what lets a live lane and an export's fork of
 //! it agree. Phase is a function of the time a lane hands in
 //! ([`ProgramTime`]), never of the program's age, so no edit is a phase
-//! reset. A route's depth may live in a cell ([`Param<Depth>`](tutti_rt::Param)) the program
+//! reset. A route's depth may live in a cell ([`Param<Bipolar>`](tutti_rt::Param)) the program
 //! reads at every evaluation, so moving it republishes nothing.
 //!
 //! Ungated: the floor, with [`Curve`]. The lane that evaluates it is
@@ -22,7 +22,7 @@ use core::fmt;
 use tutti_curve::{Law, Piece};
 use tutti_rt::{Param, SplitMix64};
 use tutti_units::{
-    Azimuth, Beat, BeatsPerCycle, Depth, Frame, Hz, Normalized, ParamId, Phase, PhaseIncrement,
+    Azimuth, Beat, BeatsPerCycle, Bipolar, Frame, Hz, Normalized, ParamId, Phase, PhaseIncrement,
     Real, SamplePosition, SampleRate, UnitParam,
 };
 
@@ -49,14 +49,14 @@ pub const MAX_LANE_DEPTHS: usize = MAX_LANE_LAYERS + MAX_LANE_INPUTS;
 #[derive(Clone, Copy, Debug)]
 pub struct DepthSnapshot {
     len: usize,
-    depths: [Depth; MAX_LANE_DEPTHS],
+    depths: [Bipolar; MAX_LANE_DEPTHS],
 }
 
 impl DepthSnapshot {
     /// The snapshot of a program with no depth cells.
     pub const EMPTY: Self = Self {
         len: 0,
-        depths: [Depth::NONE; MAX_LANE_DEPTHS],
+        depths: [Bipolar::ZERO; MAX_LANE_DEPTHS],
     };
 }
 
@@ -189,7 +189,7 @@ pub struct PeriodPoint {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Amount {
     /// A fraction of the target's range; negative inverts.
-    pub depth: Depth,
+    pub depth: Bipolar,
     /// Whether the offset swings both ways or one.
     pub polarity: Polarity,
     /// The response curve on the magnitude.
@@ -263,7 +263,7 @@ pub struct DepthBy {
 impl DepthBy {
     /// The amount that maps a wave's `[-1, 1]` onto `[0, 1]`.
     pub const UNIT: Amount = Amount {
-        depth: Depth::FULL,
+        depth: Bipolar::MAX,
         polarity: Polarity::Unipolar,
         curve: Law::Linear,
     };
@@ -377,14 +377,14 @@ pub enum ProgramError {
 ///     Amount, LayerClock, ControlProgramBuilder, ControlProgram, Law, Layer, LayerId, LfoShape, Polarity,
 ///     ProgramTime, Waveform,
 /// };
-/// use tutti_units::{Beat, BeatsPerCycle, Depth, PhaseIncrement, SamplePosition, SampleRate};
+/// use tutti_units::{Beat, BeatsPerCycle, Bipolar, PhaseIncrement, SamplePosition, SampleRate};
 ///
 /// // A bar-locked square, a quarter of the range deep, on a knob of 1000.
 /// let square = Layer {
 ///     id: LayerId(1),
 ///     clock: LayerClock::Beats { per_cycle: BeatsPerCycle::of(4.0), phase: PhaseIncrement::new(0.0) },
 ///     wave: Waveform::Shape { shape: LfoShape::Square, seed: 0 },
-///     amount: Amount { depth: Depth::of(0.25), polarity: Polarity::Bipolar, curve: Law::Linear },
+///     amount: Amount { depth: Bipolar::of(0.25), polarity: Polarity::Bipolar, curve: Law::Linear },
 ///     depth_by: None,
 /// };
 /// let program = ControlProgramBuilder::new().layers([square]).build().unwrap();
@@ -404,7 +404,7 @@ pub struct ControlProgram {
     layers: Box<[Layer]>,
     inputs: Box<[InputLayer]>,
     /// The depth cells of the layers and inputs that have one, by id.
-    depths: Box<[(LayerId, Param<Depth>)]>,
+    depths: Box<[(LayerId, Param<Bipolar>)]>,
 }
 
 impl fmt::Debug for ControlProgram {
@@ -571,7 +571,7 @@ impl ControlProgram {
     /// More than [`MAX_LANE_DEPTHS`] cells, or two cells for one id.
     pub fn bind_depths(
         &mut self,
-        depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>,
+        depths: impl IntoIterator<Item = (LayerId, Param<Bipolar>)>,
     ) -> Result<(), ProgramError> {
         let mut depths: Vec<_> = depths
             .into_iter()

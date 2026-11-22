@@ -28,7 +28,7 @@ use tutti_modulation::{
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
 use tutti_units::{
-    Beat, BeatsPerCycle, Bpm, Depth, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
+    Beat, BeatsPerCycle, Bipolar, Bpm, Frame, Hz, Normalized, ParamId, ParamKey, Phase,
     PhaseIncrement, SampleRate, Samples, UnitParam,
 };
 
@@ -279,7 +279,7 @@ fn ragged(total: usize, max: usize) -> Vec<usize> {
 
 fn amount(depth: f64) -> Amount {
     Amount {
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     }
@@ -799,7 +799,10 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
         amount: amount(0.125),
         depth_by: None,
     };
-    let (d1, d2) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
+    let (d1, d2) = (
+        Param::new(Bipolar::of(0.125)),
+        Param::new(Bipolar::of(0.125)),
+    );
     let mut program = ControlProgramBuilder::new()
         .layers(vec![constant(1), constant(2)])
         .build()
@@ -816,8 +819,8 @@ fn a_lane_sees_two_depths_stored_in_one_block_whatever_their_bits() {
     }
     assert!(all[0].iter().all(|&v| v == 700.0), "{:?}", all[0].last());
 
-    d1.store(Depth::of(0.125 + 2.0f64.powi(-11)));
-    d2.store(Depth::of(0.1875));
+    d1.store(Bipolar::of(0.125 + 2.0f64.powi(-11)));
+    d2.store(Bipolar::of(0.1875));
     for _ in 0..10 {
         host.roll(&mut ed, &mut exec, 100, &mut all);
     }

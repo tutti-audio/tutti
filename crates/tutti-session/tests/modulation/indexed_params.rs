@@ -12,7 +12,7 @@ use tutti_graph::Params;
 use tutti_modulation::Lfo;
 use tutti_session::{MainOutput, OutputPort, ParamRef, RouteSpec, Session, ValueErrorKind};
 use tutti_units::SampleRate;
-use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitParam};
+use tutti_units::{BeatsPerCycle, Bipolar, Db, ParamAddr, UnitParam};
 
 use common::bands::{BAND1, Bands};
 
@@ -120,7 +120,8 @@ fn a_route_to_index_1_does_not_touch_index_0() {
     let mut m = s.mods_mut();
     m.range_raw(band1, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
-    m.route(RouteSpec::new(lfo, band1, Depth::of(0.3))).unwrap();
+    m.route(RouteSpec::new(lfo, band1, Bipolar::of(0.3)))
+        .unwrap();
     for _ in 0..4 {
         let _ = s.update();
     }

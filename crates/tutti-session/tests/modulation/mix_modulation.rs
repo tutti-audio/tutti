@@ -19,7 +19,7 @@ use tutti_session::{
     InputPort, Key, MainOutput, MixRef, ModRefusal, ModTarget, OutputPort, ParamRef, PassError,
     Problem, RouteSpec, Session, SetRefusal, TargetName, ValueErrorKind,
 };
-use tutti_units::{Bipolar, Depth, Mix, UnitParam};
+use tutti_units::{Bipolar, Mix, UnitParam};
 
 const BLOCK: usize = 128;
 /// The constant source's level.
@@ -121,7 +121,7 @@ fn a_route_onto_a_mix_modulates_around_the_base_the_mix_target_writes() {
     m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, mix, Depth::of(0.5)))
+        .route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 0.5, "the base plus the route's offset");
@@ -180,7 +180,7 @@ fn a_route_onto_the_mix_of_a_node_added_in_the_update_sends_one_plan() {
     let mut m = s.mods_mut();
     m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
+    m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
 
     let _ = s.update();
@@ -220,7 +220,7 @@ fn a_removed_node_takes_its_mix_route_with_it() {
     let mut m = s.mods_mut();
     m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
+    m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     s.remove(node).unwrap();
@@ -278,7 +278,7 @@ fn a_route_onto_the_mix_of_a_node_with_no_pass_is_refused() {
     let mut m = s.mods_mut();
     m.range(mix, Mix::new(0.0)..Mix::new(1.0)).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, mix, Depth::of(0.5)))
+    m.route(RouteSpec::new(source, mix, Bipolar::of(0.5)))
         .unwrap();
     let target = m.key(mix);
     for _ in 0..6 {

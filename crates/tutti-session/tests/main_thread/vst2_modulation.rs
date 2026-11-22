@@ -21,7 +21,7 @@ use tutti_session::{
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Depth, SampleRate};
+use tutti_units::{Bipolar, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -112,8 +112,8 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         m.range_raw(p0, 0.0, 1.0).unwrap();
         m.range_raw(p1, 0.0, 1.0).unwrap();
         let zero = m.macro_(0.0);
-        m.route(RouteSpec::new(zero, p0, Depth::of(1.0))).unwrap();
-        m.route(RouteSpec::new(zero, p1, Depth::of(1.0))).unwrap();
+        m.route(RouteSpec::new(zero, p0, Bipolar::of(1.0))).unwrap();
+        m.route(RouteSpec::new(zero, p1, Bipolar::of(1.0))).unwrap();
     }
     // The probe's parameter `i` starts at `i / 16`.
     assert_eq!(knob_of(&mut s, p0), 0.0);
@@ -186,7 +186,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
         let offset = m.macro_(1.0);
-        m.route(RouteSpec::new(offset, p0, Depth::of(0.25)))
+        m.route(RouteSpec::new(offset, p0, Bipolar::of(0.25)))
             .unwrap();
     }
     knob_of(&mut s, p0);
@@ -251,7 +251,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
         let offset = m.macro_(1.0);
-        m.route(RouteSpec::new(offset, p0, Depth::of(0.25)))
+        m.route(RouteSpec::new(offset, p0, Bipolar::of(0.25)))
             .unwrap();
     }
     assert_eq!(knob_of(&mut s, p0), 0.0);

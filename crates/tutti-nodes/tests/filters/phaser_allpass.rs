@@ -14,7 +14,7 @@ use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_graph::contract::{drive, prepared};
 use tutti_nodes::{PhaserConfig, PhaserControls, PhaserNode, Stages, SweepRange};
-use tutti_units::{Amplitude, Depth, Feedback, Hz, SampleRate, Samples};
+use tutti_units::{Amplitude, Bipolar, Feedback, Hz, SampleRate, Samples};
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances
 // are `f32`'s.
@@ -31,7 +31,7 @@ fn wet(stages: usize, hz: f64) -> Vec<f32> {
             .range(SweepRange::of(Hz::new(F0), Hz::new(2_000.0)))
             .controls(PhaserControls {
                 rate: Hz::new(0.3),
-                depth: Depth::of(0.0),
+                depth: Bipolar::of(0.0),
                 feedback: Feedback::NONE,
             }),
     )

@@ -4,7 +4,7 @@ use tutti_units::Semitones;
 const BASE: Hz = Hz::new(1000.0);
 
 fn voice(lfo_rate: Option<Hz>) -> SynthVoice {
-    let filter_mod = FilterModConfig::new().lfo_depth(Depth::FULL);
+    let filter_mod = FilterModConfig::new().lfo_depth(Bipolar::MAX);
     let config = SynthConfig::new()
         .filter(FilterType::Moog {
             cutoff: BASE,
