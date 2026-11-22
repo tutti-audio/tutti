@@ -20,7 +20,7 @@ use tutti_timeline::Transport;
 #[test]
 fn one_import_renders_a_block() {
     use tutti::graph::ForkByClone;
-    use tutti::{Hz, InterleavedMut, Root, Session};
+    use tutti::{Hz, InterleavedMut, MainOutput, Session};
     use tutti_nodes::testing::Osc;
 
     let mut session = Session::builder()
@@ -30,7 +30,7 @@ fn one_import_renders_a_block() {
     let tone = session.graph().add(ForkByClone(Osc::sine(Hz::new(440.0))));
     session
         .graph()
-        .connect(tone, Root)
+        .connect(tone, MainOutput)
         .expect("both ends exist")
         .unfaded();
     assert!(session.update().is_empty(), "the commit raised no event");
@@ -77,7 +77,7 @@ fn the_dsp_library_and_the_node_contract_are_reachable() {
 #[test]
 fn a_session_bounces_to_buffers_through_the_umbrella() {
     use tutti::graph::ForkByClone;
-    use tutti::{Bounce, Range, Root, Session};
+    use tutti::{Bounce, MainOutput, Range, Session};
 
     let mut session = Session::builder()
         .sample_rate(SampleRate::SR_48K)
@@ -86,7 +86,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
     let node = session.graph().add(ForkByClone(Const::frame(&[0.5, 0.5])));
     session
         .graph()
-        .connect(node, Root)
+        .connect(node, MainOutput)
         .expect("both ends exist")
         .unfaded();
     let rendered = tutti_fixtures::block_on(

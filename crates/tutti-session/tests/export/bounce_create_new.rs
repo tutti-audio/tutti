@@ -7,8 +7,8 @@ use tutti_codec::{Format, Pcm};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Root,
-    Session,
+    Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, MainOutput,
+    Range, Session,
 };
 use tutti_units::{SampleRate, Seconds};
 
@@ -55,7 +55,7 @@ fn a_create_new_bounce_onto_an_existing_master_keeps_the_bounce_and_leaves_the_p
     std::fs::write(&master, b"old bytes").unwrap();
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let error = bounced(
         &mut session,
         bounce().master(&master, float_wav()).create_new(),
@@ -86,7 +86,7 @@ fn a_bounce_replaces_an_existing_master_and_leaves_nothing_beside_it() {
     std::fs::write(&master, b"old bytes").unwrap();
     let mut session = session();
     let node = session.graph().add(ForkByClone(Const::mono(0.5)));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     bounced(&mut session, bounce().master(&master, float_wav())).expect("renders");
     let planes = tutti_fixtures::signal::read_wav_f32(&master);
     assert!(planes.iter().all(|plane| plane.len() == FRAMES));

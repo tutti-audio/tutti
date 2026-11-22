@@ -9,7 +9,7 @@
 use crate::bounced::bounced;
 use std::sync::Arc;
 use tutti_buffers::InterleavedMut;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_export::Produced;
 
@@ -124,7 +124,7 @@ fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, Nod
     for c in 0..2 {
         session
             .graph()
-            .connect(synth.out(c), Root::output(c))
+            .connect(synth.out(c), MainOutput::channel(c))
             .unwrap();
     }
     let _ = session.update();
@@ -266,7 +266,7 @@ fn a_param_on_a_synth_reaches_it_and_its_fork() {
             .set_sample_rate(SampleRate::of(RATE))
             .unwrap();
         let synth = session.graph().add(poly());
-        session.graph().connect(synth, Root).unwrap();
+        session.graph().connect(synth, MainOutput).unwrap();
         let _ = session.update();
         if let Some(v) = volume {
             session.set(synth.volume().to(Amplitude::new(v))).unwrap();

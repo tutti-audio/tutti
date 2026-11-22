@@ -8,7 +8,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::{Const, Through};
-use tutti_session::{ConnectError, OutPort, Root, Session};
+use tutti_session::{ConnectError, MainOutput, OutPort, Session};
 
 fn offline() -> Session {
     Session::builder().build().expect("builds")
@@ -25,7 +25,7 @@ fn first_frame(s: &mut Session) -> [f32; 2] {
 fn feed_root(s: &mut Session, node: NodeKey) {
     for c in 0..2 {
         s.graph()
-            .set_sources(Root::output(c), [OutPort::new(node, c)])
+            .set_sources(MainOutput::channel(c), [OutPort::new(node, c)])
             .unwrap()
             .unfaded();
     }

@@ -29,7 +29,7 @@ use crate::{InstrumentHandle, Key, OutPort, ParamTarget, RemoveError, Session, S
 ///
 /// What [`Session::add_general_midi`] adds. The mix is `out()`'s ports 0 and 1
 /// (left and right). It is not wired to the graph's outputs: that is the host's
-/// (`Graph::connect` into `Root`), since a second setup must not take the first's
+/// (`Graph::connect` into `MainOutput`), since a second setup must not take the first's
 /// place.
 ///
 /// The [`instrument`](Self::instrument) is the unit's handle as any

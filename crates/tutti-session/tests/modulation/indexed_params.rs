@@ -10,7 +10,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::Params;
 use tutti_modulation::Lfo;
-use tutti_session::{OutPort, ParamRef, Root, RouteSpec, Session, ValueErrorKind};
+use tutti_session::{MainOutput, OutPort, ParamRef, RouteSpec, Session, ValueErrorKind};
 use tutti_units::SampleRate;
 use tutti_units::{BeatsPerCycle, Db, Depth, ParamAddr, UnitParam};
 
@@ -52,11 +52,11 @@ fn a_write_reaches_the_index_it_names() {
     let mut s = offline();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(node, 1)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(node, 1)])
         .unwrap()
         .unfaded();
     let _ = s.update();
@@ -97,11 +97,11 @@ fn a_route_to_index_1_does_not_touch_index_0() {
     let mut s = offline();
     let node = s.graph().add(Params(Bands::new(100.0, 500.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(node, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(node, 0)])
         .unwrap()
         .unfaded();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(node, 1)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(node, 1)])
         .unwrap()
         .unfaded();
 

@@ -10,7 +10,7 @@ use tutti_graph::NodeKey;
 use tutti_plugin_types::ParamUnit;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    DetachedSession, Root, Session, SetRefusal, UnitError, ValueError, ValueErrorKind,
+    DetachedSession, MainOutput, Session, SetRefusal, UnitError, ValueError, ValueErrorKind,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -49,7 +49,7 @@ fn session_with_probe() -> (DetachedSession, NodeKey, libloading::Library) {
             Spec::new(PluginRef::file(probe)),
         )
         .expect("the in-process VST2 loads");
-    s.graph().connect(node, Root).unwrap();
+    s.graph().connect(node, MainOutput).unwrap();
     let _ = s.update();
     (s, node.erase(), image)
 }

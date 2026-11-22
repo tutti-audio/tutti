@@ -14,7 +14,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
-use tutti_session::{DetachedSession, InPort, OutPort, Root, Session};
+use tutti_session::{DetachedSession, InPort, MainOutput, OutPort, Session};
 use tutti_units::{Db, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -47,10 +47,10 @@ fn skewed(s: &mut DetachedSession) -> (tutti_graph::NodeKey, Samples) {
         .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(eff, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(eff, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(b, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(b, 0)])
         .unwrap();
     let lat = s.graph_ref().node_latency(eff).unwrap();
     // Every test built on this graph compares against `lat`; if the limiter
@@ -67,10 +67,10 @@ fn a_graph_with_no_latency_reports_none() {
     let mut s = detached();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(a, 0)])
         .unwrap();
     let _ = s.update();
 
@@ -97,8 +97,8 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
     let mut s = detached();
     let (_, lat) = skewed(&mut s);
     let authored = [
-        s.graph_ref().sources(Root::output(0)).unwrap(),
-        s.graph_ref().sources(Root::output(1)).unwrap(),
+        s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
+        s.graph_ref().sources(MainOutput::channel(1)).unwrap(),
     ];
     let _ = s.update();
     assert!(!s.graph_ref().has_uncommitted_edits(), "committed");
@@ -127,8 +127,8 @@ fn the_published_figures_are_the_plans_and_nothing_is_spliced_in() {
     );
     assert_eq!(
         [
-            s.graph_ref().sources(Root::output(0)).unwrap(),
-            s.graph_ref().sources(Root::output(1)).unwrap()
+            s.graph_ref().sources(MainOutput::channel(0)).unwrap(),
+            s.graph_ref().sources(MainOutput::channel(1)).unwrap()
         ],
         authored,
         "nothing is spliced into the wiring"
@@ -185,7 +185,7 @@ fn the_latency_fold_and_the_compiled_plan_agree() {
 
     let mut s = detached();
     let a = s.graph().add(ForkByClone(Const::mono(1.0)));
-    s.graph().connect(a, Root).unwrap();
+    s.graph().connect(a, MainOutput).unwrap();
     let _ = s.update();
     assert_eq!(figures(&s).1, Samples::new(0));
 }
@@ -204,10 +204,10 @@ fn a_re_prepare_republishes_the_figures_once_it_resumes() {
         .set_sources(InPort::new(eff, 0), [OutPort::new(a, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(0), [OutPort::new(eff, 0)])
+        .set_sources(MainOutput::channel(0), [OutPort::new(eff, 0)])
         .unwrap();
     s.graph()
-        .set_sources(Root::output(1), [OutPort::new(a, 0)])
+        .set_sources(MainOutput::channel(1), [OutPort::new(a, 0)])
         .unwrap();
     let at_44k = s.graph_ref().node_latency(eff).unwrap();
     let mut side = s.graph().take_audio_side();

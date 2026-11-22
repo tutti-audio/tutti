@@ -20,7 +20,7 @@ use crate::bounced::bounced;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
 use tutti_export::{Produced, Rendered};
@@ -132,7 +132,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
         named.push(branch.erase());
     }
     named.push(sum.erase());
-    session.graph().connect(sum, Root).unwrap();
+    session.graph().connect(sum, MainOutput).unwrap();
 
     let mut bounce = Bounce::new()
         .master_buffers()

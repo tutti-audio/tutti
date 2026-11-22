@@ -8,7 +8,7 @@ use std::time::Duration;
 use tutti_buffers::ChannelLayout;
 use tutti_platform::Instant;
 use tutti_sampler::{Clip, StreamFailure, StreamPhase, StreamStart};
-use tutti_session::{Bounce, BounceLatency, BounceTail, Range, Root, Session};
+use tutti_session::{Bounce, BounceLatency, BounceTail, MainOutput, Range, Session};
 use tutti_units::{Beat, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;
@@ -91,7 +91,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
         .graph()
         .add(Clip::streaming(reader, stream).at(Beat::new(0.0)));
     s.graph()
-        .connect(node, Root)
+        .connect(node, MainOutput)
         .expect("the clip reaches the root");
     let _ = s.update();
 

@@ -14,7 +14,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Const;
-use tutti_session::{InPort, Key, NodeMode, OutPort, Root, Session, ValueErrorKind};
+use tutti_session::{InPort, Key, MainOutput, NodeMode, OutPort, Session, ValueErrorKind};
 
 const A: f32 = 0.25;
 const BLOCK: usize = 64;
@@ -56,7 +56,7 @@ fn rig() -> Rig {
     g.set_sources(InPort::new(halve, 0), [OutPort::new(a, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(Root::output(0), [OutPort::new(halve, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(halve, 0)])
         .unwrap()
         .unfaded();
     let _ = s.update();

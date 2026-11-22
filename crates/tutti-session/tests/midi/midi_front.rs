@@ -76,7 +76,9 @@ fn a_take_records_the_live_input_on_its_frames_and_the_target_still_hears_it() {
     let seen = tutti_fixtures::Record::new();
     let target = s.graph().add(Tap(seen.clone()));
     let latent = s.graph().add(ForkByClone(Latent));
-    s.graph().connect(latent, tutti_session::Root).unwrap();
+    s.graph()
+        .connect(latent, tutti_session::MainOutput)
+        .unwrap();
     let mut live = s.midi().input(target).expect("a live input");
     let mut take = s
         .midi()

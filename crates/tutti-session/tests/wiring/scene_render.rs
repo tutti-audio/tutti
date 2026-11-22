@@ -32,7 +32,9 @@ use tutti_nodes::{
     DistortionConfig, DistortionNode, LimiterConfig, LimiterControls, LimiterNode, ShapeKind,
     SvfFilterConfig, SvfFilterNode, SvfType,
 };
-use tutti_session::{AudioSide, DetachedSession, InPort, Key, OutPort, Replacement, Root, Session};
+use tutti_session::{
+    AudioSide, DetachedSession, InPort, Key, MainOutput, OutPort, Replacement, Session,
+};
 use tutti_units::{Db, Drive, Hz, Q, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
@@ -113,10 +115,10 @@ fn scene_driven(with_limiter: bool, drive: f64) -> Scene {
     } else {
         osc.erase()
     };
-    g.set_sources(Root::output(0), [OutPort::new(drive, 0)])
+    g.set_sources(MainOutput::channel(0), [OutPort::new(drive, 0)])
         .unwrap()
         .unfaded();
-    g.set_sources(Root::output(1), [OutPort::new(right, 0)])
+    g.set_sources(MainOutput::channel(1), [OutPort::new(right, 0)])
         .unwrap()
         .unfaded();
     let _ = session.update();
@@ -379,7 +381,7 @@ fn a_crossfade_follows_its_law_to_the_new_filter() {
 fn pdc_is_the_compilers() {
     let mut s = scene(true);
     assert_eq!(
-        s.session.graph().sources(Root::output(0)).unwrap(),
+        s.session.graph().sources(MainOutput::channel(0)).unwrap(),
         [s.drive.out(0)],
         "nothing is spliced in; the plan delays the channel"
     );

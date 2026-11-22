@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::Interleaved;
 use tutti_buffers::{InterleavedMut, PlanesMut};
-use tutti_session::Root;
+use tutti_session::MainOutput;
 
 use tutti_buffers::ChannelLayout;
 use tutti_export::Produced;
@@ -64,7 +64,7 @@ fn render_stem(
     bounce: Bounce<NodeKey, BufferMaster>,
     node: NodeKey,
 ) -> Vec<Vec<f32>> {
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     let (_, mut stems) = bounced(session, bounce.stem_with(Stem::new(node)))
         .expect("the bounce renders")
         .into_parts();
@@ -125,7 +125,7 @@ fn a_node_export_follows_a_90_bpm_timeline() {
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
             .expect("a placeable wave");
         let node = session.graph().add(source);
-        session.graph().connect(node, Root).unwrap();
+        session.graph().connect(node, MainOutput).unwrap();
         node
     };
     let zero = {
@@ -274,7 +274,7 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
         ));
         let graph = session.graph();
         let bare = graph.add(bare);
-        graph.connect(bare, Root).unwrap();
+        graph.connect(bare, MainOutput).unwrap();
         (graph.add(wrapped).erase(), graph.add(memory).erase())
     };
 
@@ -352,7 +352,7 @@ fn a_disk_voice_at_another_rate_exports_resampled() {
     {
         let voice = disk_voice(reader, 1.0);
         let node = session.graph().add(voice);
-        session.graph().connect(node, Root).unwrap();
+        session.graph().connect(node, MainOutput).unwrap();
     }
     let planes = render(&mut session, on(2.0, &timeline(120.0)));
     assert!(
@@ -401,7 +401,7 @@ fn live_disk_playback_is_untouched_while_its_voice_exports() {
 
     let mut session = session();
     let node = session.graph().add(disk_voice(reader, 0.0));
-    session.graph().connect(node, Root).unwrap();
+    session.graph().connect(node, MainOutput).unwrap();
     session.render_frame(InterleavedMut::one_frame(&mut [0.0, 0.0]).unwrap());
     let mut live = session.graph().take_audio_side();
 
@@ -491,7 +491,7 @@ fn an_export_leaves_nothing_open_behind_it() {
     {
         let voice = disk_voice(reader, 0.0);
         let node = session.graph().add(voice);
-        session.graph().connect(node, Root).unwrap();
+        session.graph().connect(node, MainOutput).unwrap();
     }
     let before = open_handles(&path);
     let planes = render(&mut session, on(0.2, &timeline(120.0)));
@@ -519,7 +519,7 @@ fn a_disk_voice_whose_file_cannot_be_read_fails_the_export_by_name() {
     let clip = {
         let voice = disk_voice(reader, 0.0);
         let node = session.graph().add(voice);
-        session.graph().connect(node, Root).unwrap();
+        session.graph().connect(node, MainOutput).unwrap();
         node
     };
     std::fs::remove_file(&path).expect("removes");

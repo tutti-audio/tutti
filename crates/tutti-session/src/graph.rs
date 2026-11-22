@@ -85,7 +85,8 @@ use crate::key::{
 use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
 use crate::{
     ChannelEdge, ConnectError, Connection, DeclarationError, EventInPort, EventOutPort, InPort,
-    InletError, Key, NoSuchNode, OutPort, RemoveError, Root, SessionNode, SetRateError,
+    InletError, Key, MainInput, MainOutput, NoSuchNode, OutPort, RemoveError, SessionNode,
+    SetRateError,
 };
 use tutti_rt::LockExt;
 
@@ -1736,7 +1737,7 @@ impl<F: Float> Graph<F> {
                 unwired
                     .root_buses
                     .iter()
-                    .map(|feed| (feed.source, BusSink::Root)),
+                    .map(|feed| (feed.source, BusSink::MainOutput)),
             );
         for wire in named {
             if !bus_edges.contains(&wire) {
@@ -2457,7 +2458,7 @@ impl<F: Float> Graph<F> {
                 .nodes
                 .contains_key(&p.node)
                 .then(|| OutPort::new(p.node, usize::from(p.port))),
-            PortSource::Global(port) => Some(Root::input(usize::from(port))),
+            PortSource::Global(port) => Some(MainInput::channel(usize::from(port))),
             PortSource::Zero => None,
         }
     }
@@ -2749,22 +2750,22 @@ impl<F: Float> Graph<F> {
     /// What the two ends are says what is connected:
     ///
     /// - an [`OutPort`] into an [`InPort`]: **one channel**
-    ///   ([`Root::output`] is the root's channel, [`Root::input`] a global
+    ///   ([`MainOutput::channel`] is the main output's channel, [`MainInput::channel`] a main
     ///   input);
-    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`Root`]: **a main
+    /// - a [`Key`] (or [`NodeKey`]) into a key, or into [`MainOutput`]: **a main
     ///   bus**, channel `c` of the source into channel `c` of the sink. The two
-    ///   must be the same width. A bus into the root may be narrower than it:
-    ///   it is placed by speaker, on the topology the root was declared with,
-    ///   else on the engine's order for the root's width
+    ///   must be the same width. A bus into the main output may be narrower than it:
+    ///   it is placed by speaker, on the topology the main output was declared with,
+    ///   else on the engine's order for the main output's width
     ///   ([`fold_to_width`](tutti_graph::fold_to_width)), so a mono source
-    ///   feeds both channels of a stereo root at gain 1.0. A placement that
-    ///   would weight a channel (a centre into a root with none) is refused:
+    ///   feeds both channels of a stereo main output at gain 1.0. A placement that
+    ///   would weight a channel (a centre into a main output with none) is refused:
     ///   a weighted fold is a bus edge. A connection never truncates;
     /// - a [`BusSource`] into a [`BusRef`] (`key.bus_out(i)`,
-    ///   `key.bus_in(i)`) or into [`Root`]: **a bus edge**, a fold between two
+    ///   `key.bus_in(i)`) or into [`MainOutput`]: **a bus edge**, a fold between two
     ///   declared topologies, lowered at the commit to one weighted lane per
     ///   contribution (`Fold::contributions`) and summed with any other source
-    ///   of the sink's ports. Into the root it folds to the topology the root
+    ///   of the sink's ports. Into the main output it folds to the topology the main output
     ///   was declared with
     ///   ([`Session::declare_root_topology`](crate::Session::declare_root_topology)).
     ///   Its lanes carry the fold's weights and no gain of their own;
@@ -2837,7 +2838,7 @@ impl<F: Float> Graph<F> {
         let was = self.editor.spec().bus_fade(from, at);
         match to {
             BusSink::Node(to) => self.editor.connect_bus(from, to),
-            BusSink::Root => self.editor.connect_bus_to_root(from),
+            BusSink::MainOutput => self.editor.connect_bus_to_root(from),
         }?;
         // A new bus edge, or one on its way out, fades in: each lane of its
         // fold does.
@@ -2851,7 +2852,7 @@ impl<F: Float> Graph<F> {
     fn bus_sink(to: BusSink) -> Option<BusRef> {
         match to {
             BusSink::Node(bus) => Some(bus),
-            BusSink::Root => None,
+            BusSink::MainOutput => None,
         }
     }
 
@@ -2870,7 +2871,7 @@ impl<F: Float> Graph<F> {
         }
         let removed = match to {
             BusSink::Node(to) => self.editor.disconnect_bus(from, to),
-            BusSink::Root => self.editor.disconnect_bus_from_root(from),
+            BusSink::MainOutput => self.editor.disconnect_bus_from_root(from),
         };
         self.edited |= removed;
         removed
@@ -2902,7 +2903,7 @@ impl<F: Float> Graph<F> {
         let spec = self.editor.spec();
         let feeds = match to {
             BusSink::Node(bus) => spec.bus_edges.get(&bus),
-            BusSink::Root => Some(&spec.root_sources),
+            BusSink::MainOutput => Some(&spec.root_sources),
         };
         Ok(feeds.map_or_else(Vec::new, |feeds| {
             feeds
@@ -2972,7 +2973,7 @@ impl<F: Float> Graph<F> {
                     })
                     .collect())
             }
-            MainSink::Root => {
+            MainSink::MainOutput => {
                 let root_width = self.outputs();
                 if out_width > root_width {
                     return Err(ConnectError::RootNarrow {
@@ -2983,7 +2984,7 @@ impl<F: Float> Graph<F> {
                 }
                 if out_width == root_width {
                     return Ok((0..out_width)
-                        .map(|c| (OutPort::new(from, out_first + c), Root::output(c)))
+                        .map(|c| (OutPort::new(from, out_first + c), MainOutput::channel(c)))
                         .collect());
                 }
                 // A narrower bus is placed on the root by speaker: the root's
@@ -3012,7 +3013,7 @@ impl<F: Float> Graph<F> {
                         if weight != 1.0 {
                             return Err(ConnectError::RootWeighted { from });
                         }
-                        wires.push((OutPort::new(from, out_first + k), Root::output(c)));
+                        wires.push((OutPort::new(from, out_first + k), MainOutput::channel(c)));
                     }
                 }
                 Ok(wires)

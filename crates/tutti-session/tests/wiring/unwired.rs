@@ -15,7 +15,7 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::Const;
 use tutti_session::{
-    BusSink, ChannelEdge, EventEdge, Feeder, InPort, OutPort, Replacement, Root, Session,
+    BusSink, ChannelEdge, EventEdge, Feeder, InPort, MainOutput, OutPort, Replacement, Session,
     SessionEvent,
 };
 use tutti_units::{Amplitude, Samples};
@@ -111,8 +111,8 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     for (from, to) in [
         (OutPort::new(a, 0), x.input(0)),
         (OutPort::new(b, 0), x.input(1)),
-        (x.out(0), Root::output(0)),
-        (x.out(1), Root::output(1)),
+        (x.out(0), MainOutput::channel(0)),
+        (x.out(1), MainOutput::channel(1)),
     ] {
         g.connect(from, to).unwrap().unfaded();
     }
@@ -155,7 +155,7 @@ fn a_narrower_reinsert_reports_what_it_dropped_and_keeps_the_rest() {
     event_edges.sort();
     let mut want_edges = vec![
         ChannelEdge::new(OutPort::new(b, 0), x.input(1)),
-        ChannelEdge::new(x.out(1), Root::output(1)),
+        ChannelEdge::new(x.out(1), MainOutput::channel(1)),
     ];
     want_edges.sort();
     let mut want_events = vec![
@@ -206,7 +206,9 @@ fn a_wider_reinsert_reports_nothing() {
     let a = g.add(ForkByClone(Const::mono(A)));
     let x = g.add(ForkByClone(Pass::<1, 1>));
     g.connect(OutPort::new(a, 0), x.input(0)).unwrap().unfaded();
-    g.connect(x.out(0), Root::output(0)).unwrap().unfaded();
+    g.connect(x.out(0), MainOutput::channel(0))
+        .unwrap()
+        .unfaded();
     let events = s.update();
     assert!(!refused(&events));
     s.graph()
@@ -348,7 +350,7 @@ fn a_narrower_reinsert_reports_the_bus_edges_it_dropped() {
     }
 }
 
-/// **A root feed from a lost bus is reported as `(source, Root)`.**
+/// **A root feed from a lost bus is reported as `(source, MainOutput)`.**
 #[test]
 fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
@@ -357,8 +359,8 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
     s.declare_root_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
         .expect("stereo");
     let g = s.graph();
-    g.connect(y.bus_out(0), Root).unwrap().unfaded();
-    g.connect(y.bus_out(1), Root).unwrap().unfaded();
+    g.connect(y.bus_out(0), MainOutput).unwrap().unfaded();
+    g.connect(y.bus_out(1), MainOutput).unwrap().unfaded();
     let events = s.update();
     assert!(!refused(&events), "{events:?}");
 
@@ -377,7 +379,7 @@ fn a_narrower_reinsert_reports_the_root_feed_it_dropped() {
             _ => None,
         })
         .collect();
-    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::Root)]]);
+    assert_eq!(reported, [vec![(y.bus_out(1), BusSink::MainOutput)]]);
 }
 
 /// **A commit that is refused reports nothing, and the record waits for the
