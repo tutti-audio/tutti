@@ -19,11 +19,8 @@ mod live;
 #[cfg(test)]
 mod tests;
 
-use std::fmt;
-use std::future::{Future, IntoFuture};
-use std::pin::Pin;
+use std::future::IntoFuture;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, Wave};
@@ -132,7 +129,9 @@ pub enum AnalyzeError {
     ShutDown,
 }
 
-impl Unanswered for AnalyzeError {
+impl Unanswered for AnalyzeError {}
+
+impl crate::unblocked::sealed::Sealed for AnalyzeError {
     fn shut_down() -> Self {
         Self::ShutDown
     }
@@ -202,24 +201,15 @@ where
     type IntoFuture = Analyzing<A, S>;
 
     fn into_future(self) -> Analyzing<A, S> {
-        Analyzing {
-            analysis: Unblocked::new(self.executor.clone(), self, Self::run),
-        }
+        Unblocked::new(self.executor.clone(), self, Self::run)
     }
 }
 
 /// An analysis being awaited ([`Analyze`]): resolves to the meter's output
 /// once the audio is folded.
 ///
-/// The first poll starts the fold as a task on the session's executor (the
-/// session's weak handle, upgraded for the spawn only) and awaits the receiver
-/// of a oneshot. **The task fills the sender**: it folds the audio chunk by
-/// chunk and sends the output or the error, which wakes the future. A poll never
-/// blocks, and `Session::update` is not needed.
-///
-/// Dropped before it resolves, the future drops the receiver: a fold that has
-/// not begun reads nothing, and one in flight finishes and its output is dropped.
-/// Dropped before its first poll it starts nothing.
+/// A [`Unblocked`]: its first poll starts the fold as a task on the session's
+/// executor, and `Session::update` is not needed.
 ///
 /// # Errors
 ///
@@ -234,39 +224,8 @@ where
 /// # Panics
 ///
 /// When polled after it resolved.
-#[must_use = "an analysis does nothing unless it is awaited"]
-pub struct Analyzing<A, S = f32>
-where
-    S: Float,
-    A: Measure<S>,
-{
-    analysis: Unblocked<Analyze<A, S>, <A::Meter as StreamMeter>::Output, AnalyzeError>,
-}
-
-impl<A, S> Future for Analyzing<A, S>
-where
-    S: Float,
-    A: Measure<S> + Send + 'static,
-    A::Context: AudioContext,
-    for<'a> <A::Meter as StreamMeter>::Input<'a>: AudioInput<'a, S>,
-    <A::Meter as StreamMeter>::Output: Send + 'static,
-{
-    type Output = Result<<A::Meter as StreamMeter>::Output, AnalyzeError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.analysis).poll(cx)
-    }
-}
-
-impl<A, S> fmt::Debug for Analyzing<A, S>
-where
-    S: Float,
-    A: Measure<S>,
-{
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Analyzing").finish_non_exhaustive()
-    }
-}
+pub type Analyzing<A, S> =
+    Unblocked<Analyze<A, S>, <<A as Measure<S>>::Meter as StreamMeter>::Output, AnalyzeError>;
 
 impl<K: AppKey, C: Clock> Session<K, C> {
     /// An [`Analyze`] of `audio` through the meter `analysis` builds; nothing

@@ -19,6 +19,7 @@ use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
+use super::watcher::{Feed, IntoTargets, Watcher};
 use crate::AppKey;
 
 /// What one node's params are written through, and what they were declared at.
@@ -84,6 +85,8 @@ pub struct ValueTable {
     output: crate::policy::FactsCell,
     /// The controls written since the last update, for the graph's editor.
     queue: Arc<Queue>,
+    /// Every change a write made, for the watchers.
+    feed: Feed,
 }
 
 impl fmt::Debug for ValueTable {
@@ -130,6 +133,11 @@ impl ValueTable {
         let guard = self.params.lock();
         HELD.with(|held| held.borrow_mut().push(token));
         Some(Held { guard, token })
+    }
+
+    /// The feed of changes a write made.
+    pub(crate) fn feed(&self) -> &Feed {
+        &self.feed
     }
 
     /// The cell the graph publishes the output device and main output to.
@@ -401,7 +409,7 @@ impl<K> fmt::Debug for ValueState<K> {
     }
 }
 
-fn error<K>(fail: Failure) -> ValueError<K> {
+pub(super) fn error<K>(fail: Failure) -> ValueError<K> {
     ValueError {
         at: fail.at,
         target: fail.target.map(AnyTarget::of),
@@ -409,7 +417,7 @@ fn error<K>(fail: Failure) -> ValueError<K> {
     }
 }
 
-fn whole_call<K>(kind: ValueErrorKind) -> ValueError<K> {
+pub(super) fn whole_call<K>(kind: ValueErrorKind) -> ValueError<K> {
     ValueError {
         at: 0,
         target: None,
@@ -434,8 +442,20 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        batch.store();
+        self.table.feed().land(batch.store());
         Ok(())
+    }
+
+    /// Takes the value lock, or answers the call's `Reentrant` error.
+    pub(super) fn enter(&self) -> Result<Held<'_>, ValueError<K>> {
+        self.table
+            .enter()
+            .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))
+    }
+
+    /// The feed of changes the writes make.
+    pub(super) fn feed(&self) -> &Feed {
+        self.table.feed()
     }
 
     /// Publishes every value a write staged since the last call. Control
@@ -496,6 +516,16 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn get<R: IntoRead>(&self, read: R) -> Result<R::Output, ValueError<K>> {
         self.state()?.get(read)
+    }
+
+    /// [`Session::watch`](crate::Session::watch), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::watch`](crate::Session::watch), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
+        self.state()?.watch(targets)
     }
 }
 

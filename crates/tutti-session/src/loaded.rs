@@ -109,7 +109,10 @@ pub enum LoadError {
 }
 
 #[cfg(any(feature = "sampler", feature = "midi", feature = "soundfont"))]
-impl crate::unblocked::Unanswered for LoadError {
+impl crate::unblocked::Unanswered for LoadError {}
+
+#[cfg(any(feature = "sampler", feature = "midi", feature = "soundfont"))]
+impl crate::unblocked::sealed::Sealed for LoadError {
     fn shut_down() -> Self {
         Self::ShutDown
     }

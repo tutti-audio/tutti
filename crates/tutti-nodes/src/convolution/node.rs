@@ -28,7 +28,7 @@ use tutti_units::{Latency, Tail};
 
 use super::IrLayout;
 use crate::kernel::{slice_in, slice_out};
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 use crate::tail_clock::{Heard, TailClock, tail_frames};
 use tutti_dsp::Ramp;
 use tutti_dsp::{

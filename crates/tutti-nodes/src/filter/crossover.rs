@@ -15,7 +15,7 @@ use tutti_units::{Hz, SampleRate, Tail};
 use tutti_units::{UnitAddr, UnitParam};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
-use crate::ramp::LastGood;
+use crate::last_good::LastGood;
 
 /// The crossover frequency cells of a node, and the last finite value each
 /// held. Used by the multiband compressor.

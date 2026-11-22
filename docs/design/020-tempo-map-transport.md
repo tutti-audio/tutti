@@ -727,8 +727,7 @@ The audio thread never sees a map edit.
   `TimeSignature`. Both are Group messages (Format Complete, Address 1; §7.5.3,
   §7.5.4): a message of another Group, one addressed to a Channel, a tempo field of
   `0` and a meter the project's units refuse are ignored. It holds no clock, no map
-  and no OS handle. Its source is an enum (`TempoSource`, `Flex` first): MIDI Clock
-  and MTC are other sources of the same follower, later.
+  and no OS handle.
 - **What the session does with it.** It places the change, builds the new map with
   `TempoMap::builder()` and publishes it with `TransportSettings::set_tempo_map`;
   `Phase::Reclaim` sweeps the old map as it does for any republish. The meter goes
