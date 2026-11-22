@@ -243,8 +243,9 @@ pub(crate) struct Parts<F: Float> {
     pub(crate) device_events: Option<tutti_midi_hardware::DeviceEvents>,
 }
 
-impl<F: SessionFloat> Default for SessionBuilder<Offline<F>> {
-    fn default() -> Self {
+impl<F: SessionFloat> SessionBuilder<Offline<F>> {
+    /// The defaults: [`Session::builder`] is the way in.
+    pub(crate) fn new() -> Self {
         Self {
             opts: Options::default(),
             config: BlockConfig::default(),

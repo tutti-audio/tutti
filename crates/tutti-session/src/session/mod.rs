@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use tutti_engine::{OutputSpec, StreamFaults};
 use tutti_graph::NodeKey;
-use tutti_units::{Amplitude, SampleRate};
+use tutti_units::Amplitude;
 
 use crate::background::Background;
 use crate::clock::sealed::Streaming;
@@ -150,17 +150,7 @@ impl Session<&'static str, Offline> {
     /// ([`SessionBuilder`](crate::SessionBuilder) has the options, and the
     /// other clocks).
     pub fn builder() -> crate::SessionBuilder<crate::Offline> {
-        crate::SessionBuilder::default()
-    }
-
-    /// An offline session at `rate` with every other option at its default:
-    /// shorthand for `Session::builder().sample_rate(rate).build()`.
-    ///
-    /// # Errors
-    ///
-    /// As [`SessionBuilder::build`](crate::SessionBuilder::build).
-    pub fn new(rate: SampleRate) -> crate::Result<Self> {
-        Self::builder().sample_rate(rate).build()
+        crate::SessionBuilder::new()
     }
 }
 

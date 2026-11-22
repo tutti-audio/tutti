@@ -280,7 +280,6 @@ tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_route_fallbac
 tutti-session  setter  crates/tutti-session/src/midi.rs::Midi::set_routes
 tutti-session  setter  crates/tutti-session/src/modulation.rs::Mods::set_source
 tutti-session  ctor-result  crates/tutti-session/src/recorder.rs::PumpLoop::new
-tutti-session  ctor-result  crates/tutti-session/src/session/mod.rs::Session::new
 
 # tutti-sf2
 

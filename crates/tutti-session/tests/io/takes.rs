@@ -15,8 +15,8 @@ use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
 use tutti_graph::{InletRing, TapWriter};
 use tutti_session::{
-    Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Recorded, Session,
-    SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeFile, TakeTarget, Trim,
+    Armed, Input, InputConfig, InputOpener, LiveSession, OpenedInput, Punch, Record, Recorded,
+    Session, SessionEvent, Start, Take, TakeEnd, TakeError, TakeEvent, TakeFile, TakeTarget, Trim,
 };
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
@@ -246,10 +246,10 @@ fn a_beat_punch_records_exactly_the_frames_between_its_beats() {
     let dir = tempfile::tempdir().unwrap();
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     roll(&mut rig);
-    let punch = Punch::at(Beat::new(0.5)).until(Beat::new(1.0)).unwrap();
+    let punch = Punch::new(Beat::new(0.5)).until(Beat::new(1.0)).unwrap();
     let take = rig
         .session
-        .record(&rig.input, punch, TakeFile::wav(wav(&dir, "a.wav")))
+        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "a.wav"))).punch(punch))
         .expect("armed");
     let window = take.window();
     let end = window.end.expect("a punch-out");
@@ -289,9 +289,8 @@ fn a_punch_in_the_past_starts_at_once_and_reports_the_real_frame() {
     let take = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(10)).until(Frame::new(5_000)).unwrap(),
-            TakeFile::wav(wav(&dir, "past.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "past.wav")))
+                .punch(Punch::new(Frame::new(10)).until(Frame::new(5_000)).unwrap()),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -333,11 +332,11 @@ fn placement_is_the_formula_with_each_term_stated() {
     let take = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(10_000))
-                .until(Frame::new(10_100))
-                .unwrap(),
-            TakeFile::wav(wav(&dir, "p.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "p.wav"))).punch(
+                Punch::new(Frame::new(10_000))
+                    .until(Frame::new(10_100))
+                    .unwrap(),
+            ),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -364,11 +363,11 @@ fn an_unreported_latency_is_stated_unknown_not_zero() {
     let take = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(2_000))
-                .until(Frame::new(2_050))
-                .unwrap(),
-            TakeFile::wav(wav(&dir, "u.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "u.wav"))).punch(
+                Punch::new(Frame::new(2_000))
+                    .until(Frame::new(2_050))
+                    .unwrap(),
+            ),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -395,11 +394,11 @@ fn started_then_finished_once() {
     let take = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(3_000))
-                .until(Frame::new(3_500))
-                .unwrap(),
-            TakeFile::wav(wav(&dir, "e.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "e.wav"))).punch(
+                Punch::new(Frame::new(3_000))
+                    .until(Frame::new(3_500))
+                    .unwrap(),
+            ),
         )
         .expect("armed");
     let id = take.id();
@@ -425,7 +424,7 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeFile::wav(wav(&dir, "o.wav")))
+        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "o.wav"))))
         .expect("armed");
     let mut armed: Option<Take<Armed>> = Some(take);
     let mut rolling = None;
@@ -468,7 +467,7 @@ fn a_take_ends_when_its_input_is_removed() {
     let path = wav(&dir, "r.wav");
     let _take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
+        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
         .expect("armed");
     rig.run_until(started);
     rig.step(BLOCK);
@@ -527,11 +526,7 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
     rig.step(256);
     let take = rig
         .session
-        .record(
-            &rig.input,
-            Punch::now(),
-            TakeTarget::sink(Failing { ok: 2 }),
-        )
+        .record(Record::new(&rig.input, TakeTarget::sink(Failing { ok: 2 })))
         .expect("armed");
     rig.run_until(finished);
     let takes = rig.takes();
@@ -570,20 +565,19 @@ fn a_sink_that_fails_mid_take_reports_failed_with_its_error() {
 fn what_cannot_be_armed_is_refused_where_it_is_made() {
     let dir = tempfile::tempdir().unwrap();
     assert!(
-        Punch::at(Beat::new(4.0)).until(Beat::new(4.0)).is_err(),
+        Punch::new(Beat::new(4.0)).until(Beat::new(4.0)).is_err(),
         "a punch of no length"
     );
-    assert!(Punch::at(Frame::new(9)).until(Frame::new(3)).is_err());
-    assert!(Punch::at(Beat::new(4.0)).until(At::NextBlock).is_err());
+    assert!(Punch::new(Frame::new(9)).until(Frame::new(3)).is_err());
+    assert!(Punch::new(Beat::new(4.0)).until(At::NextBlock).is_err());
 
     let mut rig = rig(InputConfig::default(), Samples::new(0));
     rig.step(64);
     let stopped = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Beat::new(2.0)),
-            TakeFile::wav(wav(&dir, "s.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "s.wav")))
+                .punch(Punch::new(Beat::new(2.0))),
         )
         .unwrap_err();
     assert!(
@@ -595,11 +589,11 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     let backwards = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(500_000))
-                .until(Beat::new(1.0))
-                .unwrap(),
-            TakeFile::wav(wav(&dir, "b.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "b.wav"))).punch(
+                Punch::new(Frame::new(500_000))
+                    .until(Beat::new(1.0))
+                    .unwrap(),
+            ),
         )
         .unwrap_err();
     assert!(matches!(backwards, TakeError::Punch(_)), "{backwards:?}");
@@ -621,7 +615,7 @@ fn what_cannot_be_armed_is_refused_where_it_is_made() {
     }
     let wide = rig
         .session
-        .record(&rig.input, Punch::now(), TakeTarget::sink(Mono))
+        .record(Record::new(&rig.input, TakeTarget::sink(Mono)))
         .unwrap_err();
     assert!(matches!(wide, TakeError::Width { .. }), "{wide:?}");
 }
@@ -637,11 +631,11 @@ fn a_take_makes_a_clip_only_from_a_file() {
     let to_file = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(1_000))
-                .until(Frame::new(1_200))
-                .unwrap(),
-            TakeFile::wav(wav(&dir, "c.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "c.wav"))).punch(
+                Punch::new(Frame::new(1_000))
+                    .until(Frame::new(1_200))
+                    .unwrap(),
+            ),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -668,11 +662,11 @@ fn a_take_makes_a_clip_only_from_a_file() {
     let to_sink = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(Frame::new(from + 1_000))
-                .until(Frame::new(from + 1_100))
-                .unwrap(),
-            TakeTarget::sink(Clean),
+            Record::new(&rig.input, TakeTarget::sink(Clean)).punch(
+                Punch::new(Frame::new(from + 1_000))
+                    .until(Frame::new(from + 1_100))
+                    .unwrap(),
+            ),
         )
         .expect("armed");
     rig.run_until(finished);
@@ -699,7 +693,7 @@ fn a_take_records_and_its_file_holds_the_frames_written() {
     let path = wav(&dir, "ramp.wav");
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
+        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
@@ -731,7 +725,7 @@ fn finish_returns_at_once_and_the_completion_lands_in_the_updates_after() {
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeFile::wav(wav(&dir, "f.wav")))
+        .record(Record::new(&rig.input, TakeFile::wav(wav(&dir, "f.wav"))))
         .expect("armed");
     rig.steps_until(started);
     let before = rig.takes().len();
@@ -765,9 +759,8 @@ fn an_idle_take_never_stalls_update() {
     let take = rig
         .session
         .record(
-            &rig.input,
-            Punch::at(At::Frame(Frame::new(1 << 30))),
-            TakeFile::wav(wav(&dir, "idle.wav")),
+            Record::new(&rig.input, TakeFile::wav(wav(&dir, "idle.wav")))
+                .punch(Punch::new(At::Frame(Frame::new(1 << 30)))),
         )
         .expect("armed");
     for _ in 0..100 {
@@ -802,7 +795,7 @@ fn dropping_a_session_commits_every_take_before_it_returns() {
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), TakeFile::wav(path.clone()))
+        .record(Record::new(&rig.input, TakeFile::wav(path.clone())))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
@@ -846,7 +839,7 @@ fn dropping_a_session_on_a_driving_thread_returns_without_joining() {
                 rig.step(256);
                 let take = rig
                     .session
-                    .record(&rig.input, Punch::now(), TakeFile::wav(path))
+                    .record(Record::new(&rig.input, TakeFile::wav(path)))
                     .expect("armed");
                 rig.steps_until(started);
                 drop(rig);
@@ -868,7 +861,7 @@ fn record_to_end(target: TakeFile) -> Vec<SessionEvent> {
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), target)
+        .record(Record::new(&rig.input, target))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
@@ -963,7 +956,7 @@ fn signal_take(
     rig.step(256);
     let take = rig
         .session
-        .record(&rig.input, Punch::now(), target(path.clone()))
+        .record(Record::new(&rig.input, target(path.clone())))
         .expect("armed");
     rig.steps_until(started);
     for _ in 0..16 {
