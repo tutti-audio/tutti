@@ -139,16 +139,24 @@ impl RtScope {
     }
 }
 
-/// Runs `wake`, a call that unparks a thread, with the sanitizer's reporting off.
+/// Runs `call`, one of the two syscalls the audio thread makes by design, with
+/// the sanitizer's reporting off. Without the `rtsan` feature this is `call()`.
 ///
-/// A wake never waits: the futex wake it makes is a syscall that returns at once,
-/// and the doorbells and the worker pool wake from the audio thread by design. The
-/// sanitizer flags every syscall in a region, so it is told this one is sanctioned.
-/// Nothing that waits, locks or allocates goes through here. Without the `rtsan`
-/// feature this is `wake()`.
-pub(crate) fn sanctioned_wake<R>(wake: impl FnOnce() -> R) -> R {
+/// The sanitizer flags every syscall in a region, so the sanctioned ones are
+/// told apart here, and only these two go through it:
+///
+/// - **A wake** ([`Unparker::unpark`](crate::Unparker::unpark)): the futex wake
+///   returns at once, and the doorbells and the worker pool wake from the audio
+///   thread.
+/// - **The caller's yield** in a block wait, after
+///   [`BlockWaits::caller_yield_after`](crate::BlockWaits::caller_yield_after)
+///   without progress: it gives the core to a helper the block is waiting on,
+///   and returns without waiting on any other thread.
+///
+/// Nothing that waits on a lock, sleeps or allocates goes through here.
+pub(crate) fn sanctioned<R>(call: impl FnOnce() -> R) -> R {
     let _sanctioned = region::Quiet::new();
-    wake()
+    call()
 }
 
 impl Drop for RtScopeGuard {
