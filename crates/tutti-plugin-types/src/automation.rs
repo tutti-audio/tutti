@@ -1,6 +1,9 @@
 //! Parameter automation primitives passed into a plugin's process call.
 
+#[cfg(test)]
+use crate::fake::{at_frame, unit_value};
 use crate::{PointBuf, PointPool};
+use tutti_graph::Offset;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -15,10 +18,8 @@ use tutti_units::ParamId;
 pub struct ParameterPoint {
     /// Frame offset from the start of the current process block.
     ///
-    /// Non-negative and ascending across a [`ParameterQueue`]'s `points`; a
-    /// negative value is a sample index before the start of the buffer, and
-    /// VST3's `getPoint` hands it to the plugin verbatim.
-    pub sample_offset: i32,
+    /// Ascending across a [`ParameterQueue`]'s `points`.
+    pub sample_offset: Offset,
     /// The automated value, on the host's `0..=1` scale.
     ///
     /// **Out-of-range input is clamped silently** at construction (by
@@ -37,12 +38,11 @@ pub struct ParameterPoint {
     pub value: Normalized,
 }
 
-/// A point at `sample_offset` for `value`, **silently clamped onto `0..=1`**
-/// (see [`ParameterQueue::add_point`]).
-fn point(sample_offset: i32, value: f64) -> ParameterPoint {
+/// A point at `sample_offset` for `value`.
+fn point(sample_offset: Offset, value: Normalized) -> ParameterPoint {
     ParameterPoint {
         sample_offset,
-        value: Normalized::clamped(value),
+        value,
     }
 }
 
@@ -142,27 +142,16 @@ impl ParameterQueue {
         }
     }
 
-    /// Appends one automation point, **silently clamping `value` onto `0..=1`**.
+    /// Appends one automation point.
     /// Never grows the queue: when it is full the point is handled by the one
     /// full-queue policy ([`PointBuf::push_or_replace_last`]), which keeps the
     /// queue's latest value, and `false` is returned for the caller to count.
     ///
-    /// The clamp is the whole point of the door and it reports nothing: a value
-    /// of `40.0` is stored as `1.0`, and NaN becomes `0.0`. A caller passing
-    /// anything but a normalized value gets a queue full of saturated points
-    /// that reads back as a plausible parameter sweep, so normalize before
-    /// calling — this method will not tell you that you did not.
-    ///
-    /// Takes a bare `f64` rather than a [`Normalized`] because the producer is
-    /// `Curve::value_at` (in `tutti-modulation`), a **public trait a user implements**,
-    /// whose return carries no finiteness contract — so the value arriving here
-    /// is untrusted by construction and the clamp belongs at this door rather
-    /// than at every call site. An envelope dividing by a zero-length segment
-    /// returns `f32::NAN`; unguarded, that NaN reaches a VST3 filter cutoff as a
-    /// NaN coefficient, then a NaN IIR state, and every subsequent sample on the
-    /// channel is NaN until the plugin is re-instantiated — a whole-channel
-    /// outage from one bad envelope segment.
-    pub fn add_point(&mut self, sample_offset: i32, value: f64) -> bool {
+    /// A producer whose value is untrusted (`Curve::value_at` in
+    /// `tutti-modulation` is a public trait a user implements, and an envelope
+    /// dividing by a zero-length segment returns NaN) makes the [`Normalized`]
+    /// with [`Normalized::clamped`] at its own door.
+    pub fn add_point(&mut self, sample_offset: Offset, value: Normalized) -> bool {
         self.points
             .push_or_replace_last(point(sample_offset, value))
     }
@@ -186,18 +175,13 @@ impl ParameterQueue {
     }
 
     /// Re-establish the ordering invariant this type's `points` doc claims:
-    /// clamp negative `sample_offset`s to 0 and stable-sort ascending.
+    /// stable-sort ascending by `sample_offset`.
     ///
     /// A no-op for the in-process producers (already monotonic); the wire path
     /// is what needs it. Stable so that two points sharing an offset keep the
     /// producer's intent — last-writer-wins per offset, which is what every
     /// consumer here assumes.
     pub fn normalize(&mut self) {
-        for p in self.points.iter_mut() {
-            if p.sample_offset < 0 {
-                p.sample_offset = 0;
-            }
-        }
         if !self
             .points
             .windows(2)
@@ -456,13 +440,12 @@ impl ParameterChanges {
     }
 
     /// Adds a point to `self.queues[queue]` within the set's room
-    /// ([`make_room`](Self::make_room)), **silently clamping `value` onto
-    /// `0..=1`** ([`ParameterQueue::add_point`]): `true` when it was stored
+    /// ([`make_room`](Self::make_room)): `true` when it was stored
     /// as a new point; `false` when the queue's room is spent, and the queue
     /// kept its latest value ([`PointBuf::replace_latest`]) or the index is
     /// past the queues. Counts nothing: the producer counts a `false` with
     /// its own counter. Allocation-free.
-    pub fn push_point(&mut self, queue: usize, sample_offset: i32, value: f64) -> bool {
+    pub fn push_point(&mut self, queue: usize, sample_offset: Offset, value: Normalized) -> bool {
         let room = self.make_room(queue);
         let Some(q) = self.queues.get_mut(queue) else {
             return false;
@@ -562,12 +545,13 @@ impl ParameterChanges {
     /// parameters; a producer that knows its queue's index uses
     /// [`push_point`](Self::push_point).
     ///
-    /// **`value` is silently clamped onto `0..=1`** (as
-    /// [`ParameterQueue::add_point`] does) — out-of-range input saturates with
-    /// no error, so pass an already-normalized value.
-    ///
     /// Queues are matched by [`ParamId`] equality.
-    pub fn add_change(&mut self, param_id: ParamId, sample_offset: i32, value: f64) -> bool {
+    pub fn add_change(
+        &mut self,
+        param_id: ParamId,
+        sample_offset: Offset,
+        value: Normalized,
+    ) -> bool {
         let i = match self.queues.iter().position(|q| q.param_id == param_id) {
             Some(i) => i,
             None if self.open_queue(param_id) => self.queues.len() - 1,
@@ -656,14 +640,14 @@ mod serde_tests {
     #[test]
     fn deserialize_sorts_out_of_order_points() {
         let mut q = ParameterQueue::with_capacity(ParamId::new(7), 3);
-        q.add_point(32, 0.5);
-        q.add_point(0, 0.0);
-        q.add_point(16, 0.25);
+        q.add_point(at_frame(32), unit_value(0.5));
+        q.add_point(at_frame(0), unit_value(0.0));
+        q.add_point(at_frame(16), unit_value(0.25));
 
         let got = round_trip(&q);
 
         assert_eq!(got.param_id, ParamId::new(7));
-        let offsets: Vec<i32> = got.points.iter().map(|p| p.sample_offset).collect();
+        let offsets: Vec<u32> = got.points.iter().map(|p| p.sample_offset.get()).collect();
         assert_eq!(offsets, vec![0, 16, 32]);
         // Values travel with their offsets, not independently.
         assert_eq!(got.points[0].value.get(), 0.0);
@@ -671,32 +655,17 @@ mod serde_tests {
         assert_eq!(got.points[2].value.get(), 0.5);
     }
 
-    /// A negative offset is a sample index before the start of the buffer;
-    /// VST3's `getPoint` hands it to the plugin verbatim.
-    #[test]
-    fn deserialize_clamps_negative_offsets() {
-        let mut q = ParameterQueue::with_capacity(ParamId::new(1), 2);
-        q.add_point(-100, 0.75);
-        q.add_point(8, 0.25);
-
-        let got = round_trip(&q);
-
-        assert_eq!(got.points[0].sample_offset, 0);
-        assert_eq!(got.points[0].value.get(), 0.75);
-        assert_eq!(got.points[1].sample_offset, 8);
-    }
-
     /// An already-ordered queue is untouched — the common case pays no reorder.
     #[test]
     fn deserialize_leaves_ordered_points_alone() {
         let mut q = ParameterQueue::with_capacity(ParamId::new(3), 9);
         for i in 0..9 {
-            q.add_point(i * 8, i as f64 / 8.0);
+            q.add_point(at_frame(i * 8), unit_value(i as f64 / 8.0));
         }
 
         let got = round_trip(&q);
 
-        let offsets: Vec<i32> = got.points.iter().map(|p| p.sample_offset).collect();
+        let offsets: Vec<u32> = got.points.iter().map(|p| p.sample_offset.get()).collect();
         assert_eq!(offsets, (0..9).map(|i| i * 8).collect::<Vec<_>>());
     }
 
@@ -709,7 +678,7 @@ mod serde_tests {
     fn an_id_above_i32_max_survives_the_wire() {
         let high = ParamId::new(0xF000_000A);
         let mut one = ParameterChanges::reserved(1, 1);
-        one.add_change(high, 0, 1.0);
+        one.add_change(high, at_frame(0), unit_value(1.0));
         let back: ParameterChanges =
             postcard::from_bytes(&postcard::to_allocvec(&one).expect("serialize")).expect("de");
         assert_eq!(back.queue(high).expect("high id survives").len(), 1);
@@ -722,16 +691,16 @@ mod serde_tests {
     #[test]
     fn nested_in_parameter_changes() {
         let mut changes = ParameterChanges::reserved(2, 2);
-        changes.add_change(ParamId::new(1), 32, 1.0);
-        changes.add_change(ParamId::new(1), -4, 0.0);
-        changes.add_change(ParamId::new(2), 0, 0.5);
+        changes.add_change(ParamId::new(1), at_frame(32), unit_value(1.0));
+        changes.add_change(ParamId::new(1), at_frame(4), unit_value(0.0));
+        changes.add_change(ParamId::new(2), at_frame(0), unit_value(0.5));
 
         let bytes = postcard::to_allocvec(&changes).expect("serialize");
         let got: ParameterChanges = postcard::from_bytes(&bytes).expect("deserialize");
 
         let q = got.queue(ParamId::new(1)).expect("queue 1");
-        assert_eq!(q.points[0].sample_offset, 0);
-        assert_eq!(q.points[1].sample_offset, 32);
+        assert_eq!(q.points[0].sample_offset, at_frame(4));
+        assert_eq!(q.points[1].sample_offset, at_frame(32));
     }
 
     /// **The wire format is unchanged**: a set of more than sixteen queues
@@ -764,9 +733,9 @@ mod serde_tests {
             assert!(changes.open_queue(ParamId::new(id as u32)));
             let q = changes.queues.last_mut().expect("opened");
             for k in 0..12 {
-                q.add_point(k, 0.25);
+                q.add_point(at_frame(k), unit_value(0.25));
             }
-            q.add_point(id, 0.5);
+            q.add_point(at_frame(id), unit_value(0.5));
         }
         let expected = seq(
             changes.queues.len(),
@@ -823,7 +792,11 @@ mod serde_tests {
         // within the pool.
         for k in 0..13 {
             for id in 0..200i32 {
-                changes.add_change(ParamId::new(id as u32), k * 4 + id % 4, 0.25);
+                changes.add_change(
+                    ParamId::new(id as u32),
+                    at_frame(k * 4 + id % 4),
+                    unit_value(0.25),
+                );
             }
         }
         let expected = seq(
@@ -834,7 +807,7 @@ mod serde_tests {
                     13,
                     (0..13).map(|k| {
                         postcard::to_allocvec(&ParameterPoint {
-                            sample_offset: k * 4 + id % 4,
+                            sample_offset: at_frame(k * 4 + id % 4),
                             value: tutti_units::Normalized::of(0.25),
                         })
                         .expect("serialize")
@@ -870,7 +843,7 @@ mod reserved_tests {
                 assert!(q.is_empty(), "a reused queue starts empty");
                 for k in 0..41 {
                     assert!(q.points.has_room(), "block {block} queue {id} point {k}");
-                    q.add_point(k, 0.5);
+                    q.add_point(at_frame(k), unit_value(0.5));
                 }
                 assert!(!q.points.has_room());
             }
@@ -934,7 +907,7 @@ mod reserved_tests {
         for block in 0..3 {
             for id in 0..2i32 {
                 for k in 0..16 {
-                    changes.add_change(ParamId::new(id as u32), k, 0.5);
+                    changes.add_change(ParamId::new(id as u32), at_frame(k), unit_value(0.5));
                 }
             }
             assert_eq!(changes.queues.len(), 2);
@@ -1028,7 +1001,7 @@ mod pool_tests {
             for i in 0..QUEUES {
                 for k in 0..floor {
                     assert!(changes.make_room(i), "block {block} floor {i}");
-                    changes.queues[i].add_point(k as i32, 0.5);
+                    changes.queues[i].add_point(at_frame(k as i32), unit_value(0.5));
                 }
             }
             // This block's pooled queues fill to their room; the next is
@@ -1038,7 +1011,7 @@ mod pool_tests {
             for i in moving.clone() {
                 for k in floor..=ROOM {
                     assert!(changes.make_room(i), "block {block} queue {i} point {k}");
-                    changes.queues[i].add_point(k as i32, 0.5);
+                    changes.queues[i].add_point(at_frame(k as i32), unit_value(0.5));
                 }
                 assert!(!changes.make_room(i), "full room reached");
             }
@@ -1078,7 +1051,11 @@ mod pool_tests {
             for k in 0..ROOM {
                 for id in 0..QUEUES {
                     if k < floor || moving.contains(&id) {
-                        assert!(changes.add_change(ParamId::new(id as u32), k as i32, 0.5));
+                        assert!(changes.add_change(
+                            ParamId::new(id as u32),
+                            at_frame(k as i32),
+                            unit_value(0.5)
+                        ));
                     }
                 }
             }
@@ -1097,14 +1074,19 @@ mod pool_tests {
 
         fill(&mut changes, pooled..2 * pooled);
         let past = ParamId::new((2 * pooled) as u32);
-        assert!(!changes.add_change(past, 7, 0.875), "the pool is spent");
+        assert!(
+            !changes.add_change(past, at_frame(7), unit_value(0.875)),
+            "the pool is spent"
+        );
         let q = changes.queue(past).expect("queued");
         assert_eq!(q.points.len(), floor);
         assert_eq!(
-            q.points.last().map(|p| (p.sample_offset, p.value.get())),
+            q.points
+                .last()
+                .map(|p| (p.sample_offset.get(), p.value.get())),
             Some((7, 0.875))
         );
-        assert!(!changes.add_change(ParamId::new(QUEUES as u32), 0, 0.5));
+        assert!(!changes.add_change(ParamId::new(QUEUES as u32), at_frame(0), unit_value(0.5)));
         assert_eq!(changes.queues.len(), QUEUES);
         assert_eq!(changes.points_overflowed(), 2);
         assert_eq!(changes.point_storage(), storage);
@@ -1114,7 +1096,7 @@ mod pool_tests {
 
         let mut empty = ParameterChanges::new();
         for k in 0..ROOM as i32 {
-            assert!(!empty.add_change(ParamId::new(0), k, 0.5));
+            assert!(!empty.add_change(ParamId::new(0), at_frame(k), unit_value(0.5)));
         }
         assert!(empty.queues.is_empty());
         assert_eq!(empty.points_overflowed(), ROOM as u64);
@@ -1146,7 +1128,7 @@ mod pool_tests {
         // by `clear`, ahead of every holder).
         let mut large = ParameterQueue::with_capacity(ParamId::new(QUEUES as u32 - 1), 2 * ROOM);
         for k in 0..2 * ROOM {
-            assert!(large.add_point(k as i32, 0.5));
+            assert!(large.add_point(at_frame(k as i32), unit_value(0.5)));
         }
         let grown = large.points.as_ptr() as usize;
         changes.queues[QUEUES - 1] = large;
@@ -1154,7 +1136,7 @@ mod pool_tests {
         for i in 0..ParameterChanges::POOLED_QUEUES {
             for k in 0..ROOM {
                 assert!(changes.make_room(i));
-                changes.queues[i].add_point(k as i32, 0.5);
+                changes.queues[i].add_point(at_frame(k as i32), unit_value(0.5));
             }
         }
         changes.clear();
@@ -1193,7 +1175,7 @@ mod pool_tests {
             assert!(changes.open_queue(ParamId::new(id as u32)));
             for k in 0..10 {
                 assert!(changes.make_room(id));
-                changes.queues[id].add_point(k, 0.5);
+                changes.queues[id].add_point(at_frame(k), unit_value(0.5));
             }
         }
         changes.clear();
@@ -1226,7 +1208,7 @@ mod carried_tests {
             for (changes, want) in [(&mut plain, room + 1), (&mut bridged, room)] {
                 assert!(changes.open_queue(ParamId::new(0)));
                 let mut k = 0;
-                while changes.push_point(0, k, 0.5) {
+                while changes.push_point(0, at_frame(k), unit_value(0.5)) {
                     k += 1;
                 }
                 assert_eq!(k as usize, want, "{queues} × {room}");
@@ -1267,14 +1249,14 @@ mod carried_tests {
             // producers get, with the carried value's slot kept back.
             let mut k = 0;
             while (moving.contains(&id) || k < want) && changes.make_room(id) {
-                assert!(changes.push_point(id, 1 + k as i32, 0.5));
+                assert!(changes.push_point(id, at_frame(1 + k as i32), unit_value(0.5)));
                 k += 1;
             }
             assert_eq!(k, want, "queue {id}");
         }
         assert_eq!(changes.points_overflowed(), 0);
         let carried = ParameterPoint {
-            sample_offset: 0,
+            sample_offset: at_frame(0),
             value: Normalized::of(0.25),
         };
         let all = assert_no_alloc::assert_no_alloc(|| {
@@ -1290,7 +1272,7 @@ mod carried_tests {
                 ParameterChanges::FLOOR_POINTS + 1
             };
             assert_eq!(q.points.len(), want, "queue {id}");
-            assert_eq!(q.points[0].sample_offset, 0);
+            assert_eq!(q.points[0].sample_offset.get(), 0);
             assert_eq!(q.points[0].value.get(), 0.25);
         }
         changes.clear();
@@ -1307,19 +1289,19 @@ mod carried_tests {
     fn a_carried_value_with_no_slot_is_dropped_counted() {
         let mut changes = ParameterChanges::reserved(1, 2);
         for (k, v) in [(5, 0.5), (9, 0.75), (12, 1.0)] {
-            assert!(changes.add_change(ParamId::new(0), k, v));
+            assert!(changes.add_change(ParamId::new(0), at_frame(k), unit_value(v)));
         }
         let carried = ParameterPoint {
-            sample_offset: 0,
+            sample_offset: at_frame(0),
             value: Normalized::of(0.25),
         };
         assert!(!changes.prepend_carried(0, carried));
         assert!(!changes.prepend_carried(1, carried));
         assert_eq!(changes.points_overflowed(), 2);
-        let points: Vec<(i32, f64)> = changes.queues[0]
+        let points: Vec<(u32, f64)> = changes.queues[0]
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect();
         assert_eq!(points, vec![(5, 0.5), (9, 0.75), (12, 1.0)]);
     }
@@ -1336,7 +1318,7 @@ mod wire_tests {
     #[test]
     fn a_decoded_point_outside_the_unit_range_is_refused() {
         let mut bytes = postcard::to_allocvec(&ParameterPoint {
-            sample_offset: 3,
+            sample_offset: at_frame(3),
             value: Normalized::of(0.5),
         })
         .unwrap();
@@ -1344,7 +1326,7 @@ mod wire_tests {
         assert_eq!(bytes.len(), 1 + 8);
         bytes[1..].copy_from_slice(&0.25f64.to_le_bytes());
         let point: ParameterPoint = postcard::from_bytes(&bytes).unwrap();
-        assert_eq!(point.sample_offset, 3);
+        assert_eq!(point.sample_offset.get(), 3);
         assert_eq!(point.value, Normalized::of(0.25));
         for raw in [7.5f64, -3.0, f64::NAN, f64::INFINITY] {
             bytes[1..].copy_from_slice(&raw.to_le_bytes());

@@ -19,7 +19,7 @@ use arrayvec::ArrayVec;
 use tutti_graph::MAX_TRANSPORT_CHANGES;
 use tutti_music::{LoopRange, TimeSignature};
 use tutti_ump::System;
-use tutti_units::{BarNumber, Beat, Bpm, SampleRate, Seconds};
+use tutti_units::{BarNumber, Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
 /// A transport that takes effect part-way into a chunk: from frame
 /// [`offset`](Self::offset) of the chunk on, the transport is
@@ -372,7 +372,10 @@ impl TransportInfo {
         }
         let clocks = quarters * clocks_per_quarter;
         let to_nearest = (clocks.round() - clocks) / clocks_per_quarter;
-        let frames = (to_nearest * 60.0 / self.timing.tempo.get() * self.sample_rate.get()).round();
+        let frames_per_beat = self.timing.tempo.frames_per_beat(self.sample_rate)?;
+        let frames = frames_per_beat
+            .frames_in(BeatDuration::new(to_nearest))
+            .round();
         // Half a clock at the slowest tempo a plugin is told is far inside
         // `i32`; a pathological tempo saturates rather than wraps.
         Some(frames.clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32)
@@ -411,12 +414,13 @@ impl TransportInfo {
         if !self.state.playing {
             return Some(0);
         }
-        let frames_per_beat = 60.0 / self.timing.tempo.get() * self.sample_rate.get();
-        let to_next = (beats.ceil() - beats) * frames_per_beat;
-        let frames = to_next.round();
+        let frames_per_beat = self.timing.tempo.frames_per_beat(self.sample_rate)?;
+        let frames = frames_per_beat
+            .frames_in(Beat::new(beats.ceil()) - self.position.beat)
+            .round();
         // Just past a beat, the distance to the next is a whole beat less a
         // sliver: that is "on the beat", not "a beat away".
-        if frames >= frames_per_beat.round() {
+        if frames >= frames_per_beat.get().round() {
             return Some(0);
         }
         Some(frames.clamp(0.0, f64::from(u32::MAX)) as u32)

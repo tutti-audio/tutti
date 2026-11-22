@@ -7,13 +7,13 @@
 //! [`Processor`](crate::Processor) trait and the four format host
 //! crates speak the same vocabulary.
 
-use tutti_graph::UmpAt;
+use tutti_graph::{Offset, UmpAt};
 
 use crate::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionTextChanges, ParameterChanges,
     ScaleChanges, TransportChange, TransportInfo, WireMidi,
 };
-use tutti_units::ParamId;
+use tutti_units::{Normalized, ParamId};
 
 /// Sequencer-context inputs for one block: chords, scales, per-note text and
 /// integer per-note expression.
@@ -338,11 +338,16 @@ impl ProcessOutput {
     /// [`reserve_params`](Self::reserve_params) gave
     /// [`param_changes`](Self::param_changes)
     /// ([`ParameterChanges::add_change`]: same matching on the full
-    /// [`ParamId`], same clamping of `value`). Never allocates: past the
+    /// [`ParamId`]). Never allocates: past the
     /// room the parameter keeps its latest value, or a parameter past every
     /// queue is dropped, and `false` is returned, counted in the set's
     /// [`ParameterChanges::points_overflowed`].
-    pub fn emit_param_point(&mut self, param_id: ParamId, sample_offset: i32, value: f64) -> bool {
+    pub fn emit_param_point(
+        &mut self,
+        param_id: ParamId,
+        sample_offset: Offset,
+        value: Normalized,
+    ) -> bool {
         self.param_changes
             .add_change(param_id, sample_offset, value)
     }

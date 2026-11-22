@@ -325,15 +325,6 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
         .with_plain_map(plain_map)
         .with_flags(KNOWN, flags)
         .with_group(info.module)
-        .with_measures(declared_measures(info.flags))
-}
-
-/// What a CLAP parameter's flags say it measures: an enumerated choice, and
-/// nothing else, because `clap.params` carries no unit.
-fn declared_measures(flags: ClapParamFlags) -> Option<tutti_plugin_types::ParamUnit> {
-    flags
-        .contains(ClapParamFlags::IS_ENUM)
-        .then_some(tutti_plugin_types::ParamUnit::Choice)
 }
 
 #[cfg(test)]
@@ -371,7 +362,6 @@ mod grouping_tests {
 #[cfg(test)]
 mod measures_tests {
     use super::*;
-    use tutti_plugin_types::ParamUnit;
 
     fn projected(flags: ClapParamFlags) -> tutti_plugin_types::ParameterInfo {
         let mut info = ClapParamInfo::new(1, "p");
@@ -381,14 +371,16 @@ mod measures_tests {
         project_param_info(info)
     }
 
-    /// The enum flag is a `Choice`, over a plain range; no unit is declared by
-    /// anything else, so a parameter without the flag measures nothing.
+    /// `clap.params` declares no unit, so no flag gives a parameter one.
     #[test]
-    fn the_enum_flag_gives_choice() {
-        let choice = projected(ClapParamFlags::IS_ENUM | ClapParamFlags::STEPPED);
-        assert_eq!(choice.measures(), Some(ParamUnit::Choice));
-        assert_eq!(projected(ClapParamFlags::STEPPED).measures(), None);
-        assert_eq!(projected(ClapParamFlags::empty()).measures(), None);
+    fn no_flag_gives_a_unit() {
+        for flags in [
+            ClapParamFlags::IS_ENUM | ClapParamFlags::STEPPED,
+            ClapParamFlags::STEPPED,
+            ClapParamFlags::empty(),
+        ] {
+            assert_eq!(projected(flags).measures(), None, "{flags:?}");
+        }
     }
 
     /// CLAP declares no role: not even the bypass flag gives one, which is the

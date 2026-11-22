@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
-use tutti_graph::{ForkByClone, NodeKey};
+use tutti_graph::{ForkByClone, NodeKey, Offset};
 use tutti_nodes::testing::Const;
 use tutti_plugin_host::{ParamDelivery, PluginControls, PluginHandle};
 use tutti_plugin_types::PluginTail;
@@ -76,23 +76,27 @@ impl Counters {
     fn lose_one_point_of_each_kind(&mut self) {
         let value = |k: usize| if k.is_multiple_of(2) { 0.25 } else { 0.75 };
         let slots = self.delivery.room();
+        let at = |frame: usize| Offset::of(Samples::new(frame), Samples::new(4096));
         // A queue of corners is full at its room.
         let queue = self.queue_room;
         for k in 0..queue {
-            assert!(self.delivery.point(ParamId::new(0), k as i32, value(k)));
+            assert!(self.delivery.point(ParamId::new(0), at(k), value(k)));
         }
         // A grid point at full is dropped.
         assert!(
             self.delivery
-                .grid_point(ParamId::new(0), 1000, value(queue))
+                .grid_point(ParamId::new(0), at(1000), value(queue))
         );
         // A corner at full, in a queue of corners, replaces the last point.
-        assert!(self.delivery.point(ParamId::new(0), 2000, value(queue)));
+        assert!(self.delivery.point(ParamId::new(0), at(2000), value(queue)));
         // Every spare slot learns an address; the next one has none.
         for address in 1..slots as u32 {
-            assert!(self.delivery.point(ParamId::new(address), 0, 0.5));
+            assert!(
+                self.delivery
+                    .point(ParamId::new(address), Offset::ZERO, 0.5)
+            );
         }
-        assert!(!self.delivery.point(ParamId::new(9999), 0, 0.5));
+        assert!(!self.delivery.point(ParamId::new(9999), Offset::ZERO, 0.5));
     }
 }
 
