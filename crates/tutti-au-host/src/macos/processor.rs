@@ -23,7 +23,7 @@ use tutti_plugin_types::{
     ProcessContext, ProcessOutput, Processor, TransportInfo, WireMidi,
 };
 use tutti_rt::Reader;
-use tutti_ump::SysexAssembler;
+use tutti_ump::{MessageType, SysexAssembler};
 use tutti_units::ParamId;
 
 use crate::automation::SharedStage;
