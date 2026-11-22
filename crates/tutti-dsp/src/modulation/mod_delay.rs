@@ -37,8 +37,7 @@ use crate::block::expect_widths;
 use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, InputOutput};
 use tutti_units::{
-    Bipolar, Cents, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples,
-    Seconds,
+    Bipolar, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
 };
 
 use super::sweep::{Stagger, StaggerError, Sweep};
@@ -71,6 +70,7 @@ pub struct ModDelayControls {
     /// How far the delay moves either side of the base, in seconds of delay (not a
     /// fraction: it is added to the base delay, unlike the phaser's unitless depth).
     /// Clamped into the sweep's range. Not finite reads as the default's.
+    /// [`Sweep::vibrato_controls`] refuses a depth the sweep cannot reach instead.
     pub depth: Seconds,
     /// How much of the delayed signal recirculates; on a flanger the most characterful
     /// control, since more sharpens the comb notches into a resonant sweep. Clamped into
@@ -99,25 +99,6 @@ impl ModDelayControls {
         depth: Seconds::new(0.002),
         feedback: Feedback::new(0.7),
     };
-
-    /// Vibrato: a pitch swing of `depth` at `rate`, no feedback (for [`Sweep::VIBRATO`]).
-    ///
-    /// A sine sweep `d(t) = base + D sin(2 pi r t)` of the delay reads the input at the rate
-    /// `1 - d'(t) = 1 - 2 pi r D cos(2 pi r t)`, so the pitch swings between the ratios `1 +- 2
-    /// pi r D`. The depth is the peak rise, `2^(depth / 1200) = 1 + 2 pi r D`, which gives
-    /// `D = (2^(depth / 1200) - 1) / (2 pi r)` seconds; the peak fall is the same ratio
-    /// step down, `1200 log2(2 - 2^(depth / 1200))` cents (a little more). A `depth` the sweep's
-    /// range cannot reach is clamped there when it is taken, as every control is.
-    #[must_use]
-    pub fn vibrato(depth: Cents, rate: ModulationRate) -> Self {
-        let rate = rate.get();
-        let swing = depth.to_pitch_ratio() - 1.0;
-        Self {
-            rate,
-            depth: Seconds::new(swing / (core::f64::consts::TAU * rate.get())),
-            feedback: Feedback::NONE,
-        }
-    }
 
     /// The General MIDI chorus: 0.4 Hz, a 1.9 ms sweep, no feedback (for
     /// [`Sweep::GENERAL_MIDI_CHORUS`]).

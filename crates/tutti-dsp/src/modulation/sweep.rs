@@ -3,9 +3,9 @@
 
 use tutti_buffers::{ChannelIndex, MAX_CHANNELS};
 
-use tutti_units::{Feedback, Phase, PhaseIncrement, Seconds};
+use tutti_units::{Cents, Feedback, Phase, PhaseIncrement, Seconds};
 
-use crate::MaxDelay;
+use crate::{MaxDelay, ModDelayControls, ModulationRate};
 
 /// What a swept delay is built to: the delay its LFO sweeps around, how far the sweep may
 /// reach, the line it must stay inside, and the most feedback it applies.
@@ -59,6 +59,10 @@ pub enum SweepError {
     /// The most feedback is not in `0..=`[`Feedback::MAX_STABLE`].
     #[error("the most feedback is {0:?}: it must be finite, in 0..=MAX_STABLE")]
     FeedbackMax(Feedback),
+    /// The pitch swing is not finite, or its closed-form depth is outside the sweep's
+    /// `depth_min..=depth_max`.
+    #[error("a pitch swing of {0:?} needs a depth the sweep cannot reach")]
+    Swing(Cents),
 }
 
 impl Sweep {
@@ -131,6 +135,37 @@ impl Sweep {
         }
     }
 
+    /// The controls of a vibrato on this sweep: a pitch swing of `swing` at `rate`, no feedback
+    /// (for [`Sweep::VIBRATO`]).
+    ///
+    /// A sine sweep `d(t) = base + D sin(2 pi r t)` of the delay reads the input at the rate
+    /// `1 - d'(t) = 1 - 2 pi r D cos(2 pi r t)`, so the pitch swings between the ratios `1 +- 2
+    /// pi r D`. The swing is the peak rise, `2^(swing / 1200) = 1 + 2 pi r D`, which gives
+    /// `D = (2^(swing / 1200) - 1) / (2 pi r)` seconds; the peak fall is the same ratio
+    /// step down, `1200 log2(2 - 2^(swing / 1200))` cents (a little more).
+    ///
+    /// # Errors
+    ///
+    /// [`SweepError::Swing`] for a swing that is not finite or whose depth `D` is outside this
+    /// sweep's depth range.
+    pub fn vibrato_controls(
+        &self,
+        swing: Cents,
+        rate: ModulationRate,
+    ) -> Result<ModDelayControls, SweepError> {
+        let rate = rate.get();
+        let depth =
+            Seconds::new((swing.to_pitch_ratio() - 1.0) / (core::f64::consts::TAU * rate.get()));
+        if !(depth.get() >= self.depth_min.get() && depth.get() <= self.depth_max.get()) {
+            return Err(SweepError::Swing(swing));
+        }
+        Ok(ModDelayControls {
+            rate,
+            depth,
+            feedback: Feedback::NONE,
+        })
+    }
+
     /// Chorus: a 10 ms base delay in a 50 ms line, the depth clamped to `0..=40 ms`.
     /// The long base delay is what separates chorus from flanger: the copy sits far
     /// enough behind to read as a second voice.
@@ -168,7 +203,7 @@ impl Sweep {
 
     /// Vibrato: a 12 ms base delay in a 25 ms line, the depth `0..=12 ms`, and **no
     /// feedback** (`feedback_max` is [`Feedback::NONE`]). The base keeps the
-    /// sweep inside the line, and [`ModDelayControls::vibrato`](crate::ModDelayControls::vibrato) maps a pitch swing to a depth by
+    /// sweep inside the line, and [`Sweep::vibrato_controls`] maps a pitch swing to a depth by
     /// its closed form: the full 12 ms is about 126 cents at 1 Hz.
     pub const VIBRATO: Self = Self::of(
         Seconds::new(0.012),

@@ -11,7 +11,7 @@ use core::f64::consts::PI;
 
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Seconds};
 
-use super::{SvfDesign, SvfType};
+use super::{SvfDesign, SvfDesignError, SvfType};
 use crate::Biquad;
 use crate::filter::biquad::section_l1;
 use crate::{Complex64, DecayTime, Lti, System};
@@ -49,6 +49,49 @@ impl SvfControls {
         gain: Db::UNITY,
     };
 
+    /// The coefficients of these controls at `rate`, the cutoff held in `1 Hz` to just under
+    /// Nyquist (`tan` diverges at it) and `q` and `gain` refused when out of range.
+    ///
+    /// The three tuning parameters are three different units: taking them as [`Hz`] / [`Q`] /
+    /// [`Db`] fields is what keeps them apart, where bare floats are adjacent and
+    /// interchangeable and a transposition compiles and detunes the filter.
+    ///
+    /// # Errors
+    ///
+    /// [`SvfDesignError::Q`] for a `q` that is not finite or is below
+    /// [`MIN_Q`](Self::MIN_Q), and [`SvfDesignError::Gain`] for a gain that is not finite or is
+    /// past `+-`[`SvfDesign::MAX_GAIN`].
+    pub fn design(&self, rate: impl Into<SampleRate>) -> Result<SvfDesign, SvfDesignError> {
+        if !(self.q.get().is_finite() && self.q.get() >= Self::MIN_Q) {
+            return Err(SvfDesignError::Q(self.q));
+        }
+        if !(self.gain.get().is_finite() && self.gain.get().abs() <= SvfDesign::MAX_GAIN.get()) {
+            return Err(SvfDesignError::Gain(self.gain));
+        }
+        Ok(SvfDesign::solve(
+            self.ty,
+            self.freq,
+            self.q,
+            self.gain,
+            rate.into(),
+        ))
+    }
+
+    /// The coefficients of a control value, which a caller reads every frame with no one to
+    /// refuse it to: `q` is held at [`MIN_Q`](Self::MIN_Q) or above, a gain within
+    /// `+-`[`SvfDesign::MAX_GAIN`], and a NaN gain is 0 dB. [`design`](Self::design) is the
+    /// call for a value that can be refused.
+    #[must_use]
+    pub fn design_clamped(&self, rate: impl Into<SampleRate>) -> SvfDesign {
+        let q = Q::new(self.q.get().max(Self::MIN_Q));
+        let gain = if self.gain.get().is_nan() {
+            Db::UNITY
+        } else {
+            self.gain.clamp(-SvfDesign::MAX_GAIN, SvfDesign::MAX_GAIN)
+        };
+        SvfDesign::solve(self.ty, self.freq, q, gain, rate.into())
+    }
+
     /// Whether these controls are past the dead-band of `applied`, the controls a
     /// model was last designed from: a response change, or a cutoff, resonance or
     /// gain past `FREQ_EPS`, `Q_EPS` or `GAIN_EPS`. Below them a change does not
@@ -70,7 +113,7 @@ impl SvfControls {
 
     /// These controls with every non-finite figure replaced by the default's and
     /// `q` held in `MIN_Q..=MAX_Q`. A cutoff and a gain out of range are
-    /// [`SvfDesign::new`]'s to clamp.
+    /// [`design_clamped`](Self::design_clamped)'s to clamp.
     fn sanitized(self) -> Self {
         let finite = |v: f64, d: f64| if v.is_finite() { v } else { d };
         Self {
@@ -102,7 +145,7 @@ impl SvfModel {
     pub fn new(controls: SvfControls, rate: SampleRate) -> Self {
         let controls = controls.sanitized();
         Self {
-            design: SvfDesign::new(controls.ty, controls.freq, controls.q, controls.gain, rate),
+            design: controls.design_clamped(rate),
             controls,
             rate,
         }

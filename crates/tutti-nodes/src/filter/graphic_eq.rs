@@ -2,12 +2,12 @@
 //! octave or third-octave centers run as one [`SosBank`](tutti_dsp::SosBank) cascade.
 
 use tutti_buffers::{BusTopology, Float, InputOutput, MaxBlock};
-use tutti_dsp::{BlockMismatch, GraphicBands, SimdLanes, SosCoefficients};
+use tutti_dsp::{BlockMismatch, DecayTime, GraphicBands, SimdLanes, SosCoefficients, TAIL_FLOOR};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Db, SampleRate, Tail};
+use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use super::eq_gain;
 use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use super::{MAX_EQ_GAIN, eq_gain};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The controls of a [`GraphicEqNode`]: the gain of each band, lowest first. The bands past
@@ -51,8 +51,8 @@ impl GraphicEqConfig {
 /// 16-frame grid, with the state kept. Neighbouring bands overlap, so a band's gain at its
 /// center is its own only when the others are at 0 dB.
 ///
-/// The tail is unbounded: no closed-form bound on the ring-out of the cascade over every
-/// gain is known. No latency. A [`KernelNode`]. Made from a [`GraphicEqConfig`]
+/// The tail is a finite ceiling, found in `prepare` from the slowest pole of any band over the 24 dB range
+/// ([`GraphicBands::decay_ceiling`]). No latency. A [`KernelNode`]. Made from a [`GraphicEqConfig`]
 /// (`GraphicEqNode::from`).
 pub type GraphicEqNode<F> = KernelNode<GraphicEqKernel<F>>;
 
@@ -63,6 +63,8 @@ pub struct GraphicEqKernel<F: Float + SimdLanes> {
     bands: GraphicBands,
     sos: RampedSos<F>,
     rate: SampleRate,
+    /// The ring-out over every gain at `rate`.
+    ceiling: Tail,
 }
 
 impl<F: Float + SimdLanes> GraphicEqKernel<F> {
@@ -73,10 +75,22 @@ impl<F: Float + SimdLanes> GraphicEqKernel<F> {
             bands,
             sos: RampedSos::new(input),
             rate: SampleRate::SR_48K,
+            ceiling: Tail::Unknown,
         };
         let first = kernel.design(&GraphicEqControls::FLAT);
         kernel.sos.start(first);
+        kernel.ceiling = kernel.ceiling_at();
         kernel
+    }
+
+    /// The ring-out over every gain: [`GraphicBands::decay_ceiling`] at [`MAX_EQ_GAIN`].
+    fn ceiling_at(&self) -> Tail {
+        match self.bands.decay_ceiling(MAX_EQ_GAIN, self.rate, TAIL_FLOOR) {
+            Ok(DecayTime::Finite(t)) => Tail::Finite(Samples::new(
+                (t.get() * self.rate.get()).ceil() as usize + 1,
+            )),
+            _ => Tail::Unbounded,
+        }
     }
 
     /// The coefficients at `controls`, each gain read within 24 dB; the design in force when
@@ -168,6 +182,7 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
         self.sos.at_rate(rate);
         let first = self.design(&GraphicEqControls::FLAT);
         self.sos.restart(first);
+        self.ceiling = self.ceiling_at();
     }
 
     fn reset(&mut self) {
@@ -187,8 +202,9 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
         self.sos.render(block)
     }
 
+    /// The longest ring-out over the gains, found in `prepare`.
     fn tail(&self) -> Tail {
-        Tail::Unbounded
+        self.ceiling
     }
 }
 
@@ -196,6 +212,7 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
 mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
+    use crate::filter::MAX_EQ_GAIN;
     use crate::filter::test_utils::{bin, gain, generate_sine, render};
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::ChannelLayout;
@@ -238,10 +255,9 @@ mod tests {
         assert_param_fork(node_with(GraphicBands::Octave, &[(2, 6.0)]));
     }
 
-    /// The shape is the width in and out with one gain cell per band, the cost of the bank, and
-    /// an unbounded tail.
+    /// The shape is the width in and out with one gain cell per band, and the cost of the bank.
     #[test]
-    fn the_shape_declares_a_gain_per_band_and_an_unbounded_tail() {
+    fn the_shape_declares_a_gain_per_band_and_the_banks_cost() {
         for (bands, cost, count) in [
             (GraphicBands::Octave, Cost::Moderate, 10),
             (GraphicBands::ThirdOctave, Cost::Heavy, 31),
@@ -253,10 +269,83 @@ mod tests {
                 (1, 1)
             );
             assert_eq!(shape.cost, cost);
-            assert_eq!(shape.tail, Tail::Unbounded);
             let want: Vec<UnitAddr> = (0..count).map(band).collect();
             assert_eq!(shape.params.as_slice(), &want[..]);
             assert_eq!(n.param_base(1), Some(-6.0));
+        }
+    }
+
+    /// The declared tail is finite and holds the measured ring-out of every gain set tried: the
+    /// last frame of the `f64` impulse response (the sections in transposed direct form II, never
+    /// the kernel's realization) at or above the floor under its own peak is inside it. The
+    /// ceiling is within six times the largest measured, so it is a ring-out and not a bare cap
+    /// (the pole alone ignores that a narrow bell's modes carry little of the response). The
+    /// sets are the extremes, each band alone at the largest boost, and 16 pseudo-random gains.
+    #[test]
+    fn the_tail_ceiling_holds_the_measured_decay_of_every_gain_set() {
+        let floor = tutti_dsp::TAIL_FLOOR.to_amplitude().get();
+        let measured = |bands: GraphicBands, gains: &[Db; GraphicBands::MAX_COUNT], len: usize| {
+            let sos = bands.design(gains, RATE).unwrap();
+            let mut z = vec![[0.0f64; 2]; sos.sections().len()];
+            let h: Vec<f64> = (0..len)
+                .map(|n| {
+                    let mut y = if n == 0 { 1.0 } else { 0.0 };
+                    for (b, z) in sos.sections().iter().zip(&mut z) {
+                        let x = y;
+                        y = b.b0 * x + z[0];
+                        z[0] = b.b1 * x - b.a1 * y + z[1];
+                        z[1] = b.b2 * x - b.a2 * y;
+                    }
+                    y
+                })
+                .collect();
+            let peak = h.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+            h.iter().rposition(|v| v.abs() >= floor * peak).unwrap() + 1
+        };
+        for bands in [GraphicBands::Octave, GraphicBands::ThirdOctave] {
+            let n = bands.count();
+            let node = prepared(node_with(bands, &[]));
+            let Tail::Finite(ceiling) = node.shape().tail else {
+                panic!("{bands:?}: {:?}", node.shape().tail);
+            };
+            // Past the ceiling, so a response still above the floor there is seen.
+            let len = ceiling.get() + 4_096;
+            let mut sets: Vec<[Db; GraphicBands::MAX_COUNT]> = vec![
+                [MAX_EQ_GAIN; GraphicBands::MAX_COUNT],
+                [-MAX_EQ_GAIN; GraphicBands::MAX_COUNT],
+                [Db::UNITY; GraphicBands::MAX_COUNT],
+            ];
+            sets.push(core::array::from_fn(|i| {
+                Db::new(if i % 2 == 0 { 24.0 } else { -24.0 })
+            }));
+            for i in 0..n {
+                let mut one = [Db::UNITY; GraphicBands::MAX_COUNT];
+                one[i] = MAX_EQ_GAIN;
+                sets.push(one);
+            }
+            let mut seed = 0x2545_f491_4f6c_dd1du64;
+            for _ in 0..16 {
+                sets.push(core::array::from_fn(|_| {
+                    seed = seed
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1_442_695_040_888_963_407);
+                    Db::new(f64::from((seed >> 40) as u32 % 49) - 24.0)
+                }));
+            }
+            let mut worst = 0;
+            for set in &sets {
+                let got = measured(bands, set, len);
+                worst = worst.max(got);
+                assert!(
+                    got <= ceiling.get(),
+                    "{bands:?}: {got} > {ceiling:?} at {:?}",
+                    set.iter().take(n).map(|d| d.get()).collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                ceiling.get() <= 6 * worst,
+                "{bands:?}: {ceiling:?} against a measured {worst}"
+            );
         }
     }
 

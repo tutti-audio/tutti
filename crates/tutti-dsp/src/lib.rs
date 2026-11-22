@@ -69,7 +69,7 @@
 //!   [`Ramp`] per channel's delay, the LFO the caller's on the stream's clock); the phaser
 //!   ([`PhaserChain`]: its [`Stages`] and [`SweepRange`] checked, a [`Ramp`] per channel's
 //!   coefficient, [`sweep_hz`] and [`allpass_complement`] the pure pieces the sweep is solved
-//!   from); the vibrato preset ([`ModDelayControls::vibrato`], a pitch swing in cents mapped to
+//!   from); the vibrato preset ([`Sweep::vibrato_controls`], a pitch swing in cents mapped to
 //!   a depth by its closed form); the comb and all-pass delay filters ([`CombFilter`] and
 //!   [`CombBank`] over a [`CombForm`], [`AllPassFilter`] in Schroeder's lattice form or
 //!   Freeverb's); and the frequency shifter ([`FrequencyShifterBank`]: a Hilbert network of two
@@ -315,7 +315,7 @@ pub use filter::{
     CrossoverError, CrossoverModel, EnvelopeFilterBank, EnvelopeFilterControls, LadderBank,
     LadderBlend, LadderCoefficients, LadderControls, LadderDesign, LadderModel, LadderType,
     MAX_SPLITS, SOLVE_CEILING, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfDesign,
-    SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
+    SvfDesignError, SvfModel, SvfType, fit_to_rate, ladder_step, svf_step,
 };
 pub use fir::{
     Fir, FirDesign, FirError, FirResponse, LinearPhaseDesign, MAX_ATTENUATION, MAX_GRID,

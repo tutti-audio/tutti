@@ -10,13 +10,13 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls,
-    ModDelayLayout, ModulationRate, Ramp, Steps,
+    ModDelayLayout, ModulationRate, Ramp, Steps, Sweep,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Cents, Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 #[cfg(doc)]
-use tutti_dsp::{Stagger, Sweep};
+use tutti_dsp::Stagger;
 
 use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -117,15 +117,20 @@ impl ModDelayConfig {
     }
 
     /// A vibrato on the bus `input`: [`ModDelayLayout::vibrato`] at 5 Hz and a swing of 50 cents
-    /// ([`ModDelayControls::vibrato`]). It has no feedback, so its node declares a finite
+    /// ([`Sweep::vibrato_controls`]). It has no feedback, so its node declares a finite
     /// tail, and it is the wet signal alone: the pitch swing is the whole effect, with no
     /// dry path to blend.
+    ///
+    /// # Panics
+    ///
+    /// Never: 50 cents at 5 Hz is a 0.9 ms depth, inside [`Sweep::VIBRATO`]'s range.
     #[must_use]
     pub fn vibrato(input: BusTopology) -> Self {
-        Self::new(ModDelayLayout::vibrato(input)).controls(ModDelayControls::vibrato(
-            Cents::new(50.0),
-            ModulationRate::of(Hz::new(5.0)),
-        ))
+        Self::new(ModDelayLayout::vibrato(input)).controls(
+            Sweep::VIBRATO
+                .vibrato_controls(Cents::new(50.0), ModulationRate::of(Hz::new(5.0)))
+                .expect("50 cents at 5 Hz is a 0.9 ms depth, inside Sweep::VIBRATO's 0..=12 ms"),
+        )
     }
 
     /// The General MIDI chorus on the bus `input`: [`ModDelayLayout::general_midi_chorus`] at
@@ -358,7 +363,7 @@ mod tests {
     use super::*;
     use crate::test_support::drive_kernel;
     use tutti_buffers::{ChannelLayout, MaxBlock};
-    use tutti_dsp::{MaxDelay, Stagger, Sweep};
+    use tutti_dsp::{MaxDelay, Stagger};
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, Samples, UnitParam};
@@ -1129,8 +1134,9 @@ mod tests {
         for (cents, hz) in [(50.0, 5.0), (100.0, 2.0), (200.0, 8.0)] {
             let mut k = ModDelayKernel::<f64>::new(ModDelayLayout::vibrato(BusTopology::MONO));
             k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-            let controls =
-                ModDelayControls::vibrato(Cents::new(cents), ModulationRate::of(Hz::new(hz)));
+            let controls = Sweep::VIBRATO
+                .vibrato_controls(Cents::new(cents), ModulationRate::of(Hz::new(hz)))
+                .unwrap();
             assert_eq!(controls.feedback, Feedback::NONE);
             let x: Vec<f64> = (0..len).map(|n| n as f64).collect();
             let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);

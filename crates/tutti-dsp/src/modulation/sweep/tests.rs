@@ -1,5 +1,5 @@
 use tutti_buffers::{BusTopology, ChannelIndex};
-use tutti_units::{Feedback, PhaseIncrement, Seconds};
+use tutti_units::{Cents, Feedback, Hz, PhaseIncrement, Seconds};
 
 use super::*;
 use crate::{MaxDelay, ModDelayLayout};
@@ -178,6 +178,37 @@ fn a_layout_refuses_offsets_that_do_not_fit_its_bus() {
                 .stagger(step(0.25))
                 .build()
                 .is_ok()
+        );
+    }
+}
+
+/// A vibrato's depth is `D = (2^(swing / 1200) - 1) / (2 pi r)`; the sweep refuses a swing whose
+/// `D` is outside its range, not finite, or negative, and takes one a hair inside `VIBRATO`'s
+/// 12 ms at 1 Hz.
+#[test]
+fn a_vibrato_swing_is_refused_outside_the_sweeps_depth_range() {
+    let rate = |hz: f64| ModulationRate::of(Hz::new(hz));
+    let c = Sweep::VIBRATO
+        .vibrato_controls(Cents::new(50.0), rate(5.0))
+        .unwrap();
+    let expect = (2f64.powf(50.0 / 1200.0) - 1.0) / (core::f64::consts::TAU * 5.0);
+    assert!((c.depth.get() - expect).abs() < 1e-15, "{c:?}");
+    assert_eq!((c.rate, c.feedback), (Hz::new(5.0), Feedback::NONE));
+
+    // 12 ms at 1 Hz is `2 pi 0.012` above unity.
+    let edge = 1200.0 * (1.0 + core::f64::consts::TAU * 0.012).log2();
+    assert!(
+        Sweep::VIBRATO
+            .vibrato_controls(Cents::new(edge - 0.01), rate(1.0))
+            .is_ok()
+    );
+    for swing in [edge + 0.01, 200.0, -10.0, f64::NAN, f64::INFINITY] {
+        assert!(
+            matches!(
+                Sweep::VIBRATO.vibrato_controls(Cents::new(swing), rate(1.0)),
+                Err(SweepError::Swing(_))
+            ),
+            "{swing} cents"
         );
     }
 }
