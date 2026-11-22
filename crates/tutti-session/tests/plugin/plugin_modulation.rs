@@ -12,7 +12,6 @@
 use crate::bounced::bounced;
 use crate::loading::Perform as _;
 use crate::loading::{LoadPlugin, Spec};
-use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_buffers::{InterleavedMut, PlanesMut};
 use tutti_session::MainOutput;
@@ -163,11 +162,18 @@ fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> Node
     }
 }
 
-fn gain_value(s: &DetachedSession, node: impl Into<NodeKey> + Copy) -> Option<Normalized> {
-    s.plugin_view(node)
-        .expect("hosted")
-        .handle()
-        .parameter_value(ParamId::new(GAIN))
+/// The plugin's own gain, normalized over its declared range: read from the state the
+/// plugin saves, not from the host's mirror.
+fn gain_value(
+    s: &DetachedSession,
+    node: tutti_session::Key<tutti_session::AnyPlugin>,
+) -> Option<Normalized> {
+    let state = s
+        .save_state(&node, tutti_plugin_types::StateUse::Project)
+        .ok()?
+        .perform(tutti_fixtures::main_thread())
+        .ok()?;
+    tutti_clap_test_plugin::saved_normalized(state.bytes(), GAIN).and_then(Normalized::new)
 }
 
 /// **A modulation lane on the plugin survives the replacement.** The lane

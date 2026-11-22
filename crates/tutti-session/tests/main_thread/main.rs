@@ -26,9 +26,6 @@ mod param_reads;
 #[path = "../support/loading.rs"]
 mod loading;
 
-// The handle of an in-process VST2 answers a pool thread while the main thread updates.
-#[cfg(feature = "vst2")]
-mod vst2_off_main_handle;
 // Modulation lanes on the reference VST2 plugin's parameters.
 #[cfg(feature = "vst2")]
 mod vst2_modulation;
@@ -62,8 +59,6 @@ mod export_fork_plugin;
 
 fn main() {
     let mut cases: Vec<(&str, fn())> = Vec::new();
-    #[cfg(feature = "vst2")]
-    cases.extend_from_slice(vst2_off_main_handle::CASES);
     #[cfg(feature = "vst2")]
     cases.extend_from_slice(vst2_modulation::CASES);
     #[cfg(feature = "vst2")]

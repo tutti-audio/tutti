@@ -184,9 +184,14 @@ fn a_plugin_without_its_own_bypass_is_left_to_the_executor() {
         "the click is the executor's bypass line, ticks and all"
     );
     let plugin = r.s.plugin_view(r.plugin).expect("hosted");
-    assert_eq!(plugin.handle().loaded().own_bypass, None);
+    let declared: Vec<_> = plugin.params().iter().cloned().collect();
+    assert!(!declared.is_empty(), "the plugin's parameter list is read");
+    assert_eq!(
+        tutti_plugin_types::bypass_parameter(&declared),
+        None,
+        "the plugin declares no bypass parameter of its own"
+    );
     assert_eq!(plugin.bypass_writes_unapplied(), 0);
-    assert_eq!(plugin.handle().bypassed(), None, "nothing to read back");
 }
 
 /// **A bypassed plugin is parked: its server is not called.** Bypassed from

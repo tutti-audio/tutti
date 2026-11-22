@@ -15,7 +15,6 @@
 
 use crate::bounced::bounced;
 use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Perform as _, Spec};
-use crate::param_reads::ParamReads as _;
 use crate::support;
 use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
@@ -445,12 +444,15 @@ fn gain_param(_s: &Session, _node: impl Into<NodeKey>) -> tutti_units::ParamId {
     tutti_units::ParamId::new(tutti_clap_test_plugin::params_state::GAIN_PARAM_ID)
 }
 
-fn param(s: &Session, node: impl Into<NodeKey>, id: tutti_units::ParamId) -> Option<f64> {
-    s.plugin_view(node)
-        .expect("hosted")
-        .handle()
-        .parameter_value(id)
-        .map(|v| v.get())
+/// The plugin's own value of `id`, normalized over its declared range: read from the
+/// state the plugin saves, not from the host's mirror.
+fn param(s: &Session, node: &Key<AnyPlugin>, id: tutti_units::ParamId) -> Option<f64> {
+    let state = s
+        .save_state(node, tutti_plugin_types::StateUse::Project)
+        .ok()?
+        .perform(tutti_fixtures::main_thread())
+        .ok()?;
+    tutti_clap_test_plugin::saved_normalized(state.bytes(), id.get())
 }
 
 /// Whether a read-back value is the 0.25 that was set (it passes through the
@@ -464,7 +466,7 @@ fn is_quarter(v: Option<f64>) -> bool {
 /// rendering: the number of blocks the plugin has processed does not depend on how long
 /// the echo takes, which a plugin that aborts on its Nth block relies on. A hang guard
 /// bounds the wait.
-fn take_value(s: &mut Session, node: impl Into<NodeKey> + Copy, id: tutti_units::ParamId) {
+fn take_value(s: &mut Session, node: &Key<AnyPlugin>, id: tutti_units::ParamId) {
     let _ = renders_sound(s);
     let guard = Instant::now() + Duration::from_secs(30);
     while !is_quarter(param(s, node, id)) {
@@ -607,7 +609,7 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
 
     s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
-    take_value(&mut s, node, id);
+    take_value(&mut s, &node, id);
     let t0 = Instant::now();
     snapshot_now(&mut s, node);
     let total_before = s.latency();
@@ -696,11 +698,11 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
 
     // The state came back.
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !is_quarter(param(&s, node, id)) {
+    while !is_quarter(param(&s, &node, id)) {
         assert!(
             Instant::now() < deadline,
             "the replacement's parameter is {:?}, not the snapshot's 0.25",
-            param(&s, node, id)
+            param(&s, &node, id)
         );
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -712,9 +714,9 @@ fn a_crashed_plugin_comes_back_at_its_node_with_its_last_state() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert!(
-        is_quarter(param(&s, node, id)),
+        is_quarter(param(&s, &node, id)),
         "the restored parameter was overwritten: {:?}",
-        param(&s, node, id)
+        param(&s, &node, id)
     );
 
     // The commit re-plans PDC for the new latency, and the outputs (never
@@ -852,7 +854,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
         .target();
     s.set(target.to(tutti_units::Normalized::of(0.25))).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !is_quarter(param(&s, node.erase(), gain)) {
+    while !is_quarter(param(&s, &node, gain)) {
         assert!(Instant::now() < deadline, "the probe never took the value");
         let _ = s.update();
         std::thread::yield_now();
@@ -892,7 +894,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
     let revived = load.block().expect("the plugin loads again");
     s.swap_plugin(node, revived, main).expect("it swaps in");
     let deadline = Instant::now() + Duration::from_secs(10);
-    while !(is_quarter(param(&s, node.erase(), gain)) && renders_sound(&mut s)) {
+    while !(is_quarter(param(&s, &node, gain)) && renders_sound(&mut s)) {
         assert!(
             Instant::now() < deadline,
             "the revived node never rendered with its state"
@@ -1466,7 +1468,7 @@ fn a_snapshot_that_kills_the_load_is_withheld_from_the_next_attempt() {
 
     s.set(target.to(tutti_units::Normalized::of(0.25)))
         .expect("the gain is writable");
-    take_value(&mut s, node, id);
+    take_value(&mut s, &node, id);
     snapshot_now(&mut s, node);
     let users = s
         .plugin_view(node)
