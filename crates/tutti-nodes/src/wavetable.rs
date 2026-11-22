@@ -8,7 +8,7 @@ use crate::last_good::LastGood;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::{Wavetable, WavetableOscillator, WavetableStep};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 
@@ -26,7 +26,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// position ([`UnitParam::Position`], a [`Normalized`] position along the table's frames),
 /// all read per frame: a driven control signal's every frame is heard, and a non-finite
 /// driven value holds the last finite one. Made from a [`WavetableConfig`]
-/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the
+/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`]; a fork starts from the
 /// values last set through it, at phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate
@@ -80,7 +80,7 @@ tutti_graph::declare_params!([F: Float] WavetableNode<F>, n {
     Frequency => Hz = &n.frequency,
     Volume => Amplitude = &n.level,
     Position => Normalized = &n.position,
-} nodes F);
+});
 
 /// What a [`WavetableNode`] is made from: its width, its table and its starting params.
 #[derive(Clone, Debug)]
@@ -244,6 +244,33 @@ impl<F: Float> Node<F> for WavetableNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
+    }
+}
+
+impl<F: Float> ParamNode<F> for WavetableNode<F> {
+    /// The frequency, the level and the frame position.
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+
+    /// A clone with its cells detached (at their values now), at phase 0.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.frequency.detach();
+        fork.level.detach();
+        fork.position.detach();
+        Node::<F>::reset(&mut fork);
+        fork
+    }
+}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
+/// it ([`tutti_graph::param_parts`]).
+impl<F: Float> IntoNode<F> for WavetableNode<F> {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
+        tutti_graph::param_parts(self)
     }
 }
 

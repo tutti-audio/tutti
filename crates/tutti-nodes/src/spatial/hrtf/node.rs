@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use tutti_buffers::{BusTopology, MonoMut, StereoPlanes};
 use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrirSphere, HrtfBinaural};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::Latency;
 use tutti_units::UnitParam;
@@ -20,7 +20,7 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
     Azimuth => Azimuth = &n.azimuth,
     Elevation => Elevation = &n.elevation,
     Wet => Mix = &n.blend,
-} nodes F);
+});
 
 /// A binaural panner for headphones: FFT convolution against a measured HRIR
 /// sphere, stereo in, stereo out.
@@ -29,8 +29,8 @@ tutti_graph::declare_params!([F: FftFloat] HrtfBinauralNode<F>, n {
 /// folded to mono, placed at the commanded bearing and height, and blended
 /// against the (equally delayed) dry mono by the blend ([`UnitParam::Wet`]:
 /// 1.0, the default, is full HRTF, 0.0 the dry mono).
-/// It is a graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it
-/// hands back its [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`],
+/// It is a graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it
+/// hands back its [`ParamSet`] ([`UnitParam::Azimuth`],
 /// [`Elevation`](tutti_units::UnitParam::Elevation) and [`Wet`](tutti_units::UnitParam::Wet)), which
 /// move the source lock-free while it renders, and a graph's control lanes
 /// may drive all three.
@@ -266,6 +266,34 @@ impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
+    }
+}
+
+impl<F: FftFloat> ParamNode<F> for HrtfBinauralNode<F> {
+    /// The bearing, height and blend.
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+
+    /// A clone (a rebuilt renderer) with its three cells detached at their
+    /// values now, and reset.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.azimuth.detach();
+        fork.elevation.detach();
+        fork.blend.detach();
+        Node::<F>::reset(&mut fork);
+        fork
+    }
+}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork from the values
+/// last set through it ([`tutti_graph::param_parts`]).
+impl<F: FftFloat> IntoNode<F> for HrtfBinauralNode<F> {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
+        tutti_graph::param_parts(self)
     }
 }
 

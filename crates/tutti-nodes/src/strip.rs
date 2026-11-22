@@ -2,12 +2,12 @@
 //!
 //! A mixer bus applies two things to a summed signal: a fader and a balance.
 //! [`BusStripNode`] is both in one node, addressed by [`UnitParam`] through
-//! the [`ParamSet`](tutti_graph::ParamSet) it is inserted with, so a host sets it with the same
+//! the [`ParamSet`] it is inserted with, so a host sets it with the same
 //! generic machinery it uses for a filter cutoff and needs no downcast. A
 //! strip's mute is not here: muting is graph state, `NodeMode::Muted`
 //! (`Graph::set_mode`), the same for every node.
 //!
-//! Every scalar lives in a cell the node's [`ParamSet`](tutti_graph::ParamSet) addresses by
+//! Every scalar lives in a cell the node's [`ParamSet`] addresses by
 //! [`UnitParam`] — the same shape every other node in this crate uses — so a
 //! host has one param path to the strip, not a second set of handles beside
 //! it.
@@ -44,7 +44,9 @@
 
 use crate::last_good::LastGood;
 use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
-use tutti_graph::{Cx, Inputs, Io, Node, Outputs, Prepare, Shape, Status};
+use tutti_graph::{
+    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
+};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, Balance, Tail};
@@ -52,8 +54,8 @@ use tutti_units::{Amplitude, Balance, Tail};
 // The params a [`BusStripNode`] lets the graph modulate, in port order.
 tutti_graph::declare_params!([] BusStripNode, n {
     Volume => Amplitude = &n.volume,
-    Balance => Balance = &n.balance,
-} nodes [F: Float] F);
+    Balance => Balance = n.balance.as_ref(),
+});
 
 /// A mixer strip: volume and balance over `channels` audio ports.
 ///
@@ -65,7 +67,7 @@ tutti_graph::declare_params!([] BusStripNode, n {
 /// There is deliberately no mute: it is `NodeMode::Muted`, which the graph
 /// holds for any node.
 ///
-/// Params, by address through its [`ParamSet`](tutti_graph::ParamSet):
+/// Params, by address through its [`ParamSet`]:
 ///
 /// - [`UnitParam::Volume`], a linear amplitude;
 /// - [`UnitParam::Balance`], a [`Balance`] (`-1..1`), only on a bus with a
@@ -77,7 +79,7 @@ tutti_graph::declare_params!([] BusStripNode, n {
 /// Every control is read **once per block**; no cell is loaded per sample.
 ///
 /// `Clone` shares the two cells: it is the template
-/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`](tutti_graph::ParamNode::fork_fresh) is the
+/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`] is the
 /// copy that shares nothing).
 #[derive(Clone, Debug)]
 pub struct BusStripNode {
@@ -482,13 +484,42 @@ impl<F: Float> Node<F> for BusStripNode {
     }
 }
 
+impl<F: Float> ParamNode<F> for BusStripNode {
+    /// Volume, and balance on a bus with a left/right pair.
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+
+    /// A clone with its two cells detached (at their values now), so a
+    /// fork renders the strip as it was set, not a fader ride made while it
+    /// runs; its ramp history cleared.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.volume.detach();
+        if let Some(cell) = &mut fork.balance {
+            cell.detach();
+        }
+        Node::<F>::reset(&mut fork);
+        fork
+    }
+}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork from the values
+/// last set through it ([`tutti_graph::param_parts`]).
+impl<F: Float> IntoNode<F> for BusStripNode {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
+        tutti_graph::param_parts(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
     use tutti_buffers::Planes;
     use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
-    use tutti_graph::ParamNode;
     use tutti_graph::contract::{assert_param_fork, drive};
 
     /// The strip on `bus`.

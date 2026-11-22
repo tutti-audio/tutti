@@ -8,7 +8,7 @@ use crate::last_good::LastGood;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_dsp::{OscillatorStep, OscillatorWave};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 
@@ -24,7 +24,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// wave), both read per frame: a driven control signal's every frame is heard, and a
 /// non-finite driven value holds the last finite one. Made from an
 /// [`OscillatorConfig`] (`OscillatorNode::from`); inserted, its controls
-/// are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the values last set through it, at
+/// are a [`ParamSet`]; a fork starts from the values last set through it, at
 /// phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate
@@ -67,7 +67,7 @@ pub struct OscillatorNode {
 tutti_graph::declare_params!([] OscillatorNode, n {
     Frequency => Hz = &n.frequency,
     Volume => Amplitude = &n.level,
-} nodes [F: Float] F);
+});
 
 /// What an [`OscillatorNode`] is made from: its wave, its frequency and its level.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -185,6 +185,32 @@ impl<F: Float> Node<F> for OscillatorNode {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
+    }
+}
+
+impl<F: Float> ParamNode<F> for OscillatorNode {
+    /// The frequency and the level.
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+
+    /// A clone with its cells detached (at their values now), at phase 0.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.frequency.detach();
+        fork.level.detach();
+        Node::<F>::reset(&mut fork);
+        fork
+    }
+}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork from the values
+/// last set through it ([`tutti_graph::param_parts`]).
+impl<F: Float> IntoNode<F> for OscillatorNode {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
+        tutti_graph::param_parts(self)
     }
 }
 

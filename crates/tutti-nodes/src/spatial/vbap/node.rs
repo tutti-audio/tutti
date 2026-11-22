@@ -1,7 +1,7 @@
 use super::error::{Result, VbapError};
 use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
-use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
+use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
@@ -29,7 +29,7 @@ tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
     Elevation => Elevation = &n.elevation,
     Spread => Spread = &n.spread,
     StereoWidth => StereoWidth = &n.width,
-} nodes F);
+});
 
 /// The last finite value each control cell held.
 #[derive(Clone, Copy, Debug)]
@@ -52,8 +52,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 ///
 /// Build it from a [`VbapPannerConfig`] over a bed, whose speakers sit where
 /// `tutti_buffers::Bed::direction` puts them. It is a
-/// graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it hands back its
-/// [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
+/// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
+/// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
 /// [`Spread`](tutti_units::UnitParam::Spread) and [`StereoWidth`](tutti_units::UnitParam::StereoWidth)),
 /// which move the source lock-free while it renders, and a graph's control
 /// lanes may drive all four. A mono source presents the same sample on both
@@ -453,6 +453,35 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
+    }
+}
+
+impl<F: Float> ParamNode<F> for VbapPannerNode<F> {
+    /// The bearing, height, spread and width.
+    fn param_set(&self) -> ParamSet {
+        self.declared_set()
+    }
+
+    /// A clone with its four cells detached (at their values now) and its
+    /// grid restarted.
+    fn fork_fresh(&self) -> Self {
+        let mut fork = self.clone();
+        fork.azimuth.detach();
+        fork.elevation.detach();
+        fork.spread.detach();
+        fork.width.detach();
+        Node::<F>::reset(&mut fork);
+        fork
+    }
+}
+
+/// Inserted with its [`ParamSet`] as its controls and a fork from the values
+/// last set through it ([`tutti_graph::param_parts`]).
+impl<F: Float> IntoNode<F> for VbapPannerNode<F> {
+    type Controls = ParamSet;
+
+    fn into_parts(self) -> NodeParts<ParamSet, F> {
+        tutti_graph::param_parts(self)
     }
 }
 

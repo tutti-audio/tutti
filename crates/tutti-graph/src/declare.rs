@@ -157,16 +157,6 @@ impl Cells<bool> for &Arc<AtomicF64> {
     }
 }
 
-impl<U: Scalar> Cells<U> for &Option<Param<U>> {
-    fn base(&self) -> Option<f64> {
-        self.as_ref().map(|cell| cell.load().to_cell())
-    }
-
-    fn cell(&self) -> Option<ParamCell> {
-        self.as_ref().map(Param::cell)
-    }
-}
-
 impl<U: ParamValue, C: Cells<U>> Cells<U> for Option<C> {
     fn base(&self) -> Option<f64> {
         self.as_ref().and_then(Cells::base)
@@ -175,39 +165,6 @@ impl<U: ParamValue, C: Cells<U>> Cells<U> for Option<C> {
     fn cell(&self) -> Option<ParamCell> {
         self.as_ref().and_then(Cells::cell)
     }
-}
-
-/// A cell a forking declaration detaches: it stops sharing and holds the value it had.
-#[doc(hidden)]
-pub trait Detach {
-    /// Replaces the cell with a fresh one at its current value. Control thread.
-    fn detach(&mut self);
-}
-
-impl<U: Scalar> Detach for Param<U> {
-    fn detach(&mut self) {
-        Param::detach(self);
-    }
-}
-
-impl Detach for Arc<AtomicF64> {
-    fn detach(&mut self) {
-        *self = Arc::new(AtomicF64::new(self.load(Ordering::Acquire)));
-    }
-}
-
-impl<C: Detach> Detach for Option<C> {
-    fn detach(&mut self) {
-        if let Some(cell) = self {
-            cell.detach();
-        }
-    }
-}
-
-/// Detaches the cell a declared row names.
-#[doc(hidden)]
-pub fn detach(cell: &mut impl Detach) {
-    cell.detach();
 }
 
 /// One declared param, as a declaration visits it.
@@ -399,62 +356,6 @@ pub fn input<'a, F: Float>(
 /// [`Node::param_base`](crate::Node::param_base)), and the type's
 /// [`HasParam`] impls.
 ///
-/// # The node impls
-///
-/// `declare_params!([generics] Type, n { rows } nodes F)` also writes the
-/// node's [`ParamNode`](crate::ParamNode) and [`IntoNode`](crate::IntoNode)
-/// for the float `F`: the node's [`ParamSet`] is `declared_set`, and its fork
-/// is a clone with every row's cell detached (at its value now), then
-/// [`reset`](crate::Node::reset). A node that is not generic over its float
-/// names its own impl generics, `nodes [F: Float] F`. The type is `Clone`,
-/// sharing its cells (`Param::clone` does); every row of such a declaration
-/// names its cell as `&place` (`&n.cutoff`, `&n.bands[i].gain`), a
-/// `&Param`, a `&Arc<AtomicF64>` or a `&Option<Param>`, so the declaration
-/// reaches the field to detach. A node that forks more than its cells keeps
-/// it in its `reset`; one whose cells are not places writes
-/// [`ParamNode`](crate::ParamNode) itself.
-///
-/// ```
-/// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
-/// use tutti_units::{Hz, UnitParam};
-/// use tutti_rt::Param;
-/// use tutti_buffers::ChannelLayout;
-///
-/// #[derive(Clone)]
-/// struct Tone {
-///     freq: Param<Hz>,
-///     phase: f32,
-/// }
-///
-/// declare_params!([] Tone, n {
-///     Cutoff => Hz = &n.freq,
-/// } nodes [] f32);
-///
-/// impl Node for Tone {
-///     fn shape(&self) -> Shape {
-///         Shape::source_unassigned(ChannelLayout::MONO)
-///             .param_addrs(self.declared_ports().as_slice())
-///     }
-///     fn prepare(&mut self, _: &Prepare) {}
-///     fn process(&mut self, _: &Cx<'_>, _: Io<'_>) -> Status {
-///         Status::Silent
-///     }
-///     fn reset(&mut self) {
-///         self.phase = 0.0;
-///     }
-///     fn param_base(&self, k: usize) -> Option<f64> {
-///         self.declared_base(k)
-///     }
-/// }
-///
-/// use tutti_graph::ParamNode;
-/// let tone = Tone { freq: Param::new(Hz::new(440.0)), phase: 0.5 };
-/// let fork = tone.fork_fresh();
-/// tone.freq.store(Hz::new(880.0));
-/// assert_eq!(fork.freq.load(), Hz::new(440.0));
-/// assert_eq!(fork.phase, 0.0);
-/// ```
-///
 /// # Settings
 ///
 /// A value that is one word by its encoding (a mode: a fieldless enum written
@@ -578,75 +479,6 @@ macro_rules! declare_params {
         settings $cfg:ident { $($set:tt)* }) => {
         $crate::declare_params!([$($g)*] $ty, $n { $($rows)* });
         $crate::declare_params!([$($g)*] $ty, settings $cfg { $($set)* });
-    };
-
-    // A node's rows and the node impls they give it: a generic node, whose
-    // generics are its float's, or a plain one with its own.
-    ([$($g:tt)*] $ty:ty, $n:ident { $($rows:tt)* } nodes $f:ident) => {
-        $crate::declare_params!([$($g)*] $ty, $n { $($rows)* });
-        $crate::declare_params!(@nodes [$($g)*] $ty, $n { $($rows)* } $f);
-    };
-    ([$($g:tt)*] $ty:ty, $n:ident { $($rows:tt)* } nodes [$($pg:tt)*] $f:ident) => {
-        $crate::declare_params!([$($g)*] $ty, $n { $($rows)* });
-        $crate::declare_params!(@nodes [$($pg)*] $ty, $n { $($rows)* } $f);
-    };
-
-    // The node impls: a param set over the rows, and a fork that detaches each row's cell.
-    (@nodes [$($pg:tt)*] $ty:ty, $n:ident { $($rows:tt)* } $f:ident) => {
-        impl<$($pg)*> $crate::ParamNode<$f> for $ty {
-            fn param_set(&self) -> $crate::ParamSet {
-                self.declared_set()
-            }
-
-            fn fork_fresh(&self) -> Self {
-                let mut fork = ::std::clone::Clone::clone(self);
-                {
-                    let $n = &mut fork;
-                    $crate::declare_params!(@detach $n []; $($rows)*);
-                }
-                $crate::Node::<$f>::reset(&mut fork);
-                fork
-            }
-        }
-
-        impl<$($pg)*> $crate::IntoNode<$f> for $ty {
-            type Controls = $crate::ParamSet;
-
-            fn into_parts(self) -> $crate::NodeParts<$crate::ParamSet, $f> {
-                $crate::param_parts(self)
-            }
-        }
-    };
-
-    // The detach walk: each row's cell is a `&place`, which it detaches.
-    (@detach $n:ident [$($i:ident)?];) => {};
-    (@detach $n:ident [$($i:ident)?]; ; $($rest:tt)*) => {
-        $crate::declare_params!(@detach $n [$($i)?]; $($rest)*);
-    };
-    (@detach $n:ident [];
-        [$i:ident in $range:expr] { $($body:tt)* } $(, $($rest:tt)*)?) => {
-        for $i in $range {
-            $crate::declare_params!(@detach $n [$i]; $($body)*);
-        }
-        $crate::declare_params!(@detach $n []; $($($rest)*)?);
-    };
-    (@detach $n:ident [$($i:ident)?];
-        $kind:ident => $unit:ty = & $place:expr $(, $($rest:tt)*)?) => {
-        $crate::__private::detach(&mut $place);
-        $crate::declare_params!(@detach $n [$($i)?]; $($($rest)*)?);
-    };
-    (@detach $n:ident [$($i:ident)?];
-        $kind:ident => $unit:ty = & $place:expr ; $($rest:tt)*) => {
-        $crate::__private::detach(&mut $place);
-        $crate::declare_params!(@detach $n [$($i)?]; $($rest)*);
-    };
-    (@detach $n:ident [$($i:ident)?];
-        $kind:ident => $unit:ty = $cell:expr $(, $($rest:tt)*)?) => {
-        compile_error!("a row of a `nodes` declaration names its cell as `&place`");
-    };
-    (@detach $n:ident [$($i:ident)?];
-        $kind:ident => $unit:ty = $cell:expr ; $($rest:tt)*) => {
-        compile_error!("a row of a `nodes` declaration names its cell as `&place`");
     };
 
     // A type with settings and no params.
