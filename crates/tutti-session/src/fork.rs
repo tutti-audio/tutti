@@ -94,7 +94,7 @@ impl<F: Float> PendingExport<F> {
             setup = setup.pool(pool);
         }
         if let Some(root) = self.root {
-            setup = setup.root(root);
+            setup = setup.main_output(root);
         }
         Ok(ForkedPair {
             editor,

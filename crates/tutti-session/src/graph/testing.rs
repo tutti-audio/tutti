@@ -245,7 +245,7 @@ impl<F: Float> AudioSide<F> {
             let inputs: Vec<&[F]> = (0..ins).map(|_| &zeros[..]).collect();
             let mut planes: Vec<Vec<F>> = vec![vec![F::ZERO; len]; outs];
             let mut slices: Vec<&mut [F]> = planes.iter_mut().map(|p| &mut p[..]).collect();
-            let fade = exec.root_fade();
+            let fade = exec.main_output_fade();
             if exec.plan().is_some() {
                 exec.process(len, &self.transport, &inputs, &mut slices);
             }

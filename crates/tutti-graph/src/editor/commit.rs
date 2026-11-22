@@ -17,7 +17,7 @@ use crate::param::ParamState;
 use crate::plan::{Delta, Placement, Plan};
 use crate::spec::{GraphSpec, ValidGraph};
 use crate::{Edge, EdgeId, PortSink, PortSource};
-use crate::{Fade, NodeKey, RootBank};
+use crate::{Fade, MainOutputBank, NodeKey};
 use tutti_units::Amplitude;
 
 /// A node whose audio wiring changed in a commit: a port gained its first
@@ -110,7 +110,7 @@ impl<F: Float> Editor<F> {
     /// [`commit`](Self::commit): the refusals that depend on the spec alone,
     /// checked now and without sending anything or changing the editor.
     ///
-    /// It checks, in order, the [`Limits`](crate::Limits) on the root's width, that every
+    /// It checks, in order, the [`Limits`](crate::Limits) on the main output's width, that every
     /// open tap and meter still fits the reader opened for it, that every
     /// node that may be bypassed or mixed has a dry path, and that the spec
     /// lowers (its bus edges) and validates as a graph. It does not look at
@@ -132,13 +132,13 @@ impl<F: Float> Editor<F> {
         Self::lower_and_validate(&self.spec, &self.shapes).map(|_| ())
     }
 
-    /// Refuses a root generation the attached host has no folds for.
-    fn check_root_published(&self) -> Result<(), CommitError> {
+    /// Refuses a main output generation the attached host has no folds for.
+    fn check_main_output_published(&self) -> Result<(), CommitError> {
         let outputs = self.spec.topology.outputs.len();
-        match &self.root_gate {
-            Some(gate) if outputs > 0 && !gate.published(self.spec.root_id, outputs) => {
-                Err(CommitError::RootNotPublished {
-                    root: self.spec.root_id,
+        match &self.main_output_gate {
+            Some(gate) if outputs > 0 && !gate.published(self.spec.main_output_id, outputs) => {
+                Err(CommitError::MainOutputNotPublished {
+                    main_output: self.spec.main_output_id,
                     outputs,
                 })
             }
@@ -150,7 +150,7 @@ impl<F: Float> Editor<F> {
     /// lowered: what [`commit`](Self::commit) asks even when nothing changed.
     fn check_spec(&self) -> Result<(), CommitError> {
         self.limits.outputs(self.spec.topology.outputs.len())?;
-        self.check_root_published()?;
+        self.check_main_output_published()?;
         self.check_tap_widths()?;
         self.check_meter_widths()?;
         self.check_passes()
@@ -211,8 +211,8 @@ impl<F: Float> Editor<F> {
             && !self.taps.has_pending()
             && !self.event_taps.has_pending()
             && !self.meters.has_pending()
-            // A plan whose root crossfade has ended is compiled again without
-            // the old root's channels.
+            // A plan whose main output crossfade has ended is compiled again without
+            // the old main output's channels.
             && !self.bank.is_some_and(|b| b.ended)
             && self
                 .life
@@ -237,7 +237,7 @@ impl<F: Float> Editor<F> {
             self.base().map(|p| &**p),
         )
         .map_err(CommitError::Compile)?;
-        plan.root_id = self.spec.root_id;
+        plan.main_output_id = self.spec.main_output_id;
         // The crossfades `replace` asked for, for the keys this delta
         // replaces (a key removed since has none to carry).
         delta.fades = delta
@@ -292,46 +292,46 @@ impl<F: Float> Editor<F> {
         Ok(rewired)
     }
 
-    /// How a commit that changes the root's generation trades the old root
-    /// for the new: the old root's channels are rendered beside the new root's
-    /// for the `fade`'s length, and the host folds each with its own root's
-    /// fold and mixes them by the fade's gains ([`RootBank`]).
+    /// How a commit that changes the main output's generation trades the old main output
+    /// for the new: the old main output's channels are rendered beside the new main output's
+    /// for the `fade`'s length, and the host folds each with its own main output's
+    /// fold and mixes them by the fade's gains ([`MainOutputBank`]).
     /// `None` (the default) cuts at the commit's block, as does a zero
-    /// duration. Read when a commit that changes the root is compiled.
+    /// duration. Read when a commit that changes the main output is compiled.
     ///
     /// A crossfade is one fade of one law and length, counted from the block
     /// that applies the commit that began it:
     ///
-    /// - A commit that leaves the root's generation alone continues it: the
-    ///   frames already rendered stay counted, and the old root's channels
+    /// - A commit that leaves the main output's generation alone continues it: the
+    ///   frames already rendered stay counted, and the old main output's channels
     ///   keep the wiring they had when the fade began, less the sources
     ///   removed since.
-    /// - A commit that declares the root again ends it at that block and
-    ///   begins another, of the fade set now, from the root that was fading
-    ///   in (at full level) to the newest: the root that was fading out is
-    ///   dropped, as a plan holds two roots at most. That is two steps of
-    ///   `1 - g`, `g` the dropped root's gain at the block: a caller that
-    ///   wants no step declares the new root after [`finish_fades`](Self::finish_fades)
+    /// - A commit that declares the main output again ends it at that block and
+    ///   begins another, of the fade set now, from the main output that was fading
+    ///   in (at full level) to the newest: the main output that was fading out is
+    ///   dropped, as a plan holds two main outputs at most. That is two steps of
+    ///   `1 - g`, `g` the dropped main output's gain at the block: a caller that
+    ///   wants no step declares the new main output after [`finish_fades`](Self::finish_fades)
     ///   reports the running fade over (the session does).
-    /// - A commit that changes the root's width without declaring it again
-    ///   ends the crossfade running as a cut: the old root's channels cannot
-    ///   stand beside a root of another width.
+    /// - A commit that changes the main output's width without declaring it again
+    ///   ends the crossfade running as a cut: the old main output's channels cannot
+    ///   stand beside a main output of another width.
     ///
     /// While a crossfade runs the editor holds a clone of the committed spec
-    /// and shapes, the old root's wiring, until it ends.
-    pub fn set_root_fade(&mut self, fade: Option<Fade>) {
-        self.root_fade = fade.filter(|f| !f.is_cut());
+    /// and shapes, the old main output's wiring, until it ends.
+    pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
+        self.main_output_fade = fade.filter(|f| !f.is_cut());
     }
 
-    /// The fade a root change takes ([`set_root_fade`](Self::set_root_fade)).
-    pub fn root_fade(&self) -> Option<Fade> {
-        self.root_fade
+    /// The fade a main output change takes ([`set_main_output_fade`](Self::set_main_output_fade)).
+    pub fn main_output_fade(&self) -> Option<Fade> {
+        self.main_output_fade
     }
 
     /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
-    /// does, and, when this commit changes the root's generation and a root
-    /// fade is set, with the previous root's output channels after the new
-    /// root's: the old root's wiring as it was committed, over the nodes that
+    /// does, and, when this commit changes the main output's generation and a main output
+    /// fade is set, with the previous main output's output channels after the new
+    /// main output's: the old main output's wiring as it was committed, over the nodes that
     /// are still here. Its lanes are static at the weights they had.
     fn lower_with_bank(&self) -> Result<(ValidGraph, BusLanes, Option<Fading>), CommitError> {
         let plain = || {
@@ -339,17 +339,19 @@ impl<F: Float> Editor<F> {
                 .map(|(valid, lanes)| (valid, lanes, None))
         };
         let committed = self.life.committed();
-        // The crossfade running, when this commit leaves its root alone and
+        // The crossfade running, when this commit leaves its main output alone and
         // its channels stand.
         let continuing = self.fading.as_ref().filter(|f| {
-            f.root == self.spec.root_id
-                && committed.is_some_and(|c| c.spec.root_id == self.spec.root_id)
+            f.main_output == self.spec.main_output_id
+                && committed.is_some_and(|c| c.spec.main_output_id == self.spec.main_output_id)
                 && !self.bank.is_some_and(|b| b.ended)
                 && f.bank.base == self.spec.topology.outputs.len()
         });
-        let (fade, was, published) = match (continuing, self.root_fade, committed) {
+        let (fade, was, published) = match (continuing, self.main_output_fade, committed) {
             (Some(f), _, _) => (f.bank.fade, &f.was, true),
-            (None, Some(fade), Some(c)) if c.spec.root_id != self.spec.root_id => (fade, c, false),
+            (None, Some(fade), Some(c)) if c.spec.main_output_id != self.spec.main_output_id => {
+                (fade, c, false)
+            }
             _ => return plain(),
         };
         let lower = |spec: &GraphSpec, shapes: &Shapes| {
@@ -362,9 +364,9 @@ impl<F: Float> Editor<F> {
         let old_width = before.spec.topology.outputs.len();
         let published = published
             || self
-                .root_gate
+                .main_output_gate
                 .as_ref()
-                .is_none_or(|gate| gate.published(was.spec.root_id, old_width));
+                .is_none_or(|gate| gate.published(was.spec.main_output_id, old_width));
         if base == 0 || old_width == 0 || !published {
             let valid = now.spec.validate().map_err(CommitError::Invalid)?;
             return Ok((valid, now.weights(), None));
@@ -415,17 +417,21 @@ impl<F: Float> Editor<F> {
         if !kept {
             return Ok((valid, now.weights(), None));
         }
-        let bank = RootBank {
-            old: was.spec.root_id,
+        let bank = MainOutputBank {
+            old: was.spec.main_output_id,
             base,
             fade,
         };
         let fading = Fading {
             was: was.clone(),
-            root: self.spec.root_id,
+            main_output: self.spec.main_output_id,
             bank,
         };
-        Ok((valid.with_root_bank(bank), now.weights(), Some(fading)))
+        Ok((
+            valid.with_main_output_bank(bank),
+            now.weights(),
+            Some(fading),
+        ))
     }
 
     /// Sends a plan compiled elsewhere — against [`base`](Self::base) — with
@@ -480,14 +486,14 @@ impl<F: Float> Editor<F> {
         // A plan that carries the crossfade the last one carried continues
         // it: the executor keeps its progress, and it ends under the seq that
         // began it.
-        self.bank = plan.root_bank().map(|bank| {
-            let (old, root) = (bank.old, plan.root_id());
+        self.bank = plan.main_output_bank().map(|bank| {
+            let (old, main_output) = (bank.old, plan.main_output_id());
             self.bank
-                .filter(|b| !b.ended && b.old == old && b.root == root)
+                .filter(|b| !b.ended && b.old == old && b.main_output == main_output)
                 .unwrap_or(SentBank {
                     seq: self.link.next_seq(),
                     old,
-                    root,
+                    main_output,
                     ended: false,
                 })
         });

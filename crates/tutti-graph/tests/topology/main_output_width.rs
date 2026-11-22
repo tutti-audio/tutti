@@ -4,7 +4,7 @@
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_buffers::{Float, FoldError};
-use tutti_graph::{RootError, fold_to_width};
+use tutti_graph::{MainOutputError, fold_to_width};
 
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 
@@ -133,13 +133,13 @@ fn a_zero_width_at_either_end_is_refused() {
 }
 
 #[test]
-fn a_root_error_says_what_was_refused() {
-    let wide = RootError::Width {
+fn a_main_output_error_says_what_was_refused() {
+    let wide = MainOutputError::Width {
         declared: ChannelLayout::QUAD,
         requested: width(5),
     };
     assert!(wide.to_string().contains("declared"));
-    let folded = RootError::from(FoldError::Unplaced {
+    let folded = MainOutputError::from(FoldError::Unplaced {
         channel: 2,
         speaker: Speaker::Unassigned,
     });

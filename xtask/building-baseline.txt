@@ -109,8 +109,8 @@ tutti-graph  setter  crates/tutti-graph/src/builder.rs::Renderer::set_transport
 tutti-graph  setter  crates/tutti-graph/src/builder.rs::Renderer::set_transport_fn
 tutti-graph  setter  crates/tutti-graph/src/bus_edge.rs::GraphSpec::set_bus_fade
 tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_limits
-tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_root_gate
-tutti-graph  setter  crates/tutti-graph/src/editor/commit.rs::Editor::set_root_fade
+tutti-graph  setter  crates/tutti-graph/src/editor.rs::Editor::set_main_output_gate
+tutti-graph  setter  crates/tutti-graph/src/editor/commit.rs::Editor::set_main_output_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_bus_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_edge_fade
 tutti-graph  setter  crates/tutti-graph/src/editor/controls.rs::Editor::set_edge_gain

@@ -5,7 +5,7 @@
 //!
 //! - a graph rendered through `Engine` is the graph rendered by its executor
 //!   directly, bit for bit;
-//! - the engine folds a root to the device width by position (`Fold`), and its
+//! - the engine folds a main output to the device width by position (`Fold`), and its
 //!   declick is the smootherstep fade it is specified to be;
 //! - a transport command at `At::Frame` / `At::Beat` lands on its frame in a
 //!   graph node's `Env`;
@@ -240,7 +240,7 @@ fn graph_engine_render_is_bit_identical_to_the_executor() {
     assert_eq!(ch1_at(420 + 512), 512.0);
 }
 
-/// The engine folds a root to the device width, and its declick is a
+/// The engine folds a main output to the device width, and its declick is a
 /// smootherstep fade: the same source (`Surround`), stereo and
 /// 5.1, to stereo and 5.1 devices, rolling and then stopped with a declick
 /// mid-run.

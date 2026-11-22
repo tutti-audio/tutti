@@ -18,7 +18,7 @@
 //!   that carries it, rescaling its frame clock and every scheduled
 //!   `At::Frame` transport command to the same wall-clock time;
 //! - the graph root, widened to a wider device as the build widens it
-//!   ([`root_width`](crate::root_width)), never narrowed;
+//!   ([`main_output_width`](crate::main_output_width)), never narrowed;
 //! - the transport's rate, the hardware MIDI input's timestamp rate, the
 //!   session's disk streamer (every open stream's conversion ratio) and,
 //!   through the re-prepare, the MIDI sync node;
@@ -910,14 +910,18 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // root by the build's rule.
         let policy = self.output.policy.current();
         let mapped = policy.map.targets().is_some();
-        let root = self.graph.root_topology().cloned().unwrap_or_else(|| {
-            let width = if mapped {
-                self.graph.outputs()
-            } else {
-                crate::root_width(ChannelLayout::clamped(self.graph.outputs()), channels)
-            };
-            ChannelTopology::default_for(ChannelLayout::clamped(width))
-        });
+        let root = self
+            .graph
+            .main_output_topology()
+            .cloned()
+            .unwrap_or_else(|| {
+                let width = if mapped {
+                    self.graph.outputs()
+                } else {
+                    crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), channels)
+                };
+                ChannelTopology::default_for(ChannelLayout::clamped(width))
+            });
         // The policy in force has to place the root on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
@@ -926,7 +930,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
             .fold::<C::Float>(&root, &placed)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
-                    root: self.graph.root_id(),
+                    root: self.graph.main_output_id(),
                     width: root.width(),
                     device: channels,
                     source,
@@ -997,8 +1001,9 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // A declared root keeps the width it declared: the device is no floor
         // under it.
         let mapped = self.output.policy.current().map.targets().is_some();
-        let width = crate::root_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
-        if self.graph.root_topology().is_none() && !mapped && width > self.graph.outputs() {
+        let width =
+            crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), spec.channels);
+        if self.graph.main_output_topology().is_none() && !mapped && width > self.graph.outputs() {
             // Undeclared, so it cannot be refused.
             let widened = self.graph.widen_outputs(width);
             debug_assert!(widened.is_ok());

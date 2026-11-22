@@ -97,12 +97,12 @@ use tutti_buffers::MAX_CHANNELS;
 use tutti_units::Amplitude;
 pub use unwired::{Inserted, Unwired};
 
-/// The host's side of a root generation: whether it has published the folds
-/// for `root` at `outputs` channels ([`Editor::set_root_gate`]).
-pub trait RootGate: Send + Sync {
-    /// Whether a plan of generation `root` with `outputs` global outputs has
+/// The host's side of a main output generation: whether it has published the folds
+/// for `main_output` at `outputs` channels ([`Editor::set_main_output_gate`]).
+pub trait MainOutputGate: Send + Sync {
+    /// Whether a plan of generation `main_output` with `outputs` global outputs has
     /// its folds. A graph with no outputs has nothing to fold.
-    fn published(&self, root: crate::RootId, outputs: usize) -> bool;
+    fn published(&self, main_output: crate::MainOutputId, outputs: usize) -> bool;
 }
 
 /// What the host that runs an [`Executor`] can take, enforced by its
@@ -240,9 +240,9 @@ pub struct Editor<F: Float = f32> {
     life: Lifecycle<F>,
     /// What the executor's host can take.
     limits: Limits,
-    /// The host that folds the root into a device, once one is attached: a
-    /// commit whose root it has no folds for is refused.
-    root_gate: Option<std::sync::Arc<dyn RootGate>>,
+    /// The host that folds the main output into a device, once one is attached: a
+    /// commit whose main output it has no folds for is refused.
+    main_output_gate: Option<std::sync::Arc<dyn MainOutputGate>>,
     /// Events per event slot per block, as the executor was built with: a
     /// fork gets the same.
     event_capacity: usize,
@@ -261,13 +261,13 @@ pub struct Editor<F: Float = f32> {
     /// What the executor will hold once the commits sent are applied: the
     /// bounds each commit's state is built from.
     stager: Stager,
-    /// How a commit that changes the root's generation trades the old root
-    /// for the new ([`set_root_fade`](Self::set_root_fade)); `None` cuts.
-    root_fade: Option<Fade>,
-    /// The commit sent last that carries an old root's channels, until a
+    /// How a commit that changes the main output's generation trades the old main output
+    /// for the new ([`set_main_output_fade`](Self::set_main_output_fade)); `None` cuts.
+    main_output_fade: Option<Fade>,
+    /// The commit sent last that carries an old main output's channels, until a
     /// commit without them follows.
     bank: Option<SentBank>,
-    /// The old root a crossfading plan renders, kept for the commits that
+    /// The old main output a crossfading plan renders, kept for the commits that
     /// continue the crossfade.
     fading: Option<Fading>,
     /// Where each tap this editor opens takes its bell
@@ -275,29 +275,29 @@ pub struct Editor<F: Float = f32> {
     bells: Option<tutti_rt::BellsHandle>,
 }
 
-/// The old root of a crossfade in progress, as the commit that began it
+/// The old main output of a crossfade in progress, as the commit that began it
 /// found it: what each commit while the crossfade runs compiles the bank from.
 /// It holds a clone of the committed spec and shapes until the crossfade ends.
 #[derive(Clone)]
 struct Fading {
-    /// The old root's spec and shapes.
+    /// The old main output's spec and shapes.
     was: lifecycle::Committed,
-    /// The root generation that fades in.
-    root: crate::RootId,
+    /// The main output generation that fades in.
+    main_output: crate::MainOutputId,
     /// The bank the plans carry.
-    bank: crate::RootBank,
+    bank: crate::MainOutputBank,
 }
 
-/// A commit sent with an old root's channels beside the root's own.
+/// A commit sent with an old main output's channels beside the main output's own.
 #[derive(Clone, Copy, Debug)]
 struct SentBank {
     /// Its `seq`, or that of the commit that began the crossfade it
     /// continues.
     seq: u64,
-    /// The root that fades out.
-    old: crate::RootId,
-    /// The root that fades in.
-    root: crate::RootId,
+    /// The main output that fades out.
+    old: crate::MainOutputId,
+    /// The main output that fades in.
+    main_output: crate::MainOutputId,
     /// Whether the executor has rendered its crossfade through.
     ended: bool,
 }
@@ -380,13 +380,13 @@ impl<F: Float> Editor<F> {
             meters: Outlets::new(),
             life: Lifecycle::Unplanned,
             limits: Limits::NONE,
-            root_gate: None,
+            main_output_gate: None,
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
             revision: 0,
             stager,
-            root_fade: None,
+            main_output_fade: None,
             bank: None,
             fading: None,
             bells: None,
@@ -439,14 +439,14 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// Attaches the host that folds the root into a device: from now on a
-    /// commit whose [`GraphSpec::root_id`] the gate has not published folds
+    /// Attaches the host that folds the main output into a device: from now on a
+    /// commit whose [`GraphSpec::main_output_id`] the gate has not published folds
     /// for, at the spec's width, is refused
-    /// ([`CommitError::RootNotPublished`]), so a root id the host never heard
+    /// ([`CommitError::MainOutputNotPublished`]), so a main output id the host never heard
     /// of cannot reach the executor and render silence. The gate stays; a
     /// second call replaces it.
-    pub fn set_root_gate(&mut self, gate: std::sync::Arc<dyn RootGate>) {
-        self.root_gate = Some(gate);
+    pub fn set_main_output_gate(&mut self, gate: std::sync::Arc<dyn MainOutputGate>) {
+        self.main_output_gate = Some(gate);
     }
 
     /// What this editor was bounded to with [`set_limits`](Self::set_limits).
@@ -583,31 +583,31 @@ impl<F: Float> Editor<F> {
         self.spec.disconnect_bus(from, to)
     }
 
-    /// Declares the bus edge `from -> root`: the output bus `from` feeds the
-    /// graph's outputs, folded to the declared root topology
-    /// ([`GraphSpec::root`]). Checked here, as [`connect_bus`](Self::connect_bus)
-    /// is, and nothing is stored on a failure. An undeclared root refuses it.
+    /// Declares the bus edge `from -> main_output`: the output bus `from` feeds the
+    /// graph's outputs, folded to the declared main output topology
+    /// ([`GraphSpec::main_output`]). Checked here, as [`connect_bus`](Self::connect_bus)
+    /// is, and nothing is stored on a failure. An undeclared main output refuses it.
     ///
     /// # Errors
     ///
-    /// [`BusError::RootUndeclared`], [`BusError::NoSuchNode`],
+    /// [`BusError::MainOutputUndeclared`], [`BusError::NoSuchNode`],
     /// [`BusError::NoSuchBus`], [`BusError::GlobalTooWide`],
-    /// [`BusError::RootFold`], and [`BusError::Overlaps`] /
+    /// [`BusError::MainOutputFold`], and [`BusError::Overlaps`] /
     /// [`BusError::GainOnLane`] when a lane lands on an output source or a
     /// gain the spec already has.
-    pub fn connect_bus_to_root(&mut self, from: BusSource) -> Result<(), BusError> {
+    pub fn connect_bus_to_main_output(&mut self, from: BusSource) -> Result<(), BusError> {
         self.spec
-            .check_root_bus_edge(&self.shapes, from, BusFold::Speakers)?;
+            .check_main_output_bus_edge(&self.shapes, from, BusFold::Speakers)?;
         self.touch();
-        self.spec.connect_bus_to_root(from);
+        self.spec.connect_bus_to_main_output(from);
         Ok(())
     }
 
-    /// Removes the bus edge `from -> root`, its lanes with it. Returns
+    /// Removes the bus edge `from -> main_output`, its lanes with it. Returns
     /// whether it was declared.
-    pub fn disconnect_bus_from_root(&mut self, from: BusSource) -> bool {
+    pub fn disconnect_bus_from_main_output(&mut self, from: BusSource) -> bool {
         self.touch();
-        self.spec.disconnect_bus_from_root(from)
+        self.spec.disconnect_bus_from_main_output(from)
     }
 
     /// The spec with its bus edges lowered against the shapes as they stand:

@@ -311,7 +311,7 @@ fn stereo_block(s: &mut Session) -> [Vec<f32>; 2] {
 
 /// A 5.1 source (FL .5, FR .25, C .125, LFE 0, Ls .0625, Rs .03125) and a
 /// declared stereo root, committed once.
-fn root_rig() -> (Session, NodeKey) {
+fn main_output_rig() -> (Session, NodeKey) {
     let mut s = offline();
     s.declare_root_topology(Some(smpte(2))).expect("stereo");
     let src = s.graph().add(Unforkable(Src {
@@ -328,7 +328,7 @@ fn root_rig() -> (Session, NodeKey) {
 /// marked edited both ways.
 #[test]
 fn a_bus_into_the_declared_root_renders_the_itu_rows() {
-    let (mut s, src) = root_rig();
+    let (mut s, src) = main_output_rig();
     let g = s.graph();
     g.connect(BusSource::Node(bus(src)), MainOutput)
         .expect("5.1 folds to stereo")
@@ -372,7 +372,7 @@ fn an_undeclared_root_refuses_a_bus_edge() {
     let g = r.s.graph();
     assert_eq!(
         g.connect(BusSource::Node(bus(r.stereo)), MainOutput).err(),
-        Some(ConnectError::Bus(BusError::RootUndeclared))
+        Some(ConnectError::Bus(BusError::MainOutputUndeclared))
     );
     assert!(!g.has_uncommitted_edits());
     assert!(g.bus_sources(MainOutput).unwrap().is_empty());

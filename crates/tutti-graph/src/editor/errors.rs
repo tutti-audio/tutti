@@ -72,31 +72,31 @@ pub enum CommitError {
         /// The host's limit.
         limit: usize,
     },
-    /// The spec's root generation has no folds at its width: the host that
-    /// folds the root into a device was never told of `root`
-    /// ([`Editor::set_root_gate`](crate::Editor::set_root_gate)). Nothing was
+    /// The spec's main output generation has no folds at its width: the host that
+    /// folds the main output into a device was never told of `main_output`
+    /// ([`Editor::set_main_output_gate`](crate::Editor::set_main_output_gate)). Nothing was
     /// sent, and the last plan goes on sounding.
     ///
-    /// **Recovery:** publish the root's folds with the host, then commit.
-    #[error("root {root} has no folds at {outputs} channels")]
-    RootNotPublished {
-        /// The root generation the spec carries.
-        root: crate::RootId,
+    /// **Recovery:** publish the main output's folds with the host, then commit.
+    #[error("main output {main_output} has no folds at {outputs} channels")]
+    MainOutputNotPublished {
+        /// The main output generation the spec carries.
+        main_output: crate::MainOutputId,
         /// The plan's global outputs.
         outputs: usize,
     },
-    /// The root has no fold into the device it renders to: `root` at `width`
-    /// channels has no place on the `device` ([`RootId`](crate::RootId), and a
+    /// The main output has no fold into the device it renders to: `main_output` at `width`
+    /// channels has no place on the `device` ([`MainOutputId`](crate::MainOutputId), and a
     /// device has no order for, or a declaration it cannot take). Nothing was
     /// sent, and the last plan goes on sounding. Raised by the host that owns
     /// the device, not by the editor.
     ///
-    /// **Recovery:** declare a root the device can place, or widen the
+    /// **Recovery:** declare a main output the device can place, or widen the
     /// device.
-    #[error("root {root} at {width} channels has no place on a {device:?} device")]
+    #[error("main output {main_output} at {width} channels has no place on a {device:?} device")]
     Unplaceable {
-        /// The root generation the spec carries.
-        root: crate::RootId,
+        /// The main output generation the spec carries.
+        main_output: crate::MainOutputId,
         /// The plan's global outputs.
         width: usize,
         /// The device's channels.
