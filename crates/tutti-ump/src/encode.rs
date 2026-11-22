@@ -528,7 +528,7 @@ fn stream(s: Stream) -> [u32; 4] {
                     | direction,
                 (u32::from(i.first_group.raw(FirstGroup::get)) << 24)
                     | (u32::from(i.groups_spanned.raw(GroupSpan::get)) << 16)
-                    | (u32::from(i.midi_ci_version) << 8)
+                    | (u32::from(crate::ci_version::raw(i.midi_ci_version)) << 8)
                     | u32::from(i.max_sysex8_streams.get()),
                 0,
                 0,

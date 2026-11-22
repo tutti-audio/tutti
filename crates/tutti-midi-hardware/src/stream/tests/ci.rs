@@ -11,7 +11,9 @@ use tutti_midi_ci::{
     MaxSysexSize,
 };
 use tutti_midi_device::INQUIRY_TIMEOUT;
-use tutti_ump::{MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, Sysex8StreamCount, U7};
+use tutti_ump::{
+    CiVersion, MidiGroup, MpeChannels, MpeOverlap, MpeZoneSpan, Sysex8StreamCount, U7,
+};
 
 pub(super) const GROUP_0: MidiGroup = MidiGroup::of(0);
 
@@ -64,7 +66,7 @@ fn ci_block(id: u8, first_group: u8, version: u8) -> FunctionBlock {
         FirstGroup::new(first_group).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(version, Sysex8StreamCount::new(0))
+    .midi_ci(CiVersion::new(version), Sysex8StreamCount::new(0))
     .name(BlockName::new("B").unwrap())
     .build()
     .unwrap()
@@ -673,7 +675,7 @@ fn block_info(wire: &Wire, id: u8, first_group: u8, version: u8, ms: u64) {
             midi1: tutti_ump::Midi1Port::No,
             first_group: FirstGroup::new(first_group).unwrap().into(),
             groups_spanned: GroupSpan::new(1).unwrap().into(),
-            midi_ci_version: version,
+            midi_ci_version: CiVersion::new(version).map(Into::into),
             max_sysex8_streams: Sysex8StreamCount::new(0),
         }),
         ms,

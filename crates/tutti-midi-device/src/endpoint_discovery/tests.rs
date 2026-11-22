@@ -3,9 +3,9 @@ use tutti_platform::Instant;
 
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    BlockDirection, DeviceIdentity, FirstGroup, Form, FunctionBlockCount, FunctionBlockId,
-    FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision, Stream,
-    StreamConfig, Sysex8StreamCount, U7, UiHint, Ump,
+    BlockDirection, CiVersion, DeviceIdentity, FirstGroup, Form, FunctionBlockCount,
+    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port, Protocol, SoftwareRevision,
+    Stream, StreamConfig, Sysex8StreamCount, U7, UiHint, Ump,
 };
 
 use super::*;
@@ -70,7 +70,7 @@ fn device() -> Endpoint {
         .block(block(0, 0, 1, "Keys").build().unwrap())
         .block(
             block(1, 1, 2, "A function block name past thirteen bytes")
-                .midi_ci(2, Sysex8StreamCount::new(2))
+                .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(2))
                 .build()
                 .unwrap(),
         )
@@ -162,7 +162,7 @@ fn the_happy_path_reaches_midi2_with_jr() {
             .function_block(id(1))
             .unwrap()
             .midi_ci_version(),
-        2
+        Some(CiVersion::of(2))
     );
 }
 
@@ -500,7 +500,7 @@ fn info_of(n: u8) -> Message {
         midi1: Midi1Port::No,
         first_group: FirstGroup::new(n).unwrap().into(),
         groups_spanned: GroupSpan::new(1).unwrap().into(),
-        midi_ci_version: 0,
+        midi_ci_version: None,
         max_sysex8_streams: Sysex8StreamCount::new(0),
     }))
 }

@@ -9,10 +9,10 @@ use tutti_coremidi_ffi::{
 };
 use tutti_platform::{Instant, MainThreadMarker};
 use tutti_ump::{
-    BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockInfo,
-    FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port, OsFunctionBlock,
-    ProductInstanceId, Protocol, SoftwareRevision, Sysex8StreamCount, U7, UiHint, Ump, Utility,
-    read_function_block,
+    BlockDirection, CiVersion, DeviceIdentity, Field, FirstGroup, FunctionBlockCount,
+    FunctionBlockInfo, FunctionBlocks, GroupSpan, ManufacturerId, Message, Midi1Port,
+    OsFunctionBlock, ProductInstanceId, Protocol, SoftwareRevision, Sysex8StreamCount, U7, UiHint,
+    Ump, Utility, read_function_block,
 };
 
 const KEYS: &str = "tutti-ffi-test Keys";
@@ -243,7 +243,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         refused.err(),
         Some(Error::Block(BlockRefusal::MidiCiVersion {
             id: 0,
-            version: 2
+            version: Field::Value(CiVersion::of(2))
         }))
     );
 }

@@ -23,7 +23,7 @@ use tutti_session::{
     ListedResource, MidiInput, PeFailure, PeerError, PeerEvent, PeerResourceId, Presence,
     Resource as _, ResourceFact, Session, SessionEvent, Subscription, SubscriptionCause,
 };
-use tutti_ump::{DeviceIdentity, ManufacturerId, MidiGroup, Sysex8StreamCount, U7, Ump};
+use tutti_ump::{CiVersion, DeviceIdentity, ManufacturerId, MidiGroup, Sysex8StreamCount, U7, Ump};
 
 use crate::common::{blocks, play};
 use crate::midi::{connect, hot_plug_session_ci, plug, polled, update_at};
@@ -70,7 +70,7 @@ impl PePeer {
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
-        .midi_ci(2, Sysex8StreamCount::new(0))
+        .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
         .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();

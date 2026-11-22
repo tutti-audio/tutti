@@ -30,7 +30,7 @@ use tutti_ump::MidiGroup;
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::Ump;
 #[cfg(feature = "midi-hardware")]
-use tutti_ump::{MessageType, Sysex8StreamCount};
+use tutti_ump::{CiVersion, MessageType, Sysex8StreamCount};
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber, NoteVelocity};
 #[cfg(feature = "midi-hardware")]
 use tutti_ump::{MpeChannels, MpeZoneSpan};
@@ -1066,7 +1066,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, Sysex8StreamCount::new(0))
+    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
@@ -1221,7 +1221,7 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, Sysex8StreamCount::new(0))
+    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();
@@ -1501,7 +1501,7 @@ impl MpePeer {
             FirstGroup::new(0).unwrap(),
             GroupSpan::new(1).unwrap(),
         )
-        .midi_ci(2, Sysex8StreamCount::new(0))
+        .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
         .name(tutti_ump::BlockName::new("Main").unwrap())
         .build()
         .unwrap();
@@ -1926,7 +1926,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, Sysex8StreamCount::new(0))
+    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(0))
     .name(BlockName::new("Main").unwrap())
     .build()
     .unwrap();

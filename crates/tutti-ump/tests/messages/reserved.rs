@@ -702,7 +702,7 @@ fn a_constructed_message_encodes_no_reserved_value() {
                     midi1,
                     first_group: FirstGroup::of(0).into(),
                     groups_spanned: GroupSpan::of(1).into(),
-                    midi_ci_version: 0,
+                    midi_ci_version: None,
                     max_sysex8_streams: Sysex8StreamCount::new(0),
                 },
             )));

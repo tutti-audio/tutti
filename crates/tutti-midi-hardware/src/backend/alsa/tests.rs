@@ -1181,7 +1181,7 @@ fn plug_ump(name: &str, protocol: Protocol) -> Virtual {
                     midi1: Midi1Port::No,
                     first_group: Field::Value(FirstGroup::of(2)),
                     groups_spanned: Field::Value(GroupSpan::of(2)),
-                    midi_ci_version: 0,
+                    midi_ci_version: None,
                     max_sysex8_streams: Sysex8StreamCount::new(0),
                 },
                 name: Some("Keys".into()),

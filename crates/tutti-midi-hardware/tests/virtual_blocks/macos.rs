@@ -11,8 +11,8 @@ use tutti_midi_hardware::{
 use tutti_midi_runtime::InputInlets;
 use tutti_platform::{Executor, MainThreadMarker};
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port, Sysex8StreamCount, UiHint,
-    Ump,
+    BlockDirection, CiVersion, Field, FirstGroup, FunctionBlockId, GroupSpan, Midi1Port,
+    Sysex8StreamCount, UiHint, Ump,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -183,7 +183,7 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
         FirstGroup::new(0).unwrap(),
         GroupSpan::new(1).unwrap(),
     )
-    .midi_ci(2, Sysex8StreamCount::new(1))
+    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(1))
     .build()
     .unwrap();
     let spec = VirtualSpec::new(
@@ -206,7 +206,10 @@ pub fn a_block_declaring_a_midi_ci_version_is_refused_by_name() {
     assert!(matches!(
         opening::open(&executor, &spec, producer, main_thread()),
         Err(MidiHardwareError::Os(Error::Block(
-            BlockRefusal::MidiCiVersion { id: 0, version: 2 }
+            BlockRefusal::MidiCiVersion {
+                id: 0,
+                version: Field::Value(CiVersion::of(2))
+            }
         )))
     ));
 }

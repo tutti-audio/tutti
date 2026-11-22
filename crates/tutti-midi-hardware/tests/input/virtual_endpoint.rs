@@ -21,8 +21,9 @@ use tutti_midi_hardware::{HardwareMidiInputs, VirtualEndpoint, VirtualProtocol, 
 use tutti_midi_runtime::InputInlets;
 use tutti_platform::MainThreadMarker;
 use tutti_ump::{
-    Bank, BlockDirection, CCNumber, FirstGroup, FunctionBlockId, GroupSpan, Message, MidiChannel,
-    ProductInstanceId, Protocol, Rpn, Sysex8StreamCount, U7, UiHint, Ump, Utility, Voice1,
+    Bank, BlockDirection, CCNumber, CiVersion, FirstGroup, FunctionBlockId, GroupSpan, Message,
+    MidiChannel, ProductInstanceId, Protocol, Rpn, Sysex8StreamCount, U7, UiHint, Ump, Utility,
+    Voice1,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -178,7 +179,7 @@ fn block() -> FunctionBlock {
         GroupSpan::new(2).unwrap(),
     )
     .ui_hint(UiHint::Receiver)
-    .midi_ci(2, Sysex8StreamCount::new(3))
+    .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(3))
     .name(BlockName::new("Pads").unwrap())
     .build()
     .unwrap()

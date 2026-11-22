@@ -36,7 +36,7 @@
 use std::vec::Vec;
 
 use tutti_ump::{
-    MidiChannel, MidiGroup, ProductInstanceId, Sysex7Packets, SysexError, U7, U28,
+    CiVersion, MidiChannel, MidiGroup, ProductInstanceId, Sysex7Packets, SysexError, U7, U28,
     UNIVERSAL_NON_REAL_TIME, Ump,
 };
 
@@ -207,19 +207,6 @@ pub fn is_set_profile_on(payload: &[u8]) -> bool {
 /// Changing the version a device sends is not a free edit (§5.3): the device
 /// must invalidate its MUID and start a new Discovery Transaction.
 pub const CI_VERSION: CiVersion = CiVersion::of(0x02);
-
-tutti_units::ranged! {
-    /// The Message Format Version byte (M2-101 §5.2.1, §5.3, §5.4): `0x01` to
-    /// `0x1F`.
-    ///
-    /// Version 1.1 is 0x01 and version 1.2 is 0x02. Bits 7 to 5 are reserved for
-    /// future major revisions, and a device that sees one set replies with a NAK
-    /// (error code 0x02), so a value with one set is not a version a message
-    /// carries; Message Format Version 0x00 is deprecated (§5.4).
-    #[derive(Eq, PartialOrd, Ord, Hash)]
-    CiVersion(u8), NotAVersion, "a MIDI-CI message format version (0x01 to 0x1F)",
-    |raw| raw != 0 && raw & 0xE0 == 0
-}
 
 /// The Device ID byte of a message (M2-101 §3.2 and Table 5): which Channel,
 /// Group or Function Block it is to or from.

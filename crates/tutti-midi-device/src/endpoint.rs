@@ -7,10 +7,10 @@
 //! [`EndpointDiscovery`](crate::EndpointDiscovery).
 
 use tutti_ump::{
-    BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
-    FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, Midi1Port,
-    Protocol, Stream, StreamConfig, Sysex8StreamCount, Sysex8StreamIds, UiHint, Ump, UmpVersion,
-    text_packets,
+    BlockDirection, BlockFilter, BlockSelect, CiVersion, DeviceIdentity, DiscoveryFilter,
+    FirstGroup, FunctionBlockCount, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message,
+    Midi1Port, Protocol, Stream, StreamConfig, Sysex8StreamCount, Sysex8StreamIds, UiHint, Ump,
+    UmpVersion, text_packets,
 };
 
 use tutti_ump::{BlockName, EndpointName, NameError, ProductInstanceId};
@@ -130,7 +130,7 @@ pub struct FunctionBlock {
     midi1: Midi1Port,
     first_group: FirstGroup,
     groups: GroupSpan,
-    midi_ci_version: u8,
+    midi_ci_version: Option<CiVersion>,
     max_sysex8_streams: Sysex8StreamCount,
     pub(crate) name: Option<BlockName>,
 }
@@ -194,6 +194,9 @@ pub enum BlockField {
     /// How many Groups it spans.
     #[error("Group span")]
     Groups,
+    /// The MIDI-CI version.
+    #[error("MIDI-CI version")]
+    MidiCiVersion,
 }
 
 /// A [`FunctionBlock`] being described: [`FunctionBlock::builder`] starts one
@@ -229,10 +232,14 @@ impl FunctionBlockBuilder {
         self
     }
 
-    /// The block's MIDI-CI Message Version/Format (`0` is none, the default,
+    /// The block's MIDI-CI Message Version/Format (`None` is none, the default,
     /// §7.1.8) and the number of simultaneous SysEx 8 streams it supports (`0`
     /// none: no System Exclusive 8 at all, `1` one, `2..=255` that many).
-    pub const fn midi_ci(mut self, version: u8, max_sysex8_streams: Sysex8StreamCount) -> Self {
+    pub const fn midi_ci(
+        mut self,
+        version: Option<CiVersion>,
+        max_sysex8_streams: Sysex8StreamCount,
+    ) -> Self {
         self.block.midi_ci_version = version;
         self.block.max_sysex8_streams = max_sysex8_streams;
         self
@@ -301,7 +308,7 @@ impl FunctionBlock {
                 midi1: Midi1Port::No,
                 first_group,
                 groups,
-                midi_ci_version: 0,
+                midi_ci_version: None,
                 max_sysex8_streams: Sysex8StreamCount::new(0),
                 name: None,
             },
@@ -320,7 +327,7 @@ impl FunctionBlock {
             midi1: Midi1Port::No,
             first_group: FirstGroup::of(0),
             groups,
-            midi_ci_version: 0,
+            midi_ci_version: None,
             max_sysex8_streams: Sysex8StreamCount::new(0),
             name: None,
         }
@@ -378,9 +385,9 @@ impl FunctionBlock {
         self.groups
     }
 
-    /// Its MIDI-CI Message Version/Format, `0` for none.
+    /// Its MIDI-CI Message Version/Format, `None` for none.
     #[must_use]
-    pub const fn midi_ci_version(&self) -> u8 {
+    pub const fn midi_ci_version(&self) -> Option<CiVersion> {
         self.midi_ci_version
     }
 
@@ -415,7 +422,7 @@ impl FunctionBlock {
             midi1: self.midi1,
             first_group: self.first_group.into(),
             groups_spanned: self.groups.into(),
-            midi_ci_version: self.midi_ci_version,
+            midi_ci_version: self.midi_ci_version.map(Into::into),
             max_sysex8_streams: self.max_sysex8_streams,
         }
     }
@@ -442,11 +449,17 @@ impl FunctionBlock {
         let groups = info.groups_spanned.value().ok_or(BlockError::OutOfRange {
             field: BlockField::Groups,
         })?;
+        let midi_ci_version = match info.midi_ci_version {
+            None => None,
+            Some(field) => Some(field.value().ok_or(BlockError::OutOfRange {
+                field: BlockField::MidiCiVersion,
+            })?),
+        };
         let mut builder = Self::builder(id, info.direction, first_group, groups)
             .active(info.active)
             .ui_hint(info.ui_hint)
             .midi1(info.midi1)
-            .midi_ci(info.midi_ci_version, info.max_sysex8_streams);
+            .midi_ci(midi_ci_version, info.max_sysex8_streams);
         if let Some(name) = name {
             builder = builder.name(BlockName::try_from(name).map_err(BlockError::Name)?);
         }
@@ -1168,8 +1181,8 @@ mod wire {
     //! through the checks of their parts.
 
     use tutti_ump::{
-        BlockDirection, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockId, GroupSpan,
-        Midi1Port, StreamConfig, Sysex8StreamCount, UiHint, UmpVersion,
+        BlockDirection, CiVersion, DeviceIdentity, FirstGroup, FunctionBlockCount, FunctionBlockId,
+        GroupSpan, Midi1Port, StreamConfig, Sysex8StreamCount, UiHint, UmpVersion,
     };
 
     use super::{
@@ -1186,7 +1199,7 @@ mod wire {
         pub midi1: Midi1Port,
         pub first_group: FirstGroup,
         pub groups: GroupSpan,
-        pub midi_ci_version: u8,
+        pub midi_ci_version: Option<CiVersion>,
         pub max_sysex8_streams: Sysex8StreamCount,
         pub name: Option<BlockName>,
     }

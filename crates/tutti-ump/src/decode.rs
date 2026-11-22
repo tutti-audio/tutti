@@ -616,7 +616,7 @@ pub(crate) fn function_block_info(w0: u32, w1: u32) -> FunctionBlockInfo {
         midi1: Midi1Port::from_raw(((w0 >> 2) & 0x3) as u8),
         first_group: Field::from_raw(byte(w1, 3)),
         groups_spanned: Field::from_raw(byte(w1, 2)),
-        midi_ci_version: byte(w1, 1),
+        midi_ci_version: crate::ci_version::read(byte(w1, 1)),
         max_sysex8_streams: Sysex8StreamCount::new(byte(w1, 0)),
     }
 }

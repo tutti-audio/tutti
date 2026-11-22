@@ -9,8 +9,8 @@ use crate::field::{
     Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, ControlValue, Field, ManufacturerId, MdsChunk,
-    MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
+    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, ManufacturerId,
+    MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
     ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount, Sysex8StreamId, Ump,
 };
 
@@ -1725,8 +1725,9 @@ pub struct FunctionBlockInfo {
     pub first_group: Field<FirstGroup>,
     /// How many Groups it spans.
     pub groups_spanned: Field<GroupSpan>,
-    /// The MIDI-CI message version, `0` for none.
-    pub midi_ci_version: u8,
+    /// The MIDI-CI message version: `None` is `0`, no MIDI-CI; a value above
+    /// `0x1F` is reserved, as read.
+    pub midi_ci_version: Option<Field<CiVersion>>,
     /// Simultaneous SysEx 8 streams supported.
     pub max_sysex8_streams: Sysex8StreamCount,
 }

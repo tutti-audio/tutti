@@ -941,7 +941,7 @@ fn moved_block(first_group: u8) -> Stream {
         midi1: tutti_ump::Midi1Port::No,
         first_group: FirstGroup::new(first_group).unwrap().into(),
         groups_spanned: GroupSpan::new(2).unwrap().into(),
-        midi_ci_version: 0,
+        midi_ci_version: None,
         max_sysex8_streams: Sysex8StreamCount::new(0),
     })
 }

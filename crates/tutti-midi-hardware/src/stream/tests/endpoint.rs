@@ -261,7 +261,7 @@ fn a_function_block_discovery_is_answered_with_the_one_block_over_the_sessions_g
     assert_eq!(block.direction, BlockDirection::Bidirectional);
     assert_eq!(block.first_group.value(), FirstGroup::new(0));
     assert_eq!(block.groups_spanned.value(), GroupSpan::new(4));
-    assert_eq!(block.midi_ci_version, 0);
+    assert_eq!(block.midi_ci_version, None);
 }
 
 /// A session that presents nothing is not an Endpoint to its peers: a

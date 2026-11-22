@@ -7,9 +7,9 @@
 use core::num::NonZeroU8;
 use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
-    BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, Data128,
-    DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup, Flex,
-    FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
+    BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, CiVersion,
+    Data128, DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup,
+    Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
     GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
     Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
     PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
@@ -890,7 +890,7 @@ fn stream_function_blocks() {
             midi1: Midi1Port::Restricted,
             first_group: FirstGroup::new(4).unwrap().into(),
             groups_spanned: GroupSpan::new(2).unwrap().into(),
-            midi_ci_version: 1,
+            midi_ci_version: Some(CiVersion::of(1).into()),
             max_sysex8_streams: Sysex8StreamCount::new(16),
         })),
     );
@@ -904,7 +904,7 @@ fn stream_function_blocks() {
             midi1: Midi1Port::Unrestricted,
             first_group: FirstGroup::new(15).unwrap().into(),
             groups_spanned: GroupSpan::new(16).unwrap().into(),
-            midi_ci_version: 0,
+            midi_ci_version: None,
             max_sysex8_streams: Sysex8StreamCount::new(0),
         })),
     );

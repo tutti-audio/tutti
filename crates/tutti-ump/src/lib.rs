@@ -90,6 +90,7 @@ extern crate alloc;
 mod articulation;
 mod bend_value;
 mod cc_number;
+mod ci_version;
 mod control_value;
 mod decode;
 mod encode;
@@ -129,6 +130,7 @@ pub use articulation::{
 };
 pub use bend_value::BendValue;
 pub use cc_number::{CCNumber, CCNumberOutOfRange};
+pub use ci_version::{CiVersion, NotAVersion};
 pub use control_value::ControlValue;
 pub use field::{
     ChordType, ChordTypeOutOfRange, DeltaTicks, DeltaTicksOutOfRange, FirstGroup,

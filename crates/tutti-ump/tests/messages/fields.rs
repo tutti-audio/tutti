@@ -6,7 +6,7 @@
 
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_ump::{
-    CCNumber, ChordType, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId,
+    CCNumber, ChordType, CiVersion, DeltaTicks, FirstGroup, FunctionBlockCount, FunctionBlockId,
     GroupChannelIndex, GroupSpan, ManufacturerId, MdsChunkSize, MdsChunkUmps, MidiChannel,
     MidiGroup, MonoChannels, MpeChannels, NoteNumber, SharpsFlats, TicksPerQuarterNote, U4,
     U4OutOfRange, U7, U14, U28,
@@ -82,6 +82,13 @@ fn each_bounded_field_holds_its_stated_range() {
     bounded!(FunctionBlockCount, u8, 0..=32);
     bounded!(MonoChannels, u8, 0..=16);
     bounded!(SharpsFlats, i8, -7..=7);
+    check_range_contract(&RangeContract {
+        new: CiVersion::new,
+        get: CiVersion::get,
+        of: Some(CiVersion::of),
+        valid: &[0x01, 0x02, 0x1F],
+        invalid: &[0x00, 0x20, 0x80, 0xFF],
+    });
     check_range_contract(&RangeContract {
         new: TicksPerQuarterNote::new,
         get: TicksPerQuarterNote::get,

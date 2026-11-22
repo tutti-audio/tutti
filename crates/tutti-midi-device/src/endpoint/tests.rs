@@ -1,7 +1,7 @@
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
-    BlockDirection, BlockFilter, BlockSelect, DeviceIdentity, DiscoveryFilter, FirstGroup,
-    FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, MessageType, Midi1Port,
+    BlockDirection, BlockFilter, BlockSelect, CiVersion, DeviceIdentity, DiscoveryFilter,
+    FirstGroup, FunctionBlockId, FunctionBlockInfo, GroupSpan, Message, MessageType, Midi1Port,
     OsFunctionBlock, Protocol, SoftwareRevision, Stream, StreamConfig, U7, UiHint, Ump,
     read_function_block,
 };
@@ -72,7 +72,7 @@ fn device() -> Endpoint {
         .block(
             block(3, 4, 2)
                 .ui_hint(UiHint::Both)
-                .midi_ci(2, Sysex8StreamCount::new(2))
+                .midi_ci(Some(CiVersion::of(2)), Sysex8StreamCount::new(2))
                 .name(BlockName::new("Piano").unwrap())
                 .build()
                 .unwrap(),
@@ -263,7 +263,7 @@ fn function_block_info_and_name_words() {
     // so a swapped pair of bytes shows. 0x8000 | 0x0700 | 0b11, then 5, 3, 1, 16.
     let mut e = Endpoint::new(Supports::of(FULL)).block(
         block(7, 5, 3)
-            .midi_ci(1, Sysex8StreamCount::new(16))
+            .midi_ci(Some(CiVersion::of(1)), Sysex8StreamCount::new(16))
             .build()
             .unwrap(),
     );
@@ -1016,7 +1016,7 @@ fn merge(ids: &Sysex8StreamIds, sources: &[Vec<u8>]) -> (Vec<u8>, Vec<Vec<u8>>) 
 fn a_block_declares_the_streams_a_sender_may_use() {
     for (declared, count) in [(0, 0), (1, 1), (2, 2), (3, 3), (255, 255)] {
         let block = block(0, 0, 1)
-            .midi_ci(0, Sysex8StreamCount::new(declared))
+            .midi_ci(None, Sysex8StreamCount::new(declared))
             .build()
             .unwrap();
         assert_eq!(block.sysex8_streams().count().get(), count);
@@ -1050,7 +1050,7 @@ fn a_merger_without_discovery_sends_one_stream_at_a_time() {
 #[test]
 fn a_merger_after_discovery_uses_only_stream_ids_below_the_count() {
     let block = block(0, 0, 1)
-        .midi_ci(1, Sysex8StreamCount::new(3))
+        .midi_ci(Some(CiVersion::of(1)), Sysex8StreamCount::new(3))
         .build()
         .unwrap();
     let sources: Vec<Vec<u8>> = (0..5)
@@ -1107,6 +1107,13 @@ fn from_info_refuses_what_the_block_cannot_hold() {
             ..os()
         }),
         out_of_range(BlockField::FirstGroup)
+    );
+    assert_eq!(
+        refused(OsFunctionBlock {
+            midi_ci_version: 0x20,
+            ..os()
+        }),
+        out_of_range(BlockField::MidiCiVersion)
     );
     assert_eq!(
         refused(OsFunctionBlock {
