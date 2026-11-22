@@ -53,7 +53,7 @@ use tutti_units::{Frame, Samples};
 use crate::editor::{CommitError, Editor};
 use crate::exec::Executor;
 use crate::node::{IntoNode, NodeParts, Prepare, Shape, TransportPosition};
-use crate::spec::{EventEdge, EventIn, EventOut, GraphSpec};
+use crate::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
 use tutti_buffers::{Float, Planes, PlanesMut};
 
 /// One unit waiting for [`GraphBuilder::build`], with its fork source, so a
@@ -625,11 +625,11 @@ impl<F: Float> GraphBuilder<F> {
             "{to:?} has {ins} event inputs; port {to_port} is out of range"
         );
         self.spec.connect_events(
-            EventIn {
+            EventInputPort {
                 node: to,
                 port: to_port as u16,
             },
-            EventEdge::Direct(EventOut {
+            EventEdge::Direct(EventOutputPort {
                 node: from,
                 port: from_port as u16,
             }),

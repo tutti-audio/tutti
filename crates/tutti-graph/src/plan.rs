@@ -57,7 +57,7 @@ use crate::fade::Fade;
 use crate::io::PortKind;
 use crate::node::{InPlaceMask, Prepare, Shape, Wired};
 use crate::param::ParamIn;
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 
 /// The audio slot every unconnected or `PortSource::Zero` input reads.
 pub const ZERO_SLOT: u32 = 0;
@@ -108,9 +108,9 @@ pub enum DelayKey {
     /// need a different delay.
     Event {
         /// The sink.
-        at: EventIn,
+        at: EventInputPort,
         /// The source.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// The event source of a driven param, delayed to the param's node's
     /// arrival (see [`GraphSpec::connect_param`](crate::GraphSpec::connect_param)).
@@ -120,7 +120,7 @@ pub enum DelayKey {
         /// The param port.
         at: ParamIn,
         /// The event output that drives it.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// The event source of a driven edge gain, delayed to the edge's sink
     /// like a param's source ([`ParamEvent`](Self::ParamEvent), whose rules
@@ -132,7 +132,7 @@ pub enum DelayKey {
         /// The edge whose gain it drives.
         id: crate::EdgeId,
         /// The event output that drives it.
-        from: EventOut,
+        from: EventOutputPort,
     },
     /// A global output channel, delayed to align with the slowest channel.
     Output {
@@ -156,7 +156,7 @@ pub enum DelayKey {
         /// The event tap.
         tap: crate::EventTapId,
         /// The event port copied.
-        from: crate::EventTapSource,
+        from: crate::EventTapPort,
     },
     /// One lane of an aligned tap, delayed like an output channel.
     Tap {
@@ -172,11 +172,11 @@ pub enum DelayKey {
 impl DelayKey {
     /// The event port whose stream this delay carries; `None` for an audio
     /// delay.
-    pub(crate) fn event_origin(self) -> Option<crate::EventTapSource> {
+    pub(crate) fn event_origin(self) -> Option<crate::EventTapPort> {
         match self {
             Self::Event { from, .. }
             | Self::ParamEvent { from, .. }
-            | Self::EdgeGain { from, .. } => Some(crate::EventTapSource::Out(from)),
+            | Self::EdgeGain { from, .. } => Some(crate::EventTapPort::Out(from)),
             Self::EventTap { from, .. } => Some(from),
             _ => None,
         }
@@ -214,9 +214,9 @@ pub enum FeedbackKey {
     /// One event feedback edge.
     Event {
         /// The sink port.
-        at: EventIn,
+        at: EventInputPort,
         /// The source port.
-        from: EventOut,
+        from: EventOutputPort,
         /// The source unit's generation.
         generation: u32,
         /// The edge's delay.
@@ -572,7 +572,7 @@ pub struct ParamPortOp {
     /// The event output that drives it: what its running state (the
     /// source's ramp) is kept by, so the executor crossfades a port whose
     /// source changed and leaves one that only moved slots alone.
-    pub from: EventOut,
+    pub from: EventOutputPort,
     /// The event slot it reads its source's events from.
     pub slot: u32,
 }
@@ -603,7 +603,7 @@ pub struct GainPortOp {
     pub lane: u16,
     /// The event output that drives it: what its running state (the
     /// source's ramp) is kept by.
-    pub from: EventOut,
+    pub from: EventOutputPort,
     /// The event slot it reads its source's events from.
     pub slot: u32,
 }
@@ -1033,7 +1033,7 @@ pub struct Plan {
     /// FIFO is sized for. Built from the same `Graph::events` the compiler
     /// sizes that FIFO from, so the two agree; verify re-derives the size
     /// from this list and refuses a plan where they do not.
-    pub(crate) event_edges: Vec<(EventOut, EventIn)>,
+    pub(crate) event_edges: Vec<(EventOutputPort, EventInputPort)>,
     pub(crate) op_succ: Csr,
     pub(crate) tasks: Vec<Span>,
     pub(crate) task_ops: Vec<u32>,
@@ -1229,7 +1229,7 @@ impl Plan {
     /// What event output port `port` declared it writes per block
     /// ([`Shape::event_capacity`]): `None` for the executor's default, or
     /// for a port this plan does not have.
-    pub fn event_port_capacity(&self, port: EventOut) -> Option<NonZeroU32> {
+    pub fn event_port_capacity(&self, port: EventOutputPort) -> Option<NonZeroU32> {
         self.unit(port.node)
             .filter(|u| port.port < u.shape.event_out)
             .and_then(|u| u.shape.event_capacity)
@@ -1238,7 +1238,7 @@ impl Plan {
     /// What the node of event input `port` declared it accepts per block
     /// ([`Shape::event_input_capacity`]): `None` for unbounded, or for an input
     /// this plan does not have.
-    pub fn event_input_capacity(&self, port: EventIn) -> Option<NonZeroU32> {
+    pub fn event_input_capacity(&self, port: EventInputPort) -> Option<NonZeroU32> {
         self.unit(port.node)
             .filter(|u| port.port < u.shape.event_in)
             .and_then(|u| u.shape.event_input_capacity)
@@ -1246,7 +1246,7 @@ impl Plan {
 
     /// Whether event output port `port` writes param events
     /// ([`Shape::param_events`]).
-    pub(crate) fn event_port_params(&self, port: EventOut) -> bool {
+    pub(crate) fn event_port_params(&self, port: EventOutputPort) -> bool {
         self.unit(port.node)
             .is_some_and(|u| port.port < u.shape.event_out && u.shape.param_events)
     }
@@ -1254,10 +1254,10 @@ impl Plan {
     /// Whether what an event tap's source carries includes param events: the
     /// port itself writes them, or, for an input, a port with an edge into it
     /// does.
-    pub(crate) fn event_tap_params(&self, source: crate::EventTapSource) -> bool {
+    pub(crate) fn event_tap_params(&self, source: crate::EventTapPort) -> bool {
         match source {
-            crate::EventTapSource::Out(port) => self.event_port_params(port),
-            crate::EventTapSource::In(at) => self
+            crate::EventTapPort::Out(port) => self.event_port_params(port),
+            crate::EventTapPort::In(at) => self
                 .event_edges
                 .iter()
                 .any(|&(from, to)| to == at && self.event_port_params(from)),
@@ -1267,10 +1267,10 @@ impl Plan {
     /// The declared capacity of each output port that writes what an event
     /// tap's source carries: the port itself, or, for an input, every port
     /// with an edge into it (what the node can receive there, summed).
-    pub(crate) fn event_tap_ports(&self, source: crate::EventTapSource) -> Vec<Option<NonZeroU32>> {
+    pub(crate) fn event_tap_ports(&self, source: crate::EventTapPort) -> Vec<Option<NonZeroU32>> {
         match source {
-            crate::EventTapSource::Out(port) => vec![self.event_port_capacity(port)],
-            crate::EventTapSource::In(at) => self
+            crate::EventTapPort::Out(port) => vec![self.event_port_capacity(port)],
+            crate::EventTapPort::In(at) => self
                 .event_edges
                 .iter()
                 .filter(|&&(_, to)| to == at)
@@ -1283,7 +1283,7 @@ impl Plan {
     /// each writing port, added.
     pub(crate) fn event_tap_fifo(
         &self,
-        source: crate::EventTapSource,
+        source: crate::EventTapPort,
         len: Samples,
         block: usize,
     ) -> EventSlotCapacity {
@@ -1292,7 +1292,7 @@ impl Plan {
 
     /// The rate an event tap's delay ring is sized from: the note-off room of
     /// each writing port's capacity (or `default`), added.
-    pub(crate) fn event_tap_rate(&self, source: crate::EventTapSource, default: usize) -> usize {
+    pub(crate) fn event_tap_rate(&self, source: crate::EventTapPort, default: usize) -> usize {
         self.event_tap_ports(source)
             .into_iter()
             .map(|c| crate::event::note_off_room(c.map_or(default, |n| n.get() as usize)))

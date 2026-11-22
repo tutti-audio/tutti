@@ -155,10 +155,10 @@ pub enum ConnectError {
     NoSuchInPort(crate::InputPort),
     /// An event output that the node does not have.
     #[error("no such event output: {0:?}")]
-    NoSuchEventOut(crate::EventOutPort),
+    NoSuchEventOut(crate::EventOutputPort),
     /// An event input that the node does not have.
     #[error("no such event input: {0:?}")]
-    NoSuchEventIn(crate::EventInPort),
+    NoSuchEventIn(crate::EventInputPort),
     /// A node feeds itself: a node cannot be its own source.
     #[error("{0:?} cannot feed itself")]
     Itself(tutti_graph::NodeKey),

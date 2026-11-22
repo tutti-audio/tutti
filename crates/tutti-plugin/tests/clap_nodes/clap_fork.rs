@@ -814,7 +814,7 @@ fn a_clip_note_reaches_an_exported_plugin_on_its_frame() {
 /// Feed the plugin at `plugin` from a clip node holding a chord of `n`
 /// notes, started on frame `on` and ended on frame `off`.
 fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) {
-    use tutti_graph::{EventEdge, EventIn, EventOut};
+    use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
     use tutti_ump::{MidiChannel, MidiGroup};
     use tutti_units::Beat;
@@ -844,11 +844,11 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
     let clip = NodeKey(1);
     live.insert(clip, "clip", MidiClipNode::new(events));
     live.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: plugin,
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: clip,
             port: 0,
         }),
@@ -921,7 +921,7 @@ fn a_chord_larger_than_a_chunk_ends_and_the_export_counts_the_loss() {
 /// `frame` of a 120 BPM timeline at [`SAMPLE_RATE`] (a beat is 24 000
 /// frames).
 fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
-    use tutti_graph::{EventEdge, EventIn, EventOut};
+    use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
@@ -940,11 +940,11 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
         .unwrap()]),
     );
     live.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: plugin,
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: clip,
             port: 0,
         }),
@@ -1032,7 +1032,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
 /// the note at 6 300 in the chunk from 6 240.
 #[test]
 fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
-    use tutti_graph::{EventEdge, EventIn, EventOut};
+    use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
@@ -1070,8 +1070,8 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         ),
     );
     live.spec_mut().connect_events(
-        EventIn { node: key, port: 0 },
-        EventEdge::Direct(EventOut {
+        EventInputPort { node: key, port: 0 },
+        EventEdge::Direct(EventOutputPort {
             node: clip,
             port: 0,
         }),
@@ -1143,7 +1143,7 @@ impl tutti_graph::Node for MidiSink {
 /// reply raced the audio.
 #[test]
 fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
-    use tutti_graph::{EventEdge, EventIn, EventOut};
+    use tutti_graph::{EventEdge, EventInputPort, EventOutputPort};
     use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
     use tutti_ump::MidiChannel;
     use tutti_units::Beat;
@@ -1184,18 +1184,18 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             tutti_graph::ForkByClone(MidiSink(seen.clone())),
         );
         live.spec_mut().connect_events(
-            EventIn { node: key, port: 0 },
-            EventEdge::Direct(EventOut {
+            EventInputPort { node: key, port: 0 },
+            EventEdge::Direct(EventOutputPort {
                 node: clip,
                 port: 0,
             }),
         );
         live.spec_mut().connect_events(
-            EventIn {
+            EventInputPort {
                 node: sink,
                 port: 0,
             },
-            EventEdge::Direct(EventOut { node: key, port: 0 }),
+            EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
         );
         live.spec_mut().topology.set_outputs(vec![
             PortSource::Node(OutputPort { node: key, port: 0 }),

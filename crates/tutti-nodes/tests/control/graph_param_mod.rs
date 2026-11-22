@@ -28,8 +28,8 @@ use atomic_float::AtomicF64;
 use tutti_curve::Law;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventOut, GraphBuilder, IntoNode, NodeMix, NodeParts, ParamIn, ParamNode, ParamRange,
-    Prepare, Renderer, declick_frames,
+    Editor, EventOutputPort, GraphBuilder, IntoNode, NodeMix, NodeParts, ParamIn, ParamNode,
+    ParamRange, Prepare, Renderer, declick_frames,
 };
 use tutti_modulation::{
     Amount, ControlProgram, ControlProgramBuilder, Layer, LayerClock, LayerId, Polarity, Waveform,
@@ -128,7 +128,7 @@ fn drive(ed: &mut Editor, at: ParamIn, knob: impl Into<ParamCell>, layers: Vec<L
     ed.insert(LANE, "lane", lane);
     ed.spec_mut().connect_param(
         at,
-        EventOut {
+        EventOutputPort {
             node: LANE,
             port: 0,
         },
@@ -1173,7 +1173,7 @@ fn an_unmodulated_param_adds_nothing_to_the_plan() {
         node: n,
         param: UnitParam::Drive.into(),
     };
-    let from = EventOut {
+    let from = EventOutputPort {
         node: LANE,
         port: 0,
     };

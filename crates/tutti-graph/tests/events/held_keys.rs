@@ -14,8 +14,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeSpec;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, Fade, ForkByClone,
-    ForkMode, ForkTarget, Io, Node, Offset, Prepare, Reference, Shape, Shapes, Status,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, Fade,
+    ForkByClone, ForkMode, ForkTarget, Io, Node, Offset, Prepare, Reference, Shape, Shapes, Status,
     TransportPosition, Unforkable,
 };
 use tutti_graph::{NodeKey, Topology};
@@ -99,14 +99,14 @@ impl Node for Sink {
     fn reset(&mut self) {}
 }
 
-fn out(n: u64) -> EventOut {
-    EventOut {
+fn out(n: u64) -> EventOutputPort {
+    EventOutputPort {
         node: NodeKey(n),
         port: 0,
     }
 }
-fn at(n: u64) -> EventIn {
-    EventIn {
+fn at(n: u64) -> EventInputPort {
+    EventInputPort {
         node: NodeKey(n),
         port: 0,
     }

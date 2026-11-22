@@ -17,8 +17,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventIn, EventKind, EventOut, ForkByClone,
-    NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
+    CommitError, EdgeGain, EdgeId, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort,
+    ForkByClone, NodeMix, ParamIn, ParamRange, ParamRangeCell, PassError, PortSink, ScheduleError,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -130,7 +130,7 @@ pub enum Feed {
     /// order. The follower is as wide as the node's output.
     Audio(NodeKey),
     /// A note envelope's MIDI.
-    Events(EventOut),
+    Events(EventOutputPort),
 }
 
 /// Why [`Modulation::apply`] refused. A refusal changes nothing: neither
@@ -227,7 +227,7 @@ enum Bind {
         generation: u32,
     },
     Foreign {
-        to: EventIn,
+        to: EventInputPort,
         id: ParamId,
         knob: Option<f64>,
         generation: u32,
@@ -865,11 +865,11 @@ impl Modulation {
             if let (Some(src), Some(lane)) = (self.sources.get(&s), self.lanes.get(&t)) {
                 remove_event_edge(
                     editor,
-                    EventIn {
+                    EventInputPort {
                         node: lane.key,
                         port: 0,
                     },
-                    EventOut {
+                    EventOutputPort {
                         node: src.key,
                         port: 0,
                     },
@@ -878,7 +878,7 @@ impl Modulation {
         }
         for t in &taken_lanes {
             let lane = self.lanes.remove(t).expect("listed");
-            let out = EventOut {
+            let out = EventOutputPort {
                 node: lane.key,
                 port: 0,
             };
@@ -946,11 +946,11 @@ impl Modulation {
         for (s, t) in stale {
             if let (Some(src), Some(lane)) = (self.sources.get(&s), self.lanes.get(&t)) {
                 editor.spec_mut().disconnect_events(
-                    EventIn {
+                    EventInputPort {
                         node: lane.key,
                         port: 0,
                     },
-                    EventOut {
+                    EventOutputPort {
                         node: src.key,
                         port: 0,
                     },
@@ -1062,7 +1062,7 @@ impl Modulation {
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
-                        .connect_param(*at, EventOut { node: key, port: 0 });
+                        .connect_param(*at, EventOutputPort { node: key, port: 0 });
                     controls
                 }
                 Bind::Edge { id, knob, range } => {
@@ -1077,7 +1077,7 @@ impl Modulation {
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
-                        .connect_edge_gain(*id, EventOut { node: key, port: 0 });
+                        .connect_edge_gain(*id, EventOutputPort { node: key, port: 0 });
                     controls
                 }
                 Bind::Mix { at, knob, range } => {
@@ -1092,7 +1092,7 @@ impl Modulation {
                     let controls = editor.insert(key, "control-lane", node).controls;
                     editor
                         .spec_mut()
-                        .connect_param(*at, EventOut { node: key, port: 0 });
+                        .connect_param(*at, EventOutputPort { node: key, port: 0 });
                     controls
                 }
                 Bind::Foreign { to, id, knob, .. } => {
@@ -1103,9 +1103,10 @@ impl Modulation {
                     }
                     let node = ControlLaneNode::from(config);
                     let controls = editor.insert(key, "control-lane", node).controls;
-                    editor
-                        .spec_mut()
-                        .connect_events(*to, EventEdge::Direct(EventOut { node: key, port: 0 }));
+                    editor.spec_mut().connect_events(
+                        *to,
+                        EventEdge::Direct(EventOutputPort { node: key, port: 0 }),
+                    );
                     controls
                 }
             };
@@ -1127,11 +1128,11 @@ impl Modulation {
             if self.edges.insert((s, t)) {
                 let (src, lane) = (self.sources[&s].key, self.lanes[&t].key);
                 editor.spec_mut().connect_events(
-                    EventIn {
+                    EventInputPort {
                         node: lane,
                         port: 0,
                     },
-                    EventEdge::Direct(EventOut { node: src, port: 0 }),
+                    EventEdge::Direct(EventOutputPort { node: src, port: 0 }),
                 );
                 *commit = true;
             }
@@ -1197,7 +1198,7 @@ impl Modulation {
             let Some(node) = self.sources.get(&s) else {
                 continue;
             };
-            let to = EventIn {
+            let to = EventInputPort {
                 node: node.key,
                 port: 0,
             };
@@ -1348,7 +1349,7 @@ impl Modulation {
                     return Err(ReconcileError::NoSuchEventInput(target));
                 }
                 Ok(Some(Bind::Foreign {
-                    to: EventIn { node, port },
+                    to: EventInputPort { node, port },
                     id,
                     knob,
                     generation: editor.spec().generation(node),
@@ -1587,9 +1588,10 @@ fn wire_feed<F: Float>(editor: &mut Editor<F>, key: NodeKey, feed: Option<Feed>)
             }
         }
         Some(Feed::Events(from)) => {
-            editor
-                .spec_mut()
-                .connect_events(EventIn { node: key, port: 0 }, EventEdge::Direct(from));
+            editor.spec_mut().connect_events(
+                EventInputPort { node: key, port: 0 },
+                EventEdge::Direct(from),
+            );
         }
         None => {}
     }
@@ -1616,7 +1618,7 @@ fn unwire_feed<F: Float>(
         Some(Feed::Events(from)) => {
             editor
                 .spec_mut()
-                .disconnect_events(EventIn { node: key, port: 0 }, from);
+                .disconnect_events(EventInputPort { node: key, port: 0 }, from);
         }
         None => {}
     }
@@ -1675,7 +1677,7 @@ fn taken<F: Float>(editor: &Editor<F>, key: NodeKey, generation: u32) -> bool {
 /// no other edge between them (a host's feedback edge from a node it put
 /// at a taken key stays). An identical direct edge the host wired itself
 /// cannot be told apart, and goes too.
-fn remove_event_edge<F: Float>(editor: &mut Editor<F>, at: EventIn, from: EventOut) {
+fn remove_event_edge<F: Float>(editor: &mut Editor<F>, at: EventInputPort, from: EventOutputPort) {
     let events = &mut editor.spec_mut().events;
     if let Some(sources) = events.get_mut(&at) {
         sources.retain(|e| *e != EventEdge::Direct(from));

@@ -23,9 +23,9 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapOptions, EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
-    MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
-    RouteRule, SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MIDI_INPUT_PORTS, MidiClipNode,
+    MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms,
+    Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_music::MeterMap;
 use tutti_rt::Mint;
@@ -40,7 +40,7 @@ use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
     MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
-use crate::{EventOutPort, Key, MidiError, MidiEvent, MidiNodes};
+use crate::{EventOutputPort, Key, MidiError, MidiEvent, MidiNodes};
 use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
@@ -1192,6 +1192,16 @@ pub(crate) fn drain_events(
     losses.lost(tap.take_lost());
 }
 
+// An input node has at most `MidiGroup::COUNT * MIDI_INPUT_PORTS` ports, all
+// within the graph's `u16` port index.
+const _: () = assert!(MidiGroup::COUNT as usize * MIDI_INPUT_PORTS <= u16::MAX as usize + 1);
+
+/// The graph's index of the input node's port `port`; the bound above makes the
+/// conversion infallible.
+fn input_port(port: usize) -> u16 {
+    u16::try_from(port).expect("an input node's port index fits u16")
+}
+
 /// Wires `inputs`' ports as `rules` route them (`tutti_midi_runtime::compile_routes`)
 /// to the sinks `resolve` names, replacing every route before: the ports of
 /// every input node feed each sink their rule gives ports, so devices merge in
@@ -1218,16 +1228,19 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         }),
         fallback,
     );
-    let mut wanted: BTreeMap<NodeKey, Vec<EventOutPort>> = BTreeMap::new();
+    let mut wanted: BTreeMap<NodeKey, Vec<EventOutputPort>> = BTreeMap::new();
     for (target, ports) in ports {
         let Some(sink) = resolve(target).filter(|&n| graph.contains(n)) else {
             continue;
         };
-        wanted.entry(sink).or_default().extend(
-            inputs
-                .iter()
-                .flat_map(|&input| ports.iter().map(move |&p| EventOutPort::new(input, p))),
-        );
+        wanted
+            .entry(sink)
+            .or_default()
+            .extend(inputs.iter().flat_map(|&input| {
+                ports
+                    .iter()
+                    .map(move |&p| EventOutputPort::new(input, input_port(p)))
+            }));
     }
     for &fed in routed.iter() {
         // A sink removed since has no feed left to clear.
@@ -1365,7 +1378,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, Feeder::Instrument)
             .ok()?
             .first()
-            .map(|port| port.node())
+            .map(|port| port.node)
     }
 
     /// The node of `target`'s live input, opened with its keys held if it has
@@ -1381,7 +1394,11 @@ impl<F: Float> Midi<'_, F> {
         let (node, keys) = open_keys(self.graph);
         let node = node.erase();
         self.graph
-            .set_feed(target, Feeder::LiveInput, vec![EventOutPort::new(node, 0)])
+            .set_feed(
+                target,
+                Feeder::LiveInput,
+                vec![EventOutputPort::new(node, 0)],
+            )
             .map_err(|_| MidiError::NoEventInput(target))?;
         self.state.live.insert(
             node,
@@ -1477,7 +1494,7 @@ impl<F: Float> Midi<'_, F> {
                 let fed = self.graph.set_feed(
                     transform,
                     Feeder::Sequencer,
-                    vec![EventOutPort::new(clip, 0)],
+                    vec![EventOutputPort::new(clip, 0)],
                 );
                 debug_assert!(fed.is_ok(), "the transform just added is in the graph");
                 self.state.clips.insert(clip, Clip { transform, target });
@@ -1491,7 +1508,7 @@ impl<F: Float> Midi<'_, F> {
             .set_feed(
                 target,
                 Feeder::Sequencer,
-                vec![EventOutPort::new(transform, 0)],
+                vec![EventOutputPort::new(transform, 0)],
             )
             .map_err(|_| MidiError::NoEventInput(target))?;
         Ok(())
@@ -1560,7 +1577,7 @@ impl<F: Float> Midi<'_, F> {
                 self.state
                     .clips
                     .iter()
-                    .find_map(|(&clip, c)| (c.transform == s.node()).then_some(clip))
+                    .find_map(|(&clip, c)| (c.transform == s.node).then_some(clip))
             })
             .map(Key::new)
     }
@@ -1578,7 +1595,7 @@ impl<F: Float> Midi<'_, F> {
             .feed(target, feeder)
             .ok()?
             .iter()
-            .find_map(|s| ours.get_key_value(&s.node()))
+            .find_map(|s| ours.get_key_value(&s.node))
             .map(|(&node, v)| (node, v))
     }
 
@@ -1636,7 +1653,7 @@ impl<F: Float> Midi<'_, F> {
             && self
                 .graph
                 .feed(old, feeder)
-                .is_ok_and(|fed| fed.contains(&EventOutPort::new(node, 0)))
+                .is_ok_and(|fed| fed.contains(&EventOutputPort::new(node, 0)))
         {
             // `old` is in the graph, as `feed` just answered.
             let unfed = self.graph.set_feed(old, feeder, Vec::new());
@@ -1645,7 +1662,7 @@ impl<F: Float> Midi<'_, F> {
         // The callers checked `target` takes MIDI, so it is in the graph.
         let fed = self
             .graph
-            .set_feed(target, feeder, vec![EventOutPort::new(node, 0)]);
+            .set_feed(target, feeder, vec![EventOutputPort::new(node, 0)]);
         debug_assert!(fed.is_ok(), "the target takes MIDI");
     }
 
@@ -1856,7 +1873,7 @@ impl<F: Float> Midi<'_, F> {
                 .map(|(node, _)| node)
                 .ok_or(MidiError::NoLiveInput(target))?
         };
-        let source = EventOutPort::new(node, 0);
+        let source = EventOutputPort::new(node, 0);
         self.graph
             .taps()
             .open_event(
@@ -1886,7 +1903,7 @@ impl<F: Float> Midi<'_, F> {
         self.graph
             .taps()
             .open_event(
-                EventOutPort::new(input, port),
+                EventOutputPort::new(input, input_port(port)),
                 EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
             )
             .map_err(MidiError::Tap)
@@ -2188,16 +2205,18 @@ impl<F: Float> Midi<'_, F> {
         let node = key.erase();
         if let Some(nodes) = self.nodes {
             // The node was just added, so it is in the graph.
-            let fed =
-                self.graph
-                    .set_feed(node, Feeder::Clock, vec![EventOutPort::new(nodes.sync, 0)]);
+            let fed = self.graph.set_feed(
+                node,
+                Feeder::Clock,
+                vec![EventOutputPort::new(nodes.sync, 0)],
+            );
             debug_assert!(fed.is_ok(), "the node just added is in the graph");
         }
         let tap = self
             .graph
             .taps()
             .open_event(
-                EventOutPort::new(node, 0),
+                EventOutputPort::new(node, 0),
                 EventTapOptions::new(MIDI_OUT_TAP_CAPACITY),
             )
             .expect("the output node is in the graph with its event output");

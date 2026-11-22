@@ -125,7 +125,7 @@ use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
 use crate::param_event::{ParamEvent, ParamKind};
 use crate::plan::DelayKey;
 use crate::play::PlayClock;
-use crate::spec::{EventEdge, EventIn, EventOut, ValidGraph};
+use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
 use crate::time::Offset;
 use tutti_ump::ControlValue;
 use tutti_ump::{
@@ -137,7 +137,7 @@ use tutti_units::PlayReading;
 /// One param port's state, as the reference keeps it.
 struct RefParam<F: Float> {
     /// The event source it last ran with.
-    source: Option<EventOut>,
+    source: Option<EventOutputPort>,
     modulated: bool,
     last: F,
     last_base: F,
@@ -248,12 +248,12 @@ pub struct Reference<F: Float = f32> {
     audio_lines: BTreeMap<DelayKey, VecDeque<F>>,
     event_lines: BTreeMap<DelayKey, RefFifo>,
     fb_audio: BTreeMap<(OutputPort, u32, Samples), VecDeque<F>>,
-    fb_event: BTreeMap<(EventIn, EventOut, u32, Samples), RefFifo>,
-    inject: BTreeMap<EventIn, Vec<Event>>,
+    fb_event: BTreeMap<(EventInputPort, EventOutputPort, u32, Samples), RefFifo>,
+    inject: BTreeMap<EventInputPort, Vec<Event>>,
     /// The keys each tracked event output holds (see `Executor`'s
     /// `held.rs`; written here from `decode`, sharing none of its code).
-    held: BTreeMap<EventOut, RefHeld>,
-    tracked: BTreeSet<EventOut>,
+    held: BTreeMap<EventOutputPort, RefHeld>,
+    tracked: BTreeSet<EventOutputPort>,
     /// Scheduled commands not yet due, in scheduling order.
     scheduled: Vec<RefCommand>,
     next_id: u64,
@@ -265,9 +265,9 @@ pub struct Reference<F: Float = f32> {
     suspended: Option<Prepare>,
     /// This block's scheduled deliveries, per port, each with its timeline
     /// position (the tie-break after the offset), in scheduling order.
-    landing: BTreeMap<EventIn, Vec<(f64, Event)>>,
+    landing: BTreeMap<EventInputPort, Vec<(f64, Event)>>,
     /// The same for scheduled param events.
-    landing_params: BTreeMap<EventIn, Vec<(f64, ParamEvent)>>,
+    landing_params: BTreeMap<EventInputPort, Vec<(f64, ParamEvent)>>,
     late: u64,
     unrouted: u64,
     /// Events a node's writer refused past its declared capacity.
@@ -452,7 +452,7 @@ impl<F: Float> Reference<F> {
     /// when it falls due is counted unrouted.
     ///
     /// Returns the command's id, for [`cancel`](Self::cancel).
-    pub fn schedule(&mut self, at: At, to: EventIn, payload: impl Into<Scheduled>) -> u64 {
+    pub fn schedule(&mut self, at: At, to: EventInputPort, payload: impl Into<Scheduled>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         let pos = match at {
@@ -673,7 +673,7 @@ impl<F: Float> Reference<F> {
             .copied()
             .filter(|k| t.nodes.contains_key(k))
             .collect();
-        let mut departed: BTreeMap<EventOut, RefHeld> = BTreeMap::new();
+        let mut departed: BTreeMap<EventOutputPort, RefHeld> = BTreeMap::new();
         for from in self.held.keys().copied().collect::<Vec<_>>() {
             if gone.contains(&from.node) {
                 departed.insert(from, self.held.remove(&from).expect("listed"));
@@ -963,12 +963,12 @@ impl<F: Float> Reference<F> {
 
         // Flush first, while the old state is intact. A sink survives when
         // its node is still here with that event input.
-        let survives = |at: &EventIn| {
+        let survives = |at: &EventInputPort| {
             self.units
                 .get(&at.node)
                 .is_some_and(|(_, u)| at.port < u.shape().event_in)
         };
-        let fb_event_keys: BTreeSet<(EventIn, EventOut, u32, Samples)> = graph
+        let fb_event_keys: BTreeSet<(EventInputPort, EventOutputPort, u32, Samples)> = graph
             .events()
             .iter()
             .flat_map(|(&at, v)| {
@@ -982,7 +982,7 @@ impl<F: Float> Reference<F> {
             .collect();
         let mut inject = std::mem::take(&mut self.inject);
         inject.retain(|at, _| survives(at));
-        let mut flush = |at: EventIn, pending: Vec<Event>| {
+        let mut flush = |at: EventInputPort, pending: Vec<Event>| {
             if survives(&at) {
                 // Kept in spacing order (stable: flush order on ties) before
                 // any clamping, which would erase it.
@@ -1054,7 +1054,7 @@ impl<F: Float> Reference<F> {
         for (&node, (_, unit)) in &self.units {
             let shape = unit.shape();
             for port in (0..shape.event_out).filter(|_| shape.note_events) {
-                self.tracked.insert(EventOut { node, port });
+                self.tracked.insert(EventOutputPort { node, port });
             }
         }
         self.inject = inject;
@@ -1272,7 +1272,7 @@ impl<F: Float> Reference<F> {
             self.scheduled = waiting;
 
             let mut audio: BTreeMap<OutputPort, Vec<F>> = BTreeMap::new();
-            let mut events: BTreeMap<EventOut, RefOut> = BTreeMap::new();
+            let mut events: BTreeMap<EventOutputPort, RefOut> = BTreeMap::new();
             let mut done: BTreeSet<NodeKey> = BTreeSet::new();
 
             let direct_preds = |k: NodeKey| -> Vec<NodeKey> {
@@ -1420,7 +1420,7 @@ impl<F: Float> Reference<F> {
         env: &Env,
         inputs: &[&[F]],
         audio: &mut BTreeMap<OutputPort, Vec<F>>,
-        events: &mut BTreeMap<EventOut, RefOut>,
+        events: &mut BTreeMap<EventOutputPort, RefOut>,
         targets: &BTreeMap<EdgeId, Amplitude>,
     ) {
         let t = graph.topology();
@@ -1460,7 +1460,7 @@ impl<F: Float> Reference<F> {
         let mut ev_ins: Vec<Vec<Event>> = Vec::new();
         let mut pm_ins: Vec<Vec<ParamEvent>> = Vec::new();
         for port in 0..shape.event_in {
-            let at = EventIn { node: key, port };
+            let at = EventInputPort { node: key, port };
             // Flushed events first: they are older than anything this block.
             let mut all: Vec<Event> = self.inject.remove(&at).unwrap_or_default();
             for e in &mut all {
@@ -1475,7 +1475,7 @@ impl<F: Float> Reference<F> {
             // PortSource order is `(NodeKey, port)` of the source, whatever order
             // the spec lists them in: re-keyed by source here, where the
             // compiler sorts its list.
-            let by_source: BTreeMap<EventOut, EventEdge> = graph
+            let by_source: BTreeMap<EventOutputPort, EventEdge> = graph
                 .events()
                 .get(&at)
                 .map(|v| v.iter().map(|&e| (e.from(), e)).collect())
@@ -1655,7 +1655,7 @@ impl<F: Float> Reference<F> {
             if !m.stale {
                 m.stale = true;
                 for port in 0..shape.event_out {
-                    let from = EventOut { node: key, port };
+                    let from = EventOutputPort { node: key, port };
                     if self.tracked.contains(&from) {
                         let held = std::mem::take(self.held.entry(from).or_default());
                         m.owed.insert(port, held);
@@ -1793,7 +1793,7 @@ impl<F: Float> Reference<F> {
             );
         }
         for (port, e) in ev_bufs.into_iter().enumerate() {
-            let from = EventOut {
+            let from = EventOutputPort {
                 node: key,
                 port: port as u16,
             };
@@ -1817,7 +1817,7 @@ impl<F: Float> Reference<F> {
         id: EdgeId,
         targets: &BTreeMap<EdgeId, Amplitude>,
         frames: usize,
-        events: &BTreeMap<EventOut, RefOut>,
+        events: &BTreeMap<EventOutputPort, RefOut>,
     ) -> Option<RefWeight<F>> {
         let gain = graph.gains().get(&id)?;
         let to = F::from_unit(targets[&id]);
@@ -1871,7 +1871,7 @@ impl<F: Float> Reference<F> {
         key: NodeKey,
         graph: &ValidGraph,
         frames: usize,
-        events: &BTreeMap<EventOut, RefOut>,
+        events: &BTreeMap<EventOutputPort, RefOut>,
         base: F,
         fresh: bool,
     ) -> Option<Vec<F>> {
@@ -1925,7 +1925,7 @@ impl<F: Float> Reference<F> {
         key: NodeKey,
         graph: &ValidGraph,
         frames: usize,
-        events: &BTreeMap<EventOut, RefOut>,
+        events: &BTreeMap<EventOutputPort, RefOut>,
     ) -> Vec<Option<(Vec<F>, Vec<u32>)>> {
         let unit = &self.units[&key].1;
         let declared = unit.shape().params;
@@ -1981,7 +1981,7 @@ struct RefPortIn<'a, F> {
     /// The base at the end of the block.
     b1: F,
     range: ParamRange,
-    source: Option<EventOut>,
+    source: Option<EventOutputPort>,
     /// The source's param events, through its PDC delay.
     events: &'a [ParamEvent],
     frames: usize,
@@ -2584,7 +2584,7 @@ impl RefHeld {
     }
 }
 
-fn edges_of(g: &ValidGraph) -> BTreeSet<(EventOut, EventIn)> {
+fn edges_of(g: &ValidGraph) -> BTreeSet<(EventOutputPort, EventInputPort)> {
     g.events()
         .iter()
         .flat_map(|(&at, v)| v.iter().map(move |e| (e.from(), at)))
@@ -2625,7 +2625,7 @@ struct RefFade<F: Float> {
 struct RefCommand {
     id: u64,
     at: At,
-    to: EventIn,
+    to: EventInputPort,
     payload: Scheduled,
     /// Its timeline position, unrounded: the frame it was scheduled for
     /// (rescaled on a rate change), or where a beat resolved. The tie-break

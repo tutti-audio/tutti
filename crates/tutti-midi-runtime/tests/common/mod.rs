@@ -6,8 +6,8 @@
 
 use tutti_fixtures::midi;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, EventTapId, EventTapOptions, EventTapReader, NodeKey,
-    TapAlign, TapEvent, TransportPosition,
+    Editor, EventEdge, EventInputPort, EventOutputPort, EventTapId, EventTapOptions,
+    EventTapReader, NodeKey, TapAlign, TapEvent, TransportPosition,
 };
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_ump::{MidiChannel, Ump};
@@ -44,11 +44,11 @@ pub fn off(n: u8) -> Ump {
 /// Wires event output 0 of node `from` to event input 0 of node `to`.
 pub fn connect(ed: &mut Editor, from: u64, to: u64) {
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(to),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(from),
             port: 0,
         }),
@@ -74,7 +74,7 @@ pub fn sink(ed: &mut Editor, first_id: u64, sources: &[(u64, u16)]) -> Sink {
         .map(|(&(node, port), id)| {
             ed.open_event_tap(
                 EventTapId::of(id),
-                EventOut {
+                EventOutputPort {
                     node: NodeKey(node),
                     port,
                 },

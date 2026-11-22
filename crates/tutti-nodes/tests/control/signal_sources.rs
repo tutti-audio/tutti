@@ -16,9 +16,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventOut, Executor, ForkByClone, ForkMode, ForkTarget,
-    Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape, Status,
-    TransportChanges, TransportPosition, control_in,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventOutputPort, Executor, ForkByClone, ForkMode,
+    ForkTarget, Io, Node, Offset, ParamIn, ParamKind, ParamRange, ParamSegment, Prepare, Shape,
+    Status, TransportChanges, TransportPosition, control_in,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_modulation::{
@@ -306,11 +306,11 @@ fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
 
 fn wire_events(ed: &mut Editor, from: u64, to: u64) {
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(to),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(from),
             port: 0,
         }),
@@ -373,7 +373,7 @@ fn lane_to_probe(
     ed.insert(NodeKey(lane), "lane", node);
     ed.spec_mut().connect_param(
         cutoff(probe),
-        EventOut {
+        EventOutputPort {
             node: NodeKey(lane),
             port: 0,
         },

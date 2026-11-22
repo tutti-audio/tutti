@@ -11,9 +11,9 @@ use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    COMMAND_CAPACITY, Cx, Editor, EventIn, EventKind, Executor, Io, Node, ParamKind, ParamRamp,
-    ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status, TransportPosition,
-    Unforkable,
+    COMMAND_CAPACITY, Cx, Editor, EventInputPort, EventKind, Executor, Io, Node, ParamKind,
+    ParamRamp, ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status,
+    TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -100,8 +100,8 @@ fn segment(target: f64) -> ParamKind {
     ParamKind::Segment(ParamSegment::by_id(ID, target, target, Samples::new(0)))
 }
 
-fn to() -> EventIn {
-    EventIn {
+fn to() -> EventInputPort {
+    EventInputPort {
         node: PROBE,
         port: 0,
     }
@@ -346,14 +346,14 @@ fn a_command_needs_a_port_and_an_orphan_is_counted() {
     assert_eq!(
         rig.ed.schedule(
             At::NextBlock,
-            EventIn {
+            EventInputPort {
                 node: PROBE,
                 port: 1
             },
             tag(0)
         ),
         Err(ScheduleError::NoSuchPort {
-            to: EventIn {
+            to: EventInputPort {
                 node: PROBE,
                 port: 1
             }
@@ -498,7 +498,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         units(&ref_log).into_iter().collect(),
     );
     for (k, t) in [(A, 1), (B, 2)] {
-        let to = EventIn { node: k, port: 0 };
+        let to = EventInputPort { node: k, port: 0 };
         ed.schedule(At::Frame(Frame::new(100)), to, tag(t))
             .expect("room");
         reference.schedule(At::Frame(Frame::new(100)), to, tag(t));
@@ -603,8 +603,12 @@ fn a_command_waits_for_the_commit_it_was_checked_against() {
                 Err(e) => panic!("{e}"),
             }
         }
-        ed.schedule(At::NextBlock, EventIn { node: key, port: 0 }, tag(round))
-            .expect("one outstanding at a time");
+        ed.schedule(
+            At::NextBlock,
+            EventInputPort { node: key, port: 0 },
+            tag(round),
+        )
+        .expect("one outstanding at a time");
         // Wait for it to land before the next round removes its node.
         let deadline = tutti_platform::Instant::now() + std::time::Duration::from_secs(10);
         while ed.commands_outstanding() > 0 {
@@ -985,7 +989,7 @@ fn beat_resolution_matches_a_hand_computed_table() {
         );
         units.insert(sink, Box::new(Impulse(ref_log.clone())));
         reference.set_graph(&ed.spec().validate().unwrap(), units);
-        let to = EventIn {
+        let to = EventInputPort {
             node: sink,
             port: 0,
         };
@@ -1061,7 +1065,7 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     units.insert(sink, Box::new(Impulse(tutti_fixtures::Record::new())));
     reference.set_graph(&ed.spec().validate().unwrap(), units);
 
-    let to = EventIn {
+    let to = EventInputPort {
         node: sink,
         port: 0,
     };
@@ -1456,7 +1460,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
     }
     assert!(!ScheduleError::NoParamEvents { to: to() }.is_transient());
     // A missing port is still a missing port, whatever the payload.
-    let port = EventIn {
+    let port = EventInputPort {
         node: PROBE,
         port: 1,
     };

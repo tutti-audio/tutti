@@ -49,7 +49,7 @@ use tutti_units::{
 
 use crate::lane::{arc_in, control_in, fade_gains, ramp_in, wrap_in};
 use crate::param_event::{ParamEvent, ParamKind, Timing, arrival, segment_progress};
-use crate::spec::EventOut;
+use crate::spec::EventOutputPort;
 use tutti_curve::{FadeLaw, Law, Piece};
 
 /// Most params one node can declare modulatable: 32 addresses.
@@ -473,7 +473,7 @@ pub struct ParamMod {
     /// What the value is clamped to.
     pub range: ParamRange,
     /// The event output whose value replaces the base.
-    pub source: Option<EventOut>,
+    pub source: Option<EventOutputPort>,
 }
 
 /// What a node reads for one of its params this block
@@ -910,7 +910,7 @@ pub(crate) struct PortState<F: Float> {
     /// without a declick (see the module docs).
     fresh: bool,
     /// The event source it last ran with (`None`: none).
-    source: Option<EventOut>,
+    source: Option<EventOutputPort>,
     /// Whether the last block delivered frames.
     modulated: bool,
     /// The last frame delivered.
@@ -1090,7 +1090,7 @@ impl<F: Float> ParamState<F> {
         k: usize,
         param: UnitAddr,
         frames: usize,
-        m: Option<(EventOut, &[ParamEvent])>,
+        m: Option<(EventOutputPort, &[ParamEvent])>,
         base: Option<F>,
     ) {
         let d = self.declick;

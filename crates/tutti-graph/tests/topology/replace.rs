@@ -13,8 +13,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, EventIn, EventKind, Executor, Fade, FadeLaw, Io, Node, Prepare, Shape,
-    Status, TransportPosition, Unforkable, compile,
+    CommitError, Cx, Editor, EventInputPort, EventKind, Executor, Fade, FadeLaw, Io, Node, Prepare,
+    Shape, Status, TransportPosition, Unforkable, compile,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_rt::RtScope;
@@ -503,13 +503,13 @@ fn events_go_to_the_incoming_unit_only() {
         })),
     );
     ed.insert(NODE, "count", Unforkable(EventCount(Arc::clone(&old))));
-    let to = EventIn {
+    let to = EventInputPort {
         node: NODE,
         port: 0,
     };
     ed.spec_mut().connect_events(
         to,
-        tutti_graph::EventEdge::Direct(tutti_graph::EventOut {
+        tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort {
             node: emitter,
             port: 0,
         }),

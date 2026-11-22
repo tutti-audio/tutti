@@ -32,7 +32,7 @@ use crate::NodeKey;
 use tutti_rt::RingWriter;
 
 use crate::plan::{FeedbackKey, Plan};
-use crate::spec::EventOut;
+use crate::spec::EventOutputPort;
 
 /// Entries one block's log holds (and, per worker, one parallel block's).
 pub(crate) const LOG_CAPACITY: usize = 64;
@@ -144,7 +144,7 @@ impl Dropped {
     }
 
     /// `count` events lost downstream of `from`, in a FIFO it feeds.
-    pub(crate) fn charge_source(&mut self, from: EventOut, count: u32) {
+    pub(crate) fn charge_source(&mut self, from: EventOutputPort, count: u32) {
         self.note(Owner::Key(from.node), Some(from.port), count, 0);
     }
 
@@ -157,7 +157,7 @@ impl Dropped {
             .get(delay as usize)
             .and_then(|d| d.key.event_origin())
         {
-            Some(crate::EventTapSource::Out(from)) => Some(from),
+            Some(crate::EventTapPort::Out(from)) => Some(from),
             _ => None,
         };
         self.charge(from, count);
@@ -173,7 +173,7 @@ impl Dropped {
         self.charge(from, count);
     }
 
-    fn charge(&mut self, from: Option<EventOut>, count: u64) {
+    fn charge(&mut self, from: Option<EventOutputPort>, count: u64) {
         let n = u32::try_from(count).unwrap_or(u32::MAX);
         match from {
             Some(from) => self.charge_source(from, n),

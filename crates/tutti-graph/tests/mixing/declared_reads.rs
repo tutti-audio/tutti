@@ -13,9 +13,9 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, IntoNode, Io, Node, NodeKey, NodeParts, OutputPort, ParamEvent,
-    ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape, Status,
-    TransportPosition, declare_params, param_parts,
+    Cx, Editor, EventOutputPort, Executor, IntoNode, Io, Node, NodeKey, NodeParts, OutputPort,
+    ParamEvent, ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, PortSource, Prepare, Shape,
+    Status, TransportPosition, declare_params, param_parts,
 };
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Db, Hz, Q, Samples, UnitAddr, UnitParam};
@@ -144,7 +144,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
                 node: NODE,
                 param: addr,
             },
-            EventOut { node: SRC, port: 0 },
+            EventOutputPort { node: SRC, port: 0 },
         );
     }
     ed.commit().expect("commits");

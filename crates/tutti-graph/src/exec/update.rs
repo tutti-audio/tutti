@@ -13,7 +13,7 @@ use crate::event::Event;
 use crate::gain::SumLane;
 use crate::held::Held;
 use crate::plan::Plan;
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 
 impl<F: Float> Executor<F> {
     /// Applies every queued commit, in the order the editor sent them, and
@@ -499,7 +499,7 @@ impl<F: Float> Executor<F> {
         // interpreter's order too.
         let (inject, has_inject) = (&mut new.inject, &mut new.has_inject);
         for (key, span, refused) in departed.chased.drain(..) {
-            let at = EventIn { node: key, port: 0 };
+            let at = EventInputPort { node: key, port: 0 };
             let events = &departed.chase_events[span];
             match flush_target(plan, inject, has_inject, at) {
                 Some((u, shell)) => {
@@ -516,7 +516,7 @@ impl<F: Float> Executor<F> {
         }
         if let Some(op) = old_plan {
             for inj in old.inject.iter_mut().filter(|i| i.live) {
-                let at = EventIn {
+                let at = EventInputPort {
                     node: op.units[inj.unit as usize].key,
                     port: inj.port,
                 };
@@ -582,7 +582,7 @@ impl<F: Float> Executor<F> {
             }
             let source_gone = |n: NodeKey| departed.held.iter().any(|(k, _)| *k == n);
             // What a port holds, and what it owes and has not yet sent.
-            let held_of = |from: EventOut| -> (Option<&Held>, Option<&Held>) {
+            let held_of = |from: EventOutputPort| -> (Option<&Held>, Option<&Held>) {
                 let port = usize::from(from.port);
                 if let Some((_, tables)) = departed.held.iter().find(|(k, _)| *k == from.node) {
                     return (tables.get(port).and_then(Option::as_ref), None);
@@ -721,7 +721,7 @@ fn flush_target<'a>(
     plan: &Plan,
     inject: &'a mut [Inject],
     has_inject: &mut [bool],
-    at: EventIn,
+    at: EventInputPort,
 ) -> Option<(u32, &'a mut Inject)> {
     let u = plan.units.binary_search_by_key(&at.node, |u| u.key).ok()?;
     if at.port >= plan.units[u].shape.event_in {

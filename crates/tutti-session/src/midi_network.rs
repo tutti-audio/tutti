@@ -27,7 +27,9 @@ use tutti_ump::Ump;
 
 use crate::graph::Graph;
 use crate::midi::{Claim, Departure, Held, Retiring, settle};
-use crate::{EventInPort, EventOutPort, MidiError, MidiEvent, MidiSink, SessionEvent, Stamping};
+use crate::{
+    EventInputPort, EventOutputPort, MidiError, MidiEvent, MidiSink, SessionEvent, Stamping,
+};
 
 /// An end of a Session a link runs: a [`Client`] or a [`Host`].
 trait Role: NetworkEndpoint + Send + 'static {
@@ -537,7 +539,10 @@ impl Entry {
         let (inlet, writer) = graph.open_event_inlet(LIVE_INLET_CAPACITY);
         let inlet = inlet.erase();
         // Both were added a moment ago, so both are in the graph.
-        let wired = graph.set_sources(EventInPort::new(node, 0), [EventOutPort::new(inlet, 0)]);
+        let wired = graph.set_sources(
+            EventInputPort::new(node, 0),
+            [EventOutputPort::new(inlet, 0)],
+        );
         debug_assert!(
             wired.is_ok(),
             "the input node and its inlet were just added"

@@ -12,9 +12,9 @@ use common::{Kind, TestNode, prepare};
 use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusRef, BusRole, BusSource, Buses, Cx, Edge, EdgeFade, EdgeGain, EdgeId, Editor,
-    EventEdge, EventIn, EventOut, Executor, FeedbackFrom, InputPort, Io, Node, NodeKey, OutputPort,
-    PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions, TapSpec,
-    TransportPosition, Unforkable, Unwired,
+    EventEdge, EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node,
+    NodeKey, OutputPort, PortSink, PortSource, Prepare, Shape, Status, TapAlign, TapId, TapOptions,
+    TapSpec, TransportPosition, Unforkable, Unwired,
 };
 use tutti_units::{Amplitude, Samples, UnitAddr, UnitParam};
 
@@ -63,12 +63,12 @@ fn id(sink: InputPort, from: Edge) -> EdgeId {
     }
 }
 
-fn eout(node: NodeKey, port: u16) -> EventOut {
-    EventOut { node, port }
+fn eout(node: NodeKey, port: u16) -> EventOutputPort {
+    EventOutputPort { node, port }
 }
 
-fn ein(node: NodeKey, port: u16) -> EventIn {
-    EventIn { node, port }
+fn ein(node: NodeKey, port: u16) -> EventInputPort {
+    EventInputPort { node, port }
 }
 
 /// `A -> X -> B`, three audio and three event ports on each, `X` the key
@@ -183,9 +183,9 @@ fn a_narrower_shape_drops_exactly_the_edges_to_missing_ports() {
 fn a_narrower_shape_drops_exactly_the_event_edges_to_missing_ports() {
     let (mut ed, _exec) = rig();
     let placed = ed.insert(X, "ported", Unforkable(narrow()));
-    let dropped: BTreeSet<(EventIn, EventEdge)> =
+    let dropped: BTreeSet<(EventInputPort, EventEdge)> =
         placed.unwired.event_edges.iter().copied().collect();
-    let expected: BTreeSet<(EventIn, EventEdge)> = [
+    let expected: BTreeSet<(EventInputPort, EventEdge)> = [
         (ein(X, 2), EventEdge::Direct(eout(A, 2))),
         (ein(B, 2), EventEdge::Direct(eout(X, 2))),
         (ein(A, 1), EventEdge::feedback(eout(X, 2), DELAY)),

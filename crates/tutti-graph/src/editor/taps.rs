@@ -9,10 +9,10 @@ use super::{CloseError, CommitError, Editor, MAX_CHANNELS, MissingSource, TapOpe
 use crate::PortSource;
 use crate::event_tap::EventTapReader;
 use crate::meter::MeterReader;
-use crate::spec::{EventIn, EventOut};
+use crate::spec::{EventInputPort, EventOutputPort};
 use crate::tap::{TapOptions, TapReader};
 use crate::{
-    EventTapId, EventTapOptions, EventTapSource, EventTapSpec, MeterId, MeterSpec, TapId, TapSpec,
+    EventTapId, EventTapOptions, EventTapPort, EventTapSpec, MeterId, MeterSpec, TapId, TapSpec,
 };
 
 impl<F: Float> Editor<F> {
@@ -250,8 +250,8 @@ impl<F: Float> Editor<F> {
         gone.len()
     }
 
-    /// Declares a tap on one event port (`source`: an [`EventOut`] or an
-    /// [`EventIn`], or an [`EventTapSource`]) and returns its reader.
+    /// Declares a tap on one event port (`source`: an [`EventOutputPort`] or an
+    /// [`EventInputPort`], or an [`EventTapPort`]) and returns its reader.
     /// It takes effect at the next [`commit`](Self::commit), which compiles
     /// the tap's op and hands the executor its producer; until then the
     /// reader sees nothing. `capacity` is a count of events: a
@@ -287,11 +287,11 @@ impl<F: Float> Editor<F> {
     /// # Errors
     ///
     /// [`MissingSource::Node`], [`MissingSource::EventPort`] or
-    /// [`MissingSource::EventInPort`].
+    /// [`MissingSource::EventInputPort`].
     pub fn open_event_tap(
         &mut self,
         id: EventTapId,
-        source: impl Into<EventTapSource>,
+        source: impl Into<EventTapPort>,
         options: EventTapOptions,
     ) -> Result<EventTapReader, MissingSource> {
         let (capacity, align) = options.into_parts();
@@ -303,16 +303,16 @@ impl<F: Float> Editor<F> {
         }
         let shape = self.shapes.get(&node);
         match source {
-            EventTapSource::Out(EventOut { port, .. }) => {
+            EventTapPort::Out(EventOutputPort { port, .. }) => {
                 let width = shape.map_or(0, |s| usize::from(s.event_out));
                 if usize::from(port) >= width {
                     return Err(MissingSource::EventPort { node, port, width });
                 }
             }
-            EventTapSource::In(EventIn { port, .. }) => {
+            EventTapPort::In(EventInputPort { port, .. }) => {
                 let width = shape.map_or(0, |s| usize::from(s.event_in));
                 if usize::from(port) >= width {
-                    return Err(MissingSource::EventInPort { node, port, width });
+                    return Err(MissingSource::EventInputPort { node, port, width });
                 }
             }
         }

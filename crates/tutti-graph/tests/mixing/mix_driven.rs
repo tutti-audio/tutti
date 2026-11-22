@@ -22,9 +22,9 @@ use std::sync::atomic::Ordering;
 use common::{Kind, Pair, SpecBehaviour, bits, driver_value, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CompileError, CycleEdge, Edge, Editor, EventOut, ForkMode, ForkTarget, GraphInvalid, GraphSpec,
-    InputPort, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, ParamPorts, ParamPortsError,
-    ParamRange, PortSource, Topology, TransportPosition, ValidGraph, compile,
+    CompileError, CycleEdge, Edge, Editor, EventOutputPort, ForkMode, ForkTarget, GraphInvalid,
+    GraphSpec, InputPort, NodeKey, NodeMix, NodeMode, OutputPort, ParamIn, ParamPorts,
+    ParamPortsError, ParamRange, PortSource, Topology, TransportPosition, ValidGraph, compile,
 };
 use tutti_units::{Mix, Tail, UnitAddr, UnitParam};
 
@@ -51,8 +51,8 @@ fn out(node: u64) -> PortSource {
     })
 }
 
-fn lane_out(node: u64) -> EventOut {
-    EventOut {
+fn lane_out(node: u64) -> EventOutputPort {
+    EventOutputPort {
         node: key(node),
         port: 0,
     }
@@ -529,7 +529,7 @@ fn the_mix_port_is_refused_as_a_param_is() {
     let mut port = rig.spec.clone();
     port.connect_param(
         mix_of(2),
-        EventOut {
+        EventOutputPort {
             node: key(1),
             port: 3,
         },

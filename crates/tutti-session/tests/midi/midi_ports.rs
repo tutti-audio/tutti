@@ -14,8 +14,8 @@ use tutti_midi_hardware::InputFault;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint, persistent_endpoint};
 use tutti_midi_runtime::MidiClipNode;
 use tutti_session::{
-    EventInPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PeerEvent, PortCause,
-    Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
+    EventInputPort, MidiInput, MidiOutput, MidiPortError, MidiRouteRule, Peer, PeerEvent,
+    PortCause, Presence, Resource, ResourceFact, Session, SessionEvent, Stamp,
 };
 use tutti_ump::{
     Address, CCNumber, Message, MidiChannel, MidiGroup, NoteKeyEvent, NoteNumber, U7, Voice2,
@@ -1050,7 +1050,7 @@ fn an_output_port_sends_what_its_node_is_fed_to_the_device() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
         .expect("the port's node takes events");
     let _ = s.update();
     roll(&mut s, 1_024);
@@ -1234,10 +1234,10 @@ fn an_idle_output_port_active_sensing_sends_it_with_no_update_to_drive_it() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
         .expect("the port's node takes events");
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [])
+        .set_sources(EventInputPort::new(out.node(), 0), [])
         .expect("and drops them");
     let later = sent_until(&fake, SYNTH, "it did not go on", |sent| sent.len() >= 2);
     assert!(

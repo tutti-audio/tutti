@@ -11,8 +11,8 @@ use tutti_buffers::MaxBlock;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Editor, EventEdge, EventIn, EventOut, Executor, ForkMode, ForkTarget, Prepare, Renderer,
-    TransportPosition,
+    Editor, EventEdge, EventInputPort, EventOutputPort, Executor, ForkMode, ForkTarget, Prepare,
+    Renderer, TransportPosition,
 };
 
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
@@ -52,11 +52,11 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
     );
     ed.insert(NodeKey(2), "font", unit);
     ed.spec_mut().connect_events(
-        EventIn {
+        EventInputPort {
             node: NodeKey(2),
             port: 0,
         },
-        EventEdge::Direct(EventOut {
+        EventEdge::Direct(EventOutputPort {
             node: NodeKey(1),
             port: 0,
         }),

@@ -24,8 +24,8 @@ use common::prepare;
 use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, Event, EventEdge, EventIn, EventKind, EventOut, Executor, GraphSpec, Io, Node,
-    Prepare, Reference, Shape, Shapes, Status, TransportPosition, compile,
+    Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, GraphSpec,
+    Io, Node, Prepare, Reference, Shape, Shapes, Status, TransportPosition, compile,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSource};
 use tutti_graph::{NodeKey, Topology};
@@ -173,11 +173,11 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
     let mut g = GraphSpec::new(t);
     for (p, srcs) in ph.edges.iter().enumerate() {
         for &(e, fb) in srcs {
-            let from = EventOut {
+            let from = EventOutputPort {
                 node: NodeKey(e as u64),
                 port: 0,
             };
-            let at = EventIn {
+            let at = EventInputPort {
                 node: REC,
                 port: p as u16,
             };
@@ -303,7 +303,7 @@ fn run_scheduled(
             let tag = SCHEDULED + landings.len() as u32;
             let target = now.saturating_add_signed(rel);
             let kind = EventKind::Midi(Ump([tag, target as u32, (target >> 32) as u32, 0]));
-            let at = EventIn { node: REC, port };
+            let at = EventInputPort { node: REC, port };
             let when = At::Frame(Frame::new(target));
             if executor {
                 ed.schedule(when, at, kind)
@@ -518,11 +518,11 @@ fn wide_event_fan_in_is_a_merge_tree_in_source_order() {
         // `connect_events`, which keeps source order), so a merge that fell
         // back to the listed order would be caught.
         g.events.insert(
-            EventIn { node: REC, port: 0 },
+            EventInputPort { node: REC, port: 0 },
             (0..width)
                 .rev()
                 .map(|i| {
-                    EventEdge::Direct(EventOut {
+                    EventEdge::Direct(EventOutputPort {
                         node: NodeKey(i as u64),
                         port: 0,
                     })
@@ -678,9 +678,9 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
             t.set_outputs(vec![PortSource::Node(OutputPort { node: tap, port: 0 })]);
             let mut g = GraphSpec::new(t);
             g.connect_events(
-                EventIn { node: tap, port: 0 },
+                EventInputPort { node: tap, port: 0 },
                 EventEdge::feedback(
-                    EventOut {
+                    EventOutputPort {
                         node: clock,
                         port: 0,
                     },
@@ -799,8 +799,8 @@ fn wide_fan_in_matches_the_reference() {
     let mut g = GraphSpec::new(t);
     for i in (0..width).rev() {
         g.connect_events(
-            EventIn { node: REC, port: 0 },
-            EventEdge::Direct(EventOut {
+            EventInputPort { node: REC, port: 0 },
+            EventEdge::Direct(EventOutputPort {
                 node: NodeKey(i as u64),
                 port: 0,
             }),

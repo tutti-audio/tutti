@@ -3,7 +3,7 @@
 //! The event sibling of [`tap`](crate::TapReader). An event tap is declared on
 //! the [`Topology`](crate::Topology) as "copy this event port"
 //! ([`EventTapSpec`](crate::EventTapSpec)), an output (what the port wrote) or
-//! an input ([`EventTapSource`](crate::EventTapSource)). A tap of an input
+//! an input ([`EventTapPort`](crate::EventTapPort)). A tap of an input
 //! copies what its node reads there: the sources merged in the order the node
 //! is handed them, after the delays that align them. The compiler emits one
 //! [`Op::EventTap`](crate::Op::EventTap) per tap whose port exists, and, for

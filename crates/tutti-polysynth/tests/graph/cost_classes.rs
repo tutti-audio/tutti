@@ -11,8 +11,8 @@ use tutti_fixtures::signal::plane_bits as bits;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
-    Cost, Cx, Editor, EventEdge, EventIn, EventOut, Executor, Io, Node, Prepare, Schedule, Shape,
-    Status, TransportPosition, Unforkable,
+    Cost, Cx, Editor, EventEdge, EventInputPort, EventOutputPort, Executor, Io, Node, Prepare,
+    Schedule, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{MidiClipNode, TimedMidiEvent};
@@ -113,8 +113,8 @@ fn graph(workers: usize, declared: bool) -> Executor {
             }
         }
         ed.spec_mut().connect_events(
-            EventIn { node: key, port: 0 },
-            EventEdge::Direct(EventOut {
+            EventInputPort { node: key, port: 0 },
+            EventEdge::Direct(EventOutputPort {
                 node: clip,
                 port: 0,
             }),

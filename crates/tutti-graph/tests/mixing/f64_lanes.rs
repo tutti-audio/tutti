@@ -9,7 +9,7 @@ use tutti_graph::testing as common;
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, Editor, EventOut, Executor, ForkByClone, Io, Node, NodeKey, OutputPort, ParamEvent,
+    Cx, Editor, EventOutputPort, Executor, ForkByClone, Io, Node, NodeKey, OutputPort, ParamEvent,
     ParamIn, ParamNode, ParamRamp, ParamRange, ParamSegment, ParamSet, Params, PortSource, Prepare,
     Shape, Status, TransportPosition, declare_params,
 };
@@ -114,7 +114,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
             port: 0,
         })]);
     ed.spec_mut()
-        .connect_param(at, EventOut { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
     if let Some(range) = range {
         ed.spec_mut().set_param_range(at, range);
     }
@@ -245,7 +245,7 @@ fn a_range_change_lands_on_the_next_block() {
             port: 0,
         })]);
     ed.spec_mut()
-        .connect_param(at, EventOut { node: SRC, port: 0 });
+        .connect_param(at, EventOutputPort { node: SRC, port: 0 });
     ed.commit().expect("commits");
     exec.apply_pending();
     let mut block = |ed: &mut Editor<f64>| {
@@ -461,7 +461,7 @@ fn render_segment(
             node: LANE,
             param: param.into(),
         },
-        EventOut { node: SRC, port: 0 },
+        EventOutputPort { node: SRC, port: 0 },
     );
     ed.commit().expect("commits");
     exec.apply_pending();

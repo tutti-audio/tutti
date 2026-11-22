@@ -17,7 +17,7 @@ use tutti_ump::{MidiGroup, Ump};
 use tutti_units::SampleRate;
 
 use tutti_midi_runtime::MidiClipNode;
-use tutti_session::{EventInPort, EventOutPort, MidiSink, Session, Stamp, Stamping};
+use tutti_session::{EventInputPort, EventOutputPort, MidiSink, Session, Stamp, Stamping};
 use tutti_ump::{Message, System};
 use tutti_ump::{MidiChannel, NoteKeyEvent, NoteNumber};
 use tutti_units::{Beat, BeatDuration};
@@ -121,7 +121,7 @@ fn a_full_tap_counts_what_it_drops() {
         .graph()
         .taps()
         .open_event(
-            EventOutPort::new(clock, 0),
+            EventOutputPort::new(clock, 0),
             EventTapOptions::new(EventCapacity::of(8_192)).align(TapAlign::Raw),
         )
         .expect("the clock is in the graph");
@@ -182,7 +182,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
         .graph()
         .taps()
         .open_event(
-            EventOutPort::new(clock, 0),
+            EventOutputPort::new(clock, 0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .unwrap();
@@ -190,7 +190,7 @@ fn reopening_one_tap_leaves_the_others_fed() {
         .graph()
         .taps()
         .open_event(
-            EventOutPort::new(clock, 0),
+            EventOutputPort::new(clock, 0),
             EventTapOptions::new(EventCapacity::of(64)).align(TapAlign::Raw),
         )
         .unwrap();
@@ -238,7 +238,7 @@ fn a_clip_fed_to_a_sinks_node_arrives_on_its_frames() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");
     let _ = s.update();
     render(&mut s, 50_000);
@@ -364,7 +364,7 @@ fn a_stamped_sink_stamps_at_the_new_rate_after_a_re_rate() {
         BeatDuration::new(1.0),
     )));
     s.graph()
-        .set_sources(EventInPort::new(out.node(), 0), [clip.events_out()])
+        .set_sources(EventInputPort::new(out.node(), 0), [clip.events_out()])
         .expect("the sink's node takes events");
     let _ = s.update();
     s.play().expect("room");
