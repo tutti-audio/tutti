@@ -37,6 +37,7 @@ use tutti_polysynth::UnisonVoices;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use tutti_curve::Law;
+use tutti_dsp::LadderSaturation;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Offset};
 
@@ -159,8 +160,12 @@ fn bench_oscillator(c: &mut Criterion) {
 fn bench_filter(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/filter");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    for (name, filter) in [
-        ("none", FilterType::None),
+    let moog = FilterType::Moog {
+        cutoff: Hz::new(2_000.0),
+        resonance: Resonance::new(0.3),
+    };
+    for (name, filter, ladder_saturation) in [
+        ("none", FilterType::None, LadderSaturation::PerStage),
         (
             "svf-lowpass",
             FilterType::Svf {
@@ -168,16 +173,19 @@ fn bench_filter(c: &mut Criterion) {
                 q: tutti_polysynth::SvfQ::BUTTERWORTH,
                 mode: SvfMode::Lowpass,
             },
+            LadderSaturation::PerStage,
         ),
-        (
-            "moog-ladder",
-            FilterType::Moog {
-                cutoff: Hz::new(2_000.0),
-                resonance: Resonance::new(0.3),
-            },
-        ),
+        ("moog-ladder", moog, LadderSaturation::PerStage),
+        ("moog-ladder-input", moog, LadderSaturation::Input),
     ] {
-        let mut synth = held(SynthConfig { filter, ..config() }, 16);
+        let mut synth = held(
+            SynthConfig {
+                filter,
+                ladder_saturation,
+                ..config()
+            },
+            16,
+        );
         group.bench_function(name, |b| b.iter(|| drive(&mut synth)));
     }
     group.finish();

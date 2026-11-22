@@ -903,10 +903,10 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
     );
 }
 
-/// **A node fork of a graph with no global outputs is `NoOutputs`**, not an
+/// **A node fork of a graph with no main outputs is `NoOutputs`**, not an
 /// empty fork that renders nothing.
 #[test]
-fn a_node_fork_with_no_global_outputs_is_no_outputs() {
+fn a_node_fork_with_no_main_outputs_is_no_outputs() {
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "consts", consts(1, 0.5));
     assert_eq!(
@@ -1408,7 +1408,7 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
             node: NodeKey(1),
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     let pending = ed
         .fork_gather(ForkTarget::MainOutput, ForkMode::Live, pre)

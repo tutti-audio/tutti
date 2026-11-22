@@ -8,7 +8,7 @@ use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 
 use super::kernel::LadderCoefficients;
 use super::solve::nonlinear_ladder_step;
-use super::{LadderModel, LadderType};
+use super::{LadderModel, LadderSaturation, LadderType, ladder_step};
 use crate::channel_group::group_size;
 use crate::design::along;
 use crate::{Lerp, Ramp, SimdLanes};
@@ -51,8 +51,9 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
 
 /// The state of a ladder per channel: its four stage words in the
 /// float `F`, every channel read through one shared [`LadderBlend`]. Each sample solves the
-/// nonlinear ladder's loop equation with a capped Newton iteration (see the crate's `solve`
-/// module: a `tanh` at each stage's input and in the loop).
+/// ladder's loop in its [`LadderSaturation`] model (an option of the bank, per-stage unless
+/// [`saturation`](Self::saturation) says otherwise: a capped Newton iteration with a `tanh` at
+/// each stage's input and in the loop).
 ///
 /// The width is fixed when it is built. [`process`](Self::process) runs a block of audio
 /// through it while the design ramps toward its target and then holds. Channels run in groups
@@ -61,15 +62,26 @@ impl<F: Float + SimdLanes> Lerp for LadderBlend<F> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LadderBank<F> {
     state: Box<[[F; 4]]>,
+    saturation: LadderSaturation,
 }
 
 impl<F: Float + SimdLanes> LadderBank<F> {
-    /// A silent bank `width` channels wide. Allocates: build it on the control side.
+    /// A silent bank `width` channels wide, saturating [`PerStage`](LadderSaturation::PerStage).
+    /// Allocates: build it on the control side.
     #[must_use]
     pub fn new(width: ChannelLayout) -> Self {
         Self {
             state: vec![[F::ZERO; 4]; usize::from(width.count())].into_boxed_slice(),
+            saturation: LadderSaturation::PerStage,
         }
+    }
+
+    /// The saturation model every channel runs. The stage words mean the same in both, so a
+    /// bank can be switched between blocks, though the sound steps where they differ.
+    #[must_use]
+    pub fn saturation(mut self, saturation: LadderSaturation) -> Self {
+        self.saturation = saturation;
+        self
     }
 
     /// Back to silence. No allocation.
@@ -101,14 +113,26 @@ impl<F: Float + SimdLanes> LadderBank<F> {
             let n = group_size(width - first);
             macro_rules! group {
                 ($n:literal) => {
-                    group::<F, $n>(
-                        blend,
-                        &mut self.state[first..first + $n],
-                        first,
-                        &input,
-                        &mut output,
-                        frames,
-                    )
+                    match self.saturation {
+                        LadderSaturation::Input => group::<F, $n>(
+                            input_step,
+                            blend,
+                            &mut self.state[first..first + $n],
+                            first,
+                            &input,
+                            &mut output,
+                            frames,
+                        ),
+                        LadderSaturation::PerStage => group::<F, $n>(
+                            per_stage_step,
+                            blend,
+                            &mut self.state[first..first + $n],
+                            first,
+                            &input,
+                            &mut output,
+                            frames,
+                        ),
+                    }
                 };
             }
             match n {
@@ -128,11 +152,34 @@ impl<F: Float + SimdLanes> LadderBank<F> {
     }
 }
 
+/// One sample of [`LadderSaturation::Input`]: the closed-form loop and one `tanh`.
+#[inline(always)]
+fn input_step<F: Float + SimdLanes>(
+    c: &LadderCoefficients<F>,
+    ty: LadderType,
+    s: &mut [F; 4],
+    x: F,
+) -> F {
+    ladder_step(c, ty, s, x, F::tanh)
+}
+
+/// One sample of [`LadderSaturation::PerStage`]: the Newton solve with a `tanh` per stage.
+#[inline(always)]
+fn per_stage_step<F: Float + SimdLanes>(
+    c: &LadderCoefficients<F>,
+    ty: LadderType,
+    s: &mut [F; 4],
+    x: F,
+) -> F {
+    nonlinear_ladder_step(c, ty, s, x, F::tanh)
+}
+
 /// Channels `first..first + N` over the first `frames` frames, sample-inner, the group's
 /// states in registers: the frames the ramp blends at a design per frame, the rest at its
 /// target.
 #[inline]
 fn group<F: Float + SimdLanes, const N: usize>(
+    step: impl Fn(&LadderCoefficients<F>, LadderType, &mut [F; 4], F) -> F,
     ramp: &Ramp<LadderBlend<F>>,
     state: &mut [[F; 4]],
     first: usize,
@@ -155,7 +202,7 @@ fn group<F: Float + SimdLanes, const N: usize>(
         ($i:expr, $d:expr) => {
             for k in 0..N {
                 let x = xs[k][$i] * $d.drive;
-                ys[k][$i] = nonlinear_ladder_step(&$d.coefficients, $d.ty, &mut st[k], x);
+                ys[k][$i] = step(&$d.coefficients, $d.ty, &mut st[k], x);
             }
         };
     }

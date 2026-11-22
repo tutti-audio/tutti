@@ -178,7 +178,7 @@ pub(crate) const BLOCK_DISPATCH: u64 = 6_000;
 /// its independent siblings (`compile/coarsen.rs`): five dispatches' worth.
 pub(crate) const GRAIN: u64 = 5 * TASK_DISPATCH;
 
-/// A copy of one channel (a global input, an output, a PDC delay, a
+/// A copy of one channel (a main input, an output, a PDC delay, a
 /// feedback capture).
 const COPY: Work = Work {
     fixed: 50,
@@ -216,7 +216,7 @@ const EVENTS: Work = Work {
 /// plan unit index).
 pub(crate) fn op_work(op: &Op, shapes: &[Shape], sum_lanes: &[Option<crate::EdgeId>]) -> Work {
     match *op {
-        Op::GlobalIn { .. }
+        Op::MainInput { .. }
         | Op::Delay { .. }
         | Op::Output { .. }
         | Op::Capture { .. }

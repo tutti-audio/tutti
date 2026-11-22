@@ -425,7 +425,7 @@ vocabulary it could not cover.
 
 `spawn_audio_node` adds an *unwired* node. `PortSources` on a sink names what
 feeds each of its input ports; the `MasterSources` resource names what feeds each
-global output channel. The rebuild resolves entities → `AudioNode` each frame (a
+main output channel. The rebuild resolves entities → `AudioNode` each frame (a
 stored handle goes stale on a rebind), builds a `Topology` value from the
 declarations, and writes the declared ports that differ into the editor's spec;
 the frame's commit compiles it (doc 013).

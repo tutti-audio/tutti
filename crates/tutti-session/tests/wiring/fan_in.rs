@@ -1,6 +1,6 @@
 //! A port holds a set of sources and the graph sums it (doc 013, "Audio
 //! fan-in sums", point 7): `sources`, `set_sources`, `add_source` and
-//! `remove_source` on a node's input, the same four on a global output
+//! `remove_source` on a node's input, the same four on a main output
 //! channel, and the output tap that hears a summed channel whole.
 //!
 //! Every figure is analytic: constants of exactly representable values, whose
@@ -285,7 +285,7 @@ fn a_node_cannot_be_its_own_source() {
     );
 }
 
-/// A global output channel is a sink too: its sources sum.
+/// A main output channel is a sink too: its sources sum.
 #[test]
 fn an_output_channel_sums_its_sources() {
     let mut r = rig();

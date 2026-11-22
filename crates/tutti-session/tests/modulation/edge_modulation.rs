@@ -2,7 +2,7 @@
 //! G2): `Mods::route(source, ChannelEdge, depth)` gives the edge's sink sum a
 //! driven lane, as a route onto a param gives a port one.
 //!
-//! The figures are analytic. Two constant sources sum at global output 0;
+//! The figures are analytic. Two constant sources sum at main output 0;
 //! a macro (a constant source) is routed onto the edge of the first at a
 //! depth over a range, and the render is the weighted fold
 //! `(0.0 + w * a) + b` with `w = depth * macro * span` (a bipolar linear

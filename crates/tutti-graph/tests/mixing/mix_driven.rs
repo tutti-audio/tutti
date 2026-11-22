@@ -118,7 +118,7 @@ fn stepped(n: usize, shift: usize) -> Option<f32> {
     Some((driver_value(f - f % PERIOD, PERIOD) * 2.0) as f32)
 }
 
-/// Node 1 is the driver, node 2 the node under test (fed by global input 0,
+/// Node 1 is the driver, node 2 the node under test (fed by main input 0,
 /// or by node 3 when there is one), and the mix of node 2 is driven by node 1.
 struct Rig {
     kinds: BTreeMap<NodeKey, Kind>,
@@ -138,7 +138,7 @@ impl Rig {
                 t.nodes.insert(key(3), spec_of(&kinds[&key(3)]));
                 t.connect(at(2), Edge::Direct(out(3)));
             }
-            None => t.connect(at(2), Edge::Direct(PortSource::Global(0))),
+            None => t.connect(at(2), Edge::Direct(PortSource::MainInput(0))),
         }
         for (&k, kind) in &kinds {
             t.nodes.insert(k, spec_of(kind));
@@ -429,7 +429,7 @@ fn the_mode_wins_over_a_driven_mix() {
 
 /// A lane that arrives **late** raises its node's arrival, so the audio is
 /// delayed to it and the lane itself needs no ring. Worked by hand: the driver
-/// declares 32 frames of latency, the global input none, so node 2 arrives at
+/// declares 32 frames of latency, the main input none, so node 2 arrives at
 /// 32; its input gets a 32-frame ring (silent for the first 32 frames), the
 /// lane none, and frame `n >= 32` is the blend of that delayed input at the
 /// step of its own frame.
@@ -442,7 +442,7 @@ fn a_late_lane_delays_the_audio_to_the_node() {
             &plan,
             tutti_graph::DelayKey::Audio {
                 at: at(2),
-                from: PortSource::Global(0)
+                from: PortSource::MainInput(0)
             }
         ),
         Some(32)
@@ -637,7 +637,7 @@ fn solo() -> (Editor, tutti_graph::Executor) {
     ed.insert(key(1), "triple", tutti_graph::ForkByClone(Triple));
     ed.spec_mut()
         .topology
-        .connect(at(1), Edge::Direct(PortSource::Global(0)));
+        .connect(at(1), Edge::Direct(PortSource::MainInput(0)));
     ed.spec_mut().topology.set_outputs(vec![out(1)]);
     ed.set_mix(key(1), Mix::new(0.25)).expect("a node");
     ed.commit().expect("commits");

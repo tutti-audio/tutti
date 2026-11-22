@@ -1,7 +1,7 @@
 //! The render source: a graph presented as a block-at-a-time source of planes.
 //!
 //! [`GraphSource`] block-renders a `tutti_graph` executor into one plane per
-//! global output and advances the caller's [`RenderClock`] in lockstep.
+//! main output and advances the caller's [`RenderClock`] in lockstep.
 //! [`drive`] pulls it block by block, applying the latency and length gate,
 //! and hands each block to the outputs (the fold onto each one's layout is
 //! theirs, [`FileChannels::fold_from`]), so the graph is stepped exactly once
@@ -103,11 +103,11 @@ pub(crate) struct GraphSource<'a, F: Float> {
     editor: &'a mut tutti_graph::Editor<F>,
     executor: &'a mut tutti_graph::Executor<F>,
     clock: &'a dyn RenderClock,
-    /// Silence for every global input the graph declares: an export renders
+    /// Silence for every main input the graph declares: an export renders
     /// with nothing plugged in.
     silence: Vec<F>,
-    global_inputs: usize,
-    /// One plane per global output, `max_block` long.
+    main_inputs: usize,
+    /// One plane per main output, `max_block` long.
     planes: Vec<Vec<F>>,
     /// The main output's channels: the first of `planes`.
     outputs: usize,
@@ -173,7 +173,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
         // the main output's are the first `outputs`: a plan that carries an old
         // main output's channels (a main output change crossfading) renders them into planes
         // the export never reads.
-        let (global_inputs, outputs, rendered) = executor.plan().map_or_else(
+        let (main_inputs, outputs, rendered) = executor.plan().map_or_else(
             || {
                 let topology = &editor.spec().topology;
                 let width = topology.outputs.len();
@@ -181,8 +181,8 @@ impl<'a, F: Float> GraphSource<'a, F> {
             },
             |p| {
                 (
-                    p.global_inputs() as usize,
-                    p.global_outputs(),
+                    p.main_inputs() as usize,
+                    p.main_outputs(),
                     p.rendered_outputs(),
                 )
             },
@@ -195,7 +195,7 @@ impl<'a, F: Float> GraphSource<'a, F> {
             executor,
             clock,
             silence: vec![F::ZERO; max_block],
-            global_inputs,
+            main_inputs,
             planes,
             outputs,
             main_output,
@@ -216,7 +216,7 @@ impl<F: Float> GraphSource<'_, F> {
         )
     }
 
-    /// The graph's global output channels: the planes of a block.
+    /// The graph's main output channels: the planes of a block.
     pub(crate) fn outputs(&self) -> usize {
         self.outputs
     }
@@ -226,7 +226,7 @@ impl<F: Float> GraphSource<'_, F> {
         self.main_output.as_ref()
     }
 
-    /// The planes of the block last rendered: one per global output, the first
+    /// The planes of the block last rendered: one per main output, the first
     /// frames of each valid.
     pub(crate) fn planes(&self) -> &[Vec<F>] {
         &self.planes[..self.outputs]
@@ -263,7 +263,7 @@ impl<F: Float> GraphSource<'_, F> {
         // list of borrows cannot live beside the buffers it borrows. Two
         // short `Vec`s per `max_block` frames, on an offline worker — the
         // executor's own walk inside `render_graph` stays allocation-free.
-        let inputs: Vec<&[F]> = (0..self.global_inputs)
+        let inputs: Vec<&[F]> = (0..self.main_inputs)
             .map(|_| &self.silence[..block_size])
             .collect();
         let mut outputs: Vec<&mut [F]> = self

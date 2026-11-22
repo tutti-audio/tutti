@@ -52,7 +52,7 @@ fn out(node: u64) -> PortSource {
     })
 }
 
-/// `CHAINS` independent chains `Global(0) -> Lag(5 * k) -> Gain`, each its own
+/// `CHAINS` independent chains `MainInput(0) -> Lag(5 * k) -> Gain`, each its own
 /// output channel: different latencies, so the compiler aligns the outputs.
 /// Returns the sources of the six gains.
 fn build(ed: &mut Editor) -> Vec<PortSource> {
@@ -81,7 +81,7 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
                 node: NodeKey(lag),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
         t.edges.insert(
             InputPort {
@@ -187,7 +187,7 @@ struct Read {
     raw: Vec<f32>,
     /// Chain 2, aligned.
     single: Vec<f32>,
-    /// `Global(0)` and a `Zero` lane, aligned.
+    /// `MainInput(0)` and a `Zero` lane, aligned.
     edges: Vec<f32>,
     lost: usize,
 }
@@ -215,7 +215,7 @@ fn run(r: &mut Rig, blocks: usize) -> Read {
     let mut edges =
         r.ed.open_tap(
             TapId::of(4),
-            vec![PortSource::Global(0), PortSource::Zero],
+            vec![PortSource::MainInput(0), PortSource::Zero],
             TapOptions::new(cap),
         )
         .expect("the sources exist");
@@ -258,7 +258,7 @@ fn frames(blocks: usize) -> impl Iterator<Item = u64> {
 /// Every tap equals the analytic signal of what it names, at any width: an
 /// aligned tap of the outputs' sources is each output channel (the compiler
 /// gave it the compensation an output gets), a raw one is the source as it
-/// leaves its node, a global input and silence work as sources, and the
+/// leaves its node, a main input and silence work as sources, and the
 /// outputs themselves are untouched by all four taps being open.
 #[test]
 fn a_tap_is_aligned_by_the_compiler_and_any_width() {
@@ -278,7 +278,7 @@ fn a_tap_is_aligned_by_the_compiler_and_any_width() {
     let raw5: Vec<f32> = frames(8).map(|t| chain_at(5, LATENCY, t)).collect();
     assert_eq!(lane(&read.raw, 2, 0), raw0);
     assert_eq!(lane(&read.raw, 2, 1), raw5);
-    // The global input is a source like any other: aligned, it is delayed by
+    // The main input is a source like any other: aligned, it is delayed by
     // the whole compensation, as an output wired straight to it would be. A
     // `Zero` lane is silence.
     let input: Vec<f32> = frames(8)
@@ -1061,16 +1061,16 @@ fn a_narrowed_node_silences_the_tap_lanes_past_its_width_and_commits() {
     }
 }
 
-/// A global input that goes past the declared width after the open is the same
+/// A main input that goes past the declared width after the open is the same
 /// as a narrowed node: silence, not a refused commit.
 #[test]
-fn a_tap_on_a_global_input_that_goes_missing_reads_silence() {
+fn a_tap_on_a_main_input_that_goes_missing_reads_silence() {
     let mut r = rig(1, false);
     r.ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
     let mut tap =
         r.ed.open_tap(
             TapId::of(1),
-            vec![PortSource::Global(0), PortSource::Global(1)],
+            vec![PortSource::MainInput(0), PortSource::MainInput(1)],
             TapOptions::new(Samples::new(1024)).align(TapAlign::Raw),
         )
         .expect("both inputs exist when it opens");
@@ -1087,7 +1087,7 @@ fn a_tap_on_a_global_input_that_goes_missing_reads_silence() {
 
 /// Opening refuses a source that does not exist at that moment, uncommitted
 /// edits included, and opens nothing: a bad port, a key no node has and a
-/// global input past the graph's width, for a tap and for a meter, each named
+/// main input past the graph's width, for a tap and for a meter, each named
 /// in the error. A lane that is fine does not hide a bad one after it, and a
 /// source inserted but not yet committed is accepted.
 #[test]
@@ -1117,12 +1117,12 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
         "a typo'd key"
     );
     assert_eq!(
-        tap(&mut r, vec![PortSource::Global(3)]).err(),
-        Some(MissingSource::Global {
+        tap(&mut r, vec![PortSource::MainInput(3)]).err(),
+        Some(MissingSource::MainInput {
             channel: 3,
             width: 1
         }),
-        "a global input past the graph's width"
+        "a main input past the graph's width"
     );
     let meter = |r: &mut Rig, sources: Vec<PortSource>| {
         r.ed.open_meter(MeterId::of(9), MeterSpec::raw(sources))
@@ -1142,8 +1142,8 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
         "a meter on a missing node"
     );
     assert_eq!(
-        meter(&mut r, vec![PortSource::Global(1)]),
-        Some(MissingSource::Global {
+        meter(&mut r, vec![PortSource::MainInput(1)]),
+        Some(MissingSource::MainInput {
             channel: 1,
             width: 1
         }),
@@ -1156,7 +1156,7 @@ fn opening_refuses_a_source_that_does_not_exist_now() {
     // spec, and that is what is checked.
     tap(
         &mut r,
-        vec![port(1, 1), PortSource::Global(0), PortSource::Zero],
+        vec![port(1, 1), PortSource::MainInput(0), PortSource::Zero],
     )
     .expect("all exist");
     assert_eq!(

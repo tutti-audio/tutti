@@ -159,16 +159,15 @@ fn run_waits_for_a_helper_still_inside() {
 /// `help` from inside participant 0's share, so no timing is involved.
 #[test]
 fn every_generation_hands_a_helper_an_index() {
-    use std::sync::Mutex;
     let gate = JobGate::new(2);
-    let served = Mutex::new(0u64);
+    let served = crate::Mutex::new(0u64);
     for generation in 0..3 {
         let mask = AtomicUsize::new(0);
         assert!(gate.run(
             &|i| {
                 mask.fetch_or(1 << i, Ordering::Relaxed);
                 if i == 0 {
-                    let helped = gate.help(&mut served.lock().unwrap());
+                    let helped = gate.help(&mut served.lock());
                     assert!(helped, "generation {generation}: the helper ran no share");
                 }
             },

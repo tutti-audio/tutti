@@ -340,12 +340,12 @@ impl SampleRange {
 #[derive(Debug, Clone, Copy)]
 pub struct StftConfig {
     /// Analysis window, in [`Samples`]. Also the FFT size.
-    pub window: Samples,
+    window: Samples,
     /// How far to advance between frames — fixed, or decimated to a frame count.
-    pub hop: HopPolicy,
+    hop: HopPolicy,
     /// The window *shape*. [`CosineWindow::HANN`] unless
     /// [`window_fn`](Self::window_fn) says otherwise.
-    pub window_fn: CosineWindow,
+    window_fn: CosineWindow,
 }
 
 impl StftConfig {

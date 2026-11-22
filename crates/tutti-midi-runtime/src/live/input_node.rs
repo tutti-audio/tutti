@@ -93,12 +93,12 @@ use crate::live::device_generation::DeviceGeneration;
 /// The port that carries a Group's events with no channel: after its sixteen
 /// channel ports. For the first Group (and a node that hears only it); Group
 /// `g`'s is [`MidiInputPorts::channelless`].
-pub const CHANNELLESS_PORT: usize = MidiChannel::COUNT as usize;
+pub const CHANNELLESS_PORT: u16 = MidiChannel::COUNT as u16;
 
 /// How many event outputs a [`MidiInputNode`] that hears one Group has: one
 /// per channel and [`CHANNELLESS_PORT`]. Each further Group adds as many
 /// ([`MidiInputPorts::count`]).
-pub const MIDI_INPUT_PORTS: usize = CHANNELLESS_PORT + 1;
+pub const MIDI_INPUT_PORTS: u16 = CHANNELLESS_PORT + 1;
 
 /// The fewest events a [`MidiInputNode`] translates in one block, and each port's
 /// declared event capacity at the shortest blocks.
@@ -155,8 +155,8 @@ impl MidiInputPorts {
 
     /// How many event outputs the node has.
     #[must_use]
-    pub const fn count(self) -> usize {
-        self.groups.get() as usize * PORTS_PER_GROUP
+    pub const fn count(self) -> u16 {
+        self.groups.get() as u16 * PORTS_PER_GROUP
     }
 
     /// The last Group the node hears.
@@ -168,9 +168,9 @@ impl MidiInputPorts {
     /// The port of `group`'s events with no channel (System, SysEx, Flex).
     /// `None` for a Group the node does not hear.
     #[must_use]
-    pub const fn channelless(self, group: MidiGroup) -> Option<usize> {
+    pub const fn channelless(self, group: MidiGroup) -> Option<u16> {
         if group.get() < self.groups.get() {
-            Some(group.get() as usize * PORTS_PER_GROUP + CHANNELLESS_PORT)
+            Some(group.get() as u16 * PORTS_PER_GROUP + CHANNELLESS_PORT)
         } else {
             None
         }
@@ -179,9 +179,9 @@ impl MidiInputPorts {
     /// The port channel `channel` of `group` leaves from. `None` for a Group
     /// the node does not hear.
     #[must_use]
-    pub const fn channel(self, group: MidiGroup, channel: MidiChannel) -> Option<usize> {
+    pub const fn channel(self, group: MidiGroup, channel: MidiChannel) -> Option<u16> {
         if group.get() < self.groups.get() {
-            Some(group.get() as usize * PORTS_PER_GROUP + channel.get() as usize)
+            Some(group.get() as u16 * PORTS_PER_GROUP + channel.get() as u16)
         } else {
             None
         }
@@ -193,7 +193,7 @@ impl MidiInputPorts {
     /// event of a Group the node does not hear: it was addressed to a
     /// Group nothing here listens to, so it is not delivered.
     #[must_use]
-    pub fn port_of(self, event: &Ump) -> Option<usize> {
+    pub fn port_of(self, event: &Ump) -> Option<u16> {
         match (event.address(), event.group()) {
             (Some(a), _) => self.channel(a.group, a.channel),
             (None, Some(group)) => self.channelless(group),
@@ -210,15 +210,15 @@ impl MidiInputPorts {
         self,
         group: Option<MidiGroup>,
         channel: Option<MidiChannel>,
-    ) -> impl Iterator<Item = usize> {
+    ) -> impl Iterator<Item = u16> {
         let (from, to) = match group {
             Some(g) => (g.get(), g.get() + 1),
             None => (0, self.groups.get()),
         };
         (from..to.min(self.groups.get())).flat_map(move |g| {
-            let base = usize::from(g) * PORTS_PER_GROUP;
+            let base = u16::from(g) * PORTS_PER_GROUP;
             let (a, b) = match channel {
-                Some(c) => (usize::from(c.get()), usize::from(c.get()) + 1),
+                Some(c) => (u16::from(c.get()), u16::from(c.get()) + 1),
                 None => (0, CHANNELLESS_PORT),
             };
             (base + a..base + b).chain(std::iter::once(base + CHANNELLESS_PORT))
@@ -233,7 +233,7 @@ impl Default for MidiInputPorts {
 }
 
 /// A Group's ports: its sixteen channels and its channelless port.
-const PORTS_PER_GROUP: usize = MIDI_INPUT_PORTS;
+const PORTS_PER_GROUP: u16 = MIDI_INPUT_PORTS;
 
 /// The MIDI input edge as a graph node: one event input, for one device, and
 /// [`MidiInputPorts::count`] event outputs ([`MIDI_INPUT_PORTS`] for the first
@@ -590,7 +590,7 @@ impl<F: Float> Node<F> for MidiInputNode {
     /// [`MIDI_INPUT_DENSITY`] per frame of a long block).
     fn shape(&self) -> Shape {
         Shape::EMPTY
-            .with_events(1, self.ports.count() as u16)
+            .with_events(1, self.ports.count())
             .with_event_capacity(self.capacity)
             // Event-only: a translation per event, nothing per frame.
             .with_cost(tutti_graph::Cost::Light)
@@ -723,7 +723,7 @@ impl<F: Float> Node<F> for MidiInputNode {
             };
             // Refused past the capacity: counted by the executor.
             let _ = io
-                .event_out(port)
+                .event_out(usize::from(port))
                 .push(Event::midi(offset_of(ev, block_len), ev.1));
         }
         if let (Some(cell), Some(handled)) = (&self.generation, handled_generation) {

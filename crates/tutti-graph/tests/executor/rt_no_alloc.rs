@@ -162,7 +162,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     );
     let t = &mut spec.topology;
     t.edges
-        .insert(at(5, 0), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(5, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     t.edges.insert(at(6, 0), vec![from(4, 0)]);
     t.edges.insert(at(7, 0), vec![from(5, 0)]);
     t.edges.insert(at(7, 1), vec![from(6, 0)]);
@@ -387,9 +387,9 @@ fn crossfades_are_allocation_free_on(workers: usize) {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges
-        .insert(at(1, 0), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(1, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
     t.edges
-        .insert(at(1, 1), vec![Edge::Direct(PortSource::Global(1))]);
+        .insert(at(1, 1), vec![Edge::Direct(PortSource::MainInput(1))]);
     t.set_outputs(vec![
         PortSource::Node(OutputPort {
             node: NodeKey(1),
@@ -951,7 +951,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
         t.set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(1),
@@ -1091,7 +1091,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
         t.set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(2),
@@ -1174,7 +1174,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(2, 0), vec![Edge::Direct(PortSource::Global(0))]);
+            .insert(at(2, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(1, 0), vec![from(2, 0)]);
         t.set_outputs(vec![PortSource::Node(OutputPort {
             node: NodeKey(2),
@@ -1583,7 +1583,7 @@ fn parallel_reporting_nodes_are_allocation_free() {
 }
 
 /// Audio fan-in never allocates: `Op::Sum` over 8, 64 and 100 sources (one
-/// op, one full op, and a chain of two), at a node's port and at a global
+/// op, one full op, and a chain of two), at a node's port and at a main
 /// output channel, with every source live, every source silent, and sources
 /// that fall silent one by one (a pulse each), so the silent-addend skip, the
 /// all-silent fill and the in-place form all run inside the gate, on the
@@ -1680,7 +1680,7 @@ fn parallel_fan_in_is_allocation_free() {
 }
 
 /// A weighted fan-in never allocates, ramping: 64 lanes (one full op) and 100
-/// (a chain of two), at a node's port and at a global output channel, every
+/// (a chain of two), at a node's port and at a main output channel, every
 /// lane weighted, every one moved before every block (so each block ramps
 /// every lane), with live and pulsing sources (the silent-addend skip runs
 /// with weights), on the parallel executor's helpers too. The moves are the
@@ -1947,7 +1947,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         vec![EventEdge::Direct(ev(3, 0))],
     );
     let t = &mut spec.topology;
-    t.connect(at(5, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(5, 0), Edge::Direct(PortSource::MainInput(0)));
     t.connect(at(6, 0), from(5, 0));
     t.connect(at(7, 0), from(6, 0));
     t.connect(at(8, 0), from(4, 0));
@@ -2032,7 +2032,7 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
     );
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(1);
     let t = &mut ed.spec_mut().topology;
-    t.connect(at(1, 0), Edge::Direct(PortSource::Global(0)));
+    t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
     t.set_outputs(vec![PortSource::Node(OutputPort {
         node: NodeKey(1),
         port: 0,
@@ -2460,7 +2460,7 @@ fn edge_fades_are_allocation_free() {
     assert!(heard);
 }
 
-/// Adds a chain `lag -> sum <- smooth` fed by the global input: the sum's
+/// Adds a chain `lag -> sum <- smooth` fed by the main input: the sum's
 /// second path is delayed by a PDC ring of the lag's latency. Keys start at
 /// `base`; returns the sum's key.
 fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
@@ -2474,9 +2474,11 @@ fn pdc_pair(ed: &mut Editor, base: u64, latency: usize) -> NodeKey {
     );
     let t = &mut ed.spec_mut().topology;
     t.edges
-        .insert(at(base, 0), vec![Edge::Direct(PortSource::Global(0))]);
-    t.edges
-        .insert(at(base + 1, 0), vec![Edge::Direct(PortSource::Global(0))]);
+        .insert(at(base, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
+    t.edges.insert(
+        at(base + 1, 0),
+        vec![Edge::Direct(PortSource::MainInput(0))],
+    );
     t.edges.insert(at(base + 2, 0), vec![from(base, 0)]);
     t.edges.insert(at(base + 2, 1), vec![from(base + 1, 0)]);
     sum
@@ -2650,7 +2652,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     let transport = TransportPosition::default();
     let mut blocks = |exec: &mut tutti_graph::Executor, n: usize, frames: usize| {
         for _ in 0..n {
-            let wide = exec.plan().map_or(1, |p| p.global_outputs()).min(4);
+            let wide = exec.plan().map_or(1, |p| p.main_outputs()).min(4);
             let mut slices: Vec<&mut [f32]> = Vec::new();
             slices.extend(outs.iter_mut().take(wide).map(|o| &mut o[..]));
             // The slices of a block are made before the gate.
@@ -2771,7 +2773,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     {
         let t = &mut ed.spec_mut().topology;
         t.edges
-            .insert(at(300, 0), vec![Edge::Direct(PortSource::Global(0))]);
+            .insert(at(300, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
         t.edges.insert(at(302, 0), vec![from(300, 0)]);
         t.edges.insert(at(302, 1), feedback(128));
         t.edges.insert(at(301, 0), vec![from(302, 0)]);

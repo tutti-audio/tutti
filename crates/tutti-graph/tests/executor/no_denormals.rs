@@ -86,7 +86,7 @@ fn render_probes(workers: usize, entry: Entry) {
                 node: NodeKey(k),
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
     }
     ed.spec_mut().topology.set_outputs((1..=PROBES).map(|k| {

@@ -97,8 +97,24 @@ impl RtScope {
     /// unless the thread is already unwinding (so a first panic is not turned
     /// into an abort).
     pub fn check_outside(what: &str) {
+        Self::forbid(
+            what,
+            "dropped on the audio thread: it must be freed on the control thread",
+        );
+    }
+
+    /// Panics, in debug builds, if the current thread is marked: a blocking
+    /// call named `what` is about to wait. The one check behind
+    /// [`Mutex`](crate::Mutex) and [`Condvar`](crate::Condvar).
+    pub(crate) fn check_not_blocking(what: &str) {
+        Self::forbid(what, "on the audio thread: a block never waits on a lock");
+    }
+
+    /// The check both rules share: `what` followed by `rule`, in a debug build,
+    /// inside a scope, unless the thread is already unwinding.
+    fn forbid(what: &str, rule: &str) {
         if cfg!(debug_assertions) && Self::is_inside() && !std::thread::panicking() {
-            panic!("{what} dropped on the audio thread: it must be freed on the control thread");
+            panic!("{what} {rule}");
         }
     }
 }

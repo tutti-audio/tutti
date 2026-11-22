@@ -23,9 +23,9 @@ use std::sync::{Arc, Weak};
 use tutti_graph::{EventTapOptions, EventTapReader, NodeKey, Offset, TapEvent};
 use tutti_midi_protocol::MpeMode;
 use tutti_midi_runtime::{
-    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MIDI_INPUT_PORTS, MidiClipNode,
-    MidiInputPorts, MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms,
-    Placement, RouteRule, SendAt, TimedMidiEvent, compile_routes,
+    ClipEvents, ClockMap, DeviceGeneration, GenerationWriter, MidiClipNode, MidiInputPorts,
+    MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
+    RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
 use tutti_music::MeterMap;
 use tutti_rt::Mint;
@@ -1192,16 +1192,6 @@ pub(crate) fn drain_events(
     losses.lost(tap.take_lost());
 }
 
-// An input node has at most `MidiGroup::COUNT * MIDI_INPUT_PORTS` ports, all
-// within the graph's `u16` port index.
-const _: () = assert!(MidiGroup::COUNT as usize * MIDI_INPUT_PORTS <= u16::MAX as usize + 1);
-
-/// The graph's index of the input node's port `port`; the bound above makes the
-/// conversion infallible.
-fn input_port(port: usize) -> u16 {
-    u16::try_from(port).expect("an input node's port index fits u16")
-}
-
 /// Wires `inputs`' ports as `rules` route them (`tutti_midi_runtime::compile_routes`)
 /// to the sinks `resolve` names, replacing every route before: the ports of
 /// every input node feed each sink their rule gives ports, so devices merge in
@@ -1233,14 +1223,11 @@ fn compile_feeds<'r, T: Copy + Ord + 'r, F: Float>(
         let Some(sink) = resolve(target).filter(|&n| graph.contains(n)) else {
             continue;
         };
-        wanted
-            .entry(sink)
-            .or_default()
-            .extend(inputs.iter().flat_map(|&input| {
-                ports
-                    .iter()
-                    .map(move |&p| EventOutputPort::new(input, input_port(p)))
-            }));
+        wanted.entry(sink).or_default().extend(
+            inputs
+                .iter()
+                .flat_map(|&input| ports.iter().map(move |&p| EventOutputPort::new(input, p))),
+        );
     }
     for &fed in routed.iter() {
         // A sink removed since has no feed left to clear.
@@ -1903,7 +1890,7 @@ impl<F: Float> Midi<'_, F> {
         self.graph
             .taps()
             .open_event(
-                EventOutputPort::new(input, input_port(port)),
+                EventOutputPort::new(input, port),
                 EventTapOptions::new(capacity).align(tutti_graph::TapAlign::Raw),
             )
             .map_err(MidiError::Tap)

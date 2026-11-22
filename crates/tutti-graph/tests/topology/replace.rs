@@ -27,7 +27,7 @@ fn gain(g: f32) -> TestNode {
     TestNode::new(Kind::Gain { gain: g, width: 1 })
 }
 
-/// Global input 0 → `NODE` (a one-channel gain, aliased in place) → output
+/// Main input 0 → `NODE` (a one-channel gain, aliased in place) → output
 /// 0, committed and applied.
 fn gain_graph(g: f32) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(128));
@@ -38,7 +38,7 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
             node: NODE,
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
@@ -190,7 +190,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
             node: NODE,
             port: 0,
         },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
@@ -664,7 +664,7 @@ fn the_reference_cuts_a_fade_on_a_latency_change() {
                 node: NODE,
                 port: 0,
             },
-            vec![Edge::Direct(PortSource::Global(0))],
+            vec![Edge::Direct(PortSource::MainInput(0))],
         );
         t.set_outputs(vec![PortSource::Node(OutputPort {
             node: NODE,

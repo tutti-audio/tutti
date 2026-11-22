@@ -43,8 +43,8 @@ use tutti_plugin_host::{PluginControls, PluginHandle};
 use tutti_plugin_ipc::IpcConfig;
 use tutti_units::{Latency, SampleRate, Samples};
 
-/// A bound plugin as the only node of a graph: the global inputs feed
-/// its inputs in order, its outputs feed the global outputs. The executor
+/// A bound plugin as the only node of a graph: the main inputs feed
+/// its inputs in order, its outputs feed the main outputs. The executor
 /// hands the node its `Env` and its whole block, as the engine does.
 pub struct Rig {
     renderer: Renderer,
@@ -129,7 +129,7 @@ impl Rig {
     /// `client` in a graph prepared with `prepare`, behind a latent path: a
     /// silent source declaring `latency` feeds every plugin input, so the
     /// plugin's compiled arrival latency is `latency`. The graph has no
-    /// global inputs.
+    /// main inputs.
     ///
     /// # Panics
     ///
@@ -167,7 +167,7 @@ impl Rig {
         out
     }
 
-    /// The graph's global audio inputs: the plugin's, unless it is
+    /// The graph's main audio inputs: the plugin's, unless it is
     /// [`behind`](Self::behind) a latent path.
     pub fn inputs(&self) -> usize {
         self.inputs
