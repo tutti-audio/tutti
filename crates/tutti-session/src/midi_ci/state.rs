@@ -20,11 +20,12 @@ use tutti_midi_hardware::PropertyCall;
 use super::{InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, listing};
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
-/// A save of a device's state in flight: it resolves to the state the device
-/// sent, or to why it did not.
+/// Fed by [`Session::update`](crate::Session::update): keep updating while you
+/// await it.
 ///
-/// It resolves in a later [`Session::update`](crate::Session::update): keep
-/// updating while you await it. Dropping it drops the answer; a device or session
+/// A save of a device's state in flight: it resolves to the state the device
+/// sent, or to why it did not. The update sends the call and reads the device's
+/// answer, which resolves it. Dropping it drops the answer; a device or session
 /// that goes away resolves it to [`PeerError::Disconnected`].
 #[derive(Debug)]
 #[must_use = "a save is answered only when it is awaited"]
@@ -64,11 +65,12 @@ impl Future for SavePeerState {
     }
 }
 
-/// A restore of a device's state in flight: it resolves once the device has
-/// answered its Set, or to why it did not.
+/// Fed by [`Session::update`](crate::Session::update): keep updating while you
+/// await it.
 ///
-/// It resolves in a later [`Session::update`](crate::Session::update), as
-/// [`SavePeerState`] does.
+/// A restore of a device's state in flight: it resolves once the device has
+/// answered its Set, or to why it did not. The update sends the call and reads
+/// the answer, as for [`SavePeerState`].
 #[derive(Debug)]
 #[must_use = "a restore is answered only when it is awaited"]
 pub struct RestorePeerState {
