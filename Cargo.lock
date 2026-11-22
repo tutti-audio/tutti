@@ -2739,6 +2739,7 @@ dependencies = [
  "tutti-codec",
  "tutti-fixtures",
  "tutti-platform",
+ "tutti-rt",
  "tutti-units",
 ]
 

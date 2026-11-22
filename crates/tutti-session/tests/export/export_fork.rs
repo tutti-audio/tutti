@@ -17,8 +17,8 @@ use crate::bounced::bounced;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
 use tutti_buffers::ChannelLayout;
@@ -31,7 +31,7 @@ use tutti_graph::{
 };
 use tutti_nodes::testing::{Const, Osc, Sink};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 use tutti_rt::Param;
 use tutti_session::BufferMainOutput;
 use tutti_session::SessionNode;
@@ -545,7 +545,7 @@ fn the_prepare_hook_sees_the_callers_timeline() {
         .clock(ExportClock::timeline(timeline))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
             let transport = prepared.ctx;
-            *into.lock().unwrap() = Some((
+            *into.lock() = Some((
                 transport
                     .tempo_map()
                     .tempo_at(transport.beat())
@@ -556,7 +556,7 @@ fn the_prepare_hook_sees_the_callers_timeline() {
         }));
     render(&mut session, request);
     assert_eq!(
-        *seen.lock().unwrap(),
+        *seen.lock(),
         Some((90, 16)),
         "the hook must see the caller's timeline — 90 BPM at beat 16 — not a manufactured 120 BPM one at beat 0"
     );
@@ -581,7 +581,7 @@ fn a_main_output_exports_prepare_hook_sees_the_callers_timeline() {
     let request = short()
         .clock(ExportClock::timeline(timeline))
         .edit(Box::new(move |prepared: PreparedGraph<'_>| {
-            *into.lock().unwrap() = Some(
+            *into.lock() = Some(
                 prepared
                     .ctx
                     .tempo_map()
@@ -591,7 +591,7 @@ fn a_main_output_exports_prepare_hook_sees_the_callers_timeline() {
             );
         }));
     render(&mut session, request);
-    assert_eq!(*seen.lock().unwrap(), Some(90), "the caller's 90 BPM");
+    assert_eq!(*seen.lock(), Some(90), "the caller's 90 BPM");
 }
 
 // ---------------------------------------------------------------------------
@@ -857,7 +857,7 @@ impl ForkSource for SlowFork {
     fn gather(&self, _mode: ForkMode) -> Result<ForkBuild, ForkCause> {
         // Read now, when the export starts.
         let level = f32::from_bits(self.level.load(Ordering::SeqCst));
-        let wait = self.wait.lock().unwrap().take();
+        let wait = self.wait.lock().take();
         let built = Arc::clone(&self.built);
         Ok(ForkBuild::deferred(move || {
             if let Some(wait) = wait {
@@ -880,7 +880,7 @@ impl IntoNode for Slow {
     fn into_parts(self) -> NodeParts<()> {
         let fork = SlowFork {
             level: Arc::clone(&self.level),
-            wait: Mutex::new(self.wait.lock().unwrap().take()),
+            wait: Mutex::new(self.wait.lock().take()),
             built: Arc::clone(&self.built),
         };
         NodeParts {
@@ -1006,13 +1006,13 @@ fn an_export_does_not_wait_for_a_slow_fork_and_takes_no_later_edit() {
 /// Where a [`Pinned`] unit was built, prepared and dropped.
 #[derive(Default)]
 struct Threads {
-    built: Mutex<Vec<ThreadId>>,
-    prepared: Mutex<Vec<ThreadId>>,
-    dropped: Mutex<Vec<ThreadId>>,
+    built: tutti_fixtures::Record<ThreadId>,
+    prepared: tutti_fixtures::Record<ThreadId>,
+    dropped: tutti_fixtures::Record<ThreadId>,
 }
 
-fn here(at: &Mutex<Vec<ThreadId>>) {
-    at.lock_recover().push(std::thread::current().id());
+fn here(at: &tutti_fixtures::Record<ThreadId>) {
+    at.lock().unwrap().push(std::thread::current().id());
 }
 
 /// A unit confined to the main thread, as an in-process VST2 fork is:
@@ -1080,7 +1080,7 @@ impl IntoNode for PinnedNode {
     }
 }
 
-fn all_main(what: &str, at: &Mutex<Vec<ThreadId>>) {
+fn all_main(what: &str, at: &tutti_fixtures::Record<ThreadId>) {
     let main = std::thread::current().id();
     let at = at.lock().unwrap();
     assert!(!at.is_empty(), "the fork was never {what}");
@@ -1263,7 +1263,7 @@ fn a_fork_build_that_fails_names_its_node_and_drops_on_the_main_thread() {
 
 /// Records where it is dropped: captured by a `prepare` hook's edit, it
 /// drops when the edit does.
-struct EditWitness(Arc<Mutex<Vec<ThreadId>>>);
+struct EditWitness(tutti_fixtures::Record<ThreadId>);
 
 impl Drop for EditWitness {
     fn drop(&mut self) {
@@ -1273,8 +1273,8 @@ impl Drop for EditWitness {
 
 /// A request for the mix whose `prepare` edit captures an
 /// [`EditWitness`] recording into `drops`.
-fn witnessed(drops: &Arc<Mutex<Vec<ThreadId>>>) -> Bounce<NodeKey, BufferMainOutput> {
-    let witness = EditWitness(Arc::clone(drops));
+fn witnessed(drops: &tutti_fixtures::Record<ThreadId>) -> Bounce<NodeKey, BufferMainOutput> {
+    let witness = EditWitness(drops.clone());
     buffers(0.05).edit(Box::new(move |_prepared: PreparedGraph<'_>| {
         let _ = &witness;
     }))
@@ -1296,7 +1296,7 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
         .connect(broken, MainOutput)
         .unwrap()
         .unfaded();
-    let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
+    let drops: tutti_fixtures::Record<ThreadId> = tutti_fixtures::Record::default();
     let job = session
         .bounce(witnessed(&drops))
         .expect("the export starts");
@@ -1311,7 +1311,7 @@ fn a_prepare_edit_that_never_runs_drops_on_the_main_thread() {
     let mut session = self::session();
     let dc = session.graph().add(ForkByClone(Const::mono(0.5)));
     session.graph().connect(dc, MainOutput).unwrap().unfaded();
-    let drops: Arc<Mutex<Vec<ThreadId>>> = Arc::default();
+    let drops: tutti_fixtures::Record<ThreadId> = tutti_fixtures::Record::default();
     let job = session
         .bounce(witnessed(&drops))
         .expect("the export starts");

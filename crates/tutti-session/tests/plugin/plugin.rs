@@ -18,14 +18,13 @@ use crate::loading::{Block as _, LoadFrom as _, LoadPlugin, Perform as _, Spec};
 use crate::support;
 use tutti_fixtures::block_on;
 use tutti_plugin_db::Hosting;
-use tutti_rt::LockExt;
 use tutti_session::InputPort;
 use tutti_session::MainOutput;
 use tutti_session::{AnyPlugin, Key, PluginChange, PluginEvent};
 
 use std::sync::atomic::Ordering;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
@@ -381,11 +380,11 @@ fn a_plugin_dead_for_the_window_stays_silent_at_its_node_and_is_reported_once() 
 /// on the main thread. Forked by clone, so the export's copy shares the
 /// record.
 #[derive(Clone)]
-struct DropWitness(Arc<Mutex<Vec<std::thread::ThreadId>>>);
+struct DropWitness(tutti_fixtures::Record<std::thread::ThreadId>);
 
 impl Drop for DropWitness {
     fn drop(&mut self) {
-        self.0.lock_recover().push(std::thread::current().id());
+        self.0.lock().unwrap().push(std::thread::current().id());
     }
 }
 
@@ -408,8 +407,8 @@ impl tutti_graph::Node for DropWitness {
 #[test]
 fn export_leftovers_drop_on_the_main_thread() {
     let mut s = session(&[]);
-    let drops: Arc<Mutex<Vec<std::thread::ThreadId>>> = Arc::default();
-    let witness = s.graph().add(ForkByClone(DropWitness(Arc::clone(&drops))));
+    let drops: tutti_fixtures::Record<std::thread::ThreadId> = tutti_fixtures::Record::default();
+    let witness = s.graph().add(ForkByClone(DropWitness(drops.clone())));
     let probe = add_probe(&mut s);
     s.graph()
         .set_sources(
@@ -432,7 +431,7 @@ fn export_leftovers_drop_on_the_main_thread() {
     s.apply(done).expect("renders, not cancelled");
 
     let main = std::thread::current().id();
-    let drops = drops.lock().unwrap().clone();
+    let drops = drops.lock().unwrap().to_vec();
     assert!(!drops.is_empty(), "the export's copy was never dropped");
     assert!(
         drops.iter().all(|&t| t == main),
@@ -1333,7 +1332,9 @@ fn a_replacement_with_other_ports_is_refused_and_the_graph_stays_editable() {
         drive.events
     );
     // An edit made now commits.
-    let extra = s.graph().add(ForkByClone(DropWitness(Arc::default())));
+    let extra = s
+        .graph()
+        .add(ForkByClone(DropWitness(tutti_fixtures::Record::default())));
     assert!(s.graph_ref().has_uncommitted_edits());
     // The commit alone, on the drive's clock: `update()` would run
     // `Phase::Plugins` on the real one, where a server launch (hundreds of ms on
