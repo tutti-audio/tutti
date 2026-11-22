@@ -81,7 +81,7 @@ fn a_body_that_fits_exactly_is_one_chunk() {
 
 // M2-101 §8.3: a message past the maximum is broken into chunks, each labelled
 // with the count and its number from 1.
-/// Spec: m2-101/8.3#2, m2-101/8.3#4, m2-103/5.2#4
+/// Spec: m2-101/8.3#2, m2-101/8.3#4, m2-103/5.2#4, m2-101/8.4#2, m2-103/5.3#1
 #[test]
 fn a_body_one_byte_over_is_two_chunks() {
     let body = body(FIRST_ROOM + 1);
@@ -101,7 +101,7 @@ fn a_body_one_byte_over_is_two_chunks() {
 }
 
 // M2-101 §8.3.1: Header Data is in the first chunk only; the rest have none.
-/// Spec: m2-101/8.3.1#1, m2-101/8.3.1#2
+/// Spec: m2-101/8.3.1#1, m2-101/8.3.1#2, m2-103/5.2#3
 #[test]
 fn only_the_first_chunk_carries_the_header() {
     let chunks = split_message(id(), &header(), &body(1000), SMALLEST).unwrap();

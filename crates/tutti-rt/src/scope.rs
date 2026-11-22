@@ -14,6 +14,15 @@
 
 use std::cell::Cell;
 
+// The sanitizer seam: with the `rtsan` feature on a unix target the module drives
+// RealtimeSanitizer's region, otherwise it is zero-sized and does nothing.
+#[cfg(all(feature = "rtsan", unix))]
+#[path = "scope/region_rtsan.rs"]
+mod region;
+#[cfg(not(all(feature = "rtsan", unix)))]
+#[path = "scope/region_off.rs"]
+mod region;
+
 thread_local! {
     static DEPTH: Cell<u32> = const { Cell::new(0) };
 }
@@ -33,6 +42,11 @@ thread_local! {
 ///
 /// A render prepared for realtime runs inside the scope; one prepared offline
 /// does not, because an offline render may block and allocate.
+///
+/// With the `rtsan` feature (a unix target; see the crate docs) each guard also
+/// holds LLVM's RealtimeSanitizer region, so a C `malloc`, a pthread lock or file
+/// I/O inside the scope aborts with the interceptor's stack. Without it the guard
+/// is the counter alone.
 ///
 /// # Examples
 ///
@@ -62,6 +76,8 @@ pub struct RtScopeGuard {
     // `!Send`: the mark is per thread, so the guard must be dropped on the
     // thread that made it.
     _not_send: core::marker::PhantomData<*const ()>,
+    // Ends the sanitizer's region when the guard drops; zero-sized without `rtsan`.
+    _region: region::Region,
 }
 
 impl RtScope {
@@ -72,6 +88,7 @@ impl RtScope {
         DEPTH.with(|d| d.set(d.get() + 1));
         RtScopeGuard {
             _not_send: core::marker::PhantomData,
+            _region: region::Region::enter(),
         }
     }
 
@@ -114,9 +131,24 @@ impl RtScope {
     /// inside a scope, unless the thread is already unwinding.
     fn forbid(what: &str, rule: &str) {
         if cfg!(debug_assertions) && Self::is_inside() && !std::thread::panicking() {
+            // Formatting and printing the panic allocates; the sanitizer stays quiet
+            // until the unwind drops this guard, so the message is what prints.
+            let _quiet = region::Quiet::new();
             panic!("{what} {rule}");
         }
     }
+}
+
+/// Runs `wake`, a call that unparks a thread, with the sanitizer's reporting off.
+///
+/// A wake never waits: the futex wake it makes is a syscall that returns at once,
+/// and the doorbells and the worker pool wake from the audio thread by design. The
+/// sanitizer flags every syscall in a region, so it is told this one is sanctioned.
+/// Nothing that waits, locks or allocates goes through here. Without the `rtsan`
+/// feature this is `wake()`.
+pub(crate) fn sanctioned_wake<R>(wake: impl FnOnce() -> R) -> R {
+    let _sanctioned = region::Quiet::new();
+    wake()
 }
 
 impl Drop for RtScopeGuard {
