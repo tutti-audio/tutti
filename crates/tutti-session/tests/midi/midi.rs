@@ -470,7 +470,7 @@ fn a_route_rule_names_a_group() {
     s.midi()
         .route(MidiRouteRule::new().channel(ch2).to(b))
         .unwrap();
-    assert_eq!(ports(&s, b), sorted(input_ports(first, input, 0, &[2])));
+    assert_eq!(ports(&s, b), sorted(input_ports(two, input, 0, &[2])));
     s.midi()
         .route(
             MidiRouteRule::new()

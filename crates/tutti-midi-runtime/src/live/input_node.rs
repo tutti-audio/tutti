@@ -191,11 +191,7 @@ impl MidiInputPorts {
     /// The port of `group`'s events with no channel (System, SysEx, Flex) on
     /// `node`. `None` for a Group the node does not hear.
     #[must_use]
-    pub fn channelless(
-        self,
-        node: impl Into<NodeKey>,
-        group: MidiGroup,
-    ) -> Option<EventOutputPort> {
+    pub fn channelless(self, node: NodeKey, group: MidiGroup) -> Option<EventOutputPort> {
         self.index(group, CHANNELLESS_SLOT)
             .map(|port| EventOutputPort::new(node, port))
     }
@@ -205,7 +201,7 @@ impl MidiInputPorts {
     #[must_use]
     pub fn channel(
         self,
-        node: impl Into<NodeKey>,
+        node: NodeKey,
         group: MidiGroup,
         channel: MidiChannel,
     ) -> Option<EventOutputPort> {
@@ -232,11 +228,10 @@ impl MidiInputPorts {
     /// what has no Group). A Group the node does not hear has no ports.
     pub fn listening(
         self,
-        node: impl Into<NodeKey>,
+        node: NodeKey,
         group: Option<MidiGroup>,
         channel: Option<MidiChannel>,
     ) -> impl Iterator<Item = EventOutputPort> {
-        let node = node.into();
         let (from, to) = match group {
             Some(g) => (g.get(), g.get() + 1),
             None => (0, self.groups.get()),

@@ -138,10 +138,6 @@ impl std::ops::DerefMut for Keyed {
     }
 }
 
-/// A session over a fake OS with one device, `Keys`, opened as an input port
-/// (hearing Groups up to `groups`, the first alone with `None`): the port's
-/// input node, which route rules wire from.
-#[cfg(feature = "midi-hardware")]
 /// The ports of `layout`'s input `input` that carry `channels` of `group`, and
 /// the Group's channelless port.
 #[cfg(feature = "midi-hardware")]
@@ -169,6 +165,10 @@ pub fn every_input_port(
     layout.listening(input, None, None).collect()
 }
 
+/// A session over a fake OS with one device, `Keys`, opened as an input port
+/// (hearing Groups up to `groups`, the first alone with `None`): the port's
+/// input node, which route rules wire from.
+#[cfg(feature = "midi-hardware")]
 pub fn with_input(groups: Option<tutti_ump::MidiGroup>) -> (Keyed, NodeKey) {
     use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
     let (backend, _fake) =
