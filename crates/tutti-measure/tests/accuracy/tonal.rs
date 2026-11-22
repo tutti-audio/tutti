@@ -9,7 +9,7 @@ use tutti_measure::{
     ChordConfig, ChordQuality, ChromaConfig, HarmonicCount, Key, KeyProfile, Mode, PitchClass,
     TuningOffset, TuningReference, detect_chords, estimate_key,
 };
-use tutti_measure::{Chroma, Error, Framing, Result};
+use tutti_measure::{Chroma, Framing, KeyEstimateError, MeterError};
 use tutti_rt::SplitMix64;
 use tutti_units::{Cents, SampleRate, Samples};
 
@@ -66,7 +66,7 @@ fn config() -> ChromaConfig {
 }
 
 /// The chromagram of `x` at this file's rate.
-fn chroma(x: &[f32], cfg: &ChromaConfig) -> Result<Chroma> {
+fn chroma(x: &[f32], cfg: &ChromaConfig) -> Result<Chroma, MeterError> {
     tutti_measure::chroma(cfg, Mono::new(x), SampleRate::of(SR))
 }
 
@@ -313,7 +313,7 @@ fn silence_noise_and_bad_input() {
     assert!(silent.grid().as_slice().iter().all(|&v| v == 0.0));
     assert_eq!(
         estimate_key(KeyProfile::Temperley, silent.grid()).unwrap_err(),
-        Error::NoTonalContent
+        KeyEstimateError::NoTonalContent
     );
     let chords = ChordConfig::new();
     assert!(detect_chords(&chords, &silent).unwrap().is_empty());
@@ -336,11 +336,11 @@ fn silence_noise_and_bad_input() {
 
     let mut bad = noise.clone();
     bad[5000] = f32::NAN;
-    assert_eq!(chroma(&bad, &cfg).unwrap_err(), Error::NonFiniteInput);
+    assert_eq!(chroma(&bad, &cfg).unwrap_err(), MeterError::NonFiniteInput);
     bad[5000] = f32::INFINITY;
-    assert_eq!(chroma(&bad, &cfg).unwrap_err(), Error::NonFiniteInput);
+    assert_eq!(chroma(&bad, &cfg).unwrap_err(), MeterError::NonFiniteInput);
     assert!(matches!(
         chroma(&noise[..1000], &cfg),
-        Err(Error::InsufficientInput { .. })
+        Err(MeterError::InsufficientInput { .. })
     ));
 }

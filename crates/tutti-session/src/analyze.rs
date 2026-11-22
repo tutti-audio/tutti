@@ -111,7 +111,7 @@ pub enum AnalyzeError {
     /// above its Nyquist rate, say), or a chunk was refused (a NaN, a width
     /// the meter was not built for).
     #[error("the analysis refused the audio: {0}")]
-    Measure(#[from] tutti_measure::Error),
+    Measure(#[from] tutti_measure::MeterError),
     /// The file could not be opened or decoded.
     #[cfg(codec)]
     #[error("the audio file could not be decoded: {0}")]

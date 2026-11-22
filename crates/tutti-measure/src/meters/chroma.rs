@@ -62,7 +62,7 @@ use crate::convert::{all_finite, for_blocks, widen};
 use crate::framing::{
     FrameCutter, Framing, check_frame_count, check_nyquist, check_overlap, check_window,
 };
-use crate::{Error, Measure, Result, StreamMeter};
+use crate::{EmptyFrequencyRange, Measure, MeterError, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -165,16 +165,16 @@ impl FrequencyBand {
 }
 
 impl TryFrom<core::ops::RangeInclusive<Hz>> for FrequencyBand {
-    type Error = Error;
+    type Error = EmptyFrequencyRange;
 
     /// # Errors
     ///
-    /// [`Error::EmptyFrequencyRange`] when a bound is not finite and positive,
+    /// [`EmptyFrequencyRange`] when a bound is not finite and positive,
     /// or `min` is not below `max`.
-    fn try_from(range: core::ops::RangeInclusive<Hz>) -> Result<Self> {
+    fn try_from(range: core::ops::RangeInclusive<Hz>) -> Result<Self, EmptyFrequencyRange> {
         let (min, max) = range.into_inner();
         if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
-            return Err(Error::EmptyFrequencyRange { min, max });
+            return Err(EmptyFrequencyRange { min, max });
         }
         Ok(Self { min, max })
     }
@@ -223,8 +223,8 @@ impl ChromaConfig {
     /// The window and hop frames are taken at.
     ///
     /// The call that takes the audio refuses a window under 64 or over 262144
-    /// samples ([`Error::WindowOutOfRange`]) and a hop under a sixty-fourth of
-    /// the window ([`Error::TooManyOverlaps`]).
+    /// samples ([`FramingError::WindowOutOfRange`](crate::FramingError::WindowOutOfRange)) and a hop under a sixty-fourth of
+    /// the window ([`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps)).
     #[must_use]
     pub fn framing(mut self, framing: Framing) -> Self {
         self.framing = framing;
@@ -234,8 +234,8 @@ impl ChromaConfig {
     /// Folds only peaks inside `band`.
     ///
     /// The call that takes the audio refuses a band that exceeds half the
-    /// sample rate ([`Error::AboveNyquist`]) or holds fewer than three bins
-    /// ([`Error::EmptyFrequencyRange`]).
+    /// sample rate ([`AboveNyquist`](crate::AboveNyquist)) or holds fewer than three bins
+    /// ([`MeterError::EmptyFrequencyRange`]).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = Some(band);
@@ -273,13 +273,13 @@ impl ChromaConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`] or [`Error::ZeroHop`] for a zero window or hop;
-    /// [`Error::WindowOutOfRange`]
+    /// [`FramingError::ZeroWindow`](crate::FramingError::ZeroWindow) or [`FramingError::ZeroHop`](crate::FramingError::ZeroHop) for a zero window or hop;
+    /// [`FramingError::WindowOutOfRange`](crate::FramingError::WindowOutOfRange)
     /// for a window under 64 or over 262144 samples;
-    /// [`Error::TooManyOverlaps`] for a hop under a sixty-fourth of the window;
-    /// [`Error::EmptyFrequencyRange`] when the band holds fewer than three bins;
-    /// [`Error::AboveNyquist`] when it exceeds half `rate`.
-    fn plan(&self, rate: SampleRate) -> Result<ChromaPlan> {
+    /// [`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps) for a hop under a sixty-fourth of the window;
+    /// [`MeterError::EmptyFrequencyRange`] when the band holds fewer than three bins;
+    /// [`AboveNyquist`](crate::AboveNyquist) when it exceeds half `rate`.
+    fn plan(&self, rate: SampleRate) -> Result<ChromaPlan, MeterError> {
         let geometry = self.framing.geometry(rate)?;
         check_window(geometry.window(), &WINDOWS)?;
         check_overlap(geometry.window(), geometry.hop())?;
@@ -310,7 +310,7 @@ impl<S: Sample> Measure<S> for ChromaConfig {
     /// # Errors
     ///
     /// As [`chroma`], for what depends on the framing and the band at `rate`.
-    fn measure(&self, rate: SampleRate) -> Result<ChromaMeter<S>> {
+    fn measure(&self, rate: SampleRate) -> Result<ChromaMeter<S>, MeterError> {
         Ok(ChromaMeter::new(self.plan(rate)?))
     }
 }
@@ -336,18 +336,18 @@ struct ChromaPlan {
 impl ChromaPlan {
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside
     /// the half spectrum; an error unless the band is valid and holds three.
-    fn band_bins(&self) -> Result<(usize, usize)> {
+    fn band_bins(&self) -> Result<(usize, usize), MeterError> {
         let (min, max) = (self.min_freq, self.max_freq);
-        let empty = Error::EmptyFrequencyRange { min, max };
+        let empty = EmptyFrequencyRange { min, max };
         if !(min.get().is_finite() && max.get().is_finite() && min.get() > 0.0 && min < max) {
-            return Err(empty);
+            return Err(empty.into());
         }
         check_nyquist(max, self.geometry.sample_rate())?;
         let lo = (self.geometry.bin_of(min).ceil() as usize).max(1);
         let hi =
             (self.geometry.bin_of(max).floor() as usize).min(self.geometry.window().get() / 2 - 1);
         if hi < lo + 2 {
-            return Err(empty);
+            return Err(empty.into());
         }
         Ok((lo, hi))
     }
@@ -719,11 +719,15 @@ impl<S: Sample> StreamMeter for ChromaMeter<S> {
     ///
     /// # Errors
     ///
-    /// [`Error::NonFiniteInput`] when the chunk holds a NaN or infinity. The
+    /// [`MeterError::NonFiniteInput`] when the chunk holds a NaN or infinity. The
     /// meter is untouched on error.
-    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<ChromaFrame>) -> Result<()> {
+    fn push(
+        &mut self,
+        chunk: Mono<'_, S>,
+        out: &mut impl Extend<ChromaFrame>,
+    ) -> Result<(), MeterError> {
         if !all_finite(chunk.samples()) {
-            return Err(Error::NonFiniteInput);
+            return Err(MeterError::NonFiniteInput);
         }
         for_blocks(chunk.samples(), 1, |block| {
             self.feed(block, |frame| out.extend([frame]));
@@ -752,26 +756,26 @@ impl<S: Sample> StreamMeter for ChromaMeter<S> {
 ///
 /// # Errors
 ///
-/// [`Error::EmptyFrequencyRange`] or [`Error::AboveNyquist`] when the band does
+/// [`MeterError::EmptyFrequencyRange`] or [`AboveNyquist`](crate::AboveNyquist) when the band does
 /// not suit the framing and the rate (see [`ChromaConfig::band`]);
-/// [`Error::WindowOutOfRange`] or [`Error::TooManyOverlaps`] when the framing
+/// [`FramingError::WindowOutOfRange`](crate::FramingError::WindowOutOfRange) or [`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps) when the framing
 /// is not one a chroma accepts;
-/// [`Error::NonFiniteInput`] for a NaN or infinite sample;
-/// [`Error::InsufficientInput`] for less than one window;
-/// [`Error::TooManyFrames`] for more than 524288 frames.
+/// [`MeterError::NonFiniteInput`] for a NaN or infinite sample;
+/// [`MeterError::InsufficientInput`] for less than one window;
+/// [`MeterError::TooManyFrames`] for more than 524288 frames.
 pub fn chroma<S: Sample>(
     cfg: &ChromaConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Chroma> {
+) -> Result<Chroma, MeterError> {
     let plan = cfg.plan(rate.into())?;
     let samples = widen(samples.samples());
     if !samples.iter().all(|v| v.is_finite()) {
-        return Err(Error::NonFiniteInput);
+        return Err(MeterError::NonFiniteInput);
     }
     let window = plan.geometry.window().get();
     if samples.len() < window {
-        return Err(Error::InsufficientInput {
+        return Err(MeterError::InsufficientInput {
             needed: Samples::new(window),
             got: Samples::new(samples.len()),
         });

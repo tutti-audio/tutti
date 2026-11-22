@@ -2,15 +2,15 @@ use super::*;
 
 const RATE: SampleRate = SampleRate::SR_44K1;
 
-fn stft(samples: &[f64], config: StftConfig) -> Result<Stft> {
+fn stft(samples: &[f64], config: StftConfig) -> Result<Stft, TransformError> {
     super::stft(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
-fn stft_magnitude(samples: &[f64], config: StftConfig) -> Result<StftMagnitude> {
+fn stft_magnitude(samples: &[f64], config: StftConfig) -> Result<StftMagnitude, TransformError> {
     super::stft_magnitude(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
-fn stft_polar(samples: &[f64], config: StftConfig) -> Result<StftPolar> {
+fn stft_polar(samples: &[f64], config: StftConfig) -> Result<StftPolar, TransformError> {
     super::stft_polar(&config, Mono::new(samples), SampleRange::All, RATE)
 }
 
@@ -99,8 +99,11 @@ fn a_decimated_request_is_refused_by_the_invertible_path() {
     // The hop this resolves to is far wider than the window.
     assert!(matches!(
         stft(&samples, request),
-        Err(Error::Dsp(tutti_dsp::StftError::HopExceedsWindow { .. }))
-            | Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant { .. }))
+        Err(TransformError::Dsp(
+            tutti_dsp::StftError::HopExceedsWindow { .. }
+        )) | Err(TransformError::Dsp(
+            tutti_dsp::StftError::NotColaCompliant { .. }
+        ))
     ));
 
     // The display path accepts it and yields a type with no inverse.
@@ -147,10 +150,12 @@ fn a_window_that_needs_more_overlap_is_refused_only_where_it_matters() {
 
     assert!(matches!(
         stft(&samples, request),
-        Err(Error::Dsp(tutti_dsp::StftError::NotColaCompliant {
-            window_fn: CosineWindow::BLACKMAN,
-            ..
-        }))
+        Err(TransformError::Dsp(
+            tutti_dsp::StftError::NotColaCompliant {
+                window_fn: CosineWindow::BLACKMAN,
+                ..
+            }
+        ))
     ));
 
     // Analysable, just not invertible.
@@ -225,7 +230,7 @@ fn masking_requires_a_matching_shape() {
     let wrong = Grid::filled(Complex64::default(), FrameCount(2), tutti_dsp::BinCount(3));
     assert_eq!(
         transform.resynthesize_masked::<f64>(&wrong),
-        Err(Error::GridShapeDisagreement)
+        Err(TransformError::GridShapeDisagreement)
     );
 
     // A neutral mask is the identity.

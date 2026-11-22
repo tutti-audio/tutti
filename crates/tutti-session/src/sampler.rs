@@ -43,7 +43,7 @@ pub enum SamplerError {
     NeedsThreads(crate::BackgroundWork),
     /// The disk streamer could not be started ([`SessionBuilder`](crate::SessionBuilder)).
     #[error(transparent)]
-    Streamer(#[from] tutti_sampler::Error),
+    Streamer(#[from] tutti_sampler::StreamerStartError),
 }
 
 /// Why a read file did not become a stream ([`Session::apply`] of an

@@ -29,6 +29,7 @@
 //! autocorrelation and the tracker's tables.
 
 use crate::level::SILENCE_FLOOR;
+use crate::{EmptyTempoRange, FramingError, TempoEstimateError};
 use tutti_buffers::{Float, Mono, Sample};
 use tutti_units::{Bpm, Confidence, SampleRate, Samples, Seconds};
 
@@ -36,7 +37,7 @@ use crate::analyses::xcorr::cross_correlate;
 use crate::convert::widen;
 use crate::framing::Framing;
 use crate::meters::onset::{DetectionFunction, OnsetConfig, onset_lag, run};
-use crate::{Error, Result};
+
 use tutti_dsp::FrameCount;
 use tutti_dsp::StftGeometry;
 use tutti_dsp::{local_maxima, parabolic_peak, track_beat_frames};
@@ -104,16 +105,16 @@ impl TempoRange {
 }
 
 impl TryFrom<core::ops::RangeInclusive<Bpm>> for TempoRange {
-    type Error = Error;
+    type Error = EmptyTempoRange;
 
     /// # Errors
     ///
-    /// [`Error::EmptyTempoRange`] unless `1 <= min < max <= 1000`.
-    fn try_from(range: core::ops::RangeInclusive<Bpm>) -> Result<Self> {
+    /// [`TempoEstimateError::EmptyTempoRange`] unless `1 <= min < max <= 1000`.
+    fn try_from(range: core::ops::RangeInclusive<Bpm>) -> Result<Self, EmptyTempoRange> {
         let (min, max) = range.into_inner();
         let ok = |b: Bpm| (MIN_BPM..=MAX_BPM).contains(&b.get());
         if !(ok(min) && ok(max) && min < max) {
-            return Err(Error::EmptyTempoRange { min, max });
+            return Err(EmptyTempoRange { min, max });
         }
         Ok(Self { min, max })
     }
@@ -266,16 +267,16 @@ impl BeatGrid {
 ///
 /// # Errors
 ///
-/// [`Error::NonFiniteInput`] for a NaN or infinite sample; [`Error::NoSignal`]
-/// for input whose peak is under -90 dBFS or whose novelty is flat; [`Error::InsufficientInput`]
+/// [`TempoEstimateError::NonFiniteInput`] for a NaN or infinite sample; [`TempoEstimateError::NoSignal`]
+/// for input whose peak is under -90 dBFS or whose novelty is flat; [`TempoEstimateError::InsufficientInput`]
 /// when the input is shorter than one window, or holds fewer than two periods
-/// of the slowest tempo; [`Error::EmptyTempoRange`] when no whole-frame lag
+/// of the slowest tempo; [`TempoEstimateError::EmptyTempoRange`] when no whole-frame lag
 /// falls in the range at this hop.
 pub fn estimate_tempo<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Tempo> {
+) -> Result<Tempo, TempoEstimateError> {
     let rate = rate.into();
     let hop = cfg.framing.hop();
     let novelty = novelty(cfg, &widen(samples.samples()), rate)?.0;
@@ -287,14 +288,14 @@ pub fn estimate_tempo<S: Sample>(
 /// For a caller's own detection function. The curve is read as strength per
 /// frame, and only its shape matters: any positive gain gives the same
 /// result. Its level is not judged: only an exactly flat curve (or one flat to
-/// rounding) is [`Error::NoSignal`], so a curve from near-silent audio is the
+/// rounding) is [`TempoEstimateError::NoSignal`], so a curve from near-silent audio is the
 /// caller's to gate.
 ///
 /// # Errors
 ///
 /// As [`estimate_tempo`] (except that a silence floor applies to samples
-/// only), with [`Error::NonFiniteInput`] for a NaN or infinite
-/// value in `novelty` and [`Error::ZeroHop`] for a zero `hop`.
+/// only), with [`TempoEstimateError::NonFiniteInput`] for a NaN or infinite
+/// value in `novelty` and [`FramingError::ZeroHop`] for a zero `hop`.
 ///
 /// `novelty` is a curve of readings, not audio, and `hop` is the spacing of
 /// its values in samples.
@@ -303,7 +304,7 @@ pub fn estimate_tempo_from_novelty<F: Float>(
     novelty: &[F],
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
-) -> Result<Tempo> {
+) -> Result<Tempo, TempoEstimateError> {
     let rate = frame_rate(sample_rate.into(), hop)?;
     let curve = Periodicity::new(cfg, &widen(novelty), rate, hop)?;
     Ok(curve.tempo(cfg))
@@ -322,7 +323,7 @@ pub fn track_beats<S: Sample>(
     cfg: &TempoConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<BeatGrid> {
+) -> Result<BeatGrid, TempoEstimateError> {
     let rate = rate.into();
     let (novelty, geometry) = novelty(cfg, &widen(samples.samples()), rate)?;
     let mut grid = track_beats_from_novelty(cfg, &novelty, rate, geometry.hop(), None)?;
@@ -343,8 +344,8 @@ pub fn track_beats<S: Sample>(
 /// # Errors
 ///
 /// As [`estimate_tempo_from_novelty`] when estimating. With a supplied tempo,
-/// [`Error::NonFiniteInput`] for a NaN or infinite value in `novelty`, and
-/// [`Error::UntrackableTempo`] for a tempo whose period is not between two
+/// [`TempoEstimateError::NonFiniteInput`] for a NaN or infinite value in `novelty`, and
+/// [`TempoEstimateError::UntrackableTempo`] for a tempo whose period is not between two
 /// frames and the curve's length; a flat curve gives no beats.
 pub fn track_beats_from_novelty<F: Float>(
     cfg: &TempoConfig,
@@ -352,20 +353,20 @@ pub fn track_beats_from_novelty<F: Float>(
     sample_rate: impl Into<SampleRate>,
     hop: Samples,
     tempo: Option<Bpm>,
-) -> Result<BeatGrid> {
+) -> Result<BeatGrid, TempoEstimateError> {
     let sample_rate = sample_rate.into();
     let novelty = &widen(novelty);
     let rate = frame_rate(sample_rate, hop)?;
     let bpm = match tempo {
         Some(bpm) => {
             if novelty.iter().any(|v| !v.is_finite()) {
-                return Err(Error::NonFiniteInput);
+                return Err(TempoEstimateError::NonFiniteInput);
             }
             // A period under two frames cannot be tracked, and one longer than
             // the curve holds at most one beat.
             let period = lag_of(bpm, rate);
             if !(2.0..=novelty.len() as f64).contains(&period) {
-                return Err(Error::UntrackableTempo { bpm });
+                return Err(TempoEstimateError::UntrackableTempo { bpm });
             }
             bpm
         }
@@ -381,13 +382,13 @@ pub fn track_beats_from_novelty<F: Float>(
 
 /// Frames per second of a curve with one value per `hop`: the curve's own
 /// sampling rate, in the unit that holds an `f64` rate.
-fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<SampleRate> {
+fn frame_rate(sample_rate: SampleRate, hop: Samples) -> Result<SampleRate, TempoEstimateError> {
     if hop.is_zero() {
-        return Err(Error::ZeroHop);
+        return Err(FramingError::ZeroHop.into());
     }
     // Positive and finite for a nonzero hop, short of an `f64` underflow, which
     // a hop that large reports as a zero one.
-    SampleRate::new(sample_rate.get() / hop.get() as f64).ok_or(Error::ZeroHop)
+    SampleRate::new(sample_rate.get() / hop.get() as f64).ok_or(FramingError::ZeroHop.into())
 }
 
 /// The lag in frames of one beat at `bpm` on a curve at `rate`: `60 * rate / bpm`,
@@ -407,24 +408,24 @@ fn novelty(
     cfg: &TempoConfig,
     samples: &[f64],
     rate: SampleRate,
-) -> Result<(Vec<f64>, StftGeometry)> {
+) -> Result<(Vec<f64>, StftGeometry), TempoEstimateError> {
     let onset = OnsetConfig::new(DetectionFunction::SpectralFlux)
         .framing(cfg.framing)
         .plan(rate)?;
     let geometry = onset.geometry();
     if samples.iter().any(|s| !s.is_finite()) {
-        return Err(Error::NonFiniteInput);
+        return Err(TempoEstimateError::NonFiniteInput);
     }
     let window = geometry.window().get();
     if samples.len() < window {
-        return Err(Error::InsufficientInput {
+        return Err(TempoEstimateError::InsufficientInput {
             needed: Samples::new(window),
             got: Samples::new(samples.len()),
         });
     }
     let peak = samples.iter().fold(0.0f64, |m, s| m.max(s.abs()));
     if peak < SILENCE_FLOOR.to_amplitude().get() {
-        return Err(Error::NoSignal);
+        return Err(TempoEstimateError::NoSignal);
     }
     let mut curve: Vec<f64> = run(onset, samples)
         .novelty()
@@ -455,9 +456,9 @@ impl Periodicity {
         novelty: &[f64],
         frame_rate: SampleRate,
         hop: Samples,
-    ) -> Result<Self> {
+    ) -> Result<Self, TempoEstimateError> {
         if novelty.iter().any(|v| !v.is_finite()) {
-            return Err(Error::NonFiniteInput);
+            return Err(TempoEstimateError::NonFiniteInput);
         }
         // Lag 1 has no neighbour below it for the refinement, so start at 2.
         let first_lag = (lag_of(cfg.max, frame_rate).ceil() as usize).max(2);
@@ -465,17 +466,18 @@ impl Periodicity {
         // lag that does not fit a `usize` after the arithmetic below.
         let longest = lag_of(cfg.min, frame_rate).floor();
         if longest < first_lag as f64 {
-            return Err(Error::EmptyTempoRange {
+            return Err(EmptyTempoRange {
                 min: cfg.min,
                 max: cfg.max,
-            });
+            }
+            .into());
         }
         let n = novelty.len();
         // Two periods of the slowest tempo, so the longest lag still overlaps
         // half the curve.
         let needed = 2.0 * (longest + 2.0);
         if (n as f64) < needed {
-            return Err(Error::InsufficientInput {
+            return Err(TempoEstimateError::InsufficientInput {
                 needed: Samples::new((needed * hop.get() as f64).min(usize::MAX as f64) as usize),
                 got: Samples::new(n * hop.get()),
             });
@@ -487,14 +489,14 @@ impl Periodicity {
             .iter()
             .fold((f64::MAX, f64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
         if hi - lo <= FLAT * hi.abs().max(lo.abs()) {
-            return Err(Error::NoSignal);
+            return Err(TempoEstimateError::NoSignal);
         }
         let mean = novelty.iter().copied().sum::<f64>() / n as f64;
         let centred: Vec<f64> = novelty.iter().map(|&v| v - mean).collect();
         let correlation = cross_correlate(Mono::new(&centred), Mono::new(&centred));
         let power = correlation.at(0).unwrap_or(0.0) / n as f64;
         if power <= 0.0 {
-            return Err(Error::NoSignal);
+            return Err(TempoEstimateError::NoSignal);
         }
         // Over the whole curve's power, not the overlap at the lag: a coefficient
         // in -1..=1 (Cauchy-Schwarz), where a long lag has fewer terms and

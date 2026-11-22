@@ -328,11 +328,15 @@ fn a_zero_framing_is_refused_where_the_rate_binds() {
         let cfg = flux().framing(framing);
         assert!(matches!(
             Measure::<f64>::measure(&cfg, rate()),
-            Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
+            Err(MeterError::Framing(
+                FramingError::ZeroWindow | FramingError::ZeroHop
+            ))
         ));
         assert!(matches!(
             detect_onsets(&cfg, Mono::new(&[0.0f64; 4096]), rate()),
-            Err(crate::Error::ZeroWindow | crate::Error::ZeroHop)
+            Err(MeterError::Framing(
+                FramingError::ZeroWindow | FramingError::ZeroHop
+            ))
         ));
     }
 }

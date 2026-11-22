@@ -8,7 +8,7 @@ use tutti_dsp::{FrameCount, HopSize, StftGeometry, WindowLength};
 use tutti_units::{Hz, SampleRate, Samples};
 
 use crate::convert::BLOCK;
-use crate::{Error, Result};
+use crate::{AboveNyquist, FramingError, TooManyFrames};
 
 /// A window and the hop between successive windows, in [`Samples`].
 ///
@@ -16,8 +16,8 @@ use crate::{Error, Result};
 /// signal binds the rate and derives the [`StftGeometry`], and checks the
 /// framing against what the analysis accepts (a window range, a hop no wider
 /// than the window, the overlap a tiny hop makes), answering with a named
-/// [`Error`]. A zero window or hop is [`Error::ZeroWindow`] or
-/// [`Error::ZeroHop`], wherever a framing is first used.
+/// [`FramingError`]. A zero window or hop is [`FramingError::ZeroWindow`] or
+/// [`FramingError::ZeroHop`], wherever a framing is first used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Framing {
     window: Samples,
@@ -49,14 +49,14 @@ impl Framing {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`] for a zero window, [`Error::ZeroHop`] for a zero
+    /// [`FramingError::ZeroWindow`] for a zero window, [`FramingError::ZeroHop`] for a zero
     /// hop.
-    pub(crate) fn check(self) -> Result<()> {
+    pub(crate) fn check(self) -> Result<(), FramingError> {
         if self.window.is_zero() {
-            return Err(Error::ZeroWindow);
+            return Err(FramingError::ZeroWindow);
         }
         if self.hop.is_zero() {
-            return Err(Error::ZeroHop);
+            return Err(FramingError::ZeroHop);
         }
         Ok(())
     }
@@ -66,9 +66,9 @@ impl Framing {
     /// # Errors
     ///
     /// As [`check`](Self::check).
-    pub(crate) fn geometry(self, rate: SampleRate) -> Result<StftGeometry> {
-        let window = WindowLength::new(self.window).ok_or(Error::ZeroWindow)?;
-        let hop = HopSize::new(self.hop).ok_or(Error::ZeroHop)?;
+    pub(crate) fn geometry(self, rate: SampleRate) -> Result<StftGeometry, FramingError> {
+        let window = WindowLength::new(self.window).ok_or(FramingError::ZeroWindow)?;
+        let hop = HopSize::new(self.hop).ok_or(FramingError::ZeroHop)?;
         Ok(StftGeometry::new(rate, window, hop))
     }
 }
@@ -90,12 +90,15 @@ impl Framing {
 ///
 /// # Errors
 ///
-/// [`Error::WindowOutOfRange`].
-pub(crate) fn check_window(window: Samples, accepted: &RangeInclusive<Samples>) -> Result<()> {
+/// [`FramingError::WindowOutOfRange`].
+pub(crate) fn check_window(
+    window: Samples,
+    accepted: &RangeInclusive<Samples>,
+) -> Result<(), FramingError> {
     if accepted.contains(&window) {
         return Ok(());
     }
-    Err(Error::WindowOutOfRange {
+    Err(FramingError::WindowOutOfRange {
         window,
         min: *accepted.start(),
         max: *accepted.end(),
@@ -107,10 +110,10 @@ pub(crate) fn check_window(window: Samples, accepted: &RangeInclusive<Samples>) 
 ///
 /// # Errors
 ///
-/// [`Error::HopWiderThanWindow`].
-pub(crate) fn check_hop_within(window: Samples, hop: Samples) -> Result<()> {
+/// [`FramingError::HopWiderThanWindow`].
+pub(crate) fn check_hop_within(window: Samples, hop: Samples) -> Result<(), FramingError> {
     if hop > window {
-        return Err(Error::HopWiderThanWindow { hop, window });
+        return Err(FramingError::HopWiderThanWindow { hop, window });
     }
     Ok(())
 }
@@ -119,10 +122,10 @@ pub(crate) fn check_hop_within(window: Samples, hop: Samples) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`Error::TooManyOverlaps`].
-pub(crate) fn check_overlap(window: Samples, hop: Samples) -> Result<()> {
+/// [`FramingError::TooManyOverlaps`].
+pub(crate) fn check_overlap(window: Samples, hop: Samples) -> Result<(), FramingError> {
     if window.get().div_ceil(hop.get()) > MAX_OVERLAP {
-        return Err(Error::TooManyOverlaps {
+        return Err(FramingError::TooManyOverlaps {
             window,
             hop,
             max: MAX_OVERLAP,
@@ -135,10 +138,10 @@ pub(crate) fn check_overlap(window: Samples, hop: Samples) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`Error::TooManyFrames`].
-pub(crate) fn check_frame_count(frames: FrameCount, max: FrameCount) -> Result<()> {
+/// [`TooManyFrames`].
+pub(crate) fn check_frame_count(frames: FrameCount, max: FrameCount) -> Result<(), TooManyFrames> {
     if frames > max {
-        return Err(Error::TooManyFrames { frames, max });
+        return Err(TooManyFrames { frames, max });
     }
     Ok(())
 }
@@ -147,11 +150,11 @@ pub(crate) fn check_frame_count(frames: FrameCount, max: FrameCount) -> Result<(
 ///
 /// # Errors
 ///
-/// [`Error::AboveNyquist`] when `top` exceeds half the sample rate.
-pub(crate) fn check_nyquist(top: Hz, rate: SampleRate) -> Result<()> {
+/// [`AboveNyquist`] when `top` exceeds half the sample rate.
+pub(crate) fn check_nyquist(top: Hz, rate: SampleRate) -> Result<(), AboveNyquist> {
     let nyquist = rate.nyquist();
     if top > nyquist {
-        return Err(Error::AboveNyquist { freq: top, nyquist });
+        return Err(AboveNyquist { freq: top, nyquist });
     }
     Ok(())
 }

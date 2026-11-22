@@ -14,8 +14,9 @@
 use tutti_music::PitchClass;
 use tutti_units::Confidence;
 
+use crate::KeyEstimateError;
 use crate::meters::chroma::{CLASSES, mean_of_rows};
-use crate::{Error, Result};
+
 use tutti_dsp::Grid;
 
 /// A chroma whose spread is under this fraction of its mean is flat: the
@@ -102,12 +103,15 @@ pub struct KeyEstimate {
 ///
 /// # Errors
 ///
-/// [`Error::NotTwelveClasses`] when the grid is not 12 columns wide;
-/// [`Error::NegativeInput`] when it holds a negative value; [`Error::NonFiniteInput`] for a NaN or infinity;
-/// [`Error::NoTonalContent`] when it has no frames, is silent or is flat.
-pub fn estimate_key(profile: KeyProfile, chroma: &Grid<f64>) -> Result<KeyEstimate> {
+/// [`KeyEstimateError::NotTwelveClasses`] when the grid is not 12 columns wide;
+/// [`KeyEstimateError::NegativeInput`] when it holds a negative value; [`KeyEstimateError::NonFiniteInput`] for a NaN or infinity;
+/// [`KeyEstimateError::NoTonalContent`] when it has no frames, is silent or is flat.
+pub fn estimate_key(
+    profile: KeyProfile,
+    chroma: &Grid<f64>,
+) -> Result<KeyEstimate, KeyEstimateError> {
     if chroma.bins().get() != CLASSES {
-        return Err(Error::NotTwelveClasses {
+        return Err(KeyEstimateError::NotTwelveClasses {
             columns: chroma.bins().get(),
         });
     }
@@ -121,18 +125,21 @@ pub fn estimate_key(profile: KeyProfile, chroma: &Grid<f64>) -> Result<KeyEstima
 /// # Errors
 ///
 /// As [`estimate_key`], for a vector.
-pub fn estimate_key_from_mean(profile: KeyProfile, mean: &[f64; CLASSES]) -> Result<KeyEstimate> {
+pub fn estimate_key_from_mean(
+    profile: KeyProfile,
+    mean: &[f64; CLASSES],
+) -> Result<KeyEstimate, KeyEstimateError> {
     if mean.iter().any(|v| !v.is_finite()) {
-        return Err(Error::NonFiniteInput);
+        return Err(KeyEstimateError::NonFiniteInput);
     }
     if mean.iter().any(|&v| v < 0.0) {
-        return Err(Error::NegativeInput);
+        return Err(KeyEstimateError::NegativeInput);
     }
     let x = mean.map(f64::from);
     let (centered, norm) = center(&x);
     let level = x.iter().sum::<f64>() / CLASSES as f64;
     if norm.is_nan() || norm <= FLAT * level * (CLASSES as f64).sqrt() {
-        return Err(Error::NoTonalContent);
+        return Err(KeyEstimateError::NoTonalContent);
     }
 
     // `scores[i]` for `i < 12` is major on tonic `i`, then minor.

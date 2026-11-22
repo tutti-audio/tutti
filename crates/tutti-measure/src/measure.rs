@@ -3,7 +3,7 @@
 
 use tutti_buffers::Sample;
 
-use crate::Result;
+use crate::MeterError;
 
 /// A config that builds a meter for one stream.
 ///
@@ -27,9 +27,9 @@ pub trait Measure<S: Sample> {
     ///
     /// # Errors
     ///
-    /// The [`Error`](crate::Error) of whatever the config cannot hold at
+    /// The [`MeterError`] of whatever the config cannot hold at
     /// `context`; a config that can always be bound returns `Ok`.
-    fn measure(&self, context: Self::Context) -> Result<Self::Meter>;
+    fn measure(&self, context: Self::Context) -> Result<Self::Meter, MeterError>;
 }
 
 /// A meter that folds chunks of one stream into readings.
@@ -59,7 +59,11 @@ pub trait StreamMeter {
     ///
     /// The chunk is refused (a layout that is not the meter's, a non-finite
     /// sample); the meter is untouched.
-    fn push(&mut self, input: Self::Input<'_>, out: &mut impl Extend<Self::Item>) -> Result<()>;
+    fn push(
+        &mut self,
+        input: Self::Input<'_>,
+        out: &mut impl Extend<Self::Item>,
+    ) -> Result<(), MeterError>;
 
     /// The answer over everything pushed, consuming the meter.
     #[must_use]
@@ -79,11 +83,14 @@ pub(crate) fn fold_uneven<S: Sample, M: Measure<S>>(
         &mut M::Meter,
         core::ops::Range<usize>,
         &mut Vec<<M::Meter as StreamMeter>::Item>,
-    ) -> Result<()>,
-) -> Result<(
-    Vec<<M::Meter as StreamMeter>::Item>,
-    <M::Meter as StreamMeter>::Output,
-)> {
+    ) -> Result<(), MeterError>,
+) -> Result<
+    (
+        Vec<<M::Meter as StreamMeter>::Item>,
+        <M::Meter as StreamMeter>::Output,
+    ),
+    MeterError,
+> {
     let mut meter = cfg.measure(context)?;
     let mut items = Vec::new();
     let mut at: usize = 0;

@@ -21,7 +21,7 @@ use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::{for_blocks, widen};
 use crate::framing::{FrameCutter, Framing};
-use crate::{Measure, Result, StreamMeter};
+use crate::{FramingError, Measure, MeterError, StreamMeter};
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::StftGeometry;
@@ -139,9 +139,9 @@ impl OnsetConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
-    /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
-    pub(crate) fn plan(&self, rate: SampleRate) -> Result<OnsetPlan> {
+    /// [`FramingError::ZeroWindow`] or
+    /// [`FramingError::ZeroHop`] for a zero window or hop.
+    pub(crate) fn plan(&self, rate: SampleRate) -> Result<OnsetPlan, FramingError> {
         Ok(OnsetPlan {
             geometry: self.framing.geometry(rate)?,
             function: self.function,
@@ -160,9 +160,9 @@ impl<S: Sample> Measure<S> for OnsetConfig {
     ///
     /// # Errors
     ///
-    /// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
-    /// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
-    fn measure(&self, rate: SampleRate) -> Result<OnsetMeter<S>> {
+    /// [`FramingError::ZeroWindow`] or
+    /// [`FramingError::ZeroHop`] for a zero window or hop.
+    fn measure(&self, rate: SampleRate) -> Result<OnsetMeter<S>, MeterError> {
         Ok(OnsetMeter::new(self.plan(rate)?))
     }
 }
@@ -360,7 +360,11 @@ impl<S: Sample> StreamMeter for OnsetMeter<S> {
 
     /// Feeds the next chunk of the buffer, in order, and extends `out` with the
     /// [`Novelty`] of each frame the chunk completes.
-    fn push(&mut self, chunk: Mono<'_, S>, out: &mut impl Extend<Novelty>) -> Result<()> {
+    fn push(
+        &mut self,
+        chunk: Mono<'_, S>,
+        out: &mut impl Extend<Novelty>,
+    ) -> Result<(), MeterError> {
         for_blocks(chunk.samples(), 1, |block| {
             self.feed(block, |item| out.extend([item]));
         });
@@ -383,13 +387,13 @@ impl<S: Sample> StreamMeter for OnsetMeter<S> {
 ///
 /// # Errors
 ///
-/// [`Error::ZeroWindow`](crate::Error::ZeroWindow) or
-/// [`Error::ZeroHop`](crate::Error::ZeroHop) for a zero window or hop.
+/// [`FramingError::ZeroWindow`] or
+/// [`FramingError::ZeroHop`] for a zero window or hop.
 pub fn detect_onsets<S: Sample>(
     cfg: &OnsetConfig,
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Vec<Onset>> {
+) -> Result<Vec<Onset>, MeterError> {
     let plan = cfg.plan(rate.into())?;
     Ok(run(plan, &widen(samples.samples())).finish())
 }

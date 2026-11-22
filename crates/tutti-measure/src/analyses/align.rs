@@ -16,11 +16,12 @@
 use tutti_buffers::{Mono, Sample};
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
+use crate::AlignError;
 use crate::analyses::xcorr::{CrossCorrelation, cross_correlate_shaped};
 use crate::convert::widen;
 use crate::framing::check_nyquist;
 use crate::meters::chroma::FrequencyBand;
-use crate::{Error, Result};
+
 use tutti_dsp::Complex64;
 use tutti_dsp::FftScratch;
 use tutti_dsp::parabolic_peak;
@@ -62,7 +63,7 @@ impl AlignConfig {
     /// [`FrequencyBand`] holds no zero), so a low-pass-only band is written with
     /// a small low edge, which drops the DC bin from the PHAT weighting.
     /// [`align`] refuses a band whose top exceeds half the sample rate
-    /// ([`Error::AboveNyquist`]).
+    /// ([`AboveNyquist`](crate::AboveNyquist)).
     #[must_use]
     pub fn band(mut self, band: FrequencyBand) -> Self {
         self.band = Some(band);
@@ -126,17 +127,17 @@ impl Alignment {
 ///
 /// # Errors
 ///
-/// [`Error::AboveNyquist`] when the band's top exceeds half `rate`;
-/// [`Error::InsufficientInput`] when either buffer is empty;
-/// [`Error::NonFiniteInput`] when a sample is NaN or infinite;
-/// [`Error::NoSignal`] when there is nothing to correlate: a silent input, or
+/// [`AboveNyquist`](crate::AboveNyquist) when the band's top exceeds half `rate`;
+/// [`AlignError::InsufficientInput`] when either buffer is empty;
+/// [`AlignError::NonFiniteInput`] when a sample is NaN or infinite;
+/// [`AlignError::NoSignal`] when there is nothing to correlate: a silent input, or
 /// a band that holds no spectrum bin.
 pub fn align<S: Sample>(
     config: &AlignConfig,
     reference: Mono<'_, S>,
     take: Mono<'_, S>,
     rate: impl Into<SampleRate>,
-) -> Result<Alignment> {
+) -> Result<Alignment, AlignError> {
     let rate = rate.into();
     if let Some(band) = config.band {
         check_nyquist(band.max(), rate)?;
@@ -145,13 +146,13 @@ pub fn align<S: Sample>(
     let (reference, take) = (&reference[..], &take[..]);
     for buffer in [reference, take] {
         if buffer.is_empty() {
-            return Err(Error::InsufficientInput {
+            return Err(AlignError::InsufficientInput {
                 needed: Samples::new(1),
                 got: Samples::new(0),
             });
         }
         if !buffer.iter().all(|v| v.is_finite()) {
-            return Err(Error::NonFiniteInput);
+            return Err(AlignError::NonFiniteInput);
         }
     }
     let mut signal = false;
@@ -160,13 +161,13 @@ pub fn align<S: Sample>(
         signal = phase_transform(bins, config.band, rate);
     });
     if !signal {
-        return Err(Error::NoSignal);
+        return Err(AlignError::NoSignal);
     }
     // Two non-empty buffers always overlap at lag zero, so the window is never
     // empty; the error is the type's way of saying so.
     let peak = correlation
         .peak_within(config.max_lag)
-        .ok_or(Error::NoSignal)?;
+        .ok_or(AlignError::NoSignal)?;
     Ok(Alignment {
         lag: peak.lag,
         offset: parabolic_offset(&correlation, peak.lag),

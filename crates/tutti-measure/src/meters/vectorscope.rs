@@ -13,7 +13,7 @@ use core::num::NonZeroUsize;
 
 use tutti_buffers::{Sample, StereoPlanes};
 
-use crate::{Measure, Result, StreamMeter};
+use crate::{Measure, MeterError, StreamMeter};
 
 /// One frame on the scope.
 ///
@@ -70,7 +70,7 @@ impl<S: Sample> Measure<S> for VectorscopeConfig {
     type Meter = VectorscopeMeter<S>;
 
     /// A meter at the start of a stream: the first frame is kept. Never fails.
-    fn measure(&self, (): ()) -> Result<VectorscopeMeter<S>> {
+    fn measure(&self, (): ()) -> Result<VectorscopeMeter<S>, MeterError> {
         Ok(self.bind())
     }
 }
@@ -126,7 +126,7 @@ impl<S: Sample> StreamMeter for VectorscopeMeter<S> {
         &mut self,
         planes: StereoPlanes<'_, S>,
         out: &mut impl Extend<ScopePoint>,
-    ) -> Result<()> {
+    ) -> Result<(), MeterError> {
         self.scan(planes, out);
         Ok(())
     }

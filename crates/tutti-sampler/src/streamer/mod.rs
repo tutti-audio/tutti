@@ -75,7 +75,7 @@ pub use step::StepOutcome;
 #[cfg(test)]
 pub(crate) use prefetch::RegionBuffer;
 
-use crate::error::Result;
+use crate::StreamerStartError;
 use decode::Seams;
 use handlers::{Handles, build_stream};
 use thread::Built;
@@ -145,7 +145,7 @@ use tutti_units::SampleRate;
 /// to the other state, so this does not compile.
 ///
 /// ```compile_fail
-/// # fn run() -> tutti_sampler::Result<()> {
+/// # fn run() -> Result<(), tutti_sampler::StreamerStartError> {
 /// let executor = tutti_platform::Executor::new();
 /// let bells = tutti_rt::Bells::new(&executor)?;
 /// let mut streamer = tutti_sampler::DiskStreamer::<tutti_sampler::Running, f32>::start(
@@ -162,7 +162,7 @@ use tutti_units::SampleRate;
 /// Its compiling twin steps a hand-driven one:
 ///
 /// ```
-/// # fn run() -> tutti_sampler::Result<()> {
+/// # fn run() -> Result<(), tutti_sampler::StreamerStartError> {
 /// let mut streamer = tutti_sampler::DiskStreamer::<_, f32>::manual(tutti_units::SampleRate::SR_48K, Default::default())?;
 /// let _ = streamer.step();
 /// # Ok(())
@@ -203,7 +203,7 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
     ///
     /// # Errors
     ///
-    /// [`Error::Spawn`](crate::Error::Spawn) when the OS refuses the streamer's thread.
+    /// [`StreamerStartError::Spawn`] when the OS refuses the streamer's thread.
     /// Every stream and every refill depends on it, so there is no streamer to return: a
     /// stream command with no consumer would stall silently.
     pub fn start(
@@ -211,7 +211,7 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
         config: DiskStreamerConfig,
         executor: &Executor,
         bells: &Bells,
-    ) -> Result<Self> {
+    ) -> Result<Self, StreamerStartError> {
         Self::build(
             sample_rate.into(),
             config,
@@ -229,7 +229,7 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
         seams: Seams,
         executor: &Executor,
         bells: &Bells,
-    ) -> Result<Self> {
+    ) -> Result<Self, StreamerStartError> {
         Self::from_built(
             Built::new(256, sample_rate, config.buffer_config, seams, bells),
             executor,
@@ -237,7 +237,7 @@ impl<F: RingFloat> DiskStreamer<Running, F> {
     }
 
     /// The streamer over `built`, its future spawned.
-    fn from_built(built: Built<F>, executor: &Executor) -> Result<Self> {
+    fn from_built(built: Built<F>, executor: &Executor) -> Result<Self, StreamerStartError> {
         let (streamer_tx, shared, config) =
             (built.command_sender(), built.shared(), built.config());
 
@@ -273,7 +273,10 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
     /// # Errors
     ///
     /// None at present, as for [`start`](DiskStreamer::start).
-    pub fn manual(sample_rate: impl Into<SampleRate>, config: DiskStreamerConfig) -> Result<Self> {
+    pub fn manual(
+        sample_rate: impl Into<SampleRate>,
+        config: DiskStreamerConfig,
+    ) -> Result<Self, StreamerStartError> {
         Self::manual_with(sample_rate.into(), config, Seams::default())
     }
 
@@ -282,11 +285,11 @@ impl<F: RingFloat> DiskStreamer<Manual<F>, F> {
         sample_rate: SampleRate,
         config: DiskStreamerConfig,
         seams: Seams,
-    ) -> Result<Self> {
+    ) -> Result<Self, StreamerStartError> {
         // The bells register the rings' wakes while the streamer is built; a manual
         // streamer is stepped by its caller, so the set and its tick end here.
         let executor = tutti_platform::Executor::new();
-        let bells = Bells::new(&executor).map_err(crate::Error::Spawn)?;
+        let bells = Bells::new(&executor).map_err(crate::StreamerStartError::Spawn)?;
         let built = Built::new(256, sample_rate, config.buffer_config, seams, &bells);
         let (streamer_tx, shared, config) =
             (built.command_sender(), built.shared(), built.config());
