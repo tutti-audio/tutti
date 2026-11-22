@@ -218,8 +218,9 @@ impl Sent {
 
 /// Whether the transport rolls once `event` applies: `Some(true)` for a
 /// command that starts it (a play, or a locate that then plays),
-/// `Some(false)` for a stop, `None` for a command that keeps whatever it
-/// was doing.
+/// `Some(false)` for one that stops it (a stop, or a locate that then stops),
+/// `None` for one that leaves the record as it was (a locate that keeps, or a
+/// scrub).
 fn rolls_after(event: MotionCommand) -> Option<bool> {
     match event {
         MotionCommand::Play
@@ -227,7 +228,11 @@ fn rolls_after(event: MotionCommand) -> Option<bool> {
             then: AfterLocate::Play,
             ..
         } => Some(true),
-        MotionCommand::Stop { .. } => Some(false),
+        MotionCommand::Stop { .. }
+        | MotionCommand::Locate {
+            then: AfterLocate::Stop,
+            ..
+        } => Some(false),
         _ => None,
     }
 }
