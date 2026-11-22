@@ -124,8 +124,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///   ([`MainOutputError::Width`]), or
     ///   channels past `MAX_CHANNELS`
     ///   ([`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced), as a
-    ///   [`MainOutputError::Fold`]); that
-    ///   is what a host's `MasterSources` longer than the main output comes to.
+    ///   [`MainOutputError::Fold`]).
     /// - Otherwise [`Pending`](MainOutputTopologyStatus::Pending) while a declaration
     ///   waits for a main output crossfade, and `Applied`.
     ///
