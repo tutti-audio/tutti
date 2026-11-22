@@ -466,7 +466,7 @@ impl<N: tutti_graph::Node> tutti_graph::Node for Heavy<N> {
 /// of the sink (lane `k` is sink input `k`), on a pool of four workers when
 /// `pooled`: the inlets' writers and the generations' writers.
 fn retiring_lanes(
-    lanes: u64,
+    lanes: u16,
     pooled: bool,
 ) -> (
     EventRig,
@@ -476,7 +476,7 @@ fn retiring_lanes(
     )>,
     Vec<DeviceGeneration>,
 ) {
-    let mut rig = EventRig::new(RATE, 512, lanes as u16);
+    let mut rig = EventRig::new(RATE, 512, lanes);
     if pooled {
         rig.exec.set_pool(Some(Arc::new(
             tutti_graph::WorkerPool::builder()
@@ -491,23 +491,24 @@ fn retiring_lanes(
         let (mut generation_writer, generation) = DeviceGeneration::new();
         generation_writer.arrive();
         let (inlet, writer) = EventInletNode::pair(EventCapacity::of(1024));
-        rig.editor.insert(NodeKey(10 + lane), "source", inlet);
+        rig.editor
+            .insert(NodeKey(10 + u64::from(lane)), "source", inlet);
         rig.editor.insert(
-            NodeKey(100 + lane),
+            NodeKey(100 + u64::from(lane)),
             "out",
             tutti_graph::Unforkable(Heavy(MidiOutNode::new().following(&generation))),
         );
         rig.editor.spec_mut().connect_events(
             EventInputPort {
-                node: NodeKey(100 + lane),
+                node: NodeKey(100 + u64::from(lane)),
                 port: 0,
             },
             EventEdge::Direct(EventOutputPort {
-                node: NodeKey(10 + lane),
+                node: NodeKey(10 + u64::from(lane)),
                 port: 0,
             }),
         );
-        rig.feed(NodeKey(100 + lane), 0, lane as u16);
+        rig.feed(NodeKey(100 + u64::from(lane)), 0, lane);
         writers.push((writer, generation_writer));
         generations.push(generation);
     }
@@ -516,11 +517,11 @@ fn retiring_lanes(
 }
 
 /// What sink input `lane` received: `(note, is_off)` of each note message.
-fn notes_at(seen: &Seen, lane: u64) -> Vec<(u8, bool)> {
+fn notes_at(seen: &Seen, lane: u16) -> Vec<(u8, bool)> {
     seen.lock()
         .unwrap()
         .iter()
-        .filter(|(port, ..)| u64::from(*port) == lane)
+        .filter(|(port, ..)| *port == lane)
         .filter_map(|(_, _, ump)| {
             let note = note_of(*ump)?;
             Some((
@@ -577,7 +578,7 @@ fn a_retiring_out_node_ends_the_notes_it_passed_and_then_passes_nothing() {
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn a_retiring_out_node_ends_the_notes_it_passed_on_a_pool() {
-    const LANES: u64 = 8;
+    const LANES: u16 = 8;
     let (mut rig, mut lanes, _) = retiring_lanes(LANES, true);
     rig.block(512);
     assert!(
