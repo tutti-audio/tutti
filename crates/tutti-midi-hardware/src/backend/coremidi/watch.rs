@@ -36,10 +36,10 @@
 //! is made is seeded when it is. A failed start ends no watch: the watches stay
 //! registered and unseeded, the failure reaches the callers through their [`Start`],
 //! and the next [`Start`] asks the thread for a new client, which seeds them.
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::task::Poll;
 use std::time::Duration;
-use tutti_rt::{LockExt, Parker, Unparker, parker};
+use tutti_rt::{Mutex, Parker, Unparker, parker};
 
 use crate::backend::hub::{Registry, StartGate, failed_start};
 use crate::devices::ChangeSink;
@@ -113,7 +113,7 @@ impl Hub {
     /// client exists, or the round failed), and the next start makes a thread again.
     fn thread_ended(&self) {
         let wakers = {
-            let mut slot = self.unparker.lock_recover();
+            let mut slot = self.unparker.lock();
             let wakers = self.gate.ended(self.client.get().is_some());
             *slot = None;
             wakers
@@ -212,7 +212,7 @@ fn cell() -> &'static Hub {
 /// [`MidiHardwareError::Spawn`] when the OS refuses the thread.
 pub(super) fn hub() -> Result<&'static Hub> {
     let hub = cell();
-    hub.ensure_thread(&mut hub.unparker.lock_recover())?;
+    hub.ensure_thread(&mut hub.unparker.lock())?;
     Ok(hub)
 }
 
@@ -227,7 +227,7 @@ pub(super) fn client() -> Option<SharedClient> {
 pub(super) fn begin_start() -> Start {
     let hub = cell();
     let begun = {
-        let mut slot = hub.unparker.lock_recover();
+        let mut slot = hub.unparker.lock();
         hub.ensure_thread(&mut slot).map(|()| {
             let (round, wakers) = hub.gate.begin(hub.client.get().is_some());
             if round.restarted

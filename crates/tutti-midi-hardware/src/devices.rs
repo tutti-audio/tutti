@@ -12,11 +12,11 @@
 use futures_core::Stream;
 use std::collections::VecDeque;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, MutexGuard, Weak};
 use std::task::{Context, Poll, Waker};
 use tutti_graph::{Losses, UmpAt};
 use tutti_platform::Executor;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use tutti_graph::EventInletNode;
 use tutti_midi_device::{
@@ -112,7 +112,7 @@ impl Inbox {
 
 impl Queue {
     fn inbox(&self) -> MutexGuard<'_, Inbox> {
-        self.inbox.lock_recover()
+        self.inbox.lock()
     }
 
     /// Queues `event`; the waker it returns is woken by the caller once it
@@ -135,7 +135,7 @@ impl Queue {
 
 impl Shared {
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock_recover()
+        self.state.lock()
     }
 }
 
