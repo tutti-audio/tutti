@@ -9,12 +9,13 @@ use tutti_ump::{
     Accidental, Address, Alteration, AlterationKind, Attribute, Bank, BarAccents, BlockDirection,
     BlockFilter, BlockSelect, CCNumber, ChordBass, ChordName, ChordPitch, ChordType, CiVersion,
     Data128, DeltaTicks, DeviceIdentity, DiscoveryFilter, EndpointInfoNotification, FirstGroup,
-    Flex, FlexAddress, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId, FunctionBlockInfo,
-    GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, Message,
-    Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader, NoteNumber, NoteVelocity,
-    PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController, SharpsFlats, SoftwareRevision,
-    Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount, Sysex8StreamId, SysexStatus, System, U4,
-    U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1, Voice2,
+    Flex, FlexAddress, FlexTempo, FlexTextKind, FlexTimeSignature, Form, FunctionBlockId,
+    FunctionBlockInfo, GroupSpan, KeySignature, Letter, MdsChunk, MdsChunkSize, MdsChunks,
+    MdsIdentity, Message, Metronome, Midi1Port, MidiChannel, MidiGroup, MixedDataHeader,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, Protocol, RegisteredPerNoteController,
+    SharpsFlats, SoftwareRevision, Stream, StreamConfig, Sysex7Packet, Sysex8StreamCount,
+    Sysex8StreamId, SysexStatus, System, U4, U7, U14, UiHint, Ump, UmpVersion, Utility, Voice1,
+    Voice2,
 };
 use tutti_ump::{BendValue, ControlValue, FunctionBlockCount, TicksPerQuarterNote};
 use tutti_ump::{ManufacturerId, Unknown};
@@ -506,7 +507,7 @@ fn flex_setup() {
     // Set Tempo, 120 bpm: 0.5 s per quarter = 50,000,000 units of 10 ns.
     pin(
         [0xD610_0000, 0x02FA_F080, 0, 0],
-        f(Flex::SetTempo(50_000_000)),
+        f(Flex::SetTempo(FlexTempo::new(50_000_000))),
     );
     // 3/4: numerator 3, denominator 2 (a quarter), 8 thirty-seconds in 24
     // clocks.

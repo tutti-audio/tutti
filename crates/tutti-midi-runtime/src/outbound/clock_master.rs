@@ -56,12 +56,12 @@ use tutti_graph::{Offset, TransportPosition, UmpAt};
 use tutti_music::{
     ClockPass, ClockPassEnd, Meter, MeterMap, TimeSignature, first_frame_at_or_after,
 };
-use tutti_ump::{Flex, Message, MidiGroup, System, Ump};
+use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, System, Ump};
 use tutti_units::{BarCount, Beat, BeatDuration, Bpm, SampleRate, SampleSpan, Samples, Seconds};
 
 use tutti_midi_protocol::{
     MtcFullMessage, MtcRate, MtcTimeCode, QuarterFrameCycle, QuarterFramePiece, SmpteTimecode,
-    flex_metronome, flex_tempo_field, flex_time_signature_wire, song_position,
+    flex_metronome, flex_time_signature_wire, song_position,
 };
 
 use super::sync_messages::SyncMessages;
@@ -111,7 +111,7 @@ struct FlexOut {
     was_playing: bool,
     /// The Set Tempo field last sent; `None` before the first, after a start
     /// and while Flex is off.
-    tempo: Option<u32>,
+    tempo: Option<FlexTempo>,
     /// The meter last sent, under the same reset.
     meter: Option<TimeSignature>,
     /// The meter whose Set Metronome was last sent, under the same reset.
@@ -577,7 +577,7 @@ impl ClockMaster {
         tempo: Bpm,
         emit: &mut impl FnMut(UmpAt),
     ) {
-        let field = flex_tempo_field(tempo);
+        let field = FlexTempo::from_bpm(tempo);
         if messages.flex
             && self.flex.tempo != Some(field)
             && let Some(k) = tick_frames(pass, beats_per_sample).next()

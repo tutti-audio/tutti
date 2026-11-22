@@ -32,9 +32,9 @@ use tutti_graph::Offset;
 use tutti_sf2::SoundFont;
 use tutti_soundfont::{Polyphony, SoundFontConfig, SoundFontUnit};
 use tutti_ump::{
-    Address, Attribute, Bank, CCNumber, Data128, Flex, Message, MidiChannel, MidiGroup, NoteNumber,
-    NoteVelocity, PerNoteManagement, Pitch, RegisteredPerNoteController, Stream, Sysex7Packet,
-    Sysex8StreamId, SysexStatus, System, U7, U14, Ump, Utility, Voice1, Voice2,
+    Address, Attribute, Bank, CCNumber, Data128, Flex, FlexTempo, Message, MidiChannel, MidiGroup,
+    NoteNumber, NoteVelocity, PerNoteManagement, Pitch, RegisteredPerNoteController, Stream,
+    Sysex7Packet, Sysex8StreamId, SysexStatus, System, U7, U14, Ump, Utility, Voice1, Voice2,
 };
 use tutti_ump::{BendValue, ControlValue};
 use tutti_units::Samples;
@@ -319,7 +319,10 @@ fn soundfont_every_decoded_message_is_allocation_free() {
                 stream_id: Sysex8StreamId::new(1),
             },
         )),
-        ev(Message::Flex(MidiGroup::FIRST, Flex::SetTempo(500_000))),
+        ev(Message::Flex(
+            MidiGroup::FIRST,
+            Flex::SetTempo(FlexTempo::new(500_000)),
+        )),
         ev(Message::Stream(Stream::StartOfClip)),
         // A reserved message type: `decode` refuses it.
         Ump([0x6000_0000, 0, 0, 0]),

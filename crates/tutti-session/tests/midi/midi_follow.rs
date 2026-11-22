@@ -15,7 +15,7 @@ use tutti_session::{
     FollowTempo, MidiError, MidiEvent, Session, SessionEvent, SetRefusal, ValueErrorKind,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
-use tutti_ump::{Flex, Message, MidiGroup, Ump};
+use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
 
 const RATE: f64 = 48_000.0;
@@ -58,8 +58,7 @@ fn follow(s: &mut Keyed, group: MidiGroup, meter: bool) {
 }
 
 fn flex_tempo(group: MidiGroup, bpm: f64) -> Ump {
-    // 10 ns per quarter note; the tempos used divide 6e9 exactly.
-    let field = (6.0e9 / bpm) as u32;
+    let field = FlexTempo::from_bpm(Bpm::of(bpm));
     Ump::from(Message::Flex(group, Flex::SetTempo(field)))
 }
 

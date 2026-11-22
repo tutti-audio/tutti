@@ -13,8 +13,8 @@ use tutti_midi_file::{
 };
 use tutti_ump::ControlValue;
 use tutti_ump::{
-    Address, DeltaTicks, Flex, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Stream,
-    TicksPerQuarterNote, U7, Ump, Utility, Voice1,
+    Address, DeltaTicks, Flex, FlexTempo, Message, MidiChannel, MidiGroup, NoteNumber,
+    NoteVelocity, Stream, TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
 use tutti_units::{Beat, Bpm, Seconds};
 
@@ -47,7 +47,11 @@ fn off(note: u8) -> Ump {
     midi::note_off(MidiChannel::FIRST, note, 0)
 }
 fn set_tempo(bpm: f64) -> Ump {
-    Message::Flex(MidiGroup::FIRST, Flex::SetTempo((6.0e9 / bpm) as u32)).into()
+    Message::Flex(
+        MidiGroup::FIRST,
+        Flex::SetTempo(FlexTempo::from_bpm(Bpm::of(bpm))),
+    )
+    .into()
 }
 
 /// The bytes of a clip made of exactly `parts`, in order.

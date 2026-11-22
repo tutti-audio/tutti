@@ -369,7 +369,7 @@ fn flex_text_kind(k: FlexTextKind) -> (u32, u32) {
 fn flex(g: MidiGroup, f: Flex) -> [u32; 4] {
     let complete = |address, bank, status| flex_head(g, Form::Complete, address, bank, status);
     match f {
-        Flex::SetTempo(t) => [complete(FlexAddress::Group, 0, 0x00), t, 0, 0],
+        Flex::SetTempo(t) => [complete(FlexAddress::Group, 0, 0x00), t.get(), 0, 0],
         Flex::SetTimeSignature(t) => [
             complete(FlexAddress::Group, 0, 0x01),
             word([t.numerator, t.denominator, t.thirty_seconds, 0]),

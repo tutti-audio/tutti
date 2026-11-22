@@ -19,7 +19,7 @@ use tutti_midi_file::{
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_ump::{
-    BarAccents, Flex, FlexAddress, FlexTextError, FlexTextKind, FlexTimeSignature, Form,
+    BarAccents, Flex, FlexAddress, FlexTempo, FlexTextError, FlexTextKind, FlexTimeSignature, Form,
     KeySignature, Letter, ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats,
     Stream, SysexStatus, Utility, split_stream,
 };
@@ -56,7 +56,7 @@ fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
     file.tracks()[0].events()
 }
 
-const DEFAULT_TEMPO: u32 = 50_000_000;
+const DEFAULT_TEMPO: FlexTempo = FlexTempo::new(50_000_000);
 
 fn signature_events(n: u8, d: u8, bb: u8, cc: u8) -> [FileEvent; 2] {
     [
@@ -94,7 +94,7 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
     let clip = metrical(&smf).to_clip().unwrap().clip;
     assert_eq!(
         events_of(&clip)[0],
-        (Tick(0), flex(Flex::SetTempo(50_000_000)))
+        (Tick(0), flex(Flex::SetTempo(FlexTempo::new(50_000_000))))
     );
     // The widest the wire holds still fits the field: 0xFFFFFF us is 1_677_721_500.
     let slow = format0(vec![(
@@ -105,7 +105,10 @@ fn a_set_tempo_is_ten_ns_units_per_quarter() {
         }),
     )]);
     let clip = metrical(&slow).to_clip().unwrap().clip;
-    assert_eq!(events_of(&clip)[0].1, flex(Flex::SetTempo(1_677_721_500)));
+    assert_eq!(
+        events_of(&clip)[0].1,
+        flex(Flex::SetTempo(FlexTempo::new(1_677_721_500)))
+    );
 }
 
 /// SMF 1.0: `58 04 06 03 18 08` is 6/8, 24 MIDI clocks a click, 8 32nds per
@@ -424,7 +427,7 @@ fn the_first_tempo_and_signature_lead_the_clip() {
     let clip = metrical(&smf).to_clip().unwrap().clip;
     let [sig, metronome] = signature_events(3, 2, 8, 24);
     let want = [
-        flex(Flex::SetTempo(100_000_000)),
+        flex(Flex::SetTempo(FlexTempo::new(100_000_000))),
         sig,
         metronome,
         note(0, 60),
@@ -462,7 +465,7 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
             (0, metronome),
             (0, note(0, 60)),
             // The later tempo is on a 1/24-quarter position (960 is a multiple of 20), so it stays.
-            (960, flex(Flex::SetTempo(25_000_000))),
+            (960, flex(Flex::SetTempo(FlexTempo::new(25_000_000)))),
         ]
     );
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
@@ -489,7 +492,7 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
             _ => None,
         })
         .collect();
-    assert_eq!(tempos, [100_000_000]);
+    assert_eq!(tempos, [FlexTempo::new(100_000_000)]);
 }
 
 #[test]
@@ -1034,7 +1037,7 @@ fn two_tempos_that_snap_to_one_position_leave_the_later() {
         flex_events(&done.clip, is_tempo),
         [
             (0, flex(Flex::SetTempo(DEFAULT_TEMPO))),
-            (20, flex(Flex::SetTempo(30_000_000)))
+            (20, flex(Flex::SetTempo(FlexTempo::new(30_000_000))))
         ]
     );
     let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
@@ -1059,7 +1062,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
         flex_events(&done.clip, is_tempo),
         [
             (0, flex(Flex::SetTempo(DEFAULT_TEMPO))),
-            (480, flex(Flex::SetTempo(25_000_000))),
+            (480, flex(Flex::SetTempo(FlexTempo::new(25_000_000)))),
         ]
     );
     let dropped: Vec<_> = done.dropped.iter().map(|d| (d.tick.0, d.reason)).collect();
@@ -1081,7 +1084,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
-        [(0, flex(Flex::SetTempo(100_000_000)))]
+        [(0, flex(Flex::SetTempo(FlexTempo::new(100_000_000))))]
     );
 }
 

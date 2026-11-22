@@ -9,9 +9,10 @@ use crate::field::{
     Pitch, SharpsFlats, TicksPerQuarterNote, U4, U7, U14,
 };
 use crate::{
-    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, ManufacturerId,
-    MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup, NoteVelocity, Reserved,
-    ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount, Sysex8StreamId, Ump,
+    ArticulationAttribute, BendValue, CCNumber, CiVersion, ControlValue, Field, FlexTempo,
+    ManufacturerId, MdsChunk, MdsChunkSize, MdsChunks, MdsIdentity, MidiChannel, MidiGroup,
+    NoteVelocity, Reserved, ReservedAccents, ReservedAttribute, Rpn, Sysex8StreamCount,
+    Sysex8StreamId, Ump,
 };
 
 /// One UMP, decoded.
@@ -1107,8 +1108,8 @@ pub enum Letter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Flex {
-    /// Set Tempo: units of 10 ns per quarter note.
-    SetTempo(u32),
+    /// Set Tempo.
+    SetTempo(FlexTempo),
     /// Set Time Signature.
     SetTimeSignature(FlexTimeSignature),
     /// Set Metronome.

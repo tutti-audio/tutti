@@ -95,6 +95,7 @@ mod control_value;
 mod decode;
 mod encode;
 mod field;
+mod flex_tempo;
 mod flex_text;
 mod flex_write;
 mod held_controllers;
@@ -141,6 +142,7 @@ pub use field::{
     TicksPerQuarterNoteOutOfRange, U4, U4OutOfRange, U7, U7OutOfRange, U14, U14OutOfRange, U28,
     U28OutOfRange, first_non_seven_bit,
 };
+pub use flex_tempo::FlexTempo;
 pub use flex_text::{FlexText, FlexTextAssembler, FlexTextStep};
 pub use flex_write::{
     Entry, EntryError, FLEX_TEXT_MAX_LEN, FlexTextError, FlexTextPackets, Iso8601Date,

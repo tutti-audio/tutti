@@ -1,12 +1,10 @@
 //! Flex Set Tempo and Set Time Signature as unit values (M2-104 sections
 //! 7.5.3 and 7.5.4).
 
-use tutti_midi_protocol::{
-    flex_metronome, flex_tempo, flex_tempo_field, flex_time_signature, flex_time_signature_wire,
-};
+use tutti_midi_protocol::{flex_metronome, flex_time_signature, flex_time_signature_wire};
 use tutti_music::TimeSignature;
-use tutti_ump::BarAccents;
 use tutti_ump::FlexTimeSignature as Wire;
+use tutti_ump::{BarAccents, FlexTempo};
 use tutti_units::Bpm;
 
 fn wire(numerator: u8, denominator: u8) -> Wire {
@@ -22,18 +20,18 @@ fn wire(numerator: u8, denominator: u8) -> Wire {
 /// Spec: m2-104/msg/d/00.00
 #[test]
 fn a_tempo_is_ten_ns_units_per_quarter() {
-    assert_eq!(flex_tempo(50_000_000), Bpm::new(120.0));
-    assert_eq!(flex_tempo(100_000_000), Bpm::new(60.0));
+    assert_eq!(FlexTempo::new(50_000_000).bpm(), Bpm::new(120.0));
+    assert_eq!(FlexTempo::new(100_000_000).bpm(), Bpm::new(60.0));
 }
 
 /// The slowest the field holds is 1.39698 bpm (section 7.5.3); a field of 0 is
 /// no tempo; the fastest, 1, is 6e9 bpm.
 #[test]
 fn the_field_has_a_slowest_tempo_and_zero_is_none() {
-    let slowest = flex_tempo(u32::MAX).unwrap().get();
+    let slowest = FlexTempo::new(u32::MAX).bpm().unwrap().get();
     assert!((slowest - 1.39698).abs() < 1e-4, "{slowest}");
-    assert_eq!(flex_tempo(0), None);
-    assert_eq!(flex_tempo(1), Bpm::new(6.0e9));
+    assert_eq!(FlexTempo::new(0).bpm(), None);
+    assert_eq!(FlexTempo::new(1).bpm(), Bpm::new(6.0e9));
 }
 
 /// Section 7.5.4: the denominator is a negative power of 2 (2 is a
@@ -78,17 +76,20 @@ fn what_the_meter_cannot_hold_is_refused() {
 /// slowest and fastest the field holds are its two ends.
 #[test]
 fn a_tempo_writes_its_ten_ns_units_per_quarter() {
-    assert_eq!(flex_tempo_field(Bpm::of(120.0)), 50_000_000);
-    assert_eq!(flex_tempo_field(Bpm::of(60.0)), 100_000_000);
-    assert_eq!(flex_tempo_field(Bpm::of(1.0)), u32::MAX);
-    assert_eq!(flex_tempo_field(Bpm::of(6.0e9)), 1);
-    assert_eq!(flex_tempo_field(Bpm::of(1.0e12)), 1);
+    assert_eq!(FlexTempo::from_bpm(Bpm::of(120.0)).get(), 50_000_000);
+    assert_eq!(FlexTempo::from_bpm(Bpm::of(60.0)).get(), 100_000_000);
+    assert_eq!(FlexTempo::from_bpm(Bpm::of(1.0)).get(), u32::MAX);
+    assert_eq!(FlexTempo::from_bpm(Bpm::of(6.0e9)).get(), 1);
+    assert_eq!(FlexTempo::from_bpm(Bpm::of(1.0e12)).get(), 1);
     for bpm in [20.0, 93.7, 128.0, 300.0] {
         let bpm = Bpm::of(bpm);
-        let back = flex_tempo(flex_tempo_field(bpm)).unwrap().get();
+        let back = FlexTempo::from_bpm(bpm).bpm().unwrap().get();
         assert!((back - bpm.get()).abs() < 1e-6, "{bpm:?} -> {back}");
         // The tempo read back writes the same field: within one field step.
-        assert_eq!(flex_tempo_field(Bpm::of(back)), flex_tempo_field(bpm));
+        assert_eq!(
+            FlexTempo::from_bpm(Bpm::of(back)).get(),
+            FlexTempo::from_bpm(bpm).get()
+        );
     }
 }
 
@@ -108,8 +109,8 @@ fn the_tempo_field_is_read_to_the_unit() {
         (50_000_000, 120.0),
         (1, 6.0e9),
     ] {
-        assert_eq!(flex_tempo(field), Bpm::new(bpm), "{field}");
-        let slower = flex_tempo(field + 1).unwrap().get();
+        assert_eq!(FlexTempo::new(field).bpm(), Bpm::new(bpm), "{field}");
+        let slower = FlexTempo::new(field + 1).bpm().unwrap().get();
         assert!(slower < bpm, "{field}: {slower}");
     }
 }

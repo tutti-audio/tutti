@@ -16,6 +16,7 @@
 //! its high bit set where the figure draws that bit as `0` (System messages,
 //! SysEx 7 data), which is part of the byte being 7-bit, not a reserved bit.
 
+use crate::FlexTempo;
 use crate::field::{
     ChordType, DeltaTicks, FunctionBlockCount, FunctionBlockId, NoteNumber, Pitch, SharpsFlats,
     TicksPerQuarterNote, U4, U7, U14,
@@ -445,7 +446,9 @@ fn flex(w: [u32; 4]) -> Option<Flex> {
     // The setup messages are Complete, and the first three Group messages.
     let complete = form(w0, 22) == Form::Complete;
     match (bank, status) {
-        (0x00, 0x00) if complete && address == FlexAddress::Group => Some(Flex::SetTempo(w[1])),
+        (0x00, 0x00) if complete && address == FlexAddress::Group => {
+            Some(Flex::SetTempo(FlexTempo::new(w[1])))
+        }
         (0x00, 0x01) if complete && address == FlexAddress::Group => {
             Some(Flex::SetTimeSignature(FlexTimeSignature {
                 numerator: byte(w[1], 3),
