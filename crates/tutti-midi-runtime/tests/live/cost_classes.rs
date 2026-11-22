@@ -88,7 +88,7 @@ fn clip(k: u64) -> MidiClipNode {
 }
 
 /// [`LANES`] clips each under an event tap, and [`HEAVY`] clips each into a
-/// recorder on a global output; on a pool of `workers` when more than one.
+/// recorder on a main output; on a pool of `workers` when more than one.
 /// `declared`: the clips as shipped, or wrapped to declare nothing. The
 /// taps' sinks and the recorders' logs.
 fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Seen>) {

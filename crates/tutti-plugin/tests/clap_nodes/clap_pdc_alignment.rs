@@ -160,7 +160,7 @@ fn arrivals(samples: &[f32]) -> Vec<(usize, f32)> {
         .collect()
 }
 
-/// A graph with one global input and one output, holding `plugin`
+/// A graph with one main input and one output, holding `plugin`
 /// fed by the input on every port; `sum` decides what reaches the output.
 struct Rig {
     graph: Renderer,
@@ -182,7 +182,7 @@ fn two_paths(plugin: PluginClient<Bound>) -> Rig {
     let plugin_inputs = plugin.inputs();
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (key, controls) = g.add_with_controls(plugin);
-    // The dry twin. A pass-through rather than wiring the global input straight
+    // The dry twin. A pass-through rather than wiring the main input straight
     // to the sum, so each path is a node the compiler aligns.
     let dry = g.add(Through::mono());
     // The sum is the graph's: output channel 0 holds both paths as sources
@@ -191,9 +191,9 @@ fn two_paths(plugin: PluginClient<Bound>) -> Rig {
     // alone cannot produce.
 
     for port in 0..plugin_inputs {
-        g.set_source(key, port, PortSource::Global(0));
+        g.set_source(key, port, PortSource::MainInput(0));
     }
-    g.set_source(dry, 0, PortSource::Global(0));
+    g.set_source(dry, 0, PortSource::MainInput(0));
     g.add_output(0, PortSource::Node(OutputPort { node: key, port: 0 }));
     g.add_output(0, PortSource::Node(OutputPort { node: dry, port: 0 }));
     finish(g, key, controls)
@@ -207,7 +207,7 @@ fn plugin_alone(plugin: PluginClient<Bound>) -> Rig {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (key, controls) = g.add_with_controls(plugin);
     for port in 0..plugin_inputs {
-        g.set_source(key, port, PortSource::Global(0));
+        g.set_source(key, port, PortSource::MainInput(0));
     }
     g.set_output(0, PortSource::Node(OutputPort { node: key, port: 0 }));
     finish(g, key, controls)

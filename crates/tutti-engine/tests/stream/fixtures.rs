@@ -37,7 +37,7 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
     engine
 }
 
-/// Every one of `outputs` global outputs reads `node`'s output 0.
+/// Every one of `outputs` main outputs reads `node`'s output 0.
 pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
     ed.spec_mut().topology.set_outputs(vec![
         PortSource::Node(OutputPort { node, port: 0 });

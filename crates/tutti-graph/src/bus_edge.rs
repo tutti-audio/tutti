@@ -361,7 +361,7 @@ impl GraphSpec {
 
     /// The lanes of the bus edge `from -> to` against `shapes`: `(edge,
     /// weight)` in sink-port then source order. A pure function of the two
-    /// buses' topologies (and the global input's width).
+    /// buses' topologies (and the main input's width).
     fn bus_lanes(
         &self,
         shapes: &Shapes,
@@ -457,7 +457,7 @@ impl GraphSpec {
                         node,
                         port: (source_first + k) as u16,
                     }),
-                    None => PortSource::Global(k as u16),
+                    None => PortSource::MainInput(k as u16),
                 };
                 lanes.push((
                     EdgeId {

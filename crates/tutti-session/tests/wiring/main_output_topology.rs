@@ -18,7 +18,7 @@ use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
-/// The channels `values` hold, one per global output from channel 0.
+/// The channels `values` hold, one per main output from channel 0.
 fn feed<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     session: &mut Session<K, C>,
     values: &[f32],

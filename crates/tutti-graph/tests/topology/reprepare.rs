@@ -60,7 +60,7 @@ impl Node for Recorder {
 /// The graph under test, as units:
 ///
 /// ```text
-/// global ─┬─ Lag(20) ─── Sum.0 ── out 0
+/// main input ─┬─ Lag(20) ─── Sum.0 ── out 0
 ///         └──────────── Sum.1        (a 20-frame PDC ring on Sum.1)
 /// Emit ─┬─ EventLag(30) ─ Rec        (Rec's direct edge from Emit gets a
 ///       └─────────────── Rec          30-frame event delay)
@@ -90,7 +90,7 @@ fn wire(ed: &mut Editor) {
     let t = &mut spec.topology;
     t.edges.insert(
         InputPort { node: LAG, port: 0 },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
         InputPort { node: SUM, port: 0 },
@@ -101,7 +101,7 @@ fn wire(ed: &mut Editor) {
     );
     t.edges.insert(
         InputPort { node: SUM, port: 1 },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     t.set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
     let emit = EventOutputPort {
@@ -390,7 +390,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     ed.insert(LAG, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
         InputPort { node: LAG, port: 0 },
-        vec![Edge::Direct(PortSource::Global(0))],
+        vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology

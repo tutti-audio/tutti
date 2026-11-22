@@ -76,7 +76,7 @@ fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey, out: u16) {
 
 /// A rolling transport driving a three-node chain (this crate's nodes: the
 /// oscillator, the EQ and the strip), the shape `tests/rt_no_alloc_engine.rs` already pins
-/// as allocation-free, on `outputs` global outputs (the strip's pair,
+/// as allocation-free, on `outputs` main outputs (the strip's pair,
 /// repeated).
 fn chain_engine(outputs: usize) -> Engine {
     let transport = Transport::new(SampleRate::of(SR));

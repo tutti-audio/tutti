@@ -85,7 +85,7 @@ use crate::arena::{Arena, Line};
 use crate::command::{Deliveries, Overlay};
 use crate::exec::{
     Head, Inject, OpState, Ring, Unit, audio_ring, capture_op, delay_op, event_delay_op,
-    event_merge_op, event_ring, global_in, node_dispatch, output_op, sum_op,
+    event_merge_op, event_ring, main_input, node_dispatch, output_op, sum_op,
 };
 use crate::gain::SumLane;
 use crate::history::TransportHistory;
@@ -519,11 +519,11 @@ impl<F: Float> Shared<'_, '_, F> {
         let mut flags = SharedFlags(self.flags);
         let flags = &mut flags;
         match *op {
-            Op::GlobalIn { channel, dst } => {
+            Op::MainInput { channel, dst } => {
                 let mut a = ArenaView {
                     view: self.arena.view(held_audio),
                 };
-                global_in(&mut a, flags, self.inputs, channel, dst, frames);
+                main_input(&mut a, flags, self.inputs, channel, dst, frames);
             }
             Op::Delay { delay, src, dst } => {
                 let mut ring = self.rings.claim(delay as usize);
