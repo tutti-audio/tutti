@@ -53,12 +53,6 @@ use tutti_au_host::{AuError, AuLayoutTag, BusDirection};
 /// do.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// Recover from poisoning: the guard only serializes, it protects no shared
-/// state, so one panicking test must not convert into N spurious failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -102,7 +96,7 @@ fn assert_status<T: std::fmt::Debug>(result: Result<T, AuError>, want: i32, what
 /// Spec: au.prop.SupportedChannelLayoutTags
 #[test]
 fn published_layout_tags_are_exactly_what_was_measured() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, expected) in LAYOUT_TAG_UNITS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -129,7 +123,7 @@ fn published_layout_tags_are_exactly_what_was_measured() {
 /// constants arriving as one variant is exactly what should happen.
 #[test]
 fn a_duplicate_tag_is_reported_verbatim_not_deduplicated() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, expected) = DUPLICATE_TAG_UNIT;
     let au = unit.open_uninitialized(RATE, BLOCK);
     let got = au.supported_layout_tags(BusDirection::Output, 0);
@@ -167,7 +161,7 @@ fn a_duplicate_tag_is_reported_verbatim_not_deduplicated() {
 /// quietly starting to report them.
 #[test]
 fn units_without_layout_tags_report_an_empty_list() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in NO_LAYOUT_TAG_UNITS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         for dir in BusDirection::ALL {
@@ -192,7 +186,7 @@ fn units_without_layout_tags_report_an_empty_list() {
 /// sentinel reaching this code path at all depends on the decode being right.
 #[test]
 fn the_description_sentinel_reports_no_channel_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, is_output, _) = LAYOUT_TAG_UNITS
         .iter()
         .find(|(_, _, tags)| tags.contains(&AuLayoutTag::UseChannelDescriptions))
@@ -235,7 +229,7 @@ fn the_description_sentinel_reports_no_channel_count() {
 /// Spec: au.prop.AudioChannelLayout
 #[test]
 fn the_current_layout_is_read_from_the_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, expected) in CURRENT_LAYOUT_UNITS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -263,7 +257,7 @@ fn the_current_layout_is_read_from_the_au() {
 /// cannot back up.
 #[test]
 fn an_unset_layout_is_an_error_not_a_manufactured_stereo() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output) in LAYOUT_NOT_IN_USE_UNITS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -288,7 +282,7 @@ fn an_unset_layout_is_an_error_not_a_manufactured_stereo() {
 /// `InvalidProperty`, distinct from the not-in-use status above.
 #[test]
 fn a_unit_without_the_property_is_a_different_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in NO_LAYOUT_UNITS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         for dir in BusDirection::ALL {
@@ -315,7 +309,7 @@ fn a_unit_without_the_property_is_a_different_error() {
 /// would be testing something else entirely.
 #[test]
 fn a_supported_layout_at_the_matching_width_is_accepted_and_sticks() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, width, tag) in ACCEPTED_LAYOUT_SETS {
         let (mut au, accepted_width) = open_at_output_width(unit, RATE, BLOCK, *width);
         assert_eq!(
@@ -373,7 +367,7 @@ fn a_supported_layout_at_the_matching_width_is_accepted_and_sticks() {
 /// host's model and the AU disagreeing, with no way to detect it.
 #[test]
 fn an_unsupported_layout_is_refused_and_changes_nothing() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, width, tag) in REFUSED_LAYOUT_SETS {
         let (mut au, _accepted) = open_at_output_width(unit, RATE, BLOCK, *width);
         let dir = direction(*is_output);
@@ -420,7 +414,7 @@ fn an_unsupported_layout_is_refused_and_changes_nothing() {
 /// the width differs.
 #[test]
 fn the_same_advertised_tag_is_refused_at_stereo_and_accepted_when_widened() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let unit = LAYOUT_TAG_UNITS
         .iter()
         .find(|(_, out, tags)| *out && tags.contains(&AuLayoutTag::Quadraphonic))
@@ -486,7 +480,7 @@ fn the_same_advertised_tag_is_refused_at_stereo_and_accepted_when_widened() {
 /// walking `ACCEPTED_LAYOUT_SETS` rather than the whole enum.
 #[test]
 fn a_tag_survives_the_round_trip_through_audio_toolbox() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut checked = 0usize;
     for (unit, is_output, width, tag) in ACCEPTED_LAYOUT_SETS {
         let (mut au, accepted) = open_at_output_width(unit, RATE, BLOCK, *width);
@@ -529,7 +523,7 @@ fn a_tag_survives_the_round_trip_through_audio_toolbox() {
 /// Spec: au.prop.ElementName
 #[test]
 fn element_names_read_back_what_the_au_published() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, element, expected) in NAMED_ELEMENTS_APPLE_ONLY {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -562,7 +556,7 @@ fn element_names_read_back_what_the_au_published() {
 /// as an error or an empty string, never as a wrong name.
 #[test]
 fn a_short_element_name_is_not_dropped_as_a_misaligned_pointer() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut short_names = 0usize;
     for (unit, is_output, element, expected) in NAMED_ELEMENTS_APPLE_ONLY {
         if expected.len() > 12 {
@@ -607,7 +601,7 @@ fn a_short_element_name_is_not_dropped_as_a_misaligned_pointer() {
 /// for it".
 #[test]
 fn a_nameless_bus_is_property_not_in_use_not_an_empty_string() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, element) in UNNAMED_ELEMENTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -629,7 +623,7 @@ fn a_nameless_bus_is_property_not_in_use_not_an_empty_string() {
 /// the boundary *and* that the last valid element behaves differently.
 #[test]
 fn an_out_of_range_element_errors_rather_than_returning_garbage() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, element) in OUT_OF_RANGE_ELEMENTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -667,7 +661,7 @@ fn an_out_of_range_element_errors_rather_than_returning_garbage() {
 /// is what says so.
 #[test]
 fn the_element_name_boundary_is_the_bus_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, is_output, element) in OUT_OF_RANGE_ELEMENTS {
         let au = unit.open_uninitialized(RATE, BLOCK);
         let dir = direction(*is_output);
@@ -692,7 +686,7 @@ fn the_element_name_boundary_is_the_bus_count() {
 /// [`the_element_name_copy_rule_is_observed_by_retain_count`].
 #[test]
 fn repeated_element_name_reads_do_not_move_the_retain_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, is_output, element, expected) = NAMED_ELEMENTS_APPLE_ONLY[0];
     let au = unit.open_uninitialized(RATE, BLOCK);
     let dir = direction(is_output);
@@ -741,7 +735,7 @@ fn repeated_element_name_reads_do_not_move_the_retain_count() {
 /// is the unit's own to set. What is the host's is that N reads add nothing.
 #[test]
 fn the_element_name_copy_rule_is_observed_by_retain_count() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = crate::support::au::Au::shared(RATE, BLOCK);
 
     for (dir, is_output) in [(BusDirection::Input, false), (BusDirection::Output, true)] {
@@ -787,7 +781,7 @@ fn the_element_name_copy_rule_is_observed_by_retain_count() {
 /// impossible. The other suites pin the same property for presets and bypass.
 #[test]
 fn layout_and_name_reads_work_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let checks: &[(&AuRef, bool)] = &[
         (&LAYOUT_TAG_UNITS[0].0, LAYOUT_TAG_UNITS[0].1),
         (&NAMED_ELEMENTS_APPLE_ONLY[0].0, true),

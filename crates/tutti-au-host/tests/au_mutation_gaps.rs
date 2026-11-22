@@ -89,12 +89,6 @@ use tutti_plugin_types::ChannelLayout;
 /// same reason: component discovery walks a process-global registry.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// Poison is recovered rather than propagated, so one panicking test does not
-/// turn every later one into a spurious `PoisonError`.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -120,7 +114,7 @@ const BLOCK: u32 = 512;
 /// `unimpErr`" are different facts and only the first is this guard's doing.
 #[test]
 fn push_refuses_a_scratch_with_no_input_bus() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     // Instruments: zero input buses, so the guard is what stands between the
     // caller and an empty-Vec index.
@@ -199,7 +193,7 @@ fn the_two_has_input_inferences_are_indistinguishable_on_this_machine() {
     use crate::support::au::Au;
     use tutti_au_host::component::{AuType, enumerate_components_of_type};
 
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut checked = 0;
     let mut disagree = Vec::new();
 

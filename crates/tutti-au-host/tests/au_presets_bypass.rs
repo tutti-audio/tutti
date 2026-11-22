@@ -57,13 +57,6 @@ use tutti_au_host::AuError;
 /// own copy, and cargo runs the binaries as separate processes anyway.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would
-/// convert one real failure into N spurious ones. The guard is only a
-/// serializer — there is no shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -85,7 +78,7 @@ const BLOCK: u32 = 512;
 /// Spec: au.prop.FactoryPresets
 #[test]
 fn a_unit_with_presets_enumerates_all_of_them() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, expected) in PRESET_EFFECTS {
         let au = unit.open(RATE, BLOCK);
         let presets = au.factory_presets();
@@ -138,7 +131,7 @@ fn a_unit_with_presets_enumerates_all_of_them() {
 /// caller.
 #[test]
 fn a_unit_without_presets_reports_an_empty_list_not_an_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in PRESETLESS_EFFECTS {
         let au = unit.open(RATE, BLOCK);
         assert!(
@@ -164,7 +157,7 @@ fn a_unit_without_presets_reports_an_empty_list_not_an_error() {
 /// regardless of type.
 #[test]
 fn instruments_report_an_empty_preset_list() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in INSTRUMENTS {
         let au = unit.open(RATE, BLOCK);
         assert!(
@@ -188,7 +181,7 @@ fn instruments_report_an_empty_preset_list() {
 /// Spec: au.prop.PresentPreset
 #[test]
 fn every_factory_preset_loads_and_reads_back() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _) in PRESET_EFFECTS {
         let mut au = unit.open(RATE, BLOCK);
         let presets = au.factory_presets();
@@ -227,7 +220,7 @@ fn every_factory_preset_loads_and_reads_back() {
 /// rather than a success.
 #[test]
 fn loading_a_nonexistent_preset_is_an_error_and_the_au_still_renders() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DISTORTION.open(RATE, BLOCK);
 
     let presets = au.factory_presets();
@@ -275,7 +268,7 @@ fn loading_a_nonexistent_preset_is_an_error_and_the_au_still_renders() {
 /// restoration, because restoration is the property that must hold completely.
 #[test]
 fn loading_a_preset_changes_parameter_values() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DISTORTION.open(RATE, BLOCK);
     let presets = au.factory_presets();
     let params = au.get_parameter_list();
@@ -368,7 +361,7 @@ fn loading_a_preset_changes_parameter_values() {
 /// wrapped under the Get rule instead.
 #[test]
 fn enumerating_presets_repeatedly_is_stable() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DISTORTION.open(RATE, BLOCK);
 
     let first = au.factory_presets();
@@ -400,7 +393,7 @@ fn enumerating_presets_repeatedly_is_stable() {
 /// Spec: au.prop.BypassEffect
 #[test]
 fn bypass_round_trips_on_effects() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in PRESETLESS_EFFECTS
         .iter()
         .chain(PRESET_EFFECTS.iter().map(|(u, _)| u))
@@ -444,7 +437,7 @@ fn bypass_round_trips_on_effects() {
 /// button does nothing".
 #[test]
 fn bypass_on_an_instrument_is_an_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in INSTRUMENTS {
         let mut au = unit.open(RATE, BLOCK);
 
@@ -491,7 +484,7 @@ fn bypass_on_an_instrument_is_an_error() {
 /// buy is slack the AU does not need.
 #[test]
 fn a_bypassed_effect_passes_audio_through_unchanged() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let frames = BLOCK as usize;
     let input = impulse(2, frames);
 
@@ -573,7 +566,7 @@ fn a_bypassed_effect_passes_audio_through_unchanged() {
 /// (in the `Loaded` state) and after the cycle.
 #[test]
 fn bypass_survives_an_initialize_cycle() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DISTORTION.open(RATE, BLOCK);
     au.set_bypass(true).expect("set bypass");
 

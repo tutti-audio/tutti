@@ -68,13 +68,6 @@ use tutti_units::{Beat, Bpm, Samples, Seconds};
 /// registry and several tests here open the same unit.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// Poison recovery, for the reason `au_conformance.rs` documents: the guard is
-/// only a serializer, so one panicking test must not convert into N spurious
-/// failures.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 
 /// A stopped transport at the tests' rate.
@@ -98,7 +91,7 @@ const BLOCK: u32 = 512;
 /// float. The pinned pairs disagree with the latency column wherever it matters.
 #[test]
 fn effects_report_their_measured_tail_time() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, expected) in TAIL_EFFECTS {
         let au = unit.open(RATE, BLOCK);
         let tail = au
@@ -133,7 +126,7 @@ fn effects_report_their_measured_tail_time() {
 /// read 0 here and truncate ten seconds of reverb off the end of every bounce.
 #[test]
 fn a_reverb_tail_is_large_and_distinct_from_its_latency() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MATRIX_REVERB.open(RATE, BLOCK);
 
     let tail = au.get_tail_time().expect("AUMatrixReverb reports a tail");
@@ -168,7 +161,7 @@ fn a_reverb_tail_is_large_and_distinct_from_its_latency() {
 /// the two is zero.
 #[test]
 fn a_unit_with_both_latency_and_tail_reports_them_separately() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DYNAMICS.open(RATE, BLOCK);
 
     let tail = au
@@ -210,7 +203,7 @@ fn a_unit_with_both_latency_and_tail_reports_them_separately() {
 /// exactly the material the property was read to protect.
 #[test]
 fn zero_tail_and_absent_tail_are_different_answers() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     for unit in NO_TAIL_EFFECTS {
         let au = unit.open(RATE, BLOCK);
@@ -265,7 +258,7 @@ fn zero_tail_and_absent_tail_are_different_answers() {
 /// would break that planning for no reason.
 #[test]
 fn tail_time_is_readable_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = MATRIX_REVERB.open_uninitialized(RATE, BLOCK);
     assert!(!au.is_initialized());
 
@@ -285,7 +278,7 @@ fn tail_time_is_readable_before_initialize() {
 /// `kAudioUnitErr_InvalidPropertyValue`, which is the failure this catches.
 #[test]
 fn host_callbacks_are_accepted_by_effects_and_instruments() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS.iter().chain(INSTRUMENTS.iter()) {
         let mut au = unit.open(RATE, BLOCK);
         au.install_host_callbacks()
@@ -307,7 +300,7 @@ fn host_callbacks_are_accepted_by_effects_and_instruments() {
 /// install is what proves the state survived it.
 #[test]
 fn reinstalling_host_callbacks_preserves_the_published_state() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
 
     au.install_host_callbacks().expect("first install");
@@ -337,7 +330,7 @@ fn reinstalling_host_callbacks_preserves_the_published_state() {
 /// symptom would be "tempo sync doesn't work", diagnosed nowhere near the cause.
 #[test]
 fn publishing_without_installing_is_reported() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     assert!(au.transport().is_none());
     assert!(
@@ -356,7 +349,7 @@ fn publishing_without_installing_is_reported() {
 /// exercises that.
 #[test]
 fn transport_survives_initialize_and_uninitialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
 
     au.install_host_callbacks()
@@ -692,7 +685,7 @@ fn every_proc_answers_cannot_do_until_the_host_publishes() {
 /// hardware and is not asserted here.
 #[test]
 fn an_au_pulls_the_published_transport_through_audiotoolbox() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = Misbehaviour::None.open_initialized(RATE, BLOCK);
     let input = silence(2, BLOCK as usize);
     let mut output = silence(2, BLOCK as usize);
@@ -772,7 +765,7 @@ fn an_au_pulls_the_published_transport_through_audiotoolbox() {
 /// a reported error, not a panic and not a silent success.
 #[test]
 fn a_refused_host_callbacks_install_is_an_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = Misbehaviour::RefusesHostCallbacks.open_initialized(RATE, BLOCK);
 
     let err = au
@@ -802,7 +795,7 @@ fn host_callback_info_matches_apples_layout() {
     // restated: the write in `install_host_callbacks` sends
     // `size_of::<HostCallbackInfo>()` bytes, and AudioToolbox rejects a
     // mismatched width with kAudioUnitErr_InvalidPropertyValue.
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     au.install_host_callbacks()
         .expect("a correctly-sized HostCallbackInfo is accepted");
@@ -845,7 +838,7 @@ fn host_callback_info_matches_apples_layout() {
 fn a_real_au_pulls_and_consumes_the_transport() {
     use crate::support::au::Au;
 
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = Au::shared(RATE, BLOCK);
     au.initialize().expect("initialize");
 

@@ -51,11 +51,6 @@ use tutti_au_host::parameters::{self, DisplayCurve};
 /// As in the sibling suites: serialize AudioToolbox instantiation/discovery.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// Poison recovery — the guard only serializes, so one panic must not cascade.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -71,7 +66,7 @@ const BLOCK: u32 = 512;
 /// Spec: au.prop.ParameterValueStrings
 #[test]
 fn a_value_strings_parameter_enumerates_them() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for &(unit_ref, param_id, count, first, last) in VALUE_STRING_PARAMS {
         let au = unit_ref.open(RATE, BLOCK);
         let strings = parameters::value_strings(au.unit(), param_id);
@@ -115,7 +110,7 @@ fn a_value_strings_parameter_enumerates_them() {
 /// floats.
 #[test]
 fn value_strings_are_not_gated_on_the_flag_that_under_reports() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = N_BAND_EQ.open(RATE, BLOCK);
     let params = au.get_parameter_list();
 
@@ -144,7 +139,7 @@ fn value_strings_are_not_gated_on_the_flag_that_under_reports() {
 /// fabricated single entry.
 #[test]
 fn a_continuous_parameter_has_no_value_strings() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = LOWPASS.open(RATE, BLOCK);
     // AULowpass is two continuous parameters (cutoff, resonance); neither is
     // indexed, so neither publishes value strings.
@@ -163,7 +158,7 @@ fn a_continuous_parameter_has_no_value_strings() {
 /// whatever the AU has at that slot.
 #[test]
 fn an_unknown_id_has_no_value_strings() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = N_BAND_EQ.open(RATE, BLOCK);
     let declared: Vec<u32> = au.get_parameter_list().iter().map(|p| p.id).collect();
     let unknown = (0u32..100_000)
@@ -185,7 +180,7 @@ fn an_unknown_id_has_no_value_strings() {
 /// Spec: au.prop.ParameterClumpName, au.param.flag.HasClump
 #[test]
 fn clumped_parameters_resolve_to_section_names() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for &(unit_ref, expected_clumps) in CLUMPED_EFFECTS {
         let au = unit_ref.open(RATE, BLOCK);
         let params = au.get_parameter_list();
@@ -239,7 +234,7 @@ fn clumped_parameters_resolve_to_section_names() {
 /// whose request struct carries the id inside it.
 #[test]
 fn distortion_names_its_seven_sections() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DISTORTION.open(RATE, BLOCK);
     // Measured on macOS 15.6.
     let expected = [
@@ -273,7 +268,7 @@ fn distortion_names_its_seven_sections() {
 /// not have yields `None` rather than a stray label.
 #[test]
 fn an_unclumped_unit_reports_no_groups() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(RATE, BLOCK);
     for p in au.get_parameter_list() {
         assert!(
@@ -300,7 +295,7 @@ fn an_unclumped_unit_reports_no_groups() {
 /// Spec: au.param.flag.DisplayLogarithmic
 #[test]
 fn a_log_taper_parameter_reports_a_logarithmic_curve() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // (unit, param id, param name) measured to carry DisplayLogarithmic
     // (flags & DisplayMask == 0x400000) on macOS 15.6.
     let cases: &[(support::corpus::AuRef, u32, &str)] = &[
@@ -338,7 +333,7 @@ fn a_log_taper_parameter_reports_a_logarithmic_curve() {
 /// since the logarithmic bit lives at 22.
 #[test]
 fn non_linear_curves_are_actually_observed() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut non_linear = 0usize;
     let mut logarithmic = 0usize;
     for unit in EFFECTS {
@@ -376,7 +371,7 @@ fn non_linear_curves_are_actually_observed() {
 /// Spec: au.param.flag.MeterReadOnly
 #[test]
 fn meter_parameters_are_flagged_as_read_only_readings() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for &(unit_ref, expected) in METER_PARAM_UNITS {
         let au = unit_ref.open(RATE, BLOCK);
         let params = au.get_parameter_list();
@@ -403,7 +398,7 @@ fn meter_parameters_are_flagged_as_read_only_readings() {
 /// so this pins the exact split measured on macOS 15.6.
 #[test]
 fn the_meter_flag_discriminates_meters_from_controls() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     // (unit, meter count) measured across the corpus effects. AUDelay, AUNBandEQ
     // and AULowpass publish none; AUDynamicsProcessor publishes three.
     let expected: &[(&str, usize)] = &[
@@ -467,7 +462,7 @@ fn the_meter_flag_discriminates_meters_from_controls() {
 /// should be *re-measured and tightened* into a real round-trip — not loosened.
 #[test]
 fn the_string_conversions_report_absence_rather_than_fabricating() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut probed = 0usize;
     for unit in EFFECTS {
         let au = unit.open(RATE, BLOCK);
@@ -517,7 +512,7 @@ fn the_string_conversions_report_absence_rather_than_fabricating() {
 /// implements only the former.
 #[test]
 fn enumerable_labels_do_not_imply_a_parsable_parameter() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = N_BAND_EQ.open(RATE, BLOCK);
     let strings = parameters::value_strings(au.unit(), 2000);
     assert_eq!(strings.len(), 11, "precondition: the labels are enumerable");
@@ -562,7 +557,7 @@ fn enumerable_labels_do_not_imply_a_parsable_parameter() {
 /// group.
 #[test]
 fn display_metadata_is_self_consistent() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in EFFECTS {
         let au = unit.open(RATE, BLOCK);
         for p in au.get_parameter_list() {

@@ -77,13 +77,6 @@ use tutti_au_host::AuError;
 /// binary links its own copy.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// `AU_LOCK` is poisoned by any panicking test, and a poisoned lock would turn one
-/// real failure into N spurious ones. The guard is only a serializer — there is no
-/// shared state to be left inconsistent — so recover.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
 
@@ -165,7 +158,7 @@ fn assert_still_renders(au: &mut crate::support::au::Au, context: &str) {
 /// restore is unambiguous.
 #[test]
 fn a_saved_preset_restores_the_parameter_it_captured() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     let target = params
@@ -221,7 +214,7 @@ fn a_saved_preset_restores_the_parameter_it_captured() {
 /// host's validation and restore nothing.
 #[test]
 fn a_written_preset_is_a_plist_with_the_documented_keys() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let au = DELAY.open(RATE, BLOCK);
     let tmp = TempPreset::new("keys");
     au.save_preset_file(main_thread(), tmp.path(), "KeyCheck")
@@ -287,7 +280,7 @@ fn a_written_preset_is_a_plist_with_the_documented_keys() {
 /// anything, that parameter would move.
 #[test]
 fn metadata_can_be_read_without_applying_anything() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     // A preset from AUDelay, holding a deliberately non-default value.
     let mut delay = DELAY.open(RATE, BLOCK);
@@ -345,7 +338,7 @@ fn metadata_can_be_read_without_applying_anything() {
 /// be the wrong size for the other.
 #[test]
 fn a_preset_from_a_different_au_is_refused() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     let delay = DELAY.open(RATE, BLOCK);
     let delay_file = TempPreset::new("xdelay");
@@ -526,7 +519,7 @@ fn a_version_difference_alone_does_not_block_a_load() {
 ///   it with the same opaque failure as corruption.
 #[test]
 fn every_malformed_preset_is_a_typed_error_and_leaves_the_au_renderable() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     // A genuine binary plist to truncate, produced by the host itself.
     let good = {
@@ -611,7 +604,7 @@ fn every_malformed_preset_is_a_typed_error_and_leaves_the_au_renderable() {
 /// collapsing them into one error loses that.
 #[test]
 fn a_missing_file_is_an_io_error_not_a_format_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let missing = std::env::temp_dir().join("tutti-au-definitely-not-here.aupreset");
     let _ = std::fs::remove_file(&missing);
 
@@ -658,7 +651,7 @@ fn a_missing_file_is_an_io_error_not_a_format_error() {
 /// passing, because a skip here would retire the suite's only interop evidence.
 #[test]
 fn an_apple_authored_preset_file_loads_and_applies() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     let Some(preset) = find_apple_preset_for(&SPATIAL_MIXER) else {
         panic!(
@@ -720,7 +713,7 @@ fn an_apple_authored_preset_file_loads_and_applies() {
 /// instance is the closest this suite gets to that.
 #[test]
 fn a_preset_crosses_between_two_instances() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     let target_name = "Delay Time";
     const SAVED: f32 = 0.6;
@@ -776,7 +769,7 @@ fn a_preset_crosses_between_two_instances() {
 /// pass.
 #[test]
 fn document_state_restores_through_the_documented_fallback() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let params = au.get_parameter_list();
     let target = params.iter().find(|p| p.name == "Delay Time").unwrap();
@@ -822,7 +815,7 @@ fn document_state_restores_through_the_documented_fallback() {
 /// every plugin just to write a file.
 #[test]
 fn presets_round_trip_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
     assert!(!au.is_initialized());
 

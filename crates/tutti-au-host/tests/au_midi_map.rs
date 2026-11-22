@@ -54,13 +54,8 @@ use tutti_graph::Offset;
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, U7};
 
 /// Serializes instantiate/dispose against component enumeration, for the reason
-/// `au_conformance.rs`'s `AU_LOCK` does. Recovered from poisoning so one real
-/// failure does not become N spurious ones.
+/// `au_conformance.rs`'s `AU_LOCK` does.
 static AU_LOCK: Mutex<()> = Mutex::new(());
-
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
 
 const RATE: tutti_units::SampleRate = tutti_units::SampleRate::SR_48K;
 const BLOCK: u32 = 512;
@@ -106,7 +101,7 @@ fn clear(au: &mut Au) {
 /// could not happen.
 #[test]
 fn the_capability_gate_agrees_with_the_table_read() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _) in IMPLEMENTERS {
         let au = unit.open(RATE, BLOCK);
         assert!(
@@ -152,7 +147,7 @@ fn the_capability_gate_agrees_with_the_table_read() {
 /// missing implementer means the AU environment is broken.
 #[test]
 fn exactly_two_installed_components_implement_the_mapping_family() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let expected = ["AUSampler", "AUMIDISynth"];
     let mut found: Vec<String> = Vec::new();
 
@@ -214,7 +209,7 @@ fn exactly_two_installed_components_implement_the_mapping_family() {
 /// can appear in only one of six combinations.
 #[test]
 fn nothing_implements_the_deprecated_midi_control_mapping_property() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut hits: Vec<String> = Vec::new();
 
     for info in every_component() {
@@ -270,7 +265,7 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
 /// `supports_parameter_midi_mapping` exists rather than "does the read succeed".
 #[test]
 fn a_fresh_instance_has_an_empty_mapping_table() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _) in IMPLEMENTERS {
         let au = unit.open(RATE, BLOCK);
         let table = au
@@ -295,7 +290,7 @@ fn a_fresh_instance_has_an_empty_mapping_table() {
 /// Spec: au.prop.AddParameterMIDIMapping, au.prop.AllParameterMIDIMappings
 #[test]
 fn every_field_survives_a_round_trip_through_a_real_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, param) in IMPLEMENTERS {
         let mut au = unit.open(RATE, BLOCK);
         clear(&mut au);
@@ -343,7 +338,7 @@ fn every_field_survives_a_round_trip_through_a_real_au() {
 /// always a single entry and the assertion is unambiguous.
 #[test]
 fn every_trigger_kind_survives_a_real_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -385,7 +380,7 @@ fn every_trigger_kind_survives_a_real_au() {
 /// channel 0 — the exact silent-nothing this module exists to prevent.
 #[test]
 fn the_any_channel_flag_survives_a_real_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -416,7 +411,7 @@ fn the_any_channel_flag_survives_a_real_au() {
 /// `|=` written against the wrong constant would pass the CC test.
 #[test]
 fn the_any_note_flag_survives_a_real_au() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -448,7 +443,7 @@ fn the_any_note_flag_survives_a_real_au() {
 /// reordered — an index-wise assertion would fail for the wrong reason.
 #[test]
 fn a_second_mapping_on_the_same_parameter_replaces_the_first() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -493,7 +488,7 @@ fn a_second_mapping_on_the_same_parameter_replaces_the_first() {
 /// Spec: au.prop.RemoveParameterMIDIMapping
 #[test]
 fn remove_matches_on_the_parameter_triple_alone() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -531,7 +526,7 @@ fn remove_matches_on_the_parameter_triple_alone() {
 /// request"), and both implementers honour it with `noErr`.
 #[test]
 fn removing_an_absent_mapping_is_ignored() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -556,7 +551,7 @@ fn removing_an_absent_mapping_is_ignored() {
 /// implementation that forwarded `set` to the add property would leave four.
 #[test]
 fn set_replaces_the_whole_table() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -589,7 +584,7 @@ fn set_replaces_the_whole_table() {
 /// call's status.
 #[test]
 fn an_empty_set_clears_the_table_despite_the_au_refusing_an_empty_write() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, param) in IMPLEMENTERS {
         let mut au = unit.open(RATE, BLOCK);
         au.add_parameter_midi_mapping(&[
@@ -619,7 +614,7 @@ fn an_empty_set_clears_the_table_despite_the_au_refusing_an_empty_write() {
 /// binding a whole controller layout does not pay a property write per mapping.
 #[test]
 fn add_and_remove_accept_batches() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -648,7 +643,7 @@ fn add_and_remove_accept_batches() {
 /// must succeed on a unit that implements nothing.
 #[test]
 fn empty_add_and_remove_are_no_ops() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, param) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -692,7 +687,7 @@ fn empty_add_and_remove_are_no_ops() {
 /// the test load-bearing — an unmapped CC leaves the parameter at `0`.
 #[test]
 fn a_mapped_cc_actually_moves_the_parameter() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, param) in IMPLEMENTERS {
         let mut au = unit.open(RATE, BLOCK);
         clear(&mut au);
@@ -771,7 +766,7 @@ fn a_mapped_cc_actually_moves_the_parameter() {
 /// the mapping table.
 #[test]
 fn an_unmapped_cc_does_not_move_the_parameter() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, param) in IMPLEMENTERS {
         let mut au = unit.open(RATE, BLOCK);
         clear(&mut au);
@@ -809,7 +804,7 @@ fn an_unmapped_cc_does_not_move_the_parameter() {
 /// Spec: au.prop.HotMapParameterMIDIMapping
 #[test]
 fn arming_a_hot_map_and_sending_a_cc_completes_the_mapping() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, param) in IMPLEMENTERS {
         let mut au = unit.open(RATE, BLOCK);
         clear(&mut au);
@@ -890,7 +885,7 @@ fn arming_a_hot_map_and_sending_a_cc_completes_the_mapping() {
 /// be revisited deliberately rather than discovered by a bug report.
 #[test]
 fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, _) in IMPLEMENTERS {
         let au = unit.open(RATE, BLOCK);
         // 32 bytes: the `AUParameterMIDIMapping` size, pinned by
@@ -947,7 +942,7 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
 /// message says so.
 #[test]
 fn the_au_does_not_validate_the_parameter_id() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let (unit, _) = IMPLEMENTERS[0];
     let mut au = unit.open(RATE, BLOCK);
     clear(&mut au);
@@ -981,7 +976,7 @@ fn the_au_does_not_validate_the_parameter_id() {
 /// nowhere else.
 #[test]
 fn a_unit_without_mapping_support_refuses_every_write() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     assert!(!au.supports_parameter_midi_mapping());
     let m = [AuMidiMapping::control_change(0, 0, 1)];

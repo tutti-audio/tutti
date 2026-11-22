@@ -77,14 +77,6 @@ use tutti_ump::MidiChannel;
 // several tests here open the same unit.
 static AU_LOCK: Mutex<()> = Mutex::new(());
 
-/// Poison is recovered rather than propagated: one panicking test would
-/// otherwise turn every later test into a spurious `PoisonError` and hide which
-/// one actually broke. The guard only serializes — there is no shared state to be
-/// left inconsistent.
-fn lock() -> std::sync::MutexGuard<'static, ()> {
-    AU_LOCK.lock()
-}
-
 /// The shared plugin's Audio Unit at [`RATE`] and [`RT_BLOCK`], initialized.
 fn open_shared() -> Au {
     let mut au = Au::shared(RATE, RT_BLOCK);
@@ -133,7 +125,7 @@ fn assert_property_absent<T: std::fmt::Debug>(
 /// unit is live.
 #[test]
 fn the_offline_flag_round_trips_where_implemented() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITH_OFFLINE_RENDER {
         let mut au = unit.open_uninitialized(RATE, BLOCK);
 
@@ -180,7 +172,7 @@ fn the_offline_flag_round_trips_where_implemented() {
 /// believe it could change.
 #[test]
 fn a_unit_without_the_offline_property_reports_the_refusal() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITHOUT_OFFLINE_RENDER {
         let mut au = unit.open(RATE, BLOCK);
         assert_property_absent(au.is_offline_render(), unit.label, "OfflineRender");
@@ -207,7 +199,7 @@ fn a_unit_without_the_offline_property_reports_the_refusal() {
 /// not have.
 #[test]
 fn an_offline_flagged_unit_still_renders() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITH_OFFLINE_RENDER {
         let mut peaks = Vec::new();
         for offline in [false, true] {
@@ -264,7 +256,7 @@ fn an_offline_flagged_unit_still_renders() {
 /// copy per block on each of them.
 #[test]
 fn in_place_capability_is_read_faithfully() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut advertised = Vec::new();
     for (unit, expected) in WITH_IN_PLACE {
         let au = unit.open(RATE, BLOCK);
@@ -299,7 +291,7 @@ fn in_place_capability_is_read_faithfully() {
 /// justified by this being empty.
 #[test]
 fn nothing_reports_in_place_as_forbidden() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut says_no = Vec::new();
     for (unit, _) in WITH_IN_PLACE {
         let au = unit.open(RATE, BLOCK);
@@ -337,7 +329,7 @@ fn nothing_reports_in_place_as_forbidden() {
 /// off-by-one lives.
 #[test]
 fn render_quality_round_trips_where_supported() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for (unit, default) in WITH_RENDER_QUALITY {
         let mut au = unit.open(RATE, BLOCK);
         assert_eq!(
@@ -365,7 +357,7 @@ fn render_quality_round_trips_where_supported() {
 /// directions.
 #[test]
 fn render_quality_is_refused_where_unsupported() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITHOUT_RENDER_QUALITY {
         let mut au = unit.open(RATE, BLOCK);
         assert_property_absent(au.render_quality(), unit.label, "RenderQuality");
@@ -393,7 +385,7 @@ fn render_quality_is_refused_where_unsupported() {
 /// of quietly keeping it.
 #[test]
 fn an_out_of_range_render_quality_is_refused_by_the_host() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
 
     // The host's guard: refuses without consulting the AU, on a unit that would
     // have enforced anyway and on one that would not.
@@ -490,7 +482,7 @@ fn stereo_scratch() -> PushScratch {
 /// check on its own.
 #[test]
 fn the_push_path_renders_audio() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITH_PUSH_RENDER {
         let mut au = unit.open(RATE, BLOCK);
         let mut scratch = stereo_scratch();
@@ -559,7 +551,7 @@ fn the_push_path_renders_audio() {
 /// starting from a fresh delay line, so their internal state stays in step.
 #[test]
 fn the_push_path_matches_the_pull_path_sample_for_sample() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut push_au = DELAY.open(RATE, BLOCK);
     let mut pull_au = DELAY.open(RATE, BLOCK);
     let mut scratch = stereo_scratch();
@@ -607,7 +599,7 @@ fn the_push_path_matches_the_pull_path_sample_for_sample() {
 /// on the AU's refusal and prove nothing about the host.
 #[test]
 fn the_push_path_refuses_an_oversized_block() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let mut scratch = stereo_scratch();
     assert_eq!(scratch.block_size(), BLOCK);
@@ -647,7 +639,7 @@ fn the_push_path_refuses_an_oversized_block() {
 /// rather than a substring of the Debug output.
 #[test]
 fn the_push_path_is_refused_before_initialize() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open_uninitialized(RATE, BLOCK);
     let mut scratch = stereo_scratch();
     assert!(!au.is_initialized());
@@ -691,7 +683,7 @@ fn the_push_path_is_refused_before_initialize() {
 /// silent plugin in the middle of a chain with nothing to explain it.
 #[test]
 fn units_without_a_push_path_report_unimplemented() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     for unit in WITHOUT_PUSH_RENDER {
         let mut au = unit.open(RATE, BLOCK);
         // Instruments and mixers report their own widths; the scratch only needs
@@ -737,7 +729,7 @@ fn units_without_a_push_path_report_unimplemented() {
 /// configuring more buses.
 #[test]
 fn process_multiple_is_unimplemented_across_the_corpus() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut implemented = Vec::new();
 
     for unit in WITHOUT_PUSH_RENDER.iter().chain(WITH_PUSH_RENDER.iter()) {
@@ -781,7 +773,7 @@ fn process_multiple_is_unimplemented_across_the_corpus() {
 /// elements; 1, 2 and 8 lists are all refused with the same `unimpErr`.
 #[test]
 fn a_real_multi_element_unit_still_refuses_process_multiple() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mixer = crate::support::corpus::MULTI_CHANNEL_MIXER;
     let mut au = mixer.open(RATE, BLOCK);
     let elements = au.bus_count(tutti_au_host::BusDirection::Input);
@@ -827,7 +819,7 @@ fn a_real_multi_element_unit_still_refuses_process_multiple() {
 /// 64-frame stereo render, i.e. the full `frames * 4` per channel.
 #[test]
 fn the_one_unit_that_implements_process_multiple_renders_through_it() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let unit = IMPLEMENTS_PROCESS_MULTIPLE;
     let mut au = unit.open(RATE, BLOCK);
 
@@ -923,7 +915,7 @@ fn the_one_unit_that_implements_process_multiple_renders_through_it() {
 /// otherwise be a silent stream of successful empty blocks.
 #[test]
 fn a_scratch_with_no_output_bus_is_refused() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     let mut no_out = PushScratch::new(&[ChannelLayout::STEREO], &[], BLOCK);
     assert_eq!(no_out.output_bus_count(), 0);
@@ -951,7 +943,7 @@ fn a_scratch_with_no_output_bus_is_refused() {
 /// sidechain fed with nothing and no way to tell.
 #[test]
 fn staging_into_a_missing_bus_is_reported() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut scratch = stereo_scratch();
     let input = sine(2, BLOCK as usize, 0, 0.5, RATE.get() as f32);
     let ins: Vec<&[f32]> = input.iter().map(|v| v.as_slice()).collect();
@@ -985,7 +977,7 @@ fn staging_into_a_missing_bus_is_reported() {
 /// through a real render.
 #[test]
 fn unfed_channels_and_short_sources_are_zeroed() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = DELAY.open(RATE, BLOCK);
     // Bypass so the delay's own tail cannot be mistaken for stale scratch: what
     // is being tested is the host's staging, not the AU's memory.
@@ -1125,7 +1117,7 @@ impl RtBufs {
 /// `memory allocation of N bytes failed`, not as an assertion diff.
 #[test]
 fn the_push_path_does_not_allocate() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = open_shared();
     let mut scratch =
         PushScratch::new(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO], RT_BLOCK);
@@ -1151,7 +1143,7 @@ fn the_push_path_does_not_allocate() {
 /// that pins them as fields.
 #[test]
 fn process_multiple_does_not_allocate() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = open_shared();
     let mut scratch =
         PushScratch::new(&[ChannelLayout::STEREO], &[ChannelLayout::STEREO], RT_BLOCK);
@@ -1179,7 +1171,7 @@ fn process_multiple_does_not_allocate() {
 /// tests above do not reach.
 #[test]
 fn offline_flagged_render_does_not_allocate() {
-    let _g = lock();
+    let _g = AU_LOCK.lock();
     let mut au = Au::shared(RATE, RT_BLOCK);
     au.set_offline_render(true)
         .expect("the shared plugin implements OfflineRender");
