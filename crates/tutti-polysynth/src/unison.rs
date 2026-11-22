@@ -91,21 +91,54 @@ impl From<UnisonVoices> for u8 {
 /// level.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnisonConfig {
+    pub(crate) voice_count: UnisonVoices,
+    pub(crate) detune_cents: CentsSpan,
+    pub(crate) stereo_spread: Spread,
+    pub(crate) phase_randomize: bool,
+}
+
+impl UnisonConfig {
+    /// A stack of one: [`UnisonVoices::ONE`], no detune, every sub-voice at centre and
+    /// in phase.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            voice_count: UnisonVoices::ONE,
+            detune_cents: CentsSpan::ZERO,
+            stereo_spread: Spread::POINT,
+            phase_randomize: false,
+        }
+    }
+
     /// Sub-voices per note, 1..=16. `1` is plain unison-off and the default.
     /// Even counts have no centre voice, so the written pitch is not itself
     /// sounded.
-    pub voice_count: UnisonVoices,
+    #[must_use]
+    pub const fn voice_count(mut self, count: UnisonVoices) -> Self {
+        self.voice_count = count;
+        self
+    }
+
     /// Detune amount as a [`CentsSpan`], applied symmetrically: sub-voices are spaced
-    /// evenly over ±this value, so the outermost pair sits `2 * detune_cents`
+    /// evenly over +-this value, so the outermost pair sits `2 * detune_cents`
     /// apart and the centre (odd counts only) stays at the written pitch.
-    /// A few cents is a chorus shimmer;
-    /// tens of cents is an overtly out-of-tune stack.
-    pub detune_cents: CentsSpan,
+    /// A few cents is a chorus shimmer; tens of cents is an overtly out-of-tune stack.
+    #[must_use]
+    pub const fn detune_cents(mut self, detune: CentsSpan) -> Self {
+        self.detune_cents = detune;
+        self
+    }
+
     /// How wide the sub-voices are panned, as a [`Spread`] in 0.0..1.0.
     /// `0.0` stacks them all at centre, `1.0` puts the outermost pair hard
     /// left and hard right, with the rest spaced evenly between. Pans track
     /// detune position, so the lowest sub-voice is always the leftmost.
-    pub stereo_spread: Spread,
+    #[must_use]
+    pub const fn stereo_spread(mut self, spread: Spread) -> Self {
+        self.stereo_spread = spread;
+        self
+    }
+
     /// Whether each note-on starts its sub-voices at random phases.
     ///
     /// `false` (the default) starts them all in phase, so every note begins
@@ -113,17 +146,16 @@ pub struct UnisonConfig {
     /// pulls them apart. `true` trades that consistent attack for a softer,
     /// note-to-note-varying one. The generator is a seeded [`SplitMix64`], so a
     /// render is reproducible.
-    pub phase_randomize: bool,
+    #[must_use]
+    pub const fn phase_randomize(mut self, randomize: bool) -> Self {
+        self.phase_randomize = randomize;
+        self
+    }
 }
 
 impl Default for UnisonConfig {
     fn default() -> Self {
-        Self {
-            voice_count: UnisonVoices::ONE,
-            detune_cents: CentsSpan::ZERO,
-            stereo_spread: Spread::POINT,
-            phase_randomize: false,
-        }
+        Self::new()
     }
 }
 

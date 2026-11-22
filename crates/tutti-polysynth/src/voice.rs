@@ -201,18 +201,18 @@ impl VoiceSlot {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SynthVoicesConfig {
-    pub max_voices: NonZeroUsize,
-    pub strategy: AllocationStrategy,
-    pub mode: VoiceMode,
-    /// What a full pitch bend spans on a channel until RPN 0 says otherwise.
-    pub bend_range: Semitones,
-    /// What a full Per-Note Pitch Bend spans on a channel until RPN 0/7 says
-    /// otherwise.
-    pub per_note_bend_range: Semitones,
+    max_voices: NonZeroUsize,
+    strategy: AllocationStrategy,
+    mode: VoiceMode,
+    bend_range: Semitones,
+    per_note_bend_range: Semitones,
 }
 
-impl Default for SynthVoicesConfig {
-    fn default() -> Self {
+impl SynthVoicesConfig {
+    /// 16 poly voices, the oldest stolen first, a whole-tone bend and a 48-semitone
+    /// Per-Note Pitch Bend.
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             max_voices: NonZeroUsize::new(16).unwrap(),
             strategy: AllocationStrategy::Oldest,
@@ -220,6 +220,42 @@ impl Default for SynthVoicesConfig {
             bend_range: Semitones::new(2.0),
             per_note_bend_range: Semitones::new(48.0),
         }
+    }
+
+    /// How many notes may sound at once.
+    #[must_use]
+    pub const fn max_voices(mut self, voices: NonZeroUsize) -> Self {
+        self.max_voices = voices;
+        self
+    }
+
+    /// Which voice is taken when all are busy.
+    #[must_use]
+    pub const fn strategy(mut self, strategy: AllocationStrategy) -> Self {
+        self.strategy = strategy;
+        self
+    }
+
+    /// Poly, mono or legato.
+    #[must_use]
+    pub const fn mode(mut self, mode: VoiceMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// What a full pitch bend spans on a channel until RPN 0 says otherwise.
+    #[must_use]
+    pub const fn bend_range(mut self, range: Semitones) -> Self {
+        self.bend_range = range;
+        self
+    }
+
+    /// What a full Per-Note Pitch Bend spans on a channel until RPN 0/7 says
+    /// otherwise.
+    #[must_use]
+    pub const fn per_note_bend_range(mut self, range: Semitones) -> Self {
+        self.per_note_bend_range = range;
+        self
     }
 }
 
