@@ -633,13 +633,13 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
         } else {
             floor
         };
-        let want: Vec<(i32, f64)> = (0..n)
-            .map(|k| (3 * k as i32, pooled_value(id, k)))
+        let want: Vec<(u32, f64)> = (0..n)
+            .map(|k| (3 * k as u32, pooled_value(id, k)))
             .collect();
-        let got: Vec<(i32, f64)> = q
+        let got: Vec<(u32, f64)> = q
             .points
             .iter()
-            .map(|p| (p.sample_offset, p.value.get()))
+            .map(|p| (p.sample_offset.get(), p.value.get()))
             .collect();
         assert_eq!(got, want, "parameter {id}");
     }
@@ -651,8 +651,10 @@ fn plugin_output_at_the_pool_budget_groups_without_allocating() {
     assert_eq!(last.points.len(), floor);
     let k = floor;
     assert_eq!(
-        last.points.last().map(|p| (p.sample_offset, p.value.get())),
-        Some((3 * k as i32, pooled_value(PARAMS - 1, k))),
+        last.points
+            .last()
+            .map(|p| (p.sample_offset.get(), p.value.get())),
+        Some((3 * k as u32, pooled_value(PARAMS - 1, k))),
         "ends on its latest"
     );
 }

@@ -22,6 +22,8 @@ use std::sync::Arc;
 use tutti_buffers::FloatWidth;
 use tutti_buffers::MaxBlock;
 use tutti_clap_ffi::ActivateError;
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     Control, Loaded, MIDI_STACK_BOUND, PluginError, Prepare, Refused, Request, taken,
 };
@@ -485,14 +487,14 @@ mod tests {
                     continue;
                 }
                 assert!(chunk.make_room(i));
-                chunk.queues[i].add_point(1 + 3 * k as i32, 0.5);
+                chunk.queues[i].add_point(at_frame(1 + 3 * k as i32), unit_value(0.5));
             }
         }
         for i in 0..PARAMS as usize {
             assert!(chunk.prepend_carried(
                 i,
                 ParameterPoint {
-                    sample_offset: 0,
+                    sample_offset: at_frame(0),
                     value: tutti_units::Normalized::of(0.25),
                 },
             ));
@@ -510,7 +512,7 @@ mod tests {
             }
         }
         for (q, got) in chunk.queues.iter().zip(&per) {
-            let want: Vec<u32> = q.points.iter().map(|p| p.sample_offset as u32).collect();
+            let want: Vec<u32> = q.points.iter().map(|p| p.sample_offset.get()).collect();
             assert_eq!(got, &want);
         }
     }

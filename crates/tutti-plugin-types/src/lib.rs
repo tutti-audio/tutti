@@ -344,7 +344,7 @@ pub use midi::{
 };
 pub use midi_intake::MidiIntake;
 pub use timeouts::{Timeouts, ZeroTimeout};
-pub use tutti_graph::BusRole;
+pub use tutti_graph::{BusRole, Offset};
 // In the public `IpcError::Slab`, so a host matches it without depending on ipc-ffi.
 pub use tutti_plugin_ipc_ffi::SlabError;
 pub use wakeups::Wakeups;

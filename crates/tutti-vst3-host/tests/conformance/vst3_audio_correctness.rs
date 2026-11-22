@@ -44,6 +44,7 @@ use tutti_graph::UmpAt;
 use tutti_rt::Mutex;
 
 use tutti_graph::Offset;
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_ump::{MidiChannel, MidiGroup, U7};
 use tutti_units::ParamId;
 use tutti_units::Samples;
@@ -168,7 +169,7 @@ fn set_mode(inst: &mut Active, mode: f64) {
     inst.set_parameter(PARAM_MODE, mode);
 
     let mut params = ParameterChanges::reserved(1, 1);
-    params.add_change(param_address(PARAM_MODE), 0, mode);
+    params.add_change(param_address(PARAM_MODE), at_frame(0), unit_value(mode));
     // One throwaway block so the processor consumes the change. Its output is
     // rendered in the *old* mode and deliberately discarded.
     render(inst, 64, &[], Some(&params), |_, _, _| 0.0);
@@ -334,9 +335,9 @@ fn automation_ramp_is_rendered_at_the_right_offsets() {
     // Deliberately out of order: the host must sort before delivery.
     let mut params = ParameterChanges::reserved(1, 3);
     let ramp = param_address(PARAM_RAMP);
-    params.add_change(ramp, 384, 1.0);
-    params.add_change(ramp, 0, 0.0);
-    params.add_change(ramp, 128, 0.5);
+    params.add_change(ramp, at_frame(384), unit_value(1.0));
+    params.add_change(ramp, at_frame(0), unit_value(0.0));
+    params.add_change(ramp, at_frame(128), unit_value(0.5));
 
     let rendered = render(&mut inst, FRAMES, &[], Some(&params), |_, _, _| 0.0);
     let ch0 = &rendered.out[0][0];
@@ -1242,7 +1243,7 @@ fn midi_emitted_by_the_plugin_reaches_the_host() {
     let mut block = |gain: Option<f64>| {
         let mut params = ParameterChanges::reserved(1, 1);
         if let Some(gain) = gain {
-            params.add_change(param_address(GAIN), 0, gain);
+            params.add_change(param_address(GAIN), at_frame(0), unit_value(gain));
         }
         let ins: Vec<Vec<f32>> = vec![vec![0.0; FRAMES]; 2];
         let mut outs: Vec<Vec<f32>> = vec![vec![0.0; FRAMES]; 2];

@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{MidiEventVec, SampleRate};
 
 use tutti_plugin_types::{
@@ -94,9 +96,9 @@ mod tests {
         };
         use tutti_units::ParamId;
         let mut param_changes = ParameterChanges::reserved(2, 2);
-        param_changes.add_change(ParamId::new(3), 0, 0.25);
-        param_changes.add_change(ParamId::new(3), 32, 0.75);
-        param_changes.add_change(ParamId::new(0xDEAD_BEEFu32), 16, 1.0);
+        param_changes.add_change(ParamId::new(3), at_frame(0), unit_value(0.25));
+        param_changes.add_change(ParamId::new(3), at_frame(32), unit_value(0.75));
+        param_changes.add_change(ParamId::new(0xDEAD_BEEFu32), at_frame(16), unit_value(1.0));
         let mut note_expression = NoteExpressionChanges::new();
         note_expression.add_change(NoteExpressionValue {
             sample_offset: 4,
