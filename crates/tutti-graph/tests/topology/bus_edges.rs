@@ -35,17 +35,11 @@ fn ch(n: usize) -> ChannelLayout {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out_port(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(key(node), port))
 }
 
 fn lane(sink: u64, port: u16, from: PortSource) -> EdgeId {

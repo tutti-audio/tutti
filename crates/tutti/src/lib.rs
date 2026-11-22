@@ -142,8 +142,8 @@ pub use tutti_session::Error;
 pub use tutti_curve::DECLICK;
 pub use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, EventTapOptions, EventTapReader,
-    Fade, FadeLaw, InletNode, InletRing, Level, Losses, MeterReader, NodeMode, Stamp, TapAlign,
-    TapEvent, TapId, TapOptions, TapReader, TapWriter,
+    Fade, FadeLaw, InletNode, InletRing, Level, MeterReader, NodeMode, Stamp, TapAlign, TapEvent,
+    TapId, TapOptions, TapReader, TapWriter,
 };
 pub use tutti_rt::PushError;
 // The engine's health: a `Gauge<Load>` and a `Counter<BlockCounts>`.
@@ -157,8 +157,8 @@ pub use tutti_timeline::{
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
-    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Normalized, ParamId,
-    Q, SampleRate, Samples, Seconds, Semitones, TextError,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Losses, Normalized,
+    ParamId, Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
 // The device handle and a device's identity.
@@ -548,12 +548,12 @@ pub mod session {
         OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
         PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
         Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps, Weighted,
-        Wire, main_output_width,
+        SessionHeardTapError, SessionNode, SetRateError, SetSources, SetTempoError, Taps,
+        TimelineView, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
-        AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
-        Timeline,
+        AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
+        TimedError, Timeline,
     };
 
     #[cfg(feature = "export")]

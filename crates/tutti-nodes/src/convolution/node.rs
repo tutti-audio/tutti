@@ -800,9 +800,9 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
     /// latency, which is declared on its own and compensated.
     fn shape(&self) -> Shape {
         Shape::buses(Buses::main(self.inputs), Buses::main(self.outputs))
-            .with_latency(Latency::new(self.latency_samples))
-            .with_tail(ring_after(self.engine.ir_length(), self.declared_delay))
-            .with_param_addrs(self.declared_ports().as_slice())
+            .latency(Latency::new(self.latency_samples))
+            .tail(ring_after(self.engine.ir_length(), self.declared_delay))
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     fn param_base(&self, k: usize) -> Option<f64> {

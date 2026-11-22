@@ -133,7 +133,7 @@ impl Sink {
             tutti_graph::Buses::unassigned(layout(audio_in)),
             tutti_graph::Buses::unassigned(layout(audio_out)),
         )
-        .with_events(1, 0)
+        .events(1, 0)
     }
     const IN: InEvents = Self::declared(false, false)
         .event_input(0)
@@ -215,8 +215,7 @@ struct Latent(usize);
 
 impl<F: Float> Node<F> for Latent {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.0)))
+        Shape::source_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(self.0)))
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_, F>) -> Status {
@@ -287,8 +286,8 @@ struct Script {
 
 impl Script {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(2048).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -319,8 +318,8 @@ struct Relay {
 impl Relay {
     const fn declared(capacity: u32) -> Shape {
         Shape::EMPTY
-            .with_events(1, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(capacity).expect("a capacity"))
+            .events(1, 1)
+            .event_capacity(std::num::NonZeroU32::new(capacity).expect("a capacity"))
     }
     const IN: InEvents = Self::declared(1).event_input(0).expect("declared");
     const OUT: OutEvents = Self::declared(1).event_output(0).expect("declared");
@@ -704,14 +703,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
     ed.spec_mut().topology.edges.insert(
-        InputPort {
-            node: NodeKey(2),
-            port: 0,
-        },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: NodeKey(4),
-            port: 0,
-        }))],
+        InputPort::new(NodeKey(2), 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(
+            NodeKey(4),
+            0,
+        )))],
     );
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
@@ -764,10 +760,7 @@ fn forkable_rig() -> (
     connect(&mut ed, 1, 2);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)
 }
@@ -847,8 +840,8 @@ struct Probe {
 
 impl Probe {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(8).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -1205,8 +1198,8 @@ struct SendThenRelease {
 
 impl SendThenRelease {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(64).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 

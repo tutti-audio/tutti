@@ -924,7 +924,7 @@ pub(crate) struct HostedPlugin {
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
-    banked: tutti_graph::Losses,
+    banked: tutti_units::Losses,
     /// What the nodes before the held one did not render, or the plugin did
     /// not take ([`Diagnostics::block_losses`]): banked with `banked`.
     banked_blocks: tutti_plugin_host::BlockLosses,
@@ -1203,7 +1203,7 @@ impl HostedPlugin {
             controls: None,
             answers: None,
             node,
-            banked: tutti_graph::Losses::NONE,
+            banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
             failed_snapshots: 0,
@@ -1340,14 +1340,14 @@ impl HostedPlugin {
     /// What the node lost: MIDI past a block's capacity, in a block the plugin
     /// did not run, or from a SysEx message that lost a packet, and the MIDI
     /// the plugin sent that the node had no room to put out (all
-    /// [`lost`](tutti_graph::Losses::lost)), the parameter points it did not
+    /// [`lost`](tutti_units::Losses::lost)), the parameter points it did not
     /// deliver as they were, the chords and scales past the capacity of a
-    /// block's sequencer context ([refused](tutti_graph::Losses::refused)), and,
+    /// block's sequencer context ([refused](tutti_units::Losses::refused)), and,
     /// for an out-of-process plugin, the commands its bridge's queue
-    /// [refused](tutti_graph::Losses::refused) and the responses it
-    /// [lost](tutti_graph::Losses::lost).
-    fn node_losses(&self) -> tutti_graph::Losses {
-        use tutti_graph::Losses;
+    /// [refused](tutti_units::Losses::refused) and the responses it
+    /// [lost](tutti_units::Losses::lost).
+    fn node_losses(&self) -> tutti_units::Losses {
+        use tutti_units::Losses;
         let points = self.node.param_delivery();
         let bridge = self.controls.as_ref().map_or(Losses::NONE, |c| {
             let bridge = c.bridge_losses();
@@ -1377,11 +1377,11 @@ impl HostedPlugin {
 
     /// What the plugin lost, over the record's life: what the held handle and
     /// node counted, and what the ones before them did.
-    pub(crate) fn losses(&self) -> tutti_graph::Losses {
+    pub(crate) fn losses(&self) -> tutti_units::Losses {
         self.banked
             + self.node_losses()
-            + tutti_graph::Losses::lost(self.handle.dropped_parameter_events())
-            + tutti_graph::Losses::refused(
+            + tutti_units::Losses::lost(self.handle.dropped_parameter_events())
+            + tutti_units::Losses::refused(
                 self.refused_writes
                     .load(std::sync::atomic::Ordering::Relaxed),
             )
@@ -1409,7 +1409,7 @@ impl HostedPlugin {
     /// [`replace`](Self::replace)'s handle half: everything but the
     /// controls.
     fn adopt(&mut self, handle: PluginHandle, placement: Placement) -> Outgoing {
-        self.banked += tutti_graph::Losses::lost(self.handle.dropped_parameter_events());
+        self.banked += tutti_units::Losses::lost(self.handle.dropped_parameter_events());
         self.banked_off_thread += self.handle.refused_off_thread_calls();
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
         self.mirror = mirror;
@@ -1639,9 +1639,9 @@ impl<'a> Plugin<'a> {
     /// this node's plugin: cumulative, and carried across a crash reload, a
     /// swap to another plugin and a rebuild of the node at the same key, so it
     /// only grows. In events, as the MIDI inlets count theirs
-    /// ([`Losses`](crate::Losses)):
+    /// ([`Losses`](tutti_units::Losses)):
     ///
-    /// - [`lost`](crate::Losses::lost): MIDI events on the node's event input
+    /// - [`lost`](tutti_units::Losses::lost): MIDI events on the node's event input
     ///   that never reached the plugin (in a
     ///   block the plugin did not run, or the rest of a SysEx message that
     ///   lost a packet; events past the node's declared event-input bound are
@@ -1651,23 +1651,23 @@ impl<'a> Plugin<'a> {
     ///   dropped; and parameter edits the plugin made that the host did not
     ///   hear (a lost edit costs a stale readout, not audio, and the session
     ///   re-reads the parameters after one).
-    /// - [`evicted`](crate::Losses::evicted): parameter points that replaced
+    /// - [`evicted`](tutti_units::Losses::evicted): parameter points that replaced
     ///   the last one of a full queue.
-    /// - [`refused`](crate::Losses::refused): parameter points for a
+    /// - [`refused`](tutti_units::Losses::refused): parameter points for a
     ///   parameter the node has no slot for, writes of a parameter the plugin
     ///   dropped after the session read its declaration (a rescan), and chords
     ///   and scales past the capacity of a block's sequencer context.
     ///
     /// The MIDI the plugin sent that the node had no room to put out is in
-    /// [`lost`](crate::Losses::lost) too.
+    /// [`lost`](tutti_units::Losses::lost) too.
     ///
-    /// [`late`](crate::Losses::late) stays zero. Audio the plugin's pipeline did
+    /// [`late`](tutti_units::Losses::late) stays zero. Audio the plugin's pipeline did
     /// not answer in time is not an event loss: it is counted in chunks, by
     /// [`Diagnostics::chunks`]; the blocks the node did not render and
     /// the entries the plugin refused are counted in blocks, by
     /// [`Diagnostics::block_losses`].
     #[must_use]
-    pub fn losses(&self) -> crate::Losses {
+    pub fn losses(&self) -> tutti_units::Losses {
         self.hosted.losses()
     }
 
@@ -1875,7 +1875,8 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
+                let (bound, rebinder) =
+                    (*plugin).bind_with_rebinder(self.graph.timeline.tempo().clone());
                 let (node, _) = self.graph.place(bound);
                 let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);

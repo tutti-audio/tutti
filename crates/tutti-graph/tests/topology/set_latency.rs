@@ -51,7 +51,7 @@ impl Plugin {
 impl Node for Plugin {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.probed)))
+            .latency(Latency::new(Samples::new(self.probed)))
     }
     fn prepare(&mut self, _: &Prepare) {
         self.probed = self.reported.load(Ordering::Relaxed);
@@ -96,16 +96,13 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     let t = &mut ed.spec_mut().topology;
     for k in [PLUGIN, DRY] {
         t.edges.insert(
-            InputPort { node: k, port: 0 },
+            InputPort::new(k, 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
     }
     t.set_outputs(vec![
-        PortSource::Node(OutputPort {
-            node: PLUGIN,
-            port: 0,
-        }),
-        PortSource::Node(OutputPort { node: DRY, port: 0 }),
+        PortSource::Node(OutputPort::new(PLUGIN, 0)),
+        PortSource::Node(OutputPort::new(DRY, 0)),
     ]);
     (ed, exec)
 }

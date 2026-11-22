@@ -78,10 +78,7 @@ fn rig() -> Rig {
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NODE,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -203,10 +200,7 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
                 returned: Arc::default(),
             }),
         );
-        outputs.push(PortSource::Node(OutputPort {
-            node: NodeKey(k),
-            port: 0,
-        }));
+        outputs.push(PortSource::Node(OutputPort::new(NodeKey(k), 0)));
         counts.push((processed, parked));
     }
     ed.spec_mut().topology.set_outputs(outputs);

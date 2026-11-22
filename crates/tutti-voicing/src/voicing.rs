@@ -59,7 +59,7 @@ use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     RegisteredData, Rpn, U7, Ump, Voice2,
 };
-use tutti_units::{Amplitude, Bipolar, Seconds, Semitones};
+use tutti_units::{Amplitude, Bipolar, Losses, Seconds, Semitones};
 
 use crate::channel::{Bend, ChannelState};
 use crate::master::{Master, MasterGain};
@@ -863,7 +863,7 @@ impl VoiceAllocator {
     ///   the message has no bank byte); a real-time change (and Scale/Octave Tuning, per
     ///   channel mask) answers a [`VoiceCommand::Tune`] for each sounding note whose key now
     ///   sounds elsewhere, a non-real-time one and a dump tell no voice. A program or bank
-    ///   the core has no room for is ignored and counted ([`tuning_refused`](Self::tuning_refused)).
+    ///   the core has no room for is ignored and counted ([`losses`](Self::losses)).
     ///   A Bulk Tuning Dump Request is answered with nothing: an instrument has no SysEx
     ///   output to reply on.
     /// - Identity Request and Reply are the device inquiry's (M1 p.40), a message
@@ -1011,12 +1011,13 @@ impl VoiceAllocator {
         self.tuning.table(bank, program)
     }
 
-    /// Tuning messages for a bank or program the core has no room for, which
-    /// changed nothing: a dump, a Single Note Tuning Change, or a Tuning Bank or
-    /// Program Select (MTS: such a message is ignored).
+    /// The tuning messages [refused](Losses::refused): for a bank or program
+    /// the core has no room for, which changed nothing: a dump, a Single Note
+    /// Tuning Change, or a Tuning Bank or Program Select (MTS: such a message
+    /// is ignored).
     #[must_use]
-    pub fn tuning_refused(&self) -> u64 {
-        self.tuning.refused()
+    pub fn losses(&self) -> Losses {
+        self.tuning.losses()
     }
 
     /// The gain the instrument's output is multiplied by: the Master Volume and

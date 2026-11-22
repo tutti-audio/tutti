@@ -68,7 +68,7 @@
 //!
 //! impl Node for Beats {
 //!     fn shape(&self) -> Shape {
-//!         Shape::source_unassigned(ChannelLayout::STEREO).with_tail(Tail::Unbounded)
+//!         Shape::source_unassigned(ChannelLayout::STEREO).tail(Tail::Unbounded)
 //!     }
 //!     fn prepare(&mut self, _: &Prepare) {}
 //!     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -92,7 +92,7 @@
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
 //! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort { node: beats, port })));
+//!     .map(|port| PortSource::Node(OutputPort::new(beats, port))));
 //! editor.commit().expect("the graph compiles");
 //!
 //! let engine = Engine::new(&transport, &mut editor, executor).expect("within the limits");

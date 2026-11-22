@@ -85,7 +85,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, host: Host) -> Executor {
             }
         }
         for port in 0..2u16 {
-            outputs.push(PortSource::Node(OutputPort { node: key, port }));
+            outputs.push(PortSource::Node(OutputPort::new(key, port)));
         }
     }
     ed.spec_mut().topology.set_outputs(outputs);

@@ -509,12 +509,12 @@ struct Play {
 impl MidiClipNode {
     const fn declared(capacity: NonZeroU32) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(capacity)
+            .events(0, 1)
+            .event_capacity(capacity)
             // Event-only: a walk over the block's events, nothing per frame
             // (measured about 0.3 µs a block at any length; a gain's 256
             // frames, 0.2).
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
     const OUT: OutEvents = Self::declared(MIN_EVENT_PORT_CAPACITY)
         .event_output(0)

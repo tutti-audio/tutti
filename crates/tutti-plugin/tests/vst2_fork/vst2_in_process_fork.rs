@@ -167,7 +167,7 @@ fn live_graph(key: NodeKey, node: impl IntoNode) -> Editor {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))));
     editor
 }
 
@@ -258,7 +258,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
     editor
         .spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: key, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))));
     editor.commit().expect("commits");
     let mut renderer = Renderer::new(editor, exec);
     assert_renders(&renderer.render(BLOCK * 2), 10_750.0, "the fork");
@@ -474,7 +474,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
         editor
             .spec_mut()
             .topology
-            .set_outputs(vec![PortSource::Node(OutputPort { node: key, port: 0 })]);
+            .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
         editor.commit().expect("commits");
         let _ = Renderer::new(editor, exec).render(BLOCK);
         assert_eq!(read_capture().process_level, level, "{mode:?}");

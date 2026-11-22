@@ -142,9 +142,9 @@ impl<F: Float> Node<F> for OscillatorNode {
     /// `sin` a frame, `Light`.
     fn shape(&self) -> Shape {
         Shape::source_unassigned(ChannelLayout::MONO)
-            .with_cost(tutti_graph::Cost::Light)
-            .with_tail(Tail::None)
-            .with_param_addrs(self.declared_ports().as_slice())
+            .cost(tutti_graph::Cost::Light)
+            .tail(Tail::None)
+            .param_addrs(self.declared_ports().as_slice())
     }
 
     fn prepare(&mut self, prepare: &Prepare) {

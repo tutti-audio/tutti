@@ -142,7 +142,7 @@ struct Seq {
 }
 
 impl Seq {
-    const SHAPE: Shape = Shape::EMPTY.with_events(0, 1);
+    const SHAPE: Shape = Shape::EMPTY.events(0, 1);
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -187,8 +187,8 @@ struct Midi {
 
 impl Midi {
     const SHAPE: Shape = Shape::EMPTY
-        .with_events(0, 1)
-        .with_event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
+        .events(0, 1)
+        .event_capacity(std::num::NonZeroU32::new(1024).expect("a capacity"));
     const OUT: OutEvents = Self::SHAPE.event_output(0).expect("declared");
 }
 
@@ -220,7 +220,7 @@ struct Tap {
 }
 
 impl Tap {
-    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).with_events(1, 0);
+    const SHAPE: Shape = Shape::source_unassigned(ChannelLayout::from_count(4)).events(1, 0);
     const IN: InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -270,7 +270,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -290,10 +290,7 @@ impl Node for Probe {
 // ---------------------------------------------------------------- rigs ---
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: NodeKey(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(NodeKey(node), port))
 }
 
 fn editor(max: usize) -> (Editor, Executor) {
@@ -307,10 +304,7 @@ fn editor(max: usize) -> (Editor, Executor) {
 fn wire_audio(ed: &mut Editor, from: u64, to: u64, ports: u16) {
     for port in 0..ports {
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(to),
-                port,
-            },
+            InputPort::new(NodeKey(to), port),
             vec![Edge::Direct(out(from, port))],
         );
     }
@@ -864,10 +858,7 @@ fn a_kick_ducks_the_pad_through_a_lane() {
     // the peak is not the first channel.
     for (from, to) in [(0, 1), (1, 0)] {
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(2),
-                port: to,
-            },
+            InputPort::new(NodeKey(2), to),
             vec![Edge::Direct(out(1, from))],
         );
     }

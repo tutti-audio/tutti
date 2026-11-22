@@ -66,7 +66,7 @@ struct BeatLog(Log);
 
 impl Node for BeatLog {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_tail(Tail::Unbounded)
+        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -90,10 +90,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     (ed, exec)
 }

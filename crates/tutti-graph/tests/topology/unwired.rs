@@ -36,7 +36,7 @@ impl Node for Ported {
 /// `audio` ports each way and `events` event ports each way.
 fn ported(audio: u16, events: u16) -> Ported {
     let width = ChannelLayout::from_count(audio);
-    Ported(Shape::unassigned(width, width).with_events(events, events))
+    Ported(Shape::unassigned(width, width).events(events, events))
 }
 
 const A: NodeKey = NodeKey(1);
@@ -45,11 +45,11 @@ const B: NodeKey = NodeKey(3);
 const DELAY: Samples = Samples::new(128);
 
 fn out(node: NodeKey, port: u16) -> OutputPort {
-    OutputPort { node, port }
+    OutputPort::new(node, port)
 }
 
 fn inp(node: NodeKey, port: u16) -> InputPort {
-    InputPort { node, port }
+    InputPort::new(node, port)
 }
 
 fn direct(node: NodeKey, port: u16) -> Edge {

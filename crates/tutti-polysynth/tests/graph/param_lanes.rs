@@ -126,7 +126,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     );
     ed.spec_mut()
         .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort { node: SYNTH, port })));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))));
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);
     if let Some(d) = drive {

@@ -44,17 +44,11 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn at(node: u64, port: u16) -> InputPort {
-    InputPort {
-        node: key(node),
-        port,
-    }
+    InputPort::new(key(node), port)
 }
 
 fn out(node: u64, port: u16) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port,
-    })
+    PortSource::Node(OutputPort::new(key(node), port))
 }
 
 /// A signal that is never zero and never repeats within a test.

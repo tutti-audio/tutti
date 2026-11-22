@@ -31,10 +31,7 @@ fn main_output(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor
     ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
     ed.spec_mut().topology.set_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
-            PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port: 0,
-            })
+            PortSource::Node(OutputPort::new(NodeKey(1), 0))
         } else {
             PortSource::Zero
         }

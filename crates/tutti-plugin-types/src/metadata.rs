@@ -253,7 +253,7 @@ impl Processing {
         self.measured.as_ref()
     }
 
-    /// The ceiling `Shape::with_tail` gets. **A measurement raises a finite
+    /// The ceiling `Shape::tail` gets. **A measurement raises a finite
     /// claim and never lowers or invents one**: `None`, `Unknown` and
     /// `Unbounded` stand whatever was measured (one impulse at default
     /// settings proves nothing about another patch), and a finite claim is
@@ -334,7 +334,7 @@ pub struct PluginWiring {
     /// `kAudioUnitProperty_BypassEffect`, VST2's `effSetBypass` (only where the
     /// plugin accepts it). `None` for a plugin without one, or one that refuses.
     /// A node over it declares
-    /// [`Shape::with_own_bypass`](tutti_graph::Shape::with_own_bypass) and the
+    /// [`Shape::own_bypass`](tutti_graph::Shape::own_bypass) and the
     /// host writes the plugin's bypass when the node's mode changes
     /// ([`Control::set_bypassed`](crate::Control::set_bypassed)).
     #[cfg_attr(feature = "serde", serde(default))]

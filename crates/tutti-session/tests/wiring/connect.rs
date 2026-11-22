@@ -165,14 +165,15 @@ fn topology_shows_the_edge_a_connect_wrote() {
     s.graph().connect(src, through).expect("both are stereo");
     for c in 0..2 {
         assert_eq!(
-            s.graph().testing().topology().edges.get(&InputPort {
-                node: through.erase(),
-                port: c,
-            }),
-            Some(&vec![Edge::Direct(PortSource::Node(RawOut {
-                node: src.erase(),
-                port: c
-            }))]),
+            s.graph()
+                .testing()
+                .topology()
+                .edges
+                .get(&InputPort::new(through.erase(), c)),
+            Some(&vec![Edge::Direct(PortSource::Node(RawOut::new(
+                src.erase(),
+                c
+            )))]),
             "channel {c} is fed by the source's channel {c}"
         );
     }

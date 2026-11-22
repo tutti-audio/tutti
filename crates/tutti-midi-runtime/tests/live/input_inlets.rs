@@ -10,10 +10,11 @@ use tutti_platform::Instant;
 
 use tutti_fixtures::midi;
 use tutti_fixtures::{BlockClock, EventRig};
-use tutti_graph::{Losses, NodeKey};
+use tutti_graph::NodeKey;
 use tutti_midi_runtime::{DeviceInput, InputInlets, InputWriters};
 use tutti_rt::{Counter, Gauge};
 use tutti_ump::{MidiChannel, Ump};
+use tutti_units::Losses;
 use tutti_units::{Frame, Resyncs, SampleRate, Seconds};
 
 const RATE: f64 = 48_000.0;

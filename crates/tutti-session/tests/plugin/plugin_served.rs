@@ -958,8 +958,9 @@ mod process {
 fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     use tutti_fixtures::midi;
     use tutti_graph::EventCapacity;
-    use tutti_session::{Losses, MainOutput, Stamp};
+    use tutti_session::{MainOutput, Stamp};
     use tutti_ump::MidiChannel;
+    use tutti_units::Losses;
 
     let cut = 300 - u64::from(tutti_plugin_types::MIDI_STACK_BOUND.get());
     let dropped_at = |events: Vec<SessionEvent>, node: tutti_graph::NodeKey| -> u64 {

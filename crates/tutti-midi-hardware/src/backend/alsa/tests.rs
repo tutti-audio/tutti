@@ -10,7 +10,6 @@ use crate::DeviceOut;
 use crate::{Devices, HardwareMidiInputs};
 use tutti_alsa_ffi::Client;
 use tutti_alsa_ffi::{Address, Event, PortCaps, PortId, PortKind};
-use tutti_graph::Losses;
 use tutti_midi_device::{
     DeviceEvent, DeviceInfo, Endpoint, MidiDeviceId, OsEndpointIdentity, UMP_VERSION,
 };
@@ -20,6 +19,7 @@ use tutti_ump::{
     FunctionBlockId, FunctionBlockInfo, FunctionBlocks, GroupSpan, MessageType, Midi1Port,
     Protocol, Sysex8StreamCount, UiHint,
 };
+use tutti_units::Losses;
 
 /// Long enough to be a failure, not a race: the announce arrives at once.
 const PATIENCE: Duration = Duration::from_secs(20);

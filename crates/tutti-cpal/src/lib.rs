@@ -56,7 +56,7 @@
 //! let (mut editor, executor) = Editor::new(Prepare::new(sample_rate, MaxBlock::of(Samples::new(512))));
 //! let tone = NodeKey(1);
 //! editor.insert(tone, "tone", Osc::sine(Hz::new(440.0)));
-//! editor.spec_mut().topology.set_outputs(vec![PortSource::Node(OutputPort { node: tone, port: 0 }); 2]);
+//! editor.spec_mut().topology.set_outputs(vec![PortSource::Node(OutputPort::new(tone, 0)); 2]);
 //! editor.commit()?;
 //!
 //! // The engine owns the executor and the transport's clock; the editor stays

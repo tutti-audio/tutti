@@ -46,8 +46,8 @@ impl Source {
 
     fn declared(cap: u32) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(std::num::NonZeroU32::new(cap).expect("a capacity"))
+            .events(0, 1)
+            .event_capacity(std::num::NonZeroU32::new(cap).expect("a capacity"))
     }
 }
 
@@ -76,7 +76,7 @@ impl Node for Source {
 struct Sink(InEvents);
 
 impl Sink {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0);
 
     fn new() -> Self {
         Self(Self::SHAPE.event_input(0).expect("one event input"))

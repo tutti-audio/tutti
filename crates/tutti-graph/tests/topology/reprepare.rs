@@ -40,7 +40,7 @@ type Inbox = tutti_fixtures::Record<(u32, u32, u64)>;
 struct Recorder(Inbox);
 
 impl Recorder {
-    const SHAPE: Shape = Shape::EMPTY.with_events(1, 0).with_tail(Tail::Unknown);
+    const SHAPE: Shape = Shape::EMPTY.events(1, 0).tail(Tail::Unknown);
     const IN: tutti_graph::InEvents = Self::SHAPE.event_input(0).expect("declared");
 }
 
@@ -95,21 +95,18 @@ fn wire(ed: &mut Editor) {
     spec.topology.inputs = ChannelLayout::MONO;
     let t = &mut spec.topology;
     t.edges.insert(
-        InputPort { node: LAG, port: 0 },
+        InputPort::new(LAG, 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     t.edges.insert(
-        InputPort { node: SUM, port: 0 },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: LAG,
-            port: 0,
-        }))],
+        InputPort::new(SUM, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0)))],
     );
     t.edges.insert(
-        InputPort { node: SUM, port: 1 },
+        InputPort::new(SUM, 1),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
-    t.set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
+    t.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))]);
     let emit = EventOutputPort {
         node: EMIT,
         port: 0,
@@ -332,11 +329,11 @@ fn a_rate_change_resets_rings_and_flushes_pending_events() {
 fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.insert(LAG, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
-    let at = InputPort { node: LAG, port: 0 };
+    let at = InputPort::new(LAG, 0);
     ed.spec_mut().topology.edges.insert(
         at,
         vec![Edge::Feedback(FeedbackFrom::new(
-            OutputPort { node: LAG, port: 0 },
+            OutputPort::new(LAG, 0),
             Samples::new(96),
         ))],
     );
@@ -368,7 +365,7 @@ struct RateLatency {
 impl Node for RateLatency {
     fn shape(&self) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO)
-            .with_latency(Latency::new(Samples::new(self.latency)))
+            .latency(Latency::new(Samples::new(self.latency)))
     }
     fn prepare(&mut self, p: &Prepare) {
         self.latency = (p.sample_rate().get() / 1000.0) as usize;
@@ -395,12 +392,12 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     ed.insert(LAG, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
-        InputPort { node: LAG, port: 0 },
+        InputPort::new(LAG, 0),
         vec![Edge::Direct(PortSource::MainInput(0))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: LAG, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(LAG, 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -412,15 +409,12 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
     // Uncommitted: inserted and wired, then the rate changes.
     ed.insert(SUM, "look", Unforkable(unit(&log)));
     ed.spec_mut().topology.edges.insert(
-        InputPort { node: SUM, port: 0 },
-        vec![Edge::Direct(PortSource::Node(OutputPort {
-            node: LAG,
-            port: 0,
-        }))],
+        InputPort::new(SUM, 0),
+        vec![Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0)))],
     );
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort { node: SUM, port: 0 })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))]);
     log.lock().clear();
 
     let p = prep(96_000.0, 64);
@@ -529,7 +523,7 @@ struct CoarseAt96k(tutti_graph::Resolution);
 
 impl Node for CoarseAt96k {
     fn shape(&self) -> Shape {
-        Shape::EMPTY.with_events(1, 0).with_event_resolution(self.0)
+        Shape::EMPTY.events(1, 0).event_resolution(self.0)
     }
     fn prepare(&mut self, p: &Prepare) {
         self.0 = if p.sample_rate().get() < 90_000.0 {
@@ -590,10 +584,7 @@ fn a_panic_in_prepare_poisons_the_editor() {
     ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -633,10 +624,7 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
         .require_resolution(at, from, tutti_graph::Resolution::Sample);
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: NodeKey(0),
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(0), 0))]);
     ed.commit().expect("sample-accurate at 48 kHz");
     exec.apply_pending();
     ed.collect();

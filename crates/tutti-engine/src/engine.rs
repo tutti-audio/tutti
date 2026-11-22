@@ -2061,7 +2061,7 @@ mod tests {
     impl tutti_graph::Node for Ramp {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::from_count(self.0))
-                .with_tail(tutti_units::Tail::Unbounded)
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -2083,12 +2083,9 @@ mod tests {
         use tutti_graph::NodeKey;
         use tutti_graph::{OutputPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
-        ed.spec_mut().topology.set_outputs((0..width).map(|port| {
-            PortSource::Node(OutputPort {
-                node: NodeKey(1),
-                port,
-            })
-        }));
+        ed.spec_mut().topology.set_outputs(
+            (0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
+        );
         ed.commit().expect("commits");
     }
 
@@ -3003,7 +3000,7 @@ mod tests {
     impl tutti_graph::Node for Dc {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_tail(tutti_units::Tail::Unbounded)
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -3021,10 +3018,7 @@ mod tests {
     /// main output, the others silent, in the editor's spec.
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
         use tutti_graph::{NodeKey, OutputPort, PortSource};
-        let dc = PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        });
+        let dc = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         ed.spec_mut()
             .topology
             .set_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }));
@@ -3468,10 +3462,8 @@ mod tests {
         let control = engine.output_control();
         move_main_output(&mut ed, &control, None, 2, 1);
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
-        let dc = tutti_graph::PortSource::Node(tutti_graph::OutputPort {
-            node: tutti_graph::NodeKey(1),
-            port: 0,
-        });
+        let dc =
+            tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(tutti_graph::NodeKey(1), 0));
         ed.spec_mut().topology.set_outputs([dc, dc]);
         ed.commit().expect("commits");
         heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
@@ -3497,7 +3489,7 @@ mod tests {
     impl tutti_graph::Node for Count {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_tail(tutti_units::Tail::Unbounded)
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -3521,8 +3513,8 @@ mod tests {
     impl tutti_graph::Node for Late {
         fn shape(&self) -> tutti_graph::Shape {
             tutti_graph::Shape::source_unassigned(ChannelLayout::MONO)
-                .with_latency(tutti_units::Latency::new(Samples::new(16)))
-                .with_tail(tutti_units::Tail::Unbounded)
+                .latency(tutti_units::Latency::new(Samples::new(16)))
+                .tail(tutti_units::Tail::Unbounded)
         }
         fn prepare(&mut self, _: &Prepare) {}
         fn process(
@@ -3551,14 +3543,8 @@ mod tests {
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        });
-        let late = PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        });
+        let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
+        let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
         ed.spec_mut().topology.set_outputs([count, late]);
         ed.commit().expect("commits");
         let engine =
@@ -3613,14 +3599,8 @@ mod tests {
         ));
         ed.insert(NodeKey(1), "count", tutti_graph::Unforkable(Count(0.0)));
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
-        let count = PortSource::Node(OutputPort {
-            node: NodeKey(1),
-            port: 0,
-        });
-        let late = PortSource::Node(OutputPort {
-            node: NodeKey(2),
-            port: 0,
-        });
+        let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
+        let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
         ed.spec_mut().topology.set_outputs([count, late]);
         ed.commit().expect("commits");
         let engine =

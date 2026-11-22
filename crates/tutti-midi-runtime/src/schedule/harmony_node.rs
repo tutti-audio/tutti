@@ -229,11 +229,11 @@ impl std::fmt::Debug for HarmonyNode {
 impl HarmonyNode {
     const fn declared(capacity: NonZeroU32) -> Shape {
         Shape::EMPTY
-            .with_events(0, 1)
-            .with_event_capacity(capacity)
+            .events(0, 1)
+            .event_capacity(capacity)
             // Event-only: the clip node's walk over its changes, nothing per
             // frame.
-            .with_cost(tutti_graph::Cost::Light)
+            .cost(tutti_graph::Cost::Light)
     }
     const OUT: OutEvents = Self::declared(MIN_EVENT_PORT_CAPACITY)
         .event_output(0)

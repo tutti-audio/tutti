@@ -1294,10 +1294,7 @@ mod tests {
     }
 
     fn source(node: u64) -> PortSource {
-        PortSource::Node(OutputPort {
-            node: NodeKey(node),
-            port: 0,
-        })
+        PortSource::Node(OutputPort::new(NodeKey(node), 0))
     }
 
     /// The longest ring of a source is the one a new channel copies, and of
@@ -1334,10 +1331,7 @@ mod tests {
     /// A ring that is not an output's is no source's origin.
     #[test]
     fn only_output_rings_are_origins() {
-        let at = crate::InputPort {
-            node: NodeKey(9),
-            port: 0,
-        };
+        let at = crate::InputPort::new(NodeKey(9), 0);
         let delays = [DelaySpec {
             key: DelayKey::Audio {
                 at,

@@ -93,7 +93,7 @@ struct Probe;
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).with_params(&[UnitParam::Cutoff])
+        Shape::source_unassigned(ChannelLayout::MONO).params(&[UnitParam::Cutoff])
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
@@ -126,10 +126,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ed.insert(probe, "probe", Unforkable(Probe));
     ed.spec_mut()
         .topology
-        .set_outputs(vec![PortSource::Node(OutputPort {
-            node: probe,
-            port: 0,
-        })]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))]);
     let at = ParamIn {
         node: probe,
         param: UnitParam::Cutoff.into(),

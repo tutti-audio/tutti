@@ -1802,12 +1802,7 @@ fn open_stem_taps<F: Float>(
             let sources = stem
                 .ports
                 .iter()
-                .map(|&port| {
-                    tutti_graph::PortSource::Node(OutputPort {
-                        node: stem.node,
-                        port,
-                    })
-                })
+                .map(|&port| tutti_graph::PortSource::Node(OutputPort::new(stem.node, port)))
                 .collect();
             let id = TapId::of(next);
             next += 1;

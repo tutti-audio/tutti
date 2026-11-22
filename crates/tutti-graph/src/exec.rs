@@ -155,7 +155,7 @@
 //! A node replaced by a commit (a crossfade, a replace, an insert at an
 //! existing key) may write the state its successor starts from
 //! ([`Node::chase`](crate::Node::chase), declared with
-//! [`Shape::with_chase`](crate::Shape::with_chase)). Applying the commit calls
+//! [`Shape::chase`](crate::Shape::chase)). Applying the commit calls
 //! it once, before any task of the next block runs, into a buffer sized when
 //! the plan was built, and the events are **flushed events** to the
 //! successor's first event input: offset 0 of its first block, ahead of
@@ -728,7 +728,7 @@ mod tests {
     struct Count(Arc<AtomicUsize>);
 
     impl Count {
-        const SHAPE: crate::node::Shape = crate::node::Shape::EMPTY.with_events(1, 0);
+        const SHAPE: crate::node::Shape = crate::node::Shape::EMPTY.events(1, 0);
         const IN: crate::InEvents = Self::SHAPE.event_input(0).expect("declared");
     }
 
@@ -889,17 +889,14 @@ mod tests {
         for (&k, shape) in &shapes {
             topology.nodes.insert(
                 k,
-                NodeSpec::new("node", shape.audio_in(), shape.audio_out()).with_tail(shape.tail),
+                NodeSpec::new("node", shape.audio_in(), shape.audio_out()).tail(shape.tail),
             );
         }
-        topology.set_outputs(vec![PortSource::Node(OutputPort { node: g, port: 0 })]);
+        topology.set_outputs(vec![PortSource::Node(OutputPort::new(g, 0))]);
         let mut spec = GraphSpec::new(topology);
         for from in [a, b] {
-            let edge = Edge::Direct(PortSource::Node(OutputPort {
-                node: from,
-                port: 0,
-            }));
-            spec.connect(InputPort { node: g, port: 0 }, edge);
+            let edge = Edge::Direct(PortSource::Node(OutputPort::new(from, 0)));
+            spec.connect(InputPort::new(g, 0), edge);
         }
         let (plan, delta) =
             crate::compile(&spec.validate().expect("valid"), &shapes, &prepare, None)

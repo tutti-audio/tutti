@@ -82,19 +82,13 @@ fn render_probes(workers: usize, entry: Entry) {
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));
         ed.spec_mut().topology.edges.insert(
-            InputPort {
-                node: NodeKey(k),
-                port: 0,
-            },
+            InputPort::new(NodeKey(k), 0),
             vec![Edge::Direct(PortSource::MainInput(0))],
         );
     }
-    ed.spec_mut().topology.set_outputs((1..=PROBES).map(|k| {
-        PortSource::Node(OutputPort {
-            node: NodeKey(k),
-            port: 0,
-        })
-    }));
+    ed.spec_mut()
+        .topology
+        .set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

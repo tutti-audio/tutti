@@ -31,10 +31,7 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn out(node: u64) -> PortSource {
-    PortSource::Node(OutputPort {
-        node: key(node),
-        port: 0,
-    })
+    PortSource::Node(OutputPort::new(key(node), 0))
 }
 
 fn output_edge(from: u64) -> EdgeId {
