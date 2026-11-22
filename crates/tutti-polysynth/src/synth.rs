@@ -229,7 +229,7 @@ impl FilterModConfig {
     }
 
     /// How far the LFO sweeps the cutoff, as a [`Depth`] in 0.0..1.0. At 1.0
-    /// the sine sweeps cutoff +-50% around its base. Needs an
+    /// the sine sweeps cutoff ±50% around its base. Needs an
     /// [`lfo_rate`](Self::lfo_rate) to do anything.
     #[must_use]
     pub const fn lfo_depth(mut self, depth: Depth) -> Self {
