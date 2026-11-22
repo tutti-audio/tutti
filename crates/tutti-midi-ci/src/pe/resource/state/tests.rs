@@ -2,7 +2,8 @@
 
 use std::num::NonZeroU32;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tutti_rt::Mutex;
 
 use tutti_ump::{DeviceIdentity, ManufacturerId, SoftwareRevision, U7};
 
@@ -547,18 +548,15 @@ impl StateDevice for Device {
     fn judge(&mut self, _: &StateId, arrival: Arrival<'_>) -> StateVerdict {
         match arrival {
             Arrival::Prefix(prefix) => {
-                self.asked.lock().unwrap().push((prefix.len(), false));
-                *self.seen.lock().unwrap() = prefix.to_vec();
+                self.asked.lock().push((prefix.len(), false));
+                *self.seen.lock() = prefix.to_vec();
                 match self.refuse_prefix_from {
                     Some(at) if prefix.len() >= at => StateVerdict::Refuse,
                     _ => StateVerdict::Undecided,
                 }
             }
             Arrival::Whole(state) => {
-                self.asked
-                    .lock()
-                    .unwrap()
-                    .push((state.to_wire().1.len(), true));
+                self.asked.lock().push((state.to_wire().1.len(), true));
                 if self.refuse_whole {
                     StateVerdict::Refuse
                 } else {
@@ -706,7 +704,7 @@ fn a_refused_body_is_ended_midway_with_a_terminate_nak() {
     assert!(terminates(&link, false));
     let used = chunks(&link, true, PeMessageKind::SET_INQUIRY) - sent;
     assert!(used < 5, "{used} chunks of the body were sent");
-    assert!(asked.lock().unwrap().iter().all(|(_, whole)| !whole));
+    assert!(asked.lock().iter().all(|(_, whole)| !whole));
     assert_eq!(stored_state(&link, "buffer"), before);
     assert!(matches!(
         link.served.last(),
@@ -727,13 +725,13 @@ fn the_device_is_asked_after_each_chunk_with_the_decoded_start_of_the_body() {
     let body = bytes(3000);
     let call = restore(&mut link, PeState::octets(body.clone()));
     assert_eq!(link.set_result(call), Ok(PeStatus::Ok));
-    let asked = asked.lock().unwrap();
+    let asked = asked.lock();
     let (whole, prefixes): (Vec<&(usize, bool)>, Vec<&(usize, bool)>) =
         asked.iter().partition(|(_, w)| *w);
     assert_eq!(whole, [&(3000, true)]);
     assert!(prefixes.len() > 10);
     assert!(prefixes.windows(2).all(|w| w[0].0 < w[1].0));
-    let last = seen.lock().unwrap();
+    let last = seen.lock();
     assert_eq!(&body[..last.len()], &last[..]);
 }
 

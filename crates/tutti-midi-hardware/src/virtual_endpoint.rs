@@ -55,11 +55,11 @@
 //! ([`VirtualEndpoint::sender`]).
 
 use std::marker::PhantomData;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::Poll;
 use tutti_graph::Losses;
 use tutti_platform::Instant;
-use tutti_rt::{Counter, CounterWriter, LockExt, counter};
+use tutti_rt::{Counter, CounterWriter, Mutex, counter};
 
 use tutti_midi_device::FunctionBlock;
 use tutti_midi_protocol::{Midi1Translator, Midi2Translator};
@@ -311,7 +311,7 @@ impl Outbound {
     }
 
     fn count(&self, losses: Losses) {
-        self.refused.lock_recover().add(losses);
+        self.refused.lock().add(losses);
     }
 
     fn send(&self, ump: Ump) -> Result<()> {
@@ -324,7 +324,7 @@ impl Outbound {
                 };
                 // The packets go in order under the lock: the MIDI 1.0 translator assumes
                 // that what it emitted was sent before the next message.
-                let mut midi1_translator = midi1_translator.lock_recover();
+                let mut midi1_translator = midi1_translator.lock();
                 let mut sent = Ok(());
                 // After a full queue the rest of the message's packets are not sent
                 // (a cut sequence is worse than a lost one). The counting follows
@@ -362,7 +362,7 @@ impl Outbound {
                 return sent;
             }
             Conversion::ToMidi2(translator) => {
-                let translated = translator.lock_recover().translate(ump);
+                let translated = translator.lock().translate(ump);
                 match translated {
                     Some(ump) => ump,
                     None => return Ok(()),
@@ -644,8 +644,9 @@ impl VirtualSender {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
+    use tutti_rt::Mutex;
 
     use tutti_ump::{ControlValue, MidiChannel, MidiGroup, Rpn, Voice1, Voice2};
 
@@ -669,7 +670,7 @@ mod tests {
                 }
                 return Err(MidiHardwareError::Unsupported("recorder"));
             }
-            self.sent.lock().unwrap().push(*ump);
+            self.sent.lock().push(*ump);
             Ok(Delivery::Sent)
         }
     }
@@ -714,7 +715,7 @@ mod tests {
         outbound
             .send(Message::Utility(tutti_ump::Utility::Noop).into())
             .unwrap();
-        assert!(sent.lock().unwrap().is_empty());
+        assert!(sent.lock().is_empty());
         assert_eq!(outbound.losses.get(), Losses::refused(1));
     }
 
@@ -745,7 +746,6 @@ mod tests {
 
     fn controllers(sent: &Mutex<Vec<Ump>>) -> Vec<u8> {
         sent.lock()
-            .unwrap()
             .iter()
             .filter_map(|ump| match ump.decode() {
                 Ok(Message::Midi1(_, Voice1::ControlChange { controller, .. })) => {
@@ -824,7 +824,7 @@ mod tests {
                 .into(),
             )
             .unwrap();
-        let words: Vec<u32> = sent.lock().unwrap().iter().map(|u| u.0[0]).collect();
+        let words: Vec<u32> = sent.lock().iter().map(|u| u.0[0]).collect();
         // Note On on member channel 2 (0x91), then its Pitch Bend, centre 0x2000.
         assert_eq!(words, [0x2091_3C40, 0x20E1_0040]);
     }

@@ -26,8 +26,9 @@
 //! an enable that CoreMIDI refuses and says when the next attempt is due.
 //! [`UmpVirtualEndpoint`] owns the endpoint, disposed on drop.
 
-use std::sync::{Arc, PoisonError, RwLock, Weak};
+use std::sync::{Arc, Weak};
 use std::task::Poll;
+use tutti_rt::RwLock;
 
 use tracing::debug;
 use tutti_coremidi_ffi::{CreateUmpEndpoint, UmpDestination, UmpEndpoint, UmpSender, UmpSource};
@@ -90,7 +91,7 @@ impl core::fmt::Debug for UmpVirtualEndpoint {
 impl Drop for UmpVirtualEndpoint {
     fn drop(&mut self) {
         if let Endpoint::Pair { live, .. } = &self.endpoint {
-            *live.write().unwrap_or_else(PoisonError::into_inner) = false;
+            *live.write() = false;
         }
     }
 }
@@ -269,7 +270,7 @@ impl SenderBackend for PairSender {
     /// [`MidiHardwareError::Os`] when `MIDIReceivedEventList` returns a non-zero
     /// `OSStatus`.
     fn send(&self, ump: &Ump) -> Result<Delivery> {
-        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+        let live = self.live.read();
         let source = self.source.upgrade().filter(|_| *live);
         source.ok_or(MidiHardwareError::EndpointGone)?.send(ump)?;
         Ok(Delivery::Sent)

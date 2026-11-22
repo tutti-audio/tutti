@@ -8,8 +8,9 @@
 //! 48 kHz, so a beat is 24,000 frames.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tutti_buffers::MaxBlock;
+use tutti_rt::Mutex;
 
 use self::common::{FRAMES_PER_BEAT, at, beat_of, connect, off, on, rolling};
 
@@ -136,7 +137,10 @@ impl<F: Float> Node<F> for Sink {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
-        let mut t = self.tally.lock().unwrap();
+        let mut t = self
+            .tally
+            .try_lock()
+            .expect("a test reads the tally only between blocks, so it is never held here");
         for e in io.events(0) {
             let EventKind::Midi(Ump(w)) = e.kind else {
                 continue;
@@ -176,7 +180,7 @@ struct SinkFork(Arc<Mutex<Vec<Shared>>>);
 impl ForkSource for SinkFork {
     fn fork(&self, _: ForkMode) -> Result<Forked, ForkCause> {
         let tally = Shared::default();
-        self.0.lock().unwrap().push(Arc::clone(&tally));
+        self.0.lock().push(Arc::clone(&tally));
         Ok(Forked::new(Box::new(Sink {
             tally,
             audio_in: false,
@@ -397,7 +401,7 @@ fn a_refused_off_is_paid_at_the_first_frame_of_the_next_block() {
         capacity: 256,
     };
     let (tally, exec) = through(script, relay, 6);
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!((t.ons, t.offs), (256, 256));
     assert!(t.held.is_empty());
     let late: Vec<u64> = t.off_frames.iter().copied().filter(|&f| f == 128).collect();
@@ -425,7 +429,7 @@ fn a_small_table_withholds_the_on_it_cannot_keep() {
         capacity: 256,
     };
     let (tally, exec) = through(script, relay, 6);
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!((t.ons, t.offs), (5, 7), "4 + the later note, 6 + 1 offs");
     assert_eq!(t.orphans, 2);
     assert!(t.held.is_empty());
@@ -469,7 +473,7 @@ fn random_relay(seed: u64, ledger: bool) -> usize {
         capacity: 8,
     };
     let (tally, _) = through(blocks, relay, 33);
-    tally.lock().unwrap().held.len()
+    tally.lock().held.len()
 }
 
 /// Whatever the port refuses, a relay through the ledger leaves no note
@@ -551,7 +555,7 @@ fn a_clip_leaves_nothing_sounding_after_a_stop() {
     let mut refused = 0;
     for seed in 1..=1_000 {
         let (tally, dropped) = random_clip(seed);
-        let t = tally.lock().unwrap();
+        let t = tally.lock();
         assert!(t.held.is_empty(), "seed {seed}: {:?}", t.held);
         assert_eq!(t.ons, t.offs, "seed {seed}");
         assert_eq!(t.orphans, 0, "seed {seed}");
@@ -600,7 +604,7 @@ fn a_full_table_withholds_what_it_cannot_keep() {
             .iter()
             .all(|l| l.node == NodeKey(1) && l.port == Some(0))
     );
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!((t.ons, t.offs), (2_049, 2_049));
     assert_eq!(t.orphans, 0);
     assert!(t.held.is_empty());
@@ -646,8 +650,8 @@ fn a_rewire_ends_the_held_note_at_the_old_sink() {
     let (mut ed, mut exec, _controls, a, b) = holding_clip();
     let f = run(&mut exec, 0, 2, 256);
     rewire(&mut ed, &mut exec, f);
-    assert!(a.lock().unwrap().held.is_empty());
-    assert_eq!(b.lock().unwrap().orphans, 1);
+    assert!(a.lock().held.is_empty());
+    assert_eq!(b.lock().orphans, 1);
 }
 
 /// Sink A also takes audio from a node of 1,024 frames of latency, so the
@@ -689,11 +693,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     );
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
-    assert_eq!(a.lock().unwrap().held.len(), 1, "the note reached A");
+    assert_eq!(a.lock().held.len(), 1, "the note reached A");
     let f = run(&mut exec, f, 1, 256);
     assert_eq!(f, 2_304);
     rewire(&mut ed, &mut exec, f);
-    let a = a.lock().unwrap();
+    let a = a.lock();
     assert!(a.held.is_empty());
     assert_eq!(a.off_frames, vec![2_304]);
 }
@@ -760,16 +764,16 @@ fn fork_of(ed: &Editor) -> (Editor, Executor) {
 fn a_fork_starts_with_an_empty_table() {
     let (ed, mut exec, _controls, live, forks) = forkable_rig();
     let f = run_out(&mut exec, 0, 1);
-    assert_eq!(live.lock().unwrap().held.len(), 1);
+    assert_eq!(live.lock().held.len(), 1);
     let (_fed, mut fexec) = fork_of(&ed);
     run_out(&mut fexec, f, 1);
-    let fork = forks.lock().unwrap()[0].clone();
+    let fork = forks.lock()[0].clone();
     {
-        let fork = fork.lock().unwrap();
+        let fork = fork.lock();
         assert_eq!((fork.ons, fork.offs, fork.orphans), (0, 0, 0));
     }
     run_out(&mut exec, f, 1);
-    let live = live.lock().unwrap();
+    let live = live.lock();
     assert_eq!((live.ons, live.offs), (1, 1));
     assert!(live.held.is_empty());
 }
@@ -896,7 +900,7 @@ fn a_refused_mark_outlives_the_off_that_was_paid_and_the_note_that_used_the_key(
             vec![send(60, true, 3), send(60, false, 3), send(60, false, 2)],
         ],
     );
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!(t.ons, 2, "notes 1 and 3");
     assert!(t.held.is_empty());
     assert_eq!((dropped, lost), (3, 2));
@@ -915,7 +919,7 @@ fn an_off_refused_twice_is_one_loss() {
             vec![send(60, false, 2)],
         ],
     );
-    assert!(tally.lock().unwrap().held.is_empty());
+    assert!(tally.lock().held.is_empty());
     assert_eq!((dropped, lost), (4, 2));
 }
 
@@ -946,7 +950,7 @@ fn a_refused_pedal_release_is_counted_and_its_payment_gives_the_count_back() {
         (3, 0),
         "each paid release gives its count back"
     );
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!(
         t.others,
         8 + 3 + 3,
@@ -967,7 +971,7 @@ fn overlapping_refused_ons_on_one_key_are_each_counted_with_their_offs() {
             send(60, false, 3),
         ])],
     );
-    assert_eq!(tally.lock().unwrap().ons, 0);
+    assert_eq!(tally.lock().ons, 0);
     assert_eq!((dropped, lost), (4, 4));
 }
 
@@ -986,7 +990,7 @@ fn a_release_clears_the_mark_of_a_row_that_stays_owed() {
             vec![send(61, true, 4)],
         ],
     );
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!(t.ons, 2, "note 1, then note 4 on another key");
 }
 
@@ -1010,7 +1014,7 @@ fn an_untagged_off_settles_the_row_of_a_refused_on() {
         capacity: 8,
     };
     let (tally, exec) = through(script, relay, 6);
-    let t = tally.lock().unwrap();
+    let t = tally.lock();
     assert_eq!((t.others, t.ons), (8, 6));
     assert_eq!(t.orphans, 2, "the two offs with no row pass");
     assert_eq!(exec.dropped_event_count(), 46);
@@ -1038,7 +1042,7 @@ fn an_untagged_off_of_a_held_key_settles_a_refused_on_too() {
         capacity: 8,
     };
     let (tally, _) = through(script, relay, 5);
-    assert_eq!(tally.lock().unwrap().ons, 2, "notes 60 and 61");
+    assert_eq!(tally.lock().ons, 2, "notes 60 and 61");
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,7 +1145,7 @@ fn the_loss_count_is_exact_through_loops_and_replacements() {
             ccs += ccs2;
         }
         exec.process(64, &stopped(0), &[], &mut []);
-        let t = tally.lock().unwrap();
+        let t = tally.lock();
         assert!(t.held.is_empty(), "seed {seed}");
         assert_eq!(t.ons, t.offs, "seed {seed}");
         assert_eq!(t.orphans, 0, "seed {seed}");

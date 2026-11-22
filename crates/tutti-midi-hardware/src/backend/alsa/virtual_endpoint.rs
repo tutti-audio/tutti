@@ -22,7 +22,8 @@ use crate::error::{MidiHardwareError, Result};
 use crate::virtual_endpoint::{
     Delivery, EndpointBackend, SenderBackend, VirtualProtocol, VirtualSpec,
 };
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
+use tutti_rt::RwLock;
 
 /// The sequencer's version for a protocol.
 fn version_of(protocol: VirtualProtocol) -> UmpVersion {
@@ -104,7 +105,7 @@ pub(crate) struct AlsaVirtualEndpoint {
 
 impl Drop for AlsaVirtualEndpoint {
     fn drop(&mut self) {
-        *self.live.write().unwrap_or_else(PoisonError::into_inner) = false;
+        *self.live.write() = false;
     }
 }
 
@@ -127,7 +128,7 @@ struct AlsaSender {
 
 impl SenderBackend for AlsaSender {
     fn send(&self, ump: &Ump) -> Result<Delivery> {
-        let live = self.live.read().unwrap_or_else(PoisonError::into_inner);
+        let live = self.live.read();
         if !*live {
             return Err(MidiHardwareError::EndpointGone);
         }
