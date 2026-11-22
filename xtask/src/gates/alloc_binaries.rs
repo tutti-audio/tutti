@@ -67,20 +67,7 @@ pub(super) const EXEMPT: &[(&str, &str)] = &[
 
 /// `(area binary, first failing test and its allocation site)`: removed by fixing the
 /// test node or helper that allocates inside an `RtScope`.
-pub(super) const DEBT: &[(&str, &str)] = &[
-    (
-        "crates/tutti-engine/tests/render/main.rs",
-        "engine_graph::a_tempo_wiggle_under_the_clock_hysteresis_does_not_move_the_beat: Vec::push in Gate::process, tests/render/engine_graph.rs:121",
-    ),
-    (
-        "crates/tutti-graph/tests/mixing/main.rs",
-        "mode::a_mode_stored_mid_block_lands_on_the_next_block: GraphSpec::set_mode called from a node's process, src/spec.rs:559 via tests/mixing/mode.rs:1335",
-    ),
-    (
-        "crates/tutti-session/tests/io/main.rs",
-        "clock_switch::the_old_driver_renders_its_last_block_before_the_new_one_its_first: Renderer::process, tests/io/clock_switch.rs:628",
-    ),
-];
+pub(super) const DEBT: &[(&str, &str)] = &[];
 
 /// Whether `path` is `(crates|testing)/<crate>/tests/<area>/main.rs`, an area binary.
 fn is_area_binary(path: &str) -> bool {
