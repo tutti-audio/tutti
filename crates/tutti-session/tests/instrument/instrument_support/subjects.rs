@@ -22,18 +22,18 @@ impl Subject for Poly {
     const CUT: usize = 1;
 
     fn rig() -> Rig {
-        let synth = PolySynth::new(SynthConfig {
-            polyphony: std::num::NonZeroUsize::new(8).unwrap(),
-            oscillator: OscillatorType::Saw,
-            filter: FilterType::None,
-            envelope: Adsr {
-                attack: Seconds::new(0.001),
-                decay: Seconds::new(0.0),
-                sustain: Amplitude::new(1.0),
-                release: Seconds::new(0.05),
-            },
-            ..SynthConfig::default()
-        });
+        let synth = PolySynth::new(
+            SynthConfig::new()
+                .polyphony(std::num::NonZeroUsize::new(8).unwrap())
+                .oscillator(OscillatorType::Saw)
+                .filter(FilterType::None)
+                .envelope(Adsr {
+                    attack: Seconds::new(0.001),
+                    decay: Seconds::new(0.0),
+                    sustain: Amplitude::new(1.0),
+                    release: Seconds::new(0.05),
+                }),
+        );
         let mut session = offline_session();
         let handle = session
             .add_instrument(synth)

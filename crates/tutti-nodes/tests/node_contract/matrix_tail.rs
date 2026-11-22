@@ -17,14 +17,15 @@
 //! - The boundary test: a gap one frame short of the tail does not restart the engine; one
 //!   of exactly the tail does.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::{
     AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, InputOutput,
     MaxBlock, Mono, Planes, PlanesMut,
 };
 
 use tutti_dsp::MatrixConvolver;
+use tutti_fixtures::Record;
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{ConvolverNode, FirConvolverConfig};
@@ -39,16 +40,16 @@ const FRAMES: usize = 64 * 40;
 /// with `hide_silence` it says `Modified` where the node said `Silent`.
 struct Recording<N> {
     inner: N,
-    log: Arc<Mutex<Vec<Status>>>,
+    log: Record<Status>,
     hide_silence: Arc<AtomicBool>,
 }
 
 impl<N: Node> Recording<N> {
-    fn new(inner: N) -> (Self, Arc<Mutex<Vec<Status>>>) {
-        let log = Arc::new(Mutex::new(Vec::new()));
+    fn new(inner: N) -> (Self, Record<Status>) {
+        let log = Record::new();
         let rec = Self {
             inner,
-            log: Arc::clone(&log),
+            log: log.clone(),
             hide_silence: Arc::new(AtomicBool::new(false)),
         };
         (rec, log)
@@ -79,7 +80,7 @@ impl<N: Node> Node for Recording<N> {
     }
 }
 
-fn calls(log: &Mutex<Vec<Status>>) -> usize {
+fn calls(log: &Record<Status>) -> usize {
     log.lock().expect("the log").len()
 }
 

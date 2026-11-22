@@ -21,9 +21,9 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 use std::thread::JoinHandle;
-use tutti_rt::LockExt;
+use tutti_rt::Mutex;
 
 use crate::capability::{OsEndpoint, from_os};
 use crate::devices::ChangeSink;
@@ -158,7 +158,7 @@ impl FakeCounters {
     /// Takes the packets sent to the output of device `id` since the last call,
     /// oldest first: what the fake device received on the wire.
     pub fn take_sent(&self, id: EndpointId) -> Vec<tutti_ump::Ump> {
-        let mut log = self.log.lock_recover();
+        let mut log = self.log.lock();
         let (mine, rest) = log.drain(..).partition(|(device, ..)| *device == id);
         *log = rest;
         mine.into_iter().map(|(_, ump, _)| ump).collect()
@@ -170,7 +170,7 @@ impl FakeCounters {
         &self,
         id: EndpointId,
     ) -> Vec<(tutti_ump::Ump, tutti_midi_runtime::SendAt)> {
-        let mut log = self.log.lock_recover();
+        let mut log = self.log.lock();
         let (mine, rest) = log.drain(..).partition(|(device, ..)| *device == id);
         *log = rest;
         mine.into_iter().map(|(_, ump, at)| (ump, at)).collect()
@@ -181,7 +181,7 @@ impl FakeCounters {
     #[must_use]
     pub fn connected_inputs(&self) -> Vec<EndpointId> {
         self.producers
-            .lock_recover()
+            .lock()
             .iter()
             .map(|(device, _)| *device)
             .collect()
@@ -191,13 +191,13 @@ impl FakeCounters {
     /// connection closes when its output is dropped.
     #[must_use]
     pub fn connected_outputs(&self) -> Vec<EndpointId> {
-        self.outputs.lock_recover().live.clone()
+        self.outputs.lock().live.clone()
     }
 
     /// The most output connections to one device that were open at once.
     #[must_use]
     pub fn most_output_connections(&self) -> usize {
-        self.outputs.lock_recover().most
+        self.outputs.lock().most
     }
 
     /// Events handed to the sink so far.
@@ -217,7 +217,7 @@ impl FakeCounters {
         ump: tutti_ump::Ump,
         arrival: tutti_platform::Instant,
     ) -> bool {
-        let mut producers = self.producers.lock_recover();
+        let mut producers = self.producers.lock();
         producers
             .iter_mut()
             .find(|(device, _)| *device == id)
@@ -237,7 +237,7 @@ impl FakeCounters {
     }
 
     fn devices(&self) -> MutexGuard<'_, FakeDevices> {
-        self.devices.lock_recover()
+        self.devices.lock()
     }
 
     /// Plugs `endpoint` in, as `direction` says, and tells every running
@@ -309,7 +309,7 @@ impl Drop for FakeWatch {
     fn drop(&mut self) {
         // The thread ends when its channel's last sender is gone.
         self.devices
-            .lock_recover()
+            .lock()
             .watches
             .retain(|(key, _)| *key != self.key);
         if let Some(thread) = self.thread.take() {
@@ -336,7 +336,7 @@ struct FakeConn {
 
 impl InputConnection for FakeConn {
     fn fault(&self) -> Option<InputFault> {
-        let devices = self.devices.lock_recover();
+        let devices = self.devices.lock();
         devices
             .dead_inputs
             .iter()
@@ -348,7 +348,7 @@ impl InputConnection for FakeConn {
 impl Drop for FakeConn {
     fn drop(&mut self) {
         self.producers
-            .lock_recover()
+            .lock()
             .retain(|(device, _)| *device != self.id);
     }
 }
@@ -378,7 +378,7 @@ struct FakeSink {
 
 impl Drop for FakeSink {
     fn drop(&mut self) {
-        let mut ledger = self.connections.lock_recover();
+        let mut ledger = self.connections.lock();
         if let Some(at) = ledger.live.iter().position(|id| *id == self.id) {
             ledger.live.remove(at);
         }
@@ -396,7 +396,7 @@ impl MidiOut for FakeSink {
             self.accepts
         };
         let taken = Taken::within(events, accepts);
-        self.log.lock_recover().extend(
+        self.log.lock().extend(
             events
                 .iter()
                 .take(taken.packets())
@@ -504,7 +504,7 @@ impl FakeBackend {
 
 impl FakeBackend {
     fn devices(&self) -> MutexGuard<'_, FakeDevices> {
-        self.devices.lock_recover()
+        self.devices.lock()
     }
 }
 
@@ -577,7 +577,7 @@ impl MidiEndpoints for FakeBackend {
             devices.dead_inputs.retain(|(dead, _)| *dead != id);
         }
         self.opens.fetch_add(1, Ordering::SeqCst);
-        self.producers.lock_recover().push((id, producer));
+        self.producers.lock().push((id, producer));
         Ok(Box::new(FakeConn {
             producers: Arc::clone(&self.producers),
             devices: Arc::clone(&self.devices),
@@ -595,7 +595,7 @@ impl MidiEndpoints for FakeBackend {
         }
         drop(devices);
         {
-            let mut ledger = self.outputs.lock_recover();
+            let mut ledger = self.outputs.lock();
             ledger.live.push(id);
             let held = ledger.live.iter().filter(|open| **open == id).count();
             ledger.most = ledger.most.max(held);
