@@ -49,7 +49,7 @@
 //! the sound card's clock (dropping it stops the stream).
 //! `examples/headless_engine.rs` plays a tone in under twenty lines. To write a
 //! file instead, turn on `export` and bounce the session: a `Bounce` names a
-//! range and a master, and optionally stems, and `Session::bounce` renders it
+//! range and a main output, and optionally stems, and `Session::bounce` renders it
 //! (`examples/headless_export.rs`). `examples/song_bounce.rs` is the whole common
 //! path from one `use tutti::{..}`: a sampler `Clip` into a filter into a
 //! reverb, an LFO on the cutoff, `Session::play`, and eight beats bounced to a
@@ -556,9 +556,9 @@ pub mod session {
     #[cfg(feature = "export")]
     pub use tutti_session::{
         AnyStem, BounceConfigError, BounceHandle, BounceJob, BounceRendered, Bouncing,
-        BufferMaster, BufferStem, EventLossPolicy, ExportClock, FileMaster, FileStem, Master,
-        NoMaster, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced, Progress, Resample,
-        Stage,
+        BufferMainOutput, BufferStem, EventLossPolicy, ExportClock, FileMainOutput, FileStem,
+        MainOutputKind, NoMainOutput, Normalize, Outcome, PrepareEdit, PreparedGraph, Produced,
+        Progress, Resample, Stage,
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{

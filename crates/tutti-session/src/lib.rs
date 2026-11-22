@@ -180,8 +180,9 @@ pub use apply::Apply;
 #[cfg(feature = "export")]
 pub use bounce::{
     AnyStem, Bounce, BounceConfigError, BounceError, BounceHandle, BounceJob, BounceLatency,
-    BounceRendered, BounceTail, Bounced, Bouncing, BufferMaster, BufferStem, ExportClock,
-    FileMaster, FileStem, Master, NoMaster, PrepareEdit, PreparedGraph, Range, Stem, StemGain,
+    BounceRendered, BounceTail, Bounced, Bouncing, BufferMainOutput, BufferStem, ExportClock,
+    FileMainOutput, FileStem, MainOutputKind, NoMainOutput, PrepareEdit, PreparedGraph, Range,
+    Stem, StemGain,
 };
 pub use builder::{BlockConfig, SessionBuilder, Workers, main_output_width};
 #[cfg(feature = "device")]

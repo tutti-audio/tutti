@@ -1,4 +1,4 @@
-//! The master meter is an op in the plan, so whatever renders the graph feeds
+//! The main output meter is an op in the plan, so whatever renders the graph feeds
 //! it: the level of each graph output channel, before the engine's fold to the
 //! device and its declick. These moved here from `tutti-cpal`'s output-block
 //! tests, where the callback fed a stereo-folded meter; the fold tests became
@@ -36,7 +36,7 @@ impl tutti_graph::Node for Dc {
 }
 
 /// An engine over a constant `level` on output `channel` of `outputs` (silence
-/// on the rest), or on every output when `channel` is `None`, and the master
+/// on the rest), or on every output when `channel` is `None`, and the main output
 /// meter declared on its outputs (off until enabled).
 fn engine(
     level: f32,
@@ -175,7 +175,7 @@ fn the_pure_render_feeds_the_meter() {
     assert_eq!(meter.read()[0].peak.get(), 0.25);
 }
 
-/// **The master reads before the declick.** A stop that fades the output
+/// **The main output reads before the declick.** A stop that fades the output
 /// does not lower the reading of the block in which it fades: the meter sees
 /// the graph's signal at its full level while the device buffer ramps to
 /// silence.
@@ -183,7 +183,7 @@ fn the_pure_render_feeds_the_meter() {
 /// The RMS tells them apart (the peak does not: the fade rises back to the
 /// source's level within the block).
 #[test]
-fn the_master_reads_before_the_declick() {
+fn the_main_output_reads_before_the_declick() {
     use tutti_timeline::MotionCommand;
     let transport = Transport::new(SampleRate::of(RATE));
     let (mut ed, exec) = Editor::new(Prepare::new(
@@ -220,7 +220,7 @@ fn the_master_reads_before_the_declick() {
     assert_eq!(
         l.rms.get(),
         0.5,
-        "the master reads the graph, not the faded buffer (rms {faded})"
+        "the main output reads the graph, not the faded buffer (rms {faded})"
     );
     Box::leak(Box::new((ed, transport)));
 }

@@ -115,7 +115,7 @@ fn a_forked_graph_plays_the_clip() {
     let (live, _exec) = graph(unit(), 48_000.0, 1_000);
     let prepare = *live.prepare();
     let (fork, fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("a clip and a soundfont node fork");
     assert_eq!(
         onset(&render(fork, fork_exec, 48_000.0, 4_096)),

@@ -1,4 +1,4 @@
-//! What the session lets the host listen to: the heard tap, the master meter, the load meter,
+//! What the session lets the host listen to: the heard tap, the main output meter, the load meter,
 //! and (feature `midi`) the engine's MIDI nodes and the `Session::midi` handle.
 
 use tutti_engine::{BlockCounts, Load};
@@ -87,7 +87,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.graph.take_reopened(id)
     }
 
-    /// The master meter: the level of each graph output channel, one
+    /// The main output meter: the level of each graph output channel, one
     /// [`Level`](tutti_graph::Level) per channel, with the peak held since
     /// the last read. It is an op of the plan on the outputs, declared and **on**
     /// from the build, so a host that reads it needs to ask for nothing, and every

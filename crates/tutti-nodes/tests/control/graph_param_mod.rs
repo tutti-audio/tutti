@@ -1234,7 +1234,7 @@ fn a_fork_modulates_as_the_live_graph_does() {
     drive(&mut editor, at, Arc::new(AtomicF64::new(3.0)), vec![]);
     let (fed, fexec) = editor
         .fork(
-            tutti_graph::ForkTarget::Master,
+            tutti_graph::ForkTarget::MainOutput,
             tutti_graph::ForkMode::Live,
             prepare,
         )

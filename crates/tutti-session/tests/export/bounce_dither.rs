@@ -20,8 +20,8 @@ const LEVEL: f32 = 9_830.1 / 32_768.0;
 /// its dither.
 fn dithered(
     configure: impl FnOnce(
-        Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
-    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
+        Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
+    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
 ) -> Vec<i32> {
     bounced_node(
         ForkByClone(Const::new(LEVEL, ChannelLayout::STEREO)),
@@ -33,8 +33,8 @@ fn dithered(
 fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     node: ForkByClone<N>,
     configure: impl FnOnce(
-        Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
-    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMaster>,
+        Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
+    ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
 ) -> Vec<i32> {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
@@ -47,7 +47,7 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     let path = dir.path().join("out.wav");
     let bounce = Bounce::new()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.1)))
-        .master(&path, Format::Wav(Pcm::Int16))
+        .main_output(&path, Format::Wav(Pcm::Int16))
         .tail(tutti_session::BounceTail::None);
     bounced(&mut session, configure(bounce)).expect("renders");
     hound::WavReader::open(&path)

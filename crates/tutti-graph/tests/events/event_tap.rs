@@ -581,8 +581,12 @@ fn closed_fork_reopen_and_prune() {
     let live = open(&mut r, 2);
     commit(&mut r);
     let (fed, _fexec) =
-        r.ed.fork(ForkTarget::Master, ForkMode::Offline, prepare(MAX_BLOCK))
-            .expect("forks");
+        r.ed.fork(
+            ForkTarget::MainOutput,
+            ForkMode::Offline,
+            prepare(MAX_BLOCK),
+        )
+        .expect("forks");
     assert!(fed.spec().topology.event_taps.is_empty());
 
     // Opening an id again replaces the tap.

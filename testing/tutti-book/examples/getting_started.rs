@@ -54,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // The file's name picks its format: `.flac` is FLAC.
     let mut session = tone()?;
-    let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+    let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
     // The session renders on a thread of its own; we wait for it, then hand
     // what it made back to the session.
     let rendered = block_on(rendering.into_future());
@@ -74,11 +74,11 @@ mod tests {
     #[test]
     fn the_bounce_is_a_sine_at_its_level_on_both_channels() {
         let mut session = tone().unwrap();
-        let rendering = session.bounce(two_seconds().master_buffers()).unwrap();
+        let rendering = session.bounce(two_seconds().main_output_buffers()).unwrap();
         let rendered = session
             .apply(block_on(rendering.into_future()))
             .unwrap()
-            .into_master();
+            .into_main_output();
         let frames = rendered.interleaved();
         let settled = &frames[frames.len() / 2..];
         for channel in 0..2 {

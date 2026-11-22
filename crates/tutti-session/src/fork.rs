@@ -38,7 +38,7 @@ fn fork_error(e: ForkError) -> RenderError {
 pub(crate) struct PendingExport<F: Float> {
     fork: PendingFork<F>,
     pool: Option<Arc<dyn Pool>>,
-    /// The live main output's declared topology, for an export of the master: the
+    /// The live main output's declared topology, for an export of the main output: the
     /// file is placed from it, as the device is.
     main_output: Option<ChannelTopology>,
     /// Where the fork's audio-thread log goes, named as the live graph names

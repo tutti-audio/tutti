@@ -99,7 +99,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         ..Default::default()
     }));
     let (_fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("the lane and the plugin fork");
 
     let mut block = vec![0.0f32; BLOCK];
@@ -176,7 +176,7 @@ fn render_gain(
         ..Default::default()
     }));
     let (mut fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("the graph forks");
     for &(frame, kind) in schedule {
         fork_ed

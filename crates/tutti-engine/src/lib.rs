@@ -21,7 +21,7 @@
 //!   applies what the transport schedules.
 //! - **Level metering.** A meter is an op in the compiled plan, on the outputs or
 //!   any node's port (`tutti-graph`'s `Editor::open_meter`, `MeterReader`), per
-//!   channel and before the engine's fold and declick. The engine holds no master
+//!   channel and before the engine's fold and declick. The engine holds no main output
 //!   meter and no stereo fold. The engine times each block and writes
 //!   its [`Load`] and [`BlockCounts`], because they are not audio.
 //! - **Taps.** Copying audio out of the graph is `tutti-graph`'s (`Editor::open_tap`,

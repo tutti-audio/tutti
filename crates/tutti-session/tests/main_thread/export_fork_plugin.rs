@@ -27,7 +27,7 @@ use tutti_nodes::testing::Const;
 use tutti_plugin_db::Hosting;
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::PluginRef;
-use tutti_session::BufferMaster;
+use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, DetachedSession, ExportClock, InPort, OutPort,
     Range, Session, Stem,
@@ -47,9 +47,9 @@ const NOTES: u32 = 4;
 
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
-fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
+fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
@@ -58,23 +58,26 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
+fn buffers(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
     bounce_of(seconds, RATE, ExportClock::frozen())
 }
 
 /// The planes `bounce` renders; panics with the refusal otherwise.
-fn planes(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn planes(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
+) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
-        Ok(out) => out.into_master().into_planes(),
+        Ok(out) => out.into_main_output().into_planes(),
         Err(e) => panic!("the bounce failed: {e:?}"),
     }
 }
 
 /// The planes of the one stem `bounce` names, in memory, rendered beside the
-/// master; panics with the refusal otherwise.
+/// main output; panics with the refusal otherwise.
 fn stem_planes(
     session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMaster>,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
 ) -> Vec<Vec<f32>> {
     match bounced(session, bounce) {
         Ok(out) => {

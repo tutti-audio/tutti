@@ -67,7 +67,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// [`main_output_topology_status`](Self::main_output_topology_status) is `Refused` with
     /// the error and the main output in force stays. A
     /// [`unfaded`](MainOutputDeclaration::unfaded) declaration applies at once and drops
-    /// the waiting one. An export of the master
+    /// the waiting one. An export of the main output
     /// places the file from the declaration (`tutti_export::Setup::main_output`, set by the export's fork).
     ///
     /// The device a declaration must place on is the one the session renders

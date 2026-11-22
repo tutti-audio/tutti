@@ -1127,7 +1127,7 @@ fn a_lane_fed_fork_reads_its_value_at_frame_0() {
     assert_eq!((live[0][599], live[1][599]), (500.0, 3.0), "live, held");
 
     let (mut fed, mut fexec) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare(64))
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare(64))
         .expect("forks");
     let out = render(&mut fexec, &mut fed, 10, 10);
     #[allow(clippy::needless_range_loop, reason = "two outputs at one frame")]

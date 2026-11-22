@@ -93,7 +93,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
         session
             .bounce(
                 Bounce::new()
-                    .master_buffers()
+                    .main_output_buffers()
                     .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.01))),
             )
             .expect("a DC graph starts"),
@@ -101,7 +101,7 @@ fn a_session_bounces_to_buffers_through_the_umbrella() {
     let planes = session
         .apply(rendered)
         .expect("a DC graph renders")
-        .into_master()
+        .into_main_output()
         .into_planes();
     assert_eq!(planes.len(), 2);
     assert!(planes[0].iter().all(|&s| (s - 0.5).abs() < 1e-6));

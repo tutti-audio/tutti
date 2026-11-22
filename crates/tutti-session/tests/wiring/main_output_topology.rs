@@ -283,7 +283,7 @@ fn declaring_the_same_topology_again_changes_nothing() {
     );
 }
 
-/// An export of the master places the file from the declaration, as the device
+/// An export of the main output places the file from the declaration, as the device
 /// is: four buses into a six-channel file stay at 0..4.
 #[cfg(feature = "export")]
 #[test]
@@ -292,7 +292,7 @@ fn an_export_is_placed_from_the_declaration() {
     use tutti_session::{Bounce, BounceLatency, BounceTail, ExportClock, Range};
     let planes = |s: &mut tutti_session::DetachedSession| {
         let request = Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .channels(ChannelLayout::from(6u16))
             .range(Range::Seconds(
                 tutti_units::Seconds::new(0.0),
@@ -302,7 +302,7 @@ fn an_export_is_placed_from_the_declaration() {
             .clock(ExportClock::frozen())
             .latency(BounceLatency::Keep)
             .tail(BounceTail::None);
-        let rendered = bounced(s, request).unwrap().into_master();
+        let rendered = bounced(s, request).unwrap().into_main_output();
         rendered.planes().iter().map(|p| p[0]).collect::<Vec<_>>()
     };
     let mut declared = Session::builder()

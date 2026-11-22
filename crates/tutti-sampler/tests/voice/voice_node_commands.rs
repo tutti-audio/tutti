@@ -215,7 +215,7 @@ fn a_fork_steals_no_commands() {
     let (ed, mut exec, handle) = graph_with(node_at(0.0));
     let (_fork_ed, mut fork) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Live,
             Prepare::new(RATE, MaxBlock::of(Samples::new(256))),
         )
@@ -265,7 +265,7 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
     // A fork taken before the move: not vacuous, it is still at beat 0.
     let (_before_ed, mut before) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     before.apply_pending();
 
@@ -275,7 +275,7 @@ fn a_placement_sent_after_the_insert_reaches_a_fork() {
     )));
 
     let (_after_ed, mut after) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     after.apply_pending();
     assert!(
@@ -350,7 +350,7 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
     let (ed, _exec, handle) = graph_with(node);
     let prepare = Prepare::new(RATE, MaxBlock::of(Samples::new(256)));
     let (_before_ed, mut before) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     before.apply_pending();
 
@@ -359,7 +359,7 @@ fn a_speed_published_after_the_insert_reaches_a_fork() {
         .publish(tutti_units::PlaybackRate::of(2.0));
 
     let (_after_ed, mut after) = ed
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     after.apply_pending();
     let render = |exec: &mut Executor| {

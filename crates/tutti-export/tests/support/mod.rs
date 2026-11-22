@@ -165,13 +165,13 @@ pub fn write_buffers(
     )
 }
 
-/// The master of `live`, forked offline at `rate` and assembled: what an
+/// The main output of `live`, forked offline at `rate` and assembled: what an
 /// export gets from a live graph (the session's fork, without its pool or
 /// main output).
 pub fn fork_offline(live: &Editor, rate: SampleRate) -> RenderGraph {
     let (editor, executor) = live
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             RenderGraph::prepare(rate),
         )
@@ -211,7 +211,7 @@ pub fn render_to_file(
     path: impl AsRef<Path>,
 ) -> Result<Written> {
     let job = config.job()?;
-    let output = Output::master(config.file_target(path.as_ref(), None));
+    let output = Output::main_output(config.file_target(path.as_ref(), None));
     render_output(graph, job, clock, output).map(|p| p.into_file().expect("a file output"))
 }
 
@@ -222,7 +222,7 @@ pub fn render_to_buffers(
     clock: &dyn RenderClock,
 ) -> Result<Rendered> {
     let job = config.buffers_job()?;
-    let output = Output::master(config.buffer_target());
+    let output = Output::main_output(config.buffer_target());
     render_output(graph, job, clock, output).map(|p| p.into_buffers().expect("a buffers output"))
 }
 
@@ -235,7 +235,7 @@ pub fn render_normalized_to_file(
     path: impl AsRef<Path>,
 ) -> Result<Written> {
     let job = config.job()?;
-    let output = Output::master(config.file_target(path.as_ref(), Some(normalize)));
+    let output = Output::main_output(config.file_target(path.as_ref(), Some(normalize)));
     render_output(graph, job, clock, output).map(|p| p.into_file().expect("a file output"))
 }
 
@@ -251,7 +251,7 @@ pub fn render_file_under(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Written>> {
     let job = config.job()?;
-    let output = Output::master(config.file_target(path.as_ref(), normalize));
+    let output = Output::main_output(config.file_target(path.as_ref(), normalize));
     render_one(graph.borrow_mut(), &job, clock, output, control)
         .map(|o| o.map(|p| p.into_file().expect("a file output")))
 }
@@ -264,7 +264,7 @@ pub fn render_buffers_under(
     control: &mut Control<'_>,
 ) -> Result<Outcome<Rendered>> {
     let job = config.buffers_job()?;
-    let output = Output::master(config.buffer_target());
+    let output = Output::main_output(config.buffer_target());
     render_one(graph.borrow_mut(), &job, clock, output, control)
         .map(|o| o.map(|p| p.into_buffers().expect("a buffers output")))
 }

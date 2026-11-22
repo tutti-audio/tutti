@@ -2,7 +2,7 @@
 //!
 //! Builds a surround producer graph entirely from engine primitives
 //! (`VbapPannerNode` places each source, and the graph sums the panners onto
-//! the N-wide master by fan-in), renders it through the offline export pipeline, and asserts
+//! the N-wide main output by fan-in), renders it through the offline export pipeline, and asserts
 //! the resulting file is a genuine multi-channel WAV whose channels carry the
 //! placed energy — i.e. the surround producer and the multi-channel export path
 //! work together without any DAW/ECS layer.
@@ -53,7 +53,7 @@ use tutti_nodes::testing::{Const, bass_send, vbap_mix};
 
 /// The widened export path: a graph that starts at the **device (stereo)
 /// output** width — exactly what the live engine produces — is widened offline
-/// and wired to a surround master before export. This mirrors what a host
+/// and wired to a surround main output before export. This mirrors what a host
 /// does to the graph it exports (on `tutti_graph`, the topology's global
 /// outputs grown), and proves widening a stereo graph does NOT lose the
 /// surround channels.
@@ -65,7 +65,7 @@ fn stereo_net_widened_then_exports_four_channels() {
     let src_front = g.add(Const::frame(&[1.0, 1.0]));
     let src_rear = g.add(Const::frame(&[1.0, 1.0]));
     // Widen the graph to quad (the new outputs silent until wired), then wire
-    // the surround master onto them. An output channel the graph does not have
+    // the surround main output onto them. An output channel the graph does not have
     // cannot be wired, so the widen comes first.
     g.spec_mut().topology.outputs.resize(4, Vec::new());
     assert_eq!(g.outputs(), 4, "graph widened to quad");

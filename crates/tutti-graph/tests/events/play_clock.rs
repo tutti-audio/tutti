@@ -281,7 +281,7 @@ fn a_fork_starts_its_clock_at_zero() {
     let live = r.ed.play_reading();
     assert!(live.play.get() > 0);
     let (mut fed, mut fexec) =
-        r.ed.fork(ForkTarget::Master, ForkMode::Live, prepare(MAX))
+        r.ed.fork(ForkTarget::MainOutput, ForkMode::Live, prepare(MAX))
             .expect("forks");
     let fresh = fed.play_reading();
     assert_eq!(fresh.play, Frame::new(0));

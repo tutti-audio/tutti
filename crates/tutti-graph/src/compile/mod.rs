@@ -1005,11 +1005,11 @@ pub fn compile(
         }
     }
 
-    // A master meter or an outputs tap reads each output channel as it leaves
+    // A main output meter or an outputs tap reads each output channel as it leaves
     // the alignment delay, so with one declared the delay is its own op
     // writing a slot that the `Output` op and the reader both read (one ring,
     // the same key).
-    let master_meter = topology
+    let main_output_meter = topology
         .meters
         .values()
         .any(|spec| matches!(spec, crate::MeterSpec::Outputs))
@@ -1106,7 +1106,7 @@ pub fn compile(
             });
             (em.delays.len() - 1) as u32
         });
-        if let (true, Some(ring), ARef::Val(v)) = (master_meter, delay, src) {
+        if let (true, Some(ring), ARef::Val(v)) = (main_output_meter, delay, src) {
             let op = em.push(Pre::Delay {
                 delay: ring,
                 src: v,

@@ -745,7 +745,11 @@ fn a_fork_copies_the_mix() {
     );
 
     let (fed, mut fexec) = ed
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare(MAX_BLOCK))
+        .fork(
+            ForkTarget::MainOutput,
+            ForkMode::Offline,
+            prepare(MAX_BLOCK),
+        )
         .expect("forks");
     assert_eq!(fed.mix(key(1)), Mix::new(0.5));
     let mut f = vec![0.0f32; BLOCK];

@@ -121,13 +121,13 @@ Bounce::new()
 ```
 
 Then we tell the [`Bounce`](../api/tutti/struct.Bounce.html) where the file
-goes: the *master*, the file of the whole mix (also known as the *main mix*,
-or *stereo mix*). Then we hand it to the session:
+goes: the *main output*, the file of the whole mix (also known as the *master*,
+*main mix*, or *stereo mix*). Then we hand it to the session:
 
 ```rust,ignore
 // The file's name picks its format: `.flac` is FLAC.
 let mut session = tone()?;
-let rendering = session.bounce(two_seconds().master(&path, Format::from_path(&path)?))?;
+let rendering = session.bounce(two_seconds().main_output(&path, Format::from_path(&path)?))?;
 // The session renders on a thread of its own; we wait for it, then hand
 // what it made back to the session.
 let rendered = block_on(rendering.into_future());

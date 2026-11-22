@@ -152,7 +152,7 @@ pub enum CommitError {
     },
     /// A meter's lanes in the spec do not fit the cells it was opened with
     /// ([`Editor::open_meter`](crate::Editor::open_meter) fixed them there): the spec's
-    /// `MeterSpec::Ports` was edited, or the outputs a master meter follows
+    /// `MeterSpec::Ports` was edited, or the outputs a main output meter follows
     /// grew past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS). Nothing was sent. Close the meter and
     /// open another to change its width.
     #[error("meter {} names {sources} lanes but its cells hold {capacity}", .meter)]

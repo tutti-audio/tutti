@@ -24,7 +24,7 @@ use tutti_plugin::PluginClient;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_types::PluginRef;
 use tutti_session::{
-    Bounce, BounceLatency, BounceTail, BufferMaster, ExportClock, MainOutput, OutPort, PHASES,
+    Bounce, BounceLatency, BounceTail, BufferMainOutput, ExportClock, MainOutput, OutPort, PHASES,
     Phase, PhaseCx, Range, Replacement, Session, SessionEvent,
 };
 use tutti_session::{PluginChange, PluginEvent};
@@ -144,9 +144,9 @@ fn a_plugins_tail_ceiling_is_the_plugins_claim() {
 
 /// A short offline bounce into memory: the render mode a plugin is told
 /// Offline for as long as it is in flight.
-fn request() -> Bounce<tutti_graph::NodeKey, BufferMaster> {
+fn request() -> Bounce<tutti_graph::NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
             tutti_units::Seconds::new(0.0),

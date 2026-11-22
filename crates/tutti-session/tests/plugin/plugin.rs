@@ -39,7 +39,7 @@ use tutti_graph::NodeKey;
 use tutti_plugin_types::PluginFailure;
 use tutti_plugin_types::PluginRef;
 use tutti_plugin_types::RenderMode;
-use tutti_session::BufferMaster;
+use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceError, BounceLatency, BounceTail, ExportClock, Phase, PhaseCx, PluginHealth,
     Range, Session, SessionEvent,
@@ -151,9 +151,9 @@ fn stays_latency(s: &Session, node: NodeKey, want: Samples, why: &str) {
 
 /// A render of `seconds` into memory: stereo at `RATE`, trimming nothing and
 /// keeping no tail, on a frozen clock.
-fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
+fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(
             tutti_units::Seconds::new(0.0),
@@ -166,7 +166,7 @@ fn request_for(seconds: f64) -> Bounce<NodeKey, BufferMaster> {
 }
 
 /// A short render into memory.
-fn request() -> Bounce<NodeKey, BufferMaster> {
+fn request() -> Bounce<NodeKey, BufferMainOutput> {
     request_for(0.05)
 }
 
@@ -201,7 +201,10 @@ fn an_export_announces_offline_before_its_first_block_and_realtime_after() {
 
     let done = block_on(job);
     let output = s.apply(done).expect("the export renders");
-    assert!(!output.master().planes().is_empty(), "the master is planes");
+    assert!(
+        !output.main_output().planes().is_empty(),
+        "the main output is planes"
+    );
     let _ = s.update();
     assert_eq!(s.render_mode(), RenderMode::Realtime);
     await_latency(

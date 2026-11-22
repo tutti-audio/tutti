@@ -593,8 +593,12 @@ fn a_fork_carries_no_tap_and_an_export_reads_its_own_losslessly() {
     commit(&mut r);
 
     let (mut fed, fexec) =
-        r.ed.fork(ForkTarget::Master, ForkMode::Offline, prepare(MAX_BLOCK))
-            .expect("forks");
+        r.ed.fork(
+            ForkTarget::MainOutput,
+            ForkMode::Offline,
+            prepare(MAX_BLOCK),
+        )
+        .expect("forks");
     assert!(
         fed.spec().topology.taps.is_empty(),
         "the live tap is not in the fork"

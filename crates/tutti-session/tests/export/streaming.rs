@@ -98,7 +98,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
     let rendered = bounced(
         &mut s,
         Bounce::new()
-            .master_buffers()
+            .main_output_buffers()
             .channels(ChannelLayout::STEREO)
             .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.0)))
             .sample_rate(SampleRate::of(RATE))
@@ -106,7 +106,7 @@ fn a_bounce_of_a_streamed_ramp_at_unity_reproduces_the_files_frames() {
             .tail(BounceTail::None),
     )
     .expect("the bounce renders")
-    .into_master()
+    .into_main_output()
     .into_planes();
     for k in 0..LEN {
         assert_eq!(rendered[0][k], value(k), "left, file frame {k}");

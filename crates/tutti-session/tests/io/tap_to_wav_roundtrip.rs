@@ -72,7 +72,7 @@ impl Node for Ramp {
 
 const BLOCK: usize = 512;
 
-/// The graph the tap copies out of: a [`Ramp`] on a master tap.
+/// The graph the tap copies out of: a [`Ramp`] on a main output tap.
 struct Graph {
     exec: Executor,
     _ed: Editor,

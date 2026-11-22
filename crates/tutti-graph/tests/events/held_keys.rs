@@ -1835,7 +1835,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
             &mut [&mut out_buf[..]],
         );
     }
-    ed.fork(ForkTarget::Master, ForkMode::Offline, prep)
+    ed.fork(ForkTarget::MainOutput, ForkMode::Offline, prep)
         .expect("forks")
 }
 

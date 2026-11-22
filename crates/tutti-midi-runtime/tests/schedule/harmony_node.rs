@@ -285,7 +285,7 @@ fn a_fork_sends_the_lanes_as_they_stood() {
     let (live, _exec, controls, seen) = rig(HarmonyNode::new(changes(lanes())), 512);
     let prepare = *live.prepare();
     let (_fork, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Live, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Live, prepare)
         .expect("forks");
     publish(&controls, [at(0, G)]);
     block(&mut fork_exec, 512, rolling(0));

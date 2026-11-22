@@ -83,7 +83,7 @@ fn an_in_process_instrument_without_a_live_render_mode_bounces_its_clip() {
         loop_range: None,
     }));
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(1.5)))
         .sample_rate(RATE)

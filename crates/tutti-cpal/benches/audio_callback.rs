@@ -130,7 +130,7 @@ fn bench_vs_render(c: &mut Criterion) {
 /// A closed tap is not in the plan, so it costs nothing. This prices the
 /// graph's tap op when it is open on both outputs, aligned and never drained
 /// (the ring fills and the op counts what it drops): the figure a host
-/// recording the master bus pays.
+/// recording the main output bus pays.
 fn bench_tap(c: &mut Criterion) {
     let mut group = c.benchmark_group("callback/tap");
     const FRAMES: usize = 256;

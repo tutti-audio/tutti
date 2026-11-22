@@ -176,7 +176,7 @@ fn main() -> tutti_export::Result<()> {
                 &mut graph,
                 &cfg.job(),
                 &tutti_timeline::FrozenClock,
-                Output::master(cfg.file_target(dir.join(&name), None)),
+                Output::main_output(cfg.file_target(dir.join(&name), None)),
                 &mut Control::none(),
             )?
             .into_finished()

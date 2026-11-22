@@ -638,7 +638,7 @@ fn a_failed_forks_server_is_reaped() {
     assert_eq!(children(), baseline, "a failed fork's server is reaped");
 }
 
-/// A live graph holding the plugin at key 9 on the master, to export from.
+/// A live graph holding the plugin at key 9 on the main output, to export from.
 fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
     let (mut live, exec) = Editor::new(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
@@ -658,11 +658,11 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
     (live, exec)
 }
 
-/// The master of `live` forked offline at `rate`: the pair an export
+/// The main output of `live` forked offline at `rate`: the pair an export
 /// assembles.
 fn fork_pair(live: &Editor, rate: SampleRate) -> (Editor, tutti_graph::Executor) {
     live.fork(
-        ForkTarget::Master,
+        ForkTarget::MainOutput,
         ForkMode::Offline,
         tutti_export::RenderGraph::prepare(rate),
     )
@@ -687,7 +687,7 @@ fn render_to_buffers(
         &mut graph,
         &config.0,
         clock,
-        tutti_export::Output::master(tutti_export::BufferTarget::new(config.1)),
+        tutti_export::Output::main_output(tutti_export::BufferTarget::new(config.1)),
         &mut tutti_export::Control::none(),
     )
     .map(|outcome| outcome.map(|produced| produced.into_buffers().expect("a buffers output")))
@@ -995,7 +995,7 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             ..Default::default()
         }));
         let (_fork_ed, mut fork_exec) = live
-            .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+            .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
             .expect("forks");
 
         let mut out = Vec::new();
@@ -1084,7 +1084,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
         ..Default::default()
     }));
     let (_fork_ed, mut fork_exec) = live
-        .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+        .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
         .expect("a clip node and a plugin fork");
 
     let mut out = Vec::new();
@@ -1106,7 +1106,7 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
 }
 
 /// Records the MIDI reaching its event input as `(frame, first word)`, and
-/// renders a silent mono output so a `Master` fork takes it. Forked by clone:
+/// renders a silent mono output so a `MainOutput` fork takes it. Forked by clone:
 /// the fork records into the same list.
 #[derive(Clone)]
 struct MidiSink(tutti_fixtures::Record<(u64, u32)>);
@@ -1209,7 +1209,7 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             ..Default::default()
         }));
         let (_fork_ed, mut fork_exec) = live
-            .fork(ForkTarget::Master, ForkMode::Offline, prepare)
+            .fork(ForkTarget::MainOutput, ForkMode::Offline, prepare)
             .expect("a clip, a plugin and a sink fork");
 
         let mut out = Vec::new();
@@ -1376,7 +1376,7 @@ fn a_live_fork_of_a_served_plugin_told_offline_is_offline() {
     let (live, _exec) = live_graph(probe.client);
     let (editor, executor) = live
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Live,
             Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))),
         )

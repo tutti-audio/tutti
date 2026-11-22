@@ -130,22 +130,22 @@ fn level(m: &mut MeterReader) -> Vec<(f64, f64, usize)> {
 
 /// A constant reads its peak and RMS exactly, on the outputs and on a node
 /// port, per channel: six outputs hold 2^-1 .. 2^-6 and each reads its own.
-/// The master reads what the outputs carry, and the outputs are untouched.
+/// The main output reads what the outputs carry, and the outputs are untouched.
 #[test]
 fn a_constant_reads_exactly_per_channel() {
     let mut r = rig(1, false);
     let values: Vec<f32> = (1..=6).map(|k| 0.5f32.powi(k)).collect();
     constants(&mut r, &values);
-    let mut master =
+    let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut track =
         r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(3), out(1)]))
             .expect("the sources exist");
-    master.enable();
+    main_output.enable();
     track.enable();
     commit(&mut r);
-    assert_eq!(master.channels(), 6);
+    assert_eq!(main_output.channels(), 6);
     assert_eq!(track.channels(), 2);
 
     let outs = block(&mut r, 100);
@@ -154,7 +154,7 @@ fn a_constant_reads_exactly_per_channel() {
     }
     let at = |v: f32| (f64::from(v), f64::from(v), 100);
     let want: Vec<(f64, f64, usize)> = values.iter().map(|&v| at(v)).collect();
-    assert_eq!(level(&mut master), want);
+    assert_eq!(level(&mut main_output), want);
     assert_eq!(
         level(&mut track),
         vec![at(values[2]), at(values[0])],
@@ -272,10 +272,10 @@ fn an_enabled_meter_reads_the_block() {
     );
 }
 
-/// The master meter follows the outputs: rewiring a channel to silence reads
+/// The main output meter follows the outputs: rewiring a channel to silence reads
 /// zero, and a wider output set widens the meter.
 #[test]
-fn the_master_follows_the_outputs() {
+fn the_main_output_follows_the_outputs() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
     let mut m =
@@ -446,7 +446,7 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
 /// meters `mode` asks for declared and enabled. Three paths from one varying
 /// input: latent by 30 and by 11 frames, and bare (delayed to meet the
 /// slowest), ragged block sizes, stopped blocks and a seek.
-fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
+fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
     let mut r = rig(workers, workers > 1);
     r.ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     let mut outputs = Vec::new();
@@ -480,7 +480,7 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     }
     r.ed.spec_mut().topology.set_outputs(outputs.clone());
     let mut readers = Vec::new();
-    if master {
+    if main_output {
         readers.push(
             r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
                 .expect("the sources exist"),
@@ -521,21 +521,25 @@ fn output_bits(workers: usize, master: bool, track: bool) -> Vec<u32> {
     bits
 }
 
-/// **A meter changes no output bit.** With latency on two of three master
+/// **A meter changes no output bit.** With latency on two of three main output
 /// paths, ragged blocks, stopped blocks and a seek, the outputs are identical
-/// with no meter, a master meter, an aligned track meter and both, serial and
+/// with no meter, a main output meter, an aligned track meter and both, serial and
 /// on a pool of three inside `assert_no_alloc`.
 #[test]
 fn a_meter_changes_no_output_bit() {
     let bare = output_bits(1, false, false);
     assert!(bare.iter().any(|&b| f32::from_bits(b) != 0.0), "signal");
-    for (master, track) in [(true, false), (false, true), (true, true)] {
+    for (main_output, track) in [(true, false), (false, true), (true, true)] {
         assert_eq!(
-            output_bits(1, master, track),
+            output_bits(1, main_output, track),
             bare,
-            "serial {master} {track}"
+            "serial {main_output} {track}"
         );
-        assert_eq!(output_bits(3, master, track), bare, "pool {master} {track}");
+        assert_eq!(
+            output_bits(3, main_output, track),
+            bare,
+            "pool {main_output} {track}"
+        );
     }
     assert_eq!(output_bits(3, false, false), bare, "pool, no meter");
 }
@@ -605,9 +609,9 @@ impl Node for Burst {
     fn reset(&mut self) {}
 }
 
-/// **The master reads what the outputs carry, at the outputs' time.** With a
+/// **The main output reads what the outputs carry, at the outputs' time.** With a
 /// latent node on one path the compiler delays the other output to meet it;
-/// the master meter reads each channel after that delay, so a pulse that the
+/// the main output meter reads each channel after that delay, so a pulse that the
 /// output carries at frames 30..80 reads at 30..80, not 0..50 (a meter that
 /// ran ahead of the audio would go quiet while delayed audio still plays).
 /// A raw track meter on the same source reads the pulse where it leaves the
@@ -616,7 +620,7 @@ impl Node for Burst {
 /// 40-frame block, 50-frame pulse, 30 frames of latency: the aligned lane has
 /// 10 ones in the first block (RMS 0.5), the raw one 40 (RMS 1.0).
 #[test]
-fn the_master_reads_at_the_outputs_time() {
+fn the_main_output_reads_at_the_outputs_time() {
     let mut r = rig(1, false);
     r.ed.insert(NodeKey(1), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
@@ -630,7 +634,7 @@ fn the_master_reads_at_the_outputs_time() {
     );
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
     r.ed.spec_mut().topology.set_outputs(vec![out(3), out(1)]);
-    let mut master =
+    let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut raw =
@@ -639,7 +643,7 @@ fn the_master_reads_at_the_outputs_time() {
     let mut aligned =
         r.ed.open_meter(MeterId::of(3), MeterSpec::aligned(vec![out(1)]))
             .expect("the sources exist");
-    for m in [&master, &raw, &aligned] {
+    for m in [&main_output, &raw, &aligned] {
         m.enable();
     }
     commit(&mut r);
@@ -649,7 +653,7 @@ fn the_master_reads_at_the_outputs_time() {
     assert!(outs[1][30..].iter().all(|&s| s == 1.0));
     let tenth = (10.0f64 / 40.0).sqrt();
     assert_eq!(
-        level(&mut master),
+        level(&mut main_output),
         vec![(1.0, tenth, 40), (1.0, tenth, 40)],
         "both outputs at the outputs' time"
     );
@@ -667,7 +671,7 @@ fn the_master_reads_at_the_outputs_time() {
     block(&mut r, 40);
     assert_eq!(level(&mut raw), vec![(1.0, (10.0f64 / 40.0).sqrt(), 40)]);
     assert_eq!(
-        level(&mut master)[1],
+        level(&mut main_output)[1],
         (1.0, 1.0, 40),
         "still playing at frame 79"
     );
@@ -713,7 +717,7 @@ fn a_meter_can_be_redeclared() {
 }
 
 /// A meter's lanes are fixed by how it was opened: editing a `Ports` list to
-/// another length, or growing the outputs a master follows past the cells, is
+/// another length, or growing the outputs a main output follows past the cells, is
 /// refused at the commit.
 #[test]
 fn a_meter_cannot_change_its_width_under_its_cells() {
@@ -739,7 +743,7 @@ fn a_meter_cannot_change_its_width_under_its_cells() {
     );
     r.ed.close_meter(MeterId::of(1)).unwrap();
 
-    let _master =
+    let _main_output =
         r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
     r.ed.spec_mut()
@@ -769,8 +773,12 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
     assert_eq!(level(&mut live), vec![(0.5, 0.5, 32)]);
 
     let (mut fed, fexec) =
-        r.ed.fork(ForkTarget::Master, ForkMode::Offline, prepare(MAX_BLOCK))
-            .expect("forks");
+        r.ed.fork(
+            ForkTarget::MainOutput,
+            ForkMode::Offline,
+            prepare(MAX_BLOCK),
+        )
+        .expect("forks");
     assert!(
         fed.spec().topology.meters.is_empty(),
         "the live meter is not in the fork"
@@ -797,7 +805,7 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
 }
 
 /// Six chains with different gains and lags, summed in no way: every output
-/// has its own signal. Metered by a master and a track meter, serial and then
+/// has its own signal. Metered by a main output and a track meter, serial and then
 /// on a pool; the readings of every block are identical bit for bit.
 fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     let values: Vec<f32> = (0..6).map(|k| 0.1 + 0.13 * k as f32).collect();
@@ -812,20 +820,20 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
         vec![Edge::Direct(out(1))],
     );
     r.ed.spec_mut().topology.outputs[5] = vec![out(20)];
-    let mut master =
+    let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
     let mut track =
         r.ed.open_meter(MeterId::of(2), MeterSpec::raw(vec![out(2), out(20)]))
             .expect("the sources exist");
-    master.enable();
+    main_output.enable();
     track.enable();
     commit(r);
     assert_eq!(r.exec.is_parallel(), r.gated, "a pool was set iff gated");
     let mut read = Vec::new();
     for i in 0..blocks {
         block(r, 100 + 13 * i);
-        read.push(master.read());
+        read.push(main_output.read());
         read.push(track.read());
         r.ed.collect();
     }

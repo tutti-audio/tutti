@@ -20,7 +20,7 @@ use tutti_graph::contract::Direct;
 use tutti_graph::{Event, Node, Offset};
 use tutti_midi_runtime::TimedMidiEvent;
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig};
-use tutti_session::BufferMaster;
+use tutti_session::BufferMainOutput;
 use tutti_session::{
     Bounce, BounceLatency, BounceTail, DetachedSession, ExportClock, Range, Session, Stem,
 };
@@ -41,9 +41,9 @@ const PRESET: U7 = U7::of(24);
 
 /// A bounce of the mix into memory for `seconds` at `rate`: stereo, trimming
 /// nothing and keeping no tail, on `clock`.
-fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMaster> {
+fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, BufferMainOutput> {
     Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .channels(ChannelLayout::STEREO)
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(seconds)))
         .sample_rate(SampleRate::of(rate))
@@ -52,18 +52,21 @@ fn bounce_of(seconds: f64, rate: f64, clock: ExportClock) -> Bounce<NodeKey, Buf
         .tail(BounceTail::None)
 }
 
-fn render(session: &mut DetachedSession, bounce: Bounce<NodeKey, BufferMaster>) -> Vec<Vec<f32>> {
+fn render(
+    session: &mut DetachedSession,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
+) -> Vec<Vec<f32>> {
     bounced(session, bounce)
         .expect("the bounce renders")
-        .into_master()
+        .into_main_output()
         .into_planes()
 }
 
-/// The planes of the one stem `bounce` names, in memory: the master is
+/// The planes of the one stem `bounce` names, in memory: the main output is
 /// rendered beside it and dropped.
 fn render_stem(
     session: &mut DetachedSession,
-    bounce: Bounce<NodeKey, BufferMaster>,
+    bounce: Bounce<NodeKey, BufferMainOutput>,
 ) -> Vec<Vec<f32>> {
     let (_, mut stems) = bounced(session, bounce)
         .expect("the bounce renders")
@@ -169,7 +172,7 @@ fn timeline(rate: f64) -> Arc<OfflineTimeline> {
 }
 
 /// Export the mix for 0.8 s at `rate` against [`timeline`].
-fn request(rate: f64) -> Bounce<NodeKey, BufferMaster> {
+fn request(rate: f64) -> Bounce<NodeKey, BufferMainOutput> {
     bounce_of(0.8, rate, ExportClock::timeline(timeline(rate)))
 }
 
@@ -231,7 +234,7 @@ fn assert_live_untouched(session: &mut DetachedSession) {
 }
 
 /// **An exported `PolySynth` plays its clip**, on the render's timeline
-/// and at the render's rate: a master export at 48 and 96 kHz is silent
+/// and at the render's rate: a main output export at 48 and 96 kHz is silent
 /// until beat 1 and then, sample for sample, what the synth renders for
 /// the note re-rated to the render's rate. The live synth keeps its clip.
 #[test]

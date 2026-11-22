@@ -243,10 +243,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rendering = session.bounce(
         Bounce::new()
             .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)))
-            .master(out.as_path(), Format::Wav(Pcm::Int24)),
+            .main_output(out.as_path(), Format::Wav(Pcm::Int24)),
     )?;
     let rendered = block_on(rendering.into_future());
-    let written = session.apply(rendered)?.into_master();
+    let written = session.apply(rendered)?.into_main_output();
     println!("wrote {} ({} bytes)", written.path.display(), written.bytes);
     Ok(())
 }

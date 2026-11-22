@@ -118,12 +118,12 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let rendering = s.bounce(
         Bounce::new()
             .range(Beat::new(0.0)..Beat::new(8.0))
-            .master(&path, Format::Wav(Pcm::Int24)),
+            .main_output(&path, Format::Wav(Pcm::Int24)),
     )?;
     // The render runs on a thread the session starts; an app awaits it on its own
     // executor, here the simplest one.
     let rendered = block_on(rendering.into_future());
-    Ok(s.apply(rendered)?.into_master())
+    Ok(s.apply(rendered)?.into_main_output())
 }
 
 #[cfg(test)]

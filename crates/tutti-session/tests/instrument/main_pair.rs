@@ -58,11 +58,11 @@ fn the_pair_a_node_names_is_the_one_played() {
     assert_eq!((rig.left[at], rig.right[at]), (3.0, 4.0));
 }
 
-/// `add_instrument` wires the strip to the master and `add_instrument_unwired`
+/// `add_instrument` wires the strip to the main output and `add_instrument_unwired`
 /// leaves it for the mix: the unwired one is silent at the main output until its strip
 /// is connected, then plays the same pair.
 #[test]
-fn only_add_instrument_wires_the_strip_to_the_master() {
+fn only_add_instrument_wires_the_strip_to_the_main_output() {
     let mut session = crate::instrument_support::rig::offline_session();
     let handle = session
         .add_instrument_unwired(Dressed(ForkByClone(Five)))

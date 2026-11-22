@@ -27,10 +27,10 @@ impl Node for Rated {
 
 fn bounce_at(session: &mut DetachedSession, rate: SampleRate) -> Result<usize, BounceError> {
     let bounce = Bounce::new()
-        .master_buffers()
+        .main_output_buffers()
         .range(Range::Seconds(Seconds::new(0.0), Seconds::new(0.25)))
         .sample_rate(rate);
-    Ok(bounced(session, bounce)?.into_master().into_planes()[0].len())
+    Ok(bounced(session, bounce)?.into_main_output().into_planes()[0].len())
 }
 
 /// **A fork refuses a rate outside a node's declared rates and renders at one

@@ -719,7 +719,7 @@ fn the_fork_is_silent() {
     commit(&mut ed, &mut exec);
     let (mut fed, mut fexec) = ed
         .fork(
-            ForkTarget::Master,
+            ForkTarget::MainOutput,
             ForkMode::Offline,
             common::prepare(MAX_BLOCK),
         )
