@@ -44,7 +44,8 @@ fn pairing() -> (Instant, i64) {
 
 /// The [`Instant`] of a [`monotonic_ns`] reading: [`Instant`] and the OS
 /// monotonic clock are one timebase on a native target, related by the one
-/// pairing of the two, so the conversion is an offset. `None` where the result
+/// pairing of the two, so the conversion is an offset, exact to the gap between
+/// the pairing's two reads. `None` where the result
 /// is beyond what an `Instant` holds.
 #[must_use]
 pub fn instant_of_monotonic_ns(ns: i64) -> Option<Instant> {
