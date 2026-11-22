@@ -21,5 +21,6 @@ mod max_decay;
 mod system;
 
 pub use lti::Lti;
+pub(crate) use lti::{peak_magnitude, single_output};
 pub use max_decay::{MaxDecay, MaxDecayError};
 pub use system::{DecayTime, System, TAIL_FLOOR};

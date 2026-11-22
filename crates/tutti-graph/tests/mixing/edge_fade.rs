@@ -15,7 +15,7 @@ use tutti_graph::{
     Edge, EdgeFade, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSink, PortSource,
     TransportPosition, Unforkable,
 };
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 const BLOCK: usize = 64;
 /// `DECLICK` at the rig's 48 kHz.
@@ -95,7 +95,7 @@ fn a_fade_in_rises_along_the_smootherstep_and_reaches_its_weight_at_declick() {
     assert_eq!(common::declick(), SPAN, "the rig's rate");
     let mut rig = Rig::new(&[1.0]);
     rig.ed
-        .set_edge_gain(output_edge(1), Amplitude::new(0.5))
+        .set_edge_gain(output_edge(1), Gain::new(0.5))
         .expect("the edge exists");
     rig.ed
         .set_edge_fade(output_edge(1), EdgeFade::In)
@@ -122,7 +122,7 @@ fn a_fade_in_rises_along_the_smootherstep_and_reaches_its_weight_at_declick() {
 fn a_commit_that_differs_only_in_an_edge_fade_sends_no_plan() {
     let mut rig = Rig::new(&[1.0]);
     rig.ed
-        .set_edge_gain(output_edge(1), Amplitude::new(0.5))
+        .set_edge_gain(output_edge(1), Gain::new(0.5))
         .expect("the edge exists");
     rig.commit();
     let before = rig.exec.plan().expect("applied").clone();
@@ -262,7 +262,7 @@ fn parallel_equals_serial_for_a_graph_mid_fade() {
                 EdgeFade::Out
             };
             ed.set_edge_fade(output_edge(k), fade).expect("edge");
-            ed.set_edge_gain(output_edge(k), Amplitude::new(0.25 * k as f64))
+            ed.set_edge_gain(output_edge(k), Gain::new(0.25 * k as f64))
                 .expect("edge");
         }
         ed.commit().expect("commits");

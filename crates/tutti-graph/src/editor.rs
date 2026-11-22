@@ -93,7 +93,7 @@ use link::Link;
 use outlets::Outlets;
 use placements::Placements;
 use tutti_buffers::MAX_CHANNELS;
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 pub use unwired::{Inserted, Unwired};
 
 /// The host's side of a main output generation: whether it has published the folds
@@ -287,7 +287,7 @@ struct Fading {
     /// The old main output's spec and shapes.
     was: lifecycle::Committed,
     /// The base of each gain lane of `was`'s spec when the crossfade began.
-    bases: BTreeMap<EdgeId, Amplitude>,
+    bases: BTreeMap<EdgeId, Gain>,
     /// The fade of each gain lane of `was`'s spec that ran one when the
     /// crossfade began.
     fades: BTreeMap<EdgeId, EdgeFade>,
@@ -519,6 +519,14 @@ impl<F: Float> Editor<F> {
     /// [`insert`](Self::insert), not here, so every node has a unit.
     /// Moves the [`revision`](Self::revision), whether or not the borrow
     /// writes.
+    ///
+    /// A gain entry is declared by the editor, which makes its cell
+    /// ([`set_edge_gain`](Self::set_edge_gain),
+    /// [`set_edge_gain_range`](Self::set_edge_gain_range),
+    /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
+    /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
+    /// and never write [`GraphSpec::gains`] through this borrow. A commit
+    /// that finds an entry without its cell makes one from the values.
     pub fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec
@@ -822,7 +830,7 @@ impl<F: Float> Editor<F> {
 
 /// The weighted lanes a lowering made, by edge: the fold's weight and the fade
 /// the lane runs.
-type BusLanes = BTreeMap<EdgeId, (Amplitude, EdgeFade)>;
+type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 
 /// The crossfades `delta` starts: one per fade that is not a plain swap.
 /// Each is built into the commit and comes back once on the fade-return

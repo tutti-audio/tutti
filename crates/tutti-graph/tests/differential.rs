@@ -26,7 +26,7 @@ use tutti_graph::{
     Edge, EdgeGain, EdgeId, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSink, PortSource,
 };
 use tutti_graph::{EventEdge, EventInputPort, EventOutputPort, GraphSpec, Unforkable};
-use tutti_units::{Amplitude, Samples};
+use tutti_units::{Gain, Samples};
 
 use tutti_graph::Node;
 use tutti_rt::SplitMix64;
@@ -73,7 +73,7 @@ struct Desc {
     /// to) where they were.
     fan: Rng,
     /// The base of each gain lane: the editor's, not the spec's.
-    bases: BTreeMap<EdgeId, Amplitude>,
+    bases: BTreeMap<EdgeId, Gain>,
     /// The range of each gain lane.
     gain_ranges: BTreeMap<EdgeId, tutti_graph::ParamRange>,
     /// The range of each node's mix port.
@@ -2295,7 +2295,7 @@ fn weigh(desc: &mut Desc, rng: &mut Rng) {
         if rng.chance(33) && !desc.spec.gains.contains_key(&id) {
             let w = WEIGHTS[rng.below(WEIGHTS.len() as u64) as usize];
             desc.spec.set_edge_gain(id, EdgeGain::default());
-            desc.bases.insert(id, Amplitude::new(w));
+            desc.bases.insert(id, Gain::new(w));
         }
     }
 }
@@ -2336,7 +2336,7 @@ proptest! {
                 if gains.chance(40)
                     && let Some(id) = gains.pick(&desc.spec.gains.keys().copied().collect::<Vec<_>>())
                 {
-                    let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }
@@ -2379,7 +2379,7 @@ proptest! {
                 if gains.chance(40)
                     && let Some(id) = gains.pick(&desc.spec.gains.keys().copied().collect::<Vec<_>>())
                 {
-                    let w = Amplitude::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[gains.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }
@@ -2492,7 +2492,7 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
         });
         let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
         desc.gain_ranges
-            .insert(id, tutti_graph::ParamRange::new(min, max));
+            .insert(id, tutti_graph::ParamRange::of(min, max));
     }
 }
 
@@ -2537,14 +2537,14 @@ proptest! {
                     && let Some(id) = lanes.pick(&ids)
                 {
                     let (min, max) = LANE_RANGES[lanes.below(LANE_RANGES.len() as u64) as usize];
-                    let range = tutti_graph::ParamRange::new(min, max);
+                    let range = tutti_graph::ParamRange::of(min, max);
                     pair.set_edge_gain_range(id, range);
                     desc.gain_ranges.insert(id, range);
                 }
                 if lanes.chance(30)
                     && let Some(id) = lanes.pick(&ids)
                 {
-                    let w = Amplitude::new(WEIGHTS[lanes.below(WEIGHTS.len() as u64) as usize]);
+                    let w = Gain::new(WEIGHTS[lanes.below(WEIGHTS.len() as u64) as usize]);
                     pair.set_edge_gain(id, w);
                     desc.bases.insert(id, w);
                 }
@@ -2814,7 +2814,7 @@ fn drive_mixes(desc: &mut Desc, rng: &mut Rng) {
         if rng.chance(50) {
             let (min, max) = LANE_RANGES[rng.below(LANE_RANGES.len() as u64) as usize];
             desc.port_ranges
-                .insert(at, tutti_graph::ParamRange::new(min, max));
+                .insert(at, tutti_graph::ParamRange::of(min, max));
         }
     }
 }
@@ -2871,7 +2871,7 @@ proptest! {
                     && let Some(key) = draws.pick(&desc.order)
                 {
                     let (min, max) = LANE_RANGES[draws.below(LANE_RANGES.len() as u64) as usize];
-                    let range = tutti_graph::ParamRange::new(min, max);
+                    let range = tutti_graph::ParamRange::of(min, max);
                     pair.set_mix_range(key, range);
                     desc.port_ranges.insert(mix_port(key), range);
                 }

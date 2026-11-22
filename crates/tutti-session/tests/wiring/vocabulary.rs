@@ -13,7 +13,7 @@ use tutti_session::{
     ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainInput, MainOutput,
     OutputPort, Session,
 };
-use tutti_units::Amplitude;
+use tutti_units::Gain;
 
 /// The first frame of a committed 64-frame block, per channel.
 fn first_frame(s: &mut Session) -> [f32; 2] {
@@ -128,7 +128,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
         .connect(src.output(0), MainOutput::channel(0))
         .unwrap()
         .unfaded()
-        .gain(Amplitude::new(0.5))
+        .gain(Gain::new(0.5))
         .unwrap();
     assert_eq!(first_frame(&mut s), [0.25, 0.0]);
     let edge = ChannelEdge::new(src.output(0), MainOutput::channel(0));
@@ -136,7 +136,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
         .graph_ref()
         .gain_target(edge.source(), edge.sink())
         .expect("a lane");
-    assert_eq!(s.get(gain).unwrap(), Amplitude::new(0.5));
+    assert_eq!(s.get(gain).unwrap(), Gain::new(0.5));
     assert!(edge.clear_gain(s.graph()));
     assert_eq!(
         s.graph_ref().gain_target(edge.source(), edge.sink()),
@@ -150,7 +150,7 @@ fn a_connections_gain_weights_the_edge_it_added() {
             .connect(other.output(0), MainOutput::channel(1))
             .unwrap()
             .unfaded()
-            .gain(Amplitude::new(f64::NAN))
+            .gain(Gain::new(f64::NAN))
             .err(),
         Some(DeclarationError::NotFinite)
     );

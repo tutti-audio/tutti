@@ -210,10 +210,10 @@ impl LaneControls {
     /// Sets a plugin lane's range: the span its offsets scale by and the
     /// clamp, from the next block. `false` for a native lane, whose range is
     /// its port's (`Editor::set_param_range`), and for an unranged one.
-    pub(crate) fn set_range(&self, min: f64, max: f64) -> bool {
+    pub(crate) fn set_range(&self, range: ParamRange) -> bool {
         match &self.0.range {
             RangeSource::Own(c) => {
-                c.publish(ParamRange::new(min, max));
+                c.publish(range);
                 true
             }
             _ => false,
@@ -223,7 +223,7 @@ impl LaneControls {
     /// The range the lane reads, `(min, max)`; unbounded when it has none.
     pub fn range(&self) -> (f64, f64) {
         let r = self.0.range.current();
-        (r.min, r.max)
+        (r.min(), r.max())
     }
 
     /// Blocks whose grid the lane thinned to stay within
@@ -1121,7 +1121,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
             .map(|k| k.load(Ordering::Acquire))
             .filter(|k| k.is_finite());
         let live = self.range.load();
-        let range = (live.min, live.max);
+        let range = (live.min(), live.max());
         let span = live.view(s.unit).span();
         let span = if span.is_finite() && span >= 0.0 {
             span
@@ -1309,7 +1309,7 @@ mod tests {
         let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
             ParamId::new(0),
             ControlProgram::default(),
-            ParamRange::new(0.0, 1.0),
+            ParamRange::of(0.0, 1.0),
         ));
         let controls = node.controls();
         let first = program();
@@ -1332,7 +1332,7 @@ mod tests {
         let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
             ParamId::new(0),
             ControlProgram::default(),
-            ParamRange::new(0.0, 1.0),
+            ParamRange::of(0.0, 1.0),
         ));
         let controls = node.controls();
         let RangeSource::Own(cell) = &controls.0.range else {
@@ -1344,7 +1344,7 @@ mod tests {
                 panic!("a plugin lane reads its own cell");
             };
             let _held = reader.lend();
-            assert!(controls.set_range(0.25, 0.75));
+            assert!(controls.set_range(ParamRange::of(0.25, 0.75)));
         }
         assert_eq!(cell.retired_len(), 1, "retired, pinned until a scan");
         assert_eq!(controls.reclaim(), 0);
@@ -1359,19 +1359,19 @@ mod tests {
             ForeignLaneConfig::new(
                 ParamId::new(1),
                 ControlProgram::default(),
-                ParamRange::new(0.0, 1.0),
+                ParamRange::of(0.0, 1.0),
             )
             .knob(0.25),
         );
         let c = plugin.controls();
-        assert!(c.set_range(0.1, 0.9));
+        assert!(c.set_range(ParamRange::of(0.1, 0.9)));
         assert_eq!(c.range(), (0.1, 0.9));
         let unranged = ControlLaneNode::from(UnitLaneConfig::new(
             tutti_units::UnitAddr::first(tutti_units::UnitParam::Cutoff),
             ControlProgram::default(),
         ));
         assert!(
-            !unranged.controls().set_range(0.0, 1.0),
+            !unranged.controls().set_range(ParamRange::of(0.0, 1.0)),
             "no range cell to set"
         );
     }

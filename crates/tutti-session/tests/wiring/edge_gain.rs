@@ -17,14 +17,14 @@ use tutti_session::{
     ChannelEdge, DeclarationError, GainTarget, GainTargetError, InputPort, MainOutput, OutputPort,
     Replacement, Session, SetRefusal, ValueErrorKind,
 };
-use tutti_units::{Amplitude, Samples};
+use tutti_units::{Gain, Samples};
 
 const A: f32 = 0.25;
 const B: f32 = 0.5;
 const BLOCK: usize = 64;
 
-fn amp(x: f64) -> Amplitude {
-    Amplitude::new(x)
+fn amp(x: f64) -> Gain {
+    Gain::new(x)
 }
 
 /// Commits and renders two blocks, so a weight that moved has finished its
@@ -80,7 +80,7 @@ impl Rig {
     }
 
     /// The value of the gain lane of `from`'s edge into the sink.
-    fn gain_of(&self, from: NodeKey) -> Amplitude {
+    fn gain_of(&self, from: NodeKey) -> Gain {
         let edge = self.edge_from(from);
         let target = self
             .s
