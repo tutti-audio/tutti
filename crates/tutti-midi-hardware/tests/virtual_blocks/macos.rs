@@ -259,19 +259,28 @@ pub fn what_is_written_to_an_endpoints_destination_reaches_its_producer() {
         .collect();
     let burst: Vec<(Offset, Ump)> = sent.iter().map(|&note| (Offset::ZERO, note)).collect();
     assert_eq!(out.queue(&burst).packets(), usize::from(BURST));
+    // The deadline only guards a hang: what arrived is asserted after it, so a
+    // short burst names what came instead.
+    let start = tutti_platform::Instant::now();
     let mut heard = Vec::new();
-    tutti_fixtures::wait_until("the whole burst reaches the producer", PATIENCE, || {
-        heard.extend(
-            graph
-                .listen(Duration::from_millis(20))
-                .into_iter()
-                .filter(|ump| sent.contains(ump)),
-        );
-        heard.len() >= sent.len()
-    });
+    let mut others = Vec::new();
+    while heard.len() < sent.len() && start.elapsed() < PATIENCE {
+        for ump in graph.listen(Duration::from_millis(20)) {
+            if sent.contains(&ump) {
+                heard.push(ump);
+            } else {
+                others.push(ump);
+            }
+        }
+    }
     assert_eq!(
-        heard, sent,
-        "every note of the burst arrived once, in order"
+        heard,
+        sent,
+        "every note of the burst arrived once, in order; {} of {} arrived, and {} other messages: {:?}",
+        heard.len(),
+        sent.len(),
+        others.len(),
+        &others[..others.len().min(12)]
     );
     assert!(endpoint.is_alive());
 }
