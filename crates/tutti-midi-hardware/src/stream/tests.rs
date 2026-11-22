@@ -1291,3 +1291,38 @@ fn a_poll_that_moves_the_deadline_earlier_rings_and_one_that_does_not_is_quiet()
     wire.poll(step);
     assert!(!rung(&mut listener), "a later deadline");
 }
+
+/// The port copies the device's SysEx7 packets before the first MIDI-CI message
+/// goes out, so a peer that answers at once is not lost: in the poll whose
+/// Discovery the device receives, a packet the device sends is already kept in
+/// the stream ring.
+#[test]
+fn the_port_copies_sysex_before_the_first_discovery_is_sent() {
+    let mut wire = session_over_ci(
+        midi2(),
+        PortDirection::Duplex,
+        silent_device(),
+        Some(identity()),
+    );
+    wire.open();
+    let step = STEP_TIMEOUT.as_millis() as u64;
+    let port = wire.session.ports().list_input_ports()[0].id;
+    let packet = identity_reply(0)[0];
+
+    for ms in (0..=3).map(|n| n * step) {
+        wire.poll(ms);
+        let sent = received(&wire);
+        if sent.iter().all(|ump| ump.message_type() != 3) {
+            continue;
+        }
+        // The device answers the Discovery at once.
+        assert!(wire.counters.send_input(wire.raw, packet, wire.at(ms)));
+        assert_eq!(
+            wire.session.ports().drain_stream(port).collect::<Vec<_>>(),
+            [packet],
+            "the copy was on when the Discovery went out"
+        );
+        return;
+    }
+    panic!("MIDI-CI never started");
+}
