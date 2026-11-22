@@ -27,6 +27,11 @@ pub(crate) trait Unanswered {
 
 /// `work` over `input`, run as a task on the session's executor and awaited.
 ///
+/// This is the feeder of every future built on it (`Analyzing`, `Bouncing`,
+/// `LoadingAudio`, `LoadingSoundFont`, `LoadingMidi`, `OpeningStream`): the work runs as a blocking task of the executor (`Executor::unblock`, a
+/// pool thread on a native target, the page's queue on the web), and its reply
+/// wakes the awaiting task. Those futures need no `Session::update`.
+///
 /// The first poll upgrades the executor's weak handle for the spawn only, starts
 /// a task that owns the sender of a oneshot and detaches it, and awaits the
 /// receiver. **The task fills the sender**: it checks that the receiver is still
