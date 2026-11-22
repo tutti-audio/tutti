@@ -42,7 +42,8 @@ impl FrameProgress {
     /// Steps up to `frames` frames, stopping at arrival, and returns how many
     /// were taken: fewer than `frames` when the move arrived on the way.
     pub fn advance(&mut self, frames: Samples) -> Samples {
-        let remaining = Samples::new(self.length.saturating_sub(self.done).get().ceil() as usize);
+        let remaining =
+            Samples::new(libm::ceil(self.length.saturating_sub(self.done).get()) as usize);
         let taken = frames.min(remaining);
         self.done += SampleSpan::from_samples(taken);
         taken
