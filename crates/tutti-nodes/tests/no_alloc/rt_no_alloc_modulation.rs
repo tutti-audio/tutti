@@ -103,7 +103,6 @@ fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
         DelayConfig::new(DelayLayout::new(
             BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus"),
             MaxDelay::of(Seconds::new(2.0)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(time),
@@ -409,28 +408,20 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     };
     use tutti_units::{Beat, Hz, ParamKey, Samples, UnitParam};
     let mut shaped = Trajectory::new();
-    shaped.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Hz::new(0.0),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
-    shaped.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.25),
-        Hz::new(1.0),
-        Law::PowerOut(Exponent::of(3.0)),
-    ));
-    shaped.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.4),
-        Hz::new(0.2),
-        Law::PowerInOut(Exponent::of(2.0)),
-    ));
+    shaped.add_breakpoint(
+        Breakpoint::new(Beat::new(0.0), Hz::new(0.0)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
+    shaped.add_breakpoint(
+        Breakpoint::new(Beat::new(0.25), Hz::new(1.0)).law(Law::PowerOut(Exponent::of(3.0))),
+    );
+    shaped.add_breakpoint(
+        Breakpoint::new(Beat::new(0.4), Hz::new(0.2)).law(Law::PowerInOut(Exponent::of(2.0))),
+    );
     shaped.add_breakpoint(Breakpoint::new(Beat::new(0.55), Hz::new(0.9)));
     let mut clamped = Trajectory::new().with_range(Hz::new(0.0), Hz::new(0.5));
-    clamped.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.1),
-        Hz::new(0.0),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
+    clamped.add_breakpoint(
+        Breakpoint::new(Beat::new(0.1), Hz::new(0.0)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
     clamped.add_breakpoint(Breakpoint::new(Beat::new(0.45), Hz::new(1.0)));
     let key = ParamKey::<Hz>::CUTOFF;
     let lane = |curve: Arc<dyn Curve>| {
@@ -688,11 +679,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
         3 => (None, vec![layer(seconds, shape(LfoShape::RandomSmooth))]),
         _ => {
             let mut e = Trajectory::new();
-            e.add_breakpoint(Breakpoint::with_law(
-                Beat::new(0.0),
-                Hz::new(200.0),
-                Law::PowerIn(Exponent::of(2.0)),
-            ));
+            e.add_breakpoint(
+                Breakpoint::new(Beat::new(0.0), Hz::new(200.0))
+                    .law(Law::PowerIn(Exponent::of(2.0))),
+            );
             e.add_breakpoint(Breakpoint::new(Beat::new(1.3), Hz::new(800.0)));
             let curve: Arc<dyn tutti_modulation::Curve> = Arc::new(e);
             (Some(curve), vec![layer(seconds, shape(LfoShape::Sawtooth))])
@@ -1576,11 +1566,9 @@ fn the_delay_corners_are_allocation_free() {
             InterpolationMode::Linear,
             InterpolationMode::CubicHermite,
         ] {
-            let node = DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
-                bus(width),
-                max,
-                interpolation,
-            )));
+            let node = DelayNode::<f32>::from(DelayConfig::new(
+                DelayLayout::new(bus(width), max).interpolation(interpolation),
+            ));
             let write = |cells: &ParamSet, i: usize| {
                 assert!(cells.set(UnitParam::DelayTime, if i & 1 == 1 { 1e9 } else { 0.0 }));
                 assert!(cells.set(UnitParam::Feedback, if i & 2 == 2 { 1.0 } else { 0.0 }));
@@ -1598,7 +1586,8 @@ fn the_delay_corners_are_allocation_free() {
     }
     // Every channel of a bus recirculating into the next, each with a time of its own.
     let wide = bus(16);
-    let layout = DelayLayout::builder(wide, cap, InterpolationMode::CubicHermite)
+    let layout = DelayLayout::builder(wide, cap)
+        .interpolation(InterpolationMode::CubicHermite)
         .routing(FeedbackRouting::ring(wide))
         .times(ChannelTimes::try_from(&[Seconds::new(10.0); 15][..]).expect("fifteen times"))
         .build()
@@ -1624,14 +1613,11 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
         NoteDuration::new(NoteValue::SIXTEENTH).triplet(),
         NoteDuration::new(NoteValue::of(64)).dotted(),
     ];
-    let layout = DelayLayout::builder(
-        BusTopology::STEREO,
-        MaxDelay::of(MaxDelay::CAP),
-        InterpolationMode::CubicHermite,
-    )
-    .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
-    .build()
-    .unwrap();
+    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
+        .interpolation(InterpolationMode::CubicHermite)
+        .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
+        .build()
+        .unwrap();
     let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
         feedback: Feedback::new(0.5),
         cross_feedback: Feedback::new(0.25),

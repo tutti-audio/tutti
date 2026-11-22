@@ -29,11 +29,12 @@ pub enum SvfDesignError {
 /// change. The last three ([`Bell`](Self::Bell), [`LowShelf`](Self::LowShelf),
 /// [`HighShelf`](Self::HighShelf)) are the only ones that read the gain
 /// parameter; the rest ignore it.
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default)]
+///
+/// There is no default type: the type is what the filter is, so a filter names it.
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[non_exhaustive]
 pub enum SvfType {
-    /// Passes below cutoff, attenuates above it at 12 dB/octave. The default.
-    #[default]
+    /// Passes below cutoff, attenuates above it at 12 dB/octave.
     LowPass,
     /// Passes above cutoff, attenuates below it at 12 dB/octave.
     HighPass,

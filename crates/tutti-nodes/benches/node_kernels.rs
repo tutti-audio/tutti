@@ -28,8 +28,8 @@ use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, ChannelTimes, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
-    GateControls, GateNode, InterpolationMode, KeySource, LadderFilterConfig, LadderFilterNode,
-    LadderType, LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
+    GateControls, GateNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
+    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
     TubeStageNode,
 };
 use tutti_rt::SplitMix64;
@@ -289,7 +289,6 @@ fn delay(c: &mut Criterion) {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(1.0)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(delay_at_quarter()),
             )
@@ -306,7 +305,6 @@ fn delay(c: &mut Criterion) {
                     BusTopology::default_for(ChannelLayout::from(6u16))
                         .expect("at most one bus wide"),
                     MaxDelay::of(Seconds::new(1.0)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(delay_at_quarter()),
             )
@@ -318,14 +316,10 @@ fn delay(c: &mut Criterion) {
         "delay",
         "2_cross",
         || {
-            let layout = DelayLayout::builder(
-                BusTopology::STEREO,
-                MaxDelay::of(Seconds::new(1.0)),
-                InterpolationMode::Linear,
-            )
-            .times(ChannelTimes::try_from(&[Seconds::new(0.3)][..]).expect("a time"))
-            .build()
-            .unwrap();
+            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
+                .times(ChannelTimes::try_from(&[Seconds::new(0.3)][..]).expect("a time"))
+                .build()
+                .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 cross_feedback: Feedback::new(0.3),
                 ..delay_at_quarter()

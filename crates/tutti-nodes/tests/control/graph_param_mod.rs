@@ -38,10 +38,10 @@ use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, CompressorConfig,
     CompressorControls, CompressorNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
-    DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, InterpolationMode,
-    KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls,
-    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind,
-    Stages, SvfFilterConfig, SvfFilterNode, SvfType,
+    DistortionConfig, DistortionNode, GateConfig, GateControls, GateNode, KeySource,
+    LadderFilterConfig, LadderFilterNode, LadderType, LimiterConfig, LimiterControls, LimiterNode,
+    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, ShapeKind, Stages,
+    SvfFilterConfig, SvfFilterNode, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
@@ -78,7 +78,6 @@ fn delay_of(w: usize) -> DelayNode<f32> {
             BusTopology::default_for(ChannelLayout::try_from(w).expect("a test width is small"))
                 .expect("at most one bus wide"),
             MaxDelay::of(Seconds::new(0.01)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(0.0003),

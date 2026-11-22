@@ -663,7 +663,9 @@ impl Ramp {
     /// param.
     #[inline]
     fn at(&self, t: Normalized) -> f64 {
-        Piece::new(self.from, self.target, self.shape).value(self.param, t)
+        Piece::new(self.from, self.target)
+            .law(self.shape)
+            .value(self.param, t)
     }
 
     /// The value at this frame, after any move started on it. A ramp: its

@@ -148,11 +148,8 @@ impl<F: Float + Lerp> FreeverbBank<F> {
                 ALL_PASSES
                     .iter()
                     .map(|&t| {
-                        AllPassFilter::new(
-                            AllPassForm::Freeverb,
-                            scale_tuning(rate, t + spread),
-                            ALLPASS_FEEDBACK,
-                        )
+                        AllPassFilter::new(scale_tuning(rate, t + spread), ALLPASS_FEEDBACK)
+                            .form(AllPassForm::Freeverb)
                     })
                     .collect::<Vec<_>>(),
             )

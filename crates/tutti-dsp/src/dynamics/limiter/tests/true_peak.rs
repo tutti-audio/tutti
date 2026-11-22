@@ -18,9 +18,16 @@ fn bank(detection: PeakDetection) -> LimiterBank<f32> {
     bank_at(detection, LOOKAHEAD, RATE)
 }
 
+fn detecting(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank<f32> {
+    match detection {
+        PeakDetection::Sample => LimiterBank::new(ChannelLayout::MONO, lookahead, rate),
+        PeakDetection::TruePeak => LimiterBank::true_peak(ChannelLayout::MONO, lookahead, rate)
+            .expect("the up-sampler designs at the rate"),
+    }
+}
+
 fn bank_at(detection: PeakDetection, lookahead: Lookahead, rate: SampleRate) -> LimiterBank<f32> {
-    let mut bank = LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, rate, detection)
-        .expect("the lookahead is long enough");
+    let mut bank = detecting(detection, lookahead, rate);
     bank.retarget(&controls(ceiling_db(), ceiling_db(), 0.1));
     bank
 }
@@ -262,7 +269,7 @@ fn the_upsample_delay_is_the_impulse_peak_of_the_4x_signal() {
     assert_eq!(peak, plan.upsample_delay());
 }
 
-/// `detecting` takes the lookahead as a floor: a true-peak lookahead under the
+/// `true_peak` takes the lookahead as a floor: a true-peak lookahead under the
 /// up-sampler's `1 + U / 4` frames is raised to exactly that, a longer one is kept, and sample
 /// detection keeps any.
 #[test]
@@ -272,11 +279,7 @@ fn the_lookahead_is_a_floor_raised_to_the_upsampler_delay() {
         .unwrap()
         .upsample_delay()
         / 4;
-    let at = |lookahead, detection| {
-        LimiterBank::<f32>::detecting(ChannelLayout::MONO, lookahead, RATE, detection)
-            .unwrap()
-            .latency()
-    };
+    let at = |lookahead, detection| detecting(detection, lookahead, RATE).latency();
     let short = Lookahead::of(Seconds::new(0.0002));
     assert_eq!(at(short, PeakDetection::TruePeak), Samples::new(needed));
     assert_eq!(at(short, PeakDetection::Sample), Samples::new(10));

@@ -680,9 +680,15 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-dsp/",
-        "LimiterBank::detecting",
+        "LimiterBank::true_peak",
         CTOR,
         "a true-peak lookahead is valid only together with the rate: the up-sampler's delay is a fixed count of frames, and whether the lookahead in seconds covers it depends on the rate, so no type can hold the validity before the rate is bound at this call",
+    ),
+    ty(
+        "crates/tutti-dsp/src/delay.rs",
+        "DelayLine::read_sample",
+        DEFAULT_ENUM,
+        "a per-sample read, not a construction: the interpolation is the read's own kernel, chosen by the caller's bank at each call, and the line holds no mode a read could default to",
     ),
     ty("crates/tutti-graph/", "Direct", SETTER, TEST_SUPPORT),
     ty("crates/tutti-graph/", "Reference", SETTER, TEST_SUPPORT),

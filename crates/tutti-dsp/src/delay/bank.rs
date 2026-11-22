@@ -159,7 +159,7 @@ impl<F: Float + Lerp> DelayBank<F> {
         Self {
             lines: (0..width).map(|_| DelayLine::new(cap)).collect(),
             taps: vec![F::ZERO; width].into_boxed_slice(),
-            interpolation: layout.interpolation(),
+            interpolation: layout.interpolation_mode(),
             routing: *layout.routing(),
             weights: (0..width * width)
                 .map(|k| F::from_unit(layout.routing().weight(k / width, k % width)))

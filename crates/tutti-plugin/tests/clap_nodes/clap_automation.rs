@@ -354,11 +354,9 @@ fn an_interrupting_ramp_stops_a_segment_on_a_plugin() {
 #[test]
 fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     let mut env = Trajectory::new();
-    env.add_breakpoint(Breakpoint::with_law(
-        Beat::new(0.0),
-        Hz::new(0.5),
-        Law::PowerIn(Exponent::of(2.0)),
-    ));
+    env.add_breakpoint(
+        Breakpoint::new(Beat::new(0.0), Hz::new(0.5)).law(Law::PowerIn(Exponent::of(2.0))),
+    );
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
     env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
     let lane = ControlLaneNode::from(ForeignLaneConfig::new(

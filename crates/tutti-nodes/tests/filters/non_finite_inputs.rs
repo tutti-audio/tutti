@@ -11,8 +11,8 @@ use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode, DelayConfig,
-    DelayControls, DelayLayout, DelayNode, EqBandConfig, EqBandNode, InterpolationMode,
-    LimiterConfig, LimiterControls, LimiterNode, MaxDelay, SvfType,
+    DelayControls, DelayLayout, DelayNode, EqBandConfig, EqBandNode, LimiterConfig,
+    LimiterControls, LimiterNode, MaxDelay, SvfType,
 };
 use tutti_rt::ParamCell;
 use tutti_units::{Amplitude, Balance, Db, Hz, Q, SampleRate, Samples, Seconds, UnitParam};
@@ -66,12 +66,10 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
         DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
             BusTopology::MONO,
             longest,
-            InterpolationMode::Linear,
         ))),
         DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
             BusTopology::STEREO,
             longest,
-            InterpolationMode::Linear,
         ))),
     ] {
         Node::<f32>::prepare(
@@ -89,7 +87,6 @@ fn a_delay_with_a_nan_initial_time_starts_at_zero() {
         DelayConfig::new(DelayLayout::new(
             BusTopology::MONO,
             MaxDelay::of(Seconds::new(0.1)),
-            InterpolationMode::Linear,
         ))
         .controls(DelayControls {
             time: Seconds::new(f64::NAN),

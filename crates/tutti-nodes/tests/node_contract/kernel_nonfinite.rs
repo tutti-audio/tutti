@@ -17,11 +17,11 @@ use tutti_nodes::{
     DelayLayout, DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
     DistortionConfig, DistortionNode, DynamicEqConfig, DynamicEqNode, FdnConfig, FdnNode,
     FreeverbConfig, FreeverbNode, GateConfig, GateControls, GateNode, HysteresisConfig,
-    HysteresisNode, InterpolationMode, LadderFilterConfig, LadderFilterNode, LimiterConfig,
-    LimiterControls, LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands,
-    MultibandCompressorConfig, MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode,
-    PitchShifterConfig, PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig,
-    RingModNode, ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
+    HysteresisNode, LadderFilterConfig, LadderFilterNode, LimiterConfig, LimiterControls,
+    LimiterNode, MaxDelay, ModDelayConfig, ModDelayNode, MultibandBands, MultibandCompressorConfig,
+    MultibandCompressorNode, PeakDetection, PhaserConfig, PhaserNode, PitchShifterConfig,
+    PitchShifterNode, PlateReverbConfig, PlateReverbNode, RingModConfig, RingModNode,
+    ShimmerConfig, ShimmerNode, SpringReverbConfig, SpringReverbNode, SvfFilterConfig,
     SvfFilterNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
 };
 use tutti_nodes::{
@@ -93,7 +93,6 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
                 DelayConfig::new(DelayLayout::new(
                     BusTopology::MONO,
                     MaxDelay::of(Seconds::new(0.05)),
-                    InterpolationMode::Linear,
                 ))
                 .controls(DelayControls {
                     time: Seconds::new(0.01),

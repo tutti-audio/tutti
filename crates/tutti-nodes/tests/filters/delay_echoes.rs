@@ -64,12 +64,11 @@ fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
     let (d, g) = (16usize, 0.5f64);
     let node = DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
-            MAX,
-            InterpolationMode::Linear,
-        ))
-        .controls(controls(frames(d as f64), g, 0.0)),
+        DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX)).controls(controls(
+            frames(d as f64),
+            g,
+            0.0,
+        )),
     );
     let out = render(node, &[impulse(Samples::new(d * 8 + 5))]);
     for (i, &y) in out[0].iter().enumerate() {
@@ -103,11 +102,10 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
         (InterpolationMode::Linear, w * w / 8.0 * 1.05),
         (InterpolationMode::CubicHermite, w * w * w / 8.0),
     ] {
-        let node =
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX, mode))
-                    .controls(controls(frames(delay), 0.0, 0.0)),
-            );
+        let node = DelayNode::<f32>::from(
+            DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX).interpolation(mode))
+                .controls(controls(frames(delay), 0.0, 0.0)),
+        );
         let out = render(node, std::slice::from_ref(&x));
         let worst = (20..512)
             .map(|n| (f64::from(out[0][n]) - (w * (n as f64 - delay)).sin()).abs())
@@ -133,7 +131,7 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let (n, d, amount) = (6usize, 8usize, 0.5f64);
     let bus = BusTopology::default_for(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
-    let layout = DelayLayout::builder(bus, MAX, InterpolationMode::Linear)
+    let layout = DelayLayout::builder(bus, MAX)
         .routing(FeedbackRouting::ring(bus))
         .build()
         .unwrap();
@@ -169,12 +167,11 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
 fn the_stereo_cross_feedback_ping_pongs_the_echo() {
     let (d, amount) = (8usize, 0.5f64);
     let node = DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(
-            BusTopology::STEREO,
-            MAX,
-            InterpolationMode::Linear,
-        ))
-        .controls(controls(frames(8.0), 0.0, amount)),
+        DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX)).controls(controls(
+            frames(8.0),
+            0.0,
+            amount,
+        )),
     );
     let mut left = vec![0.0; d * 5];
     left[0] = 1.0;

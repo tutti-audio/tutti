@@ -23,11 +23,12 @@ use crate::{GAIN_RAMP, Lerp, OversamplingFactor, Ramp, Steps};
 const CHUNK: usize = 64;
 
 /// Selects which waveshaping curve a [`WaveshaperBank`] applies.
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default)]
+///
+/// There is no default curve: the curve is what the waveshaper is, so a waveshaper names it.
+#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 #[non_exhaustive]
 pub enum ShapeKind {
     /// `tanh` saturation — smooth, tube-like.
-    #[default]
     Tanh,
     /// `atan` saturation — slightly harder knee than tanh.
     Atan,

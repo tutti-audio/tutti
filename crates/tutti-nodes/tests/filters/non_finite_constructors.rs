@@ -246,26 +246,18 @@ fn sweep() {
         // huge value by type (`a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds`).
         add(probe("delay time", b, || {
             Box::new(DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
-                    MaxDelay::of(s(0.5)),
-                    InterpolationMode::Linear,
-                ))
-                .controls(DelayControls {
-                    time: s(b),
-                    feedback: Feedback::new(0.3),
-                    cross_feedback: Feedback::NONE,
-                }),
+                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MaxDelay::of(s(0.5))))
+                    .controls(DelayControls {
+                        time: s(b),
+                        feedback: Feedback::new(0.3),
+                        cross_feedback: Feedback::NONE,
+                    }),
             ))
         }));
         // A channel's own time is a `ChannelTimes`, which refuses a time that is not
         // finite or is negative; the delay falls back to linked channels.
         add(probe("delay stereo", b, || {
-            let layout = DelayLayout::builder(
-                BusTopology::STEREO,
-                MaxDelay::of(s(0.5)),
-                InterpolationMode::Linear,
-            );
+            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(s(0.5)));
             let layout = match ChannelTimes::try_from(&[s(b)][..]) {
                 Ok(times) => layout.times(times),
                 Err(_) => layout,

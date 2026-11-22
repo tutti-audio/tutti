@@ -124,11 +124,9 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
 #[test]
 fn an_all_pass_is_freeverbs_form() {
     let (d, g) = (8usize, 0.5f32);
-    let mut ap = AllPassFilter::<f32>::new(
-        AllPassForm::Freeverb,
-        NonZeroUsize::new(d).unwrap(),
-        Feedback::new(f64::from(g)),
-    );
+    let mut ap =
+        AllPassFilter::<f32>::new(NonZeroUsize::new(d).unwrap(), Feedback::new(f64::from(g)))
+            .form(AllPassForm::Freeverb);
     let mut h = impulse(18 * d + 1);
     ap.process(&mut h);
     assert!((h[0] + 1.0).abs() < 1e-6, "h[0] = {}", h[0]);
@@ -627,11 +625,8 @@ fn an_f64_all_pass_is_its_difference_equation() {
         y[n] = out - x[n];
         b[n] = x[n] + a * out;
     }
-    let mut ap = AllPassFilter::<f64>::new(
-        AllPassForm::Freeverb,
-        NonZeroUsize::new(d).unwrap(),
-        Feedback::new(a),
-    );
+    let mut ap = AllPassFilter::<f64>::new(NonZeroUsize::new(d).unwrap(), Feedback::new(a))
+        .form(AllPassForm::Freeverb);
     let mut got = x.clone();
     ap.process(&mut got);
     assert_close_f64(&got, &y, 2.0f64.powi(-45));
