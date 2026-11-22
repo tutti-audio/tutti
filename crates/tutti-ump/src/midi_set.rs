@@ -1,5 +1,8 @@
 //! [`MidiChannelSet`] and [`MidiGroupSet`]: a subset of the sixteen channels or
-//! groups, one bit each.
+//! groups, one bit each. [`FunctionBlockSet`]: a subset of the thirty-two
+//! Function Block numbers.
+
+use crate::{FunctionBlockCount, FunctionBlockId};
 
 macro_rules! midi_set {
     ($(#[$meta:meta])* $set:ident of $item:ident) => {
@@ -58,10 +61,51 @@ midi_set! {
     MidiGroupSet of MidiGroup
 }
 
+/// A set of [`FunctionBlockId`]s: 32 bits wide, one for each block number 0 to 31.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct FunctionBlockSet(u32);
+
+impl FunctionBlockSet {
+    /// No member.
+    pub const EMPTY: Self = Self(0);
+
+    /// Adds `block`.
+    #[inline]
+    pub const fn insert(&mut self, block: FunctionBlockId) {
+        self.0 |= 1 << block.get();
+    }
+
+    /// Whether every block numbered below `count` is a member. An Endpoint that
+    /// declares `count` blocks numbers them from 0, so this answers whether all of
+    /// them are in the set.
+    #[must_use]
+    pub const fn covers(self, count: FunctionBlockCount) -> bool {
+        let n = count.get();
+        let below = if n >= 32 { u32::MAX } else { (1u32 << n) - 1 };
+        self.0 & below == below
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{MidiChannel, MidiGroup};
+
+    #[test]
+    fn a_function_block_set_covers_the_blocks_below_a_count() {
+        let mut set = FunctionBlockSet::EMPTY;
+        assert!(set.covers(FunctionBlockCount::of(0)));
+        assert!(!set.covers(FunctionBlockCount::of(1)));
+        set.insert(FunctionBlockId::of(1));
+        assert!(!set.covers(FunctionBlockCount::of(2)));
+        set.insert(FunctionBlockId::of(0));
+        assert!(set.covers(FunctionBlockCount::of(2)));
+        assert!(!set.covers(FunctionBlockCount::of(3)));
+        for id in 0..32 {
+            set.insert(FunctionBlockId::of(id));
+        }
+        assert!(set.covers(FunctionBlockCount::MAX));
+    }
 
     #[test]
     fn a_set_holds_each_member_once_and_iterates_them_in_order() {

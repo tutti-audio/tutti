@@ -163,6 +163,7 @@ fn nak_carries_the_refused_header_then_padded_text() {
         reason: NakReason::NotSupported,
         refused: Header::from_word(0xAB00_0000),
         text: NakText::new("hello").unwrap(),
+        text_cut: 0,
     }));
     assert_eq!(
         cmd_bytes(&nak),
@@ -175,6 +176,7 @@ fn nak_carries_the_refused_header_then_padded_text() {
         reason: NakReason::Malformed,
         refused: Header::from_word(0x2001_0000),
         text: NakText::default(),
+        text_cut: 0,
     }));
     assert_eq!(
         cmd_bytes(&bare)[1],
@@ -191,6 +193,7 @@ fn bye_carries_the_reason_in_the_header_and_optional_text() {
     let worded = Command::Bye(Box::new(Bye {
         reason: ByeReason::UserTerminated,
         text: ByeText::new("bye").unwrap(),
+        text_cut: 0,
     }));
     assert_eq!(
         cmd_bytes(&worded),
@@ -354,10 +357,12 @@ fn every_command_round_trips() {
             reason: NakReason::Reserved(0x55),
             refused: Header::from_word(0x0102_0304),
             text: NakText::new("why").unwrap(),
+            text_cut: 0,
         })),
         Command::Bye(Box::new(Bye {
             reason: ByeReason::Reserved(0x99),
             text: ByeText::new("é").unwrap(),
+            text_cut: 0,
         })),
         Command::ByeReply,
         Command::UmpData(UmpData::new(SequenceNumber::new(5), &packets).unwrap()),
@@ -649,6 +654,7 @@ fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
         Command::Bye(Box::new(Bye {
             reason: ByeReason::UserTerminated,
             text: ByeText::new("ok").unwrap(),
+            text_cut: 6,
         }))
     );
     // A multi-byte character cut in half is dropped whole.
@@ -659,6 +665,7 @@ fn advisory_text_that_is_not_utf8_is_cut_before_the_bad_byte() {
             reason: NakReason::Malformed,
             refused: Header::from_word(0x2001_0000),
             text: NakText::new("a").unwrap(),
+            text_cut: 1,
         }))
     );
 }

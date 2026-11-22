@@ -93,8 +93,9 @@ impl Vst2Loaded {
         features.set(Features::MIDI_OUT, info.emits_midi);
         features.set(Features::EDITOR, info.has_editor);
         // VST2 always gets a transport snapshot (`audioMasterGetTime`). No
-        // sample-accurate automation, note-expression, sequencer context, or
-        // host-driven editor resize (fused AEffect editor, no sizeWindow).
+        // sample-accurate automation, note-expression or sequencer context.
+        // The plugin's own `sizeWindow` is answered; the host cannot resize
+        // the fused AEffect editor.
         features.insert(Features::TRANSPORT);
         // The host answers the process level, so every plugin takes the mode.
         features.insert(Features::RENDER_MODE);

@@ -347,6 +347,10 @@ pub struct Nak {
     /// read up to the last whole character before the bad byte, and the NAK is
     /// still read.
     pub text: NakText,
+    /// How many bytes of the text a peer sent were not read (0 for a NAK built
+    /// here, and for text that is whole). A receiver counts a NAK whose text
+    /// was cut as [lost](tutti_units::Losses::lost).
+    pub text_cut: usize,
 }
 
 /// Why a Session ends (M2-124 Table 27).
@@ -446,6 +450,10 @@ pub struct Bye {
     /// read up to the last whole character before the bad byte, and the Bye
     /// still ends the Session.
     pub text: ByeText,
+    /// How many bytes of the text a peer sent were not read (0 for a Bye built
+    /// here, and for text that is whole). A receiver counts a Bye whose text
+    /// was cut as [lost](tutti_units::Losses::lost).
+    pub text_cut: usize,
 }
 
 impl Bye {
@@ -455,6 +463,7 @@ impl Bye {
         Self {
             reason,
             text: ByeText::default(),
+            text_cut: 0,
         }
     }
 }
@@ -714,13 +723,17 @@ fn read_identity(name: &[u8], id: &[u8]) -> Result<EndpointIdentity, ParseError>
 /// is not UTF-8 is cut at the last whole character before the bad byte, and an
 /// over-long one cannot occur (the field is the payload, which `MAX` covers).
 /// Constructors of the text types stay strict; only this wire reader is lenient.
-fn read_advisory_text<const MAX: usize>(field: &[u8]) -> Text<0, MAX> {
+/// The bytes after the cut are counted, so a receiver knows the text is partial.
+fn read_advisory_text<const MAX: usize>(field: &[u8]) -> (Text<0, MAX>, usize) {
     let field = trimmed(field);
     let valid = match std::str::from_utf8(field) {
         Ok(text) => text,
         Err(e) => std::str::from_utf8(&field[..e.valid_up_to()]).unwrap_or_default(),
     };
-    Text::new(valid).unwrap_or_default()
+    (
+        Text::new(valid).unwrap_or_default(),
+        field.len() - valid.len(),
+    )
 }
 
 fn be16(bytes: &[u8]) -> u16 {
@@ -953,18 +966,24 @@ impl Command {
             code::SESSION_RESET_REPLY => Ok(Self::SessionResetReply),
             code::NAK => {
                 let (refused, text) = payload.split_at_checked(4).ok_or_else(bad_length)?;
+                let (text, text_cut) = read_advisory_text(text);
                 Ok(Self::Nak(Box::new(Nak {
                     reason: NakReason::from_code(header.data1()),
                     refused: Header::from_word(u32::from_be_bytes([
                         refused[0], refused[1], refused[2], refused[3],
                     ])),
-                    text: read_advisory_text(text),
+                    text,
+                    text_cut,
                 })))
             }
-            code::BYE => Ok(Self::Bye(Box::new(Bye {
-                reason: ByeReason::from_code(header.data1()),
-                text: read_advisory_text(payload),
-            }))),
+            code::BYE => {
+                let (text, text_cut) = read_advisory_text(payload);
+                Ok(Self::Bye(Box::new(Bye {
+                    reason: ByeReason::from_code(header.data1()),
+                    text,
+                    text_cut,
+                })))
+            }
             code::BYE_REPLY => Ok(Self::ByeReply),
             code::UMP_DATA => {
                 if words > MAX_UMP_DATA_WORDS {
