@@ -3,8 +3,6 @@
 //! a commit, and the sink that loses the feed hears the note end. The one that
 //! gains it hears the later off of a note it never started, which ends nothing.
 
-use std::sync::{Arc, Mutex};
-
 use crate::common::{Seen, blocks, offline, tap};
 use tutti_graph::{Cx, Event, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status};
 use tutti_midi_runtime::{MIDI_INPUT_PORTS, MidiInputPorts, TimedMidiEvent};
@@ -14,7 +12,7 @@ use tutti_units::{Beat, BeatDuration};
 
 const MF: u16 = 0x8000;
 /// Stands in for the hardware input: sends what it is mailed on port 0.
-struct Src(Arc<Mutex<Vec<[u32; 4]>>>);
+struct Src(tutti_fixtures::Shared<Vec<[u32; 4]>>);
 impl Node for Src {
     fn shape(&self) -> Shape {
         Shape::EMPTY.with_events(0, MIDI_INPUT_PORTS as u16)
@@ -112,8 +110,8 @@ fn retarget_with_a_held_clip_note() {
 #[test]
 fn set_routes_with_a_held_key() {
     let mut s = offline();
-    let mail = Arc::new(Mutex::new(Vec::new()));
-    let src = s.graph().add(Src(Arc::clone(&mail)));
+    let mail = tutti_fixtures::Shared::default();
+    let src = s.graph().add(Src(mail.clone()));
     let (a, a_seen) = tap(&mut s);
     let (b, b_seen) = tap(&mut s);
     let resolve = |k: u8| match k {
@@ -151,7 +149,7 @@ fn set_routes_with_a_held_key() {
 
 /// Stands in for a hardware input that hears Groups 1 and 2: sends each packet
 /// it is mailed out of the port its address names.
-struct GroupSrc(Arc<Mutex<Vec<[u32; 4]>>>, MidiInputPorts);
+struct GroupSrc(tutti_fixtures::Shared<Vec<[u32; 4]>>, MidiInputPorts);
 impl Node for GroupSrc {
     fn shape(&self) -> Shape {
         Shape::EMPTY.with_events(0, self.1.count() as u16)
@@ -196,8 +194,8 @@ fn a_group_route_cut_with_keys_held_ends_them_at_the_next_block_then_nothing() {
         .midi_nodes()
         .expect("the builder's MIDI nodes")
         .input_ports;
-    let mail = Arc::new(Mutex::new(Vec::new()));
-    let src = s.graph().add(GroupSrc(Arc::clone(&mail), ports));
+    let mail = tutti_fixtures::Shared::default();
+    let src = s.graph().add(GroupSrc(mail.clone(), ports));
     let (a, a_seen) = tap(&mut s);
     let resolve = |k: u8| (k == 1).then_some(a);
     let by_group_2 = [MidiRouteRule::<u8>::new().in_group(MidiGroup::of(1)).to(1)];

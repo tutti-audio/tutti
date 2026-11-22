@@ -11,8 +11,8 @@
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 use tutti_buffers::MaxBlock;
 
 use tutti_buffers::{ByWidth, Float, InputOutput};
@@ -67,7 +67,7 @@ struct Rig {
     chunk: Option<NonZeroUsize>,
     features: Features,
     record: bool,
-    seen: Mutex<Vec<Seen>>,
+    seen: tutti_fixtures::Shared<Vec<Seen>>,
     resets: AtomicUsize,
     /// MIDI events reported lost when a chunk completes.
     lose: AtomicUsize,
@@ -91,7 +91,7 @@ impl Rig {
             chunk: chunk.and_then(NonZeroUsize::new),
             features,
             record: true,
-            seen: Mutex::new(Vec::with_capacity(4096)),
+            seen: tutti_fixtures::Shared::new(Vec::with_capacity(4096)),
             resets: AtomicUsize::new(0),
             lose: AtomicUsize::new(0),
             unsent: AtomicBool::new(false),

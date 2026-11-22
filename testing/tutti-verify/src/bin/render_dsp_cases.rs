@@ -227,12 +227,13 @@ fn phaser(dir: &Path, cases: &mut Cases) {
             let mut chain = PhaserChain::new(Stages::of(stages), ChannelLayout::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];
-            chain.process(
-                &mut [Ramp::new(c)],
-                &mut Ramp::new(0.0),
-                Planes::new(&[&x[..]]).expect("one plane"),
-                PlanesMut::new(&mut [&mut y[..]]).expect("one plane"),
-            );
+            let ins = [&x[..]];
+            let mut outs = [&mut y[..]];
+            let mut block = InputOutput::from_slices(Samples::new(IR_FRAMES), &ins, &mut outs)
+                .expect("one plane each");
+            chain
+                .process(&mut [Ramp::new(c)], &mut Ramp::new(0.0), &mut block)
+                .expect("a mono chain");
             let name = format!("allpass_chain_{stages}x_{fc}");
             wav(dir, &name, RATE, &[y]);
             cases.push(

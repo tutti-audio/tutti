@@ -103,9 +103,7 @@ impl<F: Float> Kernel for EarlyReflectionsKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        self.stage.process(input, output);
-        Ok(())
+        self.stage.process(block)
     }
 
     fn tail(&self) -> Tail {

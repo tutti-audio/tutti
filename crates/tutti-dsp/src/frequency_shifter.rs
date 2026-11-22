@@ -20,8 +20,10 @@
 //! The network is a phase network, not a delay, so it reports no latency. It rings for the
 //! slowest pole's decay ([`tail`](FrequencyShifterBank::tail)).
 
+use crate::BlockMismatch;
+use crate::block::expect_widths;
 use core::num::NonZeroUsize;
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Feedback, Hz, Phase, Radians, SampleRate, Samples, Tail};
 
 use crate::delay::{ring_seconds, trips};
@@ -160,14 +162,16 @@ impl<F: Float> FrequencyShifterBank<F> {
         Tail::Finite(chain.fold(Samples::new(1), |sum, s| Samples::new(sum.get() + s.get())))
     }
 
-    /// Runs `input` into `output`, the fewer of the two views' channels and frames. No
-    /// allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.networks.len());
+    /// Runs `input` into `output`, channel by channel. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
+        let width = self.networks.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         let shift = self.controls.shift;
         let step = OscillatorStep::<F>::new(Hz::new(shift.get().abs()), self.rate);
         let side = if shift.get() < 0.0 { -F::ONE } else { F::ONE };
@@ -184,6 +188,7 @@ impl<F: Float> FrequencyShifterBank<F> {
             (end_sine, end_cosine) = (sin, cos);
         }
         (self.sine, self.cosine) = (end_sine, end_cosine);
+        Ok(())
     }
 }
 

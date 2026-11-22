@@ -193,9 +193,7 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        self.spring.process(input, output);
-        Ok(())
+        self.spring.process(block)
     }
 
     /// The spring's ceiling, or [`Tail::Unbounded`] when that is past what a graph takes as a

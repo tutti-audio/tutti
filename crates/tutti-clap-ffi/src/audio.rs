@@ -16,6 +16,7 @@ use tutti_buffers::{Planes, PlanesMut};
 use crate::events::{EventSink, EventSource, with_input, with_output};
 use crate::plugin::{Core, PortLayout};
 use crate::pool::{PoolHandle, PoolRequest};
+use crate::roles::Refused;
 
 /// Why a block did not run, or ran and failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
@@ -57,6 +58,10 @@ pub enum ProcessError {
     /// flush) and the block does not wait for it; nothing was called.
     #[error("the main thread holds the instance")]
     Busy,
+    /// Host code panicked while it held the instance, which ends it: no
+    /// block runs on it again; nothing was called.
+    #[error("host code panicked while holding the instance, so it is never called again")]
+    Poisoned,
 }
 
 /// The channel-pointer tables of one sample width, and the silent channels
@@ -421,13 +426,14 @@ impl AudioSide {
         self.core.retired.load(Ordering::Acquire) || !self.core.active.load(Ordering::Acquire)
     }
 
-    /// `plugin.reset`, a no-op once retired. Never waits: while the main
+    /// `plugin.reset`, a no-op once retired or poisoned. Never waits: while the main
     /// thread holds the instance the reset is owed, and the next block runs it
     /// first.
     pub fn reset(&mut self) {
         match self.core.roles.try_claim() {
-            Some(_claim) => self.reset_claimed(),
-            None => self.core.reset_owed.store(true, Ordering::Release),
+            Ok(_claim) => self.reset_claimed(),
+            Err(Refused::Held) => self.core.reset_owed.store(true, Ordering::Release),
+            Err(Refused::Dead) => {}
         }
     }
 
@@ -454,7 +460,7 @@ impl AudioSide {
     /// left processing in that case, and the next deactivation stops it under
     /// its own claim, as CLAP requires before `deactivate`.
     pub fn stop(&mut self) {
-        let Some(_claim) = self.core.roles.try_claim() else {
+        let Ok(_claim) = self.core.roles.try_claim() else {
             return;
         };
         if self.is_retired() || !self.core.processing.swap(false, Ordering::Relaxed) {
@@ -502,9 +508,14 @@ impl AudioSide {
         }
         // Never waits on the main thread: a block it holds the instance for
         // is refused as `Busy`.
-        let Some(_claim) = self.core.roles.try_claim() else {
-            return Err(ProcessError::Busy);
-        };
+        let _claim = self
+            .core
+            .roles
+            .try_claim()
+            .map_err(|refused| match refused {
+                Refused::Held => ProcessError::Busy,
+                Refused::Dead => ProcessError::Poisoned,
+            })?;
         if self.is_retired() {
             return Err(ProcessError::Retired);
         }

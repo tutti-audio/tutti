@@ -202,13 +202,13 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         block: &mut InputOutput<'_, F>,
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
-        let (input, output) = block.split();
-        if let Some(r) = &mut self.running {
-            r.bank.process(&mut r.ramps, input, output);
-        }
+        let rendered = match &mut self.running {
+            Some(r) => r.bank.process(&mut r.ramps, block),
+            None => Ok(()),
+        };
         // A design after a render is a move, which ramps.
         self.applied = true;
-        Ok(())
+        rendered
     }
 
     /// The bank's ceiling (the room at its largest), or the room's own for a send, or

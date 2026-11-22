@@ -17,7 +17,9 @@
 //! The live controls move the whole bank: [`ModalControls`] names the first mode's frequency
 //! and decay now, and every mode keeps its configured ratio to the first's.
 
-use tutti_buffers::{ChannelLayout, Float, Planes, PlanesMut};
+use crate::BlockMismatch;
+use crate::block::expect_widths;
+use tutti_buffers::{ChannelLayout, Float, InputOutput};
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate, Samples, Seconds, Tail};
 
 use crate::TAIL_FLOOR;
@@ -252,15 +254,17 @@ impl<F: Float> ModalBank<F> {
         }
     }
 
-    /// Runs `input` into `output`, channel by channel: the fewer of the two views' channels
-    /// and frames. No allocation.
-    pub fn process(&mut self, input: Planes<'_, F>, mut output: PlanesMut<'_, '_, F>) {
-        let frames = input.frames().get().min(output.frames().get());
+    /// Runs `input` into `output`, channel by channel. No allocation.
+    ///
+    /// # Errors
+    ///
+    /// [`BlockMismatch`] when the block's input or output is not the bank's width in channels.
+    pub fn process(&mut self, block: &mut InputOutput<'_, F>) -> Result<(), BlockMismatch> {
         let count = self.resonators.len();
-        let width = input
-            .channels()
-            .min(output.channels())
-            .min(self.last_input.len());
+        let width = self.last_input.len();
+        expect_widths(block, width, width)?;
+        let frames = block.frames().get();
+        let (input, mut output) = block.split();
         for c in 0..width {
             let memory = &mut self.memory[c * count..(c + 1) * count];
             let mut x1 = self.last_input[c];
@@ -279,6 +283,7 @@ impl<F: Float> ModalBank<F> {
             }
             self.last_input[c] = x1;
         }
+        Ok(())
     }
 }
 
