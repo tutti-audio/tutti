@@ -33,7 +33,7 @@ use tutti_graph::{
     Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
-use tutti_units::Beat;
+use tutti_units::{Beat, FramesPerBeat};
 
 use super::walk::{Beated, Visit, Walk, lands_on_first_frame};
 
@@ -348,7 +348,7 @@ impl HarmonyWriter<'_, '_> {
         &mut self,
         at: Option<Offset>,
         beat: Beat,
-        frames_per_beat: f64,
+        frames_per_beat: FramesPerBeat,
         changes: &[TimedHarmony],
         changed_only: bool,
     ) {
@@ -368,7 +368,7 @@ impl HarmonyWriter<'_, '_> {
     fn in_force(
         changes: &[TimedHarmony],
         beat: Beat,
-        frames_per_beat: f64,
+        frames_per_beat: FramesPerBeat,
         kind: HarmonyKind,
     ) -> Option<Harmony> {
         let upto = changes.partition_point(|c| lands_on_first_frame(c.beat, beat, frames_per_beat));
@@ -384,14 +384,26 @@ impl Visit<TimedHarmony> for HarmonyWriter<'_, '_> {
     fn stop(&mut self, _at: Option<Offset>) {}
 
     /// Re-state the context in force on the jump's frame.
-    fn jump(&mut self, at: Option<Offset>, beat: Beat, fpb: f64, changes: &[TimedHarmony]) {
+    fn jump(
+        &mut self,
+        at: Option<Offset>,
+        beat: Beat,
+        fpb: FramesPerBeat,
+        changes: &[TimedHarmony],
+    ) {
         self.restate(at, beat, fpb, changes, false);
     }
 
     /// A loop pass re-states only what differs from what was last sent: a
     /// receiver holds the context, so a pass that starts in the context the
     /// last one ended in sends nothing here.
-    fn wrap(&mut self, at: Option<Offset>, beat: Beat, fpb: f64, changes: &[TimedHarmony]) {
+    fn wrap(
+        &mut self,
+        at: Option<Offset>,
+        beat: Beat,
+        fpb: FramesPerBeat,
+        changes: &[TimedHarmony],
+    ) {
         self.restate(at, beat, fpb, changes, true);
     }
 

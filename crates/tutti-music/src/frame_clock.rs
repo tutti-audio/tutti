@@ -483,7 +483,7 @@ impl FrameClock {
             return Some(next);
         }
         let fpb = self.segment.frames_per_beat()?;
-        let ahead = libm::ceil((end - self.beat()).get() * fpb);
+        let ahead = libm::ceil(fpb.frames_in(end - self.beat()));
         // Saturating: a far end is past `limit` anyway.
         let mut f = Frame::new(self.at.get().saturating_add(ahead.max(1.0) as u64)).max(next);
         while f > next && self.segment.beat_at(Frame::new(f.get() - 1)) >= end {
