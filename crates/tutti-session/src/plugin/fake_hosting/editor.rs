@@ -135,7 +135,7 @@ fn an_editor_reads_open_after_open_and_a_drop_closes_it() {
     drop(editor);
     assert_eq!(closes(&fake), 1, "the drop closed it");
     assert!(
-        !s.plugin_view(node).unwrap().handle().is_editor_open(),
+        !s.plugin_view(node).unwrap().hosted.handle.is_editor_open(),
         "the plugin reads closed"
     );
 }
