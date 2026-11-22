@@ -165,6 +165,12 @@ pub(super) fn send(conn: Connection<'_>, slab: &Slab) -> std::io::Result<()> {
 
 /// Receives the slab a frame announced, over `conn`.
 pub(super) fn receive(conn: Connection<'_>, _: SlabWire) -> Result<Slab, SlabError> {
+    receive_descriptor(conn)
+}
+
+/// Receives the one descriptor a frame announced, over `conn`, closed on `exec`
+/// as soon as it is received (the platform's `recvmsg` cannot do it atomically).
+pub(crate) fn receive_descriptor(conn: Connection<'_>) -> Result<OwnedFd, SlabError> {
     let fd = descriptor::recv(conn, RecvFlags::empty(), DESCRIPTOR_PATIENCE)?;
     fcntl_setfd(&fd, FdFlags::CLOEXEC).map_err(|e| SlabError::Transfer { source: e.into() })?;
     Ok(fd)

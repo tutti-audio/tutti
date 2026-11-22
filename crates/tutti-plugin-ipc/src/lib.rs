@@ -87,13 +87,17 @@ pub use process_guard::ProcessGuard;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
     AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AudioReply, AudioRequest,
-    CONTROL_FRAME_BYTES, ControlFrame, ControlReply, ControlRequest, Framed, News,
+    CONTROL_FRAME_BYTES, ControlFrame, ControlReply, ControlRequest, Framed, Lane, News,
     PROTOCOL_VERSION, ProcessAudioData, ReqId, Request, SlabLayout, StagedState, Working,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;
 pub use subprocess::{LoadRequest, Restore};
 #[cfg(feature = "testing")]
+pub use transport::broker_pair;
+pub use transport::control::ControlStream;
+#[cfg(feature = "testing")]
 pub use transport::control::send_state_reply;
 pub use transport::control::socket_name;
 pub use transport::shm::{AudioSlab, BlobWire, RING_SLOTS, SlabHandle, SlabWire, SlabWriter};
+pub use tutti_plugin_ipc_ffi::LaneWire;

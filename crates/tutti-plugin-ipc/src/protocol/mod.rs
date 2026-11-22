@@ -11,7 +11,7 @@ pub(crate) mod process;
 pub(crate) mod shm;
 pub(crate) mod wire;
 
-/// Wire protocol version, exchanged in the [`ControlFrame::Ready`] handshake.
+/// Wire protocol version, sent by the server in its [`ControlFrame::Hello`].
 ///
 /// Bump on ANY change to the host↔server wire shape (a new or reordered field on
 /// a serialized type), since the wire's codec (postcard) is not self-describing
@@ -193,7 +193,15 @@ pub(crate) mod wire;
 /// - **Version 60** adds `refused_off_thread_calls` to `ServerLosses` (the
 ///   callbacks the plugin made from a thread its format forbids, which the
 ///   server refused).
-pub const PROTOCOL_VERSION: u32 = 60;
+/// - **Version 61** makes the first connection a broker. The server's first
+///   frame on it is `ControlFrame::Hello` (the old `Ready`, renamed), and the
+///   connection stays open as the control connection. The audio lane is opened
+///   over it by `ControlRequest::OpenLane`, whose server end follows the frame
+///   as a descriptor on unix (a pipe's checked name in the frame on Windows),
+///   and the server answers `ControlReply::LaneOpened`. `AudioReply::Ready` and
+///   the other two connections' handshakes are gone, so `AudioReply`'s
+///   `ParametersApplied` moves down one tag.
+pub const PROTOCOL_VERSION: u32 = 61;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -252,8 +260,8 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::IpcResult<
 
 pub(crate) use envelope::default_format;
 pub use envelope::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
-    StagedState, Working,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Lane, News, ReqId,
+    Request, StagedState, Working,
 };
 pub use frame::Framed;
 pub use process::ProcessAudioData;
@@ -477,6 +485,7 @@ mod tests {
     /// change of order fails here until the version moves and the pins with it.
     #[test]
     fn the_wire_tags_are_the_declaration_order() {
+        use tutti_plugin_ipc_ffi::LaneWire;
         use tutti_plugin_types::{AutomationMode, RenderMode, StateUse};
         let tag = |bytes: Vec<u8>| {
             assert!(bytes[0] < 0x80, "a one-byte varint tag");
@@ -504,7 +513,7 @@ mod tests {
                 postcard::to_allocvec(&AudioReply::ParametersApplied { id: ReqId::new(1) })
                     .unwrap()
             ),
-            2
+            1
         );
 
         let control = |m: ControlRequest| tag(postcard::to_allocvec(&m).unwrap());
@@ -587,11 +596,19 @@ mod tests {
             2
         );
         assert_eq!(
-            frame(ControlFrame::Ready {
+            frame(ControlFrame::Hello {
                 protocol_version: 1
             }),
             3
         );
+        assert_eq!(
+            control(ControlRequest::OpenLane {
+                lane: Lane::Audio,
+                wire: LaneWire::fresh().unwrap()
+            }),
+            23
+        );
+        assert_eq!(reply(ControlReply::LaneOpened), 18);
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {

@@ -10,7 +10,8 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_plugin_ipc_ffi::Connection;
+use tutti_plugin_ipc_ffi::{Connection, LaneWire};
+use tutti_plugin_types::IpcResult;
 
 /// Converts a host-chosen socket path into the local-socket name for this
 /// platform.
@@ -33,6 +34,66 @@ pub fn socket_name(socket: &Path) -> std::io::Result<Name<'static>> {
 pub(crate) fn connection(stream: &ControlStream) -> Connection<'_> {
     let Stream::UdSocket(socket) = stream;
     socket.as_fd()
+}
+
+/// A lane the host is opening: both ends of a fresh socket pair, until the
+/// server's is sent and the host's becomes the lane's stream.
+pub(crate) struct PendingLane {
+    wire: LaneWire,
+    host: OwnedFd,
+    server: OwnedFd,
+}
+
+impl PendingLane {
+    /// A fresh lane.
+    ///
+    /// # Errors
+    ///
+    /// The OS refused the socket pair.
+    pub(crate) fn new() -> IpcResult<Self> {
+        let (host, server) = tutti_plugin_ipc_ffi::lane_pair()?;
+        Ok(Self {
+            wire: LaneWire::fresh()?,
+            host,
+            server,
+        })
+    }
+
+    /// What the `OpenLane` frame carries of the lane.
+    pub(crate) fn wire(&self) -> LaneWire {
+        self.wire
+    }
+
+    /// Sends the server's end over `broker`, after the frame that announces it.
+    pub(crate) fn send_end(&self, broker: Connection<'_>) -> std::io::Result<()> {
+        tutti_plugin_ipc_ffi::send_lane(broker, self.server.as_fd())
+    }
+
+    /// The host's end of the lane, once the server has said it holds its own.
+    ///
+    /// # Errors
+    ///
+    /// Never on unix.
+    pub(crate) fn stream(self) -> IpcResult<ControlStream> {
+        let stream = Stream::UdSocket(self.host.into());
+        let _ = stream.set_send_timeout(Some(super::control::SEND_TIMEOUT));
+        Ok(stream)
+    }
+}
+
+/// The two ends of a broker connection, host's first, for the mock servers of
+/// the tests: a socket pair, with the host's end under the send timeout
+/// of a launched server's connection.
+///
+/// # Panics
+///
+/// The OS refuses the socket pair.
+#[cfg(any(test, feature = "testing"))]
+pub fn broker_pair() -> (ControlStream, ControlStream) {
+    let (host, server) = UnixStream::pair().expect("a socket pair");
+    let host = Stream::UdSocket(OwnedFd::from(host).into());
+    let _ = host.set_send_timeout(Some(super::control::SEND_TIMEOUT));
+    (host, Stream::UdSocket(OwnedFd::from(server).into()))
 }
 
 /// The longest socket path every Unix takes: `sun_path` is 104 bytes on macOS

@@ -1,5 +1,6 @@
 //! A descriptor over a connected Unix socket: one byte whose ancillary data
-//! carries it.
+//! carries it. Any descriptor travels this way: a slab's memory, an audio
+//! lane's socket end.
 //!
 //! The byte is a message of its own, sent after the frame that announces it
 //! and received by the exact read that follows that frame, so no read of the
@@ -96,7 +97,7 @@ pub(crate) fn recv(
     fds.pop().ok_or(SlabError::NoDescriptor)
 }
 
-/// The connection a slab is sent over: the socket's descriptor.
+/// The connection a descriptor is sent over: the socket's descriptor.
 pub type Connection<'a> = BorrowedFd<'a>;
 
 /// What `SetupSharedMemory` carries of a slab: nothing, as the descriptor

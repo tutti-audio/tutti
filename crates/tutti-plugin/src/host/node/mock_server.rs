@@ -12,8 +12,8 @@ use tutti_graph::contract::Direct;
 use tutti_plugin_host::client_over;
 use tutti_plugin_ipc::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, Ipc,
-    IpcParts, PROTOCOL_VERSION, PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS, Request,
-    SlabLayout, SlabWriter, unique_socket_path,
+    IpcParts, PluginBridge, ProcessAudioData, ProcessGuard, RING_SLOTS, Request, SlabLayout,
+    SlabWriter,
 };
 use tutti_plugin_types::{
     ChannelLayout, EditorPresence, Features, MaxBlock, ParameterChanges, ParameterInfo, PluginBus,
@@ -222,18 +222,16 @@ pub(super) fn rig_gated(gate: Option<ReplyGate>) -> Rig {
 }
 
 fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
-    use interprocess::local_socket::{ListenerOptions, traits::Listener as _};
-    let path = unique_socket_path().expect("the OS has a random source");
-    let _ = std::fs::remove_file(&path);
-    let listener = ListenerOptions::new()
-        .name(tutti_plugin_ipc::socket_name(&path).unwrap())
-        .create_sync()
-        .unwrap();
+    let ((audio_stream, audio), (control_stream, control)) = (
+        tutti_plugin_ipc::broker_pair(),
+        tutti_plugin_ipc::broker_pair(),
+    );
     let (slab, handle) = AudioSlab::create(layout()).unwrap();
     let server_slab = AudioSlab::open(&handle, layout()).unwrap();
     let (bridge, thread, replies) = PluginBridge::new(
         tutti_fixtures::executor(),
-        path.clone(),
+        audio_stream,
+        control_stream,
         tutti_plugin_types::PluginRef::file("test.vst3"),
         tutti_plugin_types::PluginFormat::Vst3,
         Some(tutti_plugin_ipc::EditorLoader::new(
@@ -245,22 +243,6 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
         tutti_plugin_types::Timeouts::default(),
     )
     .unwrap();
-    // The audio connection first, then the control one, as the server accepts
-    // them; the host connects the second after the first one's `Ready`.
-    let audio = listener.accept().unwrap();
-    send(
-        &audio,
-        &AudioReply::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
-    let control = listener.accept().unwrap();
-    send(
-        &control,
-        &ControlFrame::Ready {
-            protocol_version: PROTOCOL_VERSION,
-        },
-    );
     let record: Record = Arc::default();
     let log = Arc::clone(&record);
     std::thread::Builder::new()
@@ -274,7 +256,6 @@ fn build(gate: Option<ReplyGate>, lists: bool) -> Rig {
         .name("mock-differential-server".into())
         .spawn(move || {
             serve_audio(&audio, server_slab, &log, gate);
-            let _ = std::fs::remove_file(&path);
         })
         .unwrap();
     Rig {

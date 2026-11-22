@@ -95,7 +95,9 @@ impl Ticker {
 #[cfg_attr(not(unix), path = "windows.rs")]
 mod sys;
 
-pub(crate) use sys::{Bell, Listener, Native, Stream, connection, wait_readable};
+pub(crate) use sys::{
+    Bell, LaneEnd, Listener, Native, Stream, connection, receive_lane, wait_readable,
+};
 
 impl Native {
     /// Waits until `transport` has a frame to read (`Ok(true)`), the `bell`
@@ -286,6 +288,7 @@ pub(crate) fn serve_every(
             Incoming::StateRefused { id, staging, error } => {
                 (id, session.refuse_state(staging, error))
             }
+            Incoming::OpenAudio { id, .. } => (id, session.refuse_second_lane()),
         };
         match reaction {
             Reaction::Shutdown => return Ok(()),

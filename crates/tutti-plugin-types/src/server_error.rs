@@ -80,4 +80,10 @@ pub enum ServerError {
         /// Why.
         reason: String,
     },
+    /// A lane open arrived without the lane's end.
+    #[error("a lane open arrived without its end")]
+    LaneWithoutEnd,
+    /// A lane was opened that is already open.
+    #[error("the audio lane is already open")]
+    LaneAlreadyOpen,
 }
