@@ -109,7 +109,11 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         "the first plugin is bypassed"
     );
 
-    let outgoing_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
+    let outgoing_pid = s
+        .plugin_view(node)
+        .expect("hosted")
+        .diagnostics()
+        .server_pid();
     let incoming = PluginClient::new(
         tutti_plugin_ipc::IpcConfig::at(
             tutti_plugin_ipc::unique_socket_path().expect("the OS has a random source"),
@@ -124,7 +128,11 @@ fn a_plugin_replacing_another_under_a_bypassed_node_is_bypassed_as_it_enters() {
         .replace_plugin(node, Replacement::new(Box::new(incoming)))
         .expect("the crossfade is accepted");
     // The record now holds the incoming plugin's handle, which is what is read.
-    let incoming_pid = s.plugin_view(node).expect("hosted").handle().server_pid();
+    let incoming_pid = s
+        .plugin_view(node)
+        .expect("hosted")
+        .diagnostics()
+        .server_pid();
     assert_ne!(
         incoming_pid, outgoing_pid,
         "the node's plugin is the new one"
