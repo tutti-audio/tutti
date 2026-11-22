@@ -254,19 +254,9 @@ fn spawn_process(locator: &Locator, config: &IpcConfig) -> IpcResult<(Reaped, Re
             std::process::id().to_string(),
         )
         .stderr(std::process::Stdio::inherit());
-    tutti_plugin_ipc_ffi::own_group(&mut command);
-    // The server runs plugin code: it gets the standard descriptors and nothing else of the host's.
-    tutti_plugin_ipc_ffi::inherit_only_stdio(&mut command);
-    let (child, rendezvous) = crate::transport::spawn(command)?;
-    // A server that cannot be bound to the host's end could outlive a host
-    // that dies: it is ended and the launch refused. A child spawned before the
-    // assignment stays outside the job. (Unix binds at the spawn, in
-    // `own_group`, and has nothing to do here.)
-    let bound = tutti_plugin_ipc_ffi::bind_to_host(&child);
-    // On the refusal below `reaped` drops: its group is killed and reaped.
-    let reaped = Reaped::leading_group(child);
-    bound.map_err(IpcError::ServerNotBound)?;
-    Ok((reaped, rendezvous))
+    // The server runs plugin code: it gets the standard descriptors and nothing
+    // else of the host's, and it ends with the host.
+    crate::transport::spawn(command)
 }
 
 /// How many times [`Timeouts::load`] a load may be kept waiting by the server's

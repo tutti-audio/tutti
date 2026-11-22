@@ -370,10 +370,6 @@ impl<F: Float> IntoNode<F> for SyncOut {
                 .take()
                 .unwrap_or_else(MeterSource::constant),
         };
-        NodeParts {
-            node: Box::new(self),
-            controls,
-            fork: Some(Box::new(fork)),
-        }
+        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)))
     }
 }
