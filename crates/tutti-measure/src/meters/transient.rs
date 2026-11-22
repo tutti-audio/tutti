@@ -18,6 +18,7 @@ use tutti_dsp::{TransientDetector, TransientThreshold, TransientTimes};
 use tutti_units::{Amplitude, SampleRate, Samples, Seconds};
 
 use crate::convert::for_blocks;
+use crate::measure::measure_buffer;
 use crate::meters::onset::OnsetGap;
 use crate::{Measure, MeterError, StreamMeter};
 
@@ -97,18 +98,11 @@ impl<S: Sample> Measure<S> for TransientConfig {
 /// confirms it is pushed.
 ///
 /// A NaN sample reads as quiet and an infinite one as the largest finite level.
+#[derive(Debug)]
 pub struct TransientMeter<S: Sample> {
     detector: TransientDetector<f64>,
     found: Vec<Samples>,
     sample: PhantomData<fn(S)>,
-}
-
-impl<S: Sample> core::fmt::Debug for TransientMeter<S> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("TransientMeter")
-            .field("found", &self.found.len())
-            .finish_non_exhaustive()
-    }
 }
 
 impl<S: Sample> TransientMeter<S> {
@@ -160,9 +154,7 @@ pub fn detect_transients<S: Sample>(
     samples: Mono<'_, S>,
     rate: impl Into<SampleRate>,
 ) -> Result<Vec<Samples>, MeterError> {
-    let mut meter = Measure::<S>::measure(cfg, rate.into())?;
-    meter.push(samples, &mut crate::convert::Discard)?;
-    Ok(meter.finish())
+    measure_buffer::<S, _>(cfg, rate.into(), samples)
 }
 
 #[cfg(test)]

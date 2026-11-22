@@ -51,13 +51,9 @@ tutti-graph = { path = "../tutti-graph" }
 # The one seeded generator: noise for the tests and the FFT bench.
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The shared sine, impulse and level readings (`signal`), and
-# `check_range_contract` for the range-checked settings, which are serde's
-# `try_from` shape in the tests only.
+# `check_range_contract` for the range-checked settings.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
-tutti-units = { path = "../tutti-units", default-features = false, features = ["serde"] }
-tutti-music = { path = "../tutti-music", default-features = false, features = ["serde"] }
 tutti-ump = { path = "../tutti-ump", default-features = false }
-serde = "1"
 # `PeakBlocks`' serde round trip in the `serde` feature's tests.
 serde_json = "1"
 # `benches/fft_analyses`.
