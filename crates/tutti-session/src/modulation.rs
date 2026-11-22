@@ -131,8 +131,7 @@ impl ParamRef {
     }
 }
 
-/// The mix of a node in the session's graph (doc 013, "Bypass and mute are
-/// graph state"): the node's blend with its aligned input, which
+/// The mix of a node in the session's graph: the node's blend with its aligned input, which
 /// [`MixTarget`](crate::MixTarget) writes and a modulation route onto it
 /// ([`ModTarget`]) drives. Its range is `0..=1`: a route's depth is a fraction of the range
 /// declared for it (`Mods::range`), and the value is clamped to the blend.

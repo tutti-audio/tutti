@@ -1,5 +1,5 @@
 //! Typed keys, ports and the one wiring vocabulary of the session's
-//! [`Graph`] (doc 013, "The session graph's surface").
+//! [`Graph`].
 //!
 //! - [`Key<N>`] is a node's identity with its type: [`Graph::add`] returns one, and every call that takes a node takes
 //!   `impl Into<NodeKey>`, so a [`Key`] and an erased [`NodeKey`] both work.
@@ -443,8 +443,8 @@ impl From<EventInPort> for EventTapPort {
 /// One audio edge, named: what feeds which channel. What
 /// [`Graph::connect`] adds and a modulation route onto its gain
 /// (`ModTarget`) drives: the
-/// **gain** of an edge is a weight of the sum its sink holds (doc 013, "Edge
-/// gain"). The edge must exist; a target whose edge is not in the graph yet
+/// **gain** of an edge is a weight of the sum its sink holds. The edge must
+/// exist; a target whose edge is not in the graph yet
 /// is unresolved until it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ChannelEdge {
