@@ -59,6 +59,22 @@ pub fn instant_of_monotonic_ns(ns: i64) -> Option<Instant> {
     }
 }
 
+/// The [`monotonic_ns`] reading of an [`Instant`]: the inverse of
+/// [`instant_of_monotonic_ns`], through the same pairing, so it is an offset,
+/// exact to the gap between the pairing's two reads. `None` where the result is
+/// beyond what an `i64` of nanoseconds holds.
+#[must_use]
+pub fn monotonic_ns_of(instant: Instant) -> Option<i64> {
+    let (origin, base) = pairing();
+    match instant.checked_duration_since(origin) {
+        Some(after) => base.checked_add(i64::try_from(after.as_nanos()).ok()?),
+        None => {
+            let before = origin.duration_since(instant);
+            base.checked_sub(i64::try_from(before.as_nanos()).ok()?)
+        }
+    }
+}
+
 #[cfg_attr(unix, path = "clock/unix.rs")]
 #[cfg_attr(windows, path = "clock/windows.rs")]
 #[cfg_attr(target_arch = "wasm32", path = "clock/wasm.rs")]
@@ -69,7 +85,8 @@ mod tests {
     use super::*;
 
     /// **A reading is the pairing's instant plus its distance from the paired
-    /// reading**, after the pairing's origin, at it, and before it.
+    /// reading**, after the pairing's origin, at it, and before it, and an
+    /// instant's reading is its inverse at each, and `None` past an `i64`.
     #[test]
     fn a_reading_is_an_offset_from_the_pairing() {
         let (origin, base) = pairing();
@@ -86,6 +103,15 @@ mod tests {
         assert_eq!(
             instant_of_monotonic_ns(base - 3 * second),
             origin.checked_sub(Duration::from_secs(3))
+        );
+        for ns in [base - 3 * second, base, base + 1, base + 5 * second] {
+            let at = instant_of_monotonic_ns(ns).expect("near the origin");
+            assert_eq!(monotonic_ns_of(at), Some(ns));
+        }
+        assert_eq!(
+            monotonic_ns_of(origin + Duration::from_secs(u64::MAX / 2_000_000_000)),
+            None,
+            "centuries ahead is past an i64 of nanoseconds"
         );
     }
 

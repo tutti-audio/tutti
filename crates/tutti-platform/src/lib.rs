@@ -11,10 +11,10 @@
 //! - [`Instant`] and [`SystemTime`] — std's types on a native target (the same
 //!   type, so an app's own `Instant` keeps working), `performance.now()` and
 //!   `Date.now()` on the web. `Duration` stays `std::time::Duration`.
-//! - [`monotonic_ns`] / [`sleep_until_ns`] / [`instant_of_monotonic_ns`] — the OS
-//!   monotonic clock, in nanoseconds, a sleep until an absolute deadline on it (it
-//!   returns at once on the web, which cannot block), and the [`Instant`] of a
-//!   reading.
+//! - [`monotonic_ns`] / [`sleep_until_ns`] / [`instant_of_monotonic_ns`] /
+//!   [`monotonic_ns_of`] — the OS monotonic clock, in nanoseconds, a sleep until an
+//!   absolute deadline on it (it returns at once on the web, which cannot block),
+//!   and the [`Instant`] of a reading and the reading of an [`Instant`].
 //! - [`request_priority`] — asks the OS to raise the calling thread's priority
 //!   and returns what it granted ([`PriorityOutcome`], [`Scheduling`]) or the
 //!   refusal (never real time on Linux; always a refusal on the web).
@@ -100,7 +100,7 @@ pub use asset::{
     Asset, Destination, FileStamp, Identity, Open, ReadSeek, Staged, StagedCommitError, StagedFile,
     StagedKeep,
 };
-pub use clock::{instant_of_monotonic_ns, monotonic_ns};
+pub use clock::{instant_of_monotonic_ns, monotonic_ns, monotonic_ns_of};
 pub use denormals::with_no_denormals;
 #[cfg(not(loom))]
 pub use executor::*;

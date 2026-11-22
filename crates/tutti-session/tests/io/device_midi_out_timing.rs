@@ -14,7 +14,7 @@
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tutti_platform::{Instant, instant_of_monotonic_ns, monotonic_ns};
+use tutti_platform::Instant;
 
 use tutti_buffers::ChannelLayout;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec};
@@ -91,31 +91,22 @@ fn rig(wire: &Wire) -> (LiveSession, ManualStream, tutti_session::MidiSink) {
     (s, stream, sink)
 }
 
-/// The OS clock now moved by `seconds`, in nanoseconds: the date of block 0.
-fn base_ns(seconds: f64) -> i64 {
-    monotonic_ns() + (seconds * 1e9) as i64
-}
-
-/// The instant of `ns` on the OS clock.
-fn instant(ns: i64) -> Instant {
-    instant_of_monotonic_ns(ns).expect("an instant near now")
-}
-
 /// The instant frame `frame` is rendered, for blocks dated from `base`: its
 /// frames over the rate after block 0's date.
-fn rendered(base: i64, frame: u64) -> Instant {
-    instant(base) + Duration::from_secs_f64(frame as f64 / RATE)
+fn rendered(base: Instant, frame: u64) -> Instant {
+    base + Duration::from_secs_f64(frame as f64 / RATE)
 }
 
-/// Renders blocks `from..to`, block `k` dated `base + k * BLOCK / RATE`
-/// (rounded to the nanosecond) and reporting `delay` as the audio output's
-/// latency.
-fn render(stream: &ManualStream, base: i64, blocks: Range<usize>, delay: Option<Duration>) {
+/// Renders blocks `from..to`, block `k` dated `base + k * BLOCK / RATE` and
+/// reporting `delay` as the audio output's latency.
+fn render(stream: &ManualStream, base: Instant, blocks: Range<usize>, delay: Option<Duration>) {
     for k in blocks {
-        let frames = (k * BLOCK) as u128;
-        let ns = (frames * 1_000_000_000 + RATE as u128 / 2) / RATE as u128;
         stream
-            .render_block_at(Samples::new(BLOCK), base + ns as i64, delay)
+            .render_block_at(
+                Samples::new(BLOCK),
+                rendered(base, (k * BLOCK) as u64),
+                delay,
+            )
             .expect("the stream is open");
     }
 }
@@ -137,7 +128,7 @@ fn assert_at(at: Instant, expected: Instant, what: &str) {
 /// Asserts `ticks` are the clock's, one per 1 000 frames from frame 0 on the
 /// first, each sent `after` its frame is rendered.
 #[track_caller]
-fn assert_ticks(ticks: &[Instant], base: i64, after: Duration) {
+fn assert_ticks(ticks: &[Instant], base: Instant, after: Duration) {
     for (j, at) in ticks.iter().enumerate() {
         assert_at(
             *at,
@@ -157,7 +148,7 @@ fn the_clock_is_sent_at_the_time_of_its_frames() {
     let wire = Wire::default();
     let (mut s, stream, _sink) = rig(&wire);
     let latency = Duration::from_millis(1500);
-    let base = base_ns(-1.0);
+    let base = Instant::now() - Duration::from_secs(1);
     render(&stream, base, 0..60, Some(latency));
     let _ = s.update();
     let sent = wire.take();
@@ -197,7 +188,7 @@ fn an_output_offset_shifts_the_send_times() {
             .unwrap()),
         )
         .unwrap();
-        let base = base_ns(-1.0);
+        let base = Instant::now() - Duration::from_secs(1);
         render(&stream, base, 0..60, latency);
         let _ = s.update();
         let ticks = Wire::tick_times(&wire.take());
@@ -206,7 +197,7 @@ fn an_output_offset_shifts_the_send_times() {
             base,
             Duration::from_millis(1500) + Duration::from_secs_f64(offset),
         );
-        ticks.last().unwrap().duration_since(instant(base))
+        ticks.last().unwrap().duration_since(base)
     };
     let shift = newest_after_base(0.25) - newest_after_base(0.0);
     assert!(
@@ -233,7 +224,12 @@ fn a_written_output_latency_is_the_terms_own_on_a_device_clock() {
     .unwrap();
     let target = s.midi().output_latency();
     s.set(target.to(written)).unwrap();
-    render(&stream, base_ns(0.0), 0..2, Some(Duration::from_millis(40)));
+    render(
+        &stream,
+        Instant::now(),
+        0..2,
+        Some(Duration::from_millis(40)),
+    );
     let _ = s.update();
     let terms = s.midi().output_terms().unwrap();
     assert_eq!(
@@ -257,7 +253,7 @@ fn an_unreported_audio_latency_is_left_out_and_reported() {
     assert_eq!(terms.audio_output, None);
     assert!(!terms.is_complete());
 
-    let base = base_ns(0.5);
+    let base = Instant::now() + Duration::from_millis(500);
     render(&stream, base, 0..60, None);
     let _ = s.update();
     let sent = wire.take();
@@ -331,7 +327,7 @@ fn a_clips_notes_are_sent_when_their_frames_are_heard() {
         .expect("the sink's node takes events");
     let _ = s.update();
     let latency = Duration::from_millis(1500);
-    let base = base_ns(-1.2);
+    let base = Instant::now() - Duration::from_millis(1200);
     render(&stream, base, 0..100, Some(latency));
     let _ = s.update();
     let sends: Vec<(bool, Instant)> = wire

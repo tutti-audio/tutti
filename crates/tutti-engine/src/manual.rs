@@ -124,18 +124,20 @@ impl<F: Float> ManualStream<F> {
     }
 
     /// [`render_block_delayed`](Self::render_block_delayed) as a callback the
-    /// caller dates: the block clock records `os_ns`, a
-    /// [`monotonic_ns`](tutti_platform::monotonic_ns) reading, as the OS time
-    /// the block began, where the other renders read the clock themselves, as a
-    /// device callback stamped with its own timestamp, or a timer's block
-    /// stamped with the instant it was due. `delay` is the delay the callback
-    /// reports (`None`: none, which clears the reading).
+    /// caller dates: the block clock records `at` as the OS time the block
+    /// began, where the other renders read the clock themselves, as a device
+    /// callback stamped with its own timestamp, or a timer's block stamped with
+    /// the instant it was due. `delay` is the delay the callback reports
+    /// (`None`: none, which clears the reading). Returns `None` if no stream is
+    /// open, or if `at` is beyond what the block clock's nanoseconds hold
+    /// (nothing is rendered).
     pub fn render_block_at(
         &self,
         frames: Samples,
-        os_ns: i64,
+        at: Instant,
         delay: Option<Duration>,
     ) -> Option<Vec<F>> {
+        let os_ns = tutti_platform::monotonic_ns_of(at)?;
         self.render_block_inner(frames, Some(os_ns), delay)
     }
 
