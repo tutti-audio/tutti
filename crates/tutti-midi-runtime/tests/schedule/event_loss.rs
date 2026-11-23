@@ -270,11 +270,26 @@ fn a_refused_note_off_goes_out_in_a_following_block() {
     assert_eq!(r.exec.lost_event_count(), 0);
 }
 
-/// The port is sized from the block the node was prepared for, and again
-/// after a re-prepare: 256 at 64 frames, one a frame after that, the cap at
-/// 1,048,576.
+/// The event capacity of `node`'s shape once prepared for `block` frames.
+fn port_capacity(mut node: impl tutti_graph::Node<f32>, block: usize) -> Option<u32> {
+    node.prepare(&Prepare::new(
+        SampleRate::SR_48K,
+        MaxBlock::of(Samples::new(block)),
+    ));
+    node.shape().event_capacity.map(|n| n.get())
+}
+
+/// A node's port is sized from the block it was prepared for.
+/// - Clip node: 256 up to a 256-frame block, one a frame to 8,192, then the
+///   cap at 8,192.
+/// - Input node: 512 events up to a 4,096-frame block, an eighth of the
+///   block's frames past that (1,024 at 8,192, 2,048 at 16,384).
+/// - Harmony node: two events a frame (a loop of 8 frames with a chord and a
+///   scale change in it, in a 1,024-frame block, is 256 events; its port of
+///   2,048 holds them), capped at 8,192.
 #[test]
 fn the_port_follows_the_block() {
+    use tutti_midi_runtime::{HarmonyChanges, HarmonyNode, MidiInputNode};
     for (block, want) in [
         (1usize, 256u32),
         (64, 256),
@@ -284,63 +299,16 @@ fn the_port_follows_the_block() {
         (16_384, 8_192),
         (1 << 20, 8_192),
     ] {
-        let mut node = MidiClipNode::new([]);
-        tutti_graph::Node::<f32>::prepare(
-            &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
-        );
-        assert_eq!(
-            tutti_graph::Node::<f32>::shape(&node)
-                .event_capacity
-                .map(|n| n.get()),
-            Some(want),
-            "block {block}"
-        );
+        let got = port_capacity(MidiClipNode::new([]), block);
+        assert_eq!(got, Some(want), "clip node, block {block}");
     }
-}
-
-/// The input node is sized from the block it is prepared for: 512 events up
-/// to a 4,096-frame block, an eighth of the block's frames past that (1,024 at
-/// 8,192, 2,048 at 16,384).
-#[test]
-fn the_input_node_follows_the_block() {
-    use tutti_midi_runtime::MidiInputNode;
-
     for (block, want) in [(64usize, 512u32), (4096, 512), (8192, 1024), (16_384, 2048)] {
-        let mut node = MidiInputNode::new();
-        tutti_graph::Node::<f32>::prepare(
-            &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
-        );
-        assert_eq!(
-            tutti_graph::Node::<f32>::shape(&node)
-                .event_capacity
-                .map(|n| n.get()),
-            Some(want),
-            "block {block}"
-        );
+        let got = port_capacity(MidiInputNode::new(), block);
+        assert_eq!(got, Some(want), "input node, block {block}");
     }
-}
-
-/// The harmony node's port is sized at two events a frame: a loop of 8 frames
-/// with a chord and a scale change in it, in a 1,024-frame block, is 128
-/// passes of two events each, 256 events. Its port, of 2,048, holds them.
-#[test]
-fn the_harmony_port_follows_the_block() {
-    use tutti_midi_runtime::{HarmonyChanges, HarmonyNode};
     for (block, want) in [(64usize, 256u32), (1024, 2048), (16_384, 8_192)] {
-        let mut node = HarmonyNode::new(HarmonyChanges::default());
-        tutti_graph::Node::<f32>::prepare(
-            &mut node,
-            &Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(block))),
-        );
-        assert_eq!(
-            tutti_graph::Node::<f32>::shape(&node)
-                .event_capacity
-                .map(|n| n.get()),
-            Some(want),
-            "block {block}"
-        );
+        let got = port_capacity(HarmonyNode::new(HarmonyChanges::default()), block);
+        assert_eq!(got, Some(want), "harmony node, block {block}");
     }
 }
 
