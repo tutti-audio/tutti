@@ -19,7 +19,8 @@
 //! and a row with no collision (or an allow row that also has a baseline row, or a baseline
 //! row for an unsorted or repeated key) fails as stale, so the lists only shrink.
 
-use super::umbrella::{SRC, file_module, skipped};
+use super::lex::skipped;
+use super::umbrella::{SRC, file_module};
 use super::use_tree::placed_uses;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};

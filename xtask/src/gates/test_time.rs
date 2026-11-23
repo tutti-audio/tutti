@@ -41,7 +41,9 @@
 //! baseline lines of the current counts after a failure or slack, so a lane can paste
 //! them.
 
-use super::lex::{blank, find_word_from, line_of, matching, test_ranges};
+use super::lex::{
+    blank, find_word_from, is_test_file, line_of, matching, skipped, test_ranges, word, word_char,
+};
 use super::use_tree::inline_mods;
 use super::{Report, Tree};
 use std::collections::BTreeMap;
@@ -51,10 +53,6 @@ pub(crate) const BASELINE: &str = "xtask/test-time.txt";
 
 const GATE: &str = "check-test-time";
 const ROOTS: [&str; 3] = ["crates", "testing", "xtask"];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
 
 /// A file's counts.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -112,22 +110,6 @@ fn parse(text: &str) -> Result<BTreeMap<String, Counts>, String> {
     Ok(map)
 }
 
-/// Whether the whole file is test code: it sits under a `tests` directory or is a
-/// `tests.rs`.
-pub(super) fn test_file(path: &str) -> bool {
-    let segs: Vec<&str> = path.split('/').collect();
-    let (file, dirs) = segs.split_last().expect("a path has a segment");
-    *file == "tests.rs" || dirs.contains(&"tests")
-}
-
-fn word_byte(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
-
-fn word_byte_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
-}
-
 fn skip_ws(b: &[u8], mut i: usize) -> usize {
     while b.get(i).is_some_and(u8::is_ascii_whitespace) {
         i += 1;
@@ -144,7 +126,7 @@ fn chain_end(code: &str, mut end: usize) -> usize {
             end = i + 1;
         } else if b.get(i) == Some(&b'.') {
             let j = skip_ws(b, i + 1);
-            let name = b[j..].iter().take_while(|&&c| word_byte(c)).count();
+            let name = b[j..].iter().take_while(|&&c| word(c)).count();
             if name == 0 {
                 return end;
             }
@@ -158,7 +140,7 @@ fn chain_end(code: &str, mut end: usize) -> usize {
             }
         } else if code[i..].starts_with("as ") {
             let j = skip_ws(b, i + 2);
-            let name = b[j..].iter().take_while(|&&c| word_byte(c)).count();
+            let name = b[j..].iter().take_while(|&&c| word(c)).count();
             if name == 0 {
                 return end;
             }
@@ -176,7 +158,7 @@ fn receiver_start(code: &str, dot: usize) -> usize {
     let mut i = dot;
     while i > 0 {
         let c = b[i - 1];
-        if word_byte(c) || c == b'.' || c == b':' {
+        if word(c) || c == b'.' || c == b':' {
             i -= 1;
         } else if c == b')' || c == b']' {
             let (o, cl) = if c == b')' {
@@ -257,7 +239,7 @@ fn in_assert(code: &str, at: usize) -> bool {
                 if j > 0 && b[j - 1] == b'!' {
                     let name_end = j - 1;
                     let mut s = name_end;
-                    while s > 0 && word_byte(b[s - 1]) {
+                    while s > 0 && word(b[s - 1]) {
                         s -= 1;
                     }
                     let name = &code[s..name_end];
@@ -340,7 +322,7 @@ fn wall_clock(code: &str) -> Vec<(usize, &'static str)> {
         }
         let o = skip_ws(b, m + 1);
         let mut e = o;
-        while e < b.len() && (word_byte(b[e]) || b[e] == b'.' || b[e] == b':') {
+        while e < b.len() && (word(b[e]) || b[e] == b'.' || b[e] == b':') {
             e += 1;
         }
         if e == o {
@@ -401,7 +383,7 @@ fn sleeps(code: &str) -> Vec<usize> {
             || before.ends_with('.')
             || before
                 .strip_suffix("fn")
-                .is_some_and(|p| !p.ends_with(word_byte_char))
+                .is_some_and(|p| !p.ends_with(word_char))
         {
             false
         } else {
@@ -519,7 +501,7 @@ fn declared(path: &str, base: &str, text: &str, code: &str) -> Vec<(usize, Vec<R
     while let Some(at) = find_word_from(code, "mod", from) {
         from = at + 3;
         let s = skip_ws(b, from);
-        let name_len = b[s..].iter().take_while(|&&c| word_byte(c)).count();
+        let name_len = b[s..].iter().take_while(|&&c| word(c)).count();
         if name_len == 0 || b.get(skip_ws(b, s + name_len)) != Some(&b';') {
             continue;
         }
@@ -594,7 +576,7 @@ pub(super) fn cfg_test_files(
             .get(path.as_str())
             .cloned()
             .unwrap_or_else(|| module_dir(path));
-        let whole = test_file(path) || found.contains(path);
+        let whole = is_test_file(path) || found.contains(path);
         let ranges = test_ranges(&code);
         for (at, candidates) in declared(path, &base, text, &code) {
             if !whole && !ranges.iter().any(|&(s, e)| at >= s && at <= e) {
@@ -669,7 +651,7 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     let reached = cfg_test_files(&files);
     for (path, text) in &files {
         scanned.insert(path.clone());
-        let s = scan(path, text, test_file(path) || reached.contains(path));
+        let s = scan(path, text, is_test_file(path) || reached.contains(path));
         let (n, allowed) = (s.counts(), baseline.get(path).copied().unwrap_or_default());
         if n != Counts::default() {
             current.insert(path.clone(), n);
@@ -751,7 +733,7 @@ mod tests {
     }
 
     fn sites(path: &str, text: &str) -> Sites {
-        scan(path, text, test_file(path))
+        scan(path, text, is_test_file(path))
     }
 
     fn counts(path: &str, src: &str) -> Counts {

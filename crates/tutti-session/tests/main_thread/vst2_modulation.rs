@@ -6,7 +6,6 @@
 
 use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 use tutti_session::MainOutput;
@@ -62,22 +61,29 @@ fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
 
 /// Updates until `target` has a lane, and its knob.
 fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
-    let deadline = Instant::now() + Duration::from_secs(10);
     let now = Instant::now();
-    loop {
-        assert!(
-            !s.mod_state()
-                .problems()
-                .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
-            "the declarations apply"
-        );
-        if let Some((_, lane)) = s.mod_state().lane(target.key()) {
-            return lane.value().expect("a plugin lane has a knob");
-        }
-        assert!(Instant::now() < deadline, "no lane on {target:?}");
-        update(s, now);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let mut knob = None;
+    tutti_fixtures::wait_until(
+        &format!("a lane on {target:?}"),
+        tutti_fixtures::HANG_GUARD,
+        || {
+            assert!(
+                !s.mod_state()
+                    .problems()
+                    .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
+                "the declarations apply"
+            );
+            knob = s
+                .mod_state()
+                .lane(target.key())
+                .map(|(_, lane)| lane.value().expect("a plugin lane has a knob"));
+            if knob.is_none() {
+                update(s, now);
+            }
+            knob.is_some()
+        },
+    );
+    knob.expect("the wait ended on a lane")
 }
 
 /// Calls the one-argument switch `name` the probe exports, in the image the

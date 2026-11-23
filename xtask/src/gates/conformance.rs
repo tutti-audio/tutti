@@ -73,7 +73,7 @@
 
 use super::carry::{self, CHANGED_SIDE, Fate, is_orphan};
 use super::clap_sys::{self, Item};
-use super::lex::blank_keeping_docs;
+use super::lex::{blank_keeping_docs, skipped};
 use super::midi_spec;
 use super::sf2_spec;
 use super::vst3_sdk;
@@ -87,10 +87,6 @@ const MATURITIES: [&str; 2] = ["stable", "draft"];
 const TAG: &str = "/// Spec:";
 /// The ids of the VST3 inventory.
 const VST3_PREFIX: &str = "vst3.";
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
 
 /// One inventory row, every column as written (trimmed).
 #[derive(Debug, Clone, PartialEq, Eq)]

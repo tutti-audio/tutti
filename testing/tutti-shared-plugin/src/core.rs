@@ -38,7 +38,7 @@
 //! What the plugin says of its parameters, in each format that has the concept:
 //!
 //! - **Group.** `aux` is in the group `Filter`: VST3's unit `Filter`, the
-//!   innermost of `Voices` > `Oscillator` > `Filter` (the units are declared and
+//!   innermost of "Voices" > `Oscillator` > `Filter` (the units are declared and
 //!   hold nothing else), CLAP's module `Voices/Oscillator/Filter`, AU's clump 3
 //!   named `Filter`. The others have none; VST2 declares none.
 //! - **Roles** (VST3's `IParameterFunctionName`, asked per unit): the dry/wet mix
@@ -54,7 +54,7 @@
 //!   in AU and `effSetBypass` in VST2 (neither a parameter). A write reaches the transcript as
 //!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
 //! - **Programs.** VST3 declares the program list [`PROGRAM_LIST`] in the unit
-//!   `Voices`, and selects a program through [`PROGRAM`], a stepped parameter in
+//!   "Voices", and selects a program through [`PROGRAM`], a stepped parameter in
 //!   that unit flagged `kIsProgramChange` (two steps for three programs). VST2
 //!   declares the same programs by number (`numPrograms`, the program names and
 //!   the current program, [`Core::program`]), and AU as factory presets numbered
@@ -260,15 +260,15 @@ pub const BYPASS: u32 = 5;
 /// program is [`Core::program`].
 pub const PROGRAM: u32 = 6;
 /// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
-/// (`Voices` > `Oscillator` > `Filter`).
+/// ("Voices" > `Oscillator` > `Filter`).
 pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
 /// The unit tree VST3 declares, `(id, parent, name)`, the root being unit `0`:
-/// `Voices` > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
+/// "Voices" > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
 pub const UNITS: [(i32, i32, &str); 3] = [(1, 0, "Voices"), (2, 1, "Oscillator"), (3, 2, "Filter")];
 /// The program list VST3 declares: its id, its name and its programs, in
 /// order. The unit [`PROGRAM_UNIT`] selects it.
 pub const PROGRAM_LIST: (i32, &str, [&str; 3]) = (1, "Factory", ["Init", "Pad", "Lead"]);
-/// The unit that selects [`PROGRAM_LIST`] and holds [`PROGRAM`]: `Voices`.
+/// The unit that selects [`PROGRAM_LIST`] and holds [`PROGRAM`]: "Voices".
 pub const PROGRAM_UNIT: i32 = 1;
 /// The unit `aux` is in.
 pub const AUX_UNIT: i32 = 3;

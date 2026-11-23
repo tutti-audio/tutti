@@ -770,8 +770,7 @@ impl Running {
             .collect();
         let max = MAX_SYSEX.get() as usize;
         let lanes = members.len().max(1);
-        let room = SysexAssembler::room_for(max, 1, lanes);
-        let assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
+        let assembler = SysexAssembler::boxed(max, 1, lanes);
         let mut running = Self {
             identity,
             members,
@@ -852,8 +851,7 @@ impl Running {
         // is not finished.
         let max = MAX_SYSEX.get() as usize;
         let lanes = self.members.len().max(1);
-        let room = SysexAssembler::room_for(max, 1, lanes);
-        self.assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
+        self.assembler = SysexAssembler::boxed(max, 1, lanes);
         changes.refused += send(out, &sends);
     }
 }

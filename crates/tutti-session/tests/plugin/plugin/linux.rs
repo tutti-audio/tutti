@@ -210,9 +210,9 @@ fn a_plugin_that_stops_answering_is_ended_and_replaced() {
         0
     );
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !renders_sound(&mut s) {
-        assert!(Instant::now() < deadline, "the replacement renders nothing");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the replacement to render",
+        tutti_fixtures::HANG_GUARD,
+        || renders_sound(&mut s),
+    );
 }

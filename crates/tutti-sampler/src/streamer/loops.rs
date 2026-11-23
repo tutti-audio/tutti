@@ -1,32 +1,24 @@
 //! What a stream's ring holds, position by position, and how it changes.
 //!
-//! A live stream's ring (`prefetch::Ring`) is indexed by straight
-//! position: file frames counted as if the file played straight on, the
-//! position a placed voice's gate and seat give (`interp::Seat`). What the slot for straight position `s` holds is the
-//! stream's [`Mapping`]: the file frame a loop places `s` on, its fade blended
-//! toward the lead-in (`LoopSpan`'s sequence, the one the memory tier and a
-//! forked disk voice read), or the frame a reversed read mirrors it to. The
-//! streamer writes the mapping ([`Mapping::fill`]); the audio thread reads the
-//! four taps a position needs by the same rule the memory tier takes them
-//! ([`Arrangement::taps`]). Neither side keeps a loop's state: the mapping is a
-//! function of the position.
+//! The ring (`prefetch::Ring`) is indexed by straight position: file frames
+//! counted as if the file played straight on, the position a placed voice's gate
+//! and seat give (`interp::Seat`). What the slot for straight position `s` holds
+//! is the stream's [`Mapping`]: the file frame a loop places `s` on (its fade
+//! blended toward the lead-in, `LoopSpan`'s sequence), or the frame a reversed
+//! read mirrors it to. The streamer writes the mapping ([`Mapping::fill`]); the
+//! audio thread reads the four taps a position needs by the memory tier's rule
+//! ([`Arrangement::taps`]). The mapping is a function of the position, so
+//! neither side keeps a loop's state.
 //!
-//! # A change of mapping is a switch at a straight position
-//!
-//! A loop edit or a direction change leaves the ring holding the old mapping
-//! ahead of the reader. [`apply_mapping`] finds the first position the old and
-//! new mappings disagree on (`D`). A change that disagrees nowhere in the
-//! window is free: later writes use the new mapping and nothing is heard until
-//! the reader reaches frames the old one never wrote. Otherwise the ring is
-//! rewritten from a switch point `x`: `D` itself when that is far enough ahead
-//! of the block the reader is in, so the reader goes from the old sequence to
-//! the new one where they part, exactly as the memory tier does; else a guard
-//! past that block, and then the switch is a jump the memory tier made at the
-//! edit, so the reader crossfades there from a record of what the old mapping
-//! would have played ([`FadeRecord`]), at the read rate, consuming the ring.
-//! The record also covers the frames the streamer has not rewritten yet, so a
-//! reader that arrives early plays the old sequence rather than a gap. No
-//! change of mapping flushes the ring.
+//! A loop or direction change leaves the ring holding the old mapping ahead of
+//! the reader. [`apply_mapping`] finds the first position `D` the old and new
+//! mappings disagree on. If they agree throughout the window, later writes use
+//! the new mapping and nothing is rewritten. Otherwise the ring is rewritten
+//! from a switch point `x`: `D` when it is far enough ahead of the reader's
+//! block, so the reader goes from the old sequence to the new where they part;
+//! else a guard past that block, and the reader crossfades there from a record
+//! of what the old mapping would have played ([`FadeRecord`]), covering the
+//! frames the streamer has not rewritten yet. No change flushes the ring.
 
 use std::sync::Arc;
 

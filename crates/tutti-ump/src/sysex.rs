@@ -3,7 +3,10 @@
 
 use core::iter::FusedIterator;
 
+use alloc::boxed::Box;
+
 use crate::field::first_non_seven_bit;
+use crate::lanes::LanePool;
 use crate::{Message, MessageType, MidiGroup, Sysex7Packet, SysexStatus, U7, Ump};
 
 /// The longest SysEx7 payload (the bytes between `0xF0` and `0xF7`) a host
@@ -359,22 +362,21 @@ pub enum SysexStep {
     Complete(SysexRef),
 }
 
-/// The most Groups a UMP stream has (M2-104 §2.1.2).
-const GROUPS: usize = 16;
-
-/// What one Group's SysEx7 stream is doing.
+/// What one Group's SysEx7 stream is doing, when it is doing anything.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Run {
-    Idle,
     /// A multi-packet message in lane `lane`: its bytes so far, `0xF0` first,
     /// are the first `len` bytes of the lane.
-    Assembling {
-        lane: usize,
-        len: usize,
-    },
+    Assembling { lane: usize, len: usize },
     /// Dropped and already counted: its remaining packets are skipped up to
     /// its `End`.
     Discarding,
+}
+
+impl Run {
+    const fn is_assembling(&self) -> bool {
+        matches!(self, Self::Assembling { .. })
+    }
 }
 
 /// Reassembles SysEx7 packets (M2-104 §7.7) into complete `0xF0 .. 0xF7`
@@ -449,14 +451,11 @@ enum Run {
 /// lanes)` never runs out for a block of up to that many packets.
 #[derive(Debug)]
 pub struct SysexAssembler<B> {
-    buf: B,
-    /// Completed messages of this block: `buf[..len]`, within `buf[..done_room]`.
+    /// The completed messages of this block in the buffer before the lanes,
+    /// one run slot per Group.
+    pool: LanePool<B, Run>,
+    /// Completed messages of this block: `buf[..len]`, within `buf[..pool.base()]`.
     len: usize,
-    done_room: usize,
-    lanes: usize,
-    max_message: usize,
-    runs: [Run; GROUPS],
-    dropped: u64,
 }
 
 impl SysexAssembler<()> {
@@ -473,6 +472,18 @@ impl SysexAssembler<()> {
     }
 }
 
+impl SysexAssembler<Box<[u8]>> {
+    /// An assembler over a boxed buffer of [`room_for`](SysexAssembler::room_for)
+    /// bytes, for messages of up to `max_message` bytes and blocks of up to
+    /// `packets_per_block` packets, with up to `lanes` open at once. It
+    /// allocates the buffer once, so call it off the audio thread.
+    #[must_use]
+    pub fn boxed(max_message: usize, packets_per_block: usize, lanes: usize) -> Self {
+        let room = SysexAssembler::room_for(max_message, packets_per_block, lanes);
+        Self::new(alloc::vec![0; room].into_boxed_slice(), max_message, lanes)
+    }
+}
+
 impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// An assembler over `buf` for messages of up to `max_message` bytes,
     /// delimiters included, with up to `lanes` of them open at once (at most
@@ -481,24 +492,16 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// completed messages. An empty buffer drops (and counts) every message.
     #[must_use]
     pub fn new(buf: B, max_message: usize, lanes: usize) -> Self {
-        let room = buf.as_ref().len();
-        let fit = room.checked_div(max_message).unwrap_or(0);
-        let lanes = lanes.min(GROUPS).min(fit);
         Self {
-            buf,
+            pool: LanePool::new(buf, max_message, lanes, Run::is_assembling),
             len: 0,
-            done_room: room - lanes * max_message,
-            lanes,
-            max_message,
-            runs: [Run::Idle; GROUPS],
-            dropped: 0,
         }
     }
 
     /// The longest message this assembler hands on, in bytes.
     #[must_use]
     pub fn max_message(&self) -> usize {
-        self.max_message
+        self.pool.lane_len()
     }
 
     /// Start a block: forget the last block's completed messages, keeping the
@@ -526,27 +529,27 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
         let g = group.index();
         match packet.status() {
             SysexStatus::Complete => {
-                self.end_run(g);
+                self.pool.end(g);
                 self.single(payload)
             }
             SysexStatus::Start => {
-                self.end_run(g);
+                self.pool.end(g);
                 self.start(g, payload);
                 SysexStep::Held
             }
             SysexStatus::Continue => {
-                if let Run::Assembling { lane, len } = self.runs[g] {
+                if let Some(Run::Assembling { lane, len }) = self.pool.slot(g) {
                     self.extend(g, lane, len, payload);
                 }
                 SysexStep::Held
             }
-            SysexStatus::End => match self.runs[g] {
-                Run::Assembling { lane, len } => self.finish(g, lane, len, payload),
-                Run::Discarding => {
-                    self.runs[g] = Run::Idle;
+            SysexStatus::End => match self.pool.slot(g) {
+                Some(Run::Assembling { lane, len }) => self.finish(g, lane, len, payload),
+                Some(Run::Discarding) => {
+                    self.pool.clear(g);
                     SysexStep::Held
                 }
-                Run::Idle => SysexStep::Held,
+                None => SysexStep::Held,
             },
         }
     }
@@ -556,9 +559,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// block are not spliced onto one. Call it after pushing a block's kept
     /// packets. Never allocates.
     pub fn lost_tail(&mut self) {
-        for g in 0..GROUPS {
-            self.end_run(g);
-        }
+        self.pool.lost_tail();
     }
 
     /// The consumer was reset: drop the open messages (counted, like any
@@ -573,7 +574,7 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// stable until the next [`begin_block`](Self::begin_block).
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
-        &self.buf.as_ref()[..self.len]
+        &self.pool.buf()[..self.len]
     }
 
     /// A completed message.
@@ -596,54 +597,28 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// than it was sized for).
     #[must_use]
     pub fn dropped(&self) -> u64 {
-        self.dropped
+        self.pool.dropped()
     }
 
     /// A UMP that is not a well-formed SysEx7 packet.
     fn other(&mut self, ump: Ump) -> SysexStep {
-        if let Some(group) = ump.group() {
-            // System Real Time (type 1, status 0xF8..=0xFF) may be inserted
-            // between the UMPs of a message; anything else on the Group ends it.
-            let real_time = ump.is_system_real_time();
-            if !real_time {
-                self.end_run(group.index());
-            }
-        }
+        self.pool.interrupt(ump);
         SysexStep::NotSysex
-    }
-
-    /// The Group's open message ends without its `End`: counted if it was
-    /// being assembled (a discarded one was counted when it was dropped).
-    fn end_run(&mut self, g: usize) {
-        if matches!(self.runs[g], Run::Assembling { .. }) {
-            self.dropped += 1;
-        }
-        self.runs[g] = Run::Idle;
-    }
-
-    /// Where lane `lane` starts in the buffer.
-    fn lane_base(&self, lane: usize) -> usize {
-        self.done_room + lane * self.max_message
-    }
-
-    fn free_lane(&self) -> Option<usize> {
-        (0..self.lanes).find(|&lane| {
-            !self
-                .runs
-                .iter()
-                .any(|run| matches!(run, Run::Assembling { lane: l, .. } if *l == lane))
-        })
     }
 
     /// Open a message on Group `g`: `0xF0`, then `payload`, in a free lane.
     fn start(&mut self, g: usize, payload: &[u8]) {
-        let Some(lane) = self.free_lane() else {
-            self.runs[g] = Run::Discarding;
-            self.dropped += 1;
+        let free = self.pool.free_lane(|run| match run {
+            Run::Assembling { lane, .. } => Some(*lane),
+            Run::Discarding => None,
+        });
+        let Some(lane) = free else {
+            self.pool.set(g, Run::Discarding);
+            self.pool.count_drop();
             return;
         };
-        let base = self.lane_base(lane);
-        self.buf.as_mut()[base] = 0xF0;
+        let base = self.pool.lane_start(lane);
+        self.pool.buf_mut()[base] = 0xF0;
         self.extend(g, lane, 1, payload);
     }
 
@@ -652,49 +627,52 @@ impl<B: AsRef<[u8]> + AsMut<[u8]>> SysexAssembler<B> {
     /// the rest of it.
     fn extend(&mut self, g: usize, lane: usize, len: usize, payload: &[u8]) {
         let new_len = len + payload.len();
-        if new_len + 1 > self.max_message {
-            self.runs[g] = Run::Discarding;
-            self.dropped += 1;
+        if new_len + 1 > self.max_message() {
+            self.pool.set(g, Run::Discarding);
+            self.pool.count_drop();
             return;
         }
-        let at = self.lane_base(lane) + len;
-        self.buf.as_mut()[at..at + payload.len()].copy_from_slice(payload);
-        self.runs[g] = Run::Assembling { lane, len: new_len };
+        let at = self.pool.lane_start(lane) + len;
+        self.pool.buf_mut()[at..at + payload.len()].copy_from_slice(payload);
+        self.pool.set(g, Run::Assembling { lane, len: new_len });
     }
 
     /// Close Group `g`'s message with `payload` and `0xF7`, and move it into
     /// the completed messages.
     fn finish(&mut self, g: usize, lane: usize, len: usize, payload: &[u8]) -> SysexStep {
         self.extend(g, lane, len, payload);
-        let Run::Assembling { len, .. } = self.runs[g] else {
+        let Some(Run::Assembling { len, .. }) = self.pool.slot(g) else {
             // Over capacity: `extend` dropped it and counted.
-            self.runs[g] = Run::Idle;
+            self.pool.clear(g);
             return SysexStep::Held;
         };
-        self.runs[g] = Run::Idle;
+        self.pool.clear(g);
         let size = len + 1;
-        if self.len + size > self.done_room {
-            self.dropped += 1;
+        if self.len + size > self.pool.base() {
+            self.pool.count_drop();
             return SysexStep::Held;
         }
-        let base = self.lane_base(lane);
-        let buf = self.buf.as_mut();
+        let base = self.pool.lane_start(lane);
+        let at = self.len;
+        let buf = self.pool.buf_mut();
         buf[base + len] = 0xF7;
-        buf.copy_within(base..base + size, self.len);
-        let start = self.len;
+        buf.copy_within(base..base + size, at);
         self.len += size;
-        SysexStep::Complete(SysexRef { start, len: size })
+        SysexStep::Complete(SysexRef {
+            start: at,
+            len: size,
+        })
     }
 
     /// Complete a one-packet message.
     fn single(&mut self, payload: &[u8]) -> SysexStep {
         let size = payload.len() + 2;
-        if size > self.max_message || self.len + size > self.done_room {
-            self.dropped += 1;
+        if size > self.max_message() || self.len + size > self.pool.base() {
+            self.pool.count_drop();
             return SysexStep::Held;
         }
         let start = self.len;
-        let buf = self.buf.as_mut();
+        let buf = self.pool.buf_mut();
         buf[start] = 0xF0;
         buf[start + 1..start + 1 + payload.len()].copy_from_slice(payload);
         buf[start + size - 1] = 0xF7;

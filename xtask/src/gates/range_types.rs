@@ -31,6 +31,7 @@
 //!   (?:<[^>]*>)?[ \t]*\([ \t\n]*(pub(?![\w(])|\))?
 //! ```
 
+use super::lex::{skipped_unless_examples, word_char};
 use super::{Report, Tree, under_skipped_dir};
 
 /// `(file, type, what removes the entry)`.
@@ -43,7 +44,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     (
         "crates/tutti-midi-protocol/src/sensitivity.rs",
         "PitchBendSensitivity",
-        "permanent: every u32 is a valid RPN word",
+        "permanent: every u32 is a valid RPN word_char",
     ),
     (
         "crates/tutti-graph/src/time.rs",
@@ -182,18 +183,12 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-const SKIPPED_DIRS: &[&str] = &["tests", "target", "benches"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
-
 pub(super) fn check(tree: &dyn Tree, exceptions: &[(&str, &str, &str)]) -> Report {
     let mut bad: Vec<String> = Vec::new();
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for top in ["crates", "testing"] {
-        for path in tree.files(top, &skipped) {
-            if !path.ends_with(".rs") || under_skipped_dir(&path, &skipped) {
+        for path in tree.files(top, &skipped_unless_examples) {
+            if !path.ends_with(".rs") || under_skipped_dir(&path, &skipped_unless_examples) {
                 continue;
             }
             let Some(text) = tree.read(&path) else {
@@ -254,16 +249,14 @@ pub(super) fn check(tree: &dyn Tree, exceptions: &[(&str, &str, &str)]) -> Repor
     r
 }
 
-/// Python's `\w`.
-fn word(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
 /// `\bneedle\b`.
 fn has_word(hay: &str, needle: &str) -> bool {
     hay.match_indices(needle).any(|(i, _)| {
-        !hay[..i].chars().next_back().is_some_and(word)
-            && !hay[i + needle.len()..].chars().next().is_some_and(word)
+        !hay[..i].chars().next_back().is_some_and(word_char)
+            && !hay[i + needle.len()..]
+                .chars()
+                .next()
+                .is_some_and(word_char)
     })
 }
 
@@ -363,7 +356,7 @@ fn struct_head(text: &str, at: usize) -> Option<Item> {
         private,
     };
     if let Some(r) = rest.strip_prefix("pub")
-        && !r.chars().next().is_some_and(|c| word(c) || c == '(')
+        && !r.chars().next().is_some_and(|c| word_char(c) || c == '(')
     {
         return Some(item(p + 3, false));
     }
@@ -399,7 +392,7 @@ fn struct_name(text: &str, at: usize) -> Option<(usize, String)> {
     p = after;
     let name_len: usize = text[p..]
         .chars()
-        .take_while(|&c| word(c))
+        .take_while(|&c| word_char(c))
         .map(char::len_utf8)
         .sum();
     if name_len == 0 {
@@ -517,7 +510,7 @@ fn strip_attributes(field: &str) -> String {
 fn is_bare_pub(field: &str) -> bool {
     field
         .strip_prefix("pub")
-        .is_some_and(|r| !r.chars().next().is_some_and(|c| word(c) || c == '('))
+        .is_some_and(|r| !r.chars().next().is_some_and(|c| word_char(c) || c == '('))
 }
 
 /// The attributes directly above `pos`, walking back over `#[..]` (matched
@@ -687,6 +680,13 @@ mod tests {
             &[],
         );
         assert!(r.passed(), "{:?}", r.findings);
+    }
+
+    #[test]
+    fn a_violation_under_examples_is_still_refused() {
+        let bad = "#[derive(serde::Deserialize)] struct P(u8);\n";
+        let r = run(&[("crates/c/examples/e.rs", bad)], &[]);
+        assert!(!r.passed(), "{:?}", r.findings);
     }
 
     #[test]

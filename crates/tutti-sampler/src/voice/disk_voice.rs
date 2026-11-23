@@ -1080,7 +1080,7 @@ impl<F: SamplerFloat> IntoNode<F> for DiskVoice<F> {
             state: Arc::clone(&self.shared_state),
         };
         let fork = DiskVoiceFork(self.clone());
-        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)))
+        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
     }
 }
 

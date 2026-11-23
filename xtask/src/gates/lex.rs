@@ -5,8 +5,58 @@
 //! not code. Byte offsets and newlines are kept, so an offset in the blanked
 //! text is the same offset in the source and a line number holds.
 
-fn word(b: u8) -> bool {
+/// A byte that continues an identifier.
+pub(super) fn word(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Python's `\w`: a character that continues an identifier, Unicode included
+/// (the gates written to a `\w` pattern read text, not just ASCII code).
+pub(super) fn word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Directories no gate enters, wherever they sit.
+pub(super) fn skipped(dir: &str) -> bool {
+    matches!(dir, "target" | ".git" | "node_modules")
+}
+
+/// [`skipped`], and the directories that hold no library code.
+pub(super) fn skipped_library(dir: &str) -> bool {
+    skipped(dir) || matches!(dir, "tests" | "benches" | "examples")
+}
+
+/// [`skipped`], and the `tests` and `benches` directories: `examples` is read.
+pub(super) fn skipped_unless_examples(dir: &str) -> bool {
+    skipped(dir) || matches!(dir, "tests" | "benches")
+}
+
+/// Whether `path` is a test file: `tests.rs`, or under a `tests` directory.
+pub(super) fn is_test_file(path: &str) -> bool {
+    path.split('/').any(|c| c == "tests" || c == "tests.rs")
+}
+
+/// The identifier that starts at `from` after skipping whitespace, and the
+/// offset after it; empty when none starts there.
+pub(super) fn ident_at(code: &str, from: usize) -> (&str, usize) {
+    let rest = &code[from..];
+    let start = from + (rest.len() - rest.trim_start().len());
+    let len = code[start..].bytes().take_while(|&c| word(c)).count();
+    (&code[start..start + len], start + len)
+}
+
+/// `text` without its leading `#[..]` attributes.
+pub(super) fn strip_attrs(mut text: &str) -> &str {
+    loop {
+        text = text.trim_start();
+        if !text.starts_with("#[") {
+            return text;
+        }
+        match matching(text, 1, b'[', b']') {
+            Some(close) => text = &text[close + 1..],
+            None => return text,
+        }
+    }
 }
 
 /// `src` with `//` and nested `/* */` comments, and what sits between the

@@ -618,10 +618,12 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
     let p = out.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
     assert_eq!(p, 0.0, "the fork sounds {p}");
 
-    // Rolling from beat 0 a block at a time, paced: a hosted plugin in a live
-    // fork answers a chunk in real time.
+    // Rolling from beat 0 a block at a time until the plugin is heard: a hosted
+    // plugin in a live fork answers a chunk in real time, so a block that comes
+    // before its answer plays silence.
     let mut peak = 0.0f32;
-    for i in 0..80u32 {
+    let mut i = 0u32;
+    tutti_fixtures::wait_until("the fork to play", tutti_fixtures::HANG_GUARD, || {
         let beat = f64::from(i) * BLOCK as f64 / 24_000.0;
         fork.set_transport(tutti_graph::TransportPosition::new(
             true,
@@ -631,9 +633,9 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
         ));
         fork.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         peak = out.iter().flatten().fold(peak, |a, v| a.max(v.abs()));
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    assert!(peak > 1e-4, "the fork plays nothing: {peak}");
+        i += 1;
+        peak > 1e-4
+    });
 }
 
 /// **Sending allocates nothing**, and neither does a block that plays it. The

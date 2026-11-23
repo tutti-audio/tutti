@@ -154,7 +154,7 @@ impl Rig {
                 self.events
             );
             self.step(BLOCK);
-            std::thread::sleep(Duration::from_micros(200));
+            std::thread::yield_now();
         }
     }
 
@@ -431,7 +431,7 @@ fn an_open_ended_take_is_finished_by_its_handle() {
     while rolling.is_none() {
         assert!(Instant::now() < deadline);
         rig.step(BLOCK);
-        std::thread::sleep(Duration::from_millis(1));
+        std::thread::yield_now();
         match armed.take().unwrap().rolling() {
             Ok(r) => rolling = Some(r),
             Err(still) => armed = Some(still),

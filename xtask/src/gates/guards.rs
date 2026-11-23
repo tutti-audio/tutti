@@ -26,14 +26,8 @@
 //! (a hit inside a comment is not a callback, and a guard named only in a
 //! comment is not a guard).
 
-use super::lex::{blank, find_word_from, matching};
+use super::lex::{blank, find_word_from, matching, skipped, word};
 use super::{Report, Tree};
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// Callbacks with nothing to guard: constant answers or empty bodies.
 const ALLOW: &[&str] = &[
@@ -91,10 +85,6 @@ const GUARDS: &[&str] = &[
 /// The fewest callbacks the real tree must show, or the scan is broken.
 pub(super) const MIN_SEEN: usize = 90;
 
-fn is_word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
 /// The text before the first `#[cfg(test)]` followed by a `mod` item (a
 /// `#[cfg(test)] use` or fn above production code does not end the scan).
 fn production(s: &str) -> &str {
@@ -108,7 +98,7 @@ fn production(s: &str) -> &str {
             if gap.contains('\n')
                 && item
                     .strip_prefix("mod ")
-                    .is_some_and(|n| n.bytes().next().is_some_and(is_word))
+                    .is_some_and(|n| n.bytes().next().is_some_and(word))
             {
                 return &s[..ls];
             }
@@ -120,7 +110,7 @@ fn production(s: &str) -> &str {
 
 /// The identifier at the start of `s`.
 fn ident(s: &str) -> &str {
-    let n = s.bytes().take_while(|&b| is_word(b)).count();
+    let n = s.bytes().take_while(|&b| word(b)).count();
     &s[..n]
 }
 

@@ -765,8 +765,7 @@ fn received(wire: &Wire) -> Vec<Ump> {
 /// The complete System Exclusive messages among `packets`, each with its Group
 /// and its payload (between `F0` and `F7`).
 fn payloads(packets: &[Ump]) -> Vec<(tutti_ump::MidiGroup, Vec<u8>)> {
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let mut found = Vec::new();
     for &ump in packets {
         assembler.begin_block();

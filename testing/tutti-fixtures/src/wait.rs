@@ -4,6 +4,10 @@ use std::time::Duration;
 
 use tutti_platform::Instant;
 
+/// The deadline a test gives a wait that only guards a hang: generous, so a loaded
+/// machine never trips it, and never a claim about speed.
+pub const HANG_GUARD: Duration = Duration::from_secs(60);
+
 /// How long [`wait_until`] sleeps between looks at the condition.
 const POLL: Duration = Duration::from_millis(1);
 
