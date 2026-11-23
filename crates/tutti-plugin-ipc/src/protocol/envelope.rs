@@ -354,7 +354,7 @@ messages! {
         error: Option<StateError>,
     };
     /// Point the subprocess at the shared-memory audio slab, which follows this
-    /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
+    /// frame as a descriptor of its own on unix (`send_attached` writes both, and the
     /// server's transport reads both before this reaches its session).
     SetupSharedMemory {
         /// What the frame carries of the slab: nothing on unix, where the

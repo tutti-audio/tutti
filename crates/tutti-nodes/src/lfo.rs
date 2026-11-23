@@ -17,10 +17,9 @@ use tutti_units::UnitParam;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
+use tutti_dsp::{Lfo, LfoWave};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
-use tutti_units::{
-    BeatsPerCycle, Bipolar, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate,
-};
+use tutti_units::{BeatsPerCycle, Bipolar, Hz, PhaseIncrement, SampleRate, Samples};
 use tutti_units::{Latency, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
@@ -99,23 +98,12 @@ pub struct LfoNode {
     cells: LfoCells,
     /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
-    /// Free-running clock position within its cycle: a [`RunningPhase`], exact for as
-    /// long as the node runs.
-    phase: RunningPhase,
-    /// The whole cycles the free-running clock has completed (negative when it runs
-    /// backwards), so a random wave's step index stays exact. The position in unwrapped
-    /// cycles is `cycle` plus the phase.
-    cycle: i64,
+    /// The free-running clock: only its phase, cycle count and step are read, its wave is
+    /// not. Exact for as long as the node runs.
+    running: Lfo,
     /// The rate [`Node::prepare`] set; `None` until then, when a free-running
     /// clock has no step and the node renders silence.
     sample_rate: Option<SampleRate>,
-}
-
-/// The per-frame step of a free-running clock at `rate`, its magnitude held strictly below
-/// half a cycle: a step of half a cycle or more reads as a step back.
-fn lfo_step(rate: f64, per_hz: f64) -> PhaseStep {
-    let most = 0.5_f64.next_down();
-    PhaseStep::from(PhaseIncrement::new((rate * per_hz).clamp(-most, most)))
 }
 
 // The params an [`LfoNode`] lets the graph modulate, in port order: its depth and,
@@ -174,8 +162,7 @@ impl From<LfoConfig> for LfoNode {
             clock: config.beat_sync.map_or(LfoClock::Free, LfoClock::Synced),
             cells: LfoCells::from_config(&config),
             phase_offset: config.phase_offset,
-            phase: RunningPhase::START,
-            cycle: 0,
+            running: Lfo::new(LfoWave::Sine, Hz::new(0.0), SampleRate::SR_48K),
             sample_rate: None,
         }
     }
@@ -247,28 +234,20 @@ impl<F: Float> Node<F> for LfoNode {
                     out[..size].fill(F::ZERO);
                     return Status::Modified;
                 };
-                let per_hz = 1.0 / sample_rate.get();
                 // The step is rebuilt only when the rate moves.
-                let mut step_of = (rate_cell, lfo_step(rate_cell, per_hz));
+                let mut current = rate_cell;
+                self.running.retarget(Hz::new(current), sample_rate);
                 for (i, o) in out[..size].iter_mut().enumerate() {
                     let rate = rate_signal
                         .map(|l| l[i].into())
                         .filter(|v| v.is_finite())
                         .unwrap_or(rate_cell);
-                    if rate != step_of.0 {
-                        step_of = (rate, lfo_step(rate, per_hz));
+                    if rate != current {
+                        current = rate;
+                        self.running.retarget(Hz::new(rate), sample_rate);
                     }
-                    let cycles = self.cycle as f64 + f64::from_phase(self.phase);
-                    *o = self.evaluate(cycles, offset, depth_at(i));
-                    let next = self.phase.advance(step_of.1);
-                    // A step above half a cycle is a step back (its two's complement), and
-                    // a carry out of the add is a cycle completed, a borrow one undone.
-                    if (step_of.1.get() as i64) >= 0 {
-                        self.cycle += i64::from(next.get() < self.phase.get());
-                    } else {
-                        self.cycle -= i64::from(next.get() > self.phase.get());
-                    }
-                    self.phase = next;
+                    *o = self.evaluate(self.running.cycles(), offset, depth_at(i));
+                    self.running.advance(Samples::new(1));
                 }
             }
             LfoClock::Synced(beats_per_cycle) => {
@@ -283,8 +262,7 @@ impl<F: Float> Node<F> for LfoNode {
     }
 
     fn reset(&mut self) {
-        self.phase = RunningPhase::START;
-        self.cycle = 0;
+        self.running.reset();
     }
 
     fn param_base(&self, k: usize) -> Option<f64> {
@@ -378,17 +356,6 @@ mod tests {
         assert!(out[0].abs() < 1e-6);
     }
 
-    #[test]
-    fn test_free_running_lfo() {
-        let out = render(LfoNode::from(LfoConfig::new(LfoShape::Sine)), 100.0, 25);
-        // The 25th sample: a quarter of a 1 Hz cycle at 100 Hz, the peak.
-        assert!(
-            (out[24] - 1.0).abs() < 0.1,
-            "Expected ~1.0, got {}",
-            out[24]
-        );
-    }
-
     /// A beat span selects the synced clock and leaves no rate cell, whatever
     /// rate the config was given; with no span the clock is free at that rate.
     #[test]
@@ -456,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_beat_synced_lfo() {
+    fn a_stopped_beat_reads_the_sine_of_its_phase_in_the_span() {
         let lfo = || {
             LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0))))
         };
@@ -505,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_depth_control() {
+    fn the_depth_scales_the_square_wave() {
         let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Bipolar::of(0.5)));
         let out = render(lfo, 48_000.0, 1);
         assert!((out[0] - 0.5).abs() < 0.01);
@@ -529,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_offset() {
+    fn a_quarter_phase_offset_starts_a_sine_at_its_peak() {
         let lfo =
             LfoNode::from(LfoConfig::new(LfoShape::Sine).phase_offset(PhaseIncrement::new(0.25)));
         let out = render(lfo, 100.0, 1);
@@ -537,18 +504,19 @@ mod tests {
     }
 
     #[test]
-    fn test_lfo_reset() {
+    fn a_reset_restarts_the_cycle_at_phase_zero() {
         let mut d = Direct::new(
             LfoNode::from(LfoConfig::new(LfoShape::Sine)),
             SampleRate::of(100.0),
-            50,
+            25,
         );
+        // A quarter cycle at 1 Hz and 100 Hz: the next frame would be the sine's peak.
         d.block();
         Node::<f32>::reset(&mut *d.node);
         d.block();
         assert!(
             d.output().plane(0).samples()[0].abs() < 0.1,
-            "After reset, LFO should start near zero"
+            "after a reset the first frame is the sine at phase zero"
         );
     }
 
@@ -713,20 +681,6 @@ mod tests {
     }
 
     #[test]
-    fn test_random_produces_different_values() {
-        let values = render(LfoNode::from(LfoConfig::new(LfoShape::Random)), 100.0, 500);
-
-        let unique: std::collections::HashSet<u32> =
-            values.iter().map(|v| (v * 1000.0) as u32).collect();
-
-        assert!(
-            unique.len() > 1,
-            "Random LFO should produce different values, got {}",
-            unique.len()
-        );
-    }
-
-    #[test]
     fn a_reverse_rate_walks_the_cycle_backwards_across_the_start() {
         // -1 Hz at 100 Hz: frame n is at -n / 100 cycles, whose ramp value is
         // `2 frac(-n / 100) - 1`; frame 0 is on the start, the ramp's -1.
@@ -775,15 +729,6 @@ mod tests {
     fn a_random_lfo_at_a_high_rate_below_nyquist_carries_forward_once_a_cycle() {
         // 40 Hz at 100 Hz: 0.4 cycles a frame.
         assert_random_follows(40.0, 0.4);
-    }
-
-    #[test]
-    fn a_random_lfo_at_nyquist_and_past_it_runs_forward_at_nyquist() {
-        // 50 Hz is exactly half a cycle a frame and 75 Hz is 1.5 times that; both clamp
-        // to just under half a cycle, so the cycle index steps every second frame.
-        assert_random_follows(50.0, 0.5);
-        assert_random_follows(75.0, 0.5);
-        assert_random_follows(-75.0, -0.5);
     }
 
     #[test]

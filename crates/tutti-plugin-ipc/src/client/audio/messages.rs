@@ -2,20 +2,19 @@
 //! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
 use super::ask::{Ask, Reply};
-use crate::SlabHandle;
+use crate::transport::control::{Announced, Announces};
+use crate::{Answered, ControlReply, ControlRequest, SlabHandle, Unanswered};
 use dpi::Size;
+use std::time::Duration;
 use tutti_plugin_types::{
-    BlockStatus, ContentScale, EditorError, PluginFailure, PresetError, ResyncKind, ServerLosses,
-    StateError, StateUse,
+    BlockStatus, PluginFailure, ResyncKind, ServerError, ServerLosses, StateError,
 };
 use tutti_plugin_types::{
     ChordChanges, MidiEventVec, NoteExpressionChanges, NoteExpressionIntChanges,
-    NoteExpressionTextChanges, ParamEdit, ParameterChanges, ParameterInfo, PluginPreset,
-    PluginTail, PresetId, Samples, ScaleChanges, TransportChanges, TransportInfo,
+    NoteExpressionTextChanges, ParamEdit, ParameterChanges, PluginTail, Samples, ScaleChanges,
+    TransportChanges, TransportInfo,
 };
 use tutti_plugin_types::{RateRefusal, RateRefusalCause};
-use tutti_units::Normalized;
-use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
 /// Audio-thread bulk payload for one `Process` command. Heap-boxed and
@@ -99,122 +98,184 @@ pub(super) enum Setting {
     Fence,
 }
 
-/// Callers and the audio thread → the control lane's thread.
+/// Callers and the audio thread → the control lane's thread: one request of the
+/// message table, and what an answered one waits on.
 ///
-/// Variants that need a reply carry their own [`Reply<T>`]; the calling
-/// thread holds the paired `Ask<T>` and blocks on it. There is no shared
-/// response queue — responses cannot be misrouted between requests.
-pub(super) enum ControlCommand {
-    SetAutomationState {
-        /// Format-neutral automation mode; each format loader encodes it onto its
-        /// own ABI at the FFI edge (VST3 `IAutomationState`, etc.). The wire does
-        /// NOT carry a format-specific bitmask — see [`AutomationMode`](tutti_plugin_types::AutomationMode).
-        mode: tutti_plugin_types::AutomationMode,
-    },
-    /// What the host says of the plugin's track; boxed to keep the queue's
-    /// slots small.
-    SetTrackInfo {
-        info: Box<tutti_plugin_types::TrackInfo>,
-    },
-    /// The plugin's state, as one object the server sends.
-    SaveState {
-        state_use: StateUse,
-        /// The audio lane's answer to the flush of the host's writes, when the
-        /// asker did not wait for it: the control lane waits for it (up to the
-        /// parameter wait) before it reads the state.
-        flush: Option<Ask<bool>>,
-        reply: Reply<std::result::Result<Vec<u8>, StateError>>,
-    },
-    /// A state for the plugin, made into the object that is sent.
-    LoadState {
-        state_use: StateUse,
-        len: u64,
-        blob: tutti_plugin_ipc_ffi::Blob,
-        reply: Reply<std::result::Result<(), StateError>>,
-    },
-    GetParameterList {
-        reply: Reply<Option<Vec<ParameterInfo>>>,
-    },
-    GetParameter {
-        param_id: ParamId,
-        /// The audio lane's answer to the flush of the host's writes, when the
-        /// caller asked for one: the control lane waits for it, as a blocking
-        /// caller does itself, so the value read holds the writes made before.
-        flush: Option<Ask<bool>>,
-        reply: Reply<Option<Normalized>>,
-    },
-    GetPresetList {
-        reply: Reply<Option<Vec<PluginPreset>>>,
-    },
-    LoadPreset {
-        id: PresetId,
-        reply: Reply<std::result::Result<(), PresetError>>,
-    },
-    /// Tell the server to open the slab `slab` names and render through
-    /// it from its next block: answered `true` once it has.
-    SetupSharedMemory {
-        slab: SlabHandle,
-        layout: crate::SlabLayout,
-        reply: Reply<bool>,
-    },
-    GetCurrentPreset {
-        reply: Reply<Option<PresetId>>,
-    },
-    GetParameterText {
-        param_id: ParamId,
-        value: Normalized,
-        reply: Reply<Option<String>>,
-    },
-    GetParameterValueFromText {
-        param_id: ParamId,
-        text: String,
-        reply: Reply<Option<Normalized>>,
-    },
-    GetParameterPlain {
-        param_id: ParamId,
-        value: Normalized,
-        reply: Reply<Option<f64>>,
-    },
-    GetParameterNormalized {
-        param_id: ParamId,
-        plain: f64,
-        reply: Reply<Option<Normalized>>,
-    },
-    /// Open the editor in the server (`None` parent: floating).
-    OpenEditor {
-        parent: Option<u64>,
-        scale: ContentScale,
-        reply: Reply<std::result::Result<Option<Size>, EditorError>>,
-    },
-    CloseEditor,
-    /// The app's controller entries; answered with who applies them.
-    SetAppMidiMap {
-        app: Vec<tutti_plugin_types::MidiAssignment>,
-        reply: Reply<tutti_plugin_types::MidiMapApplied>,
-    },
-    ArmPluginMidiLearn {
-        armed: bool,
-        reply: Reply<std::result::Result<(), tutti_plugin_types::PluginLearnError>>,
-    },
-    /// The plugin's wiring as the server reads it now.
-    GetWiring {
-        reply: Reply<Option<tutti_plugin_types::PluginWiring>>,
-    },
-    SetEditorSize {
-        size: Size,
-        reply: Reply<std::result::Result<Size, EditorError>>,
-    },
+/// A tell is the request alone, built without an allocation, so the audio thread
+/// can queue one. An answered request carries its [`Call`], boxed so the slot
+/// stays the request's size: the lane sends it, waits for the one reply and
+/// hands it to the call. There is no shared response queue: a reply cannot be
+/// misrouted between requests.
+pub(super) struct ControlCommand {
+    request: ControlRequest,
+    call: Option<Box<Call>>,
 }
 
-impl ControlCommand {
-    /// Answers a request the queue refused with the error that says it was not
-    /// sent, so an awaiting caller is told `Busy` and not that the plugin died.
-    pub(super) fn refuse(self) {
+/// What the lane does for an answered request besides sending it.
+pub(super) struct Call {
+    /// The audio lane's answer to the flush of the host's writes, when the asker
+    /// did not wait for it: the control lane waits for it (up to the parameter
+    /// wait) before it sends, so the answer holds the writes made before.
+    pub(super) flush: Option<Ask<bool>>,
+    /// The request's wait.
+    pub(super) deadline: Deadline,
+    /// What travels with the request or comes with its reply.
+    pub(super) object: Object,
+    /// Given what the lane heard, on the lane's thread. Dropped unanswered when
+    /// the lane ends, which cancels what waits on it.
+    pub(super) done: Box<dyn FnOnce(Outcome) + Send>,
+}
+
+/// How long the server has to answer a request, and how long a caller waits.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Deadline {
+    /// A question the plugin answers from memory ([`Timeouts::param`]).
+    ///
+    /// [`Timeouts::param`]: tutti_plugin_types::Timeouts::param
+    Query,
+    /// A state's transfer ([`Timeouts::state`]), renewed by the server's
+    /// `Working` up to its ceiling.
+    ///
+    /// [`Timeouts::state`]: tutti_plugin_types::Timeouts::state
+    State,
+    /// The editor's window ([`Timeouts::editor`]).
+    ///
+    /// [`Timeouts::editor`]: tutti_plugin_types::Timeouts::editor
+    Editor,
+}
+
+impl Deadline {
+    /// The window the server has to answer, and the ceiling it may be renewed
+    /// to.
+    pub(super) fn window(self, timeouts: &tutti_plugin_types::Timeouts) -> (Duration, Duration) {
         match self {
-            Self::SaveState { reply, .. } => reply.send(Err(StateError::Busy)),
-            Self::LoadState { reply, .. } => reply.send(Err(StateError::Busy)),
-            Self::LoadPreset { reply, .. } => reply.send(Err(PresetError::Busy)),
-            _ => {}
+            Self::Query => (timeouts.param, timeouts.param),
+            Self::State => (timeouts.state, timeouts.state_ceiling()),
+            Self::Editor => (timeouts.editor, timeouts.editor),
+        }
+    }
+
+    /// How long a caller waits for the lane's answer: the window and a margin,
+    /// so the lane's own report of a stall is the one that arrives.
+    pub(super) fn wait(self, timeouts: &tutti_plugin_types::Timeouts) -> Duration {
+        match self {
+            Self::Query => timeouts.param_wait(),
+            Self::State => timeouts.state_wait(),
+            Self::Editor => timeouts.editor_wait(),
+        }
+    }
+}
+
+/// An object that goes with a request, or comes with its reply.
+pub(super) enum Object {
+    /// None: the request is one frame.
+    None,
+    /// A state's blob, sent after the request that announces it.
+    Blob(tutti_plugin_ipc_ffi::Blob),
+    /// A slab, sent after the request that announces it.
+    Slab(SlabHandle),
+    /// A state's blob the server sends after its reply, read on the lane.
+    State,
+}
+
+impl Object {
+    /// The request of `announced` and the object it announces, queued together:
+    /// the pair is the one the announcement made.
+    pub(super) fn announced<M: Announces>(announced: Announced<M>) -> (M, Self)
+    where
+        M::Object: Into<Self>,
+    {
+        let (msg, object) = announced.into_parts();
+        (msg, object.into())
+    }
+}
+
+impl From<tutti_plugin_ipc_ffi::Blob> for Object {
+    fn from(blob: tutti_plugin_ipc_ffi::Blob) -> Self {
+        Self::Blob(blob)
+    }
+}
+
+impl From<SlabHandle> for Object {
+    fn from(slab: SlabHandle) -> Self {
+        Self::Slab(slab)
+    }
+}
+
+/// What the lane heard of an answered request: the reply, and the object that
+/// followed it when it was an [`Object::State`].
+pub(super) struct Received {
+    pub(super) reply: ControlReply,
+    pub(super) object: Vec<u8>,
+}
+
+/// Why an answered request has no reply to give.
+#[derive(Debug)]
+pub(crate) enum Lost {
+    /// The queue was full, or an earlier request still owed its answer.
+    Busy,
+    /// The bridge is crashed, or ended with the request unanswered.
+    Crashed,
+    /// The server did not answer within its window.
+    NoAnswer {
+        /// The window it had.
+        after: Duration,
+    },
+    /// The server refused with an error in place of the answer.
+    Server(ServerError),
+    /// The server answered with another kind of reply than the request's.
+    Wrong,
+    /// The object that followed the reply was refused.
+    Object(StateError),
+}
+
+impl Lost {
+    /// A reply that is not the request's: the server's refusal, or the wrong
+    /// kind.
+    pub(super) fn of(reply: ControlReply) -> Self {
+        match reply {
+            ControlReply::Error { error } => Self::Server(error),
+            _ => Self::Wrong,
+        }
+    }
+}
+
+/// What the lane made of a request: its answer, or why there is none.
+pub(super) type Outcome = Result<Received, Lost>;
+
+impl ControlCommand {
+    /// A request nothing answers.
+    pub(super) fn tell(msg: impl Unanswered) -> Self {
+        Self {
+            request: msg.into(),
+            call: None,
+        }
+    }
+
+    /// A request answered into `done`.
+    pub(super) fn ask(msg: impl Answered, call: Call) -> Self {
+        Self {
+            request: msg.into(),
+            call: Some(Box::new(call)),
+        }
+    }
+
+    /// The request, and what the lane does for it.
+    pub(super) fn into_parts(self) -> (ControlRequest, Option<Box<Call>>) {
+        (self.request, self.call)
+    }
+
+    /// Whether the command has no reply: its caller learns nothing of its fate
+    /// but from the counts.
+    pub(super) fn is_fire_and_forget(&self) -> bool {
+        self.call.is_none()
+    }
+
+    /// Answers a request the queue refused with [`Lost::Busy`], so an awaiting
+    /// caller is told it was not sent and not that the plugin died.
+    pub(super) fn refuse(self) {
+        if let Some(call) = self.call {
+            (call.done)(Err(Lost::Busy));
         }
     }
 }
@@ -647,20 +708,10 @@ impl Unsolicited {
     }
 }
 
-impl ControlCommand {
-    /// Whether the command has no reply: its caller learns nothing of its fate
-    /// but from the counts.
-    pub(super) fn is_fire_and_forget(&self) -> bool {
-        matches!(
-            self,
-            Self::SetAutomationState { .. } | Self::SetTrackInfo { .. } | Self::CloseEditor
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_units::{Normalized, ParamId};
 
     /// **A refusal of the saved state replaced before it was drained is
     /// counted**, and the latest reason is the one delivered.
@@ -678,31 +729,34 @@ mod tests {
         );
     }
 
+    /// **A queued command is one request and a pointer**, the slot size the audio
+    /// thread's push path was built for: an answered request's state travels
+    /// boxed, and a tell is the request alone.
+    #[test]
+    fn a_queued_command_is_a_request_and_a_pointer() {
+        assert_eq!(
+            std::mem::size_of::<ControlCommand>(),
+            std::mem::size_of::<ControlRequest>() + std::mem::size_of::<usize>()
+        );
+        assert!(std::mem::size_of::<ControlCommand>() <= 96);
+    }
+
     /// **A request the queue refused is answered `Busy`, not left to read as a
     /// dead plugin**: the answer is filled, where a dropped reply would cancel it.
     #[test]
     fn a_refused_request_answers_busy() {
-        let (save, reply) = super::super::ask::awaited();
-        ControlCommand::SaveState {
-            state_use: StateUse::Project,
-            flush: None,
-            reply,
-        }
+        let (answer, reply) = super::super::ask::awaited();
+        ControlCommand::ask(
+            crate::GetParameterList,
+            Call {
+                flush: None,
+                deadline: Deadline::Query,
+                object: Object::None,
+                done: Box::new(move |outcome| reply.send(matches!(outcome, Err(Lost::Busy)))),
+            },
+        )
         .refuse();
-        assert_eq!(
-            futures_lite::future::block_on(save),
-            Some(Err(StateError::Busy))
-        );
-        let (preset, reply) = super::super::ask::awaited();
-        ControlCommand::LoadPreset {
-            id: PresetId::Location("/x".into()),
-            reply,
-        }
-        .refuse();
-        assert_eq!(
-            futures_lite::future::block_on(preset),
-            Some(Err(PresetError::Busy))
-        );
+        assert_eq!(futures_lite::future::block_on(answer), Some(true));
     }
 
     /// Each drained event as a short label, for whole-sequence asserts.

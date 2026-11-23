@@ -8,6 +8,7 @@ use tutti_units::Tail;
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};
 use crate::NodeKey;
+use crate::compile::ids::{Generation, PlanUnitId, Table};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -22,7 +23,7 @@ use crate::model::mode::ModeState;
 use crate::node::param::ParamState;
 
 pub(crate) struct Unit<F: Float = f32> {
-    pub(super) generation: u32,
+    pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// Consecutive frames of fully silent input, saturating.
     pub(super) quiet: u64,
@@ -51,7 +52,7 @@ pub(crate) struct Unit<F: Float = f32> {
 
 impl<F: Float> Unit<F> {
     pub(super) fn new(
-        generation: u32,
+        generation: Generation,
         node: NodeBox<F>,
         params: ParamState<F>,
         mode: ModeState<F>,
@@ -85,7 +86,7 @@ pub(super) struct Gone {
     /// the key, its span of `chase_events` and what its buffer refused.
     pub(super) chased: CappedVec<(NodeKey, std::ops::Range<usize>, u32)>,
     /// The executor's chase buffer, lent for the commit.
-    pub(super) chase_events: Vec<Event>,
+    pub(super) chase_events: CappedVec<Event>,
     /// What a chase held for a successor behind a running fade refused, by
     /// key, counted once the new plan says where the node is.
     pub(super) held_refused: CappedVec<(NodeKey, u32)>,
@@ -116,12 +117,12 @@ pub(crate) enum Ring<F: Float = f32> {
 /// Built on the control side with room for everything that can flow in
 /// (`stage.rs`); `live` is whether anything was flushed into it.
 pub(crate) struct Inject {
-    pub(crate) unit: u32,
+    pub(crate) unit: PlanUnitId,
     pub(super) port: u16,
-    pub(super) events: Vec<Event>,
+    pub(super) events: CappedVec<Event>,
     /// Where `events` and the sink's own slot events are merged, sized when
     /// applying so the merge never grows.
-    pub(super) merged: Vec<Event>,
+    pub(super) merged: CappedVec<Event>,
     pub(super) live: bool,
     /// While a commit's flush is written: how many of `events` came before
     /// the closes of the edges it cut.
@@ -132,7 +133,7 @@ pub(crate) struct Inject {
     /// empty; a table never overflows, so no note off is lost. With several
     /// cut edges into one sink each table drains in turn, its pedal up
     /// first.
-    pub(super) owed: Vec<crate::exec::held::Held>,
+    pub(super) owed: CappedVec<crate::exec::held::Held>,
 }
 
 impl Inject {
@@ -152,17 +153,15 @@ impl Inject {
         // merge into whenever its slots are taken, and `owed.capacity() == 0`
         // is never reached with a table in hand.
         let mut lost = 0u32;
-        let left_over = if self.owed.len() < self.owed.capacity() {
-            self.owed.push(table);
+        let Err(left_over) = self.owed.push_within_capacity(table) else {
             return 0;
-        } else if let Some(first) = self.owed.first_mut() {
-            first.merge(&table);
-            table
+        };
+        if let Some(first) = self.owed.first_mut() {
+            first.merge(&left_over);
         } else {
             debug_assert!(false, "room was made for every table owed");
-            table.close_each(|_| lost = lost.saturating_add(1));
-            table
-        };
+            left_over.close_each(|_| lost = lost.saturating_add(1));
+        }
         // Room for every table is made with the commit; were it short, the
         // table leaks rather than frees on the audio thread.
         super::place(spare, left_over);
@@ -184,7 +183,7 @@ impl Inject {
             .last()
             .map_or(crate::node::time::Offset::ZERO, |e| e.offset);
         let start = self.events.len();
-        for h in &mut self.owed {
+        for h in self.owed.iter_mut() {
             h.drain_into(&mut self.events);
         }
         for e in &mut self.events[start..] {
@@ -234,9 +233,9 @@ pub(super) struct State<F: Float = f32> {
     /// across blocks, or a plain addend's none.
     pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,
-    pub(super) has_inject: Vec<bool>,
+    pub(super) has_inject: Table<PlanUnitId, bool>,
     /// Plan units with a scheduled command landing this block.
-    pub(super) has_due: Vec<bool>,
+    pub(super) has_due: Table<PlanUnitId, bool>,
     /// The room of the buffer where a node's scheduled events are merged into
     /// its inputs, one per participant (`command::overlay_capacity`).
     pub(super) overlay: usize,
@@ -259,8 +258,8 @@ impl<F: Float> State<F> {
             meters: Vec::new(),
             lanes: Vec::new(),
             inject: Vec::new(),
-            has_inject: Vec::new(),
-            has_due: Vec::new(),
+            has_inject: Table::default(),
+            has_due: Table::default(),
             overlay: 0,
             par: None,
         }
@@ -270,6 +269,7 @@ impl<F: Float> State<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
     use crate::event::types::Event;
     use crate::exec::held::Held;
     use crate::node::time::Offset;
@@ -285,13 +285,13 @@ mod tests {
 
     fn inject(room: usize) -> Inject {
         Inject {
-            unit: 0,
+            unit: PlanUnitId::new(0),
             port: 0,
-            events: Vec::new(),
-            merged: Vec::new(),
+            events: CappedVec::default(),
+            merged: CappedVec::default(),
             live: false,
             closed_from: 0,
-            owed: Vec::with_capacity(room),
+            owed: CappedVec::with_capacity(room),
         }
     }
 
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(i.owe(holding(61), &mut spare), 0, "merged, not lost");
         assert_eq!(spare.len(), 1, "the merged table goes back");
         assert_eq!(i.owed.len(), 1);
-        assert_eq!(i.owed.capacity(), capacity, "and the Vec did not grow");
+        assert_eq!(i.owed.capacity(), capacity, "and the buffer did not grow");
         let mut closes = Vec::new();
         i.owed[0].close_each(|e| closes.push(e));
         assert_eq!(closes.len(), 2, "both keys are owed");

@@ -42,13 +42,17 @@
 //! the control side. Dropping the reader last frees the ring on the reader's
 //! thread.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
+use std::cell::Cell;
+use std::sync::Weak;
 
-use tutti_rt::{ControlDrop, Overflow, RingReader, RingWriter, ring};
+use tutti_rt::{
+    ControlDrop, Counter, CounterWriter, Overflow, RingReader, RingWriter, counter, ring,
+};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
+use super::alive::Alive;
+use crate::compile::ids::EventSlotId;
 use crate::event::types::EventKind;
 use crate::event::writer::note_off_room;
 use crate::exec::slots::EventSlots;
@@ -118,7 +122,7 @@ pub struct EventTapWriter {
     capacity: usize,
     /// Events refused, by the capacity rule or by a full ring, shared with the
     /// reader: one count for both, so the ring itself (`Refuse`) counts nothing.
-    lost: Arc<AtomicU64>,
+    lost: CounterWriter<u64>,
 }
 
 impl std::fmt::Debug for EventTapWriter {
@@ -140,7 +144,7 @@ impl std::fmt::Debug for EventTapWriter {
 pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
     tap: &mut EventTapWriter,
     events: &E,
-    src: u32,
+    src: EventSlotId,
     env: &Env,
 ) {
     if tap.ring.is_disconnected() {
@@ -166,7 +170,7 @@ pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
         }
     }
     if lost > 0 {
-        tap.lost.fetch_add(lost, Ordering::Relaxed);
+        tap.lost.add(lost);
     }
 }
 
@@ -188,10 +192,12 @@ pub struct EventTapReader {
     _control: ControlDrop<Self>,
     id: EventTapId,
     ring: RingReader<TapEvent>,
-    lost: Arc<AtomicU64>,
+    lost: Counter<u64>,
+    /// What `lost` read at the last [`take_lost`](Self::take_lost).
+    lost_seen: Cell<u64>,
     rate: SampleRate,
-    /// The editor holds a `Weak` of this: when it dies, the reader is gone.
-    alive: Arc<()>,
+    /// The editor watches this: when it dies, the reader is gone.
+    alive: Alive,
 }
 
 impl std::fmt::Debug for EventTapReader {
@@ -214,15 +220,16 @@ impl EventTapReader {
         rate: SampleRate,
     ) -> (Self, EventTapWriter) {
         let capacity = capacity.slots();
-        let lost = Arc::new(AtomicU64::new(0));
+        let (lost, lost_reader) = counter::<u64>();
         let (prod, cons) = ring::<TapEvent>(note_off_room(capacity), Overflow::Refuse);
         let reader = Self {
             _control: ControlDrop::new(),
             id,
             ring: cons,
-            lost: Arc::clone(&lost),
+            lost: lost_reader,
+            lost_seen: Cell::new(0),
             rate,
-            alive: Arc::new(()),
+            alive: Alive::default(),
         };
         (
             reader,
@@ -263,7 +270,10 @@ impl EventTapReader {
     /// Events the executor could not push since the last call, and clears the
     /// count: nonzero is a gap in what was read.
     pub fn take_lost(&self) -> u64 {
-        self.lost.swap(0, Ordering::Relaxed)
+        let mut seen = self.lost_seen.get();
+        let lost = self.lost.take_since(&mut seen);
+        self.lost_seen.set(seen);
+        lost
     }
 
     /// The tap's id, the one
@@ -285,6 +295,6 @@ impl EventTapReader {
     /// is zero once the reader is dropped.
     #[must_use]
     pub fn watch(&self) -> Weak<()> {
-        Arc::downgrade(&self.alive)
+        self.alive.watch()
     }
 }

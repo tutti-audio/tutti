@@ -92,10 +92,11 @@
 //! future frame holds its credit until it lands, so the limit is on
 //! *outstanding* commands, not on commands per block.
 
+use crate::compile::ids::{PlanUnitId, TableSlice};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{CappedVec, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
 use crate::compile::plan::Plan;
@@ -255,7 +256,7 @@ pub(crate) struct CommandTx {
 /// the [`EventKind`] or [`ParamKind`] it delivers.
 #[derive(Clone, Copy, Debug)]
 struct DueItem<T> {
-    unit: u32,
+    unit: PlanUnitId,
     port: u16,
     seq: u64,
     /// `Command::pos`, as bits (non-negative, so they sort like the value).
@@ -266,9 +267,9 @@ struct DueItem<T> {
 
 impl<T> DueItem<T> {
     /// `cmd` landing on plan unit `unit` at `offset`.
-    fn of(cmd: &Command, unit: usize, offset: Offset, kind: T) -> Self {
+    fn of(cmd: &Command, unit: PlanUnitId, offset: Offset, kind: T) -> Self {
         Self {
-            unit: unit as u32,
+            unit,
             port: cmd.to.port,
             seq: cmd.seq,
             pos: cmd.pos.to_bits(),
@@ -281,7 +282,7 @@ impl<T> DueItem<T> {
     /// then timeline position, then scheduling order. Unique (`seq` is), so
     /// the unstable sort is deterministic, and it sorts in place, where the
     /// stable one would allocate.
-    fn order(&self) -> (u32, u16, Offset, u64, u64) {
+    fn order(&self) -> (PlanUnitId, u16, Offset, u64, u64) {
         (self.unit, self.port, self.offset, self.pos, self.seq)
     }
 }
@@ -523,7 +524,13 @@ impl CommandRx {
     /// plan unit with a delivery in `has_due`. Audio thread: never
     /// allocates — every list was sized to [`COMMAND_CAPACITY`], which the
     /// credit count keeps them under.
-    pub(crate) fn gather(&mut self, env: &Env, plan: &Plan, applied: u64, has_due: &mut [bool]) {
+    pub(crate) fn gather(
+        &mut self,
+        env: &Env,
+        plan: &Plan,
+        applied: u64,
+        has_due: &mut TableSlice<PlanUnitId, bool>,
+    ) {
         self.pull();
         self.crossings.observe(env);
         self.due.clear();
@@ -545,10 +552,7 @@ impl CommandRx {
             if cmd.plan_seq > applied {
                 return true;
             }
-            let node = plan
-                .units
-                .binary_search_by_key(&cmd.to.node, |u| u.key)
-                .ok();
+            let node = plan.unit_id(cmd.to.node);
             // PDC: the sink hears timeline frame F at its own F + arrival
             // (see `Env::due_at_arrival`). The node's arrival even when its
             // port is gone (the reference does the same); none when the node
@@ -639,9 +643,9 @@ impl Deliveries<'_> {
     /// are counted in the second return value instead.
     pub(crate) fn overlay<'e>(
         &self,
-        unit: u32,
+        unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -654,8 +658,7 @@ impl Deliveries<'_> {
             let port = self.due[i].port;
             let run = self.due[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_into(&[base(port), &self.events[i..run]], buf, room);
+            dropped += merge_into(&[base(port), &self.events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -672,9 +675,9 @@ impl Deliveries<'_> {
     /// events did not fit: never grows `buf`.
     pub(crate) fn overlay_params<'e>(
         &self,
-        unit: u32,
+        unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [ParamEvent],
-        buf: &mut Vec<ParamEvent>,
+        buf: &mut CappedVec<ParamEvent>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -687,8 +690,7 @@ impl Deliveries<'_> {
             let port = self.due_params[i].port;
             let run = self.due_params[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf, room);
+            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -707,11 +709,11 @@ impl Deliveries<'_> {
     /// how many views and how many events were cut. Never grows `buf`.
     pub(crate) fn overlay_bounded<'e>(
         &self,
-        unit: u32,
+        unit: PlanUnitId,
         ports: usize,
         bound: usize,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> Option<(usize, u32)> {
         let start = self.due.partition_point(|d| d.unit < unit);
@@ -751,16 +753,16 @@ impl Deliveries<'_> {
 /// Where a node's scheduled events and param events are merged into its
 /// inputs: preallocated, and never grown.
 pub(crate) struct Overlay {
-    pub(crate) events: Vec<Event>,
-    pub(crate) params: Vec<ParamEvent>,
+    pub(crate) events: CappedVec<Event>,
+    pub(crate) params: CappedVec<ParamEvent>,
 }
 
 impl Overlay {
     /// Room for `capacity` of each ([`overlay_capacity`]). Allocates.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            events: Vec::with_capacity(capacity),
-            params: Vec::with_capacity(capacity),
+            events: CappedVec::with_capacity(capacity),
+            params: CappedVec::with_capacity(capacity),
         }
     }
 }
@@ -776,7 +778,7 @@ pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize
             crate::compile::plan::Op::Node { event_in, .. } => Some(
                 plan.event_list[event_in.range()]
                     .iter()
-                    .map(|&s| plan.event_slot_capacity[s as usize].events(cap))
+                    .map(|&s| plan.event_slot_capacity[s].events(cap))
                     .sum::<usize>(),
             ),
             _ => None,

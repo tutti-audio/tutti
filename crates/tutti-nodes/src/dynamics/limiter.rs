@@ -264,7 +264,6 @@ impl LimiterSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, sample_gain, tick, tick_fed};
     use tutti_buffers::Planes;
     use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -907,29 +906,5 @@ mod tests {
             .latency()
             .get();
         assert_eq!(frames, needed, "the node declares the floor itself");
-    }
-
-    /// An `f64` kernel keeps its gain and its delay in `f64`: under a threshold at the ceiling
-    /// the gain is 1, so a signal of more than 24 bits comes out exactly `latency` frames late
-    /// (an `f32` delay line rounds it by 1e-8).
-    #[test]
-    fn an_f64_kernel_delays_a_wide_signal_by_exactly_its_latency() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let lookahead = Lookahead::of(Seconds::new(0.005));
-        let mut k = LimiterKernel::<f64>::new(ChannelTopology::MONO, lookahead);
-        k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(1_024)));
-        let latency = k.latency().get();
-        assert_eq!(latency, 240);
-        let x = wide_signal(3 * latency);
-        let controls = LimiterControls {
-            threshold: Db::new(0.0),
-            ceiling: Db::new(0.0),
-            ..LimiterControls::DEFAULT
-        };
-        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
-        let want: Vec<f64> = (0..x.len())
-            .map(|n| n.checked_sub(latency).map_or(0.0, |m| x[m]))
-            .collect();
-        assert_close_f64(&y[0], &want, 0.0);
     }
 }

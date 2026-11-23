@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_tracks_beat_position() {
+    fn value_at_reads_the_trajectory_at_each_beat() {
         let lane = AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory()));
 
         assert!((lane.value_at(Beat::new(0.0)) - 0.0).abs() < 0.01);
@@ -302,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_clears_last_value() {
+    fn a_reset_clears_the_last_value() {
         let mut flat: Trajectory<Hz> = Trajectory::new();
         flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
         flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_trajectory_returns_zero() {
+    fn an_empty_trajectory_reads_zero() {
         let empty: Trajectory<Hz> = Trajectory::new();
         let lane = AutomationLaneNode::from(AutomationLaneConfig::new(empty));
         assert_eq!(lane.value_at(Beat::new(5.0)), 0.0);
@@ -334,7 +334,7 @@ mod tests {
 
     /// A held beat holds the value for the whole block.
     #[test]
-    fn test_process_fills_block_from_beat_input() {
+    fn a_stopped_beat_holds_the_value_for_the_whole_block() {
         let out = render(
             AutomationLaneNode::from(AutomationLaneConfig::new(ramp_trajectory())),
             stopped_at(4.0),
@@ -350,7 +350,7 @@ mod tests {
 
     /// After a block, `last_value` is the block's last frame.
     #[test]
-    fn test_process_updates_last_value() {
+    fn a_block_leaves_its_last_frame_as_the_last_value() {
         let mut flat: Trajectory<Hz> = Trajectory::new();
         flat.add_breakpoint(Breakpoint::new(Beat::new(0.0), Hz::new(0.5)));
         flat.add_breakpoint(Breakpoint::new(Beat::new(8.0), Hz::new(0.5)));
@@ -372,7 +372,7 @@ mod tests {
     /// block, following the transport, rather than being held
     /// block-constant.
     #[test]
-    fn test_process_per_sample_varies() {
+    fn a_rolling_transport_moves_the_value_within_a_block() {
         // 120 BPM at 48 kHz, rolling from beat 0.
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let out = render(

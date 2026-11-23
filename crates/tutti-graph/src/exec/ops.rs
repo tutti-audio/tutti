@@ -3,9 +3,9 @@
 
 use super::node_op::{CONSTANT, SILENT, flag};
 use super::state::Ring;
-use crate::compile::plan::GainPortOp;
-use crate::compile::plan::InputBound;
-use crate::event::merge::{merge_into, merge_params};
+use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
+use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
 use crate::exec::arena::Role;
 use crate::exec::rings::{AudioRing, EventFifo};
@@ -40,7 +40,7 @@ pub(crate) fn main_input<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     flags: &mut Fl,
     inputs: &[&[F]],
     channel: u16,
-    dst: u32,
+    dst: AudioSlotId,
     frames: usize,
 ) {
     arena
@@ -55,8 +55,8 @@ pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     ring: &mut AudioRing<F>,
     arena: &mut A,
     flags: &mut Fl,
-    src: u32,
-    dst: u32,
+    src: AudioSlotId,
+    dst: AudioSlotId,
     frames: usize,
 ) {
     let src_silent = flags.get(src) & SILENT != 0;
@@ -96,10 +96,10 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     arena: &mut A,
     flags: &mut Fl,
     events: &E,
-    list: &[u32],
+    list: &[AudioSlotId],
     lanes: &mut [SumLane<F>],
     gains: &[GainPortOp],
-    dst: u32,
+    dst: AudioSlotId,
     frames: usize,
 ) {
     debug_assert!(!list.is_empty() && list.len() <= MAX_PORTS);
@@ -111,12 +111,12 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
         let source = gains
             .iter()
             .find(|g| usize::from(g.lane) == k)
-            .map(|g| (g.from, &events.pev(g.slot)[..]));
+            .map(|g| (g.from, &events.pev(EventSlotId::new(g.slot))[..]));
         *w = SumLane::weight(lane, frames, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`
     // index, among the live addends.
-    let mut reqs = [(0u32, Role::Read(0)); MAX_PORTS + 1];
+    let mut reqs = [(ZERO_SLOT, Role::Read(0)); MAX_PORTS + 1];
     let mut live_weights = [Weight::Unit; MAX_PORTS];
     let (mut live, mut m) = (0usize, 0usize);
     let (mut in_place, mut constant) = (false, true);
@@ -164,8 +164,8 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
 pub(crate) fn event_delay_op<E: EventSlots + ?Sized>(
     fifo: &mut EventFifo,
     events: &mut E,
-    src: u32,
-    dst: u32,
+    src: EventSlotId,
+    dst: EventSlotId,
     frames: usize,
 ) -> u64 {
     let (input, output) = event_pair(events, src, dst);
@@ -179,12 +179,12 @@ pub(crate) fn event_delay_op<E: EventSlots + ?Sized>(
 /// (`event_slot_capacity`) otherwise. The count is the caller's to charge
 /// (`Dropped::charge_merge`).
 pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
-    list: &[u32],
-    dst: u32,
+    list: &[EventSlotId],
+    dst: EventSlotId,
     bound: Option<InputBound>,
     events: &mut E,
 ) -> u64 {
-    let mut reqs = [(0u32, Role::Read(0)); MAX_PORTS + 1];
+    let mut reqs = [(EMPTY_SLOT, Role::Read(0)); MAX_PORTS + 1];
     for (i, &s) in list.iter().enumerate() {
         reqs[i] = (s, Role::Read(i as u8));
     }
@@ -208,8 +208,11 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     let room = events.capacity().min(room);
     // The param events are never bounded by a node's input capacity: the slot
     // holds every one its sources can write.
-    let lost = merge_params(&pins[..list.len()], params, params.capacity());
-    u64::from(lost) + u64::from(merge_into(&ins[..list.len()], events, room))
+    let lost = merge_params(&pins[..list.len()], params);
+    let cut = merge_walk(&ins[..list.len()], room, |_, e| {
+        events.push(e);
+    });
+    u64::from(lost) + u64::from(cut)
 }
 
 /// [`Op::Output`](crate::Op::Output): slot `src` into `out`, through the channel's alignment
@@ -220,7 +223,7 @@ pub(crate) fn output_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     out: &mut [F],
     arena: &A,
     flags: &Fl,
-    src: u32,
+    src: AudioSlotId,
 ) {
     let s = arena.slot(src, out.len());
     match ring {
@@ -237,7 +240,7 @@ pub(crate) fn capture_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     ring: &mut AudioRing<F>,
     arena: &A,
     flags: &Fl,
-    src: u32,
+    src: AudioSlotId,
     frames: usize,
 ) {
     ring.push(arena.slot(src, frames), flags.get(src) & SILENT != 0);

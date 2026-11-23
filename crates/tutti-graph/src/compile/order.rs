@@ -154,7 +154,7 @@ mod tests {
         assert_ne!(c[2], c[3]);
     }
 
-    /// The initially ready set comes out smallest first, a vertex only after all its
+    /// Ready vertices come out smallest first, a vertex only after all its
     /// edges (counted with multiplicity), and a cycle's vertices, with what
     /// hangs off it, are the leftover.
     #[test]
