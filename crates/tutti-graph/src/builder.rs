@@ -85,6 +85,10 @@ struct Pending<F: Float> {
 /// prepared; latency and tail are rewritten from the prepared shape when the
 /// editor is built.
 ///
+/// What the calls here do not spell, such as a resolution mark
+/// ([`GraphSpec::require_resolution`]), is set on the built editor's
+/// [`spec_mut`](crate::Editor::spec_mut) before its first commit.
+///
 /// # Panics, not errors
 ///
 /// The wiring calls assert their port indices: a builder is for code whose
