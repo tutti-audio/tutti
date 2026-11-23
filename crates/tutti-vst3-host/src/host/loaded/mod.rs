@@ -19,7 +19,6 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_types::{
     ParamAccess, ParamFlags, ParamSteps, ParameterInfo, PluginDescriptor, PluginParamRange,
 };
-use tutti_rt::Publisher;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_ffi::{
@@ -36,7 +35,6 @@ use tutti_plugin_types::Uid;
 use super::instance::usable_topology;
 use super::library::Library;
 use super::midi_learn::MidiLearnConsumer;
-use super::midi_mapping::MidiCcCell;
 
 mod buses;
 mod editor;
@@ -84,9 +82,6 @@ pub struct Vst3Loaded {
     /// parameter info may have moved since (a `kParamTitlesChanged` restart), and
     /// the table is read again at the next activation.
     pub(super) declared: Option<Arc<[(ParamId, ParamAccess)]>>,
-    /// The `IMidiMapping` table the Processor routes against: published by
-    /// whichever half rebuilds it, lent to the Processor once per block.
-    pub(super) midi_cc: Publisher<MidiCcCell>,
     /// What the `IMidiMapping` table declares, read when the table is rebuilt
     /// (at load, at every activation and when the plugin says it changed).
     pub(super) assignments: Vec<tutti_plugin_types::MidiAssignment>,

@@ -434,6 +434,10 @@ pub enum ControlRequest {
         /// Arm (`true`) or disarm.
         armed: bool,
     },
+    /// The plugin's wiring read now
+    /// ([`Control::wiring`](tutti_plugin_types::Control::wiring)), not the
+    /// one announced at load. Answered by [`ControlReply::Wiring`].
+    GetWiring,
 }
 
 /// What the server answers a [`ControlRequest`] with.
@@ -608,6 +612,11 @@ pub enum ControlReply {
         /// Armed, or why not.
         result: Result<(), tutti_plugin_types::PluginLearnError>,
     },
+    /// Answers a [`ControlRequest::GetWiring`].
+    Wiring {
+        /// The plugin's wiring as it reads now.
+        wiring: tutti_plugin_types::PluginWiring,
+    },
 }
 
 /// What the plugin says unprompted, on the control connection.
@@ -719,6 +728,9 @@ pub enum News {
         /// the server refused.
         refused_off_thread_calls: tutti_units::Calls,
     },
+    /// Plugin re-declared its controller table (VST3 `kMidiCCAssignmentChanged`).
+    /// The host asks for the wiring again ([`ControlRequest::GetWiring`]).
+    PluginMidiMapChanged,
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of

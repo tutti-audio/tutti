@@ -130,6 +130,8 @@ pub(crate) trait ServerPlugin {
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode);
     /// What the host says of the plugin's track.
     fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo);
+    /// The plugin's wiring read now (its declared controller table included).
+    fn wiring(&mut self, main: MainThreadMarker) -> PluginWiring;
     /// The app's controller entries; who applies them.
     fn set_app_midi_map(
         &mut self,
@@ -526,6 +528,9 @@ impl<L: ServerSide> Server<L> {
             Notice::ParamTitlesChanged => {
                 self.events.push(News::PluginParamTitlesChanged);
             }
+            Notice::MidiMapChanged => {
+                self.events.push(News::PluginMidiMapChanged);
+            }
             Notice::Reloaded => {
                 // A reload may change the buses: the host is told them first,
                 // so its picture is current when it re-reads everything.
@@ -891,6 +896,13 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             let delivered = control.set_track_info(main, info);
             self.edits_refused
                 .add(u64::from(delivered != Delivered::Yes));
+        }
+    }
+
+    fn wiring(&mut self, main: MainThreadMarker) -> PluginWiring {
+        match self.lifecycle.control() {
+            Some(control) => control.wiring(main),
+            None => self.wiring.clone(),
         }
     }
 

@@ -314,6 +314,19 @@ impl Session {
                 });
                 Ok(ControlReply::AppMidiMapApplied { applied }.into())
             }
+            M::GetWiring => {
+                // With no plugin the answer is the refusal, which the host reads as
+                // "no wiring" and keeps the one it has.
+                Ok(match self.plugin.as_mut() {
+                    Some(p) => ControlReply::Wiring {
+                        wiring: p.plugin_mut().wiring(main),
+                    },
+                    None => ControlReply::Error {
+                        error: tutti_plugin_types::ServerError::NoPlugin,
+                    },
+                }
+                .into())
+            }
             M::ArmPluginMidiLearn { armed } => {
                 let result = match self.plugin.as_mut() {
                     Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),
@@ -1307,6 +1320,27 @@ mod tests {
                 other => panic!("{name}: unexpected reply {other:?}"),
             }
         }
+    }
+
+    /// **A wiring asked of a server with no plugin is refused, not answered with
+    /// an empty wiring**: the host reads the refusal as "no wiring" and keeps the
+    /// one it has.
+    #[test]
+    fn a_wiring_ask_with_no_plugin_is_refused() {
+        let mut s = Rig::new();
+        let reply = s
+            .handle(main_thread(), ControlRequest::GetWiring)
+            .expect("answered")
+            .into_reply();
+        assert!(
+            matches!(
+                reply,
+                ControlReply::Error {
+                    error: tutti_plugin_types::ServerError::NoPlugin
+                }
+            ),
+            "{reply:?}"
+        );
     }
 
     /// **A block with no plugin loaded is answered, refused**: the host reads

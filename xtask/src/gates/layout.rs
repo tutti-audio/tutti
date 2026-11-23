@@ -222,6 +222,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-units",
             "tutti-rt",
             "tutti-ump",
+            "tutti-midi-protocol",
             "tutti-plugin-ipc-ffi",
             "tutti-platform",
         ],

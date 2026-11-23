@@ -254,6 +254,9 @@ impl Events {
                 self.audio.invalidate_host_edits();
                 self.ask(Request::IoChanged);
             }
+            // The declared controller table is read again, through the request
+            // the plugin raises for it in process: the pump re-reads the wiring.
+            IpcEvent::MidiMapChanged => self.ask(Request::MidiCcAssignmentChanged),
             IpcEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
                     wake.raise();
@@ -809,6 +812,17 @@ impl Ipc {
 }
 
 impl IpcController {
+    /// Hands the server's plugin the app's controller entries and returns who
+    /// applies them ([`Control::set_app_midi_map`](tutti_plugin_types::Control::set_app_midi_map)
+    /// with no main-thread marker, which the wire does not need): for a fork
+    /// built off the main thread.
+    pub fn hand_app_midi_map(
+        &self,
+        app: &[tutti_plugin_types::MidiAssignment],
+    ) -> tutti_plugin_types::MidiMapApplied {
+        self.link.bridge.audio().set_app_midi_map(app)
+    }
+
     /// What `Control::wiring` answers: the buses of the activation this
     /// controller belongs to, or the ones announced last for a view of none.
     pub(crate) fn wiring_now(&self) -> PluginWiring {

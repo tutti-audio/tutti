@@ -320,6 +320,8 @@ impl Control for AuLoaded {
                 .parameter_midi_mappings()
                 .map(|table| crate::midi_map::declared(&self.app_midi_map.plugins_own(&table)))
                 .unwrap_or_default(),
+            // The unit routes its own table during render.
+            assignments_applied: MidiMapApplied::Plugin,
             // AU names no keys.
             note_names: Vec::new(),
             param_groups: clump_groups(&<Self as Control>::parameters(self, main)),

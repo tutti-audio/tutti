@@ -23,10 +23,11 @@ use tutti_rt::AtomicRequestFlags;
 use crate::PluginClass;
 use crate::{
     ChannelLayout, ContentScale, Control, Controller, EditReader, EditWriter, EditorError,
-    EditorWindow, Layout, Loaded, MainThreadMarker, ParamEdit, ParamFlags, ParameterInfo,
-    PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult, PluginTail, PluginWiring,
-    Prepare, Processor, Rebuilt, Refused, RenderMode, RenderModeSupport, Request, RescanScope,
-    RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle, edit_slots,
+    EditorWindow, Layout, Loaded, MainThreadMarker, MidiAssignment, MidiMapApplied, ParamEdit,
+    ParamFlags, ParameterInfo, PluginBus, PluginDescriptor, PluginError, PluginIo, PluginResult,
+    PluginTail, PluginWiring, Prepare, Processor, Rebuilt, Refused, RenderMode, RenderModeSupport,
+    Request, RescanScope, RestartRules, SampleRate, Samples, Stuck, TimerId, Widths, WindowHandle,
+    edit_slots,
 };
 use tutti_buffers::{Float, FloatWidth};
 use tutti_graph::Offset;
@@ -87,6 +88,8 @@ pub enum Call {
     BlockParam(ParamId, Normalized),
     /// `Processor::flush_parameters`, with this many parameters' changes.
     FlushParameters(usize),
+    /// The MIDI events a block's context carried (not logged for a block with none).
+    BlockMidi(usize),
 }
 
 const SCOPES: [RescanScope; 4] = [
@@ -128,6 +131,7 @@ impl Call {
             Self::InformController(id, value) => [23, u64::from(id.get()), value.get().to_bits()],
             Self::BlockParam(id, value) => [24, u64::from(id.get()), value.get().to_bits()],
             Self::FlushParameters(count) => [25, count as u64, 0],
+            Self::BlockMidi(count) => [26, count as u64, 0],
         }
     }
 
@@ -168,6 +172,7 @@ impl Call {
                 Normalized::clamped(f64::from_bits(b)),
             ),
             25 => Self::FlushParameters(a as usize),
+            26 => Self::BlockMidi(a as usize),
             23 => Self::InformController(
                 ParamId::new(a as u32),
                 Normalized::clamped(f64::from_bits(b)),
@@ -295,6 +300,15 @@ struct Shared {
     track_answer: Mutex<crate::Delivered>,
     /// What `set_app_midi_map` was handed, in order.
     app_midi_maps: Mutex<Vec<Vec<crate::MidiAssignment>>>,
+    /// The controller table the fake declares and who applies it and the app's
+    /// entries (`FakePlugin::declare_midi_map`).
+    midi_map: Mutex<FakeMidiMap>,
+}
+
+#[derive(Debug)]
+struct FakeMidiMap {
+    declared: Vec<MidiAssignment>,
+    applied: MidiMapApplied,
 }
 
 impl Shared {
@@ -307,11 +321,17 @@ impl Shared {
         self.log.push(Call::Wiring);
         let outputs = ChannelLayout::try_from(self.outputs.load(Ordering::Relaxed))
             .expect("a fake plugin has few outputs");
+        let (assignments, assignments_applied) = {
+            let map = self.midi_map.lock();
+            (map.declared.clone(), map.applied)
+        };
         PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(outputs)],
             latency_samples: Samples::new(self.latency.load(Ordering::Relaxed)),
             tail: self.tail(),
+            assignments,
+            assignments_applied,
             ..PluginWiring::default()
         }
     }
@@ -373,6 +393,10 @@ impl FakePlugin {
             track_infos: Mutex::new(Vec::new()),
             app_midi_maps: Mutex::new(Vec::new()),
             track_answer: Mutex::new(crate::Delivered::Yes),
+            midi_map: Mutex::new(FakeMidiMap {
+                declared: Vec::new(),
+                applied: MidiMapApplied::Host,
+            }),
         });
         (
             Self(shared.clone()),
@@ -382,6 +406,20 @@ impl FakePlugin {
                 values: Vec::new(),
             },
         )
+    }
+
+    /// Makes the fake declare `table` as its controller table
+    /// ([`PluginWiring::assignments`]), as the plugin does after
+    /// `Request::MidiCcAssignmentChanged`.
+    pub fn declare_midi_map(&self, table: &[MidiAssignment]) {
+        self.0.midi_map.lock().declared = table.to_vec();
+    }
+
+    /// Makes the fake say `applied` applies its declared table
+    /// ([`PluginWiring::assignments_applied`]) and answer it to
+    /// `Control::set_app_midi_map`, as an AU does with `Plugin`.
+    pub fn apply_midi_map(&self, applied: MidiMapApplied) {
+        self.0.midi_map.lock().applied = applied;
     }
 
     /// Every call so far, in the order they were made. Read it once the threads
@@ -674,7 +712,7 @@ macro_rules! fake_control {
                 app: &[crate::MidiAssignment],
             ) -> crate::MidiMapApplied {
                 self.shared.app_midi_maps.lock().push(app.to_vec());
-                crate::MidiMapApplied::Host
+                self.shared.midi_map.lock().applied
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
@@ -1060,6 +1098,9 @@ impl Processor for FakeProcessor {
             .drain(|id, value| log.push(Call::Edit(id, value)));
         if self.shared.process_fails.load(Ordering::Relaxed) {
             return Err(PluginError::Block("the fake fails its blocks"));
+        }
+        if !io.ctx.midi_events.is_empty() {
+            log.push(Call::BlockMidi(io.ctx.midi_events.len()));
         }
         if let Some(changes) = io.ctx.param_changes {
             for queue in &changes.queues {

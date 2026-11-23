@@ -1,5 +1,6 @@
 //! What VST3 asks of a host that the other formats do not: controllers as
-//! parameters (`IMidiMapping`), no event for the rest of MIDI 1.0, a non-null
+//! parameters (`IMidiMapping`, which the plugin node's controller map applies, not
+//! the format host: a controller never reaches this host as MIDI), no event for the rest of MIDI 1.0, a non-null
 //! parameter list, `outputParameterChanges` to the controller, the editor's
 //! edits and the parameter flush. Each case runs against both VST3 plugins, the
 //! Rust one (a combined component and controller) and the C++ one (separate
@@ -44,25 +45,6 @@ fn cc(channel: u8, controller: u8, value: u8) -> tutti_ump::Ump {
         CCNumber::new(controller).unwrap(),
         ControlValue::from(U7::of(value)).get(),
     )
-}
-
-/// `IMidiMapping` maps controller 74 on bus 0, channel 0 to `level`
-/// (ivsteditcontroller.h: "any functionality that is to be controlled by MIDI
-/// controllers must be exported as regular parameter. The host will transform
-/// incoming MIDI controller data using this interface"). The table is read at
-/// activation, not only after `kMidiCCAssignmentChanged`: the plugin here
-/// never raises it. The controller reaches the plugin as a parameter point at
-/// its frame, and as nothing else.
-fn a_mapped_controller_reaches_the_plugin_as_a_parameter_point<F: Format<L = Vst3Loaded>>() {
-    let mut a = active::<F>();
-    silent_block(&mut a, &[at(9, cc(0, 74, 100))]);
-    let t = transcript::<F, _>(a.controller_mut());
-    let points: Vec<_> = t.of(Kind::Param).collect();
-    assert_eq!(points.len(), 1, "one point for the controller: {points:?}");
-    let p = points[0];
-    assert_eq!((p.id, p.offset), (Param::Level.id().get(), 9));
-    assert!((p.value - 100.0 / 127.0).abs() < 0.01, "value {}", p.value);
-    assert_eq!(t.of(Kind::Data).count(), 0, "and not as a data event");
 }
 
 /// Everything else of MIDI 1.0 has no VST3 event: `DataEvent` has one type,
@@ -197,7 +179,6 @@ macro_rules! vst3_cases {
 }
 
 vst3_cases!(
-    a_mapped_controller_reaches_the_plugin_as_a_parameter_point,
     unmapped_channel_messages_are_not_sent_as_sysex_data,
     the_input_parameter_list_is_never_null,
     output_parameter_changes_reach_the_controller,
