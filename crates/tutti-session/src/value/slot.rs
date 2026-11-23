@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::NodeKey;
+use tutti_graph::{ErasedPublished, NodeKey};
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
@@ -177,33 +177,6 @@ pub trait Slot<V>: Send + Sync + 'static {
 
 /// The cell a slot target lands through.
 pub type SlotCell<V> = Arc<dyn Slot<V>>;
-
-/// The values of a node that the session's verbs reach, besides its params:
-/// what [`SessionNode::slots`](crate::SessionNode::slots) answers, kept under
-/// the node's key until the node is removed or replaced.
-#[derive(Default)]
-pub struct NodeSlots(pub(crate) Vec<(SlotId, Erased)>);
-
-impl NodeSlots {
-    /// `slot` as the value `id` names.
-    #[cfg(any(feature = "midi", feature = "sampler"))]
-    pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        Self(vec![(id, erase_staged::<C::Value, _>(slot))])
-    }
-
-    /// These slots and `slot` as the value `id` names.
-    #[cfg(feature = "sampler")]
-    pub(crate) fn and<C: Held>(mut self, id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        self.0.push((id, erase_staged::<C::Value, _>(slot)));
-        self
-    }
-}
-
-impl std::fmt::Debug for NodeSlots {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeSlots").finish_non_exhaustive()
-    }
-}
 
 /// What a slot is registered as: the type-erased [`SlotCell`] of its value,
 /// and, for a staging slot, the handle the update publishes it through.
@@ -617,58 +590,44 @@ node_slot_target!(
     Speed
 );
 
-/// Where a sampler node's value targets are reached from its key: a voice node
-/// and a clip are the same node underneath.
-#[cfg(feature = "sampler")]
-macro_rules! sampler_keys {
-    ($($node:ty),*) => {$(
-        impl<F: tutti_sampler::SamplerFloat> crate::Key<$node> {
-            /// The window the voice plays on the transport.
+/// Generates a [`Key`](crate::Key)'s method for each published kind, from the
+/// node's [`HasPublished`](tutti_graph::HasPublished): only a node that
+/// publishes the kind has the method.
+macro_rules! published_methods {
+    ($($(#[$cfg:meta])* $name:ident, $target:ident => $kind:ty, $doc:literal;)+) => {
+        impl<N: ?Sized> crate::Key<N> {$(
+            #[doc = $doc]
+            $(#[$cfg])*
             #[must_use]
-            pub const fn window(self) -> WindowTarget {
-                WindowTarget::new(self.erase())
+            pub const fn $name(self) -> $target
+            where
+                N: tutti_graph::HasPublished<$kind>,
+            {
+                $target::new(self.erase())
             }
-
-            /// The voice's loop.
-            #[must_use]
-            pub const fn looping(self) -> LoopingTarget {
-                LoopingTarget::new(self.erase())
-            }
-
-            /// Which way the voice plays.
-            #[must_use]
-            pub const fn direction(self) -> DirectionTarget {
-                DirectionTarget::new(self.erase())
-            }
-
-            /// The voice's varispeed.
-            #[must_use]
-            pub const fn speed(self) -> SpeedTarget {
-                SpeedTarget::new(self.erase())
-            }
-        }
-    )*};
+        )+}
+    };
 }
 
-#[cfg(feature = "sampler")]
-sampler_keys!(tutti_sampler::VoiceNode<F>, tutti_sampler::Clip<F>);
-
-#[cfg(feature = "midi")]
-impl crate::Key<tutti_midi_runtime::MidiClipNode> {
-    /// The events the clip plays.
-    #[must_use]
-    pub const fn events(self) -> ClipEventsTarget {
-        ClipEventsTarget::new(self.erase())
-    }
-}
-
-#[cfg(feature = "midi")]
-impl crate::Key<tutti_midi_runtime::HarmonyNode> {
-    /// The chord and scale changes the node sends.
-    #[must_use]
-    pub const fn changes(self) -> HarmonyTarget {
-        HarmonyTarget::new(self.erase())
-    }
+published_methods! {
+    #[cfg(feature = "midi")]
+    events, ClipEventsTarget => tutti_midi_runtime::ClipEventsKind,
+        "The events the clip plays (only a node that publishes them has this method).";
+    #[cfg(feature = "midi")]
+    changes, HarmonyTarget => tutti_midi_runtime::HarmonyChangesKind,
+        "The chord and scale changes the node sends (only a node that publishes them has this method).";
+    #[cfg(feature = "sampler")]
+    window, WindowTarget => tutti_sampler::WindowKind,
+        "The window the voice plays on the transport (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    looping, LoopingTarget => tutti_sampler::LoopingKind,
+        "The voice's loop (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    direction, DirectionTarget => tutti_sampler::DirectionKind,
+        "Which way the voice plays (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    speed, SpeedTarget => tutti_sampler::SpeedKind,
+        "The voice's varispeed (only a node that publishes it has this method).";
 }
 
 #[cfg(feature = "midi")]
@@ -839,6 +798,69 @@ impl<C: Held> Stage for PublishedSlot<C> {
     }
 }
 
+/// A node's published cell as a slot's control side: what the node handed its
+/// [`NodeParts`](tutti_graph::NodeParts) as a [`Published`](tutti_graph::Published).
+#[cfg(any(feature = "midi", feature = "sampler"))]
+pub(crate) struct NodeCell<V>(Arc<dyn tutti_graph::Published<Value = V>>);
+
+#[cfg(any(feature = "midi", feature = "sampler"))]
+impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
+    type Value = V;
+
+    fn current(&self) -> V {
+        self.0.current()
+    }
+
+    fn replace(&self, value: &V) -> bool {
+        self.0.replace(value);
+        true
+    }
+}
+
+/// `cell` as the slot of its value type.
+#[cfg(any(feature = "midi", feature = "sampler"))]
+fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
+    cell: Arc<dyn tutti_graph::Published<Value = V>>,
+) -> Erased {
+    erase_staged::<V, _>(PublishedSlot::new(NodeCell(cell)))
+}
+
+/// The slot a node's published cell is registered as under `node`, when its
+/// kind is one the session knows (each kind here has the value type its
+/// session target holds): a node that publishes another kind has nothing that
+/// can address its value, and is left out.
+#[cfg_attr(
+    not(any(feature = "midi", feature = "sampler")),
+    allow(unused_variables)
+)]
+pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
+    #[cfg(feature = "midi")]
+    {
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::ClipEventsKind>() {
+            return Some((SlotId::ClipEvents(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::HarmonyChangesKind>() {
+            return Some((SlotId::Harmony(node), node_cell(cell)));
+        }
+    }
+    #[cfg(feature = "sampler")]
+    {
+        if let Some(cell) = entry.cell::<tutti_sampler::WindowKind>() {
+            return Some((SlotId::Window(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::LoopingKind>() {
+            return Some((SlotId::Looping(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::DirectionKind>() {
+            return Some((SlotId::Direction(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::SpeedKind>() {
+            return Some((SlotId::Speed(node), node_cell(cell)));
+        }
+    }
+    None
+}
+
 /// The tempo map, in the transport's settings.
 pub(crate) struct TempoCell {
     pub settings: TransportSettings,
@@ -919,37 +941,9 @@ impl Held for LoopCell {
     }
 }
 
-#[cfg(feature = "midi")]
-impl Held for tutti_midi_runtime::MidiClipControls {
-    type Value = Arc<tutti_midi_runtime::ClipEvents>;
-
-    fn current(&self) -> Self::Value {
-        Self::current(self)
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        self.set(Arc::clone(value));
-        true
-    }
-}
-
-#[cfg(feature = "midi")]
-impl Held for tutti_midi_runtime::HarmonyControls {
-    type Value = Arc<tutti_midi_runtime::HarmonyChanges>;
-
-    fn current(&self) -> Self::Value {
-        Self::current(self)
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        self.set(Arc::clone(value));
-        true
-    }
-}
-
 /// A published cell of a `Copy` value: written through the cell itself, which
 /// publishes when the value differs.
-#[cfg(any(feature = "midi", feature = "sampler"))]
+#[cfg(feature = "midi")]
 impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T> {
     type Value = T;
 
@@ -960,45 +954,6 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T
     fn replace(&self, value: &T) -> bool {
         if *tutti_rt::Publisher::current(self) != *value {
             self.publish(*value);
-        }
-        true
-    }
-}
-
-/// A sampler voice's loop or direction cell: written through the cell, which
-/// publishes when the value differs and wakes the streamer of a streamed voice.
-#[cfg(feature = "sampler")]
-impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::ControlCell<T> {
-    type Value = T;
-
-    fn current(&self) -> T {
-        *tutti_sampler::ControlCell::current(self)
-    }
-
-    fn replace(&self, value: &T) -> bool {
-        if *tutti_sampler::ControlCell::current(self) != *value {
-            self.publish(*value);
-        }
-        true
-    }
-}
-
-/// A sampler voice's speed cell: a published rate. A `PlaybackRate` is already
-/// one both tiers play, so it takes the default `check`.
-#[cfg(feature = "sampler")]
-pub(crate) struct SpeedCell(pub tutti_rt::Publisher<tutti_units::PlaybackRate>);
-
-#[cfg(feature = "sampler")]
-impl Held for SpeedCell {
-    type Value = tutti_units::PlaybackRate;
-
-    fn current(&self) -> Self::Value {
-        *self.0.current()
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        if *self.0.current() != *value {
-            self.0.publish(*value);
         }
         true
     }
@@ -1155,7 +1110,7 @@ mod tests {
         let controls =
             tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
                 .controls;
-        let slot = PublishedSlot::new(controls.clone());
+        let slot = PublishedSlot::new(NodeCell(Arc::new(controls.clone())));
         let before = controls.current();
         slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));
         slot.publish_pending();

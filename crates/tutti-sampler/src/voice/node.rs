@@ -27,8 +27,8 @@ use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
-    RenderMode, Shape, Status,
+    Cx, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io, Node, NodeParts, ParamSet,
+    Prepare, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_units::{Amplitude, PlaybackRate, Tail, UnitParam};
@@ -597,6 +597,10 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             params: handle.params.clone(),
         };
         let params = handle.params().clone();
+        let window = handle.window.clone();
+        let looping = handle.looping.clone();
+        let direction = handle.direction.clone();
+        let speed = handle.speed.clone();
         NodeParts::new(
             Box::new(node),
             handle.clone(),
@@ -604,8 +608,49 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             Some(Box::new(handle)),
         )
         .params(params)
+        .published::<Self, WindowKind>(Arc::new(window))
+        .published::<Self, LoopingKind>(Arc::new(looping))
+        .published::<Self, DirectionKind>(Arc::new(direction))
+        .published::<Self, SpeedKind>(Arc::new(speed))
     }
 }
+
+/// The kind of a voice's window on the transport: `sampler.window()`.
+#[derive(Clone, Copy, Debug)]
+pub enum WindowKind {}
+
+impl PublishedKind for WindowKind {
+    type Value = Option<VoiceWindow>;
+}
+
+/// The kind of a voice's loop: `sampler.looping()`.
+#[derive(Clone, Copy, Debug)]
+pub enum LoopingKind {}
+
+impl PublishedKind for LoopingKind {
+    type Value = Option<Loop>;
+}
+
+/// The kind of a voice's direction: `sampler.direction()`.
+#[derive(Clone, Copy, Debug)]
+pub enum DirectionKind {}
+
+impl PublishedKind for DirectionKind {
+    type Value = PlayDirection;
+}
+
+/// The kind of a voice's varispeed: `sampler.speed()`.
+#[derive(Clone, Copy, Debug)]
+pub enum SpeedKind {}
+
+impl PublishedKind for SpeedKind {
+    type Value = PlaybackRate;
+}
+
+impl<F: SamplerFloat> HasPublished<WindowKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<LoopingKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<DirectionKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<SpeedKind> for VoiceNode<F> {}
 
 #[cfg(test)]
 mod tests {
