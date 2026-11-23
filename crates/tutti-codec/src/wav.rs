@@ -152,7 +152,7 @@ impl<W: Write + Seek> WavWriter<W> {
     /// As [`Encoder::create`](crate::Encoder::create).
     pub(crate) fn create(spec: &Spec, pcm: Pcm, mut sink: W) -> Result<Self> {
         let rate = spec.header_rate()?.get();
-        let mask = channel_mask(spec.topology());
+        let mask = spec.topology().map_or(0, channel_mask);
         let header = Header::new(spec, pcm, rate, mask);
         sink.write_all(&header.bytes)?;
         Ok(Self {

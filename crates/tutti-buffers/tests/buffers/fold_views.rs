@@ -9,7 +9,7 @@ use tutti_units::Samples;
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::default_for(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n)).unwrap()
 }
 
 fn five_one_to_stereo() -> Fold {

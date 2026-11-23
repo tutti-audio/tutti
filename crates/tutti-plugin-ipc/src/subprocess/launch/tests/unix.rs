@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::transport::broker_pair;
+use crate::{ControlRequest, Request};
 
 /// The host's `Launch` over the host end of a broker pair, and the server's end.
 fn broker(t: &Timeouts) -> (Launch<'_>, ControlStream) {

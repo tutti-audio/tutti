@@ -5,7 +5,7 @@ use crate::{BufferError, InterleavedMut};
 use Speaker::*;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::default_for(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n)).unwrap()
 }
 
 fn fold(s: &ChannelTopology, d: &ChannelTopology) -> Fold {
@@ -17,8 +17,8 @@ fn fold(s: &ChannelTopology, d: &ChannelTopology) -> Fold {
 fn widths(src: u16, dst: u16) -> Result<Fold, FoldError> {
     let (s, d) = (ChannelLayout::from(src), ChannelLayout::from(dst));
     let (from, to) = (
-        ChannelTopology::default_for(s),
-        ChannelTopology::default_for(d),
+        ChannelTopology::default_for(s).unwrap(),
+        ChannelTopology::default_for(d).unwrap(),
     );
     if from.is_unassigned() || to.is_unassigned() {
         Fold::<f32>::by_index(s, d)
@@ -455,7 +455,7 @@ fn a_lone_centre_feeds_the_centre() {
 /// equal width, and `between` refuses any other width on either side.
 #[test]
 fn unassigned_channels_map_one_to_one() {
-    let d = |n: u16| ChannelTopology::unassigned(ChannelLayout::from(n));
+    let d = |n: u16| ChannelTopology::unassigned(ChannelLayout::from(n)).unwrap();
     let f = fold(&d(6), &d(6));
     for o in 0..6 {
         let mut want = [0.0; 6];
@@ -532,7 +532,7 @@ fn what_cannot_be_placed_is_an_error() {
 /// against another width rather than guess.
 #[test]
 fn a_bare_width_folds_through_default_for() {
-    let default = |n: u16| ChannelTopology::default_for(ChannelLayout::from(n));
+    let default = |n: u16| ChannelTopology::default_for(ChannelLayout::from(n)).unwrap();
     assert_eq!(
         Fold::<f32>::between(&default(6), &default(2)).unwrap(),
         fold(&smpte(6), &smpte(2))
@@ -1183,12 +1183,12 @@ fn copies_contribute_at_exactly_unity() {
 fn contributions_are_the_fold_as_a_matrix() {
     let mut tops: Vec<ChannelTopology> = ORDERED
         .iter()
-        .map(|&n| ChannelTopology::default_for(ChannelLayout::from(n)))
+        .map(|&n| ChannelTopology::default_for(ChannelLayout::from(n)).unwrap())
         .collect();
     tops.push(ChannelTopology::new([FrontLeft, FrontRight, SideLeft, SideRight]).unwrap());
     tops.push(ChannelTopology::new([FrontRight, FrontLeft, FrontCenter]).unwrap());
-    tops.push(ChannelTopology::unassigned(ChannelLayout::from(3u16)));
-    tops.push(ChannelTopology::unassigned(ChannelLayout::from(6u16)));
+    tops.push(ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap());
+    tops.push(ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap());
     let mut checked = 0;
     for src in &tops {
         for dst in &tops {
@@ -1580,7 +1580,7 @@ fn speakers_to_ambisonic_and_back_need_a_codec() {
     for speakers in [
         crate::Bed::Quad.topology(),
         crate::Bed::Stereo.topology(),
-        ChannelTopology::unassigned(ChannelLayout::QUAD),
+        ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap(),
     ] {
         assert_eq!(
             Fold::<f32>::between(&first, &speakers),

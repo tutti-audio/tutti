@@ -8,9 +8,7 @@ use std::sync::Arc;
 use crate::last_good::LastGood;
 use tutti_buffers::{ChannelLayout, Float, Wave};
 use tutti_dsp::{GrainSettings, Granular, MaxGrains};
-use tutti_graph::{
-    Cx, IntoNode, Io, Node, NodeParts, ParamInput, ParamNode, ParamSet, Prepare, Shape, Status,
-};
+use tutti_graph::{Cx, Io, Node, ParamInput, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam};
 
@@ -43,7 +41,7 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 /// # use tutti_buffers::Planes;
 /// use std::sync::Arc;
 /// use tutti_buffers::{ChannelLayout, Interleaved, MaxBlock, Wave};
-/// use tutti_graph::{GraphBuilder, Params, Prepare};
+/// use tutti_graph::{GraphBuilder, Prepare};
 /// use tutti_nodes::{GranularConfig, GranularNode};
 /// use tutti_units::{Hz, SampleRate, Samples, Seconds};
 ///
@@ -55,7 +53,7 @@ use tutti_units::{Cents, Hz, Normalized, Samples, Seconds, Tail, Unit, UnitParam
 ///         .length(Seconds::new(0.01)),
 /// )?;
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-/// let node = g.add_with_controls(Params(cloud));
+/// let node = g.add_with_controls(cloud);
 /// g.pipe_output(node.0);
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(480))))
@@ -70,120 +68,28 @@ pub struct GranularNode<F: Float> {
     source: Arc<Wave<F>>,
     max_grains: MaxGrains,
     seed: u64,
-    density: Param<Hz>,
-    rate: Param<Cents>,
-    length: Param<Seconds>,
-    /// The position's jitter at 0 and the timing's at 1.
-    jitter: [Param<Normalized>; 2],
-    position: Param<Normalized>,
+    cells: GranularCells<F>,
     /// The last finite value of each cell or port, in the order of [`Self::settings`]'s reads.
     good: [LastGood<f64>; 6],
     /// `None` until [`Node::prepare`]: no cloud is built at a guessed rate.
     cloud: Option<Granular<F>>,
 }
 
-// The params a [`GranularNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([F: Float] GranularNode<F>, n {
-    Rate => Hz = &n.density,
-    Pitch => Cents = &n.rate,
-    GrainLength => Seconds = &n.length,
-    [i in 0..2u8] { Jitter => Normalized = &n.jitter[usize::from(i)] },
-    Position => Normalized = &n.position,
+// The params a [`GranularNode`] lets the graph modulate, in port order, and the
+// [`GranularConfig`] it is made from: the shared source and the starting values of its
+// params. The jitter is two cells: the position's at 0 and the timing's at 1.
+tutti_graph::declare_params!([F: Float] GranularNode<F>, GranularConfig<F: Float>,
+    GranularCells<F: Float> {
+    required { layout: ChannelLayout, source: Arc<Wave<F>> }
+    params {
+        Rate => density: Hz = Hz::new(10.0),
+        Pitch => rate: Cents = Cents::new(0.0),
+        GrainLength => length: Seconds = Seconds::new(0.1),
+        Jitter => jitter[2]: Normalized = Normalized::of(0.0),
+        Position => position: Normalized = Normalized::of(0.0),
+    }
+    options { max_grains: MaxGrains = MaxGrains::of(32), seed: u64 = 0 }
 });
-
-/// What a [`GranularNode`] is made from: the shared source and the starting values of its
-/// params.
-#[derive(Clone, Debug)]
-pub struct GranularConfig<F: Float> {
-    layout: ChannelLayout,
-    source: Arc<Wave<F>>,
-    max_grains: MaxGrains,
-    seed: u64,
-    density: Hz,
-    length: Seconds,
-    rate: Cents,
-    position: Normalized,
-    position_jitter: Normalized,
-    timing_jitter: Normalized,
-}
-
-impl<F: Float> GranularConfig<F> {
-    /// Grains of `source` out of `layout`'s channels: 10 a second, 100 ms long, from its start at
-    /// its own pitch, with no jitter, at most 32 sounding, seed 0. The node refuses a source
-    /// that is neither mono nor as wide as the layout ([`GranularError`]).
-    #[must_use]
-    pub fn new(layout: ChannelLayout, source: Arc<Wave<F>>) -> Self {
-        Self {
-            layout,
-            source,
-            max_grains: MaxGrains::of(32),
-            seed: 0,
-            density: Hz::new(10.0),
-            length: Seconds::new(0.1),
-            rate: Cents::new(0.0),
-            position: Normalized::of(0.0),
-            position_jitter: Normalized::of(0.0),
-            timing_jitter: Normalized::of(0.0),
-        }
-    }
-
-    /// The most grains sounding at once.
-    #[must_use]
-    pub fn max_grains(mut self, max: MaxGrains) -> Self {
-        self.max_grains = max;
-        self
-    }
-
-    /// The seed of the jitter's stream: the same seed is the same grains.
-    #[must_use]
-    pub fn seed(mut self, seed: u64) -> Self {
-        self.seed = seed;
-        self
-    }
-
-    /// The grains started a second, at the start.
-    #[must_use]
-    pub fn density(mut self, density: Hz) -> Self {
-        self.density = density;
-        self
-    }
-
-    /// The length of a grain, at the start.
-    #[must_use]
-    pub fn length(mut self, length: Seconds) -> Self {
-        self.length = length;
-        self
-    }
-
-    /// The pitch grains are read at, against the source's own, at the start.
-    #[must_use]
-    pub fn rate(mut self, rate: Cents) -> Self {
-        self.rate = rate;
-        self
-    }
-
-    /// Where in the source grains start, `0` its start and `1` its end, at the start.
-    #[must_use]
-    pub fn position(mut self, position: Normalized) -> Self {
-        self.position = position;
-        self
-    }
-
-    /// How far a grain's start moves from the position, as a fraction of the source, at the
-    /// start.
-    #[must_use]
-    pub fn position_jitter(mut self, jitter: Normalized) -> Self {
-        self.position_jitter = jitter;
-        self
-    }
-
-    /// How far an interval between grains moves, as a fraction of the interval, at the start.
-    #[must_use]
-    pub fn timing_jitter(mut self, jitter: Normalized) -> Self {
-        self.timing_jitter = jitter;
-        self
-    }
-}
 
 /// What a [`GranularConfig`] cannot make a node of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -215,25 +121,18 @@ impl<F: Float> TryFrom<GranularConfig<F>> for GranularNode<F> {
         let good = |initial: f64, fallback: f64| LastGood::new(initial, fallback);
         Ok(Self {
             layout: config.layout,
-            source: config.source,
+            source: Arc::clone(&config.source),
             max_grains: config.max_grains,
             seed: config.seed,
             good: [
                 good(config.density.get(), 10.0),
                 good(config.rate.get(), 0.0),
                 good(config.length.get(), 0.1),
-                good(config.position_jitter.get(), 0.0),
-                good(config.timing_jitter.get(), 0.0),
+                good(config.jitter[0].get(), 0.0),
+                good(config.jitter[1].get(), 0.0),
                 good(config.position.get(), 0.0),
             ],
-            density: Param::new(config.density),
-            rate: Param::new(config.rate),
-            length: Param::new(config.length),
-            jitter: [
-                Param::new(config.position_jitter),
-                Param::new(config.timing_jitter),
-            ],
-            position: Param::new(config.position),
+            cells: GranularCells::from_config(&config),
             cloud: None,
         })
     }
@@ -251,32 +150,32 @@ impl<F: Float> GranularNode<F> {
             U::from_raw(good.block(driven.last_frame(), cell.load().to_raw()))
         }
         let density = value(
-            &self.density,
+            &self.cells.density,
             self.declared_param::<{ UnitParam::Rate as u16 }, _>(io),
             &mut self.good[0],
         );
         let rate = value(
-            &self.rate,
+            &self.cells.rate,
             self.declared_param::<{ UnitParam::Pitch as u16 }, _>(io),
             &mut self.good[1],
         );
         let length = value(
-            &self.length,
+            &self.cells.length,
             self.declared_param::<{ UnitParam::GrainLength as u16 }, _>(io),
             &mut self.good[2],
         );
         let position_jitter = value(
-            &self.jitter[0],
+            &self.cells.jitter[0],
             self.declared_param_at::<{ UnitParam::Jitter as u16 }, _>(io, 0),
             &mut self.good[3],
         );
         let timing_jitter = value(
-            &self.jitter[1],
+            &self.cells.jitter[1],
             self.declared_param_at::<{ UnitParam::Jitter as u16 }, _>(io, 1),
             &mut self.good[4],
         );
         let position = value(
-            &self.position,
+            &self.cells.position,
             self.declared_param::<{ UnitParam::Position as u16 }, _>(io),
             &mut self.good[5],
         );
@@ -333,35 +232,6 @@ impl<F: Float> Node<F> for GranularNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for GranularNode<F> {
-    /// The density, the pitch, the grain length and the two jitters.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cells detached (at their values now), its cloud at the start.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.density.detach();
-        fork.rate.detach();
-        fork.length.detach();
-        fork.jitter.iter_mut().for_each(Param::detach);
-        fork.position.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
-/// it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for GranularNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

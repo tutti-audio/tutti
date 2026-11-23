@@ -168,21 +168,21 @@ pub(super) fn build_stream<F: RingFloat>(
     shared: &Handles<F>,
     config: &BufferConfig,
 ) -> Result<(Record<F>, Opened<F>), PlaceError> {
-    let (file_length, file_sr, file_topology, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
+    let (file_length, file_sr, file_channels, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
         match source {
             // Decoder metadata carries the header's integer rate.
             #[cfg(codec)]
             Source::Stream(meta, decoder) => (
                 meta.total_frames.unwrap_or(0),
                 meta.sample_rate,
-                decoder.topology().clone(),
+                meta.channel_set,
                 Some(*decoder),
                 None,
             ),
             Source::Whole(wave) => (
                 wave.len().get() as u64,
                 wave.sample_rate(),
-                wave.topology().clone(),
+                wave.channel_set(),
                 None,
                 Some(wave),
             ),
@@ -190,8 +190,8 @@ pub(super) fn build_stream<F: RingFloat>(
 
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
-    let width = voice_width(width.unwrap_or_else(|| file_topology.width()))?;
-    let place = Place::for_topology(&file_topology, width)?;
+    let width = voice_width(width.unwrap_or(file_channels.width()))?;
+    let place = Place::for_channels(&file_channels, width)?;
 
     // Sizing only: a rate that moves before the ratio is set below changes the
     // ring's depth, never what it plays.
@@ -206,7 +206,7 @@ pub(super) fn build_stream<F: RingFloat>(
         id,
         asset.clone(),
         buffer_capacity,
-        file_topology,
+        file_channels,
         Some(Samples::new(file_length as usize)),
         config.seek_crossfade_frames,
     );

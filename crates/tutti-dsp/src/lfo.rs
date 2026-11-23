@@ -18,6 +18,8 @@ use tutti_units::{
     Bipolar, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate, Samples, Seconds,
 };
 
+use tutti_buffers::Float;
+
 use crate::design::exact_frames;
 use crate::oscillator::sine;
 
@@ -71,6 +73,17 @@ pub struct Lfo {
     delay: f64,
     fade_in: f64,
     elapsed: u64,
+    /// The whole cycles the phase has completed since the start (negative when it runs
+    /// backwards).
+    cycle: i64,
+}
+
+/// The step of `rate` at `sample_rate`, its magnitude held strictly below half a cycle: a
+/// step of half a cycle or more reads as a step back in the phase's two's complement.
+fn step_of(rate: Hz, sample_rate: SampleRate) -> PhaseIncrement {
+    let most = 0.5_f64.next_down();
+    let per_sample = PhaseIncrement::per_sample(rate, sample_rate).get();
+    PhaseIncrement::new(per_sample.clamp(-most, most))
 }
 
 impl Lfo {
@@ -81,12 +94,13 @@ impl Lfo {
         Self {
             wave,
             sample_rate,
-            step: PhaseIncrement::per_sample(rate, sample_rate),
+            step: step_of(rate, sample_rate),
             zero: RunningPhase::START,
             phase: RunningPhase::START,
             delay: 0.0,
             fade_in: 0.0,
             elapsed: 0,
+            cycle: 0,
         }
     }
 
@@ -106,17 +120,19 @@ impl Lfo {
         self
     }
 
-    /// Runs at `rate` against `sample_rate` from here on; the phase is kept, and the delay
+    /// Runs at `rate` against `sample_rate` from here on, its step held strictly below half a
+    /// cycle a frame (a negative rate runs the phase backwards, and 0 holds it); the phase is kept, and the delay
     /// and the fade-in, counted in frames when they were set, keep their frames.
     pub fn retarget(&mut self, rate: Hz, sample_rate: SampleRate) {
         self.sample_rate = sample_rate;
-        self.step = PhaseIncrement::per_sample(rate, sample_rate);
+        self.step = step_of(rate, sample_rate);
     }
 
     /// Back to the start: the delay again, and the first cycle after it.
     pub fn reset(&mut self) {
         self.phase = RunningPhase::START;
         self.elapsed = 0;
+        self.cycle = 0;
     }
 
     /// Moves on by `frames`: the same as `frames` calls with one, as the phase adds
@@ -124,10 +140,24 @@ impl Lfo {
     pub fn advance(&mut self, frames: Samples) {
         let count = frames.get() as u64;
         let step = PhaseStep::from(self.step);
+        // The step is a signed count of `2^-64` cycles: a carry out of the add is a cycle
+        // completed, a borrow one undone.
+        let total =
+            i128::from(self.phase.get()) + i128::from(step.get() as i64) * i128::from(count);
+        self.cycle += (total >> 64) as i64;
         self.phase = self
             .phase
             .advance(PhaseStep::from_count(step.get().wrapping_mul(count)));
         self.elapsed = self.elapsed.saturating_add(count);
+    }
+
+    /// The clock position in unwrapped cycles since the start (negative running backwards):
+    /// the whole cycles completed plus the phase, exact for as long as it runs, so a stepped
+    /// shape can address its step by the cycle index. The delay and the fade-in are not
+    /// applied: it is the running clock, [`value`](Self::value)'s input.
+    #[must_use]
+    pub fn cycles(&self) -> f64 {
+        self.cycle as f64 + f64::from_phase(self.phase)
     }
 
     /// The value now: the start value during the delay, then the wave at its phase, scaled by

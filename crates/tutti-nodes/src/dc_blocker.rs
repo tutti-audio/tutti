@@ -6,7 +6,7 @@ use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, DcBlocker, DcBlockerControls, Ler
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`DcBlockerNode`] is made from: its width and, optionally, its corner.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,8 +114,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 
     /// `width` channels in and out, `Light`: a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus = tutti_buffers::BusTopology::unassigned(self.width)
-            .expect("a DC blocker is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a DC blocker");
         Shape::through(bus).cost(Cost::Light)
     }
 

@@ -225,7 +225,9 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// rows the set has (`all`, or an expression: a design that cannot freeze
 /// leaves off the freeze). A row is `Kind => Unit = field`, a single control;
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
-/// and `Kind[i]` with `i` above 0 the others. A row may end in flags, `{ .. }`, that
+/// and `Kind[i]` with `i` above 0 the others. A row `Kind => Unit = field via Ranged` is a
+/// range-checked field: it reads as `field.get()` and a cell becomes `Ranged::held(cell)`, the
+/// hold of a live value that has no caller to refuse it to. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
 /// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
 /// than [`MAX_SIGNALS`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
@@ -234,7 +236,7 @@ macro_rules! control_set {
     (
         $set:ident($s:ident): $controls:ty = $base:expr;
         live: ($($live:tt)+);
-        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $([$pi:literal])?
+        $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $([$pi:literal])? $(via $ranged:ty)?
             $({ $($flag:ident),* })?),+ ;
         $($items:tt)*
     ) => {
@@ -269,7 +271,9 @@ macro_rules! control_set {
 
             fn flatten(&self, c: &$controls, out: &mut [f64]) {
                 let all = [$(
-                    <$unit as tutti_graph::ParamValue>::to_cell(c.$f $([$pi])?)
+                    <$unit as tutti_graph::ParamValue>::to_cell(
+                        control_set!(@read c.$f $([$pi])? $(via $ranged)?)
+                    )
                 ),+];
                 out.copy_from_slice(&all[..out.len()]);
             }
@@ -281,7 +285,7 @@ macro_rules! control_set {
                 let mut cells = v.iter().copied();
                 $(
                     if let Some(x) = cells.next() {
-                        c.$f $([$pi])? = <$unit as tutti_graph::ParamValue>::from_cell(x);
+                        c.$f $([$pi])? = control_set!(@write $unit, x $(, via $ranged)?);
                     }
                 )+
                 c
@@ -291,6 +295,12 @@ macro_rules! control_set {
         }
         $( control_set!(@has $set; $kind $([$ix])? => $unit); )+
     };
+    (@read $c:ident . $f:ident $([$pi:literal])? via $ranged:ty) => { $c.$f $([$pi])?.get() };
+    (@read $c:ident . $f:ident $([$pi:literal])?) => { $c.$f $([$pi])? };
+    (@write $unit:ty, $x:ident, via $ranged:ty) => {
+        <$ranged>::held(<$unit as tutti_graph::ParamValue>::from_cell($x))
+    };
+    (@write $unit:ty, $x:ident) => { <$unit as tutti_graph::ParamValue>::from_cell($x) };
     (@addr $kind:ident) => { tutti_units::UnitAddr::first(tutti_units::UnitParam::$kind) };
     (@addr $kind:ident [$ix:tt]) => {
         tutti_units::UnitAddr::new(tutti_units::UnitParam::$kind, $ix)
