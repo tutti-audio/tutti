@@ -206,6 +206,7 @@ mod seq_slots;
 mod spin;
 mod split;
 mod splitmix;
+mod sync;
 mod task_graph;
 mod vec;
 
@@ -240,7 +241,7 @@ pub use pos_ring::{
 };
 pub use reclaim::Reclaim;
 pub use render_count::{RenderCount, RenderGuard};
-pub use render_gate::{Closing, GateGuard, GateState, HeldClosed, Opening, RenderGate};
+pub use render_gate::{GateGuard, GateState, RenderGate, Transition};
 pub use request_flags::{AtomicRequestFlags, RequestFlag, RequestFlagOutOfRange, RequestFlags};
 pub use ring::{Drain, Iter, Overflow, PushError, Returned, RingReader, RingWriter, ring};
 pub use scope::{ControlDrop, RtScope, RtScopeGuard};

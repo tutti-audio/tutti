@@ -80,7 +80,7 @@ impl std::fmt::Display for BusDirection {
 /// * any positive value — a literal channel count on any single bus.
 ///
 /// Storing this as a bare number is the bug this type exists to prevent:
-/// AUSampler and AUMIDISynth on macOS 15.6 both declare `{0, -16}`, which means
+/// AUSampler and AUMIDISynth declare `{0, -16}`, which means
 /// "no input elements, at most 16 channels of output in total". Read as a count
 /// that is a nonsensical *negative sixteen channels*; coerced with `abs()` or
 /// `max(0)` it silently becomes "16 channels on a single bus" or "0 channels",
@@ -258,9 +258,8 @@ pub(crate) fn bus_count(unit: &Unit, direction: BusDirection) -> u32 {
 /// An out-of-range `bus` returns the AU's own `kAudioUnitErr_InvalidElement`
 /// (`-10877`) rather than a fabricated layout. That distinction is the point:
 /// `ChannelLayout` has no "absent" value, so a host that got `Stereo` back for
-/// bus 99 would size buffers for a bus that does not exist. Measured on macOS
-/// 15.6: DLSMusicDevice has 2 output buses, and asking for output bus 2 or 99
-/// returns -10877 from AudioToolbox — the error is the AU's, not invented here.
+/// bus 99 would size buffers for a bus that does not exist. The error is the
+/// AU's, not invented here.
 pub(crate) fn bus_layout(unit: &Unit, direction: BusDirection, bus: u32) -> Result<ChannelLayout> {
     let asbd = unit.get::<StreamFormat>(direction.scope(), Element(bus))?;
     ChannelLayout::try_from(asbd.mChannelsPerFrame).map_err(|source| AuError::BusTooWide {
@@ -276,8 +275,8 @@ pub(crate) fn bus_layout(unit: &Unit, direction: BusDirection, bus: u32) -> Resu
 /// `kAudioUnitProperty_SupportedNumChannels`.
 ///
 /// An empty vec means the AU declares nothing — which is *not* the same as
-/// declaring it supports nothing. Most Apple effects (all 22 measured on macOS
-/// 15.6) refuse this property outright, meaning "no constraint published, ask
+/// declaring it supports nothing. Most Apple effects refuse this property
+/// outright, meaning "no constraint published, ask
 /// the stream format instead". Callers must treat empty as "unconstrained", and
 /// that reading is why this returns a plain `Vec` rather than a `Result`: a
 /// refusal and an empty list are the same answer to the caller's question.
@@ -334,7 +333,7 @@ mod tests {
             AuChannelCount::from_raw(-2),
             AuChannelCount::Any { wildcard: -2 }
         );
-        // The AUSampler / AUMIDISynth case, measured on macOS 15.6: `{0, -16}`.
+        // The AUSampler / AUMIDISynth case: `{0, -16}`.
         assert_eq!(
             AuChannelCount::from_raw(-16),
             AuChannelCount::TotalAcrossBuses { max_total: 16 }
@@ -379,9 +378,9 @@ mod tests {
         assert!(independent.admits(2, 6));
     }
 
-    /// The real entries measured on this machine (macOS 15.6), decoded.
+    /// Real Apple entries, decoded.
     #[test]
-    fn measured_apple_entries_decode_to_their_documented_meaning() {
+    fn apple_entries_decode_to_their_documented_meaning() {
         // DLSMusicDevice: `{0, 2}` — no input elements, exactly 2 out.
         let dls = AuChannelConfig::from_raw(AuChannelInfo {
             in_channels: 0,

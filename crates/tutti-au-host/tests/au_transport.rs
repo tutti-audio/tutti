@@ -802,7 +802,7 @@ fn host_callback_info_matches_apples_layout() {
     let mut writable: u8 = 0;
     let status = unsafe {
         coreaudio_sys::AudioUnitGetPropertyInfo(
-            au.raw_unit(),
+            au.unit().as_raw(),
             coreaudio_sys::kAudioUnitProperty_HostCallbacks,
             Scope::GLOBAL.raw(),
             0,

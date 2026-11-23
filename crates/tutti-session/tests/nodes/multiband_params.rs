@@ -22,7 +22,7 @@ use tutti_nodes::{MultibandBands, MultibandCompressorConfig, MultibandCompressor
 use tutti_session::{InputPort, Key, MainOutput, OutputPort, Session};
 use tutti_session::{RouteSpec, ValueErrorKind};
 use tutti_units::{Amplitude, SampleRate};
-use tutti_units::{BeatsPerCycle, Depth};
+use tutti_units::{BeatsPerCycle, Bipolar};
 use tutti_units::{CompressionRatio, Db, Hz, Seconds};
 
 const RATE: f64 = 48_000.0;
@@ -239,7 +239,7 @@ fn a_route_to_band_1_modulates_band_1_only() {
     let mut m = s.mods_mut();
     m.range(band1, Db::new(-24.0)..Db::new(24.0)).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
-    m.route(RouteSpec::new(lfo, band1, Depth::of(0.25)))
+    m.route(RouteSpec::new(lfo, band1, Bipolar::of(0.25)))
         .unwrap();
     for _ in 0..4 {
         let _ = s.update();

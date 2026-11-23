@@ -61,7 +61,7 @@
 //! A unit is a name on a float, not a validated value: `Pan::new(5.0)` builds. The
 //! range a type documents is what its `new_clamped` or wrap produces, and
 //! `new_clamped` passes NaN through (see the `units` module docs). The types that
-//! do validate are `SampleRate`, `Bpm`, `Depth`, `Bipolar`, `Metres`, `Speed`,
+//! do validate are `SampleRate`, `Bpm`, `Bipolar`, `Metres`, `Speed`,
 //! `FrequencyRatio` and `ModulationIndex`: `SampleRate::new` (finite and above zero)
 //! returns `None` for a raw it cannot hold.
 //!
@@ -105,30 +105,24 @@ mod ranged;
 mod real;
 
 mod bars;
-mod blocks;
-mod calls;
-mod chunks;
+mod counts;
 mod frame;
 mod latency;
 mod losses;
 mod play;
-mod resyncs;
 mod samples;
 mod tail;
 mod text;
 mod unit_param;
 
 pub use bars::{BarCount, BarNumber};
-pub use blocks::Blocks;
-pub use calls::Calls;
-pub use chunks::Chunks;
+pub use counts::{Blocks, Calls, Chunks, Resyncs};
 pub use frame::{At, Frame, Moment};
 pub use latency::Latency;
 pub use losses::Losses;
 pub use normalized::{Normalized, NormalizedOutOfRange};
 pub use play::PlayReading;
 pub use real::Real;
-pub use resyncs::Resyncs;
 pub use samples::Samples;
 pub use tail::Tail;
 pub use text::{Text, TextError};
@@ -137,12 +131,12 @@ pub use units::Quantity;
 pub use units::{
     Amplitude, ArcDegrees, Azimuth, Balance, Ballistics, Beat, BeatDuration, BeatsPerCycle,
     BeatsPerCycleOutOfRange, Bipolar, BipolarOutOfRange, BitDepth, Bpm, BpmOutOfRange, Cents,
-    CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Depth,
-    DepthOutOfRange, Direction, Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange,
-    FrequencyRatio, FrequencyRatioOutOfRange, Gain, HoldFactor, Hz, Metres, MetresOutOfRange, Mix,
-    ModulationIndex, ModulationIndexOutOfRange, Pan, Phase, PhaseIncrement, PhaseStep,
-    PlaybackRate, PlaybackRateOutOfRange, Q, Radians, ReadPosition, ReadRate, Resonance,
-    RunningPhase, SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan,
-    SampleSpanOutOfRange, Seconds, Semitones, Speed, SpeedOutOfRange, Spread, SrcRatio,
-    StereoBalance, StereoWidth, StretchFactor, TimecodeFrames, Unit, Velocity,
+    CentsSpan, CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Db, Direction,
+    Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
+    FrequencyRatioOutOfRange, Gain, HoldFactor, Hz, Metres, MetresOutOfRange, Mix, ModulationIndex,
+    ModulationIndexOutOfRange, Pan, Phase, PhaseIncrement, PhaseStep, PlaybackRate,
+    PlaybackRateOutOfRange, Q, Radians, ReadPosition, ReadRate, Resonance, RunningPhase,
+    SamplePosition, SampleRate, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Seconds,
+    Semitones, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor,
+    TimecodeFrames, Unit, Velocity,
 };

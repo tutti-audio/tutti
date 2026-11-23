@@ -21,7 +21,7 @@ use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_fixtures::noise;
 use tutti_fixtures::signal::bits;
 use tutti_graph::contract::drive;
-use tutti_graph::{IntoNode, Prepare, Standalone};
+use tutti_graph::{IntoNode, NodeKey, Prepare, Renderer};
 use tutti_nodes::{
     ChannelTimes, CompressorConfig, CompressorControls, CompressorNode, CrossoverConfig,
     CrossoverControls, CrossoverNode, DelayConfig, DelayControls, DelayLayout, DelayNode,
@@ -35,14 +35,12 @@ const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 64;
 const FRAMES: usize = 1_024;
 
-fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
-    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
+fn solo<N: IntoNode>(node: N) -> (Renderer, NodeKey, N::Controls) {
+    Renderer::alone(node, Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))))
 }
 
-fn set_mix<C>(solo: &mut Standalone<C>, mix: Mix) {
-    let key = solo.key();
-    solo.renderer_mut()
-        .editor_mut()
+fn set_mix(solo: &mut Renderer, key: NodeKey, mix: Mix) {
+    solo.editor_mut()
         .set_mix(key, mix)
         .expect("the node is in the graph and the mix is in range");
 }
@@ -61,8 +59,8 @@ fn after_silence(x: &[Vec<f32>]) -> Vec<Vec<f32>> {
 /// What `make()` renders for `x` (after a silent block) at `mix` in a graph,
 /// the silent block cut off.
 fn rendered<N: IntoNode>(make: &dyn Fn() -> N, x: &[Vec<f32>], mix: Mix) -> Vec<Vec<f32>> {
-    let mut s = solo(make());
-    set_mix(&mut s, mix);
+    let (mut s, key, _) = solo(make());
+    set_mix(&mut s, key, mix);
     let input = after_silence(x);
     let refs: Vec<&[f32]> = input.iter().map(Vec::as_slice).collect();
     s.render_input(Planes::new(&refs).unwrap())
@@ -332,14 +330,14 @@ fn a_mix_move_on_a_delay_ramps_across_the_block() {
     };
     let x: Vec<Vec<f32>> = (0..6).map(|c| noise(70 + c, 2 * BLOCK)).collect();
     let wet = {
-        let mut s = solo(make());
+        let (mut s, ..) = solo(make());
         let refs: Vec<&[f32]> = x.iter().map(Vec::as_slice).collect();
         s.render_input(Planes::new(&refs).unwrap())
     };
-    let mut s = solo(make());
+    let (mut s, key, _) = solo(make());
     let first: Vec<&[f32]> = x.iter().map(|c| &c[..BLOCK]).collect();
     s.render_input(Planes::new(&first).unwrap());
-    set_mix(&mut s, Mix::DRY);
+    set_mix(&mut s, key, Mix::DRY);
     let second: Vec<&[f32]> = x.iter().map(|c| &c[BLOCK..]).collect();
     let got = s.render_input(Planes::new(&second).unwrap());
     for c in 0..6 {

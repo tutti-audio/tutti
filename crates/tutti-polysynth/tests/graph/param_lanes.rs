@@ -21,7 +21,7 @@ use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig, UnisonConfig, UnisonVoices};
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Voice2};
 use tutti_units::{
-    Beat, BeatsPerCycle, Bpm, CentsSpan, Depth, PhaseIncrement, SampleRate, Samples, Seconds,
+    Beat, BeatsPerCycle, Bipolar, Bpm, CentsSpan, PhaseIncrement, SampleRate, Samples, Seconds,
     Spread, UnitParam,
 };
 
@@ -69,7 +69,7 @@ fn constant(depth: f64) -> ControlProgram {
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

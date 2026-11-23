@@ -17,16 +17,12 @@
 //!    lexed (comments and literals blanked) and each `pub use .. ;` read as a use
 //!    tree.
 
-use super::lex::{blank, line_of};
+use super::lex::{blank, line_of, skipped};
 use super::use_tree::{Leaf, statements};
 use super::{Cargo, Report, Tree};
 
 const SESSION: &str = "tutti-session";
 const SESSION_SRC: &str = "crates/tutti-session/src";
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
-
 /// The whole-crate leaves of one `pub use` statement, as the text the report
 /// shows: a crate itself (with or without `as NAME`), `self`, or a glob at any
 /// depth, each under a `tutti_` crate.

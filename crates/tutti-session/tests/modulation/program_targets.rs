@@ -10,7 +10,7 @@ use tutti_modulation::{
 };
 use tutti_nodes::automation::{Breakpoint, Trajectory};
 use tutti_session::{DepthTarget, ModRouteId, ModSourceId, ParamRef, RouteSpec, ValueErrorKind};
-use tutti_units::{Beat, BeatsPerCycle, Bipolar, Depth, Hz, SamplePosition, SampleRate, UnitParam};
+use tutti_units::{Beat, BeatsPerCycle, Bipolar, Hz, SamplePosition, SampleRate, UnitParam};
 
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{frame, main_output, render, rig, settle};
@@ -33,7 +33,7 @@ fn scene(
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let source = source(&mut m);
     let route = m
-        .route(RouteSpec::new(source, cutoff, Depth::of(depth)))
+        .route(RouteSpec::new(source, cutoff, Bipolar::of(depth)))
         .unwrap();
     settle(s);
     render(side, 1_024, 128);
@@ -92,7 +92,7 @@ fn a_route_polarity_and_curve_land_at_the_update_as_the_shaped_offset() {
     let amount = program(&s, cutoff).layers()[0].amount;
     assert_eq!(amount.polarity, Polarity::Unipolar);
     assert_eq!(
-        shape(0.5f32, Depth::of(0.4), amount.polarity, amount.curve),
+        shape(0.5f32, Bipolar::of(0.4), amount.polarity, amount.curve),
         0.3f32,
         "unipolar 0.5 is 0.75, at depth 0.4"
     );
@@ -380,7 +380,7 @@ fn blocks_adopting_a_republished_program_and_curve_do_not_allocate() {
     assert!(m.automate(cutoff, Arc::new(ramp(100.0, 900.0))));
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     for _ in 0..4 {
         let _ = s.update();
@@ -494,10 +494,10 @@ fn a_depth_set_lands_at_once_with_no_republish() {
     near(tail(&mut side), 700.0);
 
     let depth = DepthTarget::of(source, cutoff);
-    assert_eq!(s.get(depth).unwrap(), Depth::of(0.4));
-    s.set(depth.to(Depth::of(-0.2))).unwrap();
-    assert_eq!(s.get(depth).unwrap(), Depth::of(-0.2));
-    assert_eq!(s.mods().route(route).unwrap().depth, Depth::of(-0.2));
+    assert_eq!(s.get(depth).unwrap(), Bipolar::of(0.4));
+    s.set(depth.to(Bipolar::of(-0.2))).unwrap();
+    assert_eq!(s.get(depth).unwrap(), Bipolar::of(-0.2));
+    assert_eq!(s.mods().route(route).unwrap().depth, Bipolar::of(-0.2));
     // No update ran: the next block is the new figure.
     near(tail(&mut side), 400.0);
     assert!(
@@ -512,9 +512,9 @@ fn a_depth_set_lands_at_once_with_no_republish() {
     near(tail(&mut side), 400.0);
 
     // Inverted and zero: the offset follows the depth.
-    s.set(depth.to(Depth::of(-0.4))).unwrap();
+    s.set(depth.to(Bipolar::of(-0.4))).unwrap();
     near(tail(&mut side), 300.0);
-    s.set(depth.to(Depth::NONE)).unwrap();
+    s.set(depth.to(Bipolar::ZERO)).unwrap();
     near(tail(&mut side), 500.0);
 }
 
@@ -527,7 +527,7 @@ fn a_depth_target_is_named_by_its_source_and_target() {
     let (cutoff, source, route) = scene(&mut s, &mut side, |m| m.macro_(0.5), 0.4);
     let other = s.mods_mut().macro_(0.0);
     assert_eq!(
-        s.set(DepthTarget::of(other, cutoff).to(Depth::of(0.1)))
+        s.set(DepthTarget::of(other, cutoff).to(Bipolar::of(0.1)))
             .unwrap_err()
             .kind,
         ValueErrorKind::NoSuchTarget,
@@ -535,12 +535,12 @@ fn a_depth_target_is_named_by_its_source_and_target() {
     );
     assert!(matches!(
         s.mods_mut()
-            .route(RouteSpec::new(source, cutoff, Depth::of(0.1))),
+            .route(RouteSpec::new(source, cutoff, Bipolar::of(0.1))),
         Err(tutti_session::RouteError::Duplicate { .. })
     ));
     s.mods_mut().remove_route(route).unwrap();
     assert_eq!(
-        s.set(DepthTarget::of(source, cutoff).to(Depth::of(0.1)))
+        s.set(DepthTarget::of(source, cutoff).to(Bipolar::of(0.1)))
             .unwrap_err()
             .kind,
         ValueErrorKind::NoSuchTarget,

@@ -10,21 +10,19 @@
 
 use tutti_buffers::{BusTopology, MaxBlock, Planes};
 use tutti_fixtures::signal::bits;
-use tutti_graph::{IntoNode, NodeMode, Prepare, Standalone, declick_frames};
+use tutti_graph::{IntoNode, NodeKey, NodeMode, Prepare, Renderer, declick_frames};
 use tutti_nodes::{BusStripConfig, BusStripNode, EqBandConfig, EqBandNode, SvfType};
 use tutti_units::{Amplitude, Db, Hz, Q, SampleRate, Samples, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const FRAMES: usize = 1024;
 
-fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
-    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
+fn solo<N: IntoNode>(node: N) -> (Renderer, NodeKey, N::Controls) {
+    Renderer::alone(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
-fn set_mode<C>(solo: &mut Standalone<C>, mode: NodeMode) {
-    let key = solo.key();
-    solo.renderer_mut()
-        .editor_mut()
+fn set_mode(solo: &mut Renderer, key: NodeKey, mode: NodeMode) {
+    solo.editor_mut()
         .set_mode(key, mode)
         .expect("the node is in the graph");
 }
@@ -45,13 +43,13 @@ fn input() -> Vec<f32> {
 /// multiplied the tone by ~250; the band is not called to do it.
 #[test]
 fn a_bypassed_band_is_its_input_bit_for_bit() {
-    let mut s = solo(EqBandNode::<f32>::from(
+    let (mut s, key, _) = solo(EqBandNode::<f32>::from(
         EqBandConfig::new(SvfType::Bell)
             .freq(Hz::new(1_000.0))
             .q(Q::new(1.0))
             .gain(Db::new(24.0)),
     ));
-    set_mode(&mut s, NodeMode::Bypassed);
+    set_mode(&mut s, key, NodeMode::Bypassed);
     let x = input();
     let y = s.render_input(Planes::new(&[&x]).unwrap()).remove(0);
     let from = declick_frames(RATE).get();
@@ -62,14 +60,14 @@ fn a_bypassed_band_is_its_input_bit_for_bit() {
 /// fader again, exactly: the mute never touched the fader's cell.
 #[test]
 fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
-    let mut s = solo(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
-    assert!(s.controls().set(UnitParam::Volume, 0.75));
+    let (mut s, key, controls) = solo(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    assert!(controls.set(UnitParam::Volume, 0.75));
     // No denormal: the node multiplies under flush-to-zero, this test does not.
     let mut x = input();
     x[declick_frames(RATE).get() + 11] = 0.5;
     let from = declick_frames(RATE).get();
 
-    set_mode(&mut s, NodeMode::Muted);
+    set_mode(&mut s, key, NodeMode::Muted);
     let muted = s.render_input(Planes::new(&[&x, &x]).unwrap());
     for (c, y) in muted.iter().enumerate() {
         assert!(
@@ -78,7 +76,7 @@ fn a_muted_strip_is_silence_and_un_muted_is_its_fader() {
         );
     }
 
-    set_mode(&mut s, NodeMode::Active);
+    set_mode(&mut s, key, NodeMode::Active);
     let back = s.render_input(Planes::new(&[&x, &x]).unwrap());
     let fader = Amplitude::new(0.75).get() as f32;
     for (c, y) in back.iter().enumerate() {

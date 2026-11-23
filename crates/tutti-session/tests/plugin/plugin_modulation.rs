@@ -33,7 +33,7 @@ use tutti_session::{
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Depth, Hz, SampleRate, Seconds};
+use tutti_units::{Bipolar, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The plugin's pipeline chunk in a detached session: its `MaxBlock`
@@ -212,7 +212,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -278,7 +278,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let offset = m.macro_(0.0);
-        m.route(RouteSpec::new(offset, gain, Depth::of(1.0)))
+        m.route(RouteSpec::new(offset, gain, Bipolar::of(1.0)))
             .unwrap();
     }
     let outgoing_lane = lane_of(&mut drive, &mut s, gain);
@@ -368,7 +368,7 @@ fn a_set_under_a_lane_writes_the_knob() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -419,7 +419,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -452,7 +452,7 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap()
     };
     lane_of(&mut drive, &mut s, gain);
@@ -501,7 +501,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -584,7 +584,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let lfo = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
-        m.route(RouteSpec::new(lfo, gain, Depth::of(0.1))).unwrap();
+        m.route(RouteSpec::new(lfo, gain, Bipolar::of(0.1)))
+            .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
     let knob = s

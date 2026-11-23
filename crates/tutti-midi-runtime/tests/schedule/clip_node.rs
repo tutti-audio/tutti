@@ -24,17 +24,13 @@ use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
 const RATE: f64 = 48_000.0;
 
-/// A clip at key 1 feeding the sink at key 2, blocks of at most `max`.
 /// Replaces the clip `controls` publishes with `events`.
 fn publish(controls: &MidiClipControls, events: impl IntoIterator<Item = TimedMidiEvent>) {
     controls.set(events.into_iter().collect::<ClipEvents>());
 }
 
-fn rig(clip: MidiClipNode, max: usize) -> (Editor, Executor, MidiClipControls, Seen) {
-    rig_with(clip, max)
-}
-
-fn rig_with<N: IntoNode>(clip: N, max: usize) -> (Editor, Executor, N::Controls, Seen) {
+/// A clip at key 1 feeding the sink at key 2, blocks of at most `max`.
+fn rig<N: IntoNode>(clip: N, max: usize) -> (Editor, Executor, N::Controls, Seen) {
     let mut rig = EventRig::events_only(RATE, max, 1);
     let controls = rig.editor.insert(NodeKey(1), "clip", clip).controls;
     rig.feed(NodeKey(1), 0, 0);
@@ -202,7 +198,7 @@ fn a_fork_plays_the_clip_as_it_was_at_the_fork() {
         .fork(RenderMode::Realtime)
         .expect("a clip forks");
     publish(&controls, [at(100, on(72))]);
-    let (_ed, mut exec, (), seen) = rig_with(Unforkable(forked.node), 256);
+    let (_ed, mut exec, (), seen) = rig(Unforkable(forked.node), 256);
     roll(&mut exec, 512, 256);
     assert_eq!(heard(&seen), vec![(300, on(60))]);
 }
@@ -348,74 +344,53 @@ fn a_note_started_twice_and_ended_once_leaves_nothing_sounding() {
     assert_eq!(voices, 0, "nothing left sounding");
 }
 
-/// **Overlapping notes of one key: the newer keeps its full length.** A is
-/// on 0..100, B (the same key) on 50..150. The stream is A on at 0, A ended
-/// and B on at 50, and B's note-off at 150: nothing at 100 (A's own
-/// note-off, swallowed), so B is not cut there and no stray note-off
-/// follows it.
+/// **Overlapping notes of one key: the newest sounds to its end, and no stray
+/// note-off follows.** Each note-on ends the one sounding on its frame; the
+/// note-offs of the ended notes are swallowed, so only the newest note's
+/// note-off ends the key.
 #[test]
-fn overlapping_notes_of_one_key_keep_the_newer_whole() {
-    let clip = MidiClipNode::new([
-        at(0, on(60)),
-        at(50, on(60)),
-        at(100, off(60)),
-        at(150, off(60)),
-    ]);
-    let (_ed, mut exec, _c, seen) = rig(clip, 256);
-    exec.process(256, &rolling(0), &[], &mut []);
-    assert_eq!(
-        heard(&seen),
-        vec![(0, on(60)), (50, off(60)), (50, on(60)), (150, off(60)),]
-    );
-}
-
-/// **A note nested inside a longer one of the same key ends at its own
-/// end.** A is on 0..100, B on 20..50, each listed with its note-off. B's
-/// note-on ends A on its frame; B's note-off at 50 ends the key; A's own
-/// note-off at 100 is swallowed, so nothing follows.
-#[test]
-fn a_note_nested_in_another_of_its_key_ends_at_its_own_end() {
-    let clip = MidiClipNode::new([
-        at(0, on(60)),
-        at(100, off(60)),
-        at(20, on(60)),
-        at(50, off(60)),
-    ]);
-    let (_ed, mut exec, _c, seen) = rig(clip, 256);
-    exec.process(256, &rolling(0), &[], &mut []);
-    assert_eq!(
-        heard(&seen),
-        vec![(0, on(60)), (20, off(60)), (20, on(60)), (50, off(60)),]
-    );
-}
-
-/// **Three overlapping notes of one key: the newest sounds to its end, and
-/// no stray note-off follows.** A on 0..30, B on 10..40, C on 20..50. Each
-/// note-on ends the one sounding; A's and B's note-offs (30, 40) are
-/// swallowed, C's ends the key at 50.
-#[test]
-fn three_overlapping_notes_of_one_key_leave_the_newest_whole() {
-    let clip = MidiClipNode::new([
-        at(0, on(60)),
-        at(30, off(60)),
-        at(10, on(60)),
-        at(40, off(60)),
-        at(20, on(60)),
-        at(50, off(60)),
-    ]);
-    let (_ed, mut exec, _c, seen) = rig(clip, 256);
-    exec.process(256, &rolling(0), &[], &mut []);
-    assert_eq!(
-        heard(&seen),
-        vec![
-            (0, on(60)),
-            (10, off(60)),
-            (10, on(60)),
-            (20, off(60)),
-            (20, on(60)),
-            (50, off(60)),
-        ]
-    );
+fn overlapping_notes_of_one_key_leave_the_newest_whole() {
+    // (case, clip events, heard events)
+    let cases: [(&str, Vec<(u64, Ump)>, Vec<(u64, Ump)>); 3] = [
+        (
+            // A on 0..100, B on 50..150: A's note-off at 100 is swallowed.
+            "overlap",
+            vec![(0, on(60)), (50, on(60)), (100, off(60)), (150, off(60))],
+            vec![(0, on(60)), (50, off(60)), (50, on(60)), (150, off(60))],
+        ),
+        (
+            // A on 0..100, B on 20..50: B's note-off ends the key, A's is swallowed.
+            "nested",
+            vec![(0, on(60)), (100, off(60)), (20, on(60)), (50, off(60))],
+            vec![(0, on(60)), (20, off(60)), (20, on(60)), (50, off(60))],
+        ),
+        (
+            // A on 0..30, B on 10..40, C on 20..50.
+            "three",
+            vec![
+                (0, on(60)),
+                (30, off(60)),
+                (10, on(60)),
+                (40, off(60)),
+                (20, on(60)),
+                (50, off(60)),
+            ],
+            vec![
+                (0, on(60)),
+                (10, off(60)),
+                (10, on(60)),
+                (20, off(60)),
+                (20, on(60)),
+                (50, off(60)),
+            ],
+        ),
+    ];
+    for (name, events, want) in cases {
+        let clip = MidiClipNode::new(events.into_iter().map(|(f, u)| at(f, u)));
+        let (_ed, mut exec, _c, seen) = rig(clip, 256);
+        exec.process(256, &rolling(0), &[], &mut []);
+        assert_eq!(heard(&seen), want, "{name}");
+    }
 }
 
 /// **A key's owner starts over at a loop wrap.** A 100-frame loop, six

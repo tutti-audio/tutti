@@ -15,33 +15,7 @@
 //!
 //! The model in `tests/last_out_loom.rs` runs this code.
 
-use sync::{AtomicU8, Ordering, UnsafeCell};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::cell::UnsafeCell;
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU8, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU8, Ordering};
-
-    /// `loom`'s cell takes its accesses through closures; this gives `std`'s
-    /// the same two, so the model checks the access the shipped code makes.
-    #[cfg(not(loom))]
-    #[derive(Debug)]
-    pub(super) struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
-
-    #[cfg(not(loom))]
-    impl<T> UnsafeCell<T> {
-        pub(super) fn new(value: T) -> Self {
-            Self(core::cell::UnsafeCell::new(value))
-        }
-
-        pub(super) fn with_mut<R>(&self, f: impl FnOnce(*mut T) -> R) -> R {
-            f(self.0.get())
-        }
-    }
-}
+use crate::sync::{AtomicU8, Ordering, UnsafeCell};
 
 /// One of the two parties of a [`LastOut`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

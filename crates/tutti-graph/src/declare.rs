@@ -15,7 +15,7 @@ use atomic_float::AtomicF64;
 
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{
-    Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Amplitude, Azimuth, Balance, Bipolar, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Drive,
     Elevation, Feedback, Gain, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Pan, Q,
     Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
 };
@@ -69,7 +69,7 @@ scalar_units!(
     CentsSpan,
     CompressionRatio,
     Db,
-    Depth,
+    Bipolar,
     Drive,
     Elevation,
     Feedback,
@@ -183,27 +183,22 @@ impl<C: OwnedCell> OwnedCell for Option<C> {
 
 /// What one `params` entry of the cells form is the value of: a unit `U`
 /// (the cell is a `Param<U>`) or an `Option<U>` (the node has the param only
-/// when the config gives a value). It names the unit the entry's row is in
-/// and the cell the node holds.
+/// when the config gives a value). It names the cell the node holds.
 ///
-/// Hidden: `declare_params!` names it to write the cell's type and the row's
-/// unit from the one type an entry states.
+/// Hidden: `declare_params!` names it to write the cell's type from the one
+/// type an entry states. It appears only in private fields: the entry's unit
+/// is read from the entry's tokens, so no generated public signature names it.
 #[doc(hidden)]
 pub trait ParamEntry: Copy {
-    /// The unit the param's value is in.
-    type Unit: ParamValue;
-
     /// The cell the node holds; its initial value is `Self`.
     type Cell: OwnedCell<Value = Self>;
 }
 
 impl<U: Scalar> ParamEntry for U {
-    type Unit = U;
     type Cell = Param<U>;
 }
 
 impl<U: Scalar> ParamEntry for Option<U> {
-    type Unit = U;
     type Cell = Option<Param<U>>;
 }
 
@@ -526,7 +521,7 @@ pub fn input<'a, F: Float>(
 ///
 /// # The cells form
 ///
-/// `declare_params!([generics] Type, Config, Cells { required { .. } params { .. } settings { .. } })`
+/// `declare_params!([generics] Type, #[attr] Config<generics>, Cells<generics> { required { .. } params { .. } options { .. } settings { .. } })`
 /// writes the node's cells and its config from one list, so the node is added
 /// bare (`graph.add(node)`, never `Params(node)`). Every block is optional, so
 /// a node with no params states `settings`, `required` or nothing. Each `params`
@@ -549,13 +544,28 @@ pub fn input<'a, F: Float>(
 ///   has a chained option `.mode(Mode::On)`; the node reads `cells.mode().load()`
 ///   once per block.
 ///
+/// - **An option**, `options { seed: u64 = 0 }`, is a plain value of the config
+///   with a default: it is no cell and no param, and not shared. The node reads
+///   `config.seed` when it is built.
+/// - **Generics** follow the config's and the cells' names
+///   (`Config<F: Float>`, `Cells<F: Float>`), one `Name: Trait` per type
+///   parameter: for a config that holds a value of the graph float (a table, a
+///   wave). A generic config has a cells of the same parameters, since
+///   `Cells::from_config` takes it; the cells hold them in a marker field the
+///   macro writes.
+/// - **Attributes** before the config's name pass to its struct. The config
+///   derives `Clone` and `Debug`; an author adds the rest
+///   (`#[derive(Copy, PartialEq)]`), which the macro never infers (an `Arc`
+///   entry has neither).
+///
 /// The macro writes:
 ///
 /// - `Cells`, with a sharing `Clone`, `detached()` (own cells at the values the
 ///   cells hold now) and `from_config(&Config)`;
 /// - `Config::new(required..)`, taking the `required` entries in order (none
-///   when the block is left out), and a chained option per param and setting
-///   (`.field(value)`; `.field([a, b])` for a counted one) for its initial value;
+///   when the block is left out), and a chained option per param, option and
+///   setting (`.field(value)`; `.field([a, b])` for a counted param) for its
+///   initial value;
 /// - the params' ports, [`ParamSet`] and [`HasParam`] impls the rows form writes;
 /// - [`ParamNode`](crate::ParamNode) (a fork detaches the cells and resets the node), and
 ///   [`IntoNode`](crate::IntoNode), whose controls are the node's [`ParamSet`].
@@ -612,6 +622,98 @@ pub fn input<'a, F: Float>(
 /// assert_eq!(set.get(UnitParam::Volume), Some(1.0));
 /// ```
 ///
+/// A config generic over the graph float, an option with a default, and a derive
+/// on the config:
+///
+/// ```
+/// use std::sync::Arc;
+/// use tutti_buffers::{ChannelLayout, Float};
+/// use tutti_graph::{declare_params, Cx, Io, Node, ParamNode, Prepare, Shape, Status};
+/// use tutti_units::{Hz, UnitParam};
+///
+/// #[derive(Clone)]
+/// struct Table<F: Float> {
+///     table: Arc<[F]>,
+///     seed: u64,
+///     cells: TableCells<F>,
+/// }
+///
+/// declare_params!([F: Float] Table<F>, #[derive(PartialEq)] TableConfig<F: Float>,
+///     TableCells<F: Float> {
+///     required { table: Arc<[F]> }
+///     params { Cutoff => cutoff: Hz = Hz::new(1_000.0) }
+///     options { seed: u64 = 0 }
+/// });
+///
+/// impl<F: Float> From<TableConfig<F>> for Table<F> {
+///     fn from(config: TableConfig<F>) -> Self {
+///         Self {
+///             cells: TableCells::from_config(&config),
+///             table: config.table,
+///             seed: config.seed,
+///         }
+///     }
+/// }
+///
+/// impl<F: Float> Node<F> for Table<F> {
+///     fn shape(&self) -> Shape {
+///         Shape::source_unassigned(ChannelLayout::MONO)
+///             .param_addrs(self.declared_ports().as_slice())
+///     }
+///     fn prepare(&mut self, _: &Prepare) {}
+///     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
+///         Status::Modified
+///     }
+///     fn reset(&mut self) {}
+/// }
+///
+/// let table: Arc<[f64]> = Arc::from([0.5, 1.0]);
+/// let config = TableConfig::new(Arc::clone(&table)).seed(7);
+/// // The derive written on the config compares two of them.
+/// assert!(config == TableConfig::new(Arc::clone(&table)).seed(7));
+/// assert!(config != TableConfig::new(table));
+/// let node = Table::<f64>::from(config);
+/// assert_eq!(node.seed, 7);
+/// assert_eq!(node.param_set().get(UnitParam::Cutoff), Some(1_000.0));
+/// ```
+///
+/// A counted entry is never an `Option`: a node has all `N` indices or none of
+/// the kind, so `field[N]: Option<U>` does not compile.
+///
+/// ```compile_fail
+/// use tutti_buffers::{ChannelLayout, Float};
+/// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
+/// use tutti_units::Db;
+///
+/// #[derive(Clone)]
+/// struct Bands<F: Float> {
+///     cells: BandsCells,
+///     float: std::marker::PhantomData<fn() -> F>,
+/// }
+///
+/// declare_params!([F: Float] Bands<F>, BandsConfig, BandsCells {
+///     params { Threshold => bands[2]: Option<Db> = None }
+/// });
+///
+/// impl<F: Float> From<BandsConfig> for Bands<F> {
+///     fn from(config: BandsConfig) -> Self {
+///         Self { cells: BandsCells::from_config(&config), float: std::marker::PhantomData }
+///     }
+/// }
+///
+/// impl<F: Float> Node<F> for Bands<F> {
+///     fn shape(&self) -> Shape {
+///         Shape::source_unassigned(ChannelLayout::MONO)
+///             .param_addrs(self.declared_ports().as_slice())
+///     }
+///     fn prepare(&mut self, _: &Prepare) {}
+///     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
+///         Status::Modified
+///     }
+///     fn reset(&mut self) {}
+/// }
+/// ```
+///
 /// # Reading a driven param
 ///
 /// `process` reads a param through the declaration, never by a port index:
@@ -658,39 +760,92 @@ pub fn input<'a, F: Float>(
 #[macro_export]
 macro_rules! declare_params {
     // The cells form: the node's cells, its config and its traits, written
-    // from the blocks it states. The entries are gathered, set-only ones
-    // marked, for the one rule that writes them.
-    ([$($g:tt)*] $ty:ty, $cfg:ident, $cells:ident {
+    // from the blocks it states. The `params` entries are gathered as tokens
+    // (`@gather`), each with the unit its row is in, for the one rule that
+    // writes them.
+    ([$($g:tt)*] $ty:ty,
+        $(#[$cattr:meta])* $cfg:ident $(<$($cn:ident : $cb:path),+ $(,)?>)?,
+        $cells:ident $(<$($ln:ident : $lb:path),+ $(,)?>)? {
         $(required { $($req:ident : $rty:ty),* $(,)? })?
-        $(params {
-            $($kind:ident => $field:ident $([$count:expr])? : $unit:ty = $default:expr),* $(,)?
-            $(; $($skind:ident => $sfield:ident $([$scount:expr])? : $sunit:ty = $sdefault:expr),+ $(,)?)?
-        })?
+        $(params { $($ptoks:tt)* })?
+        $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
         $(settings { $($sname:ident : $sty:ty = $sdefault_value:expr),+ $(,)? })?
     }) => {
-        $crate::declare_params!(@cells [$($g)*] $ty, $cfg, $cells
+        $crate::declare_params!(@gather {
+            [$($g)*] $ty,
+            [$(#[$cattr])*] $cfg [$($($cn : $cb,)+)?] [$($($cn,)+)?],
+            $cells [$($($ln : $lb,)+)?] [$($($ln,)+)?] [$(marker $($ln,)+)?],
             [$($($req : $rty,)*)?]
-            [$($(port $kind => $field $([$count])? : $unit = $default,)*
-               $($(set $skind => $sfield $([$scount])? : $sunit = $sdefault,)+)?)?]
-            [$($($sname : $sty = $sdefault_value,)+)?]);
+            [$($($oname : $oty = $odefault,)+)?]
+            [$($($sname : $sty = $sdefault_value,)+)?]
+        } [] port @ $($($ptoks)*)?);
     };
 
-    (@cells [$($g:tt)*] $ty:ty, $cfg:ident, $cells:ident
+    // The `params` tokens, an entry at a time: `[]` holds the entries so far,
+    // `port` or `set` is the mode a `;` turns to `set`.
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @) => {
+        $crate::declare_params!(@cells $ctx [$($acc)*]);
+    };
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @ , $($rest:tt)*) => {
+        $crate::declare_params!(@gather $ctx [$($acc)*] $mode @ $($rest)*);
+    };
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @ ; $($rest:tt)*) => {
+        $crate::declare_params!(@gather $ctx [$($acc)*] set @ $($rest)*);
+    };
+    // An entry whose unit is `Option<Unit>`: its row is in `Unit`.
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
+        $kind:ident => $field:ident : Option<$unit:ty> = $($rest:tt)*) => {
+        $crate::declare_params!(@default $ctx [$($acc)*]
+            [$mode $kind $field [] [Option<$unit>] [$unit]
+                [<Option<$unit> as $crate::__private::ParamEntry>::Cell] [Option<$unit>]] $($rest)*);
+    };
+    // An entry of a kind with `N` indices.
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
+        $kind:ident => $field:ident [$count:expr] : $unit:ty = $($rest:tt)*) => {
+        $crate::declare_params!(@default $ctx [$($acc)*]
+            [$mode $kind $field [$count] [$unit] [$unit]
+                [[$crate::__private::Param<$unit>; $count]] [[$unit; $count]]] $($rest)*);
+    };
+    (@gather $ctx:tt [$($acc:tt)*] $mode:ident @
+        $kind:ident => $field:ident : $unit:ty = $($rest:tt)*) => {
+        $crate::declare_params!(@default $ctx [$($acc)*]
+            [$mode $kind $field [] [$unit] [$unit]
+                [<$unit as $crate::__private::ParamEntry>::Cell] [$unit]] $($rest)*);
+    };
+    // An entry's default, then what follows it.
+    (@default $ctx:tt [$($acc:tt)*] [$mode:ident $($head:tt)*] $default:expr
+        $(, $($rest:tt)*)?) => {
+        $crate::declare_params!(@gather $ctx [$($acc)* [$mode $($head)* [$default]]]
+            $mode @ $($($rest)*)?);
+    };
+    (@default $ctx:tt [$($acc:tt)*] [$mode:ident $($head:tt)*] $default:expr
+        ; $($rest:tt)*) => {
+        $crate::declare_params!(@gather $ctx [$($acc)* [$mode $($head)* [$default]]]
+            $mode @ ; $($rest)*);
+    };
+
+    (@cells {
+        [$($g:tt)*] $ty:ty,
+        [$($cattr:tt)*] $cfg:ident [$($cd:tt)*] [$($cu:tt)*],
+        $cells:ident [$($ld:tt)*] [$($lu:tt)*] [$(marker $($lm:ident,)+)?],
         [$($req:ident : $rty:ty,)*]
-        [$($mode:ident $kind:ident => $field:ident $([$count:expr])? : $unit:ty = $default:expr,)*]
+        [$($oname:ident : $oty:ty = $odefault:expr,)*]
         [$($sname:ident : $sty:ty = $sdefault:expr,)*]
-    ) => {
+    } [$(
+        [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$default:expr]]
+    )*]) => {
         #[doc = concat!("The cells of a [`", stringify!($ty), "`], one per declared param and setting. `Clone` shares them; [`detached`](Self::detached) copies them apart.")]
         #[derive(Clone, Debug)]
-        pub struct $cells {
-            $($field: $crate::declare_params!(@cell [$($count)?] $unit),)*
+        pub struct $cells<$($ld)*> {
+            $($field: $cell,)*
             $($sname: $crate::__private::Arc<$crate::__private::AtomicCell<$sty>>,)*
+            $(__generics: ::core::marker::PhantomData<fn() -> ($($lm,)+)>,)?
         }
 
-        impl $cells {
+        impl<$($ld)*> $cells<$($lu)*> {
             /// The cells at the values `config` holds.
             #[must_use]
-            pub fn from_config(config: &$cfg) -> Self {
+            pub fn from_config(config: &$cfg<$($cu)*>) -> Self {
                 // A node with no params and no settings reads nothing from it.
                 let _ = config;
                 Self {
@@ -698,6 +853,7 @@ macro_rules! declare_params {
                     $($sname: $crate::__private::Arc::new(
                         $crate::__private::AtomicCell::new(config.$sname)
                     ),)*
+                    $(__generics: ::core::marker::PhantomData::<fn() -> ($($lm,)+)>,)?
                 }
             }
 
@@ -710,6 +866,7 @@ macro_rules! declare_params {
                     $($sname: $crate::__private::Arc::new(
                         $crate::__private::AtomicCell::new(self.$sname.load())
                     ),)*
+                    $(__generics: ::core::marker::PhantomData::<fn() -> ($($lm,)+)>,)?
                 }
             }
 
@@ -722,22 +879,25 @@ macro_rules! declare_params {
             )*
         }
 
-        #[doc = concat!("What a [`", stringify!($ty), "`] is made from: its required values and the initial value of each param and setting, set by a chained option.")]
+        #[doc = concat!("What a [`", stringify!($ty), "`] is made from: its required values, the initial value of each param and setting, and its options, set by a chained option.")]
         #[derive(Clone, Debug)]
-        pub struct $cfg {
+        $($cattr)*
+        pub struct $cfg<$($cd)*> {
             $($req: $rty,)*
-            $($field: $crate::declare_params!(@value [$($count)?] $unit),)*
+            $($field: $value,)*
+            $($oname: $oty,)*
             $($sname: $sty,)*
         }
 
-        impl $cfg {
-            /// The configuration from its required values, every param and setting at its declared default.
+        impl<$($cd)*> $cfg<$($cu)*> {
+            /// The configuration from its required values, every param, option and setting at its declared default.
             #[must_use]
             #[allow(clippy::new_without_default)]
             pub fn new($($req: $rty),*) -> Self {
                 Self {
                     $($req,)*
                     $($field: $crate::declare_params!(@fill [$($count)?] $default),)*
+                    $($oname: $odefault,)*
                     $($sname: $sdefault,)*
                 }
             }
@@ -745,8 +905,17 @@ macro_rules! declare_params {
             $(
                 #[doc = concat!("The initial value of `", stringify!($field), "`.")]
                 #[must_use]
-                pub fn $field(mut self, value: $crate::declare_params!(@value [$($count)?] $unit)) -> Self {
+                pub fn $field(mut self, value: $value) -> Self {
                     self.$field = value;
+                    self
+                }
+            )*
+
+            $(
+                #[doc = concat!("The option `", stringify!($oname), "`.")]
+                #[must_use]
+                pub fn $oname(mut self, value: $oty) -> Self {
+                    self.$oname = value;
                     self
                 }
             )*
@@ -762,7 +931,7 @@ macro_rules! declare_params {
         }
 
         $crate::declare_params!(@munch [$($g)*] $ty, n, [];
-            $($mode $kind => $field $([$count])? : $unit,)*);
+            $($mode $kind => $field $([$count])? : $row,)*);
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::ParamNode<__LaneF> for $ty
         where
@@ -800,7 +969,7 @@ macro_rules! declare_params {
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
         port $kind:ident => $field:ident : $unit:ty, $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* $kind => <$unit as $crate::__private::ParamEntry>::Unit = &$n.cells.$field,];
+            [$($acc)* $kind => $unit = &$n.cells.$field,];
             $($rest)*);
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
@@ -811,7 +980,7 @@ macro_rules! declare_params {
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
         set $kind:ident => $field:ident : $unit:ty, $($rest:tt)*) => {
         $crate::declare_params!(@munch [$($g)*] $ty, $n,
-            [$($acc)* ; $kind => <$unit as $crate::__private::ParamEntry>::Unit = &$n.cells.$field,];
+            [$($acc)* ; $kind => $unit = &$n.cells.$field,];
             $($rest)*);
     };
     (@munch [$($g:tt)*] $ty:ty, $n:ident, [$($acc:tt)*];
@@ -820,11 +989,7 @@ macro_rules! declare_params {
             [$($acc)* [i in 0..$count] { ; $kind => $unit = &$n.cells.$field[i], },]; $($rest)*);
     };
 
-    // The type of a cell, of a config's value, and a default filled to a count.
-    (@cell [] $unit:ty) => { <$unit as $crate::__private::ParamEntry>::Cell };
-    (@cell [$count:expr] $unit:ty) => { [$crate::__private::Param<$unit>; $count] };
-    (@value [] $unit:ty) => { $unit };
-    (@value [$count:expr] $unit:ty) => { [$unit; $count] };
+    // A default filled to a count.
     (@fill [] $default:expr) => { $default };
     (@fill [$count:expr] $default:expr) => { [$default; $count] };
 

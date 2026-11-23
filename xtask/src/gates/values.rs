@@ -27,8 +27,10 @@
 //! today's violations that a later change removes; the gate fails on a violation with no
 //! row and on a row with no violation, so the list only shrinks.
 
-use super::buffers::{blocks, ident_at, item_end, split_top, squash, strip_attrs};
-use super::lex::{blank, find_word_from, matching, test_ranges};
+use super::buffers::{blocks, item_end, split_top, squash};
+use super::lex::{
+    blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges,
+};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,6 +46,10 @@ pub(super) const ALLOW: &[(&str, &str)] = &[
     (
         "Values::set",
         "the session's write for any control-side thread: the same assignments",
+    ),
+    (
+        "Gesture::set",
+        "a drag's write: absolute values for the targets the gesture was opened over, through the one batch of `set`",
     ),
 ];
 
@@ -86,10 +92,6 @@ struct Site {
     short: String,
 }
 
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "tests" | "benches" | "examples" | "target")
-}
-
 fn is_receiver(param: &str) -> bool {
     let p = squash(strip_attrs(param));
     let p = p.trim();
@@ -99,7 +101,7 @@ fn is_receiver(param: &str) -> bool {
 /// The units of `tutti-units`: `struct Name(f32)` and `struct Name(f64)`.
 fn units(tree: &dyn Tree) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for file in tree.files(UNITS, &skipped) {
+    for file in tree.files(UNITS, &skipped_library) {
         if !file.ends_with(".rs") || file.ends_with("/tests.rs") {
             continue;
         }
@@ -294,7 +296,7 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize, min_units: usize) -> Repo
     };
     let units = units(tree);
     let files: Vec<String> = tree
-        .files(ROOT, &skipped)
+        .files(ROOT, &skipped_library)
         .into_iter()
         .filter(|f| f.ends_with(".rs") && !f.ends_with("/tests.rs"))
         .collect();
@@ -381,8 +383,8 @@ mod tests {
     const A: &str = "crates/tutti-session/src/a.rs";
     const SESSION: &str = "crates/tutti-session/src/session.rs";
     const KNOBS: &str = "crates/tutti-session/src/knobs.rs";
-    const ONE_WAY: &str =
-        "impl Session { pub fn set(&self, a: u8) {} }\nimpl Values { pub fn set(&self, a: u8) {} }";
+    const GESTURE: &str = "crates/tutti-session/src/gesture.rs";
+    const ONE_WAY: &str = "impl Session { pub fn set(&self, a: u8) {} }\nimpl Values { pub fn set(&self, a: u8) {} }\nimpl Gesture { pub fn set(&mut self, a: u8) {} }";
 
     fn run(files: &[(&str, &str)], list: &str) -> Report {
         let mut all: Vec<(&str, &str)> = files.to_vec();
@@ -390,6 +392,7 @@ mod tests {
         all.push((HZ, "pub struct Hz(pub f32);\npub struct Seconds(pub f64);"));
         all.push((SESSION, "impl Session { pub fn set(&self, a: u8) {} }"));
         all.push((KNOBS, "impl Values { pub fn set(&self, a: u8) {} }"));
+        all.push((GESTURE, "impl Gesture { pub fn set(&mut self, a: u8) {} }"));
         check(&Mem::with(&all), 0, 0)
     }
 
@@ -416,11 +419,30 @@ mod tests {
 
     #[test]
     fn a_public_set_that_is_not_an_allow_row_fails() {
-        let r = run(&[(A, "impl Gesture { pub fn set(&self, v: u8) {} }")], "");
+        let r = run(&[(A, "impl Dial { pub fn set(&self, v: u8) {} }")], "");
         assert!(fails_on(
             &r,
-            "set  crates/tutti-session/src/a.rs::Gesture::set"
+            "set  crates/tutti-session/src/a.rs::Dial::set"
         ));
+    }
+
+    #[test]
+    fn gesture_set_is_an_allow_row_and_an_idle_one_fails() {
+        let r = run(
+            &[(A, "impl Gesture { pub fn set(&mut self, v: u8) {} }")],
+            "",
+        );
+        assert!(r.passed(), "{:?}", r.findings);
+        let r = check(
+            &Mem::with(&[
+                (LIST, ""),
+                (SESSION, "impl Session { pub fn set(&self, a: u8) {} }"),
+                (KNOBS, "impl Values { pub fn set(&self, a: u8) {} }"),
+            ]),
+            0,
+            0,
+        );
+        assert!(fails_on(&r, "Gesture::set"));
     }
 
     #[test]

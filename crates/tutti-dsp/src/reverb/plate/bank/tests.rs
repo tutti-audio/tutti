@@ -1,5 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 use crate::reverb::network::NetworkStage;
@@ -14,7 +14,7 @@ fn still(decay: f64) -> PlateControls {
     PlateControls {
         decay: Seconds::new(decay),
         damping: Mix::new(0.0),
-        modulation: Depth::of(0.0),
+        modulation: Bipolar::of(0.0),
         ..PlateControls::DEFAULT
     }
 }
@@ -284,7 +284,7 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
     let scaled = |n: u32| (f64::from(n) * fs / 29_761.0).round();
     let c = PlateControls {
         diffusion: Mix::new(0.0),
-        modulation: Depth::of(1.0),
+        modulation: Bipolar::of(1.0),
         bandwidth: Hz::new(1.0e9),
         ..still(2.0)
     };

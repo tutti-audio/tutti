@@ -58,7 +58,7 @@ fn route(source: u64, to: RouteTarget, depth: f64) -> RouteDecl {
     RouteDecl {
         source: SourceKey(source),
         to,
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     }
@@ -268,7 +268,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
     for polarity in [Polarity::Bipolar, Polarity::Unipolar] {
         for curve in curves {
             for raw in [1.0f64, -1.0, 0.5, -0.5] {
-                let depth = Depth::of(-0.35);
+                let depth = Bipolar::of(-0.35);
                 let want = 0.0f64 + (-0.0 + shape(raw, depth, polarity, curve) * span);
                 let r = |source, t| RouteDecl {
                     source: SourceKey(source),
@@ -306,7 +306,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
                         RouteDecl {
                             source: SourceKey(5),
                             to: RouteTarget::Depth(RouteKey(5)),
-                            depth: Depth::FULL,
+                            depth: Bipolar::MAX,
                             polarity: Polarity::Unipolar,
                             curve: Law::Linear,
                         },
@@ -353,7 +353,7 @@ fn the_offset_at_raw_unit_is_shape_times_span_for_every_source_kind() {
 fn a_depth_edit_changes_only_its_targets_program_and_keeps_its_ids() {
     let mut rig = Rig::new();
     let before = rig.compile(None, now(1, 0));
-    rig.route_mut(100).depth = Depth::of(0.7);
+    rig.route_mut(100).depth = Bipolar::of(0.7);
     let after = rig.compile(Some(&before), now(1, 5_000));
     for (t, p) in &after.programs {
         if *t == target(1) {
@@ -397,7 +397,7 @@ fn a_macro_move_changes_exactly_the_programs_it_reaches() {
     let at = time(0.0, 0.0, 1);
     assert_eq!(
         after.programs[&target(2)].value_at(None, Some(0.0), &at, 2.0, &[]),
-        Some(-0.0 + shape(-0.75f64, Depth::of(0.2), Polarity::Bipolar, Law::Linear) * 2.0),
+        Some(-0.0 + shape(-0.75f64, Bipolar::of(0.2), Polarity::Bipolar, Law::Linear) * 2.0),
         "depth 0.2 of a span of 2, at the macro's −0.75"
     );
 }
@@ -482,7 +482,7 @@ fn an_anchor_is_carried_until_a_play_start() {
     let c1 = rig.compile(Some(&c0), now(7, 10_000));
     let a1 = anchor(&c1).expect("anchored");
 
-    rig.route_mut(100).depth = Depth::of(0.9);
+    rig.route_mut(100).depth = Bipolar::of(0.9);
     let c2 = rig.compile(Some(&c1), now(7, 30_000));
     assert_eq!(anchor(&c2), Some(a1), "a depth edit carries it");
 
@@ -818,7 +818,7 @@ fn every_declaration_a_host_can_make_compiles_without_a_runtime() {
                 RouteDecl {
                     source: SourceKey(s),
                     to: RouteTarget::Param(target(1 + k % 2)),
-                    depth: Depth::of(0.3),
+                    depth: Bipolar::of(0.3),
                     polarity,
                     curve,
                 },
@@ -971,7 +971,7 @@ fn a_second_rate_edit_near_its_anchor_reanchors() {
 }
 
 /// A value that is not finite is refused where it would reach the lane: an
-/// infinite constant wave (a route's depth cannot be one: `Depth` is
+/// infinite constant wave (a route's depth cannot be one: `Bipolar` is
 /// range-checked), and a clock's infinite rate or phase (a beat span cannot
 /// be one: `BeatsPerCycle` is range-checked),
 /// on an LFO no route reads (so the source check refuses it, not a

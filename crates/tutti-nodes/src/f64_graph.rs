@@ -30,7 +30,7 @@ use tutti_fixtures::signal::{assert_close_f64, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
 use tutti_units::{
-    BitDepth, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix, Q, Resonance, SampleRate,
+    Bipolar, BitDepth, CompressionRatio, Db, Drive, Feedback, Hz, Mix, Q, Resonance, SampleRate,
     Seconds, Semitones,
 };
 use tutti_units::{Gain, SampleSpan};
@@ -168,7 +168,7 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
 fn the_tremolo_at_depth_zero_returns_a_wide_signal() {
     let x = wide_signal(300);
     let node =
-        TremoloNode::<f64>::from(TremoloConfig::new(ChannelLayout::MONO).depth(Depth::of(0.0)));
+        TremoloNode::<f64>::from(TremoloConfig::new(ChannelLayout::MONO).depth(Bipolar::of(0.0)));
     assert_close_f64(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
 }
 

@@ -100,8 +100,10 @@
 //! crate or a `testing.rs`), each with its reason; a violation a row covers is not
 //! counted, and a row that covers no violation fails like a stale baseline row.
 
-use super::buffers::{blocks, ident_at, item_end, split_top, squash, strip_attrs};
-use super::lex::{blank, find_word_from, matching, test_ranges};
+use super::buffers::{blocks, item_end, split_top, squash};
+use super::lex::{
+    blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges,
+};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -993,12 +995,8 @@ pub(super) struct Site {
     pub(super) rule: Rule,
 }
 
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "tests" | "benches" | "examples")
-}
-
 fn source_files(tree: &dyn Tree) -> Vec<String> {
-    tree.files("crates", &skipped)
+    tree.files("crates", &skipped_library)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();

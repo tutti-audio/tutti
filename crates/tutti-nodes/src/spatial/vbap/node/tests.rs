@@ -370,14 +370,14 @@ fn a_non_finite_control_reads_as_unchanged() {
 /// through it reaches the running node, which the graph owns.
 #[test]
 fn the_inserted_params_move_the_running_node() {
-    use tutti_graph::Standalone;
+    use tutti_graph::Renderer;
     use tutti_units::Samples;
 
-    let mut solo = Standalone::new(
+    let (mut solo, _, controls) = Renderer::alone(
         vbap::<f32>(tutti_buffers::Bed::Stereo),
         Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
     );
-    aim(solo.controls(), Azimuth::new(90.0), Elevation::LEVEL);
+    aim(&controls, Azimuth::new(90.0), Elevation::LEVEL);
     // 100 ms: past the 50 ms ramp.
     let ones = vec![1.0f32; 4_800];
     let out = solo.render_input(Planes::new(&[&ones, &ones]).unwrap());

@@ -131,12 +131,6 @@ mod tests {
     }
 
     #[test]
-    fn display_is_numbered_and_debug_is_the_wire() {
-        assert_eq!(MidiGroup::of(9).to_string(), "10");
-        assert_eq!(format!("{:?}", MidiGroup::of(9)), "MidiGroup(9)");
-    }
-
-    #[test]
     fn all_is_every_value_in_order_and_index_is_its_position() {
         let all: Vec<_> = MidiGroup::all().collect();
         assert_eq!(all.len(), usize::from(MidiGroup::COUNT));

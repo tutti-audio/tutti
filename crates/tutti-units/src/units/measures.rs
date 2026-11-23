@@ -6,7 +6,7 @@ use super::*;
 // These three are *readings*: values the engine measures and reports back.
 //
 // That distinction is what separates them from the controls they resemble.
-// `Correlation` and `StereoBalance` share `Depth`'s range and most of its algebra, and
+// `Correlation` and `StereoBalance` share `Bipolar`'s range and most of its algebra, and
 // `Confidence` shares `Mix`'s range — but a meter's phase coherence is not an
 // LFO's modulation amount, and swapping them is silent. This is the same
 // argument `Q` and `Resonance` settle by splitting: two quantities that
@@ -60,7 +60,7 @@ unit! {
     /// Phase coherence between two channels, `-1..1`. `+1` is identical
     /// (mono-compatible), `0` uncorrelated, `-1` polarity-inverted.
     ///
-    /// Shares [`Depth`]'s range and sign convention but not its meaning: a
+    /// Shares [`Bipolar`]'s range and sign convention but not its meaning: a
     /// modulation depth is a control you set, a correlation is a measurement
     /// reported back. Feeding a correlation meter into an LFO's depth is not a
     /// plausible operation, so the compiler should refuse it.
@@ -156,7 +156,7 @@ unit! {
     /// volume dip. Same argument [`Confidence`] makes.
     ///
     /// **Not a [`Mix`]**: nothing is being blended, and a crossfade
-    /// position (a linear interpolation's `t`) is meaningless here. **Not a [`Depth`]**: that
+    /// position (a linear interpolation's `t`) is meaningless here. **Not a [`Bipolar`]**: that
     /// is bipolar, and there is no such thing as negative velocity.
     pub struct Velocity(f64): Unit, Ordered, Bounded;
 }

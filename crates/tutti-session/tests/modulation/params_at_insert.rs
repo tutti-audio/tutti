@@ -4,7 +4,7 @@
 //! The insertion paths are `Graph::add` and `Graph::replace`; these pin
 //! them: a lane finds a native param's knob
 //! through the node's `ParamSet`, which the insertion keeps by key
-//! (`SessionNode::params`, `set_node_params`). They stand at the insertion
+//! (`NodeParts::params`, `set_node_params`). They stand at the insertion
 //! paths rather than at a fixture that addresses by hand, because a path that
 //! forgot to would leave every hand-built suite green. The nodes are the
 //! suites' own `ProbeUnit` of `Drive` (a host's `ParamNode`) and an engine
@@ -21,7 +21,7 @@ use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
 use tutti_rt::ParamCell;
 use tutti_session::{MainOutput, OutputPort, ParamRef, Replacement, RouteSpec, Session};
-use tutti_units::{Depth, Drive, UnitParam};
+use tutti_units::{Bipolar, Drive, UnitParam};
 
 use common::probe::ProbeUnit;
 
@@ -40,7 +40,7 @@ fn modulate_drive(s: &mut Session, node: NodeKey) {
     let mut m = s.mods_mut();
     m.range_raw(drive, 0.0, 10.0).unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, drive, Depth::of(0.1)))
+    m.route(RouteSpec::new(offset, drive, Bipolar::of(0.1)))
         .unwrap();
     settle(s);
 }

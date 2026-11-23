@@ -156,6 +156,12 @@ pub enum PitchError {
         /// What the caller supplied, in [`Samples`].
         got: Samples,
     },
+    /// A sample that is NaN or infinite.
+    #[error("input holds a NaN or infinite sample")]
+    NonFiniteInput,
+    /// A refusal of binding the meter that no variant above names.
+    #[error(transparent)]
+    Meter(Box<MeterError>),
     /// A frequency band whose pitch grid holds more bins than a track decodes.
     #[error("the band spans {bins} pitch bins, more than the {max} a track decodes")]
     PitchGridTooLarge {
@@ -220,6 +226,9 @@ pub enum NoteError {
         /// Frames in the track.
         track: usize,
     },
+    /// A refusal of binding the meter that no variant above names.
+    #[error(transparent)]
+    Meter(Box<MeterError>),
     /// A smoothing span of more frames than the median's cost allows.
     #[error("smoothing of {frames} frames is more than {max}")]
     SmoothingTooLong {
@@ -237,6 +246,12 @@ pub enum TempoEstimateError {
     /// A hop of zero frames.
     #[error(transparent)]
     Framing(#[from] FramingError),
+    /// More frames than one call analyses.
+    #[error(transparent)]
+    TooManyFrames(#[from] TooManyFrames),
+    /// A refusal of binding the meter that no variant above names.
+    #[error(transparent)]
+    Meter(Box<MeterError>),
     /// A tempo range the call cannot hold.
     #[error(transparent)]
     EmptyTempoRange(#[from] EmptyTempoRange),
@@ -267,6 +282,10 @@ pub enum TempoEstimateError {
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum KeyEstimateError {
+    /// The chroma of the audio, which a [`KeyMeter`](crate::KeyMeter) reads
+    /// the key from, was refused.
+    #[error(transparent)]
+    Chroma(#[from] MeterError),
     /// A grid of chroma that is not twelve columns wide.
     #[error("chroma is {columns} columns wide, not 12")]
     NotTwelveClasses {
@@ -292,6 +311,10 @@ pub enum ChordError {
     /// A window or hop of zero.
     #[error(transparent)]
     Framing(#[from] FramingError),
+    /// The chroma of the audio, which a [`ChordMeter`](crate::ChordMeter) reads
+    /// the chords from, was refused.
+    #[error(transparent)]
+    Chroma(#[from] MeterError),
     /// More frames than one call analyses.
     #[error(transparent)]
     TooManyFrames(#[from] TooManyFrames),
@@ -319,6 +342,12 @@ pub enum AlignError {
     /// A band above Nyquist.
     #[error(transparent)]
     Nyquist(#[from] AboveNyquist),
+    /// More frames than one call analyses.
+    #[error(transparent)]
+    TooManyFrames(#[from] TooManyFrames),
+    /// A refusal of binding the meter that no variant above names.
+    #[error(transparent)]
+    Meter(Box<MeterError>),
     /// Input shorter than the algorithm's minimum.
     #[error("need at least {needed} samples, got {got}")]
     InsufficientInput {
@@ -351,6 +380,26 @@ pub enum MeterError {
     /// More frames than one call analyses.
     #[error(transparent)]
     TooManyFrames(#[from] TooManyFrames),
+    /// What a note analysis refuses at the rate it is bound to
+    /// ([`NoteConfig`](crate::NoteConfig)).
+    #[error(transparent)]
+    Note(#[from] NoteError),
+    /// What a pitch track refuses at the rate it is bound to
+    /// ([`PyinConfig`](crate::PyinConfig)).
+    #[error(transparent)]
+    Pitch(#[from] PitchError),
+    /// The reference of an alignment is at another sample rate than the take:
+    /// nothing resamples.
+    #[error("the reference is at {reference}, and the take at {take}")]
+    ReferenceRate {
+        /// The reference's rate.
+        reference: SampleRate,
+        /// The take's rate.
+        take: SampleRate,
+    },
+    /// The reference of an alignment cannot be folded to one channel.
+    #[error("the reference cannot be folded to mono: {0}")]
+    ReferenceFold(#[from] tutti_buffers::FoldError),
     /// A waveform block of zero samples.
     #[error("block size is zero: a block would summarize nothing")]
     ZeroBlock,
@@ -457,3 +506,46 @@ impl From<tutti_dsp::ChannelWeightError> for MeterError {
         }
     }
 }
+
+/// What a one-shot call gets of a meter's refusal: the variant the family names,
+/// or `Meter` for one it has no name for.
+macro_rules! from_meter_error {
+    ($family:ident { $($pattern:pat => $value:expr),* $(,)? }) => {
+        impl From<MeterError> for $family {
+            fn from(error: MeterError) -> Self {
+                match error {
+                    $($pattern => $value,)*
+                    other => Self::Meter(Box::new(other)),
+                }
+            }
+        }
+    };
+}
+
+from_meter_error!(NoteError {
+    MeterError::Note(e) => e,
+    MeterError::Pitch(e) => Self::Pitch(e),
+    MeterError::Framing(e) => Self::Framing(e),
+    MeterError::Nyquist(e) => Self::Pitch(PitchError::Nyquist(e)),
+    MeterError::TooManyFrames(e) => Self::TooManyFrames(e),
+    MeterError::NonFiniteInput => Self::NonFiniteInput,
+});
+
+from_meter_error!(PitchError {
+    MeterError::Pitch(e) => e,
+    MeterError::Nyquist(e) => Self::Nyquist(e),
+    MeterError::TooManyFrames(e) => Self::TooManyFrames(e),
+    MeterError::NonFiniteInput => Self::NonFiniteInput,
+});
+
+from_meter_error!(TempoEstimateError {
+    MeterError::Framing(e) => Self::Framing(e),
+    MeterError::TooManyFrames(e) => Self::TooManyFrames(e),
+    MeterError::NonFiniteInput => Self::NonFiniteInput,
+});
+
+from_meter_error!(AlignError {
+    MeterError::Nyquist(e) => Self::Nyquist(e),
+    MeterError::TooManyFrames(e) => Self::TooManyFrames(e),
+    MeterError::NonFiniteInput => Self::NonFiniteInput,
+});

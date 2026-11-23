@@ -50,7 +50,9 @@
 //! from the crate root, or a raw slice that is not audio (a coefficient
 //! table is a site too and is judged `not-audio`).
 
-use super::lex::{blank, find_word_from, matching, test_ranges};
+use super::lex::{
+    blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges, word,
+};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -76,14 +78,6 @@ const VIEWS: [&str; 7] = [
 const OWNED: [&str; 1] = ["Wave"];
 
 const RAW: [&str; 2] = ["[f64]", "Vec<f64>"];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "tests" | "benches" | "examples")
-}
-
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
 
 /// A site: its key and what it names.
 #[derive(Debug, PartialEq, Eq)]
@@ -306,27 +300,6 @@ fn header_end(code: &str, from: usize) -> usize {
     b.len()
 }
 
-pub(super) fn ident_at(code: &str, from: usize) -> (&str, usize) {
-    let rest = &code[from..];
-    let start = from + (rest.len() - rest.trim_start().len());
-    let len = code[start..].bytes().take_while(|&c| word(c)).count();
-    (&code[start..start + len], start + len)
-}
-
-/// `text` without its leading `#[..]` attributes.
-pub(super) fn strip_attrs(mut text: &str) -> &str {
-    loop {
-        text = text.trim_start();
-        if !text.starts_with("#[") {
-            return text;
-        }
-        match matching(text, 1, b'[', b']') {
-            Some(close) => text = &text[close + 1..],
-            None => return text,
-        }
-    }
-}
-
 /// How a gate judges a public item's text: what it names, or `None`. The
 /// flag is whether the item is generic over a sample.
 pub(super) type Judge<'a> = &'a dyn Fn(&str, bool) -> Option<String>;
@@ -485,7 +458,7 @@ pub(super) fn scan_with(path: &str, src: &str, judge: Judge) -> Vec<Site> {
 
 /// The files the gate reads.
 fn source_files(tree: &dyn Tree) -> Vec<String> {
-    tree.files("crates", &skipped)
+    tree.files("crates", &skipped_library)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();

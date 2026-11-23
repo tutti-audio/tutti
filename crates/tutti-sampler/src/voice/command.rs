@@ -1018,10 +1018,7 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             return Err(SendError::SlotInUse(id));
         }
         let generation = self.stamp();
-        self.send_noting_free(
-            id,
-            free,
-            generation,
+        self.send_stamped(
             VoiceCommand::AddVoice {
                 id,
                 voice: Box::new(Voice {
@@ -1030,7 +1027,13 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
                 }),
                 stretch: None,
             },
+            generation,
         )?;
+        if free {
+            self.free.lock().insert(id);
+        } else {
+            self.free.lock().remove(&id);
+        }
         live.insert(
             id,
             Live::added(Tier::Memory, generation, window, stretching),
@@ -1260,31 +1263,20 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
 
     /// [`send`](Self::send) for a command that is an add stamped `generation`.
     fn send_stamped(&self, cmd: VoiceCommand<F>, generation: u64) -> Result<(), SendError> {
-        match self.prepare(cmd) {
-            VoiceCommand::AddVoice { id, voice, stretch } => {
-                let displaced = {
-                    let mut streams = self.streams();
-                    self.queue_with(
-                        VoiceCommand::AddVoice { id, voice, stretch },
-                        None,
-                        generation,
-                    )?;
-                    streams.remove(&id)
-                };
-                // The slot this replaced held a stream of its own, if any: it
-                // ends (a send), outside the table's lock.
-                drop(displaced);
-                Ok(())
-            }
-            VoiceCommand::Remove(id) => {
-                let displaced = {
-                    let mut streams = self.streams();
-                    self.queue(VoiceCommand::Remove(id), None)?;
-                    streams.remove(&id)
-                };
-                drop(displaced);
-                Ok(())
-            }
+        let cmd = self.prepare(cmd);
+        if let VoiceCommand::AddVoice { id, .. } | VoiceCommand::Remove(id) = &cmd {
+            let id = *id;
+            let displaced = {
+                let mut streams = self.streams();
+                self.queue_with(cmd, None, generation)?;
+                streams.remove(&id)
+            };
+            // The slot this replaced held a stream of its own, if any: it
+            // ends (a send), outside the table's lock.
+            drop(displaced);
+            return Ok(());
+        }
+        match cmd {
             VoiceCommand::UpdateLoop { id, setting } => self.send_loop(id, setting),
             VoiceCommand::UpdateReverse { id, direction } => self.send_reverse(id, direction),
             cmd => self.queue(cmd, None),
@@ -1334,21 +1326,6 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             unreachable!("`prepare` returns the command kind it was given")
         };
         let generation = self.stamp();
-        self.add_stream_voice(id, voice, stream, stretch, generation)?;
-        live.insert(id, Live::added(Tier::Disk, generation, None, false));
-        Ok(())
-    }
-
-    /// The queueing half of [`add_streaming`](Self::add_streaming): `voice`
-    /// is a streaming voice, its vocoder already built.
-    fn add_stream_voice(
-        &self,
-        id: SlotId,
-        voice: Box<Voice<F>>,
-        stream: StreamHandle<F>,
-        stretch: Option<Box<Vocoders<F>>>,
-        generation: u64,
-    ) -> Result<(), Box<StreamingAddError<F>>> {
         if self.writer().is_full() {
             let error = SendError::Full;
             return Err(Box::new(StreamingAddError { error, stream }));
@@ -1368,71 +1345,52 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
         match queued {
             // The slot this replaced held a stream of its own, if any: it ends
             // (a send), outside the table's lock.
-            Ok(displaced) => {
-                drop(displaced);
-                Ok(())
-            }
+            Ok(displaced) => drop(displaced),
             // Another thread filled the queue meanwhile: the stream goes back
             // as it came.
             Err((error, stream)) => {
                 ask(stream.looping_cell(), was_loop);
                 ask(stream.direction_cell(), was_direction);
-                Err(Box::new(StreamingAddError { error, stream }))
+                return Err(Box::new(StreamingAddError { error, stream }));
             }
         }
+        live.insert(id, Live::added(Tier::Disk, generation, None, false));
+        Ok(())
     }
 
-    /// Queues the loop command setting `setting` on slot `id`, and publishes
-    /// it to the slot's stream when the handle holds one. The queue first: a
-    /// full one refuses the command with nothing changed.
+    /// Queues `cmd` for slot `id`, and publishes the control it sets
+    /// (`publish`) to the slot's stream when the handle holds one. The queue
+    /// first: a full one refuses the command with nothing changed. A slot with
+    /// no stream here is an in-memory slot, which applies the command itself
+    /// (a streaming slot without a stream is counted by the drain).
+    fn send_to_stream(
+        &self,
+        id: SlotId,
+        cmd: VoiceCommand<F>,
+        publish: impl FnOnce(&StreamHandle<F>),
+    ) -> Result<(), SendError> {
+        let Some(entry) = self.stream_of(id) else {
+            return self.queue(cmd, None);
+        };
+        let stream = entry.lock();
+        self.queue(cmd, Some(stream.id()))?;
+        publish(&stream);
+        Ok(())
+    }
+
     fn send_loop(&self, id: SlotId, setting: Option<Loop>) -> Result<(), SendError> {
         let cmd = VoiceCommand::UpdateLoop { id, setting };
-        let Some(entry) = self.stream_of(id) else {
-            // An in-memory (or unknown) slot: nothing to set it on.
-            return self.queue(cmd, None);
-        };
-        let stream = entry.lock();
-        self.queue(cmd, Some(stream.id()))?;
-        ask(stream.looping_cell(), setting);
-        Ok(())
+        self.send_to_stream(id, cmd, |stream| ask(stream.looping_cell(), setting))
     }
 
-    /// [`send_loop`](Self::send_loop) for the direction.
     fn send_reverse(&self, id: SlotId, direction: PlayDirection) -> Result<(), SendError> {
         let cmd = VoiceCommand::UpdateReverse { id, direction };
-        let Some(entry) = self.stream_of(id) else {
-            // An in-memory slot reverses its own index; a streaming slot
-            // without a stream here is counted by the drain.
-            return self.queue(cmd, None);
-        };
-        let stream = entry.lock();
-        self.queue(cmd, Some(stream.id()))?;
-        ask(stream.direction_cell(), direction);
-        Ok(())
+        self.send_to_stream(id, cmd, |stream| ask(stream.direction_cell(), direction))
     }
 
     /// The stream the handle holds for slot `id`, if any.
     pub(crate) fn stream_of(&self, id: SlotId) -> Option<Arc<Mutex<StreamHandle<F>>>> {
         self.streams().get(&id).cloned()
-    }
-
-    /// Queues `cmd`, an add at `id`, and notes whether the slot is
-    /// free-running.
-    fn send_noting_free(
-        &self,
-        id: SlotId,
-        free: bool,
-        generation: u64,
-        cmd: VoiceCommand<F>,
-    ) -> Result<(), SendError> {
-        self.send_stamped(cmd, generation)?;
-        let mut set = self.free.lock();
-        if free {
-            set.insert(id);
-        } else {
-            set.remove(&id);
-        }
-        Ok(())
     }
 
     /// A stamp no earlier add of this handle (or a clone) has had.

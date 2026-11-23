@@ -33,7 +33,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// # use tutti_buffers::Planes;
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 /// use tutti_units::{Hz, Q, UnitParam};
-/// use tutti_graph::{Prepare, Standalone};
+/// use tutti_graph::{Prepare, Renderer};
 /// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 /// use tutti_units::{SampleRate, Samples};
 ///
@@ -41,12 +41,12 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///     .freq(Hz::new(800.0))
 ///     .q(Q::new(0.707));
 /// let filter = SvfFilterNode::<f32>::from(config);
-/// let mut standalone = Standalone::new(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = standalone.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
+/// let (mut renderer, _, controls) = Renderer::alone(filter, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = renderer.render_input(Planes::new(&[&[1.0; 64]]).unwrap());
 /// assert_eq!(out.len(), 1);
 ///
 /// // Move the cutoff on the running node; it ramps over the next block.
-/// assert!(standalone.controls().set(UnitParam::Cutoff, 2_000.0));
+/// assert!(controls.set(UnitParam::Cutoff, 2_000.0));
 /// ```
 ///
 /// Cutoff ([`Hz`]), [`Q`] and gain ([`Db`]) are live [`Params`](crate::Params) shared across
