@@ -14,7 +14,7 @@ use tutti_graph::{ForkByClone, Status};
 use tutti_midi_runtime::{
     ClipEvents, HarmonyChanges, HarmonyNode, MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
-use tutti_session::{Feeder, Replacement, Session, SessionNode, ValueErrorKind};
+use tutti_session::{Feeder, Replacement, Session, ValueErrorKind};
 use tutti_ump::NoteKeyEvent;
 use tutti_units::{Beat, BeatDuration, Samples};
 
@@ -197,8 +197,6 @@ impl IntoNode for HarmonyTap {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-
-impl SessionNode for HarmonyTap {}
 
 const C: Harmony = Harmony::chord(60, 60, 0b1001_0001);
 const G: Harmony = Harmony::chord(67, 67, 0b1001_0001);

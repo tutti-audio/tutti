@@ -1,6 +1,6 @@
 //! A sampler node the session's graph adds reads the session's tempo map
 //! (doc 020, stage 5), through the builder's engine. Needs the `sampler`
-//! feature (`SessionNode` for the sampler's nodes).
+//! feature.
 
 use crate::offline::offline_48k;
 use std::sync::Arc;
@@ -81,10 +81,10 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     }
 }
 
-/// **A sampler pool the graph adds reads the transport's loop**: `Graph::add` binds it
-/// ([`SessionNode::bind_timeline`](tutti_session::SessionNode::bind_timeline)), so after the
-/// loop is armed over a stretched voice's window and a control tick, the voice carries a
-/// spare vocoder, and after the loop is disarmed it does not.
+/// **A sampler pool the graph adds follows the transport's loop**: the pool's block carries
+/// the loop in its transport, so after a block renders with the loop armed over a stretched
+/// voice's window and a control tick, the voice carries a spare vocoder, and after a block
+/// renders with the loop disarmed and a tick it does not.
 #[test]
 fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop() {
     use tutti_music::LoopRange;

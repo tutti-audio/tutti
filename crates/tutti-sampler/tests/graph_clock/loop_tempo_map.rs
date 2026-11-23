@@ -65,7 +65,7 @@ fn render_with(
         DiskStreamer::manual(SampleRate::of(SR), Default::default()).expect("builds");
     // Held while the voice plays: dropping the stream ends it.
     let mut stream = None;
-    // The pool's handle, whose reclaim tick reads the transport's loop and sends the
+    // The pool's handle, whose reclaim tick reads the loop the pool's blocks carried and sends the
     // voice the spare it primes the wrap with.
     let mut tick = None;
     if tier == Tier::Disk {
@@ -95,7 +95,7 @@ fn render_with(
         }
         let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
-        let pool = VoicePool::new().loops(transport.motion().loop_reader());
+        let pool = VoicePool::new();
         let handle = ed.insert(NodeKey(1), "voice", pool).controls;
         tick = Some(handle.clone());
         handle

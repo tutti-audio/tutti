@@ -116,6 +116,7 @@ mod midi_link;
 #[cfg(feature = "midi")]
 mod midi_load;
 // Where UDP sockets exist and the feature is on; its twin is empty of them.
+mod handled;
 #[cfg(feature = "midi")]
 #[cfg_attr(
     all(feature = "midi-network", not(target_arch = "wasm32")),
@@ -134,7 +135,6 @@ mod midi_port;
 #[cfg(feature = "midi")]
 mod midi_sink;
 mod modulation;
-mod node;
 mod params;
 mod peer;
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
@@ -162,7 +162,6 @@ mod signal_windows;
 mod switch;
 #[cfg(feature = "capture")]
 mod take;
-mod timeline_view;
 #[cfg(all(feature = "midi", feature = "analyze"))]
 mod transcribe;
 mod transport_handle;
@@ -274,6 +273,8 @@ pub use tutti_graph::{EventInputPort, EventOutputPort, EventTapPort};
 pub use unblocked::{Unanswered, Unblocked};
 // Everything public in the module: it has no items on a target with no sockets
 // but `NetworkEvent`, which `MidiEvent` names.
+#[cfg(feature = "sampler")]
+pub use handled::Handled;
 #[cfg(feature = "midi")]
 pub use midi_event::MidiEvent;
 #[cfg(feature = "midi-network")]
@@ -285,9 +286,6 @@ pub use modulation::{
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
     RouteInfo, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
 };
-#[cfg(feature = "sampler")]
-pub use node::Handled;
-pub use node::SessionNode;
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
@@ -301,7 +299,6 @@ pub use plugin::{
     RestoreStateOp, RestoreStateOutOfProcess, RestoredState, SaveState, SaveStateInProcess,
     SaveStateOp, SaveStateOutOfProcess, StateRestore, StateStartError, StateView, SwapPluginError,
 };
-pub use timeline_view::TimelineView;
 
 #[cfg(feature = "plugin")]
 use hang::HangDetector;
