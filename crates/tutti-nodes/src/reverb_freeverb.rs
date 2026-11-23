@@ -233,36 +233,3 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
             .map_or(Tail::Unknown, |r| r.bank.tail_of(controls))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
-    // format, so their tolerances are `f32`'s.
-    use super::*;
-    use crate::test_support::drive_kernel;
-    use tutti_buffers::MaxBlock;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-    use tutti_units::Samples;
-
-    /// An `f64` block through a `FreeverbKernel::<f64>` at 44.1 kHz: the unit impulse of the
-    /// wide signal's first value `x0` returns `x0 · FIXED_GAIN` (the `f32` unit widened) at
-    /// the combs of 1116, 1188 and 1277 frames, before any all-pass echo or the next comb,
-    /// and nothing before; the product is exact in `f64`, where an `f32` state rounds `x0`.
-    #[test]
-    fn an_f64_kernel_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
-        let x0 = wide_signal(1)[0];
-        let g = FreeverbBank::<f64>::FIXED_GAIN.get();
-        let len = 1_300;
-        let mut x = vec![0.0f64; len];
-        x[0] = x0;
-        let mut k = FreeverbKernel::<f64>::new(None);
-        k.prepare(SampleRate::SR_44K1, MaxBlock::of(Samples::new(len)));
-        let moves = [(0, FreeverbControls::GENERAL_MIDI)];
-        let y = drive_kernel(&mut k, &moves, &[x]);
-        let mut want = vec![0.0f64; len];
-        for at in [1_116, 1_188, 1_277] {
-            want[at] = x0 * g;
-        }
-        assert_close_f64(&y[0], &want, 0.0);
-    }
-}

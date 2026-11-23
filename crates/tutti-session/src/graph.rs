@@ -1425,7 +1425,7 @@ impl<F: Float> Graph<F> {
         main_output: crate::bounce::MainOutputChoice,
     ) -> tutti_export::Result<PendingExport<F>> {
         let main_output = match main_output {
-            crate::bounce::MainOutputChoice::Session => self.main_output.clone(),
+            crate::bounce::MainOutputChoice::Session => self.main_output,
             crate::bounce::MainOutputChoice::Engine => None,
             crate::bounce::MainOutputChoice::Placed(topology) => Some(topology),
         };
@@ -3048,7 +3048,7 @@ impl<F: Float> Graph<F> {
                 // declared topology, else the engine's order for its width. A
                 // bus that names no speaker is read in the engine's order for
                 // its width.
-                let source = tutti_buffers::ChannelTopology::from(out_topology);
+                let source = out_topology;
                 let placed = if source.is_unassigned() {
                     tutti_buffers::ChannelTopology::default_for(source.width())
                         .expect("a bus is at most MAX_CHANNELS wide")
@@ -3565,31 +3565,18 @@ impl<F: Float> Graph<F> {
     ///
     /// # Errors
     ///
-    /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS),
-    /// [`FoldError::Unplaced`](tutti_buffers::FoldError::Unplaced)), or cannot be placed on `device`. Nothing is
-    /// changed.
+    /// The [`FoldError`](tutti_buffers::FoldError) when the declaration is empty or cannot be
+    /// placed on `device`. Nothing is changed.
     /// Whether `main_output` can be a main output, and be placed on `device` when there is
-    /// one: not empty, no wider than the engine renders, and every channel
-    /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
+    /// one: not empty (a topology is never wider than the engine renders), and every
+    /// channel has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
     pub(crate) fn check_main_output(
         main_output: &tutti_buffers::ChannelTopology,
         device: Option<&tutti_buffers::ChannelSet>,
     ) -> Result<(), tutti_buffers::FoldError> {
-        use tutti_buffers::{BufferError, FoldError};
-        let width = usize::from(main_output.width().count());
-        if width == 0 {
+        use tutti_buffers::BufferError;
+        if main_output.width().count() == 0 {
             return Err(BufferError::ZeroWidth.into());
-        }
-        if width > tutti_buffers::MAX_CHANNELS {
-            return Err(FoldError::Unplaced {
-                channel: tutti_buffers::MAX_CHANNELS,
-                speaker: main_output
-                    .positions()
-                    .and_then(|list| list.get(tutti_buffers::MAX_CHANNELS))
-                    .copied()
-                    .unwrap_or(tutti_buffers::Speaker::Unassigned),
-            });
         }
         if let Some(device) = device {
             tutti_graph::fold_to_channels::<f32>(
@@ -3645,7 +3632,7 @@ impl<F: Float> Graph<F> {
     /// The main output the next commit renders: what was declared, else the engine's
     /// order for the width the graph has.
     pub(crate) fn main_output_in_force(&self) -> tutti_buffers::ChannelTopology {
-        self.main_output.clone().unwrap_or_else(|| {
+        self.main_output.unwrap_or_else(|| {
             tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
                 .expect("a graph's outputs are at most MAX_CHANNELS wide")
         })
@@ -3798,22 +3785,17 @@ impl<F: Float> Graph<F> {
             if let Some(placed) = &self.output {
                 placed
                     .control
-                    .publish_main_output(id, main_output.clone(), placed.device)?;
+                    .publish_main_output(id, main_output, placed.device)?;
             }
             Some(id)
         };
-        // The bus form of the declaration; `check_main_output` held it to
-        // `MAX_CHANNELS`, which is a bus's width.
-        let bus = main_output.as_ref().map(|r| {
-            tutti_buffers::BusTopology::try_from(r).expect("a checked main output fits a bus")
-        });
         // Both main outputs render the same nodes, in phase.
         self.editor.set_main_output_fade((!hard).then(|| {
             tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
         let spec = self.editor.spec_mut();
-        if spec.main_output != bus {
-            spec.main_output = bus;
+        if spec.main_output != main_output {
+            spec.main_output = main_output;
             // The main output's bus edges fold to the new topology at the next
             // commit.
             self.edited |= !spec.main_output_sources.is_empty();

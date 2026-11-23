@@ -96,7 +96,7 @@ use crate::compile::ids::{PlanUnitId, TableSlice};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{CappedVec, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
 use crate::compile::plan::Plan;
@@ -645,7 +645,7 @@ impl Deliveries<'_> {
         &self,
         unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -658,8 +658,7 @@ impl Deliveries<'_> {
             let port = self.due[i].port;
             let run = self.due[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_into(&[base(port), &self.events[i..run]], buf, room);
+            dropped += merge_into(&[base(port), &self.events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -678,7 +677,7 @@ impl Deliveries<'_> {
         &self,
         unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [ParamEvent],
-        buf: &mut Vec<ParamEvent>,
+        buf: &mut CappedVec<ParamEvent>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -691,8 +690,7 @@ impl Deliveries<'_> {
             let port = self.due_params[i].port;
             let run = self.due_params[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf, room);
+            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -715,7 +713,7 @@ impl Deliveries<'_> {
         ports: usize,
         bound: usize,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> Option<(usize, u32)> {
         let start = self.due.partition_point(|d| d.unit < unit);
@@ -755,16 +753,16 @@ impl Deliveries<'_> {
 /// Where a node's scheduled events and param events are merged into its
 /// inputs: preallocated, and never grown.
 pub(crate) struct Overlay {
-    pub(crate) events: Vec<Event>,
-    pub(crate) params: Vec<ParamEvent>,
+    pub(crate) events: CappedVec<Event>,
+    pub(crate) params: CappedVec<ParamEvent>,
 }
 
 impl Overlay {
     /// Room for `capacity` of each ([`overlay_capacity`]). Allocates.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            events: Vec::with_capacity(capacity),
-            params: Vec::with_capacity(capacity),
+            events: CappedVec::with_capacity(capacity),
+            params: CappedVec::with_capacity(capacity),
         }
     }
 }

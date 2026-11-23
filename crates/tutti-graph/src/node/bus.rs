@@ -176,7 +176,7 @@ impl Bus {
     /// The channels of one band.
     #[must_use]
     pub const fn band_width(&self) -> usize {
-        self.topology.layout().count() as usize
+        self.topology.width().count() as usize
     }
 
     /// The channel count: every band's.

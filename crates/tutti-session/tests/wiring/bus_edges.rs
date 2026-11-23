@@ -24,7 +24,7 @@ fn layout(n: u16) -> ChannelLayout {
 }
 
 fn named(n: u16) -> BusTopology {
-    BusTopology::try_from(&ChannelTopology::default_for(layout(n)).unwrap()).unwrap()
+    ChannelTopology::default_for(layout(n)).unwrap()
 }
 
 fn unassigned(n: u16) -> BusTopology {
@@ -60,7 +60,7 @@ impl Node for Pass {
     fn shape(&self) -> Shape {
         Shape::buses(
             Buses::main(self.input),
-            Buses::unassigned(self.input.layout()),
+            Buses::unassigned(self.input.width()),
         )
     }
     fn prepare(&mut self, _: &Prepare) {}

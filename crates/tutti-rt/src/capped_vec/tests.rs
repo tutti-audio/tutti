@@ -197,3 +197,35 @@ fn an_insert_past_len_panics_even_when_full() {
     v.extend([1, 2]);
     let _ = v.insert_within_capacity(3, 9);
 }
+
+/// `truncate`, `swap_remove` and `remove` take items out without touching the
+/// storage, the cap or a latched refusal: `swap_remove` fills the hole with the
+/// last item, `remove` shifts the rest down, and a `truncate` past `len` keeps
+/// everything.
+#[test]
+fn removing_items_keeps_the_storage_the_cap_and_the_flag() {
+    let mut v = CappedVec::with_capacity(5);
+    v.extend([1, 2, 3, 4, 5, 6]);
+    assert!(v.is_overflowed());
+    let storage = v.as_slice().as_ptr();
+    assert_eq!(v.swap_remove(1), 2);
+    assert_eq!(v.as_slice(), &[1, 5, 3, 4]);
+    assert_eq!(v.remove(1), 5);
+    assert_eq!(v.as_slice(), &[1, 3, 4]);
+    v.truncate(9);
+    assert_eq!(v.as_slice(), &[1, 3, 4]);
+    v.truncate(1);
+    assert_eq!(v.as_slice(), &[1]);
+    assert_eq!((v.capacity(), v.remaining()), (5, 4));
+    assert!(v.is_overflowed(), "a removal does not undo a refusal");
+    assert_eq!(v.as_slice().as_ptr(), storage);
+}
+
+/// An index at `len` panics, as a `Vec`'s does.
+#[test]
+#[should_panic(expected = "index")]
+fn a_swap_remove_at_len_panics() {
+    let mut v = CappedVec::with_capacity(2);
+    v.extend([1, 2]);
+    let _ = v.swap_remove(2);
+}

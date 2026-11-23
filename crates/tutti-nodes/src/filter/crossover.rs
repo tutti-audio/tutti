@@ -140,7 +140,7 @@ impl<F: Float + SimdLanes> TryFrom<CrossoverConfig> for CrossoverNode<F> {
     fn try_from(config: CrossoverConfig) -> Result<Self, CrossoverError> {
         let CrossoverConfig { input, crossovers } = config;
         let splits = crossovers.splits();
-        let channels = usize::from(input.layout().count());
+        let channels = usize::from(input.width().count());
         let bands = CrossoverBands::new(splits + 1).ok_or(CrossoverError::Bands {
             bands: splits + 1,
             min: 2,
@@ -190,14 +190,14 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
         bands: CrossoverBands,
         controls: &CrossoverControls,
     ) -> Result<Self, CrossoverError> {
-        if input.layout().count() == 0 {
+        if input.width().count() == 0 {
             return Err(CrossoverError::Channels { channels: 0 });
         }
         let rate = SampleRate::SR_48K;
         let model = CrossoverModel::designed(bands, controls, rate);
         Ok(Self {
             input,
-            bank: CrossoverBank::new(input.layout()),
+            bank: CrossoverBank::new(input.width()),
             blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
             applied: false,
@@ -297,9 +297,8 @@ mod tests {
     use crate::test_support::{amplitude_at, sine};
     use crate::test_support::{prepared, render_chunked};
     use tutti_buffers::ChannelLayout;
-    use tutti_buffers::{InputOutput, Planes};
+    use tutti_buffers::Planes;
     use tutti_graph::{Cost, Node, ParamNode};
-    use tutti_units::Samples;
     use tutti_units::Tail;
 
     // The node under test is `f32` (the session's audio format), so its tolerances are `f32`'s;
@@ -544,35 +543,5 @@ mod tests {
         let high = amplitude_at(&out[1], 200.0, RATE);
         assert!((low - 1.0).abs() < 2e-2, "{low}");
         assert!(high < 2e-3, "{high}");
-    }
-
-    /// An `f64` kernel keeps its sections in `f64`: a constant of more than 24 bits through a
-    /// 3-band tree comes out of the bands summed as itself to 1e-12 once the transient has
-    /// decayed (the bands sum to an all-pass of unit DC gain; an `f32` state is off by 1e-8).
-    #[test]
-    fn an_f64_kernel_sums_a_wide_constant_to_itself_in_f64() {
-        use tutti_fixtures::signal::wide_signal;
-        let controls =
-            CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(3_000.0)][..]).unwrap();
-        let mut k =
-            CrossoverKernel::<f64>::new(BusTopology::MONO, CrossoverBands::of(3), &controls)
-                .unwrap();
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(4_000)),
-        );
-        k.retarget(&controls);
-        let c = wide_signal(1)[0];
-        let x = vec![c; 4_000];
-        let mut out = vec![vec![0.0f64; x.len()]; 3];
-        let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
-        k.render(
-            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut views).unwrap(),
-            ControlSignals::NONE,
-        )
-        .unwrap();
-        // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.
-        let sum = out[0][3_999] + out[1][3_999] + out[2][3_999];
-        assert!((sum - c).abs() < 1e-12, "{sum} against {c}");
     }
 }

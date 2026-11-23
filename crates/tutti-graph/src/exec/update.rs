@@ -201,7 +201,7 @@ impl<F: Float> Executor<F> {
                             (new.key, refused.saturating_add(unfit)),
                         );
                     }
-                    departed.chase_events.truncate(from);
+                    departed.chase_events.drain(from..);
                 } else {
                     place(
                         &mut departed.chased,
@@ -733,10 +733,9 @@ fn flush_target<'a>(
 
 /// Appends `events` to `to` as far as its capacity takes. Returns how many
 /// did not fit.
-fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
-    let room = (to.capacity() - to.len()).min(events.len());
-    to.extend_from_slice(&events[..room]);
-    u32::try_from(events.len() - room).unwrap_or(u32::MAX)
+fn fill(to: &mut CappedVec<Event>, events: &[Event]) -> u32 {
+    let kept = to.extend(events.iter().copied());
+    u32::try_from(events.len() - kept).unwrap_or(u32::MAX)
 }
 
 /// `carried`, copied into `target`, the ring built for its new length: both

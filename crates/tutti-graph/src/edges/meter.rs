@@ -49,6 +49,7 @@ use crate::MeterId;
 use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_units::{Amplitude, Samples};
 
+use super::alive::Alive;
 use crate::compile::ids::AudioSlotId;
 use crate::exec::SILENT;
 use crate::exec::slots::{AudioSlots, SlotFlags};
@@ -208,8 +209,8 @@ pub struct MeterReader {
     id: MeterId,
     lanes: Box<[LevelReader]>,
     shared: Arc<Shared>,
-    /// The editor holds a `Weak` of this: when it dies, the reader is gone.
-    alive: Arc<()>,
+    /// The editor watches this: when it dies, the reader is gone.
+    alive: Alive,
 }
 
 impl MeterReader {
@@ -227,7 +228,7 @@ impl MeterReader {
                 id,
                 lanes: readers.into(),
                 shared: Arc::clone(&shared),
-                alive: Arc::new(()),
+                alive: Alive::default(),
             },
             MeterWriter {
                 _control: ControlDrop::new(),
@@ -241,7 +242,7 @@ impl MeterReader {
     /// is zero once the reader is dropped.
     #[must_use]
     pub fn watch(&self) -> Weak<()> {
-        Arc::downgrade(&self.alive)
+        self.alive.watch()
     }
 
     /// The meter's id, the one [`Editor::close_meter`](crate::Editor::close_meter) takes.

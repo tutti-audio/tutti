@@ -520,7 +520,7 @@ impl<F: Float> OutputControl<F> {
         let folds = self.cell.current();
         let entry = folds.devices.get(slot)?.as_ref()?;
         Some(OutputPlacement {
-            channels: entry.channels.clone(),
+            channels: entry.channels,
             placement: entry.placement,
         })
     }

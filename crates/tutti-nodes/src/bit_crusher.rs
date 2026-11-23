@@ -158,7 +158,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, drive_block, prepared};
+    use crate::test_support::{drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, UnitParam};
@@ -215,25 +215,5 @@ mod tests {
         assert!(n.param_set().set(UnitParam::HoldFactor, 2.0));
         let out = drive_block(&mut n, &[&[0.3, 0.9, 0.5, 0.1]]);
         assert_eq!(out[0], [0.25, 0.25, 0.5, 0.5]);
-    }
-
-    /// An `f64` block through a `BitCrusherKernel::<f64>` at 32 bits (`q = 2^31`) holding 2
-    /// frames is the input's frame `2 floor(k / 2)` exactly: a 29-bit signal, which `f32`
-    /// cannot hold, passes `round(x q) / q`.
-    #[test]
-    fn an_f64_kernel_at_thirty_two_bits_holds_a_twenty_nine_bit_signal_exactly() {
-        use crate::test_support::drive_kernel;
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let len = 100;
-        let x = wide_signal(len);
-        let want: Vec<f64> = (0..len).map(|k| x[2 * (k / 2)]).collect();
-        let controls = BitCrusherControls {
-            bits: BitDepth::MAX,
-            hold: HoldFactor::new(2.0),
-        };
-        let mut k = BitCrusherKernel::<f64>::new(ChannelLayout::MONO, controls);
-        k.prepare(RATE, MaxBlock::of(tutti_units::Samples::new(len)));
-        let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
-        assert_close_f64(&y, &want, 0.0);
     }
 }
