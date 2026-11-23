@@ -244,6 +244,43 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// one states `S` (`analyze::<f32, _>`).
     ///
     /// The analysis is generic, never boxed: [`StreamMeter`] is not object-safe.
+    ///
+    /// The whole-buffer analyses a caller passes, by their config, and what the
+    /// run resolves to:
+    ///
+    /// - [`NoteConfig`](tutti_measure::NoteConfig): the notes, as `NoteEvent`s;
+    /// - [`PyinConfig`](tutti_measure::PyinConfig): the pYIN pitch track, a
+    ///   `PyinFrame` a hop;
+    /// - [`TempoConfig`](tutti_measure::TempoConfig): the `Tempo`;
+    /// - [`BeatConfig`](tutti_measure::BeatConfig): the `BeatGrid`;
+    /// - [`ChordConfig`](tutti_measure::ChordConfig): the `ChordSpan`s;
+    /// - [`KeyConfig`](tutti_measure::KeyConfig): the `KeyEstimate`;
+    /// - [`AlignTo`](tutti_measure::AlignTo): the `Alignment` of the audio, as a
+    ///   take, against a reference `Wave`; its `delay` is a [`Seconds`](tutti_units::Seconds)
+    ///   to place the take by.
+    ///
+    /// Each folds a wide audio to mono and reads it at the audio's own rate. A
+    /// click train every half second reads 120 BPM:
+    ///
+    /// ```
+    /// use tutti_buffers::{Mono, Wave};
+    /// use tutti_measure::TempoConfig;
+    /// use tutti_session::Session;
+    /// use tutti_units::SampleRate;
+    ///
+    /// let rate = SampleRate::SR_44K1;
+    /// let session = Session::builder().sample_rate(rate).build().unwrap();
+    /// // 22 050 frames is 0.5 s: one impulse a beat, over 10 s.
+    /// let mut clicks = vec![0.0f32; 441_000];
+    /// for beat in clicks.iter_mut().step_by(22_050) {
+    ///     *beat = 1.0;
+    /// }
+    /// let wave = Wave::from_mono(rate, Mono::new(&clicks));
+    /// let tempo = futures_lite::future::block_on(async { session.analyze(wave, TempoConfig::new()).await })
+    ///     .unwrap()
+    ///     .unwrap();
+    /// assert!((tempo.bpm.get() - 120.0).abs() < 1.0, "{}", tempo.bpm);
+    /// ```
     pub fn analyze<S, A>(&self, audio: impl Into<Audio<S>>, analysis: A) -> Analyze<A, S>
     where
         S: Float,

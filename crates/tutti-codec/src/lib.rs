@@ -38,7 +38,7 @@
 //!   work behind them, in `src/decode/` alone, and none of its types is in a
 //!   signature or an error. `can_decode` and `decodable_extensions` say what this
 //!   build reads. Each `decode-*` feature (`decode-wav`, `decode-flac`,
-//!   `decode-mp3`, `decode-ogg`) pulls exactly one container.
+//!   `decode-aiff`, `decode-mp3`, `decode-ogg`) pulls exactly one container.
 //! - `Pcm` and `IntDepth` are the sample widths a file holds. An encoder takes a block
 //!   in any `tutti_buffers::Sample` format and converts it by that trait's rule, the
 //!   one conversion every container shares.
@@ -95,7 +95,7 @@ mod writer;
 pub use decode::{FileIn, WaveDecode, WaveMetadata, read_wave, read_wave_metadata};
 pub use decode::{can_decode, decodable_extensions};
 pub use decode_error::DecodeError;
-pub use encoder::{Encoder, FileEncoder, Finalized, FinalizedFile, Kept, Unfinished};
+pub use encoder::{Encoder, FileEncoder, FinalizedFile, Kept, Unfinished};
 pub use error::{Codec, EncodeError, Result, SpecError};
 pub use file_out::FileOut;
 pub use format::{FlacLevel, Format};

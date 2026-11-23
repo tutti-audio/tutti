@@ -8,8 +8,8 @@ use std::fmt::Debug;
 use tutti_ump::{
     ArticulationAttribute, BendValue, CCNumber, ChordType, ControlValue, Field, FirstGroup,
     FunctionBlockCount, FunctionBlockId, GroupSpan, Message, MidiChannel, MidiGroup, MonoChannels,
-    MpeChannels, Pitch, Reserved, ReservedAccents, ReservedAttribute, SharpsFlats, Sysex7Packet,
-    Sysex8Packet, TicksPerQuarterNote, Ump,
+    MpeChannels, NoteVelocity, Pitch, Reserved, ReservedAccents, ReservedAttribute, SharpsFlats,
+    Sysex7Packet, Sysex8Packet, TicksPerQuarterNote, Ump,
 };
 
 use crate::common;
@@ -85,6 +85,14 @@ fn a_whole_range_word_is_the_bare_number() {
         );
     }
     assert!(serde_json::from_str::<ControlValue>("4294967296").is_err());
+    for raw in [0u16, 1, 0x8000, 0xABCD, u16::MAX] {
+        let velocity = serde_json::to_string(&NoteVelocity::new(raw)).unwrap();
+        assert_eq!(velocity, raw.to_string());
+        assert_eq!(
+            serde_json::from_str::<NoteVelocity>(&velocity).unwrap(),
+            NoteVelocity::new(raw)
+        );
+    }
 }
 
 fn bounded_edges<T>(lo: i32, hi: i32)

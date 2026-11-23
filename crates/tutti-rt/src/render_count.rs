@@ -29,14 +29,7 @@
 //!
 //! The model in `tests/render_count_loom.rs` runs this code.
 
-use sync::{AtomicUsize, Ordering, fence};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicUsize, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicUsize, Ordering, fence};
-}
+use crate::sync::{AtomicUsize, Ordering, fence};
 
 /// The renders of one thing in flight: any number of threads enter, one clearing
 /// side asks whether none is.

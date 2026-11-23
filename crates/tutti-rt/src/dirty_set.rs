@@ -51,14 +51,7 @@
 //!
 //! The model in `tests/dirty_set_loom.rs` runs this code.
 
-use sync::{AtomicU64, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
-}
+use crate::sync::{AtomicU64, Ordering};
 
 const WORD_BITS: usize = u64::BITS as usize;
 

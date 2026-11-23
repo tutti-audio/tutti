@@ -10,7 +10,7 @@ use tutti_session::{
     DepthTarget, ModTarget, NoSuchModRoute, NoSuchModSource, ParamRef, RouteSpec, Session,
     ValueErrorKind,
 };
-use tutti_units::{Depth, Hz, Q};
+use tutti_units::{Bipolar, Hz, Q};
 
 fn filter(s: &mut Session) -> ParamRef {
     let lp = s.graph().add(SvfFilterNode::<f32>::from(
@@ -35,12 +35,12 @@ fn routes_and_sources_are_found_again() {
     let lfo = m.lfo(Lfo::sine());
     let knob = m.macro_(0.5);
     let r1 = m
-        .route(RouteSpec::new(lfo, a, Depth::of(0.25)).curve(Law::Smootherstep))
+        .route(RouteSpec::new(lfo, a, Bipolar::of(0.25)).curve(Law::Smootherstep))
         .unwrap();
     let r2 = m
-        .route(RouteSpec::new(knob, a, Depth::of(-0.5)).polarity(Polarity::Unipolar))
+        .route(RouteSpec::new(knob, a, Bipolar::of(-0.5)).polarity(Polarity::Unipolar))
         .unwrap();
-    let r3 = m.route(RouteSpec::new(knob, b, Depth::FULL)).unwrap();
+    let r3 = m.route(RouteSpec::new(knob, b, Bipolar::MAX)).unwrap();
 
     let view = s.mods();
     let into_a: Vec<_> = view.routes_to(a).collect();
@@ -56,7 +56,7 @@ fn routes_and_sources_are_found_again() {
             into_a[0].polarity,
             into_a[0].curve
         ),
-        (lfo, Depth::of(0.25), Polarity::Bipolar, Law::Smootherstep)
+        (lfo, Bipolar::of(0.25), Polarity::Bipolar, Law::Smootherstep)
     );
     assert_eq!(
         (
@@ -65,7 +65,7 @@ fn routes_and_sources_are_found_again() {
             into_a[1].polarity,
             into_a[1].curve
         ),
-        (knob, Depth::of(-0.5), Polarity::Unipolar, Law::Linear)
+        (knob, Bipolar::of(-0.5), Polarity::Unipolar, Law::Linear)
     );
     assert_eq!(into_a[0].target, ModTarget::from(a));
     assert_eq!(
@@ -112,29 +112,29 @@ fn a_route_is_edited_through_its_view() {
     let mut m = s.mods_mut();
     m.range_raw(a, 0.0, 1.0).unwrap();
     let lfo = m.lfo(Lfo::sine());
-    let route = m.route(RouteSpec::new(lfo, a, Depth::of(0.5))).unwrap();
+    let route = m.route(RouteSpec::new(lfo, a, Bipolar::of(0.5))).unwrap();
 
     s.set((
-        DepthTarget::of(lfo, a).to(Depth::of(-0.75)),
+        DepthTarget::of(lfo, a).to(Bipolar::of(-0.75)),
         route.polarity().to(Polarity::Unipolar),
         route.curve().to(Law::Hold),
     ))
     .unwrap();
     assert_eq!(
         s.mods().route(route).unwrap().depth,
-        Depth::of(-0.75),
+        Bipolar::of(-0.75),
         "the depth is in force at once"
     );
     let _ = s.update();
     let read = s.mods().route(route).unwrap();
     assert_eq!(
         (read.depth, read.polarity, read.curve),
-        (Depth::of(-0.75), Polarity::Unipolar, Law::Hold)
+        (Bipolar::of(-0.75), Polarity::Unipolar, Law::Hold)
     );
 
     s.mods_mut().remove_route(route).unwrap();
     assert_eq!(
-        s.set(DepthTarget::of(lfo, a).to(Depth::of(0.1)))
+        s.set(DepthTarget::of(lfo, a).to(Bipolar::of(0.1)))
             .unwrap_err()
             .kind,
         ValueErrorKind::NoSuchTarget

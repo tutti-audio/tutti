@@ -14,7 +14,13 @@ fn main() {
     if any(&["ENCODE_WAV", "ENCODE_AIFF", "ENCODE_FLAC"]) {
         println!("cargo::rustc-cfg=encode");
     }
-    if any(&["DECODE_WAV", "DECODE_FLAC", "DECODE_MP3", "DECODE_OGG"]) {
+    if any(&[
+        "DECODE_WAV",
+        "DECODE_AIFF",
+        "DECODE_FLAC",
+        "DECODE_MP3",
+        "DECODE_OGG",
+    ]) {
         println!("cargo::rustc-cfg=decode");
         // Read by the build scripts of its dependents as `DEP_TUTTI_CODEC_DECODE`.
         println!("cargo::metadata=decode=1");

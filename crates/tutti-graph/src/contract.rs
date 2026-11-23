@@ -1760,7 +1760,7 @@ macro_rules! contract_tests {
 /// then the block is as long as the first fed param.
 ///
 /// For a node's own unit tests, which inspect its state between blocks —
-/// what a [`Standalone`](crate::Standalone), whose node the executor owns, cannot show.
+/// what a [`Renderer::alone`](crate::Renderer::alone), whose node the executor owns, cannot show.
 /// `node` must already be [`prepare`](Node::prepare)d for a maximum block
 /// at least this long ([`prepared`]). [`drive_input`] is the same call under a
 /// transport, with events.
@@ -2092,7 +2092,7 @@ pub fn assert_param_fork<N: ParamNode + Clone>(node: N) {
     let params: Vec<UnitAddr> = live.params().collect();
     assert!(!params.is_empty(), "a ParamNode with no params");
     // A distinct value per param, away from anything a constructor picks, and
-    // inside every range-checked unit's range (a `Depth` holds `-1..=1`).
+    // inside every range-checked unit's range (a `Bipolar` holds `-1..=1`).
     // Each is an `f32` figure, which an `f32` unit's cell holds whole.
     let set = |i: usize| f64::from(0.37f32 + i as f32 * 0.11);
     let moved = |i: usize| f64::from(0.37f32 + i as f32 * 0.11 + 7.0);

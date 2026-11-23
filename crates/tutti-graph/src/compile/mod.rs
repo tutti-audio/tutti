@@ -862,31 +862,12 @@ pub fn compile(
                     EventEdge::Feedback { from, delay } => {
                         ERef::Fb(fb_index(event_fb_key(at, from, delay), &event_fb))
                     }
-                    EventEdge::Direct(from) => {
-                        let v = event_out_val[&from];
-                        let d = departure(dense[&from.node]).gap_to(arrival[n]);
-                        match d {
-                            d if !d.is_zero() => {
-                                let delay = em.delays.len() as u32;
-                                em.delays.push(DelaySpec {
-                                    key: DelayKey::Event { at, from },
-                                    len: d,
-                                });
-                                let op = em.push(Pre::EventDelay {
-                                    delay,
-                                    src: v,
-                                    dst: 0,
-                                });
-                                em.read_event(v, op);
-                                let dv = em.event_value(op);
-                                if let Pre::EventDelay { dst, .. } = &mut em.pre[op as usize] {
-                                    *dst = dv;
-                                }
-                                ERef::Val(dv)
-                            }
-                            _ => ERef::Val(v),
-                        }
-                    }
+                    EventEdge::Direct(from) => ERef::Val(align_event(
+                        &mut em,
+                        event_out_val[&from],
+                        departure(dense[&from.node]).gap_to(arrival[n]),
+                        DelayKey::Event { at, from },
+                    )),
                 });
             }
             // A lone undelayed writer whose port cannot hold more than the
@@ -1093,29 +1074,20 @@ pub fn compile(
         };
         // Delaying silence is silence: a zero channel reports its
         // compensation (as `latency::plan` does) but gets no ring.
-        let mut delay = (!d.is_zero() && src != ARef::Zero).then(|| {
-            em.delays.push(DelaySpec {
-                key: DelayKey::Output {
-                    channel,
-                    from: *source,
-                },
-                len: d,
-            });
-            (em.delays.len() - 1) as u32
-        });
-        if let (true, Some(ring), ARef::Val(v)) = (main_output_meter, delay, src) {
-            let op = em.push(Pre::Delay {
-                delay: ring,
-                src: v,
-                dst: 0,
-            });
-            em.read_audio(v, op);
-            let dv = em.audio_value(op);
-            if let Pre::Delay { dst, .. } = &mut em.pre[op as usize] {
-                *dst = dv;
+        let key = DelayKey::Output {
+            channel,
+            from: *source,
+        };
+        let mut delay = None;
+        if !d.is_zero() {
+            match src {
+                ARef::Zero => {}
+                ARef::Val(v) if main_output_meter => src = align_audio(&mut em, v, d, key),
+                _ => {
+                    em.delays.push(DelaySpec { key, len: d });
+                    delay = Some((em.delays.len() - 1) as u32);
+                }
             }
-            src = ARef::Val(dv);
-            delay = None;
         }
         output_refs.push(src);
         let op = em.push(Pre::Output {
@@ -1175,32 +1147,15 @@ pub fn compile(
                 PortSource::Zero => (ARef::Zero, Latency::ZERO),
             };
             if align == crate::TapAlign::ToOutput && src != ARef::Zero {
-                let d = dep.gap_to(total);
-                if !d.is_zero() {
-                    let ARef::Val(v) = src else {
-                        unreachable!("not zero")
-                    };
-                    let delay = em.delays.len() as u32;
-                    em.delays.push(DelaySpec {
-                        key: DelayKey::Tap {
-                            tap,
-                            lane,
-                            from: *source,
-                        },
-                        len: d,
-                    });
-                    let op = em.push(Pre::Delay {
-                        delay,
-                        src: v,
-                        dst: 0,
-                    });
-                    em.read_audio(v, op);
-                    let dv = em.audio_value(op);
-                    if let Pre::Delay { dst, .. } = &mut em.pre[op as usize] {
-                        *dst = dv;
-                    }
-                    src = ARef::Val(dv);
-                }
+                let ARef::Val(v) = src else {
+                    unreachable!("not zero")
+                };
+                let key = DelayKey::Tap {
+                    tap,
+                    lane,
+                    from: *source,
+                };
+                src = align_audio(&mut em, v, dep.gap_to(total), key);
             }
             srcs.push(src);
         }
@@ -1253,25 +1208,12 @@ pub fn compile(
         // A feedback edge's slot is read as the node reads it: it has no
         // value to delay.
         if let (crate::TapAlign::ToOutput, ERef::Val(v)) = (spec.align, carried) {
-            let d = at_time.gap_to(total);
-            if !d.is_zero() {
-                let delay = em.delays.len() as u32;
-                em.delays.push(DelaySpec {
-                    key: DelayKey::EventTap { tap, from },
-                    len: d,
-                });
-                let op = em.push(Pre::EventDelay {
-                    delay,
-                    src: v,
-                    dst: 0,
-                });
-                em.read_event(v, op);
-                let dv = em.event_value(op);
-                if let Pre::EventDelay { dst, .. } = &mut em.pre[op as usize] {
-                    *dst = dv;
-                }
-                src = ERef::Val(dv);
-            }
+            src = ERef::Val(align_event(
+                &mut em,
+                v,
+                at_time.gap_to(total),
+                DelayKey::EventTap { tap, from },
+            ));
         }
         let op = em.push(Pre::EventTap { tap: index, src });
         em.read_eref(src, op);
@@ -1305,29 +1247,12 @@ pub fn compile(
                     if *align == crate::TapAlign::ToOutput
                         && let ARef::Val(v) = src
                     {
-                        let d = dep.gap_to(total);
-                        if !d.is_zero() {
-                            let delay = em.delays.len() as u32;
-                            em.delays.push(DelaySpec {
-                                key: DelayKey::Meter {
-                                    meter,
-                                    lane,
-                                    from: *source,
-                                },
-                                len: d,
-                            });
-                            let op = em.push(Pre::Delay {
-                                delay,
-                                src: v,
-                                dst: 0,
-                            });
-                            em.read_audio(v, op);
-                            let dv = em.audio_value(op);
-                            if let Pre::Delay { dst, .. } = &mut em.pre[op as usize] {
-                                *dst = dv;
-                            }
-                            src = ARef::Val(dv);
-                        }
+                        let key = DelayKey::Meter {
+                            meter,
+                            lane,
+                            from: *source,
+                        };
+                        src = align_audio(&mut em, v, dep.gap_to(total), key);
                     }
                     srcs.push(src);
                 }

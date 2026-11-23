@@ -40,6 +40,7 @@ mod batch;
 mod controls;
 mod depth;
 mod error;
+mod gesture;
 mod param;
 #[cfg(feature = "plugin")]
 mod plugin;
@@ -59,6 +60,7 @@ pub use depth::DepthTarget;
 #[cfg(feature = "plugin")]
 pub use error::{PluginParamRefusal, UnitError};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
+pub use gesture::Gesture;
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
 pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};

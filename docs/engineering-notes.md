@@ -138,7 +138,7 @@ vendor/             third-party code we never edit
 the unit newtype, never the bare float**, for any quantity one covers — in struct
 fields, function signatures, `Param<U>`, and return types alike.
 
-The roster: `Hz` · `Seconds` · `Db` · `Amplitude` · `Mix` · `Feedback` · `Depth` ·
+The roster: `Hz` · `Seconds` · `Db` · `Amplitude` · `Mix` · `Feedback` · `Bipolar` ·
 `Drive` · `Spread` · `StereoWidth` · `Bpm` · `Beat` / `BeatDuration` ·
 `Semitones` / `Cents` · `Azimuth` / `Elevation` / `ArcDegrees` · `Phase` /
 `PhaseIncrement` / `Radians` · `SamplePosition` / `Samples` / `Resyncs` · `SrcRatio` /
@@ -150,7 +150,7 @@ infinities, zero and negative numbers (no 20 to 999 policy; that is a UI limit),
 `Bpm::of` is for literals, and there is no `From<f64>` or `Unit` impl.
 
 The last three are **measurements** — values the engine reports back — as opposed
-to the controls above them. That is why `Correlation` and `Pan` are not `Depth`
+to the controls above them. That is why `Correlation` and `Pan` are not `Bipolar`
 and `Confidence` is not `Mix` despite the coinciding ranges: swapping a reading
 for a control is silent, and the compiler should refuse it. Same split `Q` and
 `Resonance` make.
