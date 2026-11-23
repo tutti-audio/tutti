@@ -145,4 +145,4 @@ pub use roster::{DeviceChange, DeviceDirection, DeviceId, DeviceRoster, Snapshot
 pub use supported::SupportedConfig;
 
 #[cfg(feature = "capture")]
-pub use mic::{MONITOR_RING, MicConfig, MicIn};
+pub use mic::{CaptureStream, MONITOR_RING, MicConfig, MicIn};

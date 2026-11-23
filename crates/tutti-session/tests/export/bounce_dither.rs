@@ -37,7 +37,6 @@ fn bounced_node<N: tutti_graph::Node + Clone + Send + 'static>(
     ) -> Bounce<tutti_graph::NodeKey, tutti_session::FileMainOutput>,
 ) -> Vec<i32> {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::SR_48K)
         .expect("a detached session builds");

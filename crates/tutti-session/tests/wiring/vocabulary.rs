@@ -10,8 +10,7 @@ use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::{Const, Through};
 use tutti_session::{
-    ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainInput, MainOutput,
-    OutputPort, Session,
+    ChannelEdge, ConnectError, DeclarationError, GainTargetError, MainOutput, OutputPort, Session,
 };
 use tutti_units::Gain;
 
@@ -111,10 +110,6 @@ fn a_port_that_is_not_there_is_refused() {
     assert_eq!(
         g.connect(src.output(0), MainOutput::channel(9)).err(),
         Some(ConnectError::NoSuchInPort(MainOutput::channel(9)))
-    );
-    assert_eq!(
-        g.connect(MainInput::channel(3), through.input(0)).err(),
-        Some(ConnectError::NoSuchOutPort(MainInput::channel(3)))
     );
     assert!(!g.has_uncommitted_edits(), "nothing was stored");
 }
