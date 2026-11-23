@@ -15,60 +15,30 @@ mod ramped;
 pub mod svf;
 mod tilt;
 
-pub use bell::{
-    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-};
+pub use bell::{BellFilterConfig, BellFilterKernel, BellFilterNode, BellFilterSet};
 pub(crate) use crossover::Splits;
 pub use crossover::{CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet};
-pub use cut::{
-    CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
-    MIN_CUT_CUTOFF,
-};
+pub use cut::{CutFilterConfig, CutFilterKernel, CutFilterNode, CutFilterSet};
 pub use envelope::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq::{EqControls, EqKernel};
 pub use eq_band::{EqBandConfig, EqBandNode};
-pub use graphic_eq::{
-    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
-};
+pub use graphic_eq::{GraphicEqConfig, GraphicEqKernel, GraphicEqNode, GraphicEqSet};
 pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
 pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
-pub use tilt::{
-    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
-};
+pub use tilt::{TiltFilterConfig, TiltFilterKernel, TiltFilterNode, TiltFilterSet};
 
-use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_units::{Db, Hz, SampleRate};
-
-/// The lowest center a bell or tilt takes: 20 Hz.
-const MIN_EQ_CENTER: Hz = Hz::new(20.0);
-
-/// The largest gain magnitude a bell or tilt takes: 24 dB.
-const MAX_EQ_GAIN: Db = Db::new(24.0);
-
-/// `center` held within [`MIN_EQ_CENTER`] and 0.99 of the Nyquist of `rate`.
-fn eq_center(center: Hz, rate: SampleRate) -> Hz {
-    Hz::new(
-        center
-            .get()
-            .clamp(MIN_EQ_CENTER.get(), rate.nyquist_scaled(0.99).get()),
-    )
-}
-
-/// `gain` held within [`MAX_EQ_GAIN`].
-fn eq_gain(gain: Db) -> Db {
-    Db::new(gain.get().clamp(-MAX_EQ_GAIN.get(), MAX_EQ_GAIN.get()))
-}
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 
 /// The bus a filter built for a width runs on: the engine's order for it
-/// ([`BusTopology::default_for`]).
+/// ([`ChannelTopology::default_for`]).
 ///
 /// # Panics
 ///
 /// Past 16 channels: a filter is one bus.
-fn filter_bus(width: ChannelLayout) -> BusTopology {
-    BusTopology::default_for(width).expect("a filter is at most 16 channels wide")
+fn filter_bus(width: ChannelLayout) -> ChannelTopology {
+    ChannelTopology::default_for(width).expect("a filter is at most 16 channels wide")
 }
 
 #[cfg(test)]
@@ -128,21 +98,6 @@ pub(super) mod test_utils {
         let mut node = crate::test_support::prepared(node);
         let out = render(&mut node, &generate_sine(f, 48_000.0, 16_384));
         level(&out[8_192..])
-    }
-
-    /// `signal::impulse` of `len` frames.
-    pub fn impulse(len: usize) -> Vec<f32> {
-        signal::impulse(Samples::new(len))
-    }
-
-    /// A mono node over `input`, one frame per call (a block of one). The
-    /// node must be prepared.
-    pub fn process_mono(node: &mut dyn Node, input: &[f32]) -> Vec<f32> {
-        let mut output = vec![0.0f32; input.len()];
-        for (i, &sample) in input.iter().enumerate() {
-            crate::test_support::tick(node, &[sample], &mut output[i..i + 1]);
-        }
-        output
     }
 
     /// `signal::sine` at unit amplitude, for a test that holds bare numbers.

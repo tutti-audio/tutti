@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
+use common::{Harness, Kind, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, Editor, Executor, FeedbackFrom, GraphSpec, InputPort, Io, Node, NodeKey, Op,
@@ -83,13 +83,13 @@ fn render(
     workers: usize,
     blocks: usize,
 ) -> Vec<Vec<f32>> {
-    let mut pair = Pair::with_workers(BLOCK, workers);
-    pair.switch(&spec(t), kinds);
-    let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
+    let mut harness = Harness::with_workers(BLOCK, workers);
+    harness.switch(&spec(t), kinds);
+    let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
     let mut frame = 0;
     for _ in 0..blocks {
         let input = input_signal(frame, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         for (g, a) in got.iter_mut().zip(a) {
             g.extend(a);
         }
@@ -400,8 +400,8 @@ fn each_source_is_aligned_before_the_sum() {
 
 /// An edge added or removed later realigns without a click in the other path:
 /// the source that stays keeps its PDC ring (it is keyed by the sink port and
-/// the source), the new one gets its own, and the removed one's goes. The
-/// executor, over the commits, is the reference's, which keys its lines alike.
+/// the source), the new one gets its own, and the removed one's goes: over the
+/// commits the sink holds the figure each round's rings imply.
 #[test]
 fn adding_and_removing_a_source_keeps_the_others_rings() {
     // 1: a counter-like source (an emitter's count steps), 2: Lag(40) of it,
@@ -433,16 +433,43 @@ fn adding_and_removing_a_source_keeps_the_others_rings() {
     assert_eq!(sums(&plan_of(&t, &kinds)), 1);
     assert_eq!(sums(&plan_of(&with_third, &kinds)), 1);
 
+    // The counter holds its count at the end of the block it is in
+    // (an emission every 7th frame from 5), and sources 1 and 2 meet at 40
+    // frames: the Lag realises them, the PDC ring on source 1 matches.
+    let count = |n: i64| -> f32 {
+        if n < 0 {
+            0.0
+        } else {
+            ((BLOCK as i64 * (n / BLOCK as i64) + BLOCK as i64 + 1) / 7) as f32
+        }
+    };
+    // Each round is four blocks; a ring is silent for its first 40 frames
+    // after it is created (the first round, source 1's; the second, the
+    // constant's; the last, source 1's again, the removal having freed it).
+    let round = 4 * BLOCK as i64;
+    let figure = |r: usize, n: i64| -> f32 {
+        let lag = count(n - 40);
+        let ring = |born: i64, x: f32| if n - born >= 40 { x } else { 0.0 };
+        match r {
+            0 | 2 => lag + ring(0, count(n - 40)),
+            1 => lag + ring(0, count(n - 40)) + ring(round, 0.375),
+            3 => count(n),
+            _ => lag + ring(4 * round, count(n - 40)),
+        }
+    };
     for workers in [1usize, 4] {
-        let mut pair = Pair::with_workers(BLOCK, workers);
+        let mut harness = Harness::with_workers(BLOCK, workers);
         let mut frame = 0;
         let sequence = [&t, &with_third, &t, &one_source, &t];
-        for (round, topology) in sequence.into_iter().enumerate() {
-            pair.switch(&spec(topology), &kinds);
+        for (r, topology) in sequence.into_iter().enumerate() {
+            harness.switch(&spec(topology), &kinds);
             for _ in 0..4 {
                 let input = input_signal(frame, BLOCK);
-                let (a, b) = pair.block(BLOCK, &input);
-                assert_eq!(bits(&a), bits(&b), "round {round}, frame {frame}");
+                let a = harness.block(BLOCK, &input);
+                for (i, &y) in a[0].iter().enumerate() {
+                    let n = frame as i64 + i as i64;
+                    assert_eq!(y, figure(r, n), "workers {workers}, round {r}, frame {n}");
+                }
                 frame += BLOCK as u64;
             }
         }

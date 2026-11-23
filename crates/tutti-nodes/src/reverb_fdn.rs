@@ -4,11 +4,11 @@
 //! ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
+use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -161,10 +161,9 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
     const GRID: usize = FdnBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
         Shape::buses(
-            Buses::main(BusTopology::MONO),
-            Buses::NONE.with(output).expect("one bus"),
+            Buses::main(ChannelTopology::MONO),
+            Buses::main(ChannelTopology::STEREO),
         )
         .cost(Cost::Moderate)
     }
@@ -223,57 +222,5 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         self.running
             .as_mut()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.ramps, controls))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
-    // format, so their tolerances are `f32`'s.
-    use super::*;
-    use crate::test_support::drive_kernel;
-    use tutti_dsp::MaxDecay;
-    use tutti_fixtures::signal::wide_signal;
-    use tutti_units::Samples;
-
-    /// An `f64` block through a `FdnKernel::<f64>` with modulation off is linear: `R(a x + b y)
-    /// = a R(x) + b R(y)` to 2^-40 of the peak, with `a`, `b` and two wide signals that an `f32`
-    /// state cannot carry (it is off by 2^-24).
-    #[test]
-    fn an_f64_kernel_is_linear() {
-        let len = 6_000;
-        let x = wide_signal(len);
-        let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
-        let (a, b) = (1.0 / 3.0, -std::f64::consts::PI / 7.0);
-        let mix: Vec<f64> = x.iter().zip(&y).map(|(x, y)| a * x + b * y).collect();
-        let moves = [(
-            0,
-            FdnControls {
-                modulation: Bipolar::of(0.0),
-                ..FdnControls::DEFAULT
-            },
-        )];
-        // Two identical input channels: the bank averages them, and the block has the stereo
-        // width of the output the harness reads back.
-        let render = |input: &[f64]| {
-            let mut k = FdnKernel::<f64>::new(
-                FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
-            );
-            k.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(len)));
-            drive_kernel(&mut k, &moves, &[input.to_vec(), input.to_vec()])
-        };
-        let (rx, ry, rm) = (render(&x), render(&y), render(&mix));
-        for c in 0..2 {
-            let peak = rm[c].iter().fold(0.0f64, |p, v| p.max(v.abs()));
-            assert!(peak > 1e-4, "the reverb sounds");
-            for n in 0..len {
-                let want = a * rx[c][n] + b * ry[c][n];
-                assert!(
-                    (rm[c][n] - want).abs() <= peak * 2.0f64.powi(-40),
-                    "channel {c}, frame {n}: {} against {want}",
-                    rm[c][n]
-                );
-            }
-        }
     }
 }

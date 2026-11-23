@@ -32,16 +32,17 @@
 //! ([`Editor::prune_taps`](crate::Editor::prune_taps)), on the control side.
 //! Dropping the reader last frees the ring on the reader's thread.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::Cell;
 use std::sync::{Arc, Weak};
 
 use crate::{TapAlign, TapId};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
-use tutti_rt::{Bell, ControlDrop, FaultLatch, Listener};
+use tutti_rt::{Bell, ControlDrop, Counter, CounterWriter, FaultLatch, Listener, counter};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
+use super::alive::Alive;
 use crate::compile::ids::AudioSlotId;
 use crate::exec::slots::AudioSlots;
 use tutti_buffers::Float;
@@ -94,7 +95,7 @@ pub struct TapWriter<F: Float = f32> {
     next: Frame,
     /// Frames refused, counted per frame (the rings take whole blocks or none:
     /// they are `Refuse` and count nothing), shared with the reader.
-    lost: Arc<AtomicU64>,
+    lost: CounterWriter<Samples>,
     /// Rung after each block written, for a reader that awaits frames.
     bell: Option<Bell>,
     /// The reader's end latch, raised by [`close`](Self::close).
@@ -157,6 +158,71 @@ fn is_open<F: Float>(lane: &RingWriter<F>) -> bool {
 struct Run {
     start: Frame,
     frames: usize,
+}
+
+/// A reader's place in the writer's [`Run`]s: the runs not yet read through,
+/// the frame the next one handed out is, and how much of the current run is
+/// left. `left` is zero when no run is under way, and every sample read has
+/// its run (a run is written before its samples).
+struct RunCursor {
+    /// The writer's runs not yet read through.
+    runs: RingReader<Run>,
+    /// The graph frame of the next frame to hand out, while `left` is not
+    /// zero; once a run is read through, the frame after it.
+    at: Frame,
+    /// Frames of the current run not yet handed out.
+    left: usize,
+}
+
+impl RunCursor {
+    fn new(runs: RingReader<Run>) -> Self {
+        Self {
+            runs,
+            at: Frame::ZERO,
+            left: 0,
+        }
+    }
+
+    /// The graph frame of the next frame to hand out: the next run's start
+    /// when none is under way.
+    fn next_frame(&self) -> Frame {
+        if self.left > 0 {
+            return self.at;
+        }
+        self.runs.peek().map_or(self.at, |run| run.start)
+    }
+
+    /// Frames in the runs before the first gap, counting the one under way.
+    fn contiguous(&self) -> Samples {
+        let mut end = self.at + Samples::new(self.left);
+        let mut run = self.left;
+        for next in self.runs.iter() {
+            if run > 0 && next.start != end {
+                break;
+            }
+            run += next.frames;
+            end = next.start + Samples::new(next.frames);
+        }
+        Samples::new(run)
+    }
+
+    /// Advances over `frames` just handed out, across run boundaries.
+    fn consume(&mut self, mut frames: usize) {
+        while frames > 0 {
+            if self.left == 0 {
+                let Some(run) = self.runs.pop() else {
+                    debug_assert!(false, "a sample was read with no run to place it");
+                    return;
+                };
+                self.at = run.start;
+                self.left = run.frames;
+            }
+            let step = frames.min(self.left);
+            self.at += Samples::new(step);
+            self.left -= step;
+            frames -= step;
+        }
+    }
 }
 
 /// The most blocks a ring holds the start frame of at once, however deep its
@@ -275,9 +341,9 @@ impl<F: Float> TapWriter<F> {
     }
 
     #[inline]
-    fn count_lost(&self, frames: usize) {
+    fn count_lost(&mut self, frames: usize) {
         if frames > 0 {
-            self.lost.fetch_add(frames as u64, Ordering::Relaxed);
+            self.lost.add(Samples::new(frames));
         }
     }
 }
@@ -311,8 +377,7 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
         );
     }
     if take < frames {
-        tap.lost
-            .fetch_add((frames - take) as u64, Ordering::Relaxed);
+        tap.lost.add(Samples::new(frames - take));
     }
     if take > 0 {
         tap.ring();
@@ -329,16 +394,13 @@ pub struct TapReader<F: Float = f32> {
     /// The tap's id in a topology; `None` for a reader outside any.
     id: Option<TapId>,
     lanes: Vec<RingReader<F>>,
-    lost: Arc<AtomicU64>,
-    /// The writer's [`Run`]s not yet read through.
-    runs: RingReader<Run>,
-    /// The graph frame of the next frame to hand out, while `left` is not
-    /// zero; once a run is read through, the frame after it.
-    at: Frame,
-    /// Frames of the current run not yet handed out.
-    left: usize,
-    /// The editor holds a `Weak` of this: when it dies, the reader is gone.
-    alive: Arc<()>,
+    lost: Counter<Samples>,
+    /// What `lost` read at the last [`take_lost`](Self::take_lost).
+    lost_seen: Cell<Samples>,
+    /// Where the reader is in the writer's runs.
+    cursor: RunCursor,
+    /// The editor watches this: when it dies, the reader is gone.
+    alive: Alive,
     /// The wait side of the bell the writer rings; `None` for a tap opened
     /// without one.
     listener: Option<Listener>,
@@ -401,7 +463,7 @@ impl<F: Float> TapReader<F> {
             Some((bell, listener)) => (Some(bell), Some(listener)),
             None => (None, None),
         };
-        let lost = Arc::new(AtomicU64::new(0));
+        let (lost, lost_reader) = counter::<Samples>();
         let end = Arc::new(TapEnd::new(bell.clone()));
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
@@ -412,11 +474,10 @@ impl<F: Float> TapReader<F> {
             _control: ControlDrop::new(),
             id,
             lanes: cons,
-            lost: Arc::clone(&lost),
-            runs: run_cons,
-            at: Frame::ZERO,
-            left: 0,
-            alive: Arc::new(()),
+            lost: lost_reader,
+            lost_seen: Cell::new(Samples::ZERO),
+            cursor: RunCursor::new(run_cons),
+            alive: Alive::default(),
             listener,
             end: Arc::clone(&end),
         };
@@ -449,7 +510,7 @@ impl<F: Float> TapReader<F> {
     /// is zero once the reader is dropped.
     #[must_use]
     pub fn watch(&self) -> Weak<()> {
-        Arc::downgrade(&self.alive)
+        self.alive.watch()
     }
 
     /// The latch the editor raises when the tap leaves the plan because every
@@ -479,7 +540,7 @@ impl<F: Float> TapReader<F> {
     /// **Ask before reading the rings**, as for `source_gone`.
     #[must_use]
     pub fn writer_gone(&self) -> bool {
-        self.runs.is_disconnected()
+        self.cursor.runs.is_disconnected()
     }
 
     /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
@@ -528,7 +589,7 @@ impl<F: Float> TapReader<F> {
                 }
             });
         }
-        self.consume(frames);
+        self.cursor.consume(frames);
         Ok(Samples::new(frames))
     }
 
@@ -564,7 +625,7 @@ impl<F: Float> TapReader<F> {
             let popped = lane.pop_slice(&mut plane.samples_mut()[..frames]);
             debug_assert_eq!(popped, frames, "available counted every lane");
         }
-        self.consume(frames);
+        self.cursor.consume(frames);
         Ok(Samples::new(frames))
     }
 
@@ -586,10 +647,7 @@ impl<F: Float> TapReader<F> {
     /// frames it was offered from zero, written or lost.
     #[must_use]
     pub fn next_frame(&self) -> Frame {
-        if self.left > 0 {
-            return self.at;
-        }
-        self.runs.peek().map_or(self.at, |run| run.start)
+        self.cursor.next_frame()
     }
 
     /// Frames readable now before the first gap (a block the rings refused):
@@ -597,43 +655,16 @@ impl<F: Float> TapReader<F> {
     /// never inside a read. At most [`available`](Self::available).
     #[must_use]
     pub fn contiguous(&self) -> Samples {
-        let mut end = self.at + Samples::new(self.left);
-        let mut run = self.left;
-        for next in self.runs.iter() {
-            if run > 0 && next.start != end {
-                break;
-            }
-            run += next.frames;
-            end = next.start + Samples::new(next.frames);
-        }
-        Samples::new(run).min(self.available())
-    }
-
-    /// Advances the clock over `frames` just handed out, across run
-    /// boundaries.
-    fn consume(&mut self, mut frames: usize) {
-        while frames > 0 {
-            if self.left == 0 {
-                // A run is written before its samples, so every sample read
-                // has its run.
-                let Some(run) = self.runs.pop() else {
-                    debug_assert!(false, "a sample was read with no run to place it");
-                    return;
-                };
-                self.at = run.start;
-                self.left = run.frames;
-            }
-            let step = frames.min(self.left);
-            self.at += Samples::new(step);
-            self.left -= step;
-            frames -= step;
-        }
+        self.cursor.contiguous().min(self.available())
     }
 
     /// Frames the executor could not push since the last call, and clears the
     /// count: nonzero is a gap in what was read.
     pub fn take_lost(&self) -> Samples {
-        Samples::new(usize::try_from(self.lost.swap(0, Ordering::Relaxed)).unwrap_or(usize::MAX))
+        let mut seen = self.lost_seen.get();
+        let lost = self.lost.take_since(&mut seen);
+        self.lost_seen.set(seen);
+        lost
     }
 }
 

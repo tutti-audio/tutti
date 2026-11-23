@@ -36,13 +36,16 @@ fn convolver_process_is_allocation_free() {
 /// levels.
 #[test]
 fn zero_latency_convolver_process_is_allocation_free() {
-    use tutti_buffers::BusTopology;
+    use tutti_buffers::ChannelTopology;
     use tutti_fixtures::signal::decay_ir;
     use tutti_nodes::ConvolverConfig;
 
     let ir = decay_ir(8192, Seconds::new(0.3), SampleRate::SR_48K);
     let irs = [Mono::new(&ir); 4];
-    for (bus, layout) in [(BusTopology::MONO, false), (BusTopology::STEREO, true)] {
+    for (bus, layout) in [
+        (ChannelTopology::MONO, false),
+        (ChannelTopology::STEREO, true),
+    ] {
         let config = ConvolverConfig::new(bus, if layout { &irs[..] } else { &irs[..1] })
             .block_size(Samples::new(128))
             .zero_latency();
@@ -87,7 +90,7 @@ fn fir_convolver_process_is_allocation_free() {
         .unwrap();
     gate(
         ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &fir)
+            FirConvolverConfig::new(tutti_buffers::ChannelTopology::STEREO, &fir)
                 .block_size(Samples::new(64)),
         )
         .unwrap(),
@@ -340,8 +343,10 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// A one-channel convolver over `ir`.
@@ -350,7 +355,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
@@ -374,7 +379,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()

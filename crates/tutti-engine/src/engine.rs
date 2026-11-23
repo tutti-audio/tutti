@@ -1673,9 +1673,9 @@ impl<F: Float> GraphRender<F> {
 mod tests {
     use super::*;
     use tutti_buffers::Bed;
-    use tutti_buffers::ChannelTopology;
     use tutti_buffers::MaxBlock;
     use tutti_buffers::Placement;
+    use tutti_buffers::{ChannelSet, ChannelTopology};
     use tutti_graph::Prepare;
     use tutti_timeline::Timeline;
     use tutti_timeline::{MotionCommand, Transport};
@@ -2261,7 +2261,7 @@ mod tests {
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
 
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
         declare(&mut ed, &control, buses, six).expect("buses place by index");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
 
@@ -2290,7 +2290,7 @@ mod tests {
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
-        let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
+        let five_one = tutti_buffers::Bed::Surround51.topology();
         declare(&mut ed, &control, Some(five_one), ChannelLayout::STEREO).expect("5.1 into stereo");
         assert_eq!(first_frame(&engine, 2), folded);
         // The same six channels declared with the front pair swapped.
@@ -2331,9 +2331,9 @@ mod tests {
         assert_eq!(first_frame(&engine, 8), quad_on_eight);
         let mut id = ed.spec().main_output_id;
         for main_output in [
-            ChannelTopology::unassigned(ChannelLayout::QUAD),
-            ChannelTopology::default_for(ChannelLayout::from(6u16)),
-            ChannelTopology::default_for(eight),
+            ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap(),
+            tutti_buffers::Bed::Surround51.topology(),
+            ChannelTopology::default_for(eight).unwrap(),
         ] {
             id = id.next();
             control
@@ -2346,7 +2346,7 @@ mod tests {
         control
             .publish_main_output(
                 id,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 eight,
             )
             .unwrap();
@@ -2386,7 +2386,7 @@ mod tests {
             declare(
                 &mut ed.borrow_mut(),
                 &control,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 six,
             )
             .unwrap();
@@ -2409,7 +2409,7 @@ mod tests {
         let six = ChannelLayout::from(6u16);
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
         declare(&mut ed, &control, buses, six).unwrap();
         let before = engine.blocks().get().silenced;
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
@@ -2453,7 +2453,7 @@ mod tests {
             });
             for i in 0..2_000 {
                 let main_output =
-                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));
+                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
                 let id = ed.spec().main_output_id.next();
                 match control.publish_main_output(id, main_output, six) {
                     Ok(()) => {
@@ -2699,7 +2699,9 @@ mod tests {
         };
         assert!(control.set_routing(to_five.clone()).is_err(), "device 2");
         control
-            .state_device(ChannelLayout::from(8u16), None)
+            .state_device(crate::OutputPlacement::default_for(ChannelLayout::from(
+                8u16,
+            )))
             .unwrap();
         assert_eq!(control.set_routing(to_five), Ok(()));
     }
@@ -2859,7 +2861,7 @@ mod tests {
         control
             .publish_main_output(
                 id,
-                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16))),
+                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16)).unwrap()),
                 three,
             )
             .unwrap();
@@ -2898,25 +2900,22 @@ mod tests {
         // A 2-wide device stated as a left-right swap of the front pair: the
         // main output's left lands on the device's channel 1.
         let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
-        control.state_device(stereo, Some(swapped.clone())).unwrap();
+        control
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
+            .unwrap();
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);
-        assert_eq!(placed.topology, swapped);
+        assert_eq!(placed.channels, ChannelSet::from(swapped));
         assert_eq!(first_frame_after_fade(&engine, 2), [22.0, 21.0]);
         // Taken back: the width's order.
-        control.state_device(stereo, None).unwrap();
+        control
+            .state_device(crate::OutputPlacement::default_for(stereo))
+            .unwrap();
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
             Some(Placement::Default)
         );
         assert_eq!(first_frame_after_fade(&engine, 2), [21.0, 22.0]);
-        // A statement of another width than the device is refused.
-        assert!(matches!(
-            control.state_device(ChannelLayout::from(6u16), Some(swapped)),
-            Err(FoldError::Buffer(
-                tutti_buffers::BufferError::WidthMismatch { .. }
-            ))
-        ));
     }
 
     /// A main output generation's folds are published until a plan of a later main output
@@ -3282,7 +3281,7 @@ mod tests {
         ])
         .unwrap();
         control
-            .state_device(ChannelLayout::from(3u16), Some(swapped))
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
         assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
         assert!(control.cell().current().previous().is_some());
@@ -3339,7 +3338,7 @@ mod tests {
         .unwrap();
         engine
             .output_control()
-            .state_device(ChannelLayout::STEREO, Some(swapped))
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
         let n = declick_frames(SampleRate::SR_48K).get();
         let mut out = vec![0.0f32; (n + 8) * 2];
@@ -3678,7 +3677,7 @@ mod tests {
         control
             .publish_main_output(
                 ed.spec().main_output_id.next(),
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::from(6u16),
             )
             .unwrap();
@@ -3706,7 +3705,7 @@ mod tests {
         assert_eq!(
             control.publish_main_output(
                 next,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::STEREO
             ),
             Err(tutti_graph::MainOutputError::Fold(FoldError::Unplaced {

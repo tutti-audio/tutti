@@ -16,8 +16,12 @@
 
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
 use crate::transport::PendingLane;
-use crate::{ControlRequest, Framed, Lane, ReqId, Request, SlabHandle, SlabLayout};
+use crate::{
+    BlobWire, ControlRequest, Framed, Lane, LaneWire, LoadState, Message, OpenLane, ReqId, Request,
+    SetupSharedMemory, SlabHandle, SlabLayout, SlabWire, StageState,
+};
 use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
+use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
@@ -71,64 +75,194 @@ fn send_failed(io: std::io::Error) -> IpcError {
     }
 }
 
-/// Writes the request that points the server at `slab`, and then the slab.
-///
-/// The frame carries the layout and what of the slab a frame can carry
-/// ([`SlabHandle::wire`]); the slab follows it as its own message, which the
-/// server's transport reads right after the frame. This is the only way a
-/// `SetupSharedMemory` is written, so the frame never goes without its slab.
+/// An object that follows the frame announcing it: the second half of
+/// [`send_attached`].
+pub(crate) trait Attached {
+    /// What the frame carries of the object.
+    type Wire;
+    /// What the sender holds until the server has answered: a [`Lease`] for a blob
+    /// read by name, the object itself where the server maps it by name, or `()`.
+    type Held;
+
+    /// What the frame that announces this object carries.
+    fn wire(&self) -> Self::Wire;
+
+    /// Writes the object to the connection, right after its frame.
+    fn send(self, conn: Connection<'_>) -> std::io::Result<Self::Held>;
+}
+
+/// No object: the frame stands alone.
+impl Attached for () {
+    type Wire = ();
+    type Held = ();
+
+    fn wire(&self) {}
+
+    fn send(self, _: Connection<'_>) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Attached for Blob {
+    type Wire = BlobWire;
+    type Held = Lease;
+
+    fn wire(&self) -> BlobWire {
+        Blob::wire(self)
+    }
+
+    fn send(self, conn: Connection<'_>) -> std::io::Result<Lease> {
+        Blob::send(self, conn)
+    }
+}
+
+impl Attached for SlabHandle {
+    type Wire = SlabWire;
+    type Held = Self;
+
+    fn wire(&self) -> SlabWire {
+        SlabHandle::wire(self)
+    }
+
+    fn send(self, conn: Connection<'_>) -> std::io::Result<Self> {
+        SlabHandle::send(&self, conn)?;
+        Ok(self)
+    }
+}
+
+impl Attached for PendingLane {
+    type Wire = LaneWire;
+    type Held = Self;
+
+    fn wire(&self) -> LaneWire {
+        PendingLane::wire(self)
+    }
+
+    fn send(self, conn: Connection<'_>) -> std::io::Result<Self> {
+        self.send_end(conn)?;
+        Ok(self)
+    }
+}
+
+/// A request that is followed by an object, and how it is made from that object.
+pub(crate) trait Announces: Message {
+    /// The object that follows the request.
+    type Object: Attached;
+    /// What the request carries beside the object's wire.
+    type Rest;
+
+    /// The request that announces an object by `wire`, with `rest` of its fields.
+    fn announce(wire: <Self::Object as Attached>::Wire, rest: Self::Rest) -> Self;
+}
+
+impl Announces for SetupSharedMemory {
+    type Object = SlabHandle;
+    /// The slab's layout.
+    type Rest = SlabLayout;
+
+    fn announce(slab: SlabWire, layout: SlabLayout) -> Self {
+        Self { slab, layout }
+    }
+}
+
+impl Announces for OpenLane {
+    type Object = PendingLane;
+    type Rest = Lane;
+
+    fn announce(wire: LaneWire, lane: Lane) -> Self {
+        Self { lane, wire }
+    }
+}
+
+impl Announces for LoadState {
+    type Object = Blob;
+    /// What the state is restored for, and its length.
+    type Rest = (StateUse, u64);
+
+    fn announce(blob: BlobWire, (state_use, len): (StateUse, u64)) -> Self {
+        Self {
+            state_use,
+            len,
+            blob,
+        }
+    }
+}
+
+impl Announces for StageState {
+    type Object = Blob;
+    /// The state's length.
+    type Rest = u64;
+
+    fn announce(blob: BlobWire, len: u64) -> Self {
+        Self { len, blob }
+    }
+}
+
+/// A request that announces an object, with that object. The request is made by
+/// [`Announces::announce`] from the object's own wire, so the frame names this
+/// object and no other: a caller supplies the object and the request's other
+/// fields, and never a wire.
+pub(crate) struct Announced<M: Announces> {
+    msg: M,
+    object: M::Object,
+}
+
+impl<M: Announces> Announced<M> {
+    /// `object`, with the request that announces it and carries `rest`.
+    pub(crate) fn new(object: M::Object, rest: M::Rest) -> Self {
+        Self {
+            msg: M::announce(object.wire(), rest),
+            object,
+        }
+    }
+
+    /// The request and the object it announces.
+    pub(crate) fn into_parts(self) -> (M, M::Object) {
+        (self.msg, self.object)
+    }
+}
+
+/// Writes the request of `announced` and then its object: the server's
+/// transport reads both before the request reaches its session, so a frame
+/// never goes without its object. Returns what the sender holds until the server
+/// has answered.
 ///
 /// # Errors
 ///
-/// As [`send`], and a failure to send the slab itself, which like any failure
+/// As [`send`], and a failure to send the object itself, which like any failure
 /// after the frame's first byte leaves the stream mid-message: the connection
 /// cannot go on.
-pub fn send_setup(
+pub(crate) fn send_attached<M: Announces>(
     stream: &mut ControlStream,
     id: ReqId,
-    layout: SlabLayout,
-    slab: &SlabHandle,
-) -> IpcResult<()> {
-    let body = ControlRequest::SetupSharedMemory {
-        slab: slab.wire(),
-        layout,
-    };
-    send_then(stream, id, body, |conn| slab.send(conn))
+    announced: Announced<M>,
+) -> IpcResult<<M::Object as Attached>::Held> {
+    let (msg, object) = announced.into_parts();
+    send_object(stream, id, msg, object)
 }
 
-/// Writes the request that opens `lane`, and then the server's end of it
-/// ([`PendingLane::send_end`]), as [`send_setup`] does a slab.
+/// Writes the request `msg` and then `object`, which `msg` announces: for a
+/// request whose object travels apart from it (a queued command).
 ///
 /// # Errors
 ///
-/// As [`send_setup`].
-pub(crate) fn send_open_lane(
+/// As [`send_attached`].
+pub(crate) fn send_object<A: Attached>(
     stream: &mut ControlStream,
     id: ReqId,
-    lane: Lane,
-    pending: &PendingLane,
-) -> IpcResult<()> {
-    let body = ControlRequest::OpenLane {
-        lane,
-        wire: pending.wire(),
-    };
-    send_then(stream, id, body, |conn| pending.send_end(conn))
-}
-
-/// Writes the request `body`, which announces `blob` ([`Blob::wire`] is in it),
-/// and then the blob, as [`send_setup`] does a slab. The returned [`Lease`] is
-/// held until the server has answered.
-///
-/// # Errors
-///
-/// As [`send_setup`].
-pub fn send_blob(
-    stream: &mut ControlStream,
-    id: ReqId,
-    body: ControlRequest,
-    blob: Blob,
-) -> IpcResult<Lease> {
-    send_then(stream, id, body, |conn| blob.send(conn))
+    msg: impl Into<ControlRequest>,
+    object: A,
+) -> IpcResult<A::Held> {
+    send(
+        stream,
+        &Request {
+            id,
+            body: msg.into(),
+        },
+    )?;
+    object
+        .send(super::sys::connection(stream))
+        .map_err(send_failed)
 }
 
 /// Writes `state` as the answer to request `id`: its `StateReady` frame and the
@@ -150,17 +284,6 @@ pub fn send_state_reply(stream: &ControlStream, id: ReqId, state: &[u8]) -> IpcR
         .send(super::sys::connection(stream))
         .map_err(send_failed)?;
     Ok(())
-}
-
-/// Writes request `body`, then what follows its frame on the stream.
-fn send_then<T>(
-    stream: &mut ControlStream,
-    id: ReqId,
-    body: ControlRequest,
-    then: impl FnOnce(Connection<'_>) -> std::io::Result<T>,
-) -> IpcResult<T> {
-    send(stream, &Request { id, body })?;
-    then(super::sys::connection(stream)).map_err(send_failed)
 }
 
 /// Wait longer each time a peeked stream comes back empty, never past `remaining`.
@@ -609,7 +732,7 @@ mod tests {
     /// memory.** The server's end reads the `SetupSharedMemory` frame, takes the
     /// slab right after it, and maps what the host wrote into.
     #[test]
-    fn a_setup_is_a_frame_then_the_slab_it_announced() {
+    fn an_attached_request_is_a_frame_then_the_slab_it_announced() {
         use crate::protocol::frame::read_frame;
         use crate::{AudioSlab, RING_SLOTS, SlabLayout};
         let layout = SlabLayout {
@@ -625,7 +748,8 @@ mod tests {
 
         let mut p = pair();
         let mut server = p.take_peer();
-        send_setup(&mut p.host, ReqId::new(7), layout.clone(), &handle).unwrap();
+        let announced = Announced::<crate::SetupSharedMemory>::new(handle, layout.clone());
+        send_attached(&mut p.host, ReqId::new(7), announced).unwrap();
 
         let Request { id, body } = read_frame(&mut server).unwrap();
         assert_eq!(id, ReqId::new(7));

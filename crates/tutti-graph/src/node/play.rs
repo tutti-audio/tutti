@@ -20,8 +20,9 @@
 //! epoch equals a live one's, and a reading taken from one executor never
 //! names a play start of another.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
+
+use tutti_rt::{GaugeWriter, Reading};
 
 use tutti_units::{Frame, PlayReading, Samples};
 
@@ -127,19 +128,19 @@ pub(crate) struct PlayState {
     next: PlayReading,
     /// Whether the transport was playing on the last block's last frame.
     playing: bool,
-    /// The last block's end reading, packed ([`PlayReading::pack`]), for
+    /// The last block's end reading, for
     /// [`Editor::play_reading`](crate::Editor::play_reading).
-    published: Arc<AtomicU64>,
+    published: GaugeWriter<Played>,
 }
 
 impl PlayState {
     /// A fresh clock: play 0, in a fresh epoch, stopped.
-    pub(crate) fn new(published: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(mut published: GaugeWriter<Played>) -> Self {
         let next = PlayReading {
             epoch: fresh_epochs(1),
             play: Frame::ZERO,
         };
-        published.store(next.pack(), Ordering::Relaxed);
+        published.set(Played(next));
         Self {
             next,
             playing: false,
@@ -175,7 +176,7 @@ impl PlayState {
             None => env.play.start,
         };
         self.playing = env.playing_at_end();
-        self.published.store(self.next.pack(), Ordering::Release);
+        self.published.set(Played(self.next));
     }
 
     /// The reading at the next block's first frame.
@@ -190,13 +191,19 @@ impl PlayState {
     }
 }
 
-/// The control side's handle on an executor's play clock.
-#[derive(Clone, Debug)]
-pub(crate) struct PlayReader(pub(crate) Arc<AtomicU64>);
+/// The play clock as a gauge reads it: packed in one word
+/// ([`PlayReading::pack`]), so the epoch and the count are read together.
+/// The gauge's store releases and its load acquires, as the clock's
+/// publication needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Played(pub(crate) PlayReading);
 
-impl PlayReader {
-    pub(crate) fn read(&self) -> PlayReading {
-        PlayReading::unpack(self.0.load(Ordering::Acquire))
+impl Reading for Played {
+    fn to_bits(self) -> u64 {
+        self.0.pack()
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self(PlayReading::unpack(bits))
     }
 }
 
@@ -204,6 +211,7 @@ impl PlayReader {
 mod tests {
     use super::*;
     use crate::node::time::{TransportChanges, TransportPosition};
+    use tutti_rt::gauge;
     use tutti_units::{Beat, Bpm, SampleRate};
 
     fn t(playing: bool) -> TransportPosition {
@@ -316,13 +324,12 @@ mod tests {
     /// block's start.
     #[test]
     fn a_start_between_blocks_restarts_the_next_block() {
-        let published = Arc::new(AtomicU64::new(0));
-        let mut s = PlayState::new(Arc::clone(&published));
-        let reader = PlayReader(Arc::clone(&published));
+        let (writer, reader) = gauge(Played(PlayReading::default()));
+        let mut s = PlayState::new(writer);
         let e1 = env(false, &[], s.begin(false, 0));
         assert_eq!(e1.play.start.play, Frame::new(0));
         s.end(&e1);
-        assert_eq!(reader.read().play, Frame::new(64));
+        assert_eq!(reader.get().0.play, Frame::new(64));
         let e2 = env(true, &[], s.begin(true, 0));
         assert_eq!(e2.play.start.play, Frame::new(0), "a start restarts it");
         assert_ne!(e2.play.start.epoch, e1.play.start.epoch, "in a new epoch");
@@ -330,14 +337,14 @@ mod tests {
         let e3 = env(true, &[], s.begin(true, 0));
         assert_eq!(e3.play.start, e2.play.start.after(Samples::new(64)));
         s.end(&e3);
-        assert_eq!(reader.read(), e3.play.start.after(Samples::new(64)));
+        assert_eq!(reader.get().0, e3.play.start.after(Samples::new(64)));
     }
 
     /// A block of no frames advances the clock by nothing.
     #[test]
     fn an_empty_block_advances_nothing() {
-        let published = Arc::new(AtomicU64::new(0));
-        let mut s = PlayState::new(Arc::clone(&published));
+        let (writer, reader) = gauge(Played(PlayReading::default()));
+        let mut s = PlayState::new(writer);
         let e1 = env(false, &[], s.begin(false, 0));
         s.end(&e1);
         let before = s.reading();
@@ -346,7 +353,7 @@ mod tests {
             empty.block_len = Samples::new(0);
             s.end(&empty);
             assert_eq!(s.reading(), before, "empty block {k}");
-            assert_eq!(PlayReader(Arc::clone(&published)).read(), before);
+            assert_eq!(reader.get().0, before);
         }
     }
 }

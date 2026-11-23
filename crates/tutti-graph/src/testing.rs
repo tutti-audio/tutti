@@ -1,5 +1,5 @@
-//! Small test nodes and a harness that drives the executor and the reference
-//! interpreter side by side.
+//! Small test nodes, a harness that drives the executor, and a pair that
+//! drives it beside the reference interpreter.
 //!
 //! Every node here is deterministic, declares an **honest** tail (the
 //! executor's silence skip trusts it), and never turns silence into `-0.0`
@@ -716,11 +716,11 @@ pub fn units_costed<F: Float>(
         .collect()
 }
 
-/// The executor and the reference, driven together.
-pub struct Pair<F: Float = f32> {
+/// The executor, driven block by block over a graph the harness compiles
+/// itself and ships through [`Editor::package`].
+pub struct Harness<F: Float = f32> {
     pub editor: Editor<F>,
     pub exec: Executor<F>,
-    pub reference: Reference<F>,
     pub plan: Option<Plan>,
     pub outputs: usize,
     pub inputs: usize,
@@ -732,8 +732,8 @@ pub struct Pair<F: Float = f32> {
     graph: Option<ValidGraph>,
 }
 
-impl Pair {
-    /// An `f32` pair. [`with_format`](Pair::with_format) builds one for
+impl Harness {
+    /// An `f32` harness. [`with_format`](Harness::with_format) builds one for
     /// another sample format.
     pub fn new(max_block: usize) -> Self {
         Self::with_format(max_block)
@@ -742,24 +742,21 @@ impl Pair {
     /// As [`new`](Self::new), with the executor running blocks on a shared
     /// [`TestPool`] of `workers` participants (`1`: no pool).
     pub fn with_workers(max_block: usize, workers: usize) -> Self {
-        let mut pair = Self::new(max_block);
+        let mut harness = Self::new(max_block);
         if workers > 1 {
-            pair.exec.set_pool(Some(test_pool(workers)));
+            harness.exec.set_pool(Some(test_pool(workers)));
         }
-        pair
+        harness
     }
 }
 
-impl<F: Float> Pair<F> {
-    /// A pair in sample format `F`.
+impl<F: Float> Harness<F> {
+    /// A harness in sample format `F`.
     pub fn with_format(max_block: usize) -> Self {
-        // The harness compiles itself, to hand the same spec to both
-        // interpreters, and ships the plan through `Editor::package`.
         let (editor, exec) = Editor::with_event_capacity(prepare(max_block), EVENT_CAPACITY);
         Self {
             editor,
             exec,
-            reference: Reference::with_format(prepare(max_block)),
             plan: None,
             outputs: 0,
             inputs: 0,
@@ -769,7 +766,7 @@ impl<F: Float> Pair<F> {
         }
     }
 
-    /// Switch both to `graph`, building fresh units for whatever is new or
+    /// Switch to `graph`, building fresh units for whatever is new or
     /// regenerated.
     pub fn switch(&mut self, graph: &ValidGraph, kinds: &BTreeMap<NodeKey, Kind>) {
         self.switch_with_fades(graph, kinds, &BTreeMap::new());
@@ -777,15 +774,13 @@ impl<F: Float> Pair<F> {
 
     /// `switch`, with the regenerated keys in `fades` crossfading
     /// (`Editor::replace`'s contract). The executor gets the fades for the
-    /// keys its delta replaces, as `Editor::commit` attaches them; the
-    /// reference gets them all and decides for itself.
+    /// keys its delta replaces, as `Editor::commit` attaches them.
     ///
     /// A node's **declared latency is the spec's**, as after
     /// `Editor::set_latency`: the shapes compiled against take it from
     /// `graph`, not from the kind. A kept unit whose declared latency
     /// changed has its crossfade cut (`Delta::cuts`, as `Editor::commit`
-    /// attaches it, derived here from the two plans); the reference derives
-    /// the same from the two specs.
+    /// attaches it, derived here from the two plans).
     pub fn switch_with_fades(
         &mut self,
         graph: &ValidGraph,
@@ -873,42 +868,34 @@ impl<F: Float> Pair<F> {
             .expect("the harness collects every box");
         self.exec.apply_pending();
         self.editor.collect();
-
-        // The reference decides for itself what is new, from generations; give
-        // it a fresh unit for every key it might need.
-        let all = units_costed(kinds, &self.costs, graph.topology().nodes.keys().copied());
-        self.reference
-            .set_graph_with(graph, all, fades, self.editor.values());
     }
 
-    /// Move edge `id`'s weight to `base` in both, as a host moving a fader:
-    /// the editor's `set_edge_gain` (a store, no commit) and the reference's.
+    /// Move edge `id`'s weight to `base`, as a host moving a fader: the
+    /// editor's `set_edge_gain` (a store, no commit).
     pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
         self.editor
             .set_edge_gain(id, base)
             .expect("the edge has a gain entry");
-        self.reference.set_edge_gain(id, base);
     }
 
-    /// Sets the mode a unit placed at `key` by the next switch starts steady
-    /// in, in both: before the first block, no fade. After a switch it is
+    /// Sets the mode a unit placed at `key` by the next switch starts
+    /// steady in: before the first block, no fade. After a switch it is
     /// [`set_mode`](Self::set_mode) that moves a running unit.
     pub fn start_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
         self.editor.values_mut().set_mode(key, mode);
     }
 
-    /// Sets the base a lane declared by the next switch starts at, in both.
+    /// Sets the base a lane declared by the next switch starts at.
     pub fn start_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
         self.editor.values_mut().set_base(id, base);
     }
 
-    /// Sets the range a lane declared by the next switch starts with, in both.
+    /// Sets the range a lane declared by the next switch starts with.
     pub fn start_edge_gain_range(&mut self, id: crate::EdgeId, range: crate::ParamRange) {
         self.editor.values_mut().set_gain_range(id, range);
     }
 
-    /// Sets the range a port of a node placed by the next switch starts with,
-    /// in both.
+    /// Sets the range a port of a node placed by the next switch starts with.
     pub fn start_param_range(&mut self, at: crate::ParamIn, range: crate::ParamRange) {
         self.editor.values_mut().set_range(at, range);
     }
@@ -918,42 +905,38 @@ impl<F: Float> Pair<F> {
         self.editor.values_mut().set_mix(key, mix);
     }
 
-    /// Move `key`'s mode in both, as a host clicking bypass: the editor's
-    /// `set_mode` (a store, no commit) and the reference's.
-    pub fn set_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
-        // `set_mode` checks the node against the editor's spec, which a
-        // harness that compiles itself has left empty.
+    /// Gives the editor the graph's topology when its spec lacks `key`
+    /// (`set_mode` and `set_mix` check the node against it, and a harness
+    /// that compiles itself has left it empty).
+    fn know(&mut self, key: NodeKey) {
         if !self.editor.spec().topology.nodes.contains_key(&key) {
             let graph = self.graph.as_ref().expect("a graph was switched to");
             self.editor.spec_mut().topology = graph.topology().clone();
         }
+    }
+
+    /// Move `key`'s mode, as a host clicking bypass: the editor's `set_mode`
+    /// (a store, no commit).
+    pub fn set_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
+        self.know(key);
         self.editor
             .set_mode(key, mode)
             .expect("the harness's editor holds the graph's nodes");
-        self.reference.set_mode(key, mode);
     }
 
-    /// Move `key`'s mix in both, as a host moving a send knob: the editor's
-    /// `set_mix` (a store, no commit) and the reference's.
+    /// Move `key`'s mix, as a host moving a send knob: the editor's
+    /// `set_mix` (a store, no commit).
     pub fn set_mix(&mut self, key: NodeKey, mix: tutti_units::Mix) {
-        if !self.editor.spec().topology.nodes.contains_key(&key) {
-            let graph = self.graph.as_ref().expect("a graph was switched to");
-            self.editor.spec_mut().topology = graph.topology().clone();
-        }
+        self.know(key);
         self.editor
             .set_mix(key, mix)
             .expect("the harness's editor holds the graph's nodes");
-        self.reference.set_mix(key, mix);
     }
 
-    /// Move `key`'s mix range in both, as a host narrowing a send's knob: the
-    /// editor's `set_param_range` at the mix's address (a store, no commit) and
-    /// the reference's.
+    /// Move `key`'s mix range, as a host narrowing a send's knob: the
+    /// editor's `set_param_range` at the mix's address (a store, no commit).
     pub fn set_mix_range(&mut self, key: NodeKey, range: crate::ParamRange) {
-        if !self.editor.spec().topology.nodes.contains_key(&key) {
-            let graph = self.graph.as_ref().expect("a graph was switched to");
-            self.editor.spec_mut().topology = graph.topology().clone();
-        }
+        self.know(key);
         let at = crate::ParamIn {
             node: key,
             param: crate::NodeMix::ADDR,
@@ -961,15 +944,171 @@ impl<F: Float> Pair<F> {
         self.editor
             .set_param_range(at, range)
             .expect("the harness's editor holds the graph's nodes");
-        self.reference.set_param_range(at, range);
     }
 
-    /// Move edge `id`'s range in both: the editor's `set_edge_gain_range` (a
-    /// store, no commit) and the reference's.
+    /// Move edge `id`'s range: the editor's `set_edge_gain_range` (a store,
+    /// no commit).
     pub fn set_edge_gain_range(&mut self, id: crate::EdgeId, range: crate::ParamRange) {
         self.editor
             .set_edge_gain_range(id, range)
             .expect("the edge has a gain entry");
+    }
+
+    /// Channel `c` of the graph input is the signal scaled by 2^-c: exact,
+    /// and distinct per channel.
+    pub fn channels(&self, frames: usize, input: &[F]) -> Vec<Vec<F>> {
+        (0..self.inputs.max(1))
+            .map(|c| {
+                input[..frames]
+                    .iter()
+                    .map(|&x| x * F::from_f32(0.5f32.powi(c as i32)))
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Render one block; return the output channels.
+    pub fn block(&mut self, frames: usize, input: &[F]) -> Vec<Vec<F>> {
+        let transport = TransportPosition::new(
+            true,
+            tutti_units::Bpm::of(120.0),
+            tutti_units::Beat::new(0.0),
+            None,
+        );
+        self.block_at(frames, input, &transport)
+    }
+
+    /// `block`, under a transport the caller moves.
+    pub fn block_at(
+        &mut self,
+        frames: usize,
+        input: &[F],
+        transport: &TransportPosition,
+    ) -> Vec<Vec<F>> {
+        self.block_with_changes(frames, input, transport, &TransportChanges::NONE)
+    }
+
+    /// `block_at`, with the transport changing inside the block.
+    pub fn block_with_changes(
+        &mut self,
+        frames: usize,
+        input: &[F],
+        transport: &TransportPosition,
+        changes: &TransportChanges,
+    ) -> Vec<Vec<F>> {
+        let chans = self.channels(frames, input);
+        let ins: Vec<&[F]> = chans.iter().map(Vec::as_slice).collect();
+        let mut out = vec![vec![F::ZERO; frames]; self.outputs];
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+        self.exec
+            .process_with_changes(frames, transport, changes, &ins, &mut outs);
+        out
+    }
+}
+
+/// The executor and the reference, driven together.
+pub struct Pair<F: Float = f32> {
+    pub harness: Harness<F>,
+    pub reference: Reference<F>,
+}
+
+impl<F: Float> std::ops::Deref for Pair<F> {
+    type Target = Harness<F>;
+    fn deref(&self) -> &Harness<F> {
+        &self.harness
+    }
+}
+
+impl<F: Float> std::ops::DerefMut for Pair<F> {
+    fn deref_mut(&mut self) -> &mut Harness<F> {
+        &mut self.harness
+    }
+}
+
+impl Pair {
+    /// An `f32` pair. [`with_format`](Pair::with_format) builds one for
+    /// another sample format.
+    pub fn new(max_block: usize) -> Self {
+        Self::with_format(max_block)
+    }
+
+    /// As [`new`](Self::new), with the executor running blocks on a shared
+    /// [`TestPool`] of `workers` participants (`1`: no pool).
+    pub fn with_workers(max_block: usize, workers: usize) -> Self {
+        let mut pair = Self::new(max_block);
+        if workers > 1 {
+            pair.exec.set_pool(Some(test_pool(workers)));
+        }
+        pair
+    }
+}
+
+impl<F: Float> Pair<F> {
+    /// A pair in sample format `F`.
+    pub fn with_format(max_block: usize) -> Self {
+        Self {
+            harness: Harness::with_format(max_block),
+            reference: Reference::with_format(prepare(max_block)),
+        }
+    }
+
+    /// Switch both to `graph`, building fresh units for whatever is new or
+    /// regenerated.
+    pub fn switch(&mut self, graph: &ValidGraph, kinds: &BTreeMap<NodeKey, Kind>) {
+        self.switch_with_fades(graph, kinds, &BTreeMap::new());
+    }
+
+    /// [`Harness::switch_with_fades`]; the reference gets every fade and
+    /// decides for itself, and derives a cut from the two specs.
+    pub fn switch_with_fades(
+        &mut self,
+        graph: &ValidGraph,
+        kinds: &BTreeMap<NodeKey, Kind>,
+        fades: &BTreeMap<NodeKey, Fade>,
+    ) {
+        self.harness.switch_with_fades(graph, kinds, fades);
+        // The reference decides for itself what is new, from generations; give
+        // it a fresh unit for every key it might need.
+        let all = units_costed(
+            kinds,
+            &self.harness.costs,
+            graph.topology().nodes.keys().copied(),
+        );
+        self.reference
+            .set_graph_with(graph, all, fades, self.harness.editor.values());
+    }
+
+    /// Move edge `id`'s weight to `base` in both.
+    pub fn set_edge_gain(&mut self, id: crate::EdgeId, base: tutti_units::Gain) {
+        self.harness.set_edge_gain(id, base);
+        self.reference.set_edge_gain(id, base);
+    }
+
+    /// Move `key`'s mode in both.
+    pub fn set_mode(&mut self, key: NodeKey, mode: crate::NodeMode) {
+        self.harness.set_mode(key, mode);
+        self.reference.set_mode(key, mode);
+    }
+
+    /// Move `key`'s mix in both.
+    pub fn set_mix(&mut self, key: NodeKey, mix: tutti_units::Mix) {
+        self.harness.set_mix(key, mix);
+        self.reference.set_mix(key, mix);
+    }
+
+    /// Move `key`'s mix range in both.
+    pub fn set_mix_range(&mut self, key: NodeKey, range: crate::ParamRange) {
+        self.harness.set_mix_range(key, range);
+        let at = crate::ParamIn {
+            node: key,
+            param: crate::NodeMix::ADDR,
+        };
+        self.reference.set_param_range(at, range);
+    }
+
+    /// Move edge `id`'s range in both.
+    pub fn set_edge_gain_range(&mut self, id: crate::EdgeId, range: crate::ParamRange) {
+        self.harness.set_edge_gain_range(id, range);
         self.reference.set_edge_gain_range(id, range);
     }
 
@@ -1002,38 +1141,24 @@ impl<F: Float> Pair<F> {
         transport: &TransportPosition,
         changes: &TransportChanges,
     ) -> (Vec<Vec<F>>, Vec<Vec<F>>) {
-        let transport = *transport;
-        // Channel `c` of the graph input is the signal scaled by 2^-c: exact,
-        // and distinct per channel.
-        let chans: Vec<Vec<F>> = (0..self.inputs.max(1))
-            .map(|c| {
-                input[..frames]
-                    .iter()
-                    .map(|&x| x * F::from_f32(0.5f32.powi(c as i32)))
-                    .collect()
-            })
-            .collect();
+        let chans = self.harness.channels(frames, input);
         let ins: Vec<&[F]> = chans.iter().map(Vec::as_slice).collect();
-        let mut a = vec![vec![F::ZERO; frames]; self.outputs];
-        let mut b = vec![vec![F::ZERO; frames]; self.outputs];
-        {
-            let mut outs: Vec<&mut [F]> = a.iter_mut().map(Vec::as_mut_slice).collect();
-            self.exec
-                .process_with_changes(frames, &transport, changes, &ins, &mut outs);
-        }
+        let a = self
+            .harness
+            .block_with_changes(frames, input, transport, changes);
+        let mut b = vec![vec![F::ZERO; frames]; self.harness.outputs];
         {
             let mut outs: Vec<&mut [F]> = b.iter_mut().map(Vec::as_mut_slice).collect();
             self.reference
-                .process_with_changes(frames, &transport, changes, &ins, &mut outs);
+                .process_with_changes(frames, transport, changes, &ins, &mut outs);
         }
         // The one place either interpreter may refuse an event is a writer
         // past its node's declared capacity (`Kind::Burst`), which both do
-        // alike. Anything else the executor drops — a merge or a delay FIFO
-        // short of what the declarations promise, or a slot past its
-        // preallocated capacity — would surface as a divergence far from its
-        // cause, so the two counts are asserted equal here, where it happens.
+        // alike. Anything else the executor drops would surface as a
+        // divergence far from its cause, so the two counts are asserted equal
+        // here, where it happens.
         assert_eq!(
-            self.exec.dropped_event_count(),
+            self.harness.exec.dropped_event_count(),
             self.reference.dropped_event_count(),
             "the executor dropped events the reference did not"
         );

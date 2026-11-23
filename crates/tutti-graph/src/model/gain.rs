@@ -51,16 +51,16 @@
 //! nothing allocates on the audio thread.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 use tutti_curve::FadeLaw;
 
 use atomic_float::AtomicF64;
 
-use tutti_rt::{CappedVec, ParamCell};
+use tutti_rt::{AtomicCell, CappedVec, ParamCell, atomic_word};
 use tutti_units::{Gain, Samples, UnitAddr, UnitParam};
 
-use crate::exec::lane::{fade_in, ramp_in};
+use crate::exec::lane::{Declick, fade_in, ramp_in};
 use crate::model::spec::EventOutputPort;
 use crate::node::param::{
     EffectiveCell, ParamPorts, ParamRange, ParamRangeCell, ParamRanges, ParamState,
@@ -95,23 +95,7 @@ pub enum EdgeFade {
     Out,
 }
 
-impl EdgeFade {
-    fn bits(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::In => 1,
-            Self::Out => 2,
-        }
-    }
-
-    fn from_bits(bits: u8) -> Self {
-        match bits {
-            1 => Self::In,
-            2 => Self::Out,
-            _ => Self::None,
-        }
-    }
-}
+atomic_word!(EdgeFade { None, In, Out });
 
 /// What the spec holds of an edge's gain lane: the `source` that drives it.
 ///
@@ -196,7 +180,7 @@ pub enum EdgeGainError {
 pub(crate) struct GainCell {
     base: Arc<AtomicF64>,
     range: Arc<ParamRanges>,
-    fade: Arc<AtomicU8>,
+    fade: Arc<AtomicCell<EdgeFade>>,
 }
 
 impl GainCell {
@@ -207,19 +191,19 @@ impl GainCell {
         Self {
             base: Arc::new(AtomicF64::new(base.get())),
             range: ranges,
-            fade: Arc::new(AtomicU8::new(EdgeFade::None.bits())),
+            fade: Arc::new(AtomicCell::new(EdgeFade::None)),
         }
     }
 
     /// Store `fade`. Wait-free.
     pub(crate) fn store_fade(&self, fade: EdgeFade) {
-        self.fade.store(fade.bits(), Ordering::Release);
+        self.fade.store(fade);
     }
 
     /// The fade now. Wait-free.
     #[inline]
     fn load_fade(&self) -> EdgeFade {
-        EdgeFade::from_bits(self.fade.load(Ordering::Acquire))
+        self.fade.load()
     }
 
     /// Store `base`. Wait-free.
@@ -298,9 +282,9 @@ pub(crate) enum Weight<'a, F: Float> {
         /// The weight it arrives at.
         goal: F,
         /// Fade frames before this block.
-        k: usize,
+        k: Samples,
         /// The fade's length, [`DECLICK`](crate::DECLICK) in frames.
-        len: usize,
+        len: Samples,
     },
     /// A driven lane: the weight at each frame, already clamped to the
     /// lane's range (the param port's step).
@@ -329,8 +313,6 @@ pub(crate) struct SumLane<F: Float> {
     want: EdgeFade,
     /// The declick fade's bookkeeping.
     fade: FadeState<F>,
-    /// The declick's length in frames at the graph's rate.
-    declick: usize,
 }
 
 /// A lane's declick fade across blocks, carried across a commit that keeps the
@@ -339,20 +321,22 @@ pub(crate) struct SumLane<F: Float> {
 pub(crate) struct FadeState<F: Float> {
     /// The kind the lane last acted on.
     seen: EdgeFade,
-    /// Where the running fade left from; `None` when none runs.
-    start: Option<F>,
-    /// Frames of the running fade done.
-    k: usize,
+    /// Where the running fade left from; meaningful while `declick` runs.
+    start: F,
+    /// The fade's progress, over [`DECLICK`](crate::DECLICK) at the graph's
+    /// rate.
+    declick: Declick,
     /// A fade that ended, until the executor has told the editor.
     finished: Option<EdgeFade>,
 }
 
-impl<F: Float> Default for FadeState<F> {
-    fn default() -> Self {
+impl<F: Float> FadeState<F> {
+    /// No fade running, over `declick` frames.
+    fn new(declick: Samples) -> Self {
         Self {
             seen: EdgeFade::default(),
-            start: None,
-            k: 0,
+            start: F::ZERO,
+            declick: Declick::idle(declick),
             finished: None,
         }
     }
@@ -367,26 +351,24 @@ impl<F: Float> SumLane<F> {
             prev: None,
             drive: None,
             want: EdgeFade::None,
-            fade: FadeState::default(),
-            declick: 0,
+            fade: FadeState::new(Samples::ZERO),
         }
     }
 
     /// A lane reading `cell`, starting at its value. `driven` says whether
     /// this plan's lane has a source; `max` is the prepared block, which
-    /// sizes the driven state's values, and `declick` the declick's length
-    /// in frames. A lane the same edge had in the plan it replaces takes
+    /// sizes the driven state's values, and `declick` the declick's length.
+    /// A lane the same edge had in the plan it replaces takes
     /// that one's state with [`adopt`](Self::adopt). Control side: allocates
     /// the driven state.
-    pub(crate) fn weighted(cell: GainCell, driven: bool, max: usize, declick: usize) -> Self {
+    pub(crate) fn weighted(cell: GainCell, driven: bool, max: usize, declick: Samples) -> Self {
         Self {
             target: F::from_unit(cell.load()),
             want: cell.load_fade(),
             drive: driven.then(|| ParamState::lane(max, declick, cell.ranges())),
             cell: Some(cell),
             prev: None,
-            fade: FadeState::default(),
-            declick,
+            fade: FadeState::new(declick),
         }
     }
 
@@ -404,12 +386,14 @@ impl<F: Float> SumLane<F> {
         spare: &mut CappedVec<ParamState<F>>,
     ) {
         let Carried { prev, drive, fade } = carried;
+        let len = self.fade.declick.len();
         self.prev = prev;
-        self.fade = fade;
+        self.fade = FadeState {
+            declick: fade.declick.relength(len),
+            ..fade
+        };
         match drive {
-            Some(state)
-                if (self.drive.is_some() || state.busy()) && state.fits(max, self.declick) =>
-            {
+            Some(state) if (self.drive.is_some() || state.busy()) && state.fits(max, len) => {
                 if let Some(old) = self.drive.replace(state) {
                     crate::exec::place(spare, old);
                 }
@@ -490,7 +474,7 @@ impl<F: Float> SumLane<F> {
             if let Some(f) = drive.frames(0, frames) {
                 self.prev = f.last().copied();
                 // The port's frames are not scaled by a fade: it is over.
-                self.fade.start = None;
+                self.fade.declick.cut();
                 if want != self.fade.seen {
                     self.fade.seen = want;
                     self.fade.finished = (want != EdgeFade::None).then_some(want);
@@ -500,7 +484,7 @@ impl<F: Float> SumLane<F> {
         }
         if want != self.fade.seen {
             self.fade.seen = want;
-            self.fade.start = None;
+            self.fade.declick.cut();
             if want != EdgeFade::None {
                 let start = match want {
                     EdgeFade::In => self.prev.unwrap_or(F::ZERO),
@@ -510,33 +494,27 @@ impl<F: Float> SumLane<F> {
                     self.fade.finished = Some(want);
                     self.prev = Some(to);
                 } else {
-                    self.fade.start = Some(start);
-                    self.fade.k = 0;
+                    self.fade.start = start;
+                    self.fade.declick.restart();
                     self.fade.finished = None;
                 }
             }
         }
-        if let Some(start) = self.fade.start {
-            let (k, len) = (self.fade.k, self.declick);
+        if self.fade.declick.running() {
+            let (start, declick) = (self.fade.start, self.fade.declick);
             let w = Weight::Fade {
                 start,
                 goal: to,
-                k,
-                len,
+                k: declick.done(),
+                len: declick.len(),
             };
-            if k + frames >= len {
-                self.fade.start = None;
+            self.fade.declick.advance(Samples::new(frames));
+            let declick = self.fade.declick;
+            if declick.running() {
+                self.prev = Some(declick.between(start, to, declick.last_frame()));
+            } else {
                 self.fade.finished = Some(want);
                 self.prev = Some(to);
-            } else {
-                self.fade.k = k + frames;
-                self.prev = Some(fade_in(
-                    FadeLaw::EqualAmplitude,
-                    start,
-                    to,
-                    Samples::new(k + frames - 1),
-                    Samples::new(len),
-                ));
             }
             return w;
         }
@@ -616,8 +594,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) 
                         FadeLaw::EqualAmplitude,
                         start,
                         goal,
-                        Samples::new(k + i),
-                        Samples::new(len),
+                        k + Samples::new(i),
+                        len,
                     ) * x;
             }
         }
@@ -636,8 +614,8 @@ pub(crate) fn first<F: Float>(out: &mut [F], a: Option<&[F]>, w: Weight<'_, F>) 
                         FadeLaw::EqualAmplitude,
                         start,
                         goal,
-                        Samples::new(k + i),
-                        Samples::new(len),
+                        k + Samples::new(i),
+                        len,
                     ) * *o;
             }
         }
@@ -686,8 +664,8 @@ pub(crate) fn add<F: Float>(out: &mut [F], a: &[F], w: Weight<'_, F>) {
                     FadeLaw::EqualAmplitude,
                     start,
                     goal,
-                    Samples::new(k + i),
-                    Samples::new(len),
+                    k + Samples::new(i),
+                    len,
                 ) * x;
             }
         }
@@ -709,7 +687,10 @@ mod tests {
 
     fn lane(base: f32) -> (GainCell, SumLane<f32>) {
         let cell = GainCell::new(amp(base), EdgeGain::DEFAULT_RANGE);
-        (cell.clone(), SumLane::weighted(cell, false, 8, 240))
+        (
+            cell.clone(),
+            SumLane::weighted(cell, false, 8, Samples::new(240)),
+        )
     }
 
     /// The lane reads the snapshot, never the cell: a store after the
@@ -744,6 +725,62 @@ mod tests {
         );
         lane.snapshot();
         assert_eq!(lane.weight(8, None), Weight::Unit);
+    }
+
+    /// A lane with a fade in flight, adopted into a plan at half the sample
+    /// rate (a declick of 120 frames, not 240), fades over the new length,
+    /// keeps its progress, and a progress past the new length still runs one
+    /// block at the goal and reports the fade finished.
+    #[test]
+    fn an_adopted_fade_runs_over_the_new_declick_and_keeps_its_progress() {
+        let (cell, mut old) = lane(1.0);
+        cell.store_fade(EdgeFade::In);
+        let adopt = |old: &mut SumLane<f32>| {
+            let mut new = SumLane::<f32>::weighted(cell.clone(), false, 8, Samples::new(120));
+            new.adopt(old.carry(), 8, &mut CappedVec::with_capacity(1));
+            new
+        };
+
+        // 64 of 240 frames done: under the new length, so the fade goes on.
+        old.snapshot();
+        assert!(matches!(old.weight(64, None), Weight::Fade { .. }));
+        let mut kept = adopt(&mut old);
+        assert_eq!(kept.fade.declick.len(), Samples::new(120));
+        assert_eq!(kept.fade.declick.done(), Samples::new(64));
+        kept.snapshot();
+        assert_eq!(
+            kept.weight(32, None),
+            Weight::Fade {
+                start: 0.0,
+                goal: 1.0,
+                k: Samples::new(64),
+                len: Samples::new(120)
+            }
+        );
+        assert_eq!(kept.finished(), None);
+
+        // 200 of 240 done: past the new 120, so the next block is the last,
+        // at the goal, and the fade is reported.
+        let (cell, mut old) = lane(1.0);
+        cell.store_fade(EdgeFade::In);
+        old.snapshot();
+        old.weight(100, None);
+        old.snapshot();
+        old.weight(100, None);
+        let mut late = SumLane::<f32>::weighted(cell, false, 8, Samples::new(120));
+        late.adopt(old.carry(), 8, &mut CappedVec::with_capacity(1));
+        assert_eq!(late.fade.declick.len(), Samples::new(120));
+        late.snapshot();
+        assert_eq!(
+            late.weight(8, None),
+            Weight::Fade {
+                start: 0.0,
+                goal: 1.0,
+                k: Samples::new(200),
+                len: Samples::new(120)
+            }
+        );
+        assert_eq!(late.finished(), Some(EdgeFade::In));
     }
 
     #[test]

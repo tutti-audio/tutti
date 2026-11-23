@@ -48,9 +48,9 @@ mod tests {
     #[test]
     fn masks_match_ksmedia_and_are_zero_where_they_cannot_be_stated() {
         let m = |n: u16| {
-            channel_mask(&ChannelTopology::default_for(
-                tutti_buffers::ChannelLayout::from(n),
-            ))
+            channel_mask(
+                &ChannelTopology::default_for(tutti_buffers::ChannelLayout::from(n)).unwrap(),
+            )
         };
         assert_eq!(m(1), 0x4);
         assert_eq!(m(2), 0x3);

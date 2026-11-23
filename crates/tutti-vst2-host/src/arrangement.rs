@@ -9,7 +9,7 @@
 use thiserror::Error;
 use tutti_buffers::{ChannelTopology, Speaker, Speakers};
 use tutti_plugin_types::MainThreadMarker;
-use tutti_vst2_ffi::{MAX_ARRANGEMENT_CHANNELS, Speaker as Vst2Speaker, SpeakerArrangement};
+use tutti_vst2_ffi::{Speaker as Vst2Speaker, SpeakerArrangement};
 
 use crate::loaded::Vst2Loaded;
 
@@ -23,9 +23,6 @@ pub enum ArrangementError {
     /// The layout has a speaker VST 2 has no name for, so it cannot be proposed.
     #[error("{0:?} is a speaker VST 2 has no name for")]
     UnmappedSpeaker(Speaker),
-    /// The layout is wider than a VST 2 arrangement holds.
-    #[error("{0} channels are more than a VST 2 arrangement holds")]
-    TooWide(usize),
     /// The plugin is resumed; arrangements are set while it is suspended.
     #[error("a speaker arrangement is set while the plugin is suspended")]
     Resumed,
@@ -66,7 +63,7 @@ impl Vst2Loaded {
     ///
     /// # Errors
     ///
-    /// [`ArrangementError::UnmappedSpeaker`], [`ArrangementError::TooWide`] or
+    /// [`ArrangementError::UnmappedSpeaker`] or
     /// [`ArrangementError::Ambisonic`] when a layout cannot be written in the ABI, and
     /// [`ArrangementError::Resumed`] when the plugin is resumed. Nothing is sent in any
     /// of them.
@@ -112,8 +109,8 @@ impl Vst2Loaded {
             (true, None) => (
                 Negotiation::Unconfirmed,
                 Kept {
-                    input: Some(input.clone()),
-                    output: Some(output.clone()),
+                    input: Some(*input),
+                    output: Some(*output),
                 },
             ),
         };
@@ -133,15 +130,13 @@ fn same_speakers(wanted: &SpeakerArrangement, held: &SpeakerArrangement) -> bool
 /// # Errors
 ///
 /// [`ArrangementError::UnmappedSpeaker`] for a speaker with no VST 2 name
-/// ([`Speaker::Unknown`] and the top-side pair), [`ArrangementError::TooWide`] past
-/// [`MAX_ARRANGEMENT_CHANNELS`], and [`ArrangementError::Ambisonic`] for an ambisonic set.
+/// ([`Speaker::Unknown`] and the top-side pair), and [`ArrangementError::Ambisonic`] for an
+/// ambisonic set. A topology is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) wide,
+/// inside `tutti_vst2_ffi::MAX_ARRANGEMENT_CHANNELS`.
 pub(crate) fn arrangement_of(
     topology: &ChannelTopology,
 ) -> Result<SpeakerArrangement, ArrangementError> {
     let positions = topology.positions().ok_or(ArrangementError::Ambisonic)?;
-    if positions.len() > MAX_ARRANGEMENT_CHANNELS {
-        return Err(ArrangementError::TooWide(positions.len()));
-    }
     // The engine's one-channel bus is the centre, and VST 2's is `kSpeakerM`.
     if positions == [Speaker::FrontCenter] {
         return Ok(SpeakerArrangement::new(vec![Vst2Speaker::Mono]));
@@ -181,10 +176,11 @@ pub(crate) fn arrangement_of(
 }
 
 /// The topology an arrangement spells, or `None` when a speaker in it has no name in the
-/// shared vocabulary (`kSpeakerLfe2`), so the bus cannot be routed by speaker.
+/// shared vocabulary (`kSpeakerLfe2`), so the bus cannot be routed by speaker, or when it
+/// is wider than a topology holds.
 pub(crate) fn topology_of(arrangement: &SpeakerArrangement) -> Option<ChannelTopology> {
     if arrangement.speakers() == [Vst2Speaker::Mono] {
-        return Some(Speakers::from_format([Speaker::FrontCenter]).into());
+        return Some(ChannelTopology::MONO);
     }
     arrangement
         .speakers()
@@ -213,13 +209,13 @@ pub(crate) fn topology_of(arrangement: &SpeakerArrangement) -> Option<ChannelTop
             Vst2Speaker::Lfe2 => None,
         })
         .collect::<Option<Vec<_>>>()
-        .map(|speakers| Speakers::from_format(speakers).into())
+        .and_then(|speakers| Speakers::from_format(speakers).map(ChannelTopology::Speakers))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout};
+    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed};
     use tutti_vst2_ffi::SpeakerArrangementType as Kind;
 
     /// The engine's own beds map to the SDK's named arrangements: `kSpeakerArrMono`,
@@ -277,18 +273,6 @@ mod tests {
         );
     }
 
-    /// A layout wider than an arrangement holds is refused with its width.
-    #[test]
-    fn a_layout_past_the_arrangement_width_is_refused() {
-        let wide = ChannelTopology::unassigned(ChannelLayout::from(65u16));
-        assert_eq!(
-            arrangement_of(&wide).unwrap_err(),
-            ArrangementError::TooWide(65)
-        );
-        let widest = ChannelTopology::unassigned(ChannelLayout::from(64u16));
-        assert!(arrangement_of(&widest).is_ok());
-    }
-
     /// Each way is the other's inverse over every layout both can name, and `kSpeakerLfe2`,
     /// which the shared vocabulary has no speaker for, reads back as no topology.
     #[test]
@@ -310,6 +294,8 @@ mod tests {
                 Speaker::BackLeft,
                 Speaker::BackRight,
                 Speaker::TopCenter,
+            ],
+            vec![
                 Speaker::TopFrontLeft,
                 Speaker::TopFrontCenter,
                 Speaker::TopFrontRight,

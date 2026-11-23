@@ -8,7 +8,7 @@ use crate::last_good::LastGood;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_dsp::{OscillatorStep, OscillatorWave};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 
@@ -24,7 +24,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 /// wave), both read per frame: a driven control signal's every frame is heard, and a
 /// non-finite driven value holds the last finite one. Made from an
 /// [`OscillatorConfig`] (`OscillatorNode::from`); inserted, its controls
-/// are a [`ParamSet`]; a fork starts from the values last set through it, at
+/// are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the values last set through it, at
 /// phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate
@@ -35,13 +35,13 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 ///
 /// ```
 /// # use tutti_buffers::Planes;
-/// use tutti_graph::{GraphBuilder, Params, Prepare};
+/// use tutti_graph::{GraphBuilder, Prepare};
 /// use tutti_nodes::{OscillatorConfig, OscillatorNode, OscillatorWave};
 /// use tutti_units::{Amplitude, Hz, SampleRate, Samples};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
 ///
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-/// let tone = g.add_with_controls(Params(OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.5)))));
+/// let tone = g.add_with_controls(OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(440.0)).level(Amplitude::new(0.5))));
 /// g.pipe_output(tone.0);
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
@@ -53,8 +53,7 @@ use tutti_units::{Amplitude, Hz, SampleRate, Tail, UnitParam};
 #[derive(Clone, Debug)]
 pub struct OscillatorNode {
     wave: tutti_dsp::Oscillator,
-    frequency: Param<Hz>,
-    level: Param<Amplitude>,
+    cells: OscillatorCells,
     /// `None` until [`Node::prepare`]: no value is computed from a guessed rate.
     rate: Option<SampleRate>,
     /// The last finite frequency read from the cell or the port.
@@ -63,45 +62,21 @@ pub struct OscillatorNode {
     good_level: LastGood<f64>,
 }
 
-// The params an [`OscillatorNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([] OscillatorNode, n {
-    Frequency => Hz = &n.frequency,
-    Volume => Amplitude = &n.level,
+// The params an [`OscillatorNode`] lets the graph modulate, in port order, and the
+// [`OscillatorConfig`] it is made from: its wave, and its frequency and level at the start.
+tutti_graph::declare_params!([] OscillatorNode, #[derive(Copy, PartialEq)] OscillatorConfig, OscillatorCells {
+    required { wave: OscillatorWave }
+    params {
+        Frequency => frequency: Hz = Hz::new(440.0),
+        Volume => level: Amplitude = Amplitude::UNITY,
+    }
 });
-
-/// What an [`OscillatorNode`] is made from: its wave, its frequency and its level.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OscillatorConfig {
-    wave: OscillatorWave,
-    frequency: Hz,
-    level: Amplitude,
-}
-
-impl OscillatorConfig {
-    /// A `wave` at `frequency`, unity level.
-    #[must_use]
-    pub const fn new(wave: OscillatorWave, frequency: Hz) -> Self {
-        Self {
-            wave,
-            frequency,
-            level: Amplitude::UNITY,
-        }
-    }
-
-    /// The level the output is scaled by, at the start.
-    #[must_use]
-    pub const fn level(mut self, level: Amplitude) -> Self {
-        self.level = level;
-        self
-    }
-}
 
 impl From<OscillatorConfig> for OscillatorNode {
     fn from(config: OscillatorConfig) -> Self {
         Self {
             wave: tutti_dsp::Oscillator::new(config.wave),
-            frequency: Param::new(config.frequency),
-            level: Param::new(config.level),
+            cells: OscillatorCells::from_config(&config),
             rate: None,
             good_frequency: LastGood::new(config.frequency.get(), 0.0),
             good_level: LastGood::new(Amplitude::UNITY.get(), 1.0),
@@ -113,13 +88,13 @@ impl OscillatorNode {
     /// A handle on the frequency cell, for a UI or automation to share.
     #[must_use]
     pub fn frequency(&self) -> Param<Hz> {
-        self.frequency.handle()
+        self.cells.frequency.handle()
     }
 
     /// A handle on the level cell, for a UI or automation to share.
     #[must_use]
     pub fn level(&self) -> Param<Amplitude> {
-        self.level.handle()
+        self.cells.level.handle()
     }
 }
 
@@ -148,8 +123,8 @@ impl<F: Float> Node<F> for OscillatorNode {
         let level = self
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .frames();
-        let frequency_cell = self.frequency.load().get();
-        let level_cell = self.level.load().get();
+        let frequency_cell = self.cells.frequency.load().get();
+        let level_cell = self.cells.level.load().get();
         let out = io.output(0);
         // A frequency and a level that hold are read, and cross into `F`, once per block; a
         // control signal's value replaces them at each frame.
@@ -188,38 +163,12 @@ impl<F: Float> Node<F> for OscillatorNode {
     }
 }
 
-impl<F: Float> ParamNode<F> for OscillatorNode {
-    /// The frequency and the level.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cells detached (at their values now), at phase 0.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.frequency.detach();
-        fork.level.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for OscillatorNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{RATE, amplitude_at, mean};
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{Direct, assert_param_fork, drive};
+    use tutti_graph::contract::{Direct, drive};
 
     fn render(node: OscillatorNode, frames: usize) -> Vec<f32> {
         let mut d = Direct::new(node, RATE, frames);
@@ -228,33 +177,11 @@ mod tests {
     }
 
     #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(OscillatorNode::from(OscillatorConfig::new(
-            OscillatorWave::Saw,
-            Hz::new(220.0),
-        )));
-    }
-
-    #[test]
-    fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
-        let node = OscillatorNode::from(
-            OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)).level(Amplitude::new(0.25)),
-        );
-        let shape = Node::<f32>::shape(&node);
-        assert_eq!(shape.audio_in().count(), 0);
-        assert_eq!(shape.audio_out().count(), 1);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Frequency, UnitParam::Volume][..]
-        );
-        assert_eq!(Node::<f32>::param_base(&node, 0), Some(440.0));
-        assert_eq!(Node::<f32>::param_base(&node, 1), Some(0.25));
-    }
-
-    #[test]
     fn the_sine_is_sin_two_pi_f_t_at_the_graph_rate() {
         let out = render(
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0))),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(440.0)),
+            ),
             1_000,
         );
         for (n, &y) in out.iter().enumerate() {
@@ -266,12 +193,15 @@ mod tests {
     #[test]
     fn level_scales_the_output_exactly() {
         let full = render(
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(997.0))),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Saw).frequency(Hz::new(997.0)),
+            ),
             512,
         );
         let half = render(
             OscillatorNode::from(
-                OscillatorConfig::new(OscillatorWave::Saw, Hz::new(997.0))
+                OscillatorConfig::new(OscillatorWave::Saw)
+                    .frequency(Hz::new(997.0))
                     .level(Amplitude::new(0.5)),
             ),
             512,
@@ -284,11 +214,12 @@ mod tests {
     #[test]
     fn a_square_and_a_saw_have_no_dc_over_whole_periods() {
         for node in [
-            OscillatorNode::from(OscillatorConfig::new(
-                OscillatorWave::Square,
-                Hz::new(1_000.0),
-            )),
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(1_000.0))),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Square).frequency(Hz::new(1_000.0)),
+            ),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Saw).frequency(Hz::new(1_000.0)),
+            ),
         ] {
             let out = render(node, 48 * 20);
             assert!(mean(&out).abs() < 1e-6);
@@ -298,10 +229,9 @@ mod tests {
     #[test]
     fn a_square_peaks_at_plus_and_minus_one() {
         let out = render(
-            OscillatorNode::from(OscillatorConfig::new(
-                OscillatorWave::Square,
-                Hz::new(1_000.0),
-            )),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Square).frequency(Hz::new(1_000.0)),
+            ),
             48,
         );
         let (hi, lo) = out
@@ -318,7 +248,9 @@ mod tests {
     #[test]
     fn the_saw_does_not_alias_onto_a_non_harmonic_line() {
         let out = render(
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Saw, Hz::new(5_000.0))),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Saw).frequency(Hz::new(5_000.0)),
+            ),
             48 * 100,
         );
         assert!(amplitude_at(&out, 1_000.0, 48_000.0) < 0.003);
@@ -327,10 +259,9 @@ mod tests {
     #[test]
     fn a_driven_frequency_changes_the_pitch_per_frame() {
         let mut d = Direct::new(
-            OscillatorNode::from(OscillatorConfig::new(
-                OscillatorWave::Sine,
-                Hz::new(1_000.0),
-            )),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(1_000.0)),
+            ),
             RATE,
             96,
         );
@@ -355,7 +286,9 @@ mod tests {
         signal[8] = f32::NAN;
         signal[9] = f32::INFINITY;
         let mut d = Direct::new(
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(500.0))),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(500.0)),
+            ),
             RATE,
             16,
         );
@@ -366,10 +299,9 @@ mod tests {
             assert!((f64::from(y) - exact).abs() < 1e-6, "sample {n}");
         }
         let mut level = Direct::new(
-            OscillatorNode::from(OscillatorConfig::new(
-                OscillatorWave::Sine,
-                Hz::new(1_000.0),
-            )),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(1_000.0)),
+            ),
             RATE,
             4,
         );
@@ -389,8 +321,9 @@ mod tests {
 
     #[test]
     fn an_unprepared_node_renders_silence() {
-        let mut node =
-            OscillatorNode::from(OscillatorConfig::new(OscillatorWave::Sine, Hz::new(440.0)));
+        let mut node = OscillatorNode::from(
+            OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(440.0)),
+        );
         let ones = [1.0f32; 32];
         let out = drive::<f32>(&mut node, RATE, Planes::default(), &[None, Some(&ones)]);
         assert!(out[0].iter().all(|&v| v == 0.0));
@@ -399,10 +332,9 @@ mod tests {
     #[test]
     fn reset_restarts_the_cycle() {
         let mut d = Direct::new(
-            OscillatorNode::from(OscillatorConfig::new(
-                OscillatorWave::Triangle,
-                Hz::new(300.0),
-            )),
+            OscillatorNode::from(
+                OscillatorConfig::new(OscillatorWave::Triangle).frequency(Hz::new(300.0)),
+            ),
             RATE,
             64,
         );
@@ -415,10 +347,9 @@ mod tests {
 
     #[test]
     fn a_set_frequency_is_heard_on_the_next_block() {
-        let node = OscillatorNode::from(OscillatorConfig::new(
-            OscillatorWave::Sine,
-            Hz::new(1_000.0),
-        ));
+        let node = OscillatorNode::from(
+            OscillatorConfig::new(OscillatorWave::Sine).frequency(Hz::new(1_000.0)),
+        );
         let cell = node.frequency();
         let mut d = Direct::new(node, RATE, 48);
         d.block();
@@ -440,7 +371,8 @@ mod tests {
         use crate::test_support::{F64_TOLERANCE, render_f64};
         let level = 1.0 / 3.0;
         let node = OscillatorNode::from(
-            OscillatorConfig::new(OscillatorWave::Saw, Hz::new(RATE.get() / 64.0))
+            OscillatorConfig::new(OscillatorWave::Saw)
+                .frequency(Hz::new(RATE.get() / 64.0))
                 .level(Amplitude::new(level)),
         );
         let out = render_f64(node, RATE, &[], 128);

@@ -7,9 +7,9 @@
 //! maximum, ragged ones included — and the same on an offline fork of it (the
 //! graph export renders).
 //!
-//! The differential suite (`tests/differential.rs`) holds the parallel
-//! executor to the reference interpreter on random graphs as well; this file
-//! is the direct comparison, on one graph that has everything at once.
+//! `invariants.rs` holds the parallel executor to the one-participant render
+//! on random graphs as well; this file is the direct comparison, on one graph
+//! that has everything at once.
 
 use tutti_graph::testing as common;
 use tutti_graph::{Curvature, Exponent};

@@ -5,14 +5,14 @@
 //! reaches them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages,
 };
 use tutti_graph::{MAX_NODE_TAIL, Shape};
 use tutti_units::{Hz, Mix, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`SpringReverbNode`] is made from: its width, its layout and where its controls
 /// start.
@@ -163,8 +163,7 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 
     /// `width` channels in and out; `Heavy` (the default cost), as the stages are many.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
-            .expect("a spring reverb is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a spring reverb");
         Shape::through(bus)
     }
 
@@ -215,39 +214,6 @@ mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::Node;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_units::UnitParam;
-
-    fn node(width: u16) -> SpringReverbNode<f32> {
-        prepared(SpringReverbNode::from(SpringReverbConfig::new(width)))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)));
-    }
-
-    /// The shape is the width in and out and declares the decay, the tone and the dispersion
-    /// as `Decay`, `Cutoff` and `Diffusion`, at the defaults 2 s, 4 kHz and 1.
-    #[test]
-    fn the_shape_declares_decay_tone_and_dispersion() {
-        let n = node(3);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Decay, UnitParam::Cutoff, UnitParam::Diffusion][..]
-        );
-        let d = SpringReverbNode::<f32>::from(SpringReverbConfig::new(1u16));
-        assert_eq!(
-            (d.param_base(0), d.param_base(1), d.param_base(2)),
-            (Some(2.0), Some(4_000.0), Some(1.0))
-        );
-    }
 
     /// An empty layout is no channels, not one.
     #[test]

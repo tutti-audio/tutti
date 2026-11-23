@@ -2,12 +2,12 @@
 //! as a state-variable section.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, DecayTime, SimdLanes, Sos, SosError, TAIL_FLOOR};
-use tutti_graph::Shape;
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use super::ramped::{RAMP_STEPS, RampedSos};
 use crate::kernel::{ControlSignals, Kernel};
 use crate::params::ControlSet;
 
@@ -68,7 +68,7 @@ pub trait EqControls:
 /// [`TiltFilterNode`](crate::TiltFilterNode)).
 #[derive(Clone, Debug)]
 pub struct EqKernel<C: EqControls, F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     sos: RampedSos<F>,
     rate: SampleRate,
     /// The tail over every control at `rate`.
@@ -79,7 +79,7 @@ pub struct EqKernel<C: EqControls, F: Float + SimdLanes> {
 impl<C: EqControls, F: Float + SimdLanes> EqKernel<C, F> {
     /// A kernel on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
-    pub(super) fn new(input: BusTopology) -> Self {
+    pub(super) fn new(input: ChannelTopology) -> Self {
         let mut kernel = Self {
             input,
             sos: RampedSos::new(input),
@@ -128,7 +128,7 @@ impl<C: EqControls, F: Float + SimdLanes> Kernel for EqKernel<C, F> {
     const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
-        filter_shape(self.input)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

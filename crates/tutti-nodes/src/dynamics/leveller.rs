@@ -2,12 +2,12 @@
 //! short-term loudness.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank,
     LevellerControls, SimdLanes, SosCoefficients, channel_weights,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -15,7 +15,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`LevellerNode`] is made from: the bus it levels and the controls it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LevellerConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     controls: LevellerControls,
 }
 
@@ -24,7 +24,7 @@ impl LevellerConfig {
     /// [`LevellerControls::DEFAULT`]: -23 LUFS, up to 12 dB of boost and of cut, a gate at
     /// -50 LUFS, a 0.5 s attack and a 2 s release.
     #[must_use]
-    pub fn new(input: BusTopology) -> Self {
+    pub fn new(input: ChannelTopology) -> Self {
         Self {
             input,
             controls: LevellerControls::DEFAULT,
@@ -108,7 +108,7 @@ impl<F: Float + SimdLanes> TryFrom<LevellerConfig> for LevellerNode<F> {
     ///
     /// [`ChannelWeightError`] for an ambisonic bus and for speakers that are not a bed's.
     fn try_from(config: LevellerConfig) -> Result<Self, ChannelWeightError> {
-        let weights = channel_weights(&ChannelTopology::from(config.input))?;
+        let weights = channel_weights(&config.input)?;
         Ok(Self::with_kernel(
             LevellerKernel::new(config.input, weights),
             LevellerSet,
@@ -139,14 +139,14 @@ control_set! {
 /// The leveller as a [`Kernel`]: a [`LevellerBank`] at the prepared rate over the bus's weights.
 #[derive(Clone, Debug)]
 pub struct LevellerKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     weights: ChannelWeights,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<LevellerBank<F>>,
 }
 
 impl<F: Float + SimdLanes> LevellerKernel<F> {
-    fn new(input: BusTopology, weights: ChannelWeights) -> Self {
+    fn new(input: ChannelTopology, weights: ChannelWeights) -> Self {
         Self {
             input,
             weights,
@@ -162,12 +162,7 @@ impl<F: Float + SimdLanes> Kernel for LevellerKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
 use tutti_dsp::Wavetable;
@@ -64,11 +64,10 @@ use tutti_units::{
     UnitAddr, UnitParam,
 };
 
-#[test]
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
         CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::STEREO)
+            CompressorConfig::new(ChannelTopology::STEREO)
                 .key(KeySource::Sidechain)
                 .controls(CompressorControls {
                     threshold: Db::new(-20.0),
@@ -102,11 +101,10 @@ fn compressor() {
     .check();
 }
 
-#[test]
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
         GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
+            GateConfig::new(ChannelTopology::STEREO)
                 .key(KeySource::Sidechain)
                 .controls(GateControls {
                     threshold: Db::new(-15.0),
@@ -136,10 +134,9 @@ fn gate() {
     .check();
 }
 
-#[test]
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
             LimiterControls {
                 threshold: Db::new(-6.0),
                 ceiling: Db::new(-3.0),
@@ -159,11 +156,10 @@ fn limiter() {
     .check();
 }
 
-#[test]
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
         BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             Db::new(-3.0),
         ))
     })
@@ -173,10 +169,9 @@ fn brickwall_limiter() {
     .check();
 }
 
-#[test]
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
+        let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
             .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
             .build()
             .unwrap();
@@ -198,7 +193,6 @@ fn delay_line() {
     .check();
 }
 
-#[test]
 fn diode_clipper() {
     IsolateRow::new("DiodeClipperNode (stereo)", || {
         DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(ChannelLayout::STEREO))
@@ -212,7 +206,6 @@ fn diode_clipper() {
     .check();
 }
 
-#[test]
 fn hysteresis() {
     IsolateRow::new("HysteresisNode (stereo)", || {
         HysteresisNode::<f32>::from(HysteresisConfig::new(ChannelLayout::STEREO))
@@ -223,7 +216,6 @@ fn hysteresis() {
     .check();
 }
 
-#[test]
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
         DistortionNode::<f32>::from(
@@ -236,7 +228,6 @@ fn distortion() {
     .check();
 }
 
-#[test]
 fn bit_crusher() {
     IsolateRow::new("BitCrusherNode (stereo)", || {
         BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO))
@@ -250,7 +241,6 @@ fn bit_crusher() {
     .check();
 }
 
-#[test]
 fn stereo_width() {
     IsolateRow::new("StereoWidthNode", || {
         StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth::new(1.5)))
@@ -261,7 +251,6 @@ fn stereo_width() {
     .check();
 }
 
-#[test]
 fn tremolo() {
     IsolateRow::new("TremoloNode (stereo)", || {
         TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO))
@@ -275,7 +264,6 @@ fn tremolo() {
     .check();
 }
 
-#[test]
 fn dc_blocker() {
     IsolateRow::new("DcBlockerNode (stereo)", || {
         DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO))
@@ -286,7 +274,6 @@ fn dc_blocker() {
     .check();
 }
 
-#[test]
 fn bell_filter() {
     IsolateRow::new("BellFilterNode (stereo)", || {
         BellFilterNode::from(BellFilterConfig::new(
@@ -302,7 +289,6 @@ fn bell_filter() {
     .check();
 }
 
-#[test]
 fn tilt_filter() {
     IsolateRow::new("TiltFilterNode (stereo)", || {
         TiltFilterNode::from(TiltFilterConfig::new(
@@ -317,11 +303,10 @@ fn tilt_filter() {
     .check();
 }
 
-#[test]
 fn graphic_eq() {
     IsolateRow::new("GraphicEqNode (stereo, octave)", || {
         let node = GraphicEqNode::from(GraphicEqConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             GraphicBands::Octave,
         ));
         assert!(
@@ -336,7 +321,6 @@ fn graphic_eq() {
     .check();
 }
 
-#[test]
 fn dynamic_eq() {
     IsolateRow::new("DynamicEqNode<f32> (stereo, side-chain)", || {
         DynamicEqNode::<f32>::from(
@@ -353,7 +337,6 @@ fn dynamic_eq() {
     .check();
 }
 
-#[test]
 fn cut_filter() {
     IsolateRow::new("CutFilterNode (stereo)", || {
         CutFilterNode::from(CutFilterConfig::new(
@@ -368,7 +351,6 @@ fn cut_filter() {
     .check();
 }
 
-#[test]
 fn envelope_filter() {
     IsolateRow::new("EnvelopeFilterNode<f32> (stereo)", || {
         EnvelopeFilterNode::<f32>::from(
@@ -386,7 +368,6 @@ fn envelope_filter() {
     .check();
 }
 
-#[test]
 fn transient_shaper() {
     IsolateRow::new("TransientShaperNode<f32> (stereo)", || {
         TransientShaperNode::<f32>::from(
@@ -408,7 +389,7 @@ fn transient_shaper() {
 /// reads from its first 100 ms hop, so each row renders long enough for the gain to move.
 fn leveller_at(target: f64) -> LevellerNode<f32> {
     LevellerNode::<f32>::try_from(
-        LevellerConfig::new(BusTopology::STEREO)
+        LevellerConfig::new(ChannelTopology::STEREO)
             .target(Db::new(target))
             .max_boost(Db::new(9.0))
             .max_cut(Db::new(40.0))
@@ -420,7 +401,6 @@ fn leveller_at(target: f64) -> LevellerNode<f32> {
 }
 
 /// The stimulus is loud, so a target of -20 LUFS cuts: the target, the cut and both times show.
-#[test]
 fn leveller_cutting() {
     IsolateRow::new("LevellerNode<f32> (stereo, cutting)", || leveller_at(-20.0))
         .frames(65_536)
@@ -444,7 +424,6 @@ fn leveller_cutting() {
 
 /// A target of 0 LUFS is above the stimulus, so the gain rises: the boost and the gate show
 /// (a gate at 0 LUFS holds the gain).
-#[test]
 fn leveller_boosting() {
     IsolateRow::new("LevellerNode<f32> (stereo, boosting)", || leveller_at(0.0))
         .frames(65_536)
@@ -460,7 +439,6 @@ fn leveller_boosting() {
         .check();
 }
 
-#[test]
 fn auto_pan() {
     IsolateRow::new("AutoPanNode", || {
         AutoPanNode::from(AutoPanConfig::new().depth(Bipolar::of(0.2)))
@@ -474,7 +452,6 @@ fn auto_pan() {
     .check();
 }
 
-#[test]
 fn ambisonic_encoder() {
     IsolateRow::new("AmbisonicEncoderNode", || {
         AmbisonicEncoderNode::<f32>::try_from(AmbisonicEncoderConfig::new(ambix(
@@ -491,7 +468,6 @@ fn ambisonic_encoder() {
     .check();
 }
 
-#[test]
 fn ambisonic_rotator() {
     IsolateRow::new("AmbisonicRotatorNode", || {
         AmbisonicRotatorNode::<f32>::try_from(AmbisonicRotatorConfig::new(ambix(
@@ -508,7 +484,6 @@ fn ambisonic_rotator() {
     .check();
 }
 
-#[test]
 fn comb_filter() {
     for form in [CombForm::Feedforward, CombForm::Feedback] {
         IsolateRow::new("CombFilterNode (stereo)", move || {
@@ -525,7 +500,6 @@ fn comb_filter() {
     }
 }
 
-#[test]
 fn karplus_strong() {
     IsolateRow::new("KarplusStrongNode (stereo)", || {
         KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO))
@@ -539,7 +513,6 @@ fn karplus_strong() {
     .check();
 }
 
-#[test]
 fn waveguide_string() {
     IsolateRow::new("WaveguideStringNode (stereo)", || {
         WaveguideStringNode::from(WaveguideStringConfig::new(ChannelLayout::STEREO))
@@ -553,7 +526,6 @@ fn waveguide_string() {
     .check();
 }
 
-#[test]
 fn modal_bank() {
     let modes = [(440.0, 0.4), (1_130.0, 0.2)].map(|(f, t)| Mode {
         frequency: Hz::new(f),
@@ -575,7 +547,6 @@ fn modal_bank() {
     .check();
 }
 
-#[test]
 fn frequency_shifter() {
     IsolateRow::new("FrequencyShifterNode (stereo)", || {
         FrequencyShifterNode::from(
@@ -588,7 +559,6 @@ fn frequency_shifter() {
     .check();
 }
 
-#[test]
 fn pitch_shifter() {
     IsolateRow::new("PitchShifterNode (stereo)", || {
         PitchShifterNode::<f32>::from(
@@ -601,7 +571,6 @@ fn pitch_shifter() {
     .check();
 }
 
-#[test]
 fn distance() {
     IsolateRow::new("DistanceNode (stereo)", || {
         DistanceNode::<f32>::from(
@@ -616,7 +585,6 @@ fn distance() {
     .check();
 }
 
-#[test]
 fn fm() {
     let operator = Operator::of(0);
     let route = Route {
@@ -642,7 +610,6 @@ fn fm() {
     .check();
 }
 
-#[test]
 fn additive() {
     let partial = |ratio: f64, amplitude: f64| {
         Partial::new(
@@ -663,7 +630,6 @@ fn additive() {
     .check();
 }
 
-#[test]
 fn granular() {
     IsolateRow::new("GranularNode (stereo)", || {
         let mut wave = Wave::<f32>::new(2, SampleRate::SR_48K);
@@ -673,8 +639,7 @@ fn granular() {
         GranularNode::<f32>::try_from(
             GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
                 .density(Hz::new(80.0))
-                .position_jitter(Normalized::of(0.2))
-                .timing_jitter(Normalized::of(0.3))
+                .jitter([Normalized::of(0.2), Normalized::of(0.3)])
                 .seed(5),
         )
         .unwrap()
@@ -685,7 +650,6 @@ fn granular() {
     .check();
 }
 
-#[test]
 fn shimmer() {
     IsolateRow::new("ShimmerNode", || {
         ShimmerNode::<f32>::from(
@@ -703,7 +667,6 @@ fn shimmer() {
     .check();
 }
 
-#[test]
 fn ring_mod() {
     IsolateRow::new("RingModNode (stereo)", || {
         RingModNode::from(RingModConfig::new(ChannelLayout::STEREO))
@@ -714,14 +677,13 @@ fn ring_mod() {
     .check();
 }
 
-#[test]
 fn wavetable() {
     let one: Vec<f32> = (0..64).map(|i| (i as f32 / 64.0) * 2.0 - 1.0).collect();
     let two: Vec<f32> = (0..64).map(|i| 1.0 - (i as f32 / 64.0) * 2.0).collect();
     let table = Wavetable::new(&[Mono::new(&one), Mono::new(&two)]).expect("two frames");
     IsolateRow::new("WavetableNode (two frames, 3 channels)", move || {
         WavetableNode::<f32>::from(
-            WavetableConfig::new(3u16, std::sync::Arc::clone(&table))
+            WavetableConfig::new(ChannelLayout::from(3u16), std::sync::Arc::clone(&table))
                 .frequency(Hz::new(300.0))
                 .level(Amplitude::new(0.8)),
         )
@@ -738,12 +700,11 @@ fn wavetable() {
     .check();
 }
 
-#[test]
 fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .rate(Hz::new(3.0))
+                .rate(Some(Hz::new(3.0)))
                 .depth(Bipolar::clamped(0.8)),
         )
     })
@@ -756,10 +717,9 @@ fn lfo() {
     .check();
 }
 
-#[test]
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO))
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO))
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -771,11 +731,10 @@ fn chorus() {
     .check();
 }
 
-#[test]
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
         PhaserNode::<f32>::try_from(
-            PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(PhaserControls {
+            PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4)).controls(PhaserControls {
                 feedback: Feedback::new(0.3_f64),
                 ..PhaserControls::DEFAULT
             }),
@@ -792,7 +751,6 @@ fn phaser() {
     .check();
 }
 
-#[test]
 fn plate_reverb() {
     IsolateRow::new("PlateReverbNode", || {
         PlateReverbNode::<f32>::from(PlateReverbConfig::new().decay(Seconds::new(1.0)))
@@ -818,7 +776,6 @@ fn plate_reverb() {
     .check();
 }
 
-#[test]
 fn spring_reverb() {
     IsolateRow::new("SpringReverbNode", || {
         SpringReverbNode::<f32>::from(
@@ -837,7 +794,6 @@ fn spring_reverb() {
     .check();
 }
 
-#[test]
 fn ladder() {
     IsolateRow::new("LadderFilterNode (LP12)", || {
         LadderFilterNode::<f32>::from(
@@ -862,7 +818,6 @@ fn ladder() {
 /// `tutti_graph::param_parts`', from the values set through their
 /// `ParamSet`, and `assert_param_fork` is its snapshot check (their own
 /// unit tests run it).
-#[test]
 fn svf() {
     tutti_graph::contract::assert_param_fork(SvfFilterNode::<f32>::from(
         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::Bell)
@@ -872,7 +827,6 @@ fn svf() {
     ));
 }
 
-#[test]
 fn eq_band() {
     tutti_graph::contract::assert_param_fork(EqBandNode::<f32>::from(
         EqBandConfig::new(SvfType::Bell)
@@ -882,10 +836,9 @@ fn eq_band() {
     ));
 }
 
-#[test]
 fn bus_strip() {
     IsolateRow::new("BusStripNode (stereo)", || {
-        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO))
+        BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO))
     })
     .control("volume", |s| s.volume().store(Amplitude::new(0.5)))
     .control("balance", |s| {
@@ -893,7 +846,6 @@ fn bus_strip() {
     })
     .check();
 }
-#[test]
 fn fir_convolver() {
     use tutti_dsp::{LinearPhaseDesign, Tilt};
     use tutti_nodes::FirConvolverConfig;
@@ -907,7 +859,7 @@ fn fir_convolver() {
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
         ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::BusTopology::MONO, &fir)
+            FirConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &fir)
                 .block_size(Samples::new(64)),
         )
         .unwrap()
@@ -915,7 +867,6 @@ fn fir_convolver() {
     .control("gain", |c| c.gain().store(Amplitude::new(0.3)))
     .check();
 }
-#[test]
 fn convolver() {
     // A short decaying tail: a fixed LCG, so the IR is the same every run.
     let ir: Vec<f32> = (0..512u32)
@@ -938,18 +889,17 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
 }
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
-#[test]
 fn tube_stage() {
     IsolateRow::new("TubeStageNode (stereo)", || {
         TubeStageNode::<f32>::from(TubeStageConfig::new(ChannelLayout::STEREO))
@@ -958,4 +908,73 @@ fn tube_stage() {
         assert!(d.param_set().set(UnitParam::GainDb, 24.0))
     })
     .check();
+}
+
+/// Every row: a live control move reaches no fork. A failing row is named, and the others still
+/// run.
+#[test]
+fn a_fork_is_a_snapshot_of_every_nodes_controls() {
+    let rows: &[(&str, fn())] = &[
+        ("compressor", compressor),
+        ("gate", gate),
+        ("limiter", limiter),
+        ("brickwall_limiter", brickwall_limiter),
+        ("delay_line", delay_line),
+        ("diode_clipper", diode_clipper),
+        ("hysteresis", hysteresis),
+        ("distortion", distortion),
+        ("bit_crusher", bit_crusher),
+        ("stereo_width", stereo_width),
+        ("tremolo", tremolo),
+        ("dc_blocker", dc_blocker),
+        ("bell_filter", bell_filter),
+        ("tilt_filter", tilt_filter),
+        ("graphic_eq", graphic_eq),
+        ("dynamic_eq", dynamic_eq),
+        ("cut_filter", cut_filter),
+        ("envelope_filter", envelope_filter),
+        ("transient_shaper", transient_shaper),
+        ("leveller_cutting", leveller_cutting),
+        ("leveller_boosting", leveller_boosting),
+        ("auto_pan", auto_pan),
+        ("ambisonic_encoder", ambisonic_encoder),
+        ("ambisonic_rotator", ambisonic_rotator),
+        ("comb_filter", comb_filter),
+        ("karplus_strong", karplus_strong),
+        ("waveguide_string", waveguide_string),
+        ("modal_bank", modal_bank),
+        ("frequency_shifter", frequency_shifter),
+        ("pitch_shifter", pitch_shifter),
+        ("distance", distance),
+        ("fm", fm),
+        ("additive", additive),
+        ("granular", granular),
+        ("shimmer", shimmer),
+        ("ring_mod", ring_mod),
+        ("wavetable", wavetable),
+        ("lfo", lfo),
+        ("chorus", chorus),
+        ("phaser", phaser),
+        ("plate_reverb", plate_reverb),
+        ("spring_reverb", spring_reverb),
+        ("ladder", ladder),
+        ("svf", svf),
+        ("eq_band", eq_band),
+        ("bus_strip", bus_strip),
+        ("fir_convolver", fir_convolver),
+        ("convolver", convolver),
+        ("tube_stage", tube_stage),
+    ];
+    let mut failed = Vec::new();
+    for &(name, row) in rows {
+        if let Err(payload) = std::panic::catch_unwind(row) {
+            let why = payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("a non-text panic");
+            failed.push(format!("{name}: {why}"));
+        }
+    }
+    assert!(failed.is_empty(), "failing rows:\n{}", failed.join("\n"));
 }

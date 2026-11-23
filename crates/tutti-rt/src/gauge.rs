@@ -490,7 +490,15 @@ pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
 /// A cumulative count, read by any thread. It only grows.
 ///
 /// `Clone`: every clone reads the same cell. Nothing resets on read, so a
-/// reader that wants a delta keeps the last value it saw.
+/// reader that wants a delta keeps the last value it saw
+/// ([`take_since`](Self::take_since)).
+///
+/// A count orders nothing else: the writer adds with `Relaxed` stores, so
+/// reading a total says nothing about other memory the writer touched before
+/// it. Only the writer's drop is ordered, so after [`is_closed`](Self::is_closed)
+/// the totals are final. A value that tells a reader other data is ready, such
+/// as "this may now be freed", is a [`Gauge`], whose `Release` set pairs with
+/// its `Acquire` read.
 ///
 /// ```
 /// use tutti_rt::counter;
@@ -544,6 +552,39 @@ impl<U: Count> Counter<U> {
             *word = self.cell.word(i).load(Ordering::Acquire);
         }
         U::from_words(words)
+    }
+
+    /// What was counted since `seen`, which becomes the total now: the reader
+    /// keeps its own baseline, so the count stays cumulative and every clone
+    /// reads it whole. Each tally is the difference on its own, `0` where
+    /// `seen` is ahead (a baseline from another counter). Wait-free, as
+    /// [`get`](Self::get).
+    ///
+    /// ```
+    /// use tutti_rt::counter;
+    ///
+    /// let (mut writer, lost) = counter::<u64>();
+    /// let mut seen = 0;
+    /// writer.add(2);
+    /// assert_eq!(lost.take_since(&mut seen), 2);
+    /// writer.add(3);
+    /// assert_eq!(lost.take_since(&mut seen), 3);
+    /// assert_eq!(lost.take_since(&mut seen), 0);
+    /// assert_eq!(lost.get(), 5); // the total is untouched
+    /// ```
+    #[inline]
+    pub fn take_since(&self, seen: &mut U) -> U {
+        let now = self.get().to_words();
+        let mut since = now;
+        for (d, s) in since
+            .as_mut_slice()
+            .iter_mut()
+            .zip(seen.to_words().as_slice())
+        {
+            *d = d.saturating_sub(*s);
+        }
+        *seen = U::from_words(now);
+        U::from_words(since)
     }
 
     /// Whether the writer is gone: the total read is final until a

@@ -242,7 +242,7 @@ fn the_probe_agrees_with_the_full_load() {
         let w = read_wave::<f32>(asset(name)).expect("load");
         let meta = read_wave_metadata(asset(name)).expect("probe");
         assert_eq!(meta.channels(), w.channels(), "{name}: probed width");
-        assert_eq!(meta.topology, *w.topology(), "{name}: probed topology");
+        assert_eq!(meta.channel_set, w.channel_set(), "{name}: probed channels");
         assert_eq!(meta.sample_rate, w.sample_rate(), "{name}: probed rate");
         assert_eq!(
             meta.total_frames,
@@ -597,7 +597,7 @@ fn a_stream_over_bytes_reads_the_frames_the_path_stream_reads() {
             from_path.total_frames(),
             "{name}"
         );
-        assert_eq!(from_bytes.topology(), from_path.topology(), "{name}");
+        assert_eq!(from_bytes.channel_set(), from_path.channel_set(), "{name}");
         let (a, b) = (drain(&mut from_bytes), drain(&mut from_path));
         assert!(!a.is_empty(), "{name}: decoded nothing");
         assert!(

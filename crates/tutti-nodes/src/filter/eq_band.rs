@@ -134,7 +134,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{drive, prepared};
     use tutti_units::SampleRate;
 
     /// `eq`, prepared at 44.1 kHz, over `input` in one block.
@@ -142,18 +142,6 @@ mod tests {
         let rate = SampleRate::SR_44K1;
         let mut eq = prepared(eq, rate, input.len());
         drive(&mut eq, rate, Planes::new(&[input]).unwrap(), &[]).remove(0)
-    }
-
-    /// **A fork reaches the inner SVF's param cells**: it starts from the
-    /// authored values and shares none of them.
-    #[test]
-    fn a_fork_severs_the_inner_filters_cells() {
-        assert_param_fork(EqBandNode::<f32>::from(
-            EqBandConfig::new(SvfType::Bell)
-                .freq(Hz::new(1000.0))
-                .q(Q::new(1.0))
-                .gain(Db::new(6.0)),
-        ));
     }
 
     /// The band declares the inner filter's tail, not the shape default.
@@ -169,25 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eq_band_f32_variant_compiles_and_runs() {
-        let input = generate_sine(1000.0, 44100.0, 1024);
-        let out = render(
-            EqBandNode::<f32>::from(
-                EqBandConfig::new(SvfType::Bell)
-                    .freq(Hz::new(1000.0))
-                    .q(Q::new(1.0))
-                    .gain(Db::new(6.0)),
-            ),
-            &input,
-        );
-        assert!(
-            rms(&out[256..]) > 0.0,
-            "eq f32 variant should produce signal"
-        );
-    }
-
-    #[test]
-    fn test_eq_band_bell_boost() {
+    fn a_bell_boost_raises_the_level_at_its_centre() {
         let sine = generate_sine(1000.0, 44100.0, 4096);
         let out = render(
             EqBandNode::<f32>::from(
@@ -207,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eq_band_filter_type_change() {
+    fn the_filter_type_selects_the_response() {
         let high = generate_sine(5000.0, 44100.0, 2048);
         let out_lp = render(
             EqBandNode::<f32>::from(

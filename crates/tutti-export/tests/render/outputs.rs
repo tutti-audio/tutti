@@ -94,7 +94,7 @@ fn finish(g: GraphBuilder) -> RenderGraph {
 }
 
 fn stereo_placement() -> Placement {
-    Placement::new(ChannelTopology::default_for(ChannelLayout::STEREO))
+    Placement::new(tutti_buffers::Bed::Stereo.topology())
 }
 
 fn job(frames: usize) -> Job {
@@ -409,7 +409,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
         &FrozenClock,
         vec![Output::tap(
             wide,
-            Placement::new(ChannelTopology::default_for(ChannelLayout::MONO)),
+            Placement::new(tutti_buffers::Bed::Mono.topology()),
             wav(&dir.path().join("a.wav"), Pcm::Int16),
         )],
         &mut Control::none(),
@@ -436,7 +436,7 @@ fn a_tap_that_cannot_be_placed_is_a_named_error() {
             Output::main_output(wav(&dir.path().join("m.wav"), Pcm::Int16)),
             Output::tap(
                 narrow,
-                Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16))),
+                Placement::new(ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap()),
                 wav(&dir.path().join("b.wav"), Pcm::Int16),
             ),
         ],
@@ -472,7 +472,7 @@ fn a_placement_the_target_cannot_take_is_a_target_error_and_leaves_nothing() {
                 reader,
                 // Two unassigned feeds onto a mono file: unassigned channels are
                 // not downmixed, so there is no place for them.
-                Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO)),
+                Placement::new(ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
                 FileTarget::new(
                     dir.path().join("t.wav"),
                     Format::Wav(Pcm::Int16),

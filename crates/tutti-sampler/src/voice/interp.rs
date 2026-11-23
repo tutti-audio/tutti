@@ -21,7 +21,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
@@ -577,11 +577,8 @@ impl<F: Float> MonoSpread<F> {
             return Self::FAN;
         }
         Self {
-            fold: Fold::between(
-                &ChannelTopology::default_for(ChannelLayout::MONO),
-                &ChannelTopology::default_for(width),
-            )
-            .ok(),
+            fold: ChannelTopology::default_for(width)
+                .and_then(|dst| Fold::between(&tutti_buffers::Bed::Mono.topology(), &dst).ok()),
         }
     }
 
@@ -713,22 +710,23 @@ impl<F: Float> Place<F> {
     ///   than the frame where either has no channel order (10 channels into 8,
     ///   a 5.1 file into 5): its extra channels would be dropped.
     pub fn for_wave<S: Sample>(wave: &Wave<S>, width: ChannelLayout) -> Result<Self, PlaceError> {
-        Self::for_topology(wave.topology(), width)
+        Self::for_channels(&wave.channel_set(), width)
     }
 
-    /// The placement of a file whose channels feed `topology` into a frame of
-    /// `width` channels: [`for_wave`](Self::for_wave) for a source that is
-    /// not a resident wave (the streaming tier's ring). Refuses and places as
-    /// `for_wave` does; control side, it allocates.
+    /// The placement of a file of `channels` into a frame of `width` channels:
+    /// [`for_wave`](Self::for_wave) for a source that is not a resident wave
+    /// (the streaming tier's ring). Refuses and places as `for_wave` does;
+    /// control side, it allocates. A file wider than a topology holds is
+    /// unassigned channels, which only widen.
     ///
     /// # Errors
     ///
     /// As [`for_wave`](Self::for_wave).
-    pub fn for_topology(
-        topology: &ChannelTopology,
-        width: ChannelLayout,
-    ) -> Result<Self, PlaceError> {
+    pub fn for_channels(channels: &ChannelSet, width: ChannelLayout) -> Result<Self, PlaceError> {
         let frame = ChannelLayout::from_count(width.count().min(crate::MAX_SAMPLER_WIDTH));
+        let Some(topology) = channels.topology() else {
+            return Self::folded(Fold::by_index(channels.width(), frame)?, frame);
+        };
         if let Some(channel) = topology
             .positions()
             .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
@@ -745,11 +743,16 @@ impl<F: Float> Place<F> {
         // A file that names no speakers is read in the engine's order for its
         // width.
         let named = if topology.is_unassigned() {
-            ChannelTopology::default_for(topology.width())
+            ChannelTopology::default_for(topology.width()).unwrap_or(*topology)
         } else {
-            topology.clone()
+            *topology
         };
         let fold = fold_to_width(&named, frame)?;
+        Self::folded(fold, frame)
+    }
+
+    /// The placement a fold into `frame` is: the identity is native.
+    fn folded(fold: Fold<F>, frame: ChannelLayout) -> Result<Self, PlaceError> {
         if fold.is_identity() {
             return Ok(Self::new(frame));
         }
@@ -1247,8 +1250,8 @@ mod tests {
         for width in [1u16, 2, 6, 8] {
             let layout = ChannelLayout::from(width);
             let fold = Fold::between(
-                &ChannelTopology::default_for(ChannelLayout::MONO),
-                &ChannelTopology::default_for(layout),
+                &tutti_buffers::Bed::Mono.topology(),
+                &ChannelTopology::default_for(layout).unwrap(),
             )
             .unwrap();
             let spread = MonoSpread::to(layout);
@@ -1395,10 +1398,7 @@ mod tests {
         super::read_frame(&w, &place, SamplePosition::new(4.0), &mut out);
         assert_eq!(out, [0.0, 1.0, 2.0, 3.0, 6.0, 7.0, 4.0, 5.0]);
         // The engine's own order needs no fold.
-        let own = constant_wave(
-            ChannelTopology::default_for(ChannelLayout::from(8u16)),
-            &frame,
-        );
+        let own = constant_wave(tutti_buffers::Bed::Surround71.topology(), &frame);
         assert!(
             Place::<f32>::for_wave(&own, ChannelLayout::from(8u16))
                 .unwrap()
@@ -1406,38 +1406,15 @@ mod tests {
         );
     }
 
-    /// A named file wider than the cap is refused, not truncated: all twenty
-    /// speakers the vocabulary names into a frame of `MAX_CHANNELS` (which has no
-    /// order to fold to) is `Unplaced`.
+    /// A file wider than the cap is refused, not truncated: twenty channels (no
+    /// topology holds them, so they are unassigned and read by index) into a
+    /// frame of `MAX_CHANNELS` would drop four, and is `Unplaced`.
     #[test]
-    fn a_named_file_wider_than_the_cap_is_refused() {
-        use tutti_buffers::Speaker::*;
-        let twenty = ChannelTopology::new([
-            FrontLeft,
-            FrontRight,
-            FrontCenter,
-            LowFrequency,
-            BackLeft,
-            BackRight,
-            FrontLeftOfCenter,
-            FrontRightOfCenter,
-            BackCenter,
-            SideLeft,
-            SideRight,
-            TopCenter,
-            TopFrontLeft,
-            TopFrontCenter,
-            TopFrontRight,
-            TopBackLeft,
-            TopBackCenter,
-            TopBackRight,
-            TopSideLeft,
-            TopSideRight,
-        ])
-        .unwrap();
+    fn a_file_wider_than_the_cap_is_refused() {
+        let twenty = ChannelLayout::from(20u16);
         let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
         assert!(matches!(
-            Place::<f32>::for_topology(&twenty, frame),
+            Place::<f32>::for_channels(&ChannelSet::unassigned(twenty), frame),
             Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
         ));
     }
@@ -1450,7 +1427,7 @@ mod tests {
         let mut frame = [0.0f32; 12];
         frame[8] = 1.0; // top front left
         let w = Arc::new(constant_wave(
-            tutti_buffers::ChannelTopology::default_for(ChannelLayout::from(12u16)),
+            tutti_buffers::Bed::Surround714.topology(),
             &frame,
         ));
         let place = Place::for_wave(&w, ChannelLayout::from(8u16)).unwrap();

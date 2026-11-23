@@ -6,9 +6,9 @@
 //! it ([`OutputLevels`]), whose changes ramp over
 //! the declick length ([`declick_frames`](tutti_graph::declick_frames)) instead of swapping folds.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, Fold, FoldError, FoldLevels};
-use tutti_graph::fold_to_topology_with;
+use tutti_graph::{fold_to_channels, fold_to_topology_with};
 use tutti_units::Amplitude;
 
 /// The device channel each channel of what is heard goes to.
@@ -134,9 +134,11 @@ pub struct Routing {
 }
 
 impl Routing {
-    /// The one fold from `main_output` into `device`: main output to monitor, then the map's
-    /// routing or else the fold by speaker into the device's topology, composed
-    /// as one matrix ([`Fold::then`]).
+    /// The one fold from `main_output` into the `device`: main output to
+    /// monitor, then the map's routing or else the fold by speaker into the
+    /// device's topology (a device wider than a topology holds has none:
+    /// unassigned channels, taken by index), composed as one matrix
+    /// ([`Fold::then`]).
     ///
     /// # Errors
     ///
@@ -145,15 +147,16 @@ impl Routing {
     pub fn fold<F: Float>(
         &self,
         main_output: &ChannelTopology,
-        device: &ChannelTopology,
+        device: &ChannelSet,
     ) -> Result<Fold<F>, RoutingError> {
+        let device_width = device.width();
         let heard = self.monitor.as_ref().unwrap_or(main_output);
         let to_heard = match &self.monitor {
             Some(monitor) => Some(fold_to_topology_with(main_output, monitor, self.levels)?),
             None => None,
         };
         let to_device = match self.map.targets() {
-            None => fold_to_topology_with(heard, device, FoldLevels::default())?,
+            None => fold_to_channels(heard, device, FoldLevels::default())?,
             Some(to) => {
                 if to.len() != usize::from(heard.width().count()) {
                     return Err(RoutingError::MapWidth {
@@ -161,16 +164,14 @@ impl Routing {
                         heard: heard.width(),
                     });
                 }
-                if let Some(&output) = to
-                    .iter()
-                    .find(|&&o| o >= usize::from(device.width().count()))
+                if let Some(&output) = to.iter().find(|&&o| o >= usize::from(device_width.count()))
                 {
                     return Err(RoutingError::MapPast {
                         output,
-                        device: device.width(),
+                        device: device_width,
                     });
                 }
-                Fold::route(heard.width(), device.width(), to)?
+                Fold::route(heard.width(), device_width, to)?
             }
         };
         match to_heard {
@@ -468,16 +469,17 @@ mod tests {
     fn a_routing_names_the_map_it_breaks_on() {
         let five_one = Bed::Surround51.topology();
         let stereo = Bed::Stereo.topology();
+        let (five_set, stereo_set) = (ChannelSet::from(five_one), ChannelSet::from(stereo));
         let routing = Routing {
-            monitor: Some(stereo.clone()),
+            monitor: Some(stereo),
             map: OutputMap::channels([2, 3]).unwrap(),
             ..Routing::default()
         };
         // Two heard channels on a six-output device: fine.
-        assert!(routing.fold::<f32>(&five_one, &five_one).is_ok());
+        assert!(routing.fold::<f32>(&five_one, &five_set).is_ok());
         // On a stereo device output 3 does not exist.
         assert_eq!(
-            routing.fold::<f32>(&five_one, &stereo).map(|_| ()),
+            routing.fold::<f32>(&five_one, &stereo_set).map(|_| ()),
             Err(RoutingError::MapPast {
                 output: 2,
                 device: ChannelLayout::STEREO
@@ -489,12 +491,12 @@ mod tests {
             ..routing
         };
         assert_eq!(
-            wide.fold::<f32>(&five_one, &five_one).map(|_| ()),
+            wide.fold::<f32>(&five_one, &five_set).map(|_| ()),
             Err(RoutingError::MapWidth {
                 map: 3,
                 heard: ChannelLayout::STEREO
             })
         );
-        assert!(wide.fold::<f32>(&five_one, &five_one).unwrap_err().is_map());
+        assert!(wide.fold::<f32>(&five_one, &five_set).unwrap_err().is_map());
     }
 }

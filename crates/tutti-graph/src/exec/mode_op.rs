@@ -35,13 +35,13 @@ pub(super) fn moded_node_op<
         .last()
         .filter(|p| p.is_mix())
         .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));
-    u.mode.drive_step(frames, source);
+    u.mode.mix.drive_step(frames, source);
 
     let want = u.mode.seen();
     if want != u.mode.heading() && u.mode.toggle(want) {
         // Un-bypass: its state is stale. Reset before the first call.
         u.node.reset();
-        u.quiet = 0;
+        u.quiet = Samples::ZERO;
         u.last_quiet = false;
         u.last_idle = false;
         u.reported = None;
@@ -56,13 +56,13 @@ pub(super) fn moded_node_op<
     // node's own history), and kept beside the node's output when this
     // block's blend needs it. Before the call: a node that works in place
     // overwrites its input.
-    let main = u.mode.inputs();
+    let main = u.mode.aligned.inputs();
     let need = u.mode.needs_input();
     let mut input_silent = 0u64;
     for (c, &s) in ain.iter().enumerate().take(main) {
-        let silent = st.flags.get(s) & SILENT != 0;
+        let silent = st.flags.get(s).is_silent();
         let src = st.arena.slot(s, frames);
-        if u.mode.align(c, src, silent, need, frames) {
+        if u.mode.aligned.align(c, src, silent, need, frames) {
             input_silent |= 1 << c;
         }
     }
@@ -74,12 +74,12 @@ pub(super) fn moded_node_op<
         return ended;
     }
     if need {
-        u.mode.fold_aligned(frames);
+        u.mode.aligned.fold(frames);
     }
-    let lane = u.mode.lane(frames);
-    let main = u.mode.outputs();
+    let lane = u.mode.mix.lane(frames);
+    let main = u.mode.aligned.outputs();
     for (c, &s) in aout.iter().enumerate() {
-        let x = (c < main && need).then(|| u.mode.passed(c, frames));
+        let x = (c < main && need).then(|| u.mode.aligned.passed(c, frames));
         seg.blend(st.arena.slot_mut(s, frames), x, lane);
         if seg.is_steady() {
             match seg.steady {
@@ -87,27 +87,27 @@ pub(super) fn moded_node_op<
                     // A blend off the ends: silent only where both of its
                     // terms are (a channel with no input has one term, and
                     // at DRY it is silence).
-                    let node_silent = st.flags.get(s) & SILENT != 0;
+                    let node_silent = st.flags.get(s).is_silent();
                     let no_input = c >= main;
-                    let x_silent = no_input || u.mode.passes_silence(c, input_silent);
+                    let x_silent = no_input || u.mode.aligned.passes_silence(c, input_silent);
                     match seg.mix.state() {
                         MixState::Wet => {}
-                        MixState::Dry => st.flags.set(s, flag(x_silent, x_silent)),
+                        MixState::Dry => st.flags.set(s, Flags::new(x_silent, x_silent)),
                         MixState::Between => {
                             let silent = node_silent && x_silent;
-                            st.flags.set(s, flag(silent, silent));
+                            st.flags.set(s, Flags::new(silent, silent));
                         }
-                        MixState::Moving => st.flags.set(s, 0),
+                        MixState::Moving => st.flags.set(s, Flags::NONE),
                     }
                 }
-                NodeMode::Muted => st.flags.set(s, SILENT | CONSTANT),
+                NodeMode::Muted => st.flags.set(s, Flags::SILENCE),
                 NodeMode::Bypassed => {
-                    let silent = c >= main || u.mode.passes_silence(c, input_silent);
-                    st.flags.set(s, flag(silent, silent));
+                    let silent = c >= main || u.mode.aligned.passes_silence(c, input_silent);
+                    st.flags.set(s, Flags::new(silent, silent));
                 }
             }
         } else {
-            st.flags.set(s, 0);
+            st.flags.set(s, Flags::NONE);
         }
     }
     ended
@@ -149,7 +149,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     // The outputs are the inputs delayed by the declared latency: output `c`
     // is input `c` (main buses of one width naming no placement), or the fold
     // of the main buses (`pass.rs`).
-    if u.mode.folds() {
+    if u.mode.aligned.folds() {
         park_folded(u, head, st, ain, aout);
     } else {
         park_by_index(u, head, st, ain, aout);
@@ -176,7 +176,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
         }
         *st.has_due = false;
     }
-    u.quiet = 0;
+    u.quiet = Samples::ZERO;
     u.last_quiet = false;
     u.last_idle = false;
 }
@@ -190,16 +190,16 @@ fn park_by_index<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlo
     aout: &[AudioSlotId],
 ) {
     let frames = head.frames;
-    let main = u.mode.inputs();
+    let main = u.mode.aligned.inputs();
     for (c, &s) in aout.iter().enumerate() {
         if c >= main {
             st.arena.slot_mut(s, frames).fill(F::ZERO);
-            st.flags.set(s, SILENT | CONSTANT);
+            st.flags.set(s, Flags::SILENCE);
             continue;
         }
         let i = ain[c];
-        let silent_in = st.flags.get(i) & SILENT != 0;
-        match u.mode.ring(c) {
+        let silent_in = st.flags.get(i).is_silent();
+        match u.mode.aligned.ring(c) {
             None => {
                 if i != s {
                     st.arena.copy_slot(i, s);
@@ -213,7 +213,7 @@ fn park_by_index<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlo
                     let (src, dst) = st.arena.pair(i, s, frames);
                     ring.run(src, dst, silent_in)
                 };
-                st.flags.set(s, flag(silent, silent));
+                st.flags.set(s, Flags::new(silent, silent));
             }
         }
     }
@@ -231,24 +231,26 @@ fn park_folded<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots
 ) {
     let frames = head.frames;
     let mut silent_in = 0u64;
-    for (c, &i) in ain.iter().enumerate().take(u.mode.inputs()) {
-        let silent = st.flags.get(i) & SILENT != 0;
+    for (c, &i) in ain.iter().enumerate().take(u.mode.aligned.inputs()) {
+        let silent = st.flags.get(i).is_silent();
         if u.mode
+            .aligned
             .align(c, st.arena.slot(i, frames), silent, true, frames)
         {
             silent_in |= 1 << c;
         }
     }
-    let outputs = u.mode.outputs();
+    let outputs = u.mode.aligned.outputs();
     for (c, &s) in aout.iter().enumerate() {
         if c >= outputs {
             st.arena.slot_mut(s, frames).fill(F::ZERO);
-            st.flags.set(s, SILENT | CONSTANT);
+            st.flags.set(s, Flags::SILENCE);
             continue;
         }
         u.mode
-            .fold_aligned_into(c, st.arena.slot_mut(s, frames), frames);
-        let silent = u.mode.passes_silence(c, silent_in);
-        st.flags.set(s, flag(silent, silent));
+            .aligned
+            .fold_into(c, st.arena.slot_mut(s, frames), frames);
+        let silent = u.mode.aligned.passes_silence(c, silent_in);
+        st.flags.set(s, Flags::new(silent, silent));
     }
 }

@@ -10,7 +10,7 @@
 use core::ops::Range;
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
@@ -43,6 +43,21 @@ impl<'a, F: Float> ControlSignals<'a, F> {
     pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
     }
+}
+
+/// The bus of `width` unnamed channels that `what` is built on.
+///
+/// # Panics
+///
+/// Past a bus's width ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): `what` is one bus.
+#[track_caller]
+pub(crate) fn unassigned_bus(width: ChannelLayout, what: &str) -> ChannelTopology {
+    ChannelTopology::unassigned(width).unwrap_or_else(|| {
+        panic!(
+            "{what} is at most {} channels wide",
+            tutti_buffers::MAX_CHANNELS
+        )
+    })
 }
 
 /// An effect's algorithm with its state, as [`KernelNode`] runs it.
@@ -233,7 +248,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 /// declares the buses.
 ///
 /// ```
-/// use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+/// use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 /// use tutti_graph::{Buses, Shape};
 /// use tutti_dsp::BlockMismatch;
 /// use tutti_nodes::{ControlSignals, Kernel, KernelConfig, KernelNode, NoControls};
@@ -248,7 +263,7 @@ impl<K: Kernel> std::fmt::Debug for KernelNode<K> {
 ///     type Set = NoControls;
 ///     const GRID: usize = 16;
 ///     fn shape(&self) -> Shape {
-///         Shape::buses(Buses::main(BusTopology::MONO), Buses::main(BusTopology::MONO))
+///         Shape::buses(Buses::main(ChannelTopology::MONO), Buses::main(ChannelTopology::MONO))
 ///     }
 ///     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
 ///     fn reset(&mut self) {}
@@ -423,7 +438,7 @@ impl<K: Kernel> KernelNode<K> {
         let (mut output, width) = slice_out(outs.bus(self.out).into_channels(), &frames);
         // Both views are whole planes of `frames.len()` frames, at most `MAX_PORTS` wide
         // (the most ports a shape declares, so a crossover's bands are all written). A bus
-        // can be declared with no channels (an empty `BusTopology`): an output with none has
+        // can be declared with no channels (an empty `ChannelTopology`): an output with none has
         // nothing to write, and an input or key bus with none has nothing to render or detect,
         // so the output renders as silence rather than as the arena had it.
         let Ok(output) = PlanesMut::new(&mut output[..width]) else {
@@ -852,7 +867,7 @@ mod latency_tail;
 
 #[cfg(test)]
 mod tests {
-    use tutti_buffers::BusTopology;
+    use tutti_buffers::ChannelTopology;
     use tutti_dsp::{DelayControls, DelayLayout, MaxDelay};
     use tutti_graph::contract::{drive_input, prepared};
     use tutti_graph::{Env, PlayClock, Status, TransportChanges, TransportPosition};
@@ -894,7 +909,7 @@ mod tests {
         let mut node = prepared(
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(0.01)),
                 ))
                 .controls(DelayControls {
@@ -930,7 +945,7 @@ mod tests {
     /// detected or passed. A zero-width output has nothing to write.
     #[test]
     fn a_bus_with_no_channels_renders_silence() {
-        use tutti_buffers::BusTopology;
+        use tutti_buffers::ChannelTopology;
         use tutti_graph::contract::Direct;
         use tutti_graph::{Bus, BusRole, Buses};
         use tutti_units::Db;
@@ -952,8 +967,8 @@ mod tests {
         /// Never asked to render: the node refuses each block it is declared empty for.
         #[derive(Clone)]
         struct Keyed {
-            main: BusTopology,
-            key: Option<BusTopology>,
+            main: ChannelTopology,
+            key: Option<ChannelTopology>,
         }
         impl Kernel for Keyed {
             type Float = f32;
@@ -966,7 +981,7 @@ mod tests {
                         .with(Bus::new(key, BusRole::Sidechain))
                         .expect("two buses");
                 }
-                let out = Bus::banded(BusTopology::MONO, BusRole::Main, 1).expect("a bus");
+                let out = Bus::banded(ChannelTopology::MONO, BusRole::Main, 1).expect("a bus");
                 Shape::buses(main, Buses::NONE.with(out).expect("one bus"))
             }
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
@@ -984,9 +999,9 @@ mod tests {
             }
         }
         for (main, key) in [
-            (BusTopology::MONO, Some(BusTopology::EMPTY)),
-            (BusTopology::EMPTY, None),
-            (BusTopology::EMPTY, Some(BusTopology::MONO)),
+            (ChannelTopology::MONO, Some(ChannelTopology::EMPTY)),
+            (ChannelTopology::EMPTY, None),
+            (ChannelTopology::EMPTY, Some(ChannelTopology::MONO)),
         ] {
             let node =
                 KernelNode::with_kernel(Keyed { main, key }, GainSet, Gain { gain: Db::new(0.0) });
@@ -1036,8 +1051,8 @@ mod tests {
             fn shape(&self) -> Shape {
                 use tutti_graph::Buses;
                 Shape::buses(
-                    Buses::main(BusTopology::MONO),
-                    Buses::main(BusTopology::MONO),
+                    Buses::main(ChannelTopology::MONO),
+                    Buses::main(ChannelTopology::MONO),
                 )
             }
             fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}
@@ -1105,8 +1120,8 @@ mod tests {
         fn shape(&self) -> Shape {
             use tutti_graph::Buses;
             Shape::buses(
-                Buses::main(BusTopology::MONO),
-                Buses::main(BusTopology::MONO),
+                Buses::main(ChannelTopology::MONO),
+                Buses::main(ChannelTopology::MONO),
             )
         }
         fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}

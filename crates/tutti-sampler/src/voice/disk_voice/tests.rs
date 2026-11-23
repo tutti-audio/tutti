@@ -847,7 +847,7 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
         StreamId::of(1),
         PathBuf::new(),
         4096,
-        topology,
+        tutti_buffers::ChannelSet::from(topology),
         None,
         Samples::new(0),
     );
@@ -858,7 +858,7 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
         .collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let place = Place::for_topology(reader.topology(), frame).expect("a test ring places");
+    let place = Place::for_channels(reader.channel_set(), frame).expect("a test ring places");
     let control = reader.control_reader();
     let inner = DiskSource::with_reader(
         reader,
@@ -1539,12 +1539,15 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 2);
     let mut clock = crate::voice::clock::Clock::new();
     let t = MockTransport::stopped(Beat::new(1.0), Bpm::of(120.0));
-    let mut run = |voice: &mut DiskVoice<f32>, scratch: &mut crate::lanes::BlockScratch<f32>| {
+    // The block's environment is built outside the no-allocation region: the
+    // mock transport's first lock allocates its mutex on some platforms.
+    let mut run = |voice: &mut DiskVoice<f32>,
+                   scratch: &mut crate::lanes::BlockScratch<f32>,
+                   env: &tutti_graph::Env| {
         for lane in scratch.out.lanes_mut() {
             lane.fill(7.0);
         }
-        let env = t.env(BLOCK, SampleRate::of(SR));
-        let clock = clock.observe(&env);
+        let clock = clock.observe(env);
         let crate::lanes::BlockScratch {
             out,
             positions,
@@ -1554,9 +1557,10 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
         voice.render_lanes(&clock, 0..BLOCK, out, 2, positions, gather)
     };
     // The skip allocates nothing.
+    let env = t.env(BLOCK, SampleRate::of(SR));
     assert_no_alloc::assert_no_alloc(|| {
         assert!(
-            !run(&mut voice, &mut scratch),
+            !run(&mut voice, &mut scratch, &env),
             "a stopped transport sounds nothing"
         );
     });
@@ -1564,7 +1568,11 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
         assert!(lane[..BLOCK].iter().all(|&s| s == 7.0), "lanes written");
     }
     t.set_rolling(true);
-    assert!(run(&mut voice, &mut scratch), "a rolling transport sounds");
+    let env = t.env(BLOCK, SampleRate::of(SR));
+    assert!(
+        run(&mut voice, &mut scratch, &env),
+        "a rolling transport sounds"
+    );
     assert!(scratch.out.lanes()[0][..BLOCK].iter().all(|&s| s != 7.0));
     assert!(voice.inner.read.read_to() > SamplePosition::new(22_000.0));
 }

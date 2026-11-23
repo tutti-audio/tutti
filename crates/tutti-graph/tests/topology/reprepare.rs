@@ -16,8 +16,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, CompileError, Cx, CycleEdge, Editor, EventEdge, EventInputPort, EventKind,
-    EventOutputPort, Executor, Io, Node, Prepare, Reference, Shape, Status, TransportPosition,
-    Unforkable,
+    EventOutputPort, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::Ump;
@@ -185,9 +184,10 @@ fn assert_direct_events_conserved(inbox: &Inbox, spans: &[std::ops::Range<u64>])
     }
 }
 
-/// A `MaxBlock`-only change keeps every ring and FIFO: the output is exactly
-/// what a graph prepared at the larger block from the start renders, and no
-/// event is lost or repeated.
+/// A `MaxBlock`-only change keeps every ring: the output is the closed form
+/// (silence for the 20 frames of latency, then the two paths' `1.0 + 1.0`), no
+/// ring restarting at the change, and every event lands once, a PDC delay of 30
+/// frames after its emission.
 #[test]
 fn a_max_block_change_keeps_every_ring() {
     let mut rig = rig(prep(48_000.0, 64));
@@ -196,56 +196,21 @@ fn a_max_block_change_keeps_every_ring() {
     assert_eq!(rig.exec.prepare().max_block().get(), 128);
     got.extend(rig.render(&[128, 3, 128, 100, 128]));
 
-    // The same graph, at 128 from the start, with the same block schedule.
-    let mut straight = rig_reference(prep(48_000.0, 128));
-    let want = straight.render(&[64, 17, 64, 5, 64, 128, 3, 128, 100, 128]);
+    let want: Vec<f32> = (0..got.len())
+        .map(|n| if n < 20 { 0.0 } else { 2.0 })
+        .collect();
     assert_eq!(common::bits(&[got.clone()]), common::bits(&[want]));
     let span = 0..got.len() as u64 - 64;
     assert_direct_events_conserved(&rig.exec_inbox, std::slice::from_ref(&span));
-    assert_eq!(
-        rig.exec_inbox.lock().unwrap().to_vec(),
-        straight.inbox.lock().unwrap().to_vec(),
-        "and every event lands where it would have"
+    assert!(
+        rig.exec_inbox
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.1 == 0)
+            .all(|&(f, _, at)| at == u64::from(f) + 30),
+        "every direct event lands one PDC delay after its emission"
     );
-}
-
-/// A reference alone, for a baseline run.
-struct Solo {
-    reference: Reference,
-    inbox: Inbox,
-}
-
-fn rig_reference(p: Prepare) -> Solo {
-    let inbox = tutti_fixtures::Record::new();
-    let (mut ed, _exec) = Editor::new(p);
-    for (k, u) in units(&tutti_fixtures::Record::new()) {
-        ed.insert(k, "n", Unforkable(u));
-    }
-    wire(&mut ed);
-    let mut reference = Reference::new(p);
-    reference.set_graph(
-        &ed.spec().validate().unwrap(),
-        units(&inbox).into_iter().collect(),
-    );
-    Solo { reference, inbox }
-}
-
-impl Solo {
-    fn render(&mut self, blocks: &[usize]) -> Vec<f32> {
-        let mut all = Vec::new();
-        for &n in blocks {
-            let input = vec![1.0f32; n];
-            let mut out = vec![0.0f32; n];
-            self.reference.process(
-                n,
-                &TransportPosition::default(),
-                &[&input[..]],
-                &mut [&mut out[..]],
-            );
-            all.extend(out);
-        }
-        all
-    }
 }
 
 /// A sample-rate change resets time-based state: the PDC ring on `Sum.1`

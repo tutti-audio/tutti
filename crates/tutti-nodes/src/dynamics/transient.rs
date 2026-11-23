@@ -1,9 +1,9 @@
 //! [`TransientShaperNode`]: raises or lowers a signal's attacks and its sustain apart.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -112,7 +112,7 @@ control_set! {
 /// The shaper as a [`Kernel`]: a [`TransientBank`] at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct TransientShaperKernel<F: Float + Lerp> {
-    input: BusTopology,
+    input: ChannelTopology,
     fast: Seconds,
     slow: Seconds,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -124,7 +124,7 @@ pub struct TransientShaperKernel<F: Float + Lerp> {
 impl<F: Float + Lerp> TransientShaperKernel<F> {
     fn new(config: &TransientShaperConfig) -> Self {
         Self {
-            input: BusTopology::default_for(config.width)
+            input: ChannelTopology::default_for(config.width)
                 .expect("a transient shaper is at most 16 channels wide"),
             fast: config.fast,
             slow: config.slow,
@@ -141,12 +141,7 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

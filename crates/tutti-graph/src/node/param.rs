@@ -48,10 +48,10 @@ use tutti_units::{
     ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Samples, UnitAddr, UnitParam,
 };
 
-use crate::exec::lane::{arc_in, control_in, fade_gains, ramp_in, wrap_in};
+use crate::exec::lane::{Declick, arc_in, control_in, ramp_in, wrap_in};
 use crate::model::spec::EventOutputPort;
 use crate::node::param_event::{ParamEvent, ParamKind, Timing, arrival, segment_progress};
-use tutti_curve::{FadeLaw, Law, Piece};
+use tutti_curve::{Law, Piece};
 
 /// Most params one node can declare modulatable: 32 addresses.
 ///
@@ -1048,10 +1048,10 @@ pub(crate) struct PortState<F: Float> {
     last: F,
     /// The base at the end of the last block.
     last_base: F,
-    /// Where the declick fades from.
+    /// Where the declick fades from; meaningful while `declick` runs.
     hold: F,
-    /// Frames of the declick done; the declick's length or more: none running.
-    fade: usize,
+    /// The declick's progress; idle when none runs.
+    declick: Declick,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
     ramp: Ramp,
@@ -1066,8 +1066,9 @@ enum Shown {
     Driven,
 }
 
-impl<F: Float> Default for PortState<F> {
-    fn default() -> Self {
+impl<F: Float> PortState<F> {
+    /// A port that has not run, declicking over `declick`.
+    fn new(declick: Samples) -> Self {
         Self {
             fresh: true,
             source: None,
@@ -1076,7 +1077,7 @@ impl<F: Float> Default for PortState<F> {
             last: F::ZERO,
             last_base: F::ZERO,
             hold: F::ZERO,
-            fade: usize::MAX,
+            declick: Declick::idle(declick),
             ramp: Ramp::default(),
         }
     }
@@ -1088,18 +1089,10 @@ impl<F: Float> Default for PortState<F> {
 #[derive(Debug)]
 pub(crate) struct ParamState<F: Float> {
     ports: Vec<PortState<F>>,
-    scratch: Vec<F>,
-    /// Each port's corners this block, `max` slots a port: at most one a
-    /// frame, so a port's slots never run out.
-    corners: Vec<u32>,
-    /// How many of each port's corner slots this block wrote.
-    corner_count: [usize; MAX_PARAM_PORTS],
-    max: usize,
-    /// The declick's length in frames: [`DECLICK`](crate::DECLICK) at the
-    /// graph's rate.
-    declick: usize,
-    /// Per port: whether this block's step delivered frames.
-    framed: [bool; MAX_PARAM_PORTS],
+    /// What the ports delivered this block.
+    delivered: PortFrames<F>,
+    /// The declick's length: [`DECLICK`](crate::DECLICK) at the graph's rate.
+    declick: Samples,
     /// Whether any port delivered frames this block, is mid-declick, or has
     /// yet to run: a unit for which this is false and whose op lists no
     /// driven port skips the whole step.
@@ -1113,16 +1106,67 @@ pub(crate) struct ParamState<F: Float> {
     lanes: Vec<EffectiveCell>,
 }
 
+/// The per-frame values the declared ports delivered this block, and the
+/// corners of their ramps: `max` slots a port. A port's frames are read only
+/// when its step delivered them.
+#[derive(Debug)]
+struct PortFrames<F: Float> {
+    scratch: Vec<F>,
+    /// Each port's corners this block, `max` slots a port: at most one a
+    /// frame, so a port's slots never run out.
+    corners: Vec<u32>,
+    /// How many of each port's corner slots this block wrote.
+    corner_count: [usize; MAX_PARAM_PORTS],
+    max: usize,
+    /// Per port: whether this block's step delivered frames.
+    framed: [bool; MAX_PARAM_PORTS],
+}
+
+impl<F: Float> PortFrames<F> {
+    /// Room for `ports` ports at blocks of up to `max` frames. Allocates.
+    fn new(ports: usize, max: usize) -> Self {
+        Self {
+            scratch: vec![F::ZERO; ports * max],
+            corners: vec![0; ports * max],
+            corner_count: [0; MAX_PARAM_PORTS],
+            max,
+            framed: [false; MAX_PARAM_PORTS],
+        }
+    }
+
+    /// Start a block: no port delivered frames.
+    fn begin(&mut self) {
+        self.framed = [false; MAX_PARAM_PORTS];
+        self.corner_count = [0; MAX_PARAM_PORTS];
+    }
+
+    /// Port `k`'s values this block: `None` when it reads its base.
+    fn frames(&self, k: usize, frames: usize) -> Option<&[F]> {
+        self.framed[k].then(|| &self.scratch[k * self.max..k * self.max + frames])
+    }
+
+    /// What each of `ports` ports reads this block.
+    fn inputs(&self, ports: usize, frames: usize) -> [ParamInput<'_, F>; MAX_PARAM_PORTS] {
+        let mut out = [ParamInput::Base; MAX_PARAM_PORTS];
+        for (k, o) in out.iter_mut().enumerate().take(ports) {
+            if self.framed[k] {
+                let at = k * self.max;
+                *o = ParamInput::Frames {
+                    values: &self.scratch[at..at + frames],
+                    corners: &self.corners[at..at + self.corner_count[k]],
+                };
+            }
+        }
+        out
+    }
+}
+
 impl<F: Float> Default for ParamState<F> {
     fn default() -> Self {
         Self {
             ports: Vec::new(),
-            scratch: Vec::new(),
-            corners: Vec::new(),
-            corner_count: [0; MAX_PARAM_PORTS],
-            max: 0,
-            declick: 0,
-            framed: [false; MAX_PARAM_PORTS],
+            delivered: PortFrames::new(0, 0),
+            declick: Samples::ZERO,
             busy: false,
             ranges: Vec::new(),
             lanes: Vec::new(),
@@ -1138,7 +1182,7 @@ impl<F: Float> ParamState<F> {
     pub(crate) fn new(
         ports: usize,
         max: usize,
-        declick: usize,
+        declick: Samples,
         ranges: Vec<ParamRangeReader>,
         lanes: Vec<EffectiveCell>,
     ) -> Self {
@@ -1146,13 +1190,9 @@ impl<F: Float> ParamState<F> {
             return Self::default();
         }
         Self {
-            ports: vec![PortState::default(); ports],
-            scratch: vec![F::ZERO; ports * max],
-            corners: vec![0; ports * max],
-            corner_count: [0; MAX_PARAM_PORTS],
-            max,
+            ports: vec![PortState::new(declick); ports],
+            delivered: PortFrames::new(ports, max),
             declick,
-            framed: [false; MAX_PARAM_PORTS],
             // Its first block runs the step whatever the plan says, to
             // seed each port (see `PortState::fresh`).
             busy: true,
@@ -1172,7 +1212,7 @@ impl<F: Float> ParamState<F> {
     /// State for **one** port at blocks of up to `max` frames, clamping to
     /// `ranges`: an edge gain's lane, which runs the
     /// param port's step on its own.
-    pub(crate) fn lane(max: usize, declick: usize, ranges: &ParamRanges) -> Self {
+    pub(crate) fn lane(max: usize, declick: Samples, ranges: &ParamRanges) -> Self {
         Self::new(1, max, declick, ranges.readers(), ranges.lanes())
     }
 
@@ -1195,30 +1235,20 @@ impl<F: Float> ParamState<F> {
 
     /// Whether the state can serve blocks of up to `max` frames, declicking
     /// over `declick` frames.
-    pub(crate) fn fits(&self, max: usize, declick: usize) -> bool {
-        self.max >= max && self.declick == declick
+    pub(crate) fn fits(&self, max: usize, declick: Samples) -> bool {
+        self.delivered.max >= max && self.declick == declick
     }
 
     /// Port `k`'s values this block, after [`port`](Self::port): `None` when
     /// it reads its base.
     #[inline]
     pub(crate) fn frames(&self, k: usize, frames: usize) -> Option<&[F]> {
-        self.framed[k].then(|| &self.scratch[k * self.max..k * self.max + frames])
+        self.delivered.frames(k, frames)
     }
 
     /// What each port reads this block, after [`port`](Self::port).
     pub(crate) fn inputs(&self, frames: usize) -> [ParamInput<'_, F>; MAX_PARAM_PORTS] {
-        let mut out = [ParamInput::Base; MAX_PARAM_PORTS];
-        for (k, o) in out.iter_mut().enumerate().take(self.ports.len()) {
-            if self.framed[k] {
-                let at = k * self.max;
-                *o = ParamInput::Frames {
-                    values: &self.scratch[at..at + frames],
-                    corners: &self.corners[at..at + self.corner_count[k]],
-                };
-            }
-        }
-        out
+        self.delivered.inputs(self.ports.len(), frames)
     }
 
     /// How many params it keeps state for.
@@ -1230,8 +1260,7 @@ impl<F: Float> ParamState<F> {
     /// says so.
     #[inline]
     pub(crate) fn begin(&mut self) {
-        self.framed = [false; MAX_PARAM_PORTS];
-        self.corner_count = [0; MAX_PARAM_PORTS];
+        self.delivered.begin();
         self.busy = false;
     }
 
@@ -1252,7 +1281,6 @@ impl<F: Float> ParamState<F> {
         m: Option<(EventOutputPort, &[ParamEvent])>,
         base: Option<F>,
     ) {
-        let d = self.declick;
         let st = &mut self.ports[k];
         let Some(b1) = base else {
             // A node that cannot say its base is never driven: it reads
@@ -1262,7 +1290,7 @@ impl<F: Float> ParamState<F> {
             {
                 lane.release();
             }
-            *st = PortState::default();
+            *st = PortState::new(self.declick);
             st.shown = Shown::Idle;
             return;
         };
@@ -1275,11 +1303,11 @@ impl<F: Float> ParamState<F> {
             // The source changed: fade from where the port was, and start
             // the new source's ramp at rest.
             st.hold = if st.modulated { st.last } else { b1 };
-            st.fade = 0;
+            st.declick.restart();
             st.source = source;
             st.ramp = Ramp::default();
         }
-        let fading = st.fade < d;
+        let fading = st.declick.running();
         if source.is_none() && !fading {
             if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
@@ -1291,10 +1319,17 @@ impl<F: Float> ParamState<F> {
             return;
         }
         let from = if st.modulated { st.last_base } else { b1 };
-        let out = &mut self.scratch[k * self.max..k * self.max + frames];
+        let PortFrames {
+            scratch,
+            corners: corner_slots,
+            corner_count,
+            max: slot,
+            framed,
+        } = &mut self.delivered;
+        let out = &mut scratch[k * *slot..k * *slot + frames];
         match m {
             Some((_, events)) => {
-                let mut corners = Corners::new(&mut self.corners[k * self.max..(k + 1) * self.max]);
+                let mut corners = Corners::new(&mut corner_slots[k * *slot..(k + 1) * *slot]);
                 render_ramps(
                     &mut st.ramp,
                     events,
@@ -1311,7 +1346,7 @@ impl<F: Float> ParamState<F> {
                     },
                     &mut corners,
                 );
-                self.corner_count[k] = corners.len();
+                corner_count[k] = corners.len();
                 // The live range, read once per block: a move lands on the
                 // next block, and the stored base and the source's ramp are
                 // never rewritten, so a range that widens again releases
@@ -1338,12 +1373,11 @@ impl<F: Float> ParamState<F> {
         if fading {
             let circular = param.param.is_circular();
             for (i, o) in out.iter_mut().enumerate() {
-                let j = st.fade + i;
-                if j >= d {
+                let j = st.declick.done() + Samples::new(i);
+                if j >= st.declick.len() {
                     break;
                 }
-                let (out, inn) =
-                    fade_gains::<F>(FadeLaw::EqualAmplitude, Samples::new(j), Samples::new(d));
+                let (out, inn) = st.declick.gains::<F>(j);
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
@@ -1355,7 +1389,7 @@ impl<F: Float> ParamState<F> {
                     st.hold * out + *o * inn
                 };
             }
-            st.fade = (st.fade + frames).min(d);
+            st.declick.advance(Samples::new(frames));
         }
         st.last = out[frames - 1];
         st.last_base = b1;
@@ -1373,7 +1407,7 @@ impl<F: Float> ParamState<F> {
                 st.shown = Shown::Idle;
             }
         }
-        self.framed[k] = true;
+        framed[k] = true;
         self.busy = true;
     }
 }

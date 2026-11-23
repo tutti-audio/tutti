@@ -1,6 +1,5 @@
 //! Rendering a block: the frame around the plan's ops, which `par.rs` runs.
 
-use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
@@ -8,7 +7,7 @@ use tutti_rt::RingWriter;
 use tutti_units::Samples;
 
 use super::commit::{Crossfade, retire_fade};
-use super::node_op::flag;
+use super::node_op::Flags;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
 use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, TableSlice};
@@ -57,8 +56,8 @@ pub(super) fn end_fades<F: Float>(
             {
                 // Only as much as the buffer's room takes; the rest is lost
                 // and charged to the unit.
-                let room = (inj.events.capacity() - inj.events.len()).min(next.chase.len());
-                inj.events.extend_from_slice(&next.chase[..room]);
+                let room = inj.events.remaining().min(next.chase.len());
+                inj.events.extend(next.chase[..room].iter().copied());
                 inj.events.rotate_right(room);
                 let lost = next.chase.len() - room;
                 if lost > 0 {
@@ -71,7 +70,7 @@ pub(super) fn end_fades<F: Float>(
             next.out = Some(std::mem::replace(&mut u.node, incoming));
             u.keys.promote();
             u.fade = Some(next);
-            u.quiet = 0;
+            u.quiet = Samples::ZERO;
             u.last_quiet = false;
             u.last_idle = false;
             u.reported = None;
@@ -244,7 +243,6 @@ impl<F: Float> Executor<F> {
                 pool_participants: _,
                 rendered,
                 main_output_fade,
-                main_output_fade_ended,
                 stash: _,
                 logs,
             } = self;
@@ -338,7 +336,10 @@ impl<F: Float> Executor<F> {
                 let ring = f.as_ref().expect("built by apply");
                 let is_silent =
                     ring.peek_oldest(arena.slot_mut(AudioSlotId::new(spec.slot), frames));
-                flags.set(AudioSlotId::new(spec.slot), flag(is_silent, is_silent));
+                flags.set(
+                    AudioSlotId::new(spec.slot),
+                    Flags::new(is_silent, is_silent),
+                );
             }
             for (f, spec) in event_fb.iter_mut().zip(&plan.event_feedback) {
                 let fifo = f.as_mut().expect("built by apply");
@@ -406,15 +407,9 @@ impl<F: Float> Executor<F> {
             for f in event_fb.iter_mut().flatten() {
                 f.advance(frames);
             }
-            if let (Some(run), Some(bank)) = (main_output_fade.as_mut(), plan.main_output_bank()) {
-                let before = run.done;
-                run.done += frames;
-                if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
-                    main_output_fade_ended.store(run.seq, Ordering::Release);
-                }
-            }
+            main_output_fade.advance(plan, frames);
             *frame += Samples::new(frames);
-            rendered.fetch_add(1, Ordering::Release);
+            rendered.add_block();
         });
     }
 }

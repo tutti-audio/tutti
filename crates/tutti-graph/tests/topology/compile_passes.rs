@@ -8,7 +8,7 @@ use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
 
-use common::{Kind, Pair, SpecBehaviour, bits, input_signal};
+use common::{Harness, Kind, SpecBehaviour, input_signal};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, DelayKey, EventEdge, EventInputPort, EventOutputPort, GraphInvalid,
@@ -445,27 +445,47 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
     assert_eq!(plan.compensation(), &[Samples::new(0)]);
 }
 
+/// What shape `name`'s output channel `c` holds at `frame`: the nodes'
+/// behaviours (`kinds_for`: a `dc` is 0.5, a `gain` 0.75, a `sum` adds, a
+/// `fan` copies) with the ring PDC puts on the shorter path of a latent merge.
+fn figure(name: &str, c: usize, frame: u64) -> f32 {
+    let (dc, gain) = (0.5f32, 0.75f32);
+    match name {
+        "chain" | "fan_out" => dc * gain,
+        "mix_fan_in" => dc + dc,
+        "diamond" => dc * gain + dc * gain,
+        // The 512-frame latency is declared, not realised: the latent branch
+        // sounds at once and the other waits in its ring.
+        "pdc_diamond" => dc * gain + if frame >= 512 { dc * gain } else { 0.0 },
+        "serial_latency" | "tail_chain" => dc * gain * gain,
+        "multi_output" | "zero_sourced_port" | "orphan_branch" | "six_channel" => dc,
+        "silent_output_channel" => [dc, 0.0][c],
+        // Input channel `c` is the run's input scaled by 2^-c.
+        "main_input" => input_signal::<f32>(frame, 1)[0] * 0.5f32.powi(c as i32),
+        other => unreachable!("{other} has no figure"),
+    }
+}
+
 /// The rings the plan inserts actually align the paths: rendered through the
-/// executor, the thirteen shapes match the reference interpreter sample for
-/// sample, at a block size that makes the 512-frame ring span blocks.
+/// executor, each of the thirteen shapes holds its figure sample for sample,
+/// at a block size that makes the 512-frame ring span blocks.
 #[test]
-fn the_ported_shapes_render_like_the_reference() {
+fn the_shapes_render_their_figures() {
     for (name, t) in shapes() {
-        // `main_input` reads two graph inputs and the harness feeds one;
-        // main inputs are covered by the differential suite instead.
-        if t.inputs.count() > 1 {
-            continue;
-        }
         let kinds = kinds_for(&t);
         let valid = GraphSpec::new(t.clone()).validate().expect("valid");
-        let mut pair = Pair::new(128);
-        pair.switch(&valid, &kinds);
+        let mut harness = Harness::new(128);
+        harness.switch(&valid, &kinds);
         let mut frame = 0u64;
         for _ in 0..12 {
             let n = 100;
-            let input: Vec<f32> = input_signal(frame, n);
-            let (a, b) = pair.block(n, &input);
-            assert_eq!(bits(&a), bits(&b), "{name} at frame {frame}");
+            let got = harness.block(n, &input_signal(frame, n));
+            for (c, channel) in got.iter().enumerate() {
+                for (i, &y) in channel.iter().enumerate() {
+                    let f = frame + i as u64;
+                    assert_eq!(y, figure(name, c, f), "{name}, channel {c}, frame {f}");
+                }
+            }
             frame += n as u64;
         }
     }
@@ -893,16 +913,22 @@ fn a_main_input_merging_with_a_latent_path_is_delayed() {
         "latency::delays aligns the main input as the plan does"
     );
 
-    let mut pair = Pair::new(128);
-    pair.switch(
+    let mut harness = Harness::new(128);
+    harness.switch(
         &GraphSpec::new(t.clone()).validate().unwrap(),
         &kinds_for(&t),
     );
-    assert_eq!(pair.reference.delay(key), Samples::new(48));
-    let mut frame = 0;
+    // The gain's 0.375 sounds at once; the main input arrives 48 frames late.
+    let mut frame = 0u64;
     for _ in 0..6 {
-        let (a, b) = pair.block(100, &input_signal(frame, 100));
-        assert_eq!(bits(&a), bits(&b));
+        let got = harness.block(100, &input_signal(frame, 100));
+        for (i, &y) in got[0].iter().enumerate() {
+            let f = frame + i as u64;
+            let late = f
+                .checked_sub(48)
+                .map_or(0.0, |m| input_signal::<f32>(m, 1)[0]);
+            assert_eq!(y, 0.375 + late, "frame {f}");
+        }
         frame += 100;
     }
 }

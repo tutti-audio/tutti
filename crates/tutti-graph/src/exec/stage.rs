@@ -24,14 +24,14 @@
 use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
-use tutti_rt::CappedVec;
+use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
+use tutti_units::Samples;
 
-use super::commit::Commit;
-use super::node_op::{CONSTANT, SILENT};
+use super::commit::{Commit, Participants, Rendered};
+use super::node_op::Flags;
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
@@ -132,7 +132,7 @@ pub(super) struct Staged<F: Float = f32> {
     pub(super) spare_tables: CappedVec<Held>,
     pub(super) spare_drives: CappedVec<ParamState<F>>,
     /// The executor's chase buffer from this plan on.
-    pub(super) chase: Vec<Event>,
+    pub(super) chase: CappedVec<Event>,
     /// A store with room for the plan's units, when the executor's has none.
     pub(super) store: Option<Vec<Option<Unit<F>>>>,
     /// The store length the plan needs.
@@ -198,7 +198,7 @@ struct Cx<'a> {
     resumed: bool,
     max_block: usize,
     cap: usize,
-    declick: usize,
+    declick: Samples,
 }
 
 impl Cx<'_> {
@@ -225,9 +225,9 @@ impl Cx<'_> {
 pub(crate) struct Stager {
     event_cap: usize,
     /// Pool participants the executor runs on (`Executor::set_pool`).
-    pool: Arc<AtomicUsize>,
+    pool: Gauge<Participants>,
     /// Blocks the executor has rendered (`Executor::render_applied`).
-    rendered: Arc<AtomicU64>,
+    rendered: Gauge<Rendered>,
     /// The capacity of each event delay's FIFO, by key.
     fifos: BTreeMap<DelayKey, usize>,
     /// The same for event feedback.
@@ -238,18 +238,85 @@ pub(crate) struct Stager {
     /// for event feedback.
     param_fifos: BTreeSet<DelayKey>,
     param_feedback: BTreeSet<FeedbackKey>,
-    /// The injection buffers of the last commit, with the commit that made
-    /// them, once it was seen applied, and the block count then.
-    shells: Vec<Shell>,
-    shells_seq: u64,
-    shells_seen: Option<u64>,
+    /// The injection buffers of the last commit.
+    shells: Shells,
     /// The longest a replaced node's chase can be, by key.
     chase: BTreeMap<NodeKey, usize>,
     /// Crossfades sent and not yet returned, by key.
     fading: BTreeMap<NodeKey, u32>,
-    /// The executor's store: its length, and its capacity.
-    store_len: usize,
-    store_cap: usize,
+    /// The executor's store.
+    store: StoreBound,
+}
+
+/// The injection buffers of the last commit, with the commit that made them
+/// and, once it was seen applied, the block count then. The buffers are
+/// dropped from the count two blocks after the commit applied.
+struct Shells {
+    list: Vec<Shell>,
+    seq: u64,
+    seen: Option<u64>,
+}
+
+impl Shells {
+    fn new() -> Self {
+        Self {
+            list: Vec::new(),
+            seq: 0,
+            seen: None,
+        }
+    }
+
+    /// The buffers of commit `seq`, not yet seen applied.
+    fn replace(&mut self, list: Vec<Shell>, seq: u64) {
+        *self = Self {
+            list,
+            seq,
+            seen: None,
+        };
+    }
+
+    /// The executor has applied commits up to `acked` and rendered `blocks`:
+    /// the buffers are empty once it has rendered two blocks since it applied
+    /// theirs.
+    fn observe(&mut self, acked: u64, blocks: u64) {
+        if self.list.is_empty() || acked < self.seq {
+            return;
+        }
+        match self.seen {
+            None => self.seen = Some(blocks),
+            Some(seen) if blocks >= seen + 2 => {
+                self.list.clear();
+                self.seen = None;
+            }
+            Some(_) => {}
+        }
+    }
+}
+
+/// The length and capacity of the executor's unit store: the length the next
+/// commit builds for, and the capacity the executor's vector was last grown
+/// to, so growing moves into one built here.
+struct StoreBound {
+    len: usize,
+    cap: usize,
+}
+
+impl StoreBound {
+    /// The length a commit that needs `needed` units builds for.
+    fn length_for(&self, needed: usize) -> usize {
+        self.len.max(needed)
+    }
+
+    /// Record a store of `len`, and return the vector it grows into when
+    /// `len` passes the capacity (doubling it).
+    fn grow<T>(&mut self, len: usize) -> Option<Vec<T>> {
+        let grown = (len > self.cap).then(|| {
+            self.cap = len.max(self.cap * 2);
+            Vec::with_capacity(self.cap)
+        });
+        self.len = len;
+        grown
+    }
 }
 
 /// The ring and FIFO plan of one delay or feedback kind.
@@ -272,7 +339,11 @@ fn fit_fifo(from: Option<(u32, usize)>, want: usize, rate: usize) -> (RingFrom, 
 }
 
 impl Stager {
-    pub(crate) fn new(event_cap: usize, pool: Arc<AtomicUsize>, rendered: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(
+        event_cap: usize,
+        pool: Gauge<Participants>,
+        rendered: Gauge<Rendered>,
+    ) -> Self {
         Self {
             event_cap,
             pool,
@@ -282,13 +353,10 @@ impl Stager {
             owing: BTreeSet::new(),
             param_fifos: BTreeSet::new(),
             param_feedback: BTreeSet::new(),
-            shells: Vec::new(),
-            shells_seq: 0,
-            shells_seen: None,
+            shells: Shells::new(),
             chase: BTreeMap::new(),
             fading: BTreeMap::new(),
-            store_len: 0,
-            store_cap: 0,
+            store: StoreBound { len: 0, cap: 0 },
         }
     }
 
@@ -306,18 +374,8 @@ impl Stager {
     /// built are empty after it renders: a block delivers what they hold,
     /// and the next the chase a fade's end puts in them.
     pub(crate) fn observe(&mut self, acked: u64) {
-        if self.shells.is_empty() || acked < self.shells_seq {
-            return;
-        }
-        let now = self.rendered.load(Ordering::Acquire);
-        match self.shells_seen {
-            None => self.shells_seen = Some(now),
-            Some(seen) if now >= seen + 2 => {
-                self.shells.clear();
-                self.shells_seen = None;
-            }
-            Some(_) => {}
-        }
+        let blocks = self.rendered.get().0.get();
+        self.shells.observe(acked, blocks);
     }
 
     /// Builds what applying `c` needs, and puts it in `c`.
@@ -334,7 +392,7 @@ impl Stager {
             resumed: input.resumed,
             max_block: plan.prepare.max_block().get(),
             cap: self.event_cap,
-            declick: declick_frames(plan.prepare.sample_rate()).get(),
+            declick: declick_frames(plan.prepare.sample_rate()),
         };
         self.track(c, &cx);
         let closers = self.closers(c, &cx);
@@ -357,8 +415,8 @@ impl Stager {
             |i: EventSlotId| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
         let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
-        let store_len = self.store_len.max(c.delta.store_len as usize);
-        let participants = self.pool.load(Ordering::Acquire);
+        let store_len = self.store.length_for(c.delta.store_len as usize);
+        let participants = self.pool.get().0;
         let par = par_for(
             &plan,
             participants,
@@ -369,8 +427,8 @@ impl Stager {
         let state = State {
             arena: Arena::new(plan.audio_slots as usize, cx.max_block),
             flags: {
-                let mut v = vec![0u8; plan.audio_slots as usize];
-                v[0] = SILENT | CONSTANT;
+                let mut v = vec![Flags::NONE; plan.audio_slots as usize];
+                v[0] = Flags::SILENCE;
                 v
             },
             events: plan
@@ -395,12 +453,7 @@ impl Stager {
             par: Some(par),
         };
         // The store grows by moving into one built here.
-        let store = (store_len > self.store_cap).then(|| {
-            let cap = store_len.max(self.store_cap * 2);
-            self.store_cap = cap;
-            Vec::with_capacity(cap)
-        });
-        self.store_len = store_len;
+        let store = self.store.grow(store_len);
         self.prepare_incoming(c, &cx);
         let tables = flush
             .rooms
@@ -439,7 +492,7 @@ impl Stager {
             drives,
             spare_rings: CappedVec::with_capacity(moved),
             spare_tables: CappedVec::with_capacity(tables),
-            chase: Vec::with_capacity(wanted),
+            chase: CappedVec::with_capacity(wanted),
             store,
             store_len,
         }));
@@ -449,9 +502,7 @@ impl Stager {
         self.param_fifos = ring_params;
         self.param_feedback = efb_params;
         self.feedback = efb_caps;
-        self.shells = shells;
-        self.shells_seq = c.seq;
-        self.shells_seen = None;
+        self.shells.replace(shells, c.seq);
     }
 
     /// Crossfades in flight, and how long a chase can be, by key.
@@ -690,7 +741,7 @@ impl Stager {
         }
         // Injections not yet delivered: each buffer counts once, with what
         // flushed into it before, and its room for a fade's end.
-        for s in &self.shells {
+        for s in &self.shells.list {
             let at = EventInputPort::new(s.key, s.port);
             if let Some(u) = cx.sink_of(at) {
                 let r = rooms.entry((u, s.port)).or_default();
@@ -869,11 +920,11 @@ impl Stager {
                 Inject {
                     unit,
                     port,
-                    events: Vec::with_capacity(events),
-                    merged: Vec::with_capacity(events + widest),
+                    events: CappedVec::with_capacity(events),
+                    merged: CappedVec::with_capacity(events + widest),
                     live: false,
                     closed_from: 0,
-                    owed: Vec::with_capacity(owed),
+                    owed: CappedVec::with_capacity(owed),
                 }
             })
             .collect();
@@ -1212,7 +1263,7 @@ fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
         replaced: CappedVec::with_capacity(replaces),
         chased: CappedVec::with_capacity(replaces),
         held_refused: CappedVec::with_capacity(replaces),
-        chase_events: Vec::new(),
+        chase_events: CappedVec::default(),
     };
     c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.incoming.len());
 }

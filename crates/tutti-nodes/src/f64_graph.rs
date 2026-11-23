@@ -20,7 +20,7 @@ use crate::{
     SvfFilterNode, TiltFilterConfig, TiltFilterNode, TransientShaperConfig, TransientShaperNode,
     TremoloConfig, TremoloNode,
 };
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{
     DelayControls, DelayLayout, FdnLayout, FreeverbControls, FreezeMode, LadderSaturation,
     LadderType, ShapeKind, Stages, SvfType,
@@ -57,7 +57,7 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
     let x = wide_signal(256);
     let node = DelayNode::<f64>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             MaxDelay::of(Seconds::new(0.5)),
         ))
         .controls(DelayControls {
@@ -76,7 +76,7 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
 #[test]
 fn the_limiter_under_its_threshold_returns_a_wide_signal_a_lookahead_late() {
     let x = wide_signal(4_800);
-    let node = LimiterNode::<f64>::from(LimiterConfig::new(BusTopology::MONO).controls(
+    let node = LimiterNode::<f64>::from(LimiterConfig::new(ChannelTopology::MONO).controls(
         LimiterControls {
             threshold: Db::new(0.0),
             ceiling: Db::new(0.0),
@@ -107,7 +107,7 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
     let x = wide_signal(4_800);
     let input = on(1, &x);
     let compressor = CompressorNode::<f64>::from(
-        CompressorConfig::new(BusTopology::MONO).controls(CompressorControls {
+        CompressorConfig::new(ChannelTopology::MONO).controls(CompressorControls {
             threshold: Db::new(0.0),
             knee: Db::new(6.0),
             ratio: CompressionRatio::new(4.0),
@@ -118,17 +118,19 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
         }),
     );
     assert_close_f64(&render(compressor, RATE, &input)[0], &x, F64_TOLERANCE);
-    let gate = GateNode::<f64>::from(GateConfig::new(BusTopology::MONO).controls(GateControls {
-        threshold: Db::new(-40.0),
-        attack: Seconds::new(0.0),
-        hold: Seconds::new(0.0),
-        release: Seconds::new(0.0),
-        range: Db::new(-80.0),
-        ..GateControls::DEFAULT
-    }));
+    let gate = GateNode::<f64>::from(GateConfig::new(ChannelTopology::MONO).controls(
+        GateControls {
+            threshold: Db::new(-40.0),
+            attack: Seconds::new(0.0),
+            hold: Seconds::new(0.0),
+            release: Seconds::new(0.0),
+            range: Db::new(-80.0),
+            ..GateControls::DEFAULT
+        },
+    ));
     assert_close_f64(&render(gate, RATE, &input)[0], &x, F64_TOLERANCE);
     let brickwall = BrickwallLimiterNode::<f64>::from(BrickwallLimiterConfig::new(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
         Db::new(0.0),
     ));
     assert_close_f64(&render(brickwall, RATE, &input)[0], &x, F64_TOLERANCE);
@@ -273,7 +275,7 @@ fn the_filters_pass_a_wide_constant_at_unity_gain() {
         "envelope"
     );
     let phaser = PhaserNode::<f64>::try_from(
-        PhaserConfig::new(BusTopology::MONO, Stages::of(4)).controls(PhaserControls {
+        PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)).controls(PhaserControls {
             feedback: Feedback::new(0.0),
             ..PhaserControls::DEFAULT
         }),
@@ -291,7 +293,7 @@ fn the_crossover_bands_sum_to_a_wide_constant() {
     const DC: f64 = 0x2000_0001 as f64 / 2_147_483_648.0;
     const FRAMES: usize = 16_384;
     let node = CrossoverNode::<f64>::try_from(CrossoverConfig::new(
-        BusTopology::MONO,
+        ChannelTopology::MONO,
         CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
     ))
     .unwrap();
@@ -340,7 +342,7 @@ fn the_linear_nodes_satisfy_superposition() {
         || {
             DelayNode::<f64>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(0.05)),
                 ))
                 .controls(DelayControls {
@@ -355,14 +357,14 @@ fn the_linear_nodes_satisfy_superposition() {
         2_400,
     );
     assert_linear(
-        || ModDelayNode::<f64>::from(ModDelayConfig::chorus(tutti_buffers::BusTopology::MONO)),
+        || ModDelayNode::<f64>::from(ModDelayConfig::chorus(tutti_buffers::ChannelTopology::MONO)),
         RATE,
         1,
         2_400,
     );
     assert_linear(
         || {
-            PhaserNode::<f64>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+            PhaserNode::<f64>::try_from(PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)))
                 .unwrap()
         },
         RATE,
@@ -455,7 +457,7 @@ fn the_linear_nodes_satisfy_superposition() {
     assert_linear(
         || {
             CrossoverNode::<f64>::try_from(CrossoverConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
             ))
             .unwrap()

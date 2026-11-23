@@ -170,7 +170,7 @@ impl<F: Float> Arena<F> {
         frames: usize,
         d: &crate::compile::plan::Direct,
     ) -> ([&[F]; I], [&mut [F]; O]) {
-        use crate::compile::plan::Direct;
+        use crate::compile::plan::DirectRole;
         let st = self.stride;
         let mut rest: &mut [Line] = &mut self.lines;
         let mut base = 0usize;
@@ -185,19 +185,21 @@ impl<F: Float> Arena<F> {
             rest = after;
             base = slot + 1;
             match role {
-                Direct::READ => {
+                DirectRole::Read => {
                     let cur: &[Line] = cur;
                     *read = &bytemuck::cast_slice::<Line, F>(cur)[..frames];
                 }
-                c => outs[usize::from(c)] = &mut bytemuck::cast_slice_mut::<Line, F>(cur)[..frames],
+                DirectRole::Out(c) => {
+                    outs[usize::from(c)] = &mut bytemuck::cast_slice_mut::<Line, F>(cur)[..frames]
+                }
             }
         }
         let ins = std::array::from_fn(|c| match d.input[c] {
-            Direct::IN_PLACE => &[][..],
-            r => {
+            None => &[][..],
+            Some(r) => {
                 assert_eq!(
                     d.role[usize::from(r)],
-                    Direct::READ,
+                    DirectRole::Read,
                     "a direct input reads a read slot"
                 );
                 reads[usize::from(r)]

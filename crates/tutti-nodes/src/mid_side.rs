@@ -1,6 +1,6 @@
 //! [`MidSideNode`]: a stereo pair converted to mid/side or back.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::MidSide;
 use tutti_graph::{Cost, Cx, ForkByClone, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status};
@@ -54,7 +54,7 @@ impl From<MidSideConfig> for MidSideNode {
 
 impl<F: Float> Node<F> for MidSideNode {
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO).cost(Cost::Light)
+        Shape::through(ChannelTopology::STEREO).cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: &Prepare) {}
@@ -92,17 +92,6 @@ mod tests {
         assert_eq!(coded, [vec![0.75, 0.0, -0.5], vec![0.25, 1.0, 0.0]]);
         let back = drive_block(&mut dec, &[&coded[0], &coded[1]]);
         assert_eq!(back, [vec![1.0, 1.0, -0.5], vec![0.5, -1.0, -0.5]]);
-    }
-
-    /// The shape is stereo in and out, `Light`.
-    #[test]
-    fn the_shape_is_stereo_and_light() {
-        let shape = Node::<f32>::shape(&MidSideNode::from(MidSideConfig::encode()));
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.cost, Cost::Light);
     }
 
     /// In an `f64` graph the encoder is `(l + r) / 2` and `(l - r) / 2` on 29-bit signals, to

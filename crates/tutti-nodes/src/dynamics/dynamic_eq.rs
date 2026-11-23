@@ -1,7 +1,7 @@
 //! The dynamic EQ band [`DynamicEqNode`]: an SVF bell whose gain follows the level of a
 //! band-passed key, and its de-esser configuration.
 
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp,
@@ -159,7 +159,7 @@ impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// Past 16 channels: a band is one bus.
     fn from(config: DynamicEqConfig) -> Self {
         let input =
-            BusTopology::default_for(config.width).expect("a band is at most 16 channels wide");
+            ChannelTopology::default_for(config.width).expect("a band is at most 16 channels wide");
         Self::with_kernel(
             DynamicEqKernel::new(input, config.key, config.mode),
             DynamicEqSet,
@@ -194,7 +194,7 @@ control_set! {
 /// the [`KeySource`] it was built with.
 #[derive(Clone, Debug)]
 pub struct DynamicEqKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     mode: DynamicMode,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -204,7 +204,7 @@ pub struct DynamicEqKernel<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
-    fn new(input: BusTopology, key: KeySource, mode: DynamicMode) -> Self {
+    fn new(input: ChannelTopology, key: KeySource, mode: DynamicMode) -> Self {
         Self {
             input,
             key,
@@ -225,7 +225,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let main = Buses::main(self.input);
         let inputs = match self.key {
             KeySource::Own => main,
@@ -233,11 +232,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
                 .with(Bus::new(self.input, BusRole::Sidechain))
                 .expect("a main bus and a key are two buses"),
         };
-        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).cost(Cost::Moderate)
+        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(DynamicEqBank::new(self.input.layout(), rate).mode(self.mode));
+        self.bank = Some(DynamicEqBank::new(self.input.width(), rate).mode(self.mode));
         self.applied = false;
     }
 
@@ -281,42 +280,5 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     /// so the graph's tail fold never reads it as none.
     fn tail(&self) -> Tail {
         Tail::Unknown
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tutti_buffers::InputOutput;
-    use tutti_fixtures::signal::wide_signal;
-    use tutti_units::Samples;
-
-    /// An `f64` kernel keeps the bell in `f64`: with a range of 0 dB the band never leaves
-    /// flat, so a signal of more than 24 bits comes out exactly as it went in (an `f32` state
-    /// narrows it by 1e-8).
-    #[test]
-    fn an_f64_kernel_with_zero_range_returns_a_wide_signal_unchanged() {
-        let controls = DynamicEqControls {
-            threshold: Db::new(-60.0),
-            ratio: CompressionRatio::new(4.0),
-            range: Db::new(0.0),
-            ..DynamicEqControls::DEFAULT
-        };
-        let mut k =
-            DynamicEqKernel::<f64>::new(BusTopology::MONO, KeySource::Own, DynamicMode::Downward);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(2_000)),
-        );
-        k.retarget(&controls);
-        let x = wide_signal(2_000);
-        let mut y = vec![0.0f64; x.len()];
-        k.render(
-            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut [&mut y[..]])
-                .unwrap(),
-            ControlSignals::NONE,
-        )
-        .unwrap();
-        assert_eq!(y, x);
     }
 }

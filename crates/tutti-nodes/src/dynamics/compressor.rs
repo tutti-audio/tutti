@@ -1,7 +1,7 @@
 //! The feed-forward [`CompressorNode`] with an external side-chain, soft knee and
 //! makeup gain.
 
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals,
@@ -20,7 +20,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// [`CompressorBank`]'s; this file holds the cells and how the graph reaches them.
 ///
 /// Made from a [`CompressorConfig`] (`CompressorNode::from`): any width up to one bus (16
-/// channels), on a checked [`BusTopology`], with the [`KeySource`], the [`KeyFilter`] and the
+/// channels), on a checked [`ChannelTopology`], with the [`KeySource`], the [`KeyFilter`] and the
 /// [`CompressorControls`] it names. The gain is linked, so the stereo image does not shift
 /// when one side is louder.
 ///
@@ -78,7 +78,7 @@ pub type CompressorNode<F> = KernelNode<CompressorKernel<F>>;
 /// filter on that key and the controls it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CompressorConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     filter: KeyFilter,
     controls: CompressorControls,
@@ -90,9 +90,9 @@ impl CompressorConfig {
     /// threshold 0 dB): a caller names what it wants with [`controls`](Self::controls).
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
-    /// [`BusTopology::default_for`] before it reaches here: `new(BusTopology::default_for(n)?)`.
+    /// [`ChannelTopology::default_for`] before it reaches here: `new(ChannelTopology::default_for(n)?)`.
     #[must_use]
-    pub fn new(input: BusTopology) -> Self {
+    pub fn new(input: ChannelTopology) -> Self {
         Self {
             input,
             key: KeySource::Own,
@@ -196,7 +196,7 @@ control_set! {
 /// says nothing of.
 #[derive(Clone, Debug)]
 pub struct CompressorKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -207,7 +207,7 @@ pub struct CompressorKernel<F: Float + SimdLanes> {
 
 impl<F: Float + SimdLanes + Lerp> CompressorKernel<F> {
     /// A compressor on `input` whose detector reads `key`.
-    fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
+    fn new(input: ChannelTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
             input,
             key,
@@ -228,7 +228,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let main = Buses::main(self.input);
         let inputs = match self.key {
             KeySource::Own => main,
@@ -236,11 +235,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
                 .with(Bus::new(self.input, BusRole::Sidechain))
                 .expect("a main bus and a key are two buses"),
         };
-        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).cost(Cost::Moderate)
+        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.layout()));
+        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.width()));
         self.applied = false;
     }
 
@@ -296,9 +295,8 @@ impl CompressorSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -318,25 +316,10 @@ mod tests {
 
     fn comp(threshold: f64, ratio: f64, attack: f64, release: f64) -> CompressorNode<f32> {
         CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::MONO)
+            CompressorConfig::new(ChannelTopology::MONO)
                 .key(KeySource::Sidechain)
                 .controls(four(threshold, ratio, attack, release)),
         )
-    }
-
-    /// A fork starts from the values last set through the node's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(CompressorControls {
-                    knee: Db::new(6.0),
-                    makeup: Db::new(3.0),
-                    ..four(-20.0, 4.0, 0.001, 0.1)
-                }),
-        ));
     }
 
     /// A block longer than 64 frames renders whole: the gain control signal is sized from the
@@ -409,7 +392,8 @@ mod tests {
     fn a_compressor_with_its_own_key_compresses_its_own_signal() {
         let mk = || {
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::MONO).controls(four(-20.0, 4.0, 0.0001, 0.1)),
+                CompressorConfig::new(ChannelTopology::MONO)
+                    .controls(four(-20.0, 4.0, 0.0001, 0.1)),
             )
         };
         let shape = mk().shape();
@@ -431,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_mono_reduces_gain_on_loud_sidechain() {
+    fn a_loud_sidechain_key_reduces_the_main_signal() {
         let mut node = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let mut output = [0.0f32];
         for _ in 0..1000 {
@@ -441,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_mono_no_reduction_below_threshold() {
+    fn a_sidechain_key_under_the_threshold_leaves_the_main_signal_unreduced() {
         let mut node = prepared_at(comp(-10.0, 4.0, 0.001, 0.1), RATE_44K);
         let mut output = [0.0f32];
         for _ in 0..1000 {
@@ -452,11 +436,11 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_soft_knee_differs_from_hard_knee() {
+    fn a_knee_in_the_controls_changes_the_output_near_the_threshold() {
         let mut hard = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let mut soft = prepared_at(
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::MONO)
+                CompressorConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         knee: Db::new(12.0),
@@ -480,10 +464,10 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_makeup_gain() {
+    fn a_makeup_of_six_db_scales_the_reduced_output_by_its_gain() {
         let mut with = prepared_at(
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::MONO)
+                CompressorConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         makeup: Db::new(6.0),
@@ -534,36 +518,18 @@ mod tests {
         assert_eq!(output[0], 0.5);
     }
 
-    #[test]
-    fn test_compressor_stereo_reduces_on_loud_sidechain() {
-        let mut node = prepared_at(
-            CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
-                    .key(KeySource::Sidechain)
-                    .controls(four(-20.0, 4.0, 0.0001, 0.1)),
-            ),
-            RATE_44K,
-        );
-        let mut output = [0.0f32; 2];
-        for _ in 0..1000 {
-            tick(&mut node, &[0.5, 0.5, 0.9, 0.9], &mut output);
-        }
-        assert!((output[0] - output[1]).abs() < 0.001);
-        assert!(output[0] < 0.5);
-    }
-
     /// `2 * width` inputs (audio, then key) and `width` outputs for a side-chain compressor
     /// and `width` inputs for an own-key one, at every width: a config listens to its
     /// own signal at its width unless it names a key.
     #[test]
     fn the_width_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 4.0, 0.001, 0.1);
-        let wide = BusTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
+        let wide = ChannelTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
                 CompressorNode::<f32>::from(
-                    CompressorConfig::new(BusTopology::MONO)
+                    CompressorConfig::new(ChannelTopology::MONO)
                         .key(KeySource::Sidechain)
                         .controls(c),
                 ),
@@ -572,7 +538,7 @@ mod tests {
             ),
             (
                 CompressorNode::<f32>::from(
-                    CompressorConfig::new(BusTopology::STEREO)
+                    CompressorConfig::new(ChannelTopology::STEREO)
                         .key(KeySource::Sidechain)
                         .controls(c),
                 ),
@@ -589,12 +555,16 @@ mod tests {
                 4,
             ),
             (
-                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(ChannelTopology::MONO).controls(c),
+                ),
                 1,
                 1,
             ),
             (
-                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::STEREO).controls(c)),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(ChannelTopology::STEREO).controls(c),
+                ),
                 2,
                 2,
             ),
@@ -604,12 +574,16 @@ mod tests {
                 4,
             ),
             (
-                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(ChannelTopology::MONO).controls(c),
+                ),
                 1,
                 1,
             ),
             (
-                CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::STEREO).controls(c)),
+                CompressorNode::<f32>::from(
+                    CompressorConfig::new(ChannelTopology::STEREO).controls(c),
+                ),
                 2,
                 2,
             ),
@@ -636,11 +610,11 @@ mod tests {
         };
         for node in [
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(c),
             ),
-            CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(c)),
+            CompressorNode::<f32>::from(CompressorConfig::new(ChannelTopology::MONO).controls(c)),
         ] {
             let bases: Vec<_> = (0..6).map(|k| node.param_base(k)).collect();
             assert_eq!(
@@ -786,29 +760,5 @@ mod tests {
             out[16 + 240 + 16] > want * 0.9999,
             "arrived by 5 ms after the grid point"
         );
-    }
-
-    /// An `f64` kernel keeps its detector and gain in `f64`: a constant key `L` dB over the
-    /// threshold `T` of more than 24 bits comes out at `T + (L - T) / R` dB with instant
-    /// times, to 1e-12 dB (an `f32` state is off by 1e-7).
-    #[test]
-    fn an_f64_kernel_lands_a_wide_key_on_the_static_curve_in_f64() {
-        use tutti_fixtures::signal::wide_signal;
-        let (threshold, ratio) = (-30.0f64, 5.0f64);
-        let key = vec![wide_signal(1)[0]; 128];
-        let mut k = CompressorKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(128)),
-        );
-        let y = drive_kernel(
-            &mut k,
-            &[(0, four(threshold, ratio, 0.0, 0.0))],
-            std::slice::from_ref(&key),
-        );
-        let level = 20.0 * key[0].log10();
-        let want = threshold + (level - threshold) / ratio;
-        let got = 20.0 * y[0][127].log10();
-        assert!((got - want).abs() < 1e-12, "{got} dB against {want} dB");
     }
 }

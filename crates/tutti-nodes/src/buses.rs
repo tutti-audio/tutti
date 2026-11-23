@@ -2,7 +2,7 @@
 //! where its input goes: the graph refuses one it
 //! would have to guess.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::Buses;
 
 /// A main bus of `width` channels at the engine's speakers for that width
@@ -11,5 +11,5 @@ use tutti_graph::Buses;
 /// placement: the graph passes it only onto the same width. Past a bus's width
 /// there is no bus; the node's ports say how many channels it has.
 pub(crate) fn main_bus(width: ChannelLayout) -> Buses {
-    BusTopology::default_for(width).map_or(Buses::NONE, Buses::main)
+    ChannelTopology::default_for(width).map_or(Buses::NONE, Buses::main)
 }

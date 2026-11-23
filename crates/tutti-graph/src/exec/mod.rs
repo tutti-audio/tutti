@@ -188,12 +188,11 @@
 //! of the next block's events on the unit's own output.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
 
-use tutti_rt::{CappedVec, RingReader, RingWriter};
+use tutti_rt::{CappedVec, CounterWriter, GaugeWriter, RingReader, RingWriter};
 use tutti_units::PlayReading;
-use tutti_units::{Frame, Samples, Tail};
+use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
 use crate::compile::ids::PlanUnitId;
@@ -251,9 +250,11 @@ mod stage;
 mod state;
 mod update;
 
-pub(crate) use commit::{Channels, Commit, Crossfade, ExecutorEnds, Opened, channels};
-use node_op::{CONSTANT, flag, run_node_op, run_params};
-pub(crate) use node_op::{Head, OpState, SILENT, node_dispatch};
+pub(crate) use commit::{
+    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
+};
+pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
+use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
     audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
     output_op, sum_op,
@@ -338,19 +339,16 @@ pub struct Executor<F: Float = f32> {
     /// Where a replaced node writes its state for its successor
     /// (`Node::chase`), sized when a plan is built from what its nodes
     /// declare (`Shape::chase`), so the swap never allocates it.
-    chase: Vec<Event>,
+    chase: CappedVec<Event>,
     /// The pool blocks run on, if any (see [`set_pool`](Self::set_pool)).
     pool: Option<Arc<dyn Pool>>,
     /// The pool's participants, for the editor, which builds the parallel
     /// state of a plan with it (0: none).
-    pool_participants: Arc<AtomicUsize>,
+    pool_participants: GaugeWriter<Participants>,
     /// Blocks rendered with a plan, for the editor's bounds (`Stager`).
-    rendered: Arc<AtomicU64>,
-    /// How far the main output change the running plan crossfades has got: `Some`
-    /// while its fade runs (`main_output_fade`).
-    main_output_fade: Option<MainOutputFadeRun>,
-    /// Where the `seq` of the commit whose main output fade ended is published.
-    main_output_fade_ended: Arc<AtomicU64>,
+    rendered: RenderedBlocks,
+    /// The main output change the running plan crossfades.
+    main_output_fade: MainOutputFades,
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
     stash: std::collections::VecDeque<Box<Commit<F>>>,
@@ -373,12 +371,35 @@ struct Inbox<F: Float = f32> {
     /// Where each block's log of dropped events goes, for the editor to
     /// drain.
     losses: RingWriter<EventLoss>,
-    unreported: Arc<AtomicU64>,
+    unreported: CounterWriter<u64>,
     /// Where an edge whose declick fade ended is reported.
     edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     commands: CommandRx,
     /// `seq` of the last commit applied.
     applied: u64,
+}
+
+/// The blocks rendered with a plan, and the gauge the editor reads them from:
+/// the gauge always holds the count.
+struct RenderedBlocks {
+    count: Blocks,
+    published: GaugeWriter<Rendered>,
+}
+
+impl RenderedBlocks {
+    /// No blocks yet; `published` starts at zero.
+    fn new(published: GaugeWriter<Rendered>) -> Self {
+        Self {
+            count: Blocks::ZERO,
+            published,
+        }
+    }
+
+    /// One more block rendered. Wait-free.
+    fn add_block(&mut self) {
+        self.count += Blocks::new(1);
+        self.published.set(Rendered(self.count));
+    }
 }
 
 /// The frames a plan's main output crossfade has rendered.
@@ -387,6 +408,51 @@ struct MainOutputFadeRun {
     /// The `seq` of the commit that installed the plan.
     seq: u64,
     done: usize,
+}
+
+/// How far the main output change the running plan crossfades has got, and
+/// where the end of the fade is published: `run` is `Some` while the plan
+/// carries a fade, and the gauge holds the `seq` of the commit whose fade
+/// ended last.
+struct MainOutputFades {
+    run: Option<MainOutputFadeRun>,
+    ended: GaugeWriter<CommitSeq>,
+}
+
+impl MainOutputFades {
+    /// No fade running.
+    fn new(ended: GaugeWriter<CommitSeq>) -> Self {
+        Self { run: None, ended }
+    }
+
+    /// The fade after commit `seq` installs `plan` over `old`. A main output
+    /// crossfade starts with the plan that carries it, and a plan that
+    /// carries none ends one running. A plan that carries the old main output
+    /// the running plan carries, under the same new main output, continues
+    /// the crossfade from the frames it has rendered.
+    fn install(&mut self, plan: &Plan, old: Option<&Plan>, seq: u64) {
+        let continues = |old: &Plan, bank: crate::MainOutputBank| {
+            old.main_output_id() == plan.main_output_id()
+                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
+        };
+        self.run = match (plan.main_output_bank(), old, self.run) {
+            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
+            (Some(_), ..) => Some(MainOutputFadeRun { seq, done: 0 }),
+            (None, ..) => None,
+        };
+    }
+
+    /// `plan` rendered a block of `frames`: the fade moves on, and its end is
+    /// published on the block that reaches the fade's length. Wait-free.
+    fn advance(&mut self, plan: &Plan, frames: usize) {
+        if let (Some(run), Some(bank)) = (self.run.as_mut(), plan.main_output_bank()) {
+            let before = run.done;
+            run.done += frames;
+            if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
+                self.ended.set(CommitSeq(run.seq));
+            }
+        }
+    }
 }
 
 /// The main output change a running plan crossfades, and how far it has got: what a
@@ -466,10 +532,10 @@ fn par_for(
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
 /// latency then its tail (`NodeRec::park_after`).
-fn tail_elapsed(park_after: Tail, quiet: u64) -> bool {
+fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
-        Tail::Finite(n) => quiet >= n.get() as u64,
+        Tail::Finite(n) => quiet >= n,
         Tail::Unknown | Tail::Unbounded => false,
     }
 }
@@ -481,6 +547,7 @@ impl<F: Float> Executor<F> {
         ends: ExecutorEnds<F>,
         commands: CommandRx,
     ) -> Self {
+        let readings = ends.readings;
         Self {
             prepare,
             event_cap: cap,
@@ -489,7 +556,7 @@ impl<F: Float> Executor<F> {
                 back: ends.back,
                 fade_back: ends.fade_back,
                 losses: ends.losses,
-                unreported: ends.unreported,
+                unreported: readings.unreported,
                 edge_fades: ends.edge_fades,
                 commands,
                 applied: 0,
@@ -500,17 +567,16 @@ impl<F: Float> Executor<F> {
             clock: Clock {
                 frame: Frame::ZERO,
                 history: Box::new(TransportHistory::new()),
-                play: PlayState::new(ends.play),
+                play: PlayState::new(readings.play),
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
             parked: CappedVec::with_capacity(0),
-            chase: Vec::new(),
+            chase: CappedVec::default(),
             pool: None,
-            pool_participants: ends.pool,
-            rendered: ends.rendered,
-            main_output_fade: None,
-            main_output_fade_ended: ends.main_output_fade_ended,
+            pool_participants: readings.pool,
+            rendered: RenderedBlocks::new(readings.rendered),
+            main_output_fade: MainOutputFades::new(readings.main_output_fade_ended),
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -542,7 +608,7 @@ impl<F: Float> Executor<F> {
         self.logs.size(participants.unwrap_or(1));
         // Commits staged from here on are built for this pool.
         self.pool_participants
-            .store(participants.unwrap_or(0), Ordering::Release);
+            .set(Participants(participants.unwrap_or(0)));
         // A commit already sent was staged for the pool before this one: it
         // gets the parallel state for this pool, and is applied first.
         while let Some(commit) = self.inbox.queue.pop() {
@@ -634,7 +700,7 @@ impl<F: Float> Executor<F> {
     pub fn main_output_fade(&self) -> Option<MainOutputFade> {
         let plan = self.plan.as_ref()?;
         let bank = plan.main_output_bank()?;
-        let run = self.main_output_fade?;
+        let run = self.main_output_fade.run?;
         (run.done < bank.fade.duration.get()).then(|| MainOutputFade {
             old: bank.old,
             width: plan.rendered_outputs() - bank.base,
@@ -903,10 +969,10 @@ mod tests {
         let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
         let mut stager = Stager::new(
             DEFAULT_EVENT_CAPACITY,
-            Arc::clone(&channels.pool),
-            Arc::clone(&channels.rendered),
+            channels.readings.pool.clone(),
+            channels.readings.rendered.clone(),
         );
-        let declick = tutti_curve::declick_frames(prepare.sample_rate()).get();
+        let declick = tutti_curve::declick_frames(prepare.sample_rate());
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),

@@ -1,7 +1,7 @@
 use tutti_dsp::Harmonics;
 use tutti_graph::contract::{BlockRig, assert_param_fork};
 use tutti_graph::{IntoNode, Node};
-use tutti_units::{SampleRate, UnitParam};
+use tutti_units::{SampleRate, Tail, UnitParam};
 
 use super::*;
 use crate::test_support::prepared;
@@ -10,8 +10,8 @@ const THIRD: AmbisonicOrder = AmbisonicOrder::MAX;
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 fn aim(azimuth: f64, elevation: f64) -> Direction {
@@ -203,7 +203,8 @@ fn a_decoder_reads_n3d_and_sn3d_encodings_of_one_field_to_the_same_feeds() {
 #[test]
 fn a_decoder_refuses_a_bus_that_is_not_a_bed_and_a_bed_with_one_speaker() {
     let order = AmbisonicOrder::of(1);
-    let unassigned = BusTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
+    let unassigned =
+        ChannelTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
     assert!(matches!(
         AmbisonicDecoderNode::<f32>::try_from(
             AmbisonicDecoderConfig::new(unassigned).input(ambix(order))
@@ -269,8 +270,8 @@ fn forks_share_no_cell() {
 /// one of another order or scaling, is refused by name.
 #[test]
 fn the_nodes_refuse_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
-    let fuma = BusTopology::ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)));
-    let max_n = BusTopology::ambisonic(AmbisonicFormat::new(
+    let fuma = ChannelTopology::Ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)));
+    let max_n = ChannelTopology::Ambisonic(AmbisonicFormat::new(
         AmbisonicOrder::of(1),
         AmbisonicOrdering::Acn,
         AmbisonicNormalization::MaxN,

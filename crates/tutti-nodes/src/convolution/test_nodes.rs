@@ -1,14 +1,14 @@
 //! Test constructors: one `ConvolverConfig` per layout, at the buses a test names.
 
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Mono, Sample};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Mono, Sample};
 use tutti_dsp::{FftFloat, Lerp};
 use tutti_units::Samples;
 
 use super::{ConvolverConfig, ConvolverError, ConvolverNode};
 
 /// `width` channels that feed no speaker, as a bus.
-pub(crate) fn unassigned_bus(width: impl Into<ChannelLayout>) -> BusTopology {
-    BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+pub(crate) fn unassigned_bus(width: impl Into<ChannelLayout>) -> ChannelTopology {
+    ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// A one-channel node over `ir`.
@@ -16,8 +16,10 @@ pub(crate) fn mono_node<F: FftFloat + Lerp, S: Sample>(
     ir: Mono<'_, S>,
     block_size: Samples,
 ) -> ConvolverNode<F> {
-    ConvolverNode::try_from(ConvolverConfig::new(BusTopology::MONO, &[ir]).block_size(block_size))
-        .expect("one response on a mono bus")
+    ConvolverNode::try_from(
+        ConvolverConfig::new(ChannelTopology::MONO, &[ir]).block_size(block_size),
+    )
+    .expect("one response on a mono bus")
 }
 
 /// `width` unassigned channels sharing the response `ir`.
@@ -47,7 +49,7 @@ pub(crate) fn folded_node<F: FftFloat + Lerp, S: Sample>(
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
     let width = ChannelLayout::try_from(irs.len()).expect("a test width fits a layout");
-    let bus = BusTopology::default_for(width).expect("a test width fits a bus");
+    let bus = ChannelTopology::default_for(width).expect("a test width fits a bus");
     ConvolverNode::try_from(
         ConvolverConfig::new(bus, irs)
             .folded()
@@ -64,7 +66,7 @@ pub(crate) fn true_stereo_node<F: FftFloat + Lerp, S: Sample>(
     block_size: Samples,
 ) -> ConvolverNode<F> {
     ConvolverNode::try_from(
-        ConvolverConfig::new(BusTopology::STEREO, &[ll, lr, rl, rr])
+        ConvolverConfig::new(ChannelTopology::STEREO, &[ll, lr, rl, rr])
             .true_stereo()
             .block_size(block_size),
     )
@@ -78,7 +80,6 @@ pub(crate) fn ambisonic_node<F: FftFloat + Lerp, S: Sample>(
     irs: &[Mono<'_, S>],
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
-    let output = BusTopology::try_from(&output).expect("a test output fits a bus");
     ConvolverNode::try_from(
         ConvolverConfig::new(output, irs)
             .ambisonic(input)

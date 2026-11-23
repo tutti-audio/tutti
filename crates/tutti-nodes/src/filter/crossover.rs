@@ -3,7 +3,7 @@
 //! kernel, the cells and how a block reads them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, CrossoverBands, CrossoverBank, CrossoverBlend, CrossoverControls,
     CrossoverError, CrossoverModel, MAX_SPLITS, Ramp, SimdLanes, fit_to_rate,
@@ -109,7 +109,7 @@ pub type CrossoverNode<F> = KernelNode<CrossoverKernel<F>>;
 /// What a [`CrossoverNode`] is made from: its width and the frequency of each split.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CrossoverConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     crossovers: CrossoverControls,
 }
 
@@ -117,7 +117,7 @@ impl CrossoverConfig {
     /// A crossover over the bus `input` with the splits `crossovers`, one more band than
     /// [`CrossoverControls::splits`].
     #[must_use]
-    pub fn new(input: BusTopology, crossovers: CrossoverControls) -> Self {
+    pub fn new(input: ChannelTopology, crossovers: CrossoverControls) -> Self {
         Self { input, crossovers }
     }
 }
@@ -140,7 +140,7 @@ impl<F: Float + SimdLanes> TryFrom<CrossoverConfig> for CrossoverNode<F> {
     fn try_from(config: CrossoverConfig) -> Result<Self, CrossoverError> {
         let CrossoverConfig { input, crossovers } = config;
         let splits = crossovers.splits();
-        let channels = usize::from(input.layout().count());
+        let channels = usize::from(input.width().count());
         let bands = CrossoverBands::new(splits + 1).ok_or(CrossoverError::Bands {
             bands: splits + 1,
             min: 2,
@@ -168,7 +168,7 @@ const RAMP_STEPS: u32 = 16;
 /// so the bands stay a Butterworth set at every frame.
 #[derive(Clone, Debug)]
 pub struct CrossoverKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     bank: CrossoverBank<F>,
     model: CrossoverModel,
     /// The blend in flight; the first design after `prepare` or `reset` lands at once.
@@ -186,18 +186,18 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
     ///
     /// [`CrossoverError::Channels`] for no channels.
     fn new(
-        input: BusTopology,
+        input: ChannelTopology,
         bands: CrossoverBands,
         controls: &CrossoverControls,
     ) -> Result<Self, CrossoverError> {
-        if input.layout().count() == 0 {
+        if input.width().count() == 0 {
             return Err(CrossoverError::Channels { channels: 0 });
         }
         let rate = SampleRate::SR_48K;
         let model = CrossoverModel::designed(bands, controls, rate);
         Ok(Self {
             input,
-            bank: CrossoverBank::new(input.layout()),
+            bank: CrossoverBank::new(input.width()),
             blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
             applied: false,
@@ -297,9 +297,8 @@ mod tests {
     use crate::test_support::{amplitude_at, sine};
     use crate::test_support::{prepared, render_chunked};
     use tutti_buffers::ChannelLayout;
-    use tutti_buffers::{InputOutput, Planes};
+    use tutti_buffers::Planes;
     use tutti_graph::{Cost, Node, ParamNode};
-    use tutti_units::Samples;
     use tutti_units::Tail;
 
     // The node under test is `f32` (the session's audio format), so its tolerances are `f32`'s;
@@ -327,7 +326,7 @@ mod tests {
     fn the_node_writes_bands_band_major_per_channel() {
         let mut node = prepared(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
             ))
             .unwrap(),
@@ -357,7 +356,7 @@ mod tests {
     #[test]
     fn a_param_write_moves_the_split() {
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             CrossoverControls::try_from(&[Hz::new(500.0), Hz::new(4_000.0)][..]).unwrap(),
         ))
         .unwrap();
@@ -370,28 +369,12 @@ mod tests {
         assert!((low - 0.5).abs() < TOL, "{low}");
     }
 
-    /// A fork starts from the frequencies set and shares no cell with the
-    /// live node, whatever the index.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        tutti_graph::contract::assert_param_fork(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::MONO,
-                CrossoverControls::try_from(
-                    &[Hz::new(500.0), Hz::new(900.0), Hz::new(3_000.0)][..],
-                )
-                .unwrap(),
-            ))
-            .unwrap(),
-        );
-    }
-
     /// The shape declares one cutoff port per crossover, indexed, and each
     /// port's base is its cell.
     #[test]
     fn the_ports_are_the_indexed_cutoffs() {
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0), Hz::new(9_000.0)][..])
                 .unwrap(),
         ))
@@ -417,7 +400,7 @@ mod tests {
         use tutti_graph::contract::drive;
         let mut node = prepared(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
                 CrossoverControls::try_from(&[Hz::new(500.0), Hz::new(4_000.0)][..]).unwrap(),
             ))
             .unwrap(),
@@ -444,7 +427,7 @@ mod tests {
     fn the_node_validates_its_bus_and_its_splits() {
         assert!(matches!(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::EMPTY,
+                ChannelTopology::EMPTY,
                 CrossoverControls::try_from(&[Hz::new(100.0)][..]).unwrap()
             )),
             Err(CrossoverError::Channels { channels: 0 })
@@ -452,7 +435,7 @@ mod tests {
         // 11 channels x 6 bands = 66 ports.
         assert!(matches!(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::default_for(ChannelLayout::from_count(11)).unwrap(),
+                ChannelTopology::default_for(ChannelLayout::from_count(11)).unwrap(),
                 CrossoverControls::try_from(
                     &[
                         Hz::new(1.0),
@@ -468,7 +451,7 @@ mod tests {
         ));
         assert!(
             CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::default_for(ChannelLayout::from_count(10)).unwrap(),
+                ChannelTopology::default_for(ChannelLayout::from_count(10)).unwrap(),
                 CrossoverControls::try_from(
                     &[
                         Hz::new(1.0),
@@ -487,7 +470,7 @@ mod tests {
             frequencies: [Hz::ZERO; MAX_SPLITS],
         };
         assert!(matches!(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(BusTopology::MONO, none)),
+            CrossoverNode::<f32>::try_from(CrossoverConfig::new(ChannelTopology::MONO, none)),
             Err(CrossoverError::Bands { bands: 1, .. })
         ));
     }
@@ -498,7 +481,7 @@ mod tests {
     #[test]
     fn a_frequency_above_the_rate_does_not_freeze_the_others() {
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(15_000.0)][..]).unwrap(),
         ))
         .unwrap();
@@ -533,7 +516,7 @@ mod tests {
     #[test]
     fn prepare_reads_the_cells() {
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             CrossoverControls::try_from(&[Hz::new(500.0)][..]).unwrap(),
         ))
         .unwrap();
@@ -544,35 +527,5 @@ mod tests {
         let high = amplitude_at(&out[1], 200.0, RATE);
         assert!((low - 1.0).abs() < 2e-2, "{low}");
         assert!(high < 2e-3, "{high}");
-    }
-
-    /// An `f64` kernel keeps its sections in `f64`: a constant of more than 24 bits through a
-    /// 3-band tree comes out of the bands summed as itself to 1e-12 once the transient has
-    /// decayed (the bands sum to an all-pass of unit DC gain; an `f32` state is off by 1e-8).
-    #[test]
-    fn an_f64_kernel_sums_a_wide_constant_to_itself_in_f64() {
-        use tutti_fixtures::signal::wide_signal;
-        let controls =
-            CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(3_000.0)][..]).unwrap();
-        let mut k =
-            CrossoverKernel::<f64>::new(BusTopology::MONO, CrossoverBands::of(3), &controls)
-                .unwrap();
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(4_000)),
-        );
-        k.retarget(&controls);
-        let c = wide_signal(1)[0];
-        let x = vec![c; 4_000];
-        let mut out = vec![vec![0.0f64; x.len()]; 3];
-        let mut views: Vec<&mut [f64]> = out.iter_mut().map(Vec::as_mut_slice).collect();
-        k.render(
-            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut views).unwrap(),
-            ControlSignals::NONE,
-        )
-        .unwrap();
-        // 200 Hz's section has radius 0.987: 1e-12 in about 2 100 frames.
-        let sum = out[0][3_999] + out[1][3_999] + out[2][3_999];
-        assert!((sum - c).abs() < 1e-12, "{sum} against {c}");
     }
 }

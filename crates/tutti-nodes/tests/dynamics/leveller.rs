@@ -3,7 +3,9 @@
 //! 0.1), the target is the `Threshold` param at index 0, a 5.1's LFE adds no loudness (BS.1770)
 //! and a bus with no placement is refused.
 
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, Planes};
+use tutti_buffers::{
+    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, Planes,
+};
 use tutti_fixtures::signal::{peak, sine};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
@@ -114,7 +116,7 @@ fn a_bus_with_no_placement_is_refused() {
             width: ChannelLayout::from(3u16)
         }
     );
-    let ambisonic = BusTopology::ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
+    let ambisonic = ChannelTopology::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1)));
     assert_eq!(
         LevellerNode::<f32>::try_from(LevellerConfig::new(ambisonic)).unwrap_err(),
         ChannelWeightError::Ambisonic
