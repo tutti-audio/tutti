@@ -346,14 +346,9 @@ pub struct Executor<F: Float = f32> {
     /// state of a plan with it (0: none).
     pool_participants: GaugeWriter<Participants>,
     /// Blocks rendered with a plan, for the editor's bounds (`Stager`).
-    rendered: GaugeWriter<Rendered>,
-    /// What `rendered` last published.
-    rendered_blocks: Blocks,
-    /// How far the main output change the running plan crossfades has got: `Some`
-    /// while its fade runs (`main_output_fade`).
-    main_output_fade: Option<MainOutputFadeRun>,
-    /// Where the `seq` of the commit whose main output fade ended is published.
-    main_output_fade_ended: GaugeWriter<CommitSeq>,
+    rendered: RenderedBlocks,
+    /// The main output change the running plan crossfades.
+    main_output_fade: MainOutputFades,
     /// Commits taken off the queue by [`set_pool`](Self::set_pool), to apply
     /// first: room for every commit the queue holds.
     stash: std::collections::VecDeque<Box<Commit<F>>>,
@@ -384,12 +379,80 @@ struct Inbox<F: Float = f32> {
     applied: u64,
 }
 
+/// The blocks rendered with a plan, and the gauge the editor reads them from:
+/// the gauge always holds the count.
+struct RenderedBlocks {
+    count: Blocks,
+    published: GaugeWriter<Rendered>,
+}
+
+impl RenderedBlocks {
+    /// No blocks yet; `published` starts at zero.
+    fn new(published: GaugeWriter<Rendered>) -> Self {
+        Self {
+            count: Blocks::ZERO,
+            published,
+        }
+    }
+
+    /// One more block rendered. Wait-free.
+    fn add_block(&mut self) {
+        self.count += Blocks::new(1);
+        self.published.set(Rendered(self.count));
+    }
+}
+
 /// The frames a plan's main output crossfade has rendered.
 #[derive(Clone, Copy)]
 struct MainOutputFadeRun {
     /// The `seq` of the commit that installed the plan.
     seq: u64,
     done: usize,
+}
+
+/// How far the main output change the running plan crossfades has got, and
+/// where the end of the fade is published: `run` is `Some` while the plan
+/// carries a fade, and the gauge holds the `seq` of the commit whose fade
+/// ended last.
+struct MainOutputFades {
+    run: Option<MainOutputFadeRun>,
+    ended: GaugeWriter<CommitSeq>,
+}
+
+impl MainOutputFades {
+    /// No fade running.
+    fn new(ended: GaugeWriter<CommitSeq>) -> Self {
+        Self { run: None, ended }
+    }
+
+    /// The fade after commit `seq` installs `plan` over `old`. A main output
+    /// crossfade starts with the plan that carries it, and a plan that
+    /// carries none ends one running. A plan that carries the old main output
+    /// the running plan carries, under the same new main output, continues
+    /// the crossfade from the frames it has rendered.
+    fn install(&mut self, plan: &Plan, old: Option<&Plan>, seq: u64) {
+        let continues = |old: &Plan, bank: crate::MainOutputBank| {
+            old.main_output_id() == plan.main_output_id()
+                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
+        };
+        self.run = match (plan.main_output_bank(), old, self.run) {
+            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
+            (Some(_), ..) => Some(MainOutputFadeRun { seq, done: 0 }),
+            (None, ..) => None,
+        };
+    }
+
+    /// `plan` rendered a block of `frames`: the fade moves on, and its end is
+    /// published on the block that reaches the fade's length. Wait-free.
+    fn advance(&mut self, plan: &Plan, frames: usize) {
+        if let (Some(run), Some(bank)) = (self.run.as_mut(), plan.main_output_bank()) {
+            let before = run.done;
+            run.done += frames;
+            if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
+                self.ended.set(CommitSeq(run.seq));
+            }
+        }
+    }
 }
 
 /// The main output change a running plan crossfades, and how far it has got: what a
@@ -512,10 +575,8 @@ impl<F: Float> Executor<F> {
             chase: CappedVec::default(),
             pool: None,
             pool_participants: readings.pool,
-            rendered: readings.rendered,
-            rendered_blocks: Blocks::ZERO,
-            main_output_fade: None,
-            main_output_fade_ended: readings.main_output_fade_ended,
+            rendered: RenderedBlocks::new(readings.rendered),
+            main_output_fade: MainOutputFades::new(readings.main_output_fade_ended),
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -639,7 +700,7 @@ impl<F: Float> Executor<F> {
     pub fn main_output_fade(&self) -> Option<MainOutputFade> {
         let plan = self.plan.as_ref()?;
         let bank = plan.main_output_bank()?;
-        let run = self.main_output_fade?;
+        let run = self.main_output_fade.run?;
         (run.done < bank.fade.duration.get()).then(|| MainOutputFade {
             old: bank.old,
             width: plan.rendered_outputs() - bank.base,

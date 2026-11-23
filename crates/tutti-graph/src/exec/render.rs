@@ -4,9 +4,9 @@ use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
-use tutti_units::{Blocks, Samples};
+use tutti_units::Samples;
 
-use super::commit::{CommitSeq, Crossfade, Rendered, retire_fade};
+use super::commit::{Crossfade, retire_fade};
 use super::node_op::Flags;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
@@ -242,9 +242,7 @@ impl<F: Float> Executor<F> {
                 pool,
                 pool_participants: _,
                 rendered,
-                rendered_blocks,
                 main_output_fade,
-                main_output_fade_ended,
                 stash: _,
                 logs,
             } = self;
@@ -409,16 +407,9 @@ impl<F: Float> Executor<F> {
             for f in event_fb.iter_mut().flatten() {
                 f.advance(frames);
             }
-            if let (Some(run), Some(bank)) = (main_output_fade.as_mut(), plan.main_output_bank()) {
-                let before = run.done;
-                run.done += frames;
-                if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
-                    main_output_fade_ended.set(CommitSeq(run.seq));
-                }
-            }
+            main_output_fade.advance(plan, frames);
             *frame += Samples::new(frames);
-            *rendered_blocks += Blocks::new(1);
-            rendered.set(Rendered(*rendered_blocks));
+            rendered.add_block();
         });
     }
 }
