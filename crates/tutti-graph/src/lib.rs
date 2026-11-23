@@ -701,6 +701,7 @@ mod plan;
 mod play;
 mod pool;
 mod preroll;
+mod published;
 mod rates;
 #[cfg(feature = "testing")]
 mod reference;
@@ -789,6 +790,7 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+pub use published::{ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind};
 pub use rates::SampleRates;
 #[cfg(feature = "testing")]
 pub use reference::Reference;
@@ -812,6 +814,7 @@ pub mod __private {
     pub use crate::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };
+    pub use crate::published::Sweep;
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};

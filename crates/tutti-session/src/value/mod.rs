@@ -87,14 +87,12 @@ pub(crate) use range::{Bounds, RangeSlot};
 pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
-#[cfg(feature = "sampler")]
-pub(crate) use slot::SpeedCell;
 pub(crate) use slot::{
     Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
 };
 pub use slot::{
-    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, NodeSlots, OutputPolicyTarget,
-    SettingTarget, TempoTarget,
+    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, OutputPolicyTarget, SettingTarget,
+    TempoTarget,
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
