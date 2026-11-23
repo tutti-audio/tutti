@@ -298,6 +298,10 @@ impl<F: Float> MicIn<F> {
     /// drops frames without stalling the capture thread. Nothing records, so
     /// there is no recording ring to fill and lose frames.
     ///
+    /// To record the monitored input too, open a raw tap on the inlet node's
+    /// outputs: it reads the frames the capture pushed (the device is opened
+    /// once, and a capture fills one ring).
+    ///
     /// # Errors
     /// As [`open`](Self::open).
     pub fn open_with_monitor(
