@@ -1,7 +1,7 @@
 //! [`EarlyReflectionsNode`]: the reverb model's [`TapSet`] stage as a node.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, EarlyReflections, EarlyReflectionsError, TapSet};
 use tutti_graph::{Buses, Cost, Shape};
 use tutti_units::{SampleRate, Tail};
@@ -80,9 +80,9 @@ impl<F: Float> Kernel for EarlyReflectionsKernel<F> {
     fn shape(&self) -> Shape {
         let channels =
             u16::try_from(self.stage.channels()).expect("a stage has at most 8 channels");
-        let input = BusTopology::unassigned(self.width)
+        let input = ChannelTopology::unassigned(self.width)
             .expect("early reflections take at most 16 channels");
-        let output = BusTopology::unassigned(ChannelLayout::from_count(channels))
+        let output = ChannelTopology::unassigned(ChannelLayout::from_count(channels))
             .expect("a stage has at most 8 channels");
         Shape::buses(Buses::main(input), Buses::main(output)).cost(Cost::Moderate)
     }

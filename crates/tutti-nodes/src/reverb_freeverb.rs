@@ -4,7 +4,7 @@
 //! this file holds the kernel that retargets it, the cells and how the graph reaches them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, FreeverbBank, FreeverbControls, FreeverbRamps, Lerp};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Mix, SampleRate, Tail};
@@ -163,9 +163,10 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
     const GRID: usize = FreeverbBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
+        let output =
+            Bus::banded(ChannelTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
         Shape::buses(
-            Buses::main(BusTopology::MONO),
+            Buses::main(ChannelTopology::MONO),
             Buses::NONE.with(output).expect("one bus"),
         )
         .cost(Cost::Moderate)

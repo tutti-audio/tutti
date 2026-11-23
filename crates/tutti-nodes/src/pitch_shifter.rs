@@ -1,6 +1,6 @@
 //! [`PitchShifterNode`]: a pitch shift in cents over a phase vocoder, at the input's duration.
 
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, ColaGeometry, FftFloat, HopSize, PhaseVocoder, PhaseVocoderControls,
     StftGeometry, WindowLength,
@@ -165,7 +165,7 @@ impl<F: FftFloat> Kernel for PitchShifterKernel<F> {
 
     /// `width` channels in and out, `Heavy`: an FFT pair per channel per hop.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
+        let bus = ChannelTopology::unassigned(self.width)
             .expect("a pitch shifter is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Heavy)
     }

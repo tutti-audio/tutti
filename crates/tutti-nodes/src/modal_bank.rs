@@ -1,7 +1,7 @@
 //! [`ModalBankNode`]: a struck body as a bank of damped resonators, excited by its input.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, ModalBank, ModalControls, Modes};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Seconds, Tail};
@@ -104,8 +104,8 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 
     /// `width` channels in and out, `Heavy`: two multiply-adds per mode, sample and channel.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a modal bank is at most 16 channels wide");
+        let bus = ChannelTopology::unassigned(self.width)
+            .expect("a modal bank is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Heavy)
     }
 

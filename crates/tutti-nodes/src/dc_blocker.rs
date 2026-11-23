@@ -114,7 +114,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 
     /// `width` channels in and out, `Light`: a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus = tutti_buffers::BusTopology::unassigned(self.width)
+        let bus = tutti_buffers::ChannelTopology::unassigned(self.width)
             .expect("a DC blocker is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Light)
     }

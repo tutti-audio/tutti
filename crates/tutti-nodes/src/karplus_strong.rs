@@ -1,7 +1,7 @@
 //! [`KarplusStrongNode`]: a plucked string excited by its input.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch,
 };
@@ -132,7 +132,7 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
     /// sample and channel.
     fn shape(&self) -> Shape {
         let bus =
-            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
+            ChannelTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Moderate)
     }
 

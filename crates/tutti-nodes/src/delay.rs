@@ -16,7 +16,7 @@ use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
 
 #[cfg(doc)]
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 #[cfg(doc)]
 use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode, MaxDelay};
 
@@ -59,7 +59,7 @@ impl DelayConfig {
 /// cells and how the graph reaches them.
 ///
 /// Made from a [`DelayConfig`] (`DelayNode::from`) over a [`DelayLayout`]: any width up to one
-/// bus (16 channels), on a checked [`BusTopology`], with the [`MaxDelay`] and the
+/// bus (16 channels), on a checked [`ChannelTopology`], with the [`MaxDelay`] and the
 /// [`InterpolationMode`] of your own, and the layout's cross-feedback [`FeedbackRouting`] and
 /// times of the channels past the first ([`ChannelTimes`]).
 ///
@@ -277,8 +277,8 @@ mod tests {
     // format, so their tolerances are `f32`'s.
     use super::*;
     use crate::test_support::drive_kernel;
-    use tutti_buffers::BusTopology;
     use tutti_buffers::ChannelLayout;
+    use tutti_buffers::ChannelTopology;
     use tutti_dsp::{ChannelTimes, FeedbackRouting, MaxDelay};
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, drive, prepared};
     use tutti_graph::{Node, ParamNode};
@@ -301,8 +301,8 @@ mod tests {
         n / RATE.get()
     }
 
-    fn bus(width: u16) -> BusTopology {
-        BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
+    fn bus(width: u16) -> ChannelTopology {
+        ChannelTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
     }
 
     /// `node` prepared at [`RATE`], over `inputs` (one `Vec` per channel) frame by frame,
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
         let node = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                 .controls(controls(0.05, 0.4, 0.2)),
         );
         assert_eq!(
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn the_shape_declares_the_three_controls_and_no_latency() {
         let d = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                 .controls(controls(0.01, 0.5, 0.25)),
         );
         let shape = d.shape();
@@ -404,7 +404,7 @@ mod tests {
             (6, 6)
         );
         let mono = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX))
                 .controls(controls(0.01, 0.3, 0.0)),
         );
         assert_eq!(mono.shape().audio_in().count(), 1);
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn a_zero_delay_passes_the_input_through() {
         let node = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX))
                 .controls(controls(0.0, 0.0, 0.0)),
         );
         let out = frames_of(node, &[vec![0.5]], &[]);
@@ -425,7 +425,7 @@ mod tests {
     /// the layout gives the right one (here 5 and 10 frames).
     #[test]
     fn the_stereo_channels_echo_at_their_own_times() {
-        let layout = DelayLayout::builder(BusTopology::STEREO, MAX)
+        let layout = DelayLayout::builder(ChannelTopology::STEREO, MAX)
             .times(ChannelTimes::try_from(&[Seconds::new(frames(10.0))][..]).unwrap())
             .build()
             .unwrap();
@@ -444,28 +444,26 @@ mod tests {
     #[test]
     fn the_stereo_cross_feedback_reaches_the_other_channel() {
         let x = impulses(2, 41, &[0]);
-        let out =
-            frames_of(
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.0, 0.5)),
-                ),
-                &x,
-                &[],
-            );
+        let out = frames_of(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(10.0), 0.0, 0.5)),
+            ),
+            &x,
+            &[],
+        );
         assert_eq!(
             out[1][20], 0.5,
             "the right hears the left's echo a period on, scaled"
         );
-        let out =
-            frames_of(
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.0, 0.0)),
-                ),
-                &x,
-                &[],
-            );
+        let out = frames_of(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(10.0), 0.0, 0.0)),
+            ),
+            &x,
+            &[],
+        );
         assert!(out[1].iter().all(|&s| s == 0.0));
     }
 
@@ -495,7 +493,7 @@ mod tests {
         let time = vec![frames(d as f64) as f32; len];
         let feedback = vec![g; len];
         let node = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX))
                 .controls(controls(0.0, 0.0, 0.0)),
         );
         let out = frames_of(
@@ -517,11 +515,10 @@ mod tests {
     #[test]
     fn a_fed_feedback_drives_the_tail() {
         let run = |fb: f32| -> f32 {
-            let node =
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.0, 0.0)),
-                );
+            let node = DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(10.0), 0.0, 0.0)),
+            );
             let signal = vec![fb; 200];
             let out = frames_of(node, &impulses(2, 200, &[0, 1]), &[None, Some(&signal)]);
             out[0][50..].iter().map(|s| s * s).sum()
@@ -587,7 +584,7 @@ mod tests {
         let rate = SampleRate::SR_44K1;
         let node = DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
                 MaxDelay::of(Seconds::new(0.1)),
             ))
             .controls(controls(5.0, 0.0, 0.0)),
@@ -602,17 +599,15 @@ mod tests {
     /// echoes still in flight are gone.
     #[test]
     fn a_re_prepare_empties_the_lines() {
-        let mut node = prepared(
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX)).controls(controls(
-                    frames(50.0),
-                    0.9,
-                    0.0,
-                )),
-            ),
-            RATE,
-            64,
-        );
+        let mut node =
+            prepared(
+                DelayNode::<f32>::from(
+                    DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX))
+                        .controls(controls(frames(50.0), 0.9, 0.0)),
+                ),
+                RATE,
+                64,
+            );
         let x = impulses(1, 64, &[0]);
         drive(&mut node, RATE, Planes::new(&[&x[0]]).unwrap(), &[]);
         node = prepared(node, RATE, 64);
@@ -635,7 +630,7 @@ mod tests {
         let render = |block: usize, driven: bool| -> Vec<f32> {
             let mut node = prepared(
                 DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
+                    DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                         .controls(controls(frames(100.0), 0.3, 0.0)),
                 ),
                 RATE,
@@ -698,7 +693,7 @@ mod tests {
         let make = || {
             prepared(
                 DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
+                    DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
                         .controls(controls(frames(20.0), 0.7, 0.4)),
                 ),
                 RATE,
@@ -731,17 +726,15 @@ mod tests {
     /// where a ramp from 0 would not.
     #[test]
     fn a_feedback_written_after_a_reset_lands_whole() {
-        let mut node = prepared(
-            DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX)).controls(controls(
-                    frames(1.0),
-                    0.0,
-                    0.0,
-                )),
-            ),
-            RATE,
-            64,
-        );
+        let mut node =
+            prepared(
+                DelayNode::<f32>::from(
+                    DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX))
+                        .controls(controls(frames(1.0), 0.0, 0.0)),
+                ),
+                RATE,
+                64,
+            );
         let set = node.param_set();
         let x = vec![1.0f32; 32];
         drive(&mut node, RATE, Planes::new(&[&x]).unwrap(), &[]);
@@ -765,11 +758,10 @@ mod tests {
             .map(|n| ((n * 13 + 5) % 100) as f32 / 50.0 - 1.0)
             .collect();
         let render = |at: usize| -> Vec<f32> {
-            let node =
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.3, 0.0)),
-                );
+            let node = DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(10.0), 0.3, 0.0)),
+            );
             let set = node.param_set();
             let mut node = prepared(node, RATE, 2_048);
             let mut out = Vec::new();
@@ -792,15 +784,14 @@ mod tests {
     /// echoes, and the contract's honest-tail check passes.
     #[test]
     fn the_tail_is_unknown_and_honest() {
-        let mut node =
-            prepared(
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.5, 0.3)),
-                ),
-                RATE,
-                64,
-            );
+        let mut node = prepared(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                    .controls(controls(frames(10.0), 0.5, 0.3)),
+            ),
+            RATE,
+            64,
+        );
         assert_eq!(node.shape().tail, Tail::Unknown);
         assert_declared_tail(&mut node, RATE);
     }
@@ -821,7 +812,7 @@ mod tests {
         let want: Vec<f64> = (0..len)
             .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
             .collect();
-        let mut k = DelayKernel::<f64>::new(DelayLayout::new(BusTopology::MONO, MAX));
+        let mut k = DelayKernel::<f64>::new(DelayLayout::new(ChannelTopology::MONO, MAX));
         k.prepare(RATE, MaxBlock::of(Samples::new(len)));
         let moves = [(0, controls(frames(d as f64), 0.6, 0.0))];
         let y = drive_kernel(&mut k, &moves, &[x]).remove(0);
@@ -850,10 +841,11 @@ mod tests {
             (NoteDuration::QUARTER, false, 120.0, 512),
         ];
         for (note, playing, bpm, echo) in cases {
-            let layout = DelayLayout::builder(BusTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
-                .synced(NoteTimes::all(note))
-                .build()
-                .unwrap();
+            let layout =
+                DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
+                    .synced(NoteTimes::all(note))
+                    .build()
+                    .unwrap();
             let mut node = prepared(DelayNode::<f32>::from(DelayConfig::new(layout)), RATE, 2048);
             let mut x = vec![0.0f32; 2048];
             x[0] = 1.0;

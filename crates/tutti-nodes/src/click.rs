@@ -33,7 +33,7 @@
 use atomic_float::AtomicF64;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Float;
 use tutti_graph::{
     Cx, Env, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, Prepare, RenderMode,
@@ -513,7 +513,7 @@ impl<F: Float> Node<F> for ClickNode<F> {
     /// No inputs, the click in stereo. Its sound depends on the transport
     /// rather than an input, so a render's end ends it: [`Tail::None`].
     fn shape(&self) -> Shape {
-        Shape::source(BusTopology::STEREO)
+        Shape::source(ChannelTopology::STEREO)
             .tail(Tail::None)
             // A beat derived and compared per frame: measured 3.8 ns per
             // frame and channel, against a gain's 0.2 and `SvfFilterNode`'s

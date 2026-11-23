@@ -1,7 +1,7 @@
 //! [`TremoloNode`]: an LFO scales the level.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Bipolar, Hz, SampleRate, Tail};
@@ -124,7 +124,7 @@ impl<F: Float> Kernel for TremoloKernel<F> {
     /// `width` channels in and out, `Moderate`: a sine per sample and channel.
     fn shape(&self) -> Shape {
         let bus =
-            BusTopology::unassigned(self.width).expect("a tremolo is at most 16 channels wide");
+            ChannelTopology::unassigned(self.width).expect("a tremolo is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Moderate)
     }
 

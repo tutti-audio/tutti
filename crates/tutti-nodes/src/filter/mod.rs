@@ -38,7 +38,7 @@ pub use tilt::{
     TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_units::{Db, Hz, SampleRate};
 
 /// The lowest center a bell or tilt takes: 20 Hz.
@@ -62,13 +62,13 @@ fn eq_gain(gain: Db) -> Db {
 }
 
 /// The bus a filter built for a width runs on: the engine's order for it
-/// ([`BusTopology::default_for`]).
+/// ([`ChannelTopology::default_for`]).
 ///
 /// # Panics
 ///
 /// Past 16 channels: a filter is one bus.
-fn filter_bus(width: ChannelLayout) -> BusTopology {
-    BusTopology::default_for(width).expect("a filter is at most 16 channels wide")
+fn filter_bus(width: ChannelLayout) -> ChannelTopology {
+    ChannelTopology::default_for(width).expect("a filter is at most 16 channels wide")
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 //! [`HysteresisNode`]: Jiles-Atherton magnetic hysteresis, oversampled.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock, Mono};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock, Mono};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, Hysteresis, HysteresisControls, HysteresisDrive, Lerp,
     OversamplingFactor,
@@ -103,7 +103,7 @@ pub type HysteresisNode<F> = KernelNode<HysteresisKernel<F>>;
 
 impl<F: Float + Lerp> From<HysteresisConfig> for HysteresisNode<F> {
     fn from(config: HysteresisConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
+        let input = ChannelTopology::unassigned(config.width)
             .expect("a hysteresis stage is at most 16 channels wide");
         Self::with_kernel(
             HysteresisKernel::<F>::new(&config, input),
@@ -159,7 +159,7 @@ impl HasControl<{ UnitParam::GainDb as u16 }> for HysteresisSet {
 /// The [`Kernel`] of a [`HysteresisNode`].
 #[derive(Clone, Debug)]
 pub struct HysteresisKernel<F: Float> {
-    input: BusTopology,
+    input: ChannelTopology,
     factor: OversamplingFactor,
     saturation: Normalized,
     coercivity: Normalized,
@@ -169,7 +169,7 @@ pub struct HysteresisKernel<F: Float> {
 }
 
 impl<F: Float + Lerp> HysteresisKernel<F> {
-    fn new(config: &HysteresisConfig, input: BusTopology) -> Self {
+    fn new(config: &HysteresisConfig, input: ChannelTopology) -> Self {
         Self {
             input,
             factor: config.factor,

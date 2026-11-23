@@ -5,7 +5,7 @@
 //! them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, Lerp, PlateBank, PlateControls, PlateRamps};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
@@ -171,7 +171,8 @@ impl<F: Float + Lerp> Kernel for PlateKernel<F> {
     const GRID: usize = PlateBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
-        let stereo = |role| Bus::banded(BusTopology::STEREO, role, 1).expect("one band is a bus");
+        let stereo =
+            |role| Bus::banded(ChannelTopology::STEREO, role, 1).expect("one band is a bus");
         Shape::buses(
             Buses::NONE.with(stereo(BusRole::Main)).expect("one bus"),
             Buses::NONE.with(stereo(BusRole::Main)).expect("one bus"),

@@ -1,7 +1,7 @@
 //! [`AutoPanNode`]: an LFO places a stereo pair between left and right.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{AutoPan, AutoPanControls, BlockMismatch, COEFF_INTERVAL, OscillatorWave, PanLaw};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Bipolar, Hz, SampleRate, Tail};
@@ -130,7 +130,7 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
 
     /// Left/right in and out, `Moderate`: a sine and a pan law per sample.
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO).cost(Cost::Moderate)
+        Shape::through(ChannelTopology::STEREO).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

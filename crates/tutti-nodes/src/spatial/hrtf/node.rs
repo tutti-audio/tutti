@@ -4,7 +4,7 @@
 //! takes the parsed dataset.
 
 use std::sync::Arc;
-use tutti_buffers::{BusTopology, MonoMut, StereoPlanes};
+use tutti_buffers::{ChannelTopology, MonoMut, StereoPlanes};
 use tutti_dsp::{FftFloat, HRTF_LATENCY, HRTF_STEP, HrirSphere, HrtfBinaural};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::Latency;
@@ -155,7 +155,7 @@ impl<F: FftFloat> HrtfBinauralNode<F> {
 /// block after a reset already renders there.
 impl<F: FftFloat> Node<F> for HrtfBinauralNode<F> {
     fn shape(&self) -> Shape {
-        Shape::through(BusTopology::STEREO)
+        Shape::through(ChannelTopology::STEREO)
             .param_addrs(self.declared_ports().as_slice())
             .latency(Latency::new(Samples::new(HRTF_LATENCY)))
             .tail(match self.panner.as_ref().map(HrtfBinaural::ring_out) {

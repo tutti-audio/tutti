@@ -1,7 +1,7 @@
 //! The dynamic EQ band [`DynamicEqNode`]: an SVF bell whose gain follows the level of a
 //! band-passed key, and its de-esser configuration.
 
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DynamicEqBank, DynamicEqControls, DynamicMode, KeySource, Lerp,
@@ -159,7 +159,7 @@ impl<F: Float + SimdLanes + Lerp> From<DynamicEqConfig> for DynamicEqNode<F> {
     /// Past 16 channels: a band is one bus.
     fn from(config: DynamicEqConfig) -> Self {
         let input =
-            BusTopology::default_for(config.width).expect("a band is at most 16 channels wide");
+            ChannelTopology::default_for(config.width).expect("a band is at most 16 channels wide");
         Self::with_kernel(
             DynamicEqKernel::new(input, config.key, config.mode),
             DynamicEqSet,
@@ -194,7 +194,7 @@ control_set! {
 /// the [`KeySource`] it was built with.
 #[derive(Clone, Debug)]
 pub struct DynamicEqKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     mode: DynamicMode,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -204,7 +204,7 @@ pub struct DynamicEqKernel<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> DynamicEqKernel<F> {
-    fn new(input: BusTopology, key: KeySource, mode: DynamicMode) -> Self {
+    fn new(input: ChannelTopology, key: KeySource, mode: DynamicMode) -> Self {
         Self {
             input,
             key,
@@ -302,8 +302,11 @@ mod tests {
             range: Db::new(0.0),
             ..DynamicEqControls::DEFAULT
         };
-        let mut k =
-            DynamicEqKernel::<f64>::new(BusTopology::MONO, KeySource::Own, DynamicMode::Downward);
+        let mut k = DynamicEqKernel::<f64>::new(
+            ChannelTopology::MONO,
+            KeySource::Own,
+            DynamicMode::Downward,
+        );
         k.prepare(
             SampleRate::SR_48K,
             MaxBlock::of(tutti_units::Samples::new(2_000)),

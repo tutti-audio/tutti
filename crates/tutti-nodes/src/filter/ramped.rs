@@ -2,7 +2,7 @@
 //! between designs, the machinery under [`CutFilterKernel`](crate::CutFilterKernel) and
 //! [`EqKernel`](crate::EqKernel).
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::BlockMismatch;
 use tutti_dsp::{MAX_SECTIONS, Ramp, SimdLanes, Sos, SosBank, SosCoefficients, SosError};
@@ -13,7 +13,7 @@ use tutti_units::SampleRate;
 pub(super) const RAMP_STEPS: u32 = 16;
 
 /// The shape of a filter on the bus `input`: its output where it is, `Moderate`.
-pub(super) fn filter_shape(input: BusTopology) -> Shape {
+pub(super) fn filter_shape(input: ChannelTopology) -> Shape {
     let output = Bus::banded(input, BusRole::Main, 1).expect("one band is a bus");
     Shape::buses(
         Buses::main(input),
@@ -37,7 +37,7 @@ pub(super) struct RampedSos<F: Float + SimdLanes> {
 impl<F: Float + SimdLanes> RampedSos<F> {
     /// A silent cascade on the bus `input`, passing the input until a design is
     /// [`start`](Self::start)ed or [`restart`](Self::restart)ed.
-    pub(super) fn new(input: BusTopology) -> Self {
+    pub(super) fn new(input: ChannelTopology) -> Self {
         Self {
             bank: SosBank::new(input.width()),
             coefficients: Ramp::new(SosCoefficients::THROUGH),

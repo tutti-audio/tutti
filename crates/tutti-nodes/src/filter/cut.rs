@@ -2,7 +2,7 @@
 //! low-pass, run as a cascade of state-variable sections.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, Butterworth, ButterworthOrder, ChebyshevI, ChebyshevII, CutResponse, DecayTime,
     Elliptic, EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
@@ -154,7 +154,7 @@ control_set! {
 /// coefficients every channel shares.
 #[derive(Clone, Debug)]
 pub struct CutFilterKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     response: CutResponse,
     alignment: CutAlignment,
     sos: RampedSos<F>,
@@ -167,7 +167,7 @@ pub struct CutFilterKernel<F: Float + SimdLanes> {
 impl<F: Float + SimdLanes> CutFilterKernel<F> {
     /// A filter on the bus `input`, its output where it is; at a placeholder 48 kHz until
     /// `prepare`, which an unprepared node renders nothing before.
-    fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
+    fn new(input: ChannelTopology, config: &CutFilterConfig) -> Self {
         let mut kernel = Self {
             input,
             response: config.response,

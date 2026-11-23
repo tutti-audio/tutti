@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 
 use thiserror::Error;
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, Bed, BusTopology,
+    AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrdering, Bed,
     ChannelTopology, Float, InputOutput, MaxBlock, Mono,
 };
 use tutti_dsp::{
@@ -21,7 +21,7 @@ use super::vbap::speaker_of_channel;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The bus of the channels of `order` in AmbiX's ordering and the scaling `normalization`.
-fn bus(order: AmbisonicOrder, normalization: HarmonicNormalization) -> BusTopology {
+fn bus(order: AmbisonicOrder, normalization: HarmonicNormalization) -> ChannelTopology {
     ChannelTopology::Ambisonic(AmbisonicFormat::new(
         order,
         AmbisonicOrdering::Acn,
@@ -36,18 +36,18 @@ const FRONT: Direction = Direction::new(Azimuth::FRONT, Elevation::LEVEL);
 /// What an [`AmbisonicEncoderNode`] is made from: the ambisonic bus it writes and where the
 /// source starts.
 ///
-/// The bus is `BusTopology::ambisonic` of an [`AmbisonicFormat`] in ACN order and SN3D or N3D
+/// The bus is `ChannelTopology::ambisonic` of an [`AmbisonicFormat`] in ACN order and SN3D or N3D
 /// scaling.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmbisonicEncoderConfig {
-    output: BusTopology,
+    output: ChannelTopology,
     direction: Direction,
 }
 
 impl AmbisonicEncoderConfig {
     /// An encoder to `output`, with the source straight ahead.
     #[must_use]
-    pub fn new(output: impl Into<BusTopology>) -> Self {
+    pub fn new(output: impl Into<ChannelTopology>) -> Self {
         Self {
             output: output.into(),
             direction: FRONT,
@@ -128,7 +128,7 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
     /// A mono bus in, the order's channels out, `Moderate`: a gain per channel and frame.
     fn shape(&self) -> Shape {
         Shape::buses(
-            Buses::main(BusTopology::MONO),
+            Buses::main(ChannelTopology::MONO),
             Buses::main(bus(self.order, self.normalization)),
         )
         .cost(Cost::Moderate)
@@ -171,7 +171,7 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
 /// front starts and the roll.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AmbisonicRotatorConfig {
-    bus: BusTopology,
+    bus: ChannelTopology,
     front: Direction,
     roll: ArcDegrees,
 }
@@ -179,7 +179,7 @@ pub struct AmbisonicRotatorConfig {
 impl AmbisonicRotatorConfig {
     /// A rotator of the channels of `bus` that leaves the field as it is.
     #[must_use]
-    pub fn new(bus: impl Into<BusTopology>) -> Self {
+    pub fn new(bus: impl Into<ChannelTopology>) -> Self {
         Self {
             bus: bus.into(),
             front: FRONT,
@@ -319,7 +319,9 @@ pub enum AmbisonicError {
 }
 
 /// The order and the scaling of an ambisonic bus the nodes run in.
-fn format_of(bus: BusTopology) -> Result<(AmbisonicOrder, HarmonicNormalization), AmbisonicError> {
+fn format_of(
+    bus: ChannelTopology,
+) -> Result<(AmbisonicOrder, HarmonicNormalization), AmbisonicError> {
     let format = bus.ambisonic().ok_or(AmbisonicError::NotAmbisonic)?;
     let normalization = match (format.ordering(), format.normalization()) {
         (AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d) => HarmonicNormalization::Sn3d,
@@ -333,16 +335,16 @@ fn format_of(bus: BusTopology) -> Result<(AmbisonicOrder, HarmonicNormalization)
 /// reads and the decoding rule.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AmbisonicDecoderConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     decoding: Decoding,
-    output: BusTopology,
+    output: ChannelTopology,
 }
 
 impl AmbisonicDecoderConfig {
     /// A decoder to the speakers of `output`, reading first order in AmbiX and decoding by
     /// [`Decoding::AllRad`].
     #[must_use]
-    pub fn new(output: impl Into<BusTopology>) -> Self {
+    pub fn new(output: impl Into<ChannelTopology>) -> Self {
         Self {
             input: bus(AmbisonicOrder::of(1), HarmonicNormalization::Sn3d),
             decoding: Decoding::default(),
@@ -352,7 +354,7 @@ impl AmbisonicDecoderConfig {
 
     /// The ambisonic bus it reads.
     #[must_use]
-    pub fn input(self, input: impl Into<BusTopology>) -> Self {
+    pub fn input(self, input: impl Into<ChannelTopology>) -> Self {
         Self {
             input: input.into(),
             ..self
@@ -431,8 +433,8 @@ impl crate::ControlSet for AmbisonicDecoderSet {
 #[derive(Clone, Debug)]
 pub struct AmbisonicDecoderKernel<F: Float> {
     decoder: AmbisonicDecoder,
-    input: BusTopology,
-    output: BusTopology,
+    input: ChannelTopology,
+    output: ChannelTopology,
     /// Which speaker feeds each output channel; `None` for the LFE.
     speaker_of_channel: Vec<Option<usize>>,
     float: PhantomData<fn() -> F>,

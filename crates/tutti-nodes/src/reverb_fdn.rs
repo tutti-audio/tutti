@@ -4,7 +4,7 @@
 //! ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
 };
@@ -161,9 +161,10 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
     const GRID: usize = FdnBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(BusTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
+        let output =
+            Bus::banded(ChannelTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
         Shape::buses(
-            Buses::main(BusTopology::MONO),
+            Buses::main(ChannelTopology::MONO),
             Buses::NONE.with(output).expect("one bus"),
         )
         .cost(Cost::Moderate)

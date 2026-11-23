@@ -8,7 +8,7 @@
 //! kernel, the cells and how a block reads them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, Ramp, SimdLanes, SvfBank, SvfCoefficients, SvfControls, SvfModel, SvfType,
 };
@@ -166,7 +166,7 @@ const RAMP_STEPS: u32 = 16;
 /// and the ramp of the coefficients every channel shares.
 #[derive(Clone, Debug)]
 pub struct SvfKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     bank: SvfBank<F>,
     /// The coefficients in flight; the first design after `prepare` lands at once.
     coefficients: Ramp<SvfCoefficients<F>>,
@@ -178,7 +178,7 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its
     /// coefficients until `prepare` are a placeholder at 48 kHz: an unprepared node renders
     /// nothing, and `prepare` designs for the rate it is given.
-    fn new(input: BusTopology) -> Self {
+    fn new(input: ChannelTopology) -> Self {
         let rate = SampleRate::SR_48K;
         Self {
             input,

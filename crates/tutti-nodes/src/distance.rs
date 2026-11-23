@@ -1,7 +1,7 @@
 //! [`DistanceNode`]: a source at a distance, as the delay `r / c`, the level `r_ref / r` and
 //! optional air absorption.
 
-use tutti_buffers::{BusTopology, ChannelLayout, Float, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, DISTANCE_GLIDE, Distance, DistanceControls, DistanceSpec, ReferenceDistance,
 };
@@ -158,7 +158,7 @@ impl<F: Float> Kernel for DistanceKernel<F> {
 
     /// `width` channels in and out, `Moderate`: a delay read per sample and channel.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
+        let bus = ChannelTopology::unassigned(self.width)
             .expect("a distance node is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Moderate)
     }

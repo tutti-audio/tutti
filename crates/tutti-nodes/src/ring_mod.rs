@@ -1,7 +1,7 @@
 //! [`RingModNode`]: the input multiplied by a sine carrier.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
@@ -102,7 +102,7 @@ impl<F: Float> Kernel for RingModKernel<F> {
 
     /// `width` channels in and out, `Moderate`: a sine per sample and channel.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
+        let bus = ChannelTopology::unassigned(self.width)
             .expect("a ring modulator is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Moderate)
     }

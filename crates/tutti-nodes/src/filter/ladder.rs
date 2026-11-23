@@ -11,7 +11,7 @@
 //! kernel, the cells and how a block reads them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderSaturation,
     LadderType, Ramp, SimdLanes,
@@ -155,7 +155,7 @@ const RAMP_STEPS: u32 = 16;
 /// design (coefficients and drive) every channel shares.
 #[derive(Clone, Debug)]
 pub struct LadderKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     bank: LadderBank<F>,
     /// The blend in flight; the first one after `prepare` lands at once.
     blend: Ramp<LadderBlend<F>>,
@@ -167,7 +167,7 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
     /// A filter on the bus `input`, its output where it is. Allocates the state. Its design
     /// until `prepare` is a placeholder at 48 kHz: an unprepared node renders nothing, and
     /// `prepare` designs for the rate it is given.
-    fn new(input: BusTopology, saturation: LadderSaturation) -> Self {
+    fn new(input: ChannelTopology, saturation: LadderSaturation) -> Self {
         let rate = SampleRate::SR_48K;
         Self {
             input,

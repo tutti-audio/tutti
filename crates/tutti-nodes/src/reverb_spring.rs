@@ -5,7 +5,7 @@
 //! reaches them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages,
 };
@@ -163,7 +163,7 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 
     /// `width` channels in and out; `Heavy` (the default cost), as the stages are many.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
+        let bus = ChannelTopology::unassigned(self.width)
             .expect("a spring reverb is at most 16 channels wide");
         Shape::through(bus)
     }

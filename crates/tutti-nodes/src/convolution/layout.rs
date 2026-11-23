@@ -1,7 +1,7 @@
 //! [`IrLayout`]: which impulse response a [`ConvolverNode`](super::ConvolverNode) applies to
 //! which path from an input to an output.
 
-use tutti_buffers::{AmbisonicFormat, BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{AmbisonicFormat, ChannelLayout, ChannelTopology};
 
 /// How a convolver's impulse responses lay over its channels.
 ///
@@ -33,7 +33,7 @@ pub enum IrLayout {
 impl IrLayout {
     /// The bus of the channels in, for a node whose channels out are `output`.
     #[must_use]
-    pub fn input(self, output: BusTopology) -> BusTopology {
+    pub fn input(self, output: ChannelTopology) -> ChannelTopology {
         match self {
             Self::PerChannel | Self::Folded | Self::TrueStereo => output,
             Self::Ambisonic(format) => ChannelTopology::Ambisonic(format),

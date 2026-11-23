@@ -1,7 +1,7 @@
 //! [`DiodeClipperNode`]: the RC-loaded antiparallel diode pair, oversampled.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock, Mono};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock, Mono};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ClipperDrive, DiodeClipper, DiodeClipperControls, Lerp,
     OversamplingFactor,
@@ -88,7 +88,7 @@ pub type DiodeClipperNode<F> = KernelNode<DiodeClipperKernel<F>>;
 
 impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
     fn from(config: DiodeClipperConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
+        let input = ChannelTopology::unassigned(config.width)
             .expect("a diode clipper is at most 16 channels wide");
         Self::with_kernel(
             DiodeClipperKernel::<F>::new(&config, input),
@@ -155,7 +155,7 @@ impl HasControl<{ UnitParam::GainDb as u16 }> for DiodeClipperSet {
 /// The [`Kernel`] of a [`DiodeClipperNode`].
 #[derive(Clone, Debug)]
 pub struct DiodeClipperKernel<F: Float> {
-    input: BusTopology,
+    input: ChannelTopology,
     factor: OversamplingFactor,
     /// The rate the circuit runs at: the oversampled one, or the stream's where no half-band
     /// can be designed.
@@ -166,7 +166,7 @@ pub struct DiodeClipperKernel<F: Float> {
 }
 
 impl<F: Float + Lerp> DiodeClipperKernel<F> {
-    fn new(config: &DiodeClipperConfig, input: BusTopology) -> Self {
+    fn new(config: &DiodeClipperConfig, input: ChannelTopology) -> Self {
         Self {
             input,
             factor: config.factor,

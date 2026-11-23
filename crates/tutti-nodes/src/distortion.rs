@@ -1,7 +1,7 @@
 //! The waveshaper [`DistortionNode`]: seven curves ([`ShapeKind`]) at a drive.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
     ShapeKind, WaveshaperBank, WaveshaperControls,
@@ -132,7 +132,7 @@ impl DistortionConfig {
 
 impl<F: Float + Lerp> From<DistortionConfig> for DistortionNode<F> {
     fn from(config: DistortionConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
+        let input = ChannelTopology::unassigned(config.width)
             .expect("a waveshaper is at most 16 channels wide");
         Self::with_kernel(
             DistortionKernel::<F>::new(&config, input),
@@ -165,7 +165,7 @@ impl DistortionSet {
 #[derive(Clone, Debug)]
 pub struct DistortionKernel<F: Float> {
     kind: ShapeKind,
-    input: BusTopology,
+    input: ChannelTopology,
     /// The bank, at the rate it shapes at: the oversampled one when there is oversampling.
     bank: WaveshaperBank<F>,
     /// Whether the first retarget after `prepare` has been applied.
@@ -181,7 +181,7 @@ pub struct DistortionKernel<F: Float> {
 impl<F: Float + Lerp> DistortionKernel<F> {
     /// A waveshaper of `config`'s curve on the bus `input`. Its rate until `prepare` is a
     /// placeholder: an unprepared node renders nothing.
-    fn new(config: &DistortionConfig, input: BusTopology) -> Self {
+    fn new(config: &DistortionConfig, input: ChannelTopology) -> Self {
         Self {
             kind: config.kind,
             input,
@@ -803,7 +803,7 @@ mod tests {
             let config = DistortionConfig::new(ChannelLayout::MONO, ShapeKind::Softsign)
                 .antialiasing(order)
                 .expect("an order the kind has");
-            let mut k = DistortionKernel::<f64>::new(&config, BusTopology::MONO);
+            let mut k = DistortionKernel::<f64>::new(&config, ChannelTopology::MONO);
             k.prepare(RATE, MaxBlock::of(Samples::new(len)));
             drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x)).remove(0)
         };

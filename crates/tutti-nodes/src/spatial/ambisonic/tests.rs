@@ -10,7 +10,7 @@ const THIRD: AmbisonicOrder = AmbisonicOrder::MAX;
 const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
     ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
@@ -203,7 +203,8 @@ fn a_decoder_reads_n3d_and_sn3d_encodings_of_one_field_to_the_same_feeds() {
 #[test]
 fn a_decoder_refuses_a_bus_that_is_not_a_bed_and_a_bed_with_one_speaker() {
     let order = AmbisonicOrder::of(1);
-    let unassigned = BusTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
+    let unassigned =
+        ChannelTopology::unassigned(tutti_buffers::ChannelLayout::from_count(3)).unwrap();
     assert!(matches!(
         AmbisonicDecoderNode::<f32>::try_from(
             AmbisonicDecoderConfig::new(unassigned).input(ambix(order))

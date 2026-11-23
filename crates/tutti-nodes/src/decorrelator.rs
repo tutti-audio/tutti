@@ -1,7 +1,7 @@
 //! [`DecorrelatorNode`]: velvet-noise decorrelation of every channel.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, Decorrelator, VelvetDensity, VelvetLength};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{SampleRate, Tail};
@@ -99,7 +99,7 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
     /// `width` channels in and out, `Heavy`: a multiply-add for each impulse a frame, a
     /// hundred a channel at the default density.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.config.width)
+        let bus = ChannelTopology::unassigned(self.config.width)
             .expect("a decorrelator is at most 16 channels wide");
         Shape::through(bus).cost(Cost::Heavy)
     }
