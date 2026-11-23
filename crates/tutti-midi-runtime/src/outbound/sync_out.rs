@@ -50,7 +50,7 @@ use tutti_graph::{
 };
 use tutti_midi_protocol::{MtcRate, Recipient};
 use tutti_music::MeterMap;
-use tutti_rt::{AtomicCell, CappedVec, Counter, CounterWriter, Publisher, Reader, counter};
+use tutti_rt::{AtomicCell, Counter, CounterWriter, Publisher, Reader, RtVec, counter};
 use tutti_ump::{MidiGroup, Sysex7Packets};
 use tutti_units::{Beat, Losses, SampleRate};
 
@@ -146,7 +146,7 @@ pub struct SyncOut {
     /// Where a block's events are gathered, to go out in offset order. Capped
     /// at the port's capacity: past it an event is refused and counted, never
     /// grown into.
-    pending: CappedVec<UmpAt>,
+    pending: RtVec<UmpAt, SYNC_OUT_EVENT_CAPACITY>,
 }
 
 impl SyncOut {
@@ -196,7 +196,7 @@ impl SyncOut {
                 losses: reader,
             }),
             losses,
-            pending: CappedVec::with_capacity(SYNC_OUT_EVENT_CAPACITY),
+            pending: RtVec::new(),
         }
     }
 
@@ -228,7 +228,7 @@ impl SyncOut {
 /// not at all: a message with no room is counted lost, one that cannot be
 /// packed refused.
 fn push_message(
-    pending: &mut CappedVec<UmpAt>,
+    pending: &mut RtVec<UmpAt, SYNC_OUT_EVENT_CAPACITY>,
     losses: &mut CounterWriter<Losses>,
     group: MidiGroup,
     at: Offset,

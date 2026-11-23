@@ -135,8 +135,7 @@ pub const RT_NOTE_EXPR_CAPACITY: usize = 16;
 /// as `&[ClapNoteExpression]`. Capped for the same reason as
 /// [`RtMidiEvents`](tutti_plugin_types::RtMidiEvents): the plugin, not the
 /// host, decides how many events arrive.
-/// Build one with `CappedVec::with_capacity(RT_NOTE_EXPR_CAPACITY)`.
-pub type RtNoteExpressions = tutti_rt::CappedVec<ClapNoteExpression>;
+pub type RtNoteExpressions = tutti_rt::RtVec<ClapNoteExpression, RT_NOTE_EXPR_CAPACITY>;
 
 impl ClapNoteExpression {
     /// Creates a new note expression. Defaults to port 0, any channel, any key;

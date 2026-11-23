@@ -3,14 +3,13 @@
 //! inside `assert_no_alloc`; a primitive that runs on several threads runs
 //! every participant inside it, helpers included.
 
-use tutti_rt::{AudioThreadCell, CappedVec, Claim, LastOut, Party, RenderGate};
+use tutti_rt::{AudioThreadCell, CappedVec, Claim, LastOut, Party, RenderGate, RtVec};
 
-/// `CappedVec` reached through `&self`, as `tutti-midi-hardware`'s drain holds it:
+/// `RtVec` reached through `&self`, as `tutti-midi-hardware`'s drain holds it:
 /// behind an `AudioThreadCell`.
 #[test]
-fn capped_vec_through_a_cell_is_allocation_free() {
-    let buf: AudioThreadCell<CappedVec<(u32, u32)>> =
-        AudioThreadCell::new(CappedVec::with_capacity(64));
+fn rt_vec_steady_state_is_allocation_free() {
+    let buf: AudioThreadCell<RtVec<(u32, u32), 64>> = AudioThreadCell::new(RtVec::new());
     // Warm up well within the inline capacity.
     buf.borrow_mut().extend((0..32).map(|i| (32 - i, i)));
 

@@ -290,7 +290,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         Self {
             _format: std::marker::PhantomData,
             audio,
-            seq: Some(Box::new(SeqScratch::new())),
+            seq: Some(Box::default()),
             seq_truncated: tally().writer(),
             audio_side,
             context_requirements,

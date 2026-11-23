@@ -5,16 +5,14 @@
 //! `ClapProcessor` (it exists solely for `process`).
 
 use crate::events::{InputEventList, InputRooms, OutputEventList, OutputRooms, ParamBounds};
-use crate::types::{
-    ClapNoteExpression, ParameterChanges, RT_NOTE_EXPR_CAPACITY, RtNoteExpressions,
-};
+use crate::types::{ClapNoteExpression, ParameterChanges, RtNoteExpressions};
 use clap_sys::process::CLAP_PROCESS_CONTINUE;
 use std::sync::atomic::AtomicI32;
 use tutti_buffers::FloatWidth;
 use tutti_clap_ffi::PortScratch;
 use tutti_midi_protocol::Midi2Translator;
 use tutti_plugin_types::BusChannels;
-use tutti_plugin_types::{RT_MIDI_CAPACITY, RtMidiEvents};
+use tutti_plugin_types::RtMidiEvents;
 
 /// How many converted note expressions one block can carry; reserved at
 /// activation so converting never grows the buffer.
@@ -93,12 +91,12 @@ impl AudioScratch {
             process: PortScratch::new(format),
             input_events: InputEventList::new(input_rooms),
             output_events: OutputEventList::new(output_rooms),
-            out_midi: RtMidiEvents::with_capacity(RT_MIDI_CAPACITY),
+            out_midi: RtMidiEvents::new(),
             out_translator: Midi2Translator::new(),
             out_midi_lost: 0,
             out_param_changes: ParameterChanges::new(),
             out_param_points_dropped: 0,
-            out_note_expressions: RtNoteExpressions::with_capacity(RT_NOTE_EXPR_CAPACITY),
+            out_note_expressions: RtNoteExpressions::new(),
             in_note_expressions: Vec::new(),
             in_note_expressions_dropped: 0,
             steady_time: 0,

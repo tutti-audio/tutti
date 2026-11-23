@@ -26,7 +26,7 @@ use tutti_ump::{Message, MessageType, MidiGroup, Ump, parse_exact};
 
 use crate::host::RenderHandle;
 use tutti_plugin_types::{MIDI_STACK_CAPACITY, MidiEventVec, WireMidi, sysex_assembler};
-use tutti_rt::{CappedVec, Counter, CounterWriter, Tally, TallyWriter, counter};
+use tutti_rt::{Counter, CounterWriter, RtVec, Tally, TallyWriter, counter};
 use tutti_ump::{SysexAssembler, SysexRef, SysexStep};
 
 /// A count of lost items: the audio-side writer, stored, and the reader the control side
@@ -247,14 +247,14 @@ pub struct MidiSendBuffer {
     events_dropped: Drops,
     /// Plugin-side `api::MidiEvent` storage (the structs the pointer
     /// table points at).
-    api_events: CappedVec<crate::api::MidiEvent>,
+    api_events: Box<RtVec<crate::api::MidiEvent, MIDI_STACK_CAPACITY>>,
     /// Reassembled SysEx messages, whose `system_data` points into
     /// `sysex`'s buffer.
-    sysex_events: CappedVec<crate::api::SysExEvent>,
+    sysex_events: Box<RtVec<crate::api::SysExEvent, MIDI_STACK_CAPACITY>>,
     /// The block's events in staging order, as indices into `api_events`
     /// or `sysex_events`: the pointer table is built from it once every
     /// event is in place.
-    order: CappedVec<Staged>,
+    order: Box<RtVec<Staged, MIDI_STACK_CAPACITY>>,
     /// Reassembles SysEx7 packets and owns the bytes a `SysExEvent` points
     /// at. Reserved at construction; an open message carries across blocks.
     sysex: SysexAssembler<Box<[u8]>>,
@@ -274,7 +274,7 @@ pub struct MidiSendBuffer {
     /// `END` packet and the frame (clamped to the block) it lands on, filled once at the block's first piece and
     /// selected from by every piece. A message is assembled once per block: a
     /// run is open across blocks, not pieces.
-    completed: CappedVec<(usize, usize, SysexRef)>,
+    completed: Box<RtVec<(usize, usize, SysexRef), MIDI_STACK_CAPACITY>>,
     /// Backing storage for the `api::Events` header + flexible-array
     /// tail, with one `*mut api::Event` per event. `u64`s for 8-byte alignment
     /// (`api::Events` requires `isize` alignment).
@@ -296,11 +296,10 @@ enum Staged {
     SysEx(usize),
 }
 
-// SAFETY: the raw pointers inside `header` point into this struct's own
-// `api_events` / `sysex_events` storage, and the ones in `sysex_events` into
-// `sysex`'s buffer. Each is allocated at its cap and never grown, so moving the
-// whole struct moves what they point at with it (a heap block does not move).
-// Not `Sync`: nothing shares one.
+// SAFETY: the raw pointers inside `header` point into this struct's own boxed
+// `api_events` / `sysex_events`, and the ones in `sysex_events` into
+// `sysex`'s buffer, so moving the whole struct moves what they point at with it
+// (a box's heap block does not move). Not `Sync`: nothing shares one.
 unsafe impl Send for MidiSendBuffer {}
 
 impl Default for MidiSendBuffer {
@@ -317,15 +316,15 @@ impl MidiSendBuffer {
         Self {
             live: true,
             events_dropped: Drops::new(),
-            api_events: CappedVec::with_capacity(MIDI_STACK_CAPACITY),
-            sysex_events: CappedVec::with_capacity(MIDI_STACK_CAPACITY),
-            order: CappedVec::with_capacity(MIDI_STACK_CAPACITY),
+            api_events: RtVec::boxed(),
+            sysex_events: RtVec::boxed(),
+            order: RtVec::boxed(),
             sysex: sysex_assembler(),
             midi1_translator: Midi1Translator::new(),
             groups_dropped: Drops::new(),
             sysex_dropped: Drops::new(),
             sysex_seen: 0,
-            completed: CappedVec::with_capacity(MIDI_STACK_CAPACITY),
+            completed: RtVec::boxed(),
             header: vec![0; header_words(MIDI_STACK_CAPACITY)].into_boxed_slice(),
         }
     }

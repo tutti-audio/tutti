@@ -31,7 +31,7 @@ use crate::events::{InputEvents, Stager};
 use crate::types::ParameterChanges;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{MIDI_STACK_CAPACITY, MainThreadMarker, MidiAssignment, MidiSource};
-use tutti_rt::{CappedVec, Reader};
+use tutti_rt::{Reader, RtVec};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_vst3_ffi::{EventList, Plugin};
@@ -39,7 +39,7 @@ use tutti_vst3_ffi::{EventList, Plugin};
 /// The MIDI a [`CcRoute`] passes on: a block's whole MIDI cap, so the route
 /// never drops an event the plugin node delivered. Dropping one would cut a
 /// multi-packet SysEx the event list is reassembling.
-pub(crate) type FilteredMidi = CappedVec<UmpAt>;
+pub(crate) type FilteredMidi = RtVec<UmpAt, MIDI_STACK_CAPACITY>;
 
 /// Number of MIDI channels VST3 enumerates mappings for.
 pub(crate) const NUM_CHANNELS: usize = 16;
@@ -434,7 +434,7 @@ impl CcRoute {
         let mut route = Self {
             mapping: MidiCcMapping::empty(),
             shared: None,
-            filtered_midi: FilteredMidi::with_capacity(MIDI_STACK_CAPACITY),
+            filtered_midi: FilteredMidi::new(),
             param_changes: ParameterChanges::new(),
             queues,
             room,

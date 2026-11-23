@@ -25,7 +25,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::EditReader;
 use tutti_plugin_types::PipelineCounts;
-use tutti_rt::AtomicSampleRate;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
     AtomicCell, Counter, Mutex, Overflow, Parker, RingReader, RingWriter, Tally, TallyWriter,
@@ -96,7 +95,7 @@ pub(super) struct Channels {
     /// keeps the two from drifting apart: two independently-derived periods let
     /// a constant sit orders of magnitude off the real block period, which
     /// starves the command queue.
-    sample_rate: Arc<AtomicSampleRate>,
+    sample_rate: Arc<AtomicCell<SampleRate>>,
     /// How long the bridge thread waits for a block's reply, in nanoseconds,
     /// when it is not the live bound (the block period's few multiples, from
     /// the dispatcher): `0` is the live bound, so a set wait is never stored as
@@ -329,7 +328,7 @@ impl Channels {
             newest_seq: Arc::new(AtomicU64::new(0)),
             unparker,
             control_unparker,
-            sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
+            sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
             abandoned_writer: abandoned.writer(),
@@ -405,11 +404,11 @@ impl Channels {
     /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so
     /// reading a value one block stale is harmless.
     pub(super) fn sample_rate(&self) -> SampleRate {
-        self.sample_rate.load(Ordering::Relaxed)
+        self.sample_rate.load()
     }
 
     pub(super) fn set_sample_rate(&self, rate: SampleRate) {
-        self.sample_rate.store(rate, Ordering::Relaxed);
+        self.sample_rate.store(rate);
     }
 
     /// The bridge thread's wait for a block's reply, when it is not the live

@@ -101,3 +101,27 @@ fn a_bool_is_zero_or_one() {
     assert!(flag.load());
     assert_eq!(bool::from_word(2), None);
 }
+
+/// A pending rate is taken once and the latest parked wins.
+#[test]
+fn a_pending_rate_is_taken_once_and_the_latest_wins() {
+    let cell = AtomicCell::new(None);
+    assert_eq!(cell.swap(None), None, "a new cell is empty");
+    cell.store(Some(SampleRate::SR_44K1));
+    cell.store(Some(SampleRate::SR_48K));
+    assert_eq!(cell.swap(None), Some(SampleRate::SR_48K));
+    assert_eq!(cell.swap(None), None, "a take empties the cell");
+}
+
+/// A rate loads what was stored and `swap` answers the old one; a word that is
+/// no rate is refused.
+#[test]
+fn a_rate_loads_what_was_stored_and_swap_answers_the_old_one() {
+    let cell = AtomicCell::new(SampleRate::SR_44K1);
+    assert_eq!(cell.load(), SampleRate::SR_44K1);
+    cell.store(SampleRate::SR_96K);
+    assert_eq!(cell.swap(SampleRate::SR_48K), SampleRate::SR_96K);
+    assert_eq!(cell.load(), SampleRate::SR_48K);
+    assert_eq!(SampleRate::from_word(0), None);
+    assert_eq!(SampleRate::from_word((-1.0f64).to_bits()), None);
+}

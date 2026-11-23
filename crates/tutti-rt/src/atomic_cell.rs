@@ -8,6 +8,7 @@
 //! runs this code.
 
 use crate::sync::{AtomicU64, Ordering};
+use tutti_units::SampleRate;
 
 /// A value stored in one atomic word by its encoding.
 ///
@@ -172,6 +173,35 @@ impl AtomicWord for [u32; 2] {
 
     fn from_word(word: u64) -> Option<Self> {
         Some([word as u32, (word >> 32) as u32])
+    }
+}
+
+/// The rate's `f64` bits. A word whose bits are no rate (zero, negative, not
+/// finite) decodes to `None`.
+impl AtomicWord for SampleRate {
+    fn to_word(self) -> u64 {
+        self.get().to_bits()
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        Self::new(f64::from_bits(word))
+    }
+}
+
+/// `None` is word `0`, the bits of `0.0`, which no [`SampleRate`] has; a
+/// `Some` is the rate's bits. So an `AtomicCell<Option<SampleRate>>` is a rate
+/// one thread parks for another to `swap(None)` out; parking over a rate nobody
+/// took replaces it.
+impl AtomicWord for Option<SampleRate> {
+    fn to_word(self) -> u64 {
+        self.map_or(0, AtomicWord::to_word)
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        match word {
+            0 => Some(None),
+            bits => SampleRate::from_word(bits).map(Some),
+        }
     }
 }
 

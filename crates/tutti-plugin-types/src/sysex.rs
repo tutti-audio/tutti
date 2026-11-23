@@ -67,7 +67,7 @@ pub fn sysex_packets(group: MidiGroup, message: &[u8]) -> Option<Sysex7Packets<'
 ///
 /// A message is delivered whole or not at all: one whose packets do not all
 /// fit in `out`'s room is dropped and latches `out`'s
-/// [`is_overflowed`](tutti_rt::CappedVec::is_overflowed), because a `START` left
+/// [`is_overflowed`](tutti_rt::RtVec::is_overflowed), because a `START` left
 /// without its `END` would corrupt the stream that follows it. Returns
 /// whether it was pushed. A message with a payload byte of 128 or more is
 /// malformed ([`sysex_packets`]): it is dropped, not pushed, and `out` does not
@@ -97,7 +97,6 @@ pub fn push_sysex(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RT_MIDI_CAPACITY;
     use tutti_fixtures::midi;
     use tutti_ump::{MidiChannel, SysexStep, Ump, frame};
 
@@ -169,7 +168,7 @@ mod tests {
         for len in [0, 1, 6, 7, 14, 17, 40, 63 * 6] {
             let body = tutti_fixtures::midi::sysex_payload(len);
             for message in [framed(&body), body.clone()] {
-                let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+                let mut out = RtMidiEvents::new();
                 assert!(
                     push_sysex(&mut out, MidiGroup::FIRST, 9, &message),
                     "{len} bytes"
@@ -208,7 +207,7 @@ mod tests {
     /// stream after it.
     #[test]
     fn a_message_past_the_pool_is_dropped_whole() {
-        let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut out = RtMidiEvents::new();
         let room = out.remaining();
         let too_long = tutti_fixtures::midi::sysex_payload(room * 6 + 1);
         assert!(!push_sysex(&mut out, MidiGroup::FIRST, 0, &too_long));
@@ -216,7 +215,7 @@ mod tests {
         assert!(out.is_overflowed());
 
         // What fits after another event is judged on the room that is left.
-        let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut out = RtMidiEvents::new();
         assert!(out.push(WireMidi {
             offset: 0,
             ump: midi::note_on(MidiChannel::of(0), 60, 0x8000)

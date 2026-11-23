@@ -28,7 +28,7 @@ use tutti_clap_host::{
 };
 use tutti_graph::Offset;
 use tutti_plugin_types::{
-    ParameterChanges, ParameterQueue, RT_MIDI_CAPACITY, RtMidiEvents, WireMidi, sysex_assembler,
+    ParameterChanges, ParameterQueue, RtMidiEvents, WireMidi, sysex_assembler,
 };
 use tutti_ump::{SysexStep, Ump};
 use tutti_units::Samples;
@@ -543,7 +543,7 @@ fn a_long_sysex_from_the_plugin_drains_whole() {
         done
     };
     assert_eq!(reassemble(&midi_events(&mut output)), vec![message.clone()]);
-    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+    let mut pool = RtMidiEvents::new();
     output.fill_midi_events(&mut tutti_midi_protocol::Midi2Translator::new(), &mut pool);
     assert!(!pool.is_overflowed());
     assert_eq!(reassemble(pool.as_slice()), vec![message]);

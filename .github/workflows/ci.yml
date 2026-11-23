@@ -87,7 +87,7 @@ jobs:
       - run: cargo xtask check-paths tutti_buffers convert error i24 interleaved mono planes sample
       - run: cargo xtask check-paths tutti_voicing controller holds phase voicing
       - run: cargo xtask check-paths tutti_platform clock denormals main_thread priority sleep thread
-      - run: cargo xtask check-paths tutti_rt atomic_cell cell drain_clock job_gate level_cell parker pos_ring request_flags scope seq_cell spin split task_graph
+      - run: cargo xtask check-paths tutti_rt atomic_cell cell drain_clock job_gate level_cell parker pos_ring request_flags scope seq_cell spin split task_graph vec
       # Compares the SDK version the prose states against the commits the superproject records; a bumped submodule
       # otherwise shows as an unexplained C++ error in `audio-probe`.
       - run: cargo xtask check-submodule-pins

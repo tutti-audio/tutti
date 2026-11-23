@@ -17,7 +17,7 @@ use tutti_plugin_types::MainThreadMarker;
 use vst3::Steinberg::Vst::{SpeakerArr, SpeakerArrangement};
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_plugin_types::{PointPool, RT_MIDI_CAPACITY, RtMidiEvents};
+use tutti_plugin_types::{PointPool, RtMidiEvents};
 use tutti_ump::GroupSpan;
 use tutti_units::SampleRate;
 
@@ -253,7 +253,7 @@ impl<T: Vst3Sample> Staged<T> {
                     MIN_POINT_ROOM,
                     PointPool::default(),
                 ),
-                emitted_midi: RtMidiEvents::with_capacity(RT_MIDI_CAPACITY),
+                emitted_midi: RtMidiEvents::new(),
                 emitted_stream: Box::new(OutputStream::new()),
                 lost_told: 0,
                 emitted_lost: 0,

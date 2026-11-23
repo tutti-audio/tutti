@@ -6,7 +6,7 @@
 //! depending on `tutti-plugin`.
 
 use arrayvec::ArrayVec;
-use tutti_rt::CappedVec;
+use tutti_rt::RtVec;
 
 use tutti_graph::Offset;
 use tutti_ump::{MidiGroup, Ump};
@@ -80,9 +80,9 @@ pub const RT_MIDI_CAPACITY: usize = 64;
 /// Prefer this over a bare `Vec` for anything a plugin's output drains
 /// into: the host does not control how many events a plugin emits, so an
 /// unbounded pool puts a `malloc` in the audio callback at the plugin's
-/// discretion. [`CappedVec`] refuses instead, and reports it through
-/// `is_overflowed()`. Build one with `CappedVec::with_capacity(RT_MIDI_CAPACITY)`.
-pub type RtMidiEvents = CappedVec<WireMidi>;
+/// discretion. [`RtVec`] refuses instead, and reports it through
+/// `is_overflowed()`.
+pub type RtMidiEvents = RtVec<WireMidi, RT_MIDI_CAPACITY>;
 
 /// The UMP Group a plugin's note port or event bus `port` is (M2-104 section
 /// 2.1.2: a Group is a channel space of its own), or `None` past the sixteen.

@@ -9,32 +9,21 @@ use tutti_plugin_types::{
     ChordChanges, ExpressiveContext, HARMONY_CAPACITY, NoteExpressionIntValue,
     NoteExpressionTextChanges, ScaleChanges,
 };
-use tutti_rt::{CappedVec, TallyWriter};
+use tutti_rt::{RtVec, TallyWriter};
 
 /// The buffers the sequencer-context conversion in `Vst3Processor::process_shared`
 /// fills each block.
 ///
-/// Each stream is a `CappedVec` of [`HARMONY_CAPACITY`], the capacity of the shared
+/// Each stream is an `RtVec` of [`HARMONY_CAPACITY`], the capacity of the shared
 /// streams it is filled from, so every event fits; every text holds at most
-/// [`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units, inline
-/// in its event. The streams are allocated once, by [`new`](Self::new): filling
-/// allocates nothing, from the first block on. A text cut at its room is counted.
+/// [`MAX_EVENT_TEXT_LEN`](tutti_vst3_ffi::MAX_EVENT_TEXT_LEN) UTF-16 units. All of
+/// it is inline: filling allocates nothing, from the first block on. A text cut
+/// at its room is counted.
+#[derive(Default)]
 pub(super) struct SeqScratch {
-    pub(super) chords: CappedVec<Utf16Chord>,
-    pub(super) scales: CappedVec<Utf16Scale>,
-    pub(super) expr_texts: CappedVec<Utf16Text>,
-}
-
-impl SeqScratch {
-    /// Empty streams, each with room for [`HARMONY_CAPACITY`] events. Allocates:
-    /// off the audio thread.
-    pub(super) fn new() -> Self {
-        Self {
-            chords: CappedVec::with_capacity(HARMONY_CAPACITY),
-            scales: CappedVec::with_capacity(HARMONY_CAPACITY),
-            expr_texts: CappedVec::with_capacity(HARMONY_CAPACITY),
-        }
-    }
+    pub(super) chords: RtVec<Utf16Chord, HARMONY_CAPACITY>,
+    pub(super) scales: RtVec<Utf16Scale, HARMONY_CAPACITY>,
+    pub(super) expr_texts: RtVec<Utf16Text, HARMONY_CAPACITY>,
 }
 
 /// `src` as an event text, counting it in `truncated` when it was cut.
@@ -48,7 +37,7 @@ fn counted_text(src: &str, truncated: &TallyWriter<u64>) -> EventText {
 
 /// Appends `item`: the source streams hold at most [`HARMONY_CAPACITY`] events
 /// and so does the buffer, which `clear` emptied, so the push always fits.
-fn append<T>(out: &mut CappedVec<T>, item: T) {
+fn append<T>(out: &mut RtVec<T, HARMONY_CAPACITY>, item: T) {
     let fitted = out.push(item);
     debug_assert!(fitted, "a stream and its buffer share one capacity");
 }
@@ -56,7 +45,7 @@ fn append<T>(out: &mut CappedVec<T>, item: T) {
 /// Refills `out` from `chords`; an absent stream leaves it empty.
 pub(super) fn fill_chords(
     chords: Option<&ChordChanges>,
-    out: &mut CappedVec<Utf16Chord>,
+    out: &mut RtVec<Utf16Chord, HARMONY_CAPACITY>,
     truncated: &TallyWriter<u64>,
 ) {
     out.clear();
@@ -77,7 +66,7 @@ pub(super) fn fill_chords(
 /// Refills `out` from `scales`; an absent stream leaves it empty.
 pub(super) fn fill_scales(
     scales: Option<&ScaleChanges>,
-    out: &mut CappedVec<Utf16Scale>,
+    out: &mut RtVec<Utf16Scale, HARMONY_CAPACITY>,
     truncated: &TallyWriter<u64>,
 ) {
     out.clear();
@@ -97,7 +86,7 @@ pub(super) fn fill_scales(
 /// Refills `out` from `texts`; an absent stream leaves it empty.
 pub(super) fn fill_expr_texts(
     texts: Option<&NoteExpressionTextChanges>,
-    out: &mut CappedVec<Utf16Text>,
+    out: &mut RtVec<Utf16Text, HARMONY_CAPACITY>,
     truncated: &TallyWriter<u64>,
 ) {
     out.clear();
@@ -156,8 +145,8 @@ mod seq_scratch_tests {
     }
 
     /// The first block that carries a chord, on buffers nothing has warmed,
-    /// allocates nothing: the streams are sized when built, so there is no
-    /// growth to wait for.
+    /// allocates nothing: the storage is inline, so there is no growth to
+    /// wait for.
     ///
     /// The source `ChordChanges` is built outside the gate: constructing one
     /// allocates its `String`s, which is the caller's cost.
@@ -166,7 +155,7 @@ mod seq_scratch_tests {
         let source = changes(&[chord(8, "Dmin9"), chord(96, "G7")]);
         let refused = tally::<u64>();
         let writer = refused.writer();
-        let mut out = CappedVec::with_capacity(HARMONY_CAPACITY);
+        let mut out = RtVec::new();
         assert_no_alloc::assert_no_alloc(|| {
             fill_chords(Some(&source), &mut out, &writer);
         });
@@ -183,7 +172,7 @@ mod seq_scratch_tests {
     #[test]
     fn refilling_tracks_a_changing_event_count() {
         let writer = tally::<u64>().writer();
-        let mut out = CappedVec::with_capacity(HARMONY_CAPACITY);
+        let mut out = RtVec::new();
         fill_chords(
             Some(&changes(&[chord(0, "a"), chord(1, "b"), chord(2, "c")])),
             &mut out,
@@ -210,7 +199,7 @@ mod seq_scratch_tests {
     #[test]
     fn an_absent_or_empty_stream_clears_the_buffer() {
         let writer = tally::<u64>().writer();
-        let mut out = CappedVec::with_capacity(HARMONY_CAPACITY);
+        let mut out = RtVec::new();
         fill_chords(Some(&changes(&[chord(0, "Cmaj7")])), &mut out, &writer);
         assert_eq!(out.len(), 1);
 
@@ -227,7 +216,7 @@ mod seq_scratch_tests {
     fn a_text_past_the_room_is_cut_and_counted() {
         let refused = tally::<u64>();
         let writer = refused.writer();
-        let mut out = CappedVec::with_capacity(HARMONY_CAPACITY);
+        let mut out = RtVec::new();
         let exact = "a".repeat(tutti_vst3_ffi::MAX_EVENT_TEXT_LEN);
         fill_chords(Some(&changes(&[chord(0, &exact)])), &mut out, &writer);
         assert_eq!(refused.get(), 0);
@@ -245,7 +234,7 @@ mod seq_scratch_tests {
     fn a_cut_does_not_split_a_surrogate_pair() {
         let truncated = tally::<u64>();
         let writer = truncated.writer();
-        let mut out = CappedVec::with_capacity(HARMONY_CAPACITY);
+        let mut out = RtVec::new();
         // 255 one-unit characters, then U+1F3B5 (units 0xD83C 0xDFB5): the
         // pair's high half is the 256th unit.
         let name = format!(

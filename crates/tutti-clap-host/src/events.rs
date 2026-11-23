@@ -36,7 +36,7 @@ use tutti_plugin_types::{
     expression_of_per_note_controller, group_of_port, note_id_to_channel_note, per_note_message,
     per_note_tuning, plugin_note_id, push_sysex, sysex_assembler,
 };
-use tutti_rt::{CappedVec, Tally, TallyWriter, tally};
+use tutti_rt::{CappedVec, RtVec, Tally, TallyWriter, tally};
 use tutti_units::ParamId;
 use tutti_units::{Normalized, Samples, Semitones, Velocity};
 
@@ -936,9 +936,6 @@ pub struct InputEventList {
     /// The MIDI 2.0 to MIDI 1.0 state of every `clap_event_midi` sent: which
     /// parameter and bank each channel of each Group has had selected.
     midi1_translator: Midi1Translator,
-    /// The messages one [`add_bytes`](Self::add_bytes) feed produced, before any is
-    /// sent: room for [`Midi1Translator::MAX_MESSAGES`], the most one feed sends.
-    staged_bytes: CappedVec<[u8; 3]>,
     /// The input note ports the plugin has: a Group is note port `group`.
     ports: usize,
     /// Bit `n` is set when note port `n` takes the MIDI dialect only.
@@ -981,7 +978,6 @@ impl InputEventList {
             refused: 0,
             notes: Self::per_note_state(tutti_ump::GroupSpan::of(1)),
             midi1_translator: Midi1Translator::new(),
-            staged_bytes: CappedVec::with_capacity(Midi1Translator::MAX_MESSAGES),
             ports: 1,
             midi_ports: 0,
             midi_capable: u16::MAX,
@@ -1362,11 +1358,8 @@ impl InputEventList {
         let Some(port) = self.port_of(address) else {
             return;
         };
-        // One feed sends at most `Midi1Translator::MAX_MESSAGES` messages. The
-        // scratch is taken out of `self` while `push_bytes` borrows it, and put back
-        // (a cap of zero holds no storage, so the take allocates nothing).
-        let mut staged = std::mem::take(&mut self.staged_bytes);
-        staged.clear();
+        // One feed sends at most `Midi1Translator::MAX_MESSAGES` messages.
+        let mut staged: RtVec<[u8; 3], { Midi1Translator::MAX_MESSAGES }> = RtVec::new();
         self.midi1_translator.feed(message, |bytes| {
             staged.push(bytes.padded());
         });
@@ -1374,10 +1367,9 @@ impl InputEventList {
         // it is counted rather than sent short.
         if staged.is_overflowed() {
             self.midi_dropped += 1;
-        } else {
-            self.push_bytes(time, port, staged.as_slice());
+            return;
         }
-        self.staged_bytes = staged;
+        self.push_bytes(time, port, staged.as_slice());
     }
 
     /// `bytes` as MIDI events on `port`, all or none; `false` when they did not
@@ -1931,7 +1923,7 @@ pub struct OutputEventList {
     /// Whole `Vec`s rather than one arena: `ClapEvent::MidiSysex`'s `buffer`
     /// pointer aliases its own payload, and an arena reallocating mid-fill would
     /// dangle every pointer already handed out.
-    pub(crate) sysex_pool: CappedVec<Vec<u8>>,
+    pub(crate) sysex_pool: RtVec<Vec<u8>, SYSEX_POOL_BUFFERS>,
     /// The events other than `PARAM_VALUE` `try_push` accepts in one block:
     /// the room [`OutputRooms::new`] gave. Parameter events never take from it, so a parameter flood cannot
     /// refuse a note-off.
@@ -1988,7 +1980,7 @@ impl OutputEventList {
         } = rooms;
         param_ids.sort_unstable();
         param_ids.dedup();
-        let mut sysex_pool = CappedVec::with_capacity(SYSEX_POOL_BUFFERS);
+        let mut sysex_pool = RtVec::new();
         for _ in 0..events.min(SYSEX_POOL_BUFFERS) {
             sysex_pool.push(Vec::with_capacity(SYSEX_BUFFER_BYTES));
         }
@@ -2073,7 +2065,7 @@ impl OutputEventList {
     /// left on, with the time the plugin reported ([`WireMidi`]), into a
     /// caller-supplied [`RtMidiEvents`],
     /// dropping non-MIDI events. Clears `out` first. `out` is an
-    /// `CappedVec`, whose capacity is fixed when it is built, so this never allocates:
+    /// `RtVec`, whose capacity is inline and fixed, so this never allocates:
     /// events past that capacity are dropped and `out` reports the overflow.
     /// A plugin's SysEx arrives as UMP SysEx7 packets
     /// ([`push_sysex`]): any length the pool
@@ -2200,7 +2192,7 @@ impl OutputEventList {
     }
 
     /// Drains the note-expression events, in the safe [`ClapNoteExpression`]
-    /// form, into a caller-supplied [`RtNoteExpressions`], a `CappedVec` of fixed
+    /// form, into a caller-supplied [`RtNoteExpressions`], an `RtVec` of fixed inline
     /// capacity: it never allocates, and expressions past the capacity are
     /// dropped and reported by `out`.
     pub fn fill_note_expressions(&self, out: &mut RtNoteExpressions) {
@@ -2884,7 +2876,7 @@ mod tests {
         }
         output.events.push(ClapEvent::note_on(2, 1, 60, 0.75));
         output.events.push(ClapEvent::note_off(3, 1, 60, 0.5));
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         let filled = pool.len();
         assert!(filled > 15, "{filled} events");
@@ -4225,6 +4217,9 @@ mod tests {
     /// it — `try_push` is the *plugin's* callback, so an unbounded pool would
     /// let a plugin provoke a `malloc` inside the audio callback. Events past
     /// the cap are dropped and reported through `is_overflowed()`.
+    ///
+    /// Before the pool was an `RtVec`, the bound existed only as a `reserve`
+    /// performed off-RT in `activate()` and then trusted; nothing stopped this.
     #[test]
     fn midi_pool_caps_a_flood_of_plugin_emitted_events() {
         let mut output = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
@@ -4235,7 +4230,7 @@ mod tests {
                 .push(ClapEvent::midi(i as u32, 0, [0x90, 60, 100]));
         }
 
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
 
         assert_eq!(
@@ -4265,7 +4260,7 @@ mod tests {
                 .push(ClapEvent::midi(i as u32, 0, [0x90, 60, 100]));
         }
 
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         for _ in 0..256 {
             output.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
             assert_eq!(pool.len(), RT_MIDI_CAPACITY);
@@ -4377,7 +4372,7 @@ mod tests {
         list.events
             .push(ClapEvent::note_on(6, 2, 62, 1.0).addressed(40, -1));
 
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert_eq!(lost, 2, "the two events from ports with no Group");
         let groups: Vec<u8> = pool
@@ -4404,7 +4399,7 @@ mod tests {
     fn a_parameter_run_assembles_across_blocks() {
         let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);
         let mut translator = Midi2Translator::new();
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
 
         let mut first = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
         for event in [cc(101, 0), cc(100, 0), cc(6, 12)] {
@@ -4430,7 +4425,7 @@ mod tests {
     fn a_run_through_a_full_list_still_assembles() {
         let cc = |controller, value| ClapEvent::midi(0, 0, [0xB0, controller, value]);
         let mut translator = Midi2Translator::new();
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         let mut first = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
         for key in 0..RT_MIDI_CAPACITY as i16 {
             first.events.push(ClapEvent::note_on(0, 0, key % 100, 1.0));
@@ -4469,7 +4464,7 @@ mod tests {
             }
             list.events.push(e);
         }
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert!(pool.is_empty());
         assert_eq!(lost, 3, "each is counted as lost MIDI");
@@ -4517,7 +4512,7 @@ mod tests {
         list.events.push(far);
         // A status byte that is no message.
         list.events.push(ClapEvent::midi(0, 0, [0x00, 1, 2]));
-        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
+        let mut pool = RtMidiEvents::new();
         let lost = list.fill_midi_events(&mut Midi2Translator::new(), &mut pool);
         assert!(pool.is_empty());
         assert_eq!(lost, 7, "each is counted as lost MIDI");
