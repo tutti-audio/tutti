@@ -92,14 +92,16 @@ impl<F: Float> Testing<'_, F> {
     }
 
     /// Whether the graph keeps a reclaimer for `node`
-    /// ([`SessionNode::reclaimer`](crate::SessionNode::reclaimer)): for a test that a path inserts a node
+    /// ([`NodeParts::reclaimer`](tutti_graph::NodeParts::reclaimer)): for a test that a path inserts a node
     /// through [`Graph::add`].
     pub fn keeps_reclaimer(&self, node: impl Into<NodeKey>) -> bool {
         let node = node.into();
-        self.graph
-            .nodes
-            .get(&node)
-            .is_some_and(|entry| entry.reclaimer.is_some())
+        self.graph.nodes.get(&node).is_some_and(|entry| {
+            entry
+                .controls
+                .as_ref()
+                .is_some_and(|held| held.reclaimer.is_some())
+        })
     }
 
     /// Whether the node of the loaded plugin at `node` was re-inserted for new

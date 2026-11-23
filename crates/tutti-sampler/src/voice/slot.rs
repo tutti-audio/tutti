@@ -2,10 +2,8 @@
 //! the read that turns the pair into audio: a block at a time into planar
 //! lanes (`render_into`), on the block's transport.
 //!
-//! This is where the two source tiers and the two stretch states meet: four
-//! combinations, each of which has to agree with the others about how much
-//! source one output sample costs. They are easy to get subtly wrong, so the
-//! reasoning is kept inline at each fork.
+//! The two source tiers and the two stretch states meet here: each of the four
+//! combinations must agree on how much source one output sample costs.
 
 use std::ops::Range;
 
@@ -36,15 +34,9 @@ use tutti_units::{Beat, Bpm, Cents, ReadRate, SamplePosition, StretchFactor};
 /// [`VoiceNode`](super::node::VoiceNode), which holds exactly one — so the per-voice read has one
 /// definition and a fix in it is a fix in both.
 ///
-/// # Not a `VoiceSlot`
-///
-/// `tutti-polysynth` has a `VoiceSlot`, and it is a different kind of thing: an
-/// *allocator* slot carrying note identity plus an Idle/Active/Releasing/Stolen
-/// lifecycle, which is what its stealing policy scores over. This type carries
-/// no identity and no such state — it is a playback descriptor, and everything
-/// about which slot is live is decided by the owner. Sharing the name across the
-/// two crates invited reading one crate's stealing rules into the other's, so
-/// the name says which job this is.
+/// Not polysynth's `VoiceSlot`, an allocator slot carrying note identity and a
+/// stealing lifecycle: this one is a playback descriptor, and which slot is
+/// live is the owner's to decide.
 pub(crate) struct PlaybackSlot<F: SamplerFloat> {
     /// Addresses this slot for every command after the add. `SlotId(0)` on a
     /// `VoiceNode`, whose single voice has nothing to disambiguate.
@@ -94,55 +86,20 @@ pub(crate) struct PlaybackSlot<F: SamplerFloat> {
 }
 
 impl<F: SamplerFloat> PlaybackSlot<F> {
-    /// Build a slot at an explicit width.
+    /// Build a slot at an explicit width: both callers (the pool's drain and
+    /// `VoiceNode`) know their own, and a default would silently mismatch it.
     ///
-    /// # Width is explicit at every call site
+    /// The vocoder is `None` until the slot needs it: most voices never
+    /// stretch (a vocoder is about 60 KB per channel), and this constructor is
+    /// reachable from the audio thread through `VoiceCommand::AddVoice`.
+    /// A slot that arrives needing stretch gets its vocoder built on the
+    /// control thread: `VoicePool` takes one from the sender (see
+    /// `VoicePoolHandle::prepare`, which fills `AddVoice`'s `stretch`), and
+    /// `VoiceNode::with_channels` builds its own.
     ///
-    /// There is no stereo-defaulting `new`, because both callers (the reader's
-    /// drain and `VoiceNode`) know their own width and a default here would
-    /// silently mismatch it.
-    ///
-    /// # The vocoder is not built here
-    ///
-    /// It is `None` until the slot
-    /// actually needs it, for two reasons:
-    ///
-    /// - Most voices never stretch. A vocoder is one FFT setup plus its
-    ///   input, overlap-add and output rings *per channel* (about 60 KB × N),
-    ///   so building one for every voice spent that on the common case for
-    ///   nothing.
-    /// - This constructor is reachable from the audio thread.
-    ///   `VoiceCommand::AddVoice` is drained by `drain_commands`, which runs from
-    ///   the node's `process`, so eager construction meant adding a voice mid-playback
-    ///   allocated in the callback.
-    ///
-    /// # Who builds one, when the voice needs it
-    ///
-    /// A slot that arrives already needing stretch (non-unity `play.stretch` /
-    /// `play.pitch`) gets its vocoder built on the control thread, before the
-    /// audio thread ever sees the slot. The two owners do that differently, and
-    /// the difference is not cosmetic:
-    ///
-    /// - `VoicePool` takes a pre-built vocoder from the sender — see
-    ///   `VoicePoolHandle::prepare`, which fills in `VoiceCommand::AddVoice`'s
-    ///   `stretch` field. It has to: `AddVoice` is drained in the callback, so the
-    ///   pool cannot build one at the point it learns it needs one.
-    /// - `VoiceNode` builds its own, in `VoiceNode::with_channels`, because
-    ///   that constructor *is* control-thread code. Nothing prepares a vocoder for
-    ///   a node, and nothing needs to.
-    ///
-    /// # Turning stretch on later is a pool-only capability
-    ///
-    /// `VoiceCommand::UpdateStretch` reaches `set_stretch` below through the
-    /// pool's drain; a `VoiceNodeHandle` publishes a placement and nothing
-    /// else (it has no command queue), so there is no way to send a node this
-    /// command. A node's pitch is therefore fixed at construction, and a
-    /// host that wants to change it respawns the voice, which is what the
-    /// hosts we know of do.
-    ///
-    /// If that gap is ever closed, the node would adopt a vocoder built by its
-    /// handle the way the pool's drain does: moved in, with the surplus retired
-    /// for the control thread to free.
+    /// Turning stretch on later (`VoiceCommand::UpdateStretch`, which reaches
+    /// `set_stretch` below through the pool's drain) is a pool-only
+    /// capability: a node's pitch is fixed at construction.
     pub(crate) fn with_channels(
         id: SlotId,
         voice: Box<Voice<F>>,

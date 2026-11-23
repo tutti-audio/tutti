@@ -51,24 +51,14 @@ use tutti_units::{SampleRate, Tail};
 /// command with [`SendError::RetirementFull`](super::command::SendError::RetirementFull)
 /// when none is left, so the drain never drops one.
 ///
-/// `pub(crate)`, not `pub`: [`PlaybackSlot`] is crate-private, and the retirement
-/// ring is an internal thread-handoff detail. Callers only ever see the count
-/// from [`VoicePoolHandle::collect_retired`], never the values.
+/// `pub(crate)`: callers only see the count from
+/// [`VoicePoolHandle::collect_retired`], never the values.
 ///
-/// # Why the payloads are never read
-///
-/// No field is ever inspected, and that is the design: the *value* is the
-/// payload, and receiving it is what frees it. `collect_retired` pulls each one
-/// and lets it fall out of scope, on the control thread. So `dead_code` is
-/// correct that nothing reads them, and wrong that they are dead — deleting
-/// any field would move the deallocation back into the audio callback.
-///
-/// The variants are also very different sizes (a `PlaybackSlot` dwarfs a bare
-/// vocoder), which normally argues for boxing the large one. Not here: this value
-/// exists to cross a thread boundary and be dropped, so a `Box` would add an
-/// allocation on one side and a free on the other — the exact cost being avoided.
-/// The ring holds `MAX_RESIDENT_VOICES`, so the waste is one slot-sized
-/// element per queue entry, bounded and never in the callback's path.
+/// No field is ever read: the value is the payload, and receiving it on the
+/// control thread and dropping it there is what frees it, so deleting a field
+/// would move a deallocation into the audio callback. The variants differ much
+/// in size, but boxing the large one would add an allocation on one side and a
+/// free on the other, the cost being avoided.
 #[allow(
     dead_code,
     clippy::large_enum_variant,
@@ -233,23 +223,14 @@ impl DrainCounters {
     }
 }
 
-/// Where a voice's loop is applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoopRoute {
-    /// On the voice's in-memory source, by the drain.
-    Memory,
-    /// On its streamer stream (the stream it reads, which a loop is set on
-    /// through the handle's [`StreamHandle`](crate::StreamHandle), from the control
-    /// thread).
-    Stream(StreamId),
-}
-
 impl<F: SamplerFloat> Voice<F> {
-    /// Where this voice's loop is applied.
-    pub(crate) fn loop_route(&self) -> LoopRoute {
+    /// The streamer stream this voice reads, whose loop and direction are set
+    /// on it through the handle; `None` for an in-memory voice, whose drain
+    /// applies them itself.
+    pub(crate) fn stream_id(&self) -> Option<StreamId> {
         match &self.source {
-            VoiceSource::Memory(_) => LoopRoute::Memory,
-            VoiceSource::Disk(disk) => LoopRoute::Stream(disk.stream()),
+            VoiceSource::Memory(_) => None,
+            VoiceSource::Disk(disk) => Some(disk.stream()),
         }
     }
 }
@@ -639,7 +620,7 @@ impl<F: SamplerFloat> VoicePool<F> {
     ///
     /// Allocation-free and send-free: the drain runs it.
     fn apply_loop(&mut self, id: SlotId, setting: Option<Loop>) {
-        let Some(slot) = self.voices.iter_mut().find(|s| s.id == id) else {
+        let Some(slot) = self.slot_mut(id) else {
             return;
         };
         if let VoiceSource::Memory(sampler) = &mut slot.voice.source {
@@ -666,9 +647,7 @@ impl<F: SamplerFloat> VoicePool<F> {
         let Some(slot) = self.voices.iter().find(|s| s.id == id) else {
             return;
         };
-        if let LoopRoute::Stream(stream) = slot.voice.loop_route()
-            && forwarded != Some(stream)
-        {
+        if slot.voice.stream_id().is_some_and(|s| forwarded != Some(s)) {
             DrainCounters::bump(&self.counters.loops_not_forwarded);
             return;
         }
@@ -688,12 +667,10 @@ impl<F: SamplerFloat> VoicePool<F> {
         direction: super::types::PlayDirection,
         forwarded: Option<StreamId>,
     ) {
-        let Some(slot) = self.voices.iter_mut().find(|s| s.id == id) else {
+        let Some(slot) = self.slot_mut(id) else {
             return;
         };
-        if let LoopRoute::Stream(stream) = slot.voice.loop_route()
-            && forwarded != Some(stream)
-        {
+        if slot.voice.stream_id().is_some_and(|s| forwarded != Some(s)) {
             DrainCounters::bump(&self.counters.directions_dropped);
             return;
         }
@@ -1046,9 +1023,7 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
             .tail(self.ring_out())
-            // Its voices arrive while it plays, each a `VoiceNode`'s cost:
-            // measured 13 ns per frame and channel at one plain voice, 82 at
-            // eight, and one stretched voice alone is 288.
+            // Its voices arrive while it plays, so its cost is not known when it is placed.
             .cost(tutti_graph::Cost::Heavy)
     }
 
@@ -1161,6 +1136,11 @@ impl<F: SamplerFloat> IntoNode<F> for VoicePool<F> {
             counters: Arc::clone(&self.counters),
         };
         let (pool, handle) = self.with_handle();
-        NodeParts::new(Box::new(pool), handle, Some(Box::new(fork)))
+        NodeParts::new(
+            Box::new(pool),
+            handle.clone(),
+            Some(Box::new(fork)),
+            Some(Box::new(handle)),
+        )
     }
 }

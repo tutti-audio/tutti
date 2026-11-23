@@ -17,7 +17,7 @@ fn hop() -> PitchHop {
 const FRAME: usize = 580;
 
 fn track(cfg: &PyinConfig, x: &[f32]) -> Vec<PyinFrame> {
-    pyin_track(cfg, Mono::new(x), RATE, hop()).unwrap()
+    pyin_track(&cfg.hop(hop()), Mono::new(x), RATE).unwrap()
 }
 
 fn cents_between(a: f64, b: f64) -> f64 {
@@ -226,10 +226,9 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
     let wide = FrequencyBand::new(Hz::new(55.0), Hz::new(9000.0)).unwrap();
     assert_eq!(
         pyin_track(
-            &PyinConfig::new().band(wide),
+            &PyinConfig::new().band(wide).hop(hop()),
             Mono::new(&[0.0f32; 4096]),
-            RATE,
-            hop()
+            RATE
         ),
         Err(PitchError::Nyquist(AboveNyquist {
             freq: Hz::new(9000.0),
@@ -237,7 +236,11 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
         }))
     );
     assert_eq!(
-        pyin_track(&PyinConfig::new(), Mono::new(&[0.0f32; 100]), RATE, hop()),
+        pyin_track(
+            &PyinConfig::new().hop(hop()),
+            Mono::new(&[0.0f32; 100]),
+            RATE
+        ),
         Err(PitchError::InsufficientInput {
             needed: Samples::new(FRAME),
             got: Samples::new(100),
@@ -247,5 +250,45 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
     assert!(matches!(
         PyinConfig::new().band(tiny).model(),
         Err(PitchError::PitchGridTooLarge { .. })
+    ));
+}
+
+/// A meter of a 220 Hz tone tracks it within half a grid step in any chunking,
+/// and refuses a band above Nyquist, a NaN and more frames than a track decodes.
+#[test]
+fn the_pyin_meter_tracks_the_tone_and_refuses_what_it_cannot_hold() {
+    let cfg = PyinConfig::new().hop(hop());
+    let x: Vec<f64> = tone(220.0, 4000).iter().map(|&s| f64::from(s)).collect();
+    let track = crate::measure::chunk_independent(&cfg, RATE, &x).unwrap();
+    let voiced: Vec<f64> = track
+        .iter()
+        .filter_map(|f| f.frequency)
+        .map(Hz::get)
+        .collect();
+    assert!(
+        voiced.len() * 2 > track.len(),
+        "{} of {}",
+        voiced.len(),
+        track.len()
+    );
+    assert!(voiced.iter().all(|&f| cents_between(f, 220.0).abs() < 5.5));
+
+    let wide = FrequencyBand::new(Hz::new(55.0), Hz::new(9000.0)).unwrap();
+    assert!(matches!(
+        Measure::<f64>::measure(&PyinConfig::new().band(wide), RATE),
+        Err(MeterError::Pitch(PitchError::Nyquist(_)))
+    ));
+
+    let mut meter = Measure::<f64>::measure(&cfg, RATE).unwrap();
+    assert_eq!(
+        meter.push(Mono::new(&[f64::INFINITY]), &mut Vec::new()),
+        Err(MeterError::NonFiniteInput)
+    );
+    let dense = PyinConfig::new().hop(PitchHop::of(Samples::new(1)));
+    let mut meter = Measure::<f64>::measure(&dense, RATE).unwrap();
+    let long = vec![0.0f64; FRAME + MAX_FRAMES.get()];
+    assert!(matches!(
+        meter.push(Mono::new(&long), &mut Vec::new()),
+        Err(MeterError::TooManyFrames(_))
     ));
 }

@@ -249,7 +249,7 @@ Rules:
   when the only `reclaim` caller was the hardware MIDI port set's owner.
   Every publisher now reclaims on a control-side tick it already has: the
   session's `Phase::Reclaim` sweeps its graph's table (each node's
-  `Reclaimer`, which `SessionNode::reclaimer` hands the graph as the node
+  reclaimer, which the node's `NodeParts::reclaimer` hands the graph as the node
   goes in through `add` or `crossfade` and which leaves with the node:
   clips, harmony, the MIDI input, voices; and each hosted plugin's
   `PluginTimeSignature`, which a `clear_meter` leaves following no project meter)
@@ -451,7 +451,7 @@ despawn system.
 
 Params are `AudioParam<U, const P: u16>` — one generic component per scalar,
 registered with `App::add_audio_param::<U, P>()` and written in the `Params`
-phase through the node's `ParamSet` (`SessionNode::params`); a node without the
+phase through the node's `ParamSet` (`NodeParts::params`); a node without the
 param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 `UnitParam` discriminant in the low), so a node's only param of a kind is the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with

@@ -17,6 +17,7 @@
 //! reads the `contract!` calls in `testing/tutti-plugin-contract/tests/*.rs`
 //! (which may span lines).
 
+use super::lex::{skipped, word_char};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -24,18 +25,10 @@ const MARKERS: [&str; 2] = ["InProcess", "OutOfProcess"];
 const FORMATS: &str = "testing/tutti-plugin-contract/src/formats.rs";
 const SUITES: &str = "testing/tutti-plugin-contract/tests";
 
-fn skipped(dir: &str) -> bool {
-    dir == "target"
-}
-
-fn is_word(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
 /// The `[\w:]*` run at the start of `s`.
 fn path_run(s: &str) -> &str {
     let n = s
-        .find(|c: char| !(is_word(c) || c == ':'))
+        .find(|c: char| !(word_char(c) || c == ':'))
         .unwrap_or(s.len());
     &s[..n]
 }
@@ -74,7 +67,7 @@ fn impl_line(line: &str) -> Option<(&'static str, String)> {
         return None;
     }
     let name = last_segment(path_run(target));
-    let name: String = name.chars().take_while(|&c| is_word(c)).collect();
+    let name: String = name.chars().take_while(|&c| word_char(c)).collect();
     (!name.is_empty()).then_some((marker, name))
 }
 
@@ -84,7 +77,7 @@ fn loaded_type(block: &str) -> Option<String> {
     while let Some(p) = block[at..].find("type") {
         let s = at + p;
         at = s + 4;
-        let before_ok = s == 0 || !block[..s].ends_with(is_word);
+        let before_ok = s == 0 || !block[..s].ends_with(word_char);
         let rest = &block[s + 4..];
         let r = rest.trim_start();
         if !before_ok || r.len() == rest.len() {
@@ -98,7 +91,7 @@ fn loaded_type(block: &str) -> Option<String> {
         };
         let target = r.trim_start();
         let name = last_segment(path_run(target));
-        let name: String = name.chars().take_while(|&c| is_word(c)).collect();
+        let name: String = name.chars().take_while(|&c| word_char(c)).collect();
         if !name.is_empty()
             && target[path_run(target).len()..]
                 .trim_start()
@@ -130,7 +123,7 @@ fn format_impls(src: &str) -> Vec<(String, &str)> {
         if r3.len() == r2.len() {
             continue;
         }
-        let name: String = r3.chars().take_while(|&c| is_word(c)).collect();
+        let name: String = r3.chars().take_while(|&c| word_char(c)).collect();
         let Some(body) = r3[name.len()..].trim_start().strip_prefix('{') else {
             continue;
         };
@@ -166,7 +159,7 @@ fn contracts(text: &str) -> Vec<(String, BTreeSet<String>)> {
             continue;
         };
         let fmt = last_segment(args[..comma].trim());
-        if fmt.is_empty() || !fmt.chars().all(is_word) {
+        if fmt.is_empty() || !fmt.chars().all(word_char) {
             continue;
         }
         let mut names = BTreeSet::new();
@@ -176,7 +169,7 @@ fn contracts(text: &str) -> Vec<(String, BTreeSet<String>)> {
                 && let Some(r) = r.trim_start().strip_prefix('[')
                 && let Some(close) = r.find(']')
             {
-                for w in r[..close].split(|c: char| !is_word(c)) {
+                for w in r[..close].split(|c: char| !word_char(c)) {
                     if !w.is_empty() {
                         names.insert(w.to_owned());
                     }

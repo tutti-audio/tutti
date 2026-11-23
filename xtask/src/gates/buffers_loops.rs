@@ -52,9 +52,11 @@
 //! with no row, on a row with no hit (delete it), on an unknown reason and on
 //! a key listed twice.
 
-use super::buffers::{blocks, ident_at, item_end, reason_error};
-use super::lex::{blank, find_word_from, matching, test_ranges};
-use super::test_time::{cfg_test_files, test_file};
+use super::buffers::{blocks, item_end, reason_error};
+use super::lex::{
+    blank, find_word_from, ident_at, is_test_file, matching, skipped_library, test_ranges, word,
+};
+use super::test_time::cfg_test_files;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,14 +88,6 @@ const BYTE_CODECS: [&str; 6] = [
     "to_be_bytes",
     "to_ne_bytes",
 ];
-
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "tests" | "benches" | "examples")
-}
 
 /// An operand reduced to what it names: `usize::from(..)` and `.get()` peeled.
 /// Returns the path before a trailing call and the call's name, if any.
@@ -396,7 +390,7 @@ fn scan(
 
 /// The files the gate reads.
 fn source_files(tree: &dyn Tree) -> Vec<String> {
-    tree.files("crates", &skipped)
+    tree.files("crates", &skipped_library)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();
@@ -466,7 +460,7 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let reached = cfg_test_files(&files);
     let mut sites: BTreeMap<String, BTreeSet<&'static str>> = BTreeMap::new();
     for (path, text) in &files {
-        let whole = test_file(path) || reached.contains(path);
+        let whole = is_test_file(path) || reached.contains(path);
         for (k, shapes) in scan(path, text, whole) {
             sites.entry(k).or_default().extend(shapes);
         }
