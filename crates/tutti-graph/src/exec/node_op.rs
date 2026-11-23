@@ -1,7 +1,7 @@
 //! Running a node op: its params, its mode and any crossfade, and the call
 //! into the node.
 
-use crate::compile::ids::PlanUnitId;
+use crate::compile::ids::{Id, PlanUnitId};
 use std::cell::Cell;
 use tutti_buffers::Float;
 

@@ -26,7 +26,7 @@
 //! [`Editor::take_event_losses`]: crate::Editor::take_event_losses
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
-use crate::compile::ids::{DelayId, FeedbackId};
+use crate::compile::ids::{DelayId, EventFeedbackId, Id};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
@@ -173,7 +173,7 @@ impl Dropped {
     pub(crate) fn charge_feedback(&mut self, plan: &Plan, feedback: u32, count: u64) {
         let from = match plan
             .event_feedback
-            .get(FeedbackId::new(feedback))
+            .get(EventFeedbackId::new(feedback))
             .map(|f| f.key)
         {
             Some(FeedbackKey::Event { from, .. }) => Some(from),

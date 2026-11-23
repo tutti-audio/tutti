@@ -47,8 +47,8 @@
 //! run it on every proptest graph.
 
 use crate::compile::ids::{
-    DelayId, EventSlotId, FeedbackId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId,
-    Table, TaskId,
+    DelayId, EventFeedbackId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId,
+    PlanUnitId, Table, TaskId,
 };
 use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
@@ -405,8 +405,8 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
 
         // Rule 3: every read of a coloured slot reads its intended value.
         let (values, fixed) = match kind {
-            PortKind::Audio => (&plan.audio_values, audio_fixed),
-            PortKind::Event => (&plan.event_values, event_fixed),
+            PortKind::Audio => (plan.audio_values.as_slice(), audio_fixed),
+            PortKind::Event => (plan.event_values.as_slice(), event_fixed),
         };
         let mut covered: Vec<(OpId, u32)> = Vec::new();
         for v in values.iter() {
@@ -678,7 +678,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 return Ok(EventSlotCapacity::NONE);
             }
             if (s as usize) < fixed {
-                let spec = &plan.event_feedback[FeedbackId::new(s - 1)];
+                let spec = &plan.event_feedback[EventFeedbackId::new(s - 1)];
                 return match spec.key {
                     crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(
                         EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block),
@@ -813,7 +813,7 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::{AudioSlotId, EventSlotId, PlanUnitId, TaskId, ValueId};
+    use crate::compile::ids::{AudioSlotId, AudioValueId, EventSlotId, PlanUnitId, TaskId};
     use crate::compile::{Shapes, compile};
     use crate::model::spec::GraphSpec;
     use crate::node::InPlaceMask;
@@ -973,8 +973,8 @@ mod tests {
         verify(&good).expect("the compiler's own plan is sound");
 
         let mut bad = good.clone();
-        let a = bad.audio_values[ValueId::new(0)].slot;
-        let b = bad.audio_values[ValueId::new(1)].slot;
+        let a = bad.audio_values[AudioValueId::new(0)].slot;
+        let b = bad.audio_values[AudioValueId::new(1)].slot;
         assert_ne!(a, b);
         for s in &mut bad.audio_list {
             if s.get() == b {
@@ -988,7 +988,7 @@ mod tests {
                 *src = a;
             }
         }
-        bad.audio_values[ValueId::new(1)].slot = a;
+        bad.audio_values[AudioValueId::new(1)].slot = a;
         let err = verify(&bad).expect_err("two concurrent writers share a slot");
         assert!(err.0.contains("concurrently"), "{err}");
     }

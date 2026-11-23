@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use super::Val;
-use super::ids::{OpId, Table, ValueId};
+use super::ids::{Id, OpId, Table};
 
 /// Strict reachability over the op DAG.
 pub(crate) struct Reach {
@@ -58,8 +58,8 @@ impl Reach {
 }
 
 /// A colouring: slot per value, and how many slots.
-pub(crate) struct Colouring {
-    pub(crate) slot: Table<ValueId, usize>,
+pub(crate) struct Colouring<V> {
+    pub(crate) slot: Table<V, usize>,
     pub(crate) count: usize,
 }
 
@@ -70,21 +70,21 @@ fn finished_before(u: &Val, w: OpId, reach: &Reach) -> bool {
 
 /// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
 /// `u`, taken when legal.
-pub(crate) fn colour(
-    vals: &Table<ValueId, Val>,
+pub(crate) fn colour<V: Id>(
+    vals: &Table<V, Val>,
     reach: &Reach,
-    in_place: &BTreeMap<ValueId, ValueId>,
-) -> Colouring {
-    let mut slot: Table<ValueId, usize> = Table::filled(vals.len(), usize::MAX);
+    in_place: &BTreeMap<V, V>,
+) -> Colouring<V> {
+    let mut slot: Table<V, usize> = Table::filled(vals.len(), usize::MAX);
     // Last occupant of each slot. Values are visited in writer order, and a
     // value can only follow an occupant whose every op happens-before its
     // writer — so the occupants of one slot form a chain, and checking the
     // last one checks them all.
-    let mut last: Vec<ValueId> = Vec::new();
+    let mut last: Vec<V> = Vec::new();
 
     for (v, val) in vals.iter_enumerated() {
         debug_assert!(
-            v.index() == 0 || vals[ValueId::from_index(v.index() - 1)].writer <= val.writer,
+            v.index() == 0 || vals[V::from_index(v.index() - 1)].writer <= val.writer,
             "values are created in writer order"
         );
         let w = val.writer;
@@ -108,7 +108,7 @@ pub(crate) fn colour(
         let s = match reuse {
             Some(s) => s,
             None => {
-                last.push(ValueId::new(0));
+                last.push(v);
                 last.len() - 1
             }
         };
@@ -127,12 +127,13 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::compile::ids::AudioValueId;
     use proptest::prelude::*;
 
     /// One op per value: op `i` writes value `i` and reads the values in
     /// `reads[i]` (all earlier). Returns the values and the reach.
-    fn dag(reads: &[Vec<u32>]) -> (Table<ValueId, Val>, Reach) {
-        let mut vals: Table<ValueId, Val> = (0..reads.len() as u32)
+    fn dag(reads: &[Vec<u32>]) -> (Table<AudioValueId, Val>, Reach) {
+        let mut vals: Table<AudioValueId, Val> = (0..reads.len() as u32)
             .map(|w| Val {
                 writer: OpId::new(w),
                 readers: Vec::new(),
@@ -142,7 +143,9 @@ mod tests {
         let mut succ: Table<OpId, Vec<OpId>> = Table::filled(reads.len(), Vec::new());
         for (op, rs) in reads.iter().enumerate() {
             for &u in rs {
-                vals[ValueId::new(u)].readers.push(OpId::from_index(op));
+                vals[AudioValueId::new(u)]
+                    .readers
+                    .push(OpId::from_index(op));
                 if preds[op].insert(u) {
                     succ[OpId::new(u)].push(OpId::from_index(op));
                 }
@@ -152,7 +155,7 @@ mod tests {
         (vals, reach)
     }
 
-    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<ValueId, ValueId>) -> usize {
+    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<AudioValueId, AudioValueId>) -> usize {
         let (vals, reach) = dag(reads);
         colour(&vals, &reach, in_place).count
     }
@@ -187,8 +190,8 @@ mod tests {
     #[test]
     fn an_in_place_chain_needs_one_slot() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        let in_place: BTreeMap<ValueId, ValueId> = (1..5)
-            .map(|v| (ValueId::new(v), ValueId::new(v - 1)))
+        let in_place: BTreeMap<AudioValueId, AudioValueId> = (1..5)
+            .map(|v| (AudioValueId::new(v), AudioValueId::new(v - 1)))
             .collect();
         assert_eq!(slots(&reads, &in_place), 1);
     }
@@ -251,7 +254,7 @@ mod tests {
             let mut in_place = BTreeMap::new();
             for (v, rs) in reads.iter().enumerate() {
                 if offer[v] && let Some(&u) = rs.first() {
-                    in_place.insert(ValueId::from_index(v), ValueId::new(u));
+                    in_place.insert(AudioValueId::from_index(v), AudioValueId::new(u));
                 }
             }
             let c = colour(&vals, &reach, &in_place);

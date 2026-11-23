@@ -11,6 +11,10 @@ use std::ops::{Index, IndexMut};
 
 /// A typed `u32` index.
 pub(crate) trait Id: bytemuck::Pod + Eq + Ord + std::fmt::Debug {
+    /// The id with this raw value.
+    fn new(raw: u32) -> Self;
+    /// The raw value.
+    fn get(self) -> u32;
     /// The position this id names, for indexing a [`Table`] or a slice.
     fn index(self) -> usize;
     /// The id at `index`; debug-asserts that it fits.
@@ -27,24 +31,6 @@ macro_rules! ids {
         #[repr(transparent)]
         pub(crate) struct $name(u32);
 
-        impl $name {
-            /// The id with this raw value.
-            pub(crate) const fn new(raw: u32) -> Self {
-                Self(raw)
-            }
-
-            /// The position this id names.
-            pub(crate) const fn index(self) -> usize {
-                self.0 as usize
-            }
-
-            /// The id at `index`; debug-asserts that it fits.
-            pub(crate) fn from_index(index: usize) -> Self {
-                debug_assert!(u32::try_from(index).is_ok(), "an index past u32");
-                Self(index as u32)
-            }
-        }
-
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 self.0.fmt(f)
@@ -52,24 +38,21 @@ macro_rules! ids {
         }
 
         impl Id for $name {
+            fn new(raw: u32) -> Self {
+                Self(raw)
+            }
+
+            fn get(self) -> u32 {
+                self.0
+            }
+
             fn index(self) -> usize {
-                Self::index(self)
+                self.0 as usize
             }
 
             fn from_index(index: usize) -> Self {
-                Self::from_index(index)
-            }
-        }
-    )*};
-}
-
-/// `get`, for the ids that cross into a public struct's raw field.
-macro_rules! with_raw {
-    ($($name:ident)*) => {$(
-        impl $name {
-            /// The raw value.
-            pub(crate) const fn get(self) -> u32 {
-                self.0
+                debug_assert!(u32::try_from(index).is_ok(), "an index past u32");
+                Self(index as u32)
             }
         }
     )*};
@@ -78,8 +61,10 @@ macro_rules! with_raw {
 ids! {
     /// An op of a plan: a position in [`Plan::ops`](crate::Plan::ops).
     OpId;
-    /// A value under construction: a position in the audio or the event values.
-    ValueId;
+    /// An audio value under construction: a position in the audio values.
+    AudioValueId;
+    /// An event value under construction: a position in the event values.
+    EventValueId;
     /// An audio slot: a position in the audio arena.
     AudioSlotId;
     /// An event slot: a position in the event arena.
@@ -91,9 +76,12 @@ ids! {
     TaskId;
     /// A PDC delay: a position in [`Plan::delays`](crate::Plan::delays).
     DelayId;
-    /// A feedback slot of one kind: a position in that kind's
+    /// An audio feedback: a position in the audio
     /// [`Plan::feedback`](crate::Plan::feedback).
-    FeedbackId;
+    AudioFeedbackId;
+    /// An event feedback: a position in the event
+    /// [`Plan::feedback`](crate::Plan::feedback).
+    EventFeedbackId;
     /// A tap of a plan: a position in its tap table.
     PlanTapId;
     /// An event tap of a plan: a position in its event tap table.
@@ -102,15 +90,17 @@ ids! {
     PlanMeterId;
 }
 
-impl FeedbackId {
-    /// The audio slot a feedback of this id is read from: slot 0 is the null
-    /// slot, the feedback slots follow.
-    pub(crate) fn audio_slot(self) -> AudioSlotId {
+impl AudioFeedbackId {
+    /// The audio slot this feedback is read from: slot 0 is the null slot,
+    /// the feedback slots follow.
+    pub(crate) fn slot(self) -> AudioSlotId {
         AudioSlotId::from_index(1 + self.index())
     }
+}
 
-    /// The event slot a feedback of this id is read from.
-    pub(crate) fn event_slot(self) -> EventSlotId {
+impl EventFeedbackId {
+    /// The event slot this feedback is read from.
+    pub(crate) fn slot(self) -> EventSlotId {
         EventSlotId::from_index(1 + self.index())
     }
 }
@@ -246,9 +236,14 @@ impl<'t, I, T> IntoIterator for &'t Table<I, T> {
     }
 }
 
-with_raw! {
-    OpId AudioSlotId EventSlotId PlanUnitId DelayId FeedbackId PlanTapId PlanEventTapId
-    PlanMeterId
+impl AudioSlotId {
+    /// The slot every unconnected audio input reads; never written.
+    pub(crate) const ZERO: Self = Self(0);
+}
+
+impl EventSlotId {
+    /// The slot every unconnected event input reads; never written.
+    pub(crate) const EMPTY: Self = Self(0);
 }
 
 /// A slice of ids as the raw `u32`s they wrap: what a public accessor returns

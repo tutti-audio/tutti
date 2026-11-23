@@ -21,7 +21,7 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
-use crate::compile::ids::{DelayId, PlanUnitId};
+use crate::compile::ids::{DelayId, Id, PlanUnitId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

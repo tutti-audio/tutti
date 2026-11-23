@@ -87,7 +87,7 @@
 
 mod access;
 
-use crate::compile::ids::TaskId;
+use crate::compile::ids::{Id, TaskId};
 use access::{
     Audio, Claimed, ClaimedAudio, ClaimedEvents, Events, Exclusive, ExclusiveAudio, Mode, Table,
 };

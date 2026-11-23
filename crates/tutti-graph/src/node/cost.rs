@@ -44,7 +44,7 @@
 //! the same at any participant count, so a wrong estimate never changes a
 //! sample.
 
-use crate::compile::ids::{PlanUnitId, Table};
+use crate::compile::ids::{Id, PlanUnitId, Table};
 use crate::compile::plan::Op;
 use crate::node::shape::Shape;
 use tutti_units::Samples;

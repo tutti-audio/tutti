@@ -92,7 +92,7 @@
 //! future frame holds its credit until it lands, so the limit is on
 //! *outstanding* commands, not on commands per block.
 
-use crate::compile::ids::PlanUnitId;
+use crate::compile::ids::{Id, PlanUnitId};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 

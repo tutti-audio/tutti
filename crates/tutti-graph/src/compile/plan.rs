@@ -52,8 +52,8 @@ use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::compile::VerifyError;
 use crate::compile::ids::{
-    AudioSlotId, DelayId, EventSlotId, FeedbackId, Id, OpId, PlanEventTapId, PlanMeterId,
-    PlanTapId, PlanUnitId, Table, TaskId, ValueId, raw,
+    AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
+    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TaskId, raw,
 };
 use crate::exec::arena::Role;
 use crate::model::fade::Fade;
@@ -64,9 +64,9 @@ use crate::node::shape::Shape;
 use crate::node::{InPlaceMask, Prepare, Wired};
 
 /// The audio slot every unconnected or `PortSource::Zero` input reads.
-pub(crate) const ZERO_SLOT: AudioSlotId = AudioSlotId::new(0);
+pub(crate) const ZERO_SLOT: AudioSlotId = AudioSlotId::ZERO;
 /// The event slot every unconnected event input reads.
-pub(crate) const EMPTY_SLOT: EventSlotId = EventSlotId::new(0);
+pub(crate) const EMPTY_SLOT: EventSlotId = EventSlotId::EMPTY;
 
 /// A dense index into the runtime's unit store.
 ///
@@ -1067,8 +1067,8 @@ pub struct Plan {
     pub(crate) audio_slots: u32,
     pub(crate) event_slots: u32,
     pub(crate) event_slot_capacity: Table<EventSlotId, EventSlotCapacity>,
-    pub(crate) audio_feedback: Table<FeedbackId, FeedbackSpec>,
-    pub(crate) event_feedback: Table<FeedbackId, FeedbackSpec>,
+    pub(crate) audio_feedback: Table<AudioFeedbackId, FeedbackSpec>,
+    pub(crate) event_feedback: Table<EventFeedbackId, FeedbackSpec>,
     pub(crate) delays: Table<DelayId, DelaySpec>,
     pub(crate) taps: Table<PlanTapId, crate::TapId>,
     /// The event taps the topology names, by id. An op names one by its index
@@ -1094,8 +1094,8 @@ pub struct Plan {
     /// has a bank): the total of the plan the main output change was made from, kept
     /// by a plan that continues the same crossfade.
     pub(crate) bank_total: Latency,
-    pub(crate) audio_values: Table<ValueId, Value>,
-    pub(crate) event_values: Table<ValueId, Value>,
+    pub(crate) audio_values: Table<AudioValueId, Value>,
+    pub(crate) event_values: Table<EventValueId, Value>,
     pub(crate) value_readers: Vec<OpId>,
     pub(crate) param_ports: Vec<ParamPortOp>,
     /// The driven lanes of every [`Op::WeightedSum`], flattened (its `gains`

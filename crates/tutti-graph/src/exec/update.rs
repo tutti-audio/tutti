@@ -9,7 +9,7 @@ use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
-use crate::compile::ids::PlanUnitId;
+use crate::compile::ids::{Id, PlanUnitId};
 use crate::compile::plan::Plan;
 use crate::event::types::Event;
 use crate::exec::held::Held;

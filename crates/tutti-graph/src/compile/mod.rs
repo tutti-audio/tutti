@@ -65,8 +65,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
 use crate::compile::ids::{
-    AudioSlotId, DelayId, EventSlotId, FeedbackId, OpId, PlanEventTapId, PlanMeterId, PlanTapId,
-    PlanUnitId, Table, ValueId,
+    AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
+    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
 };
 use crate::compile::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
@@ -260,17 +260,17 @@ fn event_port_out_of_range(at: &EventInputPort, from: &Option<EventOutputPort>) 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ARef {
-    Val(ValueId),
+    Val(AudioValueId),
     Zero,
-    Fb(FeedbackId),
+    Fb(AudioFeedbackId),
 }
 
 /// Where an event input reads from, before colouring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ERef {
-    Val(ValueId),
+    Val(EventValueId),
     Empty,
-    Fb(FeedbackId),
+    Fb(EventFeedbackId),
 }
 
 /// An op before colouring: the same shape as [`Op`] with value ids where
@@ -278,16 +278,16 @@ enum ERef {
 enum Pre {
     MainInput {
         channel: u16,
-        dst: ValueId,
+        dst: AudioValueId,
     },
     Delay {
         delay: DelayId,
-        src: ValueId,
-        dst: ValueId,
+        src: AudioValueId,
+        dst: AudioValueId,
     },
     Sum {
         srcs: Vec<ARef>,
-        dst: ValueId,
+        dst: AudioValueId,
     },
     /// A `Sum` with a weighted lane: `lanes` is one entry per addend.
     WeightedSum {
@@ -295,24 +295,24 @@ enum Pre {
         lanes: Vec<Option<EdgeId>>,
         /// The driven lanes among them.
         gains: Vec<GPort>,
-        dst: ValueId,
+        dst: AudioValueId,
     },
     EventDelay {
         delay: DelayId,
-        src: ValueId,
-        dst: ValueId,
+        src: EventValueId,
+        dst: EventValueId,
     },
     EventMerge {
         srcs: Vec<ERef>,
-        dst: ValueId,
+        dst: EventValueId,
         bound: Option<InputBound>,
     },
     Node {
         unit: PlanUnitId,
         ain: Vec<ARef>,
-        aout: Vec<ValueId>,
+        aout: Vec<AudioValueId>,
         ein: Vec<ERef>,
-        eout: Vec<ValueId>,
+        eout: Vec<EventValueId>,
         params: Vec<PPort>,
     },
     Output {
@@ -333,12 +333,12 @@ enum Pre {
         srcs: Vec<ARef>,
     },
     Capture {
-        feedback: FeedbackId,
-        src: ValueId,
+        feedback: AudioFeedbackId,
+        src: AudioValueId,
     },
     EventCapture {
-        feedback: FeedbackId,
-        src: ValueId,
+        feedback: EventFeedbackId,
+        src: EventValueId,
     },
 }
 
@@ -348,7 +348,7 @@ struct PPort {
     port: u16,
     param: tutti_units::UnitAddr,
     from: EventOutputPort,
-    value: ValueId,
+    value: EventValueId,
 }
 
 /// A driven lane of a weighted sum before colouring: which addend it is, its
@@ -357,7 +357,7 @@ struct PPort {
 struct GPort {
     lane: u16,
     from: EventOutputPort,
-    value: ValueId,
+    value: EventValueId,
 }
 
 /// A value under construction.
@@ -369,8 +369,8 @@ pub(crate) struct Val {
 /// What the op-emission pass produces for the colouring pass.
 struct Emitted {
     pre: Table<OpId, Pre>,
-    audio: Table<ValueId, Val>,
-    event: Table<ValueId, Val>,
+    audio: Table<AudioValueId, Val>,
+    event: Table<EventValueId, Val>,
     preds: Table<OpId, BTreeSet<OpId>>,
     delays: Table<DelayId, DelaySpec>,
 }
@@ -386,14 +386,14 @@ impl Emitted {
         self.pre.push(op)
     }
 
-    fn audio_value(&mut self, writer: OpId) -> ValueId {
+    fn audio_value(&mut self, writer: OpId) -> AudioValueId {
         self.audio.push(Val {
             writer,
             readers: Vec::new(),
         })
     }
 
-    fn event_value(&mut self, writer: OpId) -> ValueId {
+    fn event_value(&mut self, writer: OpId) -> EventValueId {
         self.event.push(Val {
             writer,
             readers: Vec::new(),
@@ -401,24 +401,24 @@ impl Emitted {
     }
 
     /// Pushes the op that writes a new audio value, built from that value.
-    fn push_audio(&mut self, op: impl FnOnce(ValueId) -> Pre) -> (OpId, ValueId) {
+    fn push_audio(&mut self, op: impl FnOnce(AudioValueId) -> Pre) -> (OpId, AudioValueId) {
         let value = self.audio_value(self.next_op());
         (self.push(op(value)), value)
     }
 
     /// Pushes the op that writes a new event value, built from that value.
-    fn push_event(&mut self, op: impl FnOnce(ValueId) -> Pre) -> (OpId, ValueId) {
+    fn push_event(&mut self, op: impl FnOnce(EventValueId) -> Pre) -> (OpId, EventValueId) {
         let value = self.event_value(self.next_op());
         (self.push(op(value)), value)
     }
 
-    fn read_audio(&mut self, v: ValueId, op: OpId) {
+    fn read_audio(&mut self, v: AudioValueId, op: OpId) {
         let w = self.audio[v].writer;
         self.audio[v].readers.push(op);
         self.preds[op].insert(w);
     }
 
-    fn read_event(&mut self, v: ValueId, op: OpId) {
+    fn read_event(&mut self, v: EventValueId, op: OpId) {
         let w = self.event[v].writer;
         self.event[v].readers.push(op);
         self.preds[op].insert(w);
@@ -731,7 +731,7 @@ pub fn compile(
             generation: graph.generation(from.node),
             delay,
         };
-    let audio_fb: Table<FeedbackId, FeedbackKey> = topology
+    let audio_fb: Table<AudioFeedbackId, FeedbackKey> = topology
         .edges
         .values()
         .flatten()
@@ -742,7 +742,7 @@ pub fn compile(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let event_fb: Table<FeedbackId, FeedbackKey> = graph
+    let event_fb: Table<EventFeedbackId, FeedbackKey> = graph
         .events()
         .iter()
         .flat_map(|(&at, sources)| {
@@ -755,13 +755,6 @@ pub fn compile(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let fb_index = |key: FeedbackKey, list: &Table<FeedbackId, FeedbackKey>| -> FeedbackId {
-        FeedbackId::from_index(
-            list.as_slice()
-                .binary_search(&key)
-                .expect("collected above"),
-        )
-    };
 
     let mut em = Emitted {
         pre: Table::default(),
@@ -772,7 +765,7 @@ pub fn compile(
     };
 
     // Main inputs actually read, each copied into a slot once.
-    let mut main_input_val: BTreeMap<u16, ValueId> = BTreeMap::new();
+    let mut main_input_val: BTreeMap<u16, AudioValueId> = BTreeMap::new();
     let used_main_inputs: BTreeSet<u16> = topology
         .edges
         .values()
@@ -791,8 +784,8 @@ pub fn compile(
         main_input_val.insert(ch, v);
     }
 
-    let mut audio_out_val: BTreeMap<OutputPort, ValueId> = BTreeMap::new();
-    let mut event_out_val: BTreeMap<EventOutputPort, ValueId> = BTreeMap::new();
+    let mut audio_out_val: BTreeMap<OutputPort, AudioValueId> = BTreeMap::new();
+    let mut event_out_val: BTreeMap<EventOutputPort, EventValueId> = BTreeMap::new();
     // What each event input reads, after its sources' delays and merge: the
     // stream an event tap of an input copies.
     let mut event_in_val: BTreeMap<EventInputPort, ERef> = BTreeMap::new();
@@ -966,17 +959,17 @@ pub fn compile(
                 value,
             });
         }
-        let reads: Vec<ValueId> = params.iter().map(|p| p.value).collect();
+        let reads: Vec<EventValueId> = params.iter().map(|p| p.value).collect();
 
         let at = em.next_op();
-        let aout: Vec<ValueId> = (0..shape.audio_out().count())
+        let aout: Vec<AudioValueId> = (0..shape.audio_out().count())
             .map(|port| {
                 let v = em.audio_value(at);
                 audio_out_val.insert(OutputPort::new(key, port), v);
                 v
             })
             .collect();
-        let eout: Vec<ValueId> = (0..shape.event_out)
+        let eout: Vec<EventValueId> = (0..shape.event_out)
             .map(|port| {
                 let v = em.event_value(at);
                 event_out_val.insert(EventOutputPort::new(key, port), v);
@@ -1317,7 +1310,7 @@ pub fn compile(
     let reach = colour::Reach::new(&succ_rows);
 
     // In-place candidates: (value written, value it may overwrite).
-    let mut in_place: BTreeMap<ValueId, ValueId> = BTreeMap::new();
+    let mut in_place: BTreeMap<AudioValueId, AudioValueId> = BTreeMap::new();
     for pre in &em.pre {
         match pre {
             Pre::Delay { src, dst, .. } => {
@@ -1352,8 +1345,8 @@ pub fn compile(
     let event_fixed = 1 + event_fb.len();
     let audio_colour = colour::colour(&em.audio, &reach, &in_place);
     let event_colour = colour::colour(&em.event, &reach, &BTreeMap::new());
-    let aslot = |v: ValueId| AudioSlotId::from_index(audio_fixed + audio_colour.slot[v]);
-    let eslot = |v: ValueId| EventSlotId::from_index(event_fixed + event_colour.slot[v]);
+    let aslot = |v: AudioValueId| AudioSlotId::from_index(audio_fixed + audio_colour.slot[v]);
+    let eslot = |v: EventValueId| EventSlotId::from_index(event_fixed + event_colour.slot[v]);
 
     // Event slot capacities (`EventSlotCapacity`): a node output holds what
     // its shape declares, a delay output (and a feedback slot) all its FIFO
@@ -1368,7 +1361,7 @@ pub fn compile(
         }
         _ => unreachable!("event feedback keys are events"),
     };
-    let mut value_cap: Table<ValueId, EventSlotCapacity> =
+    let mut value_cap: Table<EventValueId, EventSlotCapacity> =
         Table::filled(em.event.len(), EventSlotCapacity::NONE);
     for pre in &em.pre {
         match pre {
@@ -1419,7 +1412,7 @@ pub fn compile(
     let mut event_slot_capacity: Table<EventSlotId, EventSlotCapacity> =
         Table::filled(event_fixed + event_colour.count, EventSlotCapacity::NONE);
     for (f, key) in event_fb.iter_enumerated() {
-        event_slot_capacity[f.event_slot()] = fb_cap(key);
+        event_slot_capacity[f.slot()] = fb_cap(key);
     }
     for (v, &c) in value_cap.iter_enumerated() {
         let s = eslot(v);
@@ -1428,12 +1421,12 @@ pub fn compile(
     let aref_slot = |r: ARef| match r {
         ARef::Val(v) => aslot(v),
         ARef::Zero => ZERO_SLOT,
-        ARef::Fb(f) => f.audio_slot(),
+        ARef::Fb(f) => f.slot(),
     };
     let eref_slot = |r: ERef| match r {
         ERef::Val(v) => eslot(v),
         ERef::Empty => EMPTY_SLOT,
-        ERef::Fb(f) => f.event_slot(),
+        ERef::Fb(f) => f.slot(),
     };
 
     // ---- lower ------------------------------------------------------------
@@ -1559,17 +1552,8 @@ pub fn compile(
         .collect();
 
     let mut value_readers: Vec<OpId> = Vec::new();
-    let mut lower_values = |vals: &Table<ValueId, Val>, slot: &dyn Fn(ValueId) -> u32| {
-        vals.iter_enumerated()
-            .map(|(i, v)| Value {
-                slot: slot(i),
-                writer: v.writer.get(),
-                readers: Span::extend(&mut value_readers, v.readers.iter().copied()),
-            })
-            .collect::<Table<ValueId, Value>>()
-    };
-    let audio_values = lower_values(&em.audio, &|v| aslot(v).get());
-    let event_values = lower_values(&em.event, &|v| eslot(v).get());
+    let audio_values = lower_values(&em.audio, &mut value_readers, |v| aslot(v).get());
+    let event_values = lower_values(&em.event, &mut value_readers, |v| eslot(v).get());
 
     // ---- 7. coarsen, and price the plan (the cost model) -----------------
     let op_work: Table<OpId, crate::node::cost::Work> = ops
@@ -1670,14 +1654,14 @@ pub fn compile(
             .iter_enumerated()
             .map(|(f, &key)| FeedbackSpec {
                 key,
-                slot: f.audio_slot().get(),
+                slot: f.slot().get(),
             })
             .collect(),
         event_feedback: event_fb
             .iter_enumerated()
             .map(|(f, &key)| FeedbackSpec {
                 key,
-                slot: f.event_slot().get(),
+                slot: f.slot().get(),
             })
             .collect(),
         delays: em.delays,
@@ -1719,6 +1703,31 @@ pub fn compile(
     }
 
     Ok((plan, delta))
+}
+
+/// The position of `key` in the sorted feedback `list`.
+fn fb_index<F: Id>(key: FeedbackKey, list: &Table<F, FeedbackKey>) -> F {
+    F::from_index(
+        list.as_slice()
+            .binary_search(&key)
+            .expect("feedback keys are collected before they are read"),
+    )
+}
+
+/// The public [`Value`] table for `vals`, each reader list appended to
+/// `readers`.
+fn lower_values<V: Id>(
+    vals: &Table<V, Val>,
+    readers: &mut Vec<OpId>,
+    slot: impl Fn(V) -> u32,
+) -> Table<V, Value> {
+    vals.iter_enumerated()
+        .map(|(i, v)| Value {
+            slot: slot(i),
+            writer: v.writer.get(),
+            readers: Span::extend(readers, v.readers.iter().copied()),
+        })
+        .collect()
 }
 
 /// The output ports something reads: an edge (direct or feedback), a main
@@ -1775,7 +1784,7 @@ fn wired_ports(
 
 /// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
 /// when `by` is zero (no op), else the output of a `Pre::Delay` ring.
-fn align_audio(em: &mut Emitted, v: ValueId, by: Samples, key: DelayKey) -> ARef {
+fn align_audio(em: &mut Emitted, v: AudioValueId, by: Samples, key: DelayKey) -> ARef {
     if by.is_zero() {
         return ARef::Val(v);
     }
@@ -1787,7 +1796,7 @@ fn align_audio(em: &mut Emitted, v: ValueId, by: Samples, key: DelayKey) -> ARef
 
 /// Event value `v`, delayed by `by` through a ring keyed `key` when `by` is
 /// not zero (the value itself otherwise).
-fn align_event(em: &mut Emitted, v: ValueId, by: Samples, key: DelayKey) -> ValueId {
+fn align_event(em: &mut Emitted, v: EventValueId, by: Samples, key: DelayKey) -> EventValueId {
     if by.is_zero() {
         return v;
     }
@@ -1813,7 +1822,7 @@ struct Addend {
 #[derive(Clone, Copy)]
 struct GainDrive {
     from: EventOutputPort,
-    value: ValueId,
+    value: EventValueId,
 }
 
 /// Sum `refs` (already in source order) into one audio value: the left fold
