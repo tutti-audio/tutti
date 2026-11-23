@@ -8,10 +8,13 @@
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
+// The offline sessions the files share.
 mod bus_strip;
 mod multiband_params;
 mod node_mix;
 mod node_mode;
+#[path = "../support/offline.rs"]
+mod offline;
 mod param_units;
 mod reverb_nodes;
 mod silenced_event;

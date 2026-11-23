@@ -175,7 +175,6 @@ impl Subject for Plugin {
             .expect("the plugin declares itself an instrument");
         let mut rig = Rig::wired(session, handle);
         rig.plugin = Some(node);
-        rig.pace = std::time::Duration::from_millis(10);
         rig
     }
 }
