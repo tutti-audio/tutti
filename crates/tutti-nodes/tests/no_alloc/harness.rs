@@ -118,6 +118,7 @@ pub struct Gate {
     floor: f32,
     blocks: usize,
     every_channel: bool,
+    warm_moves: bool,
 }
 
 impl Gate {
@@ -131,6 +132,7 @@ impl Gate {
             floor: 1e-6,
             blocks: 240,
             every_channel: false,
+            warm_moves: false,
         }
     }
 
@@ -164,26 +166,67 @@ impl Gate {
         self
     }
 
-    /// `node` alone, labelled `label` in a failure: the warm-up blocks run with `moves`
-    /// applied before each, the output must sound, then the measured blocks run under
-    /// `assert_no_alloc` with `moves` applied before each.
+    /// The warm-up blocks apply `moves` too. Without it the first move of a control lands in
+    /// the measured blocks, under `assert_no_alloc`.
+    pub fn warm_moves(mut self) -> Self {
+        self.warm_moves = true;
+        self
+    }
+
+    /// `node` alone, labelled `label` in a failure: the warm-up blocks, the output must sound,
+    /// then the measured blocks run under `assert_no_alloc` with `moves(controls, i)` applied
+    /// before block `i`. The warm-up applies `moves` only after
+    /// [`warm_moves`](Self::warm_moves).
     pub fn run<N: IntoNode>(
         &self,
         label: &str,
         node: N,
         mut moves: impl FnMut(&N::Controls, usize),
     ) {
+        let warm = self.warm_moves;
+        self.drive(label, node, &mut |c, i, measured| {
+            if measured || warm {
+                moves(c, i);
+            }
+        });
+    }
+
+    /// [`run`](Self::run) with `warm` applied before each warm-up block and `measured` before
+    /// each measured one, for a node whose warm-up moves fewer controls than the measured
+    /// blocks.
+    pub fn run_phased<N: IntoNode>(
+        &self,
+        label: &str,
+        node: N,
+        mut warm: impl FnMut(&N::Controls, usize),
+        mut measured: impl FnMut(&N::Controls, usize),
+    ) {
+        self.drive(label, node, &mut |c, i, in_measured| {
+            if in_measured {
+                measured(c, i);
+            } else {
+                warm(c, i);
+            }
+        });
+    }
+
+    fn drive<N: IntoNode>(
+        &self,
+        label: &str,
+        node: N,
+        moves: &mut dyn FnMut(&N::Controls, usize, bool),
+    ) {
         let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, self.frames);
         self.fill(rig.inputs_mut());
         for i in 0..self.warm {
-            moves(&controls, i);
+            moves(&controls, i, false);
             rig.block();
         }
         self.sounds(label, rig.output());
         let mut peak = 0.0f32;
         assert_no_alloc::assert_no_alloc(|| {
             for i in 0..self.blocks {
-                moves(&controls, i);
+                moves(&controls, i, true);
                 rig.block();
                 peak = peak_of(rig.output(), peak);
             }

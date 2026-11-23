@@ -9,6 +9,7 @@ use tutti_dsp::{
     Algorithm, CombDelay, FmPatch, Inline, MaxGrains, OperatorCount, OperatorFrequency,
     OperatorSpec, Partial, Partials, SvfType, Tap, TapSet, Wavetable,
 };
+use tutti_graph::IntoNode;
 use tutti_nodes::{
     AdditiveConfig, AdditiveNode, AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode,
     BitCrusherConfig, BitCrusherNode, ButterworthOrder, CombFilterConfig, CombFilterNode, CombForm,
@@ -68,10 +69,12 @@ pub const ROWS: &[fn()] = &[
 
 fn bit_crusher() {
     let node = BitCrusherNode::<f32>::from(BitCrusherConfig::new(ChannelLayout::STEREO));
-    Gate::new(feeds::sine).run("bit crusher", node, |c, i| {
-        c.set(UnitParam::BitDepth, alternate(i, 3.0, 11.5));
-        c.set(UnitParam::HoldFactor, f64::from(1.0 + (i % 5) as f32 * 1.3));
-    });
+    Gate::new(feeds::sine)
+        .warm_moves()
+        .run("bit crusher", node, |c, i| {
+            c.set(UnitParam::BitDepth, alternate(i, 3.0, 11.5));
+            c.set(UnitParam::HoldFactor, f64::from(1.0 + (i % 5) as f32 * 1.3));
+        });
 }
 
 fn comb_filter() {
@@ -81,17 +84,23 @@ fn comb_filter() {
             form,
             CombDelay::of(Seconds::new(0.003)),
         ));
-        Gate::new(feeds::offset_square).run(&format!("comb {form:?}"), node, |c, i| {
-            c.set(UnitParam::Feedback, alternate(i, 0.2, 0.9));
-        });
+        Gate::new(feeds::offset_square).warm_moves().run(
+            &format!("comb {form:?}"),
+            node,
+            |c, i| {
+                c.set(UnitParam::Feedback, alternate(i, 0.2, 0.9));
+            },
+        );
     }
 }
 
 fn frequency_shifter() {
     let node = FrequencyShifterNode::from(FrequencyShifterConfig::new(ChannelLayout::STEREO));
-    Gate::new(feeds::offset_square).run("frequency shifter", node, |c, i| {
-        c.set(UnitParam::Frequency, alternate(i, -220.0, 1_700.0));
-    });
+    Gate::new(feeds::offset_square)
+        .warm_moves()
+        .run("frequency shifter", node, |c, i| {
+            c.set(UnitParam::Frequency, alternate(i, -220.0, 1_700.0));
+        });
 }
 
 /// Every cutoff move designs into the held scratch and ramps the coefficients; the elliptic
@@ -114,7 +123,7 @@ fn cut_filter() {
     ];
     for (name, alignment) in alignments {
         let config = CutFilterConfig::new(ChannelLayout::STEREO, CutResponse::LowPass, alignment);
-        Gate::new(feeds::offset_square).run(
+        Gate::new(feeds::offset_square).warm_moves().run(
             &format!("cut filter {name}"),
             CutFilterNode::from(config),
             |c, i| {
@@ -127,9 +136,11 @@ fn cut_filter() {
 /// The corner moves the pole ramp.
 fn dc_blocker() {
     let node = DcBlockerNode::<f32>::from(DcBlockerConfig::new(ChannelLayout::STEREO));
-    Gate::new(feeds::offset_square).run("dc blocker", node, |c, i| {
-        c.set(UnitParam::Cutoff, alternate(i, 5.0, 90.0));
-    });
+    Gate::new(feeds::offset_square)
+        .warm_moves()
+        .run("dc blocker", node, |c, i| {
+            c.set(UnitParam::Cutoff, alternate(i, 5.0, 90.0));
+        });
 }
 
 fn diode_clipper() {
@@ -137,14 +148,14 @@ fn diode_clipper() {
         let node = DiodeClipperNode::<f32>::from(
             DiodeClipperConfig::new(ChannelLayout::STEREO).oversampling(factor),
         );
-        Gate::new(feeds::ramp).blocks(1_000).every_channel().run(
-            &format!("diode clipper {factor:?}"),
-            node,
-            |c, i| {
+        Gate::new(feeds::ramp)
+            .warm_moves()
+            .blocks(1_000)
+            .every_channel()
+            .run(&format!("diode clipper {factor:?}"), node, |c, i| {
                 c.set(UnitParam::Cutoff, alternate(i, 600.0, 9_000.0));
                 c.set(UnitParam::GainDb, every_third(i, -6.0, 24.0));
-            },
-        );
+            });
     }
 }
 
@@ -155,6 +166,7 @@ fn distance() {
             .air_absorption(Hz::new(6_000.0)),
     );
     Gate::new(feeds::sine)
+        .warm_moves()
         .frames(480)
         .run("distance", node, |c, i| {
             c.set(UnitParam::Distance, [0.5, 12.0, 55.0, 3.0][i % 4]);
@@ -183,10 +195,14 @@ fn dynamic_eq() {
         ),
     ];
     for (name, node) in nodes {
-        Gate::new(feeds::bright_square).run(&format!("dynamic eq {name}"), node, |c, i| {
-            c.set(UnitParam::Cutoff, alternate(i, 3_000.0, 6_000.0));
-            c.set(UnitParam::Threshold, f64::from(-30.0 + (i % 7) as f32));
-        });
+        Gate::new(feeds::bright_square).warm_moves().run(
+            &format!("dynamic eq {name}"),
+            node,
+            |c, i| {
+                c.set(UnitParam::Cutoff, alternate(i, 3_000.0, 6_000.0));
+                c.set(UnitParam::Threshold, f64::from(-30.0 + (i % 7) as f32));
+            },
+        );
     }
 }
 
@@ -194,11 +210,15 @@ fn envelope_filter() {
     let config =
         EnvelopeFilterConfig::new(ChannelLayout::STEREO, Hz::new(400.0), SvfType::BandPass)
             .depth(Semitones::new(36.0));
-    Gate::new(feeds::square).blocks(256).run(
+    let base = |c: &<EnvelopeFilterNode<f32> as IntoNode>::Controls, i| {
+        c.set(UnitParam::Cutoff, alternate(i, 300.0, 3_000.0));
+    };
+    Gate::new(feeds::square).blocks(256).run_phased(
         "envelope filter",
         EnvelopeFilterNode::<f32>::from(config),
+        base,
         |c, i| {
-            c.set(UnitParam::Cutoff, alternate(i, 300.0, 3_000.0));
+            base(c, i);
             c.set(UnitParam::Semitones, every_third(i, -12.0, 36.0));
         },
     );
@@ -219,6 +239,7 @@ fn granular() {
     )
     .unwrap();
     Gate::new(feeds::silence)
+        .warm_moves()
         .frames(480)
         .run("granular", node, |c, i| {
             let k = (i % 4) as f64;
@@ -236,13 +257,13 @@ fn hysteresis() {
         let node = HysteresisNode::<f32>::from(
             HysteresisConfig::new(ChannelLayout::STEREO).oversampling(factor),
         );
-        Gate::new(feeds::ramp).blocks(1_000).every_channel().run(
-            &format!("hysteresis {factor:?}"),
-            node,
-            |c, i| {
+        Gate::new(feeds::ramp)
+            .warm_moves()
+            .blocks(1_000)
+            .every_channel()
+            .run(&format!("hysteresis {factor:?}"), node, |c, i| {
                 c.set(UnitParam::GainDb, every_third(i, -6.0, 18.0));
-            },
-        );
+            });
     }
 }
 
@@ -250,10 +271,13 @@ fn hysteresis() {
 fn leveller() {
     let node = LevellerNode::<f32>::try_from(LevellerConfig::new(BusTopology::STEREO)).unwrap();
     let target = |i: usize| alternate(i, -30.0, -16.0);
+    let first = |c: &<LevellerNode<f32> as IntoNode>::Controls, i| {
+        c.set(UnitAddr::new(UnitParam::Threshold, 0), target(i));
+    };
     Gate::new(feeds::quiet_square)
         .blocks(256)
-        .run("leveller", node, |c, i| {
-            c.set(UnitAddr::new(UnitParam::Threshold, 0), target(i));
+        .run_phased("leveller", node, first, |c, i| {
+            first(c, i);
             c.set(UnitAddr::new(UnitParam::Threshold, 1), target(i + 1) - 30.0);
         });
 }
@@ -268,16 +292,19 @@ fn modal_bank() {
         ChannelLayout::STEREO,
         Modes::try_from(&modes[..]).unwrap(),
     ));
-    Gate::new(feeds::pulse).run("modal bank", node, |c, i| {
-        c.set(UnitParam::Frequency, alternate(i, 220.0, 880.0));
-        c.set(UnitParam::Decay, every_third(i, 0.2, 1.5));
-    });
+    Gate::new(feeds::pulse)
+        .warm_moves()
+        .run("modal bank", node, |c, i| {
+            c.set(UnitParam::Frequency, alternate(i, 220.0, 880.0));
+            c.set(UnitParam::Decay, every_third(i, 0.2, 1.5));
+        });
 }
 
 /// A block of 480 frames among hops of 512, the pitch across the whole range.
 fn pitch_shifter() {
     let node = PitchShifterNode::<f32>::from(PitchShifterConfig::new(ChannelLayout::STEREO));
     Gate::new(feeds::sine)
+        .warm_moves()
         .frames(480)
         .run("pitch shifter", node, |c, i| {
             c.set(UnitParam::Pitch, [-2_400.0, 700.0, 2_400.0, 0.0][i % 4]);
@@ -288,6 +315,7 @@ fn pitch_shifter() {
 fn shimmer() {
     let node = ShimmerNode::<f32>::from(ShimmerConfig::new());
     Gate::new(feeds::shared_sine)
+        .warm_moves()
         .frames(480)
         .run("shimmer", node, |c, i| {
             c.set(UnitParam::Pitch, [-2_400.0, 700.0, 2_400.0, 0.0][i % 4]);
@@ -297,14 +325,18 @@ fn shimmer() {
 
 fn transient_shaper() {
     let config = TransientShaperConfig::new(ChannelLayout::STEREO).attack(Db::new(6.0));
-    Gate::new(feeds::square).blocks(256).run(
+    let first = |c: &<TransientShaperNode<f32> as IntoNode>::Controls, i| {
+        c.set(
+            UnitAddr::new(UnitParam::GainDb, 0),
+            alternate(i, -12.0, 12.0),
+        );
+    };
+    Gate::new(feeds::square).blocks(256).run_phased(
         "transient shaper",
         TransientShaperNode::<f32>::from(config),
+        first,
         |c, i| {
-            c.set(
-                UnitAddr::new(UnitParam::GainDb, 0),
-                alternate(i, -12.0, 12.0),
-            );
+            first(c, i);
             c.set(
                 UnitAddr::new(UnitParam::GainDb, 1),
                 alternate(i + 1, -12.0, 12.0),
@@ -318,13 +350,13 @@ fn tube_stage() {
         let node = TubeStageNode::<f32>::from(
             TubeStageConfig::new(ChannelLayout::STEREO).oversampling(factor),
         );
-        Gate::new(feeds::ramp).blocks(1_000).every_channel().run(
-            &format!("tube stage {factor:?}"),
-            node,
-            |c, i| {
+        Gate::new(feeds::ramp)
+            .warm_moves()
+            .blocks(1_000)
+            .every_channel()
+            .run(&format!("tube stage {factor:?}"), node, |c, i| {
                 c.set(UnitParam::GainDb, every_third(i, -6.0, 24.0));
-            },
-        );
+            });
     }
 }
 
@@ -336,17 +368,19 @@ fn wavetable() {
         .collect();
     let table = Wavetable::new(&[Mono::new(&saw), Mono::new(&square)]).expect("two frames");
     let node = WavetableNode::<f32>::from(WavetableConfig::new(ChannelLayout::STEREO, table));
-    Gate::new(feeds::silence).run("wavetable", node, |c, i| {
-        c.set(
-            UnitParam::Frequency,
-            30.0 * 1.0037f64.powi((i % 1_900) as i32),
-        );
-        c.set(UnitParam::Position, (i % 7) as f64 / 6.0);
-    });
+    Gate::new(feeds::silence)
+        .warm_moves()
+        .run("wavetable", node, |c, i| {
+            c.set(
+                UnitParam::Frequency,
+                30.0 * 1.0037f64.powi((i % 1_900) as i32),
+            );
+            c.set(UnitParam::Position, (i % 7) as f64 / 6.0);
+        });
 }
 
 fn tremolo_auto_pan_ring_mod() {
-    let gate = Gate::new(feeds::offset_square);
+    let gate = Gate::new(feeds::offset_square).warm_moves();
     let tremolo = TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO));
     gate.run("tremolo", tremolo, |c, i| {
         c.set(UnitParam::Rate, alternate(i, 3.0, 40.0));
@@ -368,7 +402,7 @@ fn tremolo_auto_pan_ring_mod() {
 
 /// A pitch move retunes the loop on the audio thread.
 fn physical_strings() {
-    let gate = Gate::new(feeds::pulse);
+    let gate = Gate::new(feeds::pulse).warm_moves();
     let karplus = KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO));
     gate.run("karplus-strong", karplus, |c, i| {
         c.set(UnitParam::Frequency, alternate(i, 220.0, 880.0));
@@ -382,7 +416,7 @@ fn physical_strings() {
 }
 
 fn early_reflections_decorrelator() {
-    let gate = Gate::new(feeds::offset_square);
+    let gate = Gate::new(feeds::offset_square).warm_moves();
     let tap = |delay: f64, gain: f64, channel: u8| Tap {
         delay: SampleSpan::new(delay).unwrap(),
         gain: Gain::new(gain),
@@ -405,7 +439,10 @@ fn early_reflections_decorrelator() {
 }
 
 fn fm_additive() {
-    let gate = Gate::new(feeds::silence).frames(480).floor(1e-3);
+    let gate = Gate::new(feeds::silence)
+        .warm_moves()
+        .frames(480)
+        .floor(1e-3);
     let ratio = |x: f64| OperatorFrequency::Ratio(FrequencyRatio::new(x).unwrap());
     let patch = FmPatch::new(Algorithm::chain(OperatorCount::of(3))).operators(&[
         OperatorSpec::new(ratio(1.0)),
@@ -434,7 +471,7 @@ fn fm_additive() {
 
 /// Every control moves: a design into the held scratch and the coefficient ramp.
 fn bell_tilt_graphic_eq() {
-    let gate = Gate::new(feeds::offset_square);
+    let gate = Gate::new(feeds::offset_square).warm_moves();
     let bell = BellFilterConfig::new(
         ChannelLayout::STEREO,
         Hz::new(1_000.0),
@@ -471,7 +508,7 @@ fn bell_tilt_graphic_eq() {
 }
 
 fn utility() {
-    let gate = Gate::new(feeds::offset_square);
+    let gate = Gate::new(feeds::offset_square).warm_moves();
     let polarity = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);
     gate.run(
         "polarity",
