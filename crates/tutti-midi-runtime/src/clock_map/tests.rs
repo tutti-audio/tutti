@@ -2,16 +2,13 @@
 //! clock, so `base` is any instant and only the differences matter.
 
 use super::*;
+use tutti_fixtures::midi::ms;
 
 const R48: SampleRate = SampleRate::SR_48K;
 
 fn base() -> Instant {
     // Far enough from the clock's origin to subtract a second from.
     Instant::now() + Duration::from_secs(3600)
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
 }
 
 fn map_at(t0: Instant, frame: u64) -> ClockMap {

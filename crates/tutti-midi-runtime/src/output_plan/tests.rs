@@ -2,6 +2,7 @@
 //! reads no clock, so `base` is any instant and only differences matter.
 
 use serde::{Deserialize, Serialize};
+use tutti_fixtures::midi::ms;
 use tutti_fixtures::{RangeContract, check_range_contract, check_range_serde};
 
 use super::*;
@@ -12,10 +13,6 @@ const R48: SampleRate = SampleRate::SR_48K;
 
 fn base() -> Instant {
     Instant::now() + Duration::from_secs(3600)
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
 }
 
 /// A map where frame 0 is at `t0`.
