@@ -82,7 +82,7 @@ fn a_sysex_from_the_plugin_reaches_the_host_whole() {
         // SAFETY: the test calls a COM method on a live object it owns, with arguments valid
         // for the call.
         assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk, "{len} bytes");
-        let mut pool = RtMidiEvents::new();
+        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
         drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
         assert!(!pool.is_overflowed());
         assert!(pool.iter().all(|m| m.offset == 11));
@@ -111,7 +111,7 @@ fn a_sysex_past_the_output_room_is_dropped_whole_and_counted() {
     // SAFETY: the test calls a COM method on a live object it owns, with arguments valid for
     // the call.
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
-    let mut pool = RtMidiEvents::new();
+    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
     assert_eq!(reassembled(pool.as_slice()), vec![short.to_vec()]);
 }
@@ -131,7 +131,7 @@ fn a_sysex_is_detected_by_its_data_type() {
         // SAFETY: the test calls a COM method on a live object it owns, with arguments valid
         // for the call.
         assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk, "{len} bytes");
-        let mut pool = RtMidiEvents::new();
+        let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
         drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
         assert_eq!(reassembled(pool.as_slice()), vec![framed(&payload)]);
     }
@@ -148,7 +148,7 @@ fn a_sysex_is_detected_by_its_data_type() {
     // the call.
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
     assert_eq!(count(&list), 1);
-    let mut pool = RtMidiEvents::new();
+    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
     assert!(reassembled(pool.as_slice()).is_empty());
 
@@ -161,7 +161,7 @@ fn a_sysex_is_detected_by_its_data_type() {
     // SAFETY: the test calls a COM method on a live object it owns, with arguments valid for
     // the call.
     assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
-    let mut pool = RtMidiEvents::new();
+    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     drain_midi(&list, &mut tutti_vst3_host::OutputStream::new(), &mut pool);
     assert_eq!(pool.len(), 1);
     assert!(!matches!(
@@ -188,7 +188,7 @@ fn a_sysex_past_the_midi_pool_is_counted_lost() {
         assert_eq!(unsafe { ptr.addEvent(&mut e) }, kResultOk);
     }
     assert_eq!(list.dropped(), 0);
-    let mut pool = RtMidiEvents::new();
+    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     let mut stream = tutti_vst3_host::OutputStream::new();
     drain_midi(&list, &mut stream, &mut pool);
     assert!(pool.is_overflowed());
@@ -205,7 +205,7 @@ fn the_plugin_sysex_path_is_allocation_free() {
     let ptr = list.to_com_ptr::<IEventList>().unwrap();
     let message = framed(&midi::sysex_payload(200));
     let mut e = data_sysex(1, &message);
-    let mut pool = RtMidiEvents::new();
+    let mut pool = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     let mut refused = false;
     assert_no_alloc::assert_no_alloc(|| {
         // SAFETY: the test calls a COM method on a live object it owns, with arguments valid

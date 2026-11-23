@@ -12,7 +12,7 @@ use super::messages::ProcessPayload;
 use crossbeam_queue::ArrayQueue;
 use std::sync::Arc;
 use tutti_plugin_types::ParameterChanges;
-use tutti_rt::{PackedAtomic, TallyWriter};
+use tutti_rt::{AtomicCell, TallyWriter};
 use tutti_units::SampleRate;
 
 /// One payload per command the audio thread can have queued.
@@ -122,7 +122,7 @@ pub struct PayloadPool {
     /// reservation's queues with another's room: a buffer coming back of any
     /// other shape (one reserved before a re-reserve) is dropped rather than
     /// recycled, on the bridge thread. Zeroes before a reservation.
-    params_shape: Arc<PackedAtomic<[u32; 2]>>,
+    params_shape: Arc<AtomicCell<[u32; 2]>>,
     /// Counts an empty pool at `acquire`.
     refused: TallyWriter<u64>,
     /// Counts a full list at `return_params_rt`: a buffer leaked.
@@ -159,7 +159,7 @@ impl PayloadPool {
         Self {
             recycle: Arc::new(recycle),
             params: Arc::new(ArrayQueue::new(PARAM_SLOTS)),
-            params_shape: Arc::new(PackedAtomic::new([0; 2])),
+            params_shape: Arc::new(AtomicCell::new([0; 2])),
             refused,
             leaked,
         }

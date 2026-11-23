@@ -3,6 +3,7 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 
+use tutti_plugin_types::MIDI_STACK_CAPACITY;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_ump::{
@@ -124,7 +125,7 @@ fn poly_pressure_and_program_change_stay_midi_with_their_note() {
     assert_eq!(mapped(&program), None);
 
     let events = [pressure, program];
-    let mut filtered = FilteredMidi::new();
+    let mut filtered = FilteredMidi::with_capacity(MIDI_STACK_CAPACITY);
     let mut params = ParameterChanges::reserved(1, 1);
     route_cc_events(&mod_wheel_mapping(500), &events, &mut filtered, &mut params);
     assert_eq!(filtered.len(), 2, "both stay in the MIDI stream");
@@ -185,7 +186,7 @@ fn route_cc_events_splits_mapped_cc_into_params() {
         ),
     ];
 
-    let mut filtered = FilteredMidi::new();
+    let mut filtered = FilteredMidi::with_capacity(MIDI_STACK_CAPACITY);
     let mut params = ParameterChanges::reserved(1, 1);
     route_cc_events(&mapping, &events, &mut filtered, &mut params);
 
@@ -220,7 +221,7 @@ fn route_cc_events_preserves_host_params() {
         ),
     )];
 
-    let mut filtered = FilteredMidi::new();
+    let mut filtered = FilteredMidi::with_capacity(MIDI_STACK_CAPACITY);
     let mut params = ParameterChanges::reserved(2, 1);
     // Pre-seed with a host automation point (as the audio path does).
     params.add_change(ParamId::new(42u32), at_frame(0), unit_value(0.25));
@@ -264,7 +265,7 @@ fn sort_param_points_orders_merged_host_and_cc_points() {
         ),
     ];
 
-    let mut filtered = FilteredMidi::new();
+    let mut filtered = FilteredMidi::with_capacity(MIDI_STACK_CAPACITY);
     let mut params = ParameterChanges::reserved(2, 3);
     // Seed the SAME param (500) with host automation at a middle offset,
     // plus a separate param to prove per-queue sorting.

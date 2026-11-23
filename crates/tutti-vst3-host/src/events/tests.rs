@@ -1553,7 +1553,9 @@ mod message {
                 },
             ));
             let mut stream = OutputStream::new();
-            let mut out = tutti_plugin_types::RtMidiEvents::new();
+            let mut out = tutti_plugin_types::RtMidiEvents::with_capacity(
+                tutti_plugin_types::RT_MIDI_CAPACITY,
+            );
             drain_midi(&list, &mut stream, &mut out);
             (out.len(), stream.lost_total(), stream.sysex_dropped())
         };
@@ -1570,7 +1572,8 @@ mod message {
     fn an_output_list_the_plugin_holds_is_counted_lost() {
         let list = EventList::input();
         let mut stream = OutputStream::new();
-        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        let mut out =
+            tutti_plugin_types::RtMidiEvents::with_capacity(tutti_plugin_types::RT_MIDI_CAPACITY);
         {
             let _plugin_writing = list.begin();
             drain_midi(&list, &mut stream, &mut out);
@@ -1775,7 +1778,8 @@ fn a_plugins_parameter_run_assembles_across_blocks() {
             assert!(staging.push(event));
         }
         staging.finish();
-        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        let mut out =
+            tutti_plugin_types::RtMidiEvents::with_capacity(tutti_plugin_types::RT_MIDI_CAPACITY);
         drain_midi(&list, translator, &mut out);
         out.iter().map(|m| m.ump.decode()).collect::<Vec<_>>()
     };
@@ -1909,7 +1913,8 @@ fn a_run_and_a_note_through_a_full_list_are_still_read() {
             assert!(staging.push(event));
         }
         staging.finish();
-        let mut out = tutti_plugin_types::RtMidiEvents::new();
+        let mut out =
+            tutti_plugin_types::RtMidiEvents::with_capacity(tutti_plugin_types::RT_MIDI_CAPACITY);
         drain_midi(&list, stream, &mut out);
         (
             out.iter().map(|m| m.ump.decode()).collect::<Vec<_>>(),

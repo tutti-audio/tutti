@@ -6,7 +6,7 @@ use tutti_plugin_types::{
     NoteExpressionType, NoteExpressionValue, WireMidi, expression_of_per_note_controller,
     group_of_port, per_note_message, per_note_tuning, plugin_note_id,
 };
-use tutti_rt::RtVec;
+use tutti_rt::CappedVec;
 use tutti_ump::{
     Address, GroupSpan, Message, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity, Rpn,
     SysexMessage, Ump, Voice1, Voice2, parse_exact,
@@ -86,9 +86,8 @@ pub struct MidiEncoder {
     groups_dropped: u64,
     unsendable_dropped: u64,
     /// What the last [`encode`](Self::encode) made: room for the most one
-    /// packet can make ([`MAX_EVENTS`]), allocated once with the encoder: its
-    /// storage is too large to move about by value.
-    out: Box<RtVec<Event, MAX_EVENTS>>,
+    /// packet can make ([`MAX_EVENTS`]), allocated once with the encoder.
+    out: CappedVec<Event>,
 }
 
 impl Default for MidiEncoder {
@@ -112,7 +111,7 @@ impl MidiEncoder {
             buses: usize::from(buses.get()),
             groups_dropped: 0,
             unsendable_dropped: 0,
-            out: RtVec::boxed(),
+            out: CappedVec::with_capacity(MAX_EVENTS),
         }
     }
 

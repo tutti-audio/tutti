@@ -175,7 +175,7 @@ impl ClapLoaded {
         // calls never touch the allocator.
         //
         // `out_midi` / `out_note_expressions` are absent here on purpose: they
-        // are `RtVec`, whose capacity is inline and fixed at the type level.
+        // are `CappedVec`s, allocated to their cap when the config is built.
         //
         // The host delivers parameter changes only (the plugin node's
         // `ParamDelivery`), so a block can carry one change for every

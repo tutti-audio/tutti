@@ -159,7 +159,7 @@ std only. A rule the compiler already enforces is not a gate.
 - Never allocate, free, lock or wait on the audio thread. A full queue is counted, never
   waited on.
 - A collection the audio thread fills is a `tutti_rt::CappedVec`, its cap set on the
-  control side when it is built (or an inline `tutti_rt::RtVec<T, N>`); a push past it is
+  control side when it is built; a push past it is
   refused and counted. Never a `Vec` or
   `VecDeque` whose room a `with_capacity` or `reserve` elsewhere promises. An owned item a
   full collection refuses comes back to the caller (`push_within_capacity`), never drops
@@ -229,9 +229,9 @@ touched.
 - A lock is `tutti_rt::{Mutex, RwLock, Condvar}`: it recovers a poisoned lock and, in a debug
   build, panics on a wait inside an `RtScope`. `clippy.toml`'s `disallowed-types` refuses
   std's; a crate below `tutti-rt` or a test plugin allows it at its root with the reason.
-- A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
+- A collection the audio thread fills is a `tutti_rt::CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
-  one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
+  one word is an `AtomicCell`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
 - A value the audio thread reads whole is a `tutti_rt::AtomicCell<T>` over an `AtomicWord`
   (`atomic_word!`); a node declares it in `declare_params!`'s `settings` block.
 - An id type is written with `tutti_rt::id!` and minted from a `tutti_rt::Mint`.

@@ -1,9 +1,8 @@
 //! Owned collection with a cap fixed at construction, for the audio thread.
 
 /// A per-block collection whose cap is chosen when it is built, off the audio
-/// thread, and never grows: the counterpart of [`RtVec`](crate::RtVec) for a
-/// cap known only at run time (a parameter count times a block length, known
-/// at activation).
+/// thread, and never grows (a parameter count times a block length, known at
+/// activation, is a cap chosen at run time).
 ///
 /// [`with_capacity`](Self::with_capacity) allocates the whole cap once, where
 /// it is called. After that, [`push`](Self::push) **refuses** at the cap and

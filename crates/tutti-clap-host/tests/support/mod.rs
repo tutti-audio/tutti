@@ -17,7 +17,8 @@ pub mod raw;
 pub fn midi_events(
     list: &mut tutti_clap_host::OutputEventList,
 ) -> Vec<tutti_plugin_types::WireMidi> {
-    let mut out = tutti_plugin_types::RtMidiEvents::new();
+    let mut out =
+        tutti_plugin_types::RtMidiEvents::with_capacity(tutti_plugin_types::RT_MIDI_CAPACITY);
     list.fill_midi_events(&mut tutti_midi_protocol::Midi2Translator::new(), &mut out);
     out.iter().copied().collect()
 }
@@ -35,7 +36,8 @@ pub fn param_changes(
 pub fn note_expressions(
     list: &tutti_clap_host::OutputEventList,
 ) -> Vec<tutti_clap_host::ClapNoteExpression> {
-    let mut out = tutti_clap_host::RtNoteExpressions::new();
+    let mut out =
+        tutti_clap_host::RtNoteExpressions::with_capacity(tutti_clap_host::RT_NOTE_EXPR_CAPACITY);
     list.fill_note_expressions(&mut out);
     out.iter().copied().collect()
 }

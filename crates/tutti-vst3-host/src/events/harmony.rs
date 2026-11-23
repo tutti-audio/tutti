@@ -1,6 +1,5 @@
 //! Chord, scale and note-expression text events, with their text as UTF-16.
 
-use tutti_rt::RtVec;
 use tutti_vst3_ffi::{MAX_EVENT_TEXT_LEN, Staging};
 
 use super::{Chord, Event, ExpressionText, Payload, Scale};
@@ -8,8 +7,86 @@ use super::{Chord, Event, ExpressionText, Payload, Scale};
 /// The text of one harmony or text event as UTF-16 code units: the most an event
 /// list's arena takes for one text ([`MAX_EVENT_TEXT_LEN`]), held inline, so a
 /// block's texts are built without the heap. A longer name is cut at the room
-/// and the buffer reports it ([`RtVec::is_overflowed`]).
-pub type EventText = RtVec<u16, MAX_EVENT_TEXT_LEN>;
+/// and the buffer reports it ([`is_overflowed`](Self::is_overflowed)).
+pub struct EventText {
+    units: [u16; MAX_EVENT_TEXT_LEN],
+    len: usize,
+    overflowed: bool,
+}
+
+impl EventText {
+    /// An empty text.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            units: [0; MAX_EVENT_TEXT_LEN],
+            len: 0,
+            overflowed: false,
+        }
+    }
+
+    /// Appends `unit`, or latches [`is_overflowed`](Self::is_overflowed) and
+    /// drops it when the room is full.
+    pub fn push(&mut self, unit: u16) -> bool {
+        let Some(slot) = self.units.get_mut(self.len) else {
+            self.overflowed = true;
+            return false;
+        };
+        *slot = unit;
+        self.len += 1;
+        true
+    }
+
+    /// Appends `units` until the room is full; the count written.
+    pub fn extend(&mut self, units: impl IntoIterator<Item = u16>) -> usize {
+        let mut written = 0;
+        for unit in units {
+            if !self.push(unit) {
+                break;
+            }
+            written += 1;
+        }
+        written
+    }
+
+    /// Removes the last unit; the overflow flag stays as it is.
+    pub fn pop(&mut self) -> Option<u16> {
+        self.len = self.len.checked_sub(1)?;
+        Some(self.units[self.len])
+    }
+
+    /// The units written.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u16] {
+        &self.units[..self.len]
+    }
+
+    /// Whether a unit was dropped for want of room.
+    #[must_use]
+    pub const fn is_overflowed(&self) -> bool {
+        self.overflowed
+    }
+}
+
+impl Default for EventText {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl core::ops::Deref for EventText {
+    type Target = [u16];
+
+    fn deref(&self) -> &[u16] {
+        self.as_slice()
+    }
+}
+
+impl core::fmt::Debug for EventText {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_list().entries(self.as_slice()).finish()
+    }
+}
 
 /// `src` as an [`EventText`], cut at the room, on a character boundary: a
 /// surrogate pair the cut would split is dropped whole. Never allocates.

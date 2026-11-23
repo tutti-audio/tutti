@@ -206,7 +206,7 @@ pub use types::{
     ParameterChanges, ParameterPoint, ParameterQueue, PluginInfo, StateContext, SurroundChannel,
     TransportInfo, VoiceInfo, WindowHandle, WireMidi,
 };
-pub use types::{ClapNoteExpression, RtNoteExpressions};
+pub use types::{ClapNoteExpression, RT_NOTE_EXPR_CAPACITY, RtNoteExpressions};
 
 // Test-only global allocator for RT-safety regression tests.
 #[cfg(test)]

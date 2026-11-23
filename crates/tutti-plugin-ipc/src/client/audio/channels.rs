@@ -28,7 +28,7 @@ use tutti_plugin_types::PipelineCounts;
 use tutti_rt::AtomicSampleRate;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
-    Counter, Mutex, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
+    AtomicCell, Counter, Mutex, Overflow, Parker, RingReader, RingWriter, Tally, TallyWriter,
     Unparker, parker, ring, tally,
 };
 use tutti_units::{Chunks, Normalized, ParamId, SampleRate};
@@ -207,11 +207,11 @@ pub(crate) enum BatchOutcome {
 /// gated by the slab's sequence words), so a reader sees a fate or not yet,
 /// and tries again at its next look. The cell's `Acquire`/`Release` is its
 /// own contract and nothing here relies on it.
-struct BatchOutcomes([PackedAtomic<u64>; BATCH_OUTCOMES]);
+struct BatchOutcomes([AtomicCell<u64>; BATCH_OUTCOMES]);
 
 impl BatchOutcomes {
     fn new() -> Self {
-        Self(std::array::from_fn(|_| PackedAtomic::new(0)))
+        Self(std::array::from_fn(|_| AtomicCell::new(0)))
     }
 
     /// Stores `seq`'s fate, unless the word already holds a newer chunk's: a

@@ -17,15 +17,13 @@
 //! - [`AudioThreadCell`] — interior mutability through `&self` with a
 //!   one-borrow-at-a-time contract checked in every build (behind an `Arc` or
 //!   a COM object).
-//! - [`RtVec`] — a capped collection through `&mut self` that refuses the
-//!   write at the cap rather than growing, latching an overflow flag. An owner
-//!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
-//!   [`CappedVec`] is the same with a cap chosen at construction, for a count
-//!   known only at run time.
-//! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
-//!   reader never pairs one write's field with another's.
-//! - [`AtomicCell`] / [`AtomicWord`] — a mode or switch set (a fieldless enum,
-//!   [`atomic_word!`]) in one atomic word, stored by its encoding.
+//! - [`CappedVec`] — a collection through `&mut self` whose cap is chosen at
+//!   construction; it refuses the write at the cap rather than growing,
+//!   latching an overflow flag. An owner that shares one behind an `Arc` puts it
+//!   in an [`AudioThreadCell`].
+//! - [`AtomicCell`] / [`AtomicWord`] — a value in one atomic word, stored by its
+//!   encoding (a fieldless enum by [`atomic_word!`], an integer, a pair of
+//!   `u32`s), so a reader never pairs one write's field with another's.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`seq_slots()`] — an array of those, one slot per index, that one reader
@@ -107,7 +105,7 @@
 //! unless `RTSAN_ENABLE` is set when the crate builds.
 //!
 //! **The root is the API.** Every item is re-exported at the root
-//! (`tutti_rt::RtVec`); the modules are private.
+//! (`tutti_rt::CappedVec`); the modules are private.
 //!
 //! Each lock-free structure has a loom model in `tests/*_loom.rs` that runs the
 //! shipped code:
@@ -144,9 +142,6 @@
 //!   method reaches, so a shared borrow grants nothing (std's `core::sync::Exclusive`).
 //! - `handoff` (`handoff.rs`): one `MaybeUninit` slot moved between the two ends
 //!   under a state word.
-//! - `RtVec` (`vec.rs`): `N` inline `MaybeUninit` slots under a length, so
-//!   [`RtVec::boxed`] can build a large one in its box with no stack copy; the
-//!   slots `..len` are the initialised ones.
 //!
 //! `arc-lend`'s `Publisher` (an external crate) holds the rest: an `AtomicPtr` to an `Arc::into_raw`
 //! pointer that a `Loan` dereferences under a hazard-slot protocol, so the audio
@@ -192,7 +187,6 @@ mod job_gate;
 mod last_out;
 mod level_cell;
 mod mint;
-mod packed_atomic;
 mod param;
 mod pos_ring;
 mod reclaim;
@@ -208,7 +202,6 @@ mod split;
 mod splitmix;
 mod sync;
 mod task_graph;
-mod vec;
 
 pub use atomic_cell::{AtomicCell, AtomicWord};
 pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
@@ -232,7 +225,6 @@ pub use job_gate::JobGate;
 pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use mint::Mint;
-pub use packed_atomic::PackedAtomic;
 pub use param::{Param, Param64, ParamCell};
 pub use parker::{Parker, Unparker, parker};
 pub use pos_ring::{
@@ -251,7 +243,6 @@ pub use spin::BlockWaits;
 pub use split::{ClaimConflict, ClaimTable, Claimed, ClaimedRun, Held, RwView, SplitMut, SplitRw};
 pub use splitmix::SplitMix64;
 pub use task_graph::{Participant, TaskGraph};
-pub use vec::RtVec;
 
 // The cell non-scalar state reaches the audio thread through: a control
 // thread publishes, the audio thread only borrows (`Loan`), so it never frees.

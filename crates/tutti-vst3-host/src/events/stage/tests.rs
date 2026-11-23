@@ -1,5 +1,6 @@
 use super::*;
 use tutti_graph::UmpAt;
+use tutti_plugin_types::RT_MIDI_CAPACITY;
 use tutti_ump::{Message, MidiChannel, MidiGroup, SysexStatus, U7};
 
 use crate::events::event_text;
@@ -633,7 +634,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
         assert!(staging.push(Event::at(7, Payload::Data(data))));
     }
     staging.finish();
-    let mut out = RtMidiEvents::new();
+    let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     assert_no_alloc::assert_no_alloc(|| drain_midi(&list, &mut OutputStream::new(), &mut out));
     let payloads: Vec<Vec<u8>> = out
         .iter()
@@ -654,7 +655,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
     let data = Data::new(0, [0xF0, 0x81, 0xFF, 2, 0xF7]).unwrap();
     assert!(staging.push(Event::at(7, Payload::Data(data))));
     staging.finish();
-    let mut out = RtMidiEvents::new();
+    let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     drain_midi(&list, &mut OutputStream::new(), &mut out);
     assert!(out.is_empty());
     assert!(!out.is_overflowed(), "malformed is not an overflow");
@@ -672,7 +673,7 @@ fn draining_a_plugins_sysex_allocates_nothing() {
         .collect();
     let list = EventList::input();
     assert!(Stager::default().stage(&list, &midi_only(&packets)));
-    let mut out = RtMidiEvents::new();
+    let mut out = RtMidiEvents::with_capacity(RT_MIDI_CAPACITY);
     assert_no_alloc::assert_no_alloc(|| drain_midi(&list, &mut OutputStream::new(), &mut out));
     // 20 payload bytes, six to a packet (M2-104 section 7.7): 4 packets.
     assert_eq!(out.len(), 4);

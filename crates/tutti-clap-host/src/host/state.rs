@@ -14,8 +14,8 @@ use tutti_platform::Instant;
 use tutti_plugin_types::{
     AtomicRequestFlags, MainThreadMarker, ProcessWake, TrackInfo, TransportRequest,
 };
+use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
-use tutti_rt::PackedAtomic;
 
 pub(crate) struct TimerEntry {
     pub id: u32,
@@ -68,7 +68,7 @@ pub struct GuiState {
     /// What the plugin asked the editor window to be resized to, in pixels:
     /// width and height in one word, so a take never pairs one request's width
     /// with another's height. `[0, 0]` when none waits.
-    pub resize_request: PackedAtomic<[u32; 2]>,
+    pub resize_request: AtomicCell<[u32; 2]>,
 }
 
 /// [`GuiState::resize_request`] with no request: a request with no area names
@@ -88,7 +88,7 @@ impl GuiState {
         Self {
             closed: AtomicBool::new(false),
             window_destroyed: AtomicBool::new(false),
-            resize_request: PackedAtomic::new(NO_RESIZE),
+            resize_request: AtomicCell::new(NO_RESIZE),
         }
     }
 }
