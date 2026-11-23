@@ -15,51 +15,21 @@ mod ramped;
 pub mod svf;
 mod tilt;
 
-pub use bell::{
-    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-};
+pub use bell::{BellFilterConfig, BellFilterKernel, BellFilterNode, BellFilterSet};
 pub(crate) use crossover::Splits;
 pub use crossover::{CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet};
-pub use cut::{
-    CutAlignment, CutFilterConfig, CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet,
-    MIN_CUT_CUTOFF,
-};
+pub use cut::{CutFilterConfig, CutFilterKernel, CutFilterNode, CutFilterSet};
 pub use envelope::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
 pub use eq::{EqControls, EqKernel};
 pub use eq_band::{EqBandConfig, EqBandNode};
-pub use graphic_eq::{
-    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
-};
+pub use graphic_eq::{GraphicEqConfig, GraphicEqKernel, GraphicEqNode, GraphicEqSet};
 pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
 pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
-pub use tilt::{
-    TiltFilterConfig, TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
-};
+pub use tilt::{TiltFilterConfig, TiltFilterKernel, TiltFilterNode, TiltFilterSet};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_units::{Db, Hz, SampleRate};
-
-/// The lowest center a bell or tilt takes: 20 Hz.
-const MIN_EQ_CENTER: Hz = Hz::new(20.0);
-
-/// The largest gain magnitude a bell or tilt takes: 24 dB.
-const MAX_EQ_GAIN: Db = Db::new(24.0);
-
-/// `center` held within [`MIN_EQ_CENTER`] and 0.99 of the Nyquist of `rate`.
-fn eq_center(center: Hz, rate: SampleRate) -> Hz {
-    Hz::new(
-        center
-            .get()
-            .clamp(MIN_EQ_CENTER.get(), rate.nyquist_scaled(0.99).get()),
-    )
-}
-
-/// `gain` held within [`MAX_EQ_GAIN`].
-fn eq_gain(gain: Db) -> Db {
-    Db::new(gain.get().clamp(-MAX_EQ_GAIN.get(), MAX_EQ_GAIN.get()))
-}
+use tutti_buffers::{ChannelTopology, ChannelLayout};
 
 /// The bus a filter built for a width runs on: the engine's order for it
 /// ([`ChannelTopology::default_for`]).

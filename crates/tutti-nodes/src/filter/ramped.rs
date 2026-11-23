@@ -47,11 +47,6 @@ impl<F: Float + SimdLanes> RampedSos<F> {
             .unwrap_or_else(|| self.coefficients.target())
     }
 
-    /// The design in progress, as the last [`design`](Self::design) left it.
-    pub(super) fn scratch(&self) -> &Sos {
-        &self.scratch
-    }
-
     /// At rest on `first`, where the node is built.
     pub(super) fn start(&mut self, first: SosCoefficients<F>) {
         self.coefficients = Ramp::new(first);

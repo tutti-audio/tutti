@@ -49,6 +49,7 @@ use crate::MeterId;
 use tutti_rt::{ControlDrop, LevelReader, LevelSpan, LevelWriter, level_cell};
 use tutti_units::{Amplitude, Samples};
 
+use crate::compile::ids::AudioSlotId;
 use crate::exec::SILENT;
 use crate::exec::slots::{AudioSlots, SlotFlags};
 use tutti_buffers::Float;
@@ -160,7 +161,7 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
     meter: &mut MeterWriter,
     arena: &A,
     flags: &Fl,
-    srcs: &[u32],
+    srcs: &[AudioSlotId],
     frames: usize,
 ) {
     if !meter.shared.enabled.load(Ordering::Relaxed) {

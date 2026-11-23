@@ -6,7 +6,10 @@ use super::ask::Reply;
 use super::channels::response_ring;
 use super::channels::{BatchOutcome, Channels, ResponseWriter};
 use super::lifecycle::Lifecycle;
-use super::messages::{AudioCommand, AudioResponse, ControlCommand, Setting, Unsolicited};
+use super::messages::{
+    AudioCommand, AudioResponse, Call, ControlCommand, Lost, Object, Outcome, Received, Setting,
+    Unsolicited,
+};
 use super::payload_pool::PayloadPool;
 use crate::ProcessAudioData;
 use crate::conversation::{Conversation, Fault, Heard};
@@ -15,6 +18,7 @@ use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::{
     AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
+    StateReady,
 };
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -22,9 +26,7 @@ use tutti_platform::Instant;
 use tutti_plugin_types::Offset;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
-use tutti_plugin_types::{
-    EditorError, IpcError, IpcResult, PresetError, ResyncKind, SlabError, StateError,
-};
+use tutti_plugin_types::{IpcError, IpcResult, ResyncKind, SlabError, StateError};
 use tutti_plugin_types::{MidiIntake, RateRefusal, RateRefusalCause, ServerLosses};
 use tutti_plugin_types::{ParameterChanges, ParameterPoint, ParameterQueue};
 use tutti_units::SampleRate;
@@ -462,7 +464,17 @@ impl ControlState {
         }
     }
 
-    /// The next id a request of this lane carries.
+    /// Numbers the next request of this lane, whose answer is waited for from
+    /// now: the server has `window` to give it (restarting at each sign of
+    /// life, up to `ceiling`), and its frames are `late` if it gives up.
+    fn open(&mut self, late: Abandoned, window: Duration, ceiling: Duration) -> ReqId {
+        self.last_id += 1;
+        let id = ReqId::new(self.last_id);
+        self.conv.open(id, late, Instant::now(), window, ceiling);
+        id
+    }
+
+    /// The next id a request of this lane carries, for one nothing answers.
     fn fresh(&mut self) -> ReqId {
         self.last_id += 1;
         ReqId::new(self.last_id)
@@ -531,24 +543,8 @@ fn ask(
     window: Duration,
     ceiling: Duration,
 ) -> IpcResult<ReqId> {
-    ask_by(stream, state, late, window, ceiling, |stream, id| {
-        ipc::send(stream, &Request { id, body })
-    })
-}
-
-/// [`ask`] with the request written by `send`, for one that travels with more
-/// than a frame (a slab's descriptor).
-fn ask_by(
-    stream: &mut ControlStream,
-    state: &mut ControlState,
-    late: Abandoned,
-    window: Duration,
-    ceiling: Duration,
-    send: impl FnOnce(&mut ControlStream, ReqId) -> IpcResult<()>,
-) -> IpcResult<ReqId> {
-    let id = state.fresh();
-    state.conv.open(id, late, Instant::now(), window, ceiling);
-    send(stream, id)?;
+    let id = state.open(late, window, ceiling);
+    ipc::send(stream, &Request { id, body })?;
     Ok(id)
 }
 
@@ -616,21 +612,9 @@ fn query(
     lifecycle: &Lifecycle,
     body: ControlRequest,
 ) -> IpcResult<Option<ControlReply>> {
-    query_by(lane, inbox, lifecycle, |stream, id| {
-        ipc::send(stream, &Request { id, body })
-    })
-}
-
-/// [`query`] with the request written by `send`.
-fn query_by(
-    lane: &mut Lane<ControlState>,
-    inbox: &mut Unsolicited,
-    lifecycle: &Lifecycle,
-    send: impl FnOnce(&mut ControlStream, ReqId) -> IpcResult<()>,
-) -> IpcResult<Option<ControlReply>> {
     let window = lifecycle.timeouts().param;
     let Lane { stream, state } = lane;
-    let id = ask_by(stream, state, Abandoned::Discard, window, window, send)?;
+    let id = ask(stream, state, body, Abandoned::Discard, window, window)?;
     match wait_for(stream, inbox, state, id, None)? {
         Waited::Reply(reply) => Ok(Some(reply)),
         Waited::Pending | Waited::GaveUp => Ok(None),
@@ -916,317 +900,63 @@ pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
 
 /// The control lane's command, run on its thread: **every request but the
 /// blocks'**, and the plugin's unsolicited news (the server's main thread).
+///
+/// A tell is written and done. An answered request waits for its one reply
+/// within its [`Deadline`](super::messages::Deadline) and hands what came to its call: the lane names no
+/// message, and a request's object (a state, a slab) goes and comes through
+/// [`Object`].
 pub(super) fn handle_control(
     cmd: ControlCommand,
     lane: &mut Lane<ControlState>,
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
 ) -> IpcResult<()> {
-    match cmd {
-        ControlCommand::SetAutomationState { mode } => {
-            tell(
-                &mut lane.stream,
-                &mut lane.state,
-                ControlRequest::SetAutomationState { mode },
-            )?;
-        }
-        ControlCommand::SetTrackInfo { info } => {
-            tell(
-                &mut lane.stream,
-                &mut lane.state,
-                ControlRequest::SetTrackInfo { info: *info },
-            )?;
-        }
-        ControlCommand::SaveState {
-            state_use,
-            flush,
-            reply,
-        } => {
-            // The host's writes no block carried are applied first, so the state
-            // holds them: this lane waits for the audio lane, not the asker.
-            if let Some(applied) = flush {
-                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
-            }
-            let Lane { stream, state } = lane;
-            let window = lifecycle.timeouts().state;
-            // The server's `Working` while it saves restarts the window, up to the
-            // ceiling.
-            let id = ask(
-                stream,
-                state,
-                ControlRequest::SaveState { state_use },
-                Abandoned::Discard,
-                window,
-                lifecycle.timeouts().state_ceiling(),
-            )?;
-            reply.send(recv_state(stream, inbox, state, id, window)?);
-        }
-        ControlCommand::LoadState {
-            state_use,
-            len,
-            blob,
-            reply,
-        } => {
-            let body = ControlRequest::LoadState {
-                state_use,
-                len,
-                blob: blob.wire(),
-            };
-            let Lane { stream, state } = lane;
-            let window = lifecycle.timeouts().state;
-            let id = state.fresh();
-            state.conv.open(
-                id,
-                Abandoned::Discard,
-                Instant::now(),
-                window,
-                lifecycle.timeouts().state_ceiling(),
-            );
-            // Held until the answer: where the object is read by name, it stays
-            // until then.
-            let _lease = ipc::send_attached(stream, id, body, blob)?;
-            // Wait for the answer. Answering the caller straight after the write
-            // would report that the request had been *sent*, never whether the
-            // plugin accepted it.
-            //
-            // A timeout here is **not** connection-level: the socket is
-            // synchronised and the session is healthy, the plugin simply has not
-            // answered yet.
-            // Propagating would `crash()` it, and the caller would receive
-            // `Stalled` (which says "the session is fine, retrying is
-            // reasonable") against a session that had just been torn down.
-            // The answer is late when it comes, and recognised by its id.
-            let value = match wait_for(stream, inbox, state, id, None)? {
-                Waited::Reply(ControlReply::StateLoaded { error }) => error.map_or(Ok(()), Err),
-                Waited::Reply(_) => Err(StateError::UnexpectedReply),
-                Waited::Pending | Waited::GaveUp => Err(StateError::Stalled { after: window }),
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetParameterList { reply } => {
-            let value = match query(lane, inbox, lifecycle, ControlRequest::GetParameterList)? {
-                Some(ControlReply::ParameterList { parameters }) => Some(parameters),
-                _ => None,
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetPresetList { reply } => {
-            let value = match query(lane, inbox, lifecycle, ControlRequest::GetPresetList)? {
-                Some(ControlReply::PresetList { presets }) => Some(presets),
-                _ => None,
-            };
-            reply.send(value);
-        }
-        ControlCommand::LoadPreset { id, reply } => {
-            // No answer within the window: the plugin was asked and may have
-            // loaded it, which is not a refusal.
-            let loaded = match query(lane, inbox, lifecycle, ControlRequest::LoadPreset { id })? {
-                Some(ControlReply::PresetLoaded { ok: true }) => Ok(()),
-                Some(_) => Err(PresetError::Refused),
-                None => Err(PresetError::Stalled {
-                    after: lifecycle.timeouts().param,
-                }),
-            };
-            reply.send(loaded);
-        }
-        ControlCommand::SetupSharedMemory {
-            slab,
-            layout,
-            reply,
-        } => {
-            // The server's refusal (it could not open the slab) is an `Error`
-            // answer: no reason to wait out the deadline for a `SharedMemoryReady`
-            // that is not coming.
-            let ok = matches!(
-                query_by(lane, inbox, lifecycle, |stream, id| {
-                    ipc::send_attached(
-                        stream,
-                        id,
-                        crate::SetupSharedMemory {
-                            slab: slab.wire(),
-                            layout,
-                        },
-                        &slab,
-                    )
-                })?,
-                Some(ControlReply::SharedMemoryReady)
-            );
-            reply.send(ok);
-        }
-        ControlCommand::SetAppMidiMap { app, reply } => {
-            // No matching reply means the plugin is lost: the server may have
-            // applied the map, but the plugin is gone, so the host's node
-            // answers for it.
-            let applied = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::SetAppMidiMap { app },
-            )? {
-                Some(ControlReply::AppMidiMapApplied { applied }) => applied,
-                _ => tutti_plugin_types::MidiMapApplied::Host,
-            };
-            reply.send(applied);
-        }
-        ControlCommand::ArmPluginMidiLearn { armed, reply } => {
-            let result = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::ArmPluginMidiLearn { armed },
-            )? {
-                Some(ControlReply::PluginMidiLearn { result }) => result,
-                _ => Err(tutti_plugin_types::PluginLearnError::Lost),
-            };
-            reply.send(result);
-        }
-        ControlCommand::GetWiring { reply } => {
-            let wiring = match query(lane, inbox, lifecycle, ControlRequest::GetWiring)? {
-                Some(ControlReply::Wiring { wiring }) => Some(wiring),
-                _ => None,
-            };
-            reply.send(wiring);
-        }
-        ControlCommand::GetCurrentPreset { reply } => {
-            let value = match query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)? {
-                Some(ControlReply::CurrentPreset { id }) => id,
-                _ => None,
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetParameter {
-            param_id,
-            flush,
-            reply,
-        } => {
-            if let Some(applied) = flush {
-                let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
-            }
-            let value = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::GetParameter { param_id },
-            )? {
-                Some(ControlReply::ParameterValue { value }) => value,
-                _ => None,
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetParameterText {
-            param_id,
-            value,
-            reply,
-        } => {
-            let text = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::GetParameterText { param_id, value },
-            )? {
-                Some(ControlReply::ParameterText { text }) => text,
-                _ => None,
-            };
-            reply.send(text);
-        }
-        ControlCommand::GetParameterValueFromText {
-            param_id,
-            text,
-            reply,
-        } => {
-            let value = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::GetParameterValueFromText { param_id, text },
-            )? {
-                Some(ControlReply::ParameterValueFromText { value }) => value,
-                _ => None,
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetParameterPlain {
-            param_id,
-            value,
-            reply,
-        } => {
-            let plain = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::GetParameterPlain { param_id, value },
-            )? {
-                Some(ControlReply::ParameterPlain { plain }) => plain,
-                _ => None,
-            };
-            reply.send(plain);
-        }
-        ControlCommand::OpenEditor {
-            parent,
-            scale,
-            reply,
-        } => {
-            let window = lifecycle.timeouts().editor;
-            let Lane { stream, state } = lane;
-            let id = ask(
-                stream,
-                state,
-                ControlRequest::OpenEditor { parent, scale },
-                Abandoned::Discard,
-                window,
-                window,
-            )?;
-            let value = match wait_for(stream, inbox, state, id, None)? {
-                Waited::Reply(ControlReply::EditorOpened { result }) => result,
-                Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
-                Waited::Reply(_) => Err(EditorError::UnexpectedReply),
-                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { after: window }),
-            };
-            reply.send(value);
-        }
-        ControlCommand::CloseEditor => {
-            tell(
-                &mut lane.stream,
-                &mut lane.state,
-                ControlRequest::CloseEditor,
-            )?;
-        }
-        ControlCommand::SetEditorSize { size, reply } => {
-            let window = lifecycle.timeouts().editor;
-            let Lane { stream, state } = lane;
-            let id = ask(
-                stream,
-                state,
-                ControlRequest::SetEditorSize { size },
-                Abandoned::Discard,
-                window,
-                window,
-            )?;
-            let value = match wait_for(stream, inbox, state, id, None)? {
-                Waited::Reply(ControlReply::EditorSized { result }) => result,
-                Waited::Reply(ControlReply::Error { error }) => Err(EditorError::Server(error)),
-                Waited::Reply(_) => Err(EditorError::UnexpectedReply),
-                Waited::Pending | Waited::GaveUp => Err(EditorError::NoAnswer { after: window }),
-            };
-            reply.send(value);
-        }
-        ControlCommand::GetParameterNormalized {
-            param_id,
-            plain,
-            reply,
-        } => {
-            let value = match query(
-                lane,
-                inbox,
-                lifecycle,
-                ControlRequest::GetParameterNormalized { param_id, plain },
-            )? {
-                Some(ControlReply::ParameterNormalized { value }) => value,
-                _ => None,
-            };
-            reply.send(value);
-        }
+    let (request, call) = cmd.into_parts();
+    let Some(call) = call else {
+        return tell(&mut lane.stream, &mut lane.state, request);
+    };
+    let Call {
+        flush,
+        deadline,
+        object,
+        done,
+    } = *call;
+    // The host's writes no block carried are applied first, so what is asked
+    // holds them: this lane waits for the audio lane, not the asker.
+    if let Some(applied) = flush {
+        let _ = super::await_reply(applied, lifecycle.timeouts().param_wait());
     }
+    let (window, ceiling) = deadline.window(lifecycle.timeouts());
+    let Lane { stream, state } = lane;
+    let id = state.open(Abandoned::Discard, window, ceiling);
+    let receives = matches!(object, Object::State);
+    // Held until the answer: where the object is read by name, it stays until
+    // then.
+    let _held = match object {
+        Object::Blob(blob) => Some(ipc::send_attached(stream, id, request, blob)?),
+        Object::Slab(slab) => {
+            ipc::send_attached(stream, id, request, &slab)?;
+            None
+        }
+        Object::None | Object::State => {
+            ipc::send_attached(stream, id, request, ())?;
+            None
+        }
+    };
+    // A timeout here is **not** connection-level: the socket is synchronised and
+    // the session is healthy, the plugin simply has not answered yet. Propagating
+    // would `crash()` it, and the caller would be told the session is fine
+    // against one that had just been torn down. The answer is late when it
+    // comes, and recognised by its id.
+    let outcome = match wait_for(stream, inbox, state, id, None)? {
+        Waited::Reply(reply) if receives => read_state(state, reply),
+        Waited::Reply(reply) => Ok(Received {
+            reply,
+            object: Vec::new(),
+        }),
+        Waited::Pending | Waited::GaveUp => Err(Lost::NoAnswer { after: window }),
+    };
+    done(outcome);
     Ok(())
 }
 
@@ -1337,52 +1067,38 @@ pub(super) fn read_news(lane: &mut Lane<ControlState>, inbox: &mut Unsolicited) 
     }
 }
 
-/// Takes the plugin's state from the answer to request `id`: the
-/// `StateReady` frame and the object that followed it.
+/// Reads the object that followed a `StateReady` reply.
 ///
-/// Returns the caller's `IpcResult` rather than propagating, because none of
-/// the ways this fails is a connection failure: an over-limit state, an object
-/// of another length than declared and a late answer are all *this plugin's*
-/// problem, and crashing the bridge for any of them would take down a session
-/// whose socket is fine ([`StateError::Stalled`] promises the caller a healthy
-/// session to retry against). Only a genuine transport error (`?`) still
-/// propagates, and that is the one case where the stream really is unusable.
-///
-/// The object was read off the stream with its frame, so a refusal here leaves
-/// the stream in step. An answer that arrives after the lane gave up is
-/// recognised by its id and dropped ([`Abandoned::Discard`]).
-fn recv_state(
-    stream: &mut ControlStream,
-    inbox: &mut Unsolicited,
-    state: &mut ControlState,
-    id: ReqId,
-    window: Duration,
-) -> IpcResult<std::result::Result<Vec<u8>, StateError>> {
-    let msg = match wait_for(stream, inbox, state, id, None)? {
-        Waited::Reply(msg) => msg,
-        Waited::Pending | Waited::GaveUp => return Ok(Err(StateError::Stalled { after: window })),
-    };
-    let ControlReply::StateReady { len, .. } = msg else {
-        // A reply of another type is the whole answer (the server's `Error`
-        // when the plugin cannot save); the state is not coming.
-        return Ok(Err(StateError::Rejected(format!(
-            "unexpected reply while reading plugin state: {msg:?}"
-        ))));
-    };
+/// What is wrong with it is the reply's, never the connection's: an over-limit
+/// state, an object of another length than declared, or a reply of another kind
+/// are all *this plugin's* problem, and crashing the bridge for any of them
+/// would take down a session whose socket is fine ([`StateError::Stalled`]
+/// promises the caller a healthy session to retry against). The object was read
+/// off the stream with its frame, so a refusal here leaves the stream in step.
+fn read_state(state: &mut ControlState, reply: ControlReply) -> Outcome {
+    // A reply of another kind is the whole answer (the server's `Error` when
+    // the plugin cannot save); the state is not coming.
+    let ready = StateReady::try_from(reply).map_err(Lost::of)?;
     let Some(object) = state.partial.take_blob() else {
-        return Ok(Err(StateError::Rejected(
+        return Err(Lost::Object(StateError::Rejected(
             "the plugin's state object did not arrive".to_owned(),
         )));
     };
-    Ok(object
-        .read(len, tutti_plugin_types::MAX_STATE_BYTES)
-        .map_err(|e| match e {
-            SlabError::BlobTooLarge { declared, limit } => StateError::TooLarge {
-                bytes: usize::try_from(declared).unwrap_or(usize::MAX),
-                limit,
-            },
-            other => StateError::Rejected(other.to_string()),
-        }))
+    let object = object
+        .read(ready.len, tutti_plugin_types::MAX_STATE_BYTES)
+        .map_err(|e| {
+            Lost::Object(match e {
+                SlabError::BlobTooLarge { declared, limit } => StateError::TooLarge {
+                    bytes: usize::try_from(declared).unwrap_or(usize::MAX),
+                    limit,
+                },
+                other => StateError::Rejected(other.to_string()),
+            })
+        })?;
+    Ok(Received {
+        reply: ready.into(),
+        object,
+    })
 }
 
 /// Record the plugin's answer to a rate change: the refusal while it refuses,

@@ -1,6 +1,7 @@
 //! Running a node op: its params, its mode and any crossfade, and the call
 //! into the node.
 
+use crate::compile::ids::{AudioSlotId, EventSlotId, Id, PlanUnitId};
 use std::cell::Cell;
 use tutti_buffers::Float;
 
@@ -9,7 +10,7 @@ use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
 use super::tail_elapsed;
-use crate::compile::plan::{Direct, Form, NodeRec, Plan};
+use crate::compile::plan::{Direct, Form, NodePorts, NodeRec, NodeTables, Plan};
 use crate::edges::rtlog::{LogSink, LogSlots};
 use crate::event::merge::merge_into;
 use crate::event::sorted::SortedEvents;
@@ -67,12 +68,12 @@ pub(super) fn run_node_op<
         u.generation, rec.generation,
         "unit generation matches the plan"
     );
-    let borrows = &plan.nodes.borrows[..];
+    let nodes = &plan.nodes;
     if u.fade.is_some() {
         // A crossfade runs here: both units, then the blend. Off the hot
         // path, whatever the form.
-        let ports = rec.ports(&plan.nodes.slots);
-        return fading_node_op(u, head, st, ports, borrows);
+        let ports = rec.ports(nodes);
+        return fading_node_op(u, head, st, ports, nodes);
     }
     // Each arm hands `node_op` its port slots. For the three direct forms
     // they are literal one-element arrays, so once `node_op` is inlined every
@@ -80,16 +81,22 @@ pub(super) fn run_node_op<
     // code.
     match rec.form {
         Form::Source { out } => {
-            node_op(u, head, st, [&[], &[out], &[], &[]], |call, node, st| {
-                let mut outs = [st.arena.slot_mut(out, frames)];
-                call.process(node, &[], &mut outs)
-            });
+            node_op(
+                u,
+                head,
+                st,
+                NodePorts::audio(&[], &[out]),
+                |call, node, st| {
+                    let mut outs = [st.arena.slot_mut(out, frames)];
+                    call.process(node, &[], &mut outs)
+                },
+            );
         }
         Form::Split { input, out } => node_op(
             u,
             head,
             st,
-            [&[input], &[out], &[], &[]],
+            NodePorts::audio(&[input], &[out]),
             |call, node, st| {
                 let (i, o) = st.arena.pair(input, out, frames);
                 call.process(node, &[i], &mut [o])
@@ -99,7 +106,7 @@ pub(super) fn run_node_op<
             u,
             head,
             st,
-            [&[slot], &[slot], &[], &[]],
+            NodePorts::audio(&[slot], &[slot]),
             |call, node, st| {
                 let mut outs = [st.arena.slot_mut(slot, frames)];
                 call.process(node, &[&[]], &mut outs)
@@ -107,21 +114,19 @@ pub(super) fn run_node_op<
         ),
         // The stereo shapes: fixed widths, so `direct_op` gets the same
         // straight-line call path.
-        Form::Direct(d) => {
-            let slots = &plan.nodes.slots[..];
-            match (d.ins, d.outs) {
-                (0, 2) => direct_op::<0, 2, F, A, Fl, E>(u, head, st, &d, slots),
-                (1, 2) => direct_op::<1, 2, F, A, Fl, E>(u, head, st, &d, slots),
-                (2, 1) => direct_op::<2, 1, F, A, Fl, E>(u, head, st, &d, slots),
-                (2, 2) => direct_op::<2, 2, F, A, Fl, E>(u, head, st, &d, slots),
-                _ => unreachable!("a direct record has one of `Direct::SHAPES`"),
-            }
-        }
+        Form::Direct(d) => match (d.ins, d.outs) {
+            (0, 2) => direct_op::<0, 2, F, A, Fl, E>(u, head, st, &d, nodes),
+            (1, 2) => direct_op::<1, 2, F, A, Fl, E>(u, head, st, &d, nodes),
+            (2, 1) => direct_op::<2, 1, F, A, Fl, E>(u, head, st, &d, nodes),
+            (2, 2) => direct_op::<2, 2, F, A, Fl, E>(u, head, st, &d, nodes),
+            _ => unreachable!("a direct record has one of `Direct::SHAPES`"),
+        },
         // Port tables are stack arrays; pick the smallest bucket that fits
         // so a two-port node does not initialise 64 entries per call. An
         // event-free node builds no event table at all, whatever its width.
         Form::Audio => {
-            let ports = rec.ports(&plan.nodes.slots);
+            let ports = rec.ports(nodes);
+            let borrows = &nodes.audio_borrows[..];
             node_op(u, head, st, ports, |call, node, st| {
                 match rec.ain.max(rec.aout) {
                     0..=4 => call.run_audio::<4, A>(node, &mut *st.arena, borrows),
@@ -131,7 +136,7 @@ pub(super) fn run_node_op<
             });
         }
         Form::General => {
-            let ports = rec.ports(&plan.nodes.slots);
+            let ports = rec.ports(nodes);
             node_op(u, head, st, ports, |call, node, st| {
                 let a = rec.ain.max(rec.aout);
                 let e = rec.ein.max(rec.eout);
@@ -141,13 +146,13 @@ pub(super) fn run_node_op<
                 let dropped = &mut *st.dropped;
                 match (a, e) {
                     (0..=4, 0..=4) => {
-                        call.run::<4, 4, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<4, 4, A, E>(node, arena, events, nodes, extra, dropped)
                     }
                     (0..=16, 0..=4) => {
-                        call.run::<16, 4, A, E>(node, arena, events, borrows, extra, dropped)
+                        call.run::<16, 4, A, E>(node, arena, events, nodes, extra, dropped)
                     }
                     _ => call.run::<MAX_PORTS, MAX_PORTS, A, E>(
-                        node, arena, events, borrows, extra, dropped,
+                        node, arena, events, nodes, extra, dropped,
                     ),
                 }
             });
@@ -178,8 +183,13 @@ pub(super) fn fading_node_op<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    [ain, aout, ein, eout]: [&[u32]; 4],
-    borrows: &[(u32, Role)],
+    ports @ NodePorts {
+        ain,
+        aout,
+        ein,
+        eout,
+    }: NodePorts<'_>,
+    nodes: &NodeTables,
 ) -> bool {
     let frames = h.frames;
     // The key's params, once for both units: the outgoing one hears the
@@ -234,7 +244,7 @@ pub(super) fn fading_node_op<
     // The outgoing unit's status, applied to its scratch as `finish` applies
     // one to the arena.
     for c in 0..aout.len() {
-        let o = x.scratch.slot_mut(c as u32, frames);
+        let o = x.scratch.slot_mut(AudioSlotId::from_index(c), frames);
         match status {
             Status::Modified | Status::Masked { .. } => {}
             Status::Silent | Status::Idle => o.fill(F::ZERO),
@@ -249,28 +259,21 @@ pub(super) fn fading_node_op<
         }
     }
 
-    node_op_with(
-        u,
-        h,
-        st,
-        [ain, aout, ein, eout],
-        !modulated,
-        |call, node, st| {
-            let (inject, overlay) = (&*st.inject, &*st.overlay);
-            let extra = Extra { inject, overlay };
-            let (arena, events) = (&mut *st.arena, &mut *st.events);
-            let dropped = &mut *st.dropped;
-            call.run::<MAX_PORTS, MAX_PORTS, A, E>(node, arena, events, borrows, extra, dropped)
-        },
-    );
+    node_op_with(u, h, st, ports, !modulated, |call, node, st| {
+        let (inject, overlay) = (&*st.inject, &*st.overlay);
+        let extra = Extra { inject, overlay };
+        let (arena, events) = (&mut *st.arena, &mut *st.events);
+        let dropped = &mut *st.dropped;
+        call.run::<MAX_PORTS, MAX_PORTS, A, E>(node, arena, events, nodes, extra, dropped)
+    });
 
     // The blend: `outgoing * g_out + incoming * g_in` while the fade lasts,
     // the incoming unit alone after it (`FadeLaw::gains`).
     let x = u.fade.as_mut().expect("still fading");
     let n = (x.len - x.done).min(frames);
-    for (c, &s) in (0u32..).zip(aout) {
+    for (c, &s) in aout.iter().enumerate() {
         let y = st.arena.slot_mut(s, frames);
-        let out = x.scratch.slot(c, frames);
+        let out = x.scratch.slot(AudioSlotId::from_index(c), frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
             let (g_out, g_in) =
                 fade_gains::<F>(x.law, Samples::new(x.done + i), Samples::new(x.len));
@@ -301,7 +304,7 @@ pub(super) fn flag(silent: bool, constant: bool) -> u8 {
 /// wide, and `compile` refuses a wider node anyway).
 #[inline]
 pub(super) fn in_masks<Fl: SlotFlags + ?Sized>(
-    ain: &[u32],
+    ain: &[AudioSlotId],
     flags: &Fl,
 ) -> (SilenceMask, ConstantMask) {
     let (mut silent, mut constant) = (0u64, 0u64);
@@ -375,7 +378,7 @@ pub(super) fn node_op<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    ports: [&[u32]; 4],
+    ports: NodePorts<'_>,
     call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
     node_op_with(u, h, st, ports, false, call_node);
@@ -409,7 +412,7 @@ pub(super) fn run_params<
         let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
-                let events = st.events.pev(p.slot);
+                let events = st.events.pev(EventSlotId::new(p.slot));
                 params.port(k, param, frames, Some((p.from, events)), base);
             }
             None => params.port(k, param, frames, None, base),
@@ -429,7 +432,12 @@ pub(super) fn node_op_with<
     u: &mut Unit<F>,
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    [ain, aout, ein, eout]: [&[u32]; 4],
+    NodePorts {
+        ain,
+        aout,
+        ein,
+        eout,
+    }: NodePorts<'_>,
     params_done: bool,
     call_node: impl FnOnce(&Call<'_, '_, F>, &mut dyn Node<F>, &mut OpState<'_, A, Fl, E>) -> Status,
 ) {
@@ -525,7 +533,7 @@ pub(super) fn node_op_with<
     // A node declaring an input bound is sent at most that many events on its
     // inputs together, whatever the edges, flushed events and scheduled
     // commands brought: the cut is the earliest by frame, note-offs first.
-    let bound = h.plan.units[unit as usize].shape.event_input_capacity;
+    let bound = h.plan.units[unit].shape.event_input_capacity;
     if !discards && let Some(bound) = bound {
         let (inject, events) = (&*st.inject, &*st.events);
         let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
@@ -624,7 +632,7 @@ pub(super) fn node_op_with<
         params,
     };
     let status = call_node(&call, &mut *u.node, st);
-    log.flush(h.plan.units[unit as usize].key, h.env.frame, &mut *st.sink);
+    log.flush(h.plan.units[unit].key, h.env.frame, &mut *st.sink);
     // This call's report, or the ceiling when it made none.
     u.reported = reported
         .get()
@@ -689,13 +697,13 @@ pub(super) fn direct_op<
     h: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
     d: &Direct,
-    slots: &[u32],
+    nodes: &NodeTables,
 ) {
-    let [ain, aout, _, _] = h.rec.ports(slots);
-    let ain: &[u32; I] = ain.try_into().expect("a direct record's input count");
-    let aout: &[u32; O] = aout.try_into().expect("a direct record's output count");
+    let NodePorts { ain, aout, .. } = h.rec.ports(nodes);
+    let ain: &[AudioSlotId; I] = ain.try_into().expect("a direct record's input count");
+    let aout: &[AudioSlotId; O] = aout.try_into().expect("a direct record's output count");
     let frames = h.frames;
-    node_op(u, h, st, [ain, aout, &[], &[]], |call, node, st| {
+    node_op(u, h, st, NodePorts::audio(ain, aout), |call, node, st| {
         let (ins, mut outs) = st.arena.direct::<I, O>(frames, d);
         call.process(node, &ins, &mut outs)
     });
@@ -706,8 +714,8 @@ pub(super) fn direct_op<
 fn input_events<'a, E: EventSlots + ?Sized>(
     inject: &'a [Inject],
     events: &'a E,
-    unit: u32,
-    slot: u32,
+    unit: PlanUnitId,
+    slot: EventSlotId,
     port: u16,
 ) -> &'a [Event] {
     inject
@@ -807,7 +815,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
         &self,
         node: &mut dyn Node<F>,
         arena: &mut A,
-        borrows: &[(u32, Role)],
+        borrows: &[(AudioSlotId, Role)],
     ) -> Status {
         let (n_in, n_out) = (self.rec.ain as usize, self.rec.aout as usize);
         debug_assert!(n_in <= N && n_out <= N);
@@ -831,7 +839,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
         node: &mut dyn Node<F>,
         arena: &mut A,
         events: &mut E,
-        borrows: &[(u32, Role)],
+        nodes: &NodeTables,
         extra: Extra<'_>,
         dropped: &mut Dropped,
     ) -> Status {
@@ -844,12 +852,17 @@ impl<'p, F: Float> Call<'p, '_, F> {
 
         let mut ins: [&[F]; N] = [&[]; N];
         let mut outs: [&mut [F]; N] = std::array::from_fn(|_| &mut [][..]);
-        arena.borrow(frames, &borrows[rec.borrows.range()], &mut ins, &mut outs);
+        arena.borrow(
+            frames,
+            &nodes.audio_borrows[rec.borrows.range()],
+            &mut ins,
+            &mut outs,
+        );
 
         let mut evin: [SortedEvents<'_>; M] = [SortedEvents::EMPTY; M];
         let mut evout_bufs: [Option<&mut EventSlot>; M] = std::array::from_fn(|_| None);
         events.borrow_sorted(
-            &borrows[rec.event_borrows.range()],
+            &nodes.event_borrows[rec.event_borrows.range()],
             |port, v| {
                 evin[port as usize] =
                     SortedEvents::trusted(&v.events, frames).trusted_params(&v.params, frames);
@@ -932,8 +945,8 @@ impl<'p, F: Float> Call<'p, '_, F> {
 pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     status: Status,
     frames: usize,
-    ain: &[u32],
-    aout: &[u32],
+    ain: &[AudioSlotId],
+    aout: &[AudioSlotId],
     in_place: InPlaceMask,
     arena: &mut A,
     flags: &mut Fl,

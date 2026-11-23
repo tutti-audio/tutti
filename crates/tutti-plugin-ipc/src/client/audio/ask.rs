@@ -1,8 +1,8 @@
 //! One-shot reply pair for command/response choreography.
 //!
-//! Each `ControlCommand` that expects a reply carries a [`Reply<T>`] of the right
-//! type. The dispatch handler sends *into the reply*, and the calling
-//! thread blocks on the paired [`Ask<T>`]. Per-request channels mean two
+//! Each answered `ControlCommand` carries a call whose `done` closure holds a
+//! [`Reply<T>`] of the right type. The lane's thread sends *into the reply*, and
+//! the calling thread blocks on the paired [`Ask<T>`]. Per-request channels mean two
 //! in-flight `SaveState` calls can't accidentally swap their results — the
 //! one-shot semantics are enforced by the type system, not by hoping
 //! responses come back in the order requests went out.
