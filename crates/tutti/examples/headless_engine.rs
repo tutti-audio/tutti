@@ -2,6 +2,11 @@
 //! the device first and builds the graph at the rate it reports; `update()`
 //! commits the edits. Run (needs a sound card):
 //! `cargo run -p tutti --features device --example headless_engine`
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 use tutti::graph::ForkByClone;
 use tutti::{Amplitude, Hz, MainOutput, Session, SessionEvent};
 use tutti_nodes::testing::Osc;

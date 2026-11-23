@@ -9,6 +9,11 @@
 //!    twice.
 //!
 //! Run: `cargo run --example export -- <outdir>`
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::{Bed, ChannelLayout};

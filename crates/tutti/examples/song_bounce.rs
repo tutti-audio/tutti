@@ -10,6 +10,11 @@
 //! `Bounce` and `Format`; the `Lfo` is `tutti::modulation::Lfo`; the nodes are `tutti::nodes`; the two bus names a fold
 //! needs are `tutti::session::` paths. Every fallible call returns the one
 //! `Error`, so `?` runs the whole program.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;

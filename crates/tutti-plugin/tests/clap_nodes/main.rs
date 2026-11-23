@@ -3,6 +3,11 @@
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
 )]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a test binary reports on its own output"
+)]
 
 #[cfg(feature = "clap")]
 #[path = "../support/clap_probe.rs"]

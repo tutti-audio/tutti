@@ -1,5 +1,10 @@
 //! `tutti-hrir-convert <in.sofa> <out.hrir>`: writes the HRIR sphere
 //! `HrtfBinauralNode` loads from a SOFA SimpleFreeFieldHRIR file.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a program: it reports to its user on stderr"
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;

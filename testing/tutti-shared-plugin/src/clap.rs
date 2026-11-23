@@ -1,6 +1,11 @@
 //! The CLAP shell: `clap_entry` and what a CLAP host calls, decoded onto
 //! [`Core`]. Quirks of CLAP only: ports, the `flush`
 //! parameter path, note dialects, streams.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "the test plugin writes to stdout and stderr on init so the host tests can check that a plugin's own output is captured"
+)]
 
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr;

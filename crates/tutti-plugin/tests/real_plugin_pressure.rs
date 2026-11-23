@@ -55,7 +55,11 @@
 //! not waited for.
 //!
 //! That starvation path is worth a test of its own, and gets one below.
-
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a test binary reports on its own output"
+)]
 // The harness drives the reference CLAP probe, so the whole file needs the
 // `clap` feature.
 #![cfg(feature = "clap")]

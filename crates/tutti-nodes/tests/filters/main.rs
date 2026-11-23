@@ -1,4 +1,9 @@
 //! Filters and dynamics: responses, block independence and non-finite input.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a test binary reports on its own output"
+)]
 
 /// An allocation inside an `RtScope` aborts the running test.
 #[global_allocator]

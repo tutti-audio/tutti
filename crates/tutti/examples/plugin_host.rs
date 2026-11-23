@@ -32,6 +32,11 @@
 //! It is not run in CI (it needs a plugin directory and the two binaries
 //! above built); `cargo build -p tutti --features clap,export --examples`
 //! compiles it.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 
 use std::future::IntoFuture as _;
 use std::path::PathBuf;

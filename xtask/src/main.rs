@@ -7,6 +7,11 @@
 //! workspace does not depend on what it builds (`cargo xtask check-layout`).
 
 #![forbid(unsafe_code)]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "xtask is a program: its output is its job"
+)]
 
 mod cmd;
 mod gates;

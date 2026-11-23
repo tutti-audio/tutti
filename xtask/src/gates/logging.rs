@@ -1,21 +1,25 @@
-//! `check-logging`: logging is `tracing`, and nothing prints outside a `main`.
+//! `check-logging`: logging is `tracing`, and no library writes to a standard stream.
 //!
 //! - **No `log` dependency** in any manifest under `crates/` or `testing/`, in any
 //!   table (`[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, their
 //!   `target` forms and a `[dependencies.log]` table; a `package = "log"` rename
 //!   counts).
-//! - **No `println!`, `eprintln!`, `print!`, `eprint!` or `dbg!`** in library code.
+//! - **No `stderr()` or `stdout()`** in library code: a write to a standard
+//!   stream through a handle is a print. An `io::stderr` or `io::stdout` path counts
+//!   without the call too, since it is the handle's function passed as a value.
 //!   Exempt: `src/main.rs`, `src/bin/`, `build.rs`, a `tests`, `examples` or `benches`
 //!   directory, a `tests.rs` file and test-only items (`#[cfg(test)]`, `#[cfg(all(..,
 //!   test, ..))]`). Only `src/main.rs` and `src/bin/**` count as a `main`: the other
 //!   modules of a binary crate are library code. Comments and string literals are not
 //!   code.
-//! - **No `stderr()` or `stdout()`** in the same library code: a write to a standard
-//!   stream through a handle is a print. An `io::stderr` or `io::stdout` path counts
-//!   without the call too, since it is the handle's function passed as a value.
+//!
+//! The print macros (`println!`, `eprintln!`, `print!`, `eprint!`, `dbg!`) are clippy's:
+//! `print_stdout`, `print_stderr` and `dbg_macro` deny in the workspace lints, a test
+//! may print (`clippy.toml`), and a program or a test harness allows the lints at its
+//! root with its reason.
 //!
 //! A finding that is a row of [`ALLOW`], `(path, reason)`, is exempt: the path is the
-//! manifest (for a `log` dependency) or the source file (for a print). A row that
+//! manifest (for a `log` dependency) or the source file (for a handle). A row that
 //! matches nothing is stale. The reason starts with `permanent:` (the file is a
 //! program or a test harness whose output is its job) or `temporary:` (a lane
 //! converts it, and the row leaves with it).
@@ -29,31 +33,15 @@ use super::{Report, Tree};
 /// The fewest manifests a real run finds; fewer means the walk is broken.
 pub(super) const MIN_MANIFESTS: usize = 20;
 
-const MACROS: &[&str] = &["println", "eprintln", "print", "eprint", "dbg"];
-
 /// The functions that hand out a standard stream.
 const STREAMS: &[&str] = &["stderr", "stdout"];
 
 /// `(manifest or source path, reason)`. The reason starts with `permanent:` or
 /// `temporary:`.
-pub(super) const ALLOW: &[(&str, &str)] = &[
-    (
-        "testing/tutti-fixtures/src/main_thread.rs",
-        "permanent: the `harness = false` test runner prints each test's name and result as a test harness does",
-    ),
-    (
-        "testing/tutti-fixtures/src/rt_alloc_check.rs",
-        "permanent: the test allocator reports an audio-thread allocation on stderr before it aborts; `tracing` would allocate inside the allocator",
-    ),
-    (
-        "testing/tutti-plugin-contract/src/format.rs",
-        "permanent: the contract prints its gap marker, which the dashboard and the ratchet read from the test's stdout",
-    ),
-    (
-        "testing/tutti-shared-plugin/src/clap.rs",
-        "permanent: the test plugin writes to stdout and stderr on init so the host tests can check that a plugin's own output is captured",
-    ),
-];
+pub(super) const ALLOW: &[(&str, &str)] = &[(
+    "testing/tutti-fixtures/src/rt_alloc_check.rs",
+    "permanent: the test allocator reports an audio-thread allocation on stderr before it aborts; `tracing` would allocate inside the allocator",
+)];
 
 /// Whether `path` (repo-relative) is a program, a test, an example or a bench.
 fn exempt(path: &str) -> bool {
@@ -77,25 +65,11 @@ fn exempt(path: &str) -> bool {
     }
 }
 
-/// `file:line: what` of each print in library code: a print macro or a
-/// standard-stream handle.
+/// `file:line: what` of each standard-stream handle in library code.
 fn prints(path: &str, text: &str) -> Vec<String> {
     let code = blank(text);
     let ranges = test_ranges(&code);
     let mut out = Vec::new();
-    for name in MACROS {
-        let mut from = 0;
-        while let Some(at) = find_word_from(&code, name, from) {
-            from = at + name.len();
-            if !code[from..].trim_start().starts_with('!') {
-                continue;
-            }
-            if ranges.iter().any(|&(s, e)| at >= s && at <= e) {
-                continue;
-            }
-            out.push(format!("{path}:{}: `{name}!`", line_of(&code, at)));
-        }
-    }
     for name in STREAMS {
         let mut from = 0;
         while let Some(at) = find_word_from(&code, name, from) {
@@ -251,25 +225,8 @@ mod tests {
     }
 
     #[test]
-    fn a_print_in_library_code_fails() {
-        for m in MACROS {
-            let src = format!("pub fn f() {{ {m}!(\"x\"); }}\n");
-            let f = findings(&[(LIB, &src)], &[]);
-            assert_eq!(f.len(), 2, "{m}: {f:?}");
-            assert!(f[1].contains(&format!("{LIB}:1: `{m}!`")), "{f:?}");
-        }
-        let nested = "fn f() { std::eprintln!(\"x\"); }\n";
-        assert_eq!(findings(&[(LIB, nested)], &[]).len(), 2);
-        let path = "fn f() { std::println!(\"x\"); }\n";
-        let f = findings(&[(LIB, path)], &[]);
-        assert!(f[1].contains("`println!`"), "{f:?}");
-        let spaced = "fn f() { println !(\"x\"); }\n";
-        assert_eq!(findings(&[(LIB, spaced)], &[]).len(), 2);
-    }
-
-    #[test]
     fn a_print_where_printing_is_allowed_passes() {
-        let print = "fn main() { println!(\"x\"); }\n";
+        let print = "fn main() { let _ = std::io::stderr(); }\n";
         for path in [
             "crates/c1/src/main.rs",
             "crates/c1/src/bin/tool.rs",
@@ -288,31 +245,31 @@ mod tests {
     #[test]
     fn a_cfg_test_module_a_comment_and_a_string_are_not_code() {
         let src = "\
-/// `println!(\"doc\")`
-// eprintln!(\"comment\")
-pub fn f() -> &'static str { \"dbg!(x) and print!\" }
+/// `std::io::stderr()`
+// std::io::stdout()
+pub fn f() -> &'static str { \"stderr() and stdout()\" }
 #[cfg(test)]
 mod tests {
     #[test]
-    fn t() { println!(\"in a test\"); }
+    fn t() { let _ = std::io::stderr(); }
 }
 ";
         let f = findings(&[(LIB, src)], &[]);
         assert!(f.is_empty(), "{f:?}");
-        let after = format!("{src}pub fn g() {{ dbg!(1); }}\n");
+        let after = format!("{src}pub fn g() {{ let _ = std::io::stdout(); }}\n");
         assert_eq!(findings(&[(LIB, &after)], &[]).len(), 2);
     }
 
     #[test]
     fn a_cfg_test_fn_with_a_semicolon_in_its_signature_is_not_code() {
-        let src = "#[cfg(test)] fn f(x: [u8; 3]) { println!(); }\npub fn live() {}\n";
+        let src = "#[cfg(test)] fn f(x: [u8; 3]) { std::io::stderr(); }\npub fn live() {}\n";
         assert!(findings(&[(LIB, src)], &[]).is_empty());
-        let live = "#[cfg(not(test))] fn f(x: [u8; 3]) { println!(); }\n";
+        let live = "#[cfg(not(test))] fn f(x: [u8; 3]) { std::io::stderr(); }\n";
         assert_eq!(findings(&[(LIB, live)], &[]).len(), 2);
     }
 
     #[test]
-    fn a_write_to_a_standard_stream_handle_is_a_print() {
+    fn a_standard_stream_handle_in_library_code_fails() {
         let src = "fn f() { let _ = writeln!(std::io::stderr(), \"x\"); }\n";
         let f = findings(&[(LIB, src)], &[]);
         assert!(f[1].contains("`stderr()`"), "{f:?}");
@@ -328,14 +285,8 @@ mod tests {
     }
 
     #[test]
-    fn a_word_that_only_contains_a_macro_name_is_not_a_print() {
-        let src = "fn f() { reprint!(); let print = 1; let _ = print; sprintln(); }\n";
-        assert!(findings(&[(LIB, src)], &[]).is_empty());
-    }
-
-    #[test]
     fn an_allowed_row_passes_and_is_counted() {
-        let src = "fn f() { println!(); }\n";
+        let src = "fn f() { std::io::stderr(); }\n";
         let allow = [(LIB, "permanent: a harness")];
         let r = check(&tree(&[(LIB, src)]), &allow);
         assert!(r.passed(), "{:?}", r.findings);
@@ -356,7 +307,7 @@ mod tests {
     #[test]
     fn an_allow_reason_names_its_kind() {
         let allow = [(LIB, "a harness")];
-        let f = findings(&[(LIB, "fn f() { dbg!(); }\n")], &allow);
+        let f = findings(&[(LIB, "fn f() { std::io::stderr(); }\n")], &allow);
         assert!(
             f.iter().any(|l| l.contains("`permanent:` or `temporary:`")),
             "{f:?}"

@@ -23,6 +23,11 @@
 //! ```
 
 #![cfg(feature = "clap")]
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a benchmark reports its figures on its own output"
+)]
 
 #[path = "../tests/support/clap_probe.rs"]
 mod clap_probe;

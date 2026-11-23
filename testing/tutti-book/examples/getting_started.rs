@@ -3,6 +3,11 @@
 //! ```text
 //! cargo run -p tutti-book --example getting_started -- <dir>
 //! ```
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 
 use std::path::Path;
 

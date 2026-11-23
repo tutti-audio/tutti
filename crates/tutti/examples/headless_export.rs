@@ -16,6 +16,11 @@
 //!
 //! Run: `cargo run -p tutti --features "export,decode-wav" \
 //!        --example headless_export -- <outdir>`
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "an example is a program: its output is its job"
+)]
 
 use futures_lite::future::block_on;
 use std::future::IntoFuture as _;

@@ -19,6 +19,11 @@
 //! matter. The machine's scheduler adds spikes, so the maximum column is the
 //! minimum over the 21 passes of each pass's maximum; compare it, and the
 //! percentiles, only across interleaved runs.
+#![allow(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a benchmark reports its figures on its own output"
+)]
 use tutti_units::{Samples, Seconds};
 fn main() {
     use std::hint::black_box;
