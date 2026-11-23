@@ -164,11 +164,9 @@ pub(crate) const GATES: &[GateDef] = &[
         range_types::check(&r.tree, range_types::EXCEPTIONS)
     }),
     gate("check-hosting", true, |r| hosting::check(&r.tree)),
-    gate("check-lints", true, |r| {
-        lints::check(&r.tree, lints::UNLINTED)
-    }),
+    gate("check-lints", true, |r| lints::check(&r.tree)),
     gate("check-value-traits", true, |r| {
-        value_traits::check(&r.tree, value_traits::ALLOW, value_traits::MIN_FILES)
+        value_traits::check(&r.tree, value_traits::MIN_FILES)
     }),
     gate("check-submodule-pins", true, |r| {
         submodule_pins::check(&RealGit(r.root.to_path_buf()), submodule_pins::PINS)

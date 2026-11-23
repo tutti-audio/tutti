@@ -55,6 +55,7 @@
 use super::lex::{self, blank, comments, line_of, skipped, word};
 use super::prose::prose;
 use super::ratchet::{self, Found, Wording};
+use super::toml::Toml;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -568,32 +569,9 @@ fn tokens_of(blanked: &str, into: &mut BTreeSet<String>) {
 
 /// The package name and the dependency names of one manifest, with `-` as `_`.
 fn manifest_names(text: &str, packages: &mut BTreeSet<String>, deps: &mut BTreeSet<String>) {
-    let mut section = String::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(h) = line.strip_prefix('[') {
-            section = h.trim_end_matches(']').trim_matches('[').to_owned();
-            if let Some(dep) = section
-                .split_once("dependencies.")
-                .map(|(_, d)| d.to_owned())
-            {
-                deps.insert(dep.replace('-', "_"));
-            }
-            continue;
-        }
-        let key = line
-            .split(['=', '.', ' '])
-            .next()
-            .unwrap_or("")
-            .trim_matches('"');
-        if section == "package" && key == "name" {
-            if let Some(v) = line.split('"').nth(1) {
-                packages.insert(v.replace('-', "_"));
-            }
-        } else if section.ends_with("dependencies") && !key.is_empty() && !key.starts_with('#') {
-            deps.insert(key.replace('-', "_"));
-        }
-    }
+    let toml = Toml::parse(text);
+    packages.extend(toml.package_name().map(|n| n.replace('-', "_")));
+    deps.extend(toml.dependency_keys().iter().map(|d| d.replace('-', "_")));
 }
 
 /// `src` with its comments blanked and its literals kept.

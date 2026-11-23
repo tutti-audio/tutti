@@ -353,10 +353,7 @@ fn layer_of(name: &str) -> Option<usize> {
 /// The workspace members' manifests, from the root's `members` list.
 pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
     let root = Toml::parse(&tree.read("Cargo.toml").unwrap_or_default());
-    let members = root
-        .value("workspace", "members")
-        .map(strings)
-        .unwrap_or_default();
+    let members = root.workspace_members();
     if members.is_empty() {
         bad.push("Cargo.toml: no workspace members found; the scan is broken".into());
     }
@@ -367,10 +364,7 @@ pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
             continue;
         };
         let toml = Toml::parse(&text);
-        let Some(name) = toml
-            .value("package", "name")
-            .and_then(|v| strings(v).into_iter().next())
-        else {
+        let Some(name) = toml.package_name() else {
             bad.push(format!("{dir}/Cargo.toml: no package name"));
             continue;
         };

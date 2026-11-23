@@ -24,6 +24,7 @@
 //! Comments and string literals are not code.
 
 use super::lex::{blank, find_word, line_of, skipped};
+use super::toml::Toml;
 use super::{Report, Tree};
 
 /// `(crate directory, why it may hold unsafe, the lint it must carry instead)`.
@@ -168,17 +169,11 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     match tree.read(&format!("{MIDI}/Cargo.toml")) {
         None => bad.push(format!("{MIDI}/Cargo.toml: missing; was the crate moved?")),
         Some(manifest) => {
-            for dep in RAW_DEPS {
-                let named = manifest.lines().any(|l| {
-                    l.trim_start()
-                        .strip_prefix(dep)
-                        .is_some_and(|r| r.trim_start().starts_with(['=', '.']))
-                });
-                if named {
-                    bad.push(format!(
-                        "{MIDI}/Cargo.toml: depends on `{dep}` (raw FFI belongs to the -ffi crates)"
-                    ));
-                }
+            let named = Toml::parse(&manifest).dependency_keys();
+            for dep in RAW_DEPS.iter().filter(|d| named.iter().any(|n| n == *d)) {
+                bad.push(format!(
+                    "{MIDI}/Cargo.toml: depends on `{dep}` (raw FFI belongs to the -ffi crates)"
+                ));
             }
         }
     }
