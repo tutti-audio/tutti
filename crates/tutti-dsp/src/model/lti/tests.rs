@@ -3,6 +3,11 @@ use super::*;
 /// The peak is returned as a bound raised by a part in a million.
 const RAISE: f64 = 1e-6;
 
+/// Whether `peak` is the true peak `want`, raised by at most [`RAISE`] (and a hair for rounding).
+fn within_raise(peak: f64, want: f64) -> bool {
+    (want..=want * (1.0 + RAISE * 1.001)).contains(&peak)
+}
+
 /// A one-pole low-pass `H(w) = (1 - a) / (1 - a e^(-jw))` has unit gain at DC and falls
 /// monotonically to `(1 - a) / (1 + a)` at Nyquist, so its peak is 1 at `w = 0`, where
 /// the grid has a point.
@@ -12,7 +17,7 @@ fn a_one_pole_low_pass_peaks_at_dc_with_unit_gain() {
     let mag = |w: f64| (1.0 - a) / (1.0 - a * (-w).cos()).hypot(a * (-w).sin());
     let peak = peak_magnitude(vec![core::f64::consts::PI, 1.0, 0.0, 0.5], mag);
     assert!(
-        (1.0..=1.0 + RAISE * 1.001).contains(&peak),
+        within_raise(peak, 1.0),
         "peak {peak} against 1 raised by {RAISE}"
     );
 }
@@ -24,7 +29,7 @@ fn a_peak_between_grid_points_is_refined_and_bounded_from_above() {
     let mag = |w: f64| 1.0 / (1.0 + (w - 1.0).powi(2));
     let peak = peak_magnitude(vec![0.0, 0.5, 1.4, core::f64::consts::PI], mag);
     assert!(
-        (1.0..=1.0 + RAISE * 1.001).contains(&peak),
+        within_raise(peak, 1.0),
         "peak {peak} against 1 raised by {RAISE}"
     );
 }
@@ -40,5 +45,5 @@ fn angles_outside_zero_to_pi_are_ignored() {
         }
     };
     let peak = peak_magnitude(vec![4.0, 0.0, 0.0, -1.0, 2.0], mag);
-    assert!((1.0..=1.0 + RAISE * 1.001).contains(&peak), "peak {peak}");
+    assert!(within_raise(peak, 1.0), "peak {peak}");
 }
