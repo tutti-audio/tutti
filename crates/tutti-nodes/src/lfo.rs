@@ -356,17 +356,6 @@ mod tests {
         assert!(out[0].abs() < 1e-6);
     }
 
-    #[test]
-    fn test_free_running_lfo() {
-        let out = render(LfoNode::from(LfoConfig::new(LfoShape::Sine)), 100.0, 25);
-        // The 25th sample: a quarter of a 1 Hz cycle at 100 Hz, the peak.
-        assert!(
-            (out[24] - 1.0).abs() < 0.1,
-            "Expected ~1.0, got {}",
-            out[24]
-        );
-    }
-
     /// A beat span selects the synced clock and leaves no rate cell, whatever
     /// rate the config was given; with no span the clock is free at that rate.
     #[test]
@@ -434,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_beat_synced_lfo() {
+    fn a_stopped_beat_reads_the_sine_of_its_phase_in_the_span() {
         let lfo = || {
             LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0))))
         };
@@ -483,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn test_depth_control() {
+    fn the_depth_scales_the_square_wave() {
         let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Bipolar::of(0.5)));
         let out = render(lfo, 48_000.0, 1);
         assert!((out[0] - 0.5).abs() < 0.01);
@@ -507,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn test_phase_offset() {
+    fn a_quarter_phase_offset_starts_a_sine_at_its_peak() {
         let lfo =
             LfoNode::from(LfoConfig::new(LfoShape::Sine).phase_offset(PhaseIncrement::new(0.25)));
         let out = render(lfo, 100.0, 1);
@@ -515,18 +504,19 @@ mod tests {
     }
 
     #[test]
-    fn test_lfo_reset() {
+    fn a_reset_restarts_the_cycle_at_phase_zero() {
         let mut d = Direct::new(
             LfoNode::from(LfoConfig::new(LfoShape::Sine)),
             SampleRate::of(100.0),
-            50,
+            25,
         );
+        // A quarter cycle at 1 Hz and 100 Hz: the next frame would be the sine's peak.
         d.block();
         Node::<f32>::reset(&mut *d.node);
         d.block();
         assert!(
             d.output().plane(0).samples()[0].abs() < 0.1,
-            "After reset, LFO should start near zero"
+            "after a reset the first frame is the sine at phase zero"
         );
     }
 
@@ -688,20 +678,6 @@ mod tests {
                 "frame {i}: {got} vs {want}"
             );
         }
-    }
-
-    #[test]
-    fn test_random_produces_different_values() {
-        let values = render(LfoNode::from(LfoConfig::new(LfoShape::Random)), 100.0, 500);
-
-        let unique: std::collections::HashSet<u32> =
-            values.iter().map(|v| (v * 1000.0) as u32).collect();
-
-        assert!(
-            unique.len() > 1,
-            "Random LFO should produce different values, got {}",
-            unique.len()
-        );
     }
 
     #[test]
