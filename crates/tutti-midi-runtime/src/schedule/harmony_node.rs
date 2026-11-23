@@ -29,8 +29,8 @@ use tutti_rt::Mutex;
 
 use tutti_graph::{
     Cx, Event, EventDensity, EventWriter, ForkCause, ForkSource, Forked, Harmony, HarmonyKind,
-    IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents, Prepare, RenderMode,
-    Shape, Status,
+    HasPublished, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents,
+    Prepare, Published, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Publisher, Reader};
 use tutti_units::{Beat, FramesPerBeat};
@@ -478,8 +478,28 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
             Box::new(self),
             controls.clone(),
             Some(Box::new(fork)),
-            Some(Box::new(controls)),
+            Some(Box::new(controls.clone())),
         )
+        .published::<HarmonyNode, { PublishedKind::Harmony as u16 }>(Arc::new(controls))
+    }
+}
+
+impl HasPublished<{ PublishedKind::Harmony as u16 }> for HarmonyNode {
+    type Value = Arc<HarmonyChanges>;
+}
+
+/// The lanes a session writes: [`set`](HarmonyControls::set), which equal
+/// lanes leave in force.
+impl Published for HarmonyControls {
+    type Value = Arc<HarmonyChanges>;
+
+    fn current(&self) -> Arc<HarmonyChanges> {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Arc<HarmonyChanges>) -> bool {
+        self.set(Arc::clone(value));
+        true
     }
 }
 

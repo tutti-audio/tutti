@@ -10,7 +10,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{DeclaredUnit, EffectiveCell, NodeKey, ParamSet, PassError};
+use tutti_graph::{DeclaredUnit, EffectiveCell, ErasedPublished, NodeKey, ParamSet, PassError};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
@@ -21,7 +21,7 @@ use super::edit_log::EditLog;
 use super::error::{ValueError, ValueErrorKind};
 use super::gesture::{Deferred, Ending, Gesture};
 use super::saved::SavedValues;
-use super::slot::{self, NodeSlots, SlotCell, SlotId};
+use super::slot::{self, SlotCell, SlotId};
 use super::target::{AnyAssign, AnyTarget};
 use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
 use crate::AppKey;
@@ -351,10 +351,13 @@ impl ValueTable {
         }
     }
 
-    /// Registers the values of a node, from its [`NodeSlots`]. Control
-    /// thread.
-    pub(crate) fn provide_node(&self, slots: NodeSlots) {
-        self.params.lock().slots.extend(slots.0);
+    /// Registers the published values of `node`, from what its parts said of
+    /// it. Control thread.
+    pub(crate) fn provide_node(&self, node: NodeKey, published: &[ErasedPublished]) {
+        self.params
+            .lock()
+            .slots
+            .extend(published.iter().map(|entry| slot::slot_of(node, entry)));
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the

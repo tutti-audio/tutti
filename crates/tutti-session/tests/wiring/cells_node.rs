@@ -2,12 +2,16 @@
 //! through its `NodeParts`: its params are addressed from the parts, a write
 //! through its key reaches the cell the node reads, and a fork starts from the
 //! values set. The node has no `SessionNode` method of its own: its one empty
-//! impl is the admission the session's `add` still asks of every type.
+//! impl is the admission the session's `add` still asks of every type. A
+//! `published` value of such a node is written through its key and lands at
+//! the update, with no session impl of the node's type.
 
 use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
+use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
 use tutti_session::{DetachedSession, MainOutput, Session, SessionNode};
-use tutti_units::{Amplitude, SampleRate};
+use tutti_ump::MidiChannel;
+use tutti_units::{Amplitude, Beat, SampleRate};
 
 /// A source of its `level`, on one channel.
 #[derive(Clone)]
@@ -95,4 +99,125 @@ fn a_cells_node_forks_from_the_values_set() {
     let mut forked = [0.0f32];
     fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(forked, [0.5]);
+}
+
+/// A source of how many events its published `events` hold, on one channel.
+#[derive(Clone)]
+struct Count {
+    cells: CountCells,
+}
+
+declare_params!([] Count, CountConfig, CountCells {
+    published { events: ClipEvents => ClipEvents }
+});
+
+impl From<CountConfig> for Count {
+    fn from(config: CountConfig) -> Self {
+        Self {
+            cells: CountCells::from_config(&config),
+        }
+    }
+}
+
+impl Node for Count {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let events = self.cells.events().lend();
+        io.output(0).fill(events.len() as f32);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f64> {
+        self.declared_base(port)
+    }
+}
+
+impl SessionNode for Count {}
+
+fn events_of(count: u8) -> ClipEvents {
+    (0..count)
+        .map(|n| {
+            let on = tutti_fixtures::midi::note_on(MidiChannel::FIRST, 60 + n, 0xFFFF);
+            TimedMidiEvent::new(Beat::new(f64::from(n)), on).unwrap()
+        })
+        .collect()
+}
+
+fn session_with_count() -> (DetachedSession, tutti_session::Key<Count>, CountCells) {
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build_detached(SampleRate::SR_48K)
+        .expect("builds");
+    let node = Count::from(CountConfig::new());
+    let probe = node.cells.clone();
+    let count = s.graph().add(node);
+    s.graph()
+        .set_sources(MainOutput::channel(0), [count.output(0)])
+        .unwrap()
+        .unfaded();
+    let _ = s.update();
+    (s, count, probe)
+}
+
+/// **A published value written through its key lands at the update and the
+/// node reads it the next block**: the node starts at the value's default,
+/// the write is staged until the update, and the block after it renders the
+/// new value's length.
+#[test]
+fn a_published_value_lands_at_the_update_and_the_next_block_reads_it() {
+    let (mut s, count, _probe) = session_with_count();
+    assert_eq!(frame(&mut s), 0.0, "the default value is empty");
+
+    s.set(count.events().to(events_of(3))).unwrap();
+    assert_eq!(frame(&mut s), 0.0, "a write waits for the update");
+    let _ = s.update();
+    assert_eq!(frame(&mut s), 3.0, "the written value renders next block");
+    assert_eq!(s.get(count.events()).unwrap().len(), 3, "and reads back");
+}
+
+/// **The update's reclaim sweep frees the value a block held across a
+/// replacement**, through the reclaimer the node's parts carry: a reader of
+/// the cell stands in for a block in progress across the publish.
+#[test]
+fn an_update_frees_a_published_value_a_block_held_across_a_replacement() {
+    let (mut s, count, probe) = session_with_count();
+    let mut block = probe.clone();
+    {
+        let _held = block.events().lend();
+        s.set(count.events().to(events_of(1))).unwrap();
+        let _ = s.update();
+    }
+    assert_eq!(
+        probe.clone().events().publisher().retired_len(),
+        1,
+        "the first value is retired while the block holds it"
+    );
+    let _ = s.update();
+    assert_eq!(
+        probe.clone().events().publisher().retired_len(),
+        0,
+        "and the sweep frees it once the block has gone"
+    );
+}
+
+/// **A fork reads the published value as it was set**, and a later write does
+/// not reach it.
+#[test]
+fn a_fork_reads_the_published_value_as_set() {
+    let (mut s, count, _probe) = session_with_count();
+    s.set(count.events().to(events_of(2))).unwrap();
+    let _ = s.update();
+    let mut fork = s
+        .graph_ref()
+        .testing()
+        .fork_live()
+        .expect("a cells node forks");
+    s.set(count.events().to(events_of(5))).unwrap();
+    let _ = s.update();
+    let mut forked = [0.0f32];
+    fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
+    assert_eq!(forked, [2.0]);
 }

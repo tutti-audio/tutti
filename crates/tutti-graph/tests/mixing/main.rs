@@ -12,6 +12,7 @@ mod azimuth_arc;
 mod declared_cells;
 mod declared_cells_config;
 mod declared_cells_entries;
+mod declared_published;
 mod declared_reads;
 mod declared_settings;
 mod edge_fade;

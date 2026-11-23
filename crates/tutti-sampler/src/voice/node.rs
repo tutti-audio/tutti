@@ -27,8 +27,8 @@ use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
-    RenderMode, Shape, Status,
+    Copied, Cx, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io, Node, NodeParts,
+    ParamSet, Prepare, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Param, Publisher, Reader};
 use tutti_units::{Amplitude, PlaybackRate, Tail, UnitParam};
@@ -597,6 +597,10 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             params: handle.params.clone(),
         };
         let params = handle.params().clone();
+        let window = Copied(handle.window.clone());
+        let looping = handle.looping.clone();
+        let direction = handle.direction.clone();
+        let speed = Copied(handle.speed.clone());
         NodeParts::new(
             Box::new(node),
             handle.clone(),
@@ -604,7 +608,27 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             Some(Box::new(handle)),
         )
         .params(params)
+        .published::<Self, { PublishedKind::Window as u16 }>(Arc::new(window))
+        .published::<Self, { PublishedKind::Looping as u16 }>(Arc::new(looping))
+        .published::<Self, { PublishedKind::Direction as u16 }>(Arc::new(direction))
+        .published::<Self, { PublishedKind::Speed as u16 }>(Arc::new(speed))
     }
+}
+
+impl<F: SamplerFloat> HasPublished<{ PublishedKind::Window as u16 }> for VoiceNode<F> {
+    type Value = Option<VoiceWindow>;
+}
+
+impl<F: SamplerFloat> HasPublished<{ PublishedKind::Looping as u16 }> for VoiceNode<F> {
+    type Value = Option<Loop>;
+}
+
+impl<F: SamplerFloat> HasPublished<{ PublishedKind::Direction as u16 }> for VoiceNode<F> {
+    type Value = PlayDirection;
+}
+
+impl<F: SamplerFloat> HasPublished<{ PublishedKind::Speed as u16 }> for VoiceNode<F> {
+    type Value = PlaybackRate;
 }
 
 #[cfg(test)]

@@ -74,6 +74,23 @@ impl<T> ControlCell<T> {
     }
 }
 
+/// A voice's loop or direction, read and written as the value itself: a
+/// publish that differs wakes the streamer of a streamed voice.
+impl<T: Copy + PartialEq + Send + Sync + 'static> tutti_graph::Published for ControlCell<T> {
+    type Value = T;
+
+    fn current(&self) -> T {
+        *Self::current(self)
+    }
+
+    fn replace(&self, value: &T) -> bool {
+        if *Self::current(self) != *value {
+            self.publish(*value);
+        }
+        true
+    }
+}
+
 impl<T> Clone for ControlCell<T> {
     fn clone(&self) -> Self {
         Self {

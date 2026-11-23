@@ -486,10 +486,11 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ForkByClone, HasParam, HasParams, InBus,
-        InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
-        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget,
-        RtValue, SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Copied, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone,
+        HasParam, HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus,
+        OutEvents, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params,
+        Prepare, Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
+        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -551,12 +552,11 @@ pub mod session {
         BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
-        MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
-        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError,
-        Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted, Wire,
-        main_output_width,
+        MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
+        OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SessionNode,
+        SetRateError, SetSources, Taps, TimelineView, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
