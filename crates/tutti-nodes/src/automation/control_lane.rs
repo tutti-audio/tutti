@@ -35,7 +35,8 @@ enum RangeSource {
     /// clamps, the lane reads the span.
     Port(ParamRangeCell),
     /// The lane's own cell (a plugin parameter): the span, and the clamp.
-    Own(Publisher<ParamRange>),
+    /// Its [`ForeignLaneControls`] hold the same cell, and are its one writer.
+    Own(Arc<Publisher<ParamRange>>),
     /// None: an unranged target takes no modulation.
     None,
 }
@@ -124,8 +125,10 @@ impl LaneProbe {
 }
 
 /// The handles a [`ControlLaneNode`]'s owner keeps: the program it
-/// evaluates, its knob, its range (a plugin lane's), and its counters.
-/// Cheap to clone; every clone reaches the same lane.
+/// evaluates, its knob, and its counters. Cheap to clone; every clone reaches
+/// the same lane. A plugin lane's range is set through its
+/// [`ForeignLaneControls`]; a built-in parameter's is its port's
+/// (`Editor::set_param_range`).
 #[derive(Clone, Debug)]
 pub struct LaneControls(Arc<Shared>);
 
@@ -205,19 +208,6 @@ impl LaneControls {
     /// The knob now, if the lane has one.
     pub fn value(&self) -> Option<f64> {
         self.0.knob.as_ref().map(|k| k.load(Ordering::Acquire))
-    }
-
-    /// Sets a plugin lane's range: the span its offsets scale by and the
-    /// clamp, from the next block. `false` for a native lane, whose range is
-    /// its port's (`Editor::set_param_range`), and for an unranged one.
-    pub(crate) fn set_range(&self, range: ParamRange) -> bool {
-        match &self.0.range {
-            RangeSource::Own(c) => {
-                c.publish(range);
-                true
-            }
-            _ => false,
-        }
     }
 
     /// The range the lane reads, `(min, max)`; unbounded when it has none.
@@ -379,6 +369,30 @@ fn fresh_seen() -> Seen {
     }
 }
 
+/// The controls of a lane for a foreign unit's parameter, from
+/// [`ForeignLaneConfig::build`]: its [`LaneControls`] and the range it owns.
+/// Cheap to clone; every clone reaches the same lane.
+#[derive(Clone, Debug)]
+pub struct ForeignLaneControls {
+    lane: LaneControls,
+    range: Arc<Publisher<ParamRange>>,
+}
+
+impl ForeignLaneControls {
+    /// The lane's program, knob and counters.
+    #[must_use]
+    pub fn lane(&self) -> &LaneControls {
+        &self.lane
+    }
+
+    /// Sets the lane's range, the span its offsets scale by and the clamp,
+    /// from the next block. Control thread; the value it replaces is freed
+    /// by the lane's [`reclaim`](LaneControls::reclaim).
+    pub fn set_range(&self, range: ParamRange) {
+        self.range.publish(range);
+    }
+}
+
 /// What a [`ControlLaneNode`] for a built-in parameter is made from: the parameter, its
 /// program, and the cells of the target it reads.
 ///
@@ -471,21 +485,28 @@ impl ForeignLaneConfig {
         self.knob = Some(knob);
         self
     }
-}
 
-impl From<ForeignLaneConfig> for ControlLaneNode {
-    fn from(config: ForeignLaneConfig) -> Self {
-        let id = config.id;
-        Self::build(
-            Arc::new(config.program),
-            config.knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
-            RangeSource::Own(Publisher::new(config.range)),
+    /// The lane, and the controls that set its range: the one way to build
+    /// a lane for a foreign parameter.
+    #[must_use]
+    pub fn build(self) -> (ControlLaneNode, ForeignLaneControls) {
+        let id = self.id;
+        let range = Arc::new(Publisher::new(self.range));
+        let node = ControlLaneNode::build(
+            Arc::new(self.program),
+            self.knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
+            RangeSource::Own(Arc::clone(&range)),
             None,
             Arc::new(move |from, to, shape| {
                 ParamSegment::by_id(id, from, to, Samples::new(0)).law(shape)
             }),
             false,
-        )
+        );
+        let controls = ForeignLaneControls {
+            lane: node.controls(),
+            range,
+        };
+        (node, controls)
     }
 }
 
@@ -559,7 +580,7 @@ impl ControlLaneNode {
         let knob = s.knob.as_ref().map(ParamCell::detached);
         let range = match &s.range {
             RangeSource::None => RangeSource::None,
-            r => RangeSource::Own(Publisher::new(r.current())),
+            r => RangeSource::Own(Arc::new(Publisher::new(r.current()))),
         };
         Self::build(program, knob, range, s.unit, Arc::clone(make), native)
     }
@@ -1302,16 +1323,16 @@ mod tests {
         assert_eq!(exact_span(max / 2.0 + 10.0, max / 2.0 + 10.0), None);
     }
 
+    fn foreign(range: ParamRange) -> (ControlLaneNode, ForeignLaneControls) {
+        ForeignLaneConfig::new(ParamId::new(0), ControlProgram::default(), range).build()
+    }
+
     /// **A program a block still held when the lane was republished is freed
     /// by the next `reclaim`**, with no further publish.
     #[test]
     fn reclaim_frees_a_program_a_block_held_across_its_replacement() {
-        let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
-            ParamId::new(0),
-            ControlProgram::default(),
-            ParamRange::of(0.0, 1.0),
-        ));
-        let controls = node.controls();
+        let (mut node, foreign) = foreign(ParamRange::of(0.0, 1.0));
+        let controls = foreign.lane();
         let first = program();
         let gone = Arc::downgrade(&first);
         controls.publish_arc(first);
@@ -1329,50 +1350,40 @@ mod tests {
     /// by the lane's next `reclaim`**, with no further set.
     #[test]
     fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
-        let mut node = ControlLaneNode::from(ForeignLaneConfig::new(
-            ParamId::new(0),
-            ControlProgram::default(),
-            ParamRange::of(0.0, 1.0),
-        ));
-        let controls = node.controls();
-        let RangeSource::Own(cell) = &controls.0.range else {
-            panic!("a plugin lane owns its range cell");
-        };
+        let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
         {
             // A block in progress across the range change.
             let RangeReader::Own(reader) = &mut node.range else {
                 panic!("a plugin lane reads its own cell");
             };
             let _held = reader.lend();
-            assert!(controls.set_range(ParamRange::of(0.25, 0.75)));
+            controls.set_range(ParamRange::of(0.25, 0.75));
         }
-        assert_eq!(cell.retired_len(), 1, "retired, pinned until a scan");
-        assert_eq!(controls.reclaim(), 0);
-        assert_eq!(cell.retired_len(), 0, "freed by the lane's reclaim");
+        assert_eq!(
+            controls.range.retired_len(),
+            1,
+            "retired, pinned until a scan"
+        );
+        assert_eq!(controls.lane().reclaim(), 0);
+        assert_eq!(
+            controls.range.retired_len(),
+            0,
+            "freed by the lane's reclaim"
+        );
     }
 
-    /// A plugin lane's range is its own cell, set from the next block; an
-    /// unranged lane (and a native one, whose range is its port's) refuses it.
+    /// **A plugin lane reads the range its controls set**, from its next
+    /// block; **its fork reads the range at the fork**, and a later set does
+    /// not reach the fork.
     #[test]
-    fn set_range_is_a_plugin_lanes_own() {
-        let plugin = ControlLaneNode::from(
-            ForeignLaneConfig::new(
-                ParamId::new(1),
-                ControlProgram::default(),
-                ParamRange::of(0.0, 1.0),
-            )
-            .knob(0.25),
-        );
-        let c = plugin.controls();
-        assert!(c.set_range(ParamRange::of(0.1, 0.9)));
-        assert_eq!(c.range(), (0.1, 0.9));
-        let unranged = ControlLaneNode::from(UnitLaneConfig::new(
-            tutti_units::UnitAddr::first(tutti_units::UnitParam::Cutoff),
-            ControlProgram::default(),
-        ));
-        assert!(
-            !unranged.controls().set_range(ParamRange::of(0.0, 1.0)),
-            "no range cell to set"
-        );
+    fn a_plugin_lane_and_its_fork_read_the_range_set_before_them() {
+        let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
+        controls.set_range(ParamRange::of(0.1, 0.9));
+        assert_eq!(node.range.load(), ParamRange::of(0.1, 0.9));
+        assert_eq!(controls.lane().range(), (0.1, 0.9));
+        let mut fork = node.fork_fresh();
+        controls.set_range(ParamRange::of(0.2, 0.3));
+        assert_eq!(node.range.load(), ParamRange::of(0.2, 0.3));
+        assert_eq!(fork.range.load(), ParamRange::of(0.1, 0.9));
     }
 }

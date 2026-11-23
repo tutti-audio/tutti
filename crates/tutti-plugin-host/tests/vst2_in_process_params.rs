@@ -33,7 +33,7 @@ use tutti_graph::{
     TransportPosition,
 };
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig};
+use tutti_nodes::automation::ForeignLaneConfig;
 use tutti_plugin_host::PluginHandle;
 #[path = "support/param_reads.rs"]
 mod param_reads;
@@ -232,14 +232,14 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
     let _env = ProbeEnv::new().params(4).state_dc();
     let (client, handle) = load();
     // A host's knob for VST2 parameter 0, held still.
-    let held = ControlLaneNode::from(
-        ForeignLaneConfig::new(
-            ParamId::new(0),
-            ControlProgram::default(),
-            ParamRange::of(0.0, 1.0),
-        )
-        .knob(0.25),
-    );
+    let held = ForeignLaneConfig::new(
+        ParamId::new(0),
+        ControlProgram::default(),
+        ParamRange::of(0.0, 1.0),
+    )
+    .knob(0.25)
+    .build()
+    .0;
 
     let stereo = ChannelLayout::from_count(2);
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, stereo);

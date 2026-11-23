@@ -29,7 +29,9 @@ use tutti_modulation::{
 use tutti_rt::{Param, ParamCell};
 use tutti_units::{At, Bipolar, ParamAddr, ParamId};
 
-use crate::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
+use crate::automation::{
+    ControlLaneNode, ForeignLaneConfig, ForeignLaneControls, LaneControls, UnitLaneConfig,
+};
 use crate::signal::{
     EnvelopeFollowerConfig, EnvelopeFollowerNode, NoteEnvelopeConfig, NoteEnvelopeNode,
 };
@@ -336,6 +338,22 @@ impl Bind {
     }
 }
 
+/// A lane's controls: a plugin lane's also set the range it owns.
+#[derive(Debug)]
+enum Controls {
+    Unit(LaneControls),
+    Foreign(ForeignLaneControls),
+}
+
+impl Controls {
+    fn lane(&self) -> &LaneControls {
+        match self {
+            Self::Unit(c) => c,
+            Self::Foreign(c) => c.lane(),
+        }
+    }
+}
+
 /// A target's lane as built.
 #[derive(Debug)]
 struct Lane {
@@ -343,7 +361,7 @@ struct Lane {
     /// The lane node's generation at its insert: another means a host
     /// replaced (or removed) it at its key.
     generation: u32,
-    controls: LaneControls,
+    controls: Controls,
     bind: Bind,
     /// The program last published to it.
     program: ControlProgram,
@@ -676,10 +694,10 @@ impl Modulation {
         Self::default()
     }
 
-    /// `target`'s lane: its node key and its controls (a plugin lane's knob
-    /// and range, the counters). `None` while it has none.
+    /// `target`'s lane: its node key and its controls (a plugin lane's knob,
+    /// the counters). `None` while it has none.
     pub fn lane(&self, target: TargetKey) -> Option<(NodeKey, &LaneControls)> {
-        self.lanes.get(&target).map(|l| (l.key, &l.controls))
+        self.lanes.get(&target).map(|l| (l.key, l.controls.lane()))
     }
 
     /// Frees, on this thread, the programs every lane has let go of since
@@ -691,7 +709,7 @@ impl Modulation {
     pub fn reclaim(&self) -> usize {
         self.lanes
             .values()
-            .map(|lane| lane.controls.reclaim())
+            .map(|lane| lane.controls.lane().reclaim())
             .sum()
     }
 
@@ -1038,7 +1056,7 @@ impl Modulation {
                 // them), so a note envelope among them owes a resync.
                 owe_resyncs(&mut self.resync, &compiled, Some(&lane.program), program);
                 if lane.program != *program {
-                    lane.controls.publish(program.clone());
+                    lane.controls.lane().publish(program.clone());
                     lane.program = program.clone();
                     applied.republished.push(target);
                 }
@@ -1066,7 +1084,7 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_param(*at, EventOutputPort::new(key, 0));
-                    controls
+                    Controls::Unit(controls)
                 }
                 Bind::Edge { id, cells } => {
                     editor
@@ -1082,7 +1100,7 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_edge_gain(*id, EventOutputPort::new(key, 0));
-                    controls
+                    Controls::Unit(controls)
                 }
                 Bind::Mix { at, knob, range } => {
                     editor
@@ -1097,19 +1115,19 @@ impl Modulation {
                     editor
                         .spec_mut()
                         .connect_param(*at, EventOutputPort::new(key, 0));
-                    controls
+                    Controls::Unit(controls)
                 }
                 Bind::Foreign { to, id, knob, .. } => {
                     let mut config = ForeignLaneConfig::new(*id, program.clone(), bounds);
                     if let Some(knob) = *knob {
                         config = config.knob(knob);
                     }
-                    let node = ControlLaneNode::from(config);
-                    let controls = editor.insert(key, "control-lane", node).controls;
+                    let (node, controls) = config.build();
+                    editor.insert(key, "control-lane", node);
                     editor
                         .spec_mut()
                         .connect_events(*to, EventEdge::Direct(EventOutputPort::new(key, 0)));
-                    controls
+                    Controls::Foreign(controls)
                 }
             };
             self.lanes.insert(
@@ -1518,9 +1536,13 @@ fn declared_range(min: f64, max: f64) -> ParamRange {
 fn store_range<F: Float>(
     editor: &mut Editor<F>,
     bind: &Bind,
-    controls: &LaneControls,
+    controls: &Controls,
     range: ParamRange,
 ) {
+    if let Controls::Foreign(c) = controls {
+        c.set_range(range);
+        return;
+    }
     match bind {
         Bind::Native { at, .. } | Bind::Mix { at, .. } => {
             editor
@@ -1533,7 +1555,7 @@ fn store_range<F: Float>(
                 .expect("checked: the edge");
         }
         Bind::Foreign { .. } => {
-            controls.set_range(range);
+            unreachable!("a plugin target's lane is built with ForeignLaneControls")
         }
     }
 }

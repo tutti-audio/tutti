@@ -339,7 +339,7 @@ pub mod nodes {
     /// and `*Controls` handle, and the `HasControl` and `Control*` traits that connect
     /// them. An application that only inserts nodes does not name these.
     pub mod kernel {
-        pub use tutti_nodes::automation::LaneControls;
+        pub use tutti_nodes::automation::{ForeignLaneControls, LaneControls};
         pub use tutti_nodes::{
             AdditiveKernel, AdditiveSet, AmbisonicDecoderKernel, AmbisonicDecoderSet,
             AmbisonicEncoderKernel, AmbisonicRotatorKernel, AutoPanControls, AutoPanKernel,
