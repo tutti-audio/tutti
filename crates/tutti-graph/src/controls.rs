@@ -369,6 +369,7 @@ impl<F: Float, N: ParamNode<F> + Clone> IntoNode<F> for Params<N> {
 mod tests {
     use super::*;
     use tutti_rt::Param;
+    use tutti_units::{Hz, Q};
 
     /// **A declared unit is equal to another declaration of the same unit and
     /// to no other unit.**
@@ -380,7 +381,6 @@ mod tests {
             DeclaredUnit::of::<tutti_units::Seconds>()
         );
     }
-    use tutti_units::{Hz, Q};
 
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {
         let cutoff = Param::new(Hz::new(1000.0));

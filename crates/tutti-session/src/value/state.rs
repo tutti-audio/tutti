@@ -236,7 +236,8 @@ impl ValueTable {
     /// Addresses `node`'s params, replacing any it had, and seeds each from
     /// the `outgoing` node's value at the same address, under the value lock
     /// and through the cells alone: no write reaches the feed, so no watcher
-    /// and no edit-log mark sees it. Control thread.
+    /// and no edit-log mark sees it. A carried value equals the one the last
+    /// mark's saved values hold for that address. Control thread.
     ///
     /// An address takes the outgoing node's value when both nodes declare it
     /// in one unit, both declared it at the same value, and the value is one
