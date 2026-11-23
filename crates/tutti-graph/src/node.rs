@@ -18,6 +18,7 @@
 //!   pipeline latency constant.
 
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
@@ -39,6 +40,8 @@ use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_buffers::Float;
 use tutti_rt::Reclaim;
+
+use crate::published::{ErasedPublished, HasPublished, Published, PublishedKind};
 use tutti_units::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
@@ -1824,6 +1827,9 @@ pub struct NodeParts<C, F: Float = f32> {
     /// What frees the values the node's published cells retired; `None` for a
     /// node that publishes nothing.
     pub reclaimer: Option<Box<dyn Reclaim + Send>>,
+    /// The node's published values, one per cell, each under its kind; empty
+    /// for a node that publishes nothing.
+    pub published: Vec<ErasedPublished>,
 }
 
 impl<C, F: Float> NodeParts<C, F> {
@@ -1855,6 +1861,7 @@ impl<C, F: Float> NodeParts<C, F> {
             fork,
             params: None,
             reclaimer,
+            published: Vec::new(),
         }
     }
 
@@ -1863,6 +1870,19 @@ impl<C, F: Float> NodeParts<C, F> {
     #[must_use]
     pub fn params(mut self, params: ParamSet) -> Self {
         self.params = Some(params);
+        self
+    }
+
+    /// The node's published value of the kind `K`, read and replaced through
+    /// `cell`, whose value is `K::Value`. `N` is the node that declares the
+    /// kind ([`HasPublished`]). The cell's publisher belongs in the node's
+    /// reclaimer too.
+    #[must_use]
+    pub fn published<N: HasPublished<K>, K: PublishedKind>(
+        mut self,
+        cell: Arc<dyn Published<Value = K::Value>>,
+    ) -> Self {
+        self.published.push(ErasedPublished::new::<K>(cell));
         self
     }
 }

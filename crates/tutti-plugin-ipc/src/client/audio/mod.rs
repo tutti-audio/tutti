@@ -1241,6 +1241,17 @@ impl AudioBridge {
         answer.unwrap_or(tutti_plugin_types::MidiMapApplied::Host)
     }
 
+    /// The server plugin's wiring as it reads now, or `None` when it is gone or
+    /// does not answer in time.
+    pub(crate) fn wiring(&self) -> Option<tutti_plugin_types::PluginWiring> {
+        if self.lifecycle.is_crashed() {
+            return None;
+        }
+        let wait = self.lifecycle.timeouts().param_wait();
+        let ask = self.request(wait, |reply| ControlCommand::GetWiring { reply })?;
+        await_reply(ask, wait).ok().flatten()
+    }
+
     /// Arms or disarms the server plugin's own MIDI learn; the plugin's refusal,
     /// or [`Lost`](tutti_plugin_types::PluginLearnError::Lost) when it is gone or
     /// does not answer in time.

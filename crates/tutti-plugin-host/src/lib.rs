@@ -30,6 +30,7 @@ mod fork_state;
 mod in_process_erased;
 mod listeners;
 mod liveness;
+mod midi_map;
 mod node;
 mod node_losses;
 mod param_delivery;
@@ -55,6 +56,7 @@ pub use listeners::{
     TransportSink,
 };
 pub use liveness::{Liveness, LivenessVerdict};
+pub use midi_map::MidiMapSlot;
 pub use node::{
     ClientOverError, InProcessClient, LoadClientError, Pending, PluginNode, RebindError, Rebinder,
     Settlement, WidthError, client_over, load_client, load_client_restoring,

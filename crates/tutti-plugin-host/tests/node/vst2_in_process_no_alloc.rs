@@ -243,3 +243,59 @@ fn an_idle_pump_does_not_allocate() {
     });
     drop((unit, handle));
 }
+
+/// **The controller map's audio path does not allocate**: mapped Control
+/// Changes become parameter points, a table the app publishes between blocks
+/// is lent and the retired one let go on the control side, and a block still
+/// renders without an allocation.
+#[test]
+fn process_with_a_mapped_controller_does_not_allocate() {
+    use tutti_plugin_types::{MidiAssignment, MidiSource};
+    use tutti_ump::CCNumber;
+
+    let _lock = PLUGIN_LOAD_LOCK.lock();
+    let (unit, handle) = tutti_plugin_host::load_client::<Vst2Loaded, f32>(
+        main_thread(),
+        &tutti_fixtures::pumped_work(),
+        &tutti_plugin_types::PluginRef::file(tutti_fixtures::vst2_probe()),
+        SampleRate::SR_48K,
+    )
+    .expect("load failed");
+    let main = main_thread();
+    let entry = |param: u32| MidiAssignment {
+        channel: None,
+        source: MidiSource::ControlChange(U7::of(1)),
+        param: ParamId::new(param),
+    };
+    handle.set_app_midi_map(main, &[entry(1)]);
+    let mut unit = Direct::new(unit.bind(tutti_fixtures::tempo()), SampleRate::SR_48K, 64);
+    let unit_in = unit
+        .node
+        .shape()
+        .event_input(0)
+        .expect("the node declares an event input");
+    for _ in 0..32 {
+        unit.block();
+    }
+    let controller = |i: u32| {
+        at_start(midi::cc(
+            MidiChannel::of(0),
+            CCNumber::MOD_WHEEL,
+            i.wrapping_mul(0x0101_0101),
+        ))
+    };
+    // Warm the point path (the first point of a parameter opens its queue).
+    for i in 0..4 {
+        unit.events(unit_in, &[controller(i)]);
+        unit.block();
+    }
+    for i in 0..256 {
+        if i % 64 == 0 {
+            // A control-side publish between blocks: allocates there, not in a block.
+            handle.set_app_midi_map(main, &[entry(1)]);
+        }
+        unit.events(unit_in, &[controller(i)]);
+        unit.block();
+    }
+    drop(handle);
+}

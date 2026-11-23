@@ -139,6 +139,7 @@ impl Control for Vst2Loaded {
             // confirm a write of `effSetBypass`: the executor's bypass serves it.
             own_bypass: None,
             assignments: Vec::new(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
             // The current program's names on channel 0, for every channel: the
             // opcode names a key of a program and takes the channel as a scope
             // plugins do not distinguish.

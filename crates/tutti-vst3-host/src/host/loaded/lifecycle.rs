@@ -1,7 +1,7 @@
 //! Loading, initialization and the plugin's requests and notifications.
 
 use super::*;
-use crate::host::midi_mapping::{MidiCcMapping, declared_assignments, scan};
+use crate::host::midi_mapping::{declared_assignments, scan};
 use tutti_plugin_types::{
     MainThreadMarker, MainWorkHandle, PluginId, PluginRef, PluginVersion, Uid,
 };
@@ -166,7 +166,6 @@ impl Vst3Loaded {
             active: Activation::default(),
             carried: Vec::new(),
             declared: None,
-            midi_cc: Publisher::new(MidiCcCell(MidiCcMapping::empty())),
             assignments: Vec::new(),
             dropped_seen: 0,
         }
@@ -403,16 +402,12 @@ impl Vst3Loaded {
     }
 
     /// Re-queries the `IMidiMapping` CC to parameter table from the controller
-    /// and publishes it, and keeps the assignments it declares for
-    /// [`wiring`](tutti_plugin_types::Control::wiring), so the Processor routes against it from its next
-    /// block. Call it when the plugin raised
+    /// and keeps the assignments it declares for
+    /// [`wiring`](tutti_plugin_types::Control::wiring), which the plugin node
+    /// translates by. Call it when the plugin raised
     /// [`Request::MidiCcAssignmentChanged`](tutti_plugin_types::Request::MidiCcAssignmentChanged). Allocates.
     pub(crate) fn rebuild_midi_cc_mapping(&mut self, main: MainThreadMarker) {
-        let slots = scan(main, &self.plugin);
-        self.midi_cc
-            .publish(MidiCcCell(MidiCcMapping::from_slots(&slots)));
-        self.midi_cc.reclaim();
-        self.assignments = declared_assignments(&slots);
+        self.assignments = declared_assignments(&scan(main, &self.plugin));
     }
 }
 

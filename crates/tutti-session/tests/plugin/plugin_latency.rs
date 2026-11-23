@@ -33,10 +33,8 @@ use tutti_units::{SampleRate, Samples};
 const RATE: SampleRate = SampleRate::SR_48K;
 const BLOCK: usize = 1_024;
 
-/// SAFETY: nextest runs each test in its own process, and the server's path
-/// is set before the first server is spawned, from the test's own thread.
 fn set_server() {
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
 }
 
 /// An offline stereo session at 48 kHz whose block is the plugin's pipeline
@@ -168,8 +166,7 @@ fn request() -> Bounce<tutti_graph::NodeKey, BufferMainOutput> {
 fn a_latency_the_plugin_reports_reaches_the_graph() {
     // The plugin's file is probed before its variables are set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    // SAFETY: as `set_server`: before the first server, from the test's thread.
-    unsafe { std::env::set_var("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300") };
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY", "300");
     let mut s = offline();
     let node = add_probe_on_outputs(&mut s);
     let own = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
@@ -227,13 +224,10 @@ fn a_swapped_in_plugins_latency_is_the_incoming_ones() {
     const OWN: usize = tutti_clap_test_plugin::REPORTED_LATENCY_SAMPLES as usize;
     // The plugin's file is probed before its variables are set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    // SAFETY: as `set_server`: before the first server, from the test's thread.
-    unsafe {
-        std::env::set_var(
-            "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
-            OFFLINE_EXTRA.to_string(),
-        );
-    }
+    tutti_fixtures::set_env(
+        "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
+        OFFLINE_EXTRA.to_string(),
+    );
     // Tells `handle`'s plugin a render mode and waits for the latency it announces.
     fn told(handle: &tutti_plugin_host::PluginHandle, mode: tutti_plugin_types::RenderMode) {
         let (reported, heard) = std::sync::mpsc::channel();

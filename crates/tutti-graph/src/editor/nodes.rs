@@ -53,6 +53,7 @@ impl<F: Float> Editor<F> {
             // The editor places a unit; a session reads these before it does.
             params: _,
             reclaimer: _,
+            published: _,
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -184,6 +185,7 @@ impl<F: Float> Editor<F> {
             // The editor places a unit; a session reads these before it does.
             params: _,
             reclaimer: _,
+            published: _,
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());
@@ -263,6 +265,7 @@ impl<F: Float> Editor<F> {
             // The editor places a unit; a session reads these before it does.
             params: _,
             reclaimer: _,
+            published: _,
         } = node.into_parts();
         let wake = Wake::new();
         unit.bind_wake(wake.clone());

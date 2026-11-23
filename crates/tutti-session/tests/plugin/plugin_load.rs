@@ -51,14 +51,11 @@ fn catalog() -> (Catalog, tempfile::TempDir) {
 
 /// An offline session whose served plugins render their closed-form tags
 /// (`TagOnly`: output channel `c` of port `p` holds `probe_tag(p, c)`).
-///
-/// SAFETY: nextest runs each test in its own process, and the variables are
-/// set before the first server is spawned, from the test's own thread.
 fn session() -> Session {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| unsafe {
-        std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-        std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
+    ONCE.call_once(|| {
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
     });
     Session::builder()
         .max_block(MaxBlock::of(Samples::new(BLOCK)))

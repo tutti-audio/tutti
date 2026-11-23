@@ -109,7 +109,7 @@ use tutti_rt::Mutex;
 use super::client::{PluginNode, RateDelivery, TransportFeed};
 use super::instance::Instance;
 use super::loader::load_client_restoring;
-use crate::{DeliveryCounters, ForkState};
+use crate::{DeliveryCounters, ForkState, MidiMapSlot};
 use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::StateError;
 
@@ -120,6 +120,8 @@ pub(super) struct Fork<L: InProcess, F: Float> {
     /// node and handle on it is gone, a fork answers
     /// [`PluginForkError::LiveGone`].
     live: Weak<Mutex<Instance<L>>>,
+    /// The live node's controller map, whose app entries the fork carries.
+    midi_map: MidiMapSlot,
     /// Where the live instance came from: the file and the plugin in it, which
     /// the second instance loads again.
     origin: PluginRef,
@@ -161,6 +163,7 @@ where
         Some(Self {
             tempo: bound.tempo.clone(),
             live: Arc::downgrade(&client.inner),
+            midi_map: client.midi_map(),
             origin: reload.origin.clone(),
             work: reload.work.clone(),
             sample_rate: client.sample_rate,
@@ -253,6 +256,16 @@ where
             },
             Some(&mut fork.rt),
         );
+
+        // The app's controller entries, which the fork's plugin and node take
+        // as the live ones did.
+        if let Some(app) = self.midi_map.app() {
+            let mut instance = fork.inner.lock();
+            let slot = instance.midi_map();
+            if let Some(control) = instance.control() {
+                slot.hand_app(&app, |app| control.set_app_midi_map(main, app));
+            }
+        }
 
         fork.params.seed(&delivered);
         fork.transport = self.transport.forked(offline);

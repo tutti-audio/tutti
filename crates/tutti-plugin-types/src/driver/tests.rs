@@ -668,8 +668,8 @@ fn writes_before_a_block_arrive_as_the_latest_value_per_parameter() {
     );
 }
 
-/// **A VST3 mapping change reaches the plugin as one rebuild, and a
-/// note-expression change as one notice.**
+/// **A VST3 mapping change reaches the plugin as one rebuild and is told to
+/// the host once, and a note-expression change is one notice.**
 #[test]
 fn a_mapping_change_rebuilds_the_mapping_once() {
     let mut rig = Rig::new();
@@ -683,7 +683,7 @@ fn a_mapping_change_rebuilds_the_mapping_once() {
     assert_eq!(rig.plugin.calls(), [Call::RebuildMidiMapping]);
     assert!(matches!(
         rig.take_notices().as_slice(),
-        [Notice::NoteExpressionChanged]
+        [Notice::MidiMapChanged, Notice::NoteExpressionChanged]
     ));
 }
 

@@ -278,6 +278,7 @@ impl Control for Vst3Loaded {
             probed: probed::VST3,
             own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
             assignments: self.assignments.clone(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
             note_names: self.declared_note_names(main),
             param_groups: super::loaded::unit_groups(&self.units(main)),
         }
