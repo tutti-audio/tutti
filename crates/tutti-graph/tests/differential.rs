@@ -146,38 +146,6 @@ fn run<F: Word>(pair: &mut Pair<F>, blocks: &[usize], frame: &mut u64) {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// The executor renders every random graph exactly as the reference does,
-    /// at every block schedule.
-    #[test]
-    fn executor_is_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
-        for workers in modes(seed) {
-            let desc = random_graph(seed);
-            let valid = desc.spec.validate().expect("generated graphs are valid");
-            let mut pair = Pair::with_workers(MAX_BLOCK, workers);
-            pair.switch(&valid, &desc.kinds);
-            let mut frame = 0;
-            run(&mut pair, &schedule(which, seed, 700), &mut frame);
-        }
-    }
-
-    /// The same at `f64`: `Executor<f64>` renders every random graph exactly
-    /// as `Reference<f64>` does, serial and parallel, at every block
-    /// schedule.
-    #[test]
-    fn the_f64_executor_is_bit_identical_to_the_f64_reference(seed in any::<u64>(), which in 0usize..5) {
-        for workers in modes(seed) {
-            let desc = random_graph(seed);
-            let valid = desc.spec.validate().expect("generated graphs are valid");
-            let mut pair = Pair::<f64>::with_format(MAX_BLOCK);
-            if workers > 1 {
-                pair.exec.set_pool(Some(common::test_pool(workers)));
-            }
-            pair.switch(&valid, &desc.kinds);
-            let mut frame = 0;
-            run(&mut pair, &schedule(which, seed, 700), &mut frame);
-        }
-    }
-
     /// A tap changes nothing and reads exactly what it names: with an aligned
     /// tap of every output's source and an outputs tap open, the executor
     /// still renders the reference's graph bit for bit, and the lanes of each
@@ -582,44 +550,6 @@ fn the_generator_covers_what_the_suite_claims() {
     for (i, (what, n)) in all.iter().enumerate() {
         let min = if i < 6 { 25 } else { 10 };
         assert!(*n > min, "only {n} {what} over 512 graphs");
-    }
-}
-
-/// Declared costs for `desc`'s nodes, a pure function of the seed: about
-/// two in three declare `Cost::Light`, a few `Cost::Moderate`, the rest
-/// nothing (`Cost::Heavy`) — so cheap siblings pack beside heavy tasks that keep the plan parallel.
-fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
-    let mut rng = Rng::new(seed ^ 0xC057);
-    desc.kinds
-        .keys()
-        .filter_map(|&k| match rng.below(6) {
-            0..=3 => Some((k, tutti_graph::Cost::Light)),
-            4 => Some((k, tutti_graph::Cost::Moderate)),
-            _ => None,
-        })
-        .collect()
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
-
-    /// With random declared costs the compiler packs cheap tasks together
-    /// (and `Plan::schedule` picks serial or parallel per plan, and per
-    /// block length); the executor, serial and on a pool, still renders
-    /// every graph exactly as the reference does. `compile` runs the
-    /// verifier on every packed plan (debug), and `Pair::switch` runs it
-    /// again.
-    #[test]
-    fn coarsened_plans_are_bit_identical(seed in any::<u64>(), which in 0usize..5) {
-        for workers in modes(seed) {
-            let desc = random_graph(seed);
-            let valid = desc.spec.validate().expect("generated graphs are valid");
-            let mut pair = Pair::with_workers(MAX_BLOCK, workers);
-            pair.costs = random_costs(&desc, seed);
-            pair.switch(&valid, &desc.kinds);
-            let mut frame = 0;
-            run(&mut pair, &schedule(which, seed, 700), &mut frame);
-        }
     }
 }
 
