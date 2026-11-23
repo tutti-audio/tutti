@@ -193,7 +193,7 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
             // A width with no topology has no placement.
             let placed = file.channel_set().topology().is_some_and(|topology| {
                 tutti_measure::Measure::<f32>::measure(
-                    &tutti_measure::LoudnessConfig::new(topology.clone()),
+                    &tutti_measure::LoudnessConfig::new(*topology),
                     tutti_units::SampleRate::SR_48K,
                 )
                 .is_ok()

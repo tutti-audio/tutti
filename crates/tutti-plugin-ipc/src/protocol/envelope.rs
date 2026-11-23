@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::message::{Answered, Message, Unanswered};
+use super::message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
 use crate::{BlobWire, LaneWire, SlabWire};
@@ -319,7 +319,7 @@ messages! {
         /// What the frame carries of the object, as for
         /// [`ControlRequest::LoadState`].
         blob: BlobWire,
-    };
+    } => Result<SavedState, ServerError>;
     /// Restore a plugin state, which follows this frame as a memory object of its
     /// own (`send_attached` writes both, and the server's transport reads both
     /// before this reaches its session), answered by
@@ -367,7 +367,7 @@ messages! {
     /// The subprocess mapped the shared-memory slab and is ready to process.
     SharedMemoryReady;
     /// Ask the subprocess to exit cleanly.
-    Shutdown;
+    Shutdown => Stop;
     /// Tell the plugin whether it is rendering under realtime pressure.
     ///
     /// A sibling of [`SetSampleRate`](ControlRequest::SetSampleRate) rather than a field

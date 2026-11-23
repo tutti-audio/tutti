@@ -39,10 +39,8 @@ fn a_wave_wider_than_a_topology_has_none_and_round_trips() {
     let mut bytes = Vec::new();
     write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float32)).unwrap();
     let back = read_wave::<f32>(bytes).unwrap();
-    assert_eq!(back.layout(), wave.layout());
-    for c in 0..wave.channels() {
-        assert_eq!(back.channel(c), wave.channel(c), "channel {c}");
-    }
+    assert_eq!(back, wave);
+    assert_eq!((back.layout().count(), back.topology()), (17, None));
 }
 
 /// Writing a wave and reading the file back gives the same samples, rate and

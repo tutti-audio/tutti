@@ -217,7 +217,7 @@ impl<F: Float + Lerp> PhaserChain<F> {
     /// build it on the control side.
     #[must_use]
     pub fn new(stages: Stages, bus: BusTopology) -> Self {
-        let width = usize::from(bus.layout().count());
+        let width = usize::from(bus.width().count());
         Self {
             stages,
             width,

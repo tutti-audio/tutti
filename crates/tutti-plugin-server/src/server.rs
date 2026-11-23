@@ -7,7 +7,7 @@
 
 use crate::main_loop::{HostEnd, LaneEnd};
 use crate::render::{NotHome, RenderSide, RenderThread};
-use crate::session::{Reaction, Session};
+use crate::session::Session;
 use crate::transport::Pulser;
 use crate::transport::{ControlTransport, Incoming, SocketTransport, Transport};
 use std::sync::Arc;
@@ -16,7 +16,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tutti_platform::{Executor, Task, Unjoined, join_within};
 use tutti_plugin_ipc::{
-    ControlFrame, ControlReply, ControlRequest, PROTOCOL_VERSION, ReqId, Request, Working,
+    ControlFrame, ControlReply, ControlRequest, PROTOCOL_VERSION, Reaction, ReqId, Request, Working,
 };
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::{IpcError, IpcResult};
@@ -350,38 +350,20 @@ impl PluginServer {
     fn handshake_phase(&mut self, transport: &mut ControlTransport) -> IpcResult<Handshake> {
         loop {
             let (id, reaction) = match transport.recv() {
-                Ok(Incoming::Request(Request { id, body })) => {
-                    let reaction = if matches!(body, ControlRequest::LoadPlugin { .. }) {
-                        self.load_working(transport, id, body)?
-                    } else if matches!(body, ControlRequest::SaveState { .. }) {
-                        working(&self.executor, transport, id, false, || {
-                            self.session.handle_with(self.main, body, &mut |_| {})
-                        })?
-                    } else {
-                        self.session.handle_with(self.main, body, &mut |_| {})?
-                    };
-                    (id, reaction)
-                }
-                Ok(Incoming::SetupSlab { id, layout, slab }) => {
-                    (id, self.session.setup_slab(&slab, layout))
-                }
-                Ok(Incoming::LoadState {
-                    id,
-                    state_use,
-                    state,
-                }) => (
-                    id,
-                    working(&self.executor, transport, id, true, || {
-                        self.session.load_state(self.main, &state, state_use)
-                    }),
-                ),
-                Ok(Incoming::StageState { id, state }) => (id, self.session.stage_state(state)),
-                Ok(Incoming::StateRefused { id, staging, error }) => {
-                    (id, self.session.refuse_state(staging, error))
-                }
                 Ok(Incoming::OpenAudio { id, lane }) => {
                     return Ok(Handshake::AudioLane { id, lane });
                 }
+                Ok(Incoming::Request(Request {
+                    id,
+                    body: body @ ControlRequest::LoadPlugin { .. },
+                })) => (id, self.load_working(transport, id, body)),
+                Ok(incoming) => crate::server::react(
+                    &mut self.session,
+                    self.main,
+                    &self.executor,
+                    transport,
+                    incoming,
+                ),
                 Err(IpcError::Io(_)) => return Ok(Handshake::Over),
                 Err(e) => return Err(e),
             };
@@ -412,7 +394,7 @@ impl PluginServer {
         transport: &mut ControlTransport,
         id: ReqId,
         body: ControlRequest,
-    ) -> IpcResult<Reaction> {
+    ) -> Reaction {
         let restoring = Arc::new(AtomicBool::new(false));
         let pulse = transport.pulser();
         let _ = transport.send(&ControlFrame::Working {
@@ -467,6 +449,46 @@ pub(crate) fn working<R>(
         &restoring,
         work,
     )
+}
+
+/// What the session answers `incoming` with, and the id it answers.
+///
+/// A save is run with the host told the server is at work on it ([`working`]); a
+/// state's load is run so with the restore reached. A second audio lane is
+/// refused: the first is taken before this is called.
+pub(crate) fn react(
+    session: &mut Session,
+    main: MainThreadMarker,
+    executor: &Executor,
+    transport: &ControlTransport,
+    incoming: Incoming,
+) -> (ReqId, Reaction) {
+    match incoming {
+        Incoming::Request(Request { id, body }) => {
+            let reaction = if matches!(body, ControlRequest::SaveState { .. }) {
+                working(executor, transport, id, false, || {
+                    session.handle(main, body)
+                })
+            } else {
+                session.handle(main, body)
+            };
+            (id, reaction)
+        }
+        Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
+        Incoming::LoadState {
+            id,
+            state_use,
+            state,
+        } => (
+            id,
+            working(executor, transport, id, true, || {
+                session.load_state(main, &state, state_use)
+            }),
+        ),
+        Incoming::StageState { id, state } => (id, session.stage_state(state)),
+        Incoming::StateRefused { id, staging, error } => (id, session.refuse_state(staging, error)),
+        Incoming::OpenAudio { id, .. } => (id, session.refuse_second_lane()),
+    }
 }
 
 /// The beat of a request: a task on a thread of the executor's of its own that

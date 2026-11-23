@@ -2901,9 +2901,7 @@ mod tests {
         // main output's left lands on the device's channel 1.
         let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
         control
-            .state_device(crate::OutputPlacement::stated(ChannelSet::from(
-                swapped.clone(),
-            )))
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);

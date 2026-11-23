@@ -182,7 +182,7 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
         let rate = SampleRate::SR_48K;
         Self {
             input,
-            bank: SvfBank::new(input.layout()),
+            bank: SvfBank::new(input.width()),
             coefficients: Ramp::new(Self::design(&SvfControls::DEFAULT, rate)),
             rate,
             applied: false,

@@ -371,7 +371,7 @@ impl ClapLoaded {
         port_index: u32,
     ) -> Option<ChannelTopology> {
         self.surround_channel_map(main, is_input, port_index)
-            .map(|map| crate::topology::topology_of(&map))
+            .and_then(|map| crate::topology::topology_of(&map))
     }
 }
 

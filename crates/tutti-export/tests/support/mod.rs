@@ -116,7 +116,7 @@ impl ExportConfig {
     ) -> FileTarget {
         let target = FileTarget::new(path, self.encode.format, self.encode.channels);
         let target = match &self.encode.topology {
-            Some(topology) => target.topology(topology.clone()),
+            Some(topology) => target.topology(*topology),
             None => target,
         };
         let target = match self.resample {
@@ -142,7 +142,7 @@ impl ExportConfig {
     pub fn buffer_target(&self) -> BufferTarget {
         let target = BufferTarget::new(self.encode.channels);
         match &self.encode.topology {
-            Some(topology) => target.topology(topology.clone()),
+            Some(topology) => target.topology(*topology),
             None => target,
         }
     }

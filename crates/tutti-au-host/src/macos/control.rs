@@ -159,7 +159,7 @@ impl AuLoaded {
         PluginBus::single(layout)
             .into_iter()
             .map(|bus| match &placement {
-                Some(topology) => bus.placed(topology.clone()),
+                Some(topology) => bus.placed(*topology),
                 None => bus,
             })
             .collect()
