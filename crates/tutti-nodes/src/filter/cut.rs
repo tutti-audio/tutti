@@ -201,7 +201,7 @@ mod tests {
         ButterworthOrder, Elliptic, EllipticTolerances, PassbandRipple, StopbandAttenuation,
     };
 
-    use tutti_graph::{Cost, Node, ParamNode};
+    use tutti_graph::ParamNode;
     use tutti_units::{Db, UnitParam};
 
     const LP: CutResponse = CutResponse::LowPass;
@@ -328,22 +328,6 @@ mod tests {
                 "elliptic at {f}: {got}"
             );
         }
-    }
-
-    /// The shape is the width in and out, `Moderate`, declares the cutoff and a finite
-    /// tail once prepared; the cutoff starts at the configured one.
-    #[test]
-    fn the_shape_declares_the_cutoff_and_a_finite_tail() {
-        let n = node(CutFilterConfig::new(3u16, HP, bw(8)).cutoff(Hz::new(120.0)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Cutoff][..]);
-        assert!(matches!(shape.tail, Tail::Finite(_)));
-        assert_eq!(n.param_base(0), Some(120.0));
     }
 
     /// A settled rendered sine has the analog Butterworth magnitude at the prewarped

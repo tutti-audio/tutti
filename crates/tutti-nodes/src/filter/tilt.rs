@@ -104,21 +104,16 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_ramps, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps};
     use tutti_buffers::MaxBlock;
     use tutti_dsp::Tilt;
-    use tutti_graph::Cost;
 
-    use tutti_graph::{Node, ParamNode};
+    use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 
     fn config(frequency: Hz, gain: Db) -> TiltFilterConfig {
         TiltFilterConfig::new(1u16, frequency, gain)
-    }
-
-    fn node(config: TiltFilterConfig) -> TiltFilterNode<f32> {
-        prepared(TiltFilterNode::from(config))
     }
 
     fn gain_of(config: TiltFilterConfig, f: f64) -> f64 {
@@ -131,26 +126,6 @@ mod tests {
         let x = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
         let a2 = 10f64.powf(db / 20.0);
         ((a2 * x * x + 1.0) / (x * x + a2)).sqrt()
-    }
-
-    /// The shape is the width in and out, `Moderate`, declares the pivot and the gain and a
-    /// finite tail once prepared; the pivot starts at the configured one.
-    #[test]
-    fn the_shape_declares_its_controls_and_a_finite_tail() {
-        let n = node(TiltFilterConfig::new(3u16, Hz::new(120.0), Db::new(9.0)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::GainDb][..]
-        );
-        assert!(matches!(shape.tail, Tail::Finite(_)));
-        assert_eq!(n.param_base(0), Some(120.0));
-        assert_eq!(n.param_base(1), Some(9.0));
     }
 
     /// A settled rendered sine has the bilinear image of the analog tilt as its gain

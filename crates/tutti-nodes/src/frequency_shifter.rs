@@ -136,36 +136,10 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_graph::Node;
+
     use tutti_graph::contract::{assert_declared_tail, prepared};
-    use tutti_units::{Latency, Samples, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
-
-    /// The shape is the width in and out with no latency and a finite tail, and declares the
-    /// shift as `Frequency`, which starts as configured.
-    #[test]
-    fn the_shape_declares_the_shift_and_a_finite_tail() {
-        let n = prepared(
-            FrequencyShifterNode::<f32>::from(
-                FrequencyShifterConfig::new(3u16).shift(Hz::new(-12.5)),
-            ),
-            RATE,
-            64,
-        );
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.latency, Latency::new(Samples::ZERO));
-        assert!(matches!(shape.tail, Tail::Finite(_)));
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Frequency][..]);
-        assert_eq!(n.param_base(0), Some(-12.5));
-        let empty =
-            FrequencyShifterNode::<f32>::from(FrequencyShifterConfig::new(ChannelLayout::EMPTY));
-        assert_eq!(empty.shape().audio_in().count(), 0);
-    }
 
     /// The declared tail covers the ring-out.
     #[test]

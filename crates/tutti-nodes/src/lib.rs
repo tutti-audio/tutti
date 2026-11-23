@@ -291,6 +291,8 @@ mod tail_clock;
 mod f64_graph;
 #[cfg(test)]
 mod fork_table;
+#[cfg(test)]
+mod shape_table;
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
 mod test_support;

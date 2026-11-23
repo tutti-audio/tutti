@@ -327,21 +327,6 @@ mod tests {
         ))
     }
 
-    /// The node is stereo unless told otherwise, and the shape declares the drive.
-    #[test]
-    fn the_shape_is_stereo_and_declares_its_drive_param() {
-        let n = DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(1.5)),
-        );
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Drive][..]);
-        assert_eq!(n.param_base(0), Some(1.5), "the base is the drive control");
-    }
-
     /// An `n`-channel node reports `n` in and out, and shapes each channel at the same
     /// drive: a hard clip at drive 1 is the clamp to ±1 of each channel alone.
     #[test]

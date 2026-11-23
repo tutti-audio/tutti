@@ -169,7 +169,7 @@ mod tests {
     use super::*;
     use crate::test_support::{RATE, drive_block, prepared};
 
-    use tutti_graph::{Node, ParamNode};
+    use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
 
     // The node tests run `F = f32`, the session's audio format: their tolerances are `f32`'s.
@@ -177,23 +177,6 @@ mod tests {
         prepared(DcBlockerNode::<f32>::from(
             DcBlockerConfig::new(width).corner(Hz::new(corner)),
         ))
-    }
-
-    /// The shape is the width in and out, `Light`, declares the corner as `Cutoff` and has
-    /// a finite tail once prepared; the default corner is 10 Hz.
-    #[test]
-    fn the_shape_declares_the_corner_and_a_finite_tail() {
-        let n = node(3, 10.0);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Light);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Cutoff][..]);
-        assert!(matches!(shape.tail, Tail::Finite(_)));
-        let d = DcBlockerNode::<f32>::from(DcBlockerConfig::new(1u16));
-        assert_eq!(d.param_base(0), Some(10.0));
     }
 
     /// The corner is settable by `Cutoff`: moved to 100 Hz it decays faster (`R^n` of the
