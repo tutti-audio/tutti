@@ -1,13 +1,13 @@
 //! The buffers an op touches, behind two small traits, so one body of op
-//! code runs on both executors: the serial walk borrows straight out of the
-//! [`Arena`] and the event slots (`split_at_mut`, as `arena.rs` explains),
-//! and the parallel one out of a per-op view of them whose every slot is
+//! code runs on both ways of running a block: a block on the calling thread
+//! alone borrows straight out of the [`Arena`] and the event slots
+//! (`split_at_mut`, as `arena.rs` explains), and one spread over a pool out of a per-op view of them whose every slot is
 //! **claimed** before use (`tutti_rt::SplitRw`), so two ops the schedule
 //! wrongly runs at once panic on the slot they share instead of aliasing
 //! it. Neither needs `unsafe` here.
 //!
 //! The per-slot silence/constant flags go behind a third trait,
-//! [`SlotFlags`]: plain bytes serially, shared atomics in parallel.
+//! [`SlotFlags`]: plain bytes alone, shared atomics on a pool.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -20,8 +20,8 @@ use crate::param_event::ParamEvent;
 use crate::plan::Direct;
 
 /// The per-slot silence/constant flags an op reads and writes: a plain
-/// byte slice serially, and the parallel executor's shared atomics
-/// ([`SharedFlags`]) there. Two impls rather than atomics everywhere: a
+/// byte slice for a block alone, and the shared atomics
+/// ([`SharedFlags`]) of one spread over a pool. Two impls rather than atomics everywhere: a
 /// `Relaxed` atomic is a plain byte move, but the compiler may not forward
 /// a store to a later load through it, and on a chain of cheap nodes that
 /// measured about 2.5 ns a node.
@@ -123,6 +123,43 @@ impl<F: Float> AudioSlots<F> for Arena<F> {
     }
 }
 
+impl<F: Float, A: AudioSlots<F> + ?Sized> AudioSlots<F> for &mut A {
+    #[inline(always)]
+    fn slot(&self, s: u32, frames: usize) -> &[F] {
+        (**self).slot(s, frames)
+    }
+    #[inline(always)]
+    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
+        (**self).slot_mut(s, frames)
+    }
+    #[inline(always)]
+    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
+        (**self).pair(src, dst, frames)
+    }
+    #[inline(always)]
+    fn direct<const I: usize, const O: usize>(
+        &mut self,
+        frames: usize,
+        d: &Direct,
+    ) -> ([&[F]; I], [&mut [F]; O]) {
+        (**self).direct(frames, d)
+    }
+    #[inline(always)]
+    fn borrow<'a>(
+        &'a mut self,
+        frames: usize,
+        reqs: &[(u32, Role)],
+        ins: &mut [&'a [F]],
+        outs: &mut [&'a mut [F]],
+    ) {
+        (**self).borrow(frames, reqs, ins, outs);
+    }
+    #[inline(always)]
+    fn copy_slot(&mut self, src: u32, dst: u32) {
+        (**self).copy_slot(src, dst);
+    }
+}
+
 /// One event slot: the events a port holds in a block, and the param events
 /// beside them (empty of room in a slot no param-writing node reaches).
 #[derive(Debug, Default)]
@@ -205,6 +242,38 @@ impl EventSlots for [EventSlot] {
             |port, v| read(port, &v[0]),
             |port, v| write(port, &mut v[0]),
         );
+    }
+}
+
+impl<E: EventSlots + ?Sized> EventSlots for &mut E {
+    #[inline(always)]
+    fn ev(&self, s: u32) -> &Vec<Event> {
+        (**self).ev(s)
+    }
+    #[inline(always)]
+    fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
+        (**self).ev_mut(s)
+    }
+    #[inline(always)]
+    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
+        (**self).pev(s)
+    }
+    #[inline(always)]
+    fn slot(&self, s: u32) -> &EventSlot {
+        (**self).slot(s)
+    }
+    #[inline(always)]
+    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
+        (**self).slot_mut(s)
+    }
+    #[inline(always)]
+    fn borrow_sorted<'a>(
+        &'a mut self,
+        reqs: &[(u32, Role)],
+        read: impl FnMut(u8, &'a EventSlot),
+        write: impl FnMut(u8, &'a mut EventSlot),
+    ) {
+        (**self).borrow_sorted(reqs, read, write);
     }
 }
 

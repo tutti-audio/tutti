@@ -119,8 +119,8 @@ std only. A rule the compiler already enforces is not a gate.
 - A cheap node declares its cost (`Shape::cost`); one that declares none is `Heavy`.
 - Op code reaches the arena, event slots, units, rings and outputs only through
   `AudioSlots`/`EventSlots` or a claim, which keeps `tutti-graph` `#![forbid(unsafe_code)]`.
-- A parallel render is bit-identical to the serial one; a parallel test compares against
-  the serial render bit for bit.
+- A render is bit-identical at any participant count; the plan verifier proves schedule
+  independence, and one test compares 1 against N participants bit for bit.
 - Never make memory safety depend on an exact float result (nodes run inside
   `with_no_denormals`).
 - A node never latches a NaN or an infinity from its input: a block that wrote one is

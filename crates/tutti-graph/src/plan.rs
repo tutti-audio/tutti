@@ -1191,13 +1191,13 @@ impl Plan {
     }
 
     /// How this plan's blocks run on a pool of `participants` (the caller
-    /// included): serially, or spread from some block length up over some
+    /// included): on the calling thread alone, or spread from some block length up over some
     /// number of participants. Pure arithmetic on [`work`](Self::work), the
     /// costliest path through the task DAG and the task count; the executor
     /// asks it when a plan meets a pool, never per block.
     ///
-    /// A speed decision only: the parallel render is bit for bit the
-    /// serial one.
+    /// A speed decision only: a render is bit for bit the same at any
+    /// participant count.
     pub fn schedule(&self, participants: usize) -> Schedule {
         crate::cost::schedule(
             self.work,
