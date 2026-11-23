@@ -12,7 +12,7 @@ use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
     AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamMapping,
-    ParamUnit, ParameterInfo, PlainMap, PlainUnit, TrackInfo,
+    ParamUnit, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -708,21 +708,12 @@ impl MidiMap {
     }
 
     /// What drives what once the app's entries are laid over `declared`, the
-    /// plugin's own table: the declared entries no app entry shares a channel
-    /// and source with, in their order, then the app's entries in theirs. An app
-    /// entry wins per `(channel, source)`; `None` (any channel) and a channel
-    /// are different keys.
+    /// plugin's own table ([`effective_midi_map`]).
     pub fn effective<'a>(
         &'a self,
         declared: &'a [MidiAssignment],
     ) -> impl Iterator<Item = MidiAssignment> + 'a {
-        let kept = declared.iter().copied().filter(|d| {
-            !self
-                .assignments
-                .iter()
-                .any(|a| a.channel == d.channel && a.source == d.source)
-        });
-        kept.chain(self.assignments.iter().copied())
+        effective_midi_map(declared, &self.assignments)
     }
 
     /// Refuses a map that names one channel and source twice.
