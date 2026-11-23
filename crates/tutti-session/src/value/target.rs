@@ -19,7 +19,7 @@ use super::watcher::StoredChange;
 /// a value and lands it. Nothing outside the crate can name it, so nothing
 /// outside the crate implements [`Target`].
 pub(crate) mod sealed {
-    use super::{Params, SetRefusal, Target, TargetId};
+    use super::{Params, SetRefusal, StoredChange, Target, TargetId};
 
     /// Marks a type tutti-session made a [`Target`], and names it.
     pub trait Sealed: Copy {
@@ -47,6 +47,25 @@ pub(crate) mod sealed {
 
         /// Stores `value` through `cell`. Infallible and panic-free.
         fn store(cell: &Self::Cell, value: &Self::Value);
+
+        /// What a watcher is told of a stored value that is not the base it
+        /// was read at. A target whose value type a watcher does not name
+        /// (the cell's raw) tells it in the type it does.
+        fn landing(
+            id: TargetId,
+            _: &Self::Cell,
+            base: Self::Value,
+            value: Self::Value,
+        ) -> StoredChange {
+            StoredChange::new(id, base, value)
+        }
+    }
+
+    /// A target a lane can drive: what it last delivered.
+    pub trait Lane: Store {
+        /// The value the lane delivered on its last block, or `None` while no
+        /// lane drives the target.
+        fn delivered(self, params: &Params) -> Option<Self::Value>;
     }
 }
 
@@ -101,12 +120,31 @@ pub struct AnyTarget<K> {
     key: PhantomData<fn() -> K>,
 }
 
+impl TargetId {
+    /// Whether a project saves the target's value: a native param and the
+    /// slots [`SlotId::saved`] names. A plugin's parameter is in the plugin's
+    /// state.
+    pub(crate) const fn saved(self) -> bool {
+        match self {
+            Self::Param(..) => true,
+            #[cfg(feature = "plugin")]
+            Self::PluginParam(..) => false,
+            Self::Slot(slot) => slot.saved(),
+        }
+    }
+}
+
 impl<K> AnyTarget<K> {
     pub(crate) fn of(id: TargetId) -> Self {
         Self {
             id,
             key: PhantomData,
         }
+    }
+
+    /// The target's identity.
+    pub(crate) fn id(&self) -> TargetId {
+        self.id
     }
 
     /// Whether this is `target`.
@@ -183,12 +221,14 @@ impl<T: Target, F> fmt::Debug for Modify<T, F> {
     }
 }
 
-/// `target.effective()`: the value the audio thread uses, which only a
-/// [`Modulatable`] target has. [`Session::get`](crate::Session::get) takes no
-/// `Effective` yet, so asking for one does not compile.
+/// `target.effective()`: the value the audio thread uses, for
+/// [`Session::get`](crate::Session::get): the last frame of the lane that
+/// drives the target, held to the target's range, or the base while no lane
+/// drives it. It is at most one block old, and a lane that delivers a NaN or
+/// an infinity reads as no lane. Only a target a lane can drive has one
+/// ([`ParamTarget`](crate::ParamTarget) and [`GainTarget`](crate::GainTarget)).
 #[must_use = "a read is answered by `Session::get`"]
 pub struct Effective<T: Modulatable> {
-    #[allow(dead_code)]
     pub(crate) target: T,
 }
 
@@ -221,17 +261,43 @@ pub struct AnyAssign(pub(crate) Arc<dyn Erased>);
 /// An [`Assign`] behind a pointer.
 pub trait Erased: Send + Sync {
     fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Failure>;
+
+    /// The target's identity.
+    fn id(&self) -> TargetId;
+
+    /// Whether the target is there now.
+    fn live(&self, params: &Params) -> bool;
 }
 
 impl<T: sealed::Store> Erased for Assign<T> {
     fn stage(&self, batch: &mut Batch<'_>) -> Result<(), Failure> {
         self.clone().stage(batch)
     }
+
+    fn id(&self) -> TargetId {
+        sealed::Sealed::id(self.target)
+    }
+
+    fn live(&self, params: &Params) -> bool {
+        self.target.resolve(params).is_some()
+    }
 }
 
 impl fmt::Debug for AnyAssign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AnyAssign").finish_non_exhaustive()
+    }
+}
+
+impl AnyAssign {
+    /// The target's identity.
+    pub(crate) fn id(&self) -> TargetId {
+        self.0.id()
+    }
+
+    /// Whether the target is there now.
+    pub(crate) fn live(&self, params: &Params) -> bool {
+        self.0.live(params)
     }
 }
 

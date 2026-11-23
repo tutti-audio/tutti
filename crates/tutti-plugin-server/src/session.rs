@@ -800,7 +800,7 @@ impl Session {
         Ok(ControlReply::PluginLoaded {
             id,
             descriptor: Box::new(descriptor),
-            loaded,
+            loaded: Box::new(loaded),
             negotiated_format: negotiated,
             state_error: state_error.map(StateError::from),
         }

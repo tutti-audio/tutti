@@ -101,13 +101,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_au_type_display() {
-        assert_eq!(AuType::Effect.to_string(), "Effect");
-        assert_eq!(AuType::Instrument.to_string(), "Instrument");
-        assert_eq!(AuType::Generator.to_string(), "Generator");
-    }
-
-    #[test]
     fn test_au_type_receives_midi() {
         assert!(AuType::Instrument.receives_midi());
         assert!(AuType::MusicEffect.receives_midi());

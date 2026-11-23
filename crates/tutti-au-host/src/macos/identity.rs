@@ -79,7 +79,7 @@ use tutti_au_ffi::property::{ContextName, IconLocation, NickName, ParametersForO
 use tutti_au_ffi::{Element, Scope};
 
 use crate::error::Result;
-use crate::types::*;
+use coreaudio_sys::AudioUnitParameter;
 
 /// One entry of the AU's overview shortlist: a parameter, and where it lives.
 ///

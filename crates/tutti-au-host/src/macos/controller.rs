@@ -17,7 +17,7 @@ use crate::error::Result;
 use crate::instance::AuLoaded;
 use crate::processor::AuProcessor;
 use crate::ranges::RangeTable;
-use crate::types::*;
+use coreaudio_sys::AudioUnitRenderActionFlags;
 
 /// The main-thread half of an activation. `Send`, not `Sync`.
 pub struct AuController {

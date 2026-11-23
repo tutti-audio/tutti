@@ -166,12 +166,6 @@ impl<W: Write + Seek> WavWriter<W> {
         })
     }
 
-    /// Lowers the number of frames the file may hold to `frames`; it never
-    /// raises the limit the format's 32-bit sizes set.
-    pub fn limit_frames(&mut self, frames: u64) {
-        self.max_frames = self.max_frames.min(frames);
-    }
-
     /// Back-patches the RIFF and `data` sizes, leaves the sink at the end of the
     /// file and flushes it.
     fn patch_sizes(&mut self) -> std::io::Result<()> {
@@ -233,6 +227,12 @@ impl<W: Write + Seek> Drop for WavWriter<W> {
 
 impl<W: Write + Seek> FormatWriter for WavWriter<W> {
     type Sink = W;
+
+    /// Lowers the number of frames the file may hold to `frames`; it never
+    /// raises the limit the format's 32-bit sizes set.
+    fn limit_frames(&mut self, frames: u64) {
+        self.max_frames = self.max_frames.min(frames);
+    }
 
     fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let room = self.max_frames - self.frames;

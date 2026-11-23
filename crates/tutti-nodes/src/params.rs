@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_RAMP, Ramp};
-use tutti_graph::{Io, MAX_PARAM_PORTS, ParamSetBuilder};
+use tutti_graph::{DeclaredUnit, Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
@@ -36,6 +36,9 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// The addresses of the cells, in port order after the blend's; its length is
     /// the number of controls [`flatten`](Self::flatten) writes.
     fn addrs(&self) -> &'static [UnitAddr];
+
+    /// The unit of each cell, in the order of [`addrs`](Self::addrs).
+    fn units(&self) -> &'static [DeclaredUnit];
 
     /// The controls a non-finite cell falls back to.
     fn defaults(&self) -> Self::Controls;
@@ -77,6 +80,10 @@ impl ControlSet for NoControls {
     type Controls = ();
 
     fn addrs(&self) -> &'static [UnitAddr] {
+        &[]
+    }
+
+    fn units(&self) -> &'static [DeclaredUnit] {
         &[]
     }
 
@@ -241,6 +248,12 @@ macro_rules! control_set {
                 ),+];
                 let $s = self;
                 &ALL[..control_set!(@live ALL, $($live)+)]
+            }
+
+            fn units(&self) -> &'static [tutti_graph::DeclaredUnit] {
+                const ALL: &[tutti_graph::DeclaredUnit] =
+                    &[$(tutti_graph::DeclaredUnit::of::<$unit>()),+];
+                &ALL[..self.addrs().len()]
             }
 
             fn control(&self, k: usize) -> $crate::params::Control {
@@ -484,8 +497,11 @@ impl<S: ControlSet> Params<S> {
         let cells = self.cells.iter().cloned();
         self.addrs()
             .iter()
+            .zip(self.set.units().iter().copied())
             .zip(cells)
-            .fold(set, |set, (&addr, cell)| set.param(addr, cell))
+            .fold(set, |set, ((&addr, unit), cell)| {
+                set.param(unit, addr, cell)
+            })
     }
 
     /// The base of the `k`th address ([`Node::param_base`](tutti_graph::Node::param_base)): its cell's value.
@@ -651,6 +667,10 @@ mod tests {
         fn addrs(&self) -> &'static [UnitAddr] {
             const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_units::UnitParam::Cutoff)];
             &ADDRS
+        }
+        fn units(&self) -> &'static [DeclaredUnit] {
+            const UNITS: [DeclaredUnit; 1] = [DeclaredUnit::of::<tutti_units::Hz>()];
+            &UNITS
         }
         fn defaults(&self) -> f64 {
             0.0

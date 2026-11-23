@@ -95,7 +95,7 @@
 //!   `DeviceId`. Off by default so an offline render, a CI job or a server builds
 //!   without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//! - `decode-wav`, `decode-aiff`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
 //!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
@@ -157,7 +157,7 @@ pub use tutti_timeline::{
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
-    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Losses, Normalized,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Frame, Hz, Losses, Normalized,
     ParamId, Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
@@ -231,7 +231,8 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
+    Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -434,7 +435,9 @@ pub mod types {
         Stop,
     };
     pub use tutti_curve::Breakpoint;
-    pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
+    pub use tutti_curve::{
+        Curvature, CurvatureError, Exponent, ExponentError, FrameProgress, Law, Piece,
+    };
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
         InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, Note,
@@ -453,8 +456,8 @@ pub mod types {
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
-        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
+        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
+        Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
         FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
         ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
         ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
@@ -482,15 +485,15 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, InEvents,
-        Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
-        ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ForkByClone, HasParam, HasParams, InBus,
+        InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
+        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget,
+        RtValue, SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
-        Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
-        ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
+        Due, Edge, EffectiveCell, Event, EventKind, EventOrderError, EventRejected, EventWriter,
+        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamPorts,
         ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
         Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,
@@ -594,6 +597,7 @@ pub mod session {
         feature = "sampler",
         any(
             feature = "decode-wav",
+            feature = "decode-aiff",
             feature = "decode-flac",
             feature = "decode-mp3",
             feature = "decode-ogg"
@@ -642,6 +646,7 @@ pub mod codec {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -666,6 +671,7 @@ pub mod sampler {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -768,9 +774,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
-        MasterVolume, MasterVolumeOutOfRange, OscillatorType, PolySynth, PortamentoConfig,
-        PortamentoMode, ReferencePitch, ReferencePitchOutOfRange, SvfMode, SvfQ, SvfQOutOfRange,
+        FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane, MasterVolume,
+        MasterVolumeOutOfRange, Order, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
+        ReferencePitch, ReferencePitchOutOfRange, Steal, SvfMode, SvfQ, SvfQOutOfRange,
         SynthConfig, SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices,
         UnisonVoicesError, VoiceMode,
     };

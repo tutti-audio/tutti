@@ -27,7 +27,7 @@ use tutti_session::{
     RouteError, RouteSpec, Session, SessionEvent, TargetName,
 };
 use tutti_units::Samples;
-use tutti_units::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
+use tutti_units::{BeatsPerCycle, Bipolar, Hz, ParamAddr, UnitParam};
 
 use common::probe::{ProbeUnit, Pulse};
 
@@ -142,10 +142,10 @@ fn the_8_1_example_renders_its_analytic_values() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.range_raw(gain, 0.0, 1.0).unwrap();
     let wobble = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
-    m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.3)))
+    m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.3)))
         .unwrap();
     let kick = m.follower(Follower::default(), kick_bus);
-    m.route(RouteSpec::new(kick, gain, Depth::of(-0.6)))
+    m.route(RouteSpec::new(kick, gain, Bipolar::of(-0.6)))
         .unwrap(); // sidechain
     settle(&mut s);
 
@@ -215,7 +215,7 @@ impl HostDecl {
                 RouteDecl {
                     source: SourceKey(1),
                     to: RouteTarget::Param(HOST_TARGET),
-                    depth: Depth::of(0.3),
+                    depth: Bipolar::of(0.3),
                     polarity: tutti_modulation::Polarity::Bipolar,
                     curve: tutti_modulation::Law::Linear,
                 },
@@ -356,7 +356,7 @@ fn a_refusal_names_the_node_and_the_param() {
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     assert!(m.clear_range(cutoff));
 
@@ -411,7 +411,7 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     assert_eq!(
-        m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5))),
+        m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5))),
         Err(RouteError::UndeclaredRange {
             target: cutoff.into()
         })
@@ -427,7 +427,10 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
 
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    assert!(m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5))).is_ok());
+    assert!(
+        m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+            .is_ok()
+    );
     let _ = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "applies clean");
 }
@@ -472,7 +475,7 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
 
@@ -496,7 +499,7 @@ fn removing_a_node_forgets_its_declarations() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     assert!(s.mod_state().lane(cutoff.key()).is_some());
@@ -572,7 +575,7 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let follower = m.follower(Follower::default(), late);
-    m.route(RouteSpec::new(follower, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
 
     let _ = s.update();
@@ -609,7 +612,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     let (_, lane) = s.mod_state().lane(cutoff.key()).expect("the lane");
@@ -641,7 +644,7 @@ fn an_own_edit_after_a_steady_state_applies() {
         .unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     for _ in 0..4 {

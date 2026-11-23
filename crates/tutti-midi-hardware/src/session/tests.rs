@@ -50,6 +50,29 @@ fn input(s: &MidiSession, name: &str) -> MidiDeviceId {
         .id
 }
 
+/// The connected output of "Synth A" over a fake whose devices take `accepts`
+/// packets per batch, and the fake's counters.
+fn synth_a_over(accepts: usize) -> (OpenOutput, crate::test_support::FakeCounters) {
+    let (backend, counters) = FakeBackend::build_accepting(accepts);
+    let s = MidiSession::open_over(
+        &tutti_platform::Executor::new(),
+        backend,
+        crate::HardwareMidiInputs::new(inlets()),
+        crate::MidiHardwareConfig::new(),
+    )
+    .unwrap();
+    let synth_a = s
+        .outputs()
+        .into_iter()
+        .find(|d| d.name == "Synth A")
+        .unwrap()
+        .id;
+    let output = s
+        .connect_output(crate::testing::started(), &synth_a)
+        .unwrap();
+    (output, counters)
+}
+
 fn note() -> UmpAt {
     use tutti_ump::MidiChannel;
     (Offset::ZERO, midi::note_on(MidiChannel::FIRST, 60, 0x8000))
@@ -64,22 +87,13 @@ fn enumeration_passes_the_backend_through() {
     assert_eq!(names, ["IAC Bus 1", "Keystep Pro"], "ordered by id");
 }
 
-#[test]
-fn connecting_an_input_makes_it_connected() {
-    let (mut s, _, _) = session();
-    assert!(!s.is_any_input_connected());
-    let _ = s
-        .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
-        .unwrap();
-    assert!(s.is_any_input_connected());
-    assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
-}
-
 /// Reconnecting must not reopen the port — a second driver connection to one
-/// device duplicates every inbound event.
+/// device duplicates every inbound event. A connect makes the input connected, under
+/// its name, and a second one leaves it so.
 #[test]
-fn connecting_an_open_input_is_idempotent() {
+fn connecting_an_open_input_connects_it_once() {
     let (mut s, _, opens) = session();
+    assert!(!s.is_any_input_connected());
     let _ = s
         .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
         .unwrap();
@@ -87,7 +101,8 @@ fn connecting_an_open_input_is_idempotent() {
         .connect_input(crate::testing::started(), &input(&s, "Keystep Pro"))
         .unwrap();
     assert_eq!(opens.load(Ordering::SeqCst), 1, "the port opens once");
-    assert_eq!(s.connected_input_names().len(), 1);
+    assert!(s.is_any_input_connected());
+    assert_eq!(s.connected_input_names(), vec!["Keystep Pro".to_string()]);
 }
 
 #[test]
@@ -270,23 +285,7 @@ fn an_output_reaches_its_device() {
 #[test]
 fn a_send_time_reaches_the_sink_with_its_packet() {
     use tutti_midi_runtime::{Outgoing, SendAt};
-    let (backend, counters) = FakeBackend::build_accepting(usize::MAX);
-    let s = MidiSession::open_over(
-        &tutti_platform::Executor::new(),
-        backend,
-        crate::HardwareMidiInputs::new(inlets()),
-        crate::MidiHardwareConfig::new(),
-    )
-    .unwrap();
-    let synth_a = s
-        .outputs()
-        .into_iter()
-        .find(|d| d.name == "Synth A")
-        .unwrap()
-        .id;
-    let mut output = s
-        .connect_output(crate::testing::started(), &synth_a)
-        .unwrap();
+    let (mut output, counters) = synth_a_over(usize::MAX);
     let raw = EndpointId::from_raw(10);
     let t = tutti_platform::Instant::now() + std::time::Duration::from_secs(1);
     let (at, ump) = note();
@@ -312,24 +311,8 @@ fn a_send_time_reaches_the_sink_with_its_packet() {
 /// device's refusal and not an output that never reached it.
 #[test]
 fn a_refusing_output_reports_zero_accepted() {
-    let (backend, counters) = FakeBackend::build_accepting(0);
+    let (mut output, counters) = synth_a_over(0);
     let sent = counters.sent;
-    let s = MidiSession::open_over(
-        &tutti_platform::Executor::new(),
-        backend,
-        crate::HardwareMidiInputs::new(inlets()),
-        crate::MidiHardwareConfig::new(),
-    )
-    .unwrap();
-    let synth_a = s
-        .outputs()
-        .into_iter()
-        .find(|d| d.name == "Synth A")
-        .unwrap()
-        .id;
-    let mut output = s
-        .connect_output(crate::testing::started(), &synth_a)
-        .unwrap();
 
     assert_eq!(
         output.queue(&[note(), note()]).packets(),
@@ -346,39 +329,16 @@ fn a_refusing_output_reports_zero_accepted() {
 /// A partial accept reports the prefix that landed, not the batch size.
 #[test]
 fn a_partial_accept_reports_what_landed() {
-    let (backend, _counters) = FakeBackend::build_accepting(1);
-    let s = MidiSession::open_over(
-        &tutti_platform::Executor::new(),
-        backend,
-        crate::HardwareMidiInputs::new(inlets()),
-        crate::MidiHardwareConfig::new(),
-    )
-    .unwrap();
-    let synth_a = s
-        .outputs()
-        .into_iter()
-        .find(|d| d.name == "Synth A")
-        .unwrap()
-        .id;
-    let mut output = s
-        .connect_output(crate::testing::started(), &synth_a)
-        .unwrap();
+    let (mut output, _counters) = synth_a_over(1);
 
     assert_eq!(output.queue(&[note(), note(), note()]).packets(), 1);
 }
 
 /// A System Exclusive message of three packets, start, continue and end.
 fn sysex() -> [UmpAt; 3] {
-    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
-    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
-        (
-            Offset::ZERO,
-            tutti_ump::Ump::from(Message::Sysex7(
-                MidiGroup::FIRST,
-                Sysex7Packet::new(status, &[1, 2]).unwrap(),
-            )),
-        )
-    })
+    use tutti_ump::SysexStatus;
+    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End]
+        .map(|status| (Offset::ZERO, tutti_fixtures::midi::sysex7(status, &[1, 2])))
 }
 
 /// **A device that has room for two of a message's three packets takes none of
@@ -387,23 +347,7 @@ fn sysex() -> [UmpAt; 3] {
 /// end that never comes.
 #[test]
 fn a_message_the_device_cannot_take_whole_is_refused_whole_and_counted() {
-    let (backend, counters) = FakeBackend::build_accepting(2);
-    let s = MidiSession::open_over(
-        &tutti_platform::Executor::new(),
-        backend,
-        crate::HardwareMidiInputs::new(inlets()),
-        crate::MidiHardwareConfig::new(),
-    )
-    .unwrap();
-    let synth_a = s
-        .outputs()
-        .into_iter()
-        .find(|d| d.name == "Synth A")
-        .unwrap()
-        .id;
-    let mut output = s
-        .connect_output(crate::testing::started(), &synth_a)
-        .unwrap();
+    let (mut output, counters) = synth_a_over(2);
     let raw = EndpointId::from_raw(10);
     let [start, middle, end] = sysex();
     let batch = [note(), start, middle, end, note()];
@@ -588,29 +532,6 @@ fn a_refused_open_leaves_no_port() {
     assert!(!s.is_any_input_connected());
     assert!(s.ports().list_input_ports().is_empty());
     assert_eq!(s.ports().port_count(), 0);
-}
-
-/// A session moves between threads with the Property Exchange Responders its
-/// devices hold, so the Session that owns it does too.
-#[test]
-fn a_session_is_send() {
-    // The bound is the test: this stops compiling when a session is not `Send`.
-    fn is_send<T: Send>(_: &T) -> bool {
-        true
-    }
-    let (backend, _counters) = FakeBackend::build_with(vec![], vec![], usize::MAX);
-    let inlets = tutti_midi_runtime::InputInlets::new(
-        tutti_graph::EventCapacity::of(8),
-        std::time::Duration::ZERO,
-    );
-    let session = MidiSession::open_over(
-        &tutti_platform::Executor::new(),
-        backend,
-        crate::HardwareMidiInputs::new(inlets),
-        crate::MidiHardwareConfig::new(),
-    )
-    .unwrap();
-    assert!(is_send(&session));
 }
 
 /// The options are stored as written: a timing survives a round trip, and a

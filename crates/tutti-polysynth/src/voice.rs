@@ -23,44 +23,13 @@ use tutti_voicing::{
 use tutti_ump::ControlValue;
 pub use tutti_voicing::VoiceId;
 
-/// Which sounding voice gets taken when every slot is busy and another note
-/// arrives.
-///
-/// Only the tiebreak among *active* voices differs between these. A voice that
-/// is already releasing or stolen is always preferred over any active one
-/// whatever the strategy says, and among those the quietest goes first — so a
-/// chord fading out is consumed before a held note is cut off.
-#[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default)]
-#[non_exhaustive]
-pub enum AllocationStrategy {
-    /// Take the voice that started longest ago. The default, and the safe
-    /// general choice: it cuts the note the player is least likely to still be
-    /// listening for.
-    #[default]
-    Oldest,
-    /// Take the voice with the lowest current envelope level — the least
-    /// audible cut, but it can steal a held note that happens to sit in a decay
-    /// dip.
-    Quietest,
-    /// Take the highest-pitched sounding note. Preserves bass lines.
-    HighestNote,
-    /// Take the lowest-pitched sounding note. Preserves melody.
-    LowestNote,
-    /// Take the most recently started voice, so a held chord survives a run of
-    /// fast notes at the cost of dropping the new ones.
-    Newest,
-    /// Steal nothing: the note is dropped and never sounds. The allocator
-    /// returns `Unavailable` and no voice is disturbed.
-    NoSteal,
-}
-
 /// How many notes may sound at once, and whether a new note restarts the
 /// envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq, Default)]
 #[non_exhaustive]
 pub enum VoiceMode {
     /// Polyphonic: notes sound simultaneously up to the polyphony, then the
-    /// [`AllocationStrategy`] decides. The default.
+    /// [`Steal`] decides. The default.
     #[default]
     Poly,
     /// Monophonic: one note at a time on a channel. A new note releases the
@@ -202,7 +171,7 @@ impl VoiceSlot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SynthVoicesConfig {
     max_voices: NonZeroUsize,
-    strategy: AllocationStrategy,
+    steal: Steal,
     mode: VoiceMode,
     bend_range: Semitones,
     per_note_bend_range: Semitones,
@@ -215,7 +184,7 @@ impl SynthVoicesConfig {
     pub const fn new() -> Self {
         Self {
             max_voices: NonZeroUsize::new(16).unwrap(),
-            strategy: AllocationStrategy::Oldest,
+            steal: Steal::By(Order::Oldest),
             mode: VoiceMode::Poly,
             bend_range: Semitones::new(2.0),
             per_note_bend_range: Semitones::new(48.0),
@@ -231,8 +200,8 @@ impl SynthVoicesConfig {
 
     /// Which voice is taken when all are busy.
     #[must_use]
-    pub const fn strategy(mut self, strategy: AllocationStrategy) -> Self {
-        self.strategy = strategy;
+    pub const fn steal(mut self, steal: Steal) -> Self {
+        self.steal = steal;
         self
     }
 
@@ -268,14 +237,7 @@ impl SynthVoicesConfig {
                 VoiceMode::Mono => Mode::Mono,
                 VoiceMode::Legato => Mode::Legato,
             })
-            .with_steal(match self.strategy {
-                AllocationStrategy::NoSteal => Steal::Never,
-                AllocationStrategy::Oldest => Steal::By(Order::Oldest),
-                AllocationStrategy::Newest => Steal::By(Order::Newest),
-                AllocationStrategy::Quietest => Steal::By(Order::Quietest),
-                AllocationStrategy::HighestNote => Steal::By(Order::HighestNote),
-                AllocationStrategy::LowestNote => Steal::By(Order::LowestNote),
-            })
+            .with_steal(self.steal)
             .with_bend_range(self.bend_range)
             .with_per_note_bend_range(self.per_note_bend_range)
     }

@@ -5,7 +5,9 @@ use tutti_plugin_types::MainWorkHandle;
 
 use crate::component::AuType;
 use crate::error::{AuError, LoadStage, Result};
-use crate::types::*;
+use crate::fourcc_to_string;
+use coreaudio_sys as sys;
+use coreaudio_sys::AudioComponentDescription;
 
 /// RAII wrapper around an `AudioComponentInstance`.
 ///
@@ -57,7 +59,7 @@ impl AuHandle {
         // a transient condition worth retrying — into a statement about the
         // component. Measured on macOS 15.6: of 138 installed components, 5 set
         // the flag and all 5 return -10863 from the synchronous call.
-        if desc.componentFlags & K_AUDIO_COMPONENT_FLAG_REQUIRES_ASYNC_INSTANTIATION != 0 {
+        if desc.componentFlags & sys::kAudioComponentFlag_RequiresAsyncInstantiation != 0 {
             return Err(AuError::RequiresAsyncInstantiation);
         }
 

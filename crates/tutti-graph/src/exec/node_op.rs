@@ -110,7 +110,7 @@ pub(super) fn run_node_op<
                 (1, 2) => direct_op::<1, 2, F, A, Fl, E>(u, head, st, &d, slots),
                 (2, 1) => direct_op::<2, 1, F, A, Fl, E>(u, head, st, &d, slots),
                 (2, 2) => direct_op::<2, 2, F, A, Fl, E>(u, head, st, &d, slots),
-                _ => unreachable!("rule 7 admits only `Direct::SHAPES`"),
+                _ => unreachable!("a direct record has one of `Direct::SHAPES`"),
             }
         }
         // Port tables are stack arrays; pick the smallest bucket that fits

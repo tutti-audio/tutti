@@ -47,21 +47,10 @@ use std::marker::PhantomData;
 mod tally;
 pub use tally::{Tally, TallyWriter, tally};
 
-use sync::{Arc, AtomicBool, AtomicU64, Ordering};
+use crate::sync::{Arc, AtomicBool, AtomicU64, Ordering};
 use tutti_units::{Losses, Unit};
 
 use crate::ControlDrop;
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::Arc;
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::Arc;
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-}
 
 /// Plumbing for the unit blanket of [`Reading`]: a raw number as the bits of
 /// one word. Not nameable outside this module; owners never implement it.

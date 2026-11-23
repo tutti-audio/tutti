@@ -16,7 +16,7 @@ use std::future::IntoFuture as _;
 use tutti::modulation::Lfo;
 use tutti::nodes::{FreeverbConfig, FreeverbNode, SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti::{
-    Amplitude, Beat, Bounce, Bpm, ChannelLayout, Clip, Depth, Error, Format, Hz, MainOutput,
+    Amplitude, Beat, Bipolar, Bounce, Bpm, ChannelLayout, Clip, Error, Format, Hz, MainOutput,
     MaxBlock, Pcm, Q, RouteSpec, SampleRate, Samples, Session, SessionEvent, Wave, Written,
 };
 use tutti_buffers::Interleaved;
@@ -109,7 +109,7 @@ fn song(dir: &std::path::Path) -> Result<Written, Error> {
     let mut m = s.mods_mut();
     m.range(cutoff, Hz::new(200.0)..Hz::new(3_000.0))?;
     let wobble = m.lfo(Lfo::sine().rate(Hz::new(1.0)));
-    m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.5)))?;
+    m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.5)))?;
 
     // Commit the graph and the lanes, then roll the transport.
     report(s.update());

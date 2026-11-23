@@ -48,20 +48,8 @@
 
 use std::sync::Arc;
 
+use crate::sync::{AtomicU64, Ordering, fence};
 use bytemuck::{AnyBitPattern, NoUninit};
-use sync::{AtomicU64, Ordering, fence};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering, fence};
-
-    #[cfg(loom)]
-    pub(super) use loom::hint::spin_loop;
-    #[cfg(not(loom))]
-    pub(super) use std::hint::spin_loop;
-}
 
 /// Bytes per storage word.
 const WORD: usize = std::mem::size_of::<u64>();
@@ -233,7 +221,7 @@ impl<T: NoUninit + AnyBitPattern> SeqReader<T> {
             match self.attempt() {
                 Attempt::Never => return Ok(None),
                 Attempt::Stable(_, copy) => return Ok(Some(copy)),
-                Attempt::Torn => sync::spin_loop(),
+                Attempt::Torn => crate::sync::spin_loop(),
             }
         }
         Err(Contended)

@@ -229,8 +229,8 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
                 // deliberately does not support — the whole point of the test is
                 // to check nothing needs one.
                 let status = unsafe {
-                    tutti_au_host::types::AudioUnitGetPropertyInfo(
-                        au.raw_unit(),
+                    coreaudio_sys::AudioUnitGetPropertyInfo(
+                        au.unit().as_raw(),
                         MidiControlMapping::ID,
                         scope.raw(),
                         0,
@@ -238,7 +238,7 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
                         &mut writable,
                     )
                 };
-                if status == tutti_au_host::types::NO_ERR {
+                if status == coreaudio_sys::noErr as i32 {
                     hits.push(format!(
                         "{} ({phase}, scope {scope:?}, {size} bytes)",
                         info.name
@@ -893,8 +893,8 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
         let mut buf = [0u8; 32];
         let mut size = buf.len() as u32;
         let status = unsafe {
-            tutti_au_host::types::AudioUnitGetProperty(
-                au.raw_unit(),
+            coreaudio_sys::AudioUnitGetProperty(
+                au.unit().as_raw(),
                 44, // kAudioUnitProperty_HotMapParameterMIDIMapping
                 Scope::GLOBAL.raw(),
                 0,
@@ -904,7 +904,7 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
         };
         assert_eq!(
             status,
-            tutti_au_host::types::NO_ERR,
+            coreaudio_sys::noErr as i32,
             "{}: measured deviation — an unarmed HotMap read answers noErr, not \
              the kAudioUnitErr_InvalidPropertyValue the header specifies. If this \
              now fails, the OS has started honouring the header and \

@@ -15,12 +15,12 @@ mod support;
 
 use std::sync::mpsc;
 
+use coreaudio_sys::kAudioUnitType_Effect;
 use support::au::Au;
 use tutti_au_ffi::property::StreamFormat;
 use tutti_au_ffi::{Element, Scope};
 use tutti_au_host::AuLoaded;
 use tutti_au_host::component::{AuComponentRef, ComponentKey, find_component};
-use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_buffers::InputOutput;
 use tutti_fixtures::main_thread;
 use tutti_plugin_types::fake::{at_frame, unit_value};
@@ -29,7 +29,7 @@ use tutti_units::Samples;
 
 fn find_apple_delay() -> Result<AuComponentRef, tutti_au_host::AuError> {
     let desc = ComponentKey::new(
-        K_AUDIO_UNIT_TYPE_EFFECT,
+        kAudioUnitType_Effect,
         u32::from_be_bytes(*b"dely"),
         u32::from_be_bytes(*b"appl"),
     )
@@ -252,7 +252,7 @@ fn test_render_callback_installed_once() {
 ///
 /// `initialize` takes the state out with `mem::replace(.., State::Empty)`
 /// and the by-value transition consumes it, so the failure arm must put a
-/// real state back. Every later accessor — `raw_unit`, `au_type`,
+/// real state back. Every later accessor — `unit().as_raw()`, `au_type`,
 /// `num_outputs`, even `is_initialized` — routes through
 /// `handle()`/`config()`, which `unreachable!()` on `Empty`. Leaving `Empty`
 /// installed panics a host on the next thing it asks about any unit that
@@ -266,7 +266,7 @@ fn test_render_callback_installed_once() {
 #[test]
 fn a_refused_initialize_leaves_the_instance_usable() {
     let desc = ComponentKey::new(
-        K_AUDIO_UNIT_TYPE_EFFECT,
+        kAudioUnitType_Effect,
         u32::from_be_bytes(*b"vois"),
         u32::from_be_bytes(*b"appl"),
     )
@@ -608,7 +608,7 @@ mod halves {
 
 mod tail {
     use super::*;
-    use tutti_au_host::types::K_AUDIO_UNIT_TYPE_MUSIC_DEVICE;
+    use coreaudio_sys::kAudioUnitType_MusicDevice;
     use tutti_plugin_types::{Control, PluginTail};
     use tutti_units::Samples;
 
@@ -641,7 +641,7 @@ mod tail {
         // An instrument rejects the property outright: that is "no tail
         // concept", which must read as `Unknown` rather than as a zero tail.
         let instrument = ComponentKey::new(
-            K_AUDIO_UNIT_TYPE_MUSIC_DEVICE,
+            kAudioUnitType_MusicDevice,
             u32::from_be_bytes(*b"dls "),
             u32::from_be_bytes(*b"appl"),
         )

@@ -3,7 +3,7 @@ name = "tutti-codec"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Reads WAV, FLAC, MP3 and Ogg audio files, and writes WAV, AIFF and FLAC"
+description = "Reads WAV, AIFF, FLAC, MP3 and Ogg audio files, and writes WAV, AIFF and FLAC"
 license.workspace = true
 repository.workspace = true
 readme = "README.md"
@@ -27,9 +27,10 @@ encode-flac = ["dep:flacenc", "dep:md-5"]
 encode-aiff = ["dep:aifc"]
 # Each `decode-*` feature pulls exactly one symphonia container (and its codec)
 # for `read_wave`, `read_wave_metadata` and `FileIn`: a build lists exactly
-# what it can read. `decode-wav` needs `pcm`: WAV is only the container. AIFF
-# is not here: symphonia's `aiff` is not enabled by any feature.
+# what it can read. `decode-wav` and `decode-aiff` need `pcm`: each is only the
+# container.
 decode-wav = ["dep:symphonia", "symphonia/wav", "symphonia/pcm"]
+decode-aiff = ["dep:symphonia", "symphonia/aiff", "symphonia/pcm"]
 decode-flac = ["dep:symphonia", "symphonia/flac"]
 decode-mp3 = ["dep:symphonia", "symphonia/mp3"]
 decode-ogg = ["dep:symphonia", "symphonia/ogg", "symphonia/vorbis"]
@@ -63,9 +64,10 @@ aifc = { version = "0.7", optional = true }
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 # Every decoder on, so the decode suites run on every plain run: a dev-dependency on self is how a feature
 # reaches the test targets, where `required-features` would *skip* a suite on a
-# plain run and report green having decoded nothing. The encoder features are
-# not named here, and are on in a workspace run through `tutti-export`.
-tutti-codec = { path = ".", features = ["decode-wav", "decode-flac", "decode-mp3", "decode-ogg"] }
+# plain run and report green having decoded nothing. `encode-aiff` is named so the AIFF
+# decode test can write its own input; the other encoders are on in a workspace
+# run through `tutti-export`.
+tutti-codec = { path = ".", features = ["decode-wav", "decode-aiff", "decode-flac", "decode-mp3", "decode-ogg", "encode-aiff"] }
 tempfile = "3.10"
 # An independent reader for what the WAV writer emits.
 hound = "3.5"

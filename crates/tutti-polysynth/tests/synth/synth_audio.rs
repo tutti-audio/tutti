@@ -24,9 +24,7 @@ use support::{BLOCK, Hand};
 use tutti_fixtures::midi;
 use tutti_fixtures::signal::peak;
 use tutti_fixtures::signal::rms;
-use tutti_polysynth::{
-    Adsr, AllocationStrategy, OscillatorType, PolySynth, SynthConfig, VoiceMode,
-};
+use tutti_polysynth::{Adsr, Order, OscillatorType, PolySynth, Steal, SynthConfig, VoiceMode};
 use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity, Ump};
 use tutti_units::{Amplitude, Normalized, Seconds};
 
@@ -295,7 +293,7 @@ fn two_simultaneous_notes_both_sound() {
     );
 }
 
-/// `NoSteal` must refuse to steal, and the refusal must be audible.
+/// `Steal::Never` must refuse to steal, and the refusal must be audible.
 ///
 /// The allocator tests this at the slot level. What they cannot see is whether
 /// the *synth* honours it: the note that could not be allocated must simply not
@@ -304,7 +302,7 @@ fn two_simultaneous_notes_both_sound() {
 fn nosteal_leaves_the_held_notes_alone() {
     let cfg = config(OscillatorType::Sine)
         .polyphony(NonZeroUsize::new(2).unwrap())
-        .allocation_strategy(AllocationStrategy::NoSteal);
+        .steal(Steal::Never);
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(60, 100), note_on(64, 100)]);
@@ -339,7 +337,7 @@ fn nosteal_leaves_the_held_notes_alone() {
 fn a_stolen_voice_plays_the_new_note() {
     let cfg = config(OscillatorType::Sine)
         .polyphony(NonZeroUsize::MIN)
-        .allocation_strategy(AllocationStrategy::Oldest);
+        .steal(Steal::By(Order::Oldest));
     let mut synth = Hand::new(PolySynth::<f32>::new(cfg));
 
     synth.queue_midi(&[note_on(60, 100)]);

@@ -257,6 +257,30 @@ impl ClapLoaded {
         })
     }
 
+    /// The plugin's key names for the first note port, as the shared type: a name
+    /// for every port or for port 0, and for one key (`-1`, every key, names no
+    /// key).
+    pub(crate) fn declared_note_names(
+        &self,
+        main: MainThreadMarker,
+    ) -> Vec<tutti_plugin_types::NoteName> {
+        (0..self.note_name_count(main))
+            .filter_map(|index| self.note_name(main, index))
+            .filter(|n| matches!(n.port, -1 | 0))
+            .filter_map(|n| {
+                Some(tutti_plugin_types::NoteName {
+                    key: u8::try_from(n.key)
+                        .ok()
+                        .and_then(tutti_ump::NoteNumber::new)?,
+                    channel: u8::try_from(n.channel)
+                        .ok()
+                        .and_then(tutti_ump::MidiChannel::new),
+                    text: n.name,
+                })
+            })
+            .collect()
+    }
+
     /// Asks whether the plugin can process the given ambisonic ordering +
     /// normalization. Returns false when `CLAP_EXT_AMBISONIC` is unsupported,
     /// and for Furse-Malham normalization, which CLAP has no constant for.

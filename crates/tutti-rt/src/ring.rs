@@ -55,13 +55,6 @@ mod plain;
 
 pub use plain::{Drain, Iter, RingReader, RingWriter, ring};
 
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-}
-
 /// What a push into a full [`ring()`] does. Chosen when the ring is made.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Overflow {

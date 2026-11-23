@@ -666,7 +666,7 @@ impl<U> From<ParamKey<U>> for UnitAddr {
 
 use super::Normalized;
 use super::units::{
-    Amplitude, Azimuth, Balance, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Depth, Drive,
+    Amplitude, Azimuth, Balance, Bipolar, BitDepth, Cents, CentsSpan, CompressionRatio, Db, Drive,
     Elevation, Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Q, Seconds, Semitones,
     Spread, StereoWidth,
 };
@@ -719,7 +719,7 @@ param_keys! {
         /// Feedback amount.
         FEEDBACK = Feedback;
     }
-    Depth {
+    Bipolar {
         /// Modulation depth.
         DEPTH = Depth;
     }

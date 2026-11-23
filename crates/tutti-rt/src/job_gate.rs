@@ -43,34 +43,9 @@
 //! helper queued behind a `SCHED_FIFO` caller on its own core can run and
 //! leave.
 
-use sync::{AtomicBool, AtomicU32, AtomicU64, Ordering, UnsafeCell, fence};
+use crate::sync::{AtomicBool, AtomicU32, AtomicU64, Ordering, UnsafeCell, fence};
 
 use super::spin::{BlockWaits, SpinThenYield};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::cell::UnsafeCell;
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, fence};
-
-    /// `loom`'s `UnsafeCell` API over `std`'s, so the gate is written once.
-    #[cfg(not(loom))]
-    pub(super) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
-    #[cfg(not(loom))]
-    impl<T> UnsafeCell<T> {
-        pub(super) const fn new(v: T) -> Self {
-            Self(std::cell::UnsafeCell::new(v))
-        }
-        pub(super) fn with<R>(&self, f: impl FnOnce(*const T) -> R) -> R {
-            f(self.0.get())
-        }
-        pub(super) fn with_mut<R>(&self, f: impl FnOnce(*mut T) -> R) -> R {
-            f(self.0.get())
-        }
-    }
-}
 
 /// The job, with its lifetime erased. Only ever dereferenced between a
 /// helper's successful entry and its exit, both inside one `run`.

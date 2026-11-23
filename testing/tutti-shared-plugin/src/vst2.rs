@@ -76,6 +76,12 @@ impl PluginParameters for Params {
             .and_then(|i| core::NAMES.get(i))
             .map_or(String::new(), |s| (*s).to_string())
     }
+    fn get_parameter_short_label(&self, index: i32) -> Option<String> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| core::SHORT_NAMES.get(i))
+            .map(|s| (*s).to_string())
+    }
     fn get_parameter_text(&self, index: i32) -> String {
         self.get_parameter(index)
             .map_or(String::new(), |v| format!("{v:.3}"))
@@ -116,6 +122,13 @@ impl Plugin for Shared {
             block: 1024,
             double: false,
         }
+    }
+
+    fn get_midi_key_name(&self, _program: i32, key: i32) -> Option<String> {
+        core::NOTE_NAMES
+            .iter()
+            .find(|&&(k, _)| i32::from(k) == key)
+            .map(|&(_, name)| name.to_string())
     }
 
     fn get_info(&self) -> Info {

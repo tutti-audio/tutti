@@ -8,7 +8,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, Lerp, PlateBank, PlateControls, PlateRamps};
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_units::{Depth, Hz, Mix, SampleRate, Seconds, Tail};
+use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -69,7 +69,7 @@ impl PlateReverbConfig {
 
     /// The depth of the tank's delay modulation, `0..1`.
     #[must_use]
-    pub fn modulation(mut self, modulation: Depth) -> Self {
+    pub fn modulation(mut self, modulation: Bipolar) -> Self {
         self.controls.modulation = modulation;
         self
     }
@@ -124,7 +124,7 @@ control_set! {
     Damping => Mix = damping { whole },
     DelayTime => Seconds = pre_delay { whole },
     Cutoff => Hz = bandwidth { whole },
-    Depth => Depth = modulation { whole },
+    Depth => Bipolar = modulation { whole },
     Diffusion => Mix = diffusion { whole };
 
     fn defaults(&self) -> PlateControls {
@@ -256,7 +256,7 @@ mod tests {
         let moves = [(
             0,
             PlateControls {
-                modulation: Depth::of(0.0),
+                modulation: Bipolar::of(0.0),
                 damping: Mix::new(0.3),
                 ..PlateControls::DEFAULT
             },

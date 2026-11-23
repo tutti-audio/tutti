@@ -14,7 +14,7 @@ use tutti_dsp::{
     sweep_hz,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Depth, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
+use tutti_units::{Bipolar, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -156,7 +156,7 @@ control_set! {
     // How fast the notches sweep: floored at 0.01 Hz, a control signal's value and a cell's alike.
     Rate => Hz = rate { whole },
     // A fraction of the sweep range.
-    Depth => Depth = depth { whole },
+    Depth => Bipolar = depth { whole },
     Feedback => Feedback = feedback { whole };
 
     fn defaults(&self) -> PhaserControls {
@@ -256,7 +256,7 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         let (min, max, rate) = (self.min, self.max, self.rate);
         self.clock.solve(&mut self.complements, |lfo, end| {
             let depth = if end { depth_end } else { depth_start };
-            let sweep = sweep_hz(min, max, lfo, Depth::clamped(depth.into()));
+            let sweep = sweep_hz(min, max, lfo, Bipolar::clamped(depth.into()));
             allpass_complement(sweep, rate)
         });
     }
@@ -469,7 +469,7 @@ mod tests {
             "a backwards sweep would be heard"
         );
         let controls = PhaserControls {
-            depth: Depth::of(1.0),
+            depth: Bipolar::of(1.0),
             feedback: Feedback::NONE,
             ..PhaserControls::DEFAULT
         };
@@ -653,7 +653,7 @@ mod tests {
     fn controls(rate: f64, depth: f64, feedback: f64) -> PhaserControls {
         PhaserControls {
             rate: Hz::new(rate),
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             feedback: Feedback::new(feedback),
         }
     }
@@ -682,7 +682,7 @@ mod tests {
             p = p.advance(inc);
         }
         let lfo = Bipolar::clamped((std::f64::consts::TAU * (p.get() + offset)).sin());
-        let hz = sweep_hz(range.min(), range.max(), lfo, Depth::clamped(depth));
+        let hz = sweep_hz(range.min(), range.max(), lfo, Bipolar::clamped(depth));
         allpass_complement(hz, RATE)
     }
 
@@ -848,9 +848,9 @@ mod tests {
         assert_eq!(k.feedback.target(), 0.0);
         // The depth is as typed: the whole range, and inverted, the bottom and below.
         k.retarget(&controls(1.0, 1.0, 0.5));
-        assert_eq!(k.depth.target(), f32::from_unit(Depth::FULL));
+        assert_eq!(k.depth.target(), f32::from_unit(Bipolar::MAX));
         k.retarget(&controls(1.0, -1.0, 0.5));
-        assert_eq!(k.depth.target(), f32::from_unit(Depth::INVERTED));
+        assert_eq!(k.depth.target(), f32::from_unit(Bipolar::MIN));
     }
 
     /// The sweep's top is held at 0.90 of Nyquist at the rate, and the authored top is kept:
@@ -1062,7 +1062,7 @@ mod tests {
             want[n] = u;
         }
         let controls = PhaserControls {
-            depth: Depth::of(0.0),
+            depth: Bipolar::of(0.0),
             feedback: Feedback::new(0.5),
             ..PhaserControls::DEFAULT
         };

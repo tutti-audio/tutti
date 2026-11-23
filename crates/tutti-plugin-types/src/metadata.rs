@@ -9,7 +9,10 @@ use tutti_units::{SampleRate, Samples};
 
 use crate::Measured;
 
-use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, OwnBypass};
+use crate::{
+    ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, NoteName, OwnBypass,
+    ParamGroup,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -347,6 +350,16 @@ pub struct PluginWiring {
     /// plugin with none. The plugin's suggestion; nothing applies it.
     #[cfg_attr(feature = "serde", serde(default))]
     pub assignments: Vec<MidiAssignment>,
+    /// The names the plugin gives to MIDI keys (CLAP `note-name`, VST3
+    /// `IKeyswitchController`, VST2 `effGetMidiKeyName`): empty for a plugin
+    /// with none. The plugin's programs are
+    /// [`Control::presets`](crate::Control::presets), not here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub note_names: Vec<NoteName>,
+    /// The groups the plugin sorts its parameters into, parents before
+    /// children: empty for a format or a plugin with no tree.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub param_groups: Vec<ParamGroup>,
 }
 
 impl PluginWiring {
@@ -457,6 +470,16 @@ mod tests {
                 channel: tutti_ump::MidiChannel::new(3),
                 source: crate::MidiSource::PitchBend,
                 param: tutti_units::ParamId::new(9),
+            }],
+            note_names: vec![NoteName {
+                key: tutti_ump::NoteNumber::of(36),
+                channel: None,
+                text: "Kick".into(),
+            }],
+            param_groups: vec![ParamGroup {
+                path: "Filter".into(),
+                label: "Filter".into(),
+                parent: None,
             }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();

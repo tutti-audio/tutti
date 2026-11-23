@@ -38,7 +38,7 @@ use tutti_session::{
     TargetName, declare_targets,
 };
 use tutti_units::{
-    Amplitude, Beat, Bpm, Depth, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
+    Amplitude, Beat, Bipolar, Bpm, Drive, Frame, Hz, SampleRate, Samples, Seconds, UnitParam,
 };
 
 use common::probe::{ProbeUnit, Pulse};
@@ -201,9 +201,9 @@ fn an_export_is_the_live_render_on_a_native_param() {
     m.range_raw(volume, 0.0, 1.0).unwrap();
     let sine = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
     let tri = m.lfo(Lfo::triangle().rate(Hz::new(5.0)));
-    m.route(RouteSpec::new(sine, cutoff, Depth::of(0.3)))
+    m.route(RouteSpec::new(sine, cutoff, Bipolar::of(0.3)))
         .unwrap();
-    m.route(RouteSpec::new(tri, volume, Depth::of(0.2)))
+    m.route(RouteSpec::new(tri, volume, Bipolar::of(0.2)))
         .unwrap();
     settle(&mut s);
     // Past the connect's declick, stopped; then the knobs move.
@@ -299,9 +299,9 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let follower = m.follower(Follower::default(), kick);
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.1)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
         .unwrap();
-    m.route(RouteSpec::new(follower, cutoff, Depth::of(-0.2)))
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(-0.2)))
         .unwrap();
     settle(&mut s);
     render(&mut side, 1_024, 128);
@@ -354,14 +354,14 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.3)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.3)))
         .unwrap();
     settle(&mut s);
     render(&mut side, 1_024, 128);
 
     s.set(probe.cutoff().to(Hz::new(300.0))).unwrap();
     let _ = s.update();
-    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.2)))
+    s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.2)))
         .unwrap();
     let _ = s.update();
     let a = render(&mut side, 2_048, 128);
@@ -416,8 +416,8 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
     m.range_raw(c2, 0.0, 1.0).unwrap();
     let env = m.note_envelope(NoteEnvelope::new(adsr), clip, 0);
     let zero = m.macro_(0.0);
-    m.route(RouteSpec::new(env, c1, Depth::of(0.5))).unwrap();
-    m.route(RouteSpec::new(zero, c2, Depth::of(0.5))).unwrap();
+    m.route(RouteSpec::new(env, c1, Bipolar::of(0.5))).unwrap();
+    m.route(RouteSpec::new(zero, c2, Bipolar::of(0.5))).unwrap();
     settle(&mut s);
     let got = render_n(&mut side, 2, 4_096, 128);
     assert!(
@@ -428,7 +428,7 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
     assert!((got[1][4_095] - 0.1).abs() < 1e-7, "probe 2 at its knob");
 
     s.mods_mut()
-        .route(RouteSpec::new(env, c2, Depth::of(0.5)))
+        .route(RouteSpec::new(env, c2, Bipolar::of(0.5)))
         .unwrap();
     let _ = s.update();
     assert_eq!(
@@ -568,14 +568,14 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let offset = m.macro_(0.5);
-    m.route(RouteSpec::new(offset, cutoff, Depth::of(0.2)))
+    m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.2)))
         .unwrap();
     settle(&mut s);
 
     let mut m = s.mods_mut();
     let follower = m.follower(Follower::default(), probe);
     let route = m
-        .route(RouteSpec::new(follower, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
     let mut refused = refusals(s.update());
     refused.extend(refusals(s.update()));
@@ -654,7 +654,7 @@ fn host_update(
         RouteDecl {
             source: SourceKey(1),
             to: RouteTarget::Param(target),
-            depth: Depth::of(0.1),
+            depth: Bipolar::of(0.1),
             polarity: tutti_modulation::Polarity::Bipolar,
             curve: tutti_modulation::Law::Linear,
         },
@@ -769,7 +769,7 @@ fn a_route_onto_a_param_of_a_node_added_in_the_update_sends_one_plan() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, cutoff, Depth::of(0.25)))
+    m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
         .unwrap();
 
     let _ = s.update();
@@ -801,7 +801,7 @@ fn a_node_swapped_for_another_param_list_keeps_modulating() {
     m.range(probe.cutoff(), Hz::new(0.0)..Hz::new(1_000.0))
         .unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, cutoff, Depth::of(0.25)))
+    m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
     let out = render(&mut side, 1_024, 128);
@@ -856,7 +856,7 @@ fn a_host_edit_committed_for_a_target_publishes_its_latency() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, cutoff, Depth::of(0.1)))
+    m.route(RouteSpec::new(offset, cutoff, Bipolar::of(0.1)))
         .unwrap();
 
     let _ = s.update();
@@ -888,8 +888,11 @@ fn two_routes_on_one_param_sum_and_removing_one_takes_its_share() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let a = m.macro_(1.0);
     let b = m.macro_(1.0);
-    m.route(RouteSpec::new(a, cutoff, Depth::of(0.1))).unwrap();
-    let second = m.route(RouteSpec::new(b, cutoff, Depth::of(0.2))).unwrap();
+    m.route(RouteSpec::new(a, cutoff, Bipolar::of(0.1)))
+        .unwrap();
+    let second = m
+        .route(RouteSpec::new(b, cutoff, Bipolar::of(0.2)))
+        .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "both routes");
 
@@ -898,7 +901,7 @@ fn two_routes_on_one_param_sum_and_removing_one_takes_its_share() {
     assert_holds(&render(&mut side, 1_024, 128)[0], 600.0, "one removed");
 
     s.mods_mut()
-        .route(RouteSpec::new(b, cutoff, Depth::of(0.2)))
+        .route(RouteSpec::new(b, cutoff, Bipolar::of(0.2)))
         .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 800.0, "declared again");
@@ -918,7 +921,7 @@ fn removing_the_last_route_returns_the_param_to_its_knob() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let offset = m.macro_(1.0);
     let route = m
-        .route(RouteSpec::new(offset, cutoff, Depth::of(0.1)))
+        .route(RouteSpec::new(offset, cutoff, Bipolar::of(0.1)))
         .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 600.0, "the route");
@@ -948,7 +951,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let knob = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(knob, cutoff, Depth::of(0.4)))
+        .route(RouteSpec::new(knob, cutoff, Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
     assert_holds(&render(&mut side, 1_024, 128)[0], 700.0, "bipolar linear");
@@ -970,7 +973,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
     s.mods_mut().remove_route(route).unwrap();
     s.mods_mut()
         .route(
-            RouteSpec::new(knob, cutoff, Depth::of(0.4))
+            RouteSpec::new(knob, cutoff, Bipolar::of(0.4))
                 .polarity(tutti_modulation::Polarity::Unipolar),
         )
         .unwrap();
@@ -996,7 +999,8 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
     for param in [UnitParam::Volume, UnitParam::Balance] {
         let at = ParamRef::unit(strip, param);
         m.range_raw(at, 0.0, 1.0).unwrap();
-        m.route(RouteSpec::new(offset, at, Depth::of(0.5))).unwrap();
+        m.route(RouteSpec::new(offset, at, Bipolar::of(0.5)))
+            .unwrap();
     }
     settle(&mut s);
     for param in [UnitParam::Volume, UnitParam::Balance] {
@@ -1039,7 +1043,8 @@ fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let keys = targets.map(|at| m.key(at));
     for at in targets {
         m.range_raw(at, 0.0, 1.0).unwrap();
-        m.route(RouteSpec::new(offset, at, Depth::of(0.5))).unwrap();
+        m.route(RouteSpec::new(offset, at, Bipolar::of(0.5)))
+            .unwrap();
     }
     settle(&mut s);
     for (at, key) in targets.into_iter().zip(keys) {
@@ -1064,7 +1069,7 @@ fn an_added_synth_is_a_modulation_target() {
     let mut m = s.mods_mut();
     m.range_raw(volume, 0.0, 1.0).unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, volume, Depth::of(0.25)))
+    m.route(RouteSpec::new(offset, volume, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
     let (_, lane) = s
@@ -1116,7 +1121,7 @@ fn lfo_scene(
     m.range(cutoff, Hz::new(0.0)..Hz::new(1_000.0)).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(rate)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(depth)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(depth)))
         .unwrap();
     for _ in 0..4 {
         frame(s, side);
@@ -1147,7 +1152,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let settled = sent(&s);
 
     // The depth: 0.3 → 0.0, the knob alone.
-    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.0)))
+    s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.0)))
         .unwrap();
     for _ in 0..3 {
         frame(&mut s, &mut side);
@@ -1188,7 +1193,7 @@ fn range_and_depth_edits_send_no_plan_and_a_follower_route_one_commit() {
     let mut plans = vec![sent(&s)];
     let mut m = s.mods_mut();
     let kick = m.follower(Follower::default(), pulse);
-    m.route(RouteSpec::new(kick, cutoff, Depth::of(0.15)))
+    m.route(RouteSpec::new(kick, cutoff, Bipolar::of(0.15)))
         .unwrap();
     for _ in 0..6 {
         frame(&mut s, &mut side);
@@ -1237,7 +1242,7 @@ fn a_depth_slider_keeps_phase() {
         );
     }
 
-    s.set(DepthTarget::of(lfo, cutoff).to(Depth::of(0.1)))
+    s.set(DepthTarget::of(lfo, cutoff).to(Bipolar::of(0.1)))
         .unwrap();
     let _ = s.update();
     assert!(Arc::ptr_eq(&sent(&s), &settled), "a depth edit sent a plan");
@@ -1277,7 +1282,7 @@ fn a_fork_renders_a_modulated_param_as_live_does() {
     for node in [written, built] {
         let drive = ParamRef::unit(node, UnitParam::Drive);
         m.range_raw(drive, 0.0, 10.0).unwrap();
-        m.route(RouteSpec::new(offset, drive, Depth::of(0.2)))
+        m.route(RouteSpec::new(offset, drive, Bipolar::of(0.2)))
             .unwrap();
     }
     settle(&mut s);

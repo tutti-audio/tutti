@@ -3,6 +3,7 @@
 // LICENSE-RUSTYSYNTH.txt, at the root of this crate.
 
 use tutti_buffers::Float;
+use tutti_curve::FrameProgress;
 use tutti_dsp::{
     Lfo, LfoWave, PanLaw, SOLVE_CEILING, SimdLanes, SvfCoefficients, SvfControls, SvfModel,
     SvfType, pan_gains, svf_step,
@@ -10,7 +11,7 @@ use tutti_dsp::{
 use tutti_sf2::{SamplePool, Side, SoundFont};
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, RegisteredPerNoteController};
 use tutti_units::{
-    Amplitude, Cents, Db, Hz, Normalized, Pan, Q, SampleRate, Samples, Seconds, Semitones,
+    Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, SampleSpan, Samples, Seconds, Semitones,
 };
 use tutti_voicing::{ChannelState, Glide, NoteControl, NoteStart, NoteVoice};
 
@@ -111,14 +112,13 @@ impl NoteControls {
 }
 
 /// A glide in progress: the pitch is `offset` above the note's own and falls
-/// to it in a straight line over `frames` frames, a constant rate in cents
+/// to it in a straight line over its `progress`, a constant rate in cents
 /// (General MIDI 2 section 3.3.3 gives the portamento rate in cents a
 /// millisecond).
 #[derive(Debug, Clone, Copy)]
 struct GlideRun {
     offset: Semitones,
-    frames: Samples,
-    done: Samples,
+    progress: FrameProgress,
 }
 
 /// A voice: its envelopes, LFOs, oscillator and filter, rendering a chunk at a time in the
@@ -338,14 +338,15 @@ impl<F: Float + SimdLanes> Voice<F> {
         self.voice_length = 0;
     }
 
-    fn glide_run(&self, glide: Glide) -> GlideRun {
-        GlideRun {
+    /// The run of a glide, or none for a glide of no time (a jump).
+    fn glide_run(&self, glide: Glide) -> Option<GlideRun> {
+        let frames = glide.time.to_samples(self.rate);
+        (frames.get() > 0).then(|| GlideRun {
             offset: Semitones::new(f64::from(i32::from(glide.from.get()) - self.played))
                 + glide.from_tune
                 - self.tune,
-            frames: glide.time.to_samples(self.rate),
-            done: Samples::new(0),
-        }
+            progress: FrameProgress::new(SampleSpan::from_samples(frames)),
+        })
     }
 
     /// The glide's offset now, and its advance by `frames`.
@@ -353,13 +354,9 @@ impl<F: Float + SimdLanes> Voice<F> {
         let Some(run) = &mut self.glide else {
             return Semitones::new(0.0);
         };
-        let offset = if run.frames.get() > 0 {
-            run.offset * (1.0 - Normalized::progress(run.done, run.frames).get())
-        } else {
-            Semitones::new(0.0)
-        };
-        run.done = Samples::new(run.done.get() + frames);
-        if run.done >= run.frames {
+        let offset = run.offset * (1.0 - run.progress.get().get());
+        run.progress.advance(Samples::new(frames));
+        if run.progress.has_arrived() {
             self.glide = None;
         }
         offset
@@ -505,7 +502,7 @@ impl<F: Float + SimdLanes> NoteVoice for Voice<F> {
             i32::from(note.velocity.to_note_on_u7().get()),
         );
         self.tune = note.tune;
-        self.glide = note.glide.map(|g| self.glide_run(g));
+        self.glide = note.glide.and_then(|g| self.glide_run(g));
     }
 
     /// Sets how far the voice's key sounds from equal temperament, with no new
@@ -528,7 +525,7 @@ impl<F: Float + SimdLanes> NoteVoice for Voice<F> {
         let key = i32::from(key.get());
         self.transpose += Semitones::new(f64::from(key - self.played));
         self.played = key;
-        self.glide = glide.map(|g| self.glide_run(g));
+        self.glide = glide.and_then(|g| self.glide_run(g));
     }
 
     /// Takes a per-note controller's value (M2-104 section 7.4). What a

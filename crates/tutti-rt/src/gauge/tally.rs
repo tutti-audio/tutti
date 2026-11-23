@@ -32,8 +32,8 @@
 
 use std::marker::PhantomData;
 
-use super::sync::{Arc, AtomicU64, Ordering};
 use super::{Count, Words};
+use crate::sync::{Arc, AtomicU64, Ordering};
 
 #[derive(Debug)]
 struct Cells {

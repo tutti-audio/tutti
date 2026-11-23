@@ -403,7 +403,35 @@ fn dispatch_inner(
             }
         }
 
-        //EffectOpCode::GetParamInfo => { /*TODO*/ }
+        Ok(EffectOpCode::GetParamInfo) => {
+            let Some(short) = params.get_parameter_short_label(index) else {
+                return 0;
+            };
+            // SAFETY: VST2 ABI: for `effGetParameterProperties`, `ptr` is a host-owned
+            // `VstParameterProperties` to fill. Not checked for null.
+            let props = unsafe { &mut *(ptr as *mut api::ParameterProperties) };
+            props.flags = 0;
+            // SAFETY: `short_label` is `MAX_SHORT_LABEL` writable bytes of the host's struct.
+            return unsafe {
+                ffi_copy_string(
+                    props.short_label.as_mut_ptr().cast(),
+                    &short,
+                    MAX_SHORT_LABEL,
+                )
+            };
+        }
+        Ok(EffectOpCode::GetMidiKeyName) => {
+            // SAFETY: VST2 ABI: for `effGetMidiKeyName`, `ptr` is a host-owned
+            // `MidiKeyName` whose program and key the host has written. Not checked for null.
+            let key = unsafe { &mut *(ptr as *mut api::MidiKeyName) };
+            let Some(name) =
+                get_plugin().get_midi_key_name(key.this_program_index, key.this_key_number)
+            else {
+                return 0;
+            };
+            // SAFETY: `keyname` is `MAX_LABEL` writable bytes of the host's struct.
+            return unsafe { ffi_copy_string(key.keyname.as_mut_ptr().cast(), &name, MAX_LABEL) };
+        }
         Ok(EffectOpCode::GetApiVersion) => return 2400,
 
         // `index` is the ASCII character, `value` the virtual key, and `opt`'s bits the

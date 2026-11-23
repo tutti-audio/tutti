@@ -19,12 +19,12 @@
 
 use std::sync::Arc;
 
-use super::sync::{AtomicBool, AtomicU64, Ordering};
 use super::{
     Cell, NotSync, Overflow, Padded, PushError, Returned, WriterLoss, check_free_outside,
     take_since,
 };
 use crate::gauge::Counter;
+use crate::sync::{AtomicBool, AtomicU64, Ordering};
 
 struct Shared<T> {
     slots: Box<[Cell<T>]>,
