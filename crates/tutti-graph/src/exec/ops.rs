@@ -5,7 +5,7 @@ use super::node_op::{CONSTANT, SILENT, flag};
 use super::state::Ring;
 use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
-use crate::event::merge::{merge_into, merge_params};
+use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
 use crate::exec::arena::Role;
 use crate::exec::rings::{AudioRing, EventFifo};
@@ -208,8 +208,11 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     let room = events.capacity().min(room);
     // The param events are never bounded by a node's input capacity: the slot
     // holds every one its sources can write.
-    let lost = merge_params(&pins[..list.len()], params, params.capacity());
-    u64::from(lost) + u64::from(merge_into(&ins[..list.len()], events, room))
+    let lost = merge_params(&pins[..list.len()], params);
+    let cut = merge_walk(&ins[..list.len()], room, |_, e| {
+        events.push(e);
+    });
+    u64::from(lost) + u64::from(cut)
 }
 
 /// [`Op::Output`](crate::Op::Output): slot `src` into `out`, through the channel's alignment

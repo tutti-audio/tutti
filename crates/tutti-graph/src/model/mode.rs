@@ -103,11 +103,11 @@
 //! is heard.) A node that kept running (a toggle back while still fading
 //! out, or from Muted) is not reset.
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 
 use atomic_float::AtomicF64;
 use tutti_curve::FadeLaw;
-use tutti_rt::{CappedVec, ParamCell};
+use tutti_rt::{AtomicCell, CappedVec, ParamCell, atomic_word};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
@@ -151,23 +151,13 @@ pub enum NodeMode {
     Muted,
 }
 
+atomic_word!(NodeMode {
+    Active,
+    Bypassed,
+    Muted
+});
+
 impl NodeMode {
-    fn to_bits(self) -> u8 {
-        match self {
-            Self::Active => 0,
-            Self::Bypassed => 1,
-            Self::Muted => 2,
-        }
-    }
-
-    fn from_bits(bits: u8) -> Self {
-        match bits {
-            1 => Self::Bypassed,
-            2 => Self::Muted,
-            _ => Self::Active,
-        }
-    }
-
     /// The weights a steady mode holds, at mix `m` (only Active reads it).
     fn weights<F: Float>(self, m: F) -> Weights<F> {
         match self {
@@ -266,13 +256,13 @@ pub enum MixError {
 }
 
 /// A unit's mode and mix, shared between the editor (the one writer) and the
-/// unit (the executor reads each once per block). An `AtomicU8` and the
+/// unit (the executor reads each once per block). An `AtomicCell` and the
 /// mix's raw `f64` (`Mix` is not `Pod`; the cell converts at its edge): a
 /// mode and a mix are controls, not rewires. **The mix cell is the mix's one
 /// writer's**: [`Editor::set_mix`](crate::Editor::set_mix) stores into it.
 #[derive(Clone, Debug)]
 pub(crate) struct ModeCell {
-    mode: Arc<AtomicU8>,
+    mode: Arc<AtomicCell<NodeMode>>,
     mix: Arc<AtomicF64>,
     /// The range a driven mix is clamped to: the param port's own cell over
     /// the one address [`NodeMix::ADDR`], so the lane's step clamps to it as a
@@ -287,7 +277,7 @@ impl ModeCell {
         let range = ParamRanges::new(ParamPorts::MIX);
         range.store(NodeMix::ADDR, NodeMix::DEFAULT_RANGE);
         Self {
-            mode: Arc::new(AtomicU8::new(mode.to_bits())),
+            mode: Arc::new(AtomicCell::new(mode)),
             mix: Arc::new(AtomicF64::new(mix.get())),
             range,
         }
@@ -327,7 +317,7 @@ impl ModeCell {
 
     /// Store `mode`. Wait-free.
     pub(crate) fn store(&self, mode: NodeMode) {
-        self.mode.store(mode.to_bits(), Ordering::Release);
+        self.mode.store(mode);
     }
 
     /// Store `mix`. Wait-free.
@@ -338,7 +328,7 @@ impl ModeCell {
     /// The mode now. Wait-free.
     #[inline]
     pub(crate) fn load(&self) -> NodeMode {
-        NodeMode::from_bits(self.mode.load(Ordering::Acquire))
+        self.mode.load()
     }
 
     /// The mix now. Wait-free.

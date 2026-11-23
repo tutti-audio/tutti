@@ -1,13 +1,12 @@
 //! Rendering a block: the frame around the plan's ops, which `par.rs` runs.
 
-use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
-use tutti_units::Samples;
+use tutti_units::{Blocks, Samples};
 
-use super::commit::{Crossfade, retire_fade};
+use super::commit::{CommitSeq, Crossfade, retire_fade};
 use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
@@ -57,8 +56,8 @@ pub(super) fn end_fades<F: Float>(
             {
                 // Only as much as the buffer's room takes; the rest is lost
                 // and charged to the unit.
-                let room = (inj.events.capacity() - inj.events.len()).min(next.chase.len());
-                inj.events.extend_from_slice(&next.chase[..room]);
+                let room = inj.events.remaining().min(next.chase.len());
+                inj.events.extend(next.chase[..room].iter().copied());
                 inj.events.rotate_right(room);
                 let lost = next.chase.len() - room;
                 if lost > 0 {
@@ -410,11 +409,11 @@ impl<F: Float> Executor<F> {
                 let before = run.done;
                 run.done += frames;
                 if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
-                    main_output_fade_ended.store(run.seq, Ordering::Release);
+                    main_output_fade_ended.set(CommitSeq(run.seq));
                 }
             }
             *frame += Samples::new(frames);
-            rendered.fetch_add(1, Ordering::Release);
+            rendered.add(Blocks::new(1));
         });
     }
 }
