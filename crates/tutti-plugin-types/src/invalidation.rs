@@ -96,6 +96,10 @@ pub enum PluginInvalidation {
     Io,
     /// The plugin instance was rebuilt in place; re-plan everything.
     Reloaded,
+    /// The plugin's declared controller table may differ (it re-declared it, or
+    /// its instance was rebuilt): the node has re-read it, and
+    /// [`Control::wiring`](crate::Control::wiring) answers the new one. Nothing the graph holds is wrong.
+    MidiMapChanged,
     /// The plugin refused the engine's sample rate and renders silence until
     /// a rate it takes. Not terminal and not a rewire: the plugin stays
     /// loaded and keeps its declared latency, so the plan stands. Retried at

@@ -19,8 +19,8 @@ use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{
-    Features, IpcError, MainWorkHandle, MidiAssignment, NoteName, ParamGroup, PluginFailure,
-    PluginPreset, PresetError,
+    Features, IpcError, MainWorkHandle, NoteName, ParamGroup, PluginFailure, PluginPreset,
+    PresetError,
 };
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::Mutex;
@@ -129,7 +129,6 @@ pub struct PluginInfo {
     presets: PluginPresets,
     note_names: Vec<NoteName>,
     param_groups: Vec<ParamGroup>,
-    assignments: Vec<MidiAssignment>,
 }
 
 impl PluginInfo {
@@ -187,17 +186,6 @@ impl PluginInfo {
     #[must_use]
     pub fn param_groups(&self) -> &[ParamGroup] {
         &self.param_groups
-    }
-
-    /// The controller table the plugin declares (VST3 `IMidiMapping`, AU's
-    /// parameter MIDI mappings), as the load read it: empty for a plugin with
-    /// none. The app's own entries are the
-    /// [`MidiMap`](crate::MidiMap) of [`Plugin::midi_map`](crate::Plugin::midi_map),
-    /// and [`MidiMap::effective`](crate::MidiMap::effective) reads the two
-    /// together.
-    #[must_use]
-    pub fn assignments(&self) -> &[MidiAssignment] {
-        &self.assignments
     }
 }
 
@@ -266,7 +254,6 @@ impl Shared {
             presets,
             note_names: handle.loaded().note_names.clone(),
             param_groups: handle.loaded().param_groups.clone(),
-            assignments: handle.loaded().assignments.clone(),
         };
         let shared = Self {
             id,

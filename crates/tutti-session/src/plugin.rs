@@ -624,6 +624,9 @@ pub enum PluginChange {
     /// The plugin's parameter list or its titles, units or flags changed:
     /// re-read the descriptors.
     ParamTitlesChanged,
+    /// The plugin re-declared its controller table, or was rebuilt in place:
+    /// [`Plugin::assignments`] reads the new one.
+    MidiMapChanged,
     /// Reading the plugin's parameters panicked, once: the read is not made
     /// again, and the parameters stay unread
     /// ([`PluginParams::is_ready`](crate::PluginParams::is_ready) is `false`)
@@ -773,6 +776,9 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
             PluginChange::TailChanged { tail }
         }
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
+        PluginSignal::Invalidate(PluginInvalidation::MidiMapChanged) => {
+            PluginChange::MidiMapChanged
+        }
         PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
             PluginChange::StateNotRestored { reason }
         }
@@ -928,6 +934,9 @@ pub(crate) struct HostedPlugin {
     track: Arc<crate::value::TrackInfoSlot>,
     /// The app's MIDI map, which the main thread's `Phase::Plugins` delivers.
     midi_map: Arc<crate::value::MidiMapSlot>,
+    /// The controller table the plugin declares: read at the load, and again
+    /// when the plugin re-declares it ([`PluginChange::MidiMapChanged`]).
+    assignments: Vec<tutti_plugin_types::MidiAssignment>,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
@@ -1203,6 +1212,7 @@ impl HostedPlugin {
     ) -> Self {
         let (notices, hearing) = hear(&handle);
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
+        let assignments = handle.loaded().assignments.clone();
         Self {
             placement,
             plugin,
@@ -1212,6 +1222,7 @@ impl HostedPlugin {
             node,
             track: crate::value::TrackInfoSlot::new(),
             midi_map: crate::value::MidiMapSlot::new(),
+            assignments,
             banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
@@ -1424,6 +1435,8 @@ impl HostedPlugin {
         self.mirror = mirror;
         self.param_read = Some(read);
         self.mirror_token = Arc::new(());
+        // The incoming plugin declares a table of its own.
+        self.assignments = handle.loaded().assignments.clone();
         // A gesture on the outgoing plugin ends here: it is not this one.
         self.gate.end();
         self.gate = Gate::default();
@@ -1769,9 +1782,20 @@ impl<'a> Plugin<'a> {
         crate::PluginTrackInfoTarget::new(self.node)
     }
 
+    /// The controller table the plugin declares (VST3 `IMidiMapping`, AU's
+    /// parameter MIDI mappings): empty for a plugin with none. Read at the
+    /// load and again whenever the plugin re-declares it
+    /// ([`PluginChange::MidiMapChanged`]). The app's own entries are
+    /// [`midi_map`](Self::midi_map), and
+    /// [`MidiMap::effective`](crate::MidiMap::effective) reads the two together.
+    #[must_use]
+    pub fn assignments(&self) -> &'a [tutti_plugin_types::MidiAssignment] {
+        &self.hosted.assignments
+    }
+
     /// The target of the app's controller map of the plugin: which MIDI
     /// messages drive which parameters, beside the table the plugin declares
-    /// ([`PluginInfo::assignments`]).
+    /// ([`assignments`](Self::assignments)).
     #[must_use]
     pub fn midi_map(&self) -> crate::PluginMidiMapTarget {
         crate::PluginMidiMapTarget::new(self.node)
@@ -2574,6 +2598,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
                 )
             }) {
                 hosted.reread_params();
+            }
+            // A table the plugin re-declared is read now, where the main
+            // thread is at hand; the handle answers the load's copy when it
+            // has no route to the plugin.
+            let redeclared = heard.iter().any(|notice| {
+                matches!(
+                    notice,
+                    PluginSignal::Invalidate(PluginInvalidation::MidiMapChanged)
+                )
+            });
+            if let (true, Some(main)) = (redeclared, cx.main) {
+                hosted.assignments = hosted.handle.wiring(main).assignments;
             }
             out.extend(
                 heard

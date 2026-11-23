@@ -189,7 +189,15 @@ fn a_redeclared_table_is_the_nodes_after_the_tick() {
     let (fake, mut unit, inner, _slot) = rig(&[cc74(LEVEL)]);
     fake.declare_midi_map(&[cc74(OTHER)]);
     assert!(Request::MidiCcAssignmentChanged.raise(fake.request_flags()));
-    inner.lock().pump(main_thread());
+    let changes = inner.lock().pump(main_thread());
+    assert!(
+        matches!(
+            changes.reports.as_slice(),
+            [tutti_plugin_types::PluginInvalidation::MidiMapChanged]
+        ),
+        "the handle's subscribers are told once: {:?}",
+        changes.reports
+    );
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, u32::MAX))]);
     assert_eq!(params(&fake), [(OTHER, 1.0)]);
 }

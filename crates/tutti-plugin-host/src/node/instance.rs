@@ -349,6 +349,7 @@ impl<L: Loaded> Instance<L> {
         self.publish_figures();
         if std::mem::take(&mut self.midi_map_stale) {
             self.declare_midi_map(main);
+            self.reports.push(PluginInvalidation::MidiMapChanged);
         }
         if self.lifecycle.is_poisoned() {
             let source = trouble.as_ref().map_or_else(

@@ -38,6 +38,18 @@ fn entry(channel: Option<MidiChannel>, source: MidiSource, param: ParamId) -> Mi
 /// A detached session with a fake plugin that lists `CUTOFF` and `LEVEL` among
 /// its parameters (`plugin_params`' backend), read.
 fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
+    let (s, node, fake, _) = hosting_reporting();
+    (s, node, fake)
+}
+
+/// [`hosting`], and the sink the plugin's invalidations are raised on.
+fn hosting_reporting() -> (
+    DetachedSession,
+    NodeKey,
+    FakePlugin,
+    tutti_plugin_host::InvalidateSink,
+) {
+    let invalidate = tutti_plugin_host::InvalidateSink::new();
     let (fake, loaded) = FakePlugin::new();
     let control: Arc<dyn tutti_plugin_host::MainThreadControl> = Arc::new(loaded);
     let handle = PluginHandle::from_backend(
@@ -46,7 +58,8 @@ fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
         tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
         Default::default(),
         Default::default(),
-    );
+    )
+    .invalidate_sink(invalidate.clone());
     let mut s = Session::builder()
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");
@@ -62,7 +75,7 @@ fn hosting() -> (DetachedSession, NodeKey, FakePlugin) {
     update(&mut s);
     await_tasks(&s);
     update(&mut s);
-    (s, node, fake)
+    (s, node, fake, invalidate)
 }
 
 fn update(s: &mut DetachedSession) {
@@ -236,4 +249,62 @@ fn a_midi_map_round_trips_its_entries_and_refuses_a_duplicate_on_the_wire() {
 
     let twice = serde_json::to_string(&[app_map()[0], app_map()[0]]).unwrap();
     assert!(serde_json::from_str::<MidiMap>(&twice).is_err());
+}
+
+/// **A plugin that re-declares its controller table is read again on the
+/// update that hears it**: `assignments()` answers the new table, `effective`
+/// lays the app's entries over it, the app sees `MidiMapChanged` once, and an
+/// update with nothing new reports nothing.
+#[test]
+fn a_redeclared_table_replaces_the_declared_one_and_is_reported_once() {
+    use crate::{PluginChange, SessionEvent};
+    use tutti_plugin_types::PluginInvalidation;
+
+    let (mut s, node, fake, invalidate) = hosting_reporting();
+    assert!(s.plugin_view(node).unwrap().assignments().is_empty());
+
+    let declared = vec![
+        entry(Some(MidiChannel::of(0)), cc(74), CUTOFF),
+        entry(None, cc(7), LEVEL),
+    ];
+    fake.declare_midi_map(&declared);
+    invalidate.fire(PluginInvalidation::MidiMapChanged);
+    let out = s.update_on(tutti_fixtures::main_thread());
+    let changed = out
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                SessionEvent::Plugin(p) if matches!(p.change, PluginChange::MidiMapChanged)
+            )
+        })
+        .count();
+    assert_eq!(changed, 1);
+
+    let view = s.plugin_view(node).unwrap();
+    assert_eq!(view.assignments(), declared);
+    let target = view.midi_map();
+    s.set(target.to(MidiMap::new([entry(
+        Some(MidiChannel::of(0)),
+        cc(74),
+        LEVEL,
+    )])))
+    .unwrap();
+    let app = s.get(target).unwrap();
+    let effective: Vec<_> = app
+        .effective(s.plugin_view(node).unwrap().assignments())
+        .collect();
+    assert_eq!(
+        effective,
+        [
+            entry(None, cc(7), LEVEL),
+            entry(Some(MidiChannel::of(0)), cc(74), LEVEL),
+        ]
+    );
+
+    let out = s.update_on(tutti_fixtures::main_thread());
+    assert!(
+        !out.iter().any(|e| matches!(e, SessionEvent::Plugin(_))),
+        "{out:?}"
+    );
 }
