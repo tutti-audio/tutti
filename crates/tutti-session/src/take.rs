@@ -966,7 +966,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
         let anchor = Anchor {
             beat: playhead.beat(),
             frame: playhead.frame(),
-            map: self.transport.settings().tempo_map(),
+            map: self.transport.bases.tempo.get(),
             rate,
         };
         let window = resolve(&punch, &anchor, playhead.playing())?;

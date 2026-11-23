@@ -12,6 +12,7 @@ use tutti_units::{Db, Normalized, SampleRate, Samples, Tail, UnitAddr, UnitParam
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::oversampled::Oversampled;
 use crate::params::{ControlSet, HasControl};
+use tutti_graph::DeclaredUnit;
 
 /// What a [`HysteresisNode`] is made from: its width, its material and drive, and its
 /// oversampling.
@@ -123,6 +124,11 @@ impl ControlSet for HysteresisSet {
 
     fn addrs(&self) -> &'static [UnitAddr] {
         const ALL: &[UnitAddr] = &[UnitAddr::first(UnitParam::GainDb)];
+        ALL
+    }
+
+    fn units(&self) -> &'static [DeclaredUnit] {
+        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
         ALL
     }
 

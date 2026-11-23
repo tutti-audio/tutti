@@ -12,6 +12,7 @@ use tutti_units::{Db, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::oversampled::Oversampled;
 use crate::params::{ControlSet, HasControl};
+use tutti_graph::DeclaredUnit;
 
 /// What a [`TubeStageNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,6 +102,11 @@ impl ControlSet for TubeStageSet {
 
     fn addrs(&self) -> &'static [UnitAddr] {
         const ALL: &[UnitAddr] = &[UnitAddr::first(UnitParam::GainDb)];
+        ALL
+    }
+
+    fn units(&self) -> &'static [DeclaredUnit] {
+        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
         ALL
     }
 

@@ -129,12 +129,6 @@ fn a_look_that_fails_is_retried_and_is_not_a_look() {
     assert_eq!(reads.get(), 1, "one read, after the look that worked");
 }
 
-#[test]
-fn a_look_that_never_succeeds_gives_none() {
-    let settled: Settled<()> = settle(NOTHING, || NOTHING, || None);
-    assert!(settled.seen.is_none() && !settled.quiet);
-}
-
 /// A failed read is not a quiet one.
 #[test]
 fn a_failed_read_is_not_quiet() {
@@ -156,37 +150,6 @@ fn a_failed_read_is_not_quiet() {
         },
     );
     assert_eq!(looks.get(), 2);
-}
-
-/// A backend that only hands out the sink its watch is given.
-struct Capture(Arc<Mutex<Option<ChangeSink>>>);
-
-impl crate::MidiEndpoints for Capture {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock() = Some(sink);
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn outputs(&self) -> Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn crate::InputConnection>> {
-        Err(MidiHardwareError::Unsupported("none"))
-    }
-    fn open_output(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-    ) -> Result<Box<dyn crate::DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("none"))
-    }
 }
 
 /// The sequencer: one ordered announce port, and the clients.
@@ -238,7 +201,7 @@ impl World {
         let slot = Arc::new(Mutex::new(None));
         let devices = crate::Devices::open_over(
             &tutti_platform::Executor::new(),
-            Box::new(Capture(Arc::clone(&slot))),
+            Box::new(crate::testing::Stub::capturing(&slot)),
         )
         .unwrap();
         let events = devices.subscribe();
@@ -522,6 +485,9 @@ fn a_look_that_never_succeeds_reports_nothing_and_keeps_the_starts() {
     world.model.failing.set(0);
     world.wake(heard(&[]), |_| {});
     assert_eq!(world.shape(), pair("One", "One"));
+    let settled: Settled<()> = settle(NOTHING, || NOTHING, || None);
+    assert!(settled.seen.is_none(), "no look succeeded");
+    assert!(!settled.quiet, "and no read followed one");
 }
 
 /// A look that fails once is retried within the wake, and reports as if it had

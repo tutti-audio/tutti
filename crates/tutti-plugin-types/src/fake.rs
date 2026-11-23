@@ -289,6 +289,10 @@ struct Shared {
     /// The failure the fake's editor reports for its state mirror at each open
     /// (`FakePlugin::with_editor_mirror_failure`).
     mirror_failure: Mutex<Option<crate::EditorMirrorError>>,
+    /// What `set_track_info` was handed, in order, and the answer it gives
+    /// (`FakePlugin::answer_track_info`).
+    track_infos: Mutex<Vec<crate::TrackInfo>>,
+    track_answer: Mutex<crate::Delivered>,
 }
 
 impl Shared {
@@ -364,6 +368,8 @@ impl FakePlugin {
             refused_off_thread: AtomicU64::new(0),
             declared: Mutex::new(Vec::new()),
             mirror_failure: Mutex::new(None),
+            track_infos: Mutex::new(Vec::new()),
+            track_answer: Mutex::new(crate::Delivered::Yes),
         });
         (
             Self(shared.clone()),
@@ -556,6 +562,18 @@ impl FakePlugin {
         *self.0.mirror_failure.lock() = Some(error);
     }
 
+    /// Every [`TrackInfo`](crate::TrackInfo) the plugin was handed, in order.
+    #[must_use]
+    pub fn track_infos(&self) -> Vec<crate::TrackInfo> {
+        self.0.track_infos.lock().clone()
+    }
+
+    /// Makes `set_track_info` answer `answer`; the default is
+    /// [`Delivered::Yes`](crate::Delivered::Yes).
+    pub fn answer_track_info(&self, answer: crate::Delivered) {
+        *self.0.track_answer.lock() = answer;
+    }
+
     /// Makes the fake's editor take a new scale live. The default is the trait's
     /// refusal, `EditorError::ScaleUnsupported`, as VST2 and AU answer.
     pub fn with_editor_scale(&self, takes: bool) {
@@ -629,6 +647,15 @@ macro_rules! fake_control {
 
             fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
                 self.shared.wiring()
+            }
+
+            fn set_track_info(
+                &mut self,
+                _main: MainThreadMarker,
+                info: &crate::TrackInfo,
+            ) -> crate::Delivered {
+                self.shared.track_infos.lock().push(info.clone());
+                *self.shared.track_answer.lock()
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {

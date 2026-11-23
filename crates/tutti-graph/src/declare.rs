@@ -20,7 +20,7 @@ use tutti_units::{
     Resonance, SampleSpan, Seconds, Semitones, Spread, StereoWidth, Unit, UnitAddr,
 };
 
-use crate::controls::{ParamSet, Params};
+use crate::controls::{DeclaredUnit, ParamSet, Params};
 use crate::io::Io;
 use crate::param::{MAX_PARAM_PORTS, ParamInput, ParamPorts};
 use tutti_buffers::Float;
@@ -261,6 +261,7 @@ impl<U: ParamValue, C: Cells<U>> Cells<U> for Option<C> {
 #[doc(hidden)]
 pub struct Row<'a> {
     addr: UnitAddr,
+    unit: DeclaredUnit,
     port: bool,
     base: f64,
     cell: &'a dyn Fn() -> Option<ParamCell>,
@@ -294,6 +295,7 @@ pub fn row<U: ParamValue, C: Cells<U>>(
     };
     visit(Row {
         addr,
+        unit: DeclaredUnit::of::<U>(),
         port,
         base,
         cell: &|| cell.cell(),
@@ -322,7 +324,7 @@ pub fn set(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamSet {
     let mut set = ParamSet::builder();
     walk(&mut |row| {
         if let Some(cell) = (row.cell)() {
-            set = std::mem::replace(&mut set, ParamSet::builder()).param(row.addr, cell);
+            set = std::mem::replace(&mut set, ParamSet::builder()).param(row.unit, row.addr, cell);
         }
         true
     });

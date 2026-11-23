@@ -25,10 +25,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tutti_plugin_types::EditReader;
 use tutti_plugin_types::PipelineCounts;
-use tutti_rt::AtomicSampleRate;
 use tutti_rt::AudioThreadCell;
 use tutti_rt::{
-    Counter, Mutex, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
+    AtomicCell, Counter, Mutex, Overflow, Parker, RingReader, RingWriter, Tally, TallyWriter,
     Unparker, parker, ring, tally,
 };
 use tutti_units::{Chunks, Normalized, ParamId, SampleRate};
@@ -96,7 +95,7 @@ pub(super) struct Channels {
     /// keeps the two from drifting apart: two independently-derived periods let
     /// a constant sit orders of magnitude off the real block period, which
     /// starves the command queue.
-    sample_rate: Arc<AtomicSampleRate>,
+    sample_rate: Arc<AtomicCell<SampleRate>>,
     /// How long the bridge thread waits for a block's reply, in nanoseconds,
     /// when it is not the live bound (the block period's few multiples, from
     /// the dispatcher): `0` is the live bound, so a set wait is never stored as
@@ -207,11 +206,11 @@ pub(crate) enum BatchOutcome {
 /// gated by the slab's sequence words), so a reader sees a fate or not yet,
 /// and tries again at its next look. The cell's `Acquire`/`Release` is its
 /// own contract and nothing here relies on it.
-struct BatchOutcomes([PackedAtomic<u64>; BATCH_OUTCOMES]);
+struct BatchOutcomes([AtomicCell<u64>; BATCH_OUTCOMES]);
 
 impl BatchOutcomes {
     fn new() -> Self {
-        Self(std::array::from_fn(|_| PackedAtomic::new(0)))
+        Self(std::array::from_fn(|_| AtomicCell::new(0)))
     }
 
     /// Stores `seq`'s fate, unless the word already holds a newer chunk's: a
@@ -329,7 +328,7 @@ impl Channels {
             newest_seq: Arc::new(AtomicU64::new(0)),
             unparker,
             control_unparker,
-            sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
+            sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             reply_wait_ns: Arc::new(AtomicU64::new(0)),
             host_edits: Arc::new(AudioThreadCell::new(None)),
             abandoned_writer: abandoned.writer(),
@@ -402,14 +401,14 @@ impl Channels {
         taken
     }
 
-    /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so
-    /// reading a value one block stale is harmless.
+    /// The current sample rate. It only sizes a timeout, so a value one block
+    /// stale is harmless.
     pub(super) fn sample_rate(&self) -> SampleRate {
-        self.sample_rate.load(Ordering::Relaxed)
+        self.sample_rate.load()
     }
 
     pub(super) fn set_sample_rate(&self, rate: SampleRate) {
-        self.sample_rate.store(rate, Ordering::Relaxed);
+        self.sample_rate.store(rate);
     }
 
     /// The bridge thread's wait for a block's reply, when it is not the live

@@ -40,6 +40,9 @@ fn through_server<F: Format>(path: PathBuf) {
     let pid = handle.server_pid().expect("the plugin lives in a server");
     assert_ne!(pid, std::process::id(), "a process other than this one");
 
+    // The tables the plugin declared ride the load reply.
+    tutti_plugin_contract::assert_tables::<F>(handle.loaded(), "served");
+
     let state = handle
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("saves");

@@ -27,9 +27,7 @@ use tutti_midi_runtime::{
     MidiKeys, MpeTransformNode, Outgoing, OutputLatency, OutputPlan, OutputTerms, Placement,
     RouteRule, SendAt, TimedMidiEvent, compile_routes,
 };
-use tutti_music::MeterMap;
 use tutti_rt::Mint;
-use tutti_tempo::TempoMap;
 use tutti_ump::{MidiChannel, MidiGroup, Ump};
 use tutti_units::{Beat, BeatDuration, Frame, Samples};
 
@@ -829,9 +827,6 @@ pub(crate) struct MidiState {
     mpe: tutti_rt::Publisher<MpeMode>,
     /// The tempo the session follows, if it does ([`Midi::follow_tempo`]).
     follow: Option<Follow>,
-    /// Whether a live tempo owns the map, as `follow` and `clock` left it:
-    /// the tempo target's refusal reads it ([`is_following`](Self::is_following)).
-    following: Arc<std::sync::atomic::AtomicBool>,
     /// The MIDI clock the session follows, if it does ([`Midi::follow_clock`]).
     clock: Option<ClockFollow>,
     /// The Machine Control the session follows, if it does
@@ -1028,26 +1023,9 @@ impl MidiState {
             .map(|source| source.timing(self.output_latency.0.current(), now))
     }
 
-    /// Whether the session follows a live tempo now.
-    pub(crate) fn is_following(&self) -> bool {
-        self.follow.is_some() || self.clock.as_ref().is_some_and(ClockFollow::owns_tempo)
-    }
-
     /// The cell of the outputs' latency, for the value table.
     pub(crate) fn output_latency_cell(&self) -> Arc<crate::value::Cell<OutputLatency>> {
         Arc::clone(&self.output_latency.0)
-    }
-
-    /// The flag the tempo target reads, shared with this state.
-    pub(crate) fn following_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
-        Arc::clone(&self.following)
-    }
-
-    /// Publishes [`is_following`](Self::is_following) to the tempo target,
-    /// after a follower is set or dropped.
-    fn sync_following(&self) {
-        self.following
-            .store(self.is_following(), std::sync::atomic::Ordering::Release);
     }
 
     /// `Phase::Poll`, for the MIDI clock the session follows: reads its tap,
@@ -1127,7 +1105,7 @@ impl MidiState {
                 follow.set_tap(tap);
             }
         }
-        follow.apply(&heard, cx, out);
+        cx.apply(&heard, out);
         edited
     }
 
@@ -1251,10 +1229,12 @@ pub struct Midi<'a, F: Float = f32> {
     pub(crate) graph: &'a mut Graph<F>,
     pub(crate) state: &'a mut MidiState,
     pub(crate) nodes: Option<&'a MidiNodes>,
-    /// The transport's settings (the tempo map a follower overlays).
+    /// The transport's settings (the tempo map a follower publishes).
     pub(crate) settings: &'a tutti_timeline::TransportSettings,
-    /// The project meter a follower overlays.
+    /// The project meter a follower publishes.
     pub(crate) meter: tutti_timeline::ProjectMeter,
+    /// The base of the tempo and the meter a follower steps.
+    pub(crate) bases: crate::value::Bases,
     /// The session's executor, which a file load runs on.
     pub(crate) executor: tutti_platform::WeakExecutor,
     /// The OS MIDI layer, when the builder opened it.
@@ -1903,16 +1883,15 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// The source is Flex Set Tempo on one Group; MIDI Beat Clock and MIDI Time
     /// Code are followed by [`follow_clock`](Self::follow_clock).
-    /// **It overlays the project's maps; it does not replace them.** The tempo
-    /// map and meter the project has now are kept; from the beat of each change,
-    /// the published map is the project's up to there and the live steps after,
-    /// so a project point or ramp ahead of the playhead is not played while
-    /// following (a ramp a step lands in is cut at its beat). The session has no
-    /// project tempo apart from the published map, so **the map it finds now is
-    /// the one [`unfollow_tempo`](Self::unfollow_tempo) restores**. While
-    /// following, a write to the tempo target refuses with
-    /// [`SetRefusal::Following`](crate::SetRefusal::Following), so nothing else
-    /// publishes in between.
+    /// **It lays its steps over the app's maps; it does not replace them.**
+    /// The tempo map and meter the app writes are the base: from the beat of
+    /// each change, the map the engine uses is the base up to there and the
+    /// live steps after, so a base point or ramp ahead of the playhead is not
+    /// played while following (a ramp a step lands in is cut at its beat). A
+    /// write to the tempo target while following lands in the base, and the
+    /// published map is rebuilt over it; `get(tempo.effective())` reads the map
+    /// the engine uses. [`unfollow_tempo`](Self::unfollow_tempo) publishes the
+    /// base as it stands then.
     ///
     /// A change takes effect at the start of the next block (a meter at the next
     /// bar line at or after it), at the latest one block and one update after it
@@ -1921,8 +1900,8 @@ impl<F: Float> Midi<'_, F> {
     /// transport's beat stays continuous when a publish lands late.
     ///
     /// **One follower at a time**: following again replaces the first. The
-    /// project's maps stay the ones found by the first call, and the tempo in
-    /// force stays until the new source sends one.
+    /// steps laid so far stay over the base, and the tempo in force stays until
+    /// the new source sends one.
     ///
     /// # Errors
     ///
@@ -1942,48 +1921,22 @@ impl<F: Float> Midi<'_, F> {
         }
         let tap = self.follow_tap(follow.input(), follow.group(), FOLLOW_TAP_CAPACITY)?;
         let core = tutti_midi_runtime::TempoFollower::new(follow.group(), follow.follows_meter());
-        self.state.follow = Some(match self.state.follow.take() {
-            Some(first) => first.replaced_by(core, tap),
-            None => Follow::new(core, tap, self.settings.tempo_map(), self.meter.current()),
-        });
-        self.state.sync_following();
-        self.discard_staged_maps(follow.follows_meter());
+        self.state.follow = Some(Follow::new(core, tap));
         Ok(())
     }
 
-    /// Drops the tempo (and, with `meter`, the meter) a write staged and no
-    /// update has published: a follower owns the maps from here, and the
-    /// project's are the ones in force, so the staged ones must not publish
-    /// over what an unfollow restores.
-    fn discard_staged_maps(&self, meter: bool) {
-        use crate::value::SlotId;
-        let ids: &[SlotId] = if meter {
-            &[SlotId::Tempo, SlotId::Meter]
-        } else {
-            &[SlotId::Tempo]
-        };
-        self.graph.value_table().discard_pending(ids);
-    }
-
     /// Stops following ([`follow_tempo`](Self::follow_tempo)): publishes the
-    /// project's tempo map and meter again, for the ones the follower changed.
-    /// The transport takes them at the next block at its current beat, so the
-    /// playhead does not jump, and the tempo from there on is the project's.
-    /// Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
+    /// app's tempo map and meter as they stand now, for the ones the follower
+    /// stepped. The transport takes them at the next block at its current
+    /// beat, so the playhead does not jump, and the tempo from there on is the
+    /// base's. Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
     ///
     /// # Errors
     ///
     /// [`MidiError::NotFollowing`] when nothing is followed.
     pub fn unfollow_tempo(&mut self) -> Result<()> {
-        let follow = self.state.follow.take().ok_or(MidiError::NotFollowing)?;
-        self.state.sync_following();
-        let (tempo, meter) = follow.restore();
-        if let Some(tempo) = tempo {
-            self.settings.set_tempo_map(tempo);
-        }
-        if let Some(meter) = meter {
-            self.meter.set_meter(meter);
-        }
+        self.state.follow.take().ok_or(MidiError::NotFollowing)?;
+        self.release_maps();
         self.state.follow_events.push(MidiEvent::TempoUnfollowed);
         Ok(())
     }
@@ -2017,9 +1970,10 @@ impl<F: Float> Midi<'_, F> {
     /// never sooner than a declick past the next block (`At::Frame`), with the source's
     /// position advanced by the time since the message arrived, so a source that
     /// kept rolling is not trailed. **A Beat
-    /// Clock follower owns the tempo map** as `follow_tempo` does: the map found
-    /// now is the one [`unfollow_clock`](Self::unfollow_clock) restores, and
-    /// `Session::set_tempo` refuses while it follows.
+    /// Clock follower steps the tempo map** over the app's base as
+    /// `follow_tempo` does: a write to the tempo target lands in the base, and
+    /// [`unfollow_clock`](Self::unfollow_clock) publishes the base as it
+    /// stands then.
     ///
     /// **Drift is corrected.** In each poll while the transport rolls, the
     /// beat the source counts is compared with the beat the transport reaches
@@ -2051,21 +2005,14 @@ impl<F: Float> Midi<'_, F> {
         }
         let tap = self.follow_tap(follow.input(), follow.group(), CLOCK_TAP_CAPACITY)?;
         let core = tutti_midi_runtime::ClockFollower::new(follow.kind());
-        // A second follow replaces the first; the maps the first overlaid are
-        // the project's again before the second takes them.
-        if let Some(first) = self.state.clock.take() {
-            self.restore_maps(first.restore());
+        // A second follow replaces the first; the base is published again
+        // before the second steps it.
+        if let Some(first) = self.state.clock.take()
+            && first.owns_tempo()
+        {
+            self.release_maps();
         }
-        self.state.clock = Some(ClockFollow::new(
-            core,
-            tap,
-            self.settings.tempo_map(),
-            self.meter.current(),
-        ));
-        self.state.sync_following();
-        if follow.kind() == tutti_midi_runtime::ClockKind::BeatClock {
-            self.discard_staged_maps(true);
-        }
+        self.state.clock = Some(ClockFollow::new(core, tap));
         Ok(())
     }
 
@@ -2081,8 +2028,8 @@ impl<F: Float> Midi<'_, F> {
     }
 
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
-    /// keeps the motion it had, and the project's tempo map and meter are
-    /// published again for the ones a Beat Clock follower changed. Reported as
+    /// keeps the motion it had, and the app's tempo map and meter are
+    /// published again for the ones a Beat Clock follower stepped. Reported as
     /// [`MidiEvent::ClockUnfollowed`] by the next update.
     ///
     /// # Errors
@@ -2094,18 +2041,20 @@ impl<F: Float> Midi<'_, F> {
             .clock
             .take()
             .ok_or(MidiError::NotFollowingClock)?;
-        self.state.sync_following();
-        self.restore_maps(clock.restore());
+        if clock.owns_tempo() {
+            self.release_maps();
+        }
         self.state.follow_events.push(MidiEvent::ClockUnfollowed);
         Ok(())
     }
 
-    /// Publishes the maps a follower changed, as the project had them.
-    fn restore_maps(&self, (tempo, meter): (Option<Arc<TempoMap>>, Option<Arc<MeterMap>>)) {
-        if let Some(tempo) = tempo {
+    /// Drops the steps a follower laid and publishes the base again, for the
+    /// maps it stepped.
+    fn release_maps(&self) {
+        if let Some(tempo) = self.bases.tempo.release() {
             self.settings.set_tempo_map(tempo);
         }
-        if let Some(meter) = meter {
+        if let Some(meter) = self.bases.meter.release() {
             self.meter.set_meter(meter);
         }
     }

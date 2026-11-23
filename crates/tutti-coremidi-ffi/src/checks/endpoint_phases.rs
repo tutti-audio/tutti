@@ -153,12 +153,9 @@ mod tests {
     use super::*;
     use std::cell::{Cell, RefCell};
     use std::time::Duration;
+    use tutti_fixtures::midi::ms;
 
     const REFUSED: OsStatus = OsStatus::NOT_PERMITTED;
-
-    fn ms(n: u64) -> Duration {
-        Duration::from_millis(n)
-    }
 
     fn status(status: &OsStatus) -> Option<OsStatus> {
         Some(*status)

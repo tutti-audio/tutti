@@ -33,7 +33,8 @@ use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle, StateUse};
-use tutti_rt::PendingSampleRate;
+use tutti_rt::AtomicCell;
+use tutti_units::SampleRate;
 
 use tutti_rt::Mutex;
 
@@ -58,7 +59,7 @@ pub(crate) struct ControlBackend<L: InProcess> {
     /// The cell the audio unit parks a rate change in, shared with the
     /// node. Drained here because telling a plugin its rate deactivates and
     /// activates it, which allocates.
-    pub(crate) pending_sample_rate: Arc<PendingSampleRate>,
+    pub(crate) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// The host's parameter writes, which the node drains at the head of its
     /// next block (`host_edits`).
     pub(super) edits: super::host_edits::EditPost,

@@ -18,7 +18,6 @@ mod tests {
     use crate::listener::EventAddress;
     use crate::parameters::ParamAddress;
     use crate::processor::AuProcessor;
-    use crate::types::K_AUDIO_UNIT_TYPE_EFFECT;
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_plugin_types::{Loaded, MaxBlock, Prepare, SampleRate};
 
@@ -45,7 +44,7 @@ mod tests {
 
     fn delay() -> (AuProcessor, AuController) {
         let desc = ComponentKey::new(
-            K_AUDIO_UNIT_TYPE_EFFECT,
+            coreaudio_sys::kAudioUnitType_Effect,
             u32::from_be_bytes(*b"dely"),
             u32::from_be_bytes(*b"appl"),
         )

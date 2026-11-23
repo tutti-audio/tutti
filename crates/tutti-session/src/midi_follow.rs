@@ -6,16 +6,19 @@
 //! *what* to apply. This module says *where* and *how*: it drains an event tap
 //! on the followed Group's channelless port of the input node in
 //! [`Phase::Poll`](crate::Phase::Poll), places each change at the next block
-//! start, builds the new [`TempoMap`] and [`MeterMap`] and publishes them.
+//! start, builds the new [`TempoMap`] and [`MeterMap`](tutti_music::MeterMap)
+//! and publishes them.
 //!
-//! **A follow mode overlays the project's maps and never replaces them.** The
-//! maps the project had when following began are kept apart; the published map
-//! is the project's up to the beat of the first change, then the live steps.
-//! Each live step truncates what came after it: a project point or ramp ahead
-//! of the playhead is not played while following, because two authorities for
-//! the same future beats is the bug to avoid. A ramp a step lands in is cut at
-//! that beat. [`Midi::unfollow_tempo`](crate::Midi::unfollow_tempo) publishes the
-//! project's maps again; the clock re-seats at its current beat, so the
+//! **A follow mode lays its steps over the app's maps and never replaces them.**
+//! The app's tempo map and meter are the base ([`Bases`]); the map the engine
+//! uses (the effective one) is the base up to the beat of the first change,
+//! then the live steps. Each live step truncates what came after it: a base
+//! point or ramp ahead of the playhead is not played while following, because
+//! two authorities for the same future beats is the bug to avoid. A ramp a step
+//! lands in is cut at that beat. The steps are kept, so a write to the base
+//! while following publishes the new base up to the first step and the steps
+//! after it. [`Midi::unfollow_tempo`](crate::Midi::unfollow_tempo) publishes the
+//! base as it stands then; the clock re-seats at its current beat, so the
 //! playhead does not jump.
 //!
 //! **Where a change lands.** A change heard in a block is drained in the
@@ -32,7 +35,7 @@
 //! tempo from the step's beat as the map says.
 //!
 //! **The meter** lands at the next bar line at or after that beat (a meter
-//! change always begins a bar; M2-104 §7.5.4), on the same overlay.
+//! change always begins a bar; M2-104 §7.5.4), over the same base.
 //!
 //! # Following a MIDI clock
 //!
@@ -40,8 +43,8 @@
 //! MIDI Time Code from one Group the same way: a tap on its channelless port,
 //! drained in `Phase::Poll`, read by the pure
 //! `tutti_midi_runtime::ClockFollower` with each event's arrival on the graph's
-//! frame clock: seconds since graph frame 0 (the tap's frame over its rate). A tempo it fits goes through the
-//! overlay above, as a Flex Set Tempo does. Play, stop and locate go to the
+//! frame clock: seconds since graph frame 0 (the tap's frame over its rate). A tempo it fits is a
+//! step laid over the base, as a Flex Set Tempo's is. Play, stop and locate go to the
 //! transport as commands at `At::Frame`.
 //!
 //! **A command is placed on the frame its message arrived on.** The tap stamps
@@ -64,7 +67,7 @@
 //! where the transport is on the first frame of the next block
 //! (`ClockFollower::steer`): a beat for Beat Clock, a time for MTC. For Beat
 //! Clock the error against the source's beat is closed by a trim of the tempo
-//! published through the overlay; for either kind an error past
+//! laid over the base as a step; for either kind an error past
 //! `ClockFollower::SLIP` (Beat Clock) or `ClockFollower::MTC_SLIP_FRAMES` (MTC)
 //! locates to the source and is reported ([`MidiEvent::ClockSlipped`]). The
 //! latest error is [`Midi::clock_error`](crate::Midi::clock_error).
@@ -88,13 +91,13 @@ use tutti_midi_runtime::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, Followed,
     MachineControlEvent, MachineControlFollower, TempoFollower,
 };
-use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
 use tutti_timeline::{ProjectMeter, TransportSettings};
 use tutti_ump::MidiGroup;
 use tutti_units::{At, Beat, Bpm, Frame, Seconds};
 
 use crate::MidiEvent;
+use crate::value::{Bases, Steps};
 
 /// How many events the follower's tap holds between two polls. Set Tempo and
 /// Set Time Signature are rare; a source that floods them loses the oldest
@@ -248,84 +251,25 @@ impl FollowMachineControl {
     }
 }
 
-/// The maps a follower overlays: the project's, and what the follower has
-/// published over them.
-struct Overlay {
-    /// The tempo map the project had when following began: what an unfollow
-    /// publishes again. The session has no project tempo apart from the
-    /// published map, so this is the map it found.
-    project_tempo: Arc<TempoMap>,
-    /// The project's meter, likewise.
-    project_meter: Arc<MeterMap>,
-    /// The map this follower last published (the project's until a first
-    /// step): what the next step builds on.
-    tempo: Arc<TempoMap>,
-    meter: Arc<MeterMap>,
-}
-
-/// The one tempo follower a session has: its core, its tap and the maps.
+/// The one tempo follower a session has: its core and its tap.
 pub(crate) struct Follow {
     core: TempoFollower,
     tap: EventTapReader,
-    overlay: Overlay,
 }
 
 /// What a `Poll` phase reads besides the follower.
 pub(crate) struct FollowCx<'a> {
     pub(crate) settings: &'a TransportSettings,
     pub(crate) meter: &'a ProjectMeter,
+    /// The base the live steps are laid over.
+    pub(crate) bases: &'a Bases,
     pub(crate) playhead: Playhead,
 }
 
-impl Overlay {
-    /// An overlay over the project's maps, with nothing published yet.
-    fn new(project_tempo: Arc<TempoMap>, project_meter: Arc<MeterMap>) -> Self {
-        Self {
-            tempo: Arc::clone(&project_tempo),
-            meter: Arc::clone(&project_meter),
-            project_tempo,
-            project_meter,
-        }
-    }
-
-    /// What the project had, to publish again, for the maps this overlay
-    /// changed (`None` for one it never touched).
-    fn restore(&self) -> (Option<Arc<TempoMap>>, Option<Arc<MeterMap>>) {
-        (
-            (!Arc::ptr_eq(&self.tempo, &self.project_tempo))
-                .then(|| Arc::clone(&self.project_tempo)),
-            (!Arc::ptr_eq(&self.meter, &self.project_meter))
-                .then(|| Arc::clone(&self.project_meter)),
-        )
-    }
-}
-
 impl Follow {
-    /// A follower reading `tap`, over the project's maps.
-    pub(crate) fn new(
-        core: TempoFollower,
-        tap: EventTapReader,
-        project_tempo: Arc<TempoMap>,
-        project_meter: Arc<MeterMap>,
-    ) -> Self {
-        Self {
-            core,
-            tap,
-            overlay: Overlay::new(project_tempo, project_meter),
-        }
-    }
-
-    /// A follower reading `tap` in place of this one: the project's maps and the
-    /// overlay published so far carry over, so a second source replaces the
-    /// first with the tempo in force staying until it sends one.
-    pub(crate) fn replaced_by(self, core: TempoFollower, tap: EventTapReader) -> Self {
-        Self { core, tap, ..self }
-    }
-
-    /// What the project had, to publish again, for the maps this follower
-    /// changed (`None` for one it never touched).
-    pub(crate) fn restore(&self) -> (Option<Arc<TempoMap>>, Option<Arc<MeterMap>>) {
-        self.overlay.restore()
+    /// A follower reading `tap`.
+    pub(crate) fn new(core: TempoFollower, tap: EventTapReader) -> Self {
+        Self { core, tap }
     }
 
     /// The tap's rate, to compare with the graph's.
@@ -353,74 +297,61 @@ impl Follow {
         }
         heard
     }
-
-    /// Places what was heard at the next block start and publishes the new
-    /// maps. The events say what was applied.
-    pub(crate) fn apply(
-        &mut self,
-        heard: &[Followed],
-        cx: &FollowCx<'_>,
-        out: &mut Vec<crate::SessionEvent>,
-    ) {
-        self.overlay.apply(heard, cx, out);
-    }
 }
 
-impl Overlay {
+impl FollowCx<'_> {
     /// Places what was heard at the next block start and publishes the new
     /// maps. The events say what was applied.
-    fn apply(&mut self, heard: &[Followed], cx: &FollowCx<'_>, out: &mut Vec<crate::SessionEvent>) {
+    pub(crate) fn apply(&self, heard: &[Followed], out: &mut Vec<crate::SessionEvent>) {
         if heard.is_empty() {
             return;
         }
-        let stand = Stand::of(&cx.playhead);
-        let beat = stand.beat_at(&self.tempo, stand.next());
-        self.apply_at(heard, beat, cx, out);
+        let stand = Stand::of(&self.playhead);
+        let beat = stand.beat_at(&self.settings.tempo_map(), stand.next());
+        self.apply_at(heard, beat, out);
     }
 
     /// Steps the tempo to each of `tempos` on the beat the transport reaches at
     /// its frame.
     fn apply_tempos(
-        &mut self,
+        &self,
         tempos: &[(Bpm, Frame)],
         stand: &Stand,
-        cx: &FollowCx<'_>,
         out: &mut Vec<crate::SessionEvent>,
     ) {
         for &(tempo, frame) in tempos {
-            let beat = stand.beat_at(&self.tempo, frame);
-            self.apply_at(&[Followed::Tempo(tempo)], beat, cx, out);
+            let beat = stand.beat_at(&self.settings.tempo_map(), frame);
+            self.apply_at(&[Followed::Tempo(tempo)], beat, out);
         }
     }
 
-    /// As [`apply`](Self::apply), placing each change at `beat`.
-    fn apply_at(
-        &mut self,
-        heard: &[Followed],
-        beat: Beat,
-        cx: &FollowCx<'_>,
-        out: &mut Vec<crate::SessionEvent>,
-    ) {
-        let (tempo_before, meter_before) = (Arc::clone(&self.tempo), Arc::clone(&self.meter));
+    /// As [`apply`](Self::apply), placing each change at `beat`. Each change
+    /// is kept as a step over the base, then laid over the map in force, which
+    /// is published once.
+    fn apply_at(&self, heard: &[Followed], beat: Beat, out: &mut Vec<crate::SessionEvent>) {
+        let (tempo_before, meter_before) = (self.settings.tempo_map(), self.meter.current());
+        let (mut tempo, mut meter) = (Arc::clone(&tempo_before), Arc::clone(&meter_before));
         for change in heard {
             match *change {
-                Followed::Tempo(tempo) => match self.tempo.stepped_to(beat, tempo) {
-                    Ok(Some(map)) => {
-                        self.tempo = Arc::new(map);
-                        out.push(MidiEvent::TempoFollowed { tempo, beat }.into());
+                Followed::Tempo(tempo_set) => {
+                    self.bases.tempo.push((beat, tempo_set));
+                    if let Some(map) = tempo.stepped((beat, tempo_set)) {
+                        tempo = Arc::new(map);
+                        out.push(
+                            MidiEvent::TempoFollowed {
+                                tempo: tempo_set,
+                                beat,
+                            }
+                            .into(),
+                        );
                     }
-                    Ok(None) => {}
-                    // The builder refuses only a tempo whose segment duration overflows
-                    // an `f64` (below ~1e-300 bpm); a `Bpm` from `FlexTempo::bpm` is at least
-                    // 1.397 bpm (field `u32::MAX`), so this is not reached: nothing is
-                    // published and nothing reported.
-                    Err(_) => {}
-                },
+                }
                 Followed::Meter(signature) => {
-                    // `at` is a bar line: it comes from `next_bar_line`.
-                    let at = self.meter.next_bar_line(beat);
-                    if let Some(map) = self.meter.with_change_at(at, signature) {
-                        self.meter = Arc::new(map);
+                    self.bases.meter.push((beat, signature));
+                    // The change lands on a bar line: the next one at or after `beat`.
+                    let at = meter.next_bar_line(beat);
+                    if let Some(map) = meter.stepped((beat, signature)) {
+                        meter = Arc::new(map);
                         out.push(
                             MidiEvent::MeterFollowed {
                                 signature,
@@ -433,11 +364,11 @@ impl Overlay {
                 _ => {}
             }
         }
-        if !Arc::ptr_eq(&tempo_before, &self.tempo) {
-            cx.settings.set_tempo_map(Arc::clone(&self.tempo));
+        if !Arc::ptr_eq(&tempo_before, &tempo) {
+            self.settings.set_tempo_map(tempo);
         }
-        if !Arc::ptr_eq(&meter_before, &self.meter) {
-            cx.meter.set_meter(Arc::clone(&self.meter));
+        if !Arc::ptr_eq(&meter_before, &meter) {
+            self.meter.set_meter(meter);
         }
     }
 }
@@ -607,46 +538,28 @@ fn lay(
     (actions, tempos)
 }
 
-/// The one clock follower a session has: its core, its tap and, for Beat Clock,
-/// the tempo overlay.
+/// The one clock follower a session has: its core and its tap. A Beat Clock
+/// follower lays its tempo over the base; MTC carries no tempo.
 pub(crate) struct ClockFollow {
     core: ClockFollower,
     tap: EventTapReader,
-    /// The maps the clock's tempo is published over; `None` for MTC, which
-    /// carries no tempo.
-    overlay: Option<Overlay>,
     /// Whether the source has said Play and not Stop since.
     rolling: bool,
 }
 
 impl ClockFollow {
-    /// A follower of `core` reading `tap`. A Beat Clock follower overlays the
-    /// project's maps; an MTC one leaves them.
-    pub(crate) fn new(
-        core: ClockFollower,
-        tap: EventTapReader,
-        project_tempo: Arc<TempoMap>,
-        project_meter: Arc<MeterMap>,
-    ) -> Self {
-        let overlay = (core.kind() == ClockKind::BeatClock)
-            .then(|| Overlay::new(project_tempo, project_meter));
+    /// A follower of `core` reading `tap`.
+    pub(crate) fn new(core: ClockFollower, tap: EventTapReader) -> Self {
         Self {
             core,
             tap,
-            overlay,
             rolling: false,
         }
     }
 
-    /// Whether it publishes a tempo, so nothing else may.
+    /// Whether it steps the tempo, so nothing else follows one.
     pub(crate) fn owns_tempo(&self) -> bool {
-        self.overlay.is_some()
-    }
-
-    /// What the project had, to publish again, for the maps this follower
-    /// changed.
-    pub(crate) fn restore(&self) -> (Option<Arc<TempoMap>>, Option<Arc<MeterMap>>) {
-        self.overlay.as_ref().map_or((None, None), Overlay::restore)
+        self.core.kind() == ClockKind::BeatClock
     }
 
     /// The error the follower read at the last poll
@@ -720,8 +633,8 @@ impl ClockFollow {
             &map,
             out,
         );
-        if let Some(overlay) = &mut self.overlay {
-            overlay.apply_tempos(&tempos, &stand, cx, out);
+        if self.owns_tempo() {
+            cx.apply_tempos(&tempos, &stand, out);
         }
         actions
     }

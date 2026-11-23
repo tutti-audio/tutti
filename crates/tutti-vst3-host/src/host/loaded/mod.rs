@@ -44,6 +44,7 @@ mod lifecycle;
 
 pub use lifecycle::class_id;
 mod parameters;
+pub(crate) use parameters::unit_groups;
 mod state;
 
 /// Plugin instance that has been `initialize()`'d and has usable parameter,

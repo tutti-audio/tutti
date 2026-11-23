@@ -41,6 +41,7 @@ pub struct RunLoopActivity {
     pub fds_dispatched: u64,
 }
 
+pub(crate) use attr_list::AttributeList;
 pub use component_handler::{
     ComponentHandler, NOTIFICATION_CAPACITY, PROGRESS_DESCRIPTION_CAPACITY, ParameterEditEvent,
     PluginNotification, ProgressDescription, ProgressEvent, ProgressKind, RestartFlags, UnitEvent,

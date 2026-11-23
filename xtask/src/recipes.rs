@@ -256,12 +256,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "check-layout",
         "",
-        "the repo layout, the crate layering, the codec boundary and the depth-free test paths",
-    ),
-    (
-        "check-doc-refs",
-        "",
-        "prose names crate paths and design-doc sections that exist",
+        "the repo layout, the crate layering, the codec boundary, the banned names of tutti-units and the depth-free test paths",
     ),
     (
         "check-pointers",
@@ -269,9 +264,9 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "no file:line pointer in code prose; one under docs/ names a line that exists",
     ),
     (
-        "check-doc-idents",
+        "check-prose-names",
         "",
-        "a backticked item name in prose is used by some code; a per-file ratchet",
+        "prose names crate paths and design-doc sections that exist, and a backticked item name in it is used by some code (a per-file ratchet)",
     ),
     (
         "check-passive-tests",
@@ -327,11 +322,6 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "check-logging",
         "",
         "no `log` dependency, and no print macro outside a main, a test or an example",
-    ),
-    (
-        "check-units-bare",
-        "",
-        "tutti-units names no allocation (`alloc`, `Vec`, `String`, `Box`, `Arc`) and no atomic outside its tests",
     ),
     (
         "check-test-time",
@@ -755,9 +745,8 @@ impl Planner<'_> {
             "check-lints" => self.out.push(Step::Gate(Gate::Lints)),
             "check-value-traits" => self.out.push(Step::Gate(Gate::ValueTraits)),
             "check-range-types" => self.out.push(Step::Gate(Gate::RangeTypes)),
-            "check-doc-refs" => self.out.push(Step::Gate(Gate::DocRefs)),
             "check-pointers" => self.out.push(Step::Gate(Gate::Pointers)),
-            "check-doc-idents" => self.out.push(Step::Gate(Gate::DocIdents)),
+            "check-prose-names" => self.out.push(Step::Gate(Gate::ProseNames)),
             "check-passive-tests" => self.out.push(Step::Gate(Gate::PassiveTests)),
             "check-comments" => self.out.push(Step::Gate(Gate::Comments)),
             "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
@@ -768,7 +757,6 @@ impl Planner<'_> {
             "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
             "check-platform" => self.out.push(Step::Gate(Gate::Platform)),
             "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
-            "check-units-bare" => self.out.push(Step::Gate(Gate::UnitsBare)),
             "check-width" => self.out.push(Step::Gate(Gate::Width)),
             "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
@@ -904,11 +892,11 @@ impl Planner<'_> {
                 for d in [
                     "check-paths", "check-session", "check-guards", "check-ffi", "check-errors",
                     "check-layout", "check-range-types", "check-hosting", "check-lints",
-                    "check-value-traits", "check-submodule-pins", "check-doc-refs",
-                    "check-pointers", "check-comments", "check-platform-seam", "check-platform", "check-doc-idents",
+                    "check-value-traits", "check-submodule-pins",
+                    "check-pointers", "check-comments", "check-platform-seam", "check-platform", "check-prose-names",
                     "check-passive-tests", "check-alloc-binaries", "check-buffers",
                     "check-building", "check-umbrella", "check-logging", "check-test-time",
-                    "check-session-api", "check-values", "check-units-bare", "check-width",
+                    "check-session-api", "check-values", "check-width",
                 ] {
                     self.dep(d)?;
                 }
@@ -1027,7 +1015,6 @@ const RTSAN: &[&str] = &[
 
 const LOOM: &[&str] = &[
     r#"LOOM_MAX_PREEMPTIONS=4 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test pos_ring_loom"#,
-    r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test packed_atomic_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test atomic_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_cell_loom"#,
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test cell_loom"#,

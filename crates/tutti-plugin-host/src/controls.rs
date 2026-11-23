@@ -34,7 +34,7 @@ use tutti_rt::Mutex;
 use tutti_plugin_types::{
     BridgeLosses, ChunkCounters, ChunkOutcomes, PluginInvalidation, PluginTail, ServerLosses,
 };
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_timeline::ProjectMeter;
 use tutti_units::Latency;
 use tutti_units::{SampleRate, Samples};
@@ -78,7 +78,7 @@ pub struct PluginControls {
     node: NodeControls,
     /// The rate stamped onto a freshly-installed source. Shared — see the module
     /// docs for why it could not stay a per-clone field. `f64` at the atomic.
-    sample_rate: Arc<AtomicSampleRate>,
+    sample_rate: Arc<AtomicCell<SampleRate>>,
     /// What the node's IPC pipeline reports
     /// ([`chunk_outcomes`](Self::chunk_outcomes),
     /// [`chunk_in_flight_answered`](Self::chunk_in_flight_answered)).
@@ -286,7 +286,7 @@ impl PluginControls {
             tail,
             pipeline: Arc::new(AtomicUsize::new(MAX_CHUNK)),
             node: NodeControls::new(crate::PluginTimeSignature::default(), Arc::default()),
-            sample_rate: Arc::new(AtomicSampleRate::new(sample_rate)),
+            sample_rate: Arc::new(AtomicCell::new(sample_rate)),
             chunks,
         };
         (controls, reports)
@@ -384,14 +384,14 @@ impl PluginControls {
 
     /// The sample rate a source installed now would be stamped with.
     pub fn sample_rate(&self) -> SampleRate {
-        self.sample_rate.load(Ordering::Acquire)
+        self.sample_rate.load()
     }
 
     /// Update the shared rate and re-stamp every installed source. Called from
     /// the node's `prepare`; a no-op on a slot with nothing installed (a
     /// later install reads the new rate).
     pub(crate) fn restamp(&self, sample_rate: SampleRate) {
-        self.sample_rate.store(sample_rate, Ordering::Release);
+        self.sample_rate.store(sample_rate);
     }
 
     /// What a fork takes of the live node's sources, read now (a fork's

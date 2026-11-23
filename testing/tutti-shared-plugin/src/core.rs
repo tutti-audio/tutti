@@ -59,6 +59,11 @@
 //!   declares the same programs by number (`numPrograms`, the program names and
 //!   the current program, [`Core::program`]), and AU as factory presets numbered
 //!   `0`, `1` and `2`. CLAP declares none.
+//! - **Key names.** CLAP (`note-name`), VST3 (`IKeyswitchController`, one switch
+//!   for each key) and VST2 (`effGetMidiKeyName`, in every program) name the keys
+//!   of [`NOTE_NAMES`]. AU declares none.
+//! - **Short names.** VST3's `shortTitle`, VST2's `shortLabel` and AU's
+//!   `kAudioUnitProperty_ParameterIDName` are [`SHORT_NAMES`]; CLAP has no short name.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.
@@ -285,6 +290,10 @@ pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
 pub const LISTED: u32 = LISTED_IDS.len() as u32;
 /// The ids VST3 lists, in list order: [`LISTED_IDS`] and [`PROGRAM`].
 pub const VST3_LISTED_IDS: [u32; 7] = [LEVEL, AUX, MODE, TONE, METER, BYPASS, PROGRAM];
+/// The keys the plugin names, `(key, name)`: a drum kit's two pads.
+pub const NOTE_NAMES: [(u8, &str); 2] = [(36, "Kick"), (38, "Snare")];
+/// Parameter short names, by id, where the format has one.
+pub const SHORT_NAMES: [&str; 7] = ["lvl", "aux", "mod", "tne", "mtr", "byp", "prg"];
 /// Parameter names, by id.
 pub const NAMES: [&str; 7] = ["level", "aux", "mode", "tone", "meter", "bypass", "program"];
 /// The plain value of `TONE` at its normalized minimum, its largest.

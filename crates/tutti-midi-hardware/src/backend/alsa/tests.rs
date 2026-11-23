@@ -499,43 +499,18 @@ fn the_kernels_system_client_is_not_listed() {
 
 /// A backend whose enumeration panics once `armed` is set (not before: other
 /// processes' clients wake the watch at any time).
-struct Panicky {
-    armed: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    executor: tutti_platform::Executor,
-}
-
-impl crate::MidiEndpoints for Panicky {
-    fn watch(&self, sink: crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>> {
-        let armed = std::sync::Arc::clone(&self.armed);
-        super::watch::start(&self.executor, sink, move |_| {
+fn panicky(armed: std::sync::Arc<std::sync::atomic::AtomicBool>) -> crate::testing::Stub {
+    let executor = tutti_platform::Executor::new();
+    crate::testing::Stub::new(move |sink| {
+        let armed = std::sync::Arc::clone(&armed);
+        super::watch::start(&executor, sink, move |_| {
             assert!(
                 !armed.load(std::sync::atomic::Ordering::SeqCst),
                 "enumeration panics"
             );
             Some(Vec::new())
         })
-    }
-    fn inputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn outputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: tutti_midi_device::EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> crate::Result<Box<dyn crate::InputConnection>> {
-        Err(crate::MidiHardwareError::Unsupported("none"))
-    }
-    fn open_output(
-        &self,
-        _: crate::Started,
-        _: tutti_midi_device::EndpointId,
-    ) -> crate::Result<Box<dyn crate::DeviceOut>> {
-        Err(crate::MidiHardwareError::Unsupported("none"))
-    }
+    })
 }
 
 /// A watch that dies says so: `watch_failure` is set, not a frozen table with
@@ -543,10 +518,7 @@ impl crate::MidiEndpoints for Panicky {
 #[test]
 fn a_watch_that_panics_reports_its_failure() {
     let armed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let devices = Watched::with_backend(Box::new(Panicky {
-        armed: std::sync::Arc::clone(&armed),
-        executor: tutti_platform::Executor::new(),
-    }));
+    let devices = Watched::with_backend(Box::new(panicky(std::sync::Arc::clone(&armed))));
     assert!(devices.watch_failure().is_none());
     armed.store(true, std::sync::atomic::Ordering::SeqCst);
     let _device = plug(&unique("panic"));
@@ -566,10 +538,7 @@ fn a_watch_that_panics_reports_its_failure() {
 /// left for the sequencer's own.
 #[test]
 fn a_watch_whose_sequencer_will_not_open_reports_its_failure() {
-    let backend = Box::new(Panicky {
-        armed: std::sync::Arc::default(),
-        executor: tutti_platform::Executor::new(),
-    });
+    let backend = Box::new(panicky(std::sync::Arc::default()));
     let mut hogged = Vec::new();
     while let Ok(file) = std::fs::File::open("/dev/null") {
         hogged.push(file);
@@ -1015,13 +984,9 @@ fn now(ump: tutti_ump::Ump) -> tutti_midi_runtime::Outgoing {
 
 /// A System Exclusive message of three packets, start, continue and end.
 fn sysex() -> [tutti_midi_runtime::Outgoing; 3] {
-    use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus};
-    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End].map(|status| {
-        now(tutti_ump::Ump::from(Message::Sysex7(
-            MidiGroup::FIRST,
-            Sysex7Packet::new(status, &[1, 2]).unwrap(),
-        )))
-    })
+    use tutti_ump::SysexStatus;
+    [SysexStatus::Start, SysexStatus::Continue, SysexStatus::End]
+        .map(|status| now(tutti_fixtures::midi::sysex7(status, &[1, 2])))
 }
 
 /// Sends notes to `output` until it refuses one: the destination is full.

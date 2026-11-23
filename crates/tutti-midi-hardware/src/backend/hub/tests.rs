@@ -333,43 +333,12 @@ fn present() -> Vec<tutti_midi_device::OsDevice> {
 }
 
 /// A backend over a registry, whose enumeration needs a client the test makes.
-struct OverRegistry {
-    registry: Arc<Registry>,
-    client: Arc<AtomicBool>,
-}
-
-impl crate::MidiEndpoints for OverRegistry {
-    fn watch(&self, sink: crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>> {
-        let client = Arc::clone(&self.client);
-        Ok(self
-            .registry
-            .register(sink, present, move || client.load(Ordering::SeqCst)))
-    }
-
-    fn inputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-
-    fn outputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
-        Ok(Vec::new())
-    }
-
-    fn open_input(
-        &self,
-        _: Started,
-        _: tutti_midi_device::EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> crate::Result<Box<dyn crate::InputConnection>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
-
-    fn open_output(
-        &self,
-        _: Started,
-        _: tutti_midi_device::EndpointId,
-    ) -> crate::Result<Box<dyn crate::DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
+fn over_registry(registry: &Arc<Registry>, client: &Arc<AtomicBool>) -> crate::testing::Stub {
+    let (registry, client) = (Arc::clone(registry), Arc::clone(client));
+    crate::testing::Stub::new(move |sink| {
+        let client = Arc::clone(&client);
+        Ok(registry.register(sink, present, move || client.load(Ordering::SeqCst)))
+    })
 }
 
 /// **A start that fails does not end the device watch**: the watch stays registered
@@ -384,10 +353,7 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     // A `Devices` opened while the first round is under way.
     let devices = crate::Devices::open_over(
         &tutti_platform::Executor::new(),
-        Box::new(OverRegistry {
-            registry: Arc::clone(&registry),
-            client: Arc::clone(&client),
-        }),
+        Box::new(over_registry(&registry, &client)),
     )
     .unwrap();
     let events = devices.subscribe();
@@ -407,10 +373,7 @@ fn a_failed_start_leaves_the_watch_to_be_seeded_by_the_next_start() {
     // A `Devices` opened while the gate is failed does not fail either.
     let late = crate::Devices::open_over(
         &tutti_platform::Executor::new(),
-        Box::new(OverRegistry {
-            registry: Arc::clone(&registry),
-            client: Arc::clone(&client),
-        }),
+        Box::new(over_registry(&registry, &client)),
     )
     .unwrap();
     let late_events = late.subscribe();
@@ -454,10 +417,7 @@ fn a_notification_has_the_watches_look_only_when_it_changes_the_devices() {
     *PRESENT.lock() = vec![crate::test_support::endpoint(1, "Keys")];
     let devices = crate::Devices::open_over(
         &tutti_platform::Executor::new(),
-        Box::new(OverRegistry {
-            registry: Arc::clone(&registry),
-            client: Arc::new(AtomicBool::new(true)),
-        }),
+        Box::new(over_registry(&registry, &Arc::new(AtomicBool::new(true)))),
     )
     .unwrap();
     let events = devices.subscribe();
