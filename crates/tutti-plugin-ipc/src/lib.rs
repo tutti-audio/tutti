@@ -97,17 +97,18 @@ pub use offline_wait::OfflineWait;
 pub use process_guard::ProcessGuard;
 pub use protocol::frame::{FrameBuf, read_frame, write_frame};
 pub use protocol::{
-    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, AppMidiMapApplied, ArmPluginMidiLearn,
-    AudioReply, AudioRequest, CONTROL_FRAME_BYTES, CloseEditor, ControlFrame, ControlReply,
-    ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed, GetCurrentPreset,
-    GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
-    GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
-    LoadState, Message, News, OpenEditor, OpenLane, PROTOCOL_VERSION, ParameterList,
-    ParameterNormalized, ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText,
-    PluginLoaded, PluginMidiLearn, PresetList, PresetLoaded, ProcessAudioData, ReqId, Request,
-    SampleRateSet, SaveState, SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode,
-    SetSampleRate, SetTrackInfo, SetupSharedMemory, SharedMemoryReady, Shutdown, SlabLayout,
-    StageState, StagedState, StateLoaded, StateReady, StateStaged, Wiring, Working,
+    AUDIO_REPLY_FRAME_BYTES, AUDIO_REQUEST_FRAME_BYTES, Answered, AppMidiMapApplied,
+    ArmPluginMidiLearn, AudioReply, AudioRequest, CONTROL_FRAME_BYTES, CloseEditor, ControlFrame,
+    ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed,
+    GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
+    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling, Lane,
+    LaneOpened, LoadPlugin, LoadPreset, LoadState, Message, News, OpenEditor, OpenLane,
+    PROTOCOL_VERSION, ParameterList, ParameterNormalized, ParameterPlain, ParameterText,
+    ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn, PresetList,
+    PresetLoaded, ProcessAudioData, Reaction, ReqId, Request, SampleRateSet, SaveState, SavedState,
+    SetAppMidiMap, SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
+    SetupSharedMemory, SharedMemoryReady, Shutdown, SlabLayout, StageState, StagedState,
+    StateLoaded, StateReady, StateStaged, Stop, Unanswered, Wiring, Working, serve,
 };
 pub use server_watch::ServerWatch;
 pub(crate) use subprocess::launch;

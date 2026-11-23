@@ -618,13 +618,17 @@ pub fn a_fork_starts_silent_and_plays<S: Subject>() {
     let p = out.iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
     assert_eq!(p, 0.0, "the fork sounds {p}");
 
-    // Rolling from beat 0 a block at a time until the plugin is heard: a hosted
-    // plugin in a live fork answers a chunk in real time, so a block that comes
-    // before its answer plays silence.
+    // Rolling a block at a time until the plugin is heard. A hosted plugin in a
+    // live fork answers a chunk in real time, and this loop renders faster than
+    // that: a chunk the bridge is more than one behind on is skipped with its
+    // MIDI (counted, never sent again), and the clip's note-on is sent once per
+    // pass over beat 0.01. So the playhead loops over the first `PASS` blocks,
+    // and each pass strikes the note again until one reaches the plugin.
+    const PASS: u32 = 64;
     let mut peak = 0.0f32;
     let mut i = 0u32;
     tutti_fixtures::wait_until("the fork to play", tutti_fixtures::HANG_GUARD, || {
-        let beat = f64::from(i) * BLOCK as f64 / 24_000.0;
+        let beat = f64::from(i % PASS) * BLOCK as f64 / 24_000.0;
         fork.set_transport(tutti_graph::TransportPosition::new(
             true,
             tutti_units::Bpm::of(120.0),

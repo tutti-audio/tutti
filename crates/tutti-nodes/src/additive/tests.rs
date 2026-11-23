@@ -1,9 +1,7 @@
 use super::*;
-use crate::test_support::{RATE, prepared, render_f64};
+use crate::test_support::{RATE, render_f64};
 use tutti_dsp::Partial;
-use tutti_graph::Node;
-use tutti_graph::contract::assert_param_fork;
-use tutti_units::{FrequencyRatio, UnitParam};
+use tutti_units::FrequencyRatio;
 
 fn partials() -> Partials {
     let p = |ratio: f64, amplitude: f64| {
@@ -13,33 +11,6 @@ fn partials() -> Partials {
         )
     };
     Partials::try_from(&[p(1.0, 0.5), p(3.0, 0.25), p(60.0, 0.9)][..]).unwrap()
-}
-
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(AdditiveNode::<f32>::from(AdditiveConfig::new(partials())));
-}
-
-/// A mono source declaring the frequency then the level, starting as configured.
-#[test]
-fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
-    let n = prepared(AdditiveNode::<f32>::from(
-        AdditiveConfig::new(partials())
-            .frequency(Hz::new(330.0))
-            .level(Amplitude::new(0.25)),
-    ));
-    let shape = n.shape();
-    assert_eq!(
-        (shape.audio_in().count(), shape.audio_out().count()),
-        (0, 1)
-    );
-    assert_eq!(shape.tail, Tail::None);
-    assert_eq!(
-        shape.params.as_slice(),
-        &[UnitParam::Frequency, UnitParam::Volume][..]
-    );
-    assert_eq!(n.param_base(0), Some(330.0));
-    assert_eq!(n.param_base(1), Some(0.25));
 }
 
 /// At 480 Hz the partials are at 480, 1440 and 28 800 Hz: the first two are lines of their

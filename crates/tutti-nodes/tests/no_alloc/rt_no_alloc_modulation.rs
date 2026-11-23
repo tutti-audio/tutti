@@ -1,359 +1,24 @@
-//! Regression gate: modulation + delay nodes must not allocate per-buffer.
-//!
-//! Covers `LfoNode` (free-running and beat-synced), `DelayNode` (mono,
-//! stereo cross-fed, 6-wide, with its time and feedback control signals fed), and the modulation effects `ModDelayNode`
-//! (chorus and flanger) and `PhaserNode`. They are graph nodes, each
-//! driven alone in a graph by `tutti_graph::contract::BlockRig`: its `prepare`
-//! (which sizes the delay lines and the block scratch) runs when the rig is
-//! built, outside the gate; the gate walks only `process`. And control
-//! lanes (`ControlLaneNode`, automation-only ones too) driving
-//! param ports through a graph, with no pool and on a pool: four automation
-//! lanes, and 200 lanes of every layer kind with republishes, knob writes
-//! and range edits between blocks.
+//! The control lanes (`ControlLaneNode`, automation-only ones too) driving param ports through a
+//! graph never allocate on the audio thread, with no pool and on a pool: four automation lanes,
+//! and 200 lanes of every layer kind with republishes, knob writes and range edits between
+//! blocks. The LFO, the delays and the modulation effects are rows of the table.
 
+use crate::harness::bus;
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_fixtures::midi;
-use tutti_graph::contract::{BlockRig, Direct};
-use tutti_graph::{IntoNode, Node, ParamNode, ParamSet, TransportPosition};
+use tutti_graph::contract::Direct;
+use tutti_graph::{Node, ParamNode, ParamSet, TransportPosition};
 use tutti_music::{NoteDuration, NoteValue};
 use tutti_nodes::{
     ChannelTimes, DelayConfig, DelayControls, DelayLayout, DelayNode, FeedbackRouting,
-    InterpolationMode, LfoConfig, LfoNode, LfoShape, MaxDelay, ModDelayConfig, ModDelayNode,
-    NoteTimes, PhaserConfig, PhaserNode, Stages, Stagger, SweepRange,
+    InterpolationMode, MaxDelay, NoteTimes, PhaserConfig, PhaserNode, Stages, Stagger, SweepRange,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{
     Ballistics, Beat, BeatsPerCycle, Bpm, Feedback, Hz, ParamId, PhaseIncrement, Real, SampleRate,
     Seconds, UnitParam,
 };
-
-/// A node through `BlockRig`: its inputs an alternating signal of
-/// `amplitude`, 32 warm-up blocks, then `blocks` blocks under
-/// `RtScope`, `between(i)` run before each (a control move).
-fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl FnMut(usize)) {
-    let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut().iter_mut() {
-        let c = c.into_samples_mut();
-        for (i, x) in c.iter_mut().enumerate() {
-            *x = if i % 2 == 0 { amplitude } else { -amplitude };
-        }
-    }
-    for i in 0..32 {
-        between(i);
-        rig.block();
-    }
-    assert!(
-        rig.output()
-            .plane(0)
-            .samples()
-            .iter()
-            .any(|s| s.abs() > 1e-6),
-        "the node rendered silence; the gate would walk no DSP"
-    );
-    for i in 0..blocks {
-        between(i);
-        rig.block();
-    }
-}
-
-#[test]
-fn lfo_node_process_is_allocation_free() {
-    gate(
-        LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0_f64))),
-        0.0,
-        5_000,
-        |_| {},
-    );
-}
-
-#[test]
-fn lfo_random_shape_process_is_allocation_free() {
-    // RandomSmooth hashes its cycle index on its own path. Fast enough
-    // to step inside the warm-up, so the node is audible there.
-    gate(
-        LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64))),
-        0.0,
-        5_000,
-        |_| {},
-    );
-}
-
-/// The beat-synced path walks the block's `Env` frame by frame
-/// (`Env::for_each_beat`); a quarter-cycle offset puts the stopped
-/// transport's beat 0 on the sine's peak, so the node is audible.
-#[test]
-fn beat_synced_lfo_process_is_allocation_free() {
-    gate(
-        LfoNode::from(
-            LfoConfig::new(LfoShape::Sine)
-                .beat_sync(BeatsPerCycle::of(4.0))
-                .phase_offset(PhaseIncrement::new(0.25)),
-        ),
-        0.0,
-        5_000,
-        |_| {},
-    );
-}
-
-/// A delay at `time` seconds and `feedback`, `cross` cross-fed, `width` wide, holding up to
-/// two seconds.
-fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
-    DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(
-            BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus"),
-            MaxDelay::of(Seconds::new(2.0)),
-        ))
-        .controls(DelayControls {
-            time: Seconds::new(time),
-            feedback: Feedback::new(feedback),
-            cross_feedback: Feedback::new(cross),
-        }),
-    )
-}
-
-#[test]
-fn delay_node_process_is_allocation_free() {
-    // A tap shorter than the gate's warm-up (32 blocks of 64 frames), so the
-    // wet-only output is audible when the gate checks it.
-    gate(delay(1, 0.02, 0.4, 0.0), 0.5, 2_000, |_| {});
-}
-
-#[test]
-fn stereo_delay_node_process_is_allocation_free() {
-    gate(delay(2, 0.02, 0.4, 0.0), 0.5, 2_000, |_| {});
-}
-
-#[test]
-fn wide_6ch_delay_node_process_is_allocation_free() {
-    // The per-channel delay-line Vec must be built at construction; the wide
-    // path must not allocate per buffer.
-    gate(delay(6, 0.02, 0.4, 0.0), 0.5, 2_000, |_| {});
-}
-
-/// A bus of `width` channels on the engine's order.
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
-}
-
-#[test]
-fn chorus_node_process_is_allocation_free() {
-    gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
-        0.4,
-        2_000,
-        |_| {},
-    );
-}
-
-#[test]
-fn flanger_node_process_is_allocation_free() {
-    gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
-        0.4,
-        2_000,
-        |_| {},
-    );
-}
-
-#[test]
-fn general_midi_chorus_node_process_is_allocation_free() {
-    gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO)),
-        0.4,
-        2_000,
-        |_| {},
-    );
-}
-
-#[test]
-fn phaser_node_process_is_allocation_free() {
-    // 4-stage phaser. `prepare` sizes the chain, but `process` must reuse it.
-    gate(
-        PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4))).unwrap(),
-        0.4,
-        2_000,
-        |_| {},
-    );
-}
-
-/// Every control moved each block: the delay time ramps at its slew, the chorus depth
-/// sweeps, the phaser's control points are re-solved, the cross-fed delay reads
-/// every tap before writing any line. All of it on preallocated scratch.
-/// The delay's moves go through its `ParamSet`; the others through clones, which share
-/// their cells. (A moving mix is the graph's: `tutti-graph/tests/rt_no_alloc.rs`.)
-#[test]
-fn delay_and_modulation_with_moving_controls_are_allocation_free() {
-    // A cross-fed stereo delay whose time and both feedbacks move every block, the
-    // ramps in flight on every one.
-    let node = delay(2, 0.01, 0.4, 0.3);
-    let set = node.param_set();
-    gate(node, 0.5, 2_000, |i| {
-        let t = (i % 50) as f32 / 50.0;
-        assert!(set.set(UnitParam::DelayTime, f64::from(0.005 + 0.03 * t)));
-        assert!(set.set(UnitParam::Feedback, f64::from(0.2 + 0.5 * t)));
-        assert!(set.set(UnitParam::CrossFeedback, f64::from(0.4 * (1.0 - t))));
-    });
-    // A 6-wide chorus whose rate, depth and feedback all move every block: the depth and
-    // feedback ramps are in flight on every one, the rate lands whole at the grid.
-    let chorus = ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(6)));
-    let c = chorus.param_set();
-    gate(chorus, 0.5, 2_000, |i| {
-        let t = (i % 50) as f32 / 50.0;
-        assert!(c.set(UnitParam::Depth, f64::from(0.002 + 0.01 * t)));
-        assert!(c.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
-        assert!(c.set(UnitParam::Feedback, f64::from(0.6 * t)));
-    });
-    // A 6-wide, 8-stage, staggered phaser whose rate, depth and feedback all move every
-    // block, the ramps in flight on every one.
-    let phaser = PhaserNode::<f32>::try_from(
-        PhaserConfig::new(bus(6), Stages::of(8))
-            .stagger(Stagger::of_step(PhaseIncrement::new(0.2))),
-    )
-    .expect("a step fits any width");
-    let p = phaser.param_set();
-    gate(phaser, 0.5, 2_000, |i| {
-        let t = (i % 50) as f32 / 50.0;
-        assert!(p.set(UnitParam::Rate, f64::from(0.5 + 4.0 * t)));
-        assert!(p.set(UnitParam::Depth, f64::from(t)));
-        assert!(p.set(UnitParam::Feedback, f64::from(0.9 * t)));
-    });
-}
-
-/// The delay's time and feedback control signals fed per frame (a flanger's sweep, and a feedback
-/// that moves at audio rate), on the cross-fed stereo and the 6-wide delay, through
-/// `Direct`, which feeds a node's param ports. (`Direct::feed` copies the control signal, so it is
-/// fed once, before the gate: the same 64 frames of it play each block.)
-#[test]
-fn a_delay_with_its_signals_fed_is_allocation_free() {
-    for width in [2u16, 6] {
-        let mut rig = Direct::new(delay(width, 0.01, 0.4, 0.3), SampleRate::SR_48K, 64);
-        for c in rig.inputs_mut().iter_mut() {
-            let c = c.into_samples_mut();
-            for (i, x) in c.iter_mut().enumerate() {
-                *x = if i % 2 == 0 { 0.5 } else { -0.5 };
-            }
-        }
-        let tau = std::f32::consts::TAU / 64.0;
-        let time: Vec<f32> = (0..64)
-            .map(|i| 0.01 + 0.004 * (tau * i as f32).sin())
-            .collect();
-        let feedback: Vec<f32> = (0..64)
-            .map(|i| 0.4 + 0.3 * (tau * 3.0 * i as f32).sin())
-            .collect();
-        rig.feed(0, Some(&time));
-        rig.feed(1, Some(&feedback));
-        for _ in 0..32 {
-            rig.block();
-        }
-        assert!(
-            rig.output()
-                .plane(0)
-                .samples()
-                .iter()
-                .any(|s| s.abs() > 1e-6),
-            "the delay rendered silence; the gate would walk no DSP"
-        );
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..2_000 {
-                rig.block();
-            }
-        });
-    }
-}
-
-/// A chorus with its three slow controls driven (rate, depth and feedback control signals fed): each
-/// is read at the grid's solve frame, the depth and feedback ramps move on every solve,
-/// and the 6-wide stagger renders every channel's sweep. Through `Direct`, which feeds a
-/// node's param ports.
-#[test]
-fn a_chorus_with_its_signals_fed_is_allocation_free() {
-    for width in [2u16, 6] {
-        let mut rig = Direct::new(
-            ModDelayNode::<f32>::from(ModDelayConfig::chorus(bus(width))),
-            SampleRate::SR_48K,
-            64,
-        );
-        for c in rig.inputs_mut().iter_mut() {
-            let c = c.into_samples_mut();
-            for (i, x) in c.iter_mut().enumerate() {
-                *x = if i % 2 == 0 { 0.5 } else { -0.5 };
-            }
-        }
-        let tau = std::f32::consts::TAU / 64.0;
-        let signal = |base: f32, swing: f32, k: f32| -> Vec<f32> {
-            (0..64)
-                .map(|i| base + swing * (tau * k * i as f32).sin())
-                .collect()
-        };
-        rig.feed(0, Some(&signal(2.0, 1.5, 1.0)));
-        rig.feed(1, Some(&signal(0.006, 0.004, 2.0)));
-        rig.feed(2, Some(&signal(0.4, 0.3, 3.0)));
-        for _ in 0..32 {
-            rig.block();
-        }
-        assert!(
-            rig.output()
-                .plane(0)
-                .samples()
-                .iter()
-                .any(|s| s.abs() > 1e-6),
-            "the chorus rendered silence; the gate would walk no DSP"
-        );
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..2_000 {
-                rig.block();
-            }
-        });
-    }
-}
-
-/// A phaser with its three slow controls driven (rate, depth and feedback control signals fed): each
-/// is read at the grid's solve frame, the depth and feedback ramps move on every solve, and
-/// the staggered 6-wide chain renders every channel's sweep. Through `Direct`, which feeds a
-/// node's param ports.
-#[test]
-fn a_phaser_with_its_signals_fed_is_allocation_free() {
-    for width in [2u16, 6] {
-        let phaser = PhaserNode::<f32>::try_from(
-            PhaserConfig::new(bus(width), Stages::of(6))
-                .stagger(Stagger::of_step(PhaseIncrement::new(0.25))),
-        )
-        .expect("a step fits any width");
-        let mut rig = Direct::new(phaser, SampleRate::SR_48K, 64);
-        for c in rig.inputs_mut().iter_mut() {
-            let c = c.into_samples_mut();
-            for (i, x) in c.iter_mut().enumerate() {
-                *x = if i % 2 == 0 { 0.5 } else { -0.5 };
-            }
-        }
-        let tau = std::f32::consts::TAU / 64.0;
-        let signal = |base: f32, swing: f32, k: f32| -> Vec<f32> {
-            (0..64)
-                .map(|i| base + swing * (tau * k * i as f32).sin())
-                .collect()
-        };
-        rig.feed(0, Some(&signal(2.0, 1.5, 1.0)));
-        rig.feed(1, Some(&signal(0.5, 0.5, 2.0)));
-        rig.feed(2, Some(&signal(0.5, 0.4, 3.0)));
-        for _ in 0..32 {
-            rig.block();
-        }
-        assert!(
-            rig.output()
-                .plane(0)
-                .samples()
-                .iter()
-                .any(|s| s.abs() > 1e-6),
-            "the phaser rendered silence; the gate would walk no DSP"
-        );
-        assert_no_alloc::assert_no_alloc(|| {
-            for _ in 0..2_000 {
-                rig.block();
-            }
-        });
-    }
-}
 
 // ---- an event-output lane on the audio thread ---------------------------------
 
@@ -624,7 +289,7 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
         Polarity, Waveform,
     };
     use tutti_nodes::automation::{Breakpoint, Exponent, Trajectory};
-    use tutti_units::{Beat, BeatsPerCycle, Bipolar, Hz, Phase, PhaseIncrement};
+    use tutti_units::{Beat, Bipolar, Hz, Phase, PhaseIncrement};
     let depth = 0.05 + 0.01 * f64::from((k as u32 + generation) % 7);
     let amount = Amount {
         depth: Bipolar::of(depth),
@@ -1599,7 +1264,7 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
         NoteDuration::new(NoteValue::SIXTEENTH).triplet(),
         NoteDuration::new(NoteValue::of(64)).dotted(),
     ];
-    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
+    let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
         .interpolation(InterpolationMode::CubicHermite)
         .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
         .build()

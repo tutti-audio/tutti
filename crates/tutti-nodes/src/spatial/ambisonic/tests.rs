@@ -1,7 +1,7 @@
 use tutti_dsp::Harmonics;
 use tutti_graph::contract::{BlockRig, assert_param_fork};
 use tutti_graph::{IntoNode, Node};
-use tutti_units::{SampleRate, UnitParam};
+use tutti_units::{SampleRate, Tail, UnitParam};
 
 use super::*;
 use crate::test_support::prepared;
@@ -11,7 +11,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 fn aim(azimuth: f64, elevation: f64) -> Direction {
@@ -269,8 +269,8 @@ fn forks_share_no_cell() {
 /// one of another order or scaling, is refused by name.
 #[test]
 fn the_nodes_refuse_a_bus_that_is_not_acn_in_sn3d_or_n3d() {
-    let fuma = BusTopology::ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)));
-    let max_n = BusTopology::ambisonic(AmbisonicFormat::new(
+    let fuma = ChannelTopology::Ambisonic(AmbisonicFormat::fuma(AmbisonicOrder::of(1)));
+    let max_n = ChannelTopology::Ambisonic(AmbisonicFormat::new(
         AmbisonicOrder::of(1),
         AmbisonicOrdering::Acn,
         AmbisonicNormalization::MaxN,

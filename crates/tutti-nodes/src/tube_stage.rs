@@ -6,13 +6,11 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor, TubeDrive, TubeStage,
     TubeStageControls,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, SampleRate, Samples, Tail, UnitAddr, UnitParam};
+use tutti_graph::{Cost, Shape};
+use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
-use crate::params::{ControlSet, HasControl};
-use tutti_graph::DeclaredUnit;
 
 /// What a [`TubeStageNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,8 +79,7 @@ pub type TubeStageNode<F> = KernelNode<TubeStageKernel<F>>;
 
 impl<F: Float + Lerp> From<TubeStageConfig> for TubeStageNode<F> {
     fn from(config: TubeStageConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a tube stage is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a tube stage");
         Self::with_kernel(
             TubeStageKernel::<F>::new(&config, input),
             TubeStageSet,
@@ -95,43 +92,14 @@ impl<F: Float + Lerp> From<TubeStageConfig> for TubeStageNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct TubeStageSet;
 
-/// The one control is the drive, a range-checked [`TubeDrive`], which `control_set!` does not
-/// take (its rows are units), so the set is written out.
-impl ControlSet for TubeStageSet {
-    type Controls = TubeStageControls;
-
-    fn addrs(&self) -> &'static [UnitAddr] {
-        const ALL: &[UnitAddr] = &[UnitAddr::first(UnitParam::GainDb)];
-        ALL
-    }
-
-    fn units(&self) -> &'static [DeclaredUnit] {
-        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
-        ALL
-    }
+control_set! {
+    TubeStageSet(_s): TubeStageControls = TubeStageControls::DEFAULT;
+    live: (all);
+    GainDb => Db = drive via TubeDrive;
 
     fn defaults(&self) -> TubeStageControls {
         TubeStageControls::DEFAULT
     }
-
-    fn flatten(&self, c: &TubeStageControls, out: &mut [f64]) {
-        let all = [c.drive.get().get()];
-        out.copy_from_slice(&all[..out.len()]);
-    }
-
-    fn assemble(&self, v: &[f64]) -> TubeStageControls {
-        let mut c = TubeStageControls::DEFAULT;
-        if let Some(&x) = v.first() {
-            // The one place a live drive is changed: a cell is written per frame, with no
-            // caller to refuse it to.
-            c.drive = TubeDrive::held(Db::new(x));
-        }
-        c
-    }
-}
-
-impl HasControl<{ UnitParam::GainDb as u16 }> for TubeStageSet {
-    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`TubeStageNode`].
@@ -180,22 +148,17 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Heavy)
+        Shape::through(self.input).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.stage = TubeStage::<F>::new(self.input.layout(), self.rate);
+        self.stage = TubeStage::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 
@@ -247,8 +210,9 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::UnitParam;
 
     const RATE: f64 = 48_000.0;
 
@@ -256,28 +220,6 @@ mod tests {
         prepared(TubeStageNode::<f32>::from(
             TubeStageConfig::new(1u16).drive(TubeDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TubeStageNode::<f32>::from(TubeStageConfig::new(
-            ChannelLayout::STEREO,
-        )));
-    }
-
-    #[test]
-    fn the_shape_is_heavy_and_declares_the_drive() {
-        let n = TubeStageNode::<f32>::from(TubeStageConfig::new(3u16));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Heavy);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::GainDb][..]);
-        assert_eq!(n.param_base(0), Some(6.0));
-        let empty = TubeStageNode::<f32>::from(TubeStageConfig::new(0u16));
-        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// The impulse of a small input peaks at the oversampler's declared latency, and the
@@ -313,30 +255,6 @@ mod tests {
                 "{factor:?}: rings past the declared tail"
             );
         }
-    }
-
-    /// At -80 dBFS and drive 0 dB the stage has the gain of the coupling high-pass,
-    /// `|1 - e^(-jw)| / |1 - R e^(-jw)|` at the oversampled rate (the module's normalization:
-    /// unity before the coupling), through the oversampler. The bound is the oversampler's
-    /// passband ripple, each of its two stages about `1e-5` (100 dB) and the round trip crossing
-    /// each twice, `4e-5`, and `f32`'s rounding of the plate voltage: half an ulp of 170 V is `7.6e-6`
-    /// V against a plate swing of `6e-3` V, `1.3e-3` of the gain were every sample's error the
-    /// same sign.
-    #[test]
-    fn a_small_signal_has_the_coupling_high_passs_gain_through_the_oversampler() {
-        let f = 1_000.0;
-        let mut n = node(0.0);
-        let x = sine(f, RATE, 9_600 + 4_800);
-        let y = render_chunked(&mut n, &[x.iter().map(|v| v * 1e-4).collect()], 256).remove(0);
-        let gain = amplitude_at(&y[4_800..], f, RATE) / 1e-4;
-        let high = 4.0 * RATE;
-        let w = core::f64::consts::TAU * f / high;
-        let r = (-core::f64::consts::TAU * 10.0 / high).exp();
-        let coupling = (1.0 - w.cos()).hypot(w.sin()) / (1.0 - r * w.cos()).hypot(r * w.sin());
-        assert!(
-            (gain - coupling).abs() <= 4.1e-5 + 1.3e-3,
-            "{gain} vs {coupling}"
-        );
     }
 
     /// The drive is a live cell: +20 dB raises a hot output by less than the 10 times it

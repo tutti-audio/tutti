@@ -76,7 +76,7 @@ fn placed(channels: ChannelLayout, kept: Option<&ChannelTopology>) -> PluginBuse
     PluginBus::single(channels)
         .into_iter()
         .map(|bus| match kept {
-            Some(topology) => bus.placed(topology.clone()),
+            Some(topology) => bus.placed(*topology),
             None => bus,
         })
         .collect()

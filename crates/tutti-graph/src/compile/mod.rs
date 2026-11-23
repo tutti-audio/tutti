@@ -26,7 +26,7 @@
 //!
 //!    Emits a `Delay` op per mismatched audio port and per mismatched event
 //!    *source*, plus per-output alignment rings, with state keyed by
-//!    [`DelayKey`](plan::DelayKey). An event fan-in merges its sources by `(offset, source
+//!    [`DelayKey`]. An event fan-in merges its sources by `(offset, source
 //!    port)` — ties go to the lower `(NodeKey, port)` source, whatever order
 //!    the spec lists them in. One wider than [`MAX_PORTS`] becomes a tree
 //!    of merges over contiguous source ranges, which keeps that rule

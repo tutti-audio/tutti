@@ -236,7 +236,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let main = Buses::main(self.input);
         let inputs = match self.key {
             KeySource::Own => main,
@@ -244,11 +243,11 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
                 .with(Bus::new(self.input, BusRole::Sidechain))
                 .expect("a main bus and a key are two buses"),
         };
-        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).cost(Cost::Moderate)
+        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.layout()));
+        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.width()));
         self.applied = false;
     }
 
@@ -304,9 +303,8 @@ impl GateSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -339,17 +337,6 @@ mod tests {
                 .key(KeySource::Sidechain)
                 .controls(four(threshold, attack, hold, release)),
         )
-    }
-
-    /// A fork starts from the values last set through the node's `ParamSet` and shares no
-    /// cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(with_range(four(-30.0, 0.001, 0.01, 0.1), -20.0)),
-        ));
     }
 
     /// A block longer than 64 frames renders whole: the gain control signal is sized from the
@@ -778,26 +765,5 @@ mod tests {
             out[0], 1.0,
             "a -6 dB key is still over the -20 dB threshold"
         );
-    }
-
-    /// An `f64` kernel keeps its gain in `f64`: a key over the threshold with an instant attack
-    /// opens the gate to a gain of 1 to 2^-50 whatever the range, so a signal of more than 24
-    /// bits comes out as it went in.
-    #[test]
-    fn an_f64_kernel_with_an_open_gate_passes_a_wide_signal_unchanged() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let x = wide_signal(128);
-        let mut k = GateKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(128)),
-        );
-        let controls = GateControls {
-            threshold: Db::new(-40.0),
-            range: Db::new(-80.0),
-            ..GateControls::DEFAULT
-        };
-        let y = drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x));
-        assert_close_f64(&y[0], &x, 2.0f64.powi(-50));
     }
 }

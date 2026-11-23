@@ -30,7 +30,7 @@
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
-//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(440.0)))));
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -77,6 +77,7 @@
 //! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo, beats, chords, key, alignment | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
+//! | `tutti::voicing` | the note logic instruments are played by | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its config | `soundfont` |
 //! | `tutti::plugin` | hosting settings, the main-thread proof and the plugin catalog | `plugin` + a format |
 //!
@@ -154,7 +155,9 @@ pub use tutti_timeline::{
 };
 
 // Units, channels, buffers and the musical meter.
-pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
+pub use tutti_buffers::{
+    ChannelLayout, ChannelSet, ChannelTopology, Interleaved, InterleavedMut, MaxBlock,
+};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Frame, Hz, Losses, Normalized,
@@ -779,15 +782,31 @@ pub mod modulation {
 }
 
 /// The polyphonic subtractive synth node (`tutti-polysynth`): the node, its
-/// config and the voice, unison and portamento settings. Feature `synth`.
+/// config and the voice, unison and portamento settings, and the instrument that plays
+/// modal, waveguide, Karplus-Strong and additive voices. Feature `synth`.
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane, MasterVolume,
-        MasterVolumeOutOfRange, Order, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
-        ReferencePitch, ReferencePitchOutOfRange, Steal, SvfMode, SvfQ, SvfQOutOfRange,
-        SynthConfig, SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices,
-        UnisonVoicesError, VoiceMode,
+        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, GlideTime, GlideTimeError,
+        InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice, KarplusVoiceConfig, Lane,
+        MasterVolume, MasterVolumeOutOfRange, ModalVoice, ModalVoiceConfig, NoteInstrument,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch,
+        ReferencePitchOutOfRange, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig, SynthFloat,
+        Tuning, TuningError, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
+        WaveguideVoice, WaveguideVoiceConfig,
+    };
+}
+
+/// The note logic an instrument is played by (`tutti-voicing`): the voice configuration and
+/// steal rule, and the voice a note-playing instrument implements.
+/// Feature `synth`.
+#[cfg(feature = "synth")]
+pub mod voicing {
+    pub use tutti_voicing::{
+        ChannelState, Glide, Holds, MasterGain, Mode as VoicingMode, NoSuchTuning, NoteControl,
+        NoteStart, NoteVoice, Order, Patch, Phase as VoicePhase, Release, Retrigger, Steal,
+        TuningCapacity, TuningCount, TuningCountOutOfRange, VoiceCommand, VoiceConfig, VoiceId,
+        VoiceSpec,
     };
 }
 

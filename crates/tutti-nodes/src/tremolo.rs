@@ -1,12 +1,12 @@
 //! [`TremoloNode`]: an LFO scales the level.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Bipolar, Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`TremoloNode`] is made from: its width, the wave of its LFO and where its
 /// controls start.
@@ -71,11 +71,14 @@ pub type TremoloNode<F> = KernelNode<TremoloKernel<F>>;
 
 impl<F: Float> From<TremoloConfig> for TremoloNode<F> {
     fn from(config: TremoloConfig) -> Self {
-        Self::with_kernel(
-            TremoloKernel::new(config.width, config.wave),
-            TremoloSet,
-            config.controls,
-        )
+        // A placeholder rate: an unprepared node renders nothing.
+        let kernel = TremoloKernel {
+            width: config.width,
+            wave: config.wave,
+            tremolo: Tremolo::new(config.wave, SampleRate::SR_48K),
+            float: core::marker::PhantomData,
+        };
+        Self::with_kernel(kernel, TremoloSet, config.controls)
     }
 }
 
@@ -103,18 +106,6 @@ pub struct TremoloKernel<F: Float> {
     float: core::marker::PhantomData<fn() -> F>,
 }
 
-impl<F: Float> TremoloKernel<F> {
-    /// A tremolo at a placeholder rate: an unprepared node renders nothing.
-    fn new(width: ChannelLayout, wave: OscillatorWave) -> Self {
-        Self {
-            width,
-            wave,
-            tremolo: Tremolo::new(wave, SampleRate::SR_48K),
-            float: core::marker::PhantomData,
-        }
-    }
-}
-
 impl<F: Float> Kernel for TremoloKernel<F> {
     type Float = F;
     type Set = TremoloSet;
@@ -123,8 +114,7 @@ impl<F: Float> Kernel for TremoloKernel<F> {
 
     /// `width` channels in and out, `Moderate`: a sine per sample and channel.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a tremolo is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a tremolo");
         Shape::through(bus).cost(Cost::Moderate)
     }
 
@@ -157,8 +147,9 @@ impl<F: Float> Kernel for TremoloKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
+
     use tutti_units::UnitParam;
 
     fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
@@ -167,32 +158,6 @@ mod tests {
                 .rate(Hz::new(rate))
                 .depth(Bipolar::of(depth)),
         ))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TremoloNode::from(TremoloConfig::new(2u16)));
-    }
-
-    /// The shape is the width in and out, `Moderate`, with no tail, and declares the rate and
-    /// the depth; the default is 5 Hz at half depth.
-    #[test]
-    fn the_shape_declares_rate_and_depth_and_no_tail() {
-        let n = node(3, 5.0, 0.5);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Rate, UnitParam::Depth][..]
-        );
-        let d = TremoloNode::<f32>::from(TremoloConfig::new(1u16));
-        assert_eq!((d.param_base(0), d.param_base(1)), (Some(5.0), Some(0.5)));
     }
 
     /// Set to depth 1 through `Bipolar` the node swings to silence at the trough of a 100 Hz

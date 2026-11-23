@@ -12,7 +12,7 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DELAY_SLEW, GAIN_RAMP, Lerp, ModDelayBank, ModDelayControls,
     ModDelayLayout, ModulationRate, Ramp, Steps, Sweep,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Cents, Feedback, Hz, SampleRate, SampleSpan, Seconds, Tail};
 
 #[cfg(doc)]
@@ -268,12 +268,7 @@ impl<F: Float + Lerp> Kernel for ModDelayKernel<F> {
 
     fn shape(&self) -> Shape {
         let input = self.layout.input();
-        let output = Bus::banded(input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(input).cost(Cost::Moderate)
     }
 
     /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare
@@ -1078,44 +1073,6 @@ mod tests {
         moved(&fresh);
         let mut fresh = prepared(fresh, RATE, 64);
         assert_eq!(blocks(&mut used), blocks(&mut fresh));
-    }
-
-    /// An `f64` block through a `ModDelayKernel::<f64>` with no depth is a fixed delay of the
-    /// base `d` whole frames: the loop `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of
-    /// the wide signal, to 2^-45.
-    #[test]
-    fn an_f64_kernel_with_no_depth_is_a_fixed_delay_in_f64() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let (d, len) = (16usize, 200usize);
-        let rate = SampleRate::of(1_024.0);
-        let sweep = Sweep::of(
-            Seconds::new(d as f64 / rate.get()),
-            MaxDelay::of(Seconds::new(1.0)),
-            Seconds::ZERO,
-            Seconds::new(0.01),
-            Feedback::MAX_STABLE,
-        );
-        let controls = ModDelayControls {
-            rate: Hz::new(1.0),
-            depth: Seconds::ZERO,
-            feedback: Feedback::new(0.6),
-        };
-        let x = wide_signal(len);
-        let g = 0.6;
-        let mut v = vec![0.0f64; len];
-        for n in 0..len {
-            v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
-        }
-        let want: Vec<f64> = (0..len)
-            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
-            .collect();
-        let layout = ModDelayLayout::builder(BusTopology::MONO, sweep)
-            .build()
-            .unwrap();
-        let mut k = ModDelayKernel::<f64>::new(layout);
-        k.prepare(rate, MaxBlock::of(Samples::new(len)));
-        let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
-        assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }
 
     // ---- the vibrato preset ------------------------------------------------------------

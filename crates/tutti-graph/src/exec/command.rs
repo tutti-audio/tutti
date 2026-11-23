@@ -96,7 +96,7 @@ use crate::compile::ids::{PlanUnitId, TableSlice};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tutti_rt::{Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{CappedVec, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
 use crate::compile::plan::Plan;
@@ -293,10 +293,10 @@ pub(crate) struct CommandRx {
     rx: RingReader<Command>,
     cancel: RingReader<Cancel>,
     /// Cancels that arrived before the commands they name (see `pull`).
-    held: Vec<Cancel>,
+    held: CappedVec<Cancel>,
     /// One past the highest `seq` pulled so far.
     next_seq: u64,
-    pending: Vec<Command>,
+    pending: CappedVec<Command>,
     due: Vec<DueItem<EventKind>>,
     due_events: Vec<Event>,
     due_params: Vec<DueItem<ParamKind>>,
@@ -333,9 +333,9 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
         CommandRx {
             rx,
             cancel: cancel_rx,
-            held: Vec::with_capacity(CANCEL_CAPACITY),
+            held: CappedVec::with_capacity(CANCEL_CAPACITY),
             next_seq: 0,
-            pending: Vec::with_capacity(COMMAND_CAPACITY),
+            pending: CappedVec::with_capacity(COMMAND_CAPACITY),
             due: Vec::with_capacity(COMMAND_CAPACITY),
             due_events: Vec::with_capacity(COMMAND_CAPACITY),
             due_params: Vec::with_capacity(COMMAND_CAPACITY),
@@ -436,8 +436,8 @@ impl CommandRx {
     }
 
     /// Pull new commands, then apply cancellations. Frees the credit of what
-    /// it cancels. Audio thread: no allocation — `Vec::remove`/`retain`/
-    /// `swap_remove` shift in place, and `held` never passes its capacity.
+    /// it cancels. Audio thread: no allocation — `CappedVec`'s `remove`/
+    /// `retain_mut`/`swap_remove` shift in place, and `held` never passes its capacity.
     ///
     /// **A cancel can arrive before the command it names.** With the editor
     /// on another thread, the executor can find the command ring empty, the
@@ -447,9 +447,10 @@ impl CommandRx {
     /// command has arrived; a `Below(n)` is held until every `seq < n` has.
     fn pull(&mut self) {
         while let Some(cmd) = self.rx.pop() {
-            debug_assert!(self.pending.len() < self.pending.capacity());
             self.next_seq = cmd.seq + 1;
-            self.pending.push(cmd);
+            // The credit count keeps the list within its capacity.
+            let kept = self.pending.push(cmd);
+            debug_assert!(kept, "the pending list has room for every credit");
         }
         let before = self.pending.len();
         let mut i = 0;
@@ -461,12 +462,13 @@ impl CommandRx {
             }
         }
         // Past the held list's capacity, cancels wait in their ring.
-        while self.held.len() < self.held.capacity() {
+        while !self.held.is_full() {
             let Some(c) = self.cancel.pop() else {
                 break;
             };
             if !self.apply_cancel(c) {
-                self.held.push(c);
+                let kept = self.held.push(c);
+                debug_assert!(kept, "checked for room above");
             }
         }
         let gone = (before - self.pending.len()) as u64;
@@ -490,7 +492,7 @@ impl CommandRx {
                 true
             }
             Cancel::Below(below) => {
-                self.pending.retain(|p| p.seq >= below);
+                self.pending.retain_mut(|p| p.seq >= below);
                 below <= self.next_seq
             }
         }
@@ -509,7 +511,7 @@ impl CommandRx {
     /// the new rate.
     pub(crate) fn rescale(&mut self, ratio: f64, before: u64) {
         self.pull();
-        for cmd in &mut self.pending {
+        for cmd in self.pending.as_mut_slice() {
             if cmd.plan_seq < before
                 && let At::Frame(_) = cmd.at
             {
@@ -645,7 +647,7 @@ impl Deliveries<'_> {
         &self,
         unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -658,8 +660,7 @@ impl Deliveries<'_> {
             let port = self.due[i].port;
             let run = self.due[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_into(&[base(port), &self.events[i..run]], buf, room);
+            dropped += merge_into(&[base(port), &self.events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -678,7 +679,7 @@ impl Deliveries<'_> {
         &self,
         unit: PlanUnitId,
         base: impl Fn(u16) -> &'e [ParamEvent],
-        buf: &mut Vec<ParamEvent>,
+        buf: &mut CappedVec<ParamEvent>,
         views: &mut [(u16, u32, u32)],
     ) -> (usize, u32) {
         buf.clear();
@@ -691,8 +692,7 @@ impl Deliveries<'_> {
             let port = self.due_params[i].port;
             let run = self.due_params[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            let room = buf.capacity();
-            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf, room);
+            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -715,7 +715,7 @@ impl Deliveries<'_> {
         ports: usize,
         bound: usize,
         base: impl Fn(u16) -> &'e [Event],
-        buf: &mut Vec<Event>,
+        buf: &mut CappedVec<Event>,
         views: &mut [(u16, u32, u32)],
     ) -> Option<(usize, u32)> {
         let start = self.due.partition_point(|d| d.unit < unit);
@@ -755,16 +755,16 @@ impl Deliveries<'_> {
 /// Where a node's scheduled events and param events are merged into its
 /// inputs: preallocated, and never grown.
 pub(crate) struct Overlay {
-    pub(crate) events: Vec<Event>,
-    pub(crate) params: Vec<ParamEvent>,
+    pub(crate) events: CappedVec<Event>,
+    pub(crate) params: CappedVec<ParamEvent>,
 }
 
 impl Overlay {
     /// Room for `capacity` of each ([`overlay_capacity`]). Allocates.
     pub(crate) fn with_capacity(capacity: usize) -> Self {
         Self {
-            events: Vec::with_capacity(capacity),
-            params: Vec::with_capacity(capacity),
+            events: CappedVec::with_capacity(capacity),
+            params: CappedVec::with_capacity(capacity),
         }
     }
 }

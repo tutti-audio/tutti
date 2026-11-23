@@ -3,6 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_rt::CappedVec;
+use tutti_units::Samples;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
@@ -201,7 +202,7 @@ impl<F: Float> Executor<F> {
                             (new.key, refused.saturating_add(unfit)),
                         );
                     }
-                    departed.chase_events.truncate(from);
+                    departed.chase_events.drain(from..);
                 } else {
                     place(
                         &mut departed.chased,
@@ -306,7 +307,7 @@ impl<F: Float> Executor<F> {
                         place(&mut c.spare_held, staging);
                         x.out = Some(std::mem::replace(&mut u.node, node));
                         u.fade = Some(x);
-                        u.quiet = 0;
+                        u.quiet = Samples::ZERO;
                         u.last_quiet = false;
                         u.last_idle = false;
                         u.reported = None;
@@ -733,10 +734,9 @@ fn flush_target<'a>(
 
 /// Appends `events` to `to` as far as its capacity takes. Returns how many
 /// did not fit.
-fn fill(to: &mut Vec<Event>, events: &[Event]) -> u32 {
-    let room = (to.capacity() - to.len()).min(events.len());
-    to.extend_from_slice(&events[..room]);
-    u32::try_from(events.len() - room).unwrap_or(u32::MAX)
+fn fill(to: &mut CappedVec<Event>, events: &[Event]) -> u32 {
+    let kept = to.extend(events.iter().copied());
+    u32::try_from(events.len() - kept).unwrap_or(u32::MAX)
 }
 
 /// `carried`, copied into `target`, the ring built for its new length: both

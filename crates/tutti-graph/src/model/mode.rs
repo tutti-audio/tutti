@@ -103,18 +103,17 @@
 //! is heard.) A node that kept running (a toggle back while still fading
 //! out, or from Muted) is not reset.
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 
 use atomic_float::AtomicF64;
-use tutti_curve::FadeLaw;
-use tutti_rt::{CappedVec, ParamCell};
+use tutti_rt::{AtomicCell, CappedVec, ParamCell, atomic_word};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
 use crate::compile::ids::{AudioSlotId, Id};
 use crate::exec::arena::Arena;
 use crate::exec::held::Held;
-use crate::exec::lane::{fade_gains, ramp_in};
+use crate::exec::lane::{Declick, ramp_in};
 use crate::exec::rings::AudioRing;
 use crate::model::pass::Pass;
 use crate::model::spec::EventOutputPort;
@@ -151,23 +150,13 @@ pub enum NodeMode {
     Muted,
 }
 
+atomic_word!(NodeMode {
+    Active,
+    Bypassed,
+    Muted
+});
+
 impl NodeMode {
-    fn to_bits(self) -> u8 {
-        match self {
-            Self::Active => 0,
-            Self::Bypassed => 1,
-            Self::Muted => 2,
-        }
-    }
-
-    fn from_bits(bits: u8) -> Self {
-        match bits {
-            1 => Self::Bypassed,
-            2 => Self::Muted,
-            _ => Self::Active,
-        }
-    }
-
     /// The weights a steady mode holds, at mix `m` (only Active reads it).
     fn weights<F: Float>(self, m: F) -> Weights<F> {
         match self {
@@ -266,13 +255,13 @@ pub enum MixError {
 }
 
 /// A unit's mode and mix, shared between the editor (the one writer) and the
-/// unit (the executor reads each once per block). An `AtomicU8` and the
+/// unit (the executor reads each once per block). An `AtomicCell` and the
 /// mix's raw `f64` (`Mix` is not `Pod`; the cell converts at its edge): a
 /// mode and a mix are controls, not rewires. **The mix cell is the mix's one
 /// writer's**: [`Editor::set_mix`](crate::Editor::set_mix) stores into it.
 #[derive(Clone, Debug)]
 pub(crate) struct ModeCell {
-    mode: Arc<AtomicU8>,
+    mode: Arc<AtomicCell<NodeMode>>,
     mix: Arc<AtomicF64>,
     /// The range a driven mix is clamped to: the param port's own cell over
     /// the one address [`NodeMix::ADDR`], so the lane's step clamps to it as a
@@ -287,7 +276,7 @@ impl ModeCell {
         let range = ParamRanges::new(ParamPorts::MIX);
         range.store(NodeMix::ADDR, NodeMix::DEFAULT_RANGE);
         Self {
-            mode: Arc::new(AtomicU8::new(mode.to_bits())),
+            mode: Arc::new(AtomicCell::new(mode)),
             mix: Arc::new(AtomicF64::new(mix.get())),
             range,
         }
@@ -327,7 +316,7 @@ impl ModeCell {
 
     /// Store `mode`. Wait-free.
     pub(crate) fn store(&self, mode: NodeMode) {
-        self.mode.store(mode.to_bits(), Ordering::Release);
+        self.mode.store(mode);
     }
 
     /// Store `mix`. Wait-free.
@@ -338,7 +327,7 @@ impl ModeCell {
     /// The mode now. Wait-free.
     #[inline]
     pub(crate) fn load(&self) -> NodeMode {
-        NodeMode::from_bits(self.mode.load(Ordering::Acquire))
+        self.mode.load()
     }
 
     /// The mix now. Wait-free.
@@ -369,7 +358,7 @@ impl<F: Float> Weights<F> {
 
     /// These weights moved `g` of the way to `to`. At `g` one of the two ends
     /// of a toggle from a steady mode this is exactly `1 - g` and `g` (the
-    /// `gains` of [`FadeLaw`]): `1 + (0 - 1) * g` and `0 + (1 - 0) * g`.
+    /// `gains` of [`FadeLaw`](crate::FadeLaw)): `1 + (0 - 1) * g` and `0 + (1 - 0) * g`.
     fn toward(self, to: Self, g: F) -> Self {
         Self {
             node: self.node + (to.node - self.node) * g,
@@ -379,11 +368,11 @@ impl<F: Float> Weights<F> {
 }
 
 /// A fade in progress: from the weights the unit had when it began, to its
-/// mode's, `k` frames of [`DECLICK`](crate::DECLICK) done.
+/// mode's, over [`DECLICK`](crate::DECLICK).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Ramp<F: Float> {
     from: Weights<F>,
-    k: usize,
+    declick: Declick,
 }
 
 /// What a block makes of one unit, in order: `warm` frames of the aligned
@@ -403,11 +392,11 @@ pub(crate) struct Segments<F: Float> {
 pub(crate) struct RampRun<F: Float> {
     from: Weights<F>,
     heading: NodeMode,
-    /// The fade's frame the block's first ramp frame is.
-    k: usize,
+    /// The fade as the block starts it: its `done` is the fade's frame the
+    /// block's first ramp frame is.
+    declick: Declick,
+    /// The ramp frames this block runs.
     len: usize,
-    /// The fade's length in frames.
-    declick: usize,
 }
 
 /// A block's mix: the previous block's to this one's, across `frames`
@@ -519,7 +508,10 @@ impl<F: Float> Segments<F> {
             for j in 0..r.len {
                 let i = at + j;
                 let to = r.heading.weights(self.mix.at(i, lane));
-                let w = r.from.toward(to, gain(r.k + j, r.declick));
+                let w = r.from.toward(
+                    to,
+                    r.declick.gains::<F>(r.declick.done() + Samples::new(j)).1,
+                );
                 let node_on = r.from.node != F::ZERO || to.node != F::ZERO;
                 let input_on = input && (r.from.input != F::ZERO || to.input != F::ZERO);
                 let (node, input) = (w.node, w.input);
@@ -573,16 +565,6 @@ impl<F: Float> Segments<F> {
             };
         }
     }
-}
-
-/// The incoming gain of frame `k` of the `declick`-frame fade.
-fn gain<F: Float>(k: usize, declick: usize) -> F {
-    fade_gains::<F>(
-        FadeLaw::EqualAmplitude,
-        Samples::new(k),
-        Samples::new(declick),
-    )
-    .1
 }
 
 /// The aligned-input path of a latent node: one ring of its declared latency
@@ -656,16 +638,15 @@ pub(crate) struct ModeState<F: Float> {
     /// Whether the unit has run a block: a lane built for a unit that has is
     /// a connection to a running port (it declicks), not a first block.
     ran: bool,
-    /// The fade's length in frames: [`DECLICK`](crate::DECLICK) at the graph's
-    /// rate.
-    declick: usize,
+    /// The fade's length: [`DECLICK`](crate::DECLICK) at the graph's rate.
+    declick: Samples,
 }
 
 impl<F: Float> ModeState<F> {
     /// The state of a unit about to be placed: steady in `cell`'s mode, with
     /// no fade (a fork, a new unit). Control side: allocates its line, its
     /// scratch and its tables.
-    pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: usize) -> Self {
+    pub(crate) fn new(cell: ModeCell, shape: &Shape, max_block: usize, declick: Samples) -> Self {
         let own_bypass = shape.own_bypass;
         let mode = Self::read(own_bypass, cell.load());
         let mix = F::from_unit(cell.load_mix());
@@ -850,7 +831,7 @@ impl<F: Float> ModeState<F> {
         }
         self.ramp = (self.weights != want.weights(self.mix_to)).then_some(Ramp {
             from: self.weights,
-            k: 0,
+            declick: Declick::started(self.declick),
         });
         self.heading = want;
         reset
@@ -1014,20 +995,20 @@ impl<F: Float> ModeState<F> {
         if warm == frames {
             return seg;
         }
-        let declick = self.declick;
         if let Some(r) = &mut self.ramp {
-            let len = (declick - r.k).min(frames - warm);
+            let len = r.declick.remaining().get().min(frames - warm);
             seg.ramp = Some(RampRun {
                 from: r.from,
                 heading: self.heading,
-                k: r.k,
+                declick: r.declick,
                 len,
-                declick,
             });
-            r.k += len;
+            r.declick.advance(Samples::new(len));
             let to = self.heading.weights(mix.at(warm + len - 1, lane));
-            self.weights = r.from.toward(to, gain::<F>(r.k - 1, declick));
-            if r.k == declick {
+            self.weights = r
+                .from
+                .toward(to, r.declick.gains::<F>(r.declick.last_frame()).1);
+            if !r.declick.running() {
                 self.ramp = None;
             }
         }
@@ -1045,7 +1026,7 @@ mod tests {
     use tutti_units::{Latency, Samples};
 
     /// [`DECLICK`](crate::DECLICK) at 48 kHz.
-    const DECLICK_FRAMES: usize = 240;
+    const DECLICK_FRAMES: Samples = Samples::new(240);
 
     fn shape(latency: usize) -> Shape {
         Shape::through_unassigned(ChannelLayout::MONO).latency(Latency::new(Samples::new(latency)))
@@ -1115,7 +1096,7 @@ mod tests {
 
         // Let go of the source: its lane fades to the base, blended, for the
         // declick and the block that sees it done.
-        let fade = DECLICK_FRAMES.div_ceil(64) + 1;
+        let fade = DECLICK_FRAMES.get().div_ceil(64) + 1;
         for block in 0..fade {
             state.snapshot();
             assert!(!state.is_plain(), "fading, block {block}");

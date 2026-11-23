@@ -40,6 +40,9 @@ pub(super) struct Link<F: Float> {
     /// Items the executor's apply could not return, summed from each list as
     /// its box or crossfade came back.
     leaked: u64,
+    /// What the executor's `unreported` counter read at the last
+    /// [`take_unreported`](Self::take_unreported).
+    unreported_seen: u64,
 }
 
 impl<F: Float> Link<F> {
@@ -53,6 +56,7 @@ impl<F: Float> Link<F> {
             acked: 0,
             ending_taps: Vec::new(),
             leaked: 0,
+            unreported_seen: 0,
         }
     }
 
@@ -76,9 +80,7 @@ impl<F: Float> Link<F> {
     /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
     pub(super) fn main_output_fade_ended(&self) -> u64 {
-        self.channels
-            .main_output_fade_ended
-            .load(std::sync::atomic::Ordering::Acquire)
+        self.channels.readings.main_output_fade_ended.get().0
     }
 
     /// The sequence number the next commit sends with.
@@ -172,8 +174,9 @@ impl<F: Float> Link<F> {
     /// Refusals since the last call that no loss names.
     pub(super) fn take_unreported(&mut self) -> u64 {
         self.channels
+            .readings
             .unreported
-            .swap(0, std::sync::atomic::Ordering::Relaxed)
+            .take_since(&mut self.unreported_seen)
     }
 
     /// Items the executor's apply leaked, since the editor was built.
@@ -183,7 +186,7 @@ impl<F: Float> Link<F> {
 
     /// The executor's play clock, as it last published it.
     pub(super) fn play_reading(&self) -> crate::PlayReading {
-        self.channels.play.read()
+        self.channels.readings.play.get().0
     }
 
     /// Commits sent and not yet handed back.

@@ -30,7 +30,6 @@ use std::sync::Arc;
 
 use crate::FftFloat;
 use crate::design::along;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Fold, Mono, MonoMut, Planes, StereoPlanes};
 use tutti_units::{Direction, Mix, Radians, SampleRate};
 
@@ -272,8 +271,8 @@ impl<F: FftFloat> HrtfBinaural<F> {
             current,
             face_hint,
             fold: Fold::between(
-                &ChannelTopology::default_for(ChannelLayout::STEREO),
-                &ChannelTopology::default_for(ChannelLayout::MONO),
+                &tutti_buffers::Bed::Stereo.topology(),
+                &tutti_buffers::Bed::Mono.topology(),
             )
             .expect("stereo folds to mono"),
             sphere,

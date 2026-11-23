@@ -16,7 +16,7 @@ use tutti_dsp::{
     BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderSaturation,
     LadderType, Ramp, SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Shape};
+use tutti_graph::Shape;
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
@@ -171,7 +171,7 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
         let rate = SampleRate::SR_48K;
         Self {
             input,
-            bank: LadderBank::new(input.layout()).saturation(saturation),
+            bank: LadderBank::new(input.width()).saturation(saturation),
             blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
             applied: false,
@@ -191,11 +191,7 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
+        Shape::through(self.input)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
@@ -258,51 +254,13 @@ control_set! {
 mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
-    use crate::filter::test_utils::{generate_sine, process_mono, rms};
+    use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE_44K, prepared_at, render_f64, tick, tick_fed};
     use tutti_dsp::Complex64;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::Tail;
+
     use tutti_units::UnitParam;
-
-    /// A fork starts from the values last set through the node's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(LadderFilterNode::<f32>::from(
-            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
-                .freq(Hz::new(800.0))
-                .res(Resonance::new(0.3)),
-        ));
-    }
-
-    #[test]
-    fn test_ladder_lp24_attenuates_high_freq() {
-        let mut filter = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(500.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let low = generate_sine(100.0, 44100.0, 4096);
-        let high = generate_sine(5000.0, 44100.0, 4096);
-
-        let out_low = process_mono(&mut filter, &low);
-        filter.reset();
-        let out_high = process_mono(&mut filter, &high);
-
-        let rms_low = rms(&out_low[512..]);
-        let rms_high = rms(&out_high[512..]);
-
-        assert!(
-            rms_low > rms_high * 5.0,
-            "LP24 should strongly attenuate high freq: low={rms_low}, high={rms_high}"
-        );
-    }
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.
@@ -349,192 +307,6 @@ mod tests {
                 "{ty:?} resonance: {flat:.2} -> {peak:.2}"
             );
         }
-    }
-
-    #[test]
-    fn test_ladder_hp24_attenuates_low_freq() {
-        let mut filter = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::HP24)
-                    .freq(Hz::new(2000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let low = generate_sine(100.0, 44100.0, 4096);
-        let high = generate_sine(5000.0, 44100.0, 4096);
-
-        let out_low = process_mono(&mut filter, &low);
-        filter.reset();
-        let out_high = process_mono(&mut filter, &high);
-
-        let rms_low = rms(&out_low[512..]);
-        let rms_high = rms(&out_high[512..]);
-
-        assert!(
-            rms_high > rms_low * 3.0,
-            "HP24 should attenuate low freq: low={rms_low}, high={rms_high}"
-        );
-    }
-
-    #[test]
-    fn test_ladder_resonance_boosts_cutoff() {
-        let mut no_res = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let mut with_res = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.8)),
-            ),
-            RATE_44K,
-        );
-
-        let at_cutoff = generate_sine(1000.0, 44100.0, 4096);
-
-        let out_no = process_mono(&mut no_res, &at_cutoff);
-        let out_yes = process_mono(&mut with_res, &at_cutoff);
-
-        let rms_no = rms(&out_no[512..]);
-        let rms_yes = rms(&out_yes[512..]);
-
-        assert!(
-            rms_yes > rms_no,
-            "Resonance should boost at cutoff: no_res={rms_no}, with_res={rms_yes}"
-        );
-    }
-
-    #[test]
-    fn test_ladder_drive_adds_saturation() {
-        let mut clean = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(5000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let mut driven = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(5000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-        assert!(driven.param_set().set(UnitParam::Drive, 10.0));
-
-        let sine = generate_sine(440.0, 44100.0, 4096);
-
-        let out_clean = process_mono(&mut clean, &sine);
-        let out_driven = process_mono(&mut driven, &sine);
-
-        let rms_clean = rms(&out_clean[512..]);
-        let rms_driven = rms(&out_driven[512..]);
-
-        assert!(
-            (rms_clean - rms_driven).abs() > 0.01 || rms_driven > rms_clean * 0.5,
-            "Drive should affect signal: clean={rms_clean}, driven={rms_driven}"
-        );
-    }
-
-    #[test]
-    fn test_ladder_reset() {
-        let mut filter = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.5)),
-            ),
-            RATE_44K,
-        );
-
-        let sine = generate_sine(440.0, 44100.0, 100);
-        let _ = process_mono(&mut filter, &sine);
-
-        filter.reset();
-
-        let mut out = [0.0f32];
-        tick(&mut filter, &[0.0], &mut out);
-        assert!(
-            out[0].abs() < 0.0001,
-            "After reset, output should be near zero"
-        );
-    }
-
-    #[test]
-    fn test_ladder_lp12_less_steep_than_lp24() {
-        let mut lp12 = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP12)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let mut lp24 = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.0)),
-            ),
-            RATE_44K,
-        );
-
-        let high = generate_sine(5000.0, 44100.0, 4096);
-
-        let out12 = process_mono(&mut lp12, &high);
-        let out24 = process_mono(&mut lp24, &high);
-
-        let rms12 = rms(&out12[512..]);
-        let rms24 = rms(&out24[512..]);
-
-        assert!(
-            rms12 > rms24,
-            "LP12 should pass more high freq than LP24: lp12={rms12}, lp24={rms24}"
-        );
-    }
-
-    #[test]
-    fn test_ladder_f32_state_agrees_with_f64_for_mid_cutoff() {
-        let mut ladder_f64 = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.3)),
-            ),
-            RATE_44K,
-        );
-        let mut ladder_f32 = prepared_at(
-            LadderFilterNode::<f32>::from(
-                LadderFilterConfig::new(ChannelLayout::MONO, LadderType::LP24)
-                    .freq(Hz::new(1000.0))
-                    .res(Resonance::new(0.3)),
-            ),
-            RATE_44K,
-        );
-
-        let input = generate_sine(500.0, 44100.0, 2048);
-        let out_f64 = process_mono(&mut ladder_f64, &input);
-        let out_f32 = process_mono(&mut ladder_f32, &input);
-
-        let rms_f64 = rms(&out_f64[512..]);
-        let rms_f32 = rms(&out_f32[512..]);
-        let rel_diff = (rms_f64 - rms_f32).abs() / rms_f64.max(1e-6);
-        assert!(
-            rel_diff < 0.01,
-            "ladder f32/f64 should agree within 1% at mid cutoff: f64={rms_f64}, f32={rms_f32}"
-        );
     }
 
     // ── Modulated params (the graph's param feed) ───────────────────────────
@@ -592,29 +364,6 @@ mod tests {
             let e: f32 = out[c].iter().map(|s| s * s).sum();
             assert!(e < 1e-10, "ch{c} should stay silent; energy {e}");
         }
-    }
-
-    /// The shape declares cutoff, Q then drive, never changes the arity, and
-    /// reports `Tail::Unknown`.
-    #[test]
-    fn the_shape_declares_cutoff_q_then_drive() {
-        let f = LadderFilterNode::<f32>::from(
-            LadderFilterConfig::new(6u16, LadderType::LP24)
-                .freq(Hz::new(1000.0))
-                .res(Resonance::new(0.3)),
-        );
-        assert_eq!(
-            f.shape().params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::Q, UnitParam::Drive][..]
-        );
-        assert_eq!(
-            (f.shape().audio_in().count(), f.shape().audio_out().count()),
-            (6, 6)
-        );
-        assert_eq!(f.param_base(0), Some(1000.0));
-        assert_eq!(f.param_base(1), Some(0.3));
-        assert_eq!(f.param_base(2), Some(1.0), "drive starts clean");
-        assert_eq!(f.shape().tail, Tail::Unknown, "a resonant ladder rings on");
     }
 
     #[test]

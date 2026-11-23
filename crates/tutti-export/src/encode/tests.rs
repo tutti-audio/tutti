@@ -21,7 +21,7 @@ impl Case {
     fn target(&self, path: &Path) -> FileTarget {
         let target = FileTarget::new(path, Format::Wav(self.pcm), self.channels);
         let target = match &self.topology {
-            Some(topology) => target.topology(topology.clone()),
+            Some(topology) => target.topology(*topology),
             None => target,
         };
         match self.resample {
@@ -123,9 +123,7 @@ fn the_topology_reaches_the_file() {
         (4, None, 0x33),
         (
             4,
-            Some(tutti_buffers::ChannelTopology::unassigned(
-                ChannelLayout::QUAD,
-            )),
+            Some(tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
             0,
         ),
         (6, None, 0x60F),

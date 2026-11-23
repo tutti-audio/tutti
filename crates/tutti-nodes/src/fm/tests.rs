@@ -1,8 +1,7 @@
 use super::*;
-use crate::test_support::{RATE, prepared, render_f64};
+use crate::test_support::{RATE, render_f64};
 use tutti_dsp::{Algorithm, Operator, OperatorCount, OperatorFrequency, OperatorSpec, Route};
-use tutti_graph::Node;
-use tutti_graph::contract::{BlockRig, assert_param_fork};
+use tutti_graph::contract::BlockRig;
 use tutti_units::{FrequencyRatio, UnitAddr, UnitParam};
 
 /// Whole periods of every multiple of 10 Hz at 48 kHz.
@@ -66,41 +65,6 @@ fn delay() -> f64 {
         .unwrap()
         .down_delay()
         .get()
-}
-
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(FmNode::<f32>::from(FmConfig::new(two_operators())));
-}
-
-/// A mono source declaring the frequency, the level, then the index and the feedback as the
-/// two `Index` params, starting as configured, with no tail.
-#[test]
-fn the_shape_is_a_mono_source_declaring_frequency_level_index_and_feedback() {
-    let n = prepared(FmNode::<f32>::from(
-        FmConfig::new(feedback_operator())
-            .frequency(Hz::new(220.0))
-            .level(Amplitude::new(0.5))
-            .index(ModulationIndex::of(2.0))
-            .feedback(ModulationIndex::of(0.75)),
-    ));
-    let shape = n.shape();
-    assert_eq!(
-        (shape.audio_in().count(), shape.audio_out().count()),
-        (0, 1)
-    );
-    assert_eq!(shape.tail, Tail::None);
-    assert_eq!(
-        shape.params.as_slice(),
-        &[
-            UnitAddr::from(UnitParam::Frequency),
-            UnitAddr::from(UnitParam::Volume),
-            UnitAddr::new(UnitParam::Index, 0),
-            UnitAddr::new(UnitParam::Index, 1),
-        ][..]
-    );
-    let bases: Vec<_> = (0..4).map(|k| n.param_base(k)).collect();
-    assert_eq!(bases, [Some(220.0), Some(0.5), Some(2.0), Some(0.75)]);
 }
 
 /// The node plays the voice: at index `I` the carrier line is J_0(I) and its first

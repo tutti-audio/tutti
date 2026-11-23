@@ -101,21 +101,23 @@ fn default_arrangement_for(layout: ChannelLayout) -> Option<SpeakerArrangement> 
 /// by loading one — and a rule no test can reach is a rule that quietly stops
 /// being true.
 ///
-/// Three ways to have nothing to say, all of them `None`:
+/// Four ways to have nothing to say, all of them `None`:
 ///
+/// - **No topology** — the arrangement is wider than a topology holds.
 /// - **Not fully named** — the arrangement uses a speaker this vocabulary does
 ///   not have, so the bus cannot be routed by speaker even though its width is
 ///   known.
 /// - **Width disagrees** with the count reported beside it. The count sizes the
 ///   buffers, so a topology describing a different number of channels describes
 ///   a different bus.
-/// - **Zero width.** A failed `getBusArrangement` yields an empty topology,
+/// - **Zero width.** An empty arrangement is an empty topology,
 ///   which is vacuously "fully named" and would otherwise be reported as a real
 ///   bus that happens to have no channels.
-pub(super) fn usable_topology(topology: ChannelTopology, width: usize) -> Option<ChannelTopology> {
-    let usable =
-        topology.is_fully_named() && topology.width().count() as usize == width && width > 0;
-    usable.then_some(topology)
+pub(super) fn usable_topology(
+    topology: Option<ChannelTopology>,
+    width: usize,
+) -> Option<ChannelTopology> {
+    topology.filter(|t| t.is_fully_named() && t.width().count() as usize == width && width > 0)
 }
 
 /// A bus width the plugin reported (already bounded by the ffi layer's
@@ -361,8 +363,8 @@ impl<T: Vst3Sample> Staged<T> {
             let out_layouts =
                 self.loaded
                     .read_back_arrangements(main, BusDirection::Output, outputs.len());
-            let widths = |ls: &[ChannelTopology]| -> Vec<usize> {
-                ls.iter().map(|t| t.width().count() as usize).collect()
+            let widths = |ls: &[(usize, Option<ChannelTopology>)]| -> Vec<usize> {
+                ls.iter().map(|&(width, _)| width).collect()
             };
             self.resolve_scratch_from_counts(&widths(&in_layouts), &widths(&out_layouts));
         }
@@ -564,7 +566,7 @@ mod default_arrangement_tests {
         for width in [0u16, 1, 2, 4, 6, 8] {
             let arr = default_arrangement_for(ChannelLayout::from(width)).expect("width is named");
             assert_eq!(
-                speakers::from_arrangement(arr).width().count(),
+                speakers::from_arrangement(arr).unwrap().width().count(),
                 width,
                 "the arrangement proposed for width {width} is not {width} channels"
             );
@@ -592,7 +594,8 @@ mod default_arrangement_tests {
     #[test]
     fn a_named_topology_matching_its_bus_width_is_usable() {
         let stereo = speakers::from_arrangement(SpeakerArr::kStereo);
-        assert_eq!(usable_topology(stereo.clone(), 2), Some(stereo));
+        assert!(stereo.is_some());
+        assert_eq!(usable_topology(stereo, 2), stereo);
     }
 
     /// A topology naming a speaker this vocabulary lacks is not usable.
@@ -604,7 +607,11 @@ mod default_arrangement_tests {
         // `kSpeakerLfe2` is a real VST3 speaker with no name here.
         let arr = SpeakerArr::kStereo | vst3::Steinberg::Vst::kSpeakerLfe2;
         let topology = speakers::from_arrangement(arr);
-        assert_eq!(topology.width().count(), 3, "the width is still known");
+        assert_eq!(
+            topology.unwrap().width().count(),
+            3,
+            "the width is still known"
+        );
         assert_eq!(usable_topology(topology, 3), None);
     }
 
@@ -629,8 +636,12 @@ mod default_arrangement_tests {
     #[test]
     fn an_empty_topology_is_not_a_usable_answer() {
         let empty = speakers::from_arrangement(SpeakerArr::kEmpty);
-        assert!(empty.is_fully_named(), "vacuously true, which is the trap");
-        assert_eq!(empty.width().count(), 0);
+        let topology = empty.unwrap();
+        assert!(
+            topology.is_fully_named(),
+            "vacuously true, which is the trap"
+        );
+        assert_eq!(topology.width().count(), 0);
         assert_eq!(usable_topology(empty, 0), None);
     }
 

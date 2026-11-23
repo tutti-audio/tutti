@@ -2,31 +2,13 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, Tilt};
+use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, TiltFilterControls};
 use tutti_units::{Db, Hz, SampleRate};
 
 use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
-use super::{MAX_EQ_GAIN, MIN_EQ_CENTER, eq_center, eq_gain, filter_bus};
+use super::filter_bus;
 use crate::kernel::KernelNode;
-
-/// The controls of a [`TiltFilterNode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TiltFilterControls {
-    /// The pivot, where the gain is 0 dB. Read within 20 Hz and 0.99 of the Nyquist.
-    pub frequency: Hz,
-    /// The tilt: the gain at Nyquist is half of it and the gain at DC minus half. Read
-    /// within 24 dB.
-    pub gain: Db,
-}
-
-impl TiltFilterControls {
-    /// 1 kHz and 0 dB.
-    pub const DEFAULT: Self = Self {
-        frequency: Hz::new(1_000.0),
-        gain: Db::UNITY,
-    };
-}
 
 /// What a [`TiltFilterNode`] is made from: its width and its controls' start.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,7 +28,7 @@ impl TiltFilterConfig {
     }
 }
 
-/// A tilt equalizer of any width, a [`Tilt`] run as one state-variable section
+/// A tilt equalizer of any width, a [`Tilt`](tutti_dsp::Tilt) run as one state-variable section
 /// ([`SosBank`](tutti_dsp::SosBank)) in `f64`: the low end down by half the gain and the high
 /// end up by half, 0 dB at the pivot.
 ///
@@ -54,8 +36,8 @@ impl TiltFilterConfig {
 /// closed form on a 16-frame grid and reached along a line in the section's coefficients
 /// over the next 16 frames with the state kept, so an automated control ramps.
 ///
-/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::decay_time_over`]), the
-/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::decay_time`]). No latency. A [`KernelNode`]. Made from a
+/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::decay_time_over`](tutti_dsp::Tilt::decay_time_over)), the
+/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::decay_time`](tutti_dsp::Tilt::decay_time)). No latency. A [`KernelNode`]. Made from a
 /// [`TiltFilterConfig`] (`TiltFilterNode::from`).
 ///
 /// # Panics
@@ -98,24 +80,19 @@ impl Sealed for TiltFilterControls {
     const DEFAULT: Self = Self::DEFAULT;
 
     fn held(&self, rate: SampleRate) -> Self {
-        Self {
-            frequency: eq_center(self.frequency, rate),
-            gain: eq_gain(self.gain),
-        }
+        self.held(rate)
     }
 
     fn design_into(&self, rate: SampleRate, into: &mut Sos) -> Result<(), SosError> {
-        Tilt::new(self.gain).design_into(self.frequency, rate, into)
+        self.design_into(rate, into)
     }
 
     fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
-        Tilt::new(self.gain).decay_time(self.frequency, rate, floor)
+        self.decay_time(rate, floor)
     }
 
-    /// [`Tilt::decay_time_over`] the pivots and gains the controls are read within.
     fn decay_ceiling(rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
-        let top = eq_center(rate.nyquist_scaled(0.99), rate);
-        Tilt::decay_time_over(MIN_EQ_CENTER, top, MAX_EQ_GAIN, rate, floor)
+        Self::decay_ceiling(rate, floor)
     }
 }
 
@@ -127,20 +104,16 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_ramps, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps};
     use tutti_buffers::MaxBlock;
-    use tutti_graph::Cost;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
+    use tutti_dsp::Tilt;
+
+    use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 
     fn config(frequency: Hz, gain: Db) -> TiltFilterConfig {
         TiltFilterConfig::new(1u16, frequency, gain)
-    }
-
-    fn node(config: TiltFilterConfig) -> TiltFilterNode<f32> {
-        prepared(TiltFilterNode::from(config))
     }
 
     fn gain_of(config: TiltFilterConfig, f: f64) -> f64 {
@@ -153,36 +126,6 @@ mod tests {
         let x = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
         let a2 = 10f64.powf(db / 20.0);
         ((a2 * x * x + 1.0) / (x * x + a2)).sqrt()
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TiltFilterNode::from(TiltFilterConfig::new(
-            2u16,
-            Hz::new(300.0),
-            Db::new(-6.0),
-        )));
-    }
-
-    /// The shape is the width in and out, `Moderate`, declares the pivot and the gain and a
-    /// finite tail once prepared; the pivot starts at the configured one.
-    #[test]
-    fn the_shape_declares_its_controls_and_a_finite_tail() {
-        let n = node(TiltFilterConfig::new(3u16, Hz::new(120.0), Db::new(9.0)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::GainDb][..]
-        );
-        assert!(matches!(shape.tail, Tail::Finite(_)));
-        assert_eq!(n.param_base(0), Some(120.0));
-        assert_eq!(n.param_base(1), Some(9.0));
     }
 
     /// A settled rendered sine has the bilinear image of the analog tilt as its gain
@@ -235,17 +178,6 @@ mod tests {
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
         let want = analog(4_000.0, 12.0, bin(256));
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
-    }
-
-    /// A pivot and a gain past their ranges read as the end of them, bit for bit.
-    #[test]
-    fn controls_out_of_range_are_read_as_the_end_of_it() {
-        let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, db: f64| render(&mut node(config(Hz::new(hz), Db::new(db))), &input);
-        assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
-        assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
-        assert_eq!(at(500.0, 90.0), at(500.0, 24.0));
-        assert_ne!(at(500.0, 6.0), at(500.0, -6.0));
     }
 
     /// Across pivots and gains, from a pole near 1 (a low pivot) to one near -1 (a high

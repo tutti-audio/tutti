@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
 use tutti_dsp::Wavetable;
@@ -673,8 +673,7 @@ fn granular() {
         GranularNode::<f32>::try_from(
             GranularConfig::new(ChannelLayout::STEREO, Arc::new(wave))
                 .density(Hz::new(80.0))
-                .position_jitter(Normalized::of(0.2))
-                .timing_jitter(Normalized::of(0.3))
+                .jitter([Normalized::of(0.2), Normalized::of(0.3)])
                 .seed(5),
         )
         .unwrap()
@@ -721,7 +720,7 @@ fn wavetable() {
     let table = Wavetable::new(&[Mono::new(&one), Mono::new(&two)]).expect("two frames");
     IsolateRow::new("WavetableNode (two frames, 3 channels)", move || {
         WavetableNode::<f32>::from(
-            WavetableConfig::new(3u16, std::sync::Arc::clone(&table))
+            WavetableConfig::new(ChannelLayout::from(3u16), std::sync::Arc::clone(&table))
                 .frequency(Hz::new(300.0))
                 .level(Amplitude::new(0.8)),
         )
@@ -743,7 +742,7 @@ fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .rate(Hz::new(3.0))
+                .rate(Some(Hz::new(3.0)))
                 .depth(Bipolar::clamped(0.8)),
         )
     })
@@ -946,7 +945,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
 
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 #[test]

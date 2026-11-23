@@ -141,7 +141,7 @@ impl DelayLayout {
     /// The channels.
     #[must_use]
     pub fn width(&self) -> usize {
-        usize::from(self.input.layout().count())
+        usize::from(self.input.width().count())
     }
 
     /// The longest delay a line holds.

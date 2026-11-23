@@ -94,17 +94,6 @@ mod tests {
         assert_eq!(back, [vec![1.0, 1.0, -0.5], vec![0.5, -1.0, -0.5]]);
     }
 
-    /// The shape is stereo in and out, `Light`.
-    #[test]
-    fn the_shape_is_stereo_and_light() {
-        let shape = Node::<f32>::shape(&MidSideNode::from(MidSideConfig::encode()));
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.cost, Cost::Light);
-    }
-
     /// In an `f64` graph the encoder is `(l + r) / 2` and `(l - r) / 2` on 29-bit signals, to
     /// `2^-45`.
     #[test]

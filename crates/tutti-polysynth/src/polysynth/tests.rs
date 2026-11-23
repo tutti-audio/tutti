@@ -2087,7 +2087,7 @@ fn a_steal_at_a_different_velocity_does_not_click() {
     let mut synth = synth(
         SynthConfig::new()
             .polyphony(NonZeroUsize::MIN)
-            .steal(crate::Steal::By(crate::Order::Oldest))
+            .steal(tutti_voicing::Steal::By(tutti_voicing::Order::Oldest))
             .oscillator(OscillatorType::Sine)
             .envelope(Adsr::new(
                 Seconds::new(0.001),
