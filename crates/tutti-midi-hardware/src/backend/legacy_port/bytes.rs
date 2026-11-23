@@ -73,11 +73,10 @@ impl ByteOut {
     pub(in crate::backend) fn new() -> (Self, Counter<Losses>) {
         // One lane, one packet at a time: each message is sent before the next
         // packet is pushed.
-        let room = SysexAssembler::<()>::room_for(MAX_MESSAGE, 1, 1);
         let (unrepresentable, count) = counter();
         let out = Self {
             midi1_translator: Midi1Translator::new(),
-            sysex: SysexAssembler::new(vec![0; room].into_boxed_slice(), MAX_MESSAGE, 1),
+            sysex: SysexAssembler::boxed(MAX_MESSAGE, 1, 1),
             unrepresentable,
         };
         (out, count)

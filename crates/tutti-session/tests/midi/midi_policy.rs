@@ -107,8 +107,7 @@ fn streams(sent: &[Ump]) -> Vec<Stream> {
 
 /// The MIDI-CI messages among `sent`.
 fn ci(sent: &[Ump]) -> Vec<CiMessage> {
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let mut found = Vec::new();
     for &ump in sent {
         assembler.begin_block();
