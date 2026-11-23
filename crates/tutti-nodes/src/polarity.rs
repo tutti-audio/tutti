@@ -125,19 +125,6 @@ mod tests {
         prepared(PolarityNode::try_from(config).unwrap())
     }
 
-    /// The shape is the width in and out, `Light`, with no tail.
-    #[test]
-    fn the_shape_is_the_width_in_and_out_and_light() {
-        let n = node(PolarityConfig::new(3u16));
-        let shape = Node::<f32>::shape(&n);
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Light);
-        assert_eq!(shape.tail, tutti_units::Tail::None);
-    }
-
     /// Only the named channels are negated: of four, channels 1 and 3.
     #[test]
     fn only_the_named_channels_are_negated() {

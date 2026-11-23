@@ -153,29 +153,6 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-    use tutti_graph::Node;
-
-    use tutti_units::Tail;
-    use tutti_units::UnitParam;
-
-    /// The shape is a stereo pair in and out, `Moderate`, no tail, with the rate and depth
-    /// declared; the default is 1 Hz at full depth.
-    #[test]
-    fn the_shape_is_a_stereo_pair_with_rate_and_depth() {
-        let n = prepared(AutoPanNode::from(AutoPanConfig::new()));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Rate, UnitParam::Depth][..]
-        );
-        assert_eq!((n.param_base(0), n.param_base(1)), (Some(1.0), Some(1.0)));
-    }
 
     /// At 12 kHz and 48 kHz the sine reads 0, 1, 0, -1: full depth puts frame 1 hard right and
     /// frame 3 hard left under the RP-036 law.

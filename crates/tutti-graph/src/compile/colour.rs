@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 
-use super::Val;
+use super::emit::Val;
 use super::ids::{Id, OpId, Table, TableSlice};
 
 /// Strict reachability over the op DAG.

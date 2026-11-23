@@ -2,7 +2,7 @@
 //! follower active, at the widths and key paths it takes.
 
 use crate::harness::{Gate, feeds};
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, GateConfig, GateControls, GateNode, KeyFilter, KeySource, LimiterConfig,
@@ -37,20 +37,24 @@ fn compressors() {
                 .controls(controls),
         )
     };
-    keyed(0.7).run("compressor mono", node(BusTopology::MONO, mono), |_, _| {});
+    keyed(0.7).run(
+        "compressor mono",
+        node(ChannelTopology::MONO, mono),
+        |_, _| {},
+    );
     let stereo = CompressorControls {
         knee: Db::new(6.0),
         ..compressor(-18.0, 3.0, 0.003, 0.080)
     };
     keyed(0.8).run(
         "compressor stereo",
-        node(BusTopology::STEREO, stereo),
+        node(ChannelTopology::STEREO, stereo),
         |_, _| {},
     );
     // The key filter's stage: a high-pass on a mono compressor, a band-pass on a stereo one.
     for (topology, filter, amplitude) in [
-        (BusTopology::MONO, KeyFilter::HighPass, 0.7),
-        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
+        (ChannelTopology::MONO, KeyFilter::HighPass, 0.7),
+        (ChannelTopology::STEREO, KeyFilter::BandPass, 0.6),
     ] {
         let node = CompressorNode::<f32>::from(
             CompressorConfig::new(topology)
@@ -70,12 +74,13 @@ fn limiters() {
         ceiling: Db::new(-0.3),
         ..LimiterControls::DEFAULT
     };
-    let wide = BusTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide");
+    let wide =
+        ChannelTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide");
     let configs = [
-        ("stereo", LimiterConfig::new(BusTopology::STEREO)),
+        ("stereo", LimiterConfig::new(ChannelTopology::STEREO)),
         (
             "true peak",
-            LimiterConfig::new(BusTopology::STEREO).detection(PeakDetection::TruePeak),
+            LimiterConfig::new(ChannelTopology::STEREO).detection(PeakDetection::TruePeak),
         ),
         ("6ch", LimiterConfig::new(wide)),
     ];
@@ -88,8 +93,8 @@ fn limiters() {
 }
 
 fn brickwall_limiters() {
-    let wide = BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap();
-    for (name, topology) in [("6ch", wide), ("stereo", BusTopology::STEREO)] {
+    let wide = ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap();
+    for (name, topology) in [("6ch", wide), ("stereo", ChannelTopology::STEREO)] {
         let node =
             BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(topology, Db::new(-0.3)));
         keyed(1.5)
@@ -122,22 +127,22 @@ fn gates() {
     gate(
         0.5,
         "gate mono",
-        node(BusTopology::MONO, gate_controls(-40.0, -60.0)),
+        node(ChannelTopology::MONO, gate_controls(-40.0, -60.0)),
     );
     gate(
         0.6,
         "gate stereo",
-        node(BusTopology::STEREO, gate_controls(-40.0, -80.0)),
+        node(ChannelTopology::STEREO, gate_controls(-40.0, -80.0)),
     );
     // A downward expander (a finite ratio) is a gate with a level-dependent closed gain.
     let expander = GateControls {
         ratio: CompressionRatio::new(3.0),
         ..gate_controls(-10.0, -60.0)
     };
-    gate(0.1, "expander", node(BusTopology::STEREO, expander));
+    gate(0.1, "expander", node(ChannelTopology::STEREO, expander));
     for (topology, filter, amplitude) in [
-        (BusTopology::MONO, KeyFilter::HighPass, 0.5),
-        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
+        (ChannelTopology::MONO, KeyFilter::HighPass, 0.5),
+        (ChannelTopology::STEREO, KeyFilter::BandPass, 0.6),
     ] {
         let node = GateNode::<f32>::from(
             GateConfig::new(topology)

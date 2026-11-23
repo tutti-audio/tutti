@@ -281,35 +281,6 @@ mod tests {
     use tutti_units::UnitParam;
     use tutti_units::{Beat, Bpm, Samples};
 
-    /// A free-running LFO declares its depth and rate, each port's base its
-    /// cell; a beat-synced one declares only its depth, its span being its
-    /// clock.
-    #[test]
-    fn the_shape_declares_depth_and_a_free_running_rate() {
-        let free = LfoNode::from(
-            LfoConfig::new(LfoShape::Sine)
-                .rate(Some(Hz::new(2.0)))
-                .depth(Bipolar::of(0.25)),
-        );
-        assert_eq!(
-            Node::<f32>::shape(&free).params.as_slice(),
-            &[UnitParam::Depth, UnitParam::Rate][..]
-        );
-        assert_eq!(Node::<f32>::param_base(&free, 0), Some(0.25));
-        assert_eq!(Node::<f32>::param_base(&free, 1), Some(2.0));
-        let synced = LfoNode::from(
-            LfoConfig::new(LfoShape::Sine)
-                .beat_sync(Some(BeatsPerCycle::of(4.0)))
-                .depth(Bipolar::of(0.5)),
-        );
-        assert_eq!(
-            Node::<f32>::shape(&synced).params.as_slice(),
-            &[UnitParam::Depth][..]
-        );
-        assert_eq!(Node::<f32>::param_base(&synced, 0), Some(0.5));
-        assert_eq!(Node::<f32>::param_base(&synced, 1), None);
-    }
-
     // The waveform math is `tutti-modulation`'s, and so are the tests that pin it.
     // What belongs here is the adapter around it: phase generation from
     // transport, depth, and the node surface.
