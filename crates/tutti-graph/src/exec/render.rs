@@ -70,7 +70,7 @@ pub(super) fn end_fades<F: Float>(
             next.out = Some(std::mem::replace(&mut u.node, incoming));
             u.keys.promote();
             u.fade = Some(next);
-            u.quiet = 0;
+            u.quiet = Samples::ZERO;
             u.last_quiet = false;
             u.last_idle = false;
             u.reported = None;

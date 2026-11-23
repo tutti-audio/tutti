@@ -109,3 +109,132 @@ pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: Samples, len: Sampl
     let (out, inn) = fade_gains::<F>(law, j, len);
     start * out + goal * inn
 }
+
+/// The progress of one declick fade of [`FadeLaw::EqualAmplitude`]: how many
+/// of its `len` frames have run. Every fade that declicks (an edge's weight,
+/// a unit's mode weights, a param port's source change) counts its frames
+/// here and reads its gains from here; what it fades between stays its own.
+///
+/// A fade is *running* from [`restart`](Self::restart) or
+/// [`started`](Self::started) until the block that runs its last frame (or
+/// [`cut`](Self::cut)). A running fade's progress may exceed its length (one
+/// carried to a shorter length by [`relength`](Self::relength)): its next
+/// block is its last, at the goal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Declick {
+    len: Samples,
+    /// The frames run, while the fade runs; `None` when it does not.
+    at: Option<Samples>,
+}
+
+impl Declick {
+    /// The fade law every declick runs.
+    const LAW: FadeLaw = FadeLaw::EqualAmplitude;
+
+    /// A fade of `len` frames that is not running.
+    pub(crate) const fn idle(len: Samples) -> Self {
+        Self { len, at: None }
+    }
+
+    /// A fade of `len` frames about to run its first frame.
+    pub(crate) fn started(len: Samples) -> Self {
+        let mut d = Self::idle(len);
+        d.restart();
+        d
+    }
+
+    /// Run again from the first frame. A fade of no frames has none to run,
+    /// and stays idle.
+    pub(crate) fn restart(&mut self) {
+        self.at = (self.len > Samples::ZERO).then_some(Samples::ZERO);
+    }
+
+    /// End the fade where it is: it no longer runs.
+    pub(crate) fn cut(&mut self) {
+        self.at = None;
+    }
+
+    /// The same fade over `len` frames, keeping its progress.
+    pub(crate) fn relength(self, len: Samples) -> Self {
+        Self { len, ..self }
+    }
+
+    /// Whether the fade has a block left to run.
+    pub(crate) fn running(self) -> bool {
+        self.at.is_some()
+    }
+
+    /// The fade's length.
+    pub(crate) fn len(self) -> Samples {
+        self.len
+    }
+
+    /// The frames run so far: the fade's frame the next block starts at. The
+    /// whole length when the fade does not run.
+    pub(crate) fn done(self) -> Samples {
+        self.at.unwrap_or(self.len)
+    }
+
+    /// The frames left to run.
+    pub(crate) fn remaining(self) -> Samples {
+        self.len.remaining_after(self.done())
+    }
+
+    /// `frames` more have run; the fade stops running once it has run its
+    /// length.
+    pub(crate) fn advance(&mut self, frames: Samples) {
+        if let Some(at) = &mut self.at {
+            *at += frames;
+            if *at >= self.len {
+                self.at = None;
+            }
+        }
+    }
+
+    /// The last frame run: the one before [`done`](Self::done).
+    pub(crate) fn last_frame(self) -> Samples {
+        self.done().remaining_after(Samples::new(1))
+    }
+
+    /// `(out, in)`: the gains of fade frame `j`.
+    #[inline]
+    pub(crate) fn gains<F: Float>(self, j: Samples) -> (F, F) {
+        fade_gains(Self::LAW, j, self.len)
+    }
+
+    /// `start` moved to `goal` at fade frame `j`, and exactly `goal` from the
+    /// fade's length on.
+    #[inline]
+    pub(crate) fn between<F: Float>(self, start: F, goal: F, j: Samples) -> F {
+        fade_in(Self::LAW, start, goal, j, self.len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A declick of no frames never runs: starting or restarting it leaves it
+    /// idle, so no block reads a gain over a zero length.
+    #[test]
+    fn a_zero_length_declick_never_runs() {
+        assert!(!Declick::started(Samples::ZERO).running());
+        let mut d = Declick::idle(Samples::ZERO);
+        d.restart();
+        assert!(!d.running());
+        assert!(Declick::started(Samples::new(1)).running());
+    }
+
+    /// A fade carried to a shorter length keeps its progress and runs one
+    /// last block, then stops.
+    #[test]
+    fn a_relengthed_fade_past_its_length_runs_one_more_block() {
+        let mut d = Declick::started(Samples::new(240));
+        d.advance(Samples::new(200));
+        let mut d = d.relength(Samples::new(120));
+        assert_eq!((d.running(), d.done()), (true, Samples::new(200)));
+        d.advance(Samples::new(64));
+        assert!(!d.running());
+        assert_eq!(d.done(), Samples::new(120));
+    }
+}
