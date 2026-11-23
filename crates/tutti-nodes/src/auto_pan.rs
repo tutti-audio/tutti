@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{AutoPan, AutoPanControls, BlockMismatch, COEFF_INTERVAL, OscillatorWave, PanLaw};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Bipolar, Hz, SampleRate};
+use tutti_units::{Bipolar, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -142,6 +142,10 @@ impl<F: Float> Kernel for AutoPanKernel<F> {
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
         self.pan.process(block)
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

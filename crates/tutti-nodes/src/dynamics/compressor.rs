@@ -8,7 +8,7 @@ use tutti_dsp::{
     KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -280,6 +280,10 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
             Some(bank) => bank.process(signals, key, block),
             None => Ok(()),
         }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

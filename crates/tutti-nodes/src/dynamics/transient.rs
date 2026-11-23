@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, Lerp, TransientBank, TransientControls};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -173,6 +173,10 @@ impl<F: Float + Lerp> Kernel for TransientShaperKernel<F> {
             Some(bank) => bank.process(block),
             None => Ok(()),
         }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

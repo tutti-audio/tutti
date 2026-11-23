@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Hz, SampleRate};
+use tutti_units::{Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
@@ -115,6 +115,10 @@ impl<F: Float> Kernel for RingModKernel<F> {
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
         self.modulator.process(block)
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

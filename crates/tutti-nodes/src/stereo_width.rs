@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, Lerp, WidthBank, WidthControls};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{SampleRate, StereoWidth};
+use tutti_units::{SampleRate, StereoWidth, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -136,6 +136,10 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
         // A design after a render is a move, which ramps.
         self.applied = true;
         rendered
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

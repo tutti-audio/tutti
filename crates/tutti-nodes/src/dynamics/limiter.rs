@@ -11,7 +11,7 @@ use tutti_dsp::{
     PeakDetection,
 };
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Db, SampleRate, Samples, Seconds};
+use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -246,6 +246,11 @@ impl<F: Float> Kernel for LimiterKernel<F> {
         self.bank
             .as_ref()
             .map_or(Samples::ZERO, LimiterBank::<F>::latency)
+    }
+
+    /// No ring-out past the latency.
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

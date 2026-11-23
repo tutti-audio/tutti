@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BitCrusher, BitCrusherControls, BlockMismatch, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{BitDepth, HoldFactor, SampleRate};
+use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
@@ -149,6 +149,10 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
     ) -> Result<(), BlockMismatch> {
         self.crusher.process(block)
     }
+
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
 }
 
 #[cfg(test)]
@@ -157,7 +161,6 @@ mod tests {
     use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::Tail;
     use tutti_units::{Latency, UnitParam};
 
     // The node tests run `F = f32`, the session's audio format.

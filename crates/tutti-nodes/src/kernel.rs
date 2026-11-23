@@ -52,7 +52,12 @@ impl<'a, F: Float> ControlSignals<'a, F> {
 /// Past a bus's width ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): `what` is one bus.
 #[track_caller]
 pub(crate) fn unassigned_bus(width: ChannelLayout, what: &str) -> BusTopology {
-    BusTopology::unassigned(width).unwrap_or_else(|| panic!("{what} is at most 16 channels wide"))
+    BusTopology::unassigned(width).unwrap_or_else(|| {
+        panic!(
+            "{what} is at most {} channels wide",
+            tutti_buffers::MAX_CHANNELS
+        )
+    })
 }
 
 /// An effect's algorithm with its state, as [`KernelNode`] runs it.
@@ -144,11 +149,8 @@ pub trait Kernel: Clone + Send + 'static {
 
     /// How long it rings after its input stops, once prepared: the most it can, over every
     /// control. A finite or unbounded tail is a ceiling the node enforces (see
-    /// [`KernelNode`]); [`Tail::Unknown`] and [`Tail::None`] are only declared. The default is
-    /// [`Tail::None`], for a kernel with no ring-out.
-    fn tail(&self) -> Tail {
-        Tail::None
-    }
+    /// [`KernelNode`]); [`Tail::Unknown`] and [`Tail::None`] are only declared.
+    fn tail(&self) -> Tail;
 
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves

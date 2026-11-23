@@ -15,7 +15,7 @@ use tutti_dsp::{
     HarmonicNormalization, Rotation, SpeakerGeometryError, SpeakerLayout,
 };
 use tutti_graph::{Buses, Cost, Shape};
-use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, SampleRate};
+use tutti_units::{ArcDegrees, Azimuth, Direction, Elevation, SampleRate, Tail};
 
 use super::vbap::speaker_of_channel;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -161,6 +161,10 @@ impl<F: Float> Kernel for AmbisonicEncoderKernel<F> {
         self.encoder.process(input, output);
         Ok(())
     }
+
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
 }
 
 /// What an [`AmbisonicRotatorNode`] is made from: the ambisonic bus it turns, where the
@@ -276,6 +280,10 @@ impl<F: Float> Kernel for AmbisonicRotatorKernel<F> {
         let (input, output) = block.split();
         self.rotator.process(input, output);
         Ok(())
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 
@@ -462,6 +470,10 @@ impl<F: Float> Kernel for AmbisonicDecoderKernel<F> {
             }
         }
         Ok(())
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

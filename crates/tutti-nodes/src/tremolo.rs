@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Bipolar, Hz, SampleRate};
+use tutti_units::{Bipolar, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
@@ -136,6 +136,10 @@ impl<F: Float> Kernel for TremoloKernel<F> {
         _: ControlSignals<'_, F>,
     ) -> Result<(), BlockMismatch> {
         self.tremolo.process(block)
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

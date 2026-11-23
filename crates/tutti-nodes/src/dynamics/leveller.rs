@@ -8,7 +8,7 @@ use tutti_dsp::{
     LevellerControls, SimdLanes, SosCoefficients, channel_weights,
 };
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Db, SampleRate, Seconds};
+use tutti_units::{Db, SampleRate, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -196,5 +196,9 @@ impl<F: Float + SimdLanes> Kernel for LevellerKernel<F> {
             Some(bank) => bank.process(block),
             None => Ok(()),
         }
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }

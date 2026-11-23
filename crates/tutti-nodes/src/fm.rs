@@ -8,7 +8,7 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, FmControls, FmPatch, FmVoice, Oversampling, OversamplingFactor,
 };
 use tutti_graph::Shape;
-use tutti_units::{Amplitude, Hz, ModulationIndex, SampleRate};
+use tutti_units::{Amplitude, Hz, ModulationIndex, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelConfig, KernelNode};
 
@@ -169,6 +169,10 @@ impl<F: Float> Kernel for FmKernel<F> {
             None => out.samples_mut().fill(F::ZERO),
         }
         Ok(())
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 

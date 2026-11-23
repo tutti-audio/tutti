@@ -11,7 +11,7 @@ use tutti_dsp::{
     BlockMismatch, BrickwallBank, BrickwallControls, BrickwallSignals, COEFF_INTERVAL,
 };
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Db, SampleRate};
+use tutti_units::{Db, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -149,6 +149,10 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
             ceiling: signals.get(BrickwallSet::CEILING_SIGNAL),
         };
         self.bank.process(signals, block)
+    }
+
+    fn tail(&self) -> Tail {
+        Tail::None
     }
 }
 
