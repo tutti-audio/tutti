@@ -519,6 +519,7 @@ pub(crate) struct Readings {
     pub(crate) main_output_fade_ended: Gauge<CommitSeq>,
 }
 
+/// The executor's ends of [`Readings`]: one writer per reading.
 pub(crate) struct ReadingWriters {
     pub(super) play: GaugeWriter<Played>,
     pub(super) unreported: CounterWriter<u64>,
@@ -527,6 +528,7 @@ pub(crate) struct ReadingWriters {
     pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
 }
 
+/// Builds the readings: the executor's writers and the editor's readers.
 fn readings() -> (ReadingWriters, Readings) {
     let (play_tx, play_rx) = gauge(Played(PlayReading::default()));
     let (unreported_tx, unreported_rx) = counter::<u64>();

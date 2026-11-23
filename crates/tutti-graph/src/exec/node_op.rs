@@ -295,27 +295,38 @@ pub(super) fn fading_node_op<
 pub(crate) struct Flags(u8);
 
 impl Flags {
+    const SILENT: u8 = 1;
+    const CONSTANT: u8 = 2;
+
+    /// Nothing is known about the block.
     pub(crate) const NONE: Self = Self(0);
     /// Exact silence, which is constant.
-    pub(crate) const SILENCE: Self = Self(3);
+    pub(crate) const SILENCE: Self = Self(Self::SILENT | Self::CONSTANT);
 
     #[inline]
     pub(crate) const fn new(silent: bool, constant: bool) -> Self {
-        Self(silent as u8 | (constant as u8) << 1)
+        Self((silent as u8 * Self::SILENT) | (constant as u8 * Self::CONSTANT))
     }
+
+    /// Every sample of the block is exact `0.0`.
     #[inline]
     pub(crate) const fn is_silent(self) -> bool {
-        self.0 & 1 != 0
+        self.0 & Self::SILENT != 0
     }
+
+    /// The block holds one value throughout.
     #[inline]
     pub(crate) const fn is_constant(self) -> bool {
-        self.0 & 2 != 0
+        self.0 & Self::CONSTANT != 0
     }
+
     /// The byte a shared atomic holds.
     #[inline]
     pub(crate) const fn to_byte(self) -> u8 {
         self.0
     }
+
+    /// The flags a shared atomic's byte holds (`to_byte`'s inverse).
     #[inline]
     pub(crate) const fn from_byte(byte: u8) -> Self {
         Self(byte)
