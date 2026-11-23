@@ -42,7 +42,8 @@ fn frames(time: DecayTime) -> usize {
 }
 
 /// A cutoff past the range is read as its end: 1 Hz as [`MIN_CUT_CUTOFF`], one past the
-/// Nyquist as 0.99 of it, and one inside the range as itself.
+/// Nyquist as 0.99 of it, and one inside the range as itself; and a design at an out-of-range
+/// cutoff is the design at the end of the range, section for section.
 #[test]
 fn a_cutoff_out_of_range_is_held_at_the_end_of_it() {
     let held = |hz: f64| {
@@ -55,12 +56,7 @@ fn a_cutoff_out_of_range_is_held_at_the_end_of_it() {
     assert_eq!(held(1.0), MIN_CUT_CUTOFF.get());
     assert_eq!(held(90_000.0), RATE.nyquist_scaled(0.99).get());
     assert_eq!(held(1_000.0), 1_000.0);
-}
 
-/// A design at an out-of-range cutoff is the design at the end of the range, section for
-/// section.
-#[test]
-fn a_design_at_an_out_of_range_cutoff_is_the_design_at_the_end() {
     let design = CutDesign::new(
         CutResponse::HighPass,
         CutAlignment::Butterworth(ButterworthOrder::of(4)),
