@@ -70,5 +70,25 @@ pub(crate) fn pan_gains_in<F: Float>(p: F, law: PanLaw) -> (F, F) {
     }
 }
 
+/// The `(left, right)` gains of the balance `b`, as data of the float `F`:
+/// [`Balance::gains`](tutti_units::Balance::gains) evaluated at the width the signal runs in,
+/// `left = min(1, 1 - b)` and `right = min(1, 1 + b)`. A balance outside `-1..=1` reads as the
+/// nearer end, and a NaN as unity on both sides. Comparisons, not `clamp` and `min`, so the
+/// selects vectorise where the NaN-propagating forms do not.
+#[inline]
+#[must_use]
+pub fn balance_gains_in<F: Float>(b: F) -> (F, F) {
+    let one = F::ONE;
+    let b = if b < -one {
+        -one
+    } else if b > one {
+        one
+    } else {
+        b
+    };
+    let at_most_one = |x: F| if x < one { x } else { one };
+    (at_most_one(one - b), at_most_one(one + b))
+}
+
 #[cfg(test)]
 mod tests;
