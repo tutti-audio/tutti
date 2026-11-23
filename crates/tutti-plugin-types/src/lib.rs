@@ -355,7 +355,9 @@ pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutErro
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
 pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};
-pub use control_role::{Axis, ControlRole, MidiAssignment, MidiMapApplied, MidiSource};
+pub use control_role::{
+    Axis, ControlRole, MidiAssignment, MidiMapApplied, MidiSource, effective_midi_map,
+};
 pub use locate::{Helper, Locator};
 pub use note_expression::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,

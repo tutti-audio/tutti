@@ -90,3 +90,22 @@ pub struct MidiAssignment {
     /// The parameter it drives.
     pub param: ParamId,
 }
+
+/// The table a plugin's controllers follow once the app's entries are laid over
+/// `declared`, the plugin's own: the declared entries no app entry shares a
+/// channel and source with, in their order, then the app's entries in theirs.
+///
+/// An app entry wins per `(channel, source)`, where `None` (any channel) and a
+/// channel are different keys. A message on a channel that matches an entry
+/// naming that channel and an any-channel entry drives the one naming the
+/// channel.
+pub fn effective_midi_map<'a>(
+    declared: &'a [MidiAssignment],
+    app: &'a [MidiAssignment],
+) -> impl Iterator<Item = MidiAssignment> + 'a {
+    let kept = declared.iter().copied().filter(|d| {
+        !app.iter()
+            .any(|a| a.channel == d.channel && a.source == d.source)
+    });
+    kept.chain(app.iter().copied())
+}
