@@ -33,8 +33,8 @@ use crate::LoadError;
 use crate::Midi;
 use crate::unblocked::Unblocked;
 
-/// A MIDI file to read and convert to clip values, built by
-/// [`Midi::load_midi`]. It is `Send`, and it is a [`Future`] through
+/// A MIDI file, an SMF or a MIDI 2.0 Clip File, to read and convert to clip
+/// values, built by [`Midi::load_midi`]. It is `Send`, and it is a [`Future`] through
 /// [`IntoFuture`]: awaiting it reads the file and converts each track as a task
 /// on the session's executor, and resolves to a [`LoadedMidi`]. There is no
 /// blocking form.
@@ -253,7 +253,7 @@ impl LoadedMidi {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// A [`LoadMidi`] of the MIDI file `asset` (a path, or bytes); nothing is
+    /// A [`LoadMidi`] of the Standard MIDI File or Clip File `asset` (a path, or bytes); nothing is
     /// read until the app awaits it. A file that cannot be read fails with its
     /// [`tutti_midi_file::ReadError`]. The value holds the session's weak executor and nothing
     /// else of the session.
