@@ -22,6 +22,7 @@
 use std::collections::BTreeMap;
 
 use super::Val;
+use super::ids::{Id, OpId, Table};
 
 /// Strict reachability over the op DAG.
 pub(crate) struct Reach {
@@ -31,13 +32,13 @@ pub(crate) struct Reach {
 
 impl Reach {
     /// `succ[i]` are op `i`'s successors; every edge must point forward.
-    pub(crate) fn new(succ: &[Vec<u32>]) -> Self {
+    pub(crate) fn new(succ: &Table<OpId, Vec<OpId>>) -> Self {
         let n = succ.len();
         let words = n.div_ceil(64);
         let mut bits = vec![0u64; n * words];
-        for a in (0..n).rev() {
-            for &b in &succ[a] {
-                let b = b as usize;
+        for a in succ.ids().rev() {
+            let a = a.index();
+            for b in succ[OpId::from_index(a)].iter().map(|b| b.index()) {
                 debug_assert!(b > a, "op DAG edges point forward");
                 bits[a * words + b / 64] |= 1 << (b % 64);
                 for w in 0..words {
@@ -50,69 +51,73 @@ impl Reach {
     }
 
     /// Whether `a` happens-before `b` (strictly: `a != b` and a path exists).
-    pub(crate) fn before(&self, a: u32, b: u32) -> bool {
-        let (a, b) = (a as usize, b as usize);
+    pub(crate) fn before(&self, a: OpId, b: OpId) -> bool {
+        let (a, b) = (a.index(), b.index());
         (self.bits[a * self.words + b / 64] >> (b % 64)) & 1 == 1
     }
 }
 
 /// A colouring: slot per value, and how many slots.
-pub(crate) struct Colouring {
-    pub(crate) slot: Vec<u32>,
-    pub(crate) count: u32,
+pub(crate) struct Colouring<V> {
+    pub(crate) slot: Table<V, usize>,
+    pub(crate) count: usize,
 }
 
 /// Whether every op touching `u` happens-before `w`.
-fn finished_before(u: &Val, w: u32, reach: &Reach) -> bool {
+fn finished_before(u: &Val, w: OpId, reach: &Reach) -> bool {
     reach.before(u.writer, w) && u.readers.iter().all(|&r| reach.before(r, w))
 }
 
 /// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
 /// `u`, taken when legal.
-pub(crate) fn colour(vals: &[Val], reach: &Reach, in_place: &BTreeMap<u32, u32>) -> Colouring {
-    let mut slot = vec![u32::MAX; vals.len()];
+pub(crate) fn colour<V: Id>(
+    vals: &Table<V, Val>,
+    reach: &Reach,
+    in_place: &BTreeMap<V, V>,
+) -> Colouring<V> {
+    let mut slot: Table<V, usize> = Table::filled(vals.len(), usize::MAX);
     // Last occupant of each slot. Values are visited in writer order, and a
     // value can only follow an occupant whose every op happens-before its
     // writer — so the occupants of one slot form a chain, and checking the
     // last one checks them all.
-    let mut last: Vec<u32> = Vec::new();
+    let mut last: Vec<V> = Vec::new();
 
-    for (v, val) in vals.iter().enumerate() {
+    for (v, val) in vals.iter_enumerated() {
         debug_assert!(
-            v == 0 || vals[v - 1].writer <= val.writer,
+            v.index() == 0 || vals[V::from_index(v.index() - 1)].writer <= val.writer,
             "values are created in writer order"
         );
         let w = val.writer;
 
-        if let Some(&u) = in_place.get(&(v as u32)) {
-            let src = &vals[u as usize];
-            let s = slot[u as usize];
-            let legal = last[s as usize] == u
+        if let Some(&u) = in_place.get(&v) {
+            let src = &vals[u];
+            let s = slot[u];
+            let legal = last[s] == u
                 && src.readers.contains(&w)
                 && src.readers.iter().all(|&r| r == w || reach.before(r, w));
             if legal {
                 slot[v] = s;
-                last[s as usize] = v as u32;
+                last[s] = v;
                 continue;
             }
         }
 
         let reuse = last
             .iter()
-            .position(|&occ| finished_before(&vals[occ as usize], w, reach));
+            .position(|&occ| finished_before(&vals[occ], w, reach));
         let s = match reuse {
             Some(s) => s,
             None => {
-                last.push(0);
+                last.push(v);
                 last.len() - 1
             }
         };
-        slot[v] = s as u32;
-        last[s] = v as u32;
+        slot[v] = s;
+        last[s] = v;
     }
 
     Colouring {
-        count: last.len() as u32,
+        count: last.len(),
         slot,
     }
 }
@@ -122,24 +127,27 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::*;
+    use crate::compile::ids::AudioValueId;
     use proptest::prelude::*;
 
     /// One op per value: op `i` writes value `i` and reads the values in
     /// `reads[i]` (all earlier). Returns the values and the reach.
-    fn dag(reads: &[Vec<u32>]) -> (Vec<Val>, Reach) {
-        let mut vals: Vec<Val> = (0..reads.len() as u32)
+    fn dag(reads: &[Vec<u32>]) -> (Table<AudioValueId, Val>, Reach) {
+        let mut vals: Table<AudioValueId, Val> = (0..reads.len() as u32)
             .map(|w| Val {
-                writer: w,
+                writer: OpId::new(w),
                 readers: Vec::new(),
             })
             .collect();
         let mut preds = vec![BTreeSet::new(); reads.len()];
-        let mut succ = vec![Vec::new(); reads.len()];
+        let mut succ: Table<OpId, Vec<OpId>> = Table::filled(reads.len(), Vec::new());
         for (op, rs) in reads.iter().enumerate() {
             for &u in rs {
-                vals[u as usize].readers.push(op as u32);
+                vals[AudioValueId::new(u)]
+                    .readers
+                    .push(OpId::from_index(op));
                 if preds[op].insert(u) {
-                    succ[u as usize].push(op as u32);
+                    succ[OpId::new(u)].push(OpId::from_index(op));
                 }
             }
         }
@@ -147,7 +155,7 @@ mod tests {
         (vals, reach)
     }
 
-    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<u32, u32>) -> u32 {
+    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<AudioValueId, AudioValueId>) -> usize {
         let (vals, reach) = dag(reads);
         colour(&vals, &reach, in_place).count
     }
@@ -182,7 +190,9 @@ mod tests {
     #[test]
     fn an_in_place_chain_needs_one_slot() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        let in_place: BTreeMap<u32, u32> = (1..5).map(|v| (v, v - 1)).collect();
+        let in_place: BTreeMap<AudioValueId, AudioValueId> = (1..5)
+            .map(|v| (AudioValueId::new(v), AudioValueId::new(v - 1)))
+            .collect();
         assert_eq!(slots(&reads, &in_place), 1);
     }
 
@@ -244,7 +254,7 @@ mod tests {
             let mut in_place = BTreeMap::new();
             for (v, rs) in reads.iter().enumerate() {
                 if offer[v] && let Some(&u) = rs.first() {
-                    in_place.insert(v as u32, u);
+                    in_place.insert(AudioValueId::from_index(v), AudioValueId::new(u));
                 }
             }
             let c = colour(&vals, &reach, &in_place);
@@ -252,20 +262,20 @@ mod tests {
             prop_assert_eq!(&c.slot, &again.slot);
             prop_assert_eq!(c.count, again.count);
             prop_assert!(c.slot.iter().all(|&s| s < c.count));
-            for v in 0..vals.len() {
-                for u in 0..v {
+            for v in vals.ids() {
+                for u in vals.ids().take(v.index()) {
                     if c.slot[u] != c.slot[v] {
                         continue;
                     }
-                    let w = vals[v].writer as usize;
+                    let w = vals[v].writer;
                     let src = &vals[u];
-                    let precedes = |op: u32| before[op as usize][w];
+                    let precedes = |op: OpId| before[op.index()][w.index()];
                     let clear = precedes(src.writer) && src.readers.iter().all(|&r| precedes(r));
-                    let hand_over = in_place.get(&(v as u32)) == Some(&(u as u32))
-                        && src.readers.contains(&(w as u32))
+                    let hand_over = in_place.get(&v) == Some(&u)
+                        && src.readers.contains(&w)
                         && precedes(src.writer)
-                        && src.readers.iter().all(|&r| r as usize == w || precedes(r));
-                    prop_assert!(clear || hand_over, "values {u} and {v} overlap in slot {}", c.slot[u]);
+                        && src.readers.iter().all(|&r| r == w || precedes(r));
+                    prop_assert!(clear || hand_over, "values {u:?} and {v:?} overlap in slot {}", c.slot[u]);
                 }
             }
         }

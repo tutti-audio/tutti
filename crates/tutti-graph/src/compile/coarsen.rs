@@ -31,27 +31,30 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tutti_units::Samples;
 
+use crate::compile::ids::{Id, OpId, Table, TaskId};
 use crate::compile::plan::{Csr, Span};
 use crate::node::cost::{GRAIN, TASK_DISPATCH, Work};
 
 /// The task tables.
 pub(super) struct Tasks {
-    pub(super) tasks: Vec<Span>,
-    pub(super) task_ops: Vec<u32>,
+    pub(super) tasks: Table<TaskId, Span>,
+    pub(super) task_ops: Vec<OpId>,
     pub(super) succ: Csr,
-    pub(super) activation: Vec<u32>,
+    pub(super) activation: Table<TaskId, u32>,
 }
+
+/// The ops of each group, in ascending op order, and each op's group.
+type Grouping = (Table<TaskId, Vec<OpId>>, Table<OpId, TaskId>);
 
 /// Group the op DAG (`preds` / `succ` by op, ops numbered topologically)
 /// into tasks, pricing op `i` at `work[i]` and packing at `max_block`.
 pub(super) fn coarsen(
-    preds: &[BTreeSet<u32>],
-    succ: &[Vec<u32>],
-    work: &[Work],
+    preds: &Table<OpId, BTreeSet<OpId>>,
+    succ: &Table<OpId, Vec<OpId>>,
+    work: &Table<OpId, Work>,
     max_block: Samples,
 ) -> Tasks {
-    let n = preds.len();
-    debug_assert_eq!(work.len(), n);
+    debug_assert_eq!(work.len(), preds.len());
     // 1. Chains over ops.
     let (mut groups, mut of) = chained(preds, succ);
     // 2 and 3, to a fixed point: pack cheap siblings, then fuse the chains
@@ -80,8 +83,8 @@ pub(super) fn coarsen(
 }
 
 /// Pass 1 alone: every op its own item, chains fused.
-fn chained(preds: &[BTreeSet<u32>], succ: &[Vec<u32>]) -> (Vec<Vec<u32>>, Vec<u32>) {
-    let ops: Vec<Vec<u32>> = (0..preds.len() as u32).map(|o| vec![o]).collect();
+fn chained(preds: &Table<OpId, BTreeSet<OpId>>, succ: &Table<OpId, Vec<OpId>>) -> Grouping {
+    let ops: Table<OpId, Vec<OpId>> = preds.ids().map(|o| vec![o]).collect();
     chains(ops, preds, succ)
 }
 
@@ -90,30 +93,27 @@ fn chained(preds: &[BTreeSet<u32>], succ: &[Vec<u32>]) -> (Vec<Vec<u32>>, Vec<u3
 /// predecessor's only successor is `b`. Returns the groups (sorted op
 /// lists, numbered topologically: each by its first item, and an edge into
 /// a group always enters its first item) and each op's group.
-fn chains(
-    items: Vec<Vec<u32>>,
-    preds: &[BTreeSet<u32>],
-    succ: &[Vec<u32>],
-) -> (Vec<Vec<u32>>, Vec<u32>) {
-    let mut group_of = vec![u32::MAX; items.len()];
-    let mut groups: Vec<Vec<u32>> = Vec::new();
-    for (i, ops) in items.into_iter().enumerate() {
+fn chains<I: Id>(
+    items: Table<I, Vec<OpId>>,
+    preds: &Table<I, BTreeSet<I>>,
+    succ: &Table<I, Vec<I>>,
+) -> Grouping {
+    let mut group_of: Table<I, TaskId> = Table::filled(items.len(), TaskId::new(u32::MAX));
+    let mut groups: Table<TaskId, Vec<OpId>> = Table::default();
+    for (i, ops) in items.ids().zip(items) {
         let fused = (preds[i].len() == 1)
             .then(|| *preds[i].iter().next().expect("len 1"))
-            .filter(|&p| succ[p as usize].len() == 1);
+            .filter(|&p| succ[p].len() == 1);
         match fused {
             Some(p) => {
-                let g = group_of[p as usize];
+                let g = group_of[p];
                 group_of[i] = g;
-                groups[g as usize].extend(ops);
+                groups[g].extend(ops);
             }
-            None => {
-                group_of[i] = groups.len() as u32;
-                groups.push(ops);
-            }
+            None => group_of[i] = groups.push(ops),
         }
     }
-    for ops in &mut groups {
+    for ops in groups.iter_mut() {
         ops.sort_unstable();
     }
     let of = ops_of(&groups);
@@ -121,11 +121,11 @@ fn chains(
 }
 
 /// Each op's group.
-fn ops_of(groups: &[Vec<u32>]) -> Vec<u32> {
-    let mut of = vec![u32::MAX; groups.iter().map(Vec::len).sum()];
-    for (g, ops) in groups.iter().enumerate() {
+fn ops_of(groups: &Table<TaskId, Vec<OpId>>) -> Table<OpId, TaskId> {
+    let mut of = Table::filled(groups.iter().map(Vec::len).sum(), TaskId::new(u32::MAX));
+    for (g, ops) in groups.iter_enumerated() {
         for &o in ops {
-            of[o as usize] = g as u32;
+            of[o] = g;
         }
     }
     of
@@ -133,25 +133,28 @@ fn ops_of(groups: &[Vec<u32>]) -> Vec<u32> {
 
 /// The DAG between groups (`of`: each op's group), as distinct predecessor
 /// sets and sorted successor rows.
-fn group_dag(of: &[u32], succ: &[Vec<u32>], groups: usize) -> (Vec<BTreeSet<u32>>, Vec<Vec<u32>>) {
-    let mut preds = vec![BTreeSet::new(); groups];
-    let mut rows = vec![BTreeSet::new(); groups];
-    for (a, ss) in succ.iter().enumerate() {
+fn group_dag(
+    of: &Table<OpId, TaskId>,
+    succ: &Table<OpId, Vec<OpId>>,
+    groups: usize,
+) -> (Table<TaskId, BTreeSet<TaskId>>, Table<TaskId, Vec<TaskId>>) {
+    let mut preds: Table<TaskId, BTreeSet<TaskId>> = Table::filled(groups, BTreeSet::new());
+    let mut rows: Table<TaskId, BTreeSet<TaskId>> = Table::filled(groups, BTreeSet::new());
+    for (a, ss) in succ.iter_enumerated() {
         for &b in ss {
-            let (ga, gb) = (of[a], of[b as usize]);
+            let (ga, gb) = (of[a], of[b]);
             if ga != gb {
-                rows[ga as usize].insert(gb);
-                preds[gb as usize].insert(ga);
+                rows[ga].insert(gb);
+                preds[gb].insert(ga);
             }
         }
     }
-    let rows = rows.into_iter().map(|r| r.into_iter().collect()).collect();
+    let rows = rows.iter().map(|r| r.iter().copied().collect()).collect();
     (preds, rows)
 }
 
-fn cost(ops: &[u32], work: &[Work]) -> Work {
-    ops.iter()
-        .fold(Work::ZERO, |acc, &o| acc.plus(work[o as usize]))
+fn cost(ops: &[OpId], work: &Table<OpId, Work>) -> Work {
+    ops.iter().fold(Work::ZERO, |acc, &o| acc.plus(work[o]))
 }
 
 /// Pass 2: pack **siblings** — tasks with the same predecessor set — that
@@ -172,16 +175,16 @@ fn cost(ops: &[u32], work: &[Work]) -> Work {
 /// the other, so of itself), and the check refuses any pack whose task
 /// graph would cycle, so the task graph stays acyclic.
 fn pack(
-    groups: Vec<Vec<u32>>,
-    of: &[u32],
-    succ: &[Vec<u32>],
-    work: &[Work],
+    groups: Table<TaskId, Vec<OpId>>,
+    of: &Table<OpId, TaskId>,
+    succ: &Table<OpId, Vec<OpId>>,
+    work: &Table<OpId, Work>,
     max_block: Samples,
-) -> (Vec<Vec<u32>>, Vec<u32>) {
+) -> Grouping {
     let (preds, _) = group_dag(of, succ, groups.len());
-    let price = |g: &[u32]| cost(g, work).at(max_block);
-    let mut classes: BTreeMap<Vec<u32>, Vec<usize>> = BTreeMap::new();
-    for (g, ops) in groups.iter().enumerate() {
+    let price = |g: &[OpId]| cost(g, work).at(max_block);
+    let mut classes: BTreeMap<Vec<TaskId>, Vec<TaskId>> = BTreeMap::new();
+    for (g, ops) in groups.iter_enumerated() {
         if price(ops) < GRAIN {
             classes
                 .entry(preds[g].iter().copied().collect())
@@ -189,8 +192,8 @@ fn pack(
                 .push(g);
         }
     }
-    let mut cur: Vec<Option<Vec<u32>>> = groups.into_iter().map(Some).collect();
-    let length = |groups: &[Option<Vec<u32>>]| {
+    let mut cur: Table<TaskId, Option<Vec<OpId>>> = groups.iter().cloned().map(Some).collect();
+    let length = |groups: &Table<TaskId, Option<Vec<OpId>>>| {
         critical(&compact(groups), succ, work, max_block).map(|c| c.at(max_block))
     };
     let mut best = length(&cur).expect("chains are acyclic");
@@ -201,7 +204,7 @@ fn pack(
             .sum();
         let bins = (total / GRAIN).max(1);
         let target = total.div_ceil(bins);
-        let mut packs: Vec<Vec<usize>> = vec![Vec::new()];
+        let mut packs: Vec<Vec<TaskId>> = vec![Vec::new()];
         let mut bin_cost = 0u64;
         for &g in &members {
             bin_cost += price(cur[g].as_deref().expect("unpacked"));
@@ -213,7 +216,7 @@ fn pack(
         }
         let mut trial = cur.clone();
         for pack in packs.iter().filter(|p| p.len() >= 2) {
-            let mut ops: Vec<u32> = Vec::new();
+            let mut ops: Vec<OpId> = Vec::new();
             for &g in pack {
                 ops.extend(trial[g].take().expect("unpacked"));
             }
@@ -232,7 +235,7 @@ fn pack(
     (groups, of)
 }
 
-fn compact(groups: &[Option<Vec<u32>>]) -> Vec<Vec<u32>> {
+fn compact(groups: &Table<TaskId, Option<Vec<OpId>>>) -> Table<TaskId, Vec<OpId>> {
     groups.iter().flatten().cloned().collect()
 }
 
@@ -242,13 +245,17 @@ fn compact(groups: &[Option<Vec<u32>>]) -> Vec<Vec<u32>> {
 /// This is not `order::kahn`: it pops the ready group with the lowest first
 /// op across the whole ready set, where `order::kahn`'s stack pops the newest
 /// ready batch first, and the two orders differ.
-fn topological(groups: Vec<Vec<u32>>, succ: &[Vec<u32>]) -> Vec<Vec<u32>> {
+fn topological(
+    groups: Table<TaskId, Vec<OpId>>,
+    succ: &Table<OpId, Vec<OpId>>,
+) -> Table<TaskId, Vec<OpId>> {
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let of = ops_of(&groups);
     let (preds, rows) = group_dag(&of, succ, groups.len());
-    let mut left: Vec<usize> = preds.iter().map(BTreeSet::len).collect();
-    let mut ready: BinaryHeap<Reverse<(u32, usize)>> = (0..groups.len())
+    let mut left: Table<TaskId, usize> = preds.iter().map(BTreeSet::len).collect();
+    let mut ready: BinaryHeap<Reverse<(OpId, TaskId)>> = groups
+        .ids()
         .filter(|&g| left[g] == 0)
         .map(|g| Reverse((groups[g][0], g)))
         .collect();
@@ -256,14 +263,14 @@ fn topological(groups: Vec<Vec<u32>>, succ: &[Vec<u32>]) -> Vec<Vec<u32>> {
     while let Some(Reverse((_, g))) = ready.pop() {
         order.push(g);
         for &s in &rows[g] {
-            left[s as usize] -= 1;
-            if left[s as usize] == 0 {
-                ready.push(Reverse((groups[s as usize][0], s as usize)));
+            left[s] -= 1;
+            if left[s] == 0 {
+                ready.push(Reverse((groups[s][0], s)));
             }
         }
     }
     debug_assert_eq!(order.len(), groups.len(), "packing kept the DAG acyclic");
-    let mut groups: Vec<Option<Vec<u32>>> = groups.into_iter().map(Some).collect();
+    let mut groups: Table<TaskId, Option<Vec<OpId>>> = groups.iter().cloned().map(Some).collect();
     order
         .into_iter()
         .map(|g| groups[g].take().expect("once"))
@@ -283,9 +290,9 @@ fn topological(groups: Vec<Vec<u32>>, succ: &[Vec<u32>]) -> Vec<Vec<u32>> {
 /// pack whose successors now wait for all of it costs them its work. The
 /// longest path is chosen at `max_block` and kept as its affine `Work`.
 fn critical(
-    groups: &[Vec<u32>],
-    succ: &[Vec<u32>],
-    work: &[Work],
+    groups: &Table<TaskId, Vec<OpId>>,
+    succ: &Table<OpId, Vec<OpId>>,
+    work: &Table<OpId, Work>,
     max_block: Samples,
 ) -> Option<Work> {
     let of = ops_of(groups);
@@ -295,10 +302,10 @@ fn critical(
         per_frame: 0,
     };
     let key = |w: Work| w.at(max_block);
-    let mut start = vec![Work::ZERO; groups.len()];
-    let mut left: Vec<usize> = preds.iter().map(BTreeSet::len).collect();
-    let mut ready: Vec<usize> = Vec::new();
-    for (k, g) in (0..groups.len()).filter(|&g| left[g] == 0).enumerate() {
+    let mut start: Table<TaskId, Work> = Table::filled(groups.len(), Work::ZERO);
+    let mut left: Table<TaskId, usize> = preds.iter().map(BTreeSet::len).collect();
+    let mut ready: Vec<TaskId> = Vec::new();
+    for (k, g) in groups.ids().filter(|&g| left[g] == 0).enumerate() {
         start[g] = handoff(k);
         ready.push(g);
     }
@@ -311,7 +318,6 @@ fn critical(
             longest = end;
         }
         for (j, &s) in rows[t].iter().enumerate() {
-            let s = s as usize;
             let at = end.plus(handoff(j));
             if key(at) > key(start[s]) {
                 start[s] = at;
@@ -326,29 +332,28 @@ fn critical(
 }
 
 /// The plan's task tables.
-fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>]) -> Tasks {
+fn finish(
+    groups: Table<TaskId, Vec<OpId>>,
+    of: &Table<OpId, TaskId>,
+    succ: &Table<OpId, Vec<OpId>>,
+) -> Tasks {
     let (_, rows) = group_dag(of, succ, groups.len());
-    let mut activation = vec![0u32; groups.len()];
-    for (t, row) in rows.iter().enumerate() {
+    let mut activation: Table<TaskId, u32> = Table::filled(groups.len(), 0);
+    for (t, row) in rows.iter_enumerated() {
         for &s in row {
-            debug_assert!(s as usize > t, "tasks are topologically numbered");
-            activation[s as usize] += 1;
+            debug_assert!(s > t, "tasks are topologically numbered");
+            activation[s] += 1;
         }
     }
-    let mut tasks = Vec::with_capacity(groups.len());
     let mut task_ops = Vec::with_capacity(of.len());
-    for ops in &groups {
-        let start = task_ops.len() as u32;
-        task_ops.extend_from_slice(ops);
-        tasks.push(Span {
-            start,
-            len: ops.len() as u32,
-        });
-    }
+    let tasks: Table<TaskId, Span> = groups
+        .iter()
+        .map(|ops| Span::extend(&mut task_ops, ops.iter().copied()))
+        .collect();
     Tasks {
         tasks,
         task_ops,
-        succ: Csr::from_rows(&rows),
+        succ: Csr::from_ids(&rows),
         activation,
     }
 }
@@ -356,6 +361,7 @@ fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>]) -> Tasks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::raw;
     use proptest::prelude::*;
 
     const MAX: Samples = Samples::new(256);
@@ -373,41 +379,53 @@ mod tests {
     };
 
     /// `preds`/`succ` from an edge list over `n` ops (edges low → high).
-    fn dag(n: usize, edges: &[(u32, u32)]) -> (Vec<BTreeSet<u32>>, Vec<Vec<u32>>) {
-        let mut preds = vec![BTreeSet::new(); n];
-        let mut succ = vec![Vec::new(); n];
+    type Preds = Table<OpId, BTreeSet<OpId>>;
+    type Succ = Table<OpId, Vec<OpId>>;
+
+    fn dag(n: usize, edges: &[(u32, u32)]) -> (Preds, Succ) {
+        let mut preds: Preds = Table::filled(n, BTreeSet::new());
+        let mut succ: Succ = Table::filled(n, Vec::new());
         for &(a, b) in edges {
             assert!(a < b);
-            preds[b as usize].insert(a);
-            succ[a as usize].push(b);
+            preds[OpId::new(b)].insert(OpId::new(a));
+            succ[OpId::new(a)].push(OpId::new(b));
         }
         (preds, succ)
     }
 
+    fn run(preds: &Preds, succ: &Succ, work: &[Work]) -> Tasks {
+        coarsen(preds, succ, &Table::from(work.to_vec()), MAX)
+    }
+
     /// The critical path chain fusion alone gives.
-    fn chain_only(preds: &[BTreeSet<u32>], succ: &[Vec<u32>], work: &[Work]) -> u64 {
+    fn chain_only(preds: &Preds, succ: &Succ, work: &[Work]) -> u64 {
         let (groups, _) = chained(preds, succ);
-        critical(&groups, succ, work, MAX).expect("acyclic").at(MAX)
+        critical(&groups, succ, &Table::from(work.to_vec()), MAX)
+            .expect("acyclic")
+            .at(MAX)
     }
 
     /// The critical path of the coarsened task DAG.
-    fn final_critical(t: &Tasks, succ: &[Vec<u32>], work: &[Work]) -> u64 {
-        let groups: Vec<Vec<u32>> = t
+    fn final_critical(t: &Tasks, succ: &Succ, work: &[Work]) -> u64 {
+        let groups: Table<TaskId, Vec<OpId>> = t
             .tasks
             .iter()
-            .map(|s| t.task_ops[s.start as usize..(s.start + s.len) as usize].to_vec())
+            .map(|s| t.task_ops[s.range()].to_vec())
             .collect();
-        critical(&groups, succ, work, MAX).expect("acyclic").at(MAX)
+        critical(&groups, succ, &Table::from(work.to_vec()), MAX)
+            .expect("acyclic")
+            .at(MAX)
     }
 
-    fn task_of(t: &Tasks, op: u32) -> usize {
+    fn task_of(t: &Tasks, op: u32) -> TaskId {
         t.tasks
-            .iter()
-            .position(|s| t.task_ops[s.start as usize..(s.start + s.len) as usize].contains(&op))
+            .iter_enumerated()
+            .find(|(_, s)| t.task_ops[s.range()].contains(&OpId::new(op)))
+            .map(|(task, _)| task)
             .expect("every op has a task")
     }
 
-    fn reaches(t: &Tasks, from: usize, to: usize) -> bool {
+    fn reaches(t: &Tasks, from: TaskId, to: TaskId) -> bool {
         let mut stack = vec![from];
         let mut seen = BTreeSet::new();
         while let Some(x) = stack.pop() {
@@ -415,7 +433,7 @@ mod tests {
                 return true;
             }
             if seen.insert(x) {
-                stack.extend(t.succ.row(x).iter().map(|&s| s as usize));
+                stack.extend(t.succ.ids::<TaskId, TaskId>(x));
             }
         }
         false
@@ -456,7 +474,7 @@ mod tests {
             work[o] = HEAVY;
         }
         work[9..15].fill(COPY);
-        let t = coarsen(&preds, &succ, &work, MAX);
+        let t = run(&preds, &succ, &work);
         let (ha, hb1, hb2) = (task_of(&t, 1), task_of(&t, 7), task_of(&t, 8));
         assert!(!reaches(&t, ha, hb1) && !reaches(&t, ha, hb2));
         assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
@@ -471,7 +489,7 @@ mod tests {
         let (preds, succ) = dag(18, &edges);
         let mut work = vec![LIGHT; 18];
         work[0] = COPY;
-        let t = coarsen(&preds, &succ, &work, MAX);
+        let t = run(&preds, &succ, &work);
         assert!(t.tasks.len() < 5, "{} tasks", t.tasks.len());
         assert!(final_critical(&t, &succ, &work) < chain_only(&preds, &succ, &work));
     }
@@ -494,7 +512,7 @@ mod tests {
         let tasks = |node: Work| {
             let mut work = vec![COPY; 43];
             work[1..=14].fill(node);
-            coarsen(&preds, &succ, &work, MAX).tasks.len()
+            run(&preds, &succ, &work).tasks.len()
         };
         let (light, heavy) = (tasks(LIGHT), tasks(HEAVY));
         assert!(light <= heavy, "light {light} tasks, heavy {heavy}");
@@ -531,13 +549,13 @@ mod tests {
                     _ => LIGHT,
                 })
                 .collect();
-            let t = coarsen(&preds, &succ, &work, MAX);
+            let t = run(&preds, &succ, &work);
             prop_assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
-            let mut seen: Vec<u32> = t.task_ops.clone();
+            let mut seen: Vec<u32> = raw(&t.task_ops).to_vec();
             seen.sort_unstable();
             prop_assert_eq!(seen, (0..n as u32).collect::<Vec<_>>());
             for s in &t.tasks {
-                let ops = &t.task_ops[s.start as usize..(s.start + s.len) as usize];
+                let ops = &t.task_ops[s.range()];
                 prop_assert!(ops.windows(2).all(|w| w[0] < w[1]));
             }
         }
