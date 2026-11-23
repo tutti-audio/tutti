@@ -707,7 +707,7 @@ pub(crate) struct Logs {
 }
 
 impl Logs {
-    /// For `participants` (one for a serial executor). Allocates.
+    /// For `participants` (one with no pool). Allocates.
     pub(crate) fn new(participants: usize) -> Self {
         let mut logs = Self {
             lanes: Vec::new(),

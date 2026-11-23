@@ -38,19 +38,12 @@
 //! 7. **Coarsen and price** ([`coarsen`]) — fuse single-successor /
 //!    single-predecessor chains into tasks, pack sibling tasks too cheap to
 //!    dispatch alone (never lengthening the critical path), fuse the chains
-//!    that leaves, and total the
-//!    cost model's estimates (`Plan::work` and the critical path; see
-//!    `cost.rs`). A block run on the calling thread alone ignores tasks;
-//!    one spread over a pool (`par.rs`) dispatches them, when
-//!    `Plan::schedule` says spreading pays.
+//!    that leaves (estimates from `cost.rs`). A block run on
+//!    the calling thread alone ignores tasks; one spread over a pool
+//!    (`par.rs`) dispatches them.
 //! 8. **Verify** ([`verify`]) in debug builds.
 //! 9. **Place** units: `NodeKey` → dense [`UnitIdx`], diffed against `prev`
 //!    into a [`Delta`].
-//!
-//! The serial-vs-parallel decision is
-//! `Plan::schedule`: pure arithmetic on what step 7 totals, made when the
-//! plan meets a pool (the pool's participant count is not the compiler's
-//! to know).
 
 mod coarsen;
 mod colour;
@@ -1678,9 +1671,6 @@ pub fn compile(
         task_ops: coarse.task_ops,
         task_succ: coarse.succ,
         task_activation: coarse.activation,
-        work: coarse.work,
-        critical: coarse.critical,
-        task_width: coarse.width,
         audio_slots: audio_fixed + audio_colour.count,
         event_slots: event_fixed + event_colour.count,
         event_slot_capacity,

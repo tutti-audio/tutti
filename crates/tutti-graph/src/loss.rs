@@ -18,7 +18,7 @@
 //!
 //! In a parallel block the entries come in the order the workers finished and
 //! each worker's log is its own, so the entries, and which of them a full
-//! log leaves out, can differ from the serial executor's; the totals and the
+//! log leaves out, can differ from one participant's; the totals and the
 //! render do not.
 //!
 //! [`Executor::dropped_event_count`]: crate::Executor::dropped_event_count
