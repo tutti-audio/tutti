@@ -2,8 +2,10 @@
 //! description of kinds, wiring and edits, a pure function of the seed so a
 //! failing case replays exactly.
 
-// Each test crate includes this module and uses some of it.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "each test crate includes this module and uses part of it"
+)]
 
 use std::collections::{BTreeMap, BTreeSet};
 
