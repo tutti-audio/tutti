@@ -298,21 +298,6 @@ impl<F: Float> GraphBuilder<F> {
         self.units.len()
     }
 
-    /// The graph value so far. Latency and tail are as each node declared
-    /// them *before* it was prepared; the built editor's spec holds the
-    /// prepared figures.
-    pub fn spec(&self) -> &GraphSpec {
-        &self.spec
-    }
-
-    /// The graph value, for what the calls here do not spell — a
-    /// [`require_resolution`](GraphSpec::require_resolution) mark, a
-    /// parameter source. Nodes are added through [`add`](Self::add), never
-    /// here, so every node has a unit.
-    pub fn spec_mut(&mut self) -> &mut GraphSpec {
-        &mut self.spec
-    }
-
     /// Sets `node`'s [`Mix`]: the built graph starts the node steady at it.
     /// A mode has no builder call: set it on the built editor
     /// ([`Editor::set_mode`](crate::Editor::set_mode)), where it fades in.
@@ -666,6 +651,19 @@ impl<F: Float> GraphBuilder<F> {
             EventInputPort::new(to, to_port as u16),
             EventEdge::Direct(EventOutputPort::new(from, from_port as u16)),
         );
+        self
+    }
+
+    /// Drives param port `at` from `from`, replacing its source
+    /// ([`GraphSpec::connect_param`], which states the rules).
+    ///
+    /// # Panics
+    ///
+    /// If either node is not in the builder.
+    pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> &mut Self {
+        self.check_node(at.node);
+        self.check_node(from.node);
+        self.spec.connect_param(at, from);
         self
     }
 

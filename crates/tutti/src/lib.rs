@@ -482,7 +482,8 @@ pub mod tempo {
 /// What a node author names (`tutti-graph`): the `Node` contract and the
 /// shape, io and prepare values it takes, the wrappers that insert a node
 /// (`ForkByClone`, `Unforkable`) and the param declaration (`declare_params!`,
-/// `ParamNode`). The graph's compiler, editor and executor are the session's;
+/// `ParamNode`), and with `export` the offline `GraphBuilder` and its
+/// `Renderer`. The graph's compiler, editor and executor are the session's;
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
@@ -507,6 +508,8 @@ pub mod graph {
         FADE_CAPACITY, MAX_BUSES, MAX_EVENT_PORT_CAPACITY, MAX_NODE_LATENCY, MAX_NODE_TAIL,
         MAX_PORTS, MAX_TRANSPORT_CHANGES, MIN_EVENT_PORT_CAPACITY, QUEUE_CAPACITY,
     };
+    #[cfg(feature = "export")]
+    pub use tutti_graph::{GraphBuilder, Renderer};
 }
 
 /// The session's host plumbing (`tutti-session`): what a host that runs the
