@@ -218,6 +218,7 @@ mod karplus_strong;
 mod level;
 mod lfo;
 mod loudness;
+mod metronome;
 mod modal;
 mod modulation;
 mod newton;
@@ -341,6 +342,7 @@ pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_we
 pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
 };
+pub use metronome::Metronome;
 pub use mfcc::Mfcc;
 pub use modal::{MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes};
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
@@ -363,7 +365,7 @@ pub use oversample::{
     BlockTooLong, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband,
     PassbandError,
 };
-pub use pan::{PanLaw, pan_gains};
+pub use pan::{PanLaw, balance_gains_in, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
@@ -392,10 +394,12 @@ pub use sequence::{local_maxima, median, median_of_sorted};
 pub use shoebox::{ReflectionOrder, ShoeboxConfig, ShoeboxError, ShoeboxRoom, Wall};
 pub use smoother::smooth_toward;
 pub use sos::{
-    Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, Cookbook,
-    CutResponse, Elliptic, EllipticTolerances, GraphicBands, KWeighting, LinkwitzRiley,
-    MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MatchedBell, PassbandRipple, PassbandRippleError, Sos,
-    SosBank, SosCoefficients, SosError, StopbandAttenuation, StopbandAttenuationError, Tilt,
+    BellFilterControls, Butterworth, ButterworthOrder, ButterworthOrderError, ChebyshevI,
+    ChebyshevII, Cookbook, CutAlignment, CutDecayLadder, CutDesign, CutFilterControls, CutResponse,
+    Elliptic, EllipticTolerances, GraphicBands, GraphicEqControls, KWeighting, LinkwitzRiley,
+    MAX_EQ_GAIN, MAX_GAIN_MAGNITUDE, MAX_SECTIONS, MIN_CUT_CUTOFF, MIN_EQ_CENTER, MatchedBell,
+    PassbandRipple, PassbandRippleError, Sos, SosBank, SosCoefficients, SosError,
+    StopbandAttenuation, StopbandAttenuationError, Tilt, TiltFilterControls,
 };
 pub use spatial::{
     AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, GainsLengthMismatch, HRTF_LATENCY,

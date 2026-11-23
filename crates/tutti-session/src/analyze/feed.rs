@@ -5,7 +5,7 @@ use tutti_buffers::{
     BufferError, Float, Fold, FoldError, Interleaved, InterleavedMut, Mono, Planes, PlanesMut,
     StereoPlanes, deinterleave, interleave,
 };
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_units::{SampleRate, Samples};
 
 /// Why a chunk cannot be shown to a meter in the view it takes: what binding
@@ -57,12 +57,20 @@ pub struct Chunk<'w, S: Float> {
 }
 
 impl<'w, S: Float> Chunk<'w, S> {
-    /// An empty chunk of audio placed as `topology` says.
-    pub(crate) fn new(topology: &ChannelTopology) -> Self {
+    /// An empty chunk of audio placed as `channels` says; audio wider than a
+    /// topology holds has none, and no fold takes it to mono.
+    pub(crate) fn new(channels: &ChannelSet) -> Self {
+        let layout = channels.width();
         Self {
             held: Layout::Interleaved,
-            layout: topology.width(),
-            to_mono: Fold::between(topology, &ChannelTopology::default_for(ChannelLayout::MONO)),
+            layout,
+            to_mono: match channels.topology() {
+                Some(topology) => Fold::between(topology, &tutti_buffers::Bed::Mono.topology()),
+                None => Err(FoldError::Unassigned {
+                    src: layout,
+                    dst: ChannelLayout::MONO,
+                }),
+            },
             data: Vec::new(),
             interleaved: Vec::new(),
             planes: Vec::new(),

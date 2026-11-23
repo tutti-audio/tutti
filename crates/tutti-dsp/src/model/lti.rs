@@ -109,3 +109,6 @@ pub(crate) fn peak_magnitude(mut pts: Vec<f64>, mag: impl Fn(f64) -> f64) -> f64
     }
     mag(pts[best]).max(mag(0.5 * (a + b))) * (1.0 + 1e-6)
 }
+
+#[cfg(test)]
+mod tests;

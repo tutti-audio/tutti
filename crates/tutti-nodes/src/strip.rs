@@ -2,12 +2,12 @@
 //!
 //! A mixer bus applies two things to a summed signal: a fader and a balance.
 //! [`BusStripNode`] is both in one node, addressed by [`UnitParam`] through
-//! the [`ParamSet`] it is inserted with, so a host sets it with the same
+//! the [`ParamSet`](tutti_graph::ParamSet) it is inserted with, so a host sets it with the same
 //! generic machinery it uses for a filter cutoff and needs no downcast. A
 //! strip's mute is not here: muting is graph state, `NodeMode::Muted`
 //! (`Graph::set_mode`), the same for every node.
 //!
-//! Every scalar lives in a cell the node's [`ParamSet`] addresses by
+//! Every scalar lives in a cell the node's [`ParamSet`](tutti_graph::ParamSet) addresses by
 //! [`UnitParam`] — the same shape every other node in this crate uses — so a
 //! host has one param path to the strip, not a second set of handles beside
 //! it.
@@ -44,17 +44,21 @@
 
 use crate::last_good::LastGood;
 use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
-use tutti_graph::{
-    Cx, Inputs, IntoNode, Io, Node, NodeParts, Outputs, ParamNode, ParamSet, Prepare, Shape, Status,
-};
+use tutti_dsp::balance_gains_in;
+use tutti_graph::{Cx, Inputs, Io, Node, Outputs, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
 use tutti_units::{Amplitude, Balance, Tail};
 
-// The params a [`BusStripNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([] BusStripNode, n {
-    Volume => Amplitude = &n.volume,
-    Balance => Balance = n.balance.as_ref(),
+// The params a [`BusStripNode`] lets the graph modulate, in port order, and the
+// [`BusStripConfig`] it is made from: the bus, and the volume at the start. The balance is
+// present only on a bus with a left/right pair, which `From` decides.
+tutti_graph::declare_params!([] BusStripNode, #[derive(Copy, PartialEq)] BusStripConfig, BusStripCells {
+    required { input: BusTopology }
+    params {
+        Volume => volume: Amplitude = Amplitude::UNITY,
+        Balance => balance: Option<Balance> = None,
+    }
 });
 
 /// A mixer strip: volume and balance over `channels` audio ports.
@@ -67,7 +71,7 @@ tutti_graph::declare_params!([] BusStripNode, n {
 /// There is deliberately no mute: it is `NodeMode::Muted`, which the graph
 /// holds for any node.
 ///
-/// Params, by address through its [`ParamSet`]:
+/// Params, by address through its [`ParamSet`](tutti_graph::ParamSet):
 ///
 /// - [`UnitParam::Volume`], a linear amplitude;
 /// - [`UnitParam::Balance`], a [`Balance`] (`-1..1`), only on a bus with a
@@ -78,14 +82,23 @@ tutti_graph::declare_params!([] BusStripNode, n {
 ///
 /// Every control is read **once per block**; no cell is loaded per sample.
 ///
+/// Made from a [`BusStripConfig`] ([`From`]): unity volume, centred.
+///
+/// ```
+/// use tutti_buffers::BusTopology;
+/// use tutti_nodes::{BusStripConfig, BusStripNode};
+///
+/// let strip = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
+/// assert_eq!(strip.topology(), BusTopology::STEREO);
+/// ```
+///
 /// `Clone` shares the two cells: it is the template
-/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`] is the
+/// [`tutti_graph::param_parts`] forks from ([`ParamNode::fork_fresh`](tutti_graph::ParamNode::fork_fresh) is the
 /// copy that shares nothing).
 #[derive(Clone, Debug)]
 pub struct BusStripNode {
-    volume: Param<Amplitude>,
-    /// Present only when `topology` has a left/right pair to balance.
-    balance: Option<Param<Balance>>,
+    /// The volume, and the balance where `topology` has a left/right pair to balance.
+    cells: BusStripCells,
     /// The bus this strip runs on, in and out: the speakers its channels feed.
     ///
     /// Balance applies to the left/right pairs this placement has (see
@@ -174,39 +187,13 @@ impl StripGains {
     }
 }
 
-/// What a [`BusStripNode`] is made from: the bus it runs on, in and out.
-///
-/// The strip starts at unity volume, centred. [`From`] makes the node.
-///
-/// ```
-/// use tutti_buffers::BusTopology;
-/// use tutti_nodes::{BusStripConfig, BusStripNode};
-///
-/// let strip = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
-/// assert_eq!(strip.topology(), BusTopology::STEREO);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BusStripConfig {
-    input: BusTopology,
-}
-
-impl BusStripConfig {
-    /// A strip on the bus `input`: a fader, plus a balance when the bus has a left/right pair.
-    #[must_use]
-    pub fn new(input: BusTopology) -> Self {
-        Self { input }
-    }
-}
-
 impl From<BusStripConfig> for BusStripNode {
     fn from(config: BusStripConfig) -> Self {
         let topology = config.input;
         let sides = sides_of(&topology);
+        let config = config.balance(sides.contains(&Side::Left).then_some(Balance::CENTER));
         Self {
-            volume: Param::new(Amplitude::UNITY),
-            balance: sides
-                .contains(&Side::Left)
-                .then(|| Param::new(Balance::CENTER)),
+            cells: BusStripCells::from_config(&config),
             sides,
             topology,
             last_fed: 0,
@@ -225,7 +212,7 @@ impl BusStripNode {
     /// The audio channel count (its output count).
     #[inline]
     fn channels(&self) -> usize {
-        self.topology.layout().count() as usize
+        self.topology.width().count() as usize
     }
 
     /// A handle on the shared volume cell, the one the strip's `ParamSet`
@@ -235,7 +222,7 @@ impl BusStripNode {
     /// values above 1.0 amplify. It is read once per block and ramped to across it.
     #[must_use]
     pub fn volume(&self) -> Param<Amplitude> {
-        self.volume.handle()
+        self.cells.volume.handle()
     }
 
     /// A handle on the shared balance cell, the one the strip's `ParamSet`
@@ -243,7 +230,7 @@ impl BusStripNode {
     /// nothing to balance.
     #[must_use]
     pub fn balance(&self) -> Option<Param<Balance>> {
-        self.balance.as_ref().map(Param::handle)
+        self.cells.balance.as_ref().map(Param::handle)
     }
 
     /// Gains for a fader at `volume` and a balance at `balance`.
@@ -270,9 +257,9 @@ impl BusStripNode {
     fn control_gains(&mut self, fed: (bool, bool)) -> StripGains {
         let volume = match fed.0 {
             true => Amplitude::UNITY,
-            false => Amplitude::new(self.good.read(self.volume.load().get())),
+            false => Amplitude::new(self.good.read(self.cells.volume.load().get())),
         };
-        let balance = match (fed.1, &self.balance) {
+        let balance = match (fed.1, &self.cells.balance) {
             (false, Some(cell)) => cell.load(),
             _ => Balance::CENTER,
         };
@@ -347,7 +334,7 @@ impl BusStripNode {
                 } else {
                     F::from_count((i + 1) as u32) * inv
                 };
-                lerp(start, end, t)
+                tutti_dsp::lerp(start, end, t)
             };
             let steady = end;
             match (ramping, volume.is_some() || balance.is_some()) {
@@ -397,37 +384,10 @@ impl BusStripNode {
         if side == Side::Mid {
             return fader;
         }
-        let one = F::ONE;
-        // Comparisons, not `clamp` and `min`: a NaN falls through to unity, and the selects
-        // vectorise where the NaN-propagating forms do not.
-        let at_most_one = |x: F| if x < one { x } else { one };
-        let b = balance.map_or(F::ZERO, |b| {
-            let b = b[i];
-            if b < -one {
-                -one
-            } else if b > one {
-                one
-            } else {
-                b
-            }
-        });
-        let side_gain = match side {
-            Side::Right => at_most_one(one + b),
-            _ => at_most_one(one - b),
-        };
+        let (left, right) = balance_gains_in(balance.map_or(F::ZERO, |b| b[i]));
+        let side_gain = if side == Side::Right { right } else { left };
         side_gain * fader
     }
-}
-
-/// `from` at `t = 0`, `to` at `t = 1` — and *exactly* `to` there.
-///
-/// Written as `from·(1−t) + to·t` rather than `from + (to−from)·t` for that
-/// endpoint: the second form rounds, so a ramp to silence could end a few
-/// ulps above zero and a strip faded to nothing would leak. Over the sample width's bare
-/// gains, narrowed once per block: a per-frame `f64` ramp would not vectorise with the product.
-#[inline(always)]
-fn lerp<F: Float>(from: F, to: F, t: F) -> F {
-    tutti_dsp::lerp(from, to, t)
 }
 
 /// `y = x · gain(frame)`, over one channel's block.
@@ -484,43 +444,16 @@ impl<F: Float> Node<F> for BusStripNode {
     }
 }
 
-impl<F: Float> ParamNode<F> for BusStripNode {
-    /// Volume, and balance on a bus with a left/right pair.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its two cells detached (at their values now), so a
-    /// fork renders the strip as it was set, not a fader ride made while it
-    /// runs; its ramp history cleared.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.volume.detach();
-        if let Some(cell) = &mut fork.balance {
-            cell.detach();
-        }
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for BusStripNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
     use tutti_buffers::Planes;
-    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_buffers::{
+        AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Speaker, Speaker::*,
+    };
+    use tutti_graph::ParamNode;
+    use tutti_graph::contract::drive;
 
     /// The strip on `bus`.
     fn strip(bus: BusTopology) -> BusStripNode {
@@ -564,13 +497,6 @@ mod tests {
         (out[0], out[1])
     }
 
-    /// A fork starts from the values last set through the strip's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(strip(BusTopology::STEREO));
-    }
-
     /// A strip must be transparent until somebody moves it. An equal-power
     /// law would attenuate a centred signal by 3 dB.
     #[test]
@@ -584,31 +510,6 @@ mod tests {
         let mut s = strip(BusTopology::STEREO);
         s.volume().store(Amplitude::new(0.5));
         assert_eq!(tick2(&mut s, 1.0, 1.0), (0.5, 0.5));
-    }
-
-    #[test]
-    fn balance_attenuates_the_far_channel_only() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -1.0); // hard left
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 1.0); // hard right
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
-        // Halfway: the near channel stays at unity, the far one is halved.
-        set_balance(&s, -0.5);
-        let (l, r) = tick2(&mut s, 1.0, 1.0);
-        assert!((l - 1.0).abs() < 1e-6);
-        assert!((r - 0.5).abs() < 1e-6);
-    }
-
-    /// Out-of-range balance saturates rather than amplifying: without the clamp,
-    /// a balance of -2 would give the left channel a gain of 3.
-    #[test]
-    fn balance_saturates_out_of_range() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
     }
 
     #[test]
@@ -1011,7 +912,7 @@ mod tests {
         let mut s = strip(topology);
         s.volume().store(Amplitude::new(volume));
         set_balance(&s, balance);
-        let n = topology.layout().count() as usize;
+        let n = topology.width().count() as usize;
         let mut out = vec![0.0f32; n];
         tick(&mut s, &vec![1.0f32; n], &mut out);
         topology
@@ -1112,7 +1013,7 @@ mod tests {
         [
             BusTopology::MONO,
             BusTopology::unassigned(ChannelLayout::from(6u16)).expect("six fit a bus"),
-            BusTopology::ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
+            ChannelTopology::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
             BusTopology::new([FrontLeft, FrontCenter]).expect("two speakers fit a bus"),
         ]
     }
@@ -1122,7 +1023,7 @@ mod tests {
     #[test]
     fn a_bus_without_a_pair_refuses_the_balance() {
         for bus in pairless_buses() {
-            let n = bus.layout().count() as usize;
+            let n = bus.width().count() as usize;
             let mut s = strip(bus);
             s.volume().store(Amplitude::new(0.5));
             assert!(

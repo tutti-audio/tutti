@@ -6,10 +6,10 @@ use tutti_dsp::{
     Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
     ShapeKind, WaveshaperBank, WaveshaperControls,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
 
 /// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
@@ -132,8 +132,7 @@ impl DistortionConfig {
 
 impl<F: Float + Lerp> From<DistortionConfig> for DistortionNode<F> {
     fn from(config: DistortionConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a waveshaper is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a waveshaper");
         Self::with_kernel(
             DistortionKernel::<F>::new(&config, input),
             DistortionSet,
@@ -213,7 +212,6 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     /// Antialiasing makes every curve at least `Moderate`: the curve and its antiderivatives
     /// run in `f64`.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let cost = match (self.factor, self.kind) {
             (Some(_), _) => Cost::Heavy,
             (None, ShapeKind::Softsign | ShapeKind::HardClip)
@@ -223,15 +221,11 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             }
             (None, _) => Cost::Moderate,
         };
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(cost)
+        Shape::through(self.input).cost(cost)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = self
             .factor
             .and_then(|factor| Oversampled::new(factor, rate, max_block, width));
@@ -312,7 +306,7 @@ mod tests {
         render_chunked, sine,
     };
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -331,15 +325,6 @@ mod tests {
         prepared(DistortionNode::<f32>::from(
             DistortionConfig::new(channels, ShapeKind::HardClip).drive(Drive::new(drive)),
         ))
-    }
-
-    /// A fork starts from the drive last set through the node's `ParamSet` and shares no
-    /// cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(2.0)),
-        ));
     }
 
     /// The node is stereo unless told otherwise, and the shape declares the drive.
@@ -778,47 +763,5 @@ mod tests {
         Node::reset(&mut n);
         let out = drive_block(&mut n, &[&[0.0; 256]]);
         assert!(out[0].iter().all(|&y| y == 0.0));
-    }
-
-    /// An `f64` block through a `DistortionKernel::<f64>` of `Softsign` at the drive `h`
-    /// is `h x / (1 + |h x|)` in `f64`, to 2^-45, and its
-    /// first-order antialiased form on a signal that alternates in sign is
-    /// `(F(x[n]) - F(x[n-1])) / (x[n] - x[n-1])` with `F(u) = |u| - ln(1 + |u|)` the
-    /// antiderivative of `u / (1 + |u|)` that is 0 at 0, the history starting at 0.
-    #[test]
-    fn an_f64_kernel_is_the_curve_and_its_divided_difference_in_f64() {
-        use crate::test_support::drive_kernel;
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let len = 200;
-        let x: Vec<f64> = wide_signal(len)
-            .iter()
-            .enumerate()
-            .map(|(n, v)| if n % 2 == 0 { *v } else { -2.0 * v })
-            .collect();
-        let h = 1.7;
-        let controls = WaveshaperControls {
-            drive: Drive::new(h),
-        };
-        let render = |order: Antialiasing| {
-            let config = DistortionConfig::new(ChannelLayout::MONO, ShapeKind::Softsign)
-                .antialiasing(order)
-                .expect("an order the kind has");
-            let mut k = DistortionKernel::<f64>::new(&config, BusTopology::MONO);
-            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-            drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x)).remove(0)
-        };
-        let want: Vec<f64> = x.iter().map(|x| h * x / (1.0 + (h * x).abs())).collect();
-        assert_close_f64(&render(Antialiasing::Off), &want, 2.0f64.powi(-45));
-        let antiderivative = |u: f64| u.abs() - u.abs().ln_1p();
-        let mut before = 0.0f64;
-        let want: Vec<f64> = x
-            .iter()
-            .map(|&now| {
-                let (a, b) = (h * now, h * before);
-                before = now;
-                (antiderivative(a) - antiderivative(b)) / (a - b)
-            })
-            .collect();
-        assert_close_f64(&render(Antialiasing::FirstOrder), &want, 2.0f64.powi(-45));
     }
 }

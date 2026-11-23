@@ -7,11 +7,12 @@ use crate::ProcessGuard;
 use crate::config::IpcConfig;
 use crate::conversation::Conversation;
 use crate::error::unexpected_message;
-use crate::transport::control::{self as ipc, ControlStream};
+use crate::transport::control::{self as ipc, Announced, Announces, Attached, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
 use crate::transport::{PendingLane, Rendezvous};
 use crate::{
-    ControlFrame, ControlReply, ControlRequest, Lane, ReqId, Request, StagedState, Working,
+    Answered, ControlFrame, ControlReply, Lane, LaneOpened, LoadPlugin, OpenLane, ReqId, Request,
+    SetupSharedMemory, SharedMemoryReady, StageState, StagedState, StateStaged, Working,
 };
 use std::process::Command;
 use std::time::Duration;
@@ -443,25 +444,64 @@ impl<'t> Launch<'t> {
         }
     }
 
-    /// Numbers the next request (see [`Exchange::open`]).
-    fn open(&mut self, window: Duration, ceiling: Duration) -> ReqId {
-        self.exchange.open(Instant::now(), window, ceiling)
+    /// Asks the server `msg` and waits for its reply: the server has `window` to
+    /// answer (restarting at each sign of life, up to `ceiling`), and `object`
+    /// is written right after the request that announces it, held until the
+    /// answer. The inner `Err` is a reply that is not the request's: the
+    /// server's refusal, or the wrong kind.
+    ///
+    /// # Errors
+    ///
+    /// The request cannot be written, or no answer comes within its window.
+    fn call<M: Answered>(
+        &mut self,
+        msg: M,
+        window: Duration,
+        ceiling: Duration,
+    ) -> IpcResult<std::result::Result<M::Reply, ControlReply>> {
+        let id = self.exchange.open(Instant::now(), window, ceiling);
+        ipc::send(
+            &mut self.stream,
+            &Request {
+                id,
+                body: msg.into(),
+            },
+        )?;
+        self.answer::<M>(id)
     }
 
-    /// Sends a frame of the request `id`.
-    fn send(&mut self, id: ReqId, body: ControlRequest) -> IpcResult<()> {
-        ipc::send(&mut self.stream, &Request { id, body })
+    /// [`call`](Self::call) for a request that announces an object, which is
+    /// written right after it and returned with the answer, still held: where it
+    /// is read by name, it stays until then.
+    ///
+    /// # Errors
+    ///
+    /// As [`call`](Self::call).
+    fn call_announced<M: Answered + Announces>(
+        &mut self,
+        announced: Announced<M>,
+        window: Duration,
+        ceiling: Duration,
+    ) -> IpcResult<(
+        std::result::Result<M::Reply, ControlReply>,
+        <M::Object as Attached>::Held,
+    )> {
+        let id = self.exchange.open(Instant::now(), window, ceiling);
+        let held = ipc::send_attached(&mut self.stream, id, announced)?;
+        Ok((self.answer::<M>(id)?, held))
     }
 
-    /// The answer to request `id`, the signs of life on the way moving the
-    /// wait.
-    fn answer(&mut self, id: ReqId) -> IpcResult<ControlReply> {
+    /// Waits for the answer to request `id`, which the exchange has open.
+    fn answer<M: Answered>(
+        &mut self,
+        id: ReqId,
+    ) -> IpcResult<std::result::Result<M::Reply, ControlReply>> {
         loop {
             let left = self.exchange.left(id, Instant::now());
             let frame = ipc::recv_within::<ControlFrame>(&mut self.stream, left)
                 .map_err(|e| self.exchange.blame(e))?;
             if let Heard::Answer(reply) = self.exchange.hear(frame, id, Instant::now())? {
-                return Ok(reply);
+                return Ok(M::Reply::try_from(reply));
             }
         }
     }
@@ -488,36 +528,32 @@ fn load_plugin(
     // ([`IpcError::StateRestore`]); one before it is a load failure, and
     // blames nothing.
     let load = config.timeouts.load;
-    let id = launch.open(load, load.saturating_mul(LOAD_CEILING_FACTOR));
-    launch.send(
-        id,
-        ControlRequest::LoadPlugin {
-            path: request.origin.path().to_path_buf(),
-            format: request.format,
-            plugin: request.origin.id().cloned(),
-            sample_rate: request.rate,
-            block_size: config.max_buffer_size,
-            preferred_format: config.preferred_format,
-            state,
-        },
-    )?;
-    match launch.answer(id)? {
-        ControlReply::PluginLoaded {
-            id,
-            descriptor,
-            loaded,
-            negotiated_format,
-            state_error,
-        } => Ok((id, descriptor, *loaded, negotiated_format, state_error)),
-        ControlReply::Error {
+    let msg = LoadPlugin {
+        path: request.origin.path().to_path_buf(),
+        format: request.format,
+        plugin: request.origin.id().cloned(),
+        sample_rate: request.rate,
+        block_size: config.max_buffer_size,
+        preferred_format: config.preferred_format,
+        state,
+    };
+    match launch.call(msg, load, load.saturating_mul(LOAD_CEILING_FACTOR))? {
+        Ok(loaded) => Ok((
+            loaded.id,
+            loaded.descriptor,
+            *loaded.loaded,
+            loaded.negotiated_format,
+            loaded.state_error,
+        )),
+        Err(ControlReply::Error {
             error: ServerError::Load { stage, reason },
-        } => Err(IpcError::LoadFailed {
+        }) => Err(IpcError::LoadFailed {
             path: Some(request.origin.path().to_path_buf()),
             stage,
             reason,
         }),
-        ControlReply::Error { error } => Err(IpcError::Server(error)),
-        ref other => Err(unexpected_message("PluginLoaded", other)),
+        Err(ControlReply::Error { error }) => Err(IpcError::Server(error)),
+        Err(other) => Err(unexpected_message("PluginLoaded", &other)),
     }
 }
 
@@ -544,17 +580,13 @@ fn stage_state(
         }
     };
     let call = config.timeouts.call;
-    let id = launch.open(call, call);
-    let body = ControlRequest::StageState {
-        len: state.len() as u64,
-        blob: blob.wire(),
-    };
-    // Held until the answer: where the object is read by name, it stays until then.
-    let _lease = ipc::send_blob(&mut launch.stream, id, body, blob)?;
-    match launch.answer(id)? {
-        ControlReply::StateStaged { error: None } => Ok(Ok(())),
-        ControlReply::StateStaged { error: Some(e) } => Ok(Err(e)),
-        other => Err(unexpected_message("StateStaged", &other)),
+    let staged = Announced::<StageState>::new(blob, state.len() as u64);
+    // The object is held until the answer: where it is read by name, it stays
+    // until then.
+    match launch.call_announced(staged, call, call)? {
+        (Ok(StateStaged { error: None }), _held) => Ok(Ok(())),
+        (Ok(StateStaged { error: Some(e) }), _held) => Ok(Err(e)),
+        (Err(other), _held) => Err(unexpected_message("StateStaged", &other)),
     }
 }
 
@@ -599,11 +631,10 @@ fn setup_shm(
     let (slab, handle) = AudioSlab::create(layout.clone())?;
 
     let call = config.timeouts.call;
-    let id = launch.open(call, call);
-    ipc::send_setup(&mut launch.stream, id, layout, &handle)?;
-    match launch.answer(id)? {
-        ControlReply::SharedMemoryReady => Ok(slab),
-        ref other => Err(unexpected_message("SharedMemoryReady", other)),
+    let setup = Announced::<SetupSharedMemory>::new(handle, layout);
+    match launch.call_announced(setup, call, call)? {
+        (Ok(SharedMemoryReady), _held) => Ok(slab),
+        (Err(other), _held) => Err(unexpected_message("SharedMemoryReady", &other)),
     }
 }
 
@@ -613,11 +644,10 @@ fn setup_shm(
 fn open_audio_lane(launch: &mut Launch<'_>, config: &IpcConfig) -> IpcResult<ControlStream> {
     let lane = PendingLane::new()?;
     let call = config.timeouts.call;
-    let id = launch.open(call, call);
-    ipc::send_open_lane(&mut launch.stream, id, Lane::Audio, &lane)?;
-    match launch.answer(id)? {
-        ControlReply::LaneOpened => lane.stream(),
-        ref other => Err(unexpected_message("LaneOpened", other)),
+    let open = Announced::<OpenLane>::new(lane, Lane::Audio);
+    match launch.call_announced(open, call, call)? {
+        (Ok(LaneOpened), lane) => lane.stream(),
+        (Err(other), _held) => Err(unexpected_message("LaneOpened", &other)),
     }
 }
 

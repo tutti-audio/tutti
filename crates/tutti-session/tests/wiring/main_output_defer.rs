@@ -46,7 +46,7 @@ fn block(s: &mut Session) -> (Vec<SessionEvent>, Vec<[f32; 2]>) {
 }
 
 fn main_output(n: u16) -> ChannelTopology {
-    ChannelTopology::default_for(ChannelLayout::from_count(n))
+    ChannelTopology::default_for(ChannelLayout::from_count(n)).unwrap()
 }
 
 fn mono() -> ChannelTopology {
@@ -70,9 +70,7 @@ fn reopened(events: &[SessionEvent]) -> Vec<(MainOutputReader, ChannelTopology)>
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::MainOutputReaderReopened { id, topology } => {
-                Some((*id, topology.clone()))
-            }
+            SessionEvent::MainOutputReaderReopened { id, topology } => Some((*id, *topology)),
             _ => None,
         })
         .collect()
@@ -296,9 +294,9 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
     let _tap = start_fade(&mut s);
     s.declare_main_output_topology(Some(main_output(4)))
         .expect("quad");
-    let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4));
+    let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4)).unwrap();
     assert!(
-        s.declare_main_output_topology(Some(buses.clone())).is_err(),
+        s.declare_main_output_topology(Some(buses)).is_err(),
         "four buses have no place on a stereo device"
     );
     assert!(matches!(
@@ -404,8 +402,10 @@ fn a_bus_fed_main_output_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends(
         .expect("folds by index")
         .unfaded();
     let _ = block(&mut s);
-    s.declare_main_output_topology(Some(ChannelTopology::unassigned(ChannelLayout::STEREO)))
-        .expect("buses");
+    s.declare_main_output_topology(Some(
+        ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap(),
+    ))
+    .expect("buses");
     let mut first = block(&mut s).1;
     s.declare_main_output_topology(Some(swapped()))
         .expect("swapped");

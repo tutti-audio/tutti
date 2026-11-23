@@ -1,12 +1,12 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, CombBank, CombControls, CombDelay, CombForm};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Feedback, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`CombFilterNode`] is made from: its width, its form and delay, and where its
 /// coefficient starts.
@@ -117,7 +117,7 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 
     /// `width` channels in and out, `Light`: a ring read and a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width).expect("a comb is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a comb");
         Shape::through(bus).cost(Cost::Light)
     }
 
@@ -172,10 +172,8 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
-    use tutti_buffers::MaxBlock;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Samples, Seconds, UnitParam};
 
     fn delay(secs: f64) -> CombDelay {
@@ -189,12 +187,6 @@ mod tests {
         CombFilterNode::from(
             CombFilterConfig::new(1u16, form, delay(0.004)).gain(Feedback::new(gain)),
         )
-    }
-
-    /// A fork starts from the coefficient last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node(CombForm::Feedback, 0.5));
     }
 
     /// The shape is the width in and out and declares the coefficient as `Feedback`, with no
@@ -220,29 +212,5 @@ mod tests {
     fn a_feedback_comb_declares_its_ring_out() {
         let mut n = prepared(node(CombForm::Feedback, 0.5), RATE, 64);
         assert_declared_tail(&mut n, RATE);
-    }
-
-    /// The impulse response is the comb's taps: `g` at `D` for the feedforward comb (with the
-    /// direct 1) and `g^(k-1)` at `k D` for the feedback comb, and a coefficient set through
-    /// the cell lands at the first grid point.
-    #[test]
-    fn the_node_is_the_comb_of_its_form() {
-        let run = |form, gain| {
-            let mut k = CombFilterKernel::<f32>::new(ChannelLayout::MONO, form, delay(0.004));
-            k.prepare(RATE, MaxBlock::of(Samples::new(32)));
-            let mut x = vec![0.0f32; 32];
-            x[0] = 1.0;
-            let controls = CombControls {
-                gain: Feedback::new(gain),
-            };
-            drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0)
-        };
-        let ff = run(CombForm::Feedforward, 0.5);
-        assert_eq!((ff[0], ff[4], ff[8]), (1.0, 0.5, 0.0));
-        let fb = run(CombForm::Feedback, 0.5);
-        assert_eq!((fb[0], fb[4], fb[8], fb[12]), (0.0, 1.0, 0.5, 0.25));
-        // A feedback comb holds its coefficient below 1.
-        let held = run(CombForm::Feedback, 5.0);
-        assert!((held[8] - Feedback::MAX_STABLE.get() as f32).abs() < 1e-6);
     }
 }

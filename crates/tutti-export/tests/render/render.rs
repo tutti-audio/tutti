@@ -1286,7 +1286,9 @@ fn a_declared_main_output_is_what_the_file_is_placed_from() {
         first_frame(&mut graph, 6).unwrap(),
         [0.1, 0.2, 0.0, 0.0, 0.3, 0.4]
     );
-    let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::QUAD)));
+    let mut graph = four_buses(Some(
+        ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap(),
+    ));
     assert_eq!(
         first_frame(&mut graph, 6).unwrap(),
         [0.1, 0.2, 0.3, 0.4, 0.0, 0.0]
@@ -1299,7 +1301,9 @@ fn a_declared_main_output_is_what_the_file_is_placed_from() {
         ))
     ));
     // A declaration of another width than the graph is refused.
-    let mut graph = four_buses(Some(ChannelTopology::unassigned(ChannelLayout::from(6u16))));
+    let mut graph = four_buses(Some(
+        ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+    ));
     assert!(matches!(
         first_frame(&mut graph, 6),
         Err(tutti_export::RenderError::InvalidConfig(
@@ -1313,7 +1317,7 @@ fn a_declared_main_output_is_what_the_file_is_placed_from() {
         g.pipe_output(id);
         built_with(g, RATE, Setup::new().main_output(main_output))
     };
-    let swapped = ChannelTopology::default_for(ChannelLayout::from(6u16));
+    let swapped = tutti_buffers::Bed::Surround51.topology();
     assert!(swapped.index_of(Speaker::FrontLeft).is_some());
     let mut six = six_channels(swapped);
     let m = <f32 as tutti_buffers::Float>::MINUS_3_DB;

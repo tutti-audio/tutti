@@ -1,8 +1,7 @@
 use super::error::{Result, VbapError};
-use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
+use tutti_buffers::{Bed, BusTopology, ChannelLayout, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_rt::Param;
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::UnitParam;
 use tutti_units::{Azimuth, Elevation, SampleRate, Seconds, Spread, StereoWidth, Tail};
 
@@ -23,12 +22,17 @@ const GRID: usize = COEFF_INTERVAL;
 /// value.
 const RAMP: Seconds = Seconds::new(0.05);
 
-// The params a [`VbapPannerNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, n {
-    Azimuth => Azimuth = &n.azimuth,
-    Elevation => Elevation = &n.elevation,
-    Spread => Spread = &n.spread,
-    StereoWidth => StereoWidth = &n.width,
+// The params a [`VbapPannerNode`] lets the graph modulate, in port order, and the
+// [`VbapPannerConfig`] it is made from: the bus it pans over, and the bearing, height,
+// spread and width at the start.
+tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(Copy, PartialEq)] VbapPannerConfig, VbapPannerCells {
+    required { output: BusTopology }
+    params {
+        Azimuth => azimuth: Azimuth = Azimuth::FRONT,
+        Elevation => elevation: Elevation = Elevation::LEVEL,
+        Spread => spread: Spread = Spread::POINT,
+        StereoWidth => width: StereoWidth = StereoWidth::NATURAL,
+    }
 });
 
 /// The last finite value each control cell held.
@@ -52,8 +56,8 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 ///
 /// Build it from a [`VbapPannerConfig`] over a bed, whose speakers sit where
 /// `tutti_buffers::Bed::direction` puts them. It is a
-/// graph node (`tutti_graph::Node` and [`ParamNode`]); inserting it hands back its
-/// [`ParamSet`] ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
+/// graph node (`tutti_graph::Node` and [`ParamNode`](tutti_graph::ParamNode)); inserting it hands back its
+/// [`ParamSet`](tutti_graph::ParamSet) ([`UnitParam::Azimuth`], [`Elevation`](tutti_units::UnitParam::Elevation),
 /// [`Spread`](tutti_units::UnitParam::Spread) and [`StereoWidth`](tutti_units::UnitParam::StereoWidth)),
 /// which move the source lock-free while it renders, and a graph's control
 /// lanes may drive all four. A mono source presents the same sample on both
@@ -68,7 +72,7 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 /// use tutti_graph::{ParamNode, Prepare, Renderer};
 /// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
 ///
-/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
+/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad.into())).unwrap();
 /// panner.param_set().set(UnitParam::Azimuth, 45.0); // front-left
 ///
 /// let (mut renderer, ..) = Renderer::alone(panner, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
@@ -135,17 +139,13 @@ fn ramp_steps(rate: SampleRate) -> u32 {
 pub struct VbapPannerNode<F: Float> {
     kernel: VbapKernel,
     layout: ChannelLayout,
-    /// Bearing, wrapped onto the circle when read.
-    azimuth: Param<Azimuth>,
-    /// Height, clamped to the poles when read.
-    elevation: Param<Elevation>,
-    /// VBAP diffusion, `0..1`: how many speakers a point source is smeared
-    /// across. See [`Spread`]: it is not a `Mix`, because it blends nothing.
-    spread: Param<Spread>,
-    /// Mid/side stereo width, `0..`: 1.0 is unchanged, above 1.0 is wider
-    /// than the source. NOT an `Amplitude` despite the matching range: it
-    /// scales the SIDE component against the mid. See [`StereoWidth`].
-    width: Param<StereoWidth>,
+    /// The bearing (wrapped onto the circle when read), the height (clamped to the poles when
+    /// read), the VBAP diffusion `0..1` (how many speakers a point source is smeared across;
+    /// see [`Spread`]: it is not a `Mix`, because it blends nothing) and the mid/side stereo
+    /// width `0..` (1.0 is unchanged, above 1.0 is wider than the source; not an `Amplitude`
+    /// despite the matching range: it scales the SIDE component against the mid, see
+    /// [`StereoWidth`]).
+    cells: VbapPannerCells,
     /// Output-channel → speaker gather map, derived from the bed's topology
     /// (see `speaker_of_channel`). `None` marks a channel no speaker feeds:
     /// the LFE, which the panner leaves silent. Precomputed per layout so the
@@ -176,33 +176,6 @@ pub struct VbapPannerNode<F: Float> {
     seated: bool,
 }
 
-/// What a [`VbapPannerNode`] is made from: the bus it pans over.
-///
-/// The bus names a [`Bed`] ([`Bed::from_topology`]), whose speakers sit where
-/// [`Bed::direction`] puts them; [`TryFrom`] makes the node.
-///
-/// ```
-/// use tutti_buffers::Bed;
-/// use tutti_nodes::{VbapPannerConfig, VbapPannerNode};
-///
-/// let panner = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(Bed::Quad)).unwrap();
-/// assert_eq!(panner.channels().count(), 4);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VbapPannerConfig {
-    output: BusTopology,
-}
-
-impl VbapPannerConfig {
-    /// A panner over the speakers of `output`: stereo in, the bus's channels out.
-    #[must_use]
-    pub fn new(output: impl Into<BusTopology>) -> Self {
-        Self {
-            output: output.into(),
-        }
-    }
-}
-
 impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
     type Error = VbapError;
 
@@ -218,34 +191,30 @@ impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
     /// [`VbapError::NotABed`] for a bus that places no bed, and
     /// [`VbapError::Geometry`] for a bed whose speakers cannot be panned over: [`Bed::Mono`].
     fn try_from(config: VbapPannerConfig) -> Result<Self> {
-        let bed =
-            Bed::from_topology(&ChannelTopology::from(config.output)).ok_or(VbapError::NotABed)?;
+        let bed = Bed::from_topology(&config.output).ok_or(VbapError::NotABed)?;
         let layout = SpeakerLayout::try_from(bed)?;
         let steps = ramp_steps(SampleRate::SR_48K);
         let mut kernel = VbapKernel::new(layout);
         let gains = kernel.gains(
-            Azimuth::FRONT,
-            Elevation::LEVEL,
-            StereoWidth::NATURAL,
-            Spread::POINT,
+            config.azimuth,
+            config.elevation,
+            config.width,
+            config.spread,
         );
         Ok(Self {
             kernel,
             layout: bed.width(),
-            azimuth: Param::new(Azimuth::FRONT),
-            elevation: Param::new(Elevation::LEVEL),
-            spread: Param::new(Spread::POINT),
-            width: Param::new(StereoWidth::NATURAL),
+            cells: VbapPannerCells::from_config(&config),
             speaker_of_channel: speaker_of_channel(bed),
             fold: stereo_to_mono(),
             good: Held {
-                azimuth: LastGood::fixed(Azimuth::FRONT.get()),
-                elevation: LastGood::fixed(Elevation::LEVEL.get()),
-                spread: LastGood::fixed(Spread::POINT.get()),
-                width: LastGood::fixed(StereoWidth::NATURAL.get()),
+                azimuth: LastGood::fixed(config.azimuth.get()),
+                elevation: LastGood::fixed(config.elevation.get()),
+                spread: LastGood::fixed(config.spread.get()),
+                width: LastGood::fixed(config.width.get()),
             },
-            aim_azimuth: Ramp::new(Azimuth::FRONT).steps(steps),
-            aim_elevation: Ramp::new(Elevation::LEVEL).steps(steps),
+            aim_azimuth: Ramp::new(config.azimuth).steps(steps),
+            aim_elevation: Ramp::new(config.elevation).steps(steps),
             gains: Ramp::new(gains).steps(GRID as u32),
             steps,
             pos: 0,
@@ -321,8 +290,8 @@ fn steer<T: Lerp>(ramp: &mut Ramp<T>, target: T, whole: bool, steps: u32) {
 /// The fold of the stereo input to the mono the single-source branch pans.
 fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
-        &ChannelTopology::default_for(ChannelLayout::STEREO),
-        &ChannelTopology::default_for(ChannelLayout::MONO),
+        &tutti_buffers::Bed::Stereo.topology(),
+        &tutti_buffers::Bed::Mono.topology(),
     )
     .expect("stereo folds to mono")
 }
@@ -413,10 +382,10 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
                 .frames(),
         ];
         let cells = (
-            self.azimuth.load(),
-            self.elevation.load(),
-            self.spread.load(),
-            self.width.load(),
+            self.cells.azimuth.load(),
+            self.cells.elevation.load(),
+            self.cells.spread.load(),
+            self.cells.width.load(),
         );
         let (inputs, mut outputs) = io.split();
         let (left, right) = (&inputs.get(0)[..size], &inputs.get(1)[..size]);
@@ -453,35 +422,6 @@ impl<F: Float> Node<F> for VbapPannerNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for VbapPannerNode<F> {
-    /// The bearing, height, spread and width.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its four cells detached (at their values now) and its
-    /// grid restarted.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.azimuth.detach();
-        fork.elevation.detach();
-        fork.spread.detach();
-        fork.width.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values
-/// last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for VbapPannerNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 

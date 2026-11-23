@@ -10,7 +10,7 @@
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, Editor, Executor, InputPort, Io, Node, NodeBus,
     NodeKey, NodeMode, OutputPort, PortSource, Prepare, Shape, Status, TransportPosition,
@@ -25,9 +25,8 @@ fn key(n: u64) -> NodeKey {
 }
 
 fn smpte(n: u16) -> Bus {
-    let topology = ChannelTopology::default_for(ChannelLayout::from_count(n));
     Bus::new(
-        BusTopology::try_from(&topology).expect("fits a bus"),
+        ChannelTopology::default_for(ChannelLayout::from_count(n)).unwrap(),
         BusRole::Main,
     )
 }

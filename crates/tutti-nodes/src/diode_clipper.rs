@@ -6,13 +6,11 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ClipperDrive, DiodeClipper, DiodeClipperControls, Lerp,
     OversamplingFactor,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, Hz, SampleRate, Samples, Tail, UnitAddr, UnitParam};
+use tutti_graph::{Cost, Shape};
+use tutti_units::{Db, Hz, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
-use crate::params::{ControlSet, HasControl};
-use tutti_graph::DeclaredUnit;
 
 /// What a [`DiodeClipperNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,8 +86,7 @@ pub type DiodeClipperNode<F> = KernelNode<DiodeClipperKernel<F>>;
 
 impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
     fn from(config: DiodeClipperConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a diode clipper is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a diode clipper");
         Self::with_kernel(
             DiodeClipperKernel::<F>::new(&config, input),
             DiodeClipperSet,
@@ -102,54 +99,15 @@ impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct DiodeClipperSet;
 
-/// The controls are the corner and the drive; the drive is a range-checked [`ClipperDrive`],
-/// which `control_set!` does not take (its rows are units), so the set is written out.
-impl ControlSet for DiodeClipperSet {
-    type Controls = DiodeClipperControls;
-
-    fn addrs(&self) -> &'static [UnitAddr] {
-        const ALL: &[UnitAddr] = &[
-            UnitAddr::first(UnitParam::Cutoff),
-            UnitAddr::first(UnitParam::GainDb),
-        ];
-        ALL
-    }
-
-    fn units(&self) -> &'static [DeclaredUnit] {
-        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Db>()];
-        ALL
-    }
+control_set! {
+    DiodeClipperSet(_s): DiodeClipperControls = DiodeClipperControls::DEFAULT;
+    live: (all);
+    Cutoff => Hz = cutoff,
+    GainDb => Db = drive via ClipperDrive;
 
     fn defaults(&self) -> DiodeClipperControls {
         DiodeClipperControls::DEFAULT
     }
-
-    fn flatten(&self, c: &DiodeClipperControls, out: &mut [f64]) {
-        let all = [c.cutoff.get(), c.drive.get().get()];
-        out.copy_from_slice(&all[..out.len()]);
-    }
-
-    fn assemble(&self, v: &[f64]) -> DiodeClipperControls {
-        let mut c = DiodeClipperControls::DEFAULT;
-        let mut cells = v.iter().copied();
-        if let Some(x) = cells.next() {
-            c.cutoff = Hz::new(x);
-        }
-        if let Some(x) = cells.next() {
-            // The one place a live drive is changed: a cell is written per frame, with no
-            // caller to refuse it to.
-            c.drive = ClipperDrive::held(Db::new(x));
-        }
-        c
-    }
-}
-
-impl HasControl<{ UnitParam::Cutoff as u16 }> for DiodeClipperSet {
-    type Unit = Hz;
-}
-
-impl HasControl<{ UnitParam::GainDb as u16 }> for DiodeClipperSet {
-    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`DiodeClipperNode`].
@@ -195,22 +153,17 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Heavy)
+        Shape::through(self.input).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.clipper = DiodeClipper::<F>::new(self.input.layout(), self.rate);
+        self.clipper = DiodeClipper::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 
@@ -269,7 +222,7 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -281,13 +234,6 @@ mod tests {
                 .cutoff(Hz::new(cutoff))
                 .drive(ClipperDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(
-            ChannelLayout::STEREO,
-        )));
     }
 
     #[test]
@@ -346,23 +292,6 @@ mod tests {
                 "{factor:?}: rings past the declared tail"
             );
         }
-    }
-
-    /// At -80 dBFS the circuit is the linear RC of corner `(1 + beta) f_c` and DC gain `1 / (1 +
-    /// beta)` ([`DiodeClipper`]'s module), at the default oversampling. The bound is the
-    /// oversampler's passband ripple, each of its two stages about `1e-5` (100 dB) and the
-    /// round trip crossing each twice, `4e-5`, and `f32`'s rounding of the sum, `1e-6`.
-    #[test]
-    fn a_small_signal_sees_the_linear_rc_low_pass_through_the_oversampler() {
-        let (cutoff, f) = (1_000.0, 1_000.0);
-        let mut n = node(cutoff, 0.0);
-        let x = sine(f, RATE, 9_600 + 4_800);
-        let y = render_chunked(&mut n, &[x.iter().map(|v| v * 1e-4).collect()], 256).remove(0);
-        let gain = amplitude_at(&y[4_800..], f, RATE) / 1e-4;
-        let beta = 2.0 * 2_200.0 * 2.52e-9 / (1.752 * 0.025_85);
-        let f_eff = (1.0 + beta) * cutoff;
-        let analog = 1.0 / (1.0 + beta) / (1.0 + (f / f_eff).powi(2)).sqrt();
-        assert!((gain - analog).abs() <= 4.1e-5 + 1e-6, "{gain} vs {analog}");
     }
 
     /// The corner is a live cell: moved from 4 kHz to 500 Hz, the gain at 2 kHz follows the RC

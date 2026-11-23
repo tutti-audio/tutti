@@ -78,11 +78,14 @@ pub type AutoPanNode<F> = KernelNode<AutoPanKernel<F>>;
 
 impl<F: Float> From<AutoPanConfig> for AutoPanNode<F> {
     fn from(config: AutoPanConfig) -> Self {
-        Self::with_kernel(
-            AutoPanKernel::new(config.wave, config.law),
-            AutoPanSet,
-            config.controls,
-        )
+        // A placeholder rate: an unprepared node renders nothing.
+        let kernel = AutoPanKernel {
+            wave: config.wave,
+            law: config.law,
+            pan: AutoPan::new(config.wave, config.law, SampleRate::SR_48K),
+            float: core::marker::PhantomData,
+        };
+        Self::with_kernel(kernel, AutoPanSet, config.controls)
     }
 }
 
@@ -108,18 +111,6 @@ pub struct AutoPanKernel<F: Float> {
     law: PanLaw,
     pan: AutoPan,
     float: core::marker::PhantomData<fn() -> F>,
-}
-
-impl<F: Float> AutoPanKernel<F> {
-    /// An auto-pan at a placeholder rate: an unprepared node renders nothing.
-    fn new(wave: OscillatorWave, law: PanLaw) -> Self {
-        Self {
-            wave,
-            law,
-            pan: AutoPan::new(wave, law, SampleRate::SR_48K),
-            float: core::marker::PhantomData,
-        }
-    }
 }
 
 impl<F: Float> Kernel for AutoPanKernel<F> {
@@ -163,14 +154,9 @@ mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::Node;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_units::UnitParam;
 
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(AutoPanNode::from(AutoPanConfig::new()));
-    }
+    use tutti_units::Tail;
+    use tutti_units::UnitParam;
 
     /// The shape is a stereo pair in and out, `Moderate`, no tail, with the rate and depth
     /// declared; the default is 1 Hz at full depth.

@@ -1,11 +1,11 @@
 //! The plan's non-node ops: main inputs, delays, sums, event merges,
 //! outputs and captures.
 
-use super::node_op::{CONSTANT, SILENT, flag};
+use super::node_op::Flags;
 use super::state::Ring;
 use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
-use crate::event::merge::{merge_into, merge_params};
+use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
 use crate::exec::arena::Role;
 use crate::exec::rings::{AudioRing, EventFifo};
@@ -46,7 +46,7 @@ pub(crate) fn main_input<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     arena
         .slot_mut(dst, frames)
         .copy_from_slice(&inputs[channel as usize][..frames]);
-    flags.set(dst, 0);
+    flags.set(dst, Flags::NONE);
 }
 
 /// [`Op::Delay`](crate::Op::Delay); `src == dst` is the in-place form.
@@ -59,14 +59,14 @@ pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     dst: AudioSlotId,
     frames: usize,
 ) {
-    let src_silent = flags.get(src) & SILENT != 0;
+    let src_silent = flags.get(src).is_silent();
     let out_silent = if src == dst {
         ring.run_in_place(arena.slot_mut(dst, frames), src_silent)
     } else {
         let (s, d) = arena.pair(src, dst, frames);
         ring.run(s, d, src_silent)
     };
-    flags.set(dst, flag(out_silent, out_silent));
+    flags.set(dst, Flags::new(out_silent, out_silent));
 }
 
 /// [`Op::Sum`](crate::Op::Sum) or [`Op::WeightedSum`](crate::Op::WeightedSum) of the slots `list` into `dst`: the left
@@ -75,7 +75,7 @@ pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
 /// addend; an addend's weight is exactly `1.0` unless its lane says otherwise,
 /// and a `1.0` weight is the plain add, no multiply (`crate::gain`).
 ///
-/// An addend flagged [`SILENT`] is skipped whatever its weight: the
+/// An addend flagged silent is skipped whatever its weight: the
 /// accumulator starts at `+0.0` and so is never `-0.0`, and `acc + w * (+0.0)`
 /// is `acc` bit for bit (a finite `w`; every base is finite). A weight of
 /// `0.0` is not skipped by value: `0.0 * NaN` is `NaN`, and the render must
@@ -122,10 +122,10 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     let (mut in_place, mut constant) = (false, true);
     for (k, &s) in list.iter().enumerate() {
         let f = flags.get(s);
-        if f & SILENT != 0 {
+        if f.is_silent() {
             continue;
         }
-        constant &= f & CONSTANT != 0
+        constant &= f.is_constant()
             && !matches!(
                 weights[k],
                 Weight::Ramp { .. } | Weight::Frames(_) | Weight::Fade { .. }
@@ -141,7 +141,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     }
     if live == 0 {
         arena.slot_mut(dst, frames).fill(F::ZERO);
-        flags.set(dst, SILENT | CONSTANT);
+        flags.set(dst, Flags::SILENCE);
         return;
     }
     reqs[m] = (dst, Role::Write(0));
@@ -156,7 +156,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     for (a, &w) in ins[1..live].iter().zip(&live_weights[1..live]) {
         gain::add(out, a, w);
     }
-    flags.set(dst, flag(false, constant));
+    flags.set(dst, Flags::new(false, constant));
 }
 
 /// [`Op::EventDelay`](crate::Op::EventDelay). Returns the events its FIFO refused.
@@ -208,8 +208,11 @@ pub(crate) fn event_merge_op<E: EventSlots + ?Sized>(
     let room = events.capacity().min(room);
     // The param events are never bounded by a node's input capacity: the slot
     // holds every one its sources can write.
-    let lost = merge_params(&pins[..list.len()], params, params.capacity());
-    u64::from(lost) + u64::from(merge_into(&ins[..list.len()], events, room))
+    let lost = merge_params(&pins[..list.len()], params);
+    let cut = merge_walk(&ins[..list.len()], room, |_, e| {
+        events.push(e);
+    });
+    u64::from(lost) + u64::from(cut)
 }
 
 /// [`Op::Output`](crate::Op::Output): slot `src` into `out`, through the channel's alignment
@@ -225,7 +228,7 @@ pub(crate) fn output_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     let s = arena.slot(src, out.len());
     match ring {
         Some(ring) => {
-            ring.run(s, out, flags.get(src) & SILENT != 0);
+            ring.run(s, out, flags.get(src).is_silent());
         }
         None => out.copy_from_slice(s),
     }
@@ -240,5 +243,5 @@ pub(crate) fn capture_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     src: AudioSlotId,
     frames: usize,
 ) {
-    ring.push(arena.slot(src, frames), flags.get(src) & SILENT != 0);
+    ring.push(arena.slot(src, frames), flags.get(src).is_silent());
 }

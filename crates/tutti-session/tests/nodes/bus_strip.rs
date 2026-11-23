@@ -4,7 +4,7 @@
 //! Every figure is analytic: a source writes a constant exactly representable
 //! value, and a fold's gain is the fold's stated rule, not another render's.
 
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
+use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_session::{MainOutput, OutputPort, Session, SessionBuilder, ValueErrorKind};
@@ -77,7 +77,7 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
 /// front left and right, and the other four speakers are silent.
 #[test]
 fn a_stereo_strip_feeds_a_declared_surround_main_output() {
-    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
+    let five_one = tutti_buffers::Bed::Surround51.topology();
     let mut s = offline(Session::builder().main_output_topology(five_one), 6);
     let g = s.graph();
     let src = g.add(Unforkable(Src {

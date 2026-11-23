@@ -4,7 +4,7 @@
 //! The gate lives in the crate that owns the panners: `RtAllocCheck`
 //! is a global allocator, which only a test binary of that crate may do.
 
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, MaxBlock};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelTopology, MaxBlock};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
@@ -173,7 +173,7 @@ fn vbap_every_bed_under_hostile_cells_and_signals_is_allocation_free_finite_and_
         UnitParam::StereoWidth,
     ];
     for bed in Bed::ALL {
-        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed)) else {
+        let Ok(node) = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed.into())) else {
             assert_eq!(bed, Bed::Mono);
             continue;
         };
@@ -431,7 +431,7 @@ fn hrtf_binaural_resampled_set_in_split_blocks_is_allocation_free() {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
         .expect("a bed with speakers to pan between")
 }
 
@@ -534,5 +534,5 @@ fn ambisonic_decoder_process_is_allocation_free() {
 
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

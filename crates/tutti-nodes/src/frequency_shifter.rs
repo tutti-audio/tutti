@@ -1,12 +1,12 @@
 //! [`FrequencyShifterNode`]: single-sideband modulation by a shift in hertz.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, FrequencyShifterBank, FrequencyShifterControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`FrequencyShifterNode`] is made from: its width and its starting shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,8 +104,7 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 
     /// `width` channels in and out, `Moderate`: eight all-passes and two sines per sample.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
-            .expect("a frequency shifter is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a frequency shifter");
         Shape::through(bus).cost(Cost::Moderate)
     }
 
@@ -138,18 +137,10 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 mod tests {
     use super::*;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Latency, Samples, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
-
-    /// A fork starts from the shift last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(FrequencyShifterNode::from(
-            FrequencyShifterConfig::new(2u16).shift(Hz::new(-100.0)),
-        ));
-    }
 
     /// The shape is the width in and out with no latency and a finite tail, and declares the
     /// shift as `Frequency`, which starts as configured.

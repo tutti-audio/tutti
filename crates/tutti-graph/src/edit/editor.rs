@@ -375,8 +375,8 @@ impl<F: Float> Editor<F> {
         let (commands, command_rx) = command_channel();
         let stager = Stager::new(
             cap,
-            Arc::clone(&channels.pool),
-            Arc::clone(&channels.rendered),
+            channels.readings.pool.clone(),
+            channels.readings.rendered.clone(),
         );
         let editor = Self {
             link: Link::new(channels, commands),

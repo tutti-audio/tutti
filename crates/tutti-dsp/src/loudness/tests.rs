@@ -74,7 +74,7 @@ fn a_714s_backs_and_uppers_weigh_one() {
 /// Ambisonics and an unplaced set have no angle to weigh.
 #[test]
 fn ambisonic_and_unplaced_topologies_are_refused() {
-    let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
+    let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap();
     assert_eq!(
         channel_weights(&unplaced),
         Err(ChannelWeightError::Unplaced {

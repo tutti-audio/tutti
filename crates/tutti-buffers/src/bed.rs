@@ -172,11 +172,17 @@ impl Bed {
     }
 
     /// The speakers of the bed in channel order, as a topology.
+    ///
+    /// # Panics
+    ///
+    /// Never: the widest bed is twelve channels, inside [`MAX_CHANNELS`].
     #[must_use]
     pub fn topology(self) -> ChannelTopology {
         let speakers = self.rows().iter().map(|r| r.speaker);
         // The table names no speaker twice (pinned by a test).
-        ChannelTopology::Speakers(crate::Speakers::from_format(speakers))
+        ChannelTopology::Speakers(
+            crate::Speakers::from_format(speakers).expect("a bed fits a topology"),
+        )
     }
 
     /// The channel count.
@@ -566,7 +572,7 @@ mod tests {
         let twice = ChannelTopology::new([FrontLeft, FrontRight, BackLeft, SideLeft]).unwrap();
         assert_eq!(Bed::from_topology(&twice), None);
         assert_eq!(
-            Bed::from_topology(&ChannelTopology::unassigned(ChannelLayout::STEREO)),
+            Bed::from_topology(&ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
             None
         );
         let ambisonic =

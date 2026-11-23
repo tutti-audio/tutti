@@ -1,14 +1,14 @@
 //! [`KarplusStrongNode`]: a plucked string excited by its input.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, KarplusStrongBank, KarplusStrongControls, LowestPitch,
 };
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`KarplusStrongNode`] is made from: its width, the lowest pitch it plays and where its
 /// controls start.
@@ -131,8 +131,7 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
     /// `width` channels in and out, `Moderate`: a ring, an all-pass and a multiply-add per
     /// sample and channel.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a string");
         Shape::through(bus).cost(Cost::Moderate)
     }
 
@@ -184,7 +183,7 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
 mod tests {
     use super::*;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Latency, Samples, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -195,12 +194,6 @@ mod tests {
                 .frequency(Hz::new(frequency))
                 .decay(Seconds::new(decay)),
         )
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node(440.0, 1.0));
     }
 
     /// The shape is the width in and out, with no latency, and declares the pitch and the decay

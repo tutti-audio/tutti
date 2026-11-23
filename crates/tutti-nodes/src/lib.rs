@@ -289,6 +289,8 @@ mod tail_clock;
 // Tests of every kernel node in a graph of `f64`.
 #[cfg(test)]
 mod f64_graph;
+#[cfg(test)]
+mod fork_table;
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
 mod test_support;
@@ -375,21 +377,22 @@ pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
-    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-    CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig,
-    CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet, EqBandConfig, EqBandNode,
-    EqControls, EqKernel, LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet,
-    MIN_CUT_CUTOFF, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet, TiltFilterConfig,
-    TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
+    BellFilterConfig, BellFilterKernel, BellFilterNode, BellFilterSet, CrossoverConfig,
+    CrossoverKernel, CrossoverNode, CrossoverSet, CutFilterConfig, CutFilterKernel, CutFilterNode,
+    CutFilterSet, EqBandConfig, EqBandNode, EqControls, EqKernel, LadderFilterConfig,
+    LadderFilterNode, LadderKernel, LadderSet, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet,
+    TiltFilterConfig, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
-pub use filter::{
-    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
-};
+pub use filter::{GraphicEqConfig, GraphicEqKernel, GraphicEqNode, GraphicEqSet};
 pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::GraphicBands;
+pub use tutti_dsp::{
+    BellFilterControls, CutAlignment, CutFilterControls, GraphicEqControls, MIN_CUT_CUTOFF,
+    TiltFilterControls,
+};
 pub use tutti_dsp::{
     ButterworthOrder, CutResponse, EllipticTolerances, PassbandRipple, StopbandAttenuation,
 };

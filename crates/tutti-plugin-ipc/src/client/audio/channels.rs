@@ -943,10 +943,10 @@ mod tests {
     fn a_control_command_is_stamped_with_the_newest_block_pushed() {
         let (c, _parker) = channels();
         c.note_submitted(5);
-        assert!(c.push_control(ControlCommand::CloseEditor));
+        assert!(c.push_control(ControlCommand::tell(crate::CloseEditor)));
         assert_eq!(c.pop_control().map(|s| s.after), Some(0), "5 is not queued");
         c.note_pushed(5);
-        assert!(c.push_control(ControlCommand::CloseEditor));
+        assert!(c.push_control(ControlCommand::tell(crate::CloseEditor)));
         assert_eq!(c.pop_control().map(|s| s.after), Some(5));
     }
 

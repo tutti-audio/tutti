@@ -9,11 +9,30 @@ use tutti_graph::{MainOutputError, fold_to_width};
 const M: f32 = <f32 as Float>::MINUS_3_DB;
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::default_for(ChannelLayout::from(n))
+    ChannelTopology::default_for(ChannelLayout::from(n)).unwrap()
 }
 
 fn width(n: u16) -> ChannelLayout {
     ChannelLayout::from(n)
+}
+
+/// A destination wider than a topology holds is unassigned channels, so it takes
+/// the source by index: the source's channels first and zero after, never a
+/// matrix, and a source that names no speaker is still refused.
+#[test]
+fn a_destination_wider_than_a_topology_takes_channels_by_index() {
+    let fold = fold_to_width::<f32>(&smpte(6), width(20)).unwrap();
+    assert_eq!(fold.dst_layout(), width(20));
+    let src: Vec<f32> = (1..=6).map(|c| c as f32).collect();
+    let mut out = vec![9.0f32; 20];
+    fold.frame(&src, &mut out);
+    assert_eq!(&out[..6], &src[..]);
+    assert!(out[6..].iter().all(|&s| s == 0.0));
+    let lfe2 = ChannelTopology::new([Speaker::FrontLeft, Speaker::Unknown(5)]).unwrap();
+    assert!(matches!(
+        fold_to_width::<f32>(&lfe2, width(20)),
+        Err(FoldError::Unnamed { .. })
+    ));
 }
 
 /// A channel no speaker names is refused whatever the destination, even one
@@ -40,7 +59,7 @@ fn a_channel_no_speaker_names_is_refused_for_every_destination() {
 /// at four, which `ChannelTopology::default_for` would read as quad.
 #[test]
 fn an_unassigned_source_goes_by_index_and_only_widens() {
-    let four = ChannelTopology::unassigned(ChannelLayout::QUAD);
+    let four = ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap();
     let mut out = [9.0f32; 6];
     fold_to_width::<f32>(&four, width(6))
         .unwrap()
@@ -60,12 +79,9 @@ fn an_unassigned_source_goes_by_index_and_only_widens() {
 #[test]
 fn a_bare_count_in_the_engines_order_places_by_speaker() {
     let mut out = [0.0f32; 2];
-    fold_to_width::<f32>(
-        &ChannelTopology::default_for(ChannelLayout::QUAD),
-        ChannelLayout::STEREO,
-    )
-    .unwrap()
-    .frame(&[1.0, 2.0, 3.0, 4.0], &mut out);
+    fold_to_width::<f32>(&tutti_buffers::Bed::Quad.topology(), ChannelLayout::STEREO)
+        .unwrap()
+        .frame(&[1.0, 2.0, 3.0, 4.0], &mut out);
     assert_eq!(out, [1.0 + M * 3.0, 2.0 + M * 4.0]);
 }
 
