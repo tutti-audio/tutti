@@ -32,16 +32,18 @@
 //! ([`Editor::prune_taps`](crate::Editor::prune_taps)), on the control side.
 //! Dropping the reader last frees the ring on the reader's thread.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::Cell;
 use std::sync::{Arc, Weak};
 
 use crate::{TapAlign, TapId};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, PlanesMut, Pull, Source};
-use tutti_rt::{Bell, ControlDrop, FaultLatch, Listener};
+use tutti_rt::{Bell, ControlDrop, Counter, CounterWriter, FaultLatch, Listener, counter};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
+use super::alive::Alive;
+use crate::compile::ids::AudioSlotId;
 use crate::exec::slots::AudioSlots;
 use tutti_buffers::Float;
 
@@ -93,7 +95,7 @@ pub struct TapWriter<F: Float = f32> {
     next: Frame,
     /// Frames refused, counted per frame (the rings take whole blocks or none:
     /// they are `Refuse` and count nothing), shared with the reader.
-    lost: Arc<AtomicU64>,
+    lost: CounterWriter<Samples>,
     /// Rung after each block written, for a reader that awaits frames.
     bell: Option<Bell>,
     /// The reader's end latch, raised by [`close`](Self::close).
@@ -274,9 +276,9 @@ impl<F: Float> TapWriter<F> {
     }
 
     #[inline]
-    fn count_lost(&self, frames: usize) {
+    fn count_lost(&mut self, frames: usize) {
         if frames > 0 {
-            self.lost.fetch_add(frames as u64, Ordering::Relaxed);
+            self.lost.add(Samples::new(frames));
         }
     }
 }
@@ -290,7 +292,7 @@ impl<F: Float> TapWriter<F> {
 pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
     tap: &mut TapWriter<F>,
     arena: &A,
-    srcs: &[u32],
+    srcs: &[AudioSlotId],
     start: Frame,
     frames: usize,
 ) {
@@ -310,8 +312,7 @@ pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
         );
     }
     if take < frames {
-        tap.lost
-            .fetch_add((frames - take) as u64, Ordering::Relaxed);
+        tap.lost.add(Samples::new(frames - take));
     }
     if take > 0 {
         tap.ring();
@@ -328,7 +329,9 @@ pub struct TapReader<F: Float = f32> {
     /// The tap's id in a topology; `None` for a reader outside any.
     id: Option<TapId>,
     lanes: Vec<RingReader<F>>,
-    lost: Arc<AtomicU64>,
+    lost: Counter<Samples>,
+    /// What `lost` read at the last [`take_lost`](Self::take_lost).
+    lost_seen: Cell<Samples>,
     /// The writer's [`Run`]s not yet read through.
     runs: RingReader<Run>,
     /// The graph frame of the next frame to hand out, while `left` is not
@@ -336,8 +339,8 @@ pub struct TapReader<F: Float = f32> {
     at: Frame,
     /// Frames of the current run not yet handed out.
     left: usize,
-    /// The editor holds a `Weak` of this: when it dies, the reader is gone.
-    alive: Arc<()>,
+    /// The editor watches this: when it dies, the reader is gone.
+    alive: Alive,
     /// The wait side of the bell the writer rings; `None` for a tap opened
     /// without one.
     listener: Option<Listener>,
@@ -400,7 +403,7 @@ impl<F: Float> TapReader<F> {
             Some((bell, listener)) => (Some(bell), Some(listener)),
             None => (None, None),
         };
-        let lost = Arc::new(AtomicU64::new(0));
+        let (lost, lost_reader) = counter::<Samples>();
         let end = Arc::new(TapEnd::new(bell.clone()));
         let (run_prod, run_cons) = ring::<Run>(capacity.get().clamp(1, MAX_RUNS), Overflow::Refuse);
         let (cons, prods): (Vec<_>, Vec<_>) = (0..width)
@@ -411,11 +414,12 @@ impl<F: Float> TapReader<F> {
             _control: ControlDrop::new(),
             id,
             lanes: cons,
-            lost: Arc::clone(&lost),
+            lost: lost_reader,
+            lost_seen: Cell::new(Samples::ZERO),
             runs: run_cons,
             at: Frame::ZERO,
             left: 0,
-            alive: Arc::new(()),
+            alive: Alive::default(),
             listener,
             end: Arc::clone(&end),
         };
@@ -448,7 +452,7 @@ impl<F: Float> TapReader<F> {
     /// is zero once the reader is dropped.
     #[must_use]
     pub fn watch(&self) -> Weak<()> {
-        Arc::downgrade(&self.alive)
+        self.alive.watch()
     }
 
     /// The latch the editor raises when the tap leaves the plan because every
@@ -632,7 +636,10 @@ impl<F: Float> TapReader<F> {
     /// Frames the executor could not push since the last call, and clears the
     /// count: nonzero is a gap in what was read.
     pub fn take_lost(&self) -> Samples {
-        Samples::new(usize::try_from(self.lost.swap(0, Ordering::Relaxed)).unwrap_or(usize::MAX))
+        let mut seen = self.lost_seen.get();
+        let lost = self.lost.take_since(&mut seen);
+        self.lost_seen.set(seen);
+        lost
     }
 }
 
@@ -697,6 +704,7 @@ impl<F: Float> Source for TapReader<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
     use crate::exec::arena::Arena;
 
     /// **A closed writer ends its reader**: the reader drains what was
@@ -833,9 +841,17 @@ mod tests {
         let mut arena = Arena::<f64>::new(1, FRAMES);
         // Not representable in `f32`: a narrowing would be visible.
         let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
-        arena.slot_mut(0, FRAMES).copy_from_slice(&block);
+        arena
+            .slot_mut(AudioSlotId::new(0), FRAMES)
+            .copy_from_slice(&block);
         let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples::new(1024));
-        tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
+        tap_op::<f64, _>(
+            &mut writer,
+            &arena,
+            &[AudioSlotId::new(0)],
+            Frame::ZERO,
+            FRAMES,
+        );
         let mut out = vec![0.0f64; FRAMES];
         assert_eq!(
             reader

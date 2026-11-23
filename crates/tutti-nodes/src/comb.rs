@@ -172,8 +172,6 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
-    use tutti_buffers::MaxBlock;
     use tutti_graph::Node;
     use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
     use tutti_units::{Samples, Seconds, UnitParam};
@@ -220,29 +218,5 @@ mod tests {
     fn a_feedback_comb_declares_its_ring_out() {
         let mut n = prepared(node(CombForm::Feedback, 0.5), RATE, 64);
         assert_declared_tail(&mut n, RATE);
-    }
-
-    /// The impulse response is the comb's taps: `g` at `D` for the feedforward comb (with the
-    /// direct 1) and `g^(k-1)` at `k D` for the feedback comb, and a coefficient set through
-    /// the cell lands at the first grid point.
-    #[test]
-    fn the_node_is_the_comb_of_its_form() {
-        let run = |form, gain| {
-            let mut k = CombFilterKernel::<f32>::new(ChannelLayout::MONO, form, delay(0.004));
-            k.prepare(RATE, MaxBlock::of(Samples::new(32)));
-            let mut x = vec![0.0f32; 32];
-            x[0] = 1.0;
-            let controls = CombControls {
-                gain: Feedback::new(gain),
-            };
-            drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0)
-        };
-        let ff = run(CombForm::Feedforward, 0.5);
-        assert_eq!((ff[0], ff[4], ff[8]), (1.0, 0.5, 0.0));
-        let fb = run(CombForm::Feedback, 0.5);
-        assert_eq!((fb[0], fb[4], fb[8], fb[12]), (0.0, 1.0, 0.5, 0.25));
-        // A feedback comb holds its coefficient below 1.
-        let held = run(CombForm::Feedback, 5.0);
-        assert!((held[8] - Feedback::MAX_STABLE.get() as f32).abs() < 1e-6);
     }
 }

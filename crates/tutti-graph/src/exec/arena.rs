@@ -33,6 +33,8 @@ use std::mem::size_of;
 
 use tutti_buffers::Float;
 
+use crate::compile::ids::{AudioSlotId, Id};
+
 /// `f32` samples a line holds: 16, filling its 64 bytes.
 pub(crate) const LANES: usize = 16;
 
@@ -66,10 +68,10 @@ pub(crate) enum Role {
 /// (a debug build names the order earlier, in a `debug_assert!`). Never a
 /// wrong or aliased buffer.
 #[inline]
-pub(crate) fn borrow_sorted<'a, T>(
+pub(crate) fn borrow_sorted<'a, T, S: Id>(
     items: &'a mut [T],
     stride: usize,
-    reqs: &[(u32, Role)],
+    reqs: &[(S, Role)],
     mut read: impl FnMut(u8, &'a [T]),
     mut write: impl FnMut(u8, &'a mut [T]),
 ) {
@@ -81,9 +83,9 @@ pub(crate) fn borrow_sorted<'a, T>(
     let mut base = 0usize;
     let mut i = 0;
     while i < reqs.len() {
-        let slot = reqs[i].0 as usize;
+        let slot = reqs[i].0.index();
         let mut j = i + 1;
-        while j < reqs.len() && reqs[j].0 as usize == slot {
+        while j < reqs.len() && reqs[j].0.index() == slot {
             j += 1;
         }
         let tail = std::mem::take(&mut rest);
@@ -139,17 +141,17 @@ impl<F: Float> Arena<F> {
 
     /// Slot `s`'s first `frames` samples.
     #[inline]
-    pub(crate) fn slot(&self, s: u32, frames: usize) -> &[F] {
+    pub(crate) fn slot(&self, s: AudioSlotId, frames: usize) -> &[F] {
         // `[start..][..stride]` rather than `[start..end]`: two length checks
         // and no `start <= end` one, on the hottest indexing in the executor.
-        let lines = &self.lines[s as usize * self.stride..][..self.stride];
+        let lines = &self.lines[s.index() * self.stride..][..self.stride];
         &bytemuck::cast_slice::<Line, F>(lines)[..frames]
     }
 
     /// Slot `s`'s first `frames` samples, mutably.
     #[inline]
-    pub(crate) fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
-        let lines = &mut self.lines[s as usize * self.stride..][..self.stride];
+    pub(crate) fn slot_mut(&mut self, s: AudioSlotId, frames: usize) -> &mut [F] {
+        let lines = &mut self.lines[s.index() * self.stride..][..self.stride];
         &mut bytemuck::cast_slice_mut::<Line, F>(lines)[..frames]
     }
 
@@ -176,7 +178,7 @@ impl<F: Float> Arena<F> {
         let mut outs: [&mut [F]; O] = std::array::from_fn(|_| &mut [][..]);
         let entries = d.slots.iter().zip(&d.role).zip(reads.iter_mut());
         for ((&slot, &role), read) in entries.take(usize::from(d.count)) {
-            let slot = slot as usize;
+            let slot = slot.index();
             let skip = slot.checked_sub(base).expect("direct slots are sorted");
             let (_, tail) = std::mem::take(&mut rest).split_at_mut(skip * st);
             let (cur, after) = tail.split_at_mut(st);
@@ -206,10 +208,15 @@ impl<F: Float> Arena<F> {
 
     /// `src` for reading and `dst` for writing, at once. They must differ.
     #[inline]
-    pub(crate) fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
+    pub(crate) fn pair(
+        &mut self,
+        src: AudioSlotId,
+        dst: AudioSlotId,
+        frames: usize,
+    ) -> (&[F], &mut [F]) {
         assert_ne!(src, dst, "pair() of one slot");
         let st = self.stride;
-        let (lo, hi) = (src.min(dst) as usize, src.max(dst) as usize);
+        let (lo, hi) = (src.min(dst).index(), src.max(dst).index());
         let (a, b) = self.lines.split_at_mut(hi * st);
         let low = &mut a[lo * st..][..st];
         let high = &mut b[..st];
@@ -243,12 +250,10 @@ impl<F: Float> Arena<F> {
     }
 
     /// Copy slot `src` over slot `dst` (whole stride). Never allocates.
-    pub(crate) fn copy_slot(&mut self, src: u32, dst: u32) {
+    pub(crate) fn copy_slot(&mut self, src: AudioSlotId, dst: AudioSlotId) {
         let st = self.stride;
-        self.lines.copy_within(
-            src as usize * st..(src as usize + 1) * st,
-            dst as usize * st,
-        );
+        self.lines
+            .copy_within(src.index() * st..(src.index() + 1) * st, dst.index() * st);
     }
 
     /// Hand the sorted `reqs` to [`borrow_sorted`], as slices of
@@ -257,7 +262,7 @@ impl<F: Float> Arena<F> {
     pub(crate) fn borrow<'a>(
         &'a mut self,
         frames: usize,
-        reqs: &[(u32, Role)],
+        reqs: &[(AudioSlotId, Role)],
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     ) {
@@ -286,6 +291,10 @@ impl<F: Float> Arena<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
+    fn slot(s: u32) -> AudioSlotId {
+        AudioSlotId::new(s)
+    }
     use crate::node::MAX_PORTS;
 
     /// Every slot starts on a 64-byte boundary, whatever `max_block` is.
@@ -294,8 +303,8 @@ mod tests {
         for max_block in [1, 7, 64, 100, 1000] {
             let mut a = Arena::<f32>::new(5, max_block);
             assert_eq!(a.base() as usize % 64, 0);
-            for s in 0..5 {
-                assert_eq!(a.slot_mut(s, 1).as_ptr() as usize % 64, 0, "slot {s}");
+            for s in 0..5u32 {
+                assert_eq!(a.slot_mut(slot(s), 1).as_ptr() as usize % 64, 0, "slot {s}");
                 assert!(a.stride * LANES >= max_block);
             }
         }
@@ -309,8 +318,8 @@ mod tests {
             let mut a = Arena::<f64>::new(5, max_block);
             assert_eq!(a.base() as usize % 64, 0);
             assert!(a.stride * (size_of::<Line>() / size_of::<f64>()) >= max_block);
-            for s in 0..5 {
-                let slot = a.slot_mut(s, max_block);
+            for s in 0..5u32 {
+                let slot = a.slot_mut(slot(s), max_block);
                 assert_eq!(slot.as_ptr() as usize % 64, 0, "slot {s}");
                 assert_eq!(slot.len(), max_block);
             }
@@ -323,14 +332,14 @@ mod tests {
     fn borrow_hands_each_port_its_slot() {
         let mut a = Arena::<f32>::new(6, 16);
         for s in 0..6u32 {
-            a.slot_mut(s, 16).fill(s as f32);
+            a.slot_mut(slot(s), 16).fill(s as f32);
         }
         let mut reqs = [
-            (4, Role::Read(0)),
-            (1, Role::Read(1)),
-            (4, Role::Read(2)),
-            (3, Role::Write(0)),
-            (5, Role::Write(1)),
+            (slot(4), Role::Read(0)),
+            (slot(1), Role::Read(1)),
+            (slot(4), Role::Read(2)),
+            (slot(3), Role::Write(0)),
+            (slot(5), Role::Write(1)),
         ];
         let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
@@ -343,7 +352,7 @@ mod tests {
         assert_eq!(outs[0][0], 3.0);
         assert_eq!(outs[1][0], 5.0);
         outs[0][0] = 9.0;
-        assert_eq!(a.slot(3, 1)[0], 9.0);
+        assert_eq!(a.slot(slot(3), 1)[0], 9.0);
     }
 
     /// A slot requested for writing and reading in one op is refused, never
@@ -352,7 +361,7 @@ mod tests {
     #[should_panic(expected = "written and also borrowed")]
     fn borrow_refuses_a_write_that_aliases() {
         let mut a = Arena::<f32>::new(3, 16);
-        let reqs = [(2, Role::Read(0)), (2, Role::Write(0))];
+        let reqs = [(slot(2), Role::Read(0)), (slot(2), Role::Write(0))];
         let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
         a.borrow(16, &reqs, &mut ins, &mut outs);
@@ -364,7 +373,7 @@ mod tests {
     #[should_panic(expected = "sorted")]
     fn borrow_refuses_unsorted_requests() {
         let mut a = Arena::<f32>::new(4, 16);
-        let reqs = [(3, Role::Write(0)), (1, Role::Read(0))];
+        let reqs = [(slot(3), Role::Write(0)), (slot(1), Role::Read(0))];
         let mut ins: [&[f32]; MAX_PORTS] = [&[]; MAX_PORTS];
         let mut outs: [&mut [f32]; MAX_PORTS] = std::array::from_fn(|_| &mut [][..]);
         a.borrow(16, &reqs, &mut ins, &mut outs);

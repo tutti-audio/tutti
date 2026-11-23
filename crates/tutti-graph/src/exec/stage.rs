@@ -21,22 +21,21 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
-use crate::compile::ids::{DelayId, Id, PlanUnitId};
+use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
-use tutti_rt::CappedVec;
+use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
 
-use super::commit::Commit;
+use super::commit::{Commit, Participants, Rendered};
 use super::node_op::{CONSTANT, SILENT};
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
-use crate::compile::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
+use crate::compile::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -123,16 +122,16 @@ pub(super) struct Staged<F: Float = f32> {
     pub(super) closers: Vec<Closer>,
     /// Units (plan indices) that may hold a crossfade queued behind a
     /// running one.
-    pub(super) queued: Vec<u32>,
+    pub(super) queued: Vec<PlanUnitId>,
     /// The store index and the lane state of each unit whose mix a plan
     /// drives and that may have none.
-    pub(super) drives: Vec<(u32, ParamState<F>)>,
+    pub(super) drives: Vec<(UnitIdx, ParamState<F>)>,
     pub(super) spare_rings: CappedVec<Ring<F>>,
     /// Tables of owed closes merged away, to be freed on the control side.
     pub(super) spare_tables: CappedVec<Held>,
     pub(super) spare_drives: CappedVec<ParamState<F>>,
     /// The executor's chase buffer from this plan on.
-    pub(super) chase: Vec<Event>,
+    pub(super) chase: CappedVec<Event>,
     /// A store with room for the plan's units, when the executor's has none.
     pub(super) store: Option<Vec<Option<Unit<F>>>>,
     /// The store length the plan needs.
@@ -203,9 +202,9 @@ struct Cx<'a> {
 
 impl Cx<'_> {
     /// The plan unit index of the input `at`, when the plan has it.
-    fn sink_of(&self, at: EventInputPort) -> Option<u32> {
+    fn sink_of(&self, at: EventInputPort) -> Option<PlanUnitId> {
         let u = self.plan.unit_id(at.node)?;
-        (at.port < self.plan.units[u].shape.event_in).then_some(u.get())
+        (at.port < self.plan.units[u].shape.event_in).then_some(u)
     }
 
     /// Whether a unit of the old plan comes back after a re-prepare: it is
@@ -225,9 +224,9 @@ impl Cx<'_> {
 pub(crate) struct Stager {
     event_cap: usize,
     /// Pool participants the executor runs on (`Executor::set_pool`).
-    pool: Arc<AtomicUsize>,
+    pool: Gauge<Participants>,
     /// Blocks the executor has rendered (`Executor::render_applied`).
-    rendered: Arc<AtomicU64>,
+    rendered: Gauge<Rendered>,
     /// The capacity of each event delay's FIFO, by key.
     fifos: BTreeMap<DelayKey, usize>,
     /// The same for event feedback.
@@ -272,7 +271,11 @@ fn fit_fifo(from: Option<(u32, usize)>, want: usize, rate: usize) -> (RingFrom, 
 }
 
 impl Stager {
-    pub(crate) fn new(event_cap: usize, pool: Arc<AtomicUsize>, rendered: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(
+        event_cap: usize,
+        pool: Gauge<Participants>,
+        rendered: Gauge<Rendered>,
+    ) -> Self {
         Self {
             event_cap,
             pool,
@@ -309,7 +312,7 @@ impl Stager {
         if self.shells.is_empty() || acked < self.shells_seq {
             return;
         }
-        let now = self.rendered.load(Ordering::Acquire);
+        let now = self.rendered.get().0.get();
         match self.shells_seen {
             None => self.shells_seen = Some(now),
             Some(seen) if now >= seen + 2 => {
@@ -354,11 +357,11 @@ impl Stager {
         let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
         let slot_capacity =
-            |i: usize| plan.event_slot_capacity.as_slice()[i].events(cx.cap) + sizes.extra[i];
+            |i: EventSlotId| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
         let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store_len.max(c.delta.store_len as usize);
-        let participants = self.pool.load(Ordering::Acquire);
+        let participants = self.pool.get().0;
         let par = par_for(
             &plan,
             participants,
@@ -373,7 +376,9 @@ impl Stager {
                 v[0] = SILENT | CONSTANT;
                 v
             },
-            events: (0..plan.event_slot_capacity.len())
+            events: plan
+                .event_slot_capacity
+                .ids()
                 .map(|i| {
                     let params = if param_slots[i] { slot_capacity(i) } else { 0 };
                     EventSlot::with_capacity(slot_capacity(i), params)
@@ -387,8 +392,8 @@ impl Stager {
             meters: outlets.meters,
             lanes,
             inject,
-            has_inject: vec![false; plan.units.len()],
-            has_due: vec![false; plan.units.len()],
+            has_inject: Table::filled(plan.units.len(), false),
+            has_due: Table::filled(plan.units.len(), false),
             overlay,
             par: Some(par),
         };
@@ -437,7 +442,7 @@ impl Stager {
             drives,
             spare_rings: CappedVec::with_capacity(moved),
             spare_tables: CappedVec::with_capacity(tables),
-            chase: Vec::with_capacity(wanted),
+            chase: CappedVec::with_capacity(wanted),
             store,
             store_len,
         }));
@@ -674,7 +679,7 @@ impl Stager {
     /// buffer for everything that can flow into it.
     fn flush<F: Float>(&self, c: &Commit<F>, cx: &Cx<'_>, closers: Vec<Closer>) -> Flush {
         let plan = cx.plan;
-        let mut rooms: BTreeMap<(u32, u16), Room> = BTreeMap::new();
+        let mut rooms: BTreeMap<(PlanUnitId, u16), Room> = BTreeMap::new();
         // What replaced nodes wrote for their successors.
         for (old_p, new_p) in &c.delta.replace {
             let chase = cx
@@ -765,16 +770,16 @@ impl Stager {
         // wrote for the unit that waits: delivered when the fade ends, into
         // the unit's first event input.
         let mut queued = Vec::new();
-        for (u, unit) in plan.units.iter().enumerate() {
+        for (u, unit) in plan.units.iter_enumerated() {
             let Some(&n) = self.chase.get(&unit.key) else {
                 continue;
             };
             if !self.fading.contains_key(&unit.key) {
                 continue;
             }
-            queued.push(u as u32);
+            queued.push(u);
             if unit.shape.event_in > 0 {
-                let r = rooms.entry((u as u32, 0)).or_default();
+                let r = rooms.entry((u, 0)).or_default();
                 r.room = r.room.max(n);
             }
         }
@@ -858,7 +863,7 @@ impl Stager {
                 let drain = if owed > 0 { widest.max(cx.cap) } else { 0 };
                 let events = r.flush + r.room + drain;
                 shells.push(Shell {
-                    key: cx.plan.units[PlanUnitId::new(unit)].key,
+                    key: cx.plan.units[unit].key,
                     port,
                     flush: r.flush + drain,
                     room: r.room,
@@ -867,11 +872,11 @@ impl Stager {
                 Inject {
                     unit,
                     port,
-                    events: Vec::with_capacity(events),
-                    merged: Vec::with_capacity(events + widest),
+                    events: CappedVec::with_capacity(events),
+                    merged: CappedVec::with_capacity(events + widest),
                     live: false,
                     closed_from: 0,
-                    owed: Vec::with_capacity(owed),
+                    owed: CappedVec::with_capacity(owed),
                 }
             })
             .collect();
@@ -906,17 +911,17 @@ impl Stager {
 
 /// The sinks a commit can flush to, and what each is flushed from.
 struct Flush {
-    rooms: BTreeMap<(u32, u16), Room>,
+    rooms: BTreeMap<(PlanUnitId, u16), Room>,
     gone_delays: Vec<Vanished>,
     gone_feedback: Vec<Vanished>,
     closers: Vec<Closer>,
-    queued: Vec<u32>,
+    queued: Vec<PlanUnitId>,
 }
 
 /// The sizes a plan's slots and buffers are built to.
 struct Sizes {
     /// Per event slot, what a FIFO carried past its new bound can add.
-    extra: Vec<usize>,
+    extra: Table<EventSlotId, usize>,
     /// The widest event slot.
     widest: usize,
     extra_total: usize,
@@ -930,8 +935,10 @@ impl Sizes {
     fn of(cx: &Cx<'_>, rings: &FifoPlan, feedback: &FifoPlan, flush: &Flush) -> Self {
         let plan = cx.plan;
         let extra = widen(cx, &rings.extra, &feedback.extra);
-        let widest = (0..plan.event_slot_capacity.len())
-            .map(|i| plan.event_slot_capacity.as_slice()[i].events(cx.cap) + extra[i])
+        let widest = plan
+            .event_slot_capacity
+            .iter_enumerated()
+            .map(|(i, cap)| cap.events(cx.cap) + extra[i])
             .max()
             .unwrap_or(0);
         let drained = flush
@@ -1093,13 +1100,13 @@ fn drives<F: Float>(
     c: &Commit<F>,
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
-) -> Vec<(u32, ParamState<F>)> {
+) -> Vec<(UnitIdx, ParamState<F>)> {
     let driven_of = |p: &Plan, rec: &crate::compile::plan::NodeRec| {
         p.param_ports[rec.params.range()]
             .last()
             .is_some_and(ParamPortOp::is_mix)
     };
-    let old_driven: BTreeSet<u32> = cx
+    let old_driven: BTreeSet<UnitIdx> = cx
         .old
         .map(|p| {
             p.nodes
@@ -1117,7 +1124,7 @@ fn drives<F: Float>(
         .iter()
         .filter(|r| driven_of(cx.plan, r))
         .filter_map(|r| {
-            let key = cx.plan.units[PlanUnitId::new(r.unit)].key;
+            let key = cx.plan.units[r.unit].key;
             (placed.contains(&key) || !old_driven.contains(&r.store))
                 .then(|| mix_lane(key).map(|lane| (r.store, lane)))
                 .flatten()
@@ -1130,32 +1137,31 @@ fn drives<F: Float>(
 /// a feedback slot of one, or a delay's or a merge's output with such a slot
 /// among its inputs. Only these slots reserve room for them. A slot the
 /// colouring shares among values takes the union over the plan.
-fn param_slots(plan: &Plan) -> Vec<bool> {
-    let mut has = vec![false; plan.event_slot_capacity.len()];
-    for spec in &plan.event_feedback {
+fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
+    let mut has = Table::filled(plan.event_slot_capacity.len(), false);
+    for (f, spec) in plan.event_feedback.iter_enumerated() {
         if let FeedbackKey::Event { from, .. } = spec.key {
-            has[spec.slot as usize] |= plan.event_port_params(from);
+            has[f.slot()] |= plan.event_port_params(from);
         }
     }
     // Ops run in topological order, so a merge comes after what feeds it.
     for op in &plan.ops {
         match *op {
             Op::Node { unit, .. } if plan.units[PlanUnitId::new(unit)].shape.param_events => {
-                let rec = &plan.nodes.recs[unit as usize];
-                let [_, _, _, eout] = rec.ports(&plan.nodes.slots);
-                for &s in eout {
-                    has[s as usize] = true;
+                let rec = &plan.nodes.recs[PlanUnitId::new(unit)];
+                for &s in rec.ports(&plan.nodes).eout {
+                    has[s] = true;
                 }
             }
             Op::EventDelay { src, dst, .. } => {
-                let from = has[src as usize];
-                has[dst as usize] |= from;
+                let from = has[EventSlotId::new(src)];
+                has[EventSlotId::new(dst)] |= from;
             }
             Op::EventMerge { srcs, dst, .. } => {
                 let any = plan.event_list[srcs.range()]
                     .iter()
-                    .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s.index()]);
-                has[dst as usize] |= any;
+                    .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s]);
+                has[EventSlotId::new(dst)] |= any;
             }
             _ => {}
         }
@@ -1166,26 +1172,26 @@ fn param_slots(plan: &Plan) -> Vec<bool> {
 /// A FIFO carried across a commit that lowered its bound can hold more than
 /// the bound its output slot was priced at: each slot is widened by the most
 /// that can be, and so is every merge downstream of it.
-fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Vec<usize> {
+fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventSlotId, usize> {
     let plan = cx.plan;
-    let mut extra = vec![0usize; plan.event_slot_capacity.len()];
-    for (spec, &x) in plan.event_feedback.iter().zip(efb_extra) {
-        let e = &mut extra[spec.slot as usize];
+    let mut extra = Table::filled(plan.event_slot_capacity.len(), 0usize);
+    for (f, &x) in plan.event_feedback.ids().zip(efb_extra) {
+        let e = &mut extra[f.slot()];
         *e = (*e).max(x);
     }
     // Ops run in topological order, so a merge comes after whatever feeds it.
     for op in &plan.ops {
         match *op {
             Op::EventDelay { delay, dst, .. } => {
-                let e = &mut extra[dst as usize];
+                let e = &mut extra[EventSlotId::new(dst)];
                 *e = (*e).max(ring_extra[delay as usize]);
             }
             Op::EventMerge { srcs, dst, .. } => {
                 let sum = plan.event_list[srcs.range()]
                     .iter()
-                    .map(|&s| extra[s.index()])
+                    .map(|&s| extra[s])
                     .sum::<usize>();
-                let e = &mut extra[dst as usize];
+                let e = &mut extra[EventSlotId::new(dst)];
                 *e = (*e).max(sum);
             }
             _ => {}
@@ -1209,7 +1215,7 @@ fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
         replaced: CappedVec::with_capacity(replaces),
         chased: CappedVec::with_capacity(replaces),
         held_refused: CappedVec::with_capacity(replaces),
-        chase_events: Vec::new(),
+        chase_events: CappedVec::default(),
     };
     c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.incoming.len());
 }

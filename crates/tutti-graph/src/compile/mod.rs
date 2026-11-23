@@ -4,7 +4,7 @@
 //! the units declared, and the previous plan (for placements, and for the
 //! output time an old main output's channels were heard at). The passes, in order:
 //!
-//! 1. **Check** every node's shape against its spec — widths, latency and
+//! 1. **Check** (`shapes`) every node's shape against its spec — widths, latency and
 //!    tail must all agree — and every event edge's ports against the shapes.
 //!    The shape is what the unit says about itself and the spec is what the
 //!    value says; if they disagree, one of them is stale, and compiling
@@ -12,13 +12,13 @@
 //!    (`crate::latency_plan`) disagree with the plan. Every event
 //!    edge marked with a required resolution is checked against its sink's
 //!    declared `Shape::event_resolution`.
-//! 2. **SCC** ([`order::scc`]) over direct audio + event dependencies. A cycle
+//! 2. **SCC** (`schedule`, [`order::scc`]) over direct audio + event dependencies. A cycle
 //!    not broken by a feedback edge is [`CompileError::Cycle`], naming the
 //!    edges. A feedback edge becomes a read of a slot the executor fills from
 //!    the edge's own delay state before the block, and a `Capture` op
 //!    that feeds the delay, so the op DAG stays acyclic.
-//! 3. **Order** ([`order::kahn`]) — one deterministic topological sort.
-//! 4. **Latency solve** — `arrival = max(departures)`, `departure = arrival +
+//! 3. **Order** (`schedule`, [`order::kahn`]) — one deterministic topological sort.
+//! 4. **Latency solve** (`timing`) — `arrival = max(departures)`, `departure = arrival +
 //!    own`: `crate::delays`' solve, over the spec (its
 //!    `LatencyGraph` impl lists event and param sources). **Event and param
 //!    edges count toward arrival**, and **a `PortSource::MainInput` input is a
@@ -53,7 +53,10 @@ pub(crate) mod main_output;
 pub(crate) mod order;
 pub(crate) mod plan;
 pub(crate) mod preroll;
+mod schedule;
+mod shapes;
 pub(crate) mod tail;
+mod timing;
 pub(crate) mod verify;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,7 +69,7 @@ use tutti_units::{Latency, Samples, Tail};
 
 use crate::compile::ids::{
     AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
-    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
+    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
 };
 use crate::compile::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
@@ -476,247 +479,15 @@ pub fn compile(
     prev: Option<&Plan>,
 ) -> Result<(Plan, Delta), CompileError> {
     let topology = graph.topology();
-    let keys: Table<PlanUnitId, NodeKey> = topology.nodes.keys().copied().collect();
-    let dense: BTreeMap<NodeKey, PlanUnitId> =
-        keys.iter_enumerated().map(|(n, &k)| (k, n)).collect();
-
-    // ---- 1. shapes against the value -------------------------------------
-    let mut node_shapes: Table<PlanUnitId, Shape> = Table::default();
-    for (&key, spec) in &topology.nodes {
-        let shape = *shapes
-            .get(&key)
-            .ok_or(CompileError::MissingShape { node: key })?;
-        if (spec.inputs, spec.outputs) != (shape.audio_in(), shape.audio_out()) {
-            return Err(CompileError::WidthMismatch {
-                node: key,
-                declared: (spec.inputs, spec.outputs),
-                shape: (shape.audio_in(), shape.audio_out()),
-            });
-        }
-        if spec.latency != shape.latency.samples() {
-            return Err(CompileError::LatencyMismatch {
-                node: key,
-                declared: spec.latency,
-                shape: shape.latency,
-            });
-        }
-        if spec.tail != shape.tail {
-            return Err(CompileError::TailMismatch {
-                node: key,
-                declared: spec.tail,
-                shape: shape.tail,
-            });
-        }
-        for count in [
-            shape.audio_in().count() as usize,
-            shape.audio_out().count() as usize,
-            shape.event_in as usize,
-            shape.event_out as usize,
-        ] {
-            if count > MAX_PORTS {
-                return Err(CompileError::TooManyPorts { node: key, count });
-            }
-        }
-        node_shapes.push(shape);
-    }
-    for (&at, sources) in graph.events() {
-        if at.port >= node_shapes[dense[&at.node]].event_in {
-            return Err(CompileError::EventPortOutOfRange { at, from: None });
-        }
-        for e in sources {
-            let from = e.from();
-            if from.port >= node_shapes[dense[&from.node]].event_out {
-                return Err(CompileError::EventPortOutOfRange {
-                    at,
-                    from: Some(from),
-                });
-            }
-        }
-    }
-
-    // Params: each is declared by its node, and each source is an output of
-    // its own.
-    for (&at, &from) in graph.params() {
-        if at.param != NodeMix::ADDR
-            && node_shapes[dense[&at.node]]
-                .params
-                .index_of(at.param)
-                .is_none()
-        {
-            return Err(CompileError::UnknownParam { at });
-        }
-        if from.port >= node_shapes[dense[&from.node]].event_out {
-            return Err(CompileError::ParamSourceOutOfRange { at, from });
-        }
-    }
-    // Edge gains: each driving source is an output of its node.
-    for (&id, gain) in graph.gains() {
-        if let Some(from) = gain.source
-            && from.port >= node_shapes[dense[&from.node]].event_out
-        {
-            return Err(CompileError::GainSourceOutOfRange {
-                sink: id.sink,
-                from,
-            });
-        }
-    }
-
-    // Resolution: a marked edge's sink must honour what it requires (see
-    // `GraphSpec::require_resolution` for the rule, and why only marked edges).
-    for (&(at, from), &required) in graph.required_resolution() {
-        let sink = node_shapes[dense[&at.node]].event_resolution;
-        if !sink.satisfies(required) {
-            return Err(CompileError::ResolutionTooCoarse {
-                at,
-                from,
-                required,
-                sink,
-            });
-        }
-    }
-
-    // Feedback delays: at least one block, or a read would need the future.
-    let max_block = prepare.max_block().samples();
-    for (&at, e) in topology
-        .edges
-        .iter()
-        .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
-    {
-        if let Edge::Feedback(f) = *e
-            && f.delay < max_block
-        {
-            return Err(CompileError::FeedbackTooShort {
-                edge: CycleEdge::Audio(at),
-                delay: f.delay,
-                max_block,
-            });
-        }
-    }
-    for (&at, sources) in graph.events() {
-        for e in sources {
-            if let EventEdge::Feedback { from, delay } = *e
-                && delay < max_block
-            {
-                return Err(CompileError::FeedbackTooShort {
-                    edge: CycleEdge::Event { at, from },
-                    delay,
-                    max_block,
-                });
-            }
-        }
-    }
-
-    // ---- 2. cycles --------------------------------------------------------
-    // Direct dependencies, with multiplicity (for Kahn) and labelled (for the
-    // error).
-    // The cycle search runs over plain positions: `order`'s graphs are
-    // generic over `usize`.
-    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); keys.len()];
-    let mut labelled: Vec<(usize, usize, CycleEdge)> = Vec::new();
-    for (&at, edge) in topology
-        .edges
-        .iter()
-        .flat_map(|(at, es)| es.iter().map(move |e| (at, e)))
-    {
-        if let Edge::Direct(PortSource::Node(p)) = *edge {
-            let (s, d) = (dense[&p.node].index(), dense[&at.node].index());
-            preds[d].push(s);
-            labelled.push((s, d, CycleEdge::Audio(at)));
-        }
-    }
-    for (&at, sources) in graph.events() {
-        for e in sources {
-            if let EventEdge::Direct(from) = *e {
-                let (s, d) = (dense[&from.node].index(), dense[&at.node].index());
-                preds[d].push(s);
-                labelled.push((s, d, CycleEdge::Event { at, from }));
-            }
-        }
-    }
-    for (&at, &from) in graph.params() {
-        let (src, d) = (dense[&from.node].index(), dense[&at.node].index());
-        preds[d].push(src);
-        labelled.push((src, d, CycleEdge::Param { at, from }));
-    }
-    // A lane that drives the gain of an edge into a node's port runs before
-    // the sum at that port, so before the node. (One into an output channel
-    // feeds nothing a node reads.)
-    for (&id, gain) in graph.gains() {
-        if let (PortSink::Port(at), Some(from)) = (id.sink, gain.source) {
-            let (src, d) = (dense[&from.node].index(), dense[&at.node].index());
-            preds[d].push(src);
-            labelled.push((src, d, CycleEdge::Gain { at, from }));
-        }
-    }
-    let mut succ: Vec<Vec<usize>> = vec![Vec::new(); keys.len()];
-    for (d, ps) in preds.iter().enumerate() {
-        for &s in ps {
-            succ[s].push(d);
-        }
-    }
-    let comp = order::scc(&succ);
-    let mut comp_size = vec![0usize; keys.len()];
-    for &c in &comp {
-        comp_size[c] += 1;
-    }
-    let mut cycle: Vec<CycleEdge> = labelled
-        .iter()
-        .filter(|(s, d, _)| comp[*s] == comp[*d] && (s == d || comp_size[comp[*s]] > 1))
-        .map(|&(_, _, e)| e)
-        .collect();
-    if !cycle.is_empty() {
-        cycle.sort();
-        return Err(CompileError::Cycle { edges: cycle });
-    }
-
-    // ---- 3. order ---------------------------------------------------------
-    let order = order::kahn(&preds);
-    debug_assert!(order.cyclic.is_empty(), "the SCC pass left a cycle");
-    let order: Vec<PlanUnitId> = order
-        .order
-        .into_iter()
-        .map(PlanUnitId::from_index)
-        .collect();
-
-    // ---- 4. latency -------------------------------------------------------
-    // One solve: `crate::delays` over the checked graph. The
-    // compiler places its delays itself (event and param edges included) from
-    // the solve's arrivals.
-    let solved = crate::delays(graph, prepare.sample_rate());
-    let arrival: Table<PlanUnitId, Latency> = keys
-        .iter()
-        .map(|&k| Latency::new(solved.arrival(k)))
-        .collect();
-    let departures: Table<PlanUnitId, Latency> = keys
-        .iter()
-        .map(|&k| Latency::new(solved.departure(k)))
-        .collect();
-    let departure = |n: PlanUnitId| departures[n];
-    let total = Latency::new(solved.compensation().total());
-    // The main output's channels: a main output change's old channels, after them, are
-    // aligned like any output and report nothing outward.
-    let rendered_outputs = topology.outputs.len();
-    // An old main output's channels are aligned to the output time they were heard
-    // at: the previous plan's total, or, for a plan that continues the
-    // previous plan's crossfade, the alignment that plan kept. The new main output's
-    // alignment does not move for the length of the fade and back after it.
-    let bank_total = match (graph.main_output_bank(), prev) {
-        (Some(bank), Some(p)) if p.main_output_bank.is_some_and(|b| b.old == bank.old) => {
-            p.bank_total
-        }
-        (_, Some(p)) => p.total_latency,
-        (_, None) => total,
-    };
-    let output_time = |channel: u16| match graph.main_output_bank() {
-        Some(bank) if usize::from(channel) >= bank.base => bank_total,
-        _ => total,
-    };
-    let main_output_width = graph
-        .main_output_bank()
-        .map_or(rendered_outputs, |b| b.base);
-    let compensation: Vec<Samples> = (0..main_output_width)
-        .map(|ch| solved.compensation().for_channel(ch))
-        .collect();
+    let checked = shapes::check(graph, shapes, prepare)?;
+    let order = schedule::order(&schedule::acyclic(graph, &checked)?);
+    let timing = timing::solve(graph, &checked, prepare, prev);
+    let keys = &checked.keys;
+    let node_shapes = &checked.shapes;
+    let departure = |n: PlanUnitId| timing.departure[n];
+    let (total, bank_total) = (timing.total, timing.bank_total);
+    let (rendered_outputs, main_output_width) = (timing.rendered_outputs, timing.main_output_width);
+    let output_time = |channel: u16| timing.output_time(channel);
 
     // ---- 5. emit ----------------------------------------------------------
     let audio_fb_key = |f: FeedbackFrom| FeedbackKey::Audio {
@@ -815,13 +586,15 @@ pub fn compile(
                         // source like any other (see the module docs, step 4).
                         let (v, dep) = match from {
                             PortSource::MainInput(ch) => (main_input_val[&ch], Latency::ZERO),
-                            PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
+                            PortSource::Node(p) => {
+                                (audio_out_val[&p], departure(checked.unit(p.node)))
+                            }
                             PortSource::Zero => unreachable!("matched above"),
                         };
                         align_audio(
                             &mut em,
                             v,
-                            dep.gap_to(arrival[n]),
+                            dep.gap_to(timing.arrival[n]),
                             DelayKey::Audio { at, from },
                         )
                     }
@@ -839,7 +612,7 @@ pub fn compile(
                     .and_then(|g| g.source)
                     .filter(|_| r != ARef::Zero)
                     .map(|from| {
-                        let by = departure(dense[&from.node]).gap_to(arrival[n]);
+                        let by = departure(checked.unit(from.node)).gap_to(timing.arrival[n]);
                         GainDrive {
                             from,
                             value: align_event(
@@ -881,7 +654,7 @@ pub fn compile(
                     EventEdge::Direct(from) => ERef::Val(align_event(
                         &mut em,
                         event_out_val[&from],
-                        departure(dense[&from.node]).gap_to(arrival[n]),
+                        departure(checked.unit(from.node)).gap_to(timing.arrival[n]),
                         DelayKey::Event { at, from },
                     )),
                 });
@@ -891,7 +664,7 @@ pub fn compile(
             let within = |e: &EventEdge| match *e {
                 EventEdge::Direct(from) => {
                     refs[..] == [ERef::Val(event_out_val[&from])]
-                        && node_shapes[dense[&from.node]]
+                        && node_shapes[checked.unit(from.node)]
                             .event_capacity
                             .is_some_and(|c| {
                                 shape.event_input_capacity.is_some_and(|b| {
@@ -928,7 +701,7 @@ pub fn compile(
             let value = align_event(
                 &mut em,
                 event_out_val[&e],
-                departure(dense[&e.node]).gap_to(arrival[n]),
+                departure(checked.unit(e.node)).gap_to(timing.arrival[n]),
                 DelayKey::ParamEvent { at, from: e },
             );
             params.push(PPort {
@@ -949,7 +722,7 @@ pub fn compile(
             let value = align_event(
                 &mut em,
                 event_out_val[&e],
-                departure(dense[&e.node]).gap_to(arrival[n]),
+                departure(checked.unit(e.node)).gap_to(timing.arrival[n]),
                 DelayKey::ParamEvent { at, from: e },
             );
             params.push(PPort {
@@ -1032,7 +805,7 @@ pub fn compile(
                 .iter()
                 .map(|&source| {
                     let (v, dep) = match source {
-                        PortSource::Node(p) => (audio_out_val[&p], departure(dense[&p.node])),
+                        PortSource::Node(p) => (audio_out_val[&p], departure(checked.unit(p.node))),
                         PortSource::MainInput(ch) => (main_input_val[&ch], Latency::ZERO),
                         PortSource::Zero => unreachable!("filtered above"),
                     };
@@ -1054,7 +827,7 @@ pub fn compile(
                             value: align_event(
                                 &mut em,
                                 event_out_val[&from],
-                                departure(dense[&from.node]).gap_to(output_time(channel)),
+                                departure(checked.unit(from.node)).gap_to(output_time(channel)),
                                 DelayKey::EdgeGain { id, from },
                             ),
                         });
@@ -1079,11 +852,11 @@ pub fn compile(
         };
         let d = match (graph.main_output_bank(), source) {
             (Some(bank), _) if usize::from(channel) >= bank.base => match source {
-                PortSource::Node(p) => departure(dense[&p.node]).gap_to(bank_total),
+                PortSource::Node(p) => departure(checked.unit(p.node)).gap_to(bank_total),
                 PortSource::MainInput(_) => Latency::ZERO.gap_to(bank_total),
                 PortSource::Zero => Samples::ZERO,
             },
-            _ => solved.compensation().for_channel(usize::from(channel)),
+            _ => timing.compensation[usize::from(channel)],
         };
         // Delaying silence is silence: a zero channel reports its
         // compensation (as `latency::plan` does) but gets no ring.
@@ -1147,8 +920,8 @@ pub fn compile(
         let mut srcs = Vec::with_capacity(sources.len());
         for (lane, source) in sources.iter().enumerate() {
             let (mut src, dep) = match *source {
-                PortSource::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
-                    (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
+                PortSource::Node(p) => match (audio_out_val.get(&p), checked.get(p.node)) {
+                    (Some(&v), Some(n)) => (ARef::Val(v), departure(n)),
                     _ => (ARef::Zero, Latency::ZERO),
                 },
                 PortSource::MainInput(ch) => match main_input_val.get(&ch) {
@@ -1198,16 +971,16 @@ pub fn compile(
         // (an input, which an aligned tap delays to the output time too).
         let (carried, at_time) = match from {
             crate::EventTapPort::Out(port) => {
-                let (Some(&v), Some(&n)) = (event_out_val.get(&port), dense.get(&port.node)) else {
+                let (Some(&v), Some(n)) = (event_out_val.get(&port), checked.get(port.node)) else {
                     continue;
                 };
                 (ERef::Val(v), departure(n))
             }
             crate::EventTapPort::In(at) => {
-                let (Some(&r), Some(&n)) = (event_in_val.get(&at), dense.get(&at.node)) else {
+                let (Some(&r), Some(n)) = (event_in_val.get(&at), checked.get(at.node)) else {
                     continue;
                 };
-                (r, arrival[n])
+                (r, timing.arrival[n])
             }
         };
         if carried == ERef::Empty {
@@ -1243,8 +1016,8 @@ pub fn compile(
                 let mut srcs = Vec::with_capacity(sources.len());
                 for (lane, source) in sources.iter().enumerate() {
                     let (mut src, dep) = match *source {
-                        PortSource::Node(p) => match (audio_out_val.get(&p), dense.get(&p.node)) {
-                            (Some(&v), Some(&n)) => (ARef::Val(v), departure(n)),
+                        PortSource::Node(p) => match (audio_out_val.get(&p), checked.get(p.node)) {
+                            (Some(&v), Some(n)) => (ARef::Val(v), departure(n)),
                             _ => (ARef::Zero, Latency::ZERO),
                         },
                         PortSource::MainInput(ch) => match main_input_val.get(&ch) {
@@ -1356,9 +1129,11 @@ pub fn compile(
     // Emitted in topological order, so a merge's inputs are priced first.
     let block = prepare.max_block().get();
     let fb_cap = |key: &FeedbackKey| match *key {
-        FeedbackKey::Event { from, delay, .. } => {
-            EventSlotCapacity::fifo(node_shapes[dense[&from.node]].event_capacity, delay, block)
-        }
+        FeedbackKey::Event { from, delay, .. } => EventSlotCapacity::fifo(
+            node_shapes[checked.unit(from.node)].event_capacity,
+            delay,
+            block,
+        ),
         _ => unreachable!("event feedback keys are events"),
     };
     let mut value_cap: Table<EventValueId, EventSlotCapacity> =
@@ -1389,7 +1164,7 @@ pub fn compile(
                 value_cap[*dst] = EventSlotCapacity::fifo_sum(
                     ports
                         .iter()
-                        .map(|p| node_shapes[dense[&p.node]].event_capacity),
+                        .map(|p| node_shapes[checked.unit(p.node)].event_capacity),
                     d.len,
                     block,
                 );
@@ -1558,7 +1333,7 @@ pub fn compile(
     // ---- 7. coarsen, and price the plan (the cost model) -----------------
     let op_work: Table<OpId, crate::node::cost::Work> = ops
         .iter()
-        .map(|op| crate::node::cost::op_work(op, &node_shapes, &sum_lanes))
+        .map(|op| crate::node::cost::op_work(op, node_shapes, &sum_lanes))
         .collect();
     let coarse = coarsen::coarsen(
         &em.preds,
@@ -1574,7 +1349,7 @@ pub fn compile(
     let mut delta = Delta::default();
     let mut idx_of: BTreeMap<NodeKey, UnitIdx> = BTreeMap::new();
     let mut taken: BTreeSet<UnitIdx> = BTreeSet::new();
-    for &key in &keys {
+    for &key in keys {
         let generation = graph.generation(key);
         if let Some(old) = prev_units.get(&key) {
             idx_of.insert(key, old.idx);
@@ -1596,7 +1371,7 @@ pub fn compile(
         }
     }
     let mut next_free = UnitIdx(0);
-    for &key in &keys {
+    for &key in keys {
         if idx_of.contains_key(&key) {
             continue;
         }
@@ -1631,12 +1406,12 @@ pub fn compile(
             generation: graph.generation(key),
             idx: idx_of[&key],
             shape: node_shapes[n],
-            arrival: arrival[n],
+            arrival: timing.arrival[n],
             wired: wired_ports(topology, key, &node_shapes[n], &consumed),
         })
         .collect();
 
-    let nodes = NodeTables::lower(ops.as_slice(), &audio_list, &event_list, units.as_slice());
+    let nodes = NodeTables::lower(ops.as_slice(), &audio_list, &event_list, &units);
     let plan = Plan {
         prepare: *prepare,
         ops,
@@ -1681,7 +1456,7 @@ pub fn compile(
         store_len,
         order: order.iter().map(|&n| keys[n]).collect(),
         main_inputs: topology.inputs.count(),
-        compensation,
+        compensation: timing.compensation,
         main_output_id: crate::MainOutputId::GENESIS,
         main_output_bank: graph.main_output_bank(),
         rendered_outputs,
@@ -1706,7 +1481,7 @@ pub fn compile(
 }
 
 /// The position of `key` in the sorted feedback `list`.
-fn fb_index<F: Id>(key: FeedbackKey, list: &Table<F, FeedbackKey>) -> F {
+fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
     F::from_index(
         list.as_slice()
             .binary_search(&key)
@@ -1717,7 +1492,7 @@ fn fb_index<F: Id>(key: FeedbackKey, list: &Table<F, FeedbackKey>) -> F {
 /// The public [`Value`] table for `vals`, each reader list appended to
 /// `readers`.
 fn lower_values<V: Id>(
-    vals: &Table<V, Val>,
+    vals: &TableSlice<V, Val>,
     readers: &mut Vec<OpId>,
     slot: impl Fn(V) -> u32,
 ) -> Table<V, Value> {

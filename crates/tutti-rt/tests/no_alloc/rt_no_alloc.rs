@@ -221,6 +221,7 @@ fn split_claims_and_views_are_allocation_free() {
             let mut seen = 0;
             view.split(
                 &[(2, false), (3, true)],
+                |i| i,
                 |write| write,
                 |_, read| seen += read.len(),
                 |_, write| write[0] = round,

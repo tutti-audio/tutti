@@ -2,7 +2,7 @@ use super::*;
 use crate::control::{CancelToken, Progress, Stage};
 use crate::{GRAPH_MAX_BLOCK, Setup};
 use std::sync::Arc;
-use tutti_buffers::ChannelLayout;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Interleaved, Planes};
 use tutti_graph::GraphBuilder;
 use tutti_tempo::TempoMap;
@@ -39,8 +39,7 @@ fn render(
     let mut out = Vec::new();
     with_source(graph, RATE, clock, |src| {
         let file = FileChannels {
-            layout,
-            topology: None,
+            channels: ChannelSet::default_for(layout),
         };
         let fold = file.fold_from(src.outputs(), src.main_output())?;
         let mut scratch = vec![0.0f32; src.max_block() * ch];

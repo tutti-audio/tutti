@@ -144,7 +144,7 @@ fn a_topology_sets_the_mask() {
     );
     let discrete = Spec::new(
         crate::Format::Wav(Pcm::Int24),
-        tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::QUAD),
+        tutti_buffers::ChannelTopology::unassigned(tutti_buffers::ChannelLayout::QUAD).unwrap(),
         SampleRate::SR_48K,
     );
     assert_eq!(

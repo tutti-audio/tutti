@@ -22,7 +22,9 @@ mod tests;
 use std::future::IntoFuture;
 use std::sync::Arc;
 
-use tutti_buffers::ChannelTopology;
+#[cfg(codec)]
+use tutti_buffers::Source;
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, StreamMeter};
 #[cfg(codec)]
@@ -172,10 +174,10 @@ where
     /// time, so its length is not held in memory.
     fn run(self) -> Result<<A::Meter as StreamMeter>::Output, AnalyzeError> {
         let mut reader = Reader::open(&self.audio)?;
-        let topology = reader.topology();
-        let context = A::Context::from_audio(reader.sample_rate(), topology.width());
+        let layout = reader.layout();
+        let context = A::Context::from_audio(reader.sample_rate(), layout);
         let mut meter = self.analysis.measure(context)?;
-        let mut chunk = Chunk::new(&topology);
+        let mut chunk = Chunk::new(&reader.channel_set());
         loop {
             reader.next(&mut chunk)?;
             if chunk.is_empty() {
@@ -326,11 +328,19 @@ impl<'w, S: Float> Reader<'w, S> {
         }
     }
 
-    fn topology(&self) -> ChannelTopology {
+    fn layout(&self) -> ChannelLayout {
         match self {
-            Self::Wave { wave, .. } => wave.topology().clone(),
+            Self::Wave { wave, .. } => wave.layout(),
             #[cfg(codec)]
-            Self::File(file) => file.topology().clone(),
+            Self::File(file) => file.layout(),
+        }
+    }
+
+    fn channel_set(&self) -> ChannelSet {
+        match self {
+            Self::Wave { wave, .. } => wave.channel_set(),
+            #[cfg(codec)]
+            Self::File(file) => file.channel_set().clone(),
         }
     }
 

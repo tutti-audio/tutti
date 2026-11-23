@@ -1,16 +1,16 @@
 //! Rendering a block: the frame around the plan's ops, which `par.rs` runs.
 
-use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 
 use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
-use tutti_units::Samples;
+use tutti_units::{Blocks, Samples};
 
-use super::commit::{Crossfade, retire_fade};
+use super::commit::{CommitSeq, Crossfade, Rendered, retire_fade};
 use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
+use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
@@ -31,11 +31,11 @@ pub(super) fn end_fades<F: Float>(
     store: &mut [Option<Unit<F>>],
     fade_back: &mut RingWriter<Box<Crossfade<F>>>,
     inject: &mut [Inject],
-    has_inject: &mut [bool],
+    has_inject: &mut TableSlice<PlanUnitId, bool>,
     dropped: &mut Dropped,
 ) {
     for rec in &plan.nodes.recs {
-        let Some(u) = store[rec.store as usize].as_mut() else {
+        let Some(u) = store[rec.store.0 as usize].as_mut() else {
             continue;
         };
         if !u.fade.as_ref().is_some_and(|x| x.done >= x.len) {
@@ -56,15 +56,15 @@ pub(super) fn end_fades<F: Float>(
             {
                 // Only as much as the buffer's room takes; the rest is lost
                 // and charged to the unit.
-                let room = (inj.events.capacity() - inj.events.len()).min(next.chase.len());
-                inj.events.extend_from_slice(&next.chase[..room]);
+                let room = inj.events.remaining().min(next.chase.len());
+                inj.events.extend(next.chase[..room].iter().copied());
                 inj.events.rotate_right(room);
                 let lost = next.chase.len() - room;
                 if lost > 0 {
                     dropped.at_node(rec.unit, u32::try_from(lost).unwrap_or(u32::MAX));
                 }
                 inj.live = true;
-                has_inject[rec.unit as usize] = true;
+                has_inject[rec.unit] = true;
             }
             next.chase.clear();
             next.out = Some(std::mem::replace(&mut u.node, incoming));
@@ -242,6 +242,7 @@ impl<F: Float> Executor<F> {
                 pool,
                 pool_participants: _,
                 rendered,
+                rendered_blocks,
                 main_output_fade,
                 main_output_fade_ended,
                 stash: _,
@@ -310,8 +311,8 @@ impl<F: Float> Executor<F> {
                 &mut flags[..],
                 &mut events[..],
                 &mut inject[..],
-                &mut has_inject[..],
-                &mut has_due[..],
+                &mut **has_inject,
+                &mut **has_due,
             );
             let plan: &Plan = plan;
             let cap = *event_cap;
@@ -326,7 +327,7 @@ impl<F: Float> Executor<F> {
             }
             // And every unit its mode (`mode.rs`), for the same reason.
             for rec in &plan.nodes.recs {
-                if let Some(u) = store[rec.store as usize].as_mut() {
+                if let Some(u) = store[rec.store.0 as usize].as_mut() {
                     u.mode.snapshot();
                 }
             }
@@ -335,8 +336,9 @@ impl<F: Float> Executor<F> {
             // `MaxBlock`, so nothing this block's captures queue is due yet.
             for (f, spec) in audio_fb.iter().zip(&plan.audio_feedback) {
                 let ring = f.as_ref().expect("built by apply");
-                let is_silent = ring.peek_oldest(arena.slot_mut(spec.slot, frames));
-                flags.set(spec.slot, flag(is_silent, is_silent));
+                let is_silent =
+                    ring.peek_oldest(arena.slot_mut(AudioSlotId::new(spec.slot), frames));
+                flags.set(AudioSlotId::new(spec.slot), flag(is_silent, is_silent));
             }
             for (f, spec) in event_fb.iter_mut().zip(&plan.event_feedback) {
                 let fifo = f.as_mut().expect("built by apply");
@@ -408,11 +410,12 @@ impl<F: Float> Executor<F> {
                 let before = run.done;
                 run.done += frames;
                 if before < bank.fade.duration.get() && run.done >= bank.fade.duration.get() {
-                    main_output_fade_ended.store(run.seq, Ordering::Release);
+                    main_output_fade_ended.set(CommitSeq(run.seq));
                 }
             }
             *frame += Samples::new(frames);
-            rendered.fetch_add(1, Ordering::Release);
+            *rendered_blocks += Blocks::new(1);
+            rendered.set(Rendered(*rendered_blocks));
         });
     }
 }

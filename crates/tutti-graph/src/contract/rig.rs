@@ -7,6 +7,7 @@ use crate::{InEvents, OutEvents};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{BufferError, Float, Planes, PlanesMut};
+use tutti_rt::CappedVec;
 use tutti_units::{Frame, Latency, SampleRate, Samples};
 
 use crate::contract::drive::{HAND_EVENT_CAPACITY, param_room};
@@ -185,9 +186,9 @@ pub struct Direct<N: ?Sized, F: Float = f32> {
     params: Vec<Option<Vec<F>>>,
     outputs: Vec<Vec<F>>,
     events_in: Vec<Vec<Event>>,
-    events_out: Vec<Vec<Event>>,
+    events_out: Vec<CappedVec<Event>>,
     params_in: Vec<Vec<ParamEvent>>,
-    params_out: Vec<Vec<ParamEvent>>,
+    params_out: Vec<CappedVec<ParamEvent>>,
     /// What the node reported with `Io::count_lost`, over every block.
     lost: u64,
     /// The records the node logged, when [`log`](Direct::log) is set.
@@ -315,9 +316,13 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
         Self {
             params: vec![None; shape.params.as_slice().len()],
             events_in: events(shape.event_in),
-            events_out: events(shape.event_out),
+            events_out: (0..usize::from(shape.event_out))
+                .map(|_| CappedVec::with_capacity(HAND_EVENT_CAPACITY))
+                .collect(),
             params_in: param_events(shape.event_in, HAND_EVENT_CAPACITY),
-            params_out: param_events(shape.event_out, param_room(&shape)),
+            params_out: (0..usize::from(shape.event_out))
+                .map(|_| CappedVec::with_capacity(param_room(&shape)))
+                .collect(),
             node,
             prepare: *prepare,
             len: frames,

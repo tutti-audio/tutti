@@ -6,7 +6,7 @@
 
 use std::num::NonZeroUsize;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, Mono, Wave};
+use tutti_buffers::{ChannelLayout, InterleavedMut, Mono, Wave};
 use tutti_graph::{ForkByClone, TapAlign, TapOptions};
 use tutti_measure::{
     MeterError as MeasureError, PeakBlocks, PeakConfig, VectorscopeConfig, WindowedLoudnessConfig,
@@ -192,7 +192,7 @@ fn a_nan_block_is_counted_refused_and_the_next_blocks_items_arrive() {
     let finite = s.graph().add(ForkByClone(Const::mono(0.25)));
     let through = s.graph().add(ForkByClone(Through::mono()));
     s.graph().connect(nan, through).unwrap().unfaded();
-    let loudness = WindowedLoudnessConfig::new(ChannelTopology::default_for(ChannelLayout::MONO));
+    let loudness = WindowedLoudnessConfig::new(tutti_buffers::Bed::Mono.topology());
     let mut analyzer = s
         .graph()
         .taps()

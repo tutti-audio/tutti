@@ -2,7 +2,7 @@ use super::*;
 #[cfg(all(feature = "encode-wav", feature = "encode-flac", decode))]
 use crate::{FlacLevel, IntDepth};
 #[cfg(all(feature = "encode-wav", decode))]
-use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved};
+use tutti_buffers::{ChannelTopology, Interleaved};
 use tutti_units::SampleRate;
 
 /// `frames` frames over `topology` whose sample at `(c, i)` is
@@ -22,6 +22,29 @@ fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
     wave
 }
 
+/// A wave wider than a topology holds has none, and is still written and read
+/// back whole: its width is the file's, and the speaker mask says no speaker.
+#[cfg(all(feature = "encode-wav", decode))]
+#[test]
+fn a_wave_wider_than_a_topology_has_none_and_round_trips() {
+    use crate::{Pcm, read_wave};
+    let mut wave = Wave::<f32>::new(17, SampleRate::SR_48K);
+    assert_eq!(wave.topology(), None);
+    assert_eq!(wave.layout().count(), 17);
+    let frame: Vec<f32> = (0..17).map(|c| c as f32 / 32.0).collect();
+    for _ in 0..5 {
+        wave.append(Interleaved::new(&frame, wave.layout()).unwrap())
+            .unwrap();
+    }
+    let mut bytes = Vec::new();
+    write_wave(&wave, &mut bytes, Format::Wav(Pcm::Float32)).unwrap();
+    let back = read_wave::<f32>(bytes).unwrap();
+    assert_eq!(back.layout(), wave.layout());
+    for c in 0..wave.channels() {
+        assert_eq!(back.channel(c), wave.channel(c), "channel {c}");
+    }
+}
+
 /// Writing a wave and reading the file back gives the same samples, rate and
 /// topology: exactly for WAV's float format, and to within one 16-bit step
 /// (the writer scales by 32767 and the reader by 32768) for the integer ones.
@@ -30,7 +53,7 @@ fn ramp_wave(topology: ChannelTopology, rate: f64, frames: usize) -> Wave {
 fn a_written_wave_reads_back_as_itself() {
     use crate::{Pcm, read_wave};
     let dir = tempfile::tempdir().unwrap();
-    let stereo = || ChannelTopology::default_for(ChannelLayout::STEREO);
+    let stereo = || tutti_buffers::Bed::Stereo.topology();
     let cases = [
         ("stereo.wav", Format::Wav(Pcm::Int16), stereo()),
         ("float.wav", Format::Wav(Pcm::Float32), stereo()),
@@ -226,11 +249,7 @@ fn an_integer_wave_written_to_a_non_seek_writer_reads_back_exactly() {
 fn a_wave_written_as_wav_reads_back_equal() {
     use crate::{Pcm, read_wave};
     let (_, mono) = long_int_wave();
-    let stereo = ramp_wave(
-        ChannelTopology::default_for(ChannelLayout::STEREO),
-        44_100.0,
-        500,
-    );
+    let stereo = ramp_wave(tutti_buffers::Bed::Stereo.topology(), 44_100.0, 500);
     let mut bytes = Vec::new();
     write_wave(&mono, &mut bytes, Format::Wav(Pcm::Int16)).unwrap();
     assert_eq!(read_wave::<i16>(bytes).unwrap(), mono);

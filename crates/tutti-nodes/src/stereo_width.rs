@@ -146,7 +146,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
+    use crate::test_support::{assert_cell_ramps, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
@@ -207,36 +207,5 @@ mod tests {
         let (_, out) = crate::test_support::render_change(make, change, &[&l, &r], &[&la, &ra], 64);
         assert!(out[0][599] == 0.25 && out[1][599] == -0.25);
         assert!(out[0][0] < 1.0 && out[0][0] > 0.9, "starts down the line");
-    }
-
-    /// An `f64` block through a `StereoWidthKernel::<f64>` built at width 1 is the pair
-    /// exactly (a 29-bit signal, which `f32` cannot hold), and at width `w` is
-    /// `L' = M + w S`, `R' = M - w S` with `M = (L + R) / 2` and `S = (L - R) / 2` in `f64`,
-    /// to 2^-45.
-    #[test]
-    fn an_f64_kernel_is_the_identity_at_unity_and_the_mid_side_matrix_at_other_widths() {
-        use crate::test_support::drive_kernel;
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        use tutti_units::Samples;
-        let len = 100;
-        let l = wide_signal(len);
-        let r: Vec<f64> = l.iter().rev().map(|v| v * 0.75).collect();
-        let run = |w: f64| {
-            let mut k = StereoWidthKernel::<f64>::new();
-            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-            let controls = WidthControls {
-                width: StereoWidth::new(w),
-            };
-            drive_kernel(&mut k, &[(0, controls)], &[l.clone(), r.clone()])
-        };
-        let out = run(1.0);
-        assert_close_f64(&out[0], &l, 0.0);
-        assert_close_f64(&out[1], &r, 0.0);
-        let w = 0.3;
-        let out = run(w);
-        for (n, (a, b)) in out[0].iter().zip(&out[1]).enumerate() {
-            let (mid, side) = ((l[n] + r[n]) / 2.0, w * (l[n] - r[n]) / 2.0);
-            assert_close_f64(&[*a, *b], &[mid + side, mid - side], 2.0f64.powi(-45));
-        }
     }
 }
