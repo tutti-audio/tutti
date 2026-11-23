@@ -737,16 +737,14 @@ The audio thread never sees a map edit.
 
 **It overlays the project's maps; it does not replace them.**
 
-- The follower keeps the project's tempo map and meter apart: the maps the session
-  found when `follow_tempo` was called. The session has no project tempo apart from
-  the published map, so the map it finds is the one it restores. While following,
-  the session refuses a map of the app's (`Session::set_tempo` and `set_tempo_map`
-  return `TempoError::Following`), so nothing else publishes in between and the
-  restore is exact; the app unfollows first. (`Session::transport()` is the
+- The follower lays its steps over the app's tempo map and meter, the base, and
+  keeps them apart from the published map. A write to the tempo target while
+  following is accepted and lands in the base; the published map (the effective
+  value, `get(tempo.effective())`) is rebuilt over it. `Session::transport()` is the
   transport's own handle, below the session's policy: a publish through its
-  `TransportSettings` is not refused, and is overwritten by the next live step.)
-- While following, the published map is the project's up to the beat of the first
-  change, then the live steps. Each step **truncates** what came after it: a project
+  `TransportSettings` is overwritten by the next live step.
+- While following, the published map is the base up to the beat of the first
+  change, then the live steps. Each step **truncates** what came after it: a base
   point or ramp ahead of the playhead is not played while following, because two
   authorities for the same future beats is the bug to avoid.
 - **A ramp a step lands in is cut at that beat.** The builder keeps the ramp up to
@@ -756,16 +754,15 @@ The audio thread never sees a map edit.
   builder's rule).
 - A source that repeats the tempo already in force, with no point after it, changes
   nothing: no map is published and no event is sent.
-- `unfollow_tempo` publishes the project's maps again (those the follower changed).
-  The clock re-seats at its current beat, so the playhead does not jump; the tempo
-  from there on is the project's. `MidiEvent::TempoUnfollowed` reports it.
-- **One follower at a time.** Following again replaces the first; the project's maps
-  stay the ones found by the first call and the tempo in force stays until the new
-  source sends one. Two outside tempos have no merge.
+- `unfollow_tempo` publishes the base as it stands then (for the maps the follower
+  stepped), which may be newer than at follow time. The clock re-seats at its
+  current beat, so the playhead does not jump; the tempo from there on is the base's. `MidiEvent::TempoUnfollowed` reports it.
+- **One follower at a time.** Following again replaces the first; the steps laid so
+  far stay over the base and the tempo in force stays until the new source sends one. Two outside tempos have no merge.
 - Off by default; there is no routing-rule form (routing moves events between nodes,
   this changes the transport).
-- A bounce forks the published map like any other: one made while following renders
-  the tempo heard so far.
+- A bounce and a take read the base: one made while following renders the app's
+  tempo, not the live steps.
 
 ### 11.3 Timing: a step lands at the start of the next block
 
@@ -800,10 +797,11 @@ The audio thread never sees a map edit.
   at the next bar unless sent on a bar line); on a bar line (within the meter's
   downbeat tolerance) it applies there. The 1/32-notes field does not change the meter
   and is not read.
-- **Overlay.** As §11.2: the project's `MeterMap` is kept apart, the published one is
-  the project's up to that bar plus the live change, later project changes are
-  dropped while following, and unfollowing restores it. The metronome follows the
-  published meter.
+- **Overlay.** As §11.2: the app's `MeterMap` is the base, the published one is
+  the base up to that bar plus the live change (a base change while following
+  rebuilds it, the step landing on the next bar line of the new base), later base
+  changes after a step are dropped, and unfollowing publishes the base. The
+  metronome follows the published meter.
 
 ### 11.5 Surface
 

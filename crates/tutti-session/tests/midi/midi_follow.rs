@@ -608,3 +608,24 @@ fn a_bounce_while_following_renders_the_base_tempo() {
         .into_planes();
     assert_eq!(planes[0].len(), 2 * RATE as usize);
 }
+
+/// **An SMPTE file loaded while following is placed by the base tempo.** Tick
+/// 1000 at `-25` frames and 40 ticks a frame is 1.0 s: beat 2.0 on the base's
+/// 120 bpm, not the beat the followed 75 bpm map (a step from beat ~0.1)
+/// gives.
+#[test]
+fn an_smpte_load_while_following_places_notes_by_the_base() {
+    let (mut s, fake) = rig();
+    follow(&mut s, MidiGroup::FIRST, false);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
+    let _ = until_followed(&mut s);
+
+    // Header: format 0, one track, division -25 fps and 40 ticks a frame; the
+    // track is delta 1000, the F7 escape of one byte, end of track.
+    let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x09".to_vec();
+    bytes.extend([0x87, 0x68, 0xF7, 1, 0x55, 0x00, 0xFF, 0x2F, 0x00]);
+    let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
+    assert_eq!(loaded.report().dropped[0].beat, Beat::new(2.0));
+}
