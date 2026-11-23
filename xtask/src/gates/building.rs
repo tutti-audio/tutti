@@ -104,6 +104,7 @@ use super::buffers::{blocks, item_end, split_top, squash};
 use super::lex::{
     blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges,
 };
+use super::ratchet;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -1771,25 +1772,25 @@ fn allowed(path: &str, s: &Site, a: &Allow) -> bool {
 /// A baseline row: crate, rule, key.
 type Row = (String, Rule, String);
 
+/// The baseline's rows, or a failing report.
+fn read(tree: &dyn Tree) -> Result<BTreeSet<Row>, Report> {
+    let text = ratchet::text(tree, "check-building", LIST)?;
+    parse(&text).map_err(|errors| ratchet::malformed("check-building", LIST, errors))
+}
+
 fn parse(text: &str) -> Result<BTreeSet<Row>, Vec<String>> {
     let mut rows = BTreeSet::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let at = n + 1;
+    ratchet::parse_rows(text, |at, line, errors| {
         let parts: Vec<&str> = line.split_whitespace().collect();
         let [krate, rule, key] = parts[..] else {
             errors.push(format!(
                 "  {LIST}:{at}: not `<crate>  <rule>  <key>`: {line}"
             ));
-            continue;
+            return None;
         };
         let Some(rule) = Rule::parse(rule) else {
             errors.push(format!("  {LIST}:{at}: `{rule}` is not a rule"));
-            continue;
+            return None;
         };
         if key.split('/').nth(1) != Some(krate) {
             errors.push(format!("  {LIST}:{at}: `{key}` is not in crate `{krate}`"));
@@ -1797,12 +1798,9 @@ fn parse(text: &str) -> Result<BTreeSet<Row>, Vec<String>> {
         if !rows.insert((krate.to_owned(), rule, key.to_owned())) {
             errors.push(format!("  {LIST}:{at}: `{line}` is listed twice"));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        Some(())
+    })?;
+    Ok(rows)
 }
 
 /// The violations of the tree that `allow` does not cover.
@@ -1836,17 +1834,9 @@ fn found(tree: &dyn Tree, allow: &[Allow]) -> (BTreeSet<Row>, BTreeSet<usize>) {
 
 pub(super) fn check(tree: &dyn Tree, allow: &[Allow], min_sites: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(LIST) else {
-        r.fail(format!("check-building: FAIL: {LIST} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-building: FAIL ({LIST} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let (sites, used) = found(tree, allow);
     if sites.len() < min_sites {
@@ -1917,10 +1907,10 @@ pub(super) fn pruned(
     allow: &[Allow],
     min_sites: usize,
 ) -> Result<(String, usize), String> {
-    let text = tree
-        .read(LIST)
-        .ok_or_else(|| format!("{LIST} is missing"))?;
-    let rows = parse(&text).map_err(|e| format!("{LIST} is malformed:\n{}", e.join("\n")))?;
+    let report_text = |r: Report| r.findings.join("\n");
+    let text = ratchet::text(tree, "check-building", LIST).map_err(report_text)?;
+    let rows =
+        parse(&text).map_err(|e| report_text(ratchet::malformed("check-building", LIST, e)))?;
     let (sites, _) = found(tree, allow);
     if sites.len() < min_sites {
         return Err(format!(
