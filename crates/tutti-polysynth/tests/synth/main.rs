@@ -6,6 +6,7 @@ static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod channel_state;
 mod f64_synth;
+mod instrument_voices;
 #[path = "../support/mod.rs"]
 mod support;
 mod synth_audio;

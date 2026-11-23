@@ -12,7 +12,7 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
     DelayTiming, GAIN_RAMP, Lerp,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
 
 #[cfg(doc)]
@@ -195,12 +195,7 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
     fn shape(&self) -> Shape {
         let input = self.layout.input();
-        let output = Bus::banded(input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(input).cost(Cost::Moderate)
     }
 
     /// Sizes a line per channel at `rate` (`ceil(max_delay * rate)` frames: a re-prepare

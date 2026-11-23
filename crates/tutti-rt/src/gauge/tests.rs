@@ -133,6 +133,27 @@ fn a_counter_read_takes_nothing() {
     assert_eq!((lost.get(), lost.get()), (4, 4));
 }
 
+/// **A reader's take is what was counted since its own baseline, per tally,
+/// and leaves the total and every other reader's baseline alone.**
+#[test]
+fn take_since_answers_each_tallys_growth_and_leaves_the_total() {
+    let (mut writer, a) = counter::<Two>();
+    let b = a.clone();
+    let (mut seen_a, mut seen_b) = (Two { lost: 0, late: 0 }, Two { lost: 0, late: 0 });
+    writer.add(Two { lost: 3, late: 1 });
+    assert_eq!(a.take_since(&mut seen_a), Two { lost: 3, late: 1 });
+    writer.add(Two { lost: 2, late: 0 });
+    assert_eq!(a.take_since(&mut seen_a), Two { lost: 2, late: 0 });
+    assert_eq!(a.take_since(&mut seen_a), Two { lost: 0, late: 0 });
+    // `b` took nothing yet: it sees everything, and `a`'s takes moved no total.
+    assert_eq!(b.take_since(&mut seen_b), Two { lost: 5, late: 1 });
+    assert_eq!(a.get(), Two { lost: 5, late: 1 });
+    // A baseline ahead of the total (one from another counter) takes 0, never wraps.
+    let mut ahead = Two { lost: 9, late: 0 };
+    assert_eq!(a.take_since(&mut ahead), Two { lost: 0, late: 1 });
+    assert_eq!(ahead, Two { lost: 5, late: 1 });
+}
+
 #[test]
 fn a_counter_saturates_instead_of_wrapping() {
     let (mut writer, lost) = counter::<u64>();

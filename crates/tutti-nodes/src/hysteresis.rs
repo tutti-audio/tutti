@@ -6,13 +6,11 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, Hysteresis, HysteresisControls, HysteresisDrive, Lerp,
     OversamplingFactor,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, Normalized, SampleRate, Samples, Tail, UnitAddr, UnitParam};
+use tutti_graph::{Cost, Shape};
+use tutti_units::{Db, Normalized, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
-use crate::params::{ControlSet, HasControl};
-use tutti_graph::DeclaredUnit;
 
 /// What a [`HysteresisNode`] is made from: its width, its material and drive, and its
 /// oversampling.
@@ -103,8 +101,7 @@ pub type HysteresisNode<F> = KernelNode<HysteresisKernel<F>>;
 
 impl<F: Float + Lerp> From<HysteresisConfig> for HysteresisNode<F> {
     fn from(config: HysteresisConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a hysteresis stage is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a hysteresis stage");
         Self::with_kernel(
             HysteresisKernel::<F>::new(&config, input),
             HysteresisSet,
@@ -117,43 +114,14 @@ impl<F: Float + Lerp> From<HysteresisConfig> for HysteresisNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct HysteresisSet;
 
-/// The one control is the drive, a range-checked [`HysteresisDrive`], which `control_set!` does
-/// not take (its rows are units), so the set is written out.
-impl ControlSet for HysteresisSet {
-    type Controls = HysteresisControls;
-
-    fn addrs(&self) -> &'static [UnitAddr] {
-        const ALL: &[UnitAddr] = &[UnitAddr::first(UnitParam::GainDb)];
-        ALL
-    }
-
-    fn units(&self) -> &'static [DeclaredUnit] {
-        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
-        ALL
-    }
+control_set! {
+    HysteresisSet(_s): HysteresisControls = HysteresisControls::DEFAULT;
+    live: (all);
+    GainDb => Db = drive via HysteresisDrive;
 
     fn defaults(&self) -> HysteresisControls {
         HysteresisControls::DEFAULT
     }
-
-    fn flatten(&self, c: &HysteresisControls, out: &mut [f64]) {
-        let all = [c.drive.get().get()];
-        out.copy_from_slice(&all[..out.len()]);
-    }
-
-    fn assemble(&self, v: &[f64]) -> HysteresisControls {
-        let mut c = HysteresisControls::DEFAULT;
-        if let Some(&x) = v.first() {
-            // The one place a live drive is changed: a cell is written per frame, with no
-            // caller to refuse it to.
-            c.drive = HysteresisDrive::held(Db::new(x));
-        }
-        c
-    }
-}
-
-impl HasControl<{ UnitParam::GainDb as u16 }> for HysteresisSet {
-    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`HysteresisNode`].
@@ -194,12 +162,7 @@ impl<F: Float + Lerp> Kernel for HysteresisKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Heavy)
+        Shape::through(self.input).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
