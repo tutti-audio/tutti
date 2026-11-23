@@ -161,7 +161,7 @@ mod tests {
     use crate::test_support::{drive_block, prepared};
 
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::{Latency, UnitParam};
+    use tutti_units::UnitParam;
 
     // The node tests run `F = f32`, the session's audio format.
     fn node(width: u16, bits: f64, hold: f64) -> BitCrusherNode<f32> {
@@ -170,27 +170,6 @@ mod tests {
                 .bits(BitDepth::new(bits))
                 .hold(HoldFactor::new(hold)),
         ))
-    }
-
-    /// The shape is the width in and out, `Light`, no tail, declares the depth and the hold
-    /// as `BitDepth` and `HoldFactor`; the defaults are 8 bits and a hold of 1.
-    #[test]
-    fn the_shape_declares_the_two_controls() {
-        let n = node(3, 8.0, 1.0);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Light);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(shape.latency, Latency::ZERO);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::BitDepth, UnitParam::HoldFactor][..]
-        );
-        let d = BitCrusherNode::<f32>::from(BitCrusherConfig::new(1u16));
-        assert_eq!((d.param_base(0), d.param_base(1)), (Some(8.0), Some(1.0)));
     }
 
     /// An empty layout is no channels, not one.

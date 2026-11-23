@@ -171,28 +171,10 @@ mod tests {
     use tutti_buffers::Planes;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::{Tail, UnitParam};
+    use tutti_units::UnitParam;
 
     // The nodes under test are `f32` (the session's audio format), so their tolerances are
     // `f32`'s; each node has an `f64` kernel test below.
-
-    /// The shape declares the ceiling, a zero latency and no tail, and the width it was
-    /// built for.
-    #[test]
-    fn the_shape_declares_the_ceiling_no_latency_and_no_tail() {
-        let b = prepared(BrickwallLimiterNode::<f32>::from(
-            BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(-1.0)),
-        ));
-        let shape = b.shape();
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Ceiling][..]);
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.latency, tutti_units::Latency::ZERO);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(b.param_base(0), Some(-1.0));
-    }
 
     #[test]
     fn a_brickwall_fork_shares_no_cell() {

@@ -10,7 +10,12 @@ use tutti_nodes::{
 use tutti_units::{Db, Hz, Q, Resonance, UnitParam};
 
 /// The rows of this file.
-pub const ROWS: &[fn()] = &[held, svf_cutoff_moving, ladder_cutoff_and_drive_moving];
+pub const ROWS: &[fn()] = &[
+    held,
+    svf_cutoff_moving,
+    ladder_cutoff_and_drive_moving,
+    svf_ports_fed,
+];
 
 fn ladder(width: impl Into<ChannelLayout>) -> LadderFilterNode<f32> {
     LadderFilterNode::from(
@@ -22,7 +27,7 @@ fn ladder(width: impl Into<ChannelLayout>) -> LadderFilterNode<f32> {
 
 /// Held at widths 1, 2 and 6: the per-channel integrator state is built at construction.
 fn held() {
-    let gate = Gate::new(feeds::slow_square);
+    let gate = Gate::new(feeds::slow_square(0.5));
     gate.run("ladder mono", ladder(ChannelLayout::MONO), |_, _| {});
     gate.run("ladder 6ch", ladder(6u16), |_, _| {});
     let eq_band = EqBandConfig::new(SvfType::Bell)
@@ -54,7 +59,7 @@ fn svf_cutoff_moving() {
         .freq(Hz::new(1_000.0))
         .q(Q::new(1.0));
     let mut hz = 500.0f32;
-    Gate::new(feeds::slow_square).run(
+    Gate::new(feeds::slow_square(0.5)).run(
         "svf moving",
         SvfFilterNode::<f32>::from(config),
         move |c, _| {
@@ -68,9 +73,32 @@ fn svf_cutoff_moving() {
 /// solve every 16 samples and a per-sample drive ramp, both on the stack.
 fn ladder_cutoff_and_drive_moving() {
     let mut hz = 500.0f32;
-    Gate::new(feeds::slow_square).run("ladder moving", ladder(6u16), move |c, i| {
+    Gate::new(feeds::slow_square(0.5)).run("ladder moving", ladder(6u16), move |c, i| {
         hz = if hz > 4_000.0 { 500.0 } else { hz + 7.0 };
         c.set(UnitParam::Cutoff, f64::from(hz));
         c.set(UnitParam::Drive, f64::from(1.0 + (i % 7) as f32));
     });
+}
+
+/// The SVF with its cutoff and Q ports fed per frame, at widths 1, 2, 6, 9 and 16: every grid
+/// point designs and retargets, every block is cut, and the bank runs its blended and held
+/// frames in one lane group and in several.
+fn svf_ports_fed() {
+    let tau = std::f32::consts::TAU / 64.0;
+    let cutoff: Vec<f32> = (0..64)
+        .map(|i| 1_000.0 + 800.0 * (tau * i as f32).sin())
+        .collect();
+    let q: Vec<f32> = (0..64)
+        .map(|i| 1.0 + 0.5 * (tau * 3.0 * i as f32).sin())
+        .collect();
+    for width in [1u16, 2, 6, 9, 16] {
+        let config = SvfFilterConfig::new(width, SvfType::Bell)
+            .freq(Hz::new(1_000.0))
+            .q(Q::new(1.0));
+        Gate::new(feeds::slow_square(0.5)).warm(32).blocks(256).fed(
+            &format!("svf fed {width}ch"),
+            SvfFilterNode::<f32>::from(config),
+            &[cutoff.clone(), q.clone()],
+        );
+    }
 }
