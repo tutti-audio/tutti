@@ -8,8 +8,8 @@
 
 use symphonia::core::audio::{Channels, Position};
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Placement, Speaker,
-    Speakers,
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelSet, ChannelTopology, Placement,
+    Speaker, Speakers,
 };
 
 /// The speaker of one symphonia position flag.
@@ -41,32 +41,36 @@ fn speaker(flag: Position) -> Speaker {
 /// [`ChannelTopology::default_for`] at that count and [`Default`](Placement::Default).
 /// A container that states no channels at all is stereo by default; a track
 /// whose decoder then reports another set is read from that set.
-pub(super) fn topology_of(channels: Option<&Channels>) -> (ChannelTopology, Placement) {
+///
+/// The channels are a [`ChannelSet`]: past
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels no topology is held,
+/// and the width is all it states.
+pub(super) fn channels_of(channels: Option<&Channels>) -> (ChannelSet, Placement) {
+    let unassigned = |count: usize, placement| {
+        (
+            ChannelSet::unassigned(ChannelLayout::clamped(count)),
+            placement,
+        )
+    };
     let default = |count: usize| {
         (
-            ChannelTopology::default_for(ChannelLayout::clamped(count)),
+            ChannelSet::default_for(ChannelLayout::clamped(count)),
             Placement::Default,
         )
     };
+    let stated = |topology: ChannelTopology| (ChannelSet::from(topology), Placement::Stated);
     match channels {
-        Some(channels) if channels.count() == 1 => (Bed::Mono.topology(), Placement::Stated),
-        Some(Channels::Positioned(positions)) => (
-            ChannelTopology::Speakers(Speakers::from_format(positions.iter().map(speaker))),
-            Placement::Stated,
-        ),
+        Some(channels) if channels.count() == 1 => stated(Bed::Mono.topology()),
+        Some(Channels::Positioned(positions)) => stated(ChannelTopology::Speakers(
+            Speakers::from_format(positions.iter().map(speaker)),
+        )),
         Some(all @ Channels::Ambisonic(order)) => match AmbisonicOrder::new(*order) {
-            Some(order) => (AmbisonicFormat::ambix(order).into(), Placement::Stated),
-            // Past third order no bus holds it; the width is kept for the caller to refuse.
-            None => (
-                ChannelTopology::unassigned(ChannelLayout::clamped(all.count())),
-                Placement::Stated,
-            ),
+            Some(order) => stated(AmbisonicFormat::ambix(order).into()),
+            // Past third order no topology holds it; the width is kept for the caller to refuse.
+            None => unassigned(all.count(), Placement::Stated),
         },
         // Labelled channels name no speaker this vocabulary reads.
-        Some(Channels::Custom(labels)) => (
-            ChannelTopology::unassigned(ChannelLayout::clamped(labels.len())),
-            Placement::Stated,
-        ),
+        Some(Channels::Custom(labels)) => unassigned(labels.len(), Placement::Stated),
         Some(channels) if channels.count() > 0 => default(channels.count()),
         Some(_) | None => default(2),
     }

@@ -1,5 +1,4 @@
 use super::*;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Mono, MonoMut};
 
 /// `VbapGains::process_channel` over plain slices.
@@ -38,8 +37,8 @@ fn gains(mono: bool, a0: f64, b0: f64) -> VbapGains {
 
 fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
-        &ChannelTopology::default_for(ChannelLayout::STEREO),
-        &ChannelTopology::default_for(ChannelLayout::MONO),
+        &tutti_buffers::Bed::Stereo.topology(),
+        &tutti_buffers::Bed::Mono.topology(),
     )
     .unwrap()
 }

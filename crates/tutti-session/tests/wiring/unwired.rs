@@ -8,7 +8,7 @@
 //! a known gain.
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Fade, ForkByClone, Io, Node, NodeKey, Prepare, Shape,
     Status,
@@ -366,7 +366,7 @@ fn a_narrower_reinsert_reports_the_main_output_feed_it_dropped() {
     let mut s = Session::builder().build().expect("builds");
     let g = s.graph();
     let y = g.add(ForkByClone(Bused { aux: true }));
-    s.declare_main_output_topology(Some(ChannelTopology::default_for(ChannelLayout::STEREO)))
+    s.declare_main_output_topology(Some(tutti_buffers::Bed::Stereo.topology()))
         .expect("stereo");
     let g = s.graph();
     g.connect(y.bus_output(0), MainOutput).unwrap().unfaded();

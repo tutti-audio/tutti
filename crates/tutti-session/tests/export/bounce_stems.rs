@@ -303,9 +303,7 @@ fn a_stem_that_cannot_be_placed_is_refused_not_truncated() {
         .layout(ChannelLayout::MONO);
     let wrong_width = Stem::new(wide.erase())
         .file(dir.path().join("two.wav"), float_wav())
-        .topology(tutti_buffers::ChannelTopology::default_for(
-            ChannelLayout::STEREO,
-        ));
+        .topology(tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO).unwrap());
     for stem in [to_mono, wrong_width] {
         let b = bounce(0.01).stem_with(stem);
         match refused(&mut session, b) {

@@ -298,9 +298,11 @@ fn a_block_longer_than_the_capacity_is_measured_whole() {
 fn a_stereo_main_output_folds_to_a_stereo_device_unchanged() {
     let mut folded = [0.0f32; 2];
     let stereo = tutti_buffers::ChannelLayout::STEREO;
-    let fold =
-        tutti_graph::fold_to_width(&tutti_buffers::ChannelTopology::default_for(stereo), stereo)
-            .unwrap();
+    let fold = tutti_graph::fold_to_width(
+        &tutti_buffers::ChannelTopology::default_for(stereo).unwrap(),
+        stereo,
+    )
+    .unwrap();
     fold.frame(&[0.25, -0.75], &mut folded);
     assert!(fold.is_identity());
     assert_eq!(

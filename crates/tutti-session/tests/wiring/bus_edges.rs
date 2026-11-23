@@ -24,7 +24,7 @@ fn layout(n: u16) -> ChannelLayout {
 }
 
 fn named(n: u16) -> BusTopology {
-    BusTopology::try_from(&ChannelTopology::default_for(layout(n))).unwrap()
+    BusTopology::try_from(&ChannelTopology::default_for(layout(n)).unwrap()).unwrap()
 }
 
 fn unassigned(n: u16) -> BusTopology {
@@ -322,7 +322,7 @@ fn a_lane_has_no_gain_target_and_a_removed_node_takes_its_bus_edges() {
 // ---------------------------------------------------------------------------
 
 fn smpte(n: u16) -> ChannelTopology {
-    ChannelTopology::default_for(layout(n))
+    ChannelTopology::default_for(layout(n)).unwrap()
 }
 
 /// Both output channels of a committed block.
@@ -433,7 +433,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
     );
 
     // Named stereo has no place in one unassigned channel.
-    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1)).unwrap()))
         .expect("an unassigned mono main output");
     assert_eq!(refused(s.update()), 1, "the refusal is reported once");
     assert_eq!(
@@ -450,7 +450,7 @@ fn a_refused_commit_is_an_event_of_its_update() {
     for _ in 0..5 {
         let _ = out0(&mut s);
     }
-    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1)).unwrap()))
         .expect("an unassigned mono main output");
     assert_eq!(
         refused(s.update()),
@@ -481,7 +481,7 @@ fn a_redeclared_main_output_relowers_its_edges_and_a_misfit_refuses_the_commit()
     // Same width, another topology: the main output's lanes are re-lowered, so the
     // graph is edited though no width moved (stereo named to stereo unassigned
     // is the identity, so the render is the same).
-    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(2))))
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(2)).unwrap()))
         .expect("an unassigned pair")
         .unfaded();
     assert!(s.graph_ref().has_uncommitted_edits());
@@ -497,7 +497,7 @@ fn a_redeclared_main_output_relowers_its_edges_and_a_misfit_refuses_the_commit()
     assert!(all_are(&l, 0.5), "{:?}", &l[..2]);
 
     // Named stereo has no place in one unassigned channel.
-    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1))))
+    s.declare_main_output_topology(Some(ChannelTopology::unassigned(layout(1)).unwrap()))
         .expect("an unassigned mono main output");
     assert!(matches!(s.commit(), Committed::Refused(_)));
     let [l, _] = stereo_block(&mut s);

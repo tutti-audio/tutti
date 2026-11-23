@@ -143,7 +143,7 @@ pub(crate) struct LiveRead<F: SamplerFloat> {
     /// position reader when the voice is built: a block lends it.
     reader: Option<RingReader<F>>,
     /// Where the ring's channels go in the voice's frame: built once, on the
-    /// control side, from the file's topology (`Place::for_topology`).
+    /// control side, from the file's channels (`Place::for_channels`).
     place: Place<F>,
     st: State<F>,
 }

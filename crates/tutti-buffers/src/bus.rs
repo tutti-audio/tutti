@@ -118,7 +118,7 @@ impl BusTopology {
     /// once there.
     #[must_use]
     pub fn default_for(width: ChannelLayout) -> Option<Self> {
-        Self::try_from(&ChannelTopology::default_for(width)).ok()
+        Self::try_from(&ChannelTopology::default_for(width)?).ok()
     }
 
     /// The speaker each channel feeds, in channel order, or `None` for an
@@ -208,7 +208,7 @@ mod tests {
         );
         let nine = ChannelLayout::from_count(9);
         assert!(
-            ChannelTopology::default_for(nine).is_unassigned(),
+            ChannelTopology::default_for(nine).unwrap().is_unassigned(),
             "the case needs a width with no order"
         );
         assert_eq!(
@@ -226,7 +226,7 @@ mod tests {
     /// `ChannelTopology` is the identity.
     #[test]
     fn a_bus_holds_sixteen_channels_and_refuses_more() {
-        let sixteen = ChannelTopology::unassigned(ChannelLayout::from(16u16));
+        let sixteen = ChannelTopology::new([Speaker::Unassigned; 16]).unwrap();
         let bus = BusTopology::try_from(&sixteen).unwrap();
         assert_eq!(bus.layout().count(), 16);
         assert_eq!(ChannelTopology::from(bus), sixteen);
@@ -235,7 +235,7 @@ mod tests {
             Some(bus)
         );
 
-        let seventeen = ChannelTopology::unassigned(ChannelLayout::from(17u16));
+        let seventeen = ChannelTopology::new([Speaker::Unassigned; 17]).unwrap();
         assert_eq!(
             BusTopology::try_from(&seventeen),
             Err(BusTooWide { width: 17 })
