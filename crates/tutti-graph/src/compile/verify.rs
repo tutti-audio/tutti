@@ -1265,6 +1265,29 @@ mod tests {
         });
         assert!(verify(&bad).unwrap_err().0.contains("delay 0 is used by 0"));
 
+        // Rule 6: a unit run by two ops (the second node op takes the first's
+        // unit, so one unit is run twice and the other not at all).
+        let mut bad = good.clone();
+        let first = bad
+            .ops
+            .iter()
+            .find_map(|op| match *op {
+                Op::Node { unit, .. } => Some(unit),
+                _ => None,
+            })
+            .expect("the pair has node ops");
+        let second = bad
+            .ops
+            .iter_mut()
+            .filter_map(|op| match op {
+                Op::Node { unit, .. } => Some(unit),
+                _ => None,
+            })
+            .nth(1)
+            .expect("two node ops");
+        *second = first;
+        assert!(verify(&bad).unwrap_err().0.contains("is run by 2 ops"));
+
         // Two units at one store index.
         let mut bad = good.clone();
         let idx = bad.units[0].idx;
