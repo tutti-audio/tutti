@@ -91,9 +91,9 @@ use core::marker::PhantomData;
 /// anything but the audio itself: a value near the subnormal range can differ
 /// between a folded and a computed expression, between optimisation levels,
 /// and between targets. Within one build, renders still agree bit for bit
-/// where they run the same code in the same mode, and the parallel executor's
-/// identity with the serial one rests on that: the serial executor wraps the
-/// whole block, and in the parallel one every participant (the caller, which
+/// where they run the same code in the same mode, and a render's identity at
+/// every participant count rests on that: one participant wraps the whole
+/// block, and on a pool every participant (the caller, which
 /// is already inside that call, and each helper) makes its own call before
 /// its first op, so every node runs, through the same `dyn Node` code, under
 /// FTZ/DAZ. The call only adds those bits to the thread's register, so this

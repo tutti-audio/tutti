@@ -4,7 +4,8 @@
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::PendingSampleRate;
+use tutti_rt::AtomicCell;
+use tutti_units::SampleRate;
 
 use tutti_rt::Mutex;
 
@@ -192,7 +193,10 @@ where
     };
     // A pump the node's rebinder runs reports through the handle's listeners too.
     client.reporting = Some(reporting.clone());
-    let lost = inner.lock().lost_latch();
+    let (lost, midi_map) = {
+        let instance = inner.lock();
+        (instance.lost_latch(), instance.midi_map())
+    };
     let backend = Arc::new(ControlBackend {
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
@@ -209,7 +213,8 @@ where
     let control: Arc<dyn crate::MainThreadControl> = backend.clone();
     let handle = PluginHandle::from_backend(backend, Some(control), descriptor, loaded, param_sink)
         .invalidate_sink(invalidate_sink)
-        .transport_sink(transport_sink);
+        .transport_sink(transport_sink)
+        .midi_map(midi_map);
 
     Ok((client, handle))
 }
@@ -221,7 +226,7 @@ struct Wired<L: Loaded, F: Float> {
     inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
-    pending_sample_rate: Arc<PendingSampleRate>,
+    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where the backend posts the host's parameter writes the client drains.
     post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
@@ -276,7 +281,7 @@ where
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
     // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
     // or the node's `Rebinder::tick`, which the session calls at each update.
-    let pending_sample_rate = Arc::new(PendingSampleRate::new());
+    let pending_sample_rate = Arc::new(AtomicCell::new(None));
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
@@ -380,7 +385,7 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(PendingSampleRate::new()),
+        Arc::new(AtomicCell::new(None)),
         None,
         parameters,
         spares,

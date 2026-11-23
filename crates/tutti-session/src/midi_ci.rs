@@ -33,9 +33,10 @@ use std::collections::BTreeMap;
 use std::sync::Weak;
 
 use tutti_midi_ci::{
-    BodyLimit, CallError, CiDeviceId, Nak, PeData, PeOutcome, PeReply, PeResource, PeSignal,
-    PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest, ProfileState, ReportRequest,
-    ResourceEntry, ResourceFailure, ResourceGet, ResourceSet, ResourceTarget,
+    BodyLimit, CallError, CiDeviceId, Nak, PartialUpdate, PeData, PeEncoding, PeOutcome, PePage,
+    PeReply, PeResource, PeSignal, PeStatus, PeTerminator, ProfileId, ProfileOutcome,
+    ProfileRequest, ProfileState, ReportRequest, RequestRefused, ResourceEntry, ResourceFailure,
+    ResourceGet, ResourceId, ResourceSet, ResourceTarget,
 };
 use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::{
@@ -545,6 +546,7 @@ impl ResourcePeer {
                 link: self.link.clone(),
                 peer: self.peer.clone(),
                 entry: entry.clone(),
+                res_id: None,
             })
     }
 }
@@ -562,6 +564,8 @@ pub struct ListedResource {
     link: PortLink,
     peer: PropertyPeer,
     entry: ResourceEntry,
+    /// The entry of the Resource the calls name.
+    res_id: Option<ResourceId>,
 }
 
 impl ListedResource {
@@ -578,15 +582,59 @@ impl ListedResource {
         &self.entry
     }
 
+    /// The handle of the entry `res_id` of the Resource (M2-103 §8.5): its calls
+    /// name that entry. ProgramList, JSONSchema, ChCtrlList, CtrlMapList and State
+    /// are named with a `resId` and are called only through this handle, as is a
+    /// custom or unmodelled Resource whose ResourceList entry sets `requireResId`;
+    /// a Resource with no entries resolves to [`PeFailure::NotSent`] through it.
+    #[must_use]
+    pub fn with_res_id(&self, res_id: ResourceId) -> Self {
+        Self {
+            res_id: Some(res_id),
+            ..self.clone()
+        }
+    }
+
+    /// The Resource, and the entry the handle names.
+    fn target(&self) -> Result<ResourceTarget, RequestRefused> {
+        match &self.res_id {
+            None => ResourceTarget::try_from(self.resource().clone()),
+            Some(res_id) => ResourceTarget::entry(self.resource().clone(), res_id.clone()),
+        }
+    }
+
     /// Asks the peer for the Resource's Property Data.
     ///
-    /// A Resource whose entries are named by a `resId`, one the entry says cannot
-    /// be got, and any other call the ResourceList refuses resolve to
-    /// [`PeFailure::NotSent`].
+    /// A Resource whose entries are named by a `resId`, called without
+    /// [`with_res_id`](Self::with_res_id), one the entry says cannot be got, and
+    /// any other call the ResourceList refuses resolve to [`PeFailure::NotSent`].
     pub fn fetch(&self) -> GetProperty {
-        GetProperty::new(match ResourceTarget::try_from(self.resource().clone()) {
+        self.get(ResourceGet::new)
+    }
+
+    /// Asks the peer for one page of a List Resource (M2-103 §8.6.2). A Resource
+    /// that is no List Resource, and one whose entry does not declare
+    /// `canPaginate`, resolve to [`PeFailure::NotSent`].
+    pub fn fetch_page(&self, page: PePage) -> GetProperty {
+        self.get(|target| ResourceGet::new(target).paged(page))
+    }
+
+    /// The encoding a call is made in: ASCII where the entry takes it, the first
+    /// the entry lists otherwise.
+    fn encoding(&self) -> PeEncoding {
+        let listed = self.entry.encodings();
+        if listed.contains(&PeEncoding::Ascii) {
+            PeEncoding::Ascii
+        } else {
+            listed.first().copied().unwrap_or(PeEncoding::Ascii)
+        }
+    }
+
+    fn get(&self, get: impl FnOnce(ResourceTarget) -> ResourceGet) -> GetProperty {
+        GetProperty::new(match self.target() {
             Ok(target) => self.link.reply(
-                self.peer.ask(PropertyCall::Get(ResourceGet::new(target))),
+                self.peer
+                    .ask(PropertyCall::Get(get(target).encoded(self.encoding()))),
                 listing(&self.entry),
                 InputRequest::Get,
             ),
@@ -599,10 +647,11 @@ impl ListedResource {
     /// does not let be subscribed to resolves to [`PeFailure::NotSent`]. Two calls
     /// make two Subscriptions: none is shared.
     pub fn subscribe(&self) -> Subscribe {
-        Subscribe::new(match ResourceTarget::try_from(self.resource().clone()) {
+        Subscribe::new(match self.target() {
             Ok(target) => self.link.reply(
-                self.peer
-                    .ask(PropertyCall::Subscribe(ResourceGet::new(target))),
+                self.peer.ask(PropertyCall::Subscribe(
+                    ResourceGet::new(target).encoded(self.encoding()),
+                )),
                 listing(&self.entry),
                 InputRequest::Subscribe,
             ),
@@ -614,11 +663,23 @@ impl ListedResource {
     /// another Resource's resolves to [`PeFailure::NotSent`], as the
     /// ResourceList's refusal of a Set does.
     pub fn write(&self, data: PeData) -> SetProperty {
-        let set = ResourceTarget::try_from(self.resource().clone())
-            .and_then(|target| ResourceSet::full(target, data));
-        SetProperty::new(match set {
+        self.set(|target| ResourceSet::full(target, data))
+    }
+
+    /// Sends the peer `update` as a Partial Set (M2-103 §10). An entry that
+    /// does not declare `canSet` `partial` resolves to [`PeFailure::NotSent`].
+    pub fn write_partial(&self, update: PartialUpdate) -> SetProperty {
+        self.set(|target| Ok(ResourceSet::partial(target, update)))
+    }
+
+    fn set(
+        &self,
+        set: impl FnOnce(ResourceTarget) -> Result<ResourceSet, RequestRefused>,
+    ) -> SetProperty {
+        SetProperty::new(match self.target().and_then(set) {
             Ok(set) => self.link.reply(
-                self.peer.ask(PropertyCall::Set(set)),
+                self.peer
+                    .ask(PropertyCall::Set(set.encoded(self.encoding()))),
                 listing(&self.entry),
                 InputRequest::Set,
             ),
@@ -627,11 +688,14 @@ impl ListedResource {
     }
 }
 
+/// A call that was not sent because the rules of the Resource refuse it.
+pub(crate) fn refusal(refused: RequestRefused) -> PeerError<PeFailure> {
+    PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused)))
+}
+
 /// A call that ended at the handle: the rules of the Resource refuse it.
-fn not_sent<T>(refused: tutti_midi_ci::RequestRefused) -> PeerReply<T, PeFailure> {
-    PeerReply::failed(PeerError::Refused(PeFailure::NotSent(CallError::Refused(
-        refused,
-    ))))
+fn not_sent<T>(refused: RequestRefused) -> PeerReply<T, PeFailure> {
+    PeerReply::failed(refusal(refused))
 }
 
 /// A handle the hardware layer holds of one peer, named by its Group and MUID.

@@ -112,7 +112,9 @@ fn sf2(font: &Arc<SoundFont>) -> SoundFontUnit<f32> {
 /// graph node (the path a host takes), routed to the outputs: a unit with no
 /// params of its own (`SoundFontUnit`) or one a param write reaches
 /// (`PolySynth`).
-fn session_with<N: tutti_session::SessionNode>(unit: N) -> (DetachedSession, NodeKey) {
+fn session_with<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static>(
+    unit: N,
+) -> (DetachedSession, NodeKey) {
     let mut session = Session::builder()
         .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)

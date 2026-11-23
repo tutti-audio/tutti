@@ -83,6 +83,19 @@ fn every_gate_recipe_is_a_step_of_ci() {
     assert!(gates > 0);
 }
 
+/// Every row of the gate table is a recipe, a step of `ci`, and a step of `gates`
+/// unless the row says it needs more than the checkout.
+#[test]
+fn every_gate_row_is_a_recipe_and_a_step_of_ci_and_of_gates() {
+    let (ci, gates) = (dry("ci", &[]), dry("gates", &[]));
+    for g in crate::gates::GATES {
+        assert!(RECIPES.iter().any(|r| r.0 == g.recipe), "{}", g.recipe);
+        let step = dry(g.recipe, &[]);
+        assert!(ci.contains(&step[0]), "{}", g.recipe);
+        assert_eq!(gates.contains(&step[0]), g.local, "{}", g.recipe);
+    }
+}
+
 #[test]
 fn test_builds_the_plugins_before_it_runs_nextest() {
     let steps = dry("test", &["--no-fail-fast"]);

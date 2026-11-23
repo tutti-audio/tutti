@@ -1,4 +1,4 @@
-//! Rendering a block: the serial and parallel paths over a plan's ops.
+//! Rendering a block: the frame around the plan's ops, which `par.rs` runs.
 
 use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
@@ -8,23 +8,18 @@ use tutti_rt::RingWriter;
 use tutti_units::Samples;
 
 use super::commit::{Crossfade, retire_fade};
-use super::node_op::{Head, OpState, flag, node_dispatch};
-use super::ops::{
-    audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
-    output_op, sum_op,
-};
+use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
 use crate::history::TransportHistory;
 use crate::loss::Dropped;
-use crate::meter::meter_op;
 use crate::node::{Env, TransportChanges, TransportPosition};
 use crate::par::Block;
-use crate::plan::{Op, Plan};
+use crate::plan::Plan;
 use crate::play::PlayClock;
-use crate::rtlog::LogLane;
-use crate::slots::{EventSlots, SlotFlags};
+use crate::slots::SlotFlags;
 use tutti_music::MeterMap;
+use tutti_tempo::TempoMap;
 
 /// After a block in which a crossfade reached its end: retire each ended
 /// fade's outgoing unit into the commit that started it, and start the fade
@@ -130,7 +125,7 @@ impl<F: Float> Executor<F> {
     ) {
         with_no_denormals(|| {
             self.apply_pending();
-            self.render_applied(frames, transport, changes, inputs, outputs, None);
+            self.render_applied(frames, transport, changes, inputs, outputs, None, None);
         });
     }
 
@@ -154,14 +149,14 @@ impl<F: Float> Executor<F> {
     /// re-prepare's resume) would change what the sizes were read from.
     ///
     /// `inputs` and `outputs` must have one slice per main input and output
-    /// channel of the plan. Slices past those are ignored, serial or on a
-    /// pool. Fewer of either is a caller bug: it panics in debug builds, and
+    /// channel of the plan. Slices past those are ignored, on a pool or not. Fewer of either is a caller bug: it panics in debug builds, and
     /// in release the block renders silence into what was given, running no
     /// node.
     ///
     /// `meter` is the project's meter for this block, lent by the host once
-    /// for the block and handed to every node through [`Cx::meter`](crate::Cx#structfield.meter) (serial or
-    /// on a pool); `None` where the host has none.
+    /// for the block and handed to every node through [`Cx::meter`](crate::Cx#structfield.meter) (on a pool or
+    /// not); `None` where the host has none. `tempo` is the project's
+    /// tempo map, lent the same way and handed through [`Cx::tempo`](crate::Cx#structfield.tempo).
     ///
     /// # Panics
     ///
@@ -174,6 +169,7 @@ impl<F: Float> Executor<F> {
         inputs: &[&[F]],
         outputs: &mut [&mut [F]],
         meter: Option<&MeterMap>,
+        tempo: Option<&TempoMap>,
     ) {
         let _rt = self.prepare.enter_rt_scope();
         // `move` captures `self` as one pointer; the precise capture of every
@@ -304,7 +300,7 @@ impl<F: Float> Executor<F> {
                 inject,
                 has_inject,
                 has_due,
-                overlay,
+                overlay: _,
                 par,
             } = state;
             // Slices, not `&mut Vec`s: a slice's pointer and length are locals
@@ -323,8 +319,8 @@ impl<F: Float> Executor<F> {
             let mut fade_ended = false;
 
             // Every weighted lane reads its cell once, here: a store while
-            // the block runs reaches no op of it, so the serial and the
-            // parallel render cannot disagree on when it landed.
+            // the block runs reaches no op of it, so no participant count
+            // can disagree on when it landed.
             for lane in lanes.iter_mut() {
                 lane.snapshot();
             }
@@ -352,213 +348,44 @@ impl<F: Float> Executor<F> {
             let due = commands.deliveries();
             // The level gate, once for the block: every lane's slots take it.
             logs.begin_block();
-            // The cost model's verdict for this plan on this pool, and for a
-            // block this long (`Plan::schedule`); either way the same samples.
-            let spread = par.as_ref().is_some_and(|p| p.spreads(frames));
-            if let (true, Some(par), Some(pool)) = (spread, par.as_mut(), pool.as_ref()) {
-                let ended = crate::par::run_block(
-                    par,
-                    pool,
-                    Block {
-                        dropped: &mut *dropped,
-                        plan,
-                        env: &env,
-                        history,
-                        meter,
-                        frames,
-                        max,
-                        cap,
-                        inputs,
-                        // The claim table is sized for the plan's width; slices
-                        // past it are ignored here as on the serial path.
-                        outputs: &mut outputs[..plan.rendered_outputs()],
-                        arena,
-                        flags,
-                        events,
-                        store,
-                        rings,
-                        audio_fb,
-                        event_fb,
-                        taps,
-                        event_taps,
-                        meters,
-                        lanes: &mut lanes[..],
-                        inject,
-                        has_inject,
-                        has_due,
-                        due,
-                        logs: &mut logs.lanes[..],
-                        log_claims: &mut logs.claims,
-                    },
-                );
-                fade_ended |= ended;
-            } else {
-                // Built once per block, not per op: rebuilt per node call it was
-                // ~20 stack moves a node (measured on `graph_render`'s
-                // `overhead` chains). A node op sets `at`.
-                let LogLane { slots: log, sink } = &mut logs.lanes[0];
-                let mut st = OpState {
+            // The pool's participants take the plan's tasks when the plan
+            // spreads; otherwise the calling thread is the one participant.
+            fade_ended |= crate::par::run_block(
+                par.as_mut().expect("a staged plan carries its par"),
+                pool.as_ref(),
+                Block {
+                    dropped: &mut *dropped,
+                    plan,
+                    env: &env,
+                    history,
+                    meter,
+                    tempo,
+                    frames,
+                    max,
+                    cap,
+                    inputs,
+                    // The claim table is sized for the plan's width; slices
+                    // past it are ignored.
+                    outputs: &mut outputs[..plan.rendered_outputs()],
                     arena,
                     flags,
                     events,
+                    store,
+                    rings,
+                    audio_fb,
+                    event_fb,
+                    taps,
+                    event_taps,
+                    meters,
+                    lanes: &mut lanes[..],
                     inject,
                     has_inject,
                     has_due,
-                    at: 0,
-                    overlay,
                     due,
-                    dropped: &mut *dropped,
-                    log,
-                    sink,
-                };
-                for op in &plan.ops {
-                    match *op {
-                        Op::MainInput { channel, dst } => {
-                            main_input(
-                                &mut *st.arena,
-                                &mut *st.flags,
-                                inputs,
-                                channel,
-                                dst,
-                                frames,
-                            );
-                        }
-                        Op::Delay { delay, src, dst } => {
-                            delay_op(
-                                audio_ring(&mut rings[delay as usize]),
-                                &mut *st.arena,
-                                &mut *st.flags,
-                                src,
-                                dst,
-                                frames,
-                            );
-                        }
-                        Op::Sum { srcs, dst } => {
-                            sum_op(
-                                &mut *st.arena,
-                                &mut *st.flags,
-                                &*st.events,
-                                &plan.audio_list[srcs.range()],
-                                &mut [],
-                                &[],
-                                dst,
-                                frames,
-                            );
-                        }
-                        Op::WeightedSum {
-                            srcs,
-                            dst,
-                            lanes: span,
-                            gains,
-                        } => {
-                            sum_op(
-                                &mut *st.arena,
-                                &mut *st.flags,
-                                &*st.events,
-                                &plan.audio_list[srcs.range()],
-                                &mut lanes[span.range()],
-                                &plan.gain_ports[gains.range()],
-                                dst,
-                                frames,
-                            );
-                        }
-                        Op::EventDelay { delay, src, dst } => {
-                            let lost = event_delay_op(
-                                event_ring(&mut rings[delay as usize]),
-                                &mut *st.events,
-                                src,
-                                dst,
-                                frames,
-                            );
-                            st.dropped.charge_delay(plan, delay, lost);
-                        }
-                        Op::EventMerge { srcs, dst, bound } => {
-                            let lost = event_merge_op(
-                                &plan.event_list[srcs.range()],
-                                dst,
-                                bound,
-                                &mut *st.events,
-                            );
-                            st.dropped.charge_merge(bound, lost);
-                        }
-                        Op::Node { unit, .. } => {
-                            // One record per node op, lowered at compile time and
-                            // checked by the verifier: store index, generation,
-                            // arrival, tail, port slots and presorted borrows.
-                            let rec = &plan.nodes.recs[unit as usize];
-                            let u = store[rec.store as usize]
-                                .as_mut()
-                                .expect("the delta placed every unit the plan runs");
-                            let head = Head {
-                                rec,
-                                plan,
-                                frames,
-                                max,
-                                cap,
-                                env: &env,
-                                history,
-                                meter,
-                            };
-                            st.at = unit as usize;
-                            fade_ended |= node_dispatch(u, &head, &mut st);
-                        }
-                        Op::Output {
-                            channel,
-                            src,
-                            delay,
-                        } => {
-                            let ring = delay.map(|d| audio_ring(&mut rings[d as usize]));
-                            output_op(
-                                ring,
-                                &mut outputs[channel as usize][..frames],
-                                &*st.arena,
-                                &*st.flags,
-                                src,
-                            );
-                        }
-                        Op::Tap { tap, srcs } => {
-                            if let Some(tap) = taps[tap as usize].as_mut() {
-                                crate::tap::tap_op(
-                                    tap,
-                                    &*st.arena,
-                                    &plan.audio_list[srcs.range()],
-                                    env.frame,
-                                    frames,
-                                );
-                            }
-                        }
-                        Op::EventTap { tap, src } => {
-                            if let Some(tap) = event_taps[tap as usize].as_mut() {
-                                crate::event_tap::event_tap_op(tap, &*st.events, src, &env);
-                            }
-                        }
-                        Op::Meter { meter, srcs } => {
-                            if let Some(meter) = meters[meter as usize].as_mut() {
-                                meter_op(
-                                    meter,
-                                    &*st.arena,
-                                    &*st.flags,
-                                    &plan.audio_list[srcs.range()],
-                                    frames,
-                                );
-                            }
-                        }
-                        Op::Capture { feedback, src } => {
-                            let ring = audio_fb[feedback as usize]
-                                .as_mut()
-                                .expect("built by apply");
-                            capture_op(ring, &*st.arena, &*st.flags, src, frames);
-                        }
-                        Op::EventCapture { feedback, src } => {
-                            let fifo = event_fb[feedback as usize]
-                                .as_mut()
-                                .expect("built by apply");
-                            let lost = fifo.push_slot(st.events.slot(src));
-                            st.dropped.charge_feedback(plan, feedback, u64::from(lost));
-                        }
-                    }
-                }
-            }
+                    logs: &mut logs.lanes[..],
+                    log_claims: &mut logs.claims,
+                },
+            );
 
             if fade_ended {
                 end_fades(plan, store, fade_back, inject, has_inject, dropped);

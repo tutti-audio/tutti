@@ -1221,6 +1221,58 @@ impl AudioBridge {
         await_reply(ask_resp, wait).ok().flatten()
     }
 
+    /// Hands the server's plugin the app's controller entries and returns who
+    /// applies them. [`Host`](tutti_plugin_types::MidiMapApplied::Host) when the
+    /// plugin is gone or does not answer in time: nothing was applied by it.
+    pub(crate) fn set_app_midi_map(
+        &self,
+        app: &[tutti_plugin_types::MidiAssignment],
+    ) -> tutti_plugin_types::MidiMapApplied {
+        let wait = self.lifecycle.timeouts().param_wait();
+        let answer = (!self.lifecycle.is_crashed())
+            .then(|| {
+                self.request(wait, |reply| ControlCommand::SetAppMidiMap {
+                    app: app.to_vec(),
+                    reply,
+                })
+            })
+            .flatten()
+            .and_then(|ask| await_reply(ask, wait).ok());
+        answer.unwrap_or(tutti_plugin_types::MidiMapApplied::Host)
+    }
+
+    /// The server plugin's wiring as it reads now, or `None` when it is gone or
+    /// does not answer in time.
+    pub(crate) fn wiring(&self) -> Option<tutti_plugin_types::PluginWiring> {
+        if self.lifecycle.is_crashed() {
+            return None;
+        }
+        let wait = self.lifecycle.timeouts().param_wait();
+        let ask = self.request(wait, |reply| ControlCommand::GetWiring { reply })?;
+        await_reply(ask, wait).ok().flatten()
+    }
+
+    /// Arms or disarms the server plugin's own MIDI learn; the plugin's refusal,
+    /// or [`Lost`](tutti_plugin_types::PluginLearnError::Lost) when it is gone or
+    /// does not answer in time.
+    pub(crate) fn arm_plugin_midi_learn(
+        &self,
+        armed: bool,
+    ) -> std::result::Result<(), tutti_plugin_types::PluginLearnError> {
+        use tutti_plugin_types::PluginLearnError::Lost;
+        if self.lifecycle.is_crashed() {
+            return Err(Lost);
+        }
+        let wait = self.lifecycle.timeouts().param_wait();
+        let ask = self
+            .request(wait, |reply| ControlCommand::ArmPluginMidiLearn {
+                armed,
+                reply,
+            })
+            .ok_or(Lost)?;
+        await_reply(ask, wait).map_err(|_| Lost)?
+    }
+
     /// A parameter's value, or `None` when it cannot be asked. Waits up to a
     /// query's wait for a request already owed, then up to it again for its own
     /// answer.

@@ -1,4 +1,4 @@
-//! The serial plan executor, on a filter chain, a fan and a do-nothing chain.
+//! The plan executor on one thread (no pool), on a filter chain, a fan and a do-nothing chain.
 //!
 //! The nodes are written directly against `Io`: a sine source, a chain or
 //! fan of two-pole lowpass filters (the SVF's `tick`), and (for the fan) one

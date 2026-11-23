@@ -31,6 +31,9 @@ tutti-platform = { version = "0.0.1", path = "../tutti-platform" }
 tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # The sample float the node is generic over, and the width a plugin activates at.
 tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
+# The controller map reads a message through the UMP decode.
+tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }
+tutti-midi-protocol = { version = "0.0.1", path = "../tutti-midi-protocol" }
 # The one OS look at a plugin's descriptors (`service_now`).
 tutti-plugin-ipc-ffi = { version = "0.0.1", path = "../tutti-plugin-ipc-ffi" }
 
@@ -42,9 +45,6 @@ tracing.workspace = true
 [dev-dependencies]
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
-# The UMP packets the tests build.
-tutti-ump = { path = "../tutti-ump", default-features = false }
-tutti-midi-protocol = { path = "../tutti-midi-protocol" }
 # `fake`: the plugin that implements `Loaded` with no format behind it, which
 # the block-status tests drive through `client_over`.
 tutti-plugin-types = { path = "../tutti-plugin-types", features = ["testing"] }

@@ -98,8 +98,8 @@ use tutti_graph::{IntoNode, Node, NodeParts, Shape};
 use tutti_platform::Executor;
 use tutti_plugin_db::Loadable;
 use tutti_plugin_host::{
-    InProcessClient, InvalidateSink, ParameterChangeSink, PluginControls, PluginHandle, PluginNode,
-    Rebinder, RefreshSink, TransportSink, client_over,
+    InProcessClient, InvalidateSink, MidiMapSlot, ParameterChangeSink, PluginControls,
+    PluginHandle, PluginNode, Rebinder, RefreshSink, TransportSink, client_over,
 };
 use tutti_plugin_ipc::{
     Ipc, IpcConfig, IpcController, IpcEvent, LaunchSpec, Launched, LoadRequest, PluginBridge,
@@ -199,6 +199,8 @@ pub struct PluginClient<S = Unbound> {
     refresh_sink: RefreshSink,
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
+    /// The node's controller map, which the handle publishes the app's entries to.
+    midi_map: MidiMapSlot,
     /// The out-of-process plugin's control side (its bridge and the server's lifetime
     /// guard), shared with `PluginClient::handle`.
     served: IpcController,
@@ -262,6 +264,8 @@ impl EventRoute {
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             IpcEvent::ProcessRequested => {}
+            // Asked for again by the node's pump (`Request::MidiCcAssignmentChanged`).
+            IpcEvent::MidiMapChanged => {}
             // Fired above.
             IpcEvent::StateNotRestored { .. }
             | IpcEvent::RenderModeNotApplied { .. }
@@ -486,6 +490,7 @@ impl PluginClient<Unbound> {
             refresh_sink,
             invalidate_sink,
             transport_sink,
+            midi_map: client.midi_map(),
             served,
             origin,
             plugin,
@@ -525,6 +530,7 @@ impl PluginClient<Unbound> {
             refresh_sink,
             invalidate_sink,
             transport_sink,
+            midi_map,
             served,
             origin,
             plugin,
@@ -544,6 +550,7 @@ impl PluginClient<Unbound> {
             refresh_sink,
             invalidate_sink,
             transport_sink,
+            midi_map,
             served,
             origin,
             plugin,
@@ -626,7 +633,8 @@ impl<S> PluginClient<S> {
         )
         .refresh_sink(self.refresh_sink().clone())
         .invalidate_sink(self.invalidate_sink().clone())
-        .transport_sink(self.transport_sink().clone());
+        .transport_sink(self.transport_sink().clone())
+        .midi_map(self.midi_map.clone());
         match pid {
             Some(pid) => handle.with_server_pid(pid),
             None => handle,

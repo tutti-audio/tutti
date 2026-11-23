@@ -53,6 +53,8 @@ name = "automation_state"
 required-features = ["server"]
 
 [dev-dependencies]
+# `tests/server.rs` drives an in-process node by hand (`contract::Direct`).
+tutti-graph = { path = "../../crates/tutti-graph", features = ["contract"] }
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
 # `tests/server.rs` collects the bridge's parameter edits under a `tutti_rt::Mutex`.

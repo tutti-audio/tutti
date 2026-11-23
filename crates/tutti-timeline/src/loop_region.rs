@@ -193,25 +193,16 @@ impl LoopOwner {
 /// A read-only view of the transport's loop region, published by the engine the way the
 /// tempo map is ([`TempoReader`](super::TempoReader)): it reads, and can neither edit the
 /// loop nor command the transport. Cloning is cheap and any thread may.
-///
-/// [`MotionFsm::loop_reader`](super::MotionFsm::loop_reader) makes one;
-/// [`LoopReader::disarmed`] is the view of a loop nobody edits.
 #[derive(Clone, Debug)]
-pub struct LoopReader(SeqReader<Wire>);
+pub(crate) struct LoopReader(SeqReader<Wire>);
 
 impl LoopReader {
-    /// A view of a loop nobody edits: the default region, disarmed.
-    #[must_use]
-    pub fn disarmed() -> Self {
-        LoopOwner::new().1
-    }
-
     /// The region the engine last published: one write's value, never a
     /// start of one and an end of another. Spins with `yield_now` while a
     /// write is in flight (a few stores long), so it is for control and UI
     /// threads, not real-time ones.
     #[must_use]
-    pub fn read(&self) -> LoopRegion {
+    pub(crate) fn read(&self) -> LoopRegion {
         loop {
             match self.0.read(READ_RETRIES) {
                 Ok(published) => return published.and_then(decode).unwrap_or_default(),

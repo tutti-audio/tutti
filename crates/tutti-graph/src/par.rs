@@ -1,40 +1,53 @@
-//! The parallel executor: a block's tasks run across a [`Pool`]'s threads.
+//! The op executor: a block's ops run on the calling thread alone, or its
+//! tasks across a [`Pool`]'s threads.
 //!
-//! The plan already carries
-//! everything a schedule needs, computed by the pure compiler: the ops fused
-//! into **tasks** (chains run back to back on one thread), the task DAG as
-//! CSR successor rows, each task's **activation count** (its distinct
-//! predecessor tasks) and the cost model's totals, from which
-//! [`Plan::schedule`] decides — when the plan meets the pool, on the
-//! thread that applies it — whether blocks spread, from which block length,
-//! and how many participants they wake. Nothing is derived per block.
+//! The plan already carries everything a spread block needs, computed by the
+//! pure compiler: the ops fused into **tasks** (chains run back to back on
+//! one thread), the task DAG as CSR successor rows, and each task's
+//! **activation count** (its distinct predecessor tasks). Nothing is
+//! derived per block.
 //!
-//! # Per block
+//! The app chooses the threads by the pool it sets: with a pool of more than
+//! one participant, every block of a plan with more than one task runs on
+//! all of them. Nothing else decides.
 //!
-//! 1. The caller (the audio thread) arms the block's [`TaskGraph`] — built
-//!    from those tables when the plan was applied — and asks the pool to run
-//!    one job on up to the schedule's `wake` participants, itself as
-//!    participant 0. (A block shorter than the schedule's `from` runs the
-//!    serial walk instead.)
+//! One op code, `Ctx::run_op`, serves every block. How a participant
+//! borrows what an op touches is a [`Mode`]: through claims
+//! when several threads run at once, through plain `&mut` slices when the
+//! calling thread is the only participant (`access.rs`).
+//!
+//! # A block alone
+//!
+//! The calling thread (the audio thread) is the one participant. A block
+//! runs alone with no pool, a pool of one participant, or a plan of one
+//! task. It walks the plan's ops in
+//! order through plain `&mut` borrows: no task graph, no claim, no pool call.
+//!
+//! # A block spread over a pool
+//!
+//! 1. The caller arms the block's [`TaskGraph`] — built from the plan's
+//!    tables when the plan was applied — and asks the pool to run one job on
+//!    every participant of the pool, itself as participant 0.
 //! 2. Every participant takes ready tasks and runs each task's ops through
-//!    the same op code as the serial walk (`exec.rs`), on **claimed views**
-//!    of the arena and event slots (`slots.rs`) and claimed units, delay
-//!    rings, feedback state and output channels. The first successor a task
-//!    makes ready runs inline on the same thread.
+//!    the same op code, on **claimed views** of the arena and event slots
+//!    (`slots.rs`) and claimed units, delay rings, feedback state and output
+//!    channels. The first successor a task makes ready runs inline on the
+//!    same thread.
 //! 3. The pool returns once every task has run and every helper has left the
 //!    job; the caller sums the workers' dropped-event counts and ended fades.
 //!
-//! # Why the render is bit-identical to the serial one
+//! # Why the render does not depend on the participants
 //!
 //! Every op reads only values its DAG predecessors wrote (the compiler's
 //! op DAG), every slot is shared only between values whose lifetimes cannot
 //! overlap under *any* order the DAG allows (the colouring pass, checked by
 //! the verifier), and each unit, ring, feedback delay and output channel is
-//! touched by exactly one op. So each op sees the inputs it sees serially,
-//! whatever order the workers run it in, and does the same arithmetic. The
-//! only cross-op sums (dropped events) are integer counts. The tests in
-//! `tests/executor/parallel.rs` hold the parallel render to the serial one, sample for
-//! sample, across worker counts and block lengths.
+//! touched by exactly one op. So each op sees the same inputs whatever order
+//! the participants run it in, and does the same arithmetic. The only
+//! cross-op sums (dropped events) are integer counts. The plan verifier
+//! proves the schedule independence; `tests/executor/parallel.rs` holds one
+//! participant against several, sample for sample, across worker counts and
+//! block lengths.
 //!
 //! A node that shares mutable state with another node *outside* the graph's
 //! ports (two nodes behind one `Arc<Mutex<_>>`, say) is not covered: the
@@ -52,8 +65,8 @@
 //!
 //! # Real time
 //!
-//! Per block the parallel path allocates nothing, takes no lock and makes no
-//! system call on the audio thread except the pool's wake of its sleeping
+//! Per block neither path allocates, takes a lock or makes a system call on
+//! the audio thread, except a spread block's pool wake of its sleeping
 //! helpers: the claim tables, the ready list and each worker's scratch (its
 //! claim lists, its overlay buffer) are sized when a plan is applied. The
 //! caller never waits for a helper that has not started; it waits only for
@@ -72,6 +85,11 @@
 //! naming the cause. The node's own panic message has already been printed by
 //! the panic hook.
 
+mod access;
+
+use access::{
+    Audio, Claimed, ClaimedAudio, ClaimedEvents, Events, Exclusive, ExclusiveAudio, Mode, Table,
+};
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::Arc;
@@ -93,9 +111,10 @@ use crate::loss::Dropped;
 use crate::node::{Env, MAX_PORTS};
 use crate::plan::{Op, Plan, Span};
 use crate::rtlog::LogLane;
-use crate::slots::{ArenaView, EventSlot, EventSlots, EventsView, SharedFlags};
+use crate::slots::{EventSlot, EventSlots, SharedFlags};
 use tutti_buffers::MaxBlock;
 use tutti_music::MeterMap;
+use tutti_tempo::TempoMap;
 
 /// A pool of threads that runs a job on several of them — what the parallel
 /// executor (and a CLAP plugin's `clap.thread-pool` request) asks of a
@@ -187,10 +206,11 @@ impl Drop for Unclaimed<'_> {
 /// table, built when the plan is applied (with the rest of the executor's
 /// state, `exec.rs`'s `rebuild`) for the pool's participant count.
 pub(crate) struct Par {
-    /// Participants a block wakes (`Schedule::Parallel::wake`).
-    wake: usize,
-    /// The shortest block that spreads (`Schedule::Parallel::from`).
-    from: usize,
+    /// The pool participants this was built for (0: no pool).
+    participants: usize,
+    /// Whether a block spreads over the pool: a pool of more than one
+    /// participant, and a plan of more than one task.
+    spreads: bool,
     graph: TaskGraph,
     /// The per-slot flags, shared by the block's workers: seeded from the
     /// executor's own before each block (slot 0, the feedback reads), and
@@ -223,7 +243,6 @@ impl Par {
     pub(crate) fn new(
         plan: &Plan,
         participants: usize,
-        (wake, from): (usize, usize),
         store_len: usize,
         inject_units: impl Iterator<Item = u32>,
         overlay: usize,
@@ -245,13 +264,16 @@ impl Par {
             span.len += 1;
             n_inject += 1;
         }
+        let spreads = participants > 1 && plan.tasks.len() > 1;
+        // One worker per participant a block wakes.
+        let workers = if spreads { participants } else { 1 };
         // What one op's views can hold at once: a node's ports and the
         // event source of each param it declares, or an event merge's
         // inputs and output.
         let held = 2 * MAX_PORTS + crate::param::MAX_PARAM_PORTS + 1;
         Self {
-            wake,
-            from,
+            participants,
+            spreads,
             graph,
             flags: (0..plan.audio_slots).map(|_| AtomicU8::new(0)).collect(),
             audio: ClaimTable::new(plan.audio_slots as usize),
@@ -269,7 +291,7 @@ impl Par {
             has_inject: ClaimTable::new(units),
             has_due: ClaimTable::new(units),
             outputs: ClaimTable::new(plan.rendered_outputs()),
-            workers: (0..participants.max(1))
+            workers: (0..workers)
                 .map(|_| Worker {
                     held_audio: Held::new(held),
                     held_events: Held::new(held),
@@ -279,15 +301,22 @@ impl Par {
                     panic: None,
                 })
                 .collect(),
-            worker_claims: ClaimTable::new(participants.max(1)),
+            worker_claims: ClaimTable::new(workers),
         }
     }
 }
 
 impl Par {
-    /// Whether a block of `frames` spreads: the cost model's threshold.
-    pub(crate) fn spreads(&self, frames: usize) -> bool {
-        frames >= self.from
+    /// Whether blocks spread over the pool.
+    pub(crate) fn spreads(&self) -> bool {
+        self.spreads
+    }
+
+    /// The participants a block wakes on `pool`, or `None` when the calling
+    /// thread runs it alone: every participant of the pool this was built
+    /// for.
+    fn wake(&self, pool: &dyn Pool) -> Option<usize> {
+        (self.spreads && self.participants == pool.participants()).then_some(self.participants)
     }
 }
 
@@ -299,6 +328,8 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) history: &'b TransportHistory,
     /// The project's meter for the block, lent by the host.
     pub(crate) meter: Option<&'b MeterMap>,
+    /// The project's tempo map for the block, lent by the host.
+    pub(crate) tempo: Option<&'b TempoMap>,
     pub(crate) frames: usize,
     pub(crate) max: MaxBlock,
     pub(crate) cap: usize,
@@ -327,18 +358,27 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) log_claims: &'b mut ClaimTable,
 }
 
-/// What every participant shares while the block runs: `Sync`, so the pool
-/// can hand `&Shared` to its threads.
-struct Shared<'s, 'o, F: Float = f32> {
+/// What every participant of a block reads, the same for each.
+struct Frame<'s, F: Float = f32> {
     plan: &'s Plan,
     env: &'s Env,
     /// The executor's, shared read-only by every participant.
     history: &'s TransportHistory,
     meter: Option<&'s MeterMap>,
+    tempo: Option<&'s TempoMap>,
     frames: usize,
     max: MaxBlock,
     cap: usize,
     inputs: &'s [&'s [F]],
+    /// Per plan unit, its run of the (unit-sorted) inject list.
+    inject_spans: &'s [Span],
+    due: Deliveries<'s>,
+}
+
+/// What every participant shares while the block runs on a pool: `Sync`, so
+/// the pool can hand `&Shared` to its threads.
+struct Shared<'s, 'o, F: Float = f32> {
+    frame: Frame<'s, F>,
     graph: &'s TaskGraph,
     arena: SplitRw<'s, Line>,
     flags: &'s [AtomicU8],
@@ -354,7 +394,6 @@ struct Shared<'s, 'o, F: Float = f32> {
     /// A weighted lane belongs to one op, which claims its run.
     lanes: SplitMut<'s, SumLane<F>>,
     inject: SplitMut<'s, Inject>,
-    inject_spans: &'s [Span],
     has_inject: SplitMut<'s, bool>,
     has_due: SplitMut<'s, bool>,
     outputs: SplitMut<'s, &'o mut [F]>,
@@ -362,13 +401,14 @@ struct Shared<'s, 'o, F: Float = f32> {
     /// Each participant's log slots and ring, claimed by its index for the
     /// whole block.
     logs: SplitMut<'s, LogLane>,
-    due: Deliveries<'s>,
     /// The pool's wait budgets, for each participant's `work`.
     waits: BlockWaits,
 }
 
-/// Run one block's ops on `pool`. The events dropped are added to
-/// `b.dropped`; returns whether a crossfade ended.
+/// Run one block's ops: spread over `pool`'s participants when the plan
+/// spreads ([`Par::spreads`]), else on the calling thread alone. The events
+/// dropped are added to `b.dropped`; returns
+/// whether a crossfade ended.
 ///
 /// # Panics
 ///
@@ -376,7 +416,67 @@ struct Shared<'s, 'o, F: Float = f32> {
 /// the block): the first stored payload, in participant order, is resumed.
 pub(crate) fn run_block<F: Float>(
     par: &mut Par,
+    pool: Option<&Arc<dyn Pool>>,
+    b: Block<'_, '_, F>,
+) -> bool {
+    match pool.and_then(|p| par.wake(&**p).map(|wake| (p, wake))) {
+        Some((pool, wake)) => run_spread(par, pool, wake, b),
+        None => run_alone(par, b),
+    }
+}
+
+/// The block on the calling thread alone: the plan's ops in order, each
+/// through plain `&mut` borrows. No task graph, no claim.
+fn run_alone<F: Float>(par: &mut Par, b: Block<'_, '_, F>) -> bool {
+    let frame = Frame {
+        plan: b.plan,
+        env: b.env,
+        history: b.history,
+        meter: b.meter,
+        tempo: b.tempo,
+        frames: b.frames,
+        max: b.max,
+        cap: b.cap,
+        inputs: b.inputs,
+        inject_spans: &par.inject_spans,
+        due: b.due,
+    };
+    let mut ended = false;
+    let mut cx = Ctx::<F, Exclusive> {
+        store: b.store,
+        rings: b.rings,
+        audio_fb: b.audio_fb,
+        event_fb: b.event_fb,
+        taps: b.taps,
+        event_taps: b.event_taps,
+        meters: b.meters,
+        lanes: b.lanes,
+        inject: b.inject,
+        has_inject: b.has_inject,
+        has_due: b.has_due,
+        outputs: b.outputs,
+        audio: ExclusiveAudio {
+            arena: b.arena,
+            flags: b.flags,
+        },
+        events: b.events,
+        overlay: &mut par.workers[0].overlay,
+        dropped: b.dropped,
+        fade_ended: &mut ended,
+        log: &mut b.logs[0],
+    };
+    for op in &b.plan.ops {
+        cx.run_op(&frame, op);
+    }
+    ended
+}
+
+/// The block's tasks across `pool`, `wake` participants, the caller one of
+/// them.
+fn run_spread<F: Float>(
+    par: &mut Par,
     pool: &Arc<dyn Pool>,
+    wake: usize,
     b: Block<'_, '_, F>,
 ) -> bool {
     par.graph.begin();
@@ -390,8 +490,8 @@ pub(crate) fn run_block<F: Float>(
         a.store(f, std::sync::atomic::Ordering::Relaxed);
     }
     let Par {
-        wake,
-        from: _,
+        participants: _,
+        spreads: _,
         graph,
         flags,
         audio,
@@ -414,14 +514,19 @@ pub(crate) fn run_block<F: Float>(
     } = par;
     let aborted = {
         let shared = Shared {
-            plan: b.plan,
-            env: b.env,
-            history: b.history,
-            meter: b.meter,
-            frames: b.frames,
-            max: b.max,
-            cap: b.cap,
-            inputs: b.inputs,
+            frame: Frame {
+                plan: b.plan,
+                env: b.env,
+                history: b.history,
+                meter: b.meter,
+                tempo: b.tempo,
+                frames: b.frames,
+                max: b.max,
+                cap: b.cap,
+                inputs: b.inputs,
+                inject_spans,
+                due: b.due,
+            },
             graph,
             arena: b.arena.split(audio),
             flags,
@@ -435,18 +540,15 @@ pub(crate) fn run_block<F: Float>(
             meters: SplitMut::new(b.meters, meters),
             lanes: SplitMut::new(b.lanes, lanes),
             inject: SplitMut::new(b.inject, inject),
-            inject_spans,
             has_inject: SplitMut::new(b.has_inject, has_inject),
             has_due: SplitMut::new(b.has_due, has_due),
             outputs: SplitMut::new(b.outputs, outputs),
             workers: SplitMut::new(workers, worker_claims),
             logs: SplitMut::new(b.logs, b.log_claims),
-            due: b.due,
             // The pool's, not the defaults
             // (`tests/executor/parallel.rs`'s `the_executor_waits_by_its_pools_budget`).
             waits: pool.waits(),
         };
-        let wake = (*wake).clamp(1, pool.participants());
         pool.run(wake, &|w| shared.participate(w));
         shared.graph.is_aborted() || !shared.graph.done()
     };
@@ -475,7 +577,7 @@ impl<F: Float> Shared<'_, '_, F> {
         if w >= self.workers.len() || w >= self.logs.len() {
             return;
         }
-        let _rt = self.plan.prepare.enter_rt_scope();
+        let _rt = self.frame.plan.prepare.enter_rt_scope();
         // Per participant, per block: a plugin on this thread may have
         // cleared it since the last one.
         with_no_denormals(|| {
@@ -490,60 +592,109 @@ impl<F: Float> Shared<'_, '_, F> {
             } else {
                 Participant::Helper(w)
             };
+            let Worker {
+                held_audio,
+                held_events,
+                overlay,
+                dropped,
+                fade_ended,
+                panic,
+            } = &mut *ws;
+            let mut cx = Ctx::<F, Claimed> {
+                store: &self.store,
+                rings: &self.rings,
+                audio_fb: &self.audio_fb,
+                event_fb: &self.event_fb,
+                taps: &self.taps,
+                event_taps: &self.event_taps,
+                meters: &self.meters,
+                lanes: &self.lanes,
+                inject: &self.inject,
+                has_inject: &self.has_inject,
+                has_due: &self.has_due,
+                outputs: &self.outputs,
+                audio: ClaimedAudio {
+                    split: &self.arena,
+                    held: held_audio,
+                    flags: SharedFlags(self.flags),
+                },
+                events: ClaimedEvents {
+                    split: &self.events,
+                    held: held_events,
+                },
+                overlay,
+                dropped,
+                fade_ended,
+                log: &mut lane,
+            };
             let r = catch_unwind(AssertUnwindSafe(|| {
                 self.graph.work(who, self.waits, |t| {
-                    let span = self.plan.tasks[t as usize];
-                    for &op in &self.plan.task_ops[span.range()] {
-                        self.run_op(&self.plan.ops[op as usize], &mut ws, &mut lane);
+                    let span = self.frame.plan.tasks[t as usize];
+                    for &op in &self.frame.plan.task_ops[span.range()] {
+                        cx.run_op(&self.frame, &self.frame.plan.ops[op as usize]);
                     }
                 });
             }));
             if let Err(payload) = r {
-                ws.panic = Some(payload);
+                *panic = Some(payload);
                 self.graph.abort();
             }
         });
     }
+}
 
-    /// One op, on claimed state.
-    fn run_op(&self, op: &Op, ws: &mut Worker, lane: &mut LogLane) {
-        let Worker {
-            held_audio,
-            held_events,
-            overlay,
-            dropped,
-            fade_ended,
-            panic: _,
-        } = ws;
-        let frames = self.frames;
-        let mut flags = SharedFlags(self.flags);
-        let flags = &mut flags;
+/// One participant's borrows of the block's state, and its own scratch.
+struct Ctx<'c, 'o, F: Float, M: Mode<F>>
+where
+    'o: 'c,
+{
+    store: M::Table<'c, Option<Unit<F>>>,
+    rings: M::Table<'c, Option<Ring<F>>>,
+    audio_fb: M::Table<'c, Option<crate::kernels::AudioRing<F>>>,
+    event_fb: M::Table<'c, Option<crate::kernels::EventFifo>>,
+    taps: M::Table<'c, Option<crate::tap::TapWriter<F>>>,
+    event_taps: M::Table<'c, Option<crate::event_tap::EventTapWriter>>,
+    meters: M::Table<'c, Option<crate::meter::MeterWriter>>,
+    lanes: M::Table<'c, SumLane<F>>,
+    inject: M::Table<'c, Inject>,
+    has_inject: M::Table<'c, bool>,
+    has_due: M::Table<'c, bool>,
+    outputs: M::Table<'c, &'o mut [F]>,
+    audio: M::Audio<'c>,
+    events: M::Events<'c>,
+    /// Where a node's scheduled events are merged into its inputs.
+    overlay: &'c mut Overlay,
+    /// Events refused, and where.
+    dropped: &'c mut Dropped,
+    /// Whether a crossfade ended.
+    fade_ended: &'c mut bool,
+    /// The log slots and sink of this participant.
+    log: &'c mut LogLane,
+}
+
+impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
+    /// One op, on this participant's borrows.
+    #[inline]
+    fn run_op(&mut self, fx: &Frame<'_, F>, op: &Op) {
+        let frames = fx.frames;
         match *op {
             Op::MainInput { channel, dst } => {
-                let mut a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
-                main_input(&mut a, flags, self.inputs, channel, dst, frames);
+                let (mut a, flags) = self.audio.parts();
+                main_input(&mut a, flags, fx.inputs, channel, dst, frames);
             }
             Op::Delay { delay, src, dst } => {
-                let mut ring = self.rings.claim(delay as usize);
-                let mut a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
+                let mut ring = self.rings.one(delay as usize);
+                let (mut a, flags) = self.audio.parts();
                 delay_op(audio_ring(&mut ring), &mut a, flags, src, dst, frames);
             }
             Op::Sum { srcs, dst } => {
-                let mut a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
-                let e = EventsView {
-                    view: self.events.view(held_events),
-                };
+                let (mut a, flags) = self.audio.parts();
+                let e = self.events.slots();
                 sum_op::<F, _, _, _>(
                     &mut a,
                     flags,
                     &e,
-                    &self.plan.audio_list[srcs.range()],
+                    &fx.plan.audio_list[srcs.range()],
                     &mut [],
                     &[],
                     dst,
@@ -556,93 +707,79 @@ impl<F: Float> Shared<'_, '_, F> {
                 lanes: span,
                 gains,
             } => {
-                let mut a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
+                let (mut a, flags) = self.audio.parts();
                 // The events of its driven lanes' sources, read-only.
-                let e = EventsView {
-                    view: self.events.view(held_events),
-                };
+                let e = self.events.slots();
                 // The lanes of this op are its own: no other op names them.
-                let mut lanes = self.lanes.claim_run(span.range());
+                let mut lanes = self.lanes.run(span.range());
                 sum_op::<F, _, _, _>(
                     &mut a,
                     flags,
                     &e,
-                    &self.plan.audio_list[srcs.range()],
+                    &fx.plan.audio_list[srcs.range()],
                     &mut lanes,
-                    &self.plan.gain_ports[gains.range()],
+                    &fx.plan.gain_ports[gains.range()],
                     dst,
                     frames,
                 );
             }
             Op::EventDelay { delay, src, dst } => {
-                let mut ring = self.rings.claim(delay as usize);
-                let mut e = EventsView {
-                    view: self.events.view(held_events),
-                };
+                let mut ring = self.rings.one(delay as usize);
+                let mut e = self.events.slots();
                 let lost = event_delay_op(event_ring(&mut ring), &mut e, src, dst, frames);
-                dropped.charge_delay(self.plan, delay, lost);
+                self.dropped.charge_delay(fx.plan, delay, lost);
             }
             Op::EventMerge { srcs, dst, bound } => {
-                let mut e = EventsView {
-                    view: self.events.view(held_events),
-                };
-                let lost = event_merge_op(&self.plan.event_list[srcs.range()], dst, bound, &mut e);
-                dropped.charge_merge(bound, lost);
+                let mut e = self.events.slots();
+                let lost = event_merge_op(&fx.plan.event_list[srcs.range()], dst, bound, &mut e);
+                self.dropped.charge_merge(bound, lost);
             }
             Op::Node { unit, .. } => {
-                let rec = &self.plan.nodes.recs[unit as usize];
-                let mut u = self.store.claim(rec.store as usize);
+                let rec = &fx.plan.nodes.recs[unit as usize];
+                let mut u = self.store.one(rec.store as usize);
                 let u = u
                     .as_mut()
                     .expect("the delta placed every unit the plan runs");
-                let mut has_inject = self.has_inject.claim(unit as usize);
-                let mut has_due = self.has_due.claim(unit as usize);
-                let span = self.inject_spans[unit as usize];
-                let mut inject = self.inject.claim_run(span.range());
-                let mut a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
-                let mut e = EventsView {
-                    view: self.events.view(held_events),
-                };
+                let mut has_inject = self.has_inject.one(unit as usize);
+                let mut has_due = self.has_due.one(unit as usize);
+                let span = fx.inject_spans[unit as usize];
+                let mut inject = self.inject.run(span.range());
+                let (mut a, flags) = self.audio.parts();
+                let mut e = self.events.slots();
                 let head = Head {
                     rec,
-                    plan: self.plan,
+                    plan: fx.plan,
                     frames,
-                    max: self.max,
-                    cap: self.cap,
-                    env: self.env,
-                    history: self.history,
-                    meter: self.meter,
+                    max: fx.max,
+                    cap: fx.cap,
+                    env: fx.env,
+                    history: fx.history,
+                    meter: fx.meter,
+                    tempo: fx.tempo,
                 };
                 let mut st = OpState {
                     arena: &mut a,
                     flags,
                     events: &mut e,
                     inject: &mut inject,
-                    has_inject: std::slice::from_mut(&mut *has_inject),
-                    has_due: std::slice::from_mut(&mut *has_due),
-                    at: 0,
-                    overlay,
-                    due: self.due,
-                    dropped,
-                    log: &lane.slots,
-                    sink: &mut lane.sink,
+                    has_inject: &mut has_inject,
+                    has_due: &mut has_due,
+                    overlay: self.overlay,
+                    due: fx.due,
+                    dropped: self.dropped,
+                    log: &self.log.slots,
+                    sink: &mut self.log.sink,
                 };
-                *fade_ended |= node_dispatch(u, &head, &mut st);
+                *self.fade_ended |= node_dispatch(u, &head, &mut st);
             }
             Op::Output {
                 channel,
                 src,
                 delay,
             } => {
-                let mut out = self.outputs.claim(channel as usize);
-                let mut ring = delay.map(|d| self.rings.claim(d as usize));
-                let a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
+                let mut out = self.outputs.one(channel as usize);
+                let mut ring = delay.map(|d| self.rings.one(d as usize));
+                let (a, flags) = self.audio.parts();
                 output_op(
                     ring.as_mut().map(|r| audio_ring(r)),
                     &mut out[..frames],
@@ -652,60 +789,51 @@ impl<F: Float> Shared<'_, '_, F> {
                 );
             }
             Op::Tap { tap, srcs } => {
-                let mut tap = self.taps.claim(tap as usize);
+                let mut tap = self.taps.one(tap as usize);
                 if let Some(tap) = tap.as_mut() {
-                    let a = ArenaView {
-                        view: self.arena.view(held_audio),
-                    };
+                    let (a, _) = self.audio.parts();
                     crate::tap::tap_op::<F, _>(
                         tap,
                         &a,
-                        &self.plan.audio_list[srcs.range()],
-                        self.env.frame,
+                        &fx.plan.audio_list[srcs.range()],
+                        fx.env.frame,
                         frames,
                     );
                 }
             }
             Op::EventTap { tap, src } => {
-                let mut tap = self.event_taps.claim(tap as usize);
+                let mut tap = self.event_taps.one(tap as usize);
                 if let Some(tap) = tap.as_mut() {
-                    let e = EventsView {
-                        view: self.events.view(held_events),
-                    };
-                    crate::event_tap::event_tap_op(tap, &e, src, self.env);
+                    let e = self.events.slots();
+                    crate::event_tap::event_tap_op(tap, &e, src, fx.env);
                 }
             }
             Op::Meter { meter, srcs } => {
-                let mut meter = self.meters.claim(meter as usize);
+                let mut meter = self.meters.one(meter as usize);
                 if let Some(meter) = meter.as_mut() {
-                    let a = ArenaView {
-                        view: self.arena.view(held_audio),
-                    };
+                    let (a, flags) = self.audio.parts();
                     crate::meter::meter_op::<F, _, _>(
                         meter,
                         &a,
                         flags,
-                        &self.plan.audio_list[srcs.range()],
+                        &fx.plan.audio_list[srcs.range()],
                         frames,
                     );
                 }
             }
             Op::Capture { feedback, src } => {
-                let mut ring = self.audio_fb.claim(feedback as usize);
+                let mut ring = self.audio_fb.one(feedback as usize);
                 let ring = ring.as_mut().expect("built by apply");
-                let a = ArenaView {
-                    view: self.arena.view(held_audio),
-                };
+                let (a, flags) = self.audio.parts();
                 capture_op(ring, &a, flags, src, frames);
             }
             Op::EventCapture { feedback, src } => {
-                let mut fifo = self.event_fb.claim(feedback as usize);
+                let mut fifo = self.event_fb.one(feedback as usize);
                 let fifo = fifo.as_mut().expect("built by apply");
-                let e = EventsView {
-                    view: self.events.view(held_events),
-                };
+                let e = self.events.slots();
                 let lost = fifo.push_slot(e.slot(src));
-                dropped.charge_feedback(self.plan, feedback, u64::from(lost));
+                self.dropped
+                    .charge_feedback(fx.plan, feedback, u64::from(lost));
             }
         }
     }

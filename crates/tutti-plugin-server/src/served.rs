@@ -22,11 +22,11 @@ use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::News;
 use tutti_plugin_types::{
     AutomationMode, Control, Delivered, Effect, Event, Features, Hand, HostOp, Layout, Lifecycle,
-    LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, Notice, OutOfProcess, ParamEdit,
-    ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo, PluginPreset, PluginRef,
-    PluginResult, PluginWiring, Prepare, PresetId, ProcessWake, RateRefusal, RateRefusalCause,
-    RenderMode, RenderModeSupport, Request, SampleRate, Samples, Seat, ServerLosses, Stage, State,
-    StateError, StateUse, TrackInfo, Widths,
+    LoadStage, MainThreadMarker, MainWorkHandle, MaxBlock, MidiAssignment, MidiMapApplied, Notice,
+    OutOfProcess, ParamEdit, ParameterInfo, PluginClass, PluginDescriptor, PluginError, PluginIo,
+    PluginLearnError, PluginPreset, PluginRef, PluginResult, PluginWiring, Prepare, PresetId,
+    ProcessWake, RateRefusal, RateRefusalCause, RenderMode, RenderModeSupport, Request, SampleRate,
+    Samples, Seat, ServerLosses, Stage, State, StateError, StateUse, TrackInfo, Widths,
 };
 use tutti_rt::TallyWriter;
 use tutti_units::Normalized;
@@ -130,6 +130,20 @@ pub(crate) trait ServerPlugin {
     fn set_automation_state(&mut self, main: MainThreadMarker, mode: AutomationMode);
     /// What the host says of the plugin's track.
     fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo);
+    /// The plugin's wiring read now (its declared controller table included).
+    fn wiring(&mut self, main: MainThreadMarker) -> PluginWiring;
+    /// The app's controller entries; who applies them.
+    fn set_app_midi_map(
+        &mut self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied;
+    /// Arms or disarms the plugin's own MIDI learn.
+    fn arm_plugin_midi_learn(
+        &mut self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError>;
     /// The plain value of `value`, by the plugin's format.
     fn parameter_plain(
         &self,
@@ -514,6 +528,9 @@ impl<L: ServerSide> Server<L> {
             Notice::ParamTitlesChanged => {
                 self.events.push(News::PluginParamTitlesChanged);
             }
+            Notice::MidiMapChanged => {
+                self.events.push(News::PluginMidiMapChanged);
+            }
             Notice::Reloaded => {
                 // A reload may change the buses: the host is told them first,
                 // so its picture is current when it re-reads everything.
@@ -880,6 +897,34 @@ impl<L: ServerSide> ServerPlugin for Server<L> {
             self.edits_refused
                 .add(u64::from(delivered != Delivered::Yes));
         }
+    }
+
+    fn wiring(&mut self, main: MainThreadMarker) -> PluginWiring {
+        match self.lifecycle.control() {
+            Some(control) => control.wiring(main),
+            None => self.wiring.clone(),
+        }
+    }
+
+    fn set_app_midi_map(
+        &mut self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        self.lifecycle
+            .control()
+            .map_or(MidiMapApplied::Host, |c| c.set_app_midi_map(main, app))
+    }
+
+    fn arm_plugin_midi_learn(
+        &mut self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        self.lifecycle
+            .control()
+            .ok_or(PluginLearnError::Lost)?
+            .arm_plugin_midi_learn(main, armed)
     }
 
     fn parameter_plain(

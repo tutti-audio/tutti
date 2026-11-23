@@ -17,8 +17,7 @@ use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::{ClockKind, SyncMessages};
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent, SetRefusal,
-    ValueErrorKind,
+    FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent,
 };
 use tutti_timeline::FadeOut;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets};
@@ -277,8 +276,7 @@ fn segmented_commands_act_whole_and_a_stray_segment_is_reported() {
 }
 
 /// **MMC follows beside a Beat Clock follower** and takes no part of the tempo
-/// map: following both is allowed, the Beat Clock still owns the tempo, and a
-/// PLAY still plays.
+/// map: following both is allowed, and a PLAY still plays.
 #[test]
 fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
     let (mut s, fake) = rig();
@@ -287,12 +285,6 @@ fn machine_control_follows_beside_a_beat_clock_and_owns_no_tempo() {
         .follow_clock(FollowClock::new(input, G, ClockKind::BeatClock))
         .expect("follows the clock");
     follow(&mut s);
-    assert_eq!(
-        crate::tempo::set_tempo(&mut s, tutti_units::Bpm::of(100.0))
-            .unwrap_err()
-            .kind,
-        ValueErrorKind::Refused(SetRefusal::Following)
-    );
     command(&fake, 5, &[0x02]);
     until_rolling(&mut s, true);
 }

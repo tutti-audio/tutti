@@ -173,17 +173,18 @@ fn seq_slots_write_and_drain_are_allocation_free() {
     });
 }
 
-/// `PackedAtomic::store` and `load` neither allocate nor free.
+/// `AtomicCell::store`, `swap` and `load` neither allocate nor free.
 #[test]
-fn packed_atomic_store_and_load_are_allocation_free() {
-    use tutti_rt::PackedAtomic;
+fn atomic_cell_store_swap_and_load_are_allocation_free() {
+    use tutti_rt::AtomicCell;
 
-    let cell = PackedAtomic::new([0.0f32, 1.0]);
+    let cell = AtomicCell::new([0u32, 1]);
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u32 {
-            let pair = [round as f32, -(round as f32)];
+            let pair = [round, !round];
             cell.store(pair);
             assert_eq!(cell.load(), pair);
+            assert_eq!(cell.swap([0, 1]), pair);
         }
     });
 }

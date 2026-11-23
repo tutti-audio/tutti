@@ -36,14 +36,13 @@ use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
 use crate::arena::Arena;
-use crate::command::{Overlay, overlay_capacity};
+use crate::command::overlay_capacity;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
 use crate::held::{Held, Keys};
 use crate::kernels::{AudioRing, EventFifo};
 use crate::meter::MeterWriter;
-use crate::par::Par;
 use crate::param::ParamState;
 use crate::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
 use crate::slots::EventSlot;
@@ -103,8 +102,6 @@ pub(super) struct Vanished {
 pub(super) struct Staged<F: Float = f32> {
     /// Whether time-based state carries (no sample-rate change).
     pub(super) carry: bool,
-    /// The pool participants the parallel state was built for (0: none).
-    pub(super) participants: usize,
     /// The new state, shell: every ring and writer that comes from the
     /// commit is in place, the rest waits for what carries.
     pub(super) state: Option<State<F>>,
@@ -133,8 +130,6 @@ pub(super) struct Staged<F: Float = f32> {
     /// Tables of owed closes merged away, to be freed on the control side.
     pub(super) spare_tables: CappedVec<Held>,
     pub(super) spare_drives: CappedVec<ParamState<F>>,
-    /// The parallel state a pool set since this was staged left unused.
-    pub(super) spare_par: Option<Par>,
     /// The executor's chase buffer from this plan on.
     pub(super) chase: Vec<Event>,
     /// A store with room for the plan's units, when the executor's has none.
@@ -156,15 +151,14 @@ impl<F: Float> Staged<F> {
     /// built for the plan this was staged for: the pool was set after the
     /// commit was sent. Control side: allocates.
     pub(super) fn set_participants(&mut self, plan: &Plan, participants: Option<usize>) {
-        self.participants = participants.unwrap_or(0);
         if let Some(state) = &mut self.state {
-            state.par = par_for(
+            state.par = Some(par_for(
                 plan,
-                participants,
+                participants.unwrap_or(0),
                 self.store_len,
                 state.inject.iter().map(|i| i.unit),
-                state.overlay.capacity(),
-            );
+                state.overlay,
+            ));
         }
     }
 }
@@ -369,7 +363,7 @@ impl Stager {
         let participants = self.pool.load(Ordering::Acquire);
         let par = par_for(
             &plan,
-            (participants > 0).then_some(participants),
+            participants,
             store_len,
             inject.iter().map(|i| i.unit),
             overlay,
@@ -397,8 +391,8 @@ impl Stager {
             inject,
             has_inject: vec![false; plan.units.len()],
             has_due: vec![false; plan.units.len()],
-            overlay: Overlay::with_capacity(overlay),
-            par,
+            overlay,
+            par: Some(par),
         };
         // The store grows by moving into one built here.
         let store = (store_len > self.store_cap).then(|| {
@@ -429,7 +423,6 @@ impl Stager {
             .sum();
         c.staged = Some(Box::new(Staged {
             carry: cx.carry,
-            participants,
             state: Some(state),
             rings: ring_fifo.from,
             event_fb: efb_fifo.from,
@@ -446,7 +439,6 @@ impl Stager {
             drives,
             spare_rings: CappedVec::with_capacity(moved),
             spare_tables: CappedVec::with_capacity(tables),
-            spare_par: None,
             chase: Vec::with_capacity(wanted),
             store,
             store_len,

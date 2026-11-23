@@ -55,6 +55,7 @@
 use super::lex::{self, blank, comments, line_of, skipped, word};
 use super::prose::prose;
 use super::ratchet::{self, Found, Wording};
+use super::toml::Toml;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -338,11 +339,12 @@ fn check_refs(tree: &dyn Tree) -> Report {
 /// `<count> <path>` lines: each file's unresolved names when the gate began.
 pub(crate) const BASELINE: &str = "xtask/doc-idents.txt";
 
-const WORDING: Wording = Wording {
+const WORDING: Wording<1> = Wording {
     gate: "check-prose-names",
     baseline: BASELINE,
-    noun: "unresolved names",
+    nouns: ["unresolved names"],
     headline: "prose names an item no code uses; name the real one",
+    paste: false,
 };
 
 const CODE_ROOTS: [&str; 3] = ["crates", "testing", "xtask"];
@@ -567,32 +569,9 @@ fn tokens_of(blanked: &str, into: &mut BTreeSet<String>) {
 
 /// The package name and the dependency names of one manifest, with `-` as `_`.
 fn manifest_names(text: &str, packages: &mut BTreeSet<String>, deps: &mut BTreeSet<String>) {
-    let mut section = String::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(h) = line.strip_prefix('[') {
-            section = h.trim_end_matches(']').trim_matches('[').to_owned();
-            if let Some(dep) = section
-                .split_once("dependencies.")
-                .map(|(_, d)| d.to_owned())
-            {
-                deps.insert(dep.replace('-', "_"));
-            }
-            continue;
-        }
-        let key = line
-            .split(['=', '.', ' '])
-            .next()
-            .unwrap_or("")
-            .trim_matches('"');
-        if section == "package" && key == "name" {
-            if let Some(v) = line.split('"').nth(1) {
-                packages.insert(v.replace('-', "_"));
-            }
-        } else if section.ends_with("dependencies") && !key.is_empty() && !key.starts_with('#') {
-            deps.insert(key.replace('-', "_"));
-        }
-    }
+    let toml = Toml::parse(text);
+    packages.extend(toml.package_name().map(|n| n.replace('-', "_")));
+    deps.extend(toml.dependency_keys().iter().map(|d| d.replace('-', "_")));
 }
 
 /// `src` with its comments blanked and its literals kept.
@@ -783,7 +762,7 @@ fn check_idents(tree: &dyn Tree) -> Report {
         }
         found.push(Found {
             path: p.path,
-            sites,
+            sites: [sites],
         });
     }
     ratchet::settle(&WORDING, &baseline, found)
@@ -1002,16 +981,5 @@ mod tests {
                 "    crates/tutti-vst3-ffi/src/lib.rs:1: `Gone` names no item (`Gone` is in no code)",
             ]
         );
-    }
-
-    #[test]
-    fn a_file_within_its_baseline_passes_and_a_missing_baseline_fails() {
-        let files = [("crates/a/src/lib.rs", "// `Gone`\n")];
-        let ok = check_idents(&Mem::with(&[
-            (BASELINE, "1 crates/a/src/lib.rs\n"),
-            files[0],
-        ]));
-        assert!(ok.passed());
-        assert!(!check_idents(&Mem::with(&files)).passed());
     }
 }

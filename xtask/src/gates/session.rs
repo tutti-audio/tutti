@@ -13,36 +13,33 @@
 //!    `pub use tutti_x::{self ..}`, or a glob anywhere under a `tutti_` path),
 //!    with or without attributes in front, across lines, in groups nested to any
 //!    depth and in a root group. Single items are allowed: the types its own
-//!    signatures take. `pub(crate) use` is not a re-export. Each file is
-//!    lexed (comments and literals blanked) and each `pub use .. ;` read as a use
-//!    tree.
+//!    signatures take. `pub(crate) use` is not a re-export. The leaves come from
+//!    `check-umbrella`'s scan of the crate's `pub use` use trees
+//!    ([`super::umbrella::exports`]).
 
-use super::lex::{blank, line_of, skipped};
-use super::use_tree::{Leaf, statements};
+use super::umbrella::exports;
+use super::use_tree::Leaf;
 use super::{Cargo, Report, Tree};
 
 const SESSION: &str = "tutti-session";
 const SESSION_SRC: &str = "crates/tutti-session/src";
-/// The whole-crate leaves of one `pub use` statement, as the text the report
-/// shows: a crate itself (with or without `as NAME`), `self`, or a glob at any
-/// depth, each under a `tutti_` crate.
-fn whole(leaves: &[Leaf]) -> Vec<String> {
-    leaves
-        .iter()
-        .filter(|l| l.whole)
-        .filter_map(|l| {
-            let mut full: Vec<&str> = l.path.iter().map(String::as_str).collect();
-            if l.source == "*" {
-                full.push("*");
-                return l.krate().starts_with("tutti_").then(|| full.join("::"));
-            }
-            full.push(&l.source);
-            if l.is_self {
-                full.push("self");
-            }
-            Some(full.join("::"))
-        })
-        .collect()
+/// The text of a whole-crate leaf, as the report shows it: a crate itself (with
+/// or without `as NAME`), `self`, or a glob under a `tutti_` crate; `None` for a leaf
+/// that names an item or a glob of another crate.
+fn whole(l: &Leaf) -> Option<String> {
+    if !l.whole {
+        return None;
+    }
+    let mut full: Vec<&str> = l.path.iter().map(String::as_str).collect();
+    if l.source == "*" {
+        full.push("*");
+        return l.krate().starts_with("tutti_").then(|| full.join("::"));
+    }
+    full.push(&l.source);
+    if l.is_self {
+        full.push("self");
+    }
+    Some(full.join("::"))
 }
 
 pub(super) fn check(tree_: &dyn Tree, cargo: &dyn Cargo) -> Report {
@@ -81,43 +78,26 @@ pub(super) fn check(tree_: &dyn Tree, cargo: &dyn Cargo) -> Report {
         }
     }
 
-    // 2. Whole-crate re-exports.
-    let files: Vec<String> = tree_
-        .files(SESSION_SRC, &skipped)
-        .into_iter()
-        .filter(|p| p.ends_with(".rs"))
-        .collect();
-    if files.is_empty() {
+    // 2. Whole-crate re-exports: the umbrella's scan of another crate.
+    let (files, uses) = exports(tree_, SESSION_SRC);
+    if files == 0 {
         bad.push(format!(
             "{SESSION_SRC} holds no .rs file; was the crate moved?"
         ));
     }
-    for path in &files {
-        let src = tree_.read(path).unwrap_or_default();
-        let code = blank(&src);
-        for stmt in statements(&code) {
-            let (at, semi) = (stmt.at, stmt.semi);
-            let hit = whole(&stmt.leaves);
-            if hit.is_empty() {
-                continue;
-            }
-            let text = src[at..=semi]
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+    for e in uses {
+        if let Some(hit) = whole(&e.leaf) {
             bad.push(format!(
-                "{path}:{}: {text}\n    whole: {} (tutti-session is not an umbrella: the umbrella is `tutti`; \
+                "{}: re-exports `{hit}` whole (tutti-session is not an umbrella: the umbrella is `tutti`; \
                  re-export the single items its own signatures take)",
-                line_of(&code, at),
-                hit.join(", ")
+                e.place
             ));
         }
     }
 
     if bad.is_empty() {
         r.say(format!(
-            "check-session: ok ({SESSION} reaches no Bevy crate and re-exports no crate whole; {} files)",
-            files.len()
+            "check-session: ok ({SESSION} reaches no Bevy crate and re-exports no crate whole; {files} files)"
         ));
     } else {
         r.fail("check-session: FAIL");
@@ -191,7 +171,7 @@ mod tests {
         ] {
             let r = lib(src);
             assert!(!r.passed(), "{src}");
-            assert!(r.findings[1].contains("whole: "), "{src}");
+            assert!(r.findings[1].contains("whole"), "{src}");
         }
     }
 
@@ -209,11 +189,11 @@ mod tests {
     }
 
     #[test]
-    fn the_report_names_file_line_and_statement() {
+    fn the_report_names_file_line_and_leaf() {
         let r = lib("\n\npub use tutti_modulation\n    as modulation;\n");
-        assert!(r.findings[1].starts_with(&format!(
-            "  {LIB}:3: pub use tutti_modulation as modulation;\n    whole: tutti_modulation"
-        )));
+        assert!(
+            r.findings[1].starts_with(&format!("  {LIB}:3: re-exports `tutti_modulation` whole"))
+        );
     }
 
     #[test]

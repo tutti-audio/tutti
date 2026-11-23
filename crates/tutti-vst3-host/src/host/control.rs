@@ -2,7 +2,6 @@
 //! by [`Vst3Loaded`] and, with parameter writes redirected, by
 //! [`Vst3Controller`](super::Vst3Controller).
 
-use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
@@ -11,6 +10,7 @@ use tutti_plugin_types::{
     PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
     Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
+use tutti_plugin_types::{Delivered, MainThreadMarker, PluginLearnError, TrackInfo};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -278,11 +278,24 @@ impl Control for Vst3Loaded {
             probed: probed::VST3,
             own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
             assignments: self.assignments.clone(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
+            note_names: self.declared_note_names(main),
+            param_groups: super::loaded::unit_groups(&self.units(main)),
         }
     }
 
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         self.parameter_list(main)
+    }
+
+    /// The track's name and colour, told to a controller with `IInfoListener`
+    /// (`setChannelContextInfos`); VST3 has no field for the kind or the width.
+    /// A controller without the interface is told nothing.
+    fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo) -> Delivered {
+        let argb = info.color.map(|c| u32::from_be_bytes([c.a, c.r, c.g, c.b]));
+        self.plugin
+            .set_channel_context(main, info.name.as_deref(), argb);
+        Delivered::Yes
     }
 
     fn parameter_count(&self, main: MainThreadMarker) -> usize {
@@ -497,6 +510,32 @@ impl Control for Vst3Loaded {
 
     fn rebuild_midi_mapping(&mut self, main: MainThreadMarker) {
         self.rebuild_midi_cc_mapping(main);
+    }
+
+    /// Forwards the controllers the realtime path captured while learn was armed
+    /// to the plugin's `IMidiLearn`, on this (main) thread as the SDK requires.
+    fn flush_edits(&mut self, _main: MainThreadMarker) {
+        self.midi_learn.forward_pending();
+    }
+
+    /// Arms the plugin's `IMidiLearn`. While armed, the realtime path captures
+    /// incoming controllers and the next
+    /// [`flush_edits`](Control::flush_edits) (or
+    /// [`poll_plugin_notifications`](Vst3Loaded::poll_plugin_notifications))
+    /// forwards them to `onLiveMIDIControllerInput`, so the plugin binds the
+    /// controller to the parameter its own editor is learning and raises
+    /// `kMidiCCAssignmentChanged`. [`Unsupported`](PluginLearnError::Unsupported)
+    /// for a plugin without `IMidiLearn`.
+    fn arm_plugin_midi_learn(
+        &mut self,
+        _main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        if !self.midi_learn.plugin_learns() {
+            return Err(PluginLearnError::Unsupported);
+        }
+        self.midi_learn.arm(armed);
+        Ok(())
     }
 
     /// What the plugin has asked of the host since the last take, as the

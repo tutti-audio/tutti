@@ -28,7 +28,7 @@ use tutti_vst3_ffi::{
 };
 
 use super::midi_learn::MidiLearnProducer;
-use super::midi_mapping::{CcRoute, midi_to_mapped_controller, stage_input_events};
+use super::midi_mapping::learnable_controller;
 use super::sequencer::{SeqScratch, expr_ints_of, fill_chords, fill_expr_texts, fill_scales};
 use super::shell::{Hold, Shell};
 
@@ -158,8 +158,6 @@ pub(super) struct AudioIO {
     /// Sized to the per-direction channel total (main + sidechain/aux buses).
     pub(super) input: InputStaging,
     pub(super) output: OutputStaging,
-    /// Boxed (5 KiB): an `AudioIO` moves by value through activation.
-    pub(super) cc: Box<CcRoute>,
     /// RT-side MIDI-learn CC capture, paired with the
     /// [`Vst3Loaded`](super::Vst3Loaded)'s consumer. Inert (a single
     /// relaxed atomic load) unless learn is armed.
@@ -432,28 +430,27 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         self.drain_slots();
 
         // MIDI learn (IMidiLearn): when armed, capture each incoming controller
-        // from the *raw* MIDI — before CC routing can divert mapped CCs into
-        // parameter changes — so the plugin can learn even controllers that have
-        // no mapping yet. A single relaxed atomic load when disarmed (the norm).
+        // the plugin node did not map (a mapped one is a parameter change by
+        // now), so the plugin can learn the controllers that have no mapping
+        // yet. A single relaxed atomic load when disarmed (the norm).
         self.capture_midi_learn(events.midi);
 
-        // Route IMidiMapping-mapped CCs into parameter changes (when the
-        // plugin exposes a non-empty CC→param table) and stage the filtered
-        // MIDI plus every other input event source into the input list.
-        let Some(effective_params) = stage_input_events(
-            &mut self.audio.cc,
-            &mut self.audio.input.stager,
-            &self.audio.input.events,
-            events,
-            param_changes,
-        ) else {
+        // Stage every input event source into the input list: the MIDI the
+        // node's controller map did not take, and the rest.
+        let list = &self.audio.input.events;
+        let staged = if events.is_empty() {
+            list.clear()
+        } else {
+            self.audio.input.stager.stage(list, events)
+        };
+        if !staged {
             // A plugin thread is inside the input list, which therefore still
             // holds the last block's events: processing now would replay them.
             // The block is silence, nothing is emitted, and the skip is counted
             // (`lists_busy`). The controller's writes wait in `pending`.
             buffer.output().silence();
             return Ok(self.audio.output.emitted_ref());
-        };
+        }
         if !self.audio.output.events.clear() {
             // The output list is busy the same way: the plugin would append to
             // the last block's output, and the host would read it twice.
@@ -466,7 +463,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
         // plugin thread still holds is skipped like a busy event list: the
         // block is silence, nothing is emitted, and the skip is counted
         // (`lists_busy`). The controller's writes wait in `pending`.
-        let input_params = effective_params.filter(|pc| !pc.is_empty());
+        let input_params = param_changes.filter(|pc| !pc.is_empty());
         let staged = (|| {
             let mut staging = self.audio.input.param_changes.try_begin().ok_or(Busy)?;
             if let Some(changes) = input_params {
@@ -712,10 +709,8 @@ impl<T: Vst3Sample> Vst3Processor<T> {
             return;
         }
         for event in midi_events {
-            if let Some(mapped) = midi_to_mapped_controller(&event.1) {
-                self.audio
-                    .midi_learn
-                    .capture(mapped.channel, mapped.controller);
+            if let Some((channel, controller)) = learnable_controller(event.1) {
+                self.audio.midi_learn.capture(channel, controller);
             }
         }
     }
@@ -838,7 +833,7 @@ impl<T: Vst3Sample> Vst3Processor<T> {
     /// plugin-server does not report it (as it does not report the CLAP
     /// host's `param_points_dropped`).
     pub fn param_points_dropped(&self) -> u64 {
-        self.audio.input.param_changes.points_dropped() + self.audio.cc.points_overflowed()
+        self.audio.input.param_changes.points_dropped()
     }
 
     /// Points the plugin emitted that the host could not hold whole since

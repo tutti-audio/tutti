@@ -7,10 +7,14 @@
 //! varint over declaration order, and inserting mid-enum renumbers every later
 //! variant. Append, and bump
 //! [`PROTOCOL_VERSION`](super::PROTOCOL_VERSION).
+//!
+//! The control connection's requests and replies are one table, `messages!` at
+//! the end of this file: each row is a request and the reply that answers it.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+use super::message::{Answered, Message, Unanswered};
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
 use crate::{BlobWire, LaneWire, SlabWire};
@@ -182,13 +186,9 @@ pub enum Lane {
     Audio,
 }
 
-/// A request on the control connection: everything but a block.
-///
-/// Variant order is wire-significant; see the module docs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ControlRequest {
+messages! {
     /// Instantiate and activate the plugin, ready to process audio. A state
-    /// staged before ([`StageState`](Self::StageState)) and declared
+    /// staged before ([`StageState`](ControlRequest::StageState)) and declared
     /// in `state` is restored between the two; the server says
     /// [`ControlFrame::Working`] (`Restoring`) just before it starts.
     LoadPlugin {
@@ -219,42 +219,107 @@ pub enum ControlRequest {
         #[serde(default = "default_format")]
         preferred_format: FloatWidth,
         /// The state this load restores, staged before it
-        /// ([`StageState`](Self::StageState)): what the host expects the
+        /// ([`StageState`](ControlRequest::StageState)): what the host expects the
         /// server to hold. The server refuses a load whose declaration and stage
         /// do not agree (a state staged and none declared, or the reverse, or
         /// another length), so a stage left over from another load is never
         /// restored by this one.
         #[serde(default)]
         state: Option<StagedState>,
-    },
-    /// Deactivate and destroy the plugin instance, keeping the subprocess alive.
-    UnloadPlugin,
+    }
+    ->
+    /// The plugin was loaded successfully.
+    PluginLoaded {
+        /// The plugin the load opened: the chosen one, or the file's first when
+        /// it chose none.
+        id: PluginId,
+        /// Catalog identity (name, vendor, version, native class, editor).
+        descriptor: Box<PluginDescriptor>,
+        /// Engine-wiring data from instantiation (bus widths, latency, f64).
+        #[serde(default)]
+        loaded: Box<PluginWiring>,
+        /// The sample format actually agreed on, which may differ from the
+        /// host's preference.
+        negotiated_format: FloatWidth,
+        /// The plugin refused the staged state
+        /// ([`ControlRequest::StageState`]): it loaded at its defaults. `None`
+        /// when it took the state, and when none was staged.
+        #[serde(default)]
+        state_error: Option<StateError>,
+    };
     /// Enter or leave an automation gesture, so the plugin can record it.
     SetAutomationState {
         /// Format-neutral automation mode; the format loader encodes it onto its
         /// own ABI server-side. See [`AutomationMode`](tutti_plugin_types::AutomationMode).
         mode: tutti_plugin_types::AutomationMode,
-    },
+    };
     /// Read one parameter's current normalized value.
     GetParameter {
         /// Which parameter — opaque handle or positional index, per format.
         param_id: ParamId,
-    },
+    }
+    ->
+    /// One parameter's normalized value, or `None` if the plugin declined.
+    ParameterValue {
+        /// Normalized `0.0..=1.0`.
+        #[serde(with = "super::wire::normalized_opt")]
+        value: Option<Normalized>,
+    };
     /// Ask for every parameter the plugin declares.
-    GetParameterList,
+    GetParameterList
+    ->
+    /// Every parameter the plugin declares, in the plugin's own order.
+    ParameterList {
+        /// The declarations, empty if the plugin exposes no parameters.
+        parameters: Vec<ParameterInfo>,
+    };
     /// Re-rate the plugin. Deactivates and reactivates it server-side, and is
     /// answered by [`ControlReply::SampleRateSet`]: the host must learn
     /// whether the plugin runs at the rate before it renders another block.
     SetSampleRate {
         /// Sample rate, an `f64` on the wire because plugin ABIs denominate it so.
         rate: SampleRate,
-    },
+    }
+    ->
+    /// Answers a `ControlRequest::SetSampleRate`: the plugin runs at the rate, or
+    /// it does not.
+    ///
+    /// A refusal is not "keep the old rate": the plugin may have rolled back to
+    /// the rate it had or been left deactivated, and the host's blocks are
+    /// already at the new one, so neither renders the audio the host asked for.
+    /// The server renders silence for a refused plugin rather than let it be
+    /// heard at the wrong pitch, and the host retries it at every later rate
+    /// change.
+    SampleRateSet {
+        /// The rate that was asked for, echoed so a reply read late is never
+        /// attributed to a later request.
+        rate: SampleRate,
+        /// Why the plugin refused `rate`, or `None` when it now runs at it.
+        refusal: Option<RateRefusalCause>,
+    };
     /// Ask the plugin to serialize its state for `state_use`, answered by
     /// `ControlReply::StateData`.
     SaveState {
         /// What the state is saved for.
         state_use: StateUse,
-    },
+    }
+    ->
+    /// The plugin's serialized state, answering [`ControlRequest::SaveState`]:
+    /// the state follows this frame as a memory object, as
+    /// [`ControlRequest::LoadState`]'s does, and the host refuses one of another
+    /// length than `len`, or a `len` over [`MAX_STATE_BYTES`].
+    ///
+    /// An **empty** state (a plugin that declines, or no plugin loaded) is an
+    /// object of length 0, not an absent reply.
+    ///
+    /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
+    StateReady {
+        /// The length in bytes of the state, which the object must have.
+        len: u64,
+        /// What the frame carries of the object, as for
+        /// [`ControlRequest::LoadState`].
+        blob: BlobWire,
+    };
     /// Restore a plugin state, which follows this frame as a memory object of its
     /// own (`send_attached` writes both, and the server's transport reads both
     /// before this reaches its session), answered by
@@ -275,7 +340,19 @@ pub enum ControlRequest {
         /// What the frame carries of the object: nothing on unix, where the
         /// object follows, and its checked name on Windows.
         blob: BlobWire,
-    },
+    }
+    ->
+    /// Acknowledges a `ControlRequest::LoadState`, carrying the plugin's refusal
+    /// if it had one.
+    ///
+    /// A caller awaits this frame, so the answer reports that the state was
+    /// *loaded* rather than merely that the request was sent. It carries the
+    /// refusal rather than a bool because a caller wants to show the user *why*
+    /// their preset did not load, and whether another blob may do.
+    StateLoaded {
+        /// The refusal, or `None` on success.
+        error: Option<StateError>,
+    };
     /// Point the subprocess at the shared-memory audio slab, which follows this
     /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
     /// server's transport reads both before this reaches its session).
@@ -285,12 +362,15 @@ pub enum ControlRequest {
         slab: SlabWire,
         /// Region geometry, which both sides must agree on exactly.
         layout: SlabLayout,
-    },
+    }
+    ->
+    /// The subprocess mapped the shared-memory slab and is ready to process.
+    SharedMemoryReady;
     /// Ask the subprocess to exit cleanly.
-    Shutdown,
+    Shutdown;
     /// Tell the plugin whether it is rendering under realtime pressure.
     ///
-    /// A sibling of [`SetSampleRate`](Self::SetSampleRate) rather than a field
+    /// A sibling of [`SetSampleRate`](ControlRequest::SetSampleRate) rather than a field
     /// on [`ProcessAudio`](AudioRequest::ProcessAudio): three of the four formats can
     /// only accept this while the plugin is deactivated, and two of those
     /// rebuild buffers around it. Sending it per block would be both wasteful
@@ -298,9 +378,21 @@ pub enum ControlRequest {
     SetRenderMode {
         /// Realtime or offline.
         mode: tutti_plugin_types::RenderMode,
-    },
+    };
     /// Ask for the plugin's preset list.
-    GetPresetList,
+    GetPresetList
+    ->
+    /// The plugin's preset list.
+    ///
+    /// Empty when the format cannot enumerate — CLAP, whose discovery is a
+    /// factory-level extension this host does not bind. That is **not** the
+    /// same as "this plugin has no presets"; a caller separates the two by
+    /// reading `Features::PRESET_LIST`, which is unprobed for CLAP and
+    /// `Some(false)` for a format that was asked and declined.
+    PresetList {
+        /// The plugin's presets, in its own order.
+        presets: Vec<PluginPreset>,
+    };
     /// Ask the plugin to load one preset, by an id its list produced.
     ///
     /// [`PresetId`] is opaque and format-shaped —
@@ -310,9 +402,27 @@ pub enum ControlRequest {
     LoadPreset {
         /// Opaque, format-shaped preset id taken from the plugin's own list.
         id: tutti_plugin_types::PresetId,
-    },
+    }
+    ->
+    /// Whether the plugin accepted a [`LoadPreset`](ControlRequest::LoadPreset).
+    ///
+    /// `false` is a refusal rather than an error, and is also the honest
+    /// answer for VST3: its programs are selected through the parameter path,
+    /// so there is no direct load to report on.
+    PresetLoaded {
+        /// Whether the plugin accepted the preset.
+        ok: bool,
+    };
     /// Ask which preset the plugin considers current.
-    GetCurrentPreset,
+    GetCurrentPreset
+    ->
+    /// The preset the plugin considers current, if it will say. `None` means
+    /// the format has no query (VST3, CLAP) or the plugin declined — never
+    /// "the first one".
+    CurrentPreset {
+        /// The current preset's opaque id, if the plugin will say.
+        id: Option<PresetId>,
+    };
     /// Ask the plugin to render `value` as the text it would display for it.
     ///
     /// `value` is normalized, as everywhere on this wire; the loader converts
@@ -323,7 +433,15 @@ pub enum ControlRequest {
         /// The value to render, normalized.
         #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
-    },
+    }
+    ->
+    /// The plugin's display string for the value that was asked about. `None`
+    /// means the plugin did not answer — the caller renders the raw number
+    /// rather than treating this as an empty label.
+    ParameterText {
+        /// The plugin's display string, or `None` if it did not answer.
+        text: Option<String>,
+    };
     /// Ask the plugin to parse `text` into a value.
     ///
     /// Note this is not a pure query for VST2, whose `effString2Parameter`
@@ -334,10 +452,18 @@ pub enum ControlRequest {
         param_id: tutti_units::ParamId,
         /// Display text to parse, in whatever form the plugin renders.
         text: String,
-    },
+    }
+    ->
+    /// The value the plugin parsed a string into, normalized. `None` means it
+    /// could not parse it, and the caller must leave its field unchanged.
+    ParameterValueFromText {
+        /// The parsed value, normalized.
+        #[serde(with = "super::wire::normalized_opt")]
+        value: Option<Normalized>,
+    };
     /// A plugin state to restore into the plugin the **next**
-    /// [`LoadPlugin`](Self::LoadPlugin) opens, which follows this frame as a
-    /// memory object, as [`LoadState`](Self::LoadState)'s does for the plugin
+    /// [`LoadPlugin`](ControlRequest::LoadPlugin) opens, which follows this frame as a
+    /// memory object, as [`LoadState`](ControlRequest::LoadState)'s does for the plugin
     /// that is open.
     ///
     /// A load activates the plugin, and a plugin may take its mode from the
@@ -348,10 +474,17 @@ pub enum ControlRequest {
     StageState {
         /// The length in bytes of the state, which the object must have.
         len: u64,
-        /// What the frame carries of the object, as for [`LoadState`](Self::LoadState).
+        /// What the frame carries of the object, as for [`LoadState`](ControlRequest::LoadState).
         blob: BlobWire,
-    },
-    /// Ask the plugin's format for the plain value `value` stands for
+    }
+    ->
+    /// Acknowledges a `ControlRequest::StageState`, carrying the plugin's refusal
+    /// if it had one: `error: None` means staged, not applied.
+    StateStaged {
+        /// The refusal, or `None` when the state is staged.
+        error: Option<StateError>,
+    };
+/// Ask the plugin's format for the plain value `value` stands for
     /// (`Control::parameter_plain`): the conversion is the format's, so the
     /// host never computes it from a range. Answered by
     /// [`ControlReply::ParameterPlain`].
@@ -361,7 +494,15 @@ pub enum ControlRequest {
         /// The value to convert, normalized.
         #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
-    },
+    }
+    ->
+    /// The plain value the format converted a normalized one to. `None` means
+    /// the format has none (a parameter it does not declare, or VST2 without an
+    /// integer range).
+    ParameterPlain {
+        /// The plain value, in the parameter's own unit.
+        plain: Option<f64>,
+    };
     /// Ask the plugin's format for the normalized value a plain one stands for
     /// (`Control::parameter_normalized`). Answered by
     /// [`ControlReply::ParameterNormalized`].
@@ -370,7 +511,15 @@ pub enum ControlRequest {
         param_id: tutti_units::ParamId,
         /// The plain value, in the parameter's own unit.
         plain: f64,
-    },
+    }
+    ->
+    /// The normalized value the format converted a plain one to. `None` as for
+    /// [`ParameterPlain`].
+    ParameterNormalized {
+        /// The normalized value.
+        #[serde(with = "super::wire::normalized_opt")]
+        value: Option<Normalized>,
+    };
     /// Open the plugin's editor on the served instance itself, in this server
     /// process, answered by
     /// [`ControlReply::EditorOpened`].
@@ -386,10 +535,18 @@ pub enum ControlRequest {
         /// The parent's backing-store scale; the format takes it where it
         /// can.
         scale: ContentScale,
-    },
+    }
+    ->
+    /// Answers a [`ControlRequest::OpenEditor`]: the editor's size when it
+    /// embedded, `None` for a floating one, or why it did not open.
+    EditorOpened {
+        /// The size, or why the editor did not open.
+        #[serde(with = "super::wire::size_opt_result")]
+        result: Result<Option<Size>, EditorError>,
+    };
     /// Close the editor. Nothing happens when none is open; there is no
     /// answer.
-    CloseEditor,
+    CloseEditor;
     /// Ask the open editor to take `size`, answered by
     /// [`ControlReply::EditorSized`].
     SetEditorSize {
@@ -400,7 +557,15 @@ pub enum ControlRequest {
         /// refused on decode (see `wire::size`).
         #[serde(with = "super::wire::size")]
         size: Size,
-    },
+    }
+    ->
+    /// Answers a [`ControlRequest::SetEditorSize`]: the size the editor took, or
+    /// why it did not.
+    EditorSized {
+        /// The size taken, or why the editor did not take one.
+        #[serde(with = "super::wire::size_result")]
+        result: Result<Size, EditorError>,
+    };
     /// What the host says of the track the plugin sits on, for the formats
     /// that tell their plugin (CLAP `track-info`). Fire-and-forget; a format
     /// without the extension drops it.
@@ -408,7 +573,7 @@ pub enum ControlRequest {
         /// The format-neutral value; the server's format answers the plugin's
         /// reads from it.
         info: tutti_plugin_types::TrackInfo,
-    },
+    };
     /// Open a lane to the server: the audio lane's stream, whose server end is
     /// the descriptor that follows this frame on unix (`send_lane`) and the pipe
     /// `wire` names on Windows. Answered by [`ControlReply::LaneOpened`]; a lane
@@ -419,171 +584,47 @@ pub enum ControlRequest {
         /// What the frame carries of the stream's server end: nothing on unix,
         /// where the descriptor follows, and the pipe's checked name on Windows.
         wire: LaneWire,
-    },
-}
-
-/// What the server answers a [`ControlRequest`] with.
-///
-/// Variant order is wire-significant; see the module docs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ControlReply {
-    /// The plugin was loaded successfully.
-    PluginLoaded {
-        /// The plugin the load opened: the chosen one, or the file's first when
-        /// it chose none.
-        id: PluginId,
-        /// Catalog identity (name, vendor, version, native class, editor).
-        descriptor: Box<PluginDescriptor>,
-        /// Engine-wiring data from instantiation (bus widths, latency, f64).
-        #[serde(default)]
-        loaded: PluginWiring,
-        /// The sample format actually agreed on, which may differ from the
-        /// host's preference.
-        negotiated_format: FloatWidth,
-        /// The plugin refused the staged state
-        /// ([`ControlRequest::StageState`]): it loaded at its defaults. `None`
-        /// when it took the state, and when none was staged.
-        #[serde(default)]
-        state_error: Option<StateError>,
-    },
-    /// One parameter's normalized value, or `None` if the plugin declined.
-    ParameterValue {
-        /// Normalized `0.0..=1.0`.
-        #[serde(with = "super::wire::normalized_opt")]
-        value: Option<Normalized>,
-    },
-    /// Every parameter the plugin declares, in the plugin's own order.
-    ParameterList {
-        /// The declarations, empty if the plugin exposes no parameters.
-        parameters: Vec<ParameterInfo>,
-    },
-    /// The plugin's serialized state, answering [`ControlRequest::SaveState`]:
-    /// the state follows this frame as a memory object, as
-    /// [`ControlRequest::LoadState`]'s does, and the host refuses one of another
-    /// length than `len`, or a `len` over [`MAX_STATE_BYTES`].
-    ///
-    /// An **empty** state (a plugin that declines, or no plugin loaded) is an
-    /// object of length 0, not an absent reply.
-    ///
-    /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    StateReady {
-        /// The length in bytes of the state, which the object must have.
-        len: u64,
-        /// What the frame carries of the object, as for
-        /// [`ControlRequest::LoadState`].
-        blob: BlobWire,
-    },
-    /// The plugin's preset list.
-    ///
-    /// Empty when the format cannot enumerate — CLAP, whose discovery is a
-    /// factory-level extension this host does not bind. That is **not** the
-    /// same as "this plugin has no presets"; a caller separates the two by
-    /// reading `Features::PRESET_LIST`, which is unprobed for CLAP and
-    /// `Some(false)` for a format that was asked and declined.
-    PresetList {
-        /// The plugin's presets, in its own order.
-        presets: Vec<PluginPreset>,
-    },
-    /// Whether the plugin accepted a [`LoadPreset`](ControlRequest::LoadPreset).
-    ///
-    /// `false` is a refusal rather than an error, and is also the honest
-    /// answer for VST3: its programs are selected through the parameter path,
-    /// so there is no direct load to report on.
-    PresetLoaded {
-        /// Whether the plugin accepted the preset.
-        ok: bool,
-    },
-    /// The preset the plugin considers current, if it will say. `None` means
-    /// the format has no query (VST3, CLAP) or the plugin declined — never
-    /// "the first one".
-    CurrentPreset {
-        /// The current preset's opaque id, if the plugin will say.
-        id: Option<PresetId>,
-    },
-    /// The subprocess mapped the shared-memory slab and is ready to process.
-    SharedMemoryReady,
-    /// The subprocess failed at something it was asked to do.
-    ///
-    /// Fire-and-forget: nothing awaits this, so a request that a caller blocks
-    /// on needs its own reply variant rather than relying on this.
-    Error {
-        /// What failed.
-        error: ServerError,
-    },
-    /// The subprocess is exiting.
-    Shutdown,
-    /// The plugin's display string for the value that was asked about. `None`
-    /// means the plugin did not answer — the caller renders the raw number
-    /// rather than treating this as an empty label.
-    ParameterText {
-        /// The plugin's display string, or `None` if it did not answer.
-        text: Option<String>,
-    },
-    /// The value the plugin parsed a string into, normalized. `None` means it
-    /// could not parse it, and the caller must leave its field unchanged.
-    ParameterValueFromText {
-        /// The parsed value, normalized.
-        #[serde(with = "super::wire::normalized_opt")]
-        value: Option<Normalized>,
-    },
-    /// Acknowledges a `ControlRequest::LoadState`, carrying the plugin's refusal
-    /// if it had one.
-    ///
-    /// A caller awaits this frame, so the answer reports that the state was
-    /// *loaded* rather than merely that the request was sent. It carries the
-    /// refusal rather than a bool because a caller wants to show the user *why*
-    /// their preset did not load, and whether another blob may do.
-    StateLoaded {
-        /// The refusal, or `None` on success.
-        error: Option<StateError>,
-    },
-    /// Answers a `ControlRequest::SetSampleRate`: the plugin runs at the rate, or
-    /// it does not.
-    ///
-    /// A refusal is not "keep the old rate": the plugin may have rolled back to
-    /// the rate it had or been left deactivated, and the host's blocks are
-    /// already at the new one, so neither renders the audio the host asked for.
-    /// The server renders silence for a refused plugin rather than let it be
-    /// heard at the wrong pitch, and the host retries it at every later rate
-    /// change.
-    SampleRateSet {
-        /// The rate that was asked for, echoed so a reply read late is never
-        /// attributed to a later request.
-        rate: SampleRate,
-        /// Why the plugin refused `rate`, or `None` when it now runs at it.
-        refusal: Option<RateRefusalCause>,
-    },
-    /// The plain value the format converted a normalized one to. `None` means
-    /// the format has none (a parameter it does not declare, or VST2 without an
-    /// integer range).
-    ParameterPlain {
-        /// The plain value, in the parameter's own unit.
-        plain: Option<f64>,
-    },
-    /// The normalized value the format converted a plain one to. `None` as for
-    /// [`ParameterPlain`](Self::ParameterPlain).
-    ParameterNormalized {
-        /// The normalized value.
-        #[serde(with = "super::wire::normalized_opt")]
-        value: Option<Normalized>,
-    },
-    /// Answers a [`ControlRequest::OpenEditor`]: the editor's size when it
-    /// embedded, `None` for a floating one, or why it did not open.
-    EditorOpened {
-        /// The size, or why the editor did not open.
-        #[serde(with = "super::wire::size_opt_result")]
-        result: Result<Option<Size>, EditorError>,
-    },
-    /// Answers a [`ControlRequest::SetEditorSize`]: the size the editor took, or
-    /// why it did not.
-    EditorSized {
-        /// The size taken, or why the editor did not take one.
-        #[serde(with = "super::wire::size_result")]
-        result: Result<Size, EditorError>,
-    },
+    }
+    ->
     /// The server holds its end of the lane an
     /// [`OpenLane`](ControlRequest::OpenLane) opened and serves it.
-    LaneOpened,
+    LaneOpened;
+    /// The app's controller entries, replacing the last set
+    /// ([`Control::set_app_midi_map`](tutti_plugin_types::Control::set_app_midi_map)).
+    /// Answered by [`ControlReply::AppMidiMapApplied`].
+    SetAppMidiMap {
+        /// The entries.
+        app: Vec<tutti_plugin_types::MidiAssignment>,
+    }
+    ->
+    /// Who applies the entries of a [`ControlRequest::SetAppMidiMap`].
+    AppMidiMapApplied {
+        /// The plugin's answer.
+        applied: tutti_plugin_types::MidiMapApplied,
+    };
+    /// Arms or disarms the plugin's own MIDI learn
+    /// ([`Control::arm_plugin_midi_learn`](tutti_plugin_types::Control::arm_plugin_midi_learn)).
+    /// Answered by [`ControlReply::PluginMidiLearn`].
+    ArmPluginMidiLearn {
+        /// Arm (`true`) or disarm.
+        armed: bool,
+    }
+    ->
+    /// Answers a [`ControlRequest::ArmPluginMidiLearn`].
+    PluginMidiLearn {
+        /// Armed, or why not.
+        result: Result<(), tutti_plugin_types::PluginLearnError>,
+    };
+    /// The plugin's wiring read now
+    /// ([`Control::wiring`](tutti_plugin_types::Control::wiring)), not the
+    /// one announced at load. Answered by [`ControlReply::Wiring`].
+    GetWiring
+    ->
+    /// Answers a [`ControlRequest::GetWiring`].
+    Wiring {
+        /// The plugin's wiring as it reads now.
+        wiring: tutti_plugin_types::PluginWiring,
+    };
 }
 
 /// What the plugin says unprompted, on the control connection.
@@ -695,6 +736,9 @@ pub enum News {
         /// the server refused.
         refused_off_thread_calls: tutti_units::Calls,
     },
+    /// Plugin re-declared its controller table (VST3 `kMidiCCAssignmentChanged`).
+    /// The host asks for the wiring again ([`ControlRequest::GetWiring`]).
+    PluginMidiMapChanged,
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of

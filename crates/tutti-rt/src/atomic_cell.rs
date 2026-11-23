@@ -1,14 +1,14 @@
 //! [`AtomicCell`]: a value that is one word by its encoding (a mode, a switch
-//! set), stored whole in one atomic, and [`atomic_word!`](crate::atomic_word),
-//! the encoding of a fieldless enum.
+//! set, a pair of counts), stored whole in one atomic, and
+//! [`atomic_word!`](crate::atomic_word), the encoding of a fieldless enum.
 //!
-//! [`PackedAtomic`](crate::PackedAtomic) stores a value's bytes and needs every
-//! byte pattern to be a value, which no enum satisfies. An atomic cell is stored by
-//! its encoding instead: [`AtomicWord::to_word`] writes the word and
-//! [`AtomicWord::from_word`] reads it back. The `loom` model in
-//! `tests/atomic_cell_loom.rs` runs this code.
+//! A cell is stored by its encoding: [`AtomicWord::to_word`] writes the word and
+//! [`AtomicWord::from_word`] reads it back, so a load returns a value one store
+//! wrote, never fields of two. The `loom` model in `tests/atomic_cell_loom.rs`
+//! runs this code.
 
 use crate::sync::{AtomicU64, Ordering};
+use tutti_units::{Beat, SampleRate};
 
 /// A value stored in one atomic word by its encoding.
 ///
@@ -28,7 +28,7 @@ pub trait AtomicWord: Copy {
 /// audio thread reads it once per block.
 ///
 /// Wait-free on both sides, no allocation: a `store` is one `Release` store and a
-/// `load` one `Acquire` load, as [`PackedAtomic`](crate::PackedAtomic)'s are.
+/// `load` one `Acquire` load, and a `swap` one `AcqRel` exchange.
 /// A store lands at once: the next `load` on any thread that observes the
 /// store reads the new value, whole.
 ///
@@ -97,6 +97,20 @@ impl<T: AtomicWord> AtomicCell<T> {
         self.word.store(Self::encode(value), Ordering::Release);
     }
 
+    /// Replaces the value and returns the one it replaced, in one atomic step:
+    /// a store from another thread lands before or after it, never between the
+    /// read and the write, so a taker that swaps in an empty value loses no
+    /// request. Wait-free.
+    ///
+    /// # Panics
+    ///
+    /// When `T`'s [`AtomicWord`] impl does not decode its own encoding.
+    #[inline]
+    #[track_caller]
+    pub fn swap(&self, value: T) -> T {
+        Self::decode(self.word.swap(Self::encode(value), Ordering::AcqRel))
+    }
+
     /// The value, as one `store` left it. Wait-free.
     ///
     /// # Panics
@@ -106,8 +120,107 @@ impl<T: AtomicWord> AtomicCell<T> {
     /// stops decoding its own word panics here, at the read.
     #[inline]
     pub fn load(&self) -> T {
-        T::from_word(self.word.load(Ordering::Acquire))
+        Self::decode(self.word.load(Ordering::Acquire))
+    }
+
+    /// The value `word` encodes: the cell holds only words `encode` checked.
+    #[inline]
+    fn decode(word: u64) -> T {
+        T::from_word(word)
             .expect("an AtomicCell holds only words its `to_word` wrote, which `from_word` decodes")
+    }
+}
+
+/// Writes [`AtomicWord`] for the unsigned integers: the word is the value, and a
+/// word past the type's range decodes to `None`.
+macro_rules! word_of_uint {
+    ($($ty:ty),+) => {$(
+        impl AtomicWord for $ty {
+            fn to_word(self) -> u64 {
+                u64::from(self)
+            }
+
+            fn from_word(word: u64) -> Option<Self> {
+                Self::try_from(word).ok()
+            }
+        }
+    )+};
+}
+word_of_uint!(u8, u16, u32, u64);
+
+/// `0` is `false` and `1` is `true`; any other word decodes to `None`.
+impl AtomicWord for bool {
+    fn to_word(self) -> u64 {
+        u64::from(self)
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        match word {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
+    }
+}
+
+/// The first element in the low half of the word, the second in the high half:
+/// a pair stored whole, so a load never pairs one store's first with another's
+/// second.
+impl AtomicWord for [u32; 2] {
+    fn to_word(self) -> u64 {
+        u64::from(self[0]) | u64::from(self[1]) << 32
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        // Each `as u32` keeps its half's 32 bits: the truncation is the decode.
+        Some([word as u32, (word >> 32) as u32])
+    }
+}
+
+/// The rate's `f64` bits. A word whose bits are no rate (zero, negative, not
+/// finite) decodes to `None`.
+impl AtomicWord for SampleRate {
+    fn to_word(self) -> u64 {
+        self.get().to_bits()
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        Self::new(f64::from_bits(word))
+    }
+}
+
+/// `None` is word `0`, the bits of `0.0`, which no [`SampleRate`] has; a
+/// `Some` is the rate's bits. So an `AtomicCell<Option<SampleRate>>` is a rate
+/// one thread parks for another to `swap(None)` out; parking over a rate nobody
+/// took replaces it.
+impl AtomicWord for Option<SampleRate> {
+    fn to_word(self) -> u64 {
+        self.map_or(0, AtomicWord::to_word)
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        match word {
+            0 => Some(None),
+            bits => SampleRate::from_word(bits).map(Some),
+        }
+    }
+}
+
+/// `None` is the all-ones word, a NaN's bits, which no finite [`Beat`] has; a
+/// `Some` is the beat's `f64` bits, so every finite beat (zero and negatives
+/// included) is its own word. A word whose bits are NaN or infinite, other than
+/// the `None` word, decodes to the outer `None`, and a non-finite beat is
+/// refused at `store`.
+impl AtomicWord for Option<Beat> {
+    fn to_word(self) -> u64 {
+        self.map_or(u64::MAX, |beat| beat.get().to_bits())
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        match word {
+            u64::MAX => Some(None),
+            bits => Beat::finite(f64::from_bits(bits)).map(Some),
+        }
     }
 }
 

@@ -1,7 +1,6 @@
-//! The cost model and coarsening: a graph
-//! too cheap to spread renders serially on a pool, a wide one spreads, and
-//! cheap siblings packed into one task render bit for bit what the serial
-//! walk renders.
+//! The cost model and coarsening: cheap siblings pack into one task, a
+//! pool's participants run every block of a plan with more than one task,
+//! and packed plans render bit for bit what one participant renders.
 //!
 //! The random-topology check is in `tests/differential.rs`
 //! (`coarsened_plans_are_bit_identical`).
@@ -11,9 +10,9 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
+use tutti_graph::{Cost, Editor, Executor, TransportPosition, Unforkable};
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
-use tutti_units::{Beat, Bpm, Samples};
+use tutti_units::{Beat, Bpm};
 
 const MAX_BLOCK: usize = 256;
 
@@ -136,19 +135,17 @@ fn ragged() -> Vec<usize> {
 }
 
 /// `tiny/16`: sixteen light gains pack into two tasks of eight (about two
-/// grains of work), and the plan, too cheap to pay for dispatch, renders
-/// serially on a pool. The same graph with gains that declare nothing
-/// spreads, a task per gain.
+/// grains of work). The same graph with gains that declare nothing keeps a
+/// task per gain. Both spread over the pool.
 #[test]
-fn a_tiny_plan_packs_and_renders_serially() {
+fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
     let (mut ed, mut exec) = pair(4);
     fans(&mut ed, 1, 16, Some(Cost::Light), Some(Cost::Light));
     commit(&mut ed, &mut exec);
     let plan = exec.plan().expect("a plan");
     // The input, two packs of eight gains, the sum and its output.
     assert_eq!(plan.tasks().len(), 4, "{:?}", plan.tasks());
-    assert_eq!(plan.schedule(4), Schedule::Serial);
-    assert!(!exec.is_parallel());
+    assert!(exec.is_parallel());
 
     let (mut ed, mut exec) = pair(4);
     fans(&mut ed, 1, 16, None, Some(Cost::Light));
@@ -156,47 +153,7 @@ fn a_tiny_plan_packs_and_renders_serially() {
     let plan = exec.plan().expect("a plan");
     // The input, each gain, the sum and its output.
     assert_eq!(plan.tasks().len(), 18);
-    assert!(matches!(plan.schedule(4), Schedule::Parallel { .. }));
     assert!(exec.is_parallel());
-}
-
-/// Two `tiny`-shaped fans side by side keep several tasks (two sums each
-/// worth one), and the cost model still keeps them serial: spreading them
-/// would not pay for its dispatch.
-#[test]
-fn a_cheap_plan_of_several_tasks_renders_serially() {
-    let (mut ed, mut exec) = pair(4);
-    fans(&mut ed, 2, 8, Some(Cost::Light), Some(Cost::Light));
-    commit(&mut ed, &mut exec);
-    let plan = exec.plan().expect("a plan");
-    assert!(plan.tasks().len() >= 2, "{:?}", plan.tasks());
-    for p in [2, 3, 4, 8] {
-        assert_eq!(plan.schedule(p), Schedule::Serial, "{p} participants");
-    }
-    assert!(!exec.is_parallel());
-}
-
-/// Eight chains of moderate nodes spread over every participant of a
-/// four-participant pool, from a short block length up.
-#[test]
-fn a_wide_plan_spreads() {
-    let (mut ed, mut exec) = pair(4);
-    wide(&mut ed, 8, 8, Some(Cost::Moderate));
-    commit(&mut ed, &mut exec);
-    let plan = exec.plan().expect("a plan");
-    match plan.schedule(4) {
-        Schedule::Parallel { wake, from } => {
-            assert_eq!(wake, 4);
-            assert!(from <= Samples::new(64), "from {from:?}");
-        }
-        s => panic!("{s:?}"),
-    }
-    assert!(exec.is_parallel());
-    // A pool of two wakes both.
-    assert!(matches!(
-        plan.schedule(2),
-        Schedule::Parallel { wake: 2, .. }
-    ));
 }
 
 /// Light gains beside heavy ones off one input, all summed: the light ones
@@ -243,7 +200,6 @@ fn packed_siblings_render_bit_identically() {
         }
         assert!(light_tasks >= 1, "some light gains packed");
         assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
-        assert!(matches!(plan.schedule(4), Schedule::Parallel { .. }));
         render(&mut exec, 1, 1, &ragged())
     };
     assert!(serial[0].iter().any(|&x| x != 0.0));
@@ -255,10 +211,12 @@ fn packed_siblings_render_bit_identically() {
     }
 }
 
-/// A pool that counts the blocks it is asked to run.
+/// A pool that counts the blocks it is asked to run, and records the last
+/// participant count it was asked to wake.
 struct Counting {
     inner: std::sync::Arc<dyn tutti_graph::Pool>,
     runs: std::sync::atomic::AtomicUsize,
+    woke: std::sync::atomic::AtomicUsize,
 }
 
 impl tutti_graph::Pool for Counting {
@@ -267,6 +225,7 @@ impl tutti_graph::Pool for Counting {
     }
     fn run(&self, wake: usize, job: &(dyn Fn(usize) + Sync)) {
         self.runs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.woke.store(wake, std::sync::atomic::Ordering::Relaxed);
         self.inner.run(wake, job);
     }
     fn waits(&self) -> tutti_graph::BlockWaits {
@@ -274,31 +233,44 @@ impl tutti_graph::Pool for Counting {
     }
 }
 
-/// The executor honours the schedule's `from` per block: a block one frame
-/// shorter than `from` runs the serial walk (the pool is not asked), a
-/// block of exactly `from` frames is spread (the pool runs it once).
-#[test]
-fn blocks_shorter_than_from_run_serially() {
-    let (mut ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
-    let pool = std::sync::Arc::new(Counting {
-        inner: test_pool(4),
+fn counting(participants: usize) -> std::sync::Arc<Counting> {
+    std::sync::Arc::new(Counting {
+        inner: test_pool(participants),
         runs: std::sync::atomic::AtomicUsize::new(0),
-    });
+        woke: std::sync::atomic::AtomicUsize::new(0),
+    })
+}
+
+/// A plan of several tasks spreads every block over every participant of
+/// the pool, a one-frame block included: the pool runs each block once and
+/// is asked to wake all four.
+#[test]
+fn every_block_of_a_plan_of_several_tasks_wakes_every_participant() {
+    let (mut ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
+    let pool = counting(4);
     exec.set_pool(Some(pool.clone()));
-    wide(&mut ed, 4, 4, Some(Cost::Moderate));
+    wide(&mut ed, 4, 4, Some(Cost::Light));
     commit(&mut ed, &mut exec);
-    let plan = exec.plan().expect("a plan").clone();
-    let Schedule::Parallel { from, .. } = plan.schedule(4) else {
-        panic!("{:?}", plan.schedule(4));
-    };
-    assert!(
-        from > Samples::new(1) && from <= Samples::new(MAX_BLOCK),
-        "from {from:?}"
-    );
+    assert!(exec.plan().expect("a plan").tasks().len() > 1);
     assert!(exec.is_parallel());
-    let runs = || pool.runs.load(std::sync::atomic::Ordering::Relaxed);
-    render(&mut exec, 1, 1, &[from.get() - 1]);
-    assert_eq!(runs(), 0, "a block shorter than `from` reached the pool");
-    render(&mut exec, 1, 1, &[from.get()]);
-    assert_eq!(runs(), 1, "a block of `from` frames was not spread");
+    let blocks = [1, 2, 63, MAX_BLOCK];
+    render(&mut exec, 1, 1, &blocks);
+    let ordering = std::sync::atomic::Ordering::Relaxed;
+    assert_eq!(pool.runs.load(ordering), blocks.len());
+    assert_eq!(pool.woke.load(ordering), 4);
+}
+
+/// A plan of one task has nothing to spread: its blocks run on the calling
+/// thread and never reach the pool.
+#[test]
+fn a_plan_of_one_task_never_reaches_the_pool() {
+    let (mut ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
+    let pool = counting(4);
+    exec.set_pool(Some(pool.clone()));
+    wide(&mut ed, 1, 1, None);
+    commit(&mut ed, &mut exec);
+    assert_eq!(exec.plan().expect("a plan").tasks().len(), 1);
+    assert!(!exec.is_parallel());
+    render(&mut exec, 1, 1, &[1, MAX_BLOCK]);
+    assert_eq!(pool.runs.load(std::sync::atomic::Ordering::Relaxed), 0);
 }

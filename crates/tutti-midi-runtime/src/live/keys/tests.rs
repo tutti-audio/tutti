@@ -4,7 +4,11 @@ use tutti_graph::EventInletNode;
 use tutti_graph::EventKind;
 use tutti_graph::contract::Direct;
 
-use tutti_ump::{MidiGroup, NoteVelocity, U7, Ump};
+use tutti_midi_protocol::{
+    GeneralMidiMode, MmcCommands, MmcPosition, MmcSubframes, MmcTimeLabel, MtcRate, MtcTimeCode,
+    Recipient, SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds, Universal,
+};
+use tutti_ump::{Message, MidiGroup, NoteVelocity, SysexStatus, U7, U14, Ump};
 use tutti_units::{Frame, SampleRate};
 
 fn rig() -> (Direct<EventInletNode>, MidiKeys) {
@@ -118,4 +122,271 @@ fn the_helpers_send_on_the_keys_group() {
             midi::note_off(tutti_ump::Address::new(group, MidiChannel::FIRST), 60, 0),
         ]
     );
+}
+
+/// What the inlet's port carried, as `(offset, ump)`.
+fn sent_at(d: &Direct<EventInletNode>) -> Vec<(u32, Ump)> {
+    let out = tutti_graph::Node::<f32>::shape(&*d.node)
+        .event_output(0)
+        .expect("an event output");
+    d.event_output(out)
+        .iter()
+        .map(|e| match e.kind {
+            EventKind::Midi(ump) => (e.offset.get(), ump),
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
+/// The payload bytes (between `F0` and `F7`) of the one SysEx message `umps`
+/// are, checking that the packets run Start, Continue.., End.
+fn payload_of(umps: &[Ump]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (i, ump) in umps.iter().enumerate() {
+        let Ok(Message::Sysex7(group, packet)) = ump.decode() else {
+            panic!("not a SysEx7 packet: {ump:?}");
+        };
+        assert_eq!(group, MidiGroup::FIRST);
+        let status = packet.status();
+        let (first, last) = (i == 0, i + 1 == umps.len());
+        let expected = match (first, last) {
+            (true, true) => SysexStatus::Complete,
+            (true, false) => SysexStatus::Start,
+            (false, true) => SysexStatus::End,
+            (false, false) => SysexStatus::Continue,
+        };
+        assert_eq!(status, expected, "packet {i}");
+        bytes.extend(packet.bytes().iter().map(|b| b.get()));
+    }
+    bytes
+}
+
+fn addressed(to: Recipient, message: Universal) -> Addressed {
+    Addressed { to, message }
+}
+
+/// MMC Locate (RP-013 p.8, M2-104 section 7.7): `F0 7F dev 06 44 06 01 hr mn sc fr sf F7`, the
+/// target time code of 01:02:03:05 at 25 fps with 25 subframes, the hours byte
+/// carrying the rate code `01` above the hours.
+#[test]
+fn an_mmc_locate_is_the_spec_bytes() {
+    let (mut d, mut keys) = rig();
+    let position = MmcPosition {
+        label: MmcTimeLabel::new(
+            MtcTimeCode::new(
+                MtcRate::Fps25,
+                TimecodeHours::of(1),
+                TimecodeMinutes::of(2),
+                TimecodeSeconds::of(3),
+                5,
+            )
+            .unwrap(),
+        ),
+        subframes: MmcSubframes::of(25),
+    };
+    keys.send_universal(
+        Stamp::NextBlock,
+        addressed(
+            Recipient::Device(SysexDeviceId::of(5)),
+            Universal::MachineControl(MmcCommands::locate(position, false)),
+        ),
+    )
+    .unwrap();
+    d.block();
+    let umps: Vec<Ump> = sent(&d);
+    let mut wire = vec![0xF0];
+    wire.extend(payload_of(&umps));
+    wire.push(0xF7);
+    assert_eq!(
+        wire,
+        [
+            0xF0, 0x7F, 0x05, 0x06, 0x44, 0x06, 0x01, 0x21, 0x02, 0x03, 0x05, 0x19, 0xF7
+        ]
+    );
+}
+
+/// The all-call is device `7F` (M1 p.40), and General MIDI System On is
+/// Non-Real Time `09 01` (M1 p.52).
+#[test]
+fn an_all_call_addresses_device_7f() {
+    let (mut d, mut keys) = rig();
+    keys.send_universal(
+        Stamp::NextBlock,
+        addressed(
+            Recipient::AllCall,
+            Universal::GeneralMidi(GeneralMidiMode::On),
+        ),
+    )
+    .unwrap();
+    d.block();
+    assert_eq!(payload_of(&sent(&d)), [0x7E, 0x7F, 0x09, 0x01]);
+}
+
+/// A message the ring has no room for whole is refused with `Full` and not a
+/// packet of it is written, however near the ring is to taking them; one that
+/// fits exactly is sent. The refusal is not a loss.
+#[test]
+fn a_full_refusal_writes_no_packet() {
+    let (mut d, mut keys) = rig();
+    let message = addressed(
+        Recipient::AllCall,
+        Universal::MtcFullMessage(
+            tutti_midi_protocol::MtcFullMessage::new(
+                MtcRate::Fps30,
+                TimecodeHours::of(0),
+                TimecodeMinutes::of(0),
+                TimecodeSeconds::of(1),
+                2,
+            )
+            .unwrap(),
+        ),
+    );
+    // MTC Full is eight bytes: two packets. Leave room for one.
+    while keys.vacant() > 1 {
+        keys.note_on(
+            Stamp::NextBlock,
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            NoteVelocity::new(1),
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        keys.send_universal(Stamp::NextBlock, message),
+        Err(SendUniversalError::Push(PushError::Full))
+    );
+    assert_eq!(keys.vacant(), 1);
+    assert_eq!(keys.losses().lost, 0);
+    d.block();
+    assert_eq!(
+        sent(&d).len(),
+        LIVE_INLET_CAPACITY.slots() - 1,
+        "only the notes"
+    );
+}
+
+/// The room is counted in packets: a message of exactly the vacant room is
+/// sent, whole.
+#[test]
+fn a_message_that_fills_the_ring_exactly_is_sent() {
+    let (mut d, mut keys) = rig();
+    while keys.vacant() > 2 {
+        keys.note_on(
+            Stamp::NextBlock,
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            NoteVelocity::new(1),
+        )
+        .unwrap();
+    }
+    keys.send_universal(
+        Stamp::NextBlock,
+        addressed(
+            Recipient::AllCall,
+            Universal::MtcFullMessage(
+                tutti_midi_protocol::MtcFullMessage::new(
+                    MtcRate::Fps30,
+                    TimecodeHours::of(0),
+                    TimecodeMinutes::of(0),
+                    TimecodeSeconds::of(1),
+                    2,
+                )
+                .unwrap(),
+            ),
+        ),
+    )
+    .unwrap();
+    assert_eq!(keys.vacant(), 0);
+    d.block();
+    let all = sent(&d);
+    // The two packets and the notes fill the ring.
+    assert_eq!(all.len(), LIVE_INLET_CAPACITY.slots());
+}
+
+/// A message of more packets than the room is refused whole: a Single Note
+/// Tuning Change of 127 changes is 515 bytes, 86 packets, against 80 vacant.
+#[test]
+fn a_message_longer_than_the_room_is_refused_whole() {
+    let (_d, mut keys) = rig();
+    let mut changes = tutti_midi_protocol::KeyChanges::new();
+    for key in 0..127 {
+        assert!(changes.push(tutti_midi_protocol::KeyChange {
+            key: NoteNumber::of(key),
+            frequency: tutti_midi_protocol::TuningFrequency::from_parts(U7::of(key), U14::of(0)),
+        }));
+    }
+    let message = addressed(
+        Recipient::AllCall,
+        Universal::Tuning(tutti_midi_protocol::TuningMessage::NoteChange {
+            timing: tutti_midi_protocol::Timing::RealTime,
+            bank: Some(U7::of(1)),
+            program: U7::of(2),
+            changes,
+        }),
+    );
+    while keys.vacant() > 80 {
+        keys.note_on(
+            Stamp::NextBlock,
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            NoteVelocity::new(1),
+        )
+        .unwrap();
+    }
+    let before = keys.vacant();
+    assert_eq!(
+        keys.send_universal(Stamp::NextBlock, message),
+        Err(SendUniversalError::Push(PushError::Full))
+    );
+    assert_eq!(keys.vacant(), before);
+}
+
+/// The variants only a reader makes are refused naming what they are, and
+/// nothing is written.
+#[test]
+fn a_read_only_message_is_unwritable_and_writes_nothing() {
+    let (mut d, mut keys) = rig();
+    for (message, refusal) in [
+        (
+            Universal::MachineControlTruncated(MmcCommands::stop()),
+            NotWritable::MachineControlTruncated,
+        ),
+        (
+            Universal::MachineControlResponse(tutti_midi_protocol::MmcFields::new()),
+            NotWritable::MachineControlResponse,
+        ),
+    ] {
+        assert_eq!(
+            keys.send_universal(Stamp::NextBlock, addressed(Recipient::AllCall, message)),
+            Err(SendUniversalError::Unwritable(refusal))
+        );
+    }
+    assert_eq!(keys.vacant(), LIVE_INLET_CAPACITY.slots());
+    d.block();
+    assert!(sent(&d).is_empty());
+}
+
+/// Every packet of a message lands on the frame it was stamped for, in order.
+#[test]
+fn a_frame_stamp_lands_every_packet_on_that_frame() {
+    let (mut d, mut keys) = rig();
+    let full = tutti_midi_protocol::MtcFullMessage::new(
+        MtcRate::Fps30,
+        TimecodeHours::of(0),
+        TimecodeMinutes::of(0),
+        TimecodeSeconds::of(1),
+        2,
+    )
+    .unwrap();
+    keys.send_universal(
+        Frame::new(10),
+        addressed(Recipient::AllCall, Universal::MtcFullMessage(full)),
+    )
+    .unwrap();
+    d.block();
+    let at = sent_at(&d);
+    assert_eq!(at.len(), 2);
+    assert!(at.iter().all(|(offset, _)| *offset == 10), "{at:?}");
+    let umps: Vec<Ump> = at.iter().map(|(_, ump)| *ump).collect();
+    assert_eq!(payload_of(&umps), full.payload());
 }

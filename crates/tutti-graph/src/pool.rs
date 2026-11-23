@@ -19,8 +19,8 @@
 //! nanoseconds), then **yields** its core for a while longer, then **parks**
 //! (crill's progressive backoff). A parked helper is woken by
 //! the caller when a job opens — `Thread::unpark`, the one system call the
-//! audio thread makes for the pool — and only as many as the job can keep
-//! busy (`wake`, the plan's widest level): Ardour's bounded wakeups.
+//! audio thread makes for the pool — and only as many as the caller asks
+//! for (`wake`): the executor asks for every participant.
 //!
 //! The caller **never waits for a helper to wake**: it starts on the job at
 //! once, and a helper that is still waking when the job's tasks run out

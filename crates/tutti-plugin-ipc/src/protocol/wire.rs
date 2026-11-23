@@ -273,29 +273,29 @@ mod tests {
             param_id: ParamId::new(0x0102_0304),
             value: Normalized::of(0.25),
         };
-        // variant 14, id 0x0102_0304 as a varint, 0.25f64
+        // variant 13, id 0x0102_0304 as a varint, 0.25f64
         assert_eq!(
             postcard::to_allocvec(&text).unwrap(),
-            [14, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
+            [13, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
         );
 
         let rate = ControlRequest::SetSampleRate {
             rate: SampleRate::SR_48K,
         };
-        // variant 5, 48000.0f64
+        // variant 4, 48000.0f64
         assert_eq!(
             postcard::to_allocvec(&rate).unwrap(),
-            [5, 0, 0, 0, 0, 0, 112, 231, 64]
+            [4, 0, 0, 0, 0, 0, 112, 231, 64]
         );
 
         let set_reply = ControlReply::SampleRateSet {
             rate: SampleRate::SR_48K,
             refusal: None,
         };
-        // variant 13, 48000.0f64, no error
+        // variant 3, 48000.0f64, no error
         assert_eq!(
             postcard::to_allocvec(&set_reply).unwrap(),
-            [13, 0, 0, 0, 0, 0, 112, 231, 64, 0]
+            [3, 0, 0, 0, 0, 0, 112, 231, 64, 0]
         );
 
         let some = ControlReply::ParameterValue {
@@ -350,14 +350,14 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
         ] {
-            let mut bytes = vec![5u8];
+            let mut bytes = vec![4u8];
             bytes.extend(bad.to_le_bytes());
             assert!(
                 postcard::from_bytes::<ControlRequest>(&bytes).is_err(),
                 "{bad} decoded"
             );
         }
-        let mut ok = vec![5u8];
+        let mut ok = vec![4u8];
         ok.extend(48_000.0f64.to_le_bytes());
         assert!(matches!(
             postcard::from_bytes::<ControlRequest>(&ok),
@@ -367,13 +367,12 @@ mod tests {
 
     /// A wire value in `0..=1` decodes; one outside it, or NaN, fails the
     /// message, in each width and in the optional forms.
-    /// **The editor messages are appended after every earlier variant, in the
-    /// widths the spec's rules give.** A variant tag is a varint over declaration
-    /// order (`OpenEditor` is 19 of the control requests, `EditorOpened` 16 of the
-    /// replies); a size is a unit tag then two varints (physical) or two `f64`
+    /// **The editor messages are written in the widths the spec's rules give.** A
+    /// variant tag is a varint over declaration order (`OpenEditor` is 18 of the
+    /// control requests, `EditorOpened` 15 of the replies); a size is a unit tag then two varints (physical) or two `f64`
     /// (logical), a scale an `f64`, a parent an `Option<u64>`.
     #[test]
-    fn the_editor_messages_follow_every_earlier_variant() {
+    fn the_editor_messages_are_written_in_the_specs_widths() {
         use crate::{ControlReply, ControlRequest, News};
         use dpi::{LogicalSize, PhysicalSize, Size};
         use tutti_plugin_types::ContentScale;
@@ -393,7 +392,7 @@ mod tests {
         };
         assert_eq!(
             postcard::to_allocvec(&open).unwrap(),
-            [19, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [18, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         let embedded = ControlRequest::OpenEditor {
             parent: Some(300),
@@ -401,20 +400,20 @@ mod tests {
         };
         assert_eq!(
             postcard::to_allocvec(&embedded).unwrap(),
-            [19, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
+            [18, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         assert_eq!(
             postcard::to_allocvec(&ControlRequest::CloseEditor).unwrap(),
-            [20]
+            [19]
         );
-        let mut resize = vec![21];
+        let mut resize = vec![20];
         resize.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap(),
             resize
         );
 
-        let mut opened = vec![16, 0, 1];
+        let mut opened = vec![15, 0, 1];
         opened.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlReply::EditorOpened {
@@ -428,9 +427,9 @@ mod tests {
                 result: Err(EditorError::NoPlugin)
             })
             .unwrap(),
-            [16, 1, 4]
+            [15, 1, 4]
         );
-        let mut sized = vec![17, 0];
+        let mut sized = vec![16, 0];
         sized.extend(size_bytes);
         assert_eq!(
             postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap(),
@@ -444,7 +443,7 @@ mod tests {
         );
         assert_eq!(postcard::to_allocvec(&News::EditorClosed).unwrap(), [8]);
         // The scale is a checked value on the wire: a NaN is refused.
-        let mut nan = vec![19, 0];
+        let mut nan = vec![18, 0];
         nan.extend(f64::NAN.to_le_bytes());
         assert!(postcard::from_bytes::<ControlRequest>(&nan).is_err());
     }

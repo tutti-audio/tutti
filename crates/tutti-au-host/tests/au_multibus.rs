@@ -53,8 +53,8 @@ use support::corpus::{
     SAMPLER, all_finite, peak, render, silence,
 };
 
+use coreaudio_sys::kAudioUnitErr_InvalidElement;
 use tutti_au_host::parameters::{self, ParamAddress};
-use tutti_au_host::types::K_AUDIO_UNIT_ERR_INVALID_ELEMENT;
 use tutti_au_host::{AuChannelConfig, AuChannelCount, AuError, BusDirection};
 use tutti_fixtures::midi;
 use tutti_ump::MidiChannel;
@@ -77,12 +77,12 @@ const BLOCK: u32 = 512;
 fn assert_invalid_element<T: std::fmt::Debug>(result: Result<T, AuError>, what: &str) {
     match result {
         Err(AuError::OsStatus {
-            code: K_AUDIO_UNIT_ERR_INVALID_ELEMENT,
+            code: coreaudio_sys::kAudioUnitErr_InvalidElement,
             ..
         }) => {}
         Err(other) => panic!(
             "{what}: expected kAudioUnitErr_InvalidElement \
-             ({K_AUDIO_UNIT_ERR_INVALID_ELEMENT}), got {other:?}"
+             ({kAudioUnitErr_InvalidElement}), got {other:?}"
         ),
         Ok(value) => panic!(
             "{what}: an out-of-range element returned {value:?} instead of an \

@@ -393,6 +393,7 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                 | IpcEvent::IoLayout(_)
                 | IpcEvent::RateRefusal(_)
                 | IpcEvent::ProcessRequested
+                | IpcEvent::MidiMapChanged
                 | IpcEvent::Transport { .. }
                 | IpcEvent::Crashed { .. } => {}
             })));

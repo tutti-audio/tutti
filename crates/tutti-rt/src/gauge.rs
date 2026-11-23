@@ -4,8 +4,8 @@
 //! A node measures something (a gain reduction, a lock, a count of dropped
 //! events) and the app reads it. The two shapes share one cell: the value in
 //! one atomic word and a flag the writer raises when it is gone. The word is
-//! its own `AtomicU64` of bits rather than a `PackedAtomic`: the unit blanket
-//! reads a value through [`Reading`], not bytemuck, and the flag sits beside it.
+//! its own `AtomicU64` of bits rather than an `AtomicCell`: the unit blanket
+//! reads a value through [`Reading`], and the flag sits beside it.
 //!
 //! - A [`Gauge<U>`] is a latest value. [`GaugeWriter::set`] replaces it,
 //!   [`Gauge::get`] reads it; any number of `Clone`s read the same cell.
@@ -544,6 +544,39 @@ impl<U: Count> Counter<U> {
             *word = self.cell.word(i).load(Ordering::Acquire);
         }
         U::from_words(words)
+    }
+
+    /// What was counted since `seen`, which becomes the total now: the reader
+    /// keeps its own baseline, so the count stays cumulative and every clone
+    /// reads it whole. Each tally is the difference on its own, `0` where
+    /// `seen` is ahead (a baseline from another counter). Wait-free, as
+    /// [`get`](Self::get).
+    ///
+    /// ```
+    /// use tutti_rt::counter;
+    ///
+    /// let (mut writer, lost) = counter::<u64>();
+    /// let mut seen = 0;
+    /// writer.add(2);
+    /// assert_eq!(lost.take_since(&mut seen), 2);
+    /// writer.add(3);
+    /// assert_eq!(lost.take_since(&mut seen), 3);
+    /// assert_eq!(lost.take_since(&mut seen), 0);
+    /// assert_eq!(lost.get(), 5); // the total is untouched
+    /// ```
+    #[inline]
+    pub fn take_since(&self, seen: &mut U) -> U {
+        let now = self.get().to_words();
+        let mut since = now;
+        for (d, s) in since
+            .as_mut_slice()
+            .iter_mut()
+            .zip(seen.to_words().as_slice())
+        {
+            *d = d.saturating_sub(*s);
+        }
+        *seen = U::from_words(now);
+        U::from_words(since)
     }
 
     /// Whether the writer is gone: the total read is final until a

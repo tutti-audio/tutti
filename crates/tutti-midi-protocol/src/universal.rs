@@ -41,12 +41,14 @@
 
 mod machine_control;
 mod read;
+mod write;
 
 use crate::smpte::{MtcRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds};
 use crate::tuning::TuningMessage;
 use alloc::boxed::Box;
 
 pub use machine_control::*;
+pub use write::{NotWritable, UNIVERSAL_MAX_PAYLOAD, UniversalPayload};
 
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,

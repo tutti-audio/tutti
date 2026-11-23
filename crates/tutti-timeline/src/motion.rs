@@ -230,13 +230,6 @@ impl MotionFsm {
         self.loop_region.read()
     }
 
-    /// A read-only view of the loop region, for a node that follows the loop and must
-    /// not command the transport.
-    #[must_use]
-    pub fn loop_reader(&self) -> LoopReader {
-        self.loop_region.clone()
-    }
-
     /// The audio half: the FSM, taken out of this handle until the
     /// returned value is dropped. `None` while another holds it (on this
     /// handle or a clone), so there is one FSM per transport.

@@ -18,7 +18,7 @@ use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
     DetachedSession, Feeder, InputPort, MainInput, MainOutput, OutputPort, RemoveError,
-    ReplaceRefused, Replacement, Session, SessionEvent, SessionNode, main_output_width,
+    ReplaceRefused, Replacement, Session, SessionEvent, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -1210,8 +1210,6 @@ impl IntoNode for Published {
         )
     }
 }
-
-impl SessionNode for Published {}
 
 /// Publishes into `controls`' cell while a borrow on it (a block in
 /// progress) is held, then lets the borrow go: what is left is one retired

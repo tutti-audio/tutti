@@ -53,6 +53,7 @@
 use super::lex::{
     blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges, word,
 };
+use super::ratchet;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -515,16 +516,10 @@ pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
 /// The reasons `LIST` accepts.
 const KINDS: [&str; 3] = ["pending", "ffi", "not-audio"];
 
-/// The list's rows, key to reason; the errors name the line.
-fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
+/// The list's rows, key to reason, read through the ratchet's row list.
+fn read(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Report> {
     let mut rows = BTreeMap::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let at = n + 1;
+    ratchet::read_rows(tree, "check-buffers", LIST, |at, line, errors| {
         let (key, reason) = match line.split_once(char::is_whitespace) {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
@@ -535,27 +530,16 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
             errors.push(format!("  {LIST}:{at}: `{key}` is listed twice"));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        Some(())
+    })?;
+    Ok(rows)
 }
 
 pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(LIST) else {
-        r.fail(format!("check-buffers: FAIL: {LIST} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-buffers: FAIL ({LIST} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let files = source_files(tree);
     if files.len() < min_files {
@@ -613,14 +597,10 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate};
     use super::*;
 
     const F: &str = "crates/a/src/lib.rs";
-
-    fn run(list: &str, src: &str) -> Report {
-        check(&Mem::with(&[(LIST, list), (F, src)]), 0)
-    }
 
     fn keys(src: &str) -> Vec<String> {
         scan(F, src).into_iter().map(|s| s.key).collect()
@@ -628,7 +608,10 @@ mod tests {
 
     #[test]
     fn a_site_with_no_row_fails_and_names_what_it_holds() {
-        let r = run("", "pub fn gain(x: &mut [f64]) {}\n");
+        let r = run_gate(
+            |t| check(t, 0),
+            &[(LIST, ""), (F, "pub fn gain(x: &mut [f64]) {}\n")],
+        );
         assert_eq!(
             r.findings[1..],
             ["  crates/a/src/lib.rs::gain: names [f64]"]
@@ -637,9 +620,12 @@ mod tests {
 
     #[test]
     fn a_listed_site_passes_with_its_count() {
-        let r = run(
-            "crates/a/src/lib.rs::gain  pending\n",
-            "pub fn gain(x: &mut [f64]) {}\n",
+        let r = run_gate(
+            |t| check(t, 0),
+            &[
+                (LIST, "crates/a/src/lib.rs::gain  pending\n"),
+                (F, "pub fn gain(x: &mut [f64]) {}\n"),
+            ],
         );
         assert!(r.passed());
         assert_eq!(
@@ -650,7 +636,13 @@ mod tests {
 
     #[test]
     fn a_row_with_no_site_is_stale_and_fails() {
-        let r = run("crates/a/src/lib.rs::gone  pending\n", "pub fn f() {}\n");
+        let r = run_gate(
+            |t| check(t, 0),
+            &[
+                (LIST, "crates/a/src/lib.rs::gone  pending\n"),
+                (F, "pub fn f() {}\n"),
+            ],
+        );
         assert!(!r.passed());
         assert_eq!(r.findings[1..], ["  crates/a/src/lib.rs::gone"]);
     }
@@ -671,29 +663,45 @@ mod tests {
             "not-audio :x",
         ] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
-            let r = run(&list, "pub fn gain(x: &[f64]) {}\n");
+            let r = run_gate(
+                |t| check(t, 0),
+                &[(LIST, &list), (F, "pub fn gain(x: &[f64]) {}\n")],
+            );
             assert!(!r.passed(), "reason {reason:?}");
             assert!(r.findings[0].contains("malformed"));
         }
         for reason in ["pending", "ffi", "not-audio: a magnitude spectrum"] {
             let list = format!("crates/a/src/lib.rs::gain  {reason}\n");
             assert!(
-                run(&list, "pub fn gain(x: &[f64]) {}\n").passed(),
+                run_gate(
+                    |t| check(t, 0),
+                    &[(LIST, &list), (F, "pub fn gain(x: &[f64]) {}\n")]
+                )
+                .passed(),
                 "{reason}"
             );
         }
-        let r = run(
-            "crates/a/src/lib.rs::gain  measured: x\n",
-            "pub fn gain(x: &[f64]) {}\n",
+        let r = run_gate(
+            |t| check(t, 0),
+            &[
+                (LIST, "crates/a/src/lib.rs::gain  measured: x\n"),
+                (F, "pub fn gain(x: &[f64]) {}\n"),
+            ],
         );
         assert!(r.findings[1].contains("not-audio"), "{:?}", r.findings);
     }
 
     #[test]
     fn a_row_listed_twice_fails() {
-        let r = run(
-            "crates/a/src/lib.rs::g  ffi\ncrates/a/src/lib.rs::g  pending\n",
-            "pub fn g(x: &[f64]) {}\n",
+        let r = run_gate(
+            |t| check(t, 0),
+            &[
+                (
+                    LIST,
+                    "crates/a/src/lib.rs::g  ffi\ncrates/a/src/lib.rs::g  pending\n",
+                ),
+                (F, "pub fn g(x: &[f64]) {}\n"),
+            ],
         );
         assert!(r.findings[1].ends_with("is listed twice"));
     }
@@ -829,7 +837,10 @@ mod tests {
     #[test]
     fn items_that_share_a_key_share_one_row() {
         let src = "impl Foo<f64> { pub fn new(x: &[f64]) {} }\nimpl Foo<f64> { pub fn new(x: &[f64]) {} }\n";
-        let r = run("crates/a/src/lib.rs::Foo::new  pending\n", src);
+        let r = run_gate(
+            |t| check(t, 0),
+            &[(LIST, "crates/a/src/lib.rs::Foo::new  pending\n"), (F, src)],
+        );
         assert!(r.passed());
     }
 }

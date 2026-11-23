@@ -56,6 +56,7 @@ use super::buffers::{blocks, item_end, reason_error};
 use super::lex::{
     blank, find_word_from, ident_at, is_test_file, matching, skipped_library, test_ranges, word,
 };
+use super::ratchet;
 use super::test_time::cfg_test_files;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
@@ -404,16 +405,10 @@ fn source_files(tree: &dyn Tree) -> Vec<String> {
 
 const LOOP_KINDS: [&str; 3] = ["pending", "not-interleave", "atomic"];
 
-/// The list's rows, key to reason; the errors name the line.
-fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
+/// The list's rows, key to reason, read through the ratchet's row list.
+fn read(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Report> {
     let mut rows = BTreeMap::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let at = n + 1;
+    ratchet::read_rows(tree, "check-buffers", LIST, |at, line, errors| {
         let (key, reason) = match line.split_once(char::is_whitespace) {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
@@ -424,27 +419,16 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
             errors.push(format!("  {LIST}:{at}: `{key}` is listed twice"));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        Some(())
+    })?;
+    Ok(rows)
 }
 
 pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(LIST) else {
-        r.fail(format!("check-buffers: FAIL: {LIST} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-buffers: FAIL ({LIST} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let files: BTreeMap<String, String> = source_files(tree)
         .into_iter()
@@ -501,7 +485,7 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate, with_rows};
     use super::*;
 
     const F: &str = "crates/a/src/lib.rs";
@@ -512,12 +496,6 @@ mod tests {
 
     fn hit(body: &str) -> bool {
         !keys(&format!("fn f() {{ {body} }}\n")).is_empty()
-    }
-
-    fn run(list: &str, files: &[(&str, &str)]) -> Report {
-        let mut all = vec![(LIST, list)];
-        all.extend_from_slice(files);
-        check(&Mem::with(&all), 0)
     }
 
     #[test]
@@ -617,18 +595,21 @@ mod tests {
     #[test]
     fn a_test_item_a_test_file_and_the_buffers_crate_are_skipped() {
         let hit_src = "fn f() { let n = frames * channels; }\n";
-        let r = run(
-            "",
-            &[
-                (
-                    F,
-                    "#[cfg(test)]\nmod t { fn f() { let n = frames * channels; } }\n",
-                ),
-                ("crates/a/src/tests.rs", hit_src),
-                ("crates/a/src/m/tests/x.rs", hit_src),
-                ("crates/a/tests/x.rs", hit_src),
-                ("crates/tutti-buffers/src/lib.rs", hit_src),
-            ],
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "")],
+                &[
+                    (
+                        F,
+                        "#[cfg(test)]\nmod t { fn f() { let n = frames * channels; } }\n",
+                    ),
+                    ("crates/a/src/tests.rs", hit_src),
+                    ("crates/a/src/m/tests/x.rs", hit_src),
+                    ("crates/a/tests/x.rs", hit_src),
+                    ("crates/tutti-buffers/src/lib.rs", hit_src),
+                ],
+            ),
         );
         assert!(r.passed(), "{:?}", r.findings);
     }
@@ -636,17 +617,23 @@ mod tests {
     #[test]
     fn a_file_a_cfg_test_mod_declaration_reaches_is_skipped() {
         let hit_src = "fn f() { let n = frames * channels; }\n";
-        let r = run(
-            "",
-            &[
-                (F, "#[cfg(test)]\nmod helpers;\n"),
-                ("crates/a/src/helpers.rs", hit_src),
-            ],
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "")],
+                &[
+                    (F, "#[cfg(test)]\nmod helpers;\n"),
+                    ("crates/a/src/helpers.rs", hit_src),
+                ],
+            ),
         );
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run(
-            "",
-            &[(F, "mod helpers;\n"), ("crates/a/src/helpers.rs", hit_src)],
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "")],
+                &[(F, "mod helpers;\n"), ("crates/a/src/helpers.rs", hit_src)],
+            ),
         );
         assert_eq!(r.findings[1..], ["  crates/a/src/helpers.rs::f: length"]);
     }
@@ -667,15 +654,24 @@ mod tests {
 
     #[test]
     fn a_hit_with_no_row_fails_and_names_its_shape() {
-        let r = run("", &[(F, "fn f() { let n = frames * channels; }\n")]);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "")],
+                &[(F, "fn f() { let n = frames * channels; }\n")],
+            ),
+        );
         assert_eq!(r.findings[1..], ["  crates/a/src/lib.rs::f: length"]);
     }
 
     #[test]
     fn a_listed_hit_passes() {
-        let r = run(
-            "crates/a/src/lib.rs::f  pending\n",
-            &[(F, "fn f() { let n = frames * channels; }\n")],
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "crates/a/src/lib.rs::f  pending\n")],
+                &[(F, "fn f() { let n = frames * channels; }\n")],
+            ),
         );
         assert!(r.passed());
         assert_eq!(
@@ -686,9 +682,12 @@ mod tests {
 
     #[test]
     fn a_row_with_no_hit_is_stale_and_fails() {
-        let r = run(
-            "crates/a/src/lib.rs::gone  pending\n",
-            &[(F, "fn f() {}\n")],
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(LIST, "crates/a/src/lib.rs::gone  pending\n")],
+                &[(F, "fn f() {}\n")],
+            ),
         );
         assert!(!r.passed());
         assert_eq!(r.findings[1..], ["  crates/a/src/lib.rs::gone"]);
@@ -705,7 +704,13 @@ mod tests {
             "crates/a/src/lib.rs::f  not-audio: a 5.1 mixing table\n",
             "crates/a/src/lib.rs::f  pending\ncrates/a/src/lib.rs::f  pending\n",
         ] {
-            let r = run(list, &[(F, "fn f() { let n = frames * channels; }\n")]);
+            let r = run_gate(
+                |t| check(t, 0),
+                &with_rows(
+                    &[(LIST, list)],
+                    &[(F, "fn f() { let n = frames * channels; }\n")],
+                ),
+            );
             assert!(!r.passed(), "{list}");
         }
         assert!(!check(&Mem::with(&[(F, "fn f() {}\n")]), 0).passed());
@@ -713,9 +718,12 @@ mod tests {
             "not-interleave: complex re/im packing",
             "atomic: a ring of atomic cells",
         ] {
-            let ok = run(
-                &format!("crates/a/src/lib.rs::f  {reason}\n"),
-                &[(F, "fn f() { let n = frames * channels; }\n")],
+            let ok = run_gate(
+                |t| check(t, 0),
+                &with_rows(
+                    &[(LIST, &format!("crates/a/src/lib.rs::f  {reason}\n"))],
+                    &[(F, "fn f() { let n = frames * channels; }\n")],
+                ),
             );
             assert!(ok.passed(), "{reason}");
         }

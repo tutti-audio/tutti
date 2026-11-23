@@ -1,6 +1,6 @@
 //! A sampler node the session's graph adds reads the session's tempo map
 //! (doc 020, stage 5), through the builder's engine. Needs the `sampler`
-//! feature (`SessionNode` for the sampler's nodes).
+//! feature.
 
 use crate::offline::offline_48k;
 use std::sync::Arc;
@@ -28,9 +28,8 @@ fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
     out
 }
 
-/// **A sampler node the graph adds reads the session's tempo map** (doc 020,
-/// stage 5): `Graph::add` binds it to the session's reader
-/// ([`SessionNode::bind_timeline`](tutti_session::SessionNode::bind_timeline)), so
+/// **A sampler node the graph adds reads the session's tempo map**: the engine
+/// lends the map with each block (`Cx::tempo`), so
 /// a clip placed at beat 0 plays its samples one a frame through a step in
 /// the map instead of being re-seated at the new tempo. The wave is a ramp
 /// (sample `i` is `i / 2^17`), 120 BPM and 60 from beat 1 (frame 24 000): at
@@ -82,10 +81,10 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     }
 }
 
-/// **A sampler pool the graph adds reads the transport's loop**: `Graph::add` binds it
-/// ([`SessionNode::bind_timeline`](tutti_session::SessionNode::bind_timeline)), so after the
-/// loop is armed over a stretched voice's window and a control tick, the voice carries a
-/// spare vocoder, and after the loop is disarmed it does not.
+/// **A sampler pool the graph adds follows the transport's loop**: the pool's block carries
+/// the loop in its transport, so after a block renders with the loop armed over a stretched
+/// voice's window and a control tick, the voice carries a spare vocoder, and after a block
+/// renders with the loop disarmed and a tick it does not.
 #[test]
 fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop() {
     use tutti_music::LoopRange;

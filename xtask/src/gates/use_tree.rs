@@ -151,8 +151,6 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
 pub(super) struct Statement {
     /// Offset of the `pub`.
     pub(super) at: usize,
-    /// Offset of the closing `;`.
-    pub(super) semi: usize,
     pub(super) leaves: Vec<Leaf>,
 }
 
@@ -167,7 +165,6 @@ pub(super) fn statements(code: &str) -> Vec<Statement> {
             leaves(&t, &mut 0, &[], &mut leaves_);
             Statement {
                 at,
-                semi,
                 leaves: leaves_,
             }
         })
@@ -327,7 +324,7 @@ mod tests {
         let code = blank("// c\npub use tutti_x::{A, B};\n");
         let s = statements(&code);
         assert_eq!(s.len(), 1);
-        assert_eq!(&code[s[0].at..=s[0].semi], "pub use tutti_x::{A, B};");
+        assert!(code[s[0].at..].starts_with("pub use tutti_x::{A, B};"));
         assert_eq!(s[0].leaves.len(), 2);
     }
 

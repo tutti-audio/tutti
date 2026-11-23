@@ -1,24 +1,17 @@
 //! Audio fan-in, the views:
-//! the latency and tail views and the reference interpreter read a **set** of
-//! sources per input port and per output channel. Every topology here is
-//! built by hand and driven through the pure passes and the reference, never
-//! the executor (`tests/mixing/fan_in.rs` drives the compiled op).
+//! the latency and tail views read a **set** of sources per input port and per
+//! output channel. Every topology here is built by hand and driven through the
+//! pure passes, never the executor (`tests/mixing/fan_in.rs` drives the
+//! compiled op and holds the sum's order).
 //!
 //! Figures are analytic: an arrival is the latest departure over every source
-//! of every port, a source's delay is that arrival minus its own departure,
-//! and a sum is the left fold `((+0.0 + a_0) + a_1) + ..` over the sources in
-//! `Edge` order.
+//! of every port, and a source's delay is that arrival minus its own
+//! departure.
 
-use tutti_graph::testing as common;
-
-use std::collections::BTreeMap;
-
-use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Edge, Feed, FeedbackFrom, InputDelay, InputPort, Node, NodeKey, NodeSpec, OutputDelay,
-    OutputPort, PortSource, Reference, Topology, TransportPosition, delays, graph_tail,
-    latency_plan,
+    Edge, Feed, FeedbackFrom, InputDelay, InputPort, NodeKey, NodeSpec, OutputDelay, OutputPort,
+    PortSource, Topology, delays, graph_tail, latency_plan,
 };
 use tutti_units::{SampleRate, Samples, Tail};
 
@@ -224,187 +217,4 @@ fn the_tail_of_a_sum_is_the_longest_of_its_sources() {
         graph_tail(&t, SampleRate::SR_48K).samples(),
         Some(Samples::new(3000))
     );
-}
-
-// ---- the reference interpreter -------------------------------------------
-
-const A: NodeKey = NodeKey(1);
-const B: NodeKey = NodeKey(2);
-const C: NodeKey = NodeKey(3);
-/// A unit-gain, one-in one-out node: its output is its input.
-const PASS: NodeKey = NodeKey(8);
-const LAG: NodeKey = NodeKey(7);
-const LAG_FRAMES: usize = 8;
-
-fn constant(v: f32) -> Kind {
-    Kind::Const { value: v, width: 1 }
-}
-
-/// Renders `blocks` blocks of `BLOCK` frames of `t` through the reference,
-/// one output channel, and returns the concatenated output.
-fn render(t: Topology, kinds: BTreeMap<NodeKey, Kind>, input: &[f32], blocks: usize) -> Vec<f32> {
-    let valid = tutti_graph::GraphSpec::new(t).validate().expect("valid");
-    let units: BTreeMap<NodeKey, Box<dyn Node>> = kinds
-        .iter()
-        .map(|(&k, kind)| (k, Box::new(TestNode::new(kind.clone())) as Box<dyn Node>))
-        .collect();
-    let mut reference = Reference::new(prepare(BLOCK));
-    reference.set_graph(&valid, units);
-    let mut all = Vec::new();
-    for b in 0..blocks {
-        let mut block = vec![0.0f32; BLOCK];
-        let ins = if input.is_empty() {
-            Vec::new()
-        } else {
-            vec![&input[b * BLOCK..(b + 1) * BLOCK]]
-        };
-        reference.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &ins,
-            &mut [&mut block[..]],
-        );
-        all.extend(block);
-    }
-    all
-}
-
-/// The topology of `PASS` summing `sources` (given in this order, raw: the
-/// reference sorts them) into the one output.
-fn summed(list: &[(NodeKey, f32)]) -> (Topology, BTreeMap<NodeKey, Kind>) {
-    let mut t = Topology::default();
-    let mut kinds = BTreeMap::new();
-    t.nodes.insert(PASS, spec(1, 1));
-    kinds.insert(
-        PASS,
-        Kind::Gain {
-            gain: 1.0,
-            width: 1,
-        },
-    );
-    let mut edges = Vec::new();
-    for &(k, v) in list {
-        t.nodes.insert(k, spec(0, 1));
-        kinds.insert(k, constant(v));
-        edges.push(direct(k));
-    }
-    t.edges.insert(at(PASS, 0), edges);
-    t.set_outputs([PortSource::Node(out(PASS, 0))]);
-    (t, kinds)
-}
-
-/// **The sum is the left fold from `+0.0` over the sources in `Edge` order**,
-/// whatever order the spec lists them in. `1e8, -1e8, 1.0` in key order is
-/// `((0 + 1e8) - 1e8) + 1 = 1`; in any other association or order the `1.0`
-/// is lost against `1e8`.
-#[test]
-fn the_reference_sums_in_edge_order_whatever_order_they_are_listed() {
-    let (a, b, c) = (1.0e8f32, -1.0e8f32, 1.0f32);
-    let want = ((0.0f32 + a) + b) + c;
-    assert_eq!(want, 1.0, "the figures are order-dependent");
-    let (t, kinds) = summed(&[(C, c), (B, b), (A, a)]);
-    let got = render(t, kinds, &[], 1);
-    assert!(
-        got.iter().all(|&x| x.to_bits() == want.to_bits()),
-        "{got:?}"
-    );
-}
-
-/// **The accumulator starts at `+0.0`**: two `-0.0` sources sum to `+0.0`,
-/// while a single source is aliased, so its `-0.0` stays.
-#[test]
-fn the_sum_starts_from_positive_zero_and_one_source_is_an_alias() {
-    let (t, kinds) = summed(&[(A, -0.0), (B, -0.0)]);
-    let got = render(t, kinds, &[], 1);
-    assert!(got.iter().all(|x| x.to_bits() == 0.0f32.to_bits()));
-
-    let (t, kinds) = summed(&[(A, -0.0)]);
-    let got = render(t, kinds, &[], 1);
-    assert!(got.iter().all(|x| x.to_bits() == (-0.0f32).to_bits()));
-}
-
-/// An impulse into a latent path and straight into the sum: it arrives
-/// **once**, aligned, `LAG_FRAMES` late, including across a block boundary.
-fn impulse_input(frame: usize, blocks: usize) -> Vec<f32> {
-    tutti_fixtures::signal::impulse_at(Samples::new(BLOCK * blocks), Samples::new(frame))
-}
-
-fn lag_into_pass() -> (Topology, BTreeMap<NodeKey, Kind>) {
-    let mut t = Topology {
-        inputs: ChannelLayout::MONO,
-        ..Topology::default()
-    };
-    let mut kinds = BTreeMap::new();
-    t.nodes
-        .insert(LAG, spec(1, 1).latency(Samples::new(LAG_FRAMES)));
-    kinds.insert(
-        LAG,
-        Kind::Lag {
-            latency: LAG_FRAMES,
-        },
-    );
-    t.connect(at(LAG, 0), Edge::Direct(PortSource::MainInput(0)));
-    t.nodes.insert(PASS, spec(1, 1));
-    kinds.insert(
-        PASS,
-        Kind::Gain {
-            gain: 1.0,
-            width: 1,
-        },
-    );
-    (t, kinds)
-}
-
-/// **Per-source PDC at an input port.** The impulse goes down `LAG` (8
-/// frames of latency) and straight from the main input into the same port;
-/// the direct source is delayed to the sink's arrival, so both meet at frame
-/// 8 + 60 = 68 (the next block) and sum to 2.0, and nothing is heard at 60.
-#[test]
-fn a_fan_in_input_port_aligns_its_sources_across_blocks() {
-    let (mut t, kinds) = lag_into_pass();
-    t.connect(at(PASS, 0), direct(LAG));
-    t.connect(at(PASS, 0), Edge::Direct(PortSource::MainInput(0)));
-    t.set_outputs([PortSource::Node(out(PASS, 0))]);
-    let input = impulse_input(60, 2);
-    let got = render(t, kinds, &input, 2);
-    let mut want = vec![0.0f32; 2 * BLOCK];
-    want[60 + LAG_FRAMES] = 2.0;
-    assert_eq!(got, want);
-}
-
-/// **Per-source PDC at a main output**: the same sources summed straight
-/// onto the output channel, each delayed to the output time first.
-#[test]
-fn a_fan_in_output_channel_aligns_its_sources() {
-    let (mut t, kinds) = lag_into_pass();
-    t.nodes.remove(&PASS);
-    let mut kinds = kinds;
-    kinds.remove(&PASS);
-    t.set_outputs([PortSource::Node(out(LAG, 0))]);
-    t.outputs[0].push(PortSource::MainInput(0));
-    let input = impulse_input(3, 1);
-    let got = render(t, kinds, &input, 1);
-    let mut want = vec![0.0f32; BLOCK];
-    want[3 + LAG_FRAMES] = 2.0;
-    assert_eq!(got, want);
-}
-
-/// **A feedback addend sorts after every direct one**, and reads last
-/// block's value: with `1e8` and `-1e8` direct and a feedback of `1.0`, the
-/// second block is `((0 + 1e8) - 1e8) + 1 = 1`, where a feedback summed first
-/// would lose the `1.0`. The first block reads the silent line: 0.
-#[test]
-fn a_feedback_addend_is_summed_last() {
-    let (mut t, mut kinds) = summed(&[(A, 1.0e8), (B, -1.0e8)]);
-    t.nodes.insert(C, spec(0, 1));
-    kinds.insert(C, constant(1.0));
-    t.connect(
-        at(PASS, 0),
-        Edge::Feedback(FeedbackFrom::one_block(out(C, 0), Samples::new(BLOCK))),
-    );
-    let got = render(t, kinds, &[], 2);
-    let (first, second) = got.split_at(BLOCK);
-    assert!(first.iter().all(|&x| x == 0.0), "{first:?}");
-    let want = (((0.0f32 + 1.0e8) + -1.0e8) + 1.0).to_bits();
-    assert!(second.iter().all(|x| x.to_bits() == want), "{second:?}");
 }

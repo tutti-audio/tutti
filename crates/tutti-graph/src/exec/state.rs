@@ -9,7 +9,6 @@ use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};
 use crate::NodeKey;
 use crate::arena::Arena;
-use crate::command::Overlay;
 use crate::event::Event;
 use crate::event_tap::EventTapWriter;
 use crate::gain::SumLane;
@@ -236,11 +235,11 @@ pub(super) struct State<F: Float = f32> {
     pub(super) has_inject: Vec<bool>,
     /// Plan units with a scheduled command landing this block.
     pub(super) has_due: Vec<bool>,
-    /// Where a node's scheduled events are merged into its inputs; sized
-    /// when applying so the merge never grows (`command::overlay_capacity`).
-    pub(super) overlay: Overlay,
-    /// The parallel executor's state for this plan, when the executor has a
-    /// pool and the plan has tasks to spread (`par.rs`).
+    /// The room of the buffer where a node's scheduled events are merged into
+    /// its inputs, one per participant (`command::overlay_capacity`).
+    pub(super) overlay: usize,
+    /// The executor's per-plan state for running a block's tasks on its
+    /// participants (`par.rs`); `None` while there is no plan.
     pub(super) par: Option<Par>,
 }
 
@@ -260,7 +259,7 @@ impl<F: Float> State<F> {
             inject: Vec::new(),
             has_inject: Vec::new(),
             has_due: Vec::new(),
-            overlay: Overlay::with_capacity(0),
+            overlay: 0,
             par: None,
         }
     }

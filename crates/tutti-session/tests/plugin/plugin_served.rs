@@ -77,11 +77,8 @@ fn servers() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         layout("0");
-        // SAFETY: nextest runs each test in its own process; see above.
-        unsafe {
-            std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-            std::env::set_var("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE", layout_file());
-        }
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT_FILE", layout_file());
     });
 }
 
@@ -1185,9 +1182,7 @@ fn a_restore_dropped_before_it_is_awaited_sends_nothing() {
 #[test]
 fn a_restore_the_server_dies_in_ends_as_the_dead_plugin() {
     let (catalog, _dir) = catalog();
-    // SAFETY: nextest runs each test in its own process, and this is set before
-    // the first server is spawned, from the test's own thread.
-    unsafe { std::env::set_var("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1") };
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_CRASH_ON_STATE_LOAD", "1");
     let mut s = session(false);
     let (_, node) = in_a_node(&mut s, &catalog, &first_id());
     let state = block_on_save(s.save_state(&node, StateUse::Project).unwrap());

@@ -2585,6 +2585,7 @@ dependencies = [
  "crossbeam-queue",
  "dpi",
  "thiserror 2.0.21",
+ "tracing",
  "tutti-au-ffi",
  "tutti-au-host",
  "tutti-buffers",
@@ -2877,6 +2878,7 @@ dependencies = [
  "tutti-music",
  "tutti-platform",
  "tutti-rt",
+ "tutti-tempo",
  "tutti-ump",
  "tutti-units",
 ]

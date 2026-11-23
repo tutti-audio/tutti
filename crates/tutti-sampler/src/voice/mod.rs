@@ -68,7 +68,7 @@ pub use loop_span::{Loop, LoopError};
 /// configuration. Documented on `memory_source`.
 pub use memory_source::{MemorySource, MemorySourceConfig, VoiceWindow};
 /// One voice as a standalone graph node. Documented on `node`.
-pub use node::{VoiceNode, VoiceNodeError};
+pub use node::{DirectionKind, LoopingKind, SpeedKind, VoiceNode, VoiceNodeError, WindowKind};
 /// The per-track multi-voice mixer. Documented on `pool`.
 pub use pool::{PoolDrops, VoicePool};
 /// The voice vocabulary: what a voice is, which tier it reads from, and the

@@ -762,11 +762,6 @@ impl Overlay {
             params: Vec::with_capacity(capacity),
         }
     }
-
-    /// The room of each list.
-    pub(crate) fn capacity(&self) -> usize {
-        self.events.capacity()
-    }
 }
 
 /// Capacity of the executor's overlay buffer for `plan`: enough for the

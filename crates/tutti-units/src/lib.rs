@@ -116,7 +116,7 @@ mod text;
 mod unit_param;
 
 pub use bars::{BarCount, BarNumber};
-pub use counts::{Blocks, Calls, Chunks, Resyncs};
+pub use counts::{Blocks, Calls, Chunks, Resyncs, UndoSteps};
 pub use frame::{At, Frame, Moment};
 pub use latency::Latency;
 pub use losses::Losses;

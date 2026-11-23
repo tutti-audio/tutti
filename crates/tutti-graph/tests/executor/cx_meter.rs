@@ -1,8 +1,11 @@
-//! `Cx::meter`: the project's meter, lent by the host for a block, reaches
-//! every node, on the serial executor and on every participant of a pool.
+//! `Cx::meter` and `Cx::tempo`: the project's meter and tempo map, lent by the
+//! host for a block, reach every node, on the serial executor and on every
+//! participant of a pool.
 //!
-//! Each probe writes the beats per bar of the meter it reads at beat 9, or
-//! -1 when the block has none. Under 4/4 then 7/8 from beat 8 that is 7.
+//! Each meter probe writes the beats per bar of the meter it reads at beat 9,
+//! or -1 when the block has none. Under 4/4 then 7/8 from beat 8 that is 7.
+//! Each tempo probe writes the map's tempo at beat 9 in BPM, or -1 when the
+//! block has none.
 
 use tutti_graph::testing as common;
 
@@ -13,12 +16,24 @@ use tutti_graph::{
     TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_music::{Meter, MeterChange, MeterMap, TimeSignature};
-use tutti_units::{Beat, SampleRate, Samples};
+use tutti_tempo::{TempoMap, TempoPoint, Transition};
+use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const MAX_BLOCK: usize = 64;
 const PROBES: u64 = 24;
 
-struct Probe;
+/// A node writing what `read` makes of its `Cx`.
+struct Probe(fn(&Cx<'_>) -> f32);
+
+fn beats_per_bar(cx: &Cx<'_>) -> f32 {
+    cx.meter
+        .map_or(-1.0, |m| m.at(Beat::new(9.0)).beats_per_bar().get() as f32)
+}
+
+fn tempo_at_beat_9(cx: &Cx<'_>) -> f32 {
+    cx.tempo
+        .map_or(-1.0, |t| t.tempo_at(Beat::new(9.0)).get() as f32)
+}
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
@@ -26,18 +41,20 @@ impl Node for Probe {
     }
     fn prepare(&mut self, _: &Prepare) {}
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let seen = cx
-            .meter
-            .map_or(-1.0, |m| m.at(Beat::new(9.0)).beats_per_bar().get() as f32);
-        io.output(0).fill(seen);
+        io.output(0).fill((self.0)(cx));
         Status::Modified
     }
     fn reset(&mut self) {}
 }
 
-/// One block of `PROBES` probes on `workers` participants (serial for one),
-/// rendered with `meter`: each probe's output.
-fn render(workers: usize, meter: Option<&MeterMap>) -> Vec<Vec<f32>> {
+/// One block of `PROBES` probes of `read` on `workers` participants (serial
+/// for one), rendered with `meter` and `tempo`: each probe's output.
+fn render(
+    workers: usize,
+    read: fn(&Cx<'_>) -> f32,
+    meter: Option<&MeterMap>,
+    tempo: Option<&TempoMap>,
+) -> Vec<Vec<f32>> {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(MAX_BLOCK)),
@@ -46,7 +63,7 @@ fn render(workers: usize, meter: Option<&MeterMap>) -> Vec<Vec<f32>> {
         exec.set_pool(Some(test_pool(workers)));
     }
     for k in 1..=PROBES {
-        ed.insert(NodeKey(k), "probe", Unforkable(Probe));
+        ed.insert(NodeKey(k), "probe", Unforkable(Probe(read)));
     }
     ed.spec_mut()
         .topology
@@ -63,6 +80,7 @@ fn render(workers: usize, meter: Option<&MeterMap>) -> Vec<Vec<f32>> {
         &[],
         &mut outs,
         meter,
+        tempo,
     );
     chans
 }
@@ -77,7 +95,43 @@ fn a_node_reads_the_meter_the_block_was_lent() {
     ]);
     for workers in std::iter::once(1).chain(WORKERS) {
         for (meter, want) in [(Some(&map), 7.0), (None, -1.0)] {
-            for (p, chan) in render(workers, meter).iter().enumerate() {
+            for (p, chan) in render(workers, beats_per_bar, meter, None)
+                .iter()
+                .enumerate()
+            {
+                assert!(
+                    chan.iter().all(|&x| x == want),
+                    "probe {p}, {workers} workers: wanted {want}, read {:?}",
+                    &chan[..2]
+                );
+            }
+        }
+    }
+}
+
+/// **A node reads the tempo map the block was lent, serial or on a pool**, and
+/// none when the host lends none. 120 BPM, then 90 from beat 8: 90 at beat 9.
+#[test]
+fn a_node_reads_the_tempo_map_the_block_was_lent() {
+    let map = TempoMap::new([
+        TempoPoint {
+            beat: Beat::new(0.0),
+            tempo: Bpm::of(120.0),
+            transition: Transition::Step,
+        },
+        TempoPoint {
+            beat: Beat::new(8.0),
+            tempo: Bpm::of(90.0),
+            transition: Transition::Step,
+        },
+    ])
+    .expect("a map");
+    for workers in std::iter::once(1).chain(WORKERS) {
+        for (tempo, want) in [(Some(&map), 90.0), (None, -1.0)] {
+            for (p, chan) in render(workers, tempo_at_beat_9, None, tempo)
+                .iter()
+                .enumerate()
+            {
                 assert!(
                     chan.iter().all(|&x| x == want),
                     "probe {p}, {workers} workers: wanted {want}, read {:?}",

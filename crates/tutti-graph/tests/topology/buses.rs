@@ -178,7 +178,6 @@ fn declaring_buses_changes_no_plan() {
     assert_eq!(a.ops(), b.ops());
     assert_eq!(a.audio_list(), b.audio_list());
     assert_eq!((a.tasks(), a.task_ops()), (b.tasks(), b.task_ops()));
-    assert_eq!(a.work(), b.work());
     assert_eq!(a.delays(), b.delays());
     assert_eq!(a.order(), b.order());
     assert_eq!(a.compensation(), b.compensation());

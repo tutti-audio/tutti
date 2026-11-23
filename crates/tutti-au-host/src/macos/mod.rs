@@ -1,7 +1,7 @@
 //! The macOS implementation: every module that talks to AudioToolbox through
 //! `tutti-au-ffi`. `lib.rs` gates this one module on the platform and
 //! re-exports it at the crate root, so each path below is also a path of the
-//! crate (`crate::types`, `tutti_au_host::offline`, ...).
+//! crate (`tutti_au_host::offline`, ...).
 
 pub(crate) mod aupreset;
 pub(crate) mod automation;
@@ -32,7 +32,6 @@ pub mod render_notify;
 pub(crate) mod stream;
 pub(crate) mod topology;
 pub(crate) mod transport;
-pub mod types;
 pub(crate) mod watch;
 
 /// The failure of a lookup by exact key, as the safe handle layer names it.
@@ -41,7 +40,13 @@ pub(crate) use tutti_au_ffi::NotRegistered;
 /// How an [`AuType::Unknown`](crate::component::AuType::Unknown) code reads:
 /// its four characters.
 pub(crate) fn unknown_code(code: u32) -> String {
-    types::fourcc_to_string(code)
+    fourcc_to_string(code)
+}
+
+/// A big-endian four-character code (`b"aufx"`) as its string; an invalid UTF-8
+/// byte reads as the Unicode replacement character.
+pub(crate) fn fourcc_to_string(code: u32) -> String {
+    String::from_utf8_lossy(&code.to_be_bytes()).to_string()
 }
 
 /// Decodes a well-known AudioUnit `OSStatus` into a short description, falling

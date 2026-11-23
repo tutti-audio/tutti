@@ -6,6 +6,9 @@
 static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 // A held key across a retarget and a re-route.
+#[cfg(all(feature = "midi-hardware", feature = "export"))]
+#[path = "../support/bounced.rs"]
+mod bounced;
 #[cfg(feature = "midi")]
 mod common;
 #[cfg(feature = "midi")]

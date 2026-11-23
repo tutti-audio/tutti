@@ -142,15 +142,13 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate};
     use super::*;
 
-    fn run(files: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files), 0)
-    }
-
     fn fails(path: &str, src: &str) -> bool {
-        !run(&[(path, src)]).findings.is_empty()
+        !run_gate(|t| check(t, 0), &[(path, src)])
+            .findings
+            .is_empty()
     }
 
     const LIB: &str = "crates/tutti-engine/src/lib.rs";
@@ -295,7 +293,10 @@ mod tests {
 
     #[test]
     fn a_finding_names_its_file_and_line() {
-        let r = run(&[(LIB, "fn a() {}\nuse std::time::Instant;\n")]);
+        let r = run_gate(
+            |t| check(t, 0),
+            &[(LIB, "fn a() {}\nuse std::time::Instant;\n")],
+        );
         assert!(
             r.findings.iter().any(|l| l.contains(&format!("{LIB}:2:"))),
             "{:?}",

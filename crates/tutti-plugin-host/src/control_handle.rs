@@ -5,7 +5,8 @@
 //! Audio never travels through here; this is the off-RT half.
 
 use crate::{
-    InvalidateSink, ParameterChangeSink, PluginSignal, RefreshSink, Subscription, TransportSink,
+    InvalidateSink, MidiMapSlot, ParameterChangeSink, PluginSignal, RefreshSink, Subscription,
+    TransportSink,
 };
 use dpi::Size;
 use std::sync::Arc;
@@ -22,7 +23,9 @@ use tutti_plugin_types::{
     LayoutSupport, PluginBus, PluginDescriptor, PluginPreset, PluginWiring, PresetError, PresetId,
     PresetSupport,
 };
-use tutti_plugin_types::{MainThreadMarker, StateUse};
+use tutti_plugin_types::{
+    MainThreadMarker, MidiAssignment, MidiMapApplied, PluginLearnError, StateUse,
+};
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
 use tutti_units::Normalized;
@@ -221,6 +224,9 @@ pub struct PluginHandle {
     refresh_sink: RefreshSink,
     invalidate_sink: InvalidateSink,
     transport_sink: TransportSink,
+    /// The controller map the node translates by, when this handle's plugin has a
+    /// node over it.
+    midi_map: Option<MidiMapSlot>,
     server_pid: Option<u32>,
     /// Whether an editor this handle opened is open: shared by every clone, set
     /// by a successful open and cleared by `close_editor`.
@@ -272,6 +278,7 @@ impl PluginHandle {
             invalidate_sink: InvalidateSink::default(),
             transport_sink: TransportSink::default(),
             // No subprocess to name unless `with_server_pid` says so.
+            midi_map: None,
             server_pid: None,
             editor_open: Arc::new(AtomicBool::new(false)),
             instance: Arc::new(()),
@@ -304,6 +311,16 @@ impl PluginHandle {
     /// Public for `tutti-plugin`'s out-of-process-plugin handle, which hears refreshes over its wire.
     pub fn refresh_sink(mut self, sink: RefreshSink) -> Self {
         self.refresh_sink = sink;
+        self
+    }
+
+    /// This handle with `slot` as the controller map
+    /// [`set_app_midi_map`](Self::set_app_midi_map) publishes the app's entries to: the
+    /// node's ([`InProcessClient::midi_map`](crate::InProcessClient::midi_map)).
+    ///
+    /// Public for `tutti-plugin`'s out-of-process-plugin handle, whose node is built apart.
+    pub fn midi_map(mut self, slot: MidiMapSlot) -> Self {
+        self.midi_map = Some(slot);
         self
     }
 
@@ -940,6 +957,60 @@ impl PluginHandle {
             return Delivered::PluginDead;
         };
         lent(control, |c| c.set_track_info(main, info)).unwrap_or(Delivered::PluginDead)
+    }
+
+    /// The plugin's wiring read now ([`Control::wiring`]), so a table it
+    /// re-declared ([`Control::rebuild_midi_mapping`]) shows;
+    /// [`loaded`](Self::loaded) stays the copy read at load. The load copy when the
+    /// handle has no route to the plugin.
+    pub fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
+        let Some(control) = self.control.as_deref() else {
+            return self.loaded.clone();
+        };
+        lent(control, |c| c.wiring(main)).unwrap_or_else(|| self.loaded.clone())
+    }
+
+    /// Hands the plugin the app's controller entries, replacing the last set,
+    /// and says who applies them ([`Control::set_app_midi_map`]). On
+    /// [`Host`](MidiMapApplied::Host) the node translates them with the plugin's
+    /// declared table, from its next block. A handle with no route to the plugin
+    /// answers `Host` and translates nothing.
+    pub fn set_app_midi_map(
+        &self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        let ask = |app: &[MidiAssignment]| match self.control.as_deref() {
+            Some(control) => {
+                lent(control, |c| c.set_app_midi_map(main, app)).unwrap_or(MidiMapApplied::Host)
+            }
+            None => MidiMapApplied::Host,
+        };
+        // The node translates what the plugin did not take: published for its
+        // next block.
+        match &self.midi_map {
+            Some(slot) => slot.hand_app(app, ask),
+            None => ask(app),
+        }
+    }
+
+    /// Arms or disarms the plugin's own MIDI learn
+    /// ([`Control::arm_plugin_midi_learn`]).
+    ///
+    /// # Errors
+    ///
+    /// The plugin's refusal, or [`Lost`](PluginLearnError::Lost) when the handle
+    /// has no route to it.
+    pub fn arm_plugin_midi_learn(
+        &self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        let Some(control) = self.control.as_deref() else {
+            return Err(PluginLearnError::Lost);
+        };
+        lent(control, |c| c.arm_plugin_midi_learn(main, armed))
+            .unwrap_or(Err(PluginLearnError::Lost))
     }
 
     // ---- Signals (plugin -> host) -------------------------------------------

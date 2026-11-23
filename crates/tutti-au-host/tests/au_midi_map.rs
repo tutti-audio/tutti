@@ -48,7 +48,7 @@ use support::corpus::{
 
 use crate::support::au::Au;
 use tutti_au_host::{AuError, AuMidiMapping, MidiTrigger};
-use tutti_fixtures::midi;
+use tutti_fixtures::{main_thread, midi};
 use tutti_graph::Offset;
 
 use tutti_ump::{CCNumber, ControlValue, MidiChannel, U7};
@@ -229,7 +229,7 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
                 // deliberately does not support — the whole point of the test is
                 // to check nothing needs one.
                 let status = unsafe {
-                    tutti_au_host::types::AudioUnitGetPropertyInfo(
+                    coreaudio_sys::AudioUnitGetPropertyInfo(
                         au.unit().as_raw(),
                         MidiControlMapping::ID,
                         scope.raw(),
@@ -238,7 +238,7 @@ fn nothing_implements_the_deprecated_midi_control_mapping_property() {
                         &mut writable,
                     )
                 };
-                if status == tutti_au_host::types::NO_ERR {
+                if status == coreaudio_sys::noErr as i32 {
                     hits.push(format!(
                         "{} ({phase}, scope {scope:?}, {size} bytes)",
                         info.name
@@ -574,6 +574,54 @@ fn set_replaces_the_whole_table() {
     );
 }
 
+/// `Control::set_app_midi_map` writes the app's entries into the unit's own
+/// table (`kAudioUnitProperty_AllParameterMIDIMappings`) beside the plugin's,
+/// and the plugin's own table, as `wiring` reads it, never lists them. An entry
+/// for a parameter the plugin maps replaces the plugin's for as long as it is
+/// there, and an empty set brings the plugin's back.
+#[test]
+fn the_apps_entries_are_written_into_the_units_table_beside_the_plugins() {
+    use tutti_plugin_types::{Control, MidiAssignment, MidiMapApplied, MidiSource};
+    let _g = AU_LOCK.lock();
+    let (unit, param) = IMPLEMENTERS[0];
+    let mut au = unit.open(RATE, BLOCK);
+    clear(&mut au);
+
+    let own = AuMidiMapping::control_change(param, 0, 74);
+    au.add_parameter_midi_mapping(&[own]).expect("seed");
+    let entry = |channel: u8, cc: u8, param: u32| MidiAssignment {
+        channel: MidiChannel::new(channel),
+        source: MidiSource::ControlChange(U7::of(cc)),
+        param: tutti_units::ParamId::new(param),
+    };
+    let extra = entry(2, 21, param + 1);
+    let over = entry(0, 22, param);
+    let table = |au: &Au| au.parameter_midi_mappings().expect("read the unit's table");
+    let same = |got: Vec<AuMidiMapping>, want: &[AuMidiMapping]| {
+        got.len() == want.len() && want.iter().all(|w| got.contains(w))
+    };
+    let extra_raw = AuMidiMapping::control_change(param + 1, 2, 21);
+    let over_raw = AuMidiMapping::control_change(param, 0, 22);
+    let declared = [entry(0, 74, param)];
+    let steps: [(&[MidiAssignment], Vec<AuMidiMapping>); 3] = [
+        (&[extra], vec![own, extra_raw]),
+        (&[extra, over], vec![extra_raw, over_raw]),
+        (&[], vec![own]),
+    ];
+    for (app, in_unit) in steps {
+        assert_eq!(
+            Control::set_app_midi_map(&mut *au, main_thread(), app),
+            MidiMapApplied::Plugin
+        );
+        assert!(same(table(&au), &in_unit), "{app:?}: the unit's table");
+        assert_eq!(
+            Control::wiring(&*au, main_thread()).assignments,
+            declared,
+            "{app:?}: the plugin's own table"
+        );
+    }
+}
+
 /// Clearing the table works, and works *despite* the AU refusing an empty write.
 ///
 /// This is the AU deviation `midi_map::set_all` exists to paper over: writing a
@@ -893,7 +941,7 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
         let mut buf = [0u8; 32];
         let mut size = buf.len() as u32;
         let status = unsafe {
-            tutti_au_host::types::AudioUnitGetProperty(
+            coreaudio_sys::AudioUnitGetProperty(
                 au.unit().as_raw(),
                 44, // kAudioUnitProperty_HotMapParameterMIDIMapping
                 Scope::GLOBAL.raw(),
@@ -904,7 +952,7 @@ fn an_unarmed_hot_map_read_answers_noerr_not_the_documented_error() {
         };
         assert_eq!(
             status,
-            tutti_au_host::types::NO_ERR,
+            coreaudio_sys::noErr as i32,
             "{}: measured deviation — an unarmed HotMap read answers noErr, not \
              the kAudioUnitErr_InvalidPropertyValue the header specifies. If this \
              now fails, the OS has started honouring the header and \

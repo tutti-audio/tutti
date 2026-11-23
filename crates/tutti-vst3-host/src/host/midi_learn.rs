@@ -124,10 +124,14 @@ impl MidiLearnConsumer {
     }
     /// Arm or disarm MIDI learn. While armed, the RT path captures incoming
     /// CCs; [`forward_pending`](Self::forward_pending) then relays them to the
-    /// plugin on the next poll. No-op effect when the plugin has no
-    /// `IMidiLearn` (capture still records, but forwarding does nothing).
+    /// plugin on the next poll.
     pub(super) fn arm(&self, armed: bool) {
         self.armed.store(armed, Ordering::Relaxed);
+    }
+
+    /// Whether the plugin implements `IMidiLearn`, so that arming reaches it.
+    pub(super) fn plugin_learns(&self) -> bool {
+        self.controller.is_some()
     }
 
     /// Whether MIDI learn is currently armed.

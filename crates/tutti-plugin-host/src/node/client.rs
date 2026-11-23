@@ -19,11 +19,12 @@
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
 
+use crate::MidiMapSlot;
+use crate::midi_map::MidiTranslator;
 use crate::node_losses::LossCounts;
 use crate::param_delivery::chunk_offset;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
@@ -36,8 +37,8 @@ use arrayvec::ArrayVec;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, InEvents, Offset, OutEvents, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
+use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
-use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
 use tutti_timeline::TempoReader;
 use tutti_units::{SampleRate, Samples};
@@ -125,6 +126,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// and `process` size by. Moves are reported through the handle
     /// (`PluginInvalidation`), not here.
     pub(super) declared: Declared,
+    /// The controller map's reader: a mapped message of the event input becomes
+    /// a point in `params`, lent once per block or piece of one.
+    pub(super) midi_map: MidiTranslator,
     /// The event input of the node's shape: MIDI and parameter events.
     pub(super) event_in: InEvents,
     /// The event output of the node's shape, for a plugin that declared MIDI out.
@@ -156,7 +160,7 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pub(super) pending_sample_rate: Arc<PendingSampleRate>,
+    pub(super) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -496,13 +500,13 @@ impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
 }
 
 /// Park `rate` for the main thread to dispatch. Audio-thread safe: one
-/// `Relaxed` store, no lock and no allocation.
+/// `Release` store, no lock and no allocation.
 ///
 /// Last write wins. A rate superseded before anyone drained it never reached
 /// the plugin, so dropping it loses nothing — the plugin only needs to hear the
 /// rate it is about to run at.
-pub(super) fn queue_sample_rate(cell: &PendingSampleRate, rate: SampleRate) {
-    cell.set(rate, Ordering::Relaxed);
+pub(super) fn queue_sample_rate(cell: &AtomicCell<Option<SampleRate>>, rate: SampleRate) {
+    cell.store(Some(rate));
 }
 
 /// Dispatch a pending rate, if any, and report whether one reached the plugin.
@@ -514,10 +518,10 @@ pub(super) fn queue_sample_rate(cell: &PendingSampleRate, rate: SampleRate) {
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<L: Loaded>(
     main: MainThreadMarker,
-    cell: &PendingSampleRate,
+    cell: &AtomicCell<Option<SampleRate>>,
     inner: &Mutex<Instance<L>>,
 ) -> bool {
-    let Some(rate) = cell.take(Ordering::Relaxed) else {
+    let Some(rate) = cell.swap(None) else {
         return false;
     };
     // A refusal is kept in the instance and reported by the control side's next
@@ -545,7 +549,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         declared: Declared,
         features: Features,
         sample_rate: SampleRate,
-        pending_sample_rate: Arc<PendingSampleRate>,
+        pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
         counters: Option<Arc<crate::DeliveryCounters>>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,
@@ -583,9 +587,13 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, figures) = {
+        let (lost, figures, midi_map) = {
             let instance = inner.lock();
-            (instance.lost_latch(), instance.figure_cell())
+            (
+                instance.lost_latch(),
+                instance.figure_cell(),
+                instance.midi_map().translator(),
+            )
         };
         // The Processor's room: the one on offer, else the predecessor's, else
         // the node's own intake (a node built before its Processor reached it,
@@ -606,6 +614,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             figures,
             reporting: None,
             edits: None,
+            midi_map,
             descriptor,
             reload,
             pipeline,
@@ -674,6 +683,14 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             Some(main) => self.inner.lock().set_render_mode(main, mode, None),
             None => false,
         }
+    }
+
+    /// The control side of this node's controller map: what the plugin declares
+    /// and the app entered, shared by every node over the instance and by the
+    /// handle ([`PluginHandle::midi_map`](crate::PluginHandle::midi_map)).
+    #[must_use]
+    pub fn midi_map(&self) -> MidiMapSlot {
+        self.inner.lock().midi_map()
     }
 
     /// Seeds the parameter delivery with what a live node had delivered
@@ -1038,6 +1055,7 @@ mod transport_tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
             meter: None,
+            tempo: None,
         }
     }
 

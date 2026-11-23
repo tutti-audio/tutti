@@ -4,17 +4,19 @@
 //! by the test.
 
 use std::future::Future;
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use tutti_platform::Instant;
 
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
-    CallError, CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, JsonPointer,
-    MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData, PeExternalSync,
-    PeHeader, PeJson, PeLocalOn, PeReassemblyLimits, PeResource, PeStatus, PeSubscription,
-    RequestRefused, ResourceEntry, ResourceResponder, ResourceStore, ResourceTarget,
-    ResponderAction, ResponderSettings, SimultaneousRequests, StreamLimit,
+    CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DiscoveryData,
+    JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
+    PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits,
+    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused,
+    ResourceEntry, ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
+    ResponderSettings, SimultaneousRequests, StateId, StreamLimit,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -23,7 +25,10 @@ use tutti_session::{
     ListedResource, MidiInput, PeFailure, PeerError, PeerEvent, PeerResourceId, Presence,
     Resource as _, ResourceFact, Session, SessionEvent, Subscription, SubscriptionCause,
 };
-use tutti_ump::{CiVersion, DeviceIdentity, ManufacturerId, MidiGroup, Sysex8StreamCount, U7, Ump};
+use tutti_ump::{
+    CiVersion, ControlValue, DeviceIdentity, ManufacturerId, MidiChannel, MidiGroup,
+    Sysex8StreamCount, U7, Ump,
+};
 
 use crate::common::{blocks, play};
 use crate::midi::{connect, hot_plug_session_ci, plug, polled, update_at};
@@ -58,6 +63,8 @@ struct PePeer {
     store: ResourceStore,
     reply: Reply,
     asked: Vec<Asked>,
+    /// The encoding of each Get, Set and Subscription start, in the order it arrived.
+    encoded: Vec<PeEncoding>,
 }
 
 impl PePeer {
@@ -98,6 +105,7 @@ impl PePeer {
             store,
             reply: Reply::Serve,
             asked: Vec::new(),
+            encoded: Vec::new(),
         }
     }
 
@@ -159,6 +167,8 @@ impl PePeer {
             {
                 match subscription {
                     PeSubscription::Start(request) => {
+                        self.encoded
+                            .push(request.mutual_encoding.unwrap_or(PeEncoding::Ascii));
                         self.asked
                             .push(Asked::Subscribe(request.resource.as_str().to_owned()));
                     }
@@ -176,6 +186,8 @@ impl PePeer {
                 let name = request.resource.as_str().to_owned();
                 // The ResourceList is the session's own, not the app's.
                 if name != "ResourceList" {
+                    self.encoded
+                        .push(request.mutual_encoding.unwrap_or(PeEncoding::Ascii));
                     if *kind == PeMessageKind::GET_INQUIRY {
                         self.asked.push(Asked::Get(name));
                     } else if *kind == PeMessageKind::SET_INQUIRY {
@@ -1480,4 +1492,524 @@ mod state {
             Poll::Ready(Err(PeerError::Disconnected))
         );
     }
+}
+
+// ---- Resources named by a resId, pages, partial Sets and the typed Resources ----
+
+fn json(text: &str) -> PeJson {
+    PeJson::try_from(text.as_bytes()).expect("json")
+}
+
+/// The Property Data `text` of `resource`.
+fn data(resource: &PeResource, text: &str) -> PeData {
+    PeData::decode(resource, &json(text)).expect("the Resource's data")
+}
+
+fn id(text: &str) -> ResourceId {
+    ResourceId::new(text).expect("a resId")
+}
+
+/// A store of `resource`, declared as its defaults say, holding `text`.
+fn holding(resource: PeResource, text: &str) -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(ResourceEntry::builder(resource.clone()).build().unwrap());
+    store.put(None, data(&resource, text)).expect("declared");
+    store
+}
+
+/// What a Get of `resource` returns from a peer whose store holds `text` of it.
+fn fetched(resource: PeResource, text: &str) -> PeData {
+    let mut wire = Wire::new(holding(resource.clone(), text));
+    let mut request = wire.listed(&resource).fetch();
+    wire.run(60);
+    match wire.result(&mut request) {
+        Some(Ok(data)) => data,
+        other => panic!("the data: {other:?}"),
+    }
+}
+
+/// M2-105 section 4.3 Table 11: ChannelList lands typed, a Channel and a Bank and
+/// Program Change for each entry.
+#[test]
+fn a_fetched_channel_list_is_typed_with_its_channels_and_programs() {
+    let PeData::ChannelList(list) = fetched(
+        PeResource::ChannelList,
+        r#"[{"title":"Lead","channel":1,"programTitle":"Piano + Strings","bankPC":[1,0,76]},
+        {"title":"Drums","channel":10,"programTitle":"GM2 Jazz Drum Set","bankPC":[0,0,33]}]"#,
+    ) else {
+        panic!("ChannelList");
+    };
+    let [lead, drums] = list.entries() else {
+        panic!("two entries");
+    };
+    assert_eq!((lead.title.as_str(), lead.channel.get()), ("Lead", 1));
+    let program = lead.bank_program.expect("bankPC");
+    assert_eq!(
+        (
+            program.bank.msb.get(),
+            program.bank.lsb.get(),
+            program.program.get()
+        ),
+        (1, 0, 76)
+    );
+    assert_eq!(drums.channel.get(), 10);
+}
+
+/// M2-106 section 2.2: ModeList lands typed, a `modeId` and a title for each mode.
+#[test]
+fn a_fetched_mode_list_is_typed_with_its_mode_ids() {
+    let PeData::ModeList(list) = fetched(
+        PeResource::ModeList,
+        r#"[{"modeId":"singleChannelMode","title":"Single MIDI Channel Mode",
+        "description":"This describes a single Program that plays one source."},
+        {"modeId":"multiChannelMode","title":"Multiple MIDI Channel Mode"}]"#,
+    ) else {
+        panic!("ModeList");
+    };
+    let [single, multi] = list.entries() else {
+        panic!("two entries");
+    };
+    assert_eq!(single.mode_id.as_str(), "singleChannelMode");
+    assert!(single.description.is_some());
+    assert_eq!(multi.title.as_str(), "Multiple MIDI Channel Mode");
+}
+
+/// M2-106 section 3.2: CurrentMode is the `modeId` in use.
+#[test]
+fn a_fetched_current_mode_is_the_mode_id() {
+    let PeData::CurrentMode(mode) = fetched(PeResource::CurrentMode, r#""multiChannelMode""#)
+    else {
+        panic!("CurrentMode");
+    };
+    assert_eq!(mode.0.as_str(), "multiChannelMode");
+}
+
+/// M2-108 sections 3.2 and 4.2: the Basic Channels are written 1 to 16.
+#[test]
+fn fetched_basic_channels_are_written_1_to_16() {
+    let PeData::BasicChannelRx(rx) = fetched(PeResource::BasicChannelRx, "1") else {
+        panic!("BasicChannelRx");
+    };
+    assert_eq!(rx.0, MidiChannel::of(0));
+    let PeData::BasicChannelTx(tx) = fetched(PeResource::BasicChannelTx, "16") else {
+        panic!("BasicChannelTx");
+    };
+    assert_eq!(tx.0, MidiChannel::of(15));
+}
+
+/// M2-117 section 2.1.2 Table 6: AllCtrlList lands typed, the Channel, default
+/// and parameter path of each controller.
+#[test]
+fn a_fetched_all_ctrl_list_is_typed_with_its_controllers() {
+    let PeData::AllCtrlList(list) = fetched(
+        PeResource::AllCtrlList,
+        r#"[{"title":"Volume","ctrlType":"cc","channel":1,"default":4294967295,
+        "paramPath":"/volume","ctrlIndex":[7,39],"ctrlMapId":"volumeDb"},
+        {"title":"Hold Pedal","ctrlType":"cc","channel":1,"default":0,"ctrlIndex":[67],
+        "typeHint":"momentary"}]"#,
+    ) else {
+        panic!("AllCtrlList");
+    };
+    let [volume, hold] = list.entries() else {
+        panic!("two entries");
+    };
+    assert_eq!(volume.ctrl.title.as_str(), "Volume");
+    assert_eq!(volume.channel.get(), 1);
+    assert_eq!(volume.ctrl.default, Some(ControlValue::MAX));
+    assert_eq!(volume.ctrl.param_path.as_ref().unwrap().as_str(), "/volume");
+    assert_eq!(hold.ctrl.default, Some(ControlValue::MIN));
+}
+
+/// M2-111 section 2.3 Table 3: StateList lands typed, the id, revision, time and
+/// size of each state.
+#[test]
+fn a_fetched_state_list_is_typed_with_its_states() {
+    let PeData::StateList(list) = fetched(
+        PeResource::StateList,
+        r#"[{"title":"User Programs","stateId":"userPrograms","stateRev":"ahd822nkdla",
+        "timestamp":1583330400,"description":"all","size":300}]"#,
+    ) else {
+        panic!("StateList");
+    };
+    let [entry] = list.entries() else {
+        panic!("one entry");
+    };
+    assert_eq!(entry.state_id.as_str(), "userPrograms");
+    assert_eq!(entry.rev.as_ref().unwrap().as_str(), "ahd822nkdla");
+    assert_eq!(entry.timestamp.unwrap().get(), 1_583_330_400);
+    assert_eq!(entry.size.unwrap().get(), 300);
+}
+
+/// M2-103 section 8.4: a Resource named `X-` is the manufacturer's, and its Property
+/// Data lands as JSON, `PeOpaque`.
+#[test]
+fn a_fetched_custom_resource_is_opaque_json() {
+    let name = PeResource::Custom(CustomResource::new("X-ProgramEdit").unwrap());
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(name.clone())
+            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, data(&name, r#"{"name":"PIANO 4","lfoSpeed":30}"#))
+        .expect("declared");
+    let mut wire = Wire::new(store);
+    let mut request = wire.listed(&name).fetch();
+    wire.run(60);
+    let Some(Ok(PeData::Opaque(opaque))) = wire.result(&mut request) else {
+        panic!("opaque data");
+    };
+    assert_eq!(
+        opaque.json(),
+        Some(&json(r#"{"name":"PIANO 4","lfoSpeed":30}"#))
+    );
+}
+
+/// M2-103 section 11: a Subscription to ExternalSync resolves a live lease and the
+/// peer is asked to start it.
+#[test]
+fn a_subscription_to_external_sync_is_live_and_the_peer_is_asked() {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::ExternalSync)
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, PeData::ExternalSync(PeExternalSync(true)))
+        .expect("declared");
+    let mut wire = Wire::new(store);
+    let _lease = wire.subscribed(&PeResource::ExternalSync);
+    assert_eq!(
+        wire.peer.asked.first(),
+        Some(&Asked::Subscribe("ExternalSync".to_owned()))
+    );
+    assert_eq!(
+        wire.held(&PeResource::ExternalSync),
+        Some(PeData::ExternalSync(PeExternalSync(true)))
+    );
+}
+
+/// A store of the states `held`, each an octet stream under its `stateId`, with the
+/// State entry M2-111 section 3.4 gives: Mcoded7 only, so a call must encode by it.
+fn states(held: &[(&str, u8)]) -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare_states();
+    for (name, byte) in held {
+        let entry = PeStateEntry::new(
+            StateId::new(name).unwrap(),
+            PeText::new(name).expect("a title"),
+        );
+        store
+            .put_state(entry, PeState::octets(vec![*byte]))
+            .expect("declared");
+    }
+    store
+}
+
+/// M2-103 section 8.5 and M2-111 section 3: State is named by a `resId`: a Get and a
+/// Full Set through the handle of an entry reach that entry of the peer's store.
+#[test]
+fn a_state_is_fetched_and_written_by_its_res_id() {
+    let store = states(&[("buffer", 1)]);
+    let mut wire = Wire::new(store);
+    let state = wire.listed(&PeResource::State).with_res_id(id("buffer"));
+
+    let mut get = state.fetch();
+    wire.run(60);
+    assert_eq!(
+        wire.result(&mut get),
+        Some(Ok(PeData::State(PeState::octets(vec![1]))))
+    );
+
+    let mut set = state.write(PeData::State(PeState::octets(vec![9])));
+    wire.run(60);
+    let result = wire.result(&mut set);
+    let Some(Ok(status)) = result else {
+        panic!("a status: {result:?}");
+    };
+    assert_eq!(status.code(), 200);
+    let target = ResourceTarget::entry(PeResource::State, id("buffer")).unwrap();
+    assert_eq!(
+        wire.peer.store.get(&target),
+        Some(&PeData::State(PeState::octets(vec![9])))
+    );
+    assert_eq!(
+        wire.peer.asked,
+        [
+            Asked::Get("State".to_owned()),
+            Asked::Set("State".to_owned())
+        ]
+    );
+}
+
+/// M2-103 section 8.5: the entries of a Resource are different data: a Get with
+/// one `resId` does not return another's.
+#[test]
+fn a_res_id_names_one_entry_of_the_resource() {
+    let store = states(&[("one", 1), ("two", 2)]);
+    let mut wire = Wire::new(store);
+    let mut get = wire
+        .listed(&PeResource::State)
+        .with_res_id(id("two"))
+        .fetch();
+    wire.run(60);
+    assert_eq!(
+        wire.result(&mut get),
+        Some(Ok(PeData::State(PeState::octets(vec![2]))))
+    );
+}
+
+/// M2-103 section 8.5: a Resource that has no entries takes no `resId`: the call
+/// ends at the handle as not sent, and the peer hears nothing.
+#[test]
+fn a_res_id_on_a_resource_with_no_entries_is_not_sent() {
+    let mut wire = Wire::new(store());
+    let mut request = wire
+        .listed(&PeResource::LocalOn)
+        .with_res_id(id("x"))
+        .fetch();
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
+        wire.result(&mut request)
+    else {
+        panic!("not sent");
+    };
+    wire.run(30);
+    assert!(
+        matches!(refused, RequestRefused::ResIdUnused(_)),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
+}
+
+/// A store whose ProgramList entry `factory` holds five Programs, 0-based Program
+/// Change numbers 0 to 4.
+fn programs() -> ResourceStore {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::ProgramList)
+            .build()
+            .unwrap(),
+    );
+    let titles = ["Piano", "Organ", "Bass", "Strings", "Brass"];
+    let items: Vec<String> = titles
+        .iter()
+        .enumerate()
+        .map(|(n, title)| format!(r#"{{"title":"{title}","bankPC":[0,0,{n}]}}"#))
+        .collect();
+    store
+        .put(
+            Some(id("factory")),
+            data(&PeResource::ProgramList, &format!("[{}]", items.join(","))),
+        )
+        .expect("declared");
+    store
+}
+
+fn titles(data: PeData) -> Vec<String> {
+    let PeData::ProgramList(list) = data else {
+        panic!("ProgramList");
+    };
+    list.entries()
+        .iter()
+        .map(|entry| entry.title.as_str().to_owned())
+        .collect()
+}
+
+/// M2-107 section 2.2: a ProgramList is named by a `resId`, and the Get of the whole
+/// list returns every Program.
+#[test]
+fn a_program_list_is_fetched_by_its_res_id() {
+    let mut wire = Wire::new(programs());
+    let mut request = wire
+        .listed(&PeResource::ProgramList)
+        .with_res_id(id("factory"))
+        .fetch();
+    wire.run(60);
+    let Some(Ok(list)) = wire.result(&mut request) else {
+        panic!("the list");
+    };
+    assert_eq!(titles(list), ["Piano", "Organ", "Bass", "Strings", "Brass"]);
+}
+
+/// M2-103 section 8.6.2: a Get with a page returns the `limit` entries from `offset`.
+#[test]
+fn a_paged_fetch_returns_the_entries_of_the_page() {
+    let mut wire = Wire::new(programs());
+    let listed = wire
+        .listed(&PeResource::ProgramList)
+        .with_res_id(id("factory"));
+    let page = PePage {
+        offset: 1,
+        limit: NonZeroU32::new(2).unwrap(),
+    };
+    let mut request = listed.fetch_page(page);
+    wire.run(60);
+    let Some(Ok(list)) = wire.result(&mut request) else {
+        panic!("the page");
+    };
+    assert_eq!(titles(list), ["Organ", "Bass"]);
+}
+
+/// M2-103 section 8.6.2: only a List Resource has pages: a paged Get of one that is
+/// no list ends at the handle as not sent.
+#[test]
+fn a_paged_fetch_of_a_resource_that_is_no_list_is_not_sent() {
+    let mut wire = Wire::new(store());
+    let page = PePage {
+        offset: 0,
+        limit: NonZeroU32::new(1).unwrap(),
+    };
+    let mut request = wire.listed(&PeResource::LocalOn).fetch_page(page);
+    wire.run(30);
+    let result = wire.result(&mut request);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
+    else {
+        panic!("not sent: {result:?}");
+    };
+    assert!(
+        matches!(refused, RequestRefused::NotPaginable(_)),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
+}
+
+/// M2-103 section 10: a Partial Set changes the properties its pointers name and
+/// leaves the others.
+#[test]
+fn a_partial_write_changes_the_properties_it_names() {
+    let name = PeResource::Custom(CustomResource::new("X-ProgramEdit").unwrap());
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(name.clone())
+            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
+            .can_set(CanSet::Partial)
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, data(&name, r#"{"name":"PIANO 4","lfoSpeed":30}"#))
+        .expect("declared");
+    let mut wire = Wire::new(store);
+    let update = PartialUpdate::new().with(
+        JsonPointer::new("/lfoSpeed").expect("a pointer"),
+        PartialValue::Integer(45),
+    );
+    let mut request = wire.listed(&name).write_partial(update);
+    wire.run(60);
+    let Some(Ok(status)) = wire.result(&mut request) else {
+        panic!("a status");
+    };
+    assert_eq!(status.code(), 200);
+    let held = wire
+        .peer
+        .store
+        .get(&ResourceTarget::try_from(name).unwrap())
+        .and_then(|data| data.to_json());
+    assert_eq!(held, Some(json(r#"{"name":"PIANO 4","lfoSpeed":45}"#)));
+}
+
+/// M2-103 section 14.2: a Partial Set of an entry that declares only a Full Set
+/// ends at the handle as not sent, and the peer hears nothing.
+#[test]
+fn a_partial_write_of_a_resource_that_takes_only_full_sets_is_not_sent() {
+    let mut wire = Wire::new(store());
+    let update = PartialUpdate::new().with(
+        JsonPointer::new("/x").expect("a pointer"),
+        PartialValue::Bool(true),
+    );
+    let mut request = wire.listed(&PeResource::LocalOn).write_partial(update);
+    wire.run(30);
+    let result = wire.result(&mut request);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
+    else {
+        panic!("not sent: {result:?}");
+    };
+    assert!(
+        matches!(refused, RequestRefused::CannotSet { .. }),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
+}
+
+/// M2-103 section 7.2: a call is encoded in what the entry lists: a Subscribe of an
+/// entry that lists only Mcoded7, by `resId`, is started in Mcoded7.
+#[test]
+fn a_subscribe_encodes_by_the_encodings_the_entry_lists() {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![MediaType::OCTET_STREAM])
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
+    );
+    let mut wire = Wire::new(store);
+    let _request = wire
+        .listed(&PeResource::State)
+        .with_res_id(id("buffer"))
+        .subscribe();
+    wire.run(60);
+    assert_eq!(
+        wire.peer.asked.first(),
+        Some(&Asked::Subscribe("State".to_owned()))
+    );
+    assert_eq!(wire.peer.encoded.first(), Some(&PeEncoding::Mcoded7));
+}
+
+/// M2-103 section 7.2: an entry that lists ASCII among others is called in ASCII, not
+/// in the first it lists.
+#[test]
+fn an_entry_that_lists_ascii_is_called_in_ascii() {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::LocalOn)
+            .encodings(vec![PeEncoding::Mcoded7, PeEncoding::Ascii])
+            .build()
+            .unwrap(),
+    );
+    store.put(None, on(false)).expect("declared");
+    let mut wire = Wire::new(store);
+    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    wire.run(60);
+    assert_eq!(wire.result(&mut request), Some(Ok(on(false))));
+    assert_eq!(wire.peer.encoded, [PeEncoding::Ascii]);
+}
+
+/// M2-103 section 8.6.2: a page of a List Resource whose entry does not declare
+/// `canPaginate` ends at the handle as not sent, and the peer hears nothing.
+#[test]
+fn a_page_of_a_list_whose_entry_does_not_paginate_is_not_sent() {
+    let songs = PeResource::Custom(CustomResource::new("X-SongList").unwrap());
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(songs.clone())
+            .schema(json(r#"{"title":"Songs","type":"array"}"#))
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, data(&songs, r#"["a","b"]"#))
+        .expect("declared");
+    let mut wire = Wire::new(store);
+    let page = PePage {
+        offset: 0,
+        limit: NonZeroU32::new(1).unwrap(),
+    };
+    let mut request = wire.listed(&songs).fetch_page(page);
+    wire.run(30);
+    let result = wire.result(&mut request);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
+    else {
+        panic!("not sent: {result:?}");
+    };
+    assert!(
+        matches!(refused, RequestRefused::NotDeclaredPaginable(_)),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
 }

@@ -7,7 +7,6 @@ use tutti_graph::{
     Cx, ForkByClone, InstrumentNode, IntoNode, Io, Node, NodeParts, Prepare, Shape, Status,
 };
 use tutti_session::MainOutput;
-use tutti_session::SessionNode;
 use tutti_units::Losses;
 
 /// Output `c` is the constant `c + 1`, whatever it is played.
@@ -41,8 +40,6 @@ impl InstrumentNode<f32> for Dressed {
         [2, 3]
     }
 }
-impl SessionNode for Dressed {}
-
 #[test]
 fn the_pair_a_node_names_is_the_one_played() {
     let mut session = crate::instrument_support::rig::offline_session();
@@ -93,7 +90,6 @@ fn a_pair_past_the_outputs_is_refused() {
             [4, 5]
         }
     }
-    impl SessionNode for Short {}
     let mut session = crate::instrument_support::rig::offline_session();
     match session.add_instrument(Short) {
         Err(tutti_session::Error::NotInstrument {

@@ -31,6 +31,7 @@
 //! port instead), so the cell holds what the user set, and a fork of the
 //! node starts from it ([`ParamFork`]) without a second, "authored" copy.
 
+use std::any::{Any, TypeId};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -43,12 +44,56 @@ use crate::RenderMode;
 use crate::fork::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_buffers::Float;
 
+use crate::declare::ParamValue;
 use crate::node::{IntoNode, Node, NodeParts};
 
-/// One param: its address and the cell the node reads.
+/// One param: its address, the cell the node reads, and the unit the node
+/// declares it in.
 struct Slot {
     param: UnitAddr,
     live: ParamCell,
+    unit: DeclaredUnit,
+}
+
+/// The unit a param's value is in, erased: how a host that reaches a param by
+/// address names a cell's `f64` as the value of the unit the node declares it
+/// in.
+#[derive(Clone, Copy)]
+pub struct DeclaredUnit {
+    value: fn(f64) -> Arc<dyn Any + Send + Sync>,
+    /// The unit's type, as a function so `of` stays `const`.
+    type_id: fn() -> TypeId,
+}
+
+impl DeclaredUnit {
+    /// The unit `U`.
+    #[must_use]
+    pub const fn of<U: ParamValue>() -> Self {
+        Self {
+            value: |cell| Arc::new(U::from_cell(cell)),
+            type_id: TypeId::of::<U>,
+        }
+    }
+
+    /// The unit's value for a cell's `f64`: a `U` behind the pointer.
+    #[must_use]
+    pub fn value(self, cell: f64) -> Arc<dyn Any + Send + Sync> {
+        (self.value)(cell)
+    }
+}
+
+/// Two declarations of one unit `U`.
+impl PartialEq for DeclaredUnit {
+    fn eq(&self, other: &Self) -> bool {
+        (self.type_id)() == (other.type_id)()
+    }
+}
+impl Eq for DeclaredUnit {}
+
+impl std::fmt::Debug for DeclaredUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeclaredUnit").finish_non_exhaustive()
+    }
 }
 
 /// A node's params by [`UnitAddr`]: the cells the running node reads, once
@@ -104,6 +149,11 @@ impl ParamSet {
         self.slot(param.into()).map(|s| s.live.clone())
     }
 
+    /// The unit `param` is declared in, or `None` for an address not in the set.
+    pub fn unit(&self, param: impl Into<UnitAddr>) -> Option<DeclaredUnit> {
+        self.slot(param.into()).map(|s| s.unit)
+    }
+
     /// The params, in the order they were added.
     pub fn params(&self) -> impl Iterator<Item = UnitAddr> + '_ {
         self.slots.iter().map(|s| s.param)
@@ -134,8 +184,8 @@ impl std::fmt::Debug for ParamSetBuilder {
 }
 
 impl ParamSetBuilder {
-    /// Address `cell` (a `Param<U>`'s, `Param::as_atomic`) as `param`: a
-    /// [`UnitAddr`], or a bare `UnitParam` for index 0. A node with several
+    /// Address `cell` (a `Param<U>`'s, `Param::as_atomic`), whose value is in
+    /// `unit`, as `param`: a [`UnitAddr`], or a bare `UnitParam` for index 0. A node with several
     /// params of a kind adds each at its own index.
     ///
     /// # Panics
@@ -143,14 +193,23 @@ impl ParamSetBuilder {
     /// If that address (kind **and** index) was already added: one address,
     /// one cell. The same kind at another index is a different address.
     #[must_use]
-    pub fn param(mut self, param: impl Into<UnitAddr>, cell: impl Into<ParamCell>) -> Self {
+    pub fn param(
+        mut self,
+        unit: DeclaredUnit,
+        param: impl Into<UnitAddr>,
+        cell: impl Into<ParamCell>,
+    ) -> Self {
         let param = param.into();
         let cell = cell.into();
         assert!(
             self.slots.iter().all(|s| s.param != param),
             "{param:?} added to a ParamSet twice"
         );
-        self.slots.push(Slot { param, live: cell });
+        self.slots.push(Slot {
+            param,
+            live: cell,
+            unit,
+        });
         self
     }
 
@@ -312,12 +371,27 @@ mod tests {
     use tutti_rt::Param;
     use tutti_units::{Hz, Q};
 
+    /// **A declared unit is equal to another declaration of the same unit and
+    /// to no other unit.**
+    #[test]
+    fn declared_units_are_equal_when_they_declare_one_unit() {
+        assert_eq!(DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Hz>());
+        assert_ne!(
+            DeclaredUnit::of::<Hz>(),
+            DeclaredUnit::of::<tutti_units::Seconds>()
+        );
+    }
+
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {
         let cutoff = Param::new(Hz::new(1000.0));
         let q = Param::new(Q::new(0.7));
         let set = ParamSet::builder()
-            .param(UnitParam::Cutoff, cutoff.as_atomic())
-            .param(UnitParam::Q, q.as_atomic())
+            .param(
+                DeclaredUnit::of::<Hz>(),
+                UnitParam::Cutoff,
+                cutoff.as_atomic(),
+            )
+            .param(DeclaredUnit::of::<Q>(), UnitParam::Q, q.as_atomic())
             .build();
         (cutoff, q, set)
     }
@@ -346,7 +420,7 @@ mod tests {
     fn one_address_one_cell() {
         let a = Param::new(Hz::new(1.0));
         let _ = ParamSet::builder()
-            .param(UnitParam::Cutoff, a.as_atomic())
-            .param(UnitParam::Cutoff, a.as_atomic());
+            .param(DeclaredUnit::of::<Hz>(), UnitParam::Cutoff, a.as_atomic())
+            .param(DeclaredUnit::of::<Hz>(), UnitParam::Cutoff, a.as_atomic());
     }
 }
