@@ -123,9 +123,14 @@ fn lfo_step(rate: f64, per_hz: f64) -> PhaseStep {
 // it is made from: its shape, its clock and its starting depth and phase. Both params
 // are read per frame. The clock is fixed once the node is live (a config option only),
 // so its shape never changes. A config that gives a beat span has no rate cell, whatever
-// rate it was given. A free-running LFO at 1 Hz is the default; a rate of `None` with no
-// beat span is a free clock at no rate cell (not a form a caller writes).
-tutti_graph::declare_params!([] LfoNode, #[derive(Copy, PartialEq)] LfoConfig, LfoCells {
+// rate it was given; one with neither runs free at the default 1 Hz.
+tutti_graph::declare_params!([] LfoNode,
+    /// The clock is chosen by `beat_sync` and `rate`, which are independent options, not a
+    /// last-set-wins pair. A beat span ([`beat_sync`](Self::beat_sync)`(Some(..))`) wins over
+    /// a rate whatever the order they are written in, and a synced node has no rate param.
+    /// `.beat_sync(None)` returns to the free clock. A free clock with no rate
+    /// (`.rate(None)` and no span) falls back to the default of 1 Hz.
+    #[derive(Copy, PartialEq)] LfoConfig, LfoCells {
     required { shape: LfoShape }
     params {
         Depth => depth: Bipolar = Bipolar::MAX,
@@ -158,6 +163,8 @@ impl From<LfoConfig> for LfoNode {
         // A beat-synced clock has no rate param: its span is the clock.
         if config.beat_sync.is_some() {
             config.rate = None;
+        } else if config.rate.is_none() {
+            config.rate = Some(Hz::new(1.0));
         }
         Self {
             wave: Waveform::Shape {
@@ -354,6 +361,21 @@ mod tests {
 
     fn stopped_at(beat: f64) -> TransportPosition {
         TransportPosition::new(false, Bpm::of(120.0), Beat::new(beat), None)
+    }
+
+    /// A free config with `.rate(None)` and no beat span runs at the 1 Hz default: at 100 Hz
+    /// a quarter cycle is 25 frames, the sine's peak.
+    #[test]
+    fn a_free_config_without_a_rate_runs_at_one_hertz() {
+        let node = LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(None));
+        assert_eq!(node.clock(), LfoClock::Free);
+        assert_eq!(
+            node.cells.rate.as_ref().map(Param::load),
+            Some(Hz::new(1.0))
+        );
+        let out = render(node, 100.0, 26);
+        assert!((out[25] - 1.0).abs() < 1e-5, "{}", out[25]);
+        assert!(out[0].abs() < 1e-6);
     }
 
     #[test]
