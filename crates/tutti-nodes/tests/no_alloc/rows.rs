@@ -4,22 +4,31 @@
 
 use crate::harness::{Gate, alternate, every_third, feeds};
 use std::sync::Arc;
-use tutti_buffers::{BusTopology, ChannelLayout, Interleaved, Mono, Wave};
-use tutti_dsp::{CombDelay, MaxGrains, SvfType, Wavetable};
+use tutti_buffers::{BusTopology, ChannelIndex, ChannelLayout, Interleaved, Mono, Wave};
+use tutti_dsp::{
+    Algorithm, CombDelay, FmPatch, Inline, MaxGrains, OperatorCount, OperatorFrequency,
+    OperatorSpec, Partial, Partials, SvfType, Tap, TapSet, Wavetable,
+};
 use tutti_nodes::{
+    AdditiveConfig, AdditiveNode, AutoPanConfig, AutoPanNode, BellFilterConfig, BellFilterNode,
     BitCrusherConfig, BitCrusherNode, ButterworthOrder, CombFilterConfig, CombFilterNode, CombForm,
     CutAlignment, CutFilterConfig, CutFilterNode, CutResponse, DcBlockerConfig, DcBlockerNode,
-    DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode, DynamicEqConfig,
-    DynamicEqNode, DynamicMode, EllipticTolerances, EnvelopeFilterConfig, EnvelopeFilterNode,
-    FrequencyShifterConfig, FrequencyShifterNode, GranularConfig, GranularNode, HysteresisConfig,
-    HysteresisNode, KeySource, LevellerConfig, LevellerNode, ModalBankConfig, ModalBankNode, Mode,
-    Modes, OversamplingFactor, PassbandRipple, PitchShifterConfig, PitchShifterNode, ShimmerConfig,
-    ShimmerNode, StopbandAttenuation, TransientShaperConfig, TransientShaperNode, TubeStageConfig,
-    TubeStageNode, WavetableConfig, WavetableNode,
+    DecorrelatorConfig, DecorrelatorNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig,
+    DistanceNode, DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig,
+    EarlyReflectionsNode, EllipticTolerances, EnvelopeFilterConfig, EnvelopeFilterNode, FmConfig,
+    FmNode, FrequencyShifterConfig, FrequencyShifterNode, GranularConfig, GranularNode,
+    GraphicBands, GraphicEqConfig, GraphicEqNode, HysteresisConfig, HysteresisNode,
+    KarplusStrongConfig, KarplusStrongNode, KeySource, LevellerConfig, LevellerNode, MidSideConfig,
+    MidSideNode, ModalBankConfig, ModalBankNode, Mode, Modes, NoiseColour, NoiseConfig, NoiseNode,
+    OversamplingFactor, PassbandRipple, PitchShifterConfig, PitchShifterNode, PolarityConfig,
+    PolarityNode, RingModConfig, RingModNode, ShimmerConfig, ShimmerNode, StereoWidthConfig,
+    StereoWidthNode, StopbandAttenuation, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
+    TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode,
+    WaveguideStringConfig, WaveguideStringNode, WavetableConfig, WavetableNode,
 };
 use tutti_units::{
-    CompressionRatio, Db, Gain, Hz, Metres, Normalized, Q, SampleRate, Seconds, Semitones,
-    UnitAddr, UnitParam,
+    Amplitude, CompressionRatio, Db, FrequencyRatio, Gain, Hz, Metres, ModulationIndex, Normalized,
+    Q, SampleRate, SampleSpan, Seconds, Semitones, UnitAddr, UnitParam,
 };
 
 /// Every oversampled saturator is stepped at each of these.
@@ -49,6 +58,12 @@ pub const ROWS: &[fn()] = &[
     transient_shaper,
     tube_stage,
     wavetable,
+    tremolo_auto_pan_ring_mod,
+    physical_strings,
+    early_reflections_decorrelator,
+    fm_additive,
+    bell_tilt_graphic_eq,
+    utility,
 ];
 
 fn bit_crusher() {
@@ -328,4 +343,159 @@ fn wavetable() {
         );
         c.set(UnitParam::Position, (i % 7) as f64 / 6.0);
     });
+}
+
+fn tremolo_auto_pan_ring_mod() {
+    let gate = Gate::new(feeds::offset_square);
+    let tremolo = TremoloNode::from(TremoloConfig::new(ChannelLayout::STEREO));
+    gate.run("tremolo", tremolo, |c, i| {
+        c.set(UnitParam::Rate, alternate(i, 3.0, 40.0));
+        c.set(UnitParam::Depth, every_third(i, 0.2, 1.0));
+    });
+    gate.run(
+        "auto pan",
+        AutoPanNode::from(AutoPanConfig::new()),
+        |c, i| {
+            c.set(UnitParam::Rate, alternate(i, 3.0, 40.0));
+            c.set(UnitParam::Depth, every_third(i, 0.2, 1.0));
+        },
+    );
+    let ring_mod = RingModNode::from(RingModConfig::new(ChannelLayout::STEREO));
+    gate.run("ring mod", ring_mod, |c, i| {
+        c.set(UnitParam::Frequency, alternate(i, 220.0, 1_700.0));
+    });
+}
+
+/// A pitch move retunes the loop on the audio thread.
+fn physical_strings() {
+    let gate = Gate::new(feeds::pulse);
+    let karplus = KarplusStrongNode::from(KarplusStrongConfig::new(ChannelLayout::STEREO));
+    gate.run("karplus-strong", karplus, |c, i| {
+        c.set(UnitParam::Frequency, alternate(i, 220.0, 880.0));
+        c.set(UnitParam::Decay, every_third(i, 0.2, 1.5));
+    });
+    let waveguide = WaveguideStringNode::from(WaveguideStringConfig::new(ChannelLayout::STEREO));
+    gate.run("waveguide string", waveguide, |c, i| {
+        c.set(UnitParam::Frequency, alternate(i, 220.0, 880.0));
+        c.set(UnitParam::Decay, every_third(i, 0.2, 1.5));
+    });
+}
+
+fn early_reflections_decorrelator() {
+    let gate = Gate::new(feeds::offset_square);
+    let tap = |delay: f64, gain: f64, channel: u8| Tap {
+        delay: SampleSpan::new(delay).unwrap(),
+        gain: Gain::new(gain),
+        channel,
+    };
+    let taps = TapSet {
+        taps: Inline::from_slice(&[
+            tap(17.0, 0.6, 0),
+            tap(101.5, -0.4, 1),
+            tap(333.25, 0.3, 0),
+            tap(1_000.0, -0.2, 1),
+        ])
+        .unwrap(),
+    };
+    let reflections = EarlyReflectionsConfig::new(ChannelLayout::STEREO, taps);
+    let node = EarlyReflectionsNode::<f32>::try_from(reflections).unwrap();
+    gate.run("early reflections", node, |_, _| {});
+    let node = DecorrelatorNode::<f32>::from(DecorrelatorConfig::new(ChannelLayout::STEREO));
+    gate.run("decorrelator", node, |_, _| {});
+}
+
+fn fm_additive() {
+    let gate = Gate::new(feeds::silence).frames(480).floor(1e-3);
+    let ratio = |x: f64| OperatorFrequency::Ratio(FrequencyRatio::new(x).unwrap());
+    let patch = FmPatch::new(Algorithm::chain(OperatorCount::of(3))).operators(&[
+        OperatorSpec::new(ratio(1.0)),
+        OperatorSpec::new(ratio(2.0)).level(Amplitude::new(0.5)),
+        OperatorSpec::new(ratio(1.0)),
+    ]);
+    let fm = FmNode::<f32>::from(FmConfig::new(patch).index(ModulationIndex::of(2.0)));
+    gate.run("fm", fm, |c, i| {
+        c.set(UnitParam::Frequency, 110.0 * (1 + i % 5) as f64);
+        c.set(UnitAddr::new(UnitParam::Index, 0), (i % 7) as f64);
+    });
+    let partial = |ratio: f64, amplitude: f64| {
+        Partial::new(
+            FrequencyRatio::new(ratio).unwrap(),
+            Amplitude::new(amplitude),
+        )
+    };
+    let partials =
+        Partials::try_from(&[partial(1.0, 0.5), partial(2.0, 0.25), partial(40.0, 0.1)][..])
+            .unwrap();
+    let additive = AdditiveNode::<f32>::from(AdditiveConfig::new(partials));
+    gate.run("additive", additive, |c, i| {
+        c.set(UnitParam::Frequency, 220.0 * (1 + i % 4) as f64);
+    });
+}
+
+/// Every control moves: a design into the held scratch and the coefficient ramp.
+fn bell_tilt_graphic_eq() {
+    let gate = Gate::new(feeds::offset_square);
+    let bell = BellFilterConfig::new(
+        ChannelLayout::STEREO,
+        Hz::new(1_000.0),
+        Q::new(1.0),
+        Db::new(0.0),
+    );
+    gate.run("bell filter", BellFilterNode::from(bell), |c, i| {
+        c.set(UnitParam::Cutoff, alternate(i, 80.0, 15_000.0));
+        c.set(UnitParam::Q, alternate(i, 0.5, 12.0));
+        c.set(UnitParam::GainDb, alternate(i, 15.0, -15.0));
+    });
+    let tilt = TiltFilterConfig::new(ChannelLayout::STEREO, Hz::new(1_000.0), Db::new(0.0));
+    gate.run("tilt filter", TiltFilterNode::from(tilt), |c, i| {
+        c.set(UnitParam::Cutoff, alternate(i, 80.0, 15_000.0));
+        c.set(UnitParam::GainDb, alternate(i, 15.0, -15.0));
+    });
+    for bands in [GraphicBands::Octave, GraphicBands::ThirdOctave] {
+        let config = GraphicEqConfig::new(BusTopology::STEREO, bands);
+        let node = GraphicEqNode::from(config);
+        gate.run(&format!("graphic eq {bands:?}"), node, |c, i| {
+            for band in 0..bands.count() {
+                let addr = UnitAddr::new(UnitParam::GainDb, u8::try_from(band).unwrap());
+                c.set(
+                    addr,
+                    if (i + band).is_multiple_of(2) {
+                        15.0
+                    } else {
+                        -15.0
+                    },
+                );
+            }
+        });
+    }
+}
+
+fn utility() {
+    let gate = Gate::new(feeds::offset_square);
+    let polarity = PolarityConfig::new(ChannelLayout::STEREO).only([ChannelIndex::of(1)]);
+    gate.run(
+        "polarity",
+        PolarityNode::try_from(polarity).unwrap(),
+        |_, _| {},
+    );
+    gate.run(
+        "mid/side encode",
+        MidSideNode::from(MidSideConfig::encode()),
+        |_, _| {},
+    );
+    gate.run(
+        "mid/side decode",
+        MidSideNode::from(MidSideConfig::decode()),
+        |_, _| {},
+    );
+    let width = StereoWidthNode::<f32>::from(StereoWidthConfig::new());
+    gate.run("stereo width", width, |c, i| {
+        c.set(UnitParam::StereoWidth, alternate(i, 0.2, 1.8));
+    });
+    for colour in [NoiseColour::White, NoiseColour::Pink, NoiseColour::Brown] {
+        let node = NoiseNode::<f32>::from(NoiseConfig::new(colour).seed(1));
+        gate.run(&format!("noise {colour:?}"), node, |c, i| {
+            c.set(UnitParam::Volume, alternate(i, 0.2, 0.9));
+        });
+    }
 }
