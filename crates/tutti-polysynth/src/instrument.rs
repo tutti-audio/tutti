@@ -24,7 +24,7 @@ pub use waveguide::{WaveguideVoice, WaveguideVoiceConfig};
 use core::fmt::Debug;
 use core::marker::PhantomData;
 
-use tutti_buffers::{BusTopology, Float, Sample};
+use tutti_buffers::{BusTopology, Float};
 use tutti_graph::{Chase, Cx, EventKind, InEvents, Io, Node, Prepare, Shape, Status};
 use tutti_midi_protocol::{SysexDeviceId, UniversalReader, channel_voice};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump};
@@ -220,7 +220,7 @@ impl<V: InstrumentVoice> Node<V::Float> for NoteInstrument<V> {
             .declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
             .last_frame()
         {
-            Some(lane) => Amplitude::new(lane.to_f64()),
+            Some(lane) => Amplitude::new(lane.into()),
             None => {
                 let cell = self.cells.gain.load();
                 if cell.get().is_finite() {

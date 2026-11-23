@@ -12,7 +12,7 @@ use crate::tuning::key_freq;
 
 /// The seed of the burst: every strike is the same stream, so a strike scales exactly with its
 /// velocity.
-const BURST_SEED: u64 = 0x7475_7474_69;
+const BURST_SEED: u64 = 0x0074_7574_7469;
 
 /// How long a damped note takes to fall 60 dB.
 const DAMP: Seconds = Seconds::new(0.02);
@@ -210,7 +210,8 @@ impl<F: Float> Note<F> {
             for (i, (y, &m)) in span.iter_mut().zip(&made[..n]).enumerate() {
                 let gain = from + (to - from) * ((i + 1) as f64 / n as f64);
                 let heard = m * F::from_design(gain);
-                peak = peak.max(heard.to_f64().abs());
+                let heard_f64: f64 = heard.into();
+                peak = peak.max(heard_f64.abs());
                 *y += heard;
             }
             self.peak = peak;

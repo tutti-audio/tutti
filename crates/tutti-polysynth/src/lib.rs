@@ -138,8 +138,11 @@ mod mpe;
 pub(crate) use mpe::MpeVoiceState;
 // Public: these appear in `SynthConfig`'s fields.
 pub use voice::VoiceMode;
-// The steal rule `SynthConfig::steal` takes: voicing's own `Steal` and `Order`.
-pub use tutti_voicing::{Order, Steal};
+// The steal rule `SynthConfig::steal` takes: voicing's own `Steal` and `Order`; and what a
+// voice of `NoteInstrument` and its `InstrumentConfig` are written with.
+pub use tutti_voicing::{
+    Glide, NoteControl, NoteStart, NoteVoice, Order, Steal, VoiceAllocator, VoiceConfig,
+};
 
 mod unison;
 pub(crate) use unison::UnisonEngine;

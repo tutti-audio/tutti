@@ -774,12 +774,13 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, GlideTime, GlideTimeError,
-        InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice, KarplusVoiceConfig, Lane,
-        MasterVolume, MasterVolumeOutOfRange, ModalVoice, ModalVoiceConfig, NoteInstrument, Order,
-        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch,
-        ReferencePitchOutOfRange, Steal, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig,
-        SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
+        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, Glide, GlideTime,
+        GlideTimeError, InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice,
+        KarplusVoiceConfig, Lane, MasterVolume, MasterVolumeOutOfRange, ModalVoice,
+        ModalVoiceConfig, NoteControl, NoteInstrument, NoteStart, NoteVoice, Order, OscillatorType,
+        PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch, ReferencePitchOutOfRange,
+        Steal, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig, SynthFloat, Tuning, TuningError,
+        UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceAllocator, VoiceConfig, VoiceMode,
         WaveguideVoice, WaveguideVoiceConfig,
     };
 }
