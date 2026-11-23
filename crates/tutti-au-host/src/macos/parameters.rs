@@ -43,7 +43,8 @@
 // every other entry point in this crate.
 
 use crate::error::Result;
-use crate::types::*;
+use coreaudio_sys as sys;
+use coreaudio_sys::AUDependentParameter;
 use tutti_au_ffi::Unit;
 use tutti_au_ffi::property::{DependentParameters, ParameterList, ParameterValueStrings};
 use tutti_au_ffi::{Element, Scope};
@@ -209,9 +210,9 @@ impl MetaScope {
     /// stale cached value on another element with nothing to reveal it; picking
     /// the wider one costs a re-read.
     pub fn from_flags(flags: u32) -> Option<Self> {
-        if flags & K_AUDIO_UNIT_PARAMETER_FLAG_IS_GLOBAL_META != 0 {
+        if flags & sys::kAudioUnitParameterFlag_IsGlobalMeta != 0 {
             Some(Self::Global)
-        } else if flags & K_AUDIO_UNIT_PARAMETER_FLAG_IS_ELEMENT_META != 0 {
+        } else if flags & sys::kAudioUnitParameterFlag_IsElementMeta != 0 {
             Some(Self::Element)
         } else {
             None
@@ -273,13 +274,13 @@ impl DisplayCurve {
     /// `7 << 16` alone compiles, looks right, and silently drops every
     /// logarithmic parameter.
     pub fn from_flags(flags: u32) -> Self {
-        match flags & K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_MASK {
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_LOGARITHMIC => Self::Logarithmic,
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_SQUARE_ROOT => Self::SquareRoot,
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_SQUARED => Self::Squared,
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_CUBED => Self::Cubed,
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_CUBE_ROOT => Self::CubeRoot,
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_EXPONENTIAL => Self::Exponential,
+        match flags & sys::kAudioUnitParameterFlag_DisplayMask {
+            sys::kAudioUnitParameterFlag_DisplayLogarithmic => Self::Logarithmic,
+            sys::kAudioUnitParameterFlag_DisplaySquareRoot => Self::SquareRoot,
+            sys::kAudioUnitParameterFlag_DisplaySquared => Self::Squared,
+            sys::kAudioUnitParameterFlag_DisplayCubed => Self::Cubed,
+            sys::kAudioUnitParameterFlag_DisplayCubeRoot => Self::CubeRoot,
+            sys::kAudioUnitParameterFlag_DisplayExponential => Self::Exponential,
             // Includes 0 (no flag set) and any bit pattern Apple has not
             // defined. See the type docs for why this is not an `Unknown` arm.
             _ => Self::Linear,
@@ -329,15 +330,15 @@ impl ParameterUnit {
     /// Maps a raw `kAudioUnitParameterUnit_*` code onto the typed variant.
     pub fn from_raw(raw: u32) -> Self {
         match raw {
-            K_AUDIO_UNIT_PARAMETER_UNIT_GENERIC => Self::Generic,
-            K_AUDIO_UNIT_PARAMETER_UNIT_INDEXED => Self::Indexed,
-            K_AUDIO_UNIT_PARAMETER_UNIT_BOOLEAN => Self::Boolean,
-            K_AUDIO_UNIT_PARAMETER_UNIT_PERCENT => Self::Percent,
-            K_AUDIO_UNIT_PARAMETER_UNIT_SECONDS => Self::Seconds,
-            K_AUDIO_UNIT_PARAMETER_UNIT_HERTZ => Self::Hertz,
-            K_AUDIO_UNIT_PARAMETER_UNIT_DECIBELS => Self::Decibels,
-            K_AUDIO_UNIT_PARAMETER_UNIT_LINEAR_GAIN => Self::LinearGain,
-            K_AUDIO_UNIT_PARAMETER_UNIT_MIDI_CONTROLLER => Self::MidiController,
+            sys::kAudioUnitParameterUnit_Generic => Self::Generic,
+            sys::kAudioUnitParameterUnit_Indexed => Self::Indexed,
+            sys::kAudioUnitParameterUnit_Boolean => Self::Boolean,
+            sys::kAudioUnitParameterUnit_Percent => Self::Percent,
+            sys::kAudioUnitParameterUnit_Seconds => Self::Seconds,
+            sys::kAudioUnitParameterUnit_Hertz => Self::Hertz,
+            sys::kAudioUnitParameterUnit_Decibels => Self::Decibels,
+            sys::kAudioUnitParameterUnit_LinearGain => Self::LinearGain,
+            sys::kAudioUnitParameterUnit_MIDIController => Self::MidiController,
             other => Self::Unknown(other),
         }
     }
@@ -539,18 +540,18 @@ pub fn info_at(unit: &Unit, addr: ParamAddress, param_id: u32) -> Result<AuParam
         },
         unit: ParameterUnit::from_raw(raw.unit),
         unit_code: raw.unit,
-        writable: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_IS_WRITABLE != 0,
+        writable: raw.flags & sys::kAudioUnitParameterFlag_IsWritable != 0,
         display: DisplayCurve::from_flags(raw.flags),
-        meter_read_only: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_METER_READ_ONLY != 0,
+        meter_read_only: raw.flags & sys::kAudioUnitParameterFlag_MeterReadOnly != 0,
         // `clumpID` is only meaningful when the AU says so. Reading it
         // unconditionally would report clump 0 — or whatever uninitialized value
         // the AU left in the field — as a real group for every ungrouped
         // parameter, collapsing them all into one phantom section.
-        clump: (raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_HAS_CLUMP != 0).then_some(raw.clumpID),
-        values_have_strings: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_VALUES_HAVE_STRINGS != 0,
-        can_ramp: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_CAN_RAMP != 0,
-        non_realtime: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_NON_REAL_TIME != 0,
-        omit_from_presets: raw.flags & K_AUDIO_UNIT_PARAMETER_FLAG_OMIT_FROM_PRESETS != 0,
+        clump: (raw.flags & sys::kAudioUnitParameterFlag_HasClump != 0).then_some(raw.clumpID),
+        values_have_strings: raw.flags & sys::kAudioUnitParameterFlag_ValuesHaveStrings != 0,
+        can_ramp: raw.flags & sys::kAudioUnitParameterFlag_CanRamp != 0,
+        non_realtime: raw.flags & sys::kAudioUnitParameterFlag_NonRealTime != 0,
+        omit_from_presets: raw.flags & sys::kAudioUnitParameterFlag_OmitFromPresets != 0,
         meta: MetaScope::from_flags(raw.flags),
     })
 }
@@ -708,13 +709,11 @@ pub fn dependents_of(unit: &Unit, id: u32) -> Option<Vec<DependentParam>> {
 ///
 /// # The meta flag is the reliable signal
 ///
-/// That combination is the useful finding, and it is why
-/// [`AuParameter::meta`] is carried separately rather than being derived from
-/// this call: the flag is the *only* signal a host gets on this machine. Every
-/// one of those 28 parameters can silently move others, and not one will say
-/// which. A host must therefore treat `meta.is_some()` as "re-read the
-/// parameters this AU publishes", and use a non-`None` answer here purely as an
-/// optimization when a plugin does implement it.
+/// AUs commonly leave this property unimplemented
+/// (`kAudioUnitErr_InvalidProperty`, -10879) even for meta-flagged parameters,
+/// which is why [`AuParameter::meta`] is carried separately rather than derived
+/// from this call. A host treats `meta.is_some()` as "re-read the parameters this
+/// AU publishes", and uses a non-`None` answer here purely as an optimization.
 ///
 /// # Errors
 /// None — every failure is the `None` above. A refusal is the documented normal
@@ -767,7 +766,7 @@ mod tests {
         work: &tutti_plugin_types::MainWorkHandle,
     ) -> Unit {
         let desc = ComponentKey::new(
-            K_AUDIO_UNIT_TYPE_EFFECT,
+            sys::kAudioUnitType_Effect,
             u32::from_be_bytes(sub_type),
             u32::from_be_bytes(*b"appl"),
         )
@@ -807,12 +806,12 @@ mod tests {
     #[test]
     fn the_indexed_unit_is_not_unknown() {
         assert_eq!(
-            ParameterUnit::from_raw(K_AUDIO_UNIT_PARAMETER_UNIT_INDEXED),
+            ParameterUnit::from_raw(sys::kAudioUnitParameterUnit_Indexed),
             ParameterUnit::Indexed
         );
         assert_ne!(
-            ParameterUnit::from_raw(K_AUDIO_UNIT_PARAMETER_UNIT_INDEXED),
-            ParameterUnit::Unknown(K_AUDIO_UNIT_PARAMETER_UNIT_INDEXED)
+            ParameterUnit::from_raw(sys::kAudioUnitParameterUnit_Indexed),
+            ParameterUnit::Unknown(sys::kAudioUnitParameterUnit_Indexed)
         );
     }
 
@@ -884,18 +883,18 @@ mod tests {
     fn the_display_mask_spans_the_logarithmic_bit_too() {
         // Ground truth from Apple's header: (7 << 16) | (1 << 22).
         assert_eq!(
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_MASK,
+            sys::kAudioUnitParameterFlag_DisplayMask,
             (7 << 16) | (1 << 22)
         );
         // The bit that a contiguous 3-bit mask would miss.
         assert_ne!(
-            K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_MASK
-                & K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_LOGARITHMIC,
+            sys::kAudioUnitParameterFlag_DisplayMask
+                & sys::kAudioUnitParameterFlag_DisplayLogarithmic,
             0,
             "the mask must cover the logarithmic bit, or every log parameter \
              decodes as linear"
         );
-        assert_eq!(K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_LOGARITHMIC, 1 << 22);
+        assert_eq!(sys::kAudioUnitParameterFlag_DisplayLogarithmic, 1 << 22);
     }
 
     /// `kAudioUnitParameterUnit_MIDIController` (12) must decode to its own
@@ -910,11 +909,11 @@ mod tests {
     #[test]
     fn the_midi_controller_unit_is_not_unknown() {
         assert_eq!(
-            ParameterUnit::from_raw(K_AUDIO_UNIT_PARAMETER_UNIT_MIDI_CONTROLLER),
+            ParameterUnit::from_raw(sys::kAudioUnitParameterUnit_MIDIController),
             ParameterUnit::MidiController
         );
         // Pinned to Apple's value, from a C run against the real header.
-        assert_eq!(K_AUDIO_UNIT_PARAMETER_UNIT_MIDI_CONTROLLER, 12);
+        assert_eq!(sys::kAudioUnitParameterUnit_MIDIController, 12);
         assert_eq!(ParameterUnit::from_raw(12), ParameterUnit::MidiController);
         assert_eq!(ParameterUnit::MidiController.to_string(), "CC");
         // The unhandled codes still fall through to `Unknown`, so the arm does
@@ -958,11 +957,11 @@ mod tests {
         }
         // The two remaining curves, by construction.
         assert_eq!(
-            DisplayCurve::from_flags(K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_SQUARED),
+            DisplayCurve::from_flags(sys::kAudioUnitParameterFlag_DisplaySquared),
             DisplayCurve::Squared
         );
         assert_eq!(
-            DisplayCurve::from_flags(K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_CUBE_ROOT),
+            DisplayCurve::from_flags(sys::kAudioUnitParameterFlag_DisplayCubeRoot),
             DisplayCurve::CubeRoot
         );
         // Default is the safe taper.
@@ -979,7 +978,7 @@ mod tests {
         // And bits outside the mask never select a curve on their own: every
         // non-display flag set at once still decodes to Linear.
         assert_eq!(
-            DisplayCurve::from_flags(!K_AUDIO_UNIT_PARAMETER_FLAG_DISPLAY_MASK),
+            DisplayCurve::from_flags(!sys::kAudioUnitParameterFlag_DisplayMask),
             DisplayCurve::Linear
         );
     }

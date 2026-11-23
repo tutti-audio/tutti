@@ -302,6 +302,9 @@ impl Control for AuLoaded {
                 .parameter_midi_mappings()
                 .map(|table| crate::midi_map::declared(&table))
                 .unwrap_or_default(),
+            // AU names no keys, and its clumps and nick names are not read into these.
+            note_names: Vec::new(),
+            param_groups: Vec::new(),
         }
     }
 

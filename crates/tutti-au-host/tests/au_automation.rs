@@ -13,8 +13,8 @@
 
 #![cfg(target_os = "macos")]
 
+use coreaudio_sys::kAudioUnitType_Effect;
 use tutti_au_host::component::{ComponentKey, find_component};
-use tutti_au_host::types::K_AUDIO_UNIT_TYPE_EFFECT;
 use tutti_au_host::{AuController, AuLoaded, AuProcessor};
 use tutti_buffers::InputOutput;
 use tutti_plugin_types::fake::{at_frame, unit_value};
@@ -29,7 +29,7 @@ const BLOCK: usize = 512;
 
 fn delay_loaded() -> AuLoaded {
     let desc = ComponentKey::new(
-        K_AUDIO_UNIT_TYPE_EFFECT,
+        kAudioUnitType_Effect,
         u32::from_be_bytes(*b"dely"),
         u32::from_be_bytes(*b"appl"),
     )

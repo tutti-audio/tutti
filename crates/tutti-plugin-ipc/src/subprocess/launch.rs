@@ -508,7 +508,7 @@ fn load_plugin(
             loaded,
             negotiated_format,
             state_error,
-        } => Ok((id, descriptor, loaded, negotiated_format, state_error)),
+        } => Ok((id, descriptor, *loaded, negotiated_format, state_error)),
         ControlReply::Error {
             error: ServerError::Load { stage, reason },
         } => Err(IpcError::LoadFailed {

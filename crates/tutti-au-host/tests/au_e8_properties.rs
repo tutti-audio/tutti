@@ -413,7 +413,7 @@ fn an_ordinary_corpus_parameter_carries_no_meta_scope() {
 /// `ClumpNameRequest` layout.
 #[test]
 fn dependent_parameter_matches_the_c_abi() {
-    use tutti_au_host::types::AUDependentParameter;
+    use coreaudio_sys::AUDependentParameter;
 
     assert_eq!(std::mem::size_of::<AUDependentParameter>(), 8);
     assert_eq!(std::mem::align_of::<AUDependentParameter>(), 4);
