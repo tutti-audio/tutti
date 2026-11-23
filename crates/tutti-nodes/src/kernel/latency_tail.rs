@@ -9,9 +9,7 @@ use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::contract::{Driven, assert_declared_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
-use tutti_graph::{
-    Env, PlayClock, Prepare, Standalone, Status, TransportChanges, TransportPosition,
-};
+use tutti_graph::{Env, PlayClock, Prepare, Renderer, Status, TransportChanges, TransportPosition};
 use tutti_units::{Frame, Mix, SampleRate, Samples, Tail, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -262,13 +260,11 @@ fn a_block_aligned_cut_parks_and_resets() {
 #[test]
 fn the_graphs_mix_is_aligned_to_the_kernels_latency() {
     let (claimed, latency) = (25, 7);
-    let mut solo = Standalone::new(
+    let (mut solo, key, _) = Renderer::alone(
         kernel_node(Echo::new(claimed, claimed, latency)),
         Prepare::new(SR, MaxBlock::of(Samples::new(BLOCK))),
     );
-    let key = solo.key();
-    solo.renderer_mut()
-        .editor_mut()
+    solo.editor_mut()
         .set_mix(key, Mix::new(0.5))
         .expect("a mix");
     let mut x = vec![0.0; BLOCK];

@@ -59,7 +59,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// use std::num::NonZeroUsize;
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
-/// use tutti_graph::{Prepare, Standalone};
+/// use tutti_graph::{Prepare, Renderer};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 ///
 /// let synth = PolySynth::<f32>::new(
@@ -71,8 +71,8 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// assert_eq!(synth.active_voice_count(), 0);
 ///
 /// // Alone in a graph; a host wires a clip or keyboard to its event input.
-/// let mut standalone = Standalone::new(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = standalone.render(64);
+/// let (mut renderer, ..) = Renderer::alone(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = renderer.render(64);
 /// assert_eq!(out.len(), 2); // stereo
 /// ```
 #[derive(Debug)]

@@ -19,8 +19,7 @@
 //! checked `Pod` cast.
 //!
 //! **Node calls pay no sort.** A node op's requests are sorted once, when the
-//! plan is compiled (`NodeTables::lower` in `plan.rs`), and the verifier
-//! checks each record's requests against its op. The walk still *checks*
+//! plan is compiled (`NodeTables::lower` in `plan.rs`). The walk still *checks*
 //! the order it relies on: a slot behind the cursor is a panic, in every
 //! build, never a wrong buffer. Ops whose requests are built per call (event
 //! merges) go through `slots::borrow_events`, which sorts first. The port tables
@@ -161,9 +160,8 @@ impl<F: Float> Arena<F> {
     /// # Panics
     ///
     /// If the slots are not strictly ascending, a role names an output past
-    /// `O`, or an input names a slot that is not a read. Rule 7 of the
-    /// verifier refuses each of those; here they are panics, never a wrong
-    /// or aliased buffer.
+    /// `O`, or an input names a slot that is not a read. Each is a panic,
+    /// never a wrong or aliased buffer.
     #[inline]
     pub(crate) fn direct<const I: usize, const O: usize>(
         &mut self,
