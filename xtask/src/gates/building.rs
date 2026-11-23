@@ -588,10 +588,8 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
-    ty("crates/tutti-nodes/", "LfoConfig", WIDTH, FIXED_SOURCE),
     ty("crates/tutti-nodes/", "FmConfig", WIDTH, FIXED_SOURCE),
     ty("crates/tutti-nodes/", "AdditiveConfig", WIDTH, FIXED_SOURCE),
-    ty("crates/tutti-nodes/", "NoiseConfig", WIDTH, FIXED_SOURCE),
     ty(
         "crates/tutti-nodes/",
         "ClickNodeConfig",

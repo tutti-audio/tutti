@@ -19,7 +19,7 @@ use tutti_units::{Amplitude, Tail, UnitParam};
 /// again. Its one param is the level ([`UnitParam::Volume`], in [`Amplitude`], a linear gain
 /// on the generator's own scale), read per frame: a driven control signal's every frame is heard,
 /// and a non-finite value holds the last finite one. Made from a [`NoiseConfig`]
-/// (`NoiseNode::from`); inserted, its controls are a [`ParamSet`].
+/// (`NoiseNode::from`); inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet).
 ///
 /// A source with no ring-out ([`Tail::None`]): what it emits is a function of its seed, so a
 /// render's end ends it.
