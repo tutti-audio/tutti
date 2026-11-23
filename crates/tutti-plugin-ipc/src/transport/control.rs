@@ -204,9 +204,34 @@ impl<M: Announces> Announced<M> {
         }
     }
 
-    /// The request and the object it announces.
-    pub(crate) fn into_parts(self) -> (M, M::Object) {
-        (self.msg, self.object)
+    /// The request and the object it announces, the object's kind erased for a
+    /// queue that holds either.
+    pub(crate) fn detach(self) -> (M, Detached)
+    where
+        M::Object: Into<Detached>,
+    {
+        (self.msg, self.object.into())
+    }
+}
+
+/// The object of a queued [`Announced`], its kind erased so one queue holds
+/// either: sent only by [`send_detached`].
+pub(crate) enum Detached {
+    /// A state's blob.
+    Blob(Blob),
+    /// A slab.
+    Slab(SlabHandle),
+}
+
+impl From<Blob> for Detached {
+    fn from(blob: Blob) -> Self {
+        Self::Blob(blob)
+    }
+}
+
+impl From<SlabHandle> for Detached {
+    fn from(slab: SlabHandle) -> Self {
+        Self::Slab(slab)
     }
 }
 
@@ -225,17 +250,32 @@ pub(crate) fn send_attached<M: Announces>(
     id: ReqId,
     announced: Announced<M>,
 ) -> IpcResult<<M::Object as Attached>::Held> {
-    let (msg, object) = announced.into_parts();
+    let Announced { msg, object } = announced;
     send_object(stream, id, msg, object)
 }
 
-/// Writes the request `msg` and then `object`, which `msg` announces: for a
-/// request whose object travels apart from it (a queued command).
+/// Writes the request `msg` and then the object `detached`, which `msg`
+/// announces: for a request that travels apart from its object (a queued
+/// command). What the sender holds is a [`Lease`] for a blob.
 ///
 /// # Errors
 ///
 /// As [`send_attached`].
-pub(crate) fn send_object<A: Attached>(
+pub(crate) fn send_detached(
+    stream: &mut ControlStream,
+    id: ReqId,
+    msg: impl Into<ControlRequest>,
+    detached: Option<Detached>,
+) -> IpcResult<Option<Lease>> {
+    match detached {
+        Some(Detached::Blob(blob)) => send_object(stream, id, msg, blob).map(Some),
+        Some(Detached::Slab(slab)) => send_object(stream, id, msg, slab).map(|_| None),
+        None => send_object(stream, id, msg, ()).map(|()| None),
+    }
+}
+
+/// Writes the request `msg` and then `object`, which `msg` announces.
+fn send_object<A: Attached>(
     stream: &mut ControlStream,
     id: ReqId,
     msg: impl Into<ControlRequest>,

@@ -2,8 +2,8 @@
 //! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
 use super::ask::{Ask, Reply};
-use crate::transport::control::{Announced, Announces};
-use crate::{Answered, ControlReply, ControlRequest, SlabHandle, Unanswered};
+use crate::transport::control::{Announced, Announces, Detached};
+use crate::{Answered, ControlReply, ControlRequest, Unanswered};
 use dpi::Size;
 use std::time::Duration;
 use tutti_plugin_types::{
@@ -170,10 +170,8 @@ impl Deadline {
 pub(super) enum Object {
     /// None: the request is one frame.
     None,
-    /// A state's blob, sent after the request that announces it.
-    Blob(tutti_plugin_ipc_ffi::Blob),
-    /// A slab, sent after the request that announces it.
-    Slab(SlabHandle),
+    /// What the request announces, sent after it.
+    Detached(Detached),
     /// A state's blob the server sends after its reply, read on the lane.
     State,
 }
@@ -183,22 +181,10 @@ impl Object {
     /// the pair is the one the announcement made.
     pub(super) fn announced<M: Announces>(announced: Announced<M>) -> (M, Self)
     where
-        M::Object: Into<Self>,
+        M::Object: Into<Detached>,
     {
-        let (msg, object) = announced.into_parts();
-        (msg, object.into())
-    }
-}
-
-impl From<tutti_plugin_ipc_ffi::Blob> for Object {
-    fn from(blob: tutti_plugin_ipc_ffi::Blob) -> Self {
-        Self::Blob(blob)
-    }
-}
-
-impl From<SlabHandle> for Object {
-    fn from(slab: SlabHandle) -> Self {
-        Self::Slab(slab)
+        let (msg, object) = announced.detach();
+        (msg, Self::Detached(object))
     }
 }
 

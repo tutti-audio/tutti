@@ -932,17 +932,15 @@ pub(super) fn handle_control(
     let receives = matches!(object, Object::State);
     // Held until the answer: where the object is read by name, it stays until
     // then.
-    let _held = match object {
-        Object::Blob(blob) => Some(ipc::send_object(stream, id, request, blob)?),
-        Object::Slab(slab) => {
-            ipc::send_object(stream, id, request, slab)?;
-            None
-        }
-        Object::None | Object::State => {
-            ipc::send_object(stream, id, request, ())?;
-            None
-        }
-    };
+    let _held = ipc::send_detached(
+        stream,
+        id,
+        request,
+        match object {
+            Object::Detached(detached) => Some(detached),
+            Object::None | Object::State => None,
+        },
+    )?;
     // A timeout here is **not** connection-level: the socket is synchronised and
     // the session is healthy, the plugin simply has not answered yet. Propagating
     // would `crash()` it, and the caller would be told the session is fine
