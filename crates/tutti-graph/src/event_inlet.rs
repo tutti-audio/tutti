@@ -271,6 +271,15 @@ impl EventInletWriter {
             .count()
     }
 
+    /// How many events fit in the ring now: at least this many, more if the
+    /// node takes meanwhile. The writer is the ring's only producer, so that
+    /// many pushes in a row are taken: a caller that must send several or none
+    /// asks first.
+    #[must_use]
+    pub fn vacant(&self) -> usize {
+        self.ring.vacant()
+    }
+
     /// The counts as a view that outlives the writer's thread: read them from
     /// the control side while another thread pushes. The writer has no getters
     /// of its own: the view is the one place that answers.

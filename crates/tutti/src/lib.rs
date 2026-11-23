@@ -917,9 +917,9 @@ pub mod midi {
         ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
         MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
         MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
-        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
-        TimecodeSeconds, TuningFrequency,
+        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, NotWritable,
+        PitchBendSensitivity, Recipient, SmpteFrameRate, SmpteTimecode, SysexDeviceId,
+        TimecodeHours, TimecodeMinutes, TimecodeSeconds, TuningFrequency,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
@@ -927,7 +927,9 @@ pub mod midi {
         OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
         SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    pub use tutti_midi_runtime::{
+        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{

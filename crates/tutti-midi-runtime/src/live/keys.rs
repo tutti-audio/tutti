@@ -11,13 +11,30 @@
 use std::ops::{Deref, DerefMut};
 
 use tutti_graph::{EventCapacity, EventInletWriter, Stamp};
+use tutti_midi_protocol::{Addressed, NotWritable};
 use tutti_rt::PushError;
-use tutti_ump::{Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Voice2};
+use tutti_ump::{
+    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Sysex7Packets, Voice2,
+};
 use tutti_units::Losses;
 
 /// The ring a live input's inlet is opened with, in events (it is also the
 /// waiting list's size and the port's declared capacity).
 pub const LIVE_INLET_CAPACITY: EventCapacity = EventCapacity::of(256);
+
+/// Why [`MidiKeys::send_universal`] sent nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum SendUniversalError {
+    /// The message is only ever read, or has no bytes: nothing was written.
+    #[error(transparent)]
+    Unwritable(#[from] NotWritable),
+    /// The ring has less room than the message's packets: nothing was written.
+    #[error("the inlet has no room for every packet of the message")]
+    Full,
+    /// The inlet's node is gone: nothing will take the message.
+    #[error("the inlet's node is gone")]
+    Disconnected,
+}
 
 /// An [`EventInletWriter`] with the key helpers. One producer, as the writer
 /// is: share it behind a lock on the control side if it must be `Clone`.
@@ -107,6 +124,66 @@ impl MidiKeys {
         note: NoteNumber,
     ) -> Result<(), PushError> {
         self.voice(at, channel, Voice2::note_off(note, NoteVelocity::MIN))
+    }
+
+    /// A Universal System Exclusive message on the keys' Group, for `at`: the
+    /// SysEx7 packets of [`Addressed::payload`], every one stamped `at`.
+    ///
+    /// All or nothing: the ring is asked for room for every packet first
+    /// ([`vacant`](EventInletWriter::vacant); the writer is the only producer,
+    /// so the room holds), and a message that does not fit is refused whole,
+    /// never cut. The packets are made one at a time from a payload on the
+    /// stack, so nothing allocates. Like the other key helpers it is a
+    /// control-side call, and what it sends is a performance, not part of a
+    /// bounce.
+    ///
+    /// # Errors
+    ///
+    /// [`SendUniversalError::Unwritable`] for a message that is only read
+    /// ([`Universal::MachineControlResponse`](tutti_midi_protocol::Universal)
+    /// and the truncated command); [`SendUniversalError::Full`] when the ring
+    /// cannot hold every packet; [`SendUniversalError::Disconnected`] once the
+    /// node is dropped. Nothing is written for any of them, and a refusal for
+    /// `Full` is not counted as a loss.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_graph::{EventCapacity, EventInletNode, Stamp};
+    /// use tutti_midi_protocol::{Addressed, GeneralMidiMode, Recipient, Universal};
+    /// use tutti_midi_runtime::MidiKeys;
+    /// use tutti_ump::MidiGroup;
+    ///
+    /// let (_node, writer) = EventInletNode::pair(EventCapacity::of(16));
+    /// let mut keys = MidiKeys::new(writer, MidiGroup::FIRST);
+    /// keys.send_universal(
+    ///     Stamp::NextBlock,
+    ///     Addressed {
+    ///         to: Recipient::AllCall,
+    ///         message: Universal::GeneralMidi(GeneralMidiMode::On),
+    ///     },
+    /// )
+    /// .unwrap();
+    /// ```
+    pub fn send_universal(
+        &mut self,
+        at: impl Into<Stamp>,
+        message: Addressed,
+    ) -> Result<(), SendUniversalError> {
+        let payload = message.payload()?;
+        // A payload is seven-bit by its writer's types.
+        let packets = Sysex7Packets::from_payload(self.group, &payload)
+            .map_err(|_| NotWritable("a payload byte of eight bits"))?;
+        if packets.len() > self.writer.vacant() {
+            return Err(SendUniversalError::Full);
+        }
+        let at = at.into();
+        for packet in packets {
+            self.writer
+                .push(at, packet)
+                .map_err(|_| SendUniversalError::Disconnected)?;
+        }
+        Ok(())
     }
 
     fn voice(
