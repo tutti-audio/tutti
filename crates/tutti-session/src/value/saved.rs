@@ -29,7 +29,7 @@ use super::watcher::StoredChange;
 use crate::AppKey;
 
 /// The base of every saved target at one instant, read under the value lock, so
-/// a batch is in it whole or not at all: what [`Session::saved_values`] answers
+/// a batch is in it whole or not at all: what [`Session::saved_values`](crate::Session::saved_values) answers
 /// and `set(&saved)` puts back.
 ///
 /// It names its targets by what the session knows them as, not by an app key
