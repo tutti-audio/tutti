@@ -557,8 +557,8 @@ impl CommandRx {
             let node = plan.unit_id(cmd.to.node);
             // PDC: the sink hears timeline frame F at its own F + arrival
             // (see `Env::due_at_arrival`). The node's arrival even when its
-            // port is gone (the reference does the same); none when the node
-            // is — either way it is counted unrouted when its time comes.
+            // port is gone; none when the node is — either way it is counted
+            // unrouted when its time comes.
             let arrival = node.map_or(Latency::ZERO, |u| plan.units[u].arrival);
             // A param command lands only on a node that declares param
             // events: the node a commit replaced may not.

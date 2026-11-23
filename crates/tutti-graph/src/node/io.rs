@@ -9,8 +9,7 @@
 //!
 //! # The length guarantee
 //!
-//! [`Io`] can only be built by the executor (or the reference interpreter),
-//! through a constructor that asserts every slice is exactly
+//! [`Io`] can only be built by the executor, through a constructor that asserts every slice is exactly
 //! [`frames`](Io::frames) long and that `frames` is at most the
 //! [`MaxBlock`] the node was prepared with. A node therefore never clamps.
 
@@ -42,8 +41,7 @@ pub enum PortKind {
 /// One node call's buffers: audio in and out, events in and out, and the
 /// block's param values, handed to [`Node::process`](crate::Node::process).
 ///
-/// Only the executor (or the `Reference` interpreter)
-/// builds one, and it guarantees every audio slice is exactly
+/// Only the executor builds one, and it guarantees every audio slice is exactly
 /// [`frames`](Self::frames) long, at most the [`MaxBlock`] the node was
 /// prepared with — so a node never needs to clamp. Buffers are planar slices
 /// of the sample format `F` (`f32` for a plain `impl Node`) and reached through

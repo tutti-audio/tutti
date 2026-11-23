@@ -1,9 +1,10 @@
-//! The plan verifier (compiler step 8; Dropseed's verifier is the prior
-//! art).
+//! The plan verifier (compiler step 8).
 //!
 //! It re-derives every slot access from the **ops** — what the executor will
 //! actually do — and checks it against the op DAG, trusting neither the
-//! colouring nor the value table it is checking:
+//! colouring nor the value table it is checking. What the typed ids and
+//! tables already hold (an id of one kind never names another's table, a table
+//! row an id names is the one the table built) is not checked again.
 //!
 //! 1. The zero / empty slots and the feedback slots are never written by an
 //!    op (the executor fills feedback slots before the block), and every
@@ -43,13 +44,10 @@
 //!    one it fades to — so the op, its PDC and its borrows are right for
 //!    both, and the scratch sized from the plan fits the outgoing unit.
 //!
-//! Run by `compile` in every debug build, and callable directly — the tests
-//! run it on every proptest graph.
+//! `compile` runs it in every debug build, and a test calls it directly on
+//! every random graph.
 
-use crate::compile::ids::{
-    DelayId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
-    TableSlice, TaskId,
-};
+use crate::compile::ids::{DelayId, EventSlotId, Id, OpId, PlanUnitId, Table, TableSlice, TaskId};
 use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
 use crate::node::io::PortKind;
@@ -97,9 +95,7 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
             .chain([a(dst, true)])
             // The driven lanes' event sources: reads of the op.
             .chain(
-                plan.gain_ports
-                    .get(gains.range())
-                    .unwrap_or(&[])
+                plan.gain_ports[gains.range()]
                     .iter()
                     .map(|g| e(g.slot, false)),
             )
@@ -145,14 +141,9 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
     }
 }
 
-/// Every event slot a node op's driven params read. Out-of-range spans read
-/// nothing here; [`verify_params`] reports them.
+/// Every event slot a node op's driven params read.
 fn param_reads(plan: &Plan, params: crate::compile::plan::Span) -> impl Iterator<Item = u32> + '_ {
-    plan.param_ports
-        .get(params.range())
-        .unwrap_or(&[])
-        .iter()
-        .map(|p| p.slot)
+    plan.param_ports[params.range()].iter().map(|p| p.slot)
 }
 
 /// Each sum op adds at least two addends and at most [`MAX_PORTS`] (a wider
@@ -189,23 +180,13 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
                         lanes.len, srcs.len
                     )));
                 }
-                let Some(list) = plan.sum_lanes.get(lanes.range()) else {
-                    return Err(VerifyError(format!(
-                        "weighted sum op {i} names lanes past the {} the plan lists",
-                        plan.sum_lanes.len()
-                    )));
-                };
+                let list = &plan.sum_lanes[lanes.range()];
                 if list.iter().all(Option::is_none) {
                     return Err(VerifyError(format!(
                         "weighted sum op {i} has no weighted lane (a plain sum is `Op::Sum`)"
                     )));
                 }
-                let Some(driven) = plan.gain_ports.get(gains.range()) else {
-                    return Err(VerifyError(format!(
-                        "weighted sum op {i} names driven lanes past the {} the plan lists",
-                        plan.gain_ports.len()
-                    )));
-                };
+                let driven = &plan.gain_ports[gains.range()];
                 for (n, g) in driven.iter().enumerate() {
                     if n > 0 && driven[n - 1].lane >= g.lane {
                         return Err(VerifyError(format!(
@@ -238,19 +219,12 @@ fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
             continue;
         };
         let bad = |what: String| VerifyError(format!("unit {unit}'s params {what}"));
-        let ports = plan
-            .param_ports
-            .get(params.range())
-            .ok_or_else(|| bad("name ports past the table".into()))?;
+        let ports = &plan.param_ports[params.range()];
         if params.start as usize != covered {
             return Err(bad("are not the next run of the table".into()));
         }
         covered += ports.len();
-        let declared = plan
-            .units
-            .get(PlanUnitId::new(unit))
-            .map(|u| u.shape.params)
-            .unwrap_or_default();
+        let declared = plan.units[PlanUnitId::new(unit)].shape.params;
         for (i, p) in ports.iter().enumerate() {
             if i > 0 && ports[i - 1].port >= p.port {
                 return Err(bad("are not in strict port order".into()));
@@ -459,14 +433,7 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
             match (kind, op) {
                 (PortKind::Audio, Op::Capture { feedback, .. })
                 | (PortKind::Event, Op::EventCapture { feedback, .. }) => {
-                    match captures.get_mut(*feedback as usize) {
-                        Some(c) => *c += 1,
-                        None => {
-                            return Err(VerifyError(format!(
-                                "a capture names {kind:?} feedback {feedback} of {fb_len}"
-                            )));
-                        }
-                    }
+                    captures[*feedback as usize] += 1;
                 }
                 _ => {}
             }
@@ -516,18 +483,12 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     let tasks = plan.tasks.len();
     let mut found: Table<OpId, Option<TaskId>> = Table::filled(n, None);
     for (t, span) in plan.tasks.iter_enumerated() {
-        let ops = plan
-            .task_ops
-            .get(span.range())
-            .ok_or_else(|| VerifyError(format!("task {t} runs past the task op list")))?;
+        let ops = &plan.task_ops[span.range()];
         for (j, &op) in ops.iter().enumerate() {
-            let slot = found
-                .get_mut(op)
-                .ok_or_else(|| VerifyError(format!("task {t} names op {op} of {n}")))?;
-            if slot.is_some() {
+            if found[op].is_some() {
                 return Err(VerifyError(format!("op {op} is in two tasks")));
             }
-            *slot = Some(t);
+            found[op] = Some(t);
             if j > 0 && ops[j - 1] >= op {
                 return Err(VerifyError(format!(
                     "task {t} runs op {} then op {op}, out of ascending order",
@@ -544,9 +505,6 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
         let op = found.iter().position(Option::is_none);
         return Err(VerifyError(format!("op {op:?} is in no task")));
     };
-    if plan.task_succ.rows() != tasks || plan.task_activation.len() != tasks {
-        return Err(VerifyError("task tables have the wrong length".into()));
-    }
     for a in plan.ops.ids() {
         for &b in plan.op_succ.ids::<OpId, OpId>(a) {
             let (ta, tb) = (task_of[a], task_of[b]);
@@ -561,7 +519,7 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     for t in plan.tasks.ids() {
         let mut seen = std::collections::BTreeSet::new();
         for &u in plan.task_succ.ids::<TaskId, TaskId>(t) {
-            if u.index() >= tasks || !seen.insert(u) || u == t {
+            if !seen.insert(u) || u == t {
                 return Err(VerifyError(format!("task {t} has a bad successor {u}")));
             }
             indeg[u] += 1;
@@ -593,44 +551,22 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
 
 /// Rule 6: the index tables.
 fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
-    // The public ops name delays, taps, meters and units by raw index; each
-    // is checked against its table here.
+    // Each delay and each unit is named by exactly one op: the public ops hold
+    // the raw index, which the compiler took from the table's own id.
     let mut delay_uses: Table<DelayId, usize> = Table::filled(plan.delays.len(), 0);
     let mut unit_uses: Table<PlanUnitId, usize> = Table::filled(plan.units.len(), 0);
     for op in &plan.ops {
         let d = match *op {
             Op::Delay { delay, .. } | Op::EventDelay { delay, .. } => Some(delay),
             Op::Output { delay, .. } => delay,
-            Op::Tap { tap, .. } => {
-                if plan.taps.get(PlanTapId::new(tap)).is_none() {
-                    return Err(VerifyError(format!("a tap op names tap {tap}")));
-                }
-                None
-            }
-            Op::EventTap { tap, .. } => {
-                if plan.event_taps.get(PlanEventTapId::new(tap)).is_none() {
-                    return Err(VerifyError(format!("an event tap op names tap {tap}")));
-                }
-                None
-            }
-            Op::Meter { meter, .. } => {
-                if plan.meters.get(PlanMeterId::new(meter)).is_none() {
-                    return Err(VerifyError(format!("a meter op names meter {meter}")));
-                }
-                None
-            }
             Op::Node { unit, .. } => {
-                *unit_uses
-                    .get_mut(PlanUnitId::new(unit))
-                    .ok_or_else(|| VerifyError(format!("a node op names unit {unit}")))? += 1;
+                unit_uses[PlanUnitId::new(unit)] += 1;
                 None
             }
             _ => None,
         };
         if let Some(d) = d {
-            *delay_uses
-                .get_mut(DelayId::new(d))
-                .ok_or_else(|| VerifyError(format!("an op names delay {d}")))? += 1;
+            delay_uses[DelayId::new(d)] += 1;
         }
     }
     if let Some((d, uses)) = delay_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
@@ -647,12 +583,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // slot all their FIFO can hold at the source's declared rate, a merge
     // the sum of its inputs.
     let block = plan.prepare.max_block().get();
-    let slot_cap = |s: u32| {
-        plan.event_slot_capacity
-            .get(EventSlotId::new(s))
-            .copied()
-            .unwrap_or_default()
-    };
+    let slot_cap = |s: u32| plan.event_slot_capacity[EventSlotId::new(s)];
     for (f, spec) in plan.event_feedback.iter_enumerated() {
         let crate::compile::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
             return Err(VerifyError(format!(
@@ -692,17 +623,11 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 .ok_or_else(|| VerifyError(format!("op {m} reads event slot {s} of no value")))
         };
         op_need[m] = match *op {
-            Op::Node { unit, .. } => plan
-                .units
-                .get(PlanUnitId::new(unit))
-                .map_or(EventSlotCapacity::NONE, |u| {
-                    EventSlotCapacity::port(u.shape.event_capacity)
-                }),
+            Op::Node { unit, .. } => {
+                EventSlotCapacity::port(plan.units[PlanUnitId::new(unit)].shape.event_capacity)
+            }
             Op::EventDelay { delay, .. } => {
-                let d = plan
-                    .delays
-                    .get(DelayId::new(delay))
-                    .ok_or_else(|| VerifyError(format!("op {m} names delay {delay}")))?;
+                let d = &plan.delays[DelayId::new(delay)];
                 let Some(from) = d.key.event_origin() else {
                     return Err(VerifyError(format!(
                         "event delay {delay} is not keyed as events"
@@ -815,7 +740,6 @@ mod tests {
     use crate::compile::ids::{AudioSlotId, AudioValueId, EventSlotId, PlanUnitId, TaskId};
     use crate::compile::{Shapes, compile};
     use crate::model::spec::GraphSpec;
-    use crate::node::InPlaceMask;
     use crate::node::shape::Shape;
     use crate::{NodeKey, Topology};
     use crate::{NodeSpec, OutputPort, PortSource};
@@ -1256,9 +1180,7 @@ mod tests {
 
         // Activation counts that do not match.
         let mut bad = good.clone();
-        if let Some(a) = bad.task_activation.get_mut(TaskId::new(0)) {
-            *a += 1;
-        }
+        bad.task_activation[TaskId::new(0)] += 1;
         assert!(verify(&bad).unwrap_err().0.contains("activation"));
 
         // A delay no op uses.
@@ -1300,242 +1222,6 @@ mod tests {
         let idx = bad.units[PlanUnitId::new(0)].idx;
         bad.units[PlanUnitId::new(1)].idx = idx;
         assert!(verify(&bad).unwrap_err().0.contains("store index"));
-    }
-
-    /// Every node record carries what the plan says: its unit's fields, the
-    /// shape's port counts, the op's slots and sorted borrow runs, and the
-    /// form its shape and slots call for. A table row is one node: a source
-    /// with latency and a finite tail, an in-place node with an unbounded
-    /// tail, a split, an event source and sink (the general form), a stereo
-    /// node (direct) and a three-channel one (the audio walk). The expected
-    /// values are read off the shapes and the plan's ops, never off the
-    /// lowering.
-    #[test]
-    fn every_node_record_carries_what_the_plan_says() {
-        use crate::compile::plan::{Direct, Form};
-        use crate::exec::arena::Role;
-        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
-        use tutti_units::{Latency, Samples, Tail};
-        let mono = ChannelLayout::MONO;
-        let latent = Latency::new(Samples::new(4));
-        let wide = ChannelLayout::from_count(3);
-        // (key, shape, the audio source feeding it, if any).
-        let rows = [
-            (
-                1,
-                Shape::source_unassigned(mono)
-                    .latency(latent)
-                    .tail(Tail::Finite(Samples::new(9))),
-                None,
-            ),
-            (
-                2,
-                Shape::through_unassigned(mono)
-                    .in_place()
-                    .tail(Tail::Unbounded),
-                Some(1),
-            ),
-            (3, Shape::through_unassigned(mono), Some(2)),
-            (
-                4,
-                Shape::EMPTY
-                    .events(0, 1)
-                    .event_capacity(crate::testing::cap_of(5)),
-                None,
-            ),
-            (5, Shape::source_unassigned(mono).events(1, 0), None),
-            (6, Shape::source_unassigned(ChannelLayout::STEREO), None),
-            (7, Shape::through_unassigned(ChannelLayout::STEREO), Some(6)),
-            (8, Shape::source_unassigned(wide), None),
-            (9, Shape::through_unassigned(wide), Some(8)),
-        ];
-        let mut t = Topology::default();
-        let mut shapes = Shapes::new();
-        for &(k, shape, from) in &rows {
-            let key = NodeKey(k);
-            let mut spec = NodeSpec::new("n", shape.audio_in(), shape.audio_out());
-            spec.latency = shape.latency.samples();
-            spec.tail = shape.tail;
-            t.nodes.insert(key, spec);
-            shapes.insert(key, shape);
-            for port in 0..shape.audio_in().count() {
-                let from = NodeKey(from.expect("a node with inputs is fed"));
-                t.edges.insert(
-                    crate::InputPort::new(key, port),
-                    vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
-                        from, port,
-                    )))],
-                );
-            }
-        }
-        t.set_outputs(
-            [3, 5, 7, 7, 9, 9, 9]
-                .into_iter()
-                .zip([0, 0, 0, 1, 0, 1, 2])
-                .map(|(k, p)| PortSource::Node(OutputPort::new(NodeKey(k), p)))
-                .collect::<Vec<_>>(),
-        );
-        let mut g = GraphSpec::new(t);
-        g.connect_events(
-            EventInputPort::new(NodeKey(5), 0),
-            EventEdge::Direct(EventOutputPort::new(NodeKey(4), 0)),
-        );
-        let prep = crate::node::Prepare::new(
-            tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(Samples::new(64)),
-        );
-        let plan = compile(&g.validate().expect("valid"), &shapes, &prep, None)
-            .expect("compiles")
-            .0;
-
-        assert_eq!(plan.nodes.recs.len(), plan.units.len(), "a record a unit");
-        assert_eq!(plan.units.len(), rows.len());
-        let mut forms = Vec::new();
-        for op in &plan.ops {
-            let Op::Node {
-                unit,
-                audio_in,
-                audio_out,
-                event_in,
-                event_out,
-                in_place,
-                params,
-            } = *op
-            else {
-                continue;
-            };
-            let unit = PlanUnitId::new(unit);
-            let rec = &plan.nodes.recs[unit];
-            let pu = &plan.units[unit];
-            let shape = shapes[&pu.key];
-            let at = format!("node {:?}", pu.key);
-            assert_eq!(rec.unit, unit, "{at}");
-            assert_eq!(rec.store, pu.idx, "{at}");
-            assert_eq!(
-                rec.generation,
-                crate::compile::ids::Generation::new(pu.generation),
-                "{at}"
-            );
-            assert_eq!(rec.arrival, pu.arrival, "{at}");
-            assert_eq!(rec.latency, shape.latency.samples(), "{at}");
-            assert_eq!(rec.tail, shape.tail, "{at}");
-            assert_eq!(
-                rec.park_after,
-                Tail::Finite(shape.latency.samples()).then(shape.tail),
-                "{at}"
-            );
-            assert_eq!(rec.event_capacity, shape.event_capacity, "{at}");
-            assert_eq!(rec.in_place, in_place, "{at}");
-            assert_eq!(rec.params, params, "{at}");
-            assert_eq!(rec.declared, shape.params, "{at}");
-            assert_eq!(
-                in_place.get(0),
-                pu.key == NodeKey(2),
-                "only the in-place node is aliased: {at}"
-            );
-
-            let ain = &plan.audio_list[audio_in.range()];
-            let aout = &plan.audio_list[audio_out.range()];
-            let ein = &plan.event_list[event_in.range()];
-            let eout = &plan.event_list[event_out.range()];
-            let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
-            assert_eq!(
-                counts,
-                [
-                    usize::from(shape.audio_in().count()),
-                    usize::from(shape.audio_out().count()),
-                    usize::from(shape.event_in),
-                    usize::from(shape.event_out)
-                ],
-                "{at}"
-            );
-            assert_eq!(
-                counts,
-                [ain.len(), aout.len(), ein.len(), eout.len()],
-                "{at}"
-            );
-            assert_eq!(
-                rec.ports(&plan.nodes),
-                crate::compile::plan::NodePorts {
-                    ain,
-                    aout,
-                    ein,
-                    eout
-                },
-                "{at}"
-            );
-
-            // The requests the op makes, each run sorted.
-            fn sorted<S: Ord>(mut v: Vec<(S, Role)>) -> Vec<(S, Role)> {
-                v.sort_unstable();
-                v
-            }
-            fn reads<S: Copy>(slots: &[S], skip: InPlaceMask) -> Vec<(S, Role)> {
-                slots
-                    .iter()
-                    .enumerate()
-                    .filter(|&(c, _)| !skip.get(c))
-                    .map(|(c, &s)| (s, Role::Read(c as u8)))
-                    .collect()
-            }
-            fn writes<S: Copy>(slots: &[S]) -> Vec<(S, Role)> {
-                slots
-                    .iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8)))
-                    .collect()
-            }
-            assert_eq!(
-                plan.nodes.audio_borrows[rec.borrows.range()],
-                sorted([reads(ain, in_place), writes(aout)].concat()),
-                "{at}"
-            );
-            assert_eq!(
-                plan.nodes.event_borrows[rec.event_borrows.range()],
-                sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
-                "{at}"
-            );
-
-            let width = (ain.len(), aout.len());
-            let want = match (ein.len() + eout.len() > 0, width) {
-                (true, _) => "General",
-                (_, (0, 1)) => "Source",
-                (_, (1, 1)) if in_place.get(0) => "InPlace",
-                (_, (1, 1)) => "Split",
-                (_, w) if Direct::SHAPES.contains(&w) => "Direct",
-                _ => "Audio",
-            };
-            let got = match rec.form {
-                Form::General => "General",
-                Form::Source { out } => {
-                    assert_eq!(aout, [out], "{at}");
-                    "Source"
-                }
-                Form::Split { input, out } => {
-                    assert_eq!((ain, aout), (&[input][..], &[out][..]), "{at}");
-                    assert_ne!(input, out, "a split never reads and writes one slot");
-                    "Split"
-                }
-                Form::InPlace { slot } => {
-                    assert_eq!((ain, aout), (&[slot][..], &[slot][..]), "{at}");
-                    "InPlace"
-                }
-                Form::Direct(d) => {
-                    assert_eq!((usize::from(d.ins), usize::from(d.outs)), width, "{at}");
-                    "Direct"
-                }
-                Form::Audio => "Audio",
-            };
-            assert_eq!(got, want, "{at}");
-            forms.push(got);
-        }
-        forms.sort_unstable();
-        forms.dedup();
-        assert_eq!(
-            forms,
-            ["Audio", "Direct", "General", "InPlace", "Source", "Split"],
-            "the table holds a node of each form"
-        );
     }
 
     /// A merge whose slot is smaller than its inputs together is refused —

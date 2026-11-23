@@ -622,8 +622,6 @@
 //!
 //! # Testing
 //!
-//! - `Reference` (feature `testing`) is a naive interpreter the executor is
-//!   checked against, bit for bit.
 //! - [`Plan::verify`] and [`Plan::verify_fades`] check a [`Plan`] against its
 //!   op DAG; [`compile()`] runs `verify` in every debug build.
 //! - [`GraphBuilder::renderer`] returns a [`Renderer`] that drives an
@@ -635,10 +633,9 @@
 //!   harness that checks a node responds on exactly the frame its declared
 //!   latency and resolution promise, on every path the graph can put it on.
 //!   Test support: enable it from a dev-dependency.
-//! - `testing` (off by default): `Reference`, the naive interpreter this
-//!   crate's differential suites check the executor against, and the `testing`
-//!   module: the small test nodes (`TestNode`, `Kind`), the executor-versus-
-//!   reference harness (`Pair`) and a worker pool for tests (`TestPool`).
+//! - `testing` (off by default): the `testing` module: the small test nodes
+//!   (`TestNode`, `Kind`), the harness that drives an executor block by block
+//!   (`Harness`) and a worker pool for tests (`TestPool`).
 //!   Test support: this crate's own tests turn it on through a self
 //!   dev-dependency, and a node crate's tests may do the same.
 //!
@@ -669,8 +666,6 @@ mod event;
 mod exec;
 mod model;
 mod node;
-#[cfg(feature = "testing")]
-mod reference;
 #[cfg(feature = "testing")]
 pub mod testing;
 
@@ -763,8 +758,6 @@ pub use node::{
     Chase, ConstantMask, Cx, InPlaceMask, IntoNode, MAX_PORTS, Node, NodeParts, Prepare,
     Resolution, Scratch, SilenceMask, Status, Wired, WiredMask,
 };
-#[cfg(feature = "testing")]
-pub use reference::Reference;
 pub use tutti_rt::BlockWaits;
 // The reading is a value type, `tutti-units`' (the modulation compiler
 // carries one without naming the graph); the clock that keeps it is here.

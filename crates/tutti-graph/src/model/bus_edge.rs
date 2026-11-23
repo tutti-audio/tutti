@@ -6,9 +6,9 @@
 //! fan-in, so [`GraphSpec::lowered`] replaces every bus edge with per-port
 //! edges: for each destination channel `c` and each source channel `k` the
 //! fold sends to it with gain `g`, the edge `(sink port c) <- (source port k)`
-//! carrying weight `g`. The compiler and the reference interpreter never see
-//! a bus edge: they take the lowered spec, so the one sum, the one
-//! determinism rule and the one PDC rule serve a fold.
+//! carrying weight `g`. The compiler never sees a bus edge: it takes the
+//! lowered spec, so the one sum, the one determinism rule and the one PDC rule
+//! serve a fold.
 //!
 //! # What a lowered lane is
 //!

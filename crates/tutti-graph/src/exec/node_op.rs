@@ -524,7 +524,7 @@ pub(super) fn node_op_with<
     // The fused param step: only for a unit with a modulated param, or one
     // still declicking off one; every other unit pays this one branch. Run
     // whether or not the node is then skipped, so its ramps and declick
-    // advance with the timeline as the reference's do.
+    // advance with the timeline.
     if !params_done && (rec.params.len != 0 || u.params.busy()) {
         run_params(u, h, st);
     }

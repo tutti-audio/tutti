@@ -462,8 +462,8 @@ impl<F: Float> Editor<F> {
 
     /// Sends a plan compiled elsewhere — against [`base`](Self::base) — with
     /// the units its delta places, as this editor's next commit. For a caller
-    /// that compiles itself (a test harness driving two interpreters from one
-    /// spec); [`commit`](Self::commit) is the usual path.
+    /// that compiles itself (a test harness); [`commit`](Self::commit) is the
+    /// usual path.
     ///
     /// # Errors
     ///
