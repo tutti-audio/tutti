@@ -12,7 +12,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::process::Command;
 use std::ptr::null_mut;
-use windows_sys::Win32::Foundation::{HANDLE, LocalFree, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CompareObjectHandles, HANDLE, LocalFree, WAIT_OBJECT_0};
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::Storage::FileSystem::{FILE_TYPE_CHAR, FILE_TYPE_UNKNOWN, GetFileType};
 use windows_sys::Win32::System::Console::{
@@ -20,8 +20,9 @@ use windows_sys::Win32::System::Console::{
 };
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, GetProcessHandleCount, GetProcessId, OpenProcess,
-    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, GetProcessHandleCount, GetProcessId, OpenEventW, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, SYNCHRONIZATION_SYNCHRONIZE,
+    WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::CommandLineToArgvW;
 
@@ -95,14 +96,23 @@ fn exit_code(mut reaped: Reaped) -> Option<i32> {
     reaped.wait().expect("the child ends").code()
 }
 
-fn inheritable_event() -> OwnedHandle {
+/// `name` as a NUL-terminated UTF-16 string.
+fn wide(name: &str) -> Vec<u16> {
+    name.encode_utf16().chain([0]).collect()
+}
+
+/// An inheritable event named `name`, so a child can open the same object by
+/// name and tell it from any other handle that happens to share its value.
+fn inheritable_event(name: &str) -> OwnedHandle {
     let attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: null_mut(),
         bInheritHandle: 1,
     };
-    // SAFETY: `attributes` is a live, correctly sized struct; the name is null.
-    let event = unsafe { CreateEventW(&attributes, 1, 1, std::ptr::null()) };
+    let name = wide(name);
+    // SAFETY: `attributes` is a live, correctly sized struct; `name` is a live,
+    // NUL-terminated UTF-16 string.
+    let event = unsafe { CreateEventW(&attributes, 1, 1, name.as_ptr()) };
     assert!(!event.is_null(), "the event is made");
     // SAFETY: the event is open, non-null and owned by no one else.
     unsafe { OwnedHandle::from_raw_handle(event) }
@@ -117,24 +127,34 @@ fn standard_is(id: u32, kind: Option<u32>) -> bool {
 }
 
 /// **A spawned child does not inherit a handle of the host's that is marked
-/// inheritable**: the event is signalled and inheritable, and a child started by
-/// std alone sees it (the control, which also proves the child's check can see an
-/// inherited handle), while a helper and a leader do not.
+/// inheritable**: the event is named and inheritable, and a child started by std
+/// alone holds it at the host's handle value (the control, which also proves the
+/// child's check can see an inherited handle), while a helper and a leader do
+/// not. The child compares the value with the object it opens by name, so a
+/// handle of its own that shares the value is never taken for the event.
 #[test]
 fn a_spawned_child_inherits_no_inheritable_handle_of_the_host() {
     const EVENT: &str = "TUTTI_SPAWN_EVENT";
+    const NAME: &str = "TUTTI_SPAWN_EVENT_NAME";
     let test = "a_spawned_child_inherits_no_inheritable_handle_of_the_host";
     as_child(test, || {
         let event: usize = std::env::var(EVENT).unwrap().parse().unwrap();
-        // SAFETY: the wait takes a handle value and no pointer; one that is not a
-        // handle here fails.
-        unsafe { WaitForSingleObject(event as HANDLE, 0) == WAIT_OBJECT_0 }
+        let name = wide(&std::env::var(NAME).unwrap());
+        // SAFETY: `name` is a live, NUL-terminated UTF-16 string.
+        let opened = unsafe { OpenEventW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
+        assert!(!opened.is_null(), "the host's event opens by name");
+        // SAFETY: the open succeeded: the handle is open and owned by no one else.
+        let opened = unsafe { OwnedHandle::from_raw_handle(opened) };
+        // SAFETY: both arguments are handle values; one that names no object
+        // here compares unequal.
+        unsafe { CompareObjectHandles(event as HANDLE, opened.as_raw_handle()) != 0 }
     });
-    let event = inheritable_event();
+    let name = format!("Local\\tutti-spawn-inherit-{}", std::process::id());
+    let event = inheritable_event(&name);
     let value = (event.as_raw_handle() as usize).to_string();
 
     let mut control = child_of(test);
-    control.env(EVENT, &value);
+    control.env(EVENT, &value).env(NAME, &name);
     let status = control.status().expect("the control spawns");
     assert_eq!(
         status.code(),
@@ -144,7 +164,7 @@ fn a_spawned_child_inherits_no_inheritable_handle_of_the_host() {
 
     for how in [Spawn::Helper, Spawn::Leader] {
         let mut command = child_of(test);
-        command.env(EVENT, &value);
+        command.env(EVENT, &value).env(NAME, &name);
         let reaped = spawn(command, how).expect("the child spawns");
         assert_eq!(
             exit_code(reaped),
