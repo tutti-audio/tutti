@@ -1,4 +1,5 @@
 use core::f64::consts::PI;
+use tutti_units::{Amplitude, Samples};
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
@@ -17,12 +18,6 @@ const FS: f64 = 48_000.0;
 const SETTLE: usize = 12_000;
 /// Frames measured at the end: whole periods of every tone the tests use.
 const MEASURE: usize = 2_400;
-
-fn sine(f: f64, amplitude: f64, n: usize) -> Vec<f32> {
-    (0..n)
-        .map(|i| (amplitude * (2.0 * PI * f * i as f64 / FS).sin()) as f32)
-        .collect()
-}
 
 fn amplitude(db: f64) -> f64 {
     10f64.powf(db / 20.0)
@@ -124,6 +119,11 @@ fn measured_gain(mode: DynamicMode, c: &DynamicEqControls, level_db: f64) -> (f6
     let y = run(&mut b, &[&x], &[&x], 480).remove(0);
     let tail = SETTLE - MEASURE;
     (20.0 * (rms(&y[tail..]) / rms(&x[tail..])).log10(), b.gain())
+}
+
+/// `n` samples of an `amplitude` sine at `f` hertz, from phase 0.
+fn sine(f: f64, amplitude: f64, n: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(Hz::new(f), Amplitude::new(amplitude), RATE, Samples::new(n))
 }
 
 /// The settled gain of a sine at the centre is the static curve's: threshold, knee, ratio and

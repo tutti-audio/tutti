@@ -182,7 +182,6 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use tutti_graph::contract::{assert_declared_tail, prepared};
 
     const RATE: SampleRate = SampleRate::SR_48K;

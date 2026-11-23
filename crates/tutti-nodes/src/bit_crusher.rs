@@ -159,7 +159,6 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 

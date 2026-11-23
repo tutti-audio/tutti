@@ -276,8 +276,7 @@ pub use tutti_session::{ParamRef, RouteSpec};
 /// ```
 /// use tutti::dsp::{LinearPhaseDesign, MatchedBell, Tilt};
 /// use tutti::nodes::{ConvolverNode, FirConvolverConfig};
-/// use tutti::types::BusTopology;
-/// use tutti::{Db, Hz, Q, SampleRate};
+/// use tutti::{ChannelTopology, Db, Hz, Q, SampleRate};
 ///
 /// let rate = SampleRate::SR_48K;
 /// let bands = [
@@ -285,7 +284,7 @@ pub use tutti_session::{ParamRef, RouteSpec};
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(BusTopology::STEREO, &fir))
+/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
 ///     .unwrap();
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
@@ -426,8 +425,8 @@ pub mod dsp {
 pub mod types {
     pub use tutti_buffers::{
         AmbisonicFormat, AmbisonicNormalization, AmbisonicOrder, AmbisonicOrderOutOfRange,
-        AmbisonicOrdering, Bed, BusTooWide, BusTopology, ChannelIndex, ChannelIndexOutOfRange,
-        InvalidMaxBlock, LayoutError, MAX_CHANNELS, Placement, Speaker, Speakers, TopologyError,
+        AmbisonicOrdering, Bed, ChannelIndex, ChannelIndexOutOfRange, InvalidMaxBlock, LayoutError,
+        MAX_CHANNELS, Placement, Speaker, Speakers, TopologyError,
     };
     pub use tutti_buffers::{
         BlockMut, BlockSide, ByWidth, Frames, FramesMut, InputOutput, Mono, MonoMut, PlaneIter,

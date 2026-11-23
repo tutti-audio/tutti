@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, WORKERS, prepare, test_pool};
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor, FeedbackFrom,
     InputPort, Io, Node, NodeBus, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
@@ -52,12 +52,12 @@ struct Probe {
     seen: Arc<Seen>,
 }
 
-fn stereo() -> BusTopology {
-    BusTopology::unassigned(ChannelLayout::STEREO).expect("stereo")
+fn stereo() -> ChannelTopology {
+    ChannelTopology::unassigned(ChannelLayout::STEREO).expect("stereo")
 }
 
-fn mono() -> BusTopology {
-    BusTopology::unassigned(ChannelLayout::MONO).expect("mono")
+fn mono() -> ChannelTopology {
+    ChannelTopology::unassigned(ChannelLayout::MONO).expect("mono")
 }
 
 fn side(role: BusRole) -> Buses {

@@ -810,7 +810,7 @@ fn the_readers_of_a_parked_swaps_key_answer_for_the_incoming_node() {
     let _side = s.graph().take_audio_side();
     let band = |n| {
         MultibandCompressorNode::from(MultibandCompressorConfig::new(
-            tutti_buffers::BusTopology::STEREO,
+            tutti_buffers::ChannelTopology::STEREO,
             MultibandBands::of(n),
         ))
     };

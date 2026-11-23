@@ -83,7 +83,7 @@ until it is un-parked. `vendor/` is third-party and never restyled.
     only valid values.
   - *What `new` takes:* only what has no default (a filter's type, a delay's
     maximum). Where width is a choice it is the first argument, a
-    `ChannelLayout` or a `BusTopology`, never a default or a preset by name. A
+    `ChannelLayout` or a `ChannelTopology`, never a default or a preset by name. A
     sample rate or a transport is bound where the description is inserted
     (`Graph::add` prepares the node at the graph's rate and binds the tempo
     map). The terminal call that takes a spec (`bounce`) checks settings that

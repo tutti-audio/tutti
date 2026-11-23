@@ -1,6 +1,9 @@
 use super::*;
-use crate::testing::{amplitude_at, noise};
+use crate::testing::noise;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
+use tutti_fixtures::signal::amplitude_at;
+use tutti_units::Hz;
+use tutti_units::SampleRate;
 
 /// The curves, pinned.
 ///
@@ -696,7 +699,7 @@ fn harmonics(kind: ShapeKind, drive: f64, order: Antialiasing, ks: &[usize]) -> 
         .collect();
     let y = run(&mut antialiased(kind, drive, order), None, &[x]).remove(0);
     ks.iter()
-        .map(|&k| amplitude_at(&y[PERIOD..], 750.0 * k as f64, RATE.get()))
+        .map(|&k| amplitude_at(&y[PERIOD..], Hz::new(750.0 * k as f64), RATE))
         .collect()
 }
 
@@ -768,7 +771,7 @@ fn alias_energy(kind: ShapeKind, drive: f64, order: Antialiasing) -> f64 {
     let y = run(&mut antialiased(kind, drive, order), None, &[x]).remove(0);
     [19_100.0, 9_100.0, 900.0, 10_900.0, 20_900.0, 13_200.0]
         .iter()
-        .map(|&hz| amplitude_at(&y[441..], hz, rate).powi(2))
+        .map(|&hz| amplitude_at(&y[441..], Hz::new(hz), SampleRate::of(rate)).powi(2))
         .sum::<f64>()
         .sqrt()
 }

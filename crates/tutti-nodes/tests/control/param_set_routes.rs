@@ -12,7 +12,7 @@
 //! drives a control lane whose knob is the filter's cell.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock, Mono, Planes};
 use tutti_fixtures::signal::peak;
 
 use tutti_curve::Law;
@@ -277,7 +277,7 @@ fn delay_at(out: &[f32], n: usize) -> f32 {
 
 /// A chorus on the bus `input` with no feedback, so its output is the input delayed by
 /// the sweep alone.
-fn dry_chorus(input: BusTopology) -> ModDelayNode<f32> {
+fn dry_chorus(input: ChannelTopology) -> ModDelayNode<f32> {
     let n = ModDelayNode::<f32>::from(ModDelayConfig::chorus(input));
     assert!(set(&n, UnitParam::Feedback, 0.0));
     n
@@ -299,7 +299,11 @@ fn a_lane_modulates_a_chorus_rate_around_its_own_cell() {
     const FRAMES: usize = 4_800;
     const RATE: f64 = 3.0;
     let sr = 48_000.0_f64;
-    let (out, params) = render_chorus(dry_chorus(BusTopology::STEREO), Some(0.2), &ramp(FRAMES));
+    let (out, params) = render_chorus(
+        dry_chorus(ChannelTopology::STEREO),
+        Some(0.2),
+        &ramp(FRAMES),
+    );
     // Past the longest delay (15 ms, 720 frames) the line holds the ramp alone.
     for (c, channel) in out.iter().enumerate() {
         for n in (768..FRAMES).step_by(16) {
@@ -321,7 +325,7 @@ fn a_lane_modulates_a_chorus_rate_around_its_own_cell() {
 
 #[test]
 fn chorus_rate_write_moves_the_nodes_own_cell() {
-    let node = ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO));
+    let node = ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO));
     let cell = node.param_set().cell(UnitParam::Rate).expect("addressed");
     let base = cell.load(Ordering::Acquire);
     assert!(
@@ -339,7 +343,7 @@ fn chorus_rate_write_moves_the_nodes_own_cell() {
 #[test]
 fn compressor_makeup_is_addressed_as_gain_db() {
     let node = CompressorNode::<f32>::from(
-        CompressorConfig::new(BusTopology::STEREO)
+        CompressorConfig::new(ChannelTopology::STEREO)
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
                 threshold: tutti_units::Db::new(-12.0),
@@ -556,13 +560,13 @@ fn a_limiter_driven_below_its_release_floor_still_releases() {
     let mut input = tone(1.0, BURST);
     input.extend(tone(0.05, 36_000));
     let out = render_driven(
-        LimiterNode::<f32>::from(
-            LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::MONO).controls(
+            LimiterControls {
                 threshold: Db::new(-12.0),
                 ceiling: Db::new(-12.0),
                 ..LimiterControls::DEFAULT
-            }),
-        ),
+            },
+        )),
         UnitParam::Release,
         ParamRange::of(-1.0, 1.0),
         -0.25,
@@ -612,7 +616,7 @@ fn a_phaser_driven_past_its_depth_range_stays_stable() {
         // Knob 0.5 plus `depth` of the 16-wide range: 8.5 (held at the
         // range's 8) and -7.5.
         let out = render_driven(
-            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4)))
+            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)))
                 .unwrap(),
             UnitParam::Depth,
             ParamRange::of(-8.0, 8.0),
@@ -638,7 +642,7 @@ fn a_chorus_depth_lane_past_its_range_is_held_at_the_sweeps_bound() {
     const FRAMES: usize = 9_600;
     const RATE: f64 = 10.0;
     let sr = 48_000.0_f64;
-    let n = dry_chorus(BusTopology::MONO);
+    let n = dry_chorus(ChannelTopology::MONO);
     // 10 Hz, so the sweep turns twice in the render.
     assert!(set(&n, UnitParam::Rate, f64::from(RATE as f32)));
     // Knob 5 ms plus 0.495 of a 1 s range: 0.5 s.
@@ -677,7 +681,7 @@ fn a_chorus_rate_lane_below_its_range_is_held_at_the_floor() {
     let sr = 48_000.0_f64;
     // Knob 1 Hz minus 0.3 of a 20 Hz range: −5 Hz.
     let out = render_driven(
-        dry_chorus(BusTopology::MONO),
+        dry_chorus(ChannelTopology::MONO),
         UnitParam::Rate,
         ParamRange::of(-10.0, 10.0),
         -0.3,
@@ -836,8 +840,10 @@ fn a_control_a_lane_lets_go_of_is_handed_back_without_a_step() {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// `width` unassigned channels sharing the response `ir`.

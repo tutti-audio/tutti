@@ -9,7 +9,7 @@
 //! the output with an impulse, because the number alone cannot fail on a node
 //! whose DSP drifted away from it.
 
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock, Mono, Planes};
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{GraphBuilder, IntoNode, Node, Prepare};
@@ -108,7 +108,7 @@ fn onsets(ch: &[f32]) -> Vec<usize> {
 #[test]
 fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
     let xo = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        BusTopology::MONO,
+        ChannelTopology::MONO,
         CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
     ))
     .unwrap();
@@ -118,7 +118,7 @@ fn crossover_and_multiband_report_zero_latency_and_respond_at_frame_0() {
     }
 
     let mb = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-        BusTopology::MONO,
+        ChannelTopology::MONO,
         MultibandBands::of(4),
     ));
     assert_eq!(declared(&mb), Latency::ZERO);
@@ -168,7 +168,7 @@ fn early_reflections_and_the_decorrelator_report_zero_latency() {
 fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
     let node = DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             MaxDelay::of(Seconds::new(1.0_f64)),
         ))
         .controls(DelayControls {
@@ -198,7 +198,7 @@ fn delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
 /// at its own time.
 #[test]
 fn stereo_delay_line_reports_zero_latency_and_its_dry_path_is_immediate() {
-    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0_f64)))
+    let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(1.0_f64)))
         .times(ChannelTimes::try_from(&[Seconds::new(0.5_f64)][..]).unwrap())
         .build()
         .unwrap();
@@ -232,11 +232,11 @@ fn chorus_and_flanger_report_zero_latency_and_their_dry_path_is_immediate() {
     for (name, node) in [
         (
             "chorus",
-            ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
+            ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO)),
         ),
         (
             "flanger",
-            ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
+            ModDelayNode::<f32>::from(ModDelayConfig::flanger(ChannelTopology::STEREO)),
         ),
     ] {
         assert_eq!(
@@ -269,7 +269,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::from_count(3));
     let echo = DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             MaxDelay::of(Seconds::new(1.0_f64)),
         ))
         .controls(DelayControls {
@@ -281,7 +281,7 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
     let (echo, _) = g.add_with_controls(echo);
     g.mix(echo, Mix::new(0.5_f64));
     let (chorus, _) = g.add_with_controls(ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
     )));
     let dry = g.add(Through::mono());
     g.connect_input(0, echo, 0)
@@ -323,7 +323,7 @@ fn a_limiter_summed_with_a_dry_path_reports_the_limiter_latency() {
 
     let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
     let (lim, _) = g.add_with_controls(LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(-0.3),
             ..LimiterControls::DEFAULT
@@ -427,19 +427,19 @@ mod convolver {
     /// the head's `64` taps and the levels' remainder both land on their own frames.
     #[test]
     fn a_zero_latency_convolver_declares_none_and_answers_at_frame_zero() {
-        use tutti_buffers::BusTopology;
+        use tutti_buffers::ChannelTopology;
         use tutti_nodes::{ConvolverConfig, ConvolverNode};
         let (a, b) = (response(700, -1.0), response(300, 1.0));
         let (c, d) = (response(90, 1.0), response(1000, -1.0));
         let mono = ConvolverNode::<f32>::try_from(
-            ConvolverConfig::new(BusTopology::MONO, &[Mono::new(&a)])
+            ConvolverConfig::new(ChannelTopology::MONO, &[Mono::new(&a)])
                 .block_size(Samples::new(64))
                 .zero_latency(),
         )
         .unwrap();
         let stereo = ConvolverNode::<f32>::try_from(
             ConvolverConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 &[Mono::new(&a), Mono::new(&c), Mono::new(&b), Mono::new(&d)],
             )
             .true_stereo()
@@ -569,7 +569,7 @@ mod convolver {
         let (conv, _) = g.add_with_controls(conv);
         let (echo_a, _) = g.add_with_controls(DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
                 MaxDelay::of(Seconds::new(1.0_f64)),
             ))
             .controls(DelayControls {
@@ -580,7 +580,7 @@ mod convolver {
         ));
         let (echo_b, _) = g.add_with_controls(DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::MONO,
+                ChannelTopology::MONO,
                 MaxDelay::of(Seconds::new(1.0_f64)),
             ))
             .controls(DelayControls {
@@ -606,8 +606,10 @@ mod convolver {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// A one-channel convolver over `ir`.
@@ -616,7 +618,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
@@ -651,7 +653,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()
@@ -668,9 +670,12 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
-            .true_stereo()
-            .block_size(block_size),
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            &[ll, lr, rl, rr],
+        )
+        .true_stereo()
+        .block_size(block_size),
     )
     .expect("four responses on a stereo pair")
 }

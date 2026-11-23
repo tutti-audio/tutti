@@ -24,7 +24,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::PlanesMut;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::NodeKey;
 use tutti_graph::{Cx, ForkByClone, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::testing::Osc;
@@ -57,7 +57,7 @@ fn shaper(drive: f64) -> DistortionNode<f32> {
 }
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-12.0),
             ceiling: Db::new(-1.0),
             ..LimiterControls::DEFAULT

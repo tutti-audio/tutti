@@ -1,13 +1,14 @@
 //! The shape each node declares: widths, cost, latency, tail ceiling, the params in order and
 //! the base each starts at. One row per node; every figure is the node's documented one.
 
-use crate::test_support::{for_each_row, prepared};
+use crate::test_support::prepared;
 use crate::*;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{
     Algorithm, CombDelay, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec,
     Partial, Partials, Route,
 };
+use tutti_fixtures::for_each_row;
 use tutti_graph::contract::prepared as prepared_at_rate;
 use tutti_graph::{Cost, Node};
 use tutti_units::{

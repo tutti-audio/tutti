@@ -14,7 +14,7 @@
 //! here.
 
 use crate::common;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{InterleavedMut, PlanesMut};
 
 use std::cell::Cell;
@@ -992,7 +992,7 @@ fn a_routes_polarity_and_curve_reach_the_render() {
 fn a_bus_strips_volume_and_pan_take_lanes() {
     let (mut s, _side) = rig(2);
     let strip = s.graph().add(tutti_nodes::BusStripNode::from(
-        tutti_nodes::BusStripConfig::new(BusTopology::STEREO),
+        tutti_nodes::BusStripConfig::new(ChannelTopology::STEREO),
     ));
     let mut m = s.mods_mut();
     let offset = m.macro_(0.5);
@@ -1024,11 +1024,11 @@ fn a_bus_strips_volume_and_pan_take_lanes() {
 fn a_chorus_rate_and_a_phaser_mix_take_lanes() {
     let (mut s, _side) = rig(2);
     let chorus = s.graph().add(tutti_nodes::ModDelayNode::<f32>::from(
-        ModDelayConfig::chorus(tutti_buffers::BusTopology::STEREO),
+        ModDelayConfig::chorus(tutti_buffers::ChannelTopology::STEREO),
     ));
     let phaser = s.graph().add(
         tutti_nodes::PhaserNode::<f32>::try_from(
-            PhaserConfig::new(BusTopology::STEREO, tutti_nodes::Stages::of(4))
+            PhaserConfig::new(ChannelTopology::STEREO, tutti_nodes::Stages::of(4))
                 .controls(tutti_nodes::PhaserControls::DEFAULT),
         )
         .unwrap(),

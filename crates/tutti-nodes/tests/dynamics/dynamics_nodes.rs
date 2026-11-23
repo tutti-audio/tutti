@@ -4,7 +4,7 @@
 //! definition (the grid, the lookahead, the ceiling), never from another render.
 
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{CompressorControls, GateControls, LimiterControls};
 use tutti_graph::contract::{Driven, assert_declared_tail, drive, drive_input, prepared};
 use tutti_graph::{Env, Node, ParamNode, PlayClock, Status, TransportChanges, TransportPosition};
@@ -73,7 +73,7 @@ fn first_difference(a: &[Vec<f32>], b: &[Vec<f32>]) -> Option<usize> {
 
 fn compressor() -> CompressorNode<f32> {
     CompressorNode::<f32>::from(
-        CompressorConfig::new(BusTopology::STEREO)
+        CompressorConfig::new(ChannelTopology::STEREO)
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
                 threshold: Db::new(-20.0),
@@ -89,7 +89,7 @@ fn compressor() -> CompressorNode<f32> {
 
 fn gate() -> GateNode<f32> {
     GateNode::<f32>::from(
-        GateConfig::new(BusTopology::STEREO)
+        GateConfig::new(ChannelTopology::STEREO)
             .key(KeySource::Sidechain)
             .controls(GateControls {
                 threshold: Db::new(-30.0),
@@ -103,18 +103,18 @@ fn gate() -> GateNode<f32> {
 }
 
 fn limiter() -> LimiterNode<f32> {
-    LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+    LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
+        LimiterControls {
             threshold: Db::new(-12.0),
             ceiling: Db::new(-3.0),
             release: Seconds::new(0.05),
-        }),
-    )
+        },
+    ))
 }
 
 fn brickwall() -> BrickwallLimiterNode<f32> {
     BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
         Db::new(0.0),
     ))
 }
@@ -226,7 +226,7 @@ fn a_moved_cell_and_a_driven_signal_render_the_same_bits_in_any_blocks() {
             Box::new(|block, moved, driven| {
                 render(
                     CompressorNode::<f32>::from(
-                        CompressorConfig::new(BusTopology::STEREO)
+                        CompressorConfig::new(ChannelTopology::STEREO)
                             .key(KeySource::Sidechain)
                             .controls(CompressorControls {
                                 threshold: Db::new(-20.0),
@@ -256,7 +256,7 @@ fn a_moved_cell_and_a_driven_signal_render_the_same_bits_in_any_blocks() {
             Box::new(|block, moved, driven| {
                 render(
                     GateNode::<f32>::from(
-                        GateConfig::new(BusTopology::STEREO)
+                        GateConfig::new(ChannelTopology::STEREO)
                             .key(KeySource::Sidechain)
                             .controls(GateControls {
                                 threshold: Db::new(-30.0),
@@ -333,7 +333,7 @@ fn a_moved_cell_and_a_driven_signal_render_the_same_bits_in_any_blocks() {
             Box::new(|block, moved, driven| {
                 render(
                     BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-                        BusTopology::STEREO,
+                        ChannelTopology::STEREO,
                         Db::new(-1.0),
                     )),
                     &[&audio[0], &audio[1]],
@@ -457,7 +457,7 @@ fn the_limiter_reports_its_lookahead_as_latency_and_never_parks() {
     let make = || {
         prepared(
             LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO)
+                LimiterConfig::new(ChannelTopology::STEREO)
                     .lookahead(lookahead)
                     .controls(LimiterControls::DEFAULT),
             ),
@@ -525,14 +525,15 @@ fn the_key_is_the_sidechain_role_bus_and_the_detector_listens_to_it() {
             "compressor",
             Box::new(compressor()) as Box<dyn Node>,
             Box::new(CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO).controls(CompressorControls::DEFAULT),
+                CompressorConfig::new(ChannelTopology::STEREO)
+                    .controls(CompressorControls::DEFAULT),
             )) as Box<dyn Node>,
         ),
         (
             "gate",
             Box::new(gate()) as Box<dyn Node>,
             Box::new(GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO).controls(GateControls::DEFAULT),
+                GateConfig::new(ChannelTopology::STEREO).controls(GateControls::DEFAULT),
             )) as Box<dyn Node>,
         ),
     ] {
