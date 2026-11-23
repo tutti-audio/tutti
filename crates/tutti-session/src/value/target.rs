@@ -60,6 +60,13 @@ pub(crate) mod sealed {
             StoredChange::new(id, base, value)
         }
     }
+
+    /// A target a lane can drive: what it last delivered.
+    pub trait Lane: Store {
+        /// The value the lane delivered on its last block, or `None` while no
+        /// lane drives the target.
+        fn delivered(self, params: &Params) -> Option<Self::Value>;
+    }
 }
 
 /// Something that holds a value. Sealed: only tutti-session implements it.
@@ -214,12 +221,14 @@ impl<T: Target, F> fmt::Debug for Modify<T, F> {
     }
 }
 
-/// `target.effective()`: the value the audio thread uses, which only a
-/// [`Modulatable`] target has. [`Session::get`](crate::Session::get) takes no
-/// `Effective` yet, so asking for one does not compile.
+/// `target.effective()`: the value the audio thread uses, for
+/// [`Session::get`](crate::Session::get): the last frame of the lane that
+/// drives the target, held to the target's range, or the base while no lane
+/// drives it. It is at most one block old, and a lane that delivers a NaN or
+/// an infinity reads as no lane. Only a target a lane can drive has one
+/// ([`ParamTarget`](crate::ParamTarget) and [`GainTarget`](crate::GainTarget)).
 #[must_use = "a read is answered by `Session::get`"]
 pub struct Effective<T: Modulatable> {
-    #[allow(dead_code)]
     pub(crate) target: T,
 }
 

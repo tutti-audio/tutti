@@ -24,7 +24,7 @@ wrong timbre. This harness listens to the output.
 
 **Native Rust** (`tests/synth_audio.rs`, 12 tests) covers what needs no reference
 implementation: the pitch each oscillator produces, velocity scaling, note-off
-silencing, polyphonic summing, `NoSteal` and stealing behaviour, mono mode,
+silencing, polyphonic summing, `Steal::Never` and stealing behaviour, mono mode,
 master volume, exact silence when idle, and both stereo channels. These run under
 plain `cargo test`.
 

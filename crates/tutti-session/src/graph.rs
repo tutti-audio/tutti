@@ -1091,6 +1091,10 @@ impl<F: Float> Graph<F> {
             held.provide(&self.values, node);
             entry.controls = Some(held);
         }
+        self.values.bind_lanes(node, |param| {
+            self.editor
+                .param_effective_cell(tutti_graph::ParamIn { node, param })
+        });
     }
 
     /// [`address`](Self::address)'s step for the slots of an `N`.
@@ -3116,6 +3120,9 @@ impl<F: Float> Graph<F> {
         }
         let seed = self.editor.edge_gain(id).unwrap_or(Gain::UNITY);
         self.values.provide_gain(edge, seed);
+        if let Some(cell) = self.editor.edge_gain_effective_cell(id) {
+            self.values.bind_gain_lane(edge, cell);
+        }
         Ok(GainTarget::new(edge))
     }
 

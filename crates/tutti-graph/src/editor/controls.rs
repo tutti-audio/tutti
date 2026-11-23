@@ -12,7 +12,7 @@ use crate::NodeKey;
 use crate::bus_edge::{BusOutputPort, NodeBus};
 use crate::gain::{EdgeFade, EdgeGain, EdgeGainError, GainCell};
 use crate::mode::{MixError, ModeCell, ModeError, NodeMix, NodeMode};
-use crate::param::{ParamIn, ParamRange, ParamRangeCell, ParamRangeError};
+use crate::param::{EffectiveCell, ParamIn, ParamRange, ParamRangeCell, ParamRangeError};
 use crate::pass::Pass;
 use crate::{Edge, EdgeId, PortSink};
 
@@ -96,6 +96,22 @@ impl<F: Float> Editor<F> {
             return self.cells.modes.get(at.node).map(ModeCell::range_cell);
         }
         self.cells.ranges.cell(at)
+    }
+
+    /// A read-only handle on the value `at`'s lane last delivered: what the
+    /// param is driven to, beside its base. Control side. The session reads
+    /// it through `Session::get(target.effective())`.
+    ///
+    /// `None` for a node not staged, one whose unit does not declare
+    /// `at.param`, and a node's mix. As with
+    /// [`param_range_cell`](Self::param_range_cell), staging a unit with
+    /// another list of params gives the key fresh cells: ask again after such
+    /// a replace.
+    pub fn param_effective_cell(&self, at: ParamIn) -> Option<EffectiveCell> {
+        if at.param == NodeMix::ADDR {
+            return None;
+        }
+        self.cells.ranges.effective(at)
     }
 
     /// Frees the ranges [`set_param_range`](Self::set_param_range),
@@ -385,6 +401,13 @@ impl<F: Float> Editor<F> {
     /// the entry is dropped: the view then reads a range nothing writes).
     pub fn edge_gain_range_cell(&self, id: EdgeId) -> Option<ParamRangeCell> {
         self.gain_cell(id).map(GainCell::range_cell)
+    }
+
+    /// A read-only handle on the weight edge `id`'s lane last delivered: the
+    /// edge's counterpart of [`param_effective_cell`](Self::param_effective_cell).
+    /// `None` while the edge has no entry.
+    pub fn edge_gain_effective_cell(&self, id: EdgeId) -> Option<EffectiveCell> {
+        self.gain_cell(id).map(GainCell::effective_cell)
     }
 
     /// Edge `id`'s cell, while its entry is in the spec.

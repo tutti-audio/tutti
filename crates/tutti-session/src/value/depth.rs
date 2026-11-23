@@ -6,9 +6,7 @@ use tutti_units::Bipolar;
 use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
 use super::state::Params;
-use super::target::{
-    Effective, Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders,
-};
+use super::target::{Modulatable, ScalarTarget, Target, TargetId, sealed, target_builders};
 use crate::{ModSourceId, ModTarget};
 
 /// A route's depth: the [`Slot`] of its [`DepthTarget`], over the cell the
@@ -54,11 +52,6 @@ impl DepthTarget {
     #[must_use]
     pub fn of(source: ModSourceId, target: impl Into<ModTarget>) -> Self {
         Self::new((source, target.into()))
-    }
-
-    /// The value the audio thread uses.
-    pub fn effective(self) -> Effective<Self> {
-        Effective { target: self }
     }
 
     /// The source of the route.

@@ -40,8 +40,10 @@ use std::sync::Arc;
 
 use crate::NodeKey;
 use crate::mode::NodeMix;
+use atomic_float::AtomicF64;
+use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
-use tutti_rt::{Publisher, Reader, RtScope};
+use tutti_rt::{AtomicCell, Publisher, Reader, RtScope, atomic_word};
 use tutti_units::{
     ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Samples, UnitAddr, UnitParam,
 };
@@ -828,6 +830,8 @@ pub(crate) fn render_ramps<F: Float>(
 pub(crate) struct ParamRanges {
     declared: ParamPorts,
     cells: Box<[ParamRangeCell]>,
+    /// What each port's lane last delivered, in port order.
+    lanes: Box<[EffectiveCell]>,
 }
 
 impl ParamRanges {
@@ -838,6 +842,7 @@ impl ParamRanges {
             cells: (0..declared.len())
                 .map(|_| ParamRangeCell(Arc::new(Publisher::new(ParamRange::UNBOUNDED))))
                 .collect(),
+            lanes: (0..declared.len()).map(|_| EffectiveCell::new()).collect(),
         })
     }
 
@@ -850,6 +855,18 @@ impl ParamRanges {
     /// Control side.
     pub(crate) fn cell(&self, param: UnitAddr) -> Option<ParamRangeCell> {
         self.cells.get(self.declared.index_of(param)?).cloned()
+    }
+
+    /// A handle on `param`'s delivered value, if it is one of these ports.
+    /// Control side.
+    pub(crate) fn lane(&self, param: UnitAddr) -> Option<EffectiveCell> {
+        self.lanes.get(self.declared.index_of(param)?).cloned()
+    }
+
+    /// One handle per port, in port order, for a unit's param state to write
+    /// its lane's last value into. Control side.
+    pub(crate) fn lanes(&self) -> Vec<EffectiveCell> {
+        self.lanes.to_vec()
     }
 
     /// One reader per port, in port order, for a unit's param state.
@@ -879,6 +896,83 @@ impl ParamRanges {
     /// held by a block. Control side.
     pub(crate) fn reclaim(&self) -> usize {
         self.cells.iter().map(|c| c.0.reclaim()).sum()
+    }
+}
+
+/// Whether a port's lane delivered frames at the end of the last block that
+/// ran it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum LaneState {
+    /// No lane drives the port and none is fading: its value is the base.
+    Idle,
+    /// A lane drives the port, or its declick is still fading: the value cell
+    /// holds the lane's last frame.
+    Driven,
+}
+atomic_word!(LaneState { Idle, Driven });
+
+/// A port's lane state and the value it last delivered. "No lane" is the
+/// `Idle` state, never a value, so no value stands for it.
+#[derive(Debug)]
+struct Delivered {
+    state: AtomicCell<LaneState>,
+    value: AtomicF64,
+}
+
+/// What a param port's lane delivered on the last block that ran it: the
+/// effective value, which the session reads beside the base
+/// ([`Editor::param_effective_cell`](crate::Editor::param_effective_cell)).
+///
+/// The audio thread writes it once per block, and only while the port is
+/// driven or fading: the value first, then the `Driven` state, both
+/// `Release`, and the reader loads the state then the value, both `Acquire`.
+/// A read that races a block's write sees the value of that block or of the
+/// block before, so it is at most one block old; the value is the lane's last
+/// frame, after the port's range, in the unit's own width.
+///
+/// A lane that delivers a NaN or an infinity is not latched: the cell goes
+/// back to `Idle`, and the read answers the base.
+#[derive(Clone, Debug)]
+pub struct EffectiveCell(Arc<Delivered>);
+
+impl EffectiveCell {
+    /// An idle cell. Control side: allocates.
+    fn new() -> Self {
+        Self(Arc::new(Delivered {
+            state: AtomicCell::new(LaneState::Idle),
+            value: AtomicF64::new(0.0),
+        }))
+    }
+
+    /// The lane's last frame, as the raw of the param's unit, or `None` while
+    /// no lane drives the port (the effective value is then the base).
+    /// Wait-free.
+    #[must_use]
+    pub fn current(&self) -> Option<f64> {
+        (self.0.state.load() == LaneState::Driven).then(|| self.0.value.load(Ordering::Acquire))
+    }
+
+    /// Whether `self` and `other` are the same cell.
+    #[must_use]
+    pub fn same_cell(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    /// Delivers `value`, a finite lane value; `fresh` when the cell was
+    /// `Idle`. Audio side, wait-free.
+    #[inline]
+    fn deliver(&self, value: f64, fresh: bool) {
+        self.0.value.store(value, Ordering::Release);
+        if fresh {
+            self.0.state.store(LaneState::Driven);
+        }
+    }
+
+    /// Goes back to no lane. Audio side, wait-free.
+    #[inline]
+    fn release(&self) {
+        self.0.state.store(LaneState::Idle);
     }
 }
 
@@ -946,6 +1040,10 @@ pub(crate) struct PortState<F: Float> {
     source: Option<EventOutputPort>,
     /// Whether the last block delivered frames.
     modulated: bool,
+    /// What the port's [`EffectiveCell`] reads, as far as this state knows.
+    /// A state starts `Unknown`: the cell is the key's, and a unit placed
+    /// without a crossfade replaced a state that may have left it `Driven`.
+    shown: Shown,
     /// The last frame delivered.
     last: F,
     /// The base at the end of the last block.
@@ -959,12 +1057,22 @@ pub(crate) struct PortState<F: Float> {
     ramp: Ramp,
 }
 
+/// What a port state knows of its [`EffectiveCell`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shown {
+    /// Not written by this state yet: its first block stores either way.
+    Unknown,
+    Idle,
+    Driven,
+}
+
 impl<F: Float> Default for PortState<F> {
     fn default() -> Self {
         Self {
             fresh: true,
             source: None,
             modulated: false,
+            shown: Shown::Unknown,
             last: F::ZERO,
             last_base: F::ZERO,
             hold: F::ZERO,
@@ -1000,6 +1108,9 @@ pub(crate) struct ParamState<F: Float> {
     /// empty for a unit with no declared params and for one whose ports are
     /// unbounded.
     ranges: Vec<ParamRangeReader>,
+    /// Each port's delivered-value cell, in port order; empty where `ranges`
+    /// is.
+    lanes: Vec<EffectiveCell>,
 }
 
 impl<F: Float> Default for ParamState<F> {
@@ -1014,19 +1125,22 @@ impl<F: Float> Default for ParamState<F> {
             framed: [false; MAX_PARAM_PORTS],
             busy: false,
             ranges: Vec::new(),
+            lanes: Vec::new(),
         }
     }
 }
 
 impl<F: Float> ParamState<F> {
     /// State for `ports` declared params at blocks of up to `max` frames,
-    /// clamping to `ranges` (a reader per port; none: unbounded). Allocates
-    /// nothing when `ports` is 0.
+    /// clamping to `ranges` (a reader per port; none: unbounded) and
+    /// delivering each lane's last frame to `lanes` (a cell per port; none:
+    /// nowhere). Allocates nothing when `ports` is 0.
     pub(crate) fn new(
         ports: usize,
         max: usize,
         declick: usize,
         ranges: Vec<ParamRangeReader>,
+        lanes: Vec<EffectiveCell>,
     ) -> Self {
         if ports == 0 {
             return Self::default();
@@ -1043,6 +1157,7 @@ impl<F: Float> ParamState<F> {
             // seed each port (see `PortState::fresh`).
             busy: true,
             ranges,
+            lanes,
         }
     }
 
@@ -1058,7 +1173,18 @@ impl<F: Float> ParamState<F> {
     /// `ranges`: an edge gain's lane, which runs the
     /// param port's step on its own.
     pub(crate) fn lane(max: usize, declick: usize, ranges: &ParamRanges) -> Self {
-        Self::new(1, max, declick, ranges.readers())
+        Self::new(1, max, declick, ranges.readers(), ranges.lanes())
+    }
+
+    /// Reads no lane from the cells: for a state that is dropped while its
+    /// ports may still read `Driven`. Audio side, wait-free.
+    pub(crate) fn release_lanes(&mut self) {
+        for (st, lane) in self.ports.iter_mut().zip(&self.lanes) {
+            if st.shown != Shown::Idle {
+                lane.release();
+                st.shown = Shown::Idle;
+            }
+        }
     }
 
     /// The lane has run a block undriven: its first block under a source is
@@ -1131,7 +1257,13 @@ impl<F: Float> ParamState<F> {
         let Some(b1) = base else {
             // A node that cannot say its base is never driven: it reads
             // its own control. No state to carry.
+            if st.shown != Shown::Idle
+                && let Some(lane) = self.lanes.get(k)
+            {
+                lane.release();
+            }
             *st = PortState::default();
+            st.shown = Shown::Idle;
             return;
         };
         let source = m.map(|(from, _)| from);
@@ -1149,6 +1281,12 @@ impl<F: Float> ParamState<F> {
         }
         let fading = st.fade < d;
         if source.is_none() && !fading {
+            if st.shown != Shown::Idle
+                && let Some(lane) = self.lanes.get(k)
+            {
+                lane.release();
+                st.shown = Shown::Idle;
+            }
             st.modulated = false;
             return;
         }
@@ -1222,6 +1360,19 @@ impl<F: Float> ParamState<F> {
         st.last = out[frames - 1];
         st.last_base = b1;
         st.modulated = true;
+        // One store a block, only while the port is driven or fading: the
+        // lane's last frame, unless it is not finite, which is never latched
+        // (the read then answers the base).
+        if let Some(lane) = self.lanes.get(k) {
+            let last: f64 = st.last.into();
+            if last.is_finite() {
+                lane.deliver(last, st.shown != Shown::Driven);
+                st.shown = Shown::Driven;
+            } else if st.shown != Shown::Idle {
+                lane.release();
+                st.shown = Shown::Idle;
+            }
+        }
         self.framed[k] = true;
         self.busy = true;
     }

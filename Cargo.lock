@@ -3555,6 +3555,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "tutti-buffers",
+ "tutti-curve",
  "tutti-dsp",
  "tutti-fixtures",
  "tutti-graph",

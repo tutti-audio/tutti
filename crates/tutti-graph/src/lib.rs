@@ -777,8 +777,8 @@ pub use node::{
 };
 pub use par::Pool;
 pub use param::{
-    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange, ParamRangeCell,
-    ParamRangeError, ParamRangeReader, RangeView,
+    EffectiveCell, MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange,
+    ParamRangeCell, ParamRangeError, ParamRangeReader, RangeView,
 };
 pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};

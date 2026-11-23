@@ -61,6 +61,12 @@ use crate::stream::{DeviceStream, InputTiming, Negotiation};
 use crate::{HardwareMidiInputs, InputFault};
 use tutti_graph::EventInletNode;
 use tutti_midi_ci::{CiDeviceId, ProfileChange, ProfileId};
+
+// The session is `Send` (see the threading notes above): this stops compiling when it is not.
+const _: () = {
+    const fn send<T: Send>() {}
+    send::<MidiSession>();
+};
 use tutti_midi_device::{DeviceInfo, Learned, MidiDeviceId, MidiIdentity, SavedDevice};
 use tutti_midi_runtime::InputWriters;
 use tutti_ump::ProductInstanceId;

@@ -18,10 +18,11 @@ use crate::capability::{OsEndpoint, legacy};
 use crate::devices::ChangeSink;
 use crate::endpoints::{DeviceOut, InputConnection, MidiEndpoints, Watch};
 use crate::error::{MidiHardwareError, Result};
+use tutti_fixtures::midi::sysex7 as sysex;
 use tutti_midi_device::{
     DeviceEvent, EndpointId, OsDevice, OsEndpointIdentity, PortDirection, WinMmDevice,
 };
-use tutti_ump::{Message, MidiGroup, Sysex7Packet, SysexStatus, Ump};
+use tutti_ump::{SysexStatus, Ump};
 
 fn named(name: &str, product: u16) -> WinMmDevice {
     WinMmDevice::Named {
@@ -104,54 +105,60 @@ fn names(pairs: &[(&str, &str)]) -> Vec<String> {
 }
 
 #[test]
-fn ports_that_share_a_friendly_name_take_their_distinct_driver_names() {
+fn ports_are_named_apart_by_driver_name_then_number_and_a_name_of_their_own_is_kept() {
+    let rows: [(&str, &[(&str, &str)], &[&str]); 8] = [
+        (
+            "a shared friendly name takes the distinct driver names",
+            &[
+                ("Pad (USB)", "Pad"),
+                ("Pad (USB)", "MIDIIN2 (Pad)"),
+                ("Pad (USB)", "MIDIIN3 (Pad)"),
+            ],
+            &["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"],
+        ),
+        (
+            "a shared name and driver name are numbered in list order",
+            &[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")],
+            &["Twin", "Twin 2", "Twin 3"],
+        ),
+        (
+            "only the ports that still clash are numbered (X twice clashes, Y is alone)",
+            &[("G", "X"), ("G", "X"), ("G", "Y")],
+            &["G", "G 2", "Y"],
+        ),
+        (
+            "a name of its own is kept whatever the neighbours are",
+            &[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")],
+            &["Solo (USB)", "Twin", "Twin 2"],
+        ),
+        (
+            "a lone port keeps its shown name",
+            &[("Solo (USB)", "Solo")],
+            &["Solo (USB)"],
+        ),
+        (
+            "a unique name is kept after a group that would take it",
+            &[("USB MIDI", "USB MIDI"), ("USB MIDI", "X"), ("X", "X")],
+            &["USB MIDI", "USB MIDI 2", "X"],
+        ),
+        (
+            "a unique name is kept before a group that would take it",
+            &[("X", "X"), ("USB MIDI", "USB MIDI"), ("USB MIDI", "X")],
+            &["X", "USB MIDI", "USB MIDI 2"],
+        ),
+        (
+            "a blank driver name is absent and the shown name is numbered",
+            &[("Pad", ""), ("Pad", "  "), ("Pad", "\t")],
+            &["Pad", "Pad 2", "Pad 3"],
+        ),
+    ];
+    for (case, listed, expected) in rows {
+        assert_eq!(names(listed), expected, "{case}");
+    }
     assert_eq!(
-        names(&[
-            ("Pad (USB)", "Pad"),
-            ("Pad (USB)", "MIDIIN2 (Pad)"),
-            ("Pad (USB)", "MIDIIN3 (Pad)"),
-        ]),
-        ["Pad", "MIDIIN2 (Pad)", "MIDIIN3 (Pad)"]
-    );
-}
-
-#[test]
-fn ports_that_share_a_name_and_a_driver_name_get_numbers_in_list_order() {
-    assert_eq!(
-        names(&[("Twin", "Twin"), ("Twin", "Twin"), ("Twin", "Twin")]),
-        ["Twin", "Twin 2", "Twin 3"]
-    );
-}
-
-#[test]
-fn only_the_ports_that_still_clash_are_numbered() {
-    // X twice clashes; Y is alone in the group.
-    assert_eq!(
-        names(&[("G", "X"), ("G", "X"), ("G", "Y")]),
-        ["G", "G 2", "Y"]
-    );
-}
-
-#[test]
-fn a_port_with_a_name_of_its_own_keeps_it_whatever_its_neighbours_are() {
-    assert_eq!(
-        names(&[("Solo (USB)", "Solo"), ("Twin", "Twin"), ("Twin", "Twin")]),
-        ["Solo (USB)", "Twin", "Twin 2"]
-    );
-    assert_eq!(names(&[("Solo (USB)", "Solo")]), ["Solo (USB)"]);
-}
-
-#[test]
-fn a_unique_name_is_kept_before_or_after_a_group_that_would_take_it() {
-    let group = [("USB MIDI", "USB MIDI"), ("USB MIDI", "X")];
-    let unique = ("X", "X");
-    assert_eq!(
-        names(&[group[0], group[1], unique]),
-        ["USB MIDI", "USB MIDI 2", "X"]
-    );
-    assert_eq!(
-        names(&[unique, group[0], group[1]]),
-        ["X", "USB MIDI", "USB MIDI 2"]
+        names(&[("Pad", ""), ("Pad", "Pad B")]),
+        ["Pad", "Pad B"],
+        "one blank driver name beside a distinct one"
     );
 }
 
@@ -182,15 +189,6 @@ fn two_groups_never_take_the_same_driver_name() {
         sorted.dedup();
         assert_eq!(sorted.len(), all.len(), "{got:?}");
     }
-}
-
-#[test]
-fn a_blank_driver_name_is_absent_and_the_shown_name_is_numbered() {
-    assert_eq!(
-        names(&[("Pad", ""), ("Pad", "  "), ("Pad", "\t")]),
-        ["Pad", "Pad 2", "Pad 3"]
-    );
-    assert_eq!(names(&[("Pad", ""), ("Pad", "Pad B")]), ["Pad", "Pad B"]);
 }
 
 #[test]
@@ -299,13 +297,6 @@ fn sent(out: &mut ByteOut, ump: Ump) -> Vec<Vec<u8>> {
     })
     .unwrap();
     wire
-}
-
-fn sysex(status: SysexStatus, data: &[u8]) -> Ump {
-    Ump::from(Message::Sysex7(
-        MidiGroup::FIRST,
-        Sysex7Packet::new(status, data).unwrap(),
-    ))
 }
 
 #[test]
@@ -764,33 +755,6 @@ fn the_poll_seeds_then_reports_a_device_that_appears_and_one_that_goes() {
     );
 }
 
-/// A backend that hands the test its `ChangeSink` and watches nothing.
-struct Captured(Arc<Mutex<Option<ChangeSink>>>);
-
-impl MidiEndpoints for Captured {
-    fn watch(&self, sink: ChangeSink) -> Result<Box<dyn Watch>> {
-        *self.0.lock() = Some(sink);
-        Ok(Box::new(crate::endpoints::NoWatch))
-    }
-    fn inputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn outputs(&self) -> Result<Vec<OsEndpoint>> {
-        Ok(Vec::new())
-    }
-    fn open_input(
-        &self,
-        _started: crate::Started,
-        _: EndpointId,
-        _: crate::InputProducerHandle,
-    ) -> Result<Box<dyn InputConnection>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
-    fn open_output(&self, _started: crate::Started, _: EndpointId) -> Result<Box<dyn DeviceOut>> {
-        Err(MidiHardwareError::Unsupported("test"))
-    }
-}
-
 /// A poll whose executor has shut down ends without a look: a `Timer`'s sleep
 /// fails from then on, and a poll that looked again would spin. The future is polled once by hand on a thread, under a hang
 /// guard: one that loops never returns.
@@ -803,7 +767,8 @@ fn a_poll_ends_when_its_executor_has_shut_down() {
     }
     let slot = Arc::new(Mutex::new(None));
     let executor = tutti_platform::Executor::new();
-    let _devices = Devices::open_over(&executor, Box::new(Captured(Arc::clone(&slot)))).unwrap();
+    let _devices =
+        Devices::open_over(&executor, Box::new(crate::testing::Stub::capturing(&slot))).unwrap();
     let sink = slot.lock().take().unwrap();
     // The executor made here drops at once, so its timer is already shut down:
     // the poll's first sleep fails.
