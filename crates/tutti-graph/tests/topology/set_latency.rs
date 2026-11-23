@@ -142,16 +142,11 @@ fn a_latency_change_moves_the_other_paths_compensation() {
     let (mut ed, mut exec) = graph(plugin.clone());
     ed.commit().expect("commits");
 
-    // The untouched twin: the same graph, never changed.
-    let (mut twin_ed, mut twin) = graph(Plugin::new());
-    twin_ed.commit().expect("commits");
-
     // Misaligned while the plugin under-reports.
-    let [wet, dry] = block(&mut exec, &impulse(64, 8));
-    let [twin_wet, _] = block(&mut twin, &impulse(64, 8));
+    let mut fed = impulse(64, 8);
+    let [wet, dry] = block(&mut exec, &fed);
     assert_eq!(peak_at(&wet), Some(8 + TRUE_LATENCY));
     assert_eq!(peak_at(&dry), Some(8), "no compensation yet");
-    assert_eq!(wet, twin_wet);
 
     // The plugin's latency atomic moves; the host tells the editor.
     reported.store(TRUE_LATENCY, Ordering::Relaxed);
@@ -164,11 +159,10 @@ fn a_latency_change_moves_the_other_paths_compensation() {
     ed.commit().expect("recompiles");
 
     let mut wet_all = wet;
-    let mut twin_all = twin_wet;
     for b in 0..4 {
         let input = impulse(64, 20);
         let [wet, dry] = block(&mut exec, &input);
-        let [twin_wet, _] = block(&mut twin, &input);
+        fed.extend(input);
         if b > 0 {
             assert_eq!(
                 peak_at(&dry),
@@ -178,16 +172,27 @@ fn a_latency_change_moves_the_other_paths_compensation() {
             assert_eq!(peak_at(&dry), Some(20 + TRUE_LATENCY));
         }
         wet_all.extend(wet);
-        twin_all.extend(twin_wet);
     }
-    assert_eq!(
-        wet_all, twin_all,
-        "the plugin's path is untouched by the recompile: no click"
-    );
+    // An impulse at the end of a block carries into the next: the carry
+    // crosses the block boundary at the recompiled graph too.
+    let input = impulse(64, 60);
+    let [wet, _] = block(&mut exec, &input);
+    fed.extend(input);
+    wet_all.extend(wet);
+    let input = vec![0.0f32; 64];
+    let [wet, _] = block(&mut exec, &input);
+    fed.extend(input);
+    wet_all.extend(wet);
+    // The plugin's path is untouched by the recompile (no click): its wet
+    // output is the whole input delayed by `TRUE_LATENCY` at gain 1, the
+    // carry across blocks included.
+    let mut want = vec![0.0f32; TRUE_LATENCY];
+    want.extend_from_slice(&fed[..fed.len() - TRUE_LATENCY]);
+    assert_eq!(wet_all, want);
     assert!(ed.collect().is_empty(), "no unit was retired");
     assert_eq!(
         calls.load(Ordering::Relaxed),
-        5,
+        7,
         "the same unit, every block"
     );
     let plan = exec.plan().expect("applied");
