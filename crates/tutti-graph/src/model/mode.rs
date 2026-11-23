@@ -111,6 +111,7 @@ use tutti_rt::{CappedVec, ParamCell};
 use tutti_units::{Mix, Samples, UnitAddr, UnitParam};
 
 use crate::NodeKey;
+use crate::compile::ids::{AudioSlotId, Id};
 use crate::exec::arena::Arena;
 use crate::exec::held::Held;
 use crate::exec::lane::{fade_gains, ramp_in};
@@ -914,9 +915,9 @@ impl<F: Float> ModeState<F> {
         if let (Some(src), Some(dst)) = (scratch.as_ref(), folded.as_mut()) {
             for c in 0..pass.outputs() {
                 pass.fold_into(
-                    |i| src.slot(i as u32, frames),
+                    |i| src.slot(AudioSlotId::from_index(i), frames),
                     c,
-                    dst.slot_mut(c as u32, frames),
+                    dst.slot_mut(AudioSlotId::from_index(c), frames),
                 );
             }
         }
@@ -929,7 +930,8 @@ impl<F: Float> ModeState<F> {
             .scratch
             .as_ref()
             .expect("a node with a channel to pass has a scratch");
-        self.pass.fold_into(|i| src.slot(i as u32, frames), c, out);
+        self.pass
+            .fold_into(|i| src.slot(AudioSlotId::from_index(i), frames), c, out);
     }
 
     /// Whether the pass folds channels (it is not output `c` = input `c`).
@@ -969,7 +971,7 @@ impl<F: Float> ModeState<F> {
         scratch
             .as_mut()
             .expect("a node with a channel to pass has a scratch")
-            .slot_mut(c as u32, frames)
+            .slot_mut(AudioSlotId::from_index(c), frames)
     }
 
     /// Output channel `c`'s aligned input, as [`align`](Self::align) (and
@@ -979,7 +981,7 @@ impl<F: Float> ModeState<F> {
             .as_ref()
             .or(self.scratch.as_ref())
             .expect("a node with a channel to pass has a scratch")
-            .slot(c as u32, frames)
+            .slot(AudioSlotId::from_index(c), frames)
     }
 
     /// Channel `c`'s ring of the bypass line, for a parked node's output.
