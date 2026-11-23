@@ -205,8 +205,8 @@ pub use universal::{
     MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags, MtcFullMessage,
     MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition,
     NotMmcSegmentCount, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-    NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
-    Recipient, RunReference, SysexDeviceId, Universal, UniversalRead, UniversalReader, VitcInsert,
-    read,
+    NotQuarterFramePiece, NotSysexDeviceId, NotWritable, QuarterFrame, QuarterFrameCycle,
+    QuarterFramePiece, Recipient, RunReference, SysexDeviceId, UNIVERSAL_MAX_PAYLOAD, Universal,
+    UniversalPayload, UniversalRead, UniversalReader, VitcInsert, read,
 };
 pub use voice::channel_voice;

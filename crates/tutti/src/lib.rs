@@ -929,7 +929,9 @@ pub mod midi {
         OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
         SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    pub use tutti_midi_runtime::{
+        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
@@ -1066,8 +1068,9 @@ pub mod midi {
             MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
             MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
             NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
-            RunReference, Universal, UniversalRead, UniversalReader, VitcInsert,
+            NotQuarterFramePiece, NotWritable, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
+            Recipient, RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
+            UniversalRead, UniversalReader, VitcInsert,
         };
     }
 

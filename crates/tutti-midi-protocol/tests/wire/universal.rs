@@ -1802,3 +1802,167 @@ fn the_machine_control_fields_keep_the_range_contract() {
         invalid: &[0, 318, u16::MAX],
     });
 }
+
+/// The writer: `Addressed::payload` gives the spec's bytes, and what it writes
+/// `read` reads back, a dump's checksum included.
+mod write {
+    use super::*;
+    use tutti_midi_protocol::{
+        ChannelMask, KeyChange, KeyChanges, KeyTable, NotWritable, OctaveOffsets, Timing,
+        TuningFrequency, TuningMessage, TuningName,
+    };
+    use tutti_ump::U14;
+
+    fn payload(to: Recipient, message: Universal) -> Vec<u8> {
+        Addressed { to, message }
+            .payload()
+            .unwrap()
+            .iter()
+            .map(|b| b.get())
+            .collect()
+    }
+
+    fn reads_back(to: Recipient, message: Universal) {
+        let mut framed = vec![0xF0];
+        framed.extend(payload(to, message));
+        framed.push(0xF7);
+        assert_eq!(heard(&framed), Addressed { to, message });
+    }
+
+    /// M1 p.57: Master Volume is `04 01` and a 14-bit value, least significant byte
+    /// first; M1 p.40: the Identity Request is `06 01`; CA-025: Coarse Tuning is
+    /// `04 04 00 mm`.
+    #[test]
+    fn the_short_messages_are_the_spec_bytes() {
+        assert_eq!(
+            payload(Recipient::AllCall, Universal::MasterVolume(U14::of(0x3FFF))),
+            [0x7F, 0x7F, 0x04, 0x01, 0x7F, 0x7F]
+        );
+        assert_eq!(
+            payload(
+                Recipient::Device(SysexDeviceId::of(2)),
+                Universal::MasterBalance(U14::of(0x2001))
+            ),
+            [0x7F, 0x02, 0x04, 0x02, 0x01, 0x40]
+        );
+        assert_eq!(
+            payload(Recipient::AllCall, Universal::IdentityRequest),
+            [0x7E, 0x7F, 0x06, 0x01]
+        );
+        assert_eq!(
+            payload(
+                Recipient::AllCall,
+                Universal::MasterCoarseTuning(U7::of(0x40))
+            ),
+            [0x7F, 0x7F, 0x04, 0x04, 0x00, 0x40]
+        );
+        assert_eq!(
+            payload(
+                Recipient::AllCall,
+                Universal::GeneralMidi(GeneralMidiMode::Off)
+            ),
+            [0x7E, 0x7F, 0x09, 0x02]
+        );
+    }
+
+    #[test]
+    fn identity_replies_read_back_with_one_and_three_byte_manufacturers() {
+        for manufacturer in [ManufacturerId::of(0x41), ManufacturerId::of(0x8021)] {
+            reads_back(
+                Recipient::Device(SysexDeviceId::of(9)),
+                Universal::IdentityReply(DeviceIdentity {
+                    manufacturer,
+                    family: u7s([1, 2]),
+                    model: u7s([3, 4]),
+                    revision: SoftwareRevision::from(u7s([5, 6, 7, 8])),
+                }),
+            );
+        }
+    }
+
+    /// The Key-Based Dump ends in the XOR checksum of MTS, which `read` verifies:
+    /// a message that read back as one and not as `BadChecksum` carries a good one.
+    #[test]
+    fn tuning_messages_read_back() {
+        let name = TuningName::new(u7s([0x41; 16]));
+        let mut words = [TuningFrequency::NO_CHANGE; 128];
+        for (key, word) in words.iter_mut().enumerate() {
+            *word = TuningFrequency::from_parts(U7::of(key as u8), U14::of(key as u16 * 3));
+        }
+        let mut changes = KeyChanges::new();
+        changes.push(KeyChange {
+            key: NoteNumber::of(60),
+            frequency: TuningFrequency::from_parts(U7::of(61), U14::of(0x1234)),
+        });
+        let fine = OctaveOffsets::Fine([U14::of(0x2000); 12]);
+        for message in [
+            TuningMessage::DumpRequest {
+                bank: None,
+                program: U7::of(3),
+            },
+            TuningMessage::DumpRequest {
+                bank: Some(U7::of(1)),
+                program: U7::of(3),
+            },
+            TuningMessage::KeyDump {
+                bank: Some(U7::of(1)),
+                program: U7::of(3),
+                name,
+                table: KeyTable::new(words),
+            },
+            TuningMessage::OctaveDump {
+                bank: U7::of(1),
+                program: U7::of(2),
+                name,
+                offsets: fine,
+            },
+            TuningMessage::NoteChange {
+                timing: Timing::RealTime,
+                bank: None,
+                program: U7::of(2),
+                changes,
+            },
+            TuningMessage::NoteChange {
+                timing: Timing::NonRealTime,
+                bank: Some(U7::of(4)),
+                program: U7::of(2),
+                changes,
+            },
+            TuningMessage::OctaveTuning {
+                timing: Timing::RealTime,
+                channels: ChannelMask::from_bits(0b1010_0000_0000_0101),
+                offsets: OctaveOffsets::ZERO,
+            },
+        ] {
+            reads_back(Recipient::AllCall, Universal::Tuning(message));
+        }
+    }
+
+    /// The grammar has no bytes for a Non-Real Time Single Note Tuning Change
+    /// with no bank, and the reader-made Machine Control variants are not written.
+    #[test]
+    fn what_has_no_bytes_is_refused_by_name() {
+        let refused = |message| {
+            Addressed {
+                to: Recipient::AllCall,
+                message,
+            }
+            .payload()
+        };
+        assert!(matches!(
+            refused(Universal::Tuning(TuningMessage::NoteChange {
+                timing: Timing::NonRealTime,
+                bank: None,
+                program: U7::of(0),
+                changes: KeyChanges::new(),
+            })),
+            Err(NotWritable::NonRealTimeNoteChangeWithoutBank)
+        ));
+        assert_eq!(
+            refused(Universal::MachineControlTruncated(
+                tutti_midi_protocol::MmcCommands::new()
+            )),
+            Err(NotWritable::MachineControlTruncated)
+        );
+    }
+}
