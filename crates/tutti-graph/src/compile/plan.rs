@@ -54,7 +54,7 @@ use crate::compile::VerifyError;
 use crate::compile::ids::{
     AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
     EventValueId, Generation, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
-    TaskId, raw,
+    TableSlice, TaskId, raw,
 };
 use crate::exec::arena::Role;
 use crate::model::fade::Fade;
@@ -879,7 +879,7 @@ impl NodeTables {
         ops: &[Op],
         audio_list: &[AudioSlotId],
         event_list: &[EventSlotId],
-        units: &Table<PlanUnitId, PlanUnit>,
+        units: &TableSlice<PlanUnitId, PlanUnit>,
     ) -> Self {
         let mut recs: Table<PlanUnitId, Option<NodeRec>> = Table::filled(units.len(), None);
         let mut audio_slots = Vec::new();
@@ -1033,7 +1033,7 @@ pub struct Csr {
 
 impl Csr {
     /// The rows of a table of typed successor lists.
-    pub(crate) fn from_ids<R: Id, T: Id>(rows: &Table<R, Vec<T>>) -> Self {
+    pub(crate) fn from_ids<R: Id, T: Id>(rows: &TableSlice<R, Vec<T>>) -> Self {
         let raw_rows: Vec<Vec<u32>> = rows.iter().map(|row| raw(row).to_vec()).collect();
         Self::from_rows(&raw_rows)
     }

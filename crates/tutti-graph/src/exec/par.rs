@@ -87,7 +87,9 @@
 
 mod access;
 
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id, PlanUnitId, Table as IdTable, TaskId};
+use crate::compile::ids::{
+    AudioSlotId, EventSlotId, Id, PlanUnitId, Table as IdTable, TableSlice as IdTableSlice, TaskId,
+};
 use access::{
     Audio, Claimed, ClaimedAudio, ClaimedEvents, Events, Exclusive, ExclusiveAudio, Mode, Table,
 };
@@ -349,8 +351,8 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) meters: &'b mut [Option<crate::edges::meter::MeterWriter>],
     pub(crate) lanes: &'b mut [SumLane<F>],
     pub(crate) inject: &'b mut [Inject],
-    pub(crate) has_inject: &'b mut IdTable<PlanUnitId, bool>,
-    pub(crate) has_due: &'b mut IdTable<PlanUnitId, bool>,
+    pub(crate) has_inject: &'b mut IdTableSlice<PlanUnitId, bool>,
+    pub(crate) has_due: &'b mut IdTableSlice<PlanUnitId, bool>,
     pub(crate) due: Deliveries<'b>,
     /// Where the block's lost events are added up.
     pub(crate) dropped: &'b mut Dropped,
@@ -373,7 +375,7 @@ struct Frame<'s, F: Float = f32> {
     cap: usize,
     inputs: &'s [&'s [F]],
     /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: &'s IdTable<PlanUnitId, Span>,
+    inject_spans: &'s IdTableSlice<PlanUnitId, Span>,
     due: Deliveries<'s>,
 }
 

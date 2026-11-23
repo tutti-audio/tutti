@@ -9,7 +9,7 @@ use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
-use crate::compile::ids::{Generation, PlanUnitId, Table};
+use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::event::types::Event;
 use crate::exec::held::Held;
@@ -715,7 +715,7 @@ impl<F: Float> Executor<F> {
 fn flush_target<'a>(
     plan: &Plan,
     inject: &'a mut [Inject],
-    has_inject: &mut Table<PlanUnitId, bool>,
+    has_inject: &mut TableSlice<PlanUnitId, bool>,
     at: EventInputPort,
 ) -> Option<(PlanUnitId, &'a mut Inject)> {
     let id = plan.unit_id(at.node)?;

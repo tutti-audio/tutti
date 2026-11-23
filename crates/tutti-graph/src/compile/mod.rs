@@ -66,7 +66,7 @@ use tutti_units::{Latency, Samples, Tail};
 
 use crate::compile::ids::{
     AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
-    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
+    EventValueId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
 };
 use crate::compile::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
@@ -1706,7 +1706,7 @@ pub fn compile(
 }
 
 /// The position of `key` in the sorted feedback `list`.
-fn fb_index<F: Id>(key: FeedbackKey, list: &Table<F, FeedbackKey>) -> F {
+fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
     F::from_index(
         list.as_slice()
             .binary_search(&key)
@@ -1717,7 +1717,7 @@ fn fb_index<F: Id>(key: FeedbackKey, list: &Table<F, FeedbackKey>) -> F {
 /// The public [`Value`] table for `vals`, each reader list appended to
 /// `readers`.
 fn lower_values<V: Id>(
-    vals: &Table<V, Val>,
+    vals: &TableSlice<V, Val>,
     readers: &mut Vec<OpId>,
     slot: impl Fn(V) -> u32,
 ) -> Table<V, Value> {

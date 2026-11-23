@@ -31,7 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tutti_units::Samples;
 
-use crate::compile::ids::{Id, OpId, Table, TaskId};
+use crate::compile::ids::{Id, OpId, Table, TableSlice, TaskId};
 use crate::compile::plan::{Csr, Span};
 use crate::node::cost::{GRAIN, TASK_DISPATCH, Work};
 
@@ -49,9 +49,9 @@ type Grouping = (Table<TaskId, Vec<OpId>>, Table<OpId, TaskId>);
 /// Group the op DAG (`preds` / `succ` by op, ops numbered topologically)
 /// into tasks, pricing op `i` at `work[i]` and packing at `max_block`.
 pub(super) fn coarsen(
-    preds: &Table<OpId, BTreeSet<OpId>>,
-    succ: &Table<OpId, Vec<OpId>>,
-    work: &Table<OpId, Work>,
+    preds: &TableSlice<OpId, BTreeSet<OpId>>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
+    work: &TableSlice<OpId, Work>,
     max_block: Samples,
 ) -> Tasks {
     debug_assert_eq!(work.len(), preds.len());
@@ -83,7 +83,10 @@ pub(super) fn coarsen(
 }
 
 /// Pass 1 alone: every op its own item, chains fused.
-fn chained(preds: &Table<OpId, BTreeSet<OpId>>, succ: &Table<OpId, Vec<OpId>>) -> Grouping {
+fn chained(
+    preds: &TableSlice<OpId, BTreeSet<OpId>>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
+) -> Grouping {
     let ops: Table<OpId, Vec<OpId>> = preds.ids().map(|o| vec![o]).collect();
     chains(ops, preds, succ)
 }
@@ -95,8 +98,8 @@ fn chained(preds: &Table<OpId, BTreeSet<OpId>>, succ: &Table<OpId, Vec<OpId>>) -
 /// a group always enters its first item) and each op's group.
 fn chains<I: Id>(
     items: Table<I, Vec<OpId>>,
-    preds: &Table<I, BTreeSet<I>>,
-    succ: &Table<I, Vec<I>>,
+    preds: &TableSlice<I, BTreeSet<I>>,
+    succ: &TableSlice<I, Vec<I>>,
 ) -> Grouping {
     let mut group_of: Table<I, Option<TaskId>> = Table::filled(items.len(), None);
     let mut groups: Table<TaskId, Vec<OpId>> = Table::default();
@@ -121,7 +124,7 @@ fn chains<I: Id>(
 }
 
 /// Each op's group.
-fn ops_of(groups: &Table<TaskId, Vec<OpId>>) -> Table<OpId, TaskId> {
+fn ops_of(groups: &TableSlice<TaskId, Vec<OpId>>) -> Table<OpId, TaskId> {
     let mut of = Table::filled(groups.iter().map(Vec::len).sum(), None);
     for (g, ops) in groups.iter_enumerated() {
         for &o in ops {
@@ -136,8 +139,8 @@ fn ops_of(groups: &Table<TaskId, Vec<OpId>>) -> Table<OpId, TaskId> {
 /// The DAG between groups (`of`: each op's group), as distinct predecessor
 /// sets and sorted successor rows.
 fn group_dag(
-    of: &Table<OpId, TaskId>,
-    succ: &Table<OpId, Vec<OpId>>,
+    of: &TableSlice<OpId, TaskId>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
     groups: usize,
 ) -> (Table<TaskId, BTreeSet<TaskId>>, Table<TaskId, Vec<TaskId>>) {
     let mut preds: Table<TaskId, BTreeSet<TaskId>> = Table::filled(groups, BTreeSet::new());
@@ -155,7 +158,7 @@ fn group_dag(
     (preds, rows)
 }
 
-fn cost(ops: &[OpId], work: &Table<OpId, Work>) -> Work {
+fn cost(ops: &[OpId], work: &TableSlice<OpId, Work>) -> Work {
     ops.iter().fold(Work::ZERO, |acc, &o| acc.plus(work[o]))
 }
 
@@ -178,9 +181,9 @@ fn cost(ops: &[OpId], work: &Table<OpId, Work>) -> Work {
 /// graph would cycle, so the task graph stays acyclic.
 fn pack(
     groups: Table<TaskId, Vec<OpId>>,
-    of: &Table<OpId, TaskId>,
-    succ: &Table<OpId, Vec<OpId>>,
-    work: &Table<OpId, Work>,
+    of: &TableSlice<OpId, TaskId>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
+    work: &TableSlice<OpId, Work>,
     max_block: Samples,
 ) -> Grouping {
     let (preds, _) = group_dag(of, succ, groups.len());
@@ -195,7 +198,7 @@ fn pack(
         }
     }
     let mut cur: Table<TaskId, Option<Vec<OpId>>> = groups.iter().cloned().map(Some).collect();
-    let length = |groups: &Table<TaskId, Option<Vec<OpId>>>| {
+    let length = |groups: &TableSlice<TaskId, Option<Vec<OpId>>>| {
         critical(&compact(groups), succ, work, max_block).map(|c| c.at(max_block))
     };
     let mut best = length(&cur).expect("chains are acyclic");
@@ -237,7 +240,7 @@ fn pack(
     (groups, of)
 }
 
-fn compact(groups: &Table<TaskId, Option<Vec<OpId>>>) -> Table<TaskId, Vec<OpId>> {
+fn compact(groups: &TableSlice<TaskId, Option<Vec<OpId>>>) -> Table<TaskId, Vec<OpId>> {
     groups.iter().flatten().cloned().collect()
 }
 
@@ -249,7 +252,7 @@ fn compact(groups: &Table<TaskId, Option<Vec<OpId>>>) -> Table<TaskId, Vec<OpId>
 /// ready batch first, and the two orders differ.
 fn topological(
     groups: Table<TaskId, Vec<OpId>>,
-    succ: &Table<OpId, Vec<OpId>>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
 ) -> Table<TaskId, Vec<OpId>> {
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
@@ -292,9 +295,9 @@ fn topological(
 /// pack whose successors now wait for all of it costs them its work. The
 /// longest path is chosen at `max_block` and kept as its affine `Work`.
 fn critical(
-    groups: &Table<TaskId, Vec<OpId>>,
-    succ: &Table<OpId, Vec<OpId>>,
-    work: &Table<OpId, Work>,
+    groups: &TableSlice<TaskId, Vec<OpId>>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
+    work: &TableSlice<OpId, Work>,
     max_block: Samples,
 ) -> Option<Work> {
     let of = ops_of(groups);
@@ -336,8 +339,8 @@ fn critical(
 /// The plan's task tables.
 fn finish(
     groups: Table<TaskId, Vec<OpId>>,
-    of: &Table<OpId, TaskId>,
-    succ: &Table<OpId, Vec<OpId>>,
+    of: &TableSlice<OpId, TaskId>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
 ) -> Tasks {
     let (_, rows) = group_dag(of, succ, groups.len());
     let mut activation: Table<TaskId, u32> = Table::filled(groups.len(), 0);

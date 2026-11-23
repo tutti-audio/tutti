@@ -6,8 +6,9 @@
 //! [`Id::index`]. Two ids of different kinds do not convert, so an op index
 //! cannot index the values and an audio slot cannot name an event slot.
 
+use bytemuck::TransparentWrapper;
 use std::marker::PhantomData;
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 /// A typed `u32` index.
 pub(crate) trait Id: bytemuck::Pod + Eq + Ord + std::fmt::Debug {
@@ -104,12 +105,27 @@ impl EventFeedbackId {
     }
 }
 
-/// A `Vec<T>` that only an `I` indexes.
+/// A `Vec<T>` that only an `I` indexes; its rows are read and written through
+/// the [`TableSlice`] it derefs to.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct Table<I, T> {
     items: Vec<T>,
     ids: PhantomData<fn(I)>,
 }
+
+/// A slice of rows that only an `I` indexes: what a hot loop holds, so its
+/// pointer and length stay in registers where a `&mut Table` would be reloaded.
+#[derive(PartialEq, Eq, Debug, bytemuck::TransparentWrapper)]
+#[repr(transparent)]
+#[transparent(Rows<T>)]
+pub(crate) struct TableSlice<I, T> {
+    ids: PhantomData<fn(I)>,
+    items: Rows<T>,
+}
+
+/// The rows of a [`TableSlice`]; an alias because the derive reads a bracketed
+/// type wrongly.
+type Rows<T> = [T];
 
 impl<I, T> Default for Table<I, T> {
     fn default() -> Self {
@@ -132,7 +148,38 @@ impl<I, T> FromIterator<T> for Table<I, T> {
     }
 }
 
-impl<I, T> Table<I, T> {
+impl<I, T> Deref for Table<I, T> {
+    type Target = TableSlice<I, T>;
+
+    fn deref(&self) -> &TableSlice<I, T> {
+        TableSlice::wrap_ref(&self.items)
+    }
+}
+
+impl<I, T> DerefMut for Table<I, T> {
+    fn deref_mut(&mut self) -> &mut TableSlice<I, T> {
+        TableSlice::wrap_mut(&mut self.items)
+    }
+}
+
+impl<I: Id, T> Table<I, T> {
+    /// A table of `len` copies of `row`.
+    pub(crate) fn filled(len: usize, row: T) -> Self
+    where
+        T: Clone,
+    {
+        Self::from(vec![row; len])
+    }
+
+    /// Appends a row and returns its id.
+    pub(crate) fn push(&mut self, row: T) -> I {
+        let id = I::from_index(self.items.len());
+        self.items.push(row);
+        id
+    }
+}
+
+impl<I, T> TableSlice<I, T> {
     /// The rows, in id order.
     pub(crate) fn as_slice(&self) -> &[T] {
         &self.items
@@ -159,22 +206,7 @@ impl<I, T> Table<I, T> {
     }
 }
 
-impl<I: Id, T> Table<I, T> {
-    /// A table of `len` copies of `row`.
-    pub(crate) fn filled(len: usize, row: T) -> Self
-    where
-        T: Clone,
-    {
-        Self::from(vec![row; len])
-    }
-
-    /// Appends a row and returns its id.
-    pub(crate) fn push(&mut self, row: T) -> I {
-        let id = I::from_index(self.items.len());
-        self.items.push(row);
-        id
-    }
-
+impl<I: Id, T> TableSlice<I, T> {
     /// The row at `id`, if there is one.
     pub(crate) fn get(&self, id: I) -> Option<&T> {
         self.items.get(id.index())
@@ -199,7 +231,7 @@ impl<I: Id, T> Table<I, T> {
     }
 }
 
-impl<I: Id, T> Index<I> for Table<I, T> {
+impl<I: Id, T> Index<I> for TableSlice<I, T> {
     type Output = T;
 
     fn index(&self, id: I) -> &T {
@@ -207,7 +239,7 @@ impl<I: Id, T> Index<I> for Table<I, T> {
     }
 }
 
-impl<I: Id, T> IndexMut<I> for Table<I, T> {
+impl<I: Id, T> IndexMut<I> for TableSlice<I, T> {
     fn index_mut(&mut self, id: I) -> &mut T {
         &mut self.items[id.index()]
     }
@@ -227,11 +259,29 @@ impl<'t, I, T> IntoIterator for &'t mut Table<I, T> {
     type IntoIter = std::slice::IterMut<'t, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.items.iter_mut()
+        self.iter_mut()
     }
 }
 
 impl<'t, I, T> IntoIterator for &'t Table<I, T> {
+    type Item = &'t T;
+    type IntoIter = std::slice::Iter<'t, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'t, I, T> IntoIterator for &'t mut TableSlice<I, T> {
+    type Item = &'t mut T;
+    type IntoIter = std::slice::IterMut<'t, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter_mut()
+    }
+}
+
+impl<'t, I, T> IntoIterator for &'t TableSlice<I, T> {
     type Item = &'t T;
     type IntoIter = std::slice::Iter<'t, T>;
 

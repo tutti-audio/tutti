@@ -48,7 +48,7 @@
 
 use crate::compile::ids::{
     DelayId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
-    TaskId,
+    TableSlice, TaskId,
 };
 use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
@@ -672,7 +672,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
         Table::filled(plan.ops.len(), EventSlotCapacity::NONE);
     for (m, op) in plan.ops.iter_enumerated() {
         // What op `m` reads from slot `s`, priced by its writer.
-        let read_need = |s: u32, op_need: &Table<OpId, EventSlotCapacity>| {
+        let read_need = |s: u32, op_need: &TableSlice<OpId, EventSlotCapacity>| {
             if s == EMPTY_SLOT.get() {
                 return Ok(EventSlotCapacity::NONE);
             }

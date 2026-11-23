@@ -11,7 +11,7 @@ use super::commit::{Crossfade, retire_fade};
 use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
-use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, Table};
+use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
@@ -32,7 +32,7 @@ pub(super) fn end_fades<F: Float>(
     store: &mut [Option<Unit<F>>],
     fade_back: &mut RingWriter<Box<Crossfade<F>>>,
     inject: &mut [Inject],
-    has_inject: &mut Table<PlanUnitId, bool>,
+    has_inject: &mut TableSlice<PlanUnitId, bool>,
     dropped: &mut Dropped,
 ) {
     for rec in &plan.nodes.recs {
@@ -307,7 +307,13 @@ impl<F: Float> Executor<F> {
             // Slices, not `&mut Vec`s: a slice's pointer and length are locals
             // the op loop can keep in registers across the opaque node calls,
             // where a `Vec` behind a reference is reloaded after every one.
-            let (flags, events, inject) = (&mut flags[..], &mut events[..], &mut inject[..]);
+            let (flags, events, inject, has_inject, has_due) = (
+                &mut flags[..],
+                &mut events[..],
+                &mut inject[..],
+                &mut **has_inject,
+                &mut **has_due,
+            );
             let plan: &Plan = plan;
             let cap = *event_cap;
             commands.gather(&env, plan, *applied, has_due);

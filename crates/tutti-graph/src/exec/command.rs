@@ -92,7 +92,7 @@
 //! future frame holds its credit until it lands, so the limit is on
 //! *outstanding* commands, not on commands per block.
 
-use crate::compile::ids::{PlanUnitId, Table};
+use crate::compile::ids::{PlanUnitId, TableSlice};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -529,7 +529,7 @@ impl CommandRx {
         env: &Env,
         plan: &Plan,
         applied: u64,
-        has_due: &mut Table<PlanUnitId, bool>,
+        has_due: &mut TableSlice<PlanUnitId, bool>,
     ) {
         self.pull();
         self.crossings.observe(env);
