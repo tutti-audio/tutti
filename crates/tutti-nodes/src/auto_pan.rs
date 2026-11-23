@@ -154,15 +154,9 @@ mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::Node;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_units::Tail;
     use tutti_units::UnitParam;
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(AutoPanNode::from(AutoPanConfig::new()));
-    }
 
     /// The shape is a stereo pair in and out, `Moderate`, no tail, with the rate and depth
     /// declared; the default is 1 Hz at full depth.

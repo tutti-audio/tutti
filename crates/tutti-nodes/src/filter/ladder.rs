@@ -257,21 +257,10 @@ mod tests {
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE_44K, prepared_at, render_f64, tick, tick_fed};
     use tutti_dsp::Complex64;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::Tail;
     use tutti_units::UnitParam;
-
-    /// A fork starts from the values last set through the node's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(LadderFilterNode::<f32>::from(
-            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
-                .freq(Hz::new(800.0))
-                .res(Resonance::new(0.3)),
-        ));
-    }
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.

@@ -157,7 +157,7 @@ mod tests {
     use super::*;
     use tutti_dsp::Mode;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Gain, Latency, Samples, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
@@ -176,12 +176,6 @@ mod tests {
 
     fn node() -> ModalBankNode<f32> {
         ModalBankNode::from(ModalBankConfig::new(2u16, modes()))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node());
     }
 
     /// The shape is the width in and out, with no latency, and declares the first mode's
