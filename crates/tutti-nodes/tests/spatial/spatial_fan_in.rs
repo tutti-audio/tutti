@@ -78,7 +78,7 @@ fn a_centre_source_lands_in_the_centre_and_never_in_the_lfe() {
 #[test]
 fn every_bed_builds_a_panner_of_its_width_and_mono_is_refused() {
     for bed in Bed::ALL {
-        match VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed)) {
+        match VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bed.into())) {
             Ok(panner) => assert_eq!(panner.channels(), bed.width(), "{bed:?}"),
             Err(error) => {
                 assert_eq!(bed, Bed::Mono);

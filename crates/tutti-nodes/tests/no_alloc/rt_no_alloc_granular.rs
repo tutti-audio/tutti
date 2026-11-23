@@ -21,8 +21,7 @@ fn granular_process_is_allocation_free_with_the_controls_moving() {
         GranularConfig::new(ChannelLayout::STEREO, Arc::new(source))
             .max_grains(MaxGrains::of(8))
             .seed(11)
-            .position_jitter(Normalized::of(0.3))
-            .timing_jitter(Normalized::of(0.5)),
+            .jitter([Normalized::of(0.3), Normalized::of(0.5)]),
     )
     .unwrap();
     let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 480);

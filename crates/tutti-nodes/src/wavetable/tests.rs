@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::{RATE, render_f64};
 use tutti_buffers::{Mono, Planes};
+use tutti_graph::ParamNode;
 use tutti_graph::contract::{Direct, assert_param_fork, drive};
 
 /// A table of one frame per slice of `frames`, in `F`.
@@ -51,7 +52,7 @@ fn a_fork_shares_no_cell_and_shares_the_table() {
 #[test]
 fn the_shape_is_a_source_of_the_width_declaring_frequency_level_then_position() {
     let node = WavetableNode::from(
-        WavetableConfig::new(3u16, table(&[&sine_cycle::<f32>()]))
+        WavetableConfig::new(ChannelLayout::from(3u16), table(&[&sine_cycle::<f32>()]))
             .frequency(Hz::new(330.0))
             .level(Amplitude::new(0.25))
             .position(Normalized::of(0.5)),
@@ -72,7 +73,10 @@ fn the_shape_is_a_source_of_the_width_declaring_frequency_level_then_position() 
 #[test]
 fn every_channel_of_the_width_carries_the_one_signal() {
     let mut d = Direct::new(
-        WavetableNode::from(WavetableConfig::new(3u16, table(&[&sine_cycle::<f32>()]))),
+        WavetableNode::from(WavetableConfig::new(
+            ChannelLayout::from(3u16),
+            table(&[&sine_cycle::<f32>()]),
+        )),
         RATE,
         256,
     );

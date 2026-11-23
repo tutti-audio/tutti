@@ -89,7 +89,7 @@ fn synthetic_hrir_sphere(sample_rate: u32, ir_len: usize) -> Vec<u8> {
 
 /// A panner over `bed`.
 fn vbap<F: tutti_buffers::Float>(bed: tutti_buffers::Bed) -> tutti_nodes::VbapPannerNode<F> {
-    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed))
+    tutti_nodes::VbapPannerNode::try_from(tutti_nodes::VbapPannerConfig::new(bed.into()))
         .expect("a bed with speakers to pan between")
 }
 

@@ -13,6 +13,8 @@ static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 mod block_dates;
 mod build_frame;
 mod bus_edges;
+// A node's published cells, through a MIDI clip kind.
+#[cfg(feature = "midi")]
 mod cells_node;
 mod compensation;
 mod connect;

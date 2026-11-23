@@ -676,3 +676,30 @@ fn polysynth_mts_is_allocation_free() {
         }
     });
 }
+
+/// Notes struck and released inside the gate, on each instrument voice: every voice is built
+/// before the first note, so a note, a steal and a release allocate nothing.
+#[test]
+fn instrument_voices_playing_notes_are_allocation_free() {
+    use crate::support::instruments::{each_voice, hand, poly};
+    fn check<V: tutti_polysynth::InstrumentVoice<Float = f32>>(_: &str, config: V::Config) {
+        let mut played: Hand<tutti_polysynth::NoteInstrument<V>> = hand(config, poly(2));
+        played.queue_midi(&[note_on(0, 48, 100)]);
+        played.block(64);
+        assert_no_alloc::assert_no_alloc(|| {
+            // Three keys into two voices: the third steals; the churn then releases and strikes.
+            for key in [52, 55, 60, 64, 67] {
+                played.queue_midi(&[note_on(0, key, 100)]);
+                played.block(64);
+                played.queue_midi(&[note_off(0, key - 3)]);
+                for _ in 0..8 {
+                    played.block(64);
+                }
+            }
+            for _ in 0..512 {
+                played.block(64);
+            }
+        });
+    }
+    each_voice!(check);
+}
