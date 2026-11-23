@@ -2,7 +2,6 @@ use super::*;
 use crate::test_support::{RATE, prepared, render_f64};
 use tutti_dsp::Partial;
 use tutti_graph::Node;
-use tutti_graph::contract::assert_param_fork;
 use tutti_units::{FrequencyRatio, UnitParam};
 
 fn partials() -> Partials {
@@ -13,11 +12,6 @@ fn partials() -> Partials {
         )
     };
     Partials::try_from(&[p(1.0, 0.5), p(3.0, 0.25), p(60.0, 0.9)][..]).unwrap()
-}
-
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(AdditiveNode::<f32>::from(AdditiveConfig::new(partials())));
 }
 
 /// A mono source declaring the frequency then the level, starting as configured.

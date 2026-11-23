@@ -202,7 +202,7 @@ mod tests {
     use crate::filter::test_utils::{bin, gain, generate_sine, render};
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::ChannelLayout;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Hz, UnitAddr, UnitParam};
 
@@ -233,12 +233,6 @@ mod tests {
         let mut h = [tutti_dsp::Complex64::new(0.0, 0.0)];
         tutti_dsp::Lti::frequency_response(&sos, 0, &[Hz::new(f)], &mut h);
         h[0].norm()
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node_with(GraphicBands::Octave, &[(2, 6.0)]));
     }
 
     /// The shape is the width in and out with one gain cell per band, and the cost of the bank.

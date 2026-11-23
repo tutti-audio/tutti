@@ -104,6 +104,7 @@ use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, SplitMut, SplitRw, Tas
 
 use crate::compile::plan::{Op, Plan, Span};
 use crate::edges::rtlog::LogLane;
+use crate::exec::Flags;
 use crate::exec::arena::{Arena, Line};
 use crate::exec::command::{Deliveries, Overlay};
 use crate::exec::history::TransportHistory;
@@ -340,7 +341,7 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) inputs: &'b [&'b [F]],
     pub(crate) outputs: &'b mut [&'o mut [F]],
     pub(crate) arena: &'b mut Arena<F>,
-    pub(crate) flags: &'b mut [u8],
+    pub(crate) flags: &'b mut [Flags],
     pub(crate) events: &'b mut [EventSlot],
     pub(crate) store: &'b mut [Option<Unit<F>>],
     pub(crate) rings: &'b mut [Option<Ring<F>>],
@@ -491,7 +492,7 @@ fn run_spread<F: Float>(
     // Slot 0 and the feedback reads were set before the ops; the rest is
     // written by the op that writes each slot. A byte per slot.
     for (a, &f) in par.flags.iter().zip(b.flags.iter()) {
-        a.store(f, std::sync::atomic::Ordering::Relaxed);
+        a.store(f.to_byte(), std::sync::atomic::Ordering::Relaxed);
     }
     let Par {
         participants: _,

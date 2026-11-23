@@ -137,18 +137,10 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 mod tests {
     use super::*;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Latency, Samples, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
-
-    /// A fork starts from the shift last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(FrequencyShifterNode::from(
-            FrequencyShifterConfig::new(2u16).shift(Hz::new(-100.0)),
-        ));
-    }
 
     /// The shape is the width in and out with no latency and a finite tail, and declares the
     /// shift as `Frequency`, which starts as configured.

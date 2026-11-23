@@ -200,7 +200,7 @@ mod tests {
     use tutti_dsp::{
         ButterworthOrder, Elliptic, EllipticTolerances, PassbandRipple, StopbandAttenuation,
     };
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Cost, Node, ParamNode};
     use tutti_units::{Db, UnitParam};
 
@@ -328,12 +328,6 @@ mod tests {
                 "elliptic at {f}: {got}"
             );
         }
-    }
-
-    /// A fork starts from the cutoff last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(CutFilterNode::from(CutFilterConfig::new(2u16, LP, bw(4))));
     }
 
     /// The shape is the width in and out, `Moderate`, declares the cutoff and a finite

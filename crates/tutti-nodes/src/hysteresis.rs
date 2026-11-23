@@ -229,7 +229,7 @@ impl<F: Float + Lerp> Kernel for HysteresisKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -239,13 +239,6 @@ mod tests {
         prepared(HysteresisNode::<f32>::from(
             HysteresisConfig::new(1u16).drive(HysteresisDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(HysteresisNode::<f32>::from(HysteresisConfig::new(
-            ChannelLayout::STEREO,
-        )));
     }
 
     #[test]

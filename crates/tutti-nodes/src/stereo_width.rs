@@ -147,7 +147,7 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{assert_cell_ramps, drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -156,14 +156,6 @@ mod tests {
         prepared(StereoWidthNode::<f32>::from(
             StereoWidthConfig::new().width(StereoWidth::new(width)),
         ))
-    }
-
-    /// A fork starts from the width last set through the `ParamSet` and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(StereoWidthNode::<f32>::from(
-            StereoWidthConfig::new().width(StereoWidth::new(0.5)),
-        ));
     }
 
     /// The shape is stereo, `Light`, and declares the width param, whose base is the

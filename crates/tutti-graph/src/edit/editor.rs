@@ -373,7 +373,11 @@ impl<F: Float> Editor<F> {
     pub fn with_event_capacity(prepare: Prepare, cap: usize) -> (Self, Executor<F>) {
         let (channels, ends) = channels();
         let (commands, command_rx) = command_channel();
-        let stager = Stager::new(cap, channels.pool.clone(), channels.rendered.clone());
+        let stager = Stager::new(
+            cap,
+            channels.readings.pool.clone(),
+            channels.readings.rendered.clone(),
+        );
         let editor = Self {
             link: Link::new(channels, commands),
             prepare,
