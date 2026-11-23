@@ -54,14 +54,6 @@ impl ReportedEdits {
         out.extend(queue.drain(..));
     }
 
-    /// Counts one loss the host could not undo (a mapping write it could not
-    /// take back), with the edits the queue dropped: what
-    /// [`dropped_reported_edits`](tutti_plugin_types::Control::dropped_reported_edits)
-    /// reads.
-    pub(crate) fn count_loss(&self) {
-        self.dropped.fetch_add(1, Ordering::Relaxed);
-    }
-
     /// Edits dropped for want of room over the plugin's life.
     pub(crate) fn dropped(&self) -> u64 {
         self.dropped.load(Ordering::Relaxed)
