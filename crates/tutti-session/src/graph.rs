@@ -520,7 +520,7 @@ pub struct Graph<F: Float = f32> {
     /// stream) live as long.
     retiring: Vec<(NodeKey, Box<dyn Any + Send>)>,
     /// The session's timeline as a node reads it: the template each plugin and each
-    /// sampler node inserted through the graph is bound with (its readers cloned: a node
+    /// sampler pool inserted through the graph is bound with (its readers cloned: a node
     /// lends the tempo map once per block and a fork clones its reader on the control
     /// side; [`SessionNode::bind_timeline`]). The tempo's publisher is the session's
     /// `TransportSettings`, whose `Reclaim` sweep already covers the cell.
@@ -906,7 +906,7 @@ impl<F: Float> Graph<F> {
     /// modulation find them), its reclaimer is swept by the session's
     /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), its slots
     /// are the type's ([`SessionNode::slots`]), and
-    /// it reads the session's tempo map ([`SessionNode::bind_timeline`]). A node
+    /// it reads the session's loop ([`SessionNode::bind_timeline`]). A node
     /// that is only an [`IntoNode`] does not compile here: a host's own is
     /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
     /// [`Unforkable`](tutti_graph::Unforkable), or is a

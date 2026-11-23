@@ -1037,6 +1037,7 @@ mod transport_tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
             meter: None,
+            tempo: None,
         }
     }
 

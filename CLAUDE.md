@@ -367,12 +367,12 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 0. `tutti-platform`
 1. `tutti-units`, `tutti-plugin-ipc-ffi`
 2. `tutti-music`, `tutti-buffers`
-3. `tutti-ump`
+3. `tutti-ump`, `tutti-tempo`
 4. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
    `tutti-midi-ci`, `tutti-curve`
 5. `tutti-rt`, `tutti-midi-device`
 6. `tutti-midi-network`, `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
-   `tutti-tempo`, `tutti-voicing`, `tutti-sf2`
+   `tutti-voicing`, `tutti-sf2`
 7. `tutti-timeline`, `tutti-plugin-types`, `tutti-measure`
 8. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`
