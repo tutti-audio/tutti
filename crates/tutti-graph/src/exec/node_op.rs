@@ -566,7 +566,7 @@ pub(super) fn node_op_with<
     if !discards && let Some(bound) = bound {
         let (inject, events) = (&*st.inject, &*st.events);
         let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
-        if let Some((n, lost)) = st.due.overlay_bounded(
+        if let Some((n, lost)) = st.due.events.overlay_bounded(
             unit,
             ein.len(),
             bound.get() as usize,
@@ -586,6 +586,7 @@ pub(super) fn node_op_with<
         let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
         let (n, lost) = st
             .due
+            .events
             .overlay(unit, base, &mut st.overlay.events, &mut views);
         n_views = n;
         st.dropped.at_node(rec.unit, lost);
@@ -597,7 +598,8 @@ pub(super) fn node_op_with<
         let base = |port: u16| &events.pev(ein[port as usize])[..];
         let (n, lost) = st
             .due
-            .overlay_params(unit, base, &mut st.overlay.params, &mut param_views);
+            .params
+            .overlay(unit, base, &mut st.overlay.params, &mut param_views);
         n_param_views = n;
         st.dropped.at_node(rec.unit, lost);
     }

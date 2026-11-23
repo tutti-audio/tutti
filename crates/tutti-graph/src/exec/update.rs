@@ -8,7 +8,7 @@ use tutti_units::Samples;
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
-use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
+use super::{Executor, Suspension, place, place_all};
 use crate::NodeKey;
 use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
@@ -330,7 +330,7 @@ impl<F: Float> Executor<F> {
         let mut relined = std::mem::take(&mut c.relined);
         for Relined { idx, latency, line } in relined.drain(..) {
             if let Some(u) = self.store.get_mut(idx.0 as usize).and_then(Option::as_mut)
-                && let Some(old) = u.mode.relined(latency, line)
+                && let Some(old) = u.mode.aligned.relined(latency, line)
             {
                 place(&mut c.spare_lines, old);
             }
@@ -357,7 +357,7 @@ impl<F: Float> Executor<F> {
                 .get_mut(store.0 as usize)
                 .and_then(Option::as_mut)
             {
-                Some(u) => u.mode.drive_with(lane, &mut st.spare_drives),
+                Some(u) => u.mode.mix.drive_with(lane, &mut st.spare_drives),
                 None => place(&mut st.spare_drives, lane),
             }
         }
@@ -369,26 +369,8 @@ impl<F: Float> Executor<F> {
             std::mem::swap(&mut self.parked, &mut c.parked);
         }
         c.staged = Some(st);
-        // A main output crossfade starts with the plan that carries it, and a plan
-        // that carries none ends one running. A plan that carries the old main output
-        // the running plan carries, under the same new main output, continues the
-        // crossfade from the frames it has rendered.
-        let continues = |old: &Plan, bank: crate::MainOutputBank| {
-            old.main_output_id() == plan.main_output_id()
-                && old.main_output_bank().is_some_and(|b| b.old == bank.old)
-        };
-        self.main_output_fade = match (
-            plan.main_output_bank(),
-            old_plan.as_deref(),
-            self.main_output_fade,
-        ) {
-            (Some(bank), Some(old), Some(run)) if continues(old, bank) => Some(run),
-            (Some(_), ..) => Some(MainOutputFadeRun {
-                seq: c.seq,
-                done: 0,
-            }),
-            (None, ..) => None,
-        };
+        self.main_output_fade
+            .install(&plan, old_plan.as_deref(), c.seq);
         self.plan = Some(plan);
         c.plan = old_plan;
     }

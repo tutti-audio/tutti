@@ -252,7 +252,7 @@ impl<F: Float> Editor<F> {
     /// its block.
     #[must_use]
     pub fn main_output_fade_running(&self) -> bool {
-        self.bank.is_some_and(|b| !b.ended)
+        self.main_output.fade_running()
     }
 
     /// Finishes, in the spec, every declick fade the executor has reported
@@ -286,10 +286,7 @@ impl<F: Float> Editor<F> {
         // A main output change's crossfade the executor has rendered through: the
         // commit that follows compiles the old main output's channels away.
         let ended = self.link.main_output_fade_ended();
-        if let Some(bank) = self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
-            bank.ended = true;
-            changed = true;
-        }
+        changed |= self.main_output.finish(ended);
         if changed {
             self.touch();
         }

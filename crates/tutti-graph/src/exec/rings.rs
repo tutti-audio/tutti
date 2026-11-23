@@ -179,11 +179,14 @@ impl<F: Float> AudioRing<F> {
 /// drops: should the slot be full anyway, the due events stay queued and go
 /// out at offset 0 of the next block — late, not lost.
 pub(crate) struct EventFifo {
-    q: VecDeque<(u64, Event)>,
-    len: u64,
-    clock: u64,
-    limit: usize,
-    reserve: usize,
+    /// The events in flight, with the note-off reserve.
+    events: Lane<Event>,
+    /// The param events in flight. It has room only in a FIFO built for a
+    /// source that writes them ([`with_params`](Self::with_params)); a param
+    /// event past its room is dropped and counted, newest first, with no
+    /// note-off to keep.
+    params: Lane<ParamEvent>,
+    clock: DelayClock,
     /// The declared events per block of the port it carries: what one block's
     /// input needs room for.
     rate: usize,
@@ -191,14 +194,163 @@ pub(crate) struct EventFifo {
     /// poured in, as room frees, ahead of each block's input. Present only
     /// in a FIFO the editor built for a cut edge ([`with_owed`](Self::with_owed)).
     owed: Option<Held>,
-    /// The param events in flight, as `q` holds the events: due time and
-    /// event, oldest first. It has room only in a FIFO built for a source that
-    /// writes them ([`with_params`](Self::with_params)); a param event past
-    /// its room is dropped and counted, newest first, with no note-off to
-    /// keep.
-    pq: VecDeque<(u64, ParamEvent)>,
-    /// The most param events queued.
-    plimit: usize,
+}
+
+/// A queued event: what a [`Lane`] orders by offset and keeps, a note-off
+/// above the rest.
+pub(crate) trait Queued: Copy {
+    /// Where in its block.
+    fn offset(&self) -> Offset;
+
+    /// This event at `offset`.
+    fn at(self, offset: Offset) -> Self;
+
+    /// Whether the lane keeps it before any other when it overflows.
+    fn is_note_off(&self) -> bool;
+}
+
+impl Queued for Event {
+    fn offset(&self) -> Offset {
+        self.offset
+    }
+
+    fn at(self, offset: Offset) -> Self {
+        Self { offset, ..self }
+    }
+
+    fn is_note_off(&self) -> bool {
+        Event::is_note_off(self)
+    }
+}
+
+impl Queued for ParamEvent {
+    fn offset(&self) -> Offset {
+        self.offset
+    }
+
+    fn at(self, offset: Offset) -> Self {
+        Self { offset, ..self }
+    }
+
+    fn is_note_off(&self) -> bool {
+        false
+    }
+}
+
+/// A delay's length and the frame it has reached: the time every queued
+/// event's due frame is read against.
+struct DelayClock {
+    /// The delay, in frames.
+    len: u64,
+    /// The frame the next block starts at.
+    now: u64,
+}
+
+impl DelayClock {
+    /// The frame an event queued at `t` falls due.
+    fn due(&self, t: u64) -> u64 {
+        t + self.len
+    }
+
+    /// The frames `[start, end)` of the block of `frames` starting now.
+    fn block(&self, frames: usize) -> (u64, u64) {
+        (self.now, self.now + frames as u64)
+    }
+}
+
+/// One kind of event in flight through a delay: due time and event, oldest
+/// first. Holds at most `limit` events, and a note-off may use `reserve`
+/// more, evicting the oldest other event when even that is full. Never grows
+/// past the room it was built with.
+struct Lane<T> {
+    q: VecDeque<(u64, T)>,
+    limit: usize,
+    reserve: usize,
+}
+
+impl<T: Queued> Lane<T> {
+    /// A lane with room for `room` events, holding at most `limit` (and
+    /// `reserve` more note-offs). Control side: allocates.
+    fn with_room(room: usize, limit: usize, reserve: usize) -> Self {
+        Self {
+            q: VecDeque::with_capacity(room),
+            limit,
+            reserve,
+        }
+    }
+
+    /// Re-derive the limit and reserve, clamped to the room the lane has.
+    fn fit(&mut self, limit: usize, reserve: usize) {
+        let room = self.q.capacity();
+        self.limit = limit.min(room);
+        self.reserve = reserve.min(room - self.limit);
+    }
+
+    /// Queue this block's `input`, which starts at frame `start`. Returns how
+    /// many were dropped.
+    fn push(&mut self, start: u64, input: &[T]) -> u32 {
+        let mut dropped = 0;
+        for e in input {
+            let item = (start + u64::from(e.offset().get()), *e);
+            if self.q.len() < self.limit {
+                self.q.push_back(item);
+            } else if !e.is_note_off() {
+                dropped += 1;
+            } else if self.q.len() < self.limit + self.reserve {
+                self.q.push_back(item);
+            } else if let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off()) {
+                // `remove` shifts in place and never reallocates, but it is
+                // O(n) in the queue length, as is the `position` scan. That
+                // is paid only on overflow — the rate the FIFO was sized for
+                // has already been exceeded — so it buys note-off safety at
+                // the one moment it is needed, not every block.
+                self.q.remove(i);
+                self.q.push_back(item);
+                dropped += 1;
+            } else {
+                dropped += 1;
+            }
+        }
+        dropped
+    }
+
+    /// Emit into `out` what falls due in the block of `frames` starting at
+    /// the clock. Stops, without dropping, when `out` is full.
+    fn pop_due(&mut self, clock: &DelayClock, out: &mut CappedVec<T>, frames: usize) {
+        let (start, end) = clock.block(frames);
+        while let Some(&(t, e)) = self.q.front() {
+            let due = clock.due(t);
+            if due >= end || out.is_full() {
+                break;
+            }
+            self.q.pop_front();
+            // `start <= … < end`: inside this block by the loop condition.
+            out.push(e.at(Offset::raw(due.saturating_sub(start) as u32)));
+        }
+    }
+
+    /// Take `old`'s queue into this lane, which was built with room for all
+    /// of it. Should the room fall short, what does not fit is lost,
+    /// non-note-offs first (a note-off evicts the oldest of them, as
+    /// [`push`](Self::push) does): returns how many were lost.
+    fn take_from(&mut self, old: &mut Self) -> usize {
+        let room = self.q.capacity();
+        let mut lost = 0;
+        while let Some(item) = old.q.pop_front() {
+            if self.q.len() < room {
+                self.q.push_back(item);
+            } else if item.1.is_note_off()
+                && let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off())
+            {
+                self.q.remove(i);
+                self.q.push_back(item);
+                lost += 1;
+            } else {
+                lost += 1;
+            }
+        }
+        lost
+    }
 }
 
 impl EventFifo {
@@ -215,23 +367,21 @@ impl EventFifo {
     pub(crate) fn sized_for(len: Samples, cap: usize, max_block: usize, room: usize) -> Self {
         let (limit, reserve) = Self::bounds(len.get(), cap, max_block);
         Self {
-            q: VecDeque::with_capacity((limit + reserve).max(room)),
-            len: len.get() as u64,
-            clock: 0,
-            limit,
-            reserve,
+            events: Lane::with_room((limit + reserve).max(room), limit, reserve),
+            params: Lane::with_room(0, 0, 0),
+            clock: DelayClock {
+                len: len.get() as u64,
+                now: 0,
+            },
             rate: cap.max(1),
             owed: None,
-            pq: VecDeque::new(),
-            plimit: 0,
         }
     }
 
     /// This FIFO with room for param events: as many as it holds events (its
     /// limit), for a source that writes them. Control side: allocates.
     pub(crate) fn with_params(mut self) -> Self {
-        self.pq = VecDeque::with_capacity(self.limit);
-        self.plimit = self.limit;
+        self.params = Lane::with_room(self.events.limit, self.events.limit, 0);
         self
     }
 
@@ -270,15 +420,15 @@ impl EventFifo {
     /// note-off reserve stays free, so a live note-off always finds room.
     /// Allocates nothing.
     pub(crate) fn pour(&mut self) {
-        let room = self.limit.saturating_sub(self.rate);
+        let room = self.events.limit.saturating_sub(self.rate);
         let Some(owed) = &mut self.owed else {
             return;
         };
-        while self.q.len() < room {
+        while self.events.q.len() < room {
             let Some(e) = owed.pop_close() else {
                 break;
             };
-            self.q.push_back((self.clock, e));
+            self.events.q.push_back((self.clock.now, e));
         }
     }
 
@@ -304,7 +454,7 @@ impl EventFifo {
     }
 
     pub(crate) fn retune(&mut self, len: Samples) {
-        self.len = len.get() as u64;
+        self.clock.len = len.get() as u64;
     }
 
     /// Re-derive the limit for the current length at this rate and maximum
@@ -325,24 +475,22 @@ impl EventFifo {
     /// can be, so they still go out on their frames even if they all fall
     /// due at once.
     pub(crate) fn resize(&mut self, cap: usize, max_block: usize) {
-        let (limit, reserve) = Self::bounds(self.len as usize, cap, max_block);
-        let room = self.q.capacity();
-        self.limit = limit.min(room);
-        self.reserve = reserve.min(room - self.limit);
+        let (limit, reserve) = Self::bounds(self.clock.len as usize, cap, max_block);
+        self.events.fit(limit, reserve);
+        self.params.fit(limit, 0);
         self.rate = cap.max(1);
-        self.plimit = limit.min(self.pq.capacity());
         // A table pours up to `limit - rate`: staging sizes the room for the
         // new bound, so the clamp above never leaves a FIFO that carries
         // events no room to pour into.
         debug_assert!(
-            cap == 0 || self.limit > self.rate,
+            cap == 0 || self.events.limit > self.rate,
             "an event FIFO's limit leaves a pour no room"
         );
     }
 
     /// How many events are queued.
     pub(crate) fn queued(&self) -> usize {
-        self.q.len() + self.pq.len()
+        self.events.q.len() + self.params.q.len()
     }
 
     /// Take over `old`'s queue and clock into this FIFO, which was built on
@@ -353,30 +501,9 @@ impl EventFifo {
     /// [`push`](Self::push) does): returns how many were lost, for the
     /// caller to count.
     pub(crate) fn transfer_from(&mut self, old: &mut EventFifo) -> usize {
-        let room = self.q.capacity();
-        let mut lost = 0;
-        while let Some(item) = old.q.pop_front() {
-            if self.q.len() < room {
-                self.q.push_back(item);
-            } else if item.1.is_note_off()
-                && let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off())
-            {
-                self.q.remove(i);
-                self.q.push_back(item);
-                lost += 1;
-            } else {
-                lost += 1;
-            }
-        }
-        let proom = self.pq.capacity();
-        while let Some(item) = old.pq.pop_front() {
-            if self.pq.len() < proom {
-                self.pq.push_back(item);
-            } else {
-                lost += 1;
-            }
-        }
-        self.clock = old.clock;
+        let mut lost = self.events.take_from(&mut old.events);
+        lost += self.params.take_from(&mut old.params);
+        self.clock.now = old.clock.now;
         // What was owed stays owed (the old table goes back with the FIFO).
         if let Some(owed) = old.owed.as_ref().filter(|t| !t.is_empty())
             && !self.owe(owed)
@@ -390,7 +517,7 @@ impl EventFifo {
     /// Every event still queued, oldest first.
     #[cfg(test)]
     pub(crate) fn pending(&self) -> impl Iterator<Item = Event> + '_ {
-        self.q.iter().map(|&(_, e)| e)
+        self.events.q.iter().map(|&(_, e)| e)
     }
 
     /// The queued events for a flush, when the delay itself goes away: each
@@ -398,119 +525,40 @@ impl EventFifo {
     /// keeps its length, appended to `out` as far as its capacity takes.
     /// Returns how many did not fit. Allocates nothing.
     pub(crate) fn flush_into(&self, out: &mut CappedVec<Event>) -> usize {
-        let first = self.q.front().map_or(0, |&(t, _)| t + self.len);
+        let first = self.events.q.front().map_or(0, |&(t, _)| self.clock.due(t));
         // The param events in flight go no further: a sink that outlives its
         // delay takes up the source's own segments again (each is absolute).
-        let mut lost = self.pq.len();
-        for &(t, e) in &self.q {
+        let mut lost = self.params.q.len();
+        for &(t, e) in &self.events.q {
             if out.is_full() {
                 lost += 1;
                 continue;
             }
             out.push(Event {
-                offset: Offset::raw((t + self.len - first).min(u64::from(u32::MAX)) as u32),
+                offset: Offset::raw((self.clock.due(t) - first).min(u64::from(u32::MAX)) as u32),
                 ..e
             });
         }
         lost
     }
 
-    /// Queue this block's `input`. Returns how many were dropped.
-    fn push_events(&mut self, input: &[Event]) -> u32 {
-        let mut dropped = 0;
-        let start = self.clock;
-        for e in input {
-            let item = (start + u64::from(e.offset.get()), *e);
-            if self.q.len() < self.limit {
-                self.q.push_back(item);
-            } else if !e.is_note_off() {
-                dropped += 1;
-            } else if self.q.len() < self.limit + self.reserve {
-                self.q.push_back(item);
-            } else if let Some(i) = self.q.iter().position(|(_, x)| !x.is_note_off()) {
-                // `remove` shifts in place and never reallocates, but it is
-                // O(n) in the queue length, as is the `position` scan. That
-                // is paid only on overflow — the rate the FIFO was sized for
-                // has already been exceeded — so it buys note-off safety at
-                // the one moment it is needed, not every block.
-                self.q.remove(i);
-                self.q.push_back(item);
-                dropped += 1;
-            } else {
-                dropped += 1;
-            }
-        }
-        dropped
-    }
-
-    /// Emit into `out` what falls due in the block of `frames` starting at
-    /// the FIFO's clock. Stops, without dropping, when `out` is full.
-    fn pop_due_events(&mut self, out: &mut CappedVec<Event>, frames: usize) {
-        let start = self.clock;
-        let end = start + frames as u64;
-        while let Some(&(t, e)) = self.q.front() {
-            let due = t + self.len;
-            if due >= end || out.is_full() {
-                break;
-            }
-            self.q.pop_front();
-            // `start <= … < end`: inside this block by the loop condition.
-            out.push(Event {
-                offset: Offset::raw(due.saturating_sub(start) as u32),
-                ..e
-            });
-        }
-    }
-
     /// Queue this block's `input`, events and param events. Returns how many
     /// were dropped.
     pub(crate) fn push(&mut self, input: &EventSlot) -> u32 {
-        self.push_events(&input.events) + self.push_params(&input.params)
+        let start = self.clock.now;
+        self.events.push(start, &input.events) + self.params.push(start, &input.params)
     }
 
     /// Emit into `out` what falls due in the block of `frames`, events and
     /// param events.
     pub(crate) fn pop_due(&mut self, out: &mut EventSlot, frames: usize) {
-        self.pop_due_events(&mut out.events, frames);
-        self.pop_due_params(&mut out.params, frames);
-    }
-
-    /// Queue this block's param events `input`. Returns how many were
-    /// dropped.
-    fn push_params(&mut self, input: &[ParamEvent]) -> u32 {
-        let mut dropped = 0;
-        let start = self.clock;
-        for e in input {
-            if self.pq.len() < self.plimit {
-                self.pq.push_back((start + u64::from(e.offset.get()), *e));
-            } else {
-                dropped += 1;
-            }
-        }
-        dropped
-    }
-
-    /// Emit into `out` the param events that fall due in the block of
-    /// `frames`, as [`pop_due_events`](Self::pop_due_events) does events.
-    fn pop_due_params(&mut self, out: &mut CappedVec<ParamEvent>, frames: usize) {
-        let start = self.clock;
-        let end = start + frames as u64;
-        while let Some(&(t, e)) = self.pq.front() {
-            let due = t + self.len;
-            if due >= end || out.is_full() {
-                break;
-            }
-            self.pq.pop_front();
-            out.push(ParamEvent {
-                offset: Offset::raw(due.saturating_sub(start) as u32),
-                ..e
-            });
-        }
+        self.events.pop_due(&self.clock, &mut out.events, frames);
+        self.params.pop_due(&self.clock, &mut out.params, frames);
     }
 
     /// Move the clock past a block of `frames`.
     pub(crate) fn advance(&mut self, frames: usize) {
-        self.clock += frames as u64;
+        self.clock.now += frames as u64;
     }
 
     /// A PDC delay's whole block: emit what was already queued and falls
@@ -627,14 +675,14 @@ mod tests {
         push_events(&mut old, &[note(0, true, 10)]);
         let mut new = EventFifo::sized(Samples::new(64), 4, 8);
         // Room for three: shrink it by building one that holds three.
-        new.q = VecDeque::with_capacity(3);
-        let room = new.q.capacity();
+        new.events.q = VecDeque::with_capacity(3);
+        let room = new.events.q.capacity();
         assert!(room < 5);
         let lost = new.transfer_from(&mut old);
-        assert_eq!(new.q.capacity(), room, "the queue did not grow");
+        assert_eq!(new.events.q.capacity(), room, "the queue did not grow");
         assert_eq!(lost, 5 - room);
-        assert_eq!(new.q.len(), room);
-        assert!(old.q.is_empty());
+        assert_eq!(new.events.q.len(), room);
+        assert!(old.events.q.is_empty());
         assert!(
             new.pending().any(|e| e.is_note_off()),
             "the note-off evicted a note-on"
@@ -652,11 +700,11 @@ mod tests {
             &[note(0, true, 1), note(0, true, 2), note(0, true, 3)],
         );
         let mut new = EventFifo::sized(Samples::new(64), 4, 8);
-        new.q = VecDeque::with_capacity(2);
-        let room = new.q.capacity();
+        new.events.q = VecDeque::with_capacity(2);
+        let room = new.events.q.capacity();
         let lost = new.transfer_from(&mut old);
         assert_eq!(lost, 3 - room);
-        assert_eq!(new.q.capacity(), room);
+        assert_eq!(new.events.q.capacity(), room);
         assert!(new.pending().all(|e| e.is_note_off()));
     }
 
@@ -686,7 +734,7 @@ mod tests {
     #[test]
     fn a_due_backlog_makes_room_for_the_blocks_input() {
         let mut f = EventFifo::sized(Samples::new(64), 2, 64);
-        let limit = f.limit;
+        let limit = f.events.limit;
         let backlog: Vec<Event> = (0..limit as u32).map(|i| note(i, false, i)).collect();
         push_events(&mut f, &backlog);
         // Shorter: the whole backlog is overdue.
@@ -785,11 +833,11 @@ mod tests {
     #[test]
     fn a_note_off_survives_overflow() {
         let mut f = EventFifo::sized(Samples::new(4), 1, 4);
-        let limit = f.limit;
-        let cap = f.q.capacity();
+        let limit = f.events.limit;
+        let cap = f.events.q.capacity();
         let ons: Vec<Event> = (0..cap as u32 + 5).map(|i| note(0, false, i)).collect();
         let dropped = push_events(&mut f, &ons);
-        assert_eq!(f.q.len(), limit, "note-ons stop at the limit");
+        assert_eq!(f.events.q.len(), limit, "note-ons stop at the limit");
         assert_eq!(dropped as usize, ons.len() - limit);
         // Fill the reserve with note-offs, then one more.
         let offs: Vec<Event> = (0..(cap - limit) as u32 + 1)
@@ -798,7 +846,7 @@ mod tests {
         push_events(&mut f, &offs);
         let kept_offs = f.pending().filter(Event::is_note_off).count();
         assert_eq!(kept_offs, offs.len(), "every note-off is kept");
-        assert!(f.q.len() <= cap, "and the FIFO never grew");
+        assert!(f.events.q.len() <= cap, "and the FIFO never grew");
     }
 
     /// The queue never passes its bound, however much room its allocation

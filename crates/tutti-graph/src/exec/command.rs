@@ -297,14 +297,12 @@ pub(crate) struct CommandRx {
     /// One past the highest `seq` pulled so far.
     next_seq: u64,
     pending: CappedVec<Command>,
-    due: Vec<DueItem<EventKind>>,
-    due_events: Vec<Event>,
-    due_params: Vec<DueItem<ParamKind>>,
-    due_param_events: Vec<ParamEvent>,
+    /// The events due this block.
+    events: DueLane<Event>,
+    /// The param events due this block.
+    params: DueLane<ParamEvent>,
     done: Arc<AtomicU64>,
-    late: u64,
-    unrouted: u64,
-    cancelled: u64,
+    counts: Counts,
     /// What continuous playback has crossed: tells a late beat from one a
     /// seek jumped over.
     crossings: BeatCrossings,
@@ -336,14 +334,10 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
             held: CappedVec::with_capacity(CANCEL_CAPACITY),
             next_seq: 0,
             pending: CappedVec::with_capacity(COMMAND_CAPACITY),
-            due: Vec::with_capacity(COMMAND_CAPACITY),
-            due_events: Vec::with_capacity(COMMAND_CAPACITY),
-            due_params: Vec::with_capacity(COMMAND_CAPACITY),
-            due_param_events: Vec::with_capacity(COMMAND_CAPACITY),
+            events: DueLane::with_capacity(COMMAND_CAPACITY),
+            params: DueLane::with_capacity(COMMAND_CAPACITY),
             done,
-            late: 0,
-            unrouted: 0,
-            cancelled: 0,
+            counts: Counts::default(),
             crossings: BeatCrossings::new(),
         },
     )
@@ -422,17 +416,17 @@ impl CommandRx {
     /// Commands that landed late (at offset 0 of the first block that saw
     /// them past due).
     pub(crate) fn late(&self) -> u64 {
-        self.late
+        self.counts.late
     }
 
     /// Commands whose node or port was gone when they fell due.
     pub(crate) fn unrouted(&self) -> u64 {
-        self.unrouted
+        self.counts.unrouted
     }
 
     /// Commands cancelled before they landed.
     pub(crate) fn cancelled(&self) -> u64 {
-        self.cancelled
+        self.counts.cancelled
     }
 
     /// Pull new commands, then apply cancellations. Frees the credit of what
@@ -473,7 +467,7 @@ impl CommandRx {
         }
         let gone = (before - self.pending.len()) as u64;
         if gone > 0 {
-            self.cancelled += gone;
+            self.counts.cancelled += gone;
             self.done.fetch_add(gone, Ordering::Release);
         }
     }
@@ -535,15 +529,13 @@ impl CommandRx {
     ) {
         self.pull();
         self.crossings.observe(env);
-        self.due.clear();
-        self.due_events.clear();
-        self.due_params.clear();
-        self.due_param_events.clear();
+        self.events.clear();
+        self.params.clear();
         if self.pending.is_empty() {
             return;
         }
-        let (due, due_params) = (&mut self.due, &mut self.due_params);
-        let (late, unrouted) = (&mut self.late, &mut self.unrouted);
+        let (events, params) = (&mut self.events, &mut self.params);
+        let counts = &mut self.counts;
         let crossings = &self.crossings;
         let mut finished = 0u64;
         // `retain` keeps arrival order and shifts in place: no allocation.
@@ -578,7 +570,7 @@ impl CommandRx {
                 Due::NotYet => return true,
                 Due::In(o) => o,
                 Due::Late => {
-                    *late += 1;
+                    counts.late += 1;
                     Offset::ZERO
                 }
             };
@@ -586,70 +578,156 @@ impl CommandRx {
             match (target, cmd.payload) {
                 (Some(u), Scheduled::Event(kind)) => {
                     has_due[u] = true;
-                    due.push(DueItem::of(cmd, u, offset, kind));
+                    events.push(DueItem::of(cmd, u, offset, kind));
                 }
                 (Some(u), Scheduled::Param(kind)) => {
                     has_due[u] = true;
-                    due_params.push(DueItem::of(cmd, u, offset, kind));
+                    params.push(DueItem::of(cmd, u, offset, kind));
                 }
-                (None, _) => *unrouted += 1,
+                (None, _) => counts.unrouted += 1,
             }
             false
         });
         if finished > 0 {
             self.done.fetch_add(finished, Ordering::Release);
         }
-        // Ties at one offset go by timeline position, then scheduling order.
-        self.due.sort_unstable_by_key(DueItem::order);
-        self.due_params.sort_unstable_by_key(DueItem::order);
-        self.due_events.extend(self.due.iter().map(|d| Event {
-            offset: d.offset,
-            kind: d.kind,
-        }));
-        self.due_param_events
-            .extend(self.due_params.iter().map(|d| ParamEvent {
-                offset: d.offset,
-                kind: d.kind,
-            }));
+        self.events.settle();
+        self.params.settle();
     }
 
     /// This block's deliveries, as a `Sync` view the executor's workers
     /// share.
     pub(crate) fn deliveries(&self) -> Deliveries<'_> {
         Deliveries {
-            due: &self.due,
-            events: &self.due_events,
-            due_params: &self.due_params,
-            param_events: &self.due_param_events,
+            events: self.events.view(),
+            params: self.params.view(),
         }
     }
 }
 
-/// This block's scheduled deliveries, sorted by unit and port: what
-/// [`overlay`](Self::overlay) merges into a node's event inputs. Plain
-/// slices, so every worker of a parallel block can read them at once.
-#[derive(Clone, Copy)]
-pub(crate) struct Deliveries<'a> {
-    due: &'a [DueItem<EventKind>],
-    events: &'a [Event],
-    due_params: &'a [DueItem<ParamKind>],
-    param_events: &'a [ParamEvent],
+/// What the executor counted while resolving commands.
+#[derive(Default)]
+struct Counts {
+    /// Commands that landed late.
+    late: u64,
+    /// Commands whose node or port was gone when they fell due.
+    unrouted: u64,
+    /// Commands cancelled before they landed.
+    cancelled: u64,
 }
 
-impl Deliveries<'_> {
+/// An event type a due command is delivered as: the [`Event`] of an event
+/// input or the [`ParamEvent`] of a param input.
+pub(crate) trait Delivered: Copy {
+    /// The payload a command carries for it.
+    type Kind: Copy;
+
+    /// The delivery of `kind` at `offset`.
+    fn at(offset: Offset, kind: Self::Kind) -> Self;
+
+    /// Merge `sources` into `out` as this type's input merge does; returns
+    /// how many did not fit.
+    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32;
+}
+
+impl Delivered for Event {
+    type Kind = EventKind;
+
+    fn at(offset: Offset, kind: EventKind) -> Self {
+        Self { offset, kind }
+    }
+
+    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32 {
+        merge_into(sources, out)
+    }
+}
+
+impl Delivered for ParamEvent {
+    type Kind = ParamKind;
+
+    fn at(offset: Offset, kind: ParamKind) -> Self {
+        Self { offset, kind }
+    }
+
+    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32 {
+        merge_params(sources, out)
+    }
+}
+
+/// The commands of one kind that fall due this block: the resolved items,
+/// and their events once sorted. Both lists are sized at construction, and
+/// `events[i]` is `due[i]` as an event, so a run of `due` indexes the same
+/// run of `events`.
+struct DueLane<V: Delivered> {
+    due: Vec<DueItem<V::Kind>>,
+    events: Vec<V>,
+}
+
+impl<V: Delivered> DueLane<V> {
+    /// Room for `capacity` of each. Allocates.
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            due: Vec::with_capacity(capacity),
+            events: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.due.clear();
+        self.events.clear();
+    }
+
+    fn push(&mut self, item: DueItem<V::Kind>) {
+        self.due.push(item);
+    }
+
+    /// Sort the items (ties at one offset go by timeline position, then
+    /// scheduling order) and derive their events.
+    fn settle(&mut self) {
+        self.due.sort_unstable_by_key(DueItem::order);
+        self.events
+            .extend(self.due.iter().map(|d| V::at(d.offset, d.kind)));
+    }
+
+    fn view(&self) -> DueView<'_, V> {
+        DueView {
+            due: &self.due,
+            events: &self.events,
+        }
+    }
+}
+
+/// One kind of this block's scheduled deliveries, sorted by unit and port.
+/// Plain slices, so every worker of a parallel block can read them at once.
+pub(crate) struct DueView<'a, V: Delivered> {
+    due: &'a [DueItem<V::Kind>],
+    events: &'a [V],
+}
+
+impl<V: Delivered> Clone for DueView<'_, V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<V: Delivered> Copy for DueView<'_, V> {}
+
+impl<V: Delivered> DueView<'_, V> {
     /// Merge this block's deliveries for plan unit `unit` into `buf`, each
     /// port's after `base(port)` (the port's events as the executor would
     /// otherwise hand them), and record `(port, range in buf)` in `views`.
-    /// Returns how many views were written. Never grows `buf`: past its
-    /// capacity (which the executor sizes so it cannot be reached) events
-    /// are counted in the second return value instead.
+    /// Returns how many views were written, and how many events did not
+    /// fit: never grows `buf`.
     pub(crate) fn overlay<'e>(
         &self,
         unit: PlanUnitId,
-        base: impl Fn(u16) -> &'e [Event],
-        buf: &mut CappedVec<Event>,
+        base: impl Fn(u16) -> &'e [V],
+        buf: &mut CappedVec<V>,
         views: &mut [(u16, u32, u32)],
-    ) -> (usize, u32) {
+    ) -> (usize, u32)
+    where
+        V: 'e,
+    {
         buf.clear();
         let start = self.due.partition_point(|d| d.unit < unit);
         let end = self.due.partition_point(|d| d.unit <= unit);
@@ -660,7 +738,7 @@ impl Deliveries<'_> {
             let port = self.due[i].port;
             let run = self.due[i..end].partition_point(|d| d.port == port) + i;
             let from = buf.len() as u32;
-            dropped += merge_into(&[base(port), &self.events[i..run]], buf);
+            dropped += V::merge(&[base(port), &self.events[i..run]], buf);
             views[n] = (port, from, buf.len() as u32);
             n += 1;
             i = run;
@@ -669,39 +747,15 @@ impl Deliveries<'_> {
     }
 }
 
-impl Deliveries<'_> {
-    /// Merge this block's scheduled param events for plan unit `unit` into
-    /// `buf`, each port's after `base(port)` (the port's param events as the
-    /// executor would otherwise hand them), and record `(port, range in buf)`
-    /// in `views`. Returns how many views were written, and how many param
-    /// events did not fit: never grows `buf`.
-    pub(crate) fn overlay_params<'e>(
-        &self,
-        unit: PlanUnitId,
-        base: impl Fn(u16) -> &'e [ParamEvent],
-        buf: &mut CappedVec<ParamEvent>,
-        views: &mut [(u16, u32, u32)],
-    ) -> (usize, u32) {
-        buf.clear();
-        let start = self.due_params.partition_point(|d| d.unit < unit);
-        let end = self.due_params.partition_point(|d| d.unit <= unit);
-        let mut n = 0;
-        let mut dropped = 0;
-        let mut i = start;
-        while i < end {
-            let port = self.due_params[i].port;
-            let run = self.due_params[i..end].partition_point(|d| d.port == port) + i;
-            let from = buf.len() as u32;
-            dropped += merge_params(&[base(port), &self.param_events[i..run]], buf);
-            views[n] = (port, from, buf.len() as u32);
-            n += 1;
-            i = run;
-        }
-        (n, dropped)
-    }
+/// This block's scheduled deliveries: what [`DueView::overlay`] merges into
+/// a node's event and param inputs.
+#[derive(Clone, Copy)]
+pub(crate) struct Deliveries<'a> {
+    pub(crate) events: DueView<'a, Event>,
+    pub(crate) params: DueView<'a, ParamEvent>,
 }
 
-impl Deliveries<'_> {
+impl DueView<'_, Event> {
     /// A node's whole event input for the block under a declared bound of
     /// `bound` events, all ports together: every port's `base(port)` with its
     /// scheduled deliveries after it, cut to the earliest `bound` by
@@ -771,7 +825,7 @@ impl Overlay {
 
 /// Capacity of the executor's overlay buffer for `plan`: enough for the
 /// widest node's event inputs at full slots, every flushed event, and every
-/// outstanding command — so [`Deliveries::overlay`] can never be short.
+/// outstanding command — so [`DueView::overlay`] can never be short.
 pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize {
     let widest = plan
         .ops
