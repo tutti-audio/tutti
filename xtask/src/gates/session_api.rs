@@ -23,6 +23,7 @@
 //! reason, fails.
 
 use super::lex::{blank, find_word_from, matching, skipped_library, test_ranges, word};
+use super::ratchet;
 use super::{Report, Tree};
 use std::collections::BTreeSet;
 
@@ -173,44 +174,28 @@ fn scan(tree: &dyn Tree) -> (Found, usize) {
     (found, files.len())
 }
 
-fn parse(text: &str) -> Result<Vec<(String, String)>, Vec<String>> {
-    let mut rows = Vec::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        match line.split_once(char::is_whitespace) {
+fn read(tree: &dyn Tree) -> Result<Vec<(String, String)>, Report> {
+    ratchet::read_rows(tree, "check-session-api", ALLOW, |at, line, errors| {
+        let row = match line.split_once(char::is_whitespace) {
             Some((key, reason)) if key.contains("::") && !reason.trim().is_empty() => {
-                rows.push((key.to_owned(), reason.trim().to_owned()));
+                Some((key.to_owned(), reason.trim().to_owned()))
             }
-            _ => errors.push(format!(
-                "{ALLOW}:{}: not `<file>::<Type>  <reason>`: {line}",
-                n + 1
-            )),
+            _ => None,
+        };
+        if row.is_none() {
+            errors.push(format!(
+                "{ALLOW}:{at}: not `<file>::<Type>  <reason>`: {line}"
+            ));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        row
+    })
 }
 
 pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(ALLOW) else {
-        r.fail(format!("check-session-api: FAIL: {ALLOW} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-session-api: FAIL ({ALLOW} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let (found, files) = scan(tree);
     if files < min_files {
@@ -410,14 +395,12 @@ mod tests {
     }
 
     #[test]
-    fn a_row_without_a_reason_or_a_missing_list_fails() {
+    fn a_row_without_a_reason_fails() {
         let r = run(
             &[(ED, "pub struct Editor { m: MainThreadMarker }")],
             "x.rs::Editor\n",
         );
         assert!(r.findings.iter().any(|l| l.contains("malformed")));
-        let r = check(&Mem::with(&[(ED, "")]), 0);
-        assert!(r.findings.iter().any(|l| l.contains("is missing")));
     }
 
     #[test]

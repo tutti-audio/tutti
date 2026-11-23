@@ -338,11 +338,12 @@ fn check_refs(tree: &dyn Tree) -> Report {
 /// `<count> <path>` lines: each file's unresolved names when the gate began.
 pub(crate) const BASELINE: &str = "xtask/doc-idents.txt";
 
-const WORDING: Wording = Wording {
+const WORDING: Wording<1> = Wording {
     gate: "check-prose-names",
     baseline: BASELINE,
-    noun: "unresolved names",
+    nouns: ["unresolved names"],
     headline: "prose names an item no code uses; name the real one",
+    paste: false,
 };
 
 const CODE_ROOTS: [&str; 3] = ["crates", "testing", "xtask"];
@@ -783,7 +784,7 @@ fn check_idents(tree: &dyn Tree) -> Report {
         }
         found.push(Found {
             path: p.path,
-            sites,
+            sites: [sites],
         });
     }
     ratchet::settle(&WORDING, &baseline, found)
@@ -1002,16 +1003,5 @@ mod tests {
                 "    crates/tutti-vst3-ffi/src/lib.rs:1: `Gone` names no item (`Gone` is in no code)",
             ]
         );
-    }
-
-    #[test]
-    fn a_file_within_its_baseline_passes_and_a_missing_baseline_fails() {
-        let files = [("crates/a/src/lib.rs", "// `Gone`\n")];
-        let ok = check_idents(&Mem::with(&[
-            (BASELINE, "1 crates/a/src/lib.rs\n"),
-            files[0],
-        ]));
-        assert!(ok.passed());
-        assert!(!check_idents(&Mem::with(&files)).passed());
     }
 }

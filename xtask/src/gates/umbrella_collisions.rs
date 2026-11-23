@@ -20,11 +20,13 @@
 //! row for an unsorted or repeated key) fails as stale, so the lists only shrink.
 
 use super::lex::skipped;
+use super::ratchet;
 use super::umbrella::{SRC, file_module};
 use super::use_tree::placed_uses;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
+const GATE: &str = "umbrella-collisions";
 pub(crate) const BASELINE: &str = "xtask/umbrella-collisions-baseline.txt";
 pub(crate) const ALLOW: &str = "xtask/umbrella-collisions-allow.txt";
 
@@ -114,21 +116,16 @@ fn collisions(tree: &dyn Tree) -> Result<BTreeSet<Row>, String> {
     Ok(out)
 }
 
-fn rows(text: &str, file: &str, errors: &mut Vec<String>) -> Vec<(usize, Vec<String>)> {
-    let mut out = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
+/// The rows of the list at `path`, each split into at least three columns.
+fn read(tree: &dyn Tree, path: &str) -> Result<Vec<(usize, Vec<String>)>, Report> {
+    ratchet::read_rows(tree, GATE, path, |at, line, errors| {
         let cols: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
         if cols.len() < 3 {
-            errors.push(format!("{file}:{}: too few columns: {line}", n + 1));
-        } else {
-            out.push((n + 1, cols));
+            errors.push(format!("{path}:{at}: too few columns: {line}"));
+            return None;
         }
-    }
-    out
+        Some((at, cols))
+    })
 }
 
 pub(super) fn check(tree: &dyn Tree) -> Report {
@@ -140,35 +137,35 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
             return r;
         }
     };
+    let (base, allowed_rows) = (read(tree, BASELINE), read(tree, ALLOW));
+    let (base, allowed_rows) = match (base, allowed_rows) {
+        (Ok(b), Ok(a)) => (b, a),
+        (b, a) => {
+            for lists in [b.err(), a.err()].into_iter().flatten() {
+                lists.findings.into_iter().for_each(|f| r.fail(f));
+            }
+            return r;
+        }
+    };
     let mut errors = Vec::new();
     let mut baseline: Vec<Row> = Vec::new();
     let mut allow: Vec<(Row, String)> = Vec::new();
-    match tree.read(BASELINE) {
-        None => errors.push(format!("{BASELINE} is missing")),
-        Some(text) => {
-            for (n, c) in rows(&text, BASELINE, &mut errors) {
-                let kind = match c[0].as_str() {
-                    "crates" => Kind::Crates,
-                    "paths" => Kind::Paths,
-                    _ => {
-                        errors.push(format!("{BASELINE}:{n}: kind is `crates` or `paths`"));
-                        continue;
-                    }
-                };
-                baseline.push((kind, c[1].clone(), c[2].clone()));
+    for (n, c) in base {
+        let kind = match c[0].as_str() {
+            "crates" => Kind::Crates,
+            "paths" => Kind::Paths,
+            _ => {
+                errors.push(format!("{BASELINE}:{n}: kind is `crates` or `paths`"));
+                continue;
             }
-        }
+        };
+        baseline.push((kind, c[1].clone(), c[2].clone()));
     }
-    match tree.read(ALLOW) {
-        None => errors.push(format!("{ALLOW} is missing")),
-        Some(text) => {
-            for (n, c) in rows(&text, ALLOW, &mut errors) {
-                if c.len() > 3 {
-                    allow.push(((Kind::Crates, c[0].clone(), c[1].clone()), c[2..].join(" ")));
-                } else {
-                    errors.push(format!("{ALLOW}:{n}: `<name> <crates> <citation>: <why>`"));
-                }
-            }
+    for (n, c) in allowed_rows {
+        if c.len() > 3 {
+            allow.push(((Kind::Crates, c[0].clone(), c[1].clone()), c[2..].join(" ")));
+        } else {
+            errors.push(format!("{ALLOW}:{n}: `<name> <crates> <citation>: <why>`"));
         }
     }
     if !errors.is_empty() {
