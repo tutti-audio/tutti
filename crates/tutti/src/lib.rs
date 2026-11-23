@@ -769,15 +769,18 @@ pub mod modulation {
 }
 
 /// The polyphonic subtractive synth node (`tutti-polysynth`): the node, its
-/// config and the voice, unison and portamento settings. Feature `synth`.
+/// config and the voice, unison and portamento settings, and the instrument that plays
+/// modal, waveguide, Karplus-Strong and additive voices. Feature `synth`.
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane, MasterVolume,
-        MasterVolumeOutOfRange, Order, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
-        ReferencePitch, ReferencePitchOutOfRange, Steal, SvfMode, SvfQ, SvfQOutOfRange,
-        SynthConfig, SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices,
-        UnisonVoicesError, VoiceMode,
+        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, GlideTime, GlideTimeError,
+        InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice, KarplusVoiceConfig, Lane,
+        MasterVolume, MasterVolumeOutOfRange, ModalVoice, ModalVoiceConfig, NoteInstrument, Order,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch,
+        ReferencePitchOutOfRange, Steal, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig,
+        SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
+        WaveguideVoice, WaveguideVoiceConfig,
     };
 }
 

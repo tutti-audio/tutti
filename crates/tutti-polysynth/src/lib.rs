@@ -168,6 +168,14 @@ pub use tutti_music::Adsr;
 mod polysynth;
 pub use polysynth::PolySynth;
 
+mod instrument;
+// A voice that sounds a `tutti-dsp` resonator, and the node that plays them by MIDI.
+pub use instrument::{
+    AdditiveVoice, AdditiveVoiceConfig, InstrumentCells, InstrumentConfig, InstrumentVoice,
+    KarplusVoice, KarplusVoiceConfig, ModalVoice, ModalVoiceConfig, NoteInstrument, Strike,
+    WaveguideVoice, WaveguideVoiceConfig,
+};
+
 mod synth_voice;
 
 mod bank;

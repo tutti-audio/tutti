@@ -222,6 +222,14 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 #[cfg(feature = "synth")]
 impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySynth<F> {}
 
+// An instrument over note voices (modal, waveguide, Karplus-Strong, additive): one MIDI
+// event input and the master volume as a `ParamSet`.
+#[cfg(feature = "synth")]
+impl<V: tutti_polysynth::InstrumentVoice> SessionNode<V::Float>
+    for tutti_polysynth::NoteInstrument<V>
+{
+}
+
 /// The values of a voice node that the session's verbs reach: its window,
 /// loop, direction and speed, each a published cell of its handle.
 #[cfg(feature = "sampler")]
