@@ -406,7 +406,8 @@ struct Shared<'s, 'o, F: Float = f32> {
 }
 
 /// Run one block's ops: spread over `pool`'s participants when the plan
-/// spreads ([`Par::spreads`]), else on the calling thread alone. The events dropped are added to `b.dropped`; returns
+/// spreads ([`Par::spreads`]), else on the calling thread alone. The events
+/// dropped are added to `b.dropped`; returns
 /// whether a crossfade ended.
 ///
 /// # Panics

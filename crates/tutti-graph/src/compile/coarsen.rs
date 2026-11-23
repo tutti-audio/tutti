@@ -1,5 +1,5 @@
 //! Coarsening (compiler step 7): the ops grouped into **tasks**, the units
-//! a parallel executor dispatches, and the cost model's total work.
+//! a parallel executor dispatches.
 //!
 //! Three passes, each keeping the task graph acyclic and every op
 //! dependency:
@@ -34,13 +34,12 @@ use tutti_units::Samples;
 use crate::cost::{GRAIN, TASK_DISPATCH, Work};
 use crate::plan::{Csr, Span};
 
-/// The task tables and the cost model's total.
+/// The task tables.
 pub(super) struct Tasks {
     pub(super) tasks: Vec<Span>,
     pub(super) task_ops: Vec<u32>,
     pub(super) succ: Csr,
     pub(super) activation: Vec<u32>,
-    pub(super) work: Work,
 }
 
 /// Group the op DAG (`preds` / `succ` by op, ops numbered topologically)
@@ -77,7 +76,7 @@ pub(super) fn coarsen(
             break;
         }
     }
-    finish(groups, &of, succ, work)
+    finish(groups, &of, succ)
 }
 
 /// Pass 1 alone: every op its own item, chains fused.
@@ -322,9 +321,8 @@ fn critical(
     (done == groups.len()).then_some(longest)
 }
 
-/// The plan's task tables, and the cost model's total: the whole block's
-/// work.
-fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>], work: &[Work]) -> Tasks {
+/// The plan's task tables.
+fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>]) -> Tasks {
     let (_, rows) = group_dag(of, succ, groups.len());
     let mut activation = vec![0u32; groups.len()];
     for (t, row) in rows.iter().enumerate() {
@@ -333,7 +331,6 @@ fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>], work: &[Work]) -
             activation[s as usize] += 1;
         }
     }
-    let total = work.iter().fold(Work::ZERO, |acc, &w| acc.plus(w));
     let mut tasks = Vec::with_capacity(groups.len());
     let mut task_ops = Vec::with_capacity(of.len());
     for ops in &groups {
@@ -349,7 +346,6 @@ fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>], work: &[Work]) -
         task_ops,
         succ: Csr::from_rows(&rows),
         activation,
-        work: total,
     }
 }
 

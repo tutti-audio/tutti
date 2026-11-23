@@ -196,9 +196,8 @@ pub struct Shape {
     /// until something is connected to it, and the node must then answer
     /// [`Node::param_base`] for it.
     pub params: ParamPorts,
-    /// About how much work the node does per sample and channel: the compiler's
-    /// cost model packs cheap siblings into one task and keeps a graph too
-    /// cheap to spread on one thread. [`Cost::Heavy`] unless set with
+    /// About how much work the node does per sample and channel: the compiler
+    /// packs cheap siblings into one task. [`Cost::Heavy`] unless set with
     /// [`cost`](Self::cost): a node that declares nothing is assumed
     /// worth a thread of its own. A speed hint only — it never changes a
     /// sample.
@@ -1649,8 +1648,8 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// Processor) would otherwise never hand it back.
     ///
     /// The contract is narrow: answer pending handoffs only. It runs at the node's place in the
-    /// schedule, on the thread that would have run `process`, so the parallel
-    /// executor sees what the serial one does. It is never called for a node
+    /// schedule, on the thread that would have run `process`, so every
+    /// participant count sees the same. It is never called for a node
     /// that is not parked, nor for one the executor skips as idle (that one is
     /// woken through its [`Wake`] and processed). Audio thread: must not allocate, lock or block.
     ///

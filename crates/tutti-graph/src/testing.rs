@@ -740,7 +740,7 @@ impl Pair {
     }
 
     /// As [`new`](Self::new), with the executor running blocks on a shared
-    /// [`TestPool`] of `workers` participants (`1`: serially, no pool).
+    /// [`TestPool`] of `workers` participants (`1`: no pool).
     pub fn with_workers(max_block: usize, workers: usize) -> Self {
         let mut pair = Self::new(max_block);
         if workers > 1 {

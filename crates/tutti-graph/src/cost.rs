@@ -6,8 +6,7 @@
 //! **coarsening** (`compile/coarsen.rs`): sibling tasks (one predecessor
 //! set) cheaper than [`GRAIN`] are packed together until a task is worth
 //! dispatching, where that does not lengthen the costliest path through the
-//! task DAG. [`Plan::work`](crate::Plan::work) reports the whole block's
-//! estimate.
+//! task DAG.
 //!
 //! The estimates never decide whether a block spreads: with a pool, every
 //! block of a plan with more than one task runs on all of its participants.
@@ -53,8 +52,8 @@ use tutti_units::Samples;
 /// an order of magnitude the compiler's cost model works from (see
 /// [`Shape::cost`](crate::Shape::cost)).
 ///
-/// A speed hint only. Whatever a node declares, the parallel render is bit
-/// for bit the serial one; a wrong class can only make a block slower.
+/// A speed hint only. Whatever a node declares, the render is bit for bit the
+/// same at any participant count; a wrong class can only make a block slower.
 ///
 /// `#[non_exhaustive]`: a finer class may come later without a breaking
 /// change.
@@ -62,8 +61,7 @@ use tutti_units::Samples;
 #[non_exhaustive]
 pub enum Cost {
     /// A few arithmetic operations per sample and channel: a gain, a pan, a
-    /// sum, a meter. Siblings this cheap are packed into one task, and a
-    /// graph of nothing else renders serially.
+    /// sum, a meter. Siblings this cheap are packed into one task.
     Light,
     /// Tens of operations per sample and channel: a biquad or
     /// state-variable filter, an oscillator, a dynamics detector.
@@ -96,30 +94,30 @@ impl Cost {
 /// `fixed + per_frame × frames`, in the cost model's units (about a
 /// nanosecond of one core; see the module docs of `cost.rs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Work {
+pub(crate) struct Work {
     /// Work per block whatever its length.
-    pub fixed: u64,
+    pub(crate) fixed: u64,
     /// Work per frame.
-    pub per_frame: u64,
+    pub(crate) per_frame: u64,
 }
 
 impl Work {
     /// No work.
-    pub const ZERO: Self = Self {
+    pub(crate) const ZERO: Self = Self {
         fixed: 0,
         per_frame: 0,
     };
 
     /// The estimate for a block of `frames`.
     #[must_use]
-    pub const fn at(self, frames: Samples) -> u64 {
+    pub(crate) const fn at(self, frames: Samples) -> u64 {
         self.fixed
             .saturating_add(self.per_frame.saturating_mul(frames.get() as u64))
     }
 
     /// The sum of two estimates.
     #[must_use]
-    pub const fn plus(self, other: Self) -> Self {
+    pub(crate) const fn plus(self, other: Self) -> Self {
         Self {
             fixed: self.fixed.saturating_add(other.fixed),
             per_frame: self.per_frame.saturating_add(other.per_frame),

@@ -52,7 +52,6 @@ use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::arena::Role;
 use crate::compile::VerifyError;
-use crate::cost::Work;
 use crate::fade::Fade;
 use crate::io::PortKind;
 use crate::node::{InPlaceMask, Prepare, Shape, Wired};
@@ -1037,7 +1036,6 @@ pub struct Plan {
     pub(crate) task_ops: Vec<u32>,
     pub(crate) task_succ: Csr,
     pub(crate) task_activation: Vec<u32>,
-    pub(crate) work: Work,
     pub(crate) audio_slots: u32,
     pub(crate) event_slots: u32,
     pub(crate) event_slot_capacity: Vec<EventSlotCapacity>,
@@ -1169,12 +1167,6 @@ impl Plan {
     /// a parallel executor's per-task counter starts from.
     pub fn task_activation(&self) -> &[u32] {
         &self.task_activation
-    }
-
-    /// The cost model's estimate of one block's work, every op included
-    /// (see [`Work`] and [`Shape::cost`](crate::Shape::cost)).
-    pub fn work(&self) -> Work {
-        self.work
     }
 
     /// Arena size in slots for `kind`, including the null slot (0) and the

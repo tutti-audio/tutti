@@ -56,8 +56,8 @@
 //! # Running a block
 //!
 //! One op code (`par.rs`) runs every block, on the calling thread alone or,
-//! when [`Executor::set_pool`] gave it a pool and the cost model says the
-//! plan pays for it, as tasks across the pool's threads. Alone, it walks
+//! when [`Executor::set_pool`] gave it a pool of more than one participant
+//! and the plan has more than one task, as tasks across the pool's threads. Alone, it walks
 //! [`Plan::ops`] in order, inside a flush-to-zero scope
 //! ([`with_no_denormals`](tutti_platform::with_no_denormals)). Per block it never allocates when no commit is
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
