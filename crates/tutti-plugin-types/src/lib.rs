@@ -216,6 +216,7 @@ mod midi;
 mod midi_intake;
 mod note_expression;
 mod note_id;
+mod note_name;
 mod order;
 mod param_edit;
 mod param_mapping;
@@ -359,6 +360,7 @@ pub use note_expression::{
     expression_of_per_note_controller, per_note_message, per_note_tuning,
 };
 pub use note_id::{note_id_to_channel_note, plugin_note_id};
+pub use note_name::{NoteName, ParamGroup};
 pub use param_edit::ParamEdit;
 pub use param_mapping::{LinearRange, ParamMapping, PlainMap};
 pub use param_unit::{ParamUnit, PlainUnit};

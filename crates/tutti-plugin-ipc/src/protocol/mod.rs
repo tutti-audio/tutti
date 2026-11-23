@@ -204,7 +204,9 @@ pub(crate) mod wire;
 /// - **Version 62** carries a parameter point's frame offset as an unsigned
 ///   `Offset` (a varint of a `u32`), where it was a signed `i32` (a zigzag
 ///   varint).
-pub const PROTOCOL_VERSION: u32 = 62;
+/// - **Version 63** adds to a plugin's wiring the names it gives to MIDI keys and
+///   the groups it sorts its parameters into, and to a parameter its short name.
+pub const PROTOCOL_VERSION: u32 = 63;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -953,7 +955,8 @@ mod tests {
             .with_plain_range(-1.0, 1.0, 0.0)
             .with_measures(Some(ParamUnit::Pan))
             .with_role(Some(ControlRole::Pan(Axis::Y)))
-            .with_overview(true);
+            .with_overview(true)
+            .with_short_name("Pn");
         let untyped = ParameterInfo::new(ParamId::new(3), "Other");
 
         let list = ControlReply::ParameterList {
@@ -967,6 +970,7 @@ mod tests {
         assert_eq!(parameters[0].measures(), Some(ParamUnit::Pan));
         assert_eq!(parameters[0].role(), Some(ControlRole::Pan(Axis::Y)));
         assert!(parameters[0].overview());
+        assert_eq!(parameters[0].short_name(), "Pn");
         assert_eq!(
             (
                 parameters[1].measures(),

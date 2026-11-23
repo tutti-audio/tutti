@@ -47,6 +47,30 @@ impl AttributeList {
     }
 }
 
+impl AttributeList {
+    /// The list `IInfoListener::setChannelContextInfos` reads: the channel's
+    /// name (with its length) and its colour, each where given.
+    pub(crate) fn channel_context(name: Option<&str>, argb: Option<u32>) -> ComWrapper<Self> {
+        let list = Self::new();
+        {
+            let mut attributes = list.attributes.lock();
+            if let Some(name) = name {
+                let mut units: Vec<u16> = name.encode_utf16().collect();
+                attributes.insert(
+                    "channel name length".into(),
+                    AttributeValue::Int(units.len() as i64),
+                );
+                units.push(0);
+                attributes.insert("channel name".into(), AttributeValue::String(units));
+            }
+            if let Some(argb) = argb {
+                attributes.insert("channel color".into(), AttributeValue::Int(i64::from(argb)));
+            }
+        }
+        list
+    }
+}
+
 fn key_from_ptr(key: AttrID) -> Option<String> {
     if key.is_null() {
         return None;
@@ -492,5 +516,36 @@ mod tests {
             weak.upgrade().is_none(),
             "the first buffer went at the next get"
         );
+    }
+
+    /// A channel context carries the name, its length and the colour under the
+    /// keys `ivstchannelcontextinfo.h` names.
+    ///
+    /// Spec: vst3.IInfoListener.setChannelContextInfos
+    #[test]
+    fn a_channel_context_is_read_under_the_sdks_keys() {
+        use vst3::Steinberg::Vst::ChannelContext::{
+            kChannelColorKey, kChannelNameKey, kChannelNameLengthKey,
+        };
+        let list = AttributeList::channel_context(Some("Lead"), Some(0xFF11_2233));
+        let ptr = list.to_com_ptr::<IAttributeList>().unwrap();
+        let mut name = [0u16; 16];
+        let (mut length, mut color) = (0i64, 0i64);
+        // SAFETY: the test calls COM methods on a live object it owns, with
+        // arguments valid for the call.
+        unsafe {
+            assert_eq!(
+                ptr.getString(
+                    kChannelNameKey,
+                    name.as_mut_ptr() as *mut TChar,
+                    std::mem::size_of_val(&name) as u32
+                ),
+                kResultOk
+            );
+            assert_eq!(ptr.getInt(kChannelNameLengthKey, &mut length), kResultOk);
+            assert_eq!(ptr.getInt(kChannelColorKey, &mut color), kResultOk);
+        }
+        assert_eq!(String::from_utf16(&name[..4]).unwrap(), "Lead");
+        assert_eq!((name[4], length, color), (0, 4, 0xFF11_2233));
     }
 }
