@@ -1,6 +1,6 @@
 //! [`FeedbackRouting`]: which channel's delayed tap recirculates into which channel's line.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_units::{Amplitude, Gain};
 
 /// The widest routing: a bus's channel count.
@@ -27,7 +27,7 @@ pub(crate) const MAX_WIDTH: usize = tutti_buffers::MAX_CHANNELS;
 /// field).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FeedbackRouting {
-    input: BusTopology,
+    input: ChannelTopology,
     weights: [[Gain; MAX_WIDTH]; MAX_WIDTH],
 }
 
@@ -77,7 +77,7 @@ impl FeedbackRouting {
     /// No routing between channels: each renders independently, and the cross-feedback
     /// is inert.
     #[must_use]
-    pub const fn none(input: BusTopology) -> Self {
+    pub const fn none(input: ChannelTopology) -> Self {
         Self {
             input,
             weights: [[Gain::SILENT; MAX_WIDTH]; MAX_WIDTH],
@@ -87,7 +87,7 @@ impl FeedbackRouting {
     /// The stereo ping-pong: each channel is fed by the other, `[[0, 1], [1, 0]]`.
     #[must_use]
     pub const fn swap() -> Self {
-        let mut r = Self::none(BusTopology::STEREO);
+        let mut r = Self::none(ChannelTopology::STEREO);
         r.weights[0][1] = Gain::UNITY;
         r.weights[1][0] = Gain::UNITY;
         r
@@ -97,7 +97,7 @@ impl FeedbackRouting {
     /// goes round the field. A mono bus has no other channel to feed from: it is
     /// [`none`](Self::none).
     #[must_use]
-    pub fn ring(input: BusTopology) -> Self {
+    pub fn ring(input: ChannelTopology) -> Self {
         let mut r = Self::none(input);
         let n = r.width();
         if n > 1 {
@@ -112,7 +112,7 @@ impl FeedbackRouting {
     /// row-major: entry `matrix[c * width + j]` is how much of channel `j`'s tap feeds
     /// channel `c`.
     #[must_use]
-    pub const fn builder(input: BusTopology, matrix: &[Gain]) -> FeedbackRoutingBuilder<'_> {
+    pub const fn builder(input: ChannelTopology, matrix: &[Gain]) -> FeedbackRoutingBuilder<'_> {
         FeedbackRoutingBuilder {
             input,
             matrix,
@@ -122,7 +122,7 @@ impl FeedbackRouting {
 
     /// The bus this routing is for.
     #[must_use]
-    pub const fn input(&self) -> BusTopology {
+    pub const fn input(&self) -> ChannelTopology {
         self.input
     }
 
@@ -155,7 +155,7 @@ impl FeedbackRouting {
 /// sums to at most 1, which depend on the bus and the matrix together.
 #[derive(Clone, Copy, Debug)]
 pub struct FeedbackRoutingBuilder<'a> {
-    input: BusTopology,
+    input: ChannelTopology,
     matrix: &'a [Gain],
     normalize: bool,
 }

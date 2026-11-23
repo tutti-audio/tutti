@@ -15,7 +15,7 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock, Mono, Planes};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock, Mono, Planes};
 
 use tutti_fixtures::Noise;
 use tutti_graph::contract::drive;
@@ -159,10 +159,11 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "delay",
         || {
-            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
-                .times(ChannelTimes::try_from(&[Seconds::new(0.013)][..]).unwrap())
-                .build()
-                .unwrap();
+            let layout =
+                DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(0.1)))
+                    .times(ChannelTimes::try_from(&[Seconds::new(0.013)][..]).unwrap())
+                    .build()
+                    .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 time: Seconds::new(0.01),
                 feedback: Feedback::new(0.5),
@@ -191,7 +192,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     );
     survives_node(
         "chorus",
-        || ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
+        || ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO)),
         |n| {
             vec![
                 ("rate", n.param_set().cell(UnitParam::Rate).unwrap(), 3.0),
@@ -211,7 +212,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
     survives_node(
         "phaser",
         || {
-            PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::STEREO, Stages::of(6)))
+            PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::STEREO, Stages::of(6)))
                 .unwrap()
         },
         |n| {
@@ -230,7 +231,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
         "compressor",
         || {
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         threshold: Db::new(-20.0),
@@ -273,7 +274,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
         "gate",
         || {
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(GateControls {
                         threshold: Db::new(-30.0),
@@ -377,8 +378,10 @@ fn a_distortion_built_with_a_non_finite_drive_renders_finite() {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// `width` unassigned channels sharing the response `ir`.

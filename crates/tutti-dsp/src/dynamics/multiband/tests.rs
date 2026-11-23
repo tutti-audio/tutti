@@ -1,6 +1,6 @@
 use core::f64::consts::PI;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Seconds};
 
@@ -21,7 +21,7 @@ const SETTLE: usize = 24_000;
 fn bank(width: u16, bands: usize) -> MultibandBank<f32> {
     MultibandBank::<f32>::new(
         BankShape::new(
-            BusTopology::default_for(ChannelLayout::from_count(width)).unwrap(),
+            ChannelTopology::default_for(ChannelLayout::from_count(width)).unwrap(),
             MultibandBands::new(u8::try_from(bands).unwrap()).unwrap(),
         ),
         RATE,
@@ -383,7 +383,7 @@ fn a_bypassed_band_passes_unprocessed() {
     set.bands[0] = band(-30.0, 0.0, 8.0, 0.001, 0.001, 6.0);
     set.bands[0].bypass = true;
     let mut k = MultibandBank::<f64>::new(
-        BankShape::new(BusTopology::MONO, MultibandBands::of(3)),
+        BankShape::new(ChannelTopology::MONO, MultibandBands::of(3)),
         RATE,
     );
     k.retarget(&set);
@@ -609,7 +609,7 @@ fn a_band_reads_its_own_threshold_signal() {
     assert_eq!(k.take_reading().band(0).unwrap(), Db::UNITY);
     // The same control signal in f64 over f64 audio.
     let mut k = MultibandBank::<f64>::new(
-        BankShape::new(BusTopology::MONO, MultibandBands::of(3)),
+        BankShape::new(ChannelTopology::MONO, MultibandBands::of(3)),
         RATE,
     );
     k.retarget(&set);
@@ -853,7 +853,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     let n = 4_800;
     let x = wide_signal(n);
     let mut k = MultibandBank::<f64>::new(
-        BankShape::new(BusTopology::MONO, MultibandBands::of(2)),
+        BankShape::new(ChannelTopology::MONO, MultibandBands::of(2)),
         RATE,
     );
     // The signal is near 0.25 (-12 dB), 12 dB under the threshold of every band.

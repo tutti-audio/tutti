@@ -34,7 +34,7 @@
 
 use crate::BlockMismatch;
 use crate::block::expect_widths;
-use tutti_buffers::{BusTopology, MAX_CHANNELS};
+use tutti_buffers::{ChannelTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, InputOutput};
 use tutti_units::{
     Bipolar, Feedback, Hz, PhaseIncrement, ReadPosition, SampleRate, SampleSpan, Samples, Seconds,
@@ -136,7 +136,7 @@ pub struct SweepDesign {
 /// chorus send of a General MIDI synthesizer, with no feedback.
 #[derive(Clone, Copy, Debug)]
 pub struct ModDelayLayout {
-    input: BusTopology,
+    input: ChannelTopology,
     sweep: Sweep,
     stagger: Stagger,
 }
@@ -145,7 +145,7 @@ impl ModDelayLayout {
     /// A [`ModDelayLayoutBuilder`] for a swept delay on the bus `input`, built to `sweep`, its
     /// channels' sweeps in step.
     #[must_use]
-    pub const fn builder(input: BusTopology, sweep: Sweep) -> ModDelayLayoutBuilder {
+    pub const fn builder(input: ChannelTopology, sweep: Sweep) -> ModDelayLayoutBuilder {
         ModDelayLayoutBuilder {
             input,
             sweep,
@@ -156,31 +156,31 @@ impl ModDelayLayout {
     /// A chorus: [`Sweep::CHORUS`], channel `c` a quarter cycle of the LFO behind channel
     /// `c - 1`. Sweeping the channels out of step is what makes it feel wide.
     #[must_use]
-    pub fn chorus(input: BusTopology) -> Self {
+    pub fn chorus(input: ChannelTopology) -> Self {
         Self::preset(input, Sweep::CHORUS, PhaseIncrement::new(0.25))
     }
 
     /// A vibrato: [`Sweep::VIBRATO`], every channel's sweep in step (a pitch swing that moved
     /// between channels would be a chorus).
     #[must_use]
-    pub fn vibrato(input: BusTopology) -> Self {
+    pub fn vibrato(input: ChannelTopology) -> Self {
         Self::preset(input, Sweep::VIBRATO, PhaseIncrement::new(0.0))
     }
 
     /// A flanger: [`Sweep::FLANGER`], channels a half cycle apart.
     #[must_use]
-    pub fn flanger(input: BusTopology) -> Self {
+    pub fn flanger(input: ChannelTopology) -> Self {
         Self::preset(input, Sweep::FLANGER, PhaseIncrement::new(0.5))
     }
 
     /// The General MIDI chorus: [`Sweep::GENERAL_MIDI_CHORUS`], channels a quarter cycle
     /// apart, no feedback.
     #[must_use]
-    pub fn general_midi_chorus(input: BusTopology) -> Self {
+    pub fn general_midi_chorus(input: ChannelTopology) -> Self {
         Self::preset(input, Sweep::GENERAL_MIDI_CHORUS, PhaseIncrement::new(0.25))
     }
 
-    fn preset(input: BusTopology, sweep: Sweep, step: PhaseIncrement) -> Self {
+    fn preset(input: ChannelTopology, sweep: Sweep, step: PhaseIncrement) -> Self {
         Self {
             input,
             sweep,
@@ -190,7 +190,7 @@ impl ModDelayLayout {
 
     /// The bus it runs on.
     #[must_use]
-    pub const fn input(&self) -> BusTopology {
+    pub const fn input(&self) -> ChannelTopology {
         self.input
     }
 
@@ -238,7 +238,7 @@ impl ModDelayLayout {
 /// stagger against the bus, which the option cannot see.
 #[derive(Clone, Copy, Debug)]
 pub struct ModDelayLayoutBuilder {
-    input: BusTopology,
+    input: ChannelTopology,
     sweep: Sweep,
     stagger: Stagger,
 }

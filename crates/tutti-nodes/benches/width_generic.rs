@@ -19,7 +19,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_nodes::{
@@ -116,7 +116,7 @@ fn delay(c: &mut Criterion) {
     for w in [2usize, 6] {
         let node = DelayNode::<f32>::from(
             DelayConfig::new(DelayLayout::new(
-                BusTopology::default_for(
+                ChannelTopology::default_for(
                     ChannelLayout::try_from(w).expect("a test width is small"),
                 )
                 .expect("at most one bus wide"),
@@ -139,7 +139,7 @@ fn mod_delay(c: &mut Criterion) {
             "chorus",
             w,
             ModDelayNode::<f32>::from(ModDelayConfig::chorus(
-                BusTopology::default_for(
+                ChannelTopology::default_for(
                     ChannelLayout::try_from(w).expect("a test width is small"),
                 )
                 .expect("a test width is one bus"),
@@ -156,7 +156,7 @@ fn phaser(c: &mut Criterion) {
             "phaser",
             w,
             PhaserNode::<f32>::try_from(PhaserConfig::new(
-                BusTopology::default_for(
+                ChannelTopology::default_for(
                     ChannelLayout::try_from(w).expect("a test width is small"),
                 )
                 .expect("a test width is one bus"),

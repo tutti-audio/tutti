@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Float};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
 use tutti_graph::testing::{self as common, Harness, Kind};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Edge, EdgeGain, EdgeId, EventOutputPort, GraphSpec,
@@ -376,7 +376,7 @@ fn bus_of(width: usize, named: bool) -> Bus {
     let topology = if named {
         ChannelTopology::default_for(layout).expect("fits a bus")
     } else {
-        BusTopology::unassigned(layout).expect("fits a bus")
+        ChannelTopology::unassigned(layout).expect("fits a bus")
     };
     Bus::new(topology, BusRole::Main)
 }

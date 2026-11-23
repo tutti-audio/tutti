@@ -23,7 +23,7 @@
 //!
 //! Every row is a graph node (`Row::new`).
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Mono;
 use tutti_graph::contract::{Detect, Excite, Row};
 use tutti_graph::contract_tests;
@@ -47,7 +47,7 @@ fn limiter_row() -> Row {
         "LimiterNode (mono, 5 ms lookahead)",
         || {
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+                LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
                     threshold: Db::new(-3.0),
                     ceiling: Db::new(-0.3),
                     ..LimiterControls::DEFAULT
@@ -67,7 +67,7 @@ fn stereo_limiter_row() -> Row {
         "LimiterNode (stereo, right channel)",
         || {
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls {
                     threshold: Db::new(-3.0),
                     ceiling: Db::new(-0.3),
                     ..LimiterControls::DEFAULT
@@ -91,7 +91,7 @@ fn delay_line_row() -> Row {
         || {
             Box::new(DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(1.0_f64)),
                 ))
                 .controls(DelayControls {
@@ -116,7 +116,7 @@ fn crossover_row() -> Row {
         || {
             Box::new(
                 CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::STEREO,
+                    ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(1_000.0)][..]).unwrap(),
                 ))
                 .unwrap(),
@@ -135,7 +135,7 @@ fn multiband_row() -> Row {
         "MultibandCompressorNode<f32> (stereo, 3 bands, right channel)",
         || {
             Box::new(MultibandCompressorNode::<f32>::from(
-                MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(3)),
+                MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(3)),
             ))
         },
         impulse(1),
@@ -177,7 +177,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")

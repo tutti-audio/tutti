@@ -239,7 +239,7 @@ touched.
   `tutti_buffers::ChannelIndex`; a meter's attack and release are a `tutti_units::Ballistics`.
 - Time and layout have one type each: `tutti_music::LoopRange` for a loop,
   `TimeSignature` and `MeterMap` for meter, `tutti_tempo::TempoMap` for tempo,
-  `tutti_buffers::{ChannelLayout, ChannelTopology, BusTopology}` for channels, and
+  `tutti_buffers::{ChannelLayout, ChannelTopology, ChannelSet}` for channels, and
   `tutti_curve::Trajectory<U>` for an automation curve.
 
 ### Unit types

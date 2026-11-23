@@ -1,11 +1,11 @@
-use tutti_buffers::{BusTopology, ChannelIndex};
+use tutti_buffers::{ChannelIndex, ChannelTopology};
 use tutti_units::{Cents, Feedback, Hz, PhaseIncrement, Seconds};
 
 use super::*;
 use crate::{MaxDelay, ModDelayLayout};
 
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(width.into()).expect("a test width is one bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn step(x: f64) -> Stagger {
@@ -153,7 +153,7 @@ fn a_stagger_is_finite_and_wrapped_into_one_cycle() {
 fn a_layout_refuses_offsets_that_do_not_fit_its_bus() {
     let two = Stagger::try_from(&[PhaseIncrement::new(0.0), PhaseIncrement::new(0.5)][..]).unwrap();
     assert!(
-        ModDelayLayout::builder(BusTopology::STEREO, Sweep::CHORUS)
+        ModDelayLayout::builder(ChannelTopology::STEREO, Sweep::CHORUS)
             .stagger(two)
             .build()
             .is_ok()
@@ -166,7 +166,7 @@ fn a_layout_refuses_offsets_that_do_not_fit_its_bus() {
         StaggerError::Length { width: 3, got: 2 }
     );
     assert_eq!(
-        ModDelayLayout::builder(BusTopology::MONO, Sweep::CHORUS)
+        ModDelayLayout::builder(ChannelTopology::MONO, Sweep::CHORUS)
             .stagger(two)
             .build()
             .unwrap_err(),

@@ -7,7 +7,7 @@
 
 use crate::offline::offline;
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{FoldError, InterleavedMut};
 use tutti_graph::{BusError, BusOutputPort, Buses, NodeBus, NodeKey, Unforkable};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
@@ -23,18 +23,18 @@ fn layout(n: u16) -> ChannelLayout {
     ChannelLayout::from_count(n)
 }
 
-fn named(n: u16) -> BusTopology {
+fn named(n: u16) -> ChannelTopology {
     ChannelTopology::default_for(layout(n)).unwrap()
 }
 
-fn unassigned(n: u16) -> BusTopology {
-    BusTopology::unassigned(layout(n)).unwrap()
+fn unassigned(n: u16) -> ChannelTopology {
+    ChannelTopology::unassigned(layout(n)).unwrap()
 }
 
 /// Constant `values` on its output channels, declaring `out` as its bus.
 struct Src {
     values: Vec<f32>,
-    out: BusTopology,
+    out: ChannelTopology,
 }
 
 impl Node for Src {
@@ -53,7 +53,7 @@ impl Node for Src {
 
 /// A pass-through of its input, declaring `input` as its bus.
 struct Pass {
-    input: BusTopology,
+    input: ChannelTopology,
 }
 
 impl Node for Pass {

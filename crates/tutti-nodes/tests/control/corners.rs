@@ -2,7 +2,7 @@
 //! controls, as well as on its grid.
 
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, MaxBlock};
+use tutti_buffers::{ChannelTopology, MaxBlock};
 use tutti_graph::{
     Cx, EventOutputPort, GraphBuilder, IntoNode, Io, Node, NodeParts, OutEvents, ParamEvent,
     ParamIn, ParamSegment, Prepare, Shape, Status,
@@ -62,9 +62,10 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         tutti_buffers::ChannelLayout::MONO,
         tutti_buffers::ChannelLayout::MONO,
     );
-    let NodeParts { node, fork, .. } =
-        CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(controls))
-            .into_parts();
+    let NodeParts { node, fork, .. } = CompressorNode::<f32>::from(
+        CompressorConfig::new(ChannelTopology::MONO).controls(controls),
+    )
+    .into_parts();
     let c = g.add(NodeParts::new(node, (), fork, None));
     g.connect_input(0, c, 0);
     g.connect_output(c, 0, 0);
