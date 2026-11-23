@@ -9,8 +9,8 @@ use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
     BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
-    ParameterChanges, PluginBus, PluginIo, PluginPreset, PluginTail, PresetId, ProcessContext,
-    ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
+    ParameterChanges, PluginBus, PluginIo, PluginPreset, PluginTail, PluginWiring, PresetId,
+    ProcessContext, ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, ParamMapping, PlainMap, Request};
 use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity};
@@ -531,6 +531,15 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
                 ""
             };
             assert_eq!(info.group(), group, "{what} group");
+            assert_eq!(
+                info.short_name(),
+                if spec.short_names {
+                    spec::short_name(param)
+                } else {
+                    ""
+                },
+                "{what} short name"
+            );
             let role = spec
                 .roles
                 .iter()
@@ -556,32 +565,51 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
     check::<F, _>(active.controller(), "active");
 }
 
-/// The controller table a plugin declares is listed in its wiring as data:
-/// VST3's `IMidiMapping` (Control Change 74 on channel 0 drives `level`; no
-/// other slot is mapped) and an AU's mapping table. CLAP and VST2 have no such
-/// table, so they list none.
+/// What the plugin declares in tables is listed in its wiring as data: the
+/// controller table (VST3's `IMidiMapping`, Control Change 74 on channel 0
+/// drives `level`; an AU's mapping table; none for CLAP and VST2), the names of
+/// MIDI keys (CLAP's `note-name`, VST3's keyswitches, VST2's
+/// `effGetMidiKeyName`) and the groups of parameters as a tree (VST3's units,
+/// CLAP's module path).
 ///
 /// # Panics
 ///
 /// Panics when an assertion of the case fails.
 ///
-/// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings
-pub fn the_plugins_midi_assignments_are_listed<F: Format>() {
-    let main = main_thread();
+/// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings, clap.ext.note-name.get, vst3.IKeyswitchController.getKeyswitchInfo, vst2.opcode.effGetMidiKeyName, vst3.IUnitInfo.getUnitInfo, clap.ext.params.get_info
+pub fn the_plugins_declared_tables_are_listed<F: Format>() {
     let loaded = F::load();
-    assert_eq!(
-        loaded.wiring(main).assignments,
-        F::SURFACE.assignments,
-        "{}: loaded",
-        F::NAME
-    );
+    assert_tables::<F>(&loaded.wiring(main_thread()), "loaded");
     let active = activate(loaded, BLOCK);
-    assert_eq!(
-        active.controller().wiring(main).assignments,
-        F::SURFACE.assignments,
-        "{}: active",
-        F::NAME
-    );
+    assert_tables::<F>(&active.controller().wiring(main_thread()), "active");
+}
+
+/// The tables of `wiring` are the format's own ([`the_plugins_declared_tables_are_listed`]).
+///
+/// # Panics
+///
+/// Panics when a table differs.
+pub fn assert_tables<F: Format>(wiring: &PluginWiring, when: &str) {
+    let spec = F::SURFACE;
+    assert_eq!(wiring.assignments, spec.assignments, "{}: {when}", F::NAME);
+    let keys: Vec<_> = wiring
+        .note_names
+        .iter()
+        .map(|n| {
+            (
+                n.key.get(),
+                n.channel.map(MidiChannel::get),
+                n.text.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(keys, spec.note_names, "{}: key names, {when}", F::NAME);
+    let groups: Vec<_> = wiring
+        .param_groups
+        .iter()
+        .map(|g| (g.name.as_str(), g.parent.as_deref()))
+        .collect();
+    assert_eq!(groups, spec.groups, "{}: groups, {when}", F::NAME);
 }
 
 /// `got` is `want` to the format's own representation (`Format::PARAM_VALUE_TOLERANCE`,

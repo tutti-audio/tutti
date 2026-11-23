@@ -6,7 +6,8 @@ use crate::types::{PlainRange, ProcessContextRequirements, UnitId};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::ParamUnit;
-use tutti_plugin_types::{Axis, ControlRole};
+use tutti_plugin_types::{Axis, ControlRole, NoteName, ParamGroup};
+use tutti_ump::{MidiChannel, NoteNumber};
 
 impl Vst3Loaded {
     // VST3 enumerates parameters by index (`getParameterInfo`) and addresses
@@ -231,6 +232,48 @@ impl Vst3Loaded {
         index: u32,
     ) -> Option<Vst3KeyswitchInfo> {
         self.plugin.keyswitch_info(main, bus_index, channel, index)
+    }
+
+    /// The plugin's key names for the first event input bus: each keyswitch's
+    /// title on every key of its range. A list the plugin gives every channel
+    /// alike is for every channel; one that differs by channel is named for
+    /// each, and a channel with none adds none.
+    pub(crate) fn declared_note_names(&self, main: MainThreadMarker) -> Vec<NoteName> {
+        let per_channel: Vec<Vec<(u8, String)>> = MidiChannel::all()
+            .map(|channel| {
+                let channel = i16::from(channel.get());
+                (0..self.keyswitch_count(main, 0, channel))
+                    .filter_map(|i| self.keyswitch_info(main, 0, channel, i))
+                    .flat_map(|k| {
+                        let (min, max) = (k.keyswitch_min.max(0), k.keyswitch_max.min(127));
+                        let title = k.title_string();
+                        (min..=max)
+                            .filter_map(move |key| Some((u8::try_from(key).ok()?, title.clone())))
+                    })
+                    .collect()
+            })
+            .collect();
+        let name = |key, channel, text: &String| {
+            Some(NoteName {
+                key: NoteNumber::new(key)?,
+                channel,
+                text: text.clone(),
+            })
+        };
+        if per_channel.windows(2).all(|w| w[0] == w[1]) {
+            return per_channel[0]
+                .iter()
+                .filter_map(|(key, text)| name(*key, None, text))
+                .collect();
+        }
+        MidiChannel::all()
+            .zip(&per_channel)
+            .flat_map(|(channel, names)| {
+                names
+                    .iter()
+                    .filter_map(move |(key, text)| name(*key, Some(channel), text))
+            })
+            .collect()
     }
 
     /// Asks the plugin (via `IRemapParamID`) for the parameter ID in *this*
@@ -480,7 +523,45 @@ pub(super) fn build_param_info(
         // (`normalizedParamToPlain`, whatever its shape).
         .with_flags(KNOWN, reported)
         .with_group(group)
+        .with_short_name(info.short_title_string())
         .with_measures(measures)
+}
+
+/// The units that name a group ([`unit_names`]) as a tree, a parent before its
+/// children. A unit's parent is its nearest ancestor that names a group, so an
+/// unnamed or unpublished unit between two is skipped over, and a unit under the
+/// root is at the top.
+pub(crate) fn unit_groups(units: &[Vst3UnitInfo]) -> Vec<ParamGroup> {
+    let names = unit_names(units);
+    // A unit's named ancestors, nearest first; a cycle in a plugin's tree ends
+    // after as many steps as there are units.
+    let ancestors = |unit: &Vst3UnitInfo| {
+        let mut named = Vec::new();
+        let mut at = unit.parent;
+        for _ in 0..units.len() {
+            let Some(id) = at else { break };
+            named.extend(names.get(&id).copied());
+            at = units.iter().find(|u| u.id == id).and_then(|u| u.parent);
+        }
+        named
+    };
+    let mut groups: Vec<(usize, ParamGroup)> = units
+        .iter()
+        .filter(|u| names.contains_key(&u.id))
+        .map(|u| {
+            let named = ancestors(u);
+            let parent = named.first().map(|n| (*n).to_string());
+            (
+                named.len(),
+                ParamGroup {
+                    name: u.name.clone(),
+                    parent,
+                },
+            )
+        })
+        .collect();
+    groups.sort_by_key(|(depth, _)| *depth);
+    groups.into_iter().map(|(_, group)| group).collect()
 }
 
 #[cfg(test)]
@@ -506,6 +587,34 @@ mod unit_group_tests {
         let groups = unit_names(&units);
         assert_eq!(groups.get(&UnitId::new(1)).copied(), Some("Filter"));
         assert_eq!(groups.get(&UnitId::new(2)).copied(), Some("Amp"));
+    }
+
+    /// A unit's parent is its nearest named ancestor, a parent comes before its
+    /// children, and a unit under an unnamed unit skips over it.
+    #[test]
+    fn units_become_a_tree_of_groups_a_parent_first() {
+        let mut units = [
+            unit(3, "Filter"),
+            unit(2, "Hidden"),
+            unit(1, "Voices"),
+            unit(4, "Amp"),
+        ];
+        units[0].parent = Some(UnitId::new(2));
+        units[1].parent = Some(UnitId::new(1));
+        units[1].name = String::new();
+        let groups: Vec<_> = unit_groups(&units)
+            .into_iter()
+            .map(|g| (g.name, g.parent))
+            .collect();
+        let named = |n: &str, p: Option<&str>| (n.to_string(), p.map(str::to_string));
+        assert_eq!(
+            groups,
+            [
+                named("Voices", None),
+                named("Amp", None),
+                named("Filter", Some("Voices")),
+            ]
+        );
     }
 
     /// The root unit names no group.

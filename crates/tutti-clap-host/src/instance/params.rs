@@ -311,9 +311,8 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
     //
     // `clap_param_info.module` is a `/`-separated path ("Osc 1/Filter"), and
     // CLAP documents it as a display hint rather than an addressing scheme. It
-    // passes through verbatim: splitting it here would impose a hierarchy the
-    // shared vocabulary does not model, and three of the four hosted formats
-    // could not fill.
+    // is the parameter's group verbatim; `module_groups` reads the tree out of
+    // the paths.
     let plain_map = crate::ParamBounds::declared(&info).plain_map();
     tutti_plugin_types::ParameterInfo::new(tutti_units::ParamId::new(info.id), info.name)
         .with_range(PluginParamRange::Plain {
@@ -327,16 +326,61 @@ pub(super) fn project_param_info(info: ClapParamInfo) -> tutti_plugin_types::Par
         .with_group(info.module)
 }
 
+/// The groups the parameters' `module` paths declare: each path and every
+/// prefix of it, once, a parent before its children, in the order first met.
+pub(crate) fn module_groups(
+    params: &[tutti_plugin_types::ParameterInfo],
+) -> Vec<tutti_plugin_types::ParamGroup> {
+    let mut groups: Vec<tutti_plugin_types::ParamGroup> = Vec::new();
+    for path in params.iter().map(|p| p.group()).filter(|g| !g.is_empty()) {
+        let mut parent: Option<&str> = None;
+        for (end, _) in path.match_indices('/').chain([(path.len(), "")]) {
+            let name = &path[..end];
+            if !groups.iter().any(|g| g.name == name) {
+                groups.push(tutti_plugin_types::ParamGroup {
+                    name: name.to_string(),
+                    parent: parent.map(str::to_string),
+                });
+            }
+            parent = Some(name);
+        }
+    }
+    groups
+}
+
 #[cfg(test)]
 mod grouping_tests {
     use super::*;
 
+    /// A path declares its prefixes as the ancestors, once each, a parent first.
+    #[test]
+    fn a_module_path_declares_its_prefixes_as_the_ancestors() {
+        let params: Vec<_> = ["Osc/Filter", "", "Osc", "Fx"]
+            .into_iter()
+            .map(|module| {
+                let mut info = ClapParamInfo::new(1, "p");
+                info.module = module.to_string();
+                project_param_info(info)
+            })
+            .collect();
+        let groups: Vec<_> = module_groups(&params)
+            .into_iter()
+            .map(|g| (g.name, g.parent))
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("Osc".to_string(), None),
+                ("Osc/Filter".to_string(), Some("Osc".to_string())),
+                ("Fx".to_string(), None),
+            ]
+        );
+    }
+
     /// CLAP's `module` reaches the shared type as the group, unchanged.
     ///
     /// Kept verbatim rather than split on `/`: CLAP documents the path as a
-    /// display hint, and splitting here would build a hierarchy the shared
-    /// vocabulary does not model and three of the four hosted formats could
-    /// not fill.
+    /// display hint, and the tree is [`module_groups`]'s.
     #[test]
     fn a_clap_module_becomes_the_group_verbatim() {
         let mut info = ClapParamInfo::new(1, "Cutoff");

@@ -66,7 +66,7 @@ macro_rules! contract {
             own_bypass_is_declared_and_written,
             the_bypass_parameter_is_not_a_listed_control,
             a_control_carries_what_the_plugin_declares_of_it,
-            the_plugins_midi_assignments_are_listed,
+            the_plugins_declared_tables_are_listed,
             parameter_conversion_is_the_formats_own,
             parameter_round_trip,
             unlisted_parameter_is_none,
