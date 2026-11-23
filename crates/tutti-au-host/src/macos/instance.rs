@@ -905,9 +905,18 @@ impl AuLoaded {
 
     /// Writes the app's controller entries into the unit's table in place of the
     /// last set, keeping the plugin's own entries
-    /// ([`AppMap::set`](midi_map::AppMap::set)); whether the unit took them.
+    /// ([`AppMap::set`](midi_map::AppMap::set)); whether the unit took them. A
+    /// refusal leaves its table as it was; one whose undo failed too is counted
+    /// with the lost reports.
     pub(crate) fn write_app_midi_map(&mut self, app: &[MidiAssignment]) -> bool {
-        self.app_midi_map.set(self.handle.unit(), app).is_ok()
+        match self.app_midi_map.set(self.handle.unit(), app) {
+            midi_map::Written::Applied => true,
+            midi_map::Written::Refused => false,
+            midi_map::Written::Unrestored => {
+                self.edits.count_loss();
+                false
+            }
+        }
     }
 
     /// Removes the mappings targeting each argument's

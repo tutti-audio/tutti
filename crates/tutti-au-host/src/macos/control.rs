@@ -315,9 +315,10 @@ impl Control for AuLoaded {
             own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Property),
             // A unit that does not implement the mapping family (most effects)
             // refuses the read and declares none.
+            // The plugin's own table: the unit's, less what the app wrote.
             assignments: self
                 .parameter_midi_mappings()
-                .map(|table| crate::midi_map::declared(&table))
+                .map(|table| crate::midi_map::declared(&self.app_midi_map.plugins_own(&table)))
                 .unwrap_or_default(),
             // AU names no keys.
             note_names: Vec::new(),
@@ -328,8 +329,9 @@ impl Control for AuLoaded {
     /// Writes the app's entries into the unit's own mapping table, which routes
     /// them during render: [`Plugin`](MidiMapApplied::Plugin) when the unit takes
     /// them, [`Host`](MidiMapApplied::Host) for a unit without the mapping family
-    /// (most effects). The plugin's declared entries stay;
-    /// [`wiring`](Self::wiring) reads the table, so it lists both.
+    /// (most effects), or when it refuses a write partway: its table is then put
+    /// back as it was, so no entry is applied twice. The plugin's declared entries
+    /// stay, and [`wiring`](Self::wiring) lists only them.
     fn set_app_midi_map(
         &mut self,
         _main: MainThreadMarker,

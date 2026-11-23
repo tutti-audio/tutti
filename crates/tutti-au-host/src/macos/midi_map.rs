@@ -425,6 +425,37 @@ impl AuMidiMapping {
     }
 }
 
+/// One write to a unit's mapping table.
+#[derive(Debug, Clone, PartialEq)]
+enum Op {
+    /// Removes whatever holds the triple of each entry.
+    Remove(Vec<AuMidiMapping>),
+    /// Adds the entries, each replacing the one for its parameter.
+    Add(Vec<AuMidiMapping>),
+}
+
+/// The writes that move a unit's table to a new app set, and the writes that
+/// move it back from any point of them.
+#[derive(Debug, PartialEq)]
+struct Plan {
+    forward: Vec<Op>,
+    undo: Vec<Op>,
+    /// The plugin's entries the new set replaces.
+    replaced: Vec<AuMidiMapping>,
+}
+
+/// How a [`AppMap::set`] ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Written {
+    /// The unit holds the entries.
+    Applied,
+    /// The unit refused, and its table is as it was.
+    Refused,
+    /// The unit refused partway and the writes that restore its table failed
+    /// too: it may hold some of the entries.
+    Unrestored,
+}
+
 /// The app's entries as written into a unit's table, and the entries of the
 /// plugin's own that they replaced.
 ///
@@ -440,25 +471,87 @@ pub(crate) struct AppMap {
 }
 
 impl AppMap {
-    /// Replaces the app's entries in the unit's table with `app`: the last set is
-    /// removed, the plugin's entries it replaced come back, and `app` is added.
-    ///
-    /// # Errors
-    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
-    /// family (most effects); its table is then untouched.
-    pub(crate) fn set(&mut self, unit: &Unit, app: &[MidiAssignment]) -> Result<()> {
-        remove(unit, &self.applied)?;
-        self.applied.clear();
-        add(unit, &self.replaced)?;
-        self.replaced.clear();
-        let entries: Vec<AuMidiMapping> = app.iter().map(AuMidiMapping::of_assignment).collect();
-        self.replaced = all(unit)?
-            .into_iter()
-            .filter(|held| entries.iter().any(|e| e.targets_same_parameter(held)))
+    /// The plugin's own table: `table`, the unit's, without the app's entries and
+    /// with the plugin's entries they replaced.
+    pub(crate) fn plugins_own(&self, table: &[AuMidiMapping]) -> Vec<AuMidiMapping> {
+        let mut own: Vec<AuMidiMapping> = table
+            .iter()
+            .filter(|held| !self.applied.iter().any(|a| a.targets_same_parameter(held)))
+            .copied()
             .collect();
-        add(unit, &entries)?;
-        self.applied = entries;
-        Ok(())
+        own.extend_from_slice(&self.replaced);
+        own
+    }
+
+    /// The writes from the unit's `table` to `entries` in place of the last set:
+    /// the last set is removed, the plugin's entries it replaced come back, and
+    /// `entries` are added. The undo removes every parameter touched and writes
+    /// back what `table` held for it.
+    fn plan(&self, table: &[AuMidiMapping], entries: &[AuMidiMapping]) -> Plan {
+        let own = self.plugins_own(table);
+        let replaced: Vec<AuMidiMapping> = own
+            .iter()
+            .filter(|held| entries.iter().any(|e| e.targets_same_parameter(held)))
+            .copied()
+            .collect();
+        let touched: Vec<AuMidiMapping> = self
+            .applied
+            .iter()
+            .chain(&self.replaced)
+            .chain(entries)
+            .copied()
+            .collect();
+        let before = table
+            .iter()
+            .filter(|held| touched.iter().any(|t| t.targets_same_parameter(held)))
+            .copied()
+            .collect();
+        Plan {
+            forward: vec![
+                Op::Remove(self.applied.clone()),
+                Op::Add(self.replaced.clone()),
+                Op::Add(entries.to_vec()),
+            ],
+            undo: vec![Op::Remove(touched), Op::Add(before)],
+            replaced,
+        }
+    }
+
+    /// Replaces the app's entries in the unit's table with `app`. A refusal
+    /// partway puts the table back as it was.
+    pub(crate) fn set(&mut self, unit: &Unit, app: &[MidiAssignment]) -> Written {
+        let entries: Vec<AuMidiMapping> = app.iter().map(AuMidiMapping::of_assignment).collect();
+        // A unit without the mapping family refuses the read: nothing is written.
+        let Ok(table) = all(unit) else {
+            return Written::Refused;
+        };
+        let plan = self.plan(&table, &entries);
+        let written = transact(&plan, |op| {
+            match op {
+                Op::Remove(m) => remove(unit, m),
+                Op::Add(m) => add(unit, m),
+            }
+            .is_ok()
+        });
+        if written == Written::Applied {
+            self.applied = entries;
+            self.replaced = plan.replaced;
+        }
+        written
+    }
+}
+
+/// Runs the writes of `plan` through `write` (which says whether the unit took
+/// one), and on a refusal runs the undo, every write of it.
+fn transact(plan: &Plan, mut write: impl FnMut(&Op) -> bool) -> Written {
+    if plan.forward.iter().all(&mut write) {
+        return Written::Applied;
+    }
+    let restored = plan.undo.iter().fold(true, |ok, op| write(op) && ok);
+    if restored {
+        Written::Refused
+    } else {
+        Written::Unrestored
     }
 }
 
@@ -610,6 +703,98 @@ pub fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A unit's table under the writes the unit accepts: one entry per parameter.
+    fn apply(table: &mut Vec<AuMidiMapping>, op: &Op) {
+        match op {
+            Op::Remove(ms) => table.retain(|t| !ms.iter().any(|m| m.targets_same_parameter(t))),
+            Op::Add(ms) => {
+                for m in ms {
+                    table.retain(|t| !t.targets_same_parameter(m));
+                    table.push(*m);
+                }
+            }
+        }
+    }
+
+    fn same_set(a: &[AuMidiMapping], b: &[AuMidiMapping]) -> bool {
+        a.len() == b.len() && a.iter().all(|x| b.contains(x))
+    }
+
+    /// The table of a unit that declares CC 74 for parameter 900, the app's
+    /// entries for 900 (an override) and 901 (a new one).
+    fn fixtures() -> (Vec<AuMidiMapping>, AuMidiMapping, AuMidiMapping) {
+        (
+            vec![AuMidiMapping::control_change(900, 0, 74)],
+            AuMidiMapping::control_change(900, 0, 22),
+            AuMidiMapping::control_change(901, 2, 21),
+        )
+    }
+
+    /// Whatever the app's set is, the plugin's own table reads the same, and an
+    /// empty set brings the unit's table back to the plugin's.
+    #[test]
+    fn the_plugins_own_table_is_the_same_before_during_and_after_a_set() {
+        let (own, over, extra) = fixtures();
+        let mut unit = own.clone();
+        let mut app = AppMap::default();
+        for entries in [vec![extra], vec![extra, over], vec![]] {
+            let plan = app.plan(&unit, &entries);
+            assert_eq!(
+                transact(&plan, |op| {
+                    apply(&mut unit, op);
+                    true
+                }),
+                Written::Applied
+            );
+            app.applied = entries.clone();
+            app.replaced = plan.replaced;
+            assert!(same_set(&app.plugins_own(&unit), &own), "{entries:?}");
+            let mut held = own.clone();
+            if entries.contains(&over) {
+                held.clear();
+            }
+            held.extend(entries);
+            assert!(same_set(&unit, &held));
+        }
+    }
+
+    /// A refusal at any write leaves the unit's table as it was, and the answer
+    /// is a refusal; with the undo refused too it is unrestored.
+    #[test]
+    fn a_refused_write_puts_the_table_back() {
+        let (own, over, extra) = fixtures();
+        let mut app = AppMap::default();
+        let mut unit = own.clone();
+        let first = app.plan(&unit, &[extra]);
+        transact(&first, |op| {
+            apply(&mut unit, op);
+            true
+        });
+        app.applied = vec![extra];
+        app.replaced = first.replaced;
+        let before = unit.clone();
+        let plan = app.plan(&unit, &[extra, over]);
+        for failing in 0..plan.forward.len() {
+            let mut held = before.clone();
+            let mut calls = 0;
+            let written = transact(&plan, |op| {
+                let refused = calls == failing;
+                calls += 1;
+                if !refused {
+                    apply(&mut held, op);
+                }
+                !refused
+            });
+            assert_eq!(written, Written::Refused, "refused at write {failing}");
+            assert!(same_set(&held, &before), "refused at write {failing}");
+        }
+        let written = transact(&plan, |op| {
+            let _ = op;
+            false
+        });
+        assert_eq!(written, Written::Unrestored);
+    }
 
     /// An assignment written into the unit reads back as the same assignment,
     /// on its channel or on any.

@@ -8,10 +8,10 @@ use tutti_buffers::InputOutput;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    BusRole, BypassWrite, Control, Controller, Loaded, MidiAssignment, MidiMapApplied, OwnBypass,
-    ParamFlags, ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginLearnError,
-    PluginPreset, PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput, Processor,
-    Reopen, Samples, TransportChange, TransportInfo,
+    BusRole, BypassWrite, Control, Controller, Loaded, MidiAssignment, OwnBypass, ParamFlags,
+    ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginLearnError, PluginPreset,
+    PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput, Processor, Reopen, Samples,
+    TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, ParamMapping, PlainMap, Request};
 use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteVelocity};
@@ -613,19 +613,12 @@ pub fn assert_tables<F: Format>(wiring: &PluginWiring, when: &str) {
     assert_eq!(groups, spec.groups, "{}: groups, {when}", F::NAME);
 }
 
-/// `got` lists the entries of `want`, in any order: a unit hands its table back
-/// unordered.
-fn assert_entries(got: &[MidiAssignment], want: &[MidiAssignment], what: &str) {
-    let held = got.len() == want.len() && want.iter().all(|w| got.contains(w));
-    assert!(held, "{what}: got {got:?}, want {want:?}");
-}
-
 /// The app's controller entries are applied by who the format says
-/// ([`spec::Surface::app_map`]): the unit of an AU holds them in its own table
-/// beside the plugin's, an entry for a parameter the plugin's table drives takes
-/// that entry's place for as long as it is there, and an empty set brings the
-/// plugin's table back untouched. Every other format answers that the host
-/// applies them and its table does not change.
+/// ([`spec::Surface::app_map`]) and never change the table the plugin declares:
+/// the wiring lists the plugin's entries before, during and after each set (an
+/// AU holds the app's entries in its own table, and an entry for a parameter the
+/// plugin maps replaces the plugin's there only for as long as it is set; the
+/// unit's own table is read back in tutti-au-host's tests).
 ///
 /// # Panics
 ///
@@ -636,34 +629,24 @@ pub fn an_app_midi_map_is_applied_by_who_the_format_says<F: Format>() {
     fn check<F: Format, C: Control + ?Sized>(c: &mut C, when: &str) {
         let main = main_thread();
         let spec = F::SURFACE;
-        let applied_by_unit = spec.app_map == MidiMapApplied::Plugin;
-        let with = |app: &[MidiAssignment], replaces_declared: bool| -> Vec<MidiAssignment> {
-            let mut table = if applied_by_unit && replaces_declared {
-                Vec::new()
-            } else {
-                spec.assignments.to_vec()
-            };
-            if applied_by_unit {
-                table.extend_from_slice(app);
-            }
-            table
-        };
-        let steps: [(&[MidiAssignment], bool); 3] = [
-            (&[spec::APP_ENTRY], false),
-            (&[spec::APP_ENTRY, spec::APP_OVERRIDE], true),
-            (&[], false),
+        let sets: [&[MidiAssignment]; 4] = [
+            &[],
+            &[spec::APP_ENTRY],
+            &[spec::APP_ENTRY, spec::APP_OVERRIDE],
+            &[],
         ];
-        for (app, replaces_declared) in steps {
+        for app in sets {
             assert_eq!(
                 c.set_app_midi_map(main, app),
                 spec.app_map,
                 "{}: who applies {app:?}, {when}",
                 F::NAME
             );
-            assert_entries(
-                &c.wiring(main).assignments,
-                &with(app, replaces_declared),
-                &format!("{}: the table after {app:?}, {when}", F::NAME),
+            assert_eq!(
+                c.wiring(main).assignments,
+                spec.assignments,
+                "{}: the declared table after {app:?}, {when}",
+                F::NAME
             );
         }
     }
