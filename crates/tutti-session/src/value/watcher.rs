@@ -12,17 +12,19 @@ use std::sync::{Arc, Weak};
 
 use tutti_rt::Mutex;
 
-use super::batch::Failure;
+use super::batch::{Batch, Failure, Stageable};
 use super::error::{ValueError, ValueErrorKind};
 use super::state::{Params, ValueState};
 use super::target::{
-    Target, TargetId,
+    Assign, Target, TargetId,
     sealed::{Sealed, Store},
 };
 use crate::AppKey;
 
-/// What one gesture is: a batch that moved two or more targets, which an app
-/// undoes as one step. Two changes with equal ids are of one batch.
+/// What one gesture is: the changes an app undoes as one step. A batch that
+/// moved two or more targets is one, and so is everything a
+/// [`Gesture`](crate::Gesture) writes. Two changes with equal ids are of one
+/// gesture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GestureId(u64);
 
@@ -66,11 +68,14 @@ pub struct Change<T: Target> {
 
 /// The gesture a [`Change`] belongs to.
 pub struct GestureState<T: Target> {
-    /// The gesture, shared by every change of its batch.
+    /// The gesture, shared by every change of it.
     pub id: GestureId,
     /// The base before the first change since the last read: what undoing restores.
     pub base: T::Value,
-    /// Whether the gesture is over: a batch ends with its call.
+    /// Whether the gesture is over: a batch ends with its call, and a
+    /// [`Gesture`](crate::Gesture) when it is dropped. A change landed while
+    /// a gesture is open is not ended; its end lands as one change per target
+    /// the gesture moved, carrying the value the target then has.
     pub ended: bool,
 }
 
@@ -132,10 +137,10 @@ where
     }
 }
 
-type Erased = Arc<dyn Any + Send + Sync>;
+pub(super) type Erased = Arc<dyn Any + Send + Sync>;
 
 /// One target's base moved: before and after, erased.
-pub(crate) struct StoredChange {
+pub struct StoredChange {
     id: TargetId,
     base: Erased,
     value: Erased,
@@ -146,6 +151,16 @@ impl StoredChange {
         Self {
             id,
             base: Arc::new(base),
+            value: Arc::new(value),
+        }
+    }
+
+    /// The change of a gesture's end: `value` over the base the gesture's
+    /// first change started from.
+    fn ended<V: Send + Sync + 'static>(id: TargetId, base: Erased, value: V) -> Self {
+        Self {
+            id,
+            base,
             value: Arc::new(value),
         }
     }
@@ -160,6 +175,25 @@ impl Stored {
     pub(super) fn new(landings: Vec<StoredChange>) -> Self {
         Self { landings }
     }
+
+    /// The base each moved target had before the batch.
+    pub(super) fn bases(&self) -> impl Iterator<Item = (TargetId, Erased)> + '_ {
+        self.landings
+            .iter()
+            .map(|landing| (landing.id, Arc::clone(&landing.base)))
+    }
+}
+
+/// How a landing is grouped into gestures: the one rule `Feed::land` applies.
+#[derive(Clone, Copy)]
+pub(super) enum Grouping {
+    /// A batch: two or more moved targets are one new gesture, which ends with
+    /// the call; one moved target is no gesture.
+    Batch,
+    /// A write of an open [`Gesture`](crate::Gesture): its changes, not ended.
+    Open(GestureId),
+    /// The end of a [`Gesture`](crate::Gesture): its changes, ended.
+    End(GestureId),
 }
 
 /// What a watcher keeps of a target since it last read: the newest value, and
@@ -172,6 +206,7 @@ pub struct Record {
 }
 
 /// The gesture of the newest change.
+#[derive(Clone)]
 struct Gestured {
     id: GestureId,
     ended: bool,
@@ -240,19 +275,32 @@ impl Feed {
         self.inner.lock().watchers.retain(|w| !w.ptr_eq(&weak));
     }
 
-    /// Tells every watcher what `landed`. A batch that moved two or more
-    /// targets is one gesture, which ends with the call. A watcher that has not
-    /// read since an earlier change keeps that change's base.
-    pub(super) fn land(&self, landed: Stored) {
+    /// The id of a new gesture.
+    pub(super) fn open(&self) -> GestureId {
+        let mut inner = self.inner.lock();
+        let id = GestureId(inner.next);
+        inner.next += 1;
+        id
+    }
+
+    /// Tells every watcher what `landed`, grouped as `grouping` says. A
+    /// watcher that has not read since an earlier change keeps that change's
+    /// base. The one path every landing takes, so a watcher's read sees all of
+    /// one landing or none.
+    pub(super) fn land(&self, landed: Stored, grouping: Grouping) {
         if landed.landings.is_empty() {
             return;
         }
         let mut inner = self.inner.lock();
-        let gesture = (landed.landings.len() >= 2).then(|| {
-            let id = GestureId(inner.next);
-            inner.next += 1;
-            id
-        });
+        let gesture = match grouping {
+            Grouping::Batch => (landed.landings.len() >= 2).then(|| {
+                let id = GestureId(inner.next);
+                inner.next += 1;
+                Gestured { id, ended: true }
+            }),
+            Grouping::Open(id) => Some(Gestured { id, ended: false }),
+            Grouping::End(id) => Some(Gestured { id, ended: true }),
+        };
         inner.watchers.retain(|w| w.strong_count() > 0);
         for slot in inner.watchers.iter().filter_map(Weak::upgrade) {
             let mut pending = slot.pending.lock();
@@ -265,7 +313,7 @@ impl Feed {
                         by: ChangedBy::App,
                         value: Arc::clone(&landing.value),
                         base: Arc::clone(base),
-                        gesture: gesture.map(|id| Gestured { id, ended: true }),
+                        gesture: gesture.clone(),
                     };
                     pending.insert(landing.id, record);
                 }
@@ -312,6 +360,23 @@ mod seal {
 
         /// Each target's change in `drained`.
         fn changes(&self, drained: &Drained) -> Self::Changes;
+
+        /// What a gesture writes: one absolute value per target, in the
+        /// argument's shape.
+        type Values;
+
+        /// Stages `values`, one per target.
+        fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure>;
+
+        /// The end of each target in `moved` (each taken out of it, so a
+        /// target named twice ends once): its value now, over the base it
+        /// had before the gesture's first change.
+        fn ended(
+            &self,
+            params: &Params,
+            moved: &mut BTreeMap<TargetId, Erased>,
+            out: &mut Vec<StoredChange>,
+        );
     }
 }
 use seal::Sealed as Targets;
@@ -320,7 +385,7 @@ use seal::Sealed as Targets;
 /// but a plugin's parameter), or tuples of up to 12 of them (nested too),
 /// arrays, `Vec`s and `Option`s (`None` watches nothing but keeps its
 /// position). It answers in the argument's shape. Sealed.
-pub trait IntoTargets: Targets + Send {}
+pub trait IntoTargets: Targets + Send + 'static {}
 
 impl<T: Watchable + Store> Targets for T {
     type Changes = Option<Change<T>>;
@@ -372,6 +437,30 @@ impl<T: Watchable + Store> Targets for T {
             }),
         })
     }
+
+    type Values = T::Value;
+
+    fn stage(&self, value: T::Value, batch: &mut Batch<'_>) -> Result<(), Failure> {
+        Assign {
+            target: *self,
+            value,
+        }
+        .stage(batch)
+    }
+
+    fn ended(
+        &self,
+        params: &Params,
+        moved: &mut BTreeMap<TargetId, Erased>,
+        out: &mut Vec<StoredChange>,
+    ) {
+        let id = Sealed::id(*self);
+        if let Some(base) = moved.remove(&id)
+            && let Some((_, now)) = (*self).resolve(params)
+        {
+            out.push(StoredChange::ended(id, base, now));
+        }
+    }
 }
 impl<T: Watchable + Store> IntoTargets for T {}
 
@@ -400,6 +489,29 @@ impl<A: Targets> Targets for Option<A> {
     fn changes(&self, drained: &Drained) -> Self::Changes {
         self.as_ref().map(|item| item.changes(drained))
     }
+
+    type Values = Option<A::Values>;
+
+    fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure> {
+        match self.as_ref().zip(values) {
+            Some((item, value)) => item.stage(value, batch),
+            None => {
+                batch.skip();
+                Ok(())
+            }
+        }
+    }
+
+    fn ended(
+        &self,
+        params: &Params,
+        moved: &mut BTreeMap<TargetId, Erased>,
+        out: &mut Vec<StoredChange>,
+    ) {
+        if let Some(item) = self {
+            item.ended(params, moved, out);
+        }
+    }
 }
 impl<A: IntoTargets> IntoTargets for Option<A> {}
 
@@ -423,6 +535,29 @@ impl<A: Targets> Targets for Vec<A> {
     fn changes(&self, drained: &Drained) -> Self::Changes {
         self.iter().map(|item| item.changes(drained)).collect()
     }
+
+    type Values = Vec<A::Values>;
+
+    fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure> {
+        if values.len() != self.len() {
+            return Err(batch.refuse(ValueErrorKind::Mismatched {
+                targets: self.len(),
+                values: values.len(),
+            }));
+        }
+        self.iter()
+            .zip(values)
+            .try_for_each(|(item, value)| item.stage(value, batch))
+    }
+
+    fn ended(
+        &self,
+        params: &Params,
+        moved: &mut BTreeMap<TargetId, Erased>,
+        out: &mut Vec<StoredChange>,
+    ) {
+        self.iter().for_each(|item| item.ended(params, moved, out));
+    }
 }
 impl<A: IntoTargets> IntoTargets for Vec<A> {}
 
@@ -445,6 +580,23 @@ impl<A: Targets, const N: usize> Targets for [A; N] {
 
     fn changes(&self, drained: &Drained) -> Self::Changes {
         self.each_ref().map(|item| item.changes(drained))
+    }
+
+    type Values = [A::Values; N];
+
+    fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure> {
+        self.iter()
+            .zip(values)
+            .try_for_each(|(item, value)| item.stage(value, batch))
+    }
+
+    fn ended(
+        &self,
+        params: &Params,
+        moved: &mut BTreeMap<TargetId, Erased>,
+        out: &mut Vec<StoredChange>,
+    ) {
+        self.iter().for_each(|item| item.ended(params, moved, out));
     }
 }
 impl<A: IntoTargets, const N: usize> IntoTargets for [A; N] {}
@@ -470,6 +622,22 @@ macro_rules! tuples {
 
             fn changes(&self, drained: &Drained) -> Self::Changes {
                 ($(self.$at.changes(drained),)+)
+            }
+
+            type Values = ($($name::Values,)+);
+
+            fn stage(&self, values: Self::Values, batch: &mut Batch<'_>) -> Result<(), Failure> {
+                $(self.$at.stage(values.$at, batch)?;)+
+                Ok(())
+            }
+
+            fn ended(
+                &self,
+                params: &Params,
+                moved: &mut BTreeMap<TargetId, Erased>,
+                out: &mut Vec<StoredChange>,
+            ) {
+                $(self.$at.ended(params, moved, out);)+
             }
         }
         impl<$($name: IntoTargets),+> IntoTargets for ($($name,)+) {}
@@ -659,5 +827,22 @@ mod tests {
         assert_eq!(feed.watching(), before + 1);
         drop(other);
         assert_eq!(feed.watching(), before);
+    }
+
+    /// **A gesture draws one id however many writes it makes**, and the batch rule draws
+    /// none for them: the next batch's id is the one after the gesture's.
+    #[test]
+    fn a_gesture_draws_one_id_for_all_its_writes() {
+        let (s, lp) = detached();
+        let values = Arc::clone(&s.values);
+        let feed = values.feed();
+        let first = feed.next_gesture();
+
+        let mut drag = s.gesture((lp.cutoff(), lp.q())).unwrap();
+        assert_eq!(drag.id(), first);
+        drag.set((Hz::new(2.0), Q::new(2.0))).unwrap();
+        drag.set((Hz::new(3.0), Q::new(3.0))).unwrap();
+        drop(drag);
+        assert_eq!(feed.next_gesture(), GestureId(first.0 + 1));
     }
 }

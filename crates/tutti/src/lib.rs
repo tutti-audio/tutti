@@ -231,7 +231,7 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
