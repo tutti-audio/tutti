@@ -12,11 +12,11 @@ use tutti_platform::Instant;
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
     CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DiscoveryData,
-    JsonPointer, MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData,
-    PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits, PeResource, PeState,
-    PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused, ResourceEntry, ResourceId,
-    ResourceResponder, ResourceStore, ResourceTarget, ResponderAction, ResponderSettings,
-    SimultaneousRequests, StateId, StreamLimit,
+    JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
+    PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits,
+    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused,
+    ResourceEntry, ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
+    ResponderSettings, SimultaneousRequests, StateId, StreamLimit,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -63,6 +63,8 @@ struct PePeer {
     store: ResourceStore,
     reply: Reply,
     asked: Vec<Asked>,
+    /// The encoding of each Get, Set and Subscription start, in the order it arrived.
+    encoded: Vec<PeEncoding>,
 }
 
 impl PePeer {
@@ -103,6 +105,7 @@ impl PePeer {
             store,
             reply: Reply::Serve,
             asked: Vec::new(),
+            encoded: Vec::new(),
         }
     }
 
@@ -164,6 +167,8 @@ impl PePeer {
             {
                 match subscription {
                     PeSubscription::Start(request) => {
+                        self.encoded
+                            .push(request.mutual_encoding.unwrap_or(PeEncoding::Ascii));
                         self.asked
                             .push(Asked::Subscribe(request.resource.as_str().to_owned()));
                     }
@@ -181,6 +186,8 @@ impl PePeer {
                 let name = request.resource.as_str().to_owned();
                 // The ResourceList is the session's own, not the app's.
                 if name != "ResourceList" {
+                    self.encoded
+                        .push(request.mutual_encoding.unwrap_or(PeEncoding::Ascii));
                     if *kind == PeMessageKind::GET_INQUIRY {
                         self.asked.push(Asked::Get(name));
                     } else if *kind == PeMessageKind::SET_INQUIRY {
@@ -1923,6 +1930,85 @@ fn a_partial_write_of_a_resource_that_takes_only_full_sets_is_not_sent() {
     };
     assert!(
         matches!(refused, RequestRefused::CannotSet { .. }),
+        "{refused:?}"
+    );
+    assert!(wire.peer.asked.is_empty());
+}
+
+/// M2-103 section 7.2: a call is encoded in what the entry lists: a Subscribe of an
+/// entry that lists only Mcoded7, by `resId`, is started in Mcoded7.
+#[test]
+fn a_subscribe_encodes_by_the_encodings_the_entry_lists() {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::State)
+            .encodings(vec![PeEncoding::Mcoded7])
+            .media_types(vec![MediaType::OCTET_STREAM])
+            .can_subscribe(true)
+            .build()
+            .unwrap(),
+    );
+    let mut wire = Wire::new(store);
+    let _request = wire
+        .listed(&PeResource::State)
+        .with_res_id(id("buffer"))
+        .subscribe();
+    wire.run(60);
+    assert_eq!(
+        wire.peer.asked.first(),
+        Some(&Asked::Subscribe("State".to_owned()))
+    );
+    assert_eq!(wire.peer.encoded.first(), Some(&PeEncoding::Mcoded7));
+}
+
+/// M2-103 section 7.2: an entry that lists ASCII among others is called in ASCII, not
+/// in the first it lists.
+#[test]
+fn an_entry_that_lists_ascii_is_called_in_ascii() {
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(PeResource::LocalOn)
+            .encodings(vec![PeEncoding::Mcoded7, PeEncoding::Ascii])
+            .build()
+            .unwrap(),
+    );
+    store.put(None, on(false)).expect("declared");
+    let mut wire = Wire::new(store);
+    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    wire.run(60);
+    assert_eq!(wire.result(&mut request), Some(Ok(on(false))));
+    assert_eq!(wire.peer.encoded, [PeEncoding::Ascii]);
+}
+
+/// M2-103 section 8.6.2: a page of a List Resource whose entry does not declare
+/// `canPaginate` ends at the handle as not sent, and the peer hears nothing.
+#[test]
+fn a_page_of_a_list_whose_entry_does_not_paginate_is_not_sent() {
+    let songs = PeResource::Custom(CustomResource::new("X-SongList").unwrap());
+    let mut store = ResourceStore::new();
+    store.declare(
+        ResourceEntry::builder(songs.clone())
+            .schema(json(r#"{"title":"Songs","type":"array"}"#))
+            .build()
+            .unwrap(),
+    );
+    store
+        .put(None, data(&songs, r#"["a","b"]"#))
+        .expect("declared");
+    let mut wire = Wire::new(store);
+    let page = PePage {
+        offset: 0,
+        limit: NonZeroU32::new(1).unwrap(),
+    };
+    let mut request = wire.listed(&songs).fetch_page(page);
+    wire.run(30);
+    let result = wire.result(&mut request);
+    let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
+    else {
+        panic!("not sent: {result:?}");
+    };
+    assert!(
+        matches!(refused, RequestRefused::NotDeclaredPaginable(_)),
         "{refused:?}"
     );
     assert!(wire.peer.asked.is_empty());

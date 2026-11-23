@@ -584,8 +584,9 @@ impl ListedResource {
 
     /// The handle of the entry `res_id` of the Resource (M2-103 §8.5): its calls
     /// name that entry. ProgramList, JSONSchema, ChCtrlList, CtrlMapList and State
-    /// are named with a `resId` and are called only through this handle; a
-    /// Resource with no entries resolves to [`PeFailure::NotSent`] through it.
+    /// are named with a `resId` and are called only through this handle, as is a
+    /// custom or unmodelled Resource whose ResourceList entry sets `requireResId`;
+    /// a Resource with no entries resolves to [`PeFailure::NotSent`] through it.
     #[must_use]
     pub fn with_res_id(&self, res_id: ResourceId) -> Self {
         Self {
@@ -687,11 +688,14 @@ impl ListedResource {
     }
 }
 
+/// A call that was not sent because the rules of the Resource refuse it.
+pub(crate) fn refusal(refused: RequestRefused) -> PeerError<PeFailure> {
+    PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused)))
+}
+
 /// A call that ended at the handle: the rules of the Resource refuse it.
 fn not_sent<T>(refused: RequestRefused) -> PeerReply<T, PeFailure> {
-    PeerReply::failed(PeerError::Refused(PeFailure::NotSent(CallError::Refused(
-        refused,
-    ))))
+    PeerReply::failed(refusal(refused))
 }
 
 /// A handle the hardware layer holds of one peer, named by its Group and MUID.

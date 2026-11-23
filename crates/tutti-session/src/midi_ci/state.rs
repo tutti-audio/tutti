@@ -10,12 +10,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tutti_midi_ci::{
-    CallError, MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeResource, PeState, Place,
+    MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeResource, PeState, Place,
     RequestRefused, ResourceFailure, StateId,
 };
 use tutti_midi_device::SavedDevice;
 
-use super::{GetProperty, ListedPeer, ListedResource, PeFailure, PeerReply, SetProperty};
+use super::{GetProperty, ListedPeer, ListedResource, PeFailure, PeerReply, SetProperty, refusal};
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
 /// Resolves when the device answers, on the session's MIDI-CI task, with no
@@ -90,7 +90,7 @@ impl ListedPeer {
     fn state_resource(&self) -> Result<ListedResource, PeerError<PeFailure>> {
         self.resources()
             .and_then(|peer| peer.listed().find(|l| *l.resource() == PeResource::State))
-            .ok_or(not_sent(RequestRefused::NotListed(PeResource::State)))
+            .ok_or(refusal(RequestRefused::NotListed(PeResource::State)))
     }
 
     /// Saves the device's state: a Get of its State resource's `fullState`
@@ -130,26 +130,18 @@ impl ListedPeer {
     #[must_use = "a restore is answered only when it is awaited"]
     pub fn restore_state(&self, state: PeerState) -> Result<RestorePeerState, OtherPeer> {
         state.check_for(&SavedPeer::Device(self.device.clone()))?;
-        let reply = match self.state_resource() {
-            Ok(resource) => {
+        let reply = self
+            .state_resource()
+            .and_then(|resource| {
                 let body =
                     PeState::from_wire(Some(state.media_type()), state.bytes()).map_err(|e| {
                         PeerError::Refused(PeFailure::Unreadable(ResourceFailure::from(e)))
-                    });
-                match body {
-                    Ok(body) => resource
-                        .with_res_id(StateId::FULL_STATE.resource_id())
-                        .write(PeData::State(body)),
-                    Err(failed) => SetProperty::new(PeerReply::failed(failed)),
-                }
-            }
-            Err(refused) => SetProperty::new(PeerReply::failed(refused)),
-        };
+                    })?;
+                Ok(resource
+                    .with_res_id(StateId::FULL_STATE.resource_id())
+                    .write(PeData::State(body)))
+            })
+            .unwrap_or_else(|failed| SetProperty::new(PeerReply::failed(failed)));
         Ok(RestorePeerState { reply })
     }
-}
-
-/// A call that was not sent because the rules of the Resource refuse it.
-fn not_sent(refused: RequestRefused) -> PeerError<PeFailure> {
-    PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused)))
 }
