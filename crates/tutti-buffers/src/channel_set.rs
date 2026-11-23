@@ -23,7 +23,7 @@ use crate::{ChannelLayout, ChannelTopology};
 /// assert_eq!(wide.width().count(), 24);
 /// assert!(wide.topology().is_none());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Serialize, serde::Deserialize),
@@ -31,7 +31,7 @@ use crate::{ChannelLayout, ChannelTopology};
 )]
 pub struct ChannelSet(Repr);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Repr {
     /// Placed by a topology: every width up to [`MAX_CHANNELS`](crate::MAX_CHANNELS).
     Placed(ChannelTopology),

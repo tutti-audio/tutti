@@ -152,13 +152,13 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.stage = TubeStage::<F>::new(self.input.layout(), self.rate);
+        self.stage = TubeStage::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 

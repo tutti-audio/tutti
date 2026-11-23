@@ -73,7 +73,7 @@ impl OutputPolicy {
     #[must_use]
     pub fn routing(&self) -> Routing {
         Routing {
-            monitor: self.monitor.clone(),
+            monitor: self.monitor,
             map: self.map.clone(),
             levels: self.levels,
         }

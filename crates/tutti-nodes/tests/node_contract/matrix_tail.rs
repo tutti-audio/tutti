@@ -807,7 +807,6 @@ fn ambisonic_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sa
     irs: &[tutti_buffers::Mono<'_, S>],
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
-    let output = tutti_buffers::BusTopology::try_from(&output).expect("a test output fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(output, irs)
             .ambisonic(input)

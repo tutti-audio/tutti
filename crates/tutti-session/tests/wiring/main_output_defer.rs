@@ -70,9 +70,7 @@ fn reopened(events: &[SessionEvent]) -> Vec<(MainOutputReader, ChannelTopology)>
     events
         .iter()
         .filter_map(|e| match e {
-            SessionEvent::MainOutputReaderReopened { id, topology } => {
-                Some((*id, topology.clone()))
-            }
+            SessionEvent::MainOutputReaderReopened { id, topology } => Some((*id, *topology)),
             _ => None,
         })
         .collect()
@@ -298,7 +296,7 @@ fn a_refused_newer_declaration_leaves_the_waiting_one_to_apply() {
         .expect("quad");
     let buses = ChannelTopology::unassigned(ChannelLayout::from_count(4)).unwrap();
     assert!(
-        s.declare_main_output_topology(Some(buses.clone())).is_err(),
+        s.declare_main_output_topology(Some(buses)).is_err(),
         "four buses have no place on a stereo device"
     );
     assert!(matches!(

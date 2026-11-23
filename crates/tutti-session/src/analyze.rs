@@ -340,7 +340,7 @@ impl<'w, S: Float> Reader<'w, S> {
         match self {
             Self::Wave { wave, .. } => wave.channel_set(),
             #[cfg(codec)]
-            Self::File(file) => file.channel_set().clone(),
+            Self::File(file) => *file.channel_set(),
         }
     }
 

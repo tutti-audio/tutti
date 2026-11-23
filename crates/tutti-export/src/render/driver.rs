@@ -73,7 +73,7 @@ impl FileChannels {
         // A graph wider than a topology holds has none: its channels are
         // unassigned, so they go by index.
         let from = match main_output {
-            Some(main_output) => Some(main_output.clone()),
+            Some(main_output) => Some(*main_output),
             None => ChannelTopology::default_for(graph),
         };
         let fold = match (&from, self.channels.topology()) {

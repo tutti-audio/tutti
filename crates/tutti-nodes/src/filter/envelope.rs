@@ -150,7 +150,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(EnvelopeFilterBank::new(self.input.layout(), self.ty, rate));
+        self.bank = Some(EnvelopeFilterBank::new(self.input.width(), self.ty, rate));
         self.applied = false;
     }
 

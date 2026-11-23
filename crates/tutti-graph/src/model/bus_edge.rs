@@ -33,7 +33,7 @@
 
 use std::collections::BTreeMap;
 
-use tutti_buffers::{BusTopology, ChannelTopology};
+use tutti_buffers::BusTopology;
 use tutti_buffers::{Fold, FoldError};
 use tutti_units::Gain;
 
@@ -454,15 +454,12 @@ impl GraphSpec {
         };
 
         let fold = match by {
-            BusFold::Speakers => Fold::<f64>::between(
-                &ChannelTopology::from(source_topology),
-                &ChannelTopology::from(sink),
-            ),
+            BusFold::Speakers => Fold::<f64>::between(&source_topology, &sink),
         }
         .map_err(LaneError::Fold)?;
 
         let mut lanes = Vec::new();
-        for c in 0..usize::from(sink.layout().count()) {
+        for c in 0..usize::from(sink.width().count()) {
             for (k, gain) in fold.contributions(c) {
                 let source = match source_node {
                     Some(node) => {
