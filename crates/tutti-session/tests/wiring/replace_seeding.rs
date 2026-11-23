@@ -5,7 +5,7 @@
 
 use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{
-    Cx, DeclaredUnit, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
+    Cx, DeclaredUnit, ForkByClone, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status,
 };
 use tutti_rt::Param;
 use tutti_session::{DetachedSession, Replacement, Session, SessionEvent, ValueErrorKind};
@@ -287,4 +287,58 @@ fn seeding_is_no_change_a_watcher_sees() {
 
     assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0), "it seeded");
     assert!(w.changes().unwrap().is_none(), "and no change was seen");
+}
+
+/// A source with an event output: another shape than `Tone`'s, so a fade to it
+/// is refused when a parked swap lands.
+#[derive(Clone)]
+struct Eventful;
+
+impl Node for Eventful {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).events(0, 1)
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.output(0).fill(0.0);
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+}
+
+/// **A refused parked swap leaves the outgoing node as it was, seeds
+/// included**: after the failed landing, a replace by the same declaration
+/// still keeps the value that was set, not the declaration's initial.
+#[test]
+fn a_refused_parked_swap_gives_the_outgoing_params_back_whole() {
+    let mut s = detached();
+    let mut side = s.graph().take_audio_side();
+    let tone = s.graph().add(Params(Tone::new(1_000.0, 0.7)));
+    assert!(s.update().is_empty());
+    s.set(tone.cutoff().to(Hz::new(800.0))).unwrap();
+
+    s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+    s.graph()
+        .replace(tone, Replacement::new(ForkByClone(Eventful)))
+        .expect("accepted: the shapes are checked when it lands");
+    let mut out = [0.0f32];
+    let mut failed = false;
+    for _ in 0..16 {
+        side.tick(InterleavedMut::one_frame(&mut out).unwrap());
+        failed |= s
+            .update()
+            .iter()
+            .any(|e| matches!(e, SessionEvent::ReplaceFailed { .. }));
+        if failed {
+            break;
+        }
+    }
+    assert!(failed, "the landing is refused");
+    assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
+
+    let tone = s
+        .graph()
+        .replace(tone, Replacement::new(Params(Tone::new(1_000.0, 0.7))))
+        .expect("the node is in the graph");
+    assert_eq!(s.get(tone.cutoff()).unwrap(), Hz::new(800.0));
 }

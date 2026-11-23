@@ -120,13 +120,6 @@ impl Params {
     }
 }
 
-/// The unit type behind a declared unit: what two declarations of one address
-/// are compared by.
-fn unit_type(unit: DeclaredUnit) -> TypeId {
-    // The cell's value is a `U` behind the pointer; the pointee names it.
-    (*unit.value(0.0)).type_id()
-}
-
 /// Copies `from`'s value at `addr` into `set`'s cell, when both declare the
 /// param in one unit at one declared value and the value is finite, as a
 /// write requires ([`ParamTarget`](crate::ParamTarget)'s check). `declared`
@@ -138,7 +131,7 @@ fn seed_from(from: &NodeParams, set: &ParamSet, addr: UnitAddr, declared: f64) {
     };
     let same_unit = matches!(
         (from.set.unit(addr), set.unit(addr)),
-        (Some(a), Some(b)) if unit_type(a) == unit_type(b)
+        (Some(a), Some(b)) if a == b
     );
     let same_declaration = from
         .seeds
@@ -273,6 +266,16 @@ impl ValueTable {
             )
         };
         drop(old);
+    }
+
+    /// Puts `outgoing` back under `node` whole, as it was: a replace that
+    /// failed leaves the node it did not replace its params, seeds and lanes.
+    /// Control thread.
+    pub(crate) fn reinstate(&self, node: NodeKey, outgoing: Outgoing) {
+        if let Some(params) = outgoing.0 {
+            let old = self.params.lock().nodes.insert(node, params);
+            drop(old);
+        }
     }
 
     /// Binds the delivered-value cells `cell` names to `node`'s params, as

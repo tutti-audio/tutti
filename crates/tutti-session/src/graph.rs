@@ -247,12 +247,16 @@ struct Held {
 }
 
 impl Held {
-    /// Registers the params and slots under `node`, the params seeded from
-    /// `outgoing`.
+    /// Registers the params under `node`, seeded from `outgoing`, and the slots.
     fn provide(&self, values: &ValueTable, node: NodeKey, outgoing: &Outgoing) {
         if let Some(set) = &self.params {
             values.address(node, self.owner, set.clone(), outgoing);
         }
+        self.provide_slots(values, node);
+    }
+
+    /// Registers the slots under `node`.
+    fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
         (self.slots)(values, node, self.controls.as_ref());
     }
 }
@@ -280,8 +284,12 @@ pub(crate) enum OnShape {
 
 /// What the controls under a key were when a replacement parked: the
 /// outgoing node's, or the incoming one an earlier parked replacement put
-/// there (`None`: a node with no controls).
-struct Stash(Option<Held>);
+/// there (`None`: a node with no controls), with the params they were
+/// addressed as.
+struct Stash {
+    controls: Option<Held>,
+    params: Outgoing,
+}
 
 /// The executor, while this side still holds it, and what a local render
 /// needs beside it.
@@ -1591,7 +1599,11 @@ impl<F: Float> Graph<F> {
         let stash = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
         let outgoing = self.values.retire_keeping(node);
         self.address::<N>(node, placed, &outgoing);
-        self.park(node, Box::new(Swap(unit)), fade, Some(Stash(stash)));
+        let stash = Stash {
+            controls: stash,
+            params: outgoing,
+        };
+        self.park(node, Box::new(Swap(unit)), fade, Some(stash));
     }
 
     /// Registers the plugin hosted at `node` with the value table, as its
@@ -1865,7 +1877,11 @@ impl<F: Float> Graph<F> {
             let Parked { swap, stash, .. } = parked;
             match swap.swap(self, node, fade) {
                 Ok(()) => {
-                    if let Some(Stash(Some(outgoing))) = stash {
+                    if let Some(Stash {
+                        controls: Some(outgoing),
+                        ..
+                    }) = stash
+                    {
                         self.retiring.push((node, outgoing.controls));
                     }
                     out.push(Retried::Landed { node });
@@ -1906,9 +1922,10 @@ impl<F: Float> Graph<F> {
             return;
         };
         self.values.retire(node);
-        entry.controls = stash.0;
+        entry.controls = stash.controls;
+        self.values.reinstate(node, stash.params);
         if let Some(held) = &entry.controls {
-            held.provide(&self.values, node, &Outgoing::default());
+            held.provide_slots(&self.values, node);
         }
     }
 
@@ -2309,7 +2326,9 @@ impl<F: Float> Graph<F> {
         // rest, and the entry's, are of incoming nodes that never ran.
         let mut stashes = stashes.into_iter();
         match stashes.next() {
-            Some(Stash(outgoing)) => {
+            Some(Stash {
+                controls: outgoing, ..
+            }) => {
                 if let Some(held) = outgoing {
                     self.retiring.push((node, held.controls));
                 }
