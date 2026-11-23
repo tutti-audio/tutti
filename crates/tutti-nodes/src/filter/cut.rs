@@ -50,8 +50,8 @@ impl CutFilterConfig {
     }
 }
 
-/// A high-pass or low-pass of any width, a [`Butterworth`], [`LinkwitzRiley`], [`ChebyshevI`],
-/// [`ChebyshevII`] or [`Elliptic`] design run
+/// A high-pass or low-pass of any width, a [`Butterworth`](tutti_dsp::Butterworth), [`LinkwitzRiley`](tutti_dsp::LinkwitzRiley), [`ChebyshevI`](tutti_dsp::ChebyshevI),
+/// [`ChebyshevII`](tutti_dsp::ChebyshevII) or [`Elliptic`](tutti_dsp::Elliptic) design run
 /// as a cascade of state-variable sections ([`SosBank`](tutti_dsp::SosBank)) in `f64`.
 ///
 /// The cutoff is a live [`Hz`] cell (`UnitParam::Cutoff`), designed on a 16-frame grid
