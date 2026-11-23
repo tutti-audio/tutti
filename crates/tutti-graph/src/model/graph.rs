@@ -1,0 +1,1055 @@
+//! The audio graph as a **value**: build it, fold over it, compare it, hash it.
+//!
+//! [`Topology`] **is** the graph: nodes by stable [`NodeKey`], the set of edges
+//! feeding each sink port, and the main outputs. A compiler interprets it (a
+//! `Topology` in, an immutable plan out), and nothing reads a topology back out
+//! of a plan. Because it is a plain value, `Eq` compares two
+//! graphs, `Hash` keys a cache on one, and every static property is a pure
+//! fold over it: evaluation order ([`Topology::topo_order`]), width agreement
+//! ([`Topology::validate`]), latency ([`latency::plan`](crate::compile::latency::plan))
+//! and tail ([`graph_tail`](crate::graph_tail)).
+//!
+//! # Validation instead of a type index
+//!
+//! Channel widths are runtime data (a file's channel count, a plugin's bus
+//! arity, a device's layout), so a stereo-into-mono edge cannot be a compile
+//! error. [`Topology::validate`] is the replacement: one total function that
+//! returns every disagreement at once, run on the control thread, whose
+//! *result* is carried in the type as [`Valid`].
+//!
+//! # Examples
+//!
+//! ```
+//! use tutti_graph::{Edge, InputPort, NodeSpec, OutputPort, PortSource};
+//! use tutti_buffers::ChannelLayout;
+//! use tutti_graph::{NodeKey, Topology};
+//!
+//! let (osc, gain) = (NodeKey(1), NodeKey(2));
+//! let mut g = Topology::default();
+//! g.nodes.insert(osc, NodeSpec::new("osc", ChannelLayout::EMPTY, ChannelLayout::MONO));
+//! g.nodes.insert(gain, NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO));
+//! g.connect(
+//!     InputPort::new(gain, 0),
+//!     Edge::Direct(PortSource::Node(OutputPort::new(osc, 0))),
+//! );
+//! g.set_outputs([PortSource::Node(OutputPort::new(gain, 0))]);
+//!
+//! let valid = g.validate().expect("well formed");
+//! assert_eq!(valid.get().topo_order(), Ok(vec![osc, gain]));
+//! ```
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use crate::compile::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
+use crate::compile::tail::TailGraph;
+use crate::model::spec::{EventInputPort, EventOutputPort};
+use tutti_buffers::ChannelLayout;
+use tutti_units::{Samples, Tail};
+
+/// A stable identity for a node, chosen by the **author** of the topology.
+///
+/// A `NodeKey` is supplied from outside (a document
+/// node id, a test's literal), so it stays the same across any number of
+/// recompiles and across a crossfade that replaces the node: a handle a caller
+/// stored never goes stale. The runtime's own id is derived from it while
+/// compiling and never escapes.
+///
+/// A host with no id of its own to supply takes one from
+/// [`NodeKey::fresh`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NodeKey(pub u64);
+
+impl NodeKey {
+    /// Returns a key no earlier call in this process returned: a
+    /// process-wide counter from 1, one step per call, from any thread.
+    ///
+    /// Unique among its own calls only. A key a host writes itself (an
+    /// `Entity`'s bits, a literal) is not reserved against it, so a host
+    /// mixing the two keeps them in ranges that cannot meet.
+    pub fn fresh() -> Self {
+        static NEXT: tutti_rt::Mint = tutti_rt::Mint::new();
+        Self(NEXT.mint().get())
+    }
+}
+
+/// Which **output** port of which node a signal leaves from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OutputPort {
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
+}
+
+impl OutputPort {
+    /// Output `port` of `node`.
+    #[must_use]
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
+    }
+
+    /// The node the signal leaves.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// Which of its output ports.
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
+}
+
+/// Which **input** port of which node a signal arrives at.
+///
+/// The key of [`Topology::edges`] — see that field for why.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputPort {
+    pub(crate) node: NodeKey,
+    pub(crate) port: u16,
+}
+
+impl InputPort {
+    /// Input `port` of `node`.
+    #[must_use]
+    pub const fn new(node: NodeKey, port: u16) -> Self {
+        Self { node, port }
+    }
+
+    /// The node the signal arrives at.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.node
+    }
+
+    /// Which of its input ports.
+    #[must_use]
+    pub const fn port(self) -> u16 {
+        self.port
+    }
+}
+
+/// Where signals arrive: an input port of a node, or a main output channel.
+/// Both are sinks, and both take a set of sources.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PortSink {
+    /// An input port of a node.
+    Port(InputPort),
+    /// A main output channel.
+    Output(u16),
+}
+
+/// One audio edge, named: the sink it arrives at and the [`Edge`] that feeds
+/// it. The key of [`GraphSpec::gains`](crate::GraphSpec::gains) and of the
+/// state a weighted lane keeps across commits.
+///
+/// A main output channel's source is a `Direct` edge, as
+/// [`Invalid::DuplicateEdge`] names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EdgeId {
+    /// Where the edge arrives.
+    pub sink: PortSink,
+    /// What feeds it.
+    pub from: Edge,
+}
+
+/// What feeds one sink port.
+///
+/// An [`InputPort`] is a map *key* and its value is a list of sources
+/// ([`Topology::edges`]), so the representation holds several, and the compiler sums them
+/// in source order (`Op::Sum`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PortSource {
+    /// An output port of another node in this topology.
+    Node(OutputPort),
+    /// A channel of the topology's own main input.
+    MainInput(u16),
+    /// Explicit silence. Distinct from *absent*: an author who wired a port to
+    /// nothing on purpose has said something a missing key has not.
+    Zero,
+}
+
+/// A source read through an explicit delay, closing a cycle.
+///
+/// # The delay is part of the edge
+///
+/// A feedback edge delays by exactly [`delay`](Self::delay) frames, whatever
+/// the block size. It is *not* "one block", because the block size is a
+/// property of the runtime, not of the graph: a bounce prepared at a larger
+/// maximum block than live playback would otherwise loop at a different
+/// period, and a bounce must sound like what was heard.
+///
+/// A block cannot read samples it has not produced yet, so an interpreter
+/// needs `delay >= its maximum block`, and a compiler refuses a shorter one. **An offline render must therefore be prepared with a maximum
+/// block no larger than the smallest feedback delay in the graph**; the
+/// compile error enforces it rather than silently changing the sound.
+/// [`one_block`](Self::one_block) spells the common case: a delay of one
+/// block at the size the author chose.
+///
+/// The rest of this module's "last block" wording means this delay.
+///
+/// **The only way to express feedback.** A [`PortSource`] edge that closes a cycle
+/// is an [`Invalid::Cycle`]; a feedback edge is a cycle the author declared. The
+/// mandatory delay is a property of the *edge kind*, not a node the author has
+/// to remember to insert, so "I forgot the delay" is unrepresentable rather than
+/// a hang.
+///
+/// Named `FeedbackFrom` rather than `Feedback` because
+/// [`tutti_units::Feedback`] is already the recirculation-coefficient unit; two
+/// types called `Feedback` in one crate is a collision, not a pun.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FeedbackFrom {
+    /// The port whose delayed output feeds the sink.
+    pub from: OutputPort,
+    /// How far back, in frames. See the type docs for the lower bound.
+    pub delay: Samples,
+}
+
+impl FeedbackFrom {
+    /// Creates a feedback edge from `from`, delayed by `delay` frames.
+    #[must_use]
+    pub const fn new(from: OutputPort, delay: Samples) -> Self {
+        Self { from, delay }
+    }
+
+    /// Creates a feedback edge from `from`, delayed by one block of `block` frames —
+    /// the block size the author designed the loop for, fixed here so every
+    /// interpreter (live or offline) renders the same loop.
+    pub const fn one_block(from: OutputPort, block: Samples) -> Self {
+        Self { from, delay: block }
+    }
+}
+
+/// One incoming connection: a normal edge, or a feedback edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Edge {
+    /// This block's value, from the named source.
+    Direct(PortSource),
+    /// Last block's value, from the named port — a declared cycle.
+    Feedback(FeedbackFrom),
+}
+
+/// What kind of node this is, by **catalog id** — never a boxed unit.
+///
+/// The whole point of the split: a spec is `Clone + Eq + Hash` and carries no
+/// DSP state, so a test can compare two graphs and a recompile can diff them.
+/// The unit itself lives in the runtime, under the same `NodeKey`.
+///
+/// Deliberately **not** `Ord`: [`Tail`] has no ordering upstream (`Unknown` and
+/// `Unbounded` are not points on a line), and inventing one here would be a
+/// second, disagreeing definition of a value this crate already owns.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NodeSpec {
+    /// Catalog id — `"gain"`, `"plugin:vst3:…"`, `"ext:my.reverb"`. Open on
+    /// purpose: a closed enum here would mean a plugin format cannot add a kind,
+    /// and the set of kinds is a host's to extend, not this crate's to enumerate.
+    pub kind: String,
+    /// Declared input width. [`Topology::validate`] checks incoming edges
+    /// against it.
+    pub inputs: ChannelLayout,
+    /// Declared output width.
+    pub outputs: ChannelLayout,
+    /// **Involuntary** latency the node reports: frames it buffers as a side
+    /// effect, a lookahead limiter's, never a delay line's. A voluntary delay is
+    /// the effect, and compensating for it would drag every parallel path late.
+    pub latency: Samples,
+    /// How long it rings after its input stops, counted once its `latency`
+    /// is compensated: a tail excludes latency ([`Tail`]).
+    pub tail: Tail,
+}
+
+impl NodeSpec {
+    /// Creates a spec of `kind` at the given widths: no latency, no tail, no
+    /// params.
+    ///
+    /// The common shape; amend with the builder that names the field you mean.
+    /// A constructor rather than a struct literal so adding a field later does
+    /// not break every call site that never cared about it.
+    pub fn new(kind: impl Into<String>, inputs: ChannelLayout, outputs: ChannelLayout) -> Self {
+        Self {
+            kind: kind.into(),
+            inputs,
+            outputs,
+            latency: Samples::ZERO,
+            tail: Tail::None,
+        }
+    }
+
+    /// Returns this spec with `latency` frames of involuntary latency.
+    #[must_use]
+    pub fn latency(mut self, latency: Samples) -> Self {
+        self.latency = latency;
+        self
+    }
+
+    /// Returns this spec with the given ring-out, which excludes latency.
+    #[must_use]
+    pub fn tail(mut self, tail: Tail) -> Self {
+        self.tail = tail;
+        self
+    }
+}
+
+/// The audio graph, as a value.
+///
+/// See the module docs (`graph.rs`) for what it is for and an example. `Default`
+/// is the empty graph with no main inputs.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Topology {
+    /// Nodes by stable key. `BTreeMap` so iteration order — and therefore the
+    /// hash, and therefore every derived answer — is deterministic.
+    pub nodes: BTreeMap<NodeKey, NodeSpec>,
+    /// The sources of each sink port, keyed on the sink port: a set, held as
+    /// a `Vec` in sorted order ([`connect`](Self::connect) keeps it so).
+    ///
+    /// Silence is the empty set: an absent key and an empty `Vec` mean the
+    /// same (nothing feeds the port), and [`disconnect`](Self::disconnect)
+    /// removes the key when the last edge goes, so the derived `Eq` and `Hash`
+    /// agree. `PortSource::Zero` is never stored. A raw write is legal and
+    /// [`validate`](Self::validate) checks it: the same edge twice is
+    /// [`Invalid::DuplicateEdge`], and a stored `PortSource::Zero` is
+    /// [`Invalid::StoredSilence`].
+    pub edges: BTreeMap<InputPort, Vec<Edge>>,
+    /// The sources of each main output channel, in channel order, with the
+    /// same rules as [`edges`](Self::edges) (a sink is a sink).
+    pub outputs: Vec<Vec<PortSource>>,
+    /// The topology's own main input width — [`ChannelLayout::EMPTY`] for a
+    /// graph with none.
+    pub inputs: ChannelLayout,
+    /// Copy-out points ("tap these sources"). A closed tap is absent: nothing
+    /// is compiled for it. [`validate`](Self::validate) does not check a tap's
+    /// sources: opening one refuses a source that does not exist then
+    /// (`tutti_graph::MissingSource`), and a lane whose port goes missing
+    /// later reads silence.
+    pub taps: BTreeMap<TapId, TapSpec>,
+    /// Event copy-out points ("tap this event output"). A closed event tap is
+    /// absent: nothing is compiled for it. Like [`taps`](Self::taps),
+    /// [`validate`](Self::validate) does not check them: opening one refuses an
+    /// event port that does not exist then
+    /// (`tutti_graph::MissingSource::EventPort`), and one whose port goes
+    /// missing later reads nothing.
+    pub event_taps: BTreeMap<EventTapId, EventTapSpec>,
+    /// Level meters ("measure these sources"). A closed meter is absent:
+    /// nothing is compiled for it.
+    pub meters: BTreeMap<MeterId, MeterSpec>,
+}
+
+tutti_rt::id! {
+    /// The name of one level meter.
+    pub struct MeterId: named;
+}
+
+/// What a level meter measures: one lane per source.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum MeterSpec {
+    /// The graph's main outputs, one lane per output channel, following
+    /// [`Topology::outputs`] when they change, **aligned**: each lane is the
+    /// signal its output channel carries, at the output's time (before the
+    /// engine's fold and declick).
+    Outputs,
+    /// These sources, any ports, any number.
+    Ports {
+        /// One per lane. A lane naming a port that does not exist (a node
+        /// replaced by one with fewer outputs, a removed node) reads
+        /// silence; it does not fail a commit.
+        sources: Vec<PortSource>,
+        /// Where the reading sits in time: as the sources leave their nodes
+        /// ([`TapAlign::Raw`]) or delayed by the compiler to the output time
+        /// ([`TapAlign::ToOutput`], with a ring per lane).
+        align: TapAlign,
+    },
+}
+
+impl MeterSpec {
+    /// A meter on `sources` as they leave their nodes: a track's level.
+    #[must_use]
+    pub fn raw(sources: Vec<PortSource>) -> Self {
+        Self::Ports {
+            sources,
+            align: TapAlign::Raw,
+        }
+    }
+
+    /// A meter on `sources` aligned to the output time, as an output of the
+    /// same sources would carry them.
+    #[must_use]
+    pub fn aligned(sources: Vec<PortSource>) -> Self {
+        Self::Ports {
+            sources,
+            align: TapAlign::ToOutput,
+        }
+    }
+
+    /// The number of lanes; `outputs` is the topology's main output count
+    /// (one lane per channel, whatever feeds it).
+    #[must_use]
+    pub fn lanes(&self, outputs: usize) -> usize {
+        match self {
+            Self::Outputs => outputs,
+            Self::Ports { sources, .. } => sources.len(),
+        }
+    }
+
+    /// Where the reading sits in time.
+    #[must_use]
+    pub fn align(&self) -> TapAlign {
+        match self {
+            Self::Outputs => TapAlign::ToOutput,
+            Self::Ports { align, .. } => *align,
+        }
+    }
+}
+
+tutti_rt::id! {
+    /// The name of one tap.
+    pub struct TapId: named;
+}
+
+/// Where a tap's copy sits in time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum TapAlign {
+    /// As the sources leave their nodes: no delay is added.
+    Raw,
+    /// Delayed by the compiler to the graph's output time, the compensation an
+    /// output channel of the same sources gets. The output time is the latest
+    /// any *output* departs: a source that departs later than every output
+    /// (one no output reads) cannot be delayed to it, and is read as it
+    /// leaves its node, as [`Raw`](Self::Raw) would.
+    #[default]
+    ToOutput,
+}
+
+tutti_rt::id! {
+    /// The name of one event tap. Its own type: a [`TapId`] names a key of
+    /// [`Topology::taps`], and the two maps do not share a namespace.
+    pub struct EventTapId: named;
+}
+
+/// The event port an event tap copies: an output, or an input.
+///
+/// An [`EventOutputPort`] and an [`EventInputPort`] both convert into it, so one open call
+/// takes either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EventTapPort {
+    /// An event output: what the port wrote.
+    Out(EventOutputPort),
+    /// An event input: what the node reads there, every source merged in the
+    /// order the node is handed them.
+    In(EventInputPort),
+}
+
+impl EventTapPort {
+    /// The node whose port this is.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        match self {
+            Self::Out(p) => p.node,
+            Self::In(p) => p.node,
+        }
+    }
+}
+
+impl From<EventOutputPort> for EventTapPort {
+    fn from(port: EventOutputPort) -> Self {
+        Self::Out(port)
+    }
+}
+
+impl From<EventInputPort> for EventTapPort {
+    fn from(port: EventInputPort) -> Self {
+        Self::In(port)
+    }
+}
+
+/// "Tap this event port": one output or input of any node, copied out with
+/// the frame each event was due on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EventTapSpec {
+    /// The event port copied. `None` once its node was removed (a key is
+    /// the author's and can be inserted again, and a tap left naming it would
+    /// read the new node, as [`TapSpec::Ports`] says of an audio lane): it
+    /// reads nothing. A port that does not exist (a node replaced by one with
+    /// fewer event ports) reads nothing too; it does not fail a commit.
+    /// Opening an event tap refuses a port that does not exist at that moment.
+    pub source: Option<EventTapPort>,
+    /// Where the copy sits in time.
+    pub align: TapAlign,
+}
+
+/// What a tap copies out: the graph's output channels, or any sources.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum TapSpec {
+    /// The graph's main outputs, one lane per output channel, following
+    /// [`Topology::outputs`] when they change, **post-sum and aligned**: lane
+    /// `c` is the signal output channel `c` carries (every source of a summed
+    /// channel delayed to the output time and added), at the output's time,
+    /// before the engine's fold and declick. A tap names ports and not sums,
+    /// so this is the form that hears a fan-in channel whole.
+    Outputs {
+        /// The lanes the tap was opened with: fixed, because the writer the
+        /// executor holds has that many rings. A lane past the topology's
+        /// output count reads silence.
+        width: usize,
+    },
+    /// These sources, one lane each, any ports, any number.
+    Ports {
+        /// One per lane. A lane naming a port that does not exist (a node
+        /// replaced by one with fewer outputs, a removed node, a main input
+        /// past the declared width) reads silence; it does not fail a commit.
+        /// Opening a tap refuses a source that does not exist at that moment.
+        sources: Vec<PortSource>,
+        /// Where the copy sits in time.
+        align: TapAlign,
+    },
+}
+
+impl TapSpec {
+    /// A tap on `sources` as they leave their nodes.
+    #[must_use]
+    pub fn raw(sources: Vec<PortSource>) -> Self {
+        Self::Ports {
+            sources,
+            align: TapAlign::Raw,
+        }
+    }
+
+    /// A tap on `sources` aligned to the output time, as an output of the
+    /// same sources would carry them.
+    #[must_use]
+    pub fn aligned(sources: Vec<PortSource>) -> Self {
+        Self::Ports {
+            sources,
+            align: TapAlign::ToOutput,
+        }
+    }
+
+    /// The number of lanes the tap writes.
+    #[must_use]
+    pub fn lanes(&self) -> usize {
+        match self {
+            Self::Outputs { width } => *width,
+            Self::Ports { sources, .. } => sources.len(),
+        }
+    }
+
+    /// Where the copy sits in time.
+    #[must_use]
+    pub fn align(&self) -> TapAlign {
+        match self {
+            Self::Outputs { .. } => TapAlign::ToOutput,
+            Self::Ports { align, .. } => *align,
+        }
+    }
+}
+
+/// An empty graph with **no main inputs** — before anything is added
+/// to it.
+///
+/// Hand-written: `ChannelLayout` has no `Default`, so the width is chosen here.
+/// With no main inputs, a stray `PortSource::MainInput` edge is rejected by
+/// [`Topology::validate`] rather than resolving against inputs nobody asked
+/// for.
+impl Default for Topology {
+    fn default() -> Self {
+        Self {
+            nodes: BTreeMap::new(),
+            edges: BTreeMap::new(),
+            outputs: Vec::new(),
+            inputs: ChannelLayout::EMPTY,
+            taps: BTreeMap::new(),
+            event_taps: BTreeMap::new(),
+            meters: BTreeMap::new(),
+        }
+    }
+}
+
+/// Every way a [`Topology`] can be malformed.
+///
+/// Returned as a list, never short-circuited: an author fixing a graph wants all
+/// of them, and reporting one fault at a time turns a single edit into a
+/// bisection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Invalid {
+    /// An edge names a node that is not in [`Topology::nodes`].
+    UnknownNode {
+        /// The sink port whose edge names it.
+        at: InputPort,
+        /// The key that is not in the map.
+        missing: NodeKey,
+    },
+    /// An edge arrives at a port past the sink's declared input width.
+    SinkPortOutOfRange {
+        /// The out-of-range sink port.
+        at: InputPort,
+        /// The sink's declared width.
+        width: ChannelLayout,
+    },
+    /// An edge leaves from a port past the source's declared output width.
+    SourcePortOutOfRange {
+        /// The sink port whose edge is bad.
+        at: InputPort,
+        /// The out-of-range source port.
+        from: OutputPort,
+        /// The source's declared width.
+        width: ChannelLayout,
+    },
+    /// A main-input edge names a channel past [`Topology::inputs`].
+    MainInputOutOfRange {
+        /// The sink port whose edge is bad.
+        at: InputPort,
+        /// The named main input channel.
+        channel: u16,
+        /// The topology's declared input width.
+        width: ChannelLayout,
+    },
+    /// The same edge twice at one sink.
+    ///
+    /// A source wired twice is a weight of 2, and a weight is written as one;
+    /// a duplicate is a mistake.
+    DuplicateEdge {
+        /// The sink: an input port or a main output channel.
+        at: PortSink,
+        /// The edge listed more than once (a main output's source is a
+        /// `Direct` edge).
+        edge: Edge,
+    },
+    /// A `PortSource::Zero` stored in a sink's set, alone or beside others.
+    ///
+    /// Silence has one representation: the empty set. A `Zero` in a set would
+    /// make two equal wirings compare unequal, so every writer drops it and
+    /// `validate` refuses one a raw write left.
+    StoredSilence {
+        /// The sink: an input port or a main output channel.
+        at: PortSink,
+    },
+    /// A main output channel is sourced from a node port that does not exist.
+    OutputOutOfRange {
+        /// Which output channel.
+        channel: usize,
+        /// The port it names.
+        from: OutputPort,
+    },
+    /// A cycle **not** broken by an [`Edge::Feedback`] edge.
+    Cycle {
+        /// The nodes the topological walk could not place.
+        involving: Vec<NodeKey>,
+    },
+    /// A declared input port left unconnected.
+    ///
+    /// Reported, but **not fatal** — see [`Topology::validate`]. An unconnected
+    /// input reads silence, which is well defined and is what a graph looks like
+    /// mid-edit.
+    Unconnected {
+        /// The port nothing feeds.
+        at: InputPort,
+    },
+}
+
+impl Invalid {
+    /// Returns whether this fault blocks validity.
+    ///
+    /// Only [`Unconnected`](Self::Unconnected) does not.
+    #[must_use]
+    pub fn is_fatal(&self) -> bool {
+        !matches!(self, Invalid::Unconnected { .. })
+    }
+}
+
+/// A [`Topology`] that has passed [`validate`](Topology::validate).
+///
+/// Compiling takes one of these, not a bare [`Topology`], so "did anyone check
+/// this?" is answered by the type rather than by convention. This is the nearest
+/// available analogue of a type index: the check is still runtime, but its
+/// *result* is carried in the type system from there on.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Valid(Topology);
+
+impl Valid {
+    /// Returns the checked topology.
+    pub fn get(&self) -> &Topology {
+        &self.0
+    }
+
+    /// Takes the checked topology back out.
+    ///
+    /// Consuming rather than clone-and-get, so a caller that means to *edit* the
+    /// graph gives up the proof it was checked — which is the wrapper's point.
+    #[must_use]
+    pub fn into_inner(self) -> Topology {
+        self.0
+    }
+}
+
+impl Topology {
+    /// Checks every structural property: that every edge names existing nodes
+    /// and in-range ports, that main inputs and outputs resolve, and that
+    /// every cycle is broken by a feedback edge.
+    ///
+    /// Clones the topology into the returned [`Valid`]; runs on the control
+    /// thread.
+    ///
+    /// # Errors
+    ///
+    /// Returns **all** problems, not the first, when any is fatal.
+    /// [`Unconnected`](Invalid::Unconnected) is reported but does not block
+    /// validity: a partially built graph is renderable and reads silence there.
+    /// A caller that wants to warn about half-wired ports asks
+    /// [`unconnected`](Self::unconnected) directly, rather than inferring it
+    /// from an error list that an `Ok` will not carry.
+    pub fn validate(&self) -> Result<Valid, Vec<Invalid>> {
+        let mut errs = Vec::new();
+
+        for (&at, edges) in &self.edges {
+            let Some(sink) = self.nodes.get(&at.node) else {
+                errs.push(Invalid::UnknownNode {
+                    at,
+                    missing: at.node,
+                });
+                continue;
+            };
+            if at.port >= sink.inputs.count() {
+                errs.push(Invalid::SinkPortOutOfRange {
+                    at,
+                    width: sink.inputs,
+                });
+            }
+            if edges.contains(&Edge::Direct(PortSource::Zero)) {
+                errs.push(Invalid::StoredSilence {
+                    at: PortSink::Port(at),
+                });
+            }
+            for (n, edge) in edges.iter().enumerate() {
+                if edges[..n].contains(edge) {
+                    errs.push(Invalid::DuplicateEdge {
+                        at: PortSink::Port(at),
+                        edge: *edge,
+                    });
+                }
+                let from = match *edge {
+                    Edge::Direct(PortSource::Node(p))
+                    | Edge::Feedback(FeedbackFrom { from: p, .. }) => Some(p),
+                    Edge::Direct(PortSource::MainInput(ch)) => {
+                        if ch >= self.inputs.count() {
+                            errs.push(Invalid::MainInputOutOfRange {
+                                at,
+                                channel: ch,
+                                width: self.inputs,
+                            });
+                        }
+                        None
+                    }
+                    Edge::Direct(PortSource::Zero) => None,
+                };
+                if let Some(from) = from {
+                    match self.nodes.get(&from.node) {
+                        None => errs.push(Invalid::UnknownNode {
+                            at,
+                            missing: from.node,
+                        }),
+                        Some(src) if from.port >= src.outputs.count() => {
+                            errs.push(Invalid::SourcePortOutOfRange {
+                                at,
+                                from,
+                                width: src.outputs,
+                            });
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+        }
+
+        for (channel, sources) in self.outputs.iter().enumerate() {
+            if sources.contains(&PortSource::Zero) {
+                errs.push(Invalid::StoredSilence {
+                    at: PortSink::Output(channel as u16),
+                });
+            }
+            for (n, src) in sources.iter().enumerate() {
+                if sources[..n].contains(src) {
+                    errs.push(Invalid::DuplicateEdge {
+                        at: PortSink::Output(channel as u16),
+                        edge: Edge::Direct(*src),
+                    });
+                }
+                if let PortSource::Node(from) = *src {
+                    let resolves = self
+                        .nodes
+                        .get(&from.node)
+                        .is_some_and(|n| from.port < n.outputs.count());
+                    if !resolves {
+                        errs.push(Invalid::OutputOutOfRange { channel, from });
+                    }
+                }
+            }
+        }
+
+        errs.extend(self.unconnected().map(|at| Invalid::Unconnected { at }));
+
+        // Cycles over DIRECT edges only: a feedback edge is the author saying
+        // "this one reads last block", so it is cut before the walk.
+        if let Err(involving) = self.acyclic_order() {
+            errs.push(Invalid::Cycle { involving });
+        }
+
+        if errs.iter().any(Invalid::is_fatal) {
+            Err(errs)
+        } else {
+            Ok(Valid(self.clone()))
+        }
+    }
+
+    /// Adds `edge` to the sources of `at`, keeping the list sorted and free of
+    /// duplicates: the same edge twice is one edge.
+    ///
+    /// Two topologies that wire the same sources compare and hash equal
+    /// whatever order they were wired in.
+    ///
+    /// `Edge::Direct(PortSource::Zero)` adds nothing: silence is the empty set and
+    /// is never stored.
+    pub fn connect(&mut self, at: InputPort, edge: Edge) {
+        if edge == Edge::Direct(PortSource::Zero) {
+            return;
+        }
+        let list = self.edges.entry(at).or_default();
+        if let Err(i) = list.binary_search(&edge) {
+            list.insert(i, edge);
+        }
+    }
+
+    /// Removes `edge` from the sources of `at`, and the key itself when it was
+    /// the last, so the derived `Eq` and `Hash` see an unfed port as one.
+    /// Returns whether it was there.
+    pub fn disconnect(&mut self, at: InputPort, edge: Edge) -> bool {
+        let Some(list) = self.edges.get_mut(&at) else {
+            return false;
+        };
+        let Ok(i) = list.binary_search(&edge) else {
+            return false;
+        };
+        list.remove(i);
+        if list.is_empty() {
+            self.edges.remove(&at);
+        }
+        true
+    }
+
+    /// Adds `source` to the sources of main output `channel`, keeping the
+    /// list sorted and free of duplicates, as [`connect`](Self::connect) does
+    /// for an input port (the output is a sink too: several sources sum).
+    /// `PortSource::Zero` adds nothing. Returns whether the set changed.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` is past [`outputs`](Self::outputs).
+    pub fn connect_output(&mut self, channel: usize, source: PortSource) -> bool {
+        if source == PortSource::Zero {
+            return false;
+        }
+        let list = &mut self.outputs[channel];
+        match list.binary_search(&source) {
+            Ok(_) => false,
+            Err(i) => {
+                list.insert(i, source);
+                true
+            }
+        }
+    }
+
+    /// Removes `source` from the sources of main output `channel`. Returns
+    /// whether it was there.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` is past [`outputs`](Self::outputs).
+    pub fn disconnect_output(&mut self, channel: usize, source: PortSource) -> bool {
+        let list = &mut self.outputs[channel];
+        match list.binary_search(&source) {
+            Ok(i) => {
+                list.remove(i);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Sets the main outputs to one source per channel, in order, replacing
+    /// every channel's set: the one-source wiring. A `PortSource::Zero` is an
+    /// empty channel (silence is the empty set, never a stored `Zero`).
+    pub fn set_outputs(&mut self, sources: impl IntoIterator<Item = PortSource>) {
+        self.outputs = sources
+            .into_iter()
+            .map(|s| {
+                if s == PortSource::Zero {
+                    vec![]
+                } else {
+                    vec![s]
+                }
+            })
+            .collect();
+    }
+
+    /// Returns every declared input port nothing feeds, in key order.
+    ///
+    /// Not a fault (see [`validate`](Self::validate)) — exposed so a caller that
+    /// wants to warn about a half-wired graph has an answer that does not depend
+    /// on validation having failed.
+    pub fn unconnected(&self) -> impl Iterator<Item = InputPort> + '_ {
+        self.nodes.iter().flat_map(move |(&node, spec)| {
+            (0..spec.inputs.count())
+                .map(move |port| InputPort::new(node, port))
+                .filter(move |at| self.edges.get(at).is_none_or(Vec::is_empty))
+        })
+    }
+
+    /// Direct-edge predecessors of `node`. Feedback edges are excluded — they
+    /// carry last block's value, so they are not predecessors *this* block.
+    fn direct_preds(&self, node: NodeKey) -> impl Iterator<Item = NodeKey> + '_ {
+        self.edges
+            .iter()
+            .filter(move |(at, _)| at.node == node)
+            .flat_map(|(_, es)| es)
+            .filter_map(|e| match e {
+                Edge::Direct(PortSource::Node(p)) => Some(p.node),
+                _ => None,
+            })
+    }
+
+    /// Kahn's algorithm over the direct edges. `Err` carries the nodes left in
+    /// the cycle.
+    fn acyclic_order(&self) -> Result<Vec<NodeKey>, Vec<NodeKey>> {
+        let mut in_degree: BTreeMap<NodeKey, usize> = self.nodes.keys().map(|&k| (k, 0)).collect();
+        let mut dependents: HashMap<NodeKey, Vec<NodeKey>> = HashMap::new();
+
+        for &node in self.nodes.keys() {
+            for pred in self.direct_preds(node) {
+                if self.nodes.contains_key(&pred) {
+                    dependents.entry(pred).or_default().push(node);
+                    *in_degree.get_mut(&node).expect("keyed from nodes") += 1;
+                }
+            }
+        }
+
+        // Seeding from a `BTreeMap` keeps the queue deterministic, which is what
+        // makes `topo_order` a *function* of the value rather than merely one
+        // valid answer — so a test can assert the exact vector.
+        let mut queue: Vec<NodeKey> = in_degree
+            .iter()
+            .filter(|&(_, &d)| d == 0)
+            .map(|(&k, _)| k)
+            .rev()
+            .collect();
+
+        let mut order = Vec::with_capacity(self.nodes.len());
+        while let Some(n) = queue.pop() {
+            order.push(n);
+            let mut ready = Vec::new();
+            for &dep in dependents.get(&n).into_iter().flatten() {
+                let d = in_degree.get_mut(&dep).expect("keyed from nodes");
+                *d -= 1;
+                if *d == 0 {
+                    ready.push(dep);
+                }
+            }
+            ready.sort_unstable();
+            queue.extend(ready.into_iter().rev());
+        }
+
+        if order.len() == self.nodes.len() {
+            Ok(order)
+        } else {
+            let placed: HashSet<NodeKey> = order.iter().copied().collect();
+            Err(self
+                .nodes
+                .keys()
+                .copied()
+                .filter(|k| !placed.contains(k))
+                .collect())
+        }
+    }
+
+    /// Returns the evaluation order: deterministic, and a pure function of the
+    /// value.
+    ///
+    /// Feedback edges are cut before the walk, so they never order two nodes.
+    ///
+    /// # Errors
+    ///
+    /// The nodes a cycle of direct edges left unplaceable.
+    pub fn topo_order(&self) -> Result<Vec<NodeKey>, Vec<NodeKey>> {
+        self.acyclic_order()
+    }
+}
+
+impl LatencyGraph for Topology {
+    type Node = NodeKey;
+
+    fn nodes(&self) -> impl Iterator<Item = NodeKey> {
+        self.nodes.keys().copied()
+    }
+
+    fn latency(&self, node: NodeKey) -> Samples {
+        self.nodes.get(&node).map_or(Samples::ZERO, |n| n.latency)
+    }
+
+    /// In **port order**, one [`PortFeed`] per source: a node's output is
+    /// [`Feed::Node`], a main input [`Feed::Outside`] (aligned at a merge
+    /// point, as the compiler aligns it). A port with several sources yields
+    /// one per source, in sorted (compile) order; an unconnected port yields
+    /// one whose feed is `Feed::None`.
+    ///
+    /// A feedback edge yields `Feed::None`: it carries last block's value, so
+    /// it contributes no latency along this block's path, and reporting it as
+    /// a live predecessor would put the walk back in the cycle the edge kind
+    /// exists to cut.
+    fn inputs(&self, node: NodeKey) -> impl Iterator<Item = PortFeed<NodeKey>> {
+        let width = self.nodes.get(&node).map_or(0, |n| n.inputs.count());
+        (0..width).flat_map(move |port| {
+            let edges = self
+                .edges
+                .get(&InputPort::new(node, port))
+                .map_or(&[][..], Vec::as_slice);
+            let feed = |e: &Edge| match e {
+                Edge::Direct(PortSource::Node(p)) => Feed::Node(p.node),
+                Edge::Direct(PortSource::MainInput(_)) => Feed::Outside,
+                _ => Feed::None,
+            };
+            let empty = edges.is_empty().then_some(PortFeed {
+                port,
+                feed: Feed::None,
+            });
+            empty.into_iter().chain(edges.iter().map(move |e| PortFeed {
+                port,
+                feed: feed(e),
+            }))
+        })
+    }
+
+    /// In channel order, one [`ChannelFeed`] per source; a channel with none
+    /// yields one whose feed is `Feed::None`.
+    fn outputs(&self) -> impl Iterator<Item = ChannelFeed<NodeKey>> {
+        self.outputs.iter().enumerate().flat_map(|(ch, sources)| {
+            let feed = |s: &PortSource| match s {
+                PortSource::Node(p) => Feed::Node(p.node),
+                PortSource::MainInput(_) => Feed::Outside,
+                PortSource::Zero => Feed::None,
+            };
+            let empty = sources.is_empty().then_some(ChannelFeed {
+                channel: ch,
+                feed: Feed::None,
+            });
+            empty
+                .into_iter()
+                .chain(sources.iter().map(move |s| ChannelFeed {
+                    channel: ch,
+                    feed: feed(s),
+                }))
+        })
+    }
+}
+
+impl TailGraph for Topology {
+    fn tail(&self, node: NodeKey) -> Tail {
+        self.nodes.get(&node).map_or(Tail::Unknown, |n| n.tail)
+    }
+}

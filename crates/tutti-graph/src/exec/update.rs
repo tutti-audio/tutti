@@ -9,11 +9,11 @@ use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
-use crate::event::Event;
-use crate::gain::SumLane;
-use crate::held::Held;
-use crate::plan::Plan;
-use crate::spec::{EventInputPort, EventOutputPort};
+use crate::compile::plan::Plan;
+use crate::event::types::Event;
+use crate::exec::held::Held;
+use crate::model::gain::SumLane;
+use crate::model::spec::{EventInputPort, EventOutputPort};
 
 impl<F: Float> Executor<F> {
     /// Applies every queued commit, in the order the editor sent them, and
@@ -664,7 +664,7 @@ impl<F: Float> Executor<F> {
                     .iter()
                     .map(|e| e.offset)
                     .max()
-                    .unwrap_or(crate::time::Offset::ZERO);
+                    .unwrap_or(crate::node::time::Offset::ZERO);
                 for e in closes {
                     e.offset = end;
                 }

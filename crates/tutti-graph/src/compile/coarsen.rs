@@ -31,8 +31,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tutti_units::Samples;
 
-use crate::cost::{GRAIN, TASK_DISPATCH, Work};
-use crate::plan::{Csr, Span};
+use crate::compile::plan::{Csr, Span};
+use crate::node::cost::{GRAIN, TASK_DISPATCH, Work};
 
 /// The task tables.
 pub(super) struct Tasks {

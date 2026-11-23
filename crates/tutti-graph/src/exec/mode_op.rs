@@ -6,7 +6,7 @@
 //! its own unit.
 
 use super::*;
-use crate::mode::{MixState, NodeMode};
+use crate::model::mode::{MixState, NodeMode};
 
 /// [`node_dispatch`] for a unit that is not plain steady Active: toggle if
 /// the block's mode snapshot differs, then either park the node (the aligned

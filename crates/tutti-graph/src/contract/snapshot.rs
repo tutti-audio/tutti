@@ -32,7 +32,7 @@
 //! frames. Comparisons are within one run on one machine, so bit equality
 //! is sound on every platform.
 
-use crate::controls::{ParamFork, ParamNode};
+use crate::node::controls::{ParamFork, ParamNode};
 
 use super::SAMPLE_RATE;
 
@@ -184,15 +184,15 @@ impl<N: ParamNode + Clone> IsolateRow<N> {
                 .map(|ch| (0..size).map(|i| stimulus(ch, done + i)).collect())
                 .collect();
             let refs: Vec<&[f32]> = input.iter().map(|c| &c[..]).collect();
-            let planes = super::or_empty(tutti_buffers::Planes::new(&refs));
+            let planes = super::rig::or_empty(tutti_buffers::Planes::new(&refs));
             // `drive_input`, not `drive`: the block's length is the `Env`'s, so
             // a generator with no inputs (an LFO) renders too.
-            let env = crate::node::Env {
+            let env = crate::node::time::Env {
                 frame: tutti_units::Frame::new(done as u64),
                 sample_rate: SAMPLE_RATE,
                 block_len: tutti_units::Samples::new(size),
-                transport: crate::node::TransportPosition::default(),
-                changes: crate::node::TransportChanges::NONE,
+                transport: crate::node::time::TransportPosition::default(),
+                changes: crate::node::time::TransportChanges::NONE,
                 play: crate::PlayClock {
                     start: crate::PlayReading {
                         epoch: 0,
