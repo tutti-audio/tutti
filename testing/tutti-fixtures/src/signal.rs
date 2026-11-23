@@ -35,7 +35,8 @@ pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec
 /// The complex amplitude of the `hz` component of `x`, as `(re, im)` of
 /// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
 ///
-/// Exact (no leakage) when `x` spans a whole number of periods of `hz`.
+/// Exact (no leakage) when `x` spans a whole number of periods of `hz`. `x`
+/// is not empty: an empty `x` reads NaN.
 pub fn lock_in<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> (f64, f64) {
     let w = std::f64::consts::TAU * hz.get() / rate.get();
     let (mut re, mut im) = (0.0, 0.0);
