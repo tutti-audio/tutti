@@ -73,9 +73,10 @@ pub struct TransportAudio {
     control: Control,
     schedule: CommandQueueAudio,
     settings: TransportSettings,
-    /// The published tempo map, lent for the calls made outside a block's
-    /// walk (a rate change, a seconds lookup); the walk takes the block's
-    /// one loan from the caller ([`tempo_reader`](Self::tempo_reader)).
+    /// The published tempo map, lent only outside a segment's one loan: by
+    /// `take` and by `with_lent_map` (a rate change, outside any walk). The
+    /// walk and everything else in a segment read the caller's loan
+    /// ([`tempo_reader`](Self::tempo_reader)).
     tempo_map: TempoReader,
     /// The publisher's count at the last block that took the map.
     seen: u64,
@@ -316,11 +317,11 @@ impl TransportAudio {
 
     /// The transport time of `beat`, in seconds on the project's tempo map: a
     /// constant map at `tempo` (the tempo of the block that stands at
-    /// `beat`), a stepped one by its own segments. Audio thread: a lend of
-    /// the map at most, no allocation.
-    pub fn seconds_at(&mut self, beat: Beat, tempo: Bpm) -> Seconds {
+    /// `beat`), a stepped one by its own segments, read on `map`, the
+    /// block's one loan. Audio thread: no allocation.
+    pub fn seconds_at(&self, beat: Beat, tempo: Bpm, map: &TempoMap) -> Seconds {
         if self.stepped {
-            self.tempo_map.lend().seconds_at(beat)
+            map.seconds_at(beat)
         } else {
             BeatDuration::new(beat.get()).to_seconds(tempo)
         }

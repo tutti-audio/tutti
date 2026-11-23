@@ -397,11 +397,12 @@ impl<F: Float> GraphRender<F> {
         rate: SampleRate,
         frames: usize,
         first: &GraphTransport,
+        map: &tutti_tempo::TempoMap,
     ) {
         let beat = first.beat();
         let pose = Pose {
             beat,
-            seconds: self.transport.seconds_at(beat, first.tempo),
+            seconds: self.transport.seconds_at(beat, first.tempo, map),
             tempo: first.tempo,
             playing: first.playing,
             span: Samples::new(frames),
@@ -746,7 +747,7 @@ impl<F: Float> Engine<F> {
             let map = tempos.lend();
             let t = g.transport.begin_block(generation, &map);
             if let Some(os_ns) = began {
-                g.publish_call(os_ns, rate, frames, &t);
+                g.publish_call(os_ns, rate, frames, &t, &map);
             }
             // The tempo steps inside the block, if the map has any; a block
             // that would need more than it holds ends before the first that
@@ -913,7 +914,7 @@ impl<F: Float> Engine<F> {
             );
             let changes = pieces.changes;
             if let Some(os_ns) = began {
-                g.publish_call(os_ns, rate, frames, &walk.start);
+                g.publish_call(os_ns, rate, frames, &walk.start, &map);
             }
             // The walk cut the block short where a tempo step did not fit
             // its changes; the rest is the next iteration's block.
