@@ -647,13 +647,20 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
             Some(Box::new(fork)),
             Some(Box::new(controls.clone())),
         )
-        .published::<MidiClipNode, { PublishedKind::ClipEvents as u16 }>(Arc::new(controls))
+        .published::<MidiClipNode, ClipEventsKind>(Arc::new(controls))
     }
 }
 
-impl HasPublished<{ PublishedKind::ClipEvents as u16 }> for MidiClipNode {
+/// The kind of a clip node's events: the clip a session writes through
+/// `clip.events()`.
+#[derive(Clone, Copy, Debug)]
+pub enum ClipEventsKind {}
+
+impl PublishedKind for ClipEventsKind {
     type Value = Arc<ClipEvents>;
 }
+
+impl HasPublished<ClipEventsKind> for MidiClipNode {}
 
 /// The clip a session writes: [`set`](MidiClipControls::set), which an equal
 /// clip leaves in force.

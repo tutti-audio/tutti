@@ -354,10 +354,11 @@ impl ValueTable {
     /// Registers the published values of `node`, from what its parts said of
     /// it. Control thread.
     pub(crate) fn provide_node(&self, node: NodeKey, published: &[ErasedPublished]) {
-        self.params
-            .lock()
-            .slots
-            .extend(published.iter().map(|entry| slot::slot_of(node, entry)));
+        self.params.lock().slots.extend(
+            published
+                .iter()
+                .filter_map(|entry| slot::slot_of(node, entry)),
+        );
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the

@@ -480,13 +480,20 @@ impl<F: Float> IntoNode<F> for HarmonyNode {
             Some(Box::new(fork)),
             Some(Box::new(controls.clone())),
         )
-        .published::<HarmonyNode, { PublishedKind::Harmony as u16 }>(Arc::new(controls))
+        .published::<HarmonyNode, HarmonyChangesKind>(Arc::new(controls))
     }
 }
 
-impl HasPublished<{ PublishedKind::Harmony as u16 }> for HarmonyNode {
+/// The kind of a harmony node's changes: the lanes a session writes through
+/// `harmony.changes()`.
+#[derive(Clone, Copy, Debug)]
+pub enum HarmonyChangesKind {}
+
+impl PublishedKind for HarmonyChangesKind {
     type Value = Arc<HarmonyChanges>;
 }
+
+impl HasPublished<HarmonyChangesKind> for HarmonyNode {}
 
 /// The lanes a session writes: [`set`](HarmonyControls::set), which equal
 /// lanes leave in force.

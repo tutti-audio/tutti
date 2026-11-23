@@ -3,8 +3,6 @@
 //! and the parts a session reads (each cell under its kind, and a reclaimer
 //! over every publisher).
 
-use std::sync::Arc;
-
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, IntoNode, Io, Node, ParamNode, Prepare, PublishedKind, Shape, Status, declare_params,
@@ -13,6 +11,18 @@ use tutti_graph::{
 /// A list of numbers the test node publishes.
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Numbers(Vec<u32>);
+
+/// The kinds of the two values: each one fixes the type it holds.
+enum EventsKind {}
+enum ChangesKind {}
+
+impl PublishedKind for EventsKind {
+    type Value = Numbers;
+}
+
+impl PublishedKind for ChangesKind {
+    type Value = Numbers;
+}
 
 /// A node with a published value that starts at its default and one that
 /// starts at a stated value.
@@ -23,8 +33,8 @@ struct Holder {
 
 declare_params!([] Holder, HolderConfig, HolderCells {
     published {
-        events: ClipEvents => Numbers,
-        changes: Harmony => Numbers = Numbers(vec![7]),
+        events: EventsKind,
+        changes: ChangesKind = Numbers(vec![7]),
     }
 });
 
@@ -74,13 +84,14 @@ fn the_parts_carry_each_cell_under_its_kind_and_a_write_reaches_the_node() {
     let node = Holder::from(HolderConfig::new());
     let probe = node.cells.clone();
     let parts = IntoNode::<f32>::into_parts(node);
-    let kinds: Vec<_> = parts.published.iter().map(|p| p.kind()).collect();
-    assert_eq!(kinds, [PublishedKind::ClipEvents, PublishedKind::Harmony]);
+    assert!(parts.published[0].cell::<EventsKind>().is_some());
+    assert!(parts.published[0].cell::<ChangesKind>().is_none());
+    assert!(parts.published[1].cell::<ChangesKind>().is_some());
 
     let cell = parts.published[0]
-        .cell::<Arc<Numbers>>()
+        .cell::<EventsKind>()
         .expect("the cell is held as the declared value");
-    cell.replace(&Arc::new(Numbers(vec![9])));
+    cell.replace(&Numbers(vec![9]));
     let mut probe = probe;
     assert_eq!(*probe.events().lend(), Numbers(vec![9]));
 }
@@ -96,11 +107,11 @@ fn the_reclaimer_frees_what_a_block_held_across_a_replacement() {
         .reclaimer
         .expect("a node that publishes has a reclaimer");
     let cell = parts.published[1]
-        .cell::<Arc<Numbers>>()
+        .cell::<ChangesKind>()
         .expect("the declared value");
     {
         let _held = block.changes().lend();
-        cell.replace(&Arc::new(Numbers(vec![3])));
+        cell.replace(&Numbers(vec![3]));
         assert_eq!(
             reclaimer.reclaim(),
             1,

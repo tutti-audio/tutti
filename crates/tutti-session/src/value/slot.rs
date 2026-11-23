@@ -591,17 +591,17 @@ node_slot_target!(
 );
 
 /// Generates a [`Key`](crate::Key)'s method for each published kind, from the
-/// node's [`HasPublished`](tutti_graph::HasPublished): only a node that declares the kind, with the
-/// value type the session holds it as, has the method.
+/// node's [`HasPublished`](tutti_graph::HasPublished): only a node that
+/// publishes the kind has the method.
 macro_rules! published_methods {
-    ($($(#[$cfg:meta])* $name:ident, $target:ident => $kind:ident, $value:ty, $doc:literal;)+) => {
+    ($($(#[$cfg:meta])* $name:ident, $target:ident => $kind:ty, $doc:literal;)+) => {
         impl<N: ?Sized> crate::Key<N> {$(
             #[doc = $doc]
             $(#[$cfg])*
             #[must_use]
             pub const fn $name(self) -> $target
             where
-                N: tutti_graph::HasPublished<{ tutti_graph::PublishedKind::$kind as u16 }, Value = $value>,
+                N: tutti_graph::HasPublished<$kind>,
             {
                 $target::new(self.erase())
             }
@@ -611,22 +611,22 @@ macro_rules! published_methods {
 
 published_methods! {
     #[cfg(feature = "midi")]
-    events, ClipEventsTarget => ClipEvents, Arc<tutti_midi_runtime::ClipEvents>,
+    events, ClipEventsTarget => tutti_midi_runtime::ClipEventsKind,
         "The events the clip plays (only a node that publishes them has this method).";
     #[cfg(feature = "midi")]
-    changes, HarmonyTarget => Harmony, Arc<tutti_midi_runtime::HarmonyChanges>,
+    changes, HarmonyTarget => tutti_midi_runtime::HarmonyChangesKind,
         "The chord and scale changes the node sends (only a node that publishes them has this method).";
     #[cfg(feature = "sampler")]
-    window, WindowTarget => Window, Option<tutti_sampler::VoiceWindow>,
+    window, WindowTarget => tutti_sampler::WindowKind,
         "The window the voice plays on the transport (only a node that publishes it has this method).";
     #[cfg(feature = "sampler")]
-    looping, LoopingTarget => Looping, Option<tutti_sampler::Loop>,
+    looping, LoopingTarget => tutti_sampler::LoopingKind,
         "The voice's loop (only a node that publishes it has this method).";
     #[cfg(feature = "sampler")]
-    direction, DirectionTarget => Direction, tutti_sampler::PlayDirection,
+    direction, DirectionTarget => tutti_sampler::DirectionKind,
         "Which way the voice plays (only a node that publishes it has this method).";
     #[cfg(feature = "sampler")]
-    speed, SpeedTarget => Speed, tutti_units::PlaybackRate,
+    speed, SpeedTarget => tutti_sampler::SpeedKind,
         "The voice's varispeed (only a node that publishes it has this method).";
 }
 
@@ -817,64 +817,48 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
     }
 }
 
-/// The slot of `entry`, a cell the node holds as a `V`. A node whose
-/// declaration gives the kind another value type is refused here, at the
-/// call that adds it, with both types named: the table of kinds in
-/// [`slot_of`] fixes each kind's value type.
+/// `cell` as the slot of its value type.
 #[cfg(any(feature = "midi", feature = "sampler"))]
-fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(entry: &ErasedPublished) -> Erased {
-    let Some(cell) = entry.cell::<V>() else {
-        panic!(
-            "a node publishes {:?} as `{}`, but a session holds that kind as `{}`",
-            entry.kind(),
-            entry.declared(),
-            std::any::type_name::<V>(),
-        );
-    };
+fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
+    cell: Arc<dyn tutti_graph::Published<Value = V>>,
+) -> Erased {
     erase_staged::<V, _>(PublishedSlot::new(NodeCell(cell)))
 }
 
-/// The slot a node's published cell is registered as under `node`: the table
-/// of kinds, each with the value type a session holds it as.
+/// The slot a node's published cell is registered as under `node`, when its
+/// kind is one the session knows (each kind here has the value type its
+/// session target holds): a node that publishes another kind has nothing that
+/// can address its value, and is left out.
 #[cfg_attr(
     not(any(feature = "midi", feature = "sampler")),
     allow(unused_variables)
 )]
-pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> (SlotId, Erased) {
-    match entry.kind() {
-        #[cfg(feature = "midi")]
-        tutti_graph::PublishedKind::ClipEvents => (
-            SlotId::ClipEvents(node),
-            node_cell::<Arc<tutti_midi_runtime::ClipEvents>>(entry),
-        ),
-        #[cfg(feature = "midi")]
-        tutti_graph::PublishedKind::Harmony => (
-            SlotId::Harmony(node),
-            node_cell::<Arc<tutti_midi_runtime::HarmonyChanges>>(entry),
-        ),
-        #[cfg(feature = "sampler")]
-        tutti_graph::PublishedKind::Window => (
-            SlotId::Window(node),
-            node_cell::<Option<tutti_sampler::VoiceWindow>>(entry),
-        ),
-        #[cfg(feature = "sampler")]
-        tutti_graph::PublishedKind::Looping => (
-            SlotId::Looping(node),
-            node_cell::<Option<tutti_sampler::Loop>>(entry),
-        ),
-        #[cfg(feature = "sampler")]
-        tutti_graph::PublishedKind::Direction => (
-            SlotId::Direction(node),
-            node_cell::<tutti_sampler::PlayDirection>(entry),
-        ),
-        #[cfg(feature = "sampler")]
-        tutti_graph::PublishedKind::Speed => (
-            SlotId::Speed(node),
-            node_cell::<tutti_units::PlaybackRate>(entry),
-        ),
-        #[allow(unreachable_patterns)]
-        kind => panic!("a session built without the feature of {kind:?} holds no such value"),
+pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
+    #[cfg(feature = "midi")]
+    {
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::ClipEventsKind>() {
+            return Some((SlotId::ClipEvents(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::HarmonyChangesKind>() {
+            return Some((SlotId::Harmony(node), node_cell(cell)));
+        }
     }
+    #[cfg(feature = "sampler")]
+    {
+        if let Some(cell) = entry.cell::<tutti_sampler::WindowKind>() {
+            return Some((SlotId::Window(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::LoopingKind>() {
+            return Some((SlotId::Looping(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::DirectionKind>() {
+            return Some((SlotId::Direction(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::SpeedKind>() {
+            return Some((SlotId::Speed(node), node_cell(cell)));
+        }
+    }
+    None
 }
 
 /// The tempo map, in the transport's settings.

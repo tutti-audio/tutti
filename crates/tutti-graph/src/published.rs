@@ -1,60 +1,28 @@
 //! A node's published values: the cells a session writes at `update()` and the
 //! node reads once per block through a [`Reader`].
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::sync::Arc;
 
 use tutti_rt::{Loan, Publisher, Reader, Reclaim};
 
-/// Which published value of a node a cell is: the vocabulary the session keys
-/// a node's values by ([`HasPublished`]). Each kind's value type is fixed by
-/// the session's table of kinds, so a node declares a kind with that type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(u16)]
-pub enum PublishedKind {
-    /// The events a MIDI clip node plays.
-    ClipEvents,
-    /// The chord and scale changes a harmony node sends.
-    Harmony,
-    /// Where a sampler voice sits on the transport.
-    Window,
-    /// A sampler voice's loop.
-    Looping,
-    /// Which way a sampler voice plays.
-    Direction,
-    /// A sampler voice's varispeed.
-    Speed,
-}
-
-impl PublishedKind {
-    /// The kind a [`HasPublished`] constant names, or `None` for a number no
-    /// kind has.
-    #[must_use]
-    pub const fn new(kind: u16) -> Option<Self> {
-        Some(match kind {
-            0 => Self::ClipEvents,
-            1 => Self::Harmony,
-            2 => Self::Window,
-            3 => Self::Looping,
-            4 => Self::Direction,
-            5 => Self::Speed,
-            _ => return None,
-        })
-    }
-}
-
-/// That the node `Self` publishes a value of the kind `K` (a
-/// [`PublishedKind`] as `u16`), whose value is `Value`. What a typed key's
-/// method for that kind needs, and what [`declare_params!`](crate::declare_params)
-/// writes from a `published` entry.
-///
-/// A kind's `Value` is fixed by the session's table of kinds: a node that
-/// declares another type for a kind gets no key method for it, and its
-/// insertion into a session panics, naming the kind and both types.
-pub trait HasPublished<const K: u16> {
+/// Which published value of a node a cell is, and the type it holds: the
+/// vocabulary a session addresses a node's values by. A kind is an
+/// uninhabited type declared next to its value (`enum Window {}`), so a kind
+/// has one value type and a node cannot declare another for it.
+pub trait PublishedKind: 'static {
     /// The value the key's target reads and writes.
     type Value: Clone + PartialEq + Send + Sync + 'static;
 }
+
+/// That the node `Self` publishes a value of the kind `K`, whose value is
+/// `K::Value`. What a typed key's method for that kind needs, and what
+/// [`declare_params!`](crate::declare_params) writes from a `published` entry.
+///
+/// A session addresses the kinds it knows. A node that publishes a kind the
+/// session does not know has nothing that can address its value, and the
+/// session leaves it out.
+pub trait HasPublished<K: PublishedKind> {}
 
 /// A cell the control side reads and replaces one published value through.
 /// Control thread only: the session calls it under its value lock.
@@ -69,102 +37,61 @@ pub trait Published: Send + Sync + 'static {
     fn replace(&self, value: &Self::Value);
 }
 
-/// A published `T`, shared as an `Arc`: an equal value changes nothing.
-impl<T: PartialEq + Send + Sync + 'static> Published for Publisher<T> {
-    type Value = Arc<T>;
-
-    fn current(&self) -> Arc<T> {
-        Self::current(self)
-    }
-
-    fn replace(&self, value: &Arc<T>) {
-        let current = Self::current(self);
-        if !Arc::ptr_eq(&current, value) && *current != **value {
-            self.publish(Arc::clone(value));
-        }
-    }
-}
-
-/// A published `Copy` value, read and written as the value itself.
-#[derive(Clone, Debug)]
-pub struct Copied<T>(Publisher<T>);
-
-impl<T> Copied<T> {
-    /// `publisher`'s value, read and written as the value itself.
-    #[must_use]
-    pub fn new(publisher: Publisher<T>) -> Self {
-        Self(publisher)
-    }
-}
-
-impl<T: Copy + PartialEq + Send + Sync + 'static> Published for Copied<T> {
+/// A published `T`: the value in force is read and replaced as the `T` itself.
+impl<T: Clone + PartialEq + Send + Sync + 'static> Published for Publisher<T> {
     type Value = T;
 
     fn current(&self) -> T {
-        *self.0.current()
+        (*Self::current(self)).clone()
     }
 
     fn replace(&self, value: &T) {
-        if *self.0.current() != *value {
-            self.0.publish(*value);
+        if *Self::current(self) != *value {
+            self.publish(value.clone());
         }
     }
 }
 
-/// One published cell of a node as `NodeParts` carries it: the kind, the type
-/// the node declared for it, and the cell, an `Arc<dyn Published<Value = V>>`
-/// behind `Any`.
+/// One published cell of a node as `NodeParts` carries it: its kind and the
+/// cell, an `Arc<dyn Published<Value = K::Value>>` behind `Any`.
 pub struct ErasedPublished {
-    kind: PublishedKind,
-    declared: &'static str,
+    kind: TypeId,
+    kind_name: &'static str,
     cell: Arc<dyn Any + Send + Sync>,
 }
 
 impl ErasedPublished {
-    /// Which value the cell is.
-    #[must_use]
-    pub const fn kind(&self) -> PublishedKind {
-        self.kind
-    }
-
-    /// The name of the value type the node declared (for a refusal's text).
-    #[must_use]
-    pub const fn declared(&self) -> &'static str {
-        self.declared
-    }
-
-    /// The cell as a publisher of `V`, or `None` when the node declared the
-    /// kind with another value type.
-    #[must_use]
-    pub fn cell<V: Clone + PartialEq + Send + Sync + 'static>(
-        &self,
-    ) -> Option<Arc<dyn Published<Value = V>>> {
-        self.cell
-            .downcast_ref::<Arc<dyn Published<Value = V>>>()
-            .cloned()
-    }
-
-    pub(crate) fn new<N: HasPublished<K>, const K: u16>(
-        cell: Arc<dyn Published<Value = N::Value>>,
-    ) -> Self {
-        let kind = const {
-            match PublishedKind::new(K) {
-                Some(kind) => kind,
-                None => panic!("`HasPublished<K>` names no `PublishedKind`"),
-            }
-        };
+    pub(crate) fn new<K: PublishedKind>(cell: Arc<dyn Published<Value = K::Value>>) -> Self {
         Self {
-            kind,
-            declared: std::any::type_name::<N::Value>(),
+            kind: TypeId::of::<K>(),
+            kind_name: std::any::type_name::<K>(),
             cell: Arc::new(cell),
         }
+    }
+
+    /// The name of the kind's type.
+    #[must_use]
+    pub const fn kind_name(&self) -> &'static str {
+        self.kind_name
+    }
+
+    /// The cell, when it is of the kind `K`: its value is `K::Value` by the
+    /// one way an entry is made.
+    #[must_use]
+    pub fn cell<K: PublishedKind>(&self) -> Option<Arc<dyn Published<Value = K::Value>>> {
+        if self.kind != TypeId::of::<K>() {
+            return None;
+        }
+        self.cell
+            .downcast_ref::<Arc<dyn Published<Value = K::Value>>>()
+            .cloned()
     }
 }
 
 impl std::fmt::Debug for ErasedPublished {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ErasedPublished")
-            .field("kind", &self.kind)
+            .field("kind", &self.kind_name)
             .finish_non_exhaustive()
     }
 }

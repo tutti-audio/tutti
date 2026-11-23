@@ -223,8 +223,9 @@ pub use output_plan::{
     OutputPlan, OutputTerms, Placement, SendAt,
 };
 pub use schedule::{
-    CLIP_EVENT_DENSITY, ClipEvents, HARMONY_EVENT_DENSITY, HarmonyChanges, HarmonyChangesError,
-    HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, TimedHarmony, TimedMidiEvent,
+    CLIP_EVENT_DENSITY, ClipEvents, ClipEventsKind, HARMONY_EVENT_DENSITY, HarmonyChanges,
+    HarmonyChangesError, HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls,
+    MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,

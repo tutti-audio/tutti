@@ -791,9 +791,7 @@ pub use plan::{
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
-pub use published::{
-    Copied, ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind,
-};
+pub use published::{ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind};
 pub use rates::SampleRates;
 #[cfg(feature = "testing")]
 pub use reference::Reference;

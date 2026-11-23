@@ -546,22 +546,21 @@ pub fn input<'a, F: Float>(
 ///   has a chained option `.mode(Mode::On)`; the node reads `cells.mode().load()`
 ///   once per block.
 ///
-/// - **A published value**, `published { events: ClipEvents => ClipEvents }`
-///   (`name: Kind => Value`), is a value a session writes at `update()` and the
-///   node reads once per block: a [`PublishedKind`](crate::PublishedKind) names
-///   what it is, and `Value` is the type it holds. `Cells` holds it as a
-///   [`PublishedCell`](crate::PublishedCell) (a clone shares the publisher and
-///   registers a reader of its own; a fork gets its own at the value it holds),
-///   `cells.events()` hands the cell out and the node calls `lend()` on it
-///   once per block, never keeping the `Loan` across blocks. `Value` starts at
-///   `Default::default()`; `events: ClipEvents => ClipEvents = expr` starts at
+/// - **A published value**, `published { events: ClipEventsKind }`
+///   (`name: Kind`), is a value a session writes at `update()` and the node
+///   reads once per block. The [`PublishedKind`](crate::PublishedKind) names
+///   what it is and fixes the type it holds, `Kind::Value`. `Cells` holds it as
+///   a [`PublishedCell`](crate::PublishedCell) (a clone shares the publisher
+///   and registers a reader of its own; a fork gets its own at the value it
+///   holds), `cells.events()` hands the cell out and the node calls `lend()` on
+///   it once per block, never keeping the `Loan` across blocks. The value starts
+///   at `Kind::Value`'s `Default`; `events: ClipEventsKind = expr` starts at
 ///   `expr` and gives the config a chained option `.events(value)`. The macro
-///   writes the node's [`HasPublished`](crate::HasPublished) for the kind (its
-///   value an `Arc<Value>`, which the session's key method for the kind needs)
-///   and puts each cell in the node's [`NodeParts`](crate::NodeParts) with a
-///   reclaimer over every publisher. A kind's value type is fixed by the
-///   session's table of kinds. A published value is no param: it has no
-///   address and cannot be modulated.
+///   writes the node's [`HasPublished`](crate::HasPublished) for the kind, which
+///   the session's key method for the kind needs, and puts each cell in the
+///   node's [`NodeParts`](crate::NodeParts) with a reclaimer over every
+///   publisher. A published value is no param: it has no address and cannot be
+///   modulated.
 ///
 /// - **An option**, `options { seed: u64 = 0 }`, is a plain value of the config
 ///   with a default: it is no cell and no param, and not shared. The node reads
@@ -801,9 +800,9 @@ macro_rules! declare_params {
         } { $($($ptoks)*)? } [] [] @ $($($pubtoks)*)?);
     };
 
-    // The `published` entries, one at a time: `Name: Kind => Value` starts at
-    // `Value::default()`, `Name: Kind => Value = expr` starts at `expr` and
-    // has a config option. The first list holds the entries with no default,
+    // The `published` entries, one at a time: `name: Kind` starts at
+    // `Kind::Value`'s default, `name: Kind = expr` starts at `expr` and has a
+    // config option. The first list holds the entries with no default,
     // the second the entries with one.
     (@pub { $($top:tt)* } { $($pt:tt)* } [$($nd:tt)*] [$($d:tt)*] @) => {
         $crate::declare_params!(@gather { [$($nd)*] [$($d)*] $($top)* } [] port @ $($pt)*);
@@ -812,23 +811,23 @@ macro_rules! declare_params {
         $crate::declare_params!(@pub $top $pt [$($nd)*] [$($d)*] @ $($rest)*);
     };
     (@pub $top:tt $pt:tt [$($nd:tt)*] [$($d:tt)*] @
-        $name:ident : $kind:ident => $value:ty = $default:expr , $($rest:tt)*) => {
-        $crate::declare_params!(@pub $top $pt [$($nd)*] [$($d)* [$name $kind $value [$default]]]
+        $name:ident : $kind:ty = $default:expr , $($rest:tt)*) => {
+        $crate::declare_params!(@pub $top $pt [$($nd)*] [$($d)* [$name $kind [$default]]]
             @ $($rest)*);
     };
     (@pub $top:tt $pt:tt [$($nd:tt)*] [$($d:tt)*] @
-        $name:ident : $kind:ident => $value:ty = $default:expr) => {
-        $crate::declare_params!(@pub $top $pt [$($nd)*] [$($d)* [$name $kind $value [$default]]]
+        $name:ident : $kind:ty = $default:expr) => {
+        $crate::declare_params!(@pub $top $pt [$($nd)*] [$($d)* [$name $kind [$default]]]
             @);
     };
     (@pub $top:tt $pt:tt [$($nd:tt)*] [$($d:tt)*] @
-        $name:ident : $kind:ident => $value:ty , $($rest:tt)*) => {
-        $crate::declare_params!(@pub $top $pt [$($nd)* [$name $kind $value]] [$($d)*]
+        $name:ident : $kind:ty , $($rest:tt)*) => {
+        $crate::declare_params!(@pub $top $pt [$($nd)* [$name $kind]] [$($d)*]
             @ $($rest)*);
     };
     (@pub $top:tt $pt:tt [$($nd:tt)*] [$($d:tt)*] @
-        $name:ident : $kind:ident => $value:ty) => {
-        $crate::declare_params!(@pub $top $pt [$($nd)* [$name $kind $value]] [$($d)*] @);
+        $name:ident : $kind:ty) => {
+        $crate::declare_params!(@pub $top $pt [$($nd)* [$name $kind]] [$($d)*] @);
     };
 
     // The `params` tokens, an entry at a time: `[]` holds the entries so far,
@@ -875,8 +874,8 @@ macro_rules! declare_params {
     };
 
     (@cells {
-        [$([$pn:ident $pk:ident $pv:ty])*]
-        [$([$dn:ident $dk:ident $dv:ty [$dd:expr]])*]
+        [$([$pn:ident $pk:ty])*]
+        [$([$dn:ident $dk:ty [$dd:expr]])*]
         $gall:tt [$($g:tt)*] $ty:ty,
         [$($cattr:tt)*] $cfg:ident [$($cd:tt)*] [$($cu:tt)*],
         $cells:ident [$($ld:tt)*] [$($lu:tt)*] [$(marker $($lm:ident,)+)?],
@@ -891,8 +890,8 @@ macro_rules! declare_params {
         pub struct $cells<$($ld)*> {
             $($field: $cell,)*
             $($sname: $crate::__private::Arc<$crate::__private::AtomicCell<$sty>>,)*
-            $($pn: $crate::PublishedCell<$pv>,)*
-            $($dn: $crate::PublishedCell<$dv>,)*
+            $($pn: $crate::PublishedCell<<$pk as $crate::PublishedKind>::Value>,)*
+            $($dn: $crate::PublishedCell<<$dk as $crate::PublishedKind>::Value>,)*
             $(__generics: ::core::marker::PhantomData<fn() -> ($($lm,)+)>,)?
         }
 
@@ -908,7 +907,7 @@ macro_rules! declare_params {
                         $crate::__private::AtomicCell::new(config.$sname)
                     ),)*
                     $($pn: $crate::PublishedCell::new(
-                        <$pv as ::core::default::Default>::default()
+                        <<$pk as $crate::PublishedKind>::Value as ::core::default::Default>::default()
                     ),)*
                     $($dn: $crate::PublishedCell::new(config.$dn.clone()),)*
                     $(__generics: ::core::marker::PhantomData::<fn() -> ($($lm,)+)>,)?
@@ -941,7 +940,7 @@ macro_rules! declare_params {
             $(
                 #[doc = concat!("The published value `", stringify!($pn), "`: `lend` it once per block on the audio side.")]
                 #[must_use]
-                pub fn $pn(&mut self) -> &mut $crate::PublishedCell<$pv> {
+                pub fn $pn(&mut self) -> &mut $crate::PublishedCell<<$pk as $crate::PublishedKind>::Value> {
                     &mut self.$pn
                 }
             )*
@@ -949,7 +948,7 @@ macro_rules! declare_params {
             $(
                 #[doc = concat!("The published value `", stringify!($dn), "`: `lend` it once per block on the audio side.")]
                 #[must_use]
-                pub fn $dn(&mut self) -> &mut $crate::PublishedCell<$dv> {
+                pub fn $dn(&mut self) -> &mut $crate::PublishedCell<<$dk as $crate::PublishedKind>::Value> {
                     &mut self.$dn
                 }
             )*
@@ -963,7 +962,7 @@ macro_rules! declare_params {
             $($field: $value,)*
             $($oname: $oty,)*
             $($sname: $sty,)*
-            $($dn: $dv,)*
+            $($dn: <$dk as $crate::PublishedKind>::Value,)*
         }
 
         impl<$($cd)*> $cfg<$($cu)*> {
@@ -1010,7 +1009,7 @@ macro_rules! declare_params {
             $(
                 #[doc = concat!("The initial value of the published value `", stringify!($dn), "`.")]
                 #[must_use]
-                pub fn $dn(mut self, value: $dv) -> Self {
+                pub fn $dn(mut self, value: <$dk as $crate::PublishedKind>::Value) -> Self {
                     self.$dn = value;
                     self
                 }
@@ -1036,8 +1035,8 @@ macro_rules! declare_params {
             }
         }
 
-        $($crate::declare_params!(@has $gall $ty, $pk, $pv);)*
-        $($crate::declare_params!(@has $gall $ty, $dk, $dv);)*
+        $($crate::declare_params!(@has $gall $ty, $pk);)*
+        $($crate::declare_params!(@has $gall $ty, $dk);)*
 
         impl<__LaneF: $crate::__private::Float, $($g)*> $crate::IntoNode<__LaneF> for $ty
         where
@@ -1053,12 +1052,12 @@ macro_rules! declare_params {
                 #[allow(unused_mut)]
                 let mut parts = $crate::param_parts(self);
                 $(
-                    parts = parts.published::<$ty, { $crate::PublishedKind::$pk as u16 }>(
+                    parts = parts.published::<$ty, $pk>(
                         $crate::__private::Arc::new(cells.$pn.publisher().clone()),
                     );
                 )*
                 $(
-                    parts = parts.published::<$ty, { $crate::PublishedKind::$dk as u16 }>(
+                    parts = parts.published::<$ty, $dk>(
                         $crate::__private::Arc::new(cells.$dn.publisher().clone()),
                     );
                 )*
@@ -1071,11 +1070,9 @@ macro_rules! declare_params {
         }
     };
 
-    // `$ty` publishes a value of the kind `$kind`, held as an `Arc<$value>`.
-    (@has [$($g:tt)*] $ty:ty, $kind:ident, $value:ty) => {
-        impl<$($g)*> $crate::HasPublished<{ $crate::PublishedKind::$kind as u16 }> for $ty {
-            type Value = $crate::__private::Arc<$value>;
-        }
+    // `$ty` publishes a value of the kind `$kind`.
+    (@has [$($g:tt)*] $ty:ty, $kind:ty) => {
+        impl<$($g)*> $crate::HasPublished<$kind> for $ty {}
     };
 
     // The cells form's rows, written as the rows form: a kind with a count is

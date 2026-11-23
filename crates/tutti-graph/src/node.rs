@@ -41,7 +41,7 @@ use crate::wake::Wake;
 use tutti_buffers::Float;
 use tutti_rt::Reclaim;
 
-use crate::published::{ErasedPublished, HasPublished, Published};
+use crate::published::{ErasedPublished, HasPublished, Published, PublishedKind};
 use tutti_units::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
@@ -1874,15 +1874,15 @@ impl<C, F: Float> NodeParts<C, F> {
     }
 
     /// The node's published value of the kind `K`, read and replaced through
-    /// `cell`. `N` is the node that declares it ([`HasPublished`]), so the
-    /// cell's value is the one the declaration states. The cell's publisher
-    /// belongs in the node's reclaimer too.
+    /// `cell`, whose value is `K::Value`. `N` is the node that declares the
+    /// kind ([`HasPublished`]). The cell's publisher belongs in the node's
+    /// reclaimer too.
     #[must_use]
-    pub fn published<N: HasPublished<K>, const K: u16>(
+    pub fn published<N: HasPublished<K>, K: PublishedKind>(
         mut self,
-        cell: Arc<dyn Published<Value = N::Value>>,
+        cell: Arc<dyn Published<Value = K::Value>>,
     ) -> Self {
-        self.published.push(ErasedPublished::new::<N, K>(cell));
+        self.published.push(ErasedPublished::new::<K>(cell));
         self
     }
 }

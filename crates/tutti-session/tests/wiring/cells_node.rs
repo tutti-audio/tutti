@@ -8,7 +8,7 @@
 
 use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
-use tutti_midi_runtime::{ClipEvents, TimedMidiEvent};
+use tutti_midi_runtime::{ClipEvents, ClipEventsKind, TimedMidiEvent};
 use tutti_session::{DetachedSession, MainOutput, Session, SessionNode};
 use tutti_ump::MidiChannel;
 use tutti_units::{Amplitude, Beat, SampleRate};
@@ -108,7 +108,7 @@ struct Count {
 }
 
 declare_params!([] Count, CountConfig, CountCells {
-    published { events: ClipEvents => ClipEvents }
+    published { events: ClipEventsKind }
 });
 
 impl From<CountConfig> for Count {
@@ -220,4 +220,66 @@ fn a_fork_reads_the_published_value_as_set() {
     let mut forked = [0.0f32];
     fork.tick(InterleavedMut::one_frame(&mut forked).unwrap());
     assert_eq!(forked, [2.0]);
+}
+
+/// A kind no session addresses.
+enum Unaddressed {}
+
+impl tutti_graph::PublishedKind for Unaddressed {
+    type Value = u8;
+}
+
+/// A source of silence that publishes a value of a kind the session does not
+/// know.
+#[derive(Clone)]
+struct Silent {
+    cells: SilentCells,
+}
+
+declare_params!([] Silent, SilentConfig, SilentCells {
+    published { level: Unaddressed }
+});
+
+impl From<SilentConfig> for Silent {
+    fn from(config: SilentConfig) -> Self {
+        Self {
+            cells: SilentCells::from_config(&config),
+        }
+    }
+}
+
+impl Node for Silent {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO).param_addrs(self.declared_ports().as_slice())
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let level = *self.cells.level().lend();
+        io.output(0).fill(f32::from(level));
+        Status::Modified
+    }
+    fn reset(&mut self) {}
+    fn param_base(&self, port: usize) -> Option<f64> {
+        self.declared_base(port)
+    }
+}
+
+impl SessionNode for Silent {}
+
+/// **A node that publishes a kind the session does not know is added and
+/// renders**: the session has nothing that can address the value, and leaves
+/// it out.
+#[test]
+fn a_node_publishing_an_unknown_kind_is_added_and_renders() {
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build_detached(SampleRate::SR_48K)
+        .expect("builds");
+    let silent = s.graph().add(Silent::from(SilentConfig::new()));
+    s.graph()
+        .set_sources(MainOutput::channel(0), [silent.output(0)])
+        .unwrap()
+        .unfaded();
+    let _ = s.update();
+    assert_eq!(frame(&mut s), 0.0, "the value starts at its default");
 }

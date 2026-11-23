@@ -486,11 +486,11 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Copied, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone,
-        HasParam, HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus,
-        OutEvents, Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params,
-        Prepare, Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
+        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
+        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
+        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
+        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -665,6 +665,7 @@ pub mod sampler {
         StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
         StreamStatus, VoiceNodeHandle,
     };
+    pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
         ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
@@ -924,10 +925,10 @@ pub mod midi {
         SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
-        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
-        SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError,
+        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
+        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{
         MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
