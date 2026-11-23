@@ -253,8 +253,8 @@ impl LoadedMidi {
 }
 
 impl<F: Float> Midi<'_, F> {
-    /// A [`LoadMidi`] of the Standard MIDI File or Clip File `asset` (a path, or bytes); nothing is
-    /// read until the app awaits it. A file that cannot be read fails with its
+    /// A [`LoadMidi`] of the Standard MIDI File or Clip File `asset` (a path, or bytes);
+    /// nothing is read until the app awaits it. A file that cannot be read fails with its
     /// [`tutti_midi_file::ReadError`]. The value holds the session's weak executor and nothing
     /// else of the session.
     pub fn load_midi(&self, asset: impl Into<Asset>) -> LoadMidi {

@@ -12,11 +12,11 @@ use tutti_platform::Instant;
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
     CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DiscoveryData,
-    JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
-    PeData, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits, PeResource,
-    PeState, PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused, ResourceEntry,
-    ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
-    ResponderSettings, SimultaneousRequests, StateId, StreamLimit,
+    JsonPointer, MaxSysexSize, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities, PeData,
+    PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits, PeResource, PeState,
+    PeStateEntry, PeStatus, PeSubscription, PeText, RequestRefused, ResourceEntry, ResourceId,
+    ResourceResponder, ResourceStore, ResourceTarget, ResponderAction, ResponderSettings,
+    SimultaneousRequests, StateId, StreamLimit,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -1686,17 +1686,11 @@ fn a_subscription_to_external_sync_is_live_and_the_peer_is_asked() {
     );
 }
 
-/// A store of the states `held`, each an octet stream under its `stateId`, whose
-/// State entry takes ASCII, which `fetch` and `write` send.
+/// A store of the states `held`, each an octet stream under its `stateId`, with the
+/// State entry M2-111 section 3.4 gives: Mcoded7 only, so a call must encode by it.
 fn states(held: &[(&str, u8)]) -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare_states();
-    store.declare(
-        ResourceEntry::builder(PeResource::State)
-            .media_types(vec![MediaType::OCTET_STREAM])
-            .build()
-            .unwrap(),
-    );
     for (name, byte) in held {
         let entry = PeStateEntry::new(
             StateId::new(name).unwrap(),

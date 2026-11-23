@@ -33,10 +33,10 @@ use std::collections::BTreeMap;
 use std::sync::Weak;
 
 use tutti_midi_ci::{
-    BodyLimit, CallError, CiDeviceId, Nak, PartialUpdate, PeData, PeOutcome, PePage, PeReply,
-    PeResource, PeSignal, PeStatus, PeTerminator, ProfileId, ProfileOutcome, ProfileRequest,
-    ProfileState, ReportRequest, RequestRefused, ResourceEntry, ResourceFailure, ResourceGet,
-    ResourceId, ResourceSet, ResourceTarget,
+    BodyLimit, CallError, CiDeviceId, Nak, PartialUpdate, PeData, PeEncoding, PeOutcome, PePage,
+    PeReply, PeResource, PeSignal, PeStatus, PeTerminator, ProfileId, ProfileOutcome,
+    ProfileRequest, ProfileState, ReportRequest, RequestRefused, ResourceEntry, ResourceFailure,
+    ResourceGet, ResourceId, ResourceSet, ResourceTarget,
 };
 use tutti_midi_device::SavedDevice;
 use tutti_midi_hardware::{
@@ -618,10 +618,22 @@ impl ListedResource {
         self.get(|target| ResourceGet::new(target).paged(page))
     }
 
+    /// The encoding a call is made in: ASCII where the entry takes it, the first
+    /// the entry lists otherwise.
+    fn encoding(&self) -> PeEncoding {
+        let listed = self.entry.encodings();
+        if listed.contains(&PeEncoding::Ascii) {
+            PeEncoding::Ascii
+        } else {
+            listed.first().copied().unwrap_or(PeEncoding::Ascii)
+        }
+    }
+
     fn get(&self, get: impl FnOnce(ResourceTarget) -> ResourceGet) -> GetProperty {
         GetProperty::new(match self.target() {
             Ok(target) => self.link.reply(
-                self.peer.ask(PropertyCall::Get(get(target))),
+                self.peer
+                    .ask(PropertyCall::Get(get(target).encoded(self.encoding()))),
                 listing(&self.entry),
                 InputRequest::Get,
             ),
@@ -636,8 +648,9 @@ impl ListedResource {
     pub fn subscribe(&self) -> Subscribe {
         Subscribe::new(match self.target() {
             Ok(target) => self.link.reply(
-                self.peer
-                    .ask(PropertyCall::Subscribe(ResourceGet::new(target))),
+                self.peer.ask(PropertyCall::Subscribe(
+                    ResourceGet::new(target).encoded(self.encoding()),
+                )),
                 listing(&self.entry),
                 InputRequest::Subscribe,
             ),
@@ -664,7 +677,8 @@ impl ListedResource {
     ) -> SetProperty {
         SetProperty::new(match self.target().and_then(set) {
             Ok(set) => self.link.reply(
-                self.peer.ask(PropertyCall::Set(set)),
+                self.peer
+                    .ask(PropertyCall::Set(set.encoded(self.encoding()))),
                 listing(&self.entry),
                 InputRequest::Set,
             ),
