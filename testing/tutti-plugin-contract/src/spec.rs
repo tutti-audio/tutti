@@ -497,7 +497,7 @@ const CPP_KEYS: [(u8, Option<u8>, &str); 4] = [
     (3, Some(0), "Staccato"),
 ];
 
-/// VST3's units, `Voices` > `Oscillator` > `Filter`, by path.
+/// VST3's units, "Voices" > "Oscillator" > "Filter", by path.
 const UNIT_GROUPS: [(&str, Option<&str>); 3] = [
     ("Voices", None),
     ("Voices/Oscillator", Some("Voices")),
