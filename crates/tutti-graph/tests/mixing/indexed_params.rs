@@ -76,8 +76,16 @@ impl Node for Bands {
 impl ParamNode for Bands {
     fn param_set(&self) -> ParamSet {
         ParamSet::builder()
-            .param(BAND0, self.thr[0].as_atomic())
-            .param(BAND1, self.thr[1].as_atomic())
+            .param(
+                tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+                BAND0,
+                self.thr[0].as_atomic(),
+            )
+            .param(
+                tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+                BAND1,
+                self.thr[1].as_atomic(),
+            )
             .build()
     }
     fn fork_fresh(&self) -> Self {
@@ -233,9 +241,21 @@ fn the_same_kind_at_another_index_is_accepted() {
     let b = Param::new(Db::new(1.0));
     let c = Param::new(Db::new(2.0));
     let set = ParamSet::builder()
-        .param(UnitParam::Threshold, a.as_atomic())
-        .param(UnitAddr::new(UnitParam::Threshold, 1), b.as_atomic())
-        .param(UnitAddr::new(UnitParam::Threshold, 2), c.as_atomic())
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitParam::Threshold,
+            a.as_atomic(),
+        )
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitAddr::new(UnitParam::Threshold, 1),
+            b.as_atomic(),
+        )
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitAddr::new(UnitParam::Threshold, 2),
+            c.as_atomic(),
+        )
         .build();
     assert_eq!(set.params().count(), 3);
 }
@@ -247,8 +267,16 @@ fn the_same_kind_at_another_index_is_accepted() {
 fn a_duplicate_full_address_is_refused() {
     let a = Param::new(Db::new(0.0));
     let _ = ParamSet::builder()
-        .param(UnitAddr::new(UnitParam::Threshold, 1), a.as_atomic())
-        .param(UnitAddr::new(UnitParam::Threshold, 1), a.as_atomic());
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitAddr::new(UnitParam::Threshold, 1),
+            a.as_atomic(),
+        )
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitAddr::new(UnitParam::Threshold, 1),
+            a.as_atomic(),
+        );
 }
 
 /// Index 0 spelled as a bare `UnitParam` and as `UnitAddr::new(.., 0)` is
@@ -258,8 +286,16 @@ fn a_duplicate_full_address_is_refused() {
 fn a_bare_param_is_index_zero_for_the_duplicate_check() {
     let a = Param::new(Db::new(0.0));
     let _ = ParamSet::builder()
-        .param(UnitParam::Threshold, a.as_atomic())
-        .param(BAND0, a.as_atomic());
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            UnitParam::Threshold,
+            a.as_atomic(),
+        )
+        .param(
+            tutti_graph::DeclaredUnit::of::<tutti_units::Db>(),
+            BAND0,
+            a.as_atomic(),
+        );
 }
 
 /// A node's port list takes the same kind at several indices, refuses a

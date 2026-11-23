@@ -77,7 +77,7 @@ type Write<N> = Box<dyn Fn(&N)>;
 /// # }
 /// # impl ParamNode for Gain {
 /// #     fn param_set(&self) -> ParamSet {
-/// #         ParamSet::builder().param(UnitParam::Volume, self.0.as_atomic()).build()
+/// #         ParamSet::builder().param(tutti_graph::DeclaredUnit::of::<tutti_units::Amplitude>(), UnitParam::Volume, self.0.as_atomic()).build()
 /// #     }
 /// #     fn fork_fresh(&self) -> Self { let mut f = self.clone(); f.0.detach(); f }
 /// # }
@@ -291,7 +291,11 @@ mod tests {
     impl ParamNode for TwoCells {
         fn param_set(&self) -> ParamSet {
             ParamSet::builder()
-                .param(UnitParam::Volume, self.addressed.as_atomic())
+                .param(
+                    crate::DeclaredUnit::of::<tutti_units::Amplitude>(),
+                    UnitParam::Volume,
+                    self.addressed.as_atomic(),
+                )
                 .build()
         }
 

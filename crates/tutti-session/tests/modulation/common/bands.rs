@@ -63,8 +63,16 @@ impl Node for Bands {
 impl ParamNode for Bands {
     fn param_set(&self) -> ParamSet {
         ParamSet::builder()
-            .param(BAND0, Arc::clone(&self.knobs[0]))
-            .param(BAND1, Arc::clone(&self.knobs[1]))
+            .param(
+                tutti_graph::DeclaredUnit::of::<Db>(),
+                BAND0,
+                Arc::clone(&self.knobs[0]),
+            )
+            .param(
+                tutti_graph::DeclaredUnit::of::<Db>(),
+                BAND1,
+                Arc::clone(&self.knobs[1]),
+            )
             .build()
     }
 

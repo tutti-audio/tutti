@@ -14,7 +14,7 @@ use tutti_rt::Mutex;
 use super::error::{ValueError, ValueErrorKind};
 use super::state::{Params, ValueState, whole_call};
 use super::target::TargetId;
-use super::watcher::{Erased, Feed, GestureId, Grouping, IntoTargets, Stored};
+use super::watcher::{ChangedBy, Erased, Feed, GestureId, Grouping, IntoTargets, Stored};
 use crate::AppKey;
 
 /// What lands a gesture's end once the value lock is free.
@@ -129,7 +129,7 @@ impl<K: AppKey, W: IntoTargets> Drop for Gesture<K, W> {
         state.finish(Box::new(move |params, feed| {
             let mut out = Vec::new();
             targets.ended(params, &mut moved, &mut out);
-            feed.land(Stored::new(out), Grouping::End(id));
+            feed.land(Stored::new(out, ChangedBy::App), Grouping::End(id));
         }));
     }
 }
