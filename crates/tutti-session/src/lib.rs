@@ -380,7 +380,8 @@ pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTar
 pub use value::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(feature = "plugin")]
 pub use value::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginTrackInfoTarget,
+    PluginUnit, UnitError,
 };
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

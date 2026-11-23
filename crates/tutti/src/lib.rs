@@ -256,7 +256,8 @@ pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 pub use tutti_session::{ParamRef, RouteSpec};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginTrackInfoTarget,
+    PluginUnit, UnitError,
 };
 
 // --- the modules ------------------------------------------------------------
@@ -828,7 +829,8 @@ pub mod plugin {
         UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
-        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, PluginPreset,
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, NoteName, ParamGroup,
+        PluginPreset, TrackInfo, TrackKind,
     };
     pub use tutti_plugin_types::{
         EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,

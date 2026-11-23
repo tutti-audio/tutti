@@ -923,6 +923,9 @@ pub(crate) struct HostedPlugin {
     /// What the node counts and holds (its meter cell and delivery counters).
     /// The project meter is installed only for a plugin the session added.
     pub(crate) node: NodeControls,
+    /// What the host says of the plugin's track, which the main thread's
+    /// `Phase::Plugins` delivers.
+    track: Arc<crate::value::TrackInfoSlot>,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
@@ -1205,6 +1208,7 @@ impl HostedPlugin {
             controls: None,
             answers: None,
             node,
+            track: crate::value::TrackInfoSlot::new(),
             banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
@@ -1432,6 +1436,8 @@ impl HostedPlugin {
         self.hang = HangDetector::default();
         self.status = PluginLiveness::Healthy;
         self.told = false;
+        // The incoming plugin has been told nothing of its track.
+        self.track.resend();
         self.snapshot = None;
         self.snapshot_from = None;
         self.withheld = None;
@@ -1543,7 +1549,7 @@ impl HostedPlugin {
         let mode = self
             .takes_automation_mode()
             .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
-        table.provide_plugin(node, entry, mode);
+        table.provide_plugin(node, entry, mode, self.track.clone());
     }
 
     /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
@@ -1750,6 +1756,13 @@ impl<'a> Plugin<'a> {
     /// plugin reports and the host sets.
     pub fn params(&self) -> PluginParams<'a> {
         PluginParams::new(self.node, self.hosted)
+    }
+
+    /// The target of what the host tells the plugin about the track it sits on.
+    /// A format with no place for it takes it and drops it.
+    #[must_use]
+    pub fn track_info(&self) -> crate::PluginTrackInfoTarget {
+        crate::PluginTrackInfoTarget::new(self.node)
     }
 
     /// The target of the automation mode the host tells the plugin, or `None`
@@ -2566,6 +2579,9 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if matches!(hosted.status, PluginLiveness::Recovering { .. }) {
                 self.drive_reload(node, now, out, &mut gave_up);
                 continue;
+            }
+            if let Some(main) = cx.main {
+                hosted.track.deliver(&hosted.handle, main);
             }
             match hosted.liveness.observe(cause.is_none(), now) {
                 LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,

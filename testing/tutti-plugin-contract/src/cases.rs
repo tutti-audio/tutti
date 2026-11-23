@@ -511,7 +511,7 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
 /// no other's), the roles of VST3's function names, the AU overview's
 /// shortlist, and the shape a control surface draws (`mode` is a
 /// five-position selector, the others continuous), loaded and active alike.
-/// Spec: clap.ext.params.get_info, vst3.IUnitInfo.getUnitInfo, vst3.IParameterFunctionName.getParameterIDFromFunctionName, au.prop.ParameterClumpName, au.prop.ParametersForOverview, au.prop.ParameterInfo
+/// Spec: clap.ext.params.get_info, vst3.IUnitInfo.getUnitInfo, vst3.IParameterFunctionName.getParameterIDFromFunctionName, au.prop.ParameterClumpName, au.prop.ParameterIDName, au.prop.ParametersForOverview, au.prop.ParameterInfo
 pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
     fn check<F: Format, C: Control + ?Sized>(c: &C, when: &str) {
         let spec = F::SURFACE;
