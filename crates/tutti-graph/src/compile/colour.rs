@@ -19,10 +19,14 @@
 //! which is why it is offered only to ops that promise to (PDC delay rings,
 //! and nodes whose `Shape::in_place` is set).
 
-use std::collections::BTreeMap;
-
-use super::emit::Val;
-use super::ids::{Id, OpId, Table, TableSlice};
+use super::emit::{ARef, ERef, Emitted, Pre, Val};
+use super::ids::{
+    AudioSlotId, AudioValueId, EventSlotId, EventValueId, Id, OpId, Table, TableSlice,
+};
+use super::plan::{EMPTY_SLOT, EventSlotCapacity, FeedbackKey, ZERO_SLOT};
+use super::shapes::Units;
+use crate::model::spec::{EventOutputPort, ValidGraph};
+use crate::node::Prepare;
 
 /// Strict reachability over the op DAG.
 pub(crate) struct Reach {
@@ -63,17 +67,234 @@ pub(crate) struct Colouring<V> {
     pub(crate) count: usize,
 }
 
+/// The colouring pass's result: the op successors, the slot of every value and
+/// the capacity of every event slot.
+///
+/// Slot 0 of each arena is the null slot and the feedback slots follow it, so
+/// every value's slot is past them. Two values share a slot only when every op
+/// touching the first happens-before the second's writer (or the second is an
+/// in-place overwrite of it), whatever parallel schedule runs the DAG.
+pub(super) struct Coloured {
+    /// The ops that read what each op writes; a plan's `op_succ`.
+    pub(super) succ: Table<OpId, Vec<OpId>>,
+    audio_slot: Table<AudioValueId, AudioSlotId>,
+    event_slot: Table<EventValueId, EventSlotId>,
+    /// The size of the audio arena.
+    pub(super) audio_slots: AudioSlotId,
+    /// The size of the event arena.
+    pub(super) event_slots: EventSlotId,
+    /// What each event slot holds at most, by slot.
+    pub(super) event_slot_capacity: Table<EventSlotId, EventSlotCapacity>,
+}
+
+impl Coloured {
+    /// The slot an audio value is written to.
+    pub(super) fn aslot(&self, v: AudioValueId) -> AudioSlotId {
+        self.audio_slot[v]
+    }
+
+    /// The slot an event value is written to.
+    pub(super) fn eslot(&self, v: EventValueId) -> EventSlotId {
+        self.event_slot[v]
+    }
+
+    /// The slot an audio input reads.
+    pub(super) fn aref_slot(&self, r: ARef) -> AudioSlotId {
+        match r {
+            ARef::Val(v) => self.aslot(v),
+            ARef::Zero => ZERO_SLOT,
+            ARef::Fb(f) => f.slot(),
+        }
+    }
+
+    /// The slot an event input reads.
+    pub(super) fn eref_slot(&self, r: ERef) -> EventSlotId {
+        match r {
+            ERef::Val(v) => self.eslot(v),
+            ERef::Empty => EMPTY_SLOT,
+            ERef::Fb(f) => f.slot(),
+        }
+    }
+}
+
+/// The audio values an op may write over: `Some(u)` offers a value the slot
+/// of `u`. Delay rings, a sum's first addend and the ports of an in-place
+/// node qualify; the colouring takes each offer only when it is legal.
+fn in_place_offers(emitted: &Emitted, units: &Units) -> Table<AudioValueId, Option<AudioValueId>> {
+    let mut offers = Table::filled(emitted.audio.len(), None);
+    for op in &emitted.pre {
+        match op {
+            Pre::Delay { src, dst, .. } => offers[*dst] = Some(*src),
+            // The sum accumulates into its first addend's slot when that
+            // addend is read nowhere else later (the colouring's own test).
+            Pre::Sum { srcs, dst } | Pre::WeightedSum { srcs, dst, .. } => {
+                if let Some(&ARef::Val(u)) = srcs.first() {
+                    offers[*dst] = Some(u);
+                }
+            }
+            Pre::Node {
+                unit, ain, aout, ..
+            } if units.shapes[*unit].in_place => {
+                for (&r, &out) in ain.iter().zip(aout) {
+                    let ARef::Val(u) = r else { continue };
+                    // Read by this node on exactly one port, or the other
+                    // port would see the output instead of the input.
+                    if ain.iter().filter(|&&x| x == r).count() == 1 {
+                        offers[out] = Some(u);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    offers
+}
+
+/// What a feedback slot of the event arena holds: all its FIFO can hold at its
+/// source's declared rate.
+fn feedback_capacity(units: &Units, key: &FeedbackKey, block: usize) -> EventSlotCapacity {
+    match *key {
+        FeedbackKey::Event { from, delay, .. } => {
+            EventSlotCapacity::fifo(units.shape_of(from.node).event_capacity, delay, block)
+        }
+        FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
+    }
+}
+
+/// The capacity of every event value, in value order: a node output holds
+/// what its shape declares, a delay output all its FIFO can hold at its
+/// source's declared rate (what can fall due in one block), and a merge all
+/// its inputs together, so a merge can never drop an event (a note-off least
+/// of all). Emission is in topological order, so a merge's inputs are priced
+/// first.
+fn event_value_capacities(
+    graph: &ValidGraph,
+    units: &Units,
+    block: usize,
+    emitted: &Emitted,
+) -> Table<EventValueId, EventSlotCapacity> {
+    let mut cap: Table<EventValueId, EventSlotCapacity> =
+        Table::filled(emitted.event.len(), EventSlotCapacity::NONE);
+    for op in &emitted.pre {
+        match op {
+            Pre::Node { unit, eout, .. } => {
+                let port = EventSlotCapacity::port(units.shapes[*unit].event_capacity);
+                for &v in eout {
+                    cap[v] = port;
+                }
+            }
+            Pre::EventDelay { delay, dst, .. } => {
+                let d = &emitted.delays[*delay];
+                let Some(from) = d.key.event_origin() else {
+                    unreachable!("an event delay is keyed as events")
+                };
+                // An output's own capacity, or, for an input, every port with
+                // an edge into it.
+                let ports: Vec<EventOutputPort> = match from {
+                    crate::EventTapPort::Out(port) => vec![port],
+                    crate::EventTapPort::In(at) => graph
+                        .events()
+                        .get(&at)
+                        .map(|edges| edges.iter().map(|e| e.from()).collect())
+                        .unwrap_or_default(),
+                };
+                cap[*dst] = EventSlotCapacity::fifo_sum(
+                    ports.iter().map(|p| units.shape_of(p.node).event_capacity),
+                    d.len,
+                    block,
+                );
+            }
+            Pre::EventMerge { srcs, dst, bound } => {
+                cap[*dst] = srcs
+                    .iter()
+                    .fold(EventSlotCapacity::NONE, |acc, r| {
+                        acc.plus(match *r {
+                            ERef::Val(v) => cap[v],
+                            ERef::Fb(f) => {
+                                feedback_capacity(units, &emitted.event_feedback[f], block)
+                            }
+                            ERef::Empty => EventSlotCapacity::NONE,
+                        })
+                    })
+                    .bounded(bound.map(|b| b.capacity));
+            }
+            _ => {}
+        }
+    }
+    cap
+}
+
+/// Assigns every value a slot and every event slot a capacity.
+///
+/// Takes the graph, the checked units, the `Prepare` the plan is for and the
+/// [`Emitted`] ops; returns the [`Coloured`] slots. Slots are coloured over
+/// the op DAG's reachability, with in-place overwrites where legal, and past
+/// the null and feedback slots of each arena. An event slot's capacity covers
+/// every value that shares it.
+pub(super) fn assign(
+    graph: &ValidGraph,
+    units: &Units,
+    prepare: &Prepare,
+    emitted: &Emitted,
+) -> Coloured {
+    let mut succ: Table<OpId, Vec<OpId>> = Table::filled(emitted.pre.len(), Vec::new());
+    for (op, ps) in emitted.preds.iter_enumerated() {
+        for &p in ps {
+            debug_assert!(p < op, "ops are emitted in topological order");
+            succ[p].push(op);
+        }
+    }
+    let reach = Reach::new(&succ);
+    let audio = colour(&emitted.audio, &reach, &in_place_offers(emitted, units));
+    let event = colour(
+        &emitted.event,
+        &reach,
+        &Table::filled(emitted.event.len(), None),
+    );
+    // Slot 0 of each arena is the null slot, then one slot per feedback.
+    let audio_fixed = 1 + emitted.audio_feedback.len();
+    let event_fixed = 1 + emitted.event_feedback.len();
+    let audio_slot: Table<AudioValueId, AudioSlotId> = audio
+        .slot
+        .iter()
+        .map(|&s| AudioSlotId::from_index(audio_fixed + s))
+        .collect();
+    let event_slot: Table<EventValueId, EventSlotId> = event
+        .slot
+        .iter()
+        .map(|&s| EventSlotId::from_index(event_fixed + s))
+        .collect();
+    let block = prepare.max_block().get();
+    let mut event_slot_capacity: Table<EventSlotId, EventSlotCapacity> =
+        Table::filled(event_fixed + event.count, EventSlotCapacity::NONE);
+    for (f, key) in emitted.event_feedback.iter_enumerated() {
+        event_slot_capacity[f.slot()] = feedback_capacity(units, key, block);
+    }
+    for (v, &c) in event_value_capacities(graph, units, block, emitted).iter_enumerated() {
+        let s = event_slot[v];
+        event_slot_capacity[s] = event_slot_capacity[s].covering(c);
+    }
+    Coloured {
+        succ,
+        audio_slot,
+        event_slot,
+        audio_slots: AudioSlotId::from_index(audio_fixed + audio.count),
+        event_slots: EventSlotId::from_index(event_fixed + event.count),
+        event_slot_capacity,
+    }
+}
+
 /// Whether every op touching `u` happens-before `w`.
 fn finished_before(u: &Val, w: OpId, reach: &Reach) -> bool {
     reach.before(u.writer, w) && u.readers.iter().all(|&r| reach.before(r, w))
 }
 
-/// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
-/// `u`, taken when legal.
+/// Greedy colouring in writer order. `in_place[v] = Some(u)` offers `v` the
+/// slot of `u`, taken when legal.
 pub(crate) fn colour<V: Id>(
     vals: &TableSlice<V, Val>,
     reach: &Reach,
-    in_place: &BTreeMap<V, V>,
+    in_place: &TableSlice<V, Option<V>>,
 ) -> Colouring<V> {
     let mut slot: Table<V, usize> = Table::filled(vals.len(), usize::MAX);
     // Last occupant of each slot. Values are visited in writer order, and a
@@ -89,7 +310,7 @@ pub(crate) fn colour<V: Id>(
         );
         let w = val.writer;
 
-        if let Some(&u) = in_place.get(&v) {
+        if let Some(u) = in_place[v] {
             let src = &vals[u];
             let s = slot[u];
             let legal = last[s] == u
@@ -155,7 +376,14 @@ mod tests {
         (vals, reach)
     }
 
-    fn slots(reads: &[Vec<u32>], in_place: &BTreeMap<AudioValueId, AudioValueId>) -> usize {
+    fn no_in_place(len: usize) -> Table<AudioValueId, Option<AudioValueId>> {
+        Table::filled(len, None)
+    }
+
+    fn slots(
+        reads: &[Vec<u32>],
+        in_place: &TableSlice<AudioValueId, Option<AudioValueId>>,
+    ) -> usize {
         let (vals, reach) = dag(reads);
         colour(&vals, &reach, in_place).count
     }
@@ -166,7 +394,7 @@ mod tests {
     #[test]
     fn a_chain_needs_two_slots() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 2);
+        assert_eq!(slots(&reads, &no_in_place(reads.len())), 2);
     }
 
     /// A diamond `0 → {1, 2} → 3`: the two arms are unordered, so three
@@ -174,7 +402,7 @@ mod tests {
     #[test]
     fn a_diamond_needs_three_slots() {
         let reads = vec![vec![], vec![0], vec![0], vec![1, 2]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 3);
+        assert_eq!(slots(&reads, &no_in_place(reads.len())), 3);
     }
 
     /// A source fanning out to four unordered ops that fan in: the source and
@@ -183,15 +411,15 @@ mod tests {
     #[test]
     fn a_fan_out_fan_in_needs_width_plus_one_slots() {
         let reads = vec![vec![], vec![0], vec![0], vec![0], vec![0], vec![1, 2, 3, 4]];
-        assert_eq!(slots(&reads, &BTreeMap::new()), 5);
+        assert_eq!(slots(&reads, &no_in_place(reads.len())), 5);
     }
 
     /// A chain whose every op overwrites its input in place lives in one slot.
     #[test]
     fn an_in_place_chain_needs_one_slot() {
         let reads = vec![vec![], vec![0], vec![1], vec![2], vec![3]];
-        let in_place: BTreeMap<AudioValueId, AudioValueId> = (1..5)
-            .map(|v| (AudioValueId::new(v), AudioValueId::new(v - 1)))
+        let in_place: Table<AudioValueId, Option<AudioValueId>> = (0..5)
+            .map(|v: u32| v.checked_sub(1).map(AudioValueId::new))
             .collect();
         assert_eq!(slots(&reads, &in_place), 1);
     }
@@ -251,12 +479,11 @@ mod tests {
             let reads = random_reads(&masks);
             let (vals, reach) = dag(&reads);
             let before = closure(&reads);
-            let mut in_place = BTreeMap::new();
-            for (v, rs) in reads.iter().enumerate() {
-                if offer[v] && let Some(&u) = rs.first() {
-                    in_place.insert(AudioValueId::from_index(v), AudioValueId::new(u));
-                }
-            }
+            let in_place: Table<AudioValueId, Option<AudioValueId>> = reads
+                .iter()
+                .enumerate()
+                .map(|(v, rs)| rs.first().filter(|_| offer[v]).map(|&u| AudioValueId::new(u)))
+                .collect();
             let c = colour(&vals, &reach, &in_place);
             let again = colour(&vals, &reach, &in_place);
             prop_assert_eq!(&c.slot, &again.slot);
@@ -271,7 +498,7 @@ mod tests {
                     let src = &vals[u];
                     let precedes = |op: OpId| before[op.index()][w.index()];
                     let clear = precedes(src.writer) && src.readers.iter().all(|&r| precedes(r));
-                    let hand_over = in_place.get(&v) == Some(&u)
+                    let hand_over = in_place[v] == Some(u)
                         && src.readers.contains(&w)
                         && precedes(src.writer)
                         && src.readers.iter().all(|&r| r == w || precedes(r));
