@@ -2,7 +2,7 @@
 //! offs of what the edge's source holds. A sink that gains an edge is told
 //! nothing; the later off of a note it never heard begin reaches it.
 //!
-//! Each scenario runs on the serial executor and on the parallel one, and the
+//! Each scenario runs on the one-participant executor and on the parallel one, and the
 //! two must log the same events.
 
 use tutti_graph::testing as common;
@@ -1186,7 +1186,7 @@ fn around_promotion(
 }
 
 /// Run `act` at every offset that crosses the promotion, for fades of 2, 3
-/// and 5 blocks, on the serial and the parallel executor, and `check` each.
+/// and 5 blocks, on the one-participant and the parallel executor, and `check` each.
 fn sweep(sinks: &[u64], act: impl Fn(&mut Rig), check: impl Fn(&Rig, &str)) {
     for mode in [Mode::Serial, Mode::Parallel] {
         for fade in [2, 3, 5] {
@@ -1322,7 +1322,7 @@ fn cutting_an_edge_closes_every_key_of_a_full_keyboard_over_blocks() {
 
 /// Two commits cut two edges with no block between: what the first owed
 /// still moves to the next, and each sink closes every key once, the pedal
-/// up first. The serial and the parallel executor send the same stream, bit
+/// up first. The one-participant and the parallel executor send the same stream, bit
 /// for bit.
 #[test]
 fn closes_owed_across_two_commits_with_no_block_between_reach_every_sink() {
@@ -1933,7 +1933,7 @@ mod random {
         #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(300), ..ProptestConfig::default() })]
 
         /// Every sink ends with nothing held, hears no on the source did not
-        /// write, and no off for a key the source never wrote. Serial
+        /// write, and no off for a key the source never wrote. One-participant
         /// and parallel agree, with and without a PDC delay.
         #[test]
         fn sinks_end_holding_nothing(steps in steps(), lag in any::<bool>()) {
@@ -1973,7 +1973,7 @@ mod no_alloc {
         fn reset(&mut self) {}
     }
 
-    /// Dense note traffic through tracked edges allocates nothing, serially
+    /// Dense note traffic through tracked edges allocates nothing with no pool
     /// and on a pool whose every participant is inside the gate.
     fn run(workers: usize) {
         let prep = common::prepare(MAX);
@@ -2023,7 +2023,7 @@ mod no_alloc {
     }
 
     #[test]
-    fn serial() {
+    fn one_participant() {
         run(1);
     }
     #[test]

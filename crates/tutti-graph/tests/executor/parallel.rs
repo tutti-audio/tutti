@@ -773,7 +773,7 @@ fn the_executor_waits_by_its_pools_budget() {
 
 /// Three pulses, each into a [`common::RingingNode`] that reports less than its
 /// ceiling (and one that reports nothing): the units' skip decisions are
-/// their own, so the pooled render stays bit-identical to the serial one,
+/// their own, so the pooled render stays bit-identical to the one-participant one,
 /// and no ring is lost (analytic: a pulse of `len` frames into a ring of
 /// `ring` sounds through frame `len + ring - 2`).
 ///
@@ -781,7 +781,7 @@ fn the_executor_waits_by_its_pools_budget() {
 /// One-frame blocks make the call counts exact; the schedules of `schedules`
 /// cover the rest.
 ///
-/// It pins that the pooled and serial skips lose nothing.
+/// It pins that the pooled and one-participant skips lose nothing.
 #[test]
 fn reporting_nodes_render_bit_identically_on_a_pool() {
     use common::{Burst, NO_REPORT, RingingNode};

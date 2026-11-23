@@ -66,7 +66,7 @@ impl GraphValues {
 
     /// Sets `node`'s mix.
     pub(crate) fn set_mix(&mut self, node: NodeKey, mix: Mix) {
-        if mix.get().to_bits() == Mix::WET.get().to_bits() {
+        if mix == Mix::WET {
             self.mixes.remove(&node);
         } else {
             self.mixes.insert(node, mix);

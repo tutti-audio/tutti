@@ -1,5 +1,5 @@
 //! A looped render with a wrap crossfade live is bit for bit the same on a
-//! worker pool as serial, over ragged blocks that cut the fade at every
+//! worker pool as it does with none, over ragged blocks that cut the fade at every
 //! offset. (The differential suite lives in `tutti-graph`, which cannot name
 //! a sampler node, so the comparison is made here.)
 //!

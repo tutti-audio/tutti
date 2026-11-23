@@ -1,6 +1,6 @@
 //! The audio thread's side of the buses allocates nothing: a bus edge's
 //! weighted lanes, a bypass that is the fold of the main buses, and a node at
-//! `Mix::DRY` that reads the same fold through the blend, each on the serial
+//! `Mix::DRY` that reads the same fold through the blend, each on the one-participant
 //! executor and on a pool whose every participant runs inside
 //! `assert_no_alloc`.
 //!
@@ -162,7 +162,7 @@ fn gate(workers: usize) {
 }
 
 #[test]
-fn bus_edges_and_bypass_folds_are_allocation_free_on_the_serial_executor() {
+fn bus_edges_and_bypass_folds_are_allocation_free_on_the_one_participant_executor() {
     gate(1);
 }
 

@@ -5,7 +5,7 @@
 //! input bit for bit, a blend is the formula written out here with the exact
 //! `f32` expression the executor uses (a multiply and an add, never fused),
 //! and a ramp is the doc's `w_prev + (w_new - w_prev) * ((i + 1) / frames)`.
-//! A render is compared with another only as serial against parallel.
+//! A render is compared with another only as one-participant against parallel.
 
 #![allow(
     clippy::needless_range_loop,
@@ -144,7 +144,7 @@ impl Rig {
     }
 }
 
-/// Serial, and parallel on two and four participants.
+/// One-participant, and parallel on two and four participants.
 const WORKERS: [usize; 3] = [1, 2, 4];
 
 // ---------------------------------------------------------------------------
@@ -511,7 +511,7 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
 
 /// **The mix snapshot is per block**: a `set_mix` that lands while a block runs
 /// (here from an upstream node's `process`, before the node's own op) reaches
-/// no op of that block, and the ramp is the next block's. Serial and
+/// no op of that block, and the ramp is the next block's. One-participant and
 /// parallel.
 #[test]
 fn a_mix_stored_mid_block_lands_on_the_next_block() {

@@ -5,7 +5,7 @@
 //!
 //! Every figure is analytic: the expected render is `y * m + x̂ * (1 - m)` with
 //! the `m` the driver's steps give at each frame, written out in the test.
-//! The parallel executor is compared against the serial one, bit for bit.
+//! The parallel executor is compared against the one-participant one, bit for bit.
 
 #![allow(
     clippy::needless_range_loop,
@@ -179,7 +179,7 @@ fn run(pair: &mut Pair, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
     (got, x)
 }
 
-/// Serial and four participants, bit for bit; the serial render.
+/// One-participant and four participants, bit for bit; the one-participant render.
 fn render_both(rig: &Rig, blocks: usize) -> (Vec<f32>, Vec<f32>) {
     let serial = render(rig, 1, blocks);
     let parallel = render(rig, 4, blocks);
@@ -215,7 +215,7 @@ fn plan_of(rig: &Rig) -> tutti_graph::Plan {
 
 /// A lane driving a node's mix renders the blend at the mix the driver's steps
 /// give at every frame (clamped to the blend), for a node with no latency and
-/// for a latent one (whose aligned input is its input `L` frames late), serial
+/// for a latent one (whose aligned input is its input `L` frames late), one-participant
 /// and parallel.
 #[test]
 fn a_driven_mix_renders_the_analytic_blend() {

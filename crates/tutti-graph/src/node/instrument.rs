@@ -6,7 +6,7 @@ use crate::IntoNode;
 /// plays.
 ///
 /// What it is, beyond that, is in its shape, not in methods: MIDI arrives on
-/// event input 0, and audio leaves on the outputs. A `SoundFont` after Stage 2
+/// event input 0, and audio leaves on the outputs. A `SoundFont`
 /// has five outputs, a plugin has the buses it declares; the main pair is the
 /// two a host wires to a mix, the rest (effect sends, extra buses) stay on the
 /// node's own ports.

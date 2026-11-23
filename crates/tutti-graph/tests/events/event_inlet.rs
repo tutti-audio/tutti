@@ -3,7 +3,7 @@
 //! Driven two ways: by hand through `contract::Direct` (the node's own
 //! `process` on blocks of chosen length and frame, which is what pins offsets,
 //! the late rule, the counts and the rate), and through an `Editor` and an
-//! `Executor` (the silent fork, and the serial-against-pooled render with the
+//! `Executor` (the silent fork, and the one-participant-against-pooled render with the
 //! ring pre-filled, every participant inside `RtScope`).
 //!
 //! Every figure is analytic (a frame, an offset, a capacity), none read from
@@ -629,12 +629,12 @@ fn script(k: u32) -> Vec<(Stamp, Ump)> {
     v
 }
 
-/// A pooled render with the rings pre-filled equals the serial one, bit for
+/// A pooled render with the rings pre-filled equals the one-participant one, bit for
 /// bit in its audio, with inlet 1's tap listing every pushed event at its
-/// frame (the serial run is also checked against the script); every
+/// frame (the one-participant run is also checked against the script); every
 /// participant runs inside `RtScope`.
 #[test]
-fn the_parallel_render_equals_the_serial_one_and_allocates_nothing() {
+fn the_parallel_render_equals_the_one_participant_one_and_allocates_nothing() {
     let run = |workers: usize, gated: bool| {
         let (mut ed, mut exec, mut writers, tap) = graph(3, workers, gated, true, true);
         for (k, w) in writers.iter_mut().enumerate() {

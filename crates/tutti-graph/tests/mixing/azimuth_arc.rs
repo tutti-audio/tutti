@@ -299,7 +299,7 @@ impl Node for Heavy {
 /// each has base `base` and runs one block alone, then a source that steps
 /// to `target` on the next block's first frame is connected to all, so each
 /// port fades from the base to the source over the declick. The next block's
-/// frames of the first probe, on `workers` participants (1: the serial
+/// frames of the first probe, on `workers` participants (1: the one-participant
 /// executor); every probe reads the same.
 fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
@@ -359,7 +359,7 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
 /// A bearing's declick between 170 and -170 (and back) crosses at 180 along the
 /// short arc, `wrap(hold + arc · gain)`: no frame of the fade is near 0 as an
 /// equal-amplitude blend of the two bearings would be, and the pool's render,
-/// which runs in parallel, is the serial one bit for bit.
+/// which runs in parallel, is the one-participant one bit for bit.
 #[test]
 fn a_bearings_declick_crosses_the_seam_and_the_pool_agrees_bit_for_bit() {
     let d = tutti_graph::declick_frames(RATE).get();
