@@ -404,8 +404,9 @@ pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
 impl AuMidiMapping {
     /// The entry that drives `assignment.param` from its message: global scope,
     /// element 0, no flags but the one that matches any channel (or any key for
-    /// polyphonic pressure) where the assignment names none.
-    fn of_assignment(assignment: &MidiAssignment) -> Self {
+    /// polyphonic pressure) where the assignment names none. `None` for a
+    /// message the unit's table has no trigger for.
+    fn of_assignment(assignment: &MidiAssignment) -> Option<Self> {
         let trigger = match assignment.source {
             MidiSource::ControlChange(controller) => MidiTrigger::ControlChange {
                 controller: controller.get(),
@@ -414,14 +415,15 @@ impl AuMidiMapping {
             MidiSource::PitchBend => MidiTrigger::PitchBend,
             MidiSource::ProgramChange => MidiTrigger::ProgramChange { patch: 0 },
             MidiSource::PolyPressure => MidiTrigger::KeyPressure { note: 0 },
+            _ => return None,
         };
-        Self {
+        Some(Self {
             trigger,
             channel: assignment.channel.map_or(0, MidiChannel::get),
             any_channel: assignment.channel.is_none(),
             any_note: matches!(trigger, MidiTrigger::KeyPressure { .. }),
             ..Self::control_change(assignment.param.get(), 0, 0)
-        }
+        })
     }
 }
 
@@ -518,9 +520,16 @@ impl AppMap {
     }
 
     /// Replaces the app's entries in the unit's table with `app`. A refusal
-    /// partway puts the table back as it was.
+    /// partway puts the table back as it was; a set naming a message the table
+    /// has no trigger for is refused whole, before anything is written.
     pub(crate) fn set(&mut self, unit: &Unit, app: &[MidiAssignment]) -> Written {
-        let entries: Vec<AuMidiMapping> = app.iter().map(AuMidiMapping::of_assignment).collect();
+        let Some(entries) = app
+            .iter()
+            .map(AuMidiMapping::of_assignment)
+            .collect::<Option<Vec<AuMidiMapping>>>()
+        else {
+            return Written::Refused;
+        };
         // A unit without the mapping family refuses the read: nothing is written.
         let Ok(table) = all(unit) else {
             return Written::Refused;
@@ -812,7 +821,8 @@ mod tests {
                 param: ParamId::new(901),
             },
         ];
-        let entries = table.map(|a| AuMidiMapping::of_assignment(&a));
+        let entries =
+            table.map(|a| AuMidiMapping::of_assignment(&a).expect("each source has a trigger"));
         assert_eq!(declared(&entries), table);
         assert!(entries[1].any_channel && !entries[0].any_channel);
     }
