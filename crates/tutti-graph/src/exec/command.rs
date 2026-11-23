@@ -293,10 +293,10 @@ pub(crate) struct CommandRx {
     rx: RingReader<Command>,
     cancel: RingReader<Cancel>,
     /// Cancels that arrived before the commands they name (see `pull`).
-    held: Vec<Cancel>,
+    held: CappedVec<Cancel>,
     /// One past the highest `seq` pulled so far.
     next_seq: u64,
-    pending: Vec<Command>,
+    pending: CappedVec<Command>,
     due: Vec<DueItem<EventKind>>,
     due_events: Vec<Event>,
     due_params: Vec<DueItem<ParamKind>>,
@@ -333,9 +333,9 @@ pub(crate) fn command_channel() -> (CommandTx, CommandRx) {
         CommandRx {
             rx,
             cancel: cancel_rx,
-            held: Vec::with_capacity(CANCEL_CAPACITY),
+            held: CappedVec::with_capacity(CANCEL_CAPACITY),
             next_seq: 0,
-            pending: Vec::with_capacity(COMMAND_CAPACITY),
+            pending: CappedVec::with_capacity(COMMAND_CAPACITY),
             due: Vec::with_capacity(COMMAND_CAPACITY),
             due_events: Vec::with_capacity(COMMAND_CAPACITY),
             due_params: Vec::with_capacity(COMMAND_CAPACITY),
@@ -436,8 +436,8 @@ impl CommandRx {
     }
 
     /// Pull new commands, then apply cancellations. Frees the credit of what
-    /// it cancels. Audio thread: no allocation — `Vec::remove`/`retain`/
-    /// `swap_remove` shift in place, and `held` never passes its capacity.
+    /// it cancels. Audio thread: no allocation — `CappedVec`'s `remove`/
+    /// `retain_mut`/`swap_remove` shift in place, and `held` never passes its capacity.
     ///
     /// **A cancel can arrive before the command it names.** With the editor
     /// on another thread, the executor can find the command ring empty, the
@@ -447,9 +447,10 @@ impl CommandRx {
     /// command has arrived; a `Below(n)` is held until every `seq < n` has.
     fn pull(&mut self) {
         while let Some(cmd) = self.rx.pop() {
-            debug_assert!(self.pending.len() < self.pending.capacity());
             self.next_seq = cmd.seq + 1;
-            self.pending.push(cmd);
+            // The credit count keeps the list within its capacity.
+            let kept = self.pending.push(cmd);
+            debug_assert!(kept, "the pending list has room for every credit");
         }
         let before = self.pending.len();
         let mut i = 0;
@@ -461,12 +462,13 @@ impl CommandRx {
             }
         }
         // Past the held list's capacity, cancels wait in their ring.
-        while self.held.len() < self.held.capacity() {
+        while !self.held.is_full() {
             let Some(c) = self.cancel.pop() else {
                 break;
             };
             if !self.apply_cancel(c) {
-                self.held.push(c);
+                let kept = self.held.push(c);
+                debug_assert!(kept, "checked for room above");
             }
         }
         let gone = (before - self.pending.len()) as u64;
@@ -490,7 +492,7 @@ impl CommandRx {
                 true
             }
             Cancel::Below(below) => {
-                self.pending.retain(|p| p.seq >= below);
+                self.pending.retain_mut(|p| p.seq >= below);
                 below <= self.next_seq
             }
         }
@@ -509,7 +511,7 @@ impl CommandRx {
     /// the new rate.
     pub(crate) fn rescale(&mut self, ratio: f64, before: u64) {
         self.pull();
-        for cmd in &mut self.pending {
+        for cmd in self.pending.as_mut_slice() {
             if cmd.plan_seq < before
                 && let At::Frame(_) = cmd.at
             {

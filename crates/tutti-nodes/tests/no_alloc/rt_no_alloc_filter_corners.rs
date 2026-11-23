@@ -27,7 +27,7 @@
 //! them on every grid point, and values the node holds or clamps.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, Prepare};
 use tutti_nodes::{
@@ -301,7 +301,7 @@ fn a_forked_ladder_and_crossover_are_allocation_free() {
     });
     assert!(peak.is_some_and(|p| p <= 16.0 * 1.001), "{peak:?}");
     let crossover = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
         CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(2_000.0)][..]).unwrap(),
     ))
     .unwrap();
@@ -366,7 +366,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
                     .map(|i| Hz::new(150.0 * 3f64.powi(i as i32)))
                     .collect();
                 let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::default_for(ChannelLayout::from(width)).unwrap(),
+                    ChannelTopology::default_for(ChannelLayout::from(width)).unwrap(),
                     CrossoverControls::try_from(&initial[..]).unwrap(),
                 ))
                 .unwrap();
@@ -404,7 +404,7 @@ fn the_crossover_corners_are_allocation_free_with_every_split_moving() {
 /// norms), with a factor 1.001 for the `f32` rounding.
 #[test]
 fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
-    use tutti_buffers::BusTopology;
+    use tutti_buffers::ChannelTopology;
     use tutti_dsp::{CrossoverBands, CrossoverControls, CrossoverModel, Lti};
     for set in [
         [1.0f64, 2.0],
@@ -415,7 +415,7 @@ fn the_crossover_at_held_extreme_splits_stays_within_the_models_l1_bound() {
         for shape in [1usize, 3, 4] {
             let hz = [Hz::new(set[0]), Hz::new(set[1])];
             let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 CrossoverControls::try_from(&hz[..]).unwrap(),
             ))
             .unwrap();
