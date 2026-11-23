@@ -397,9 +397,8 @@ pub(crate) struct Timing {
 
 /// A segment's value `j` frames after its event: `to` exactly once it
 /// has arrived (see [`segment_progress`]), so a segment always lands
-/// on its end value. The one definition the param port, the reference
-/// interpreter and [`ParamSegment::raw_value_after`] share, as they share a
-/// shaping LUT.
+/// on its end value. The one definition the param port and
+/// [`ParamSegment::raw_value_after`] share, as they share a shaping LUT.
 #[inline]
 pub(crate) fn segment_value(param: Option<UnitParam>, piece: Piece, timing: Timing, j: u32) -> f64 {
     match segment_progress(timing, j) {
@@ -410,8 +409,7 @@ pub(crate) fn segment_value(param: Option<UnitParam>, piece: Piece, timing: Timi
 
 /// How many frames after its event a segment arrives: the first `j` at which
 /// [`segment_progress`] is `None` (0 for a step). The one count the port's
-/// corners, the reference interpreter's and [`ParamSegment::arrives_after`]
-/// share.
+/// corners and [`ParamSegment::arrives_after`] share.
 pub(crate) fn arrival(t: Timing) -> u32 {
     let left = t.span.get() - (f64::from(t.position) + t.lead.get());
     if left <= 0.0 {

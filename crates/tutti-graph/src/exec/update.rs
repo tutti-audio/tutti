@@ -485,8 +485,7 @@ impl<F: Float> Executor<F> {
 
         // Flush what disappeared, to sinks that survive. Order: what replaced
         // nodes wrote for their successors, injections not yet delivered,
-        // then event delays and event feedback in key order — the reference
-        // interpreter's order too.
+        // then event delays and event feedback in key order.
         let (inject, has_inject) = (&mut new.inject, &mut new.has_inject);
         for (key, span, refused) in departed.chased.drain(..) {
             let at = EventInputPort::new(key, 0);

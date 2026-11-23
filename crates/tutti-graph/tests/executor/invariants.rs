@@ -21,33 +21,44 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
-use tutti_buffers::InterleavedMut;
-use tutti_graph::testing::{self as common, Harness, bits, input_signal};
+use tutti_buffers::{Float, InterleavedMut};
+use tutti_graph::testing::{self as common, Harness, Kind, Word, bits, input_signal};
 use tutti_graph::{
-    Edge, EventEdge, EventInputPort, NodeKey, PortSource, ScheduleError, TapId, TapOptions,
-    TapSpec, TransportChanges, compile, graph_tail,
+    Edge, EventEdge, EventInputPort, FeedbackFrom, GraphSpec, InputPort, NodeKey, OutputPort,
+    PortSource, ScheduleError, TapId, TapOptions, TapSpec, Topology, TransportChanges, Unforkable,
+    compile, graph_tail,
 };
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Tail};
 
-use crate::generator::{Desc, MAX_BLOCK, Rng, mutate, random_costs, random_graph, schedule, shape};
+use crate::generator::{
+    Desc, MAX_BLOCK, mutate, random_costs, random_graph, schedule, shape, spec_for,
+};
 use crate::script::Script;
 
-/// What a run produced: each block's output, bit for bit, and the executor's
-/// counts.
+/// What a run produced: each block's output, bit for bit (widened to 64
+/// bits), and the executor's counts.
 #[derive(Debug, Default, PartialEq)]
-struct Trace {
-    blocks: Vec<Vec<Vec<u32>>>,
+pub(crate) struct Trace {
+    blocks: Vec<Vec<Vec<u64>>>,
     late: u64,
     unrouted: u64,
     dropped: u64,
 }
 
 impl Trace {
-    fn push(&mut self, block: &[Vec<f32>]) {
-        self.blocks.push(bits(block));
+    pub(crate) fn push<F: Word>(&mut self, block: &[Vec<F>])
+    where
+        F::Bits: Into<u64>,
+    {
+        self.blocks.push(
+            bits(block)
+                .into_iter()
+                .map(|c| c.into_iter().map(Into::into).collect())
+                .collect(),
+        );
     }
 
-    fn finish(mut self, harness: &Harness) -> Self {
+    pub(crate) fn finish<F: Float>(mut self, harness: &Harness<F>) -> Self {
         self.late = harness.exec.late_command_count();
         self.unrouted = harness.exec.unrouted_command_count();
         self.dropped = harness.exec.dropped_event_count();
@@ -55,10 +66,9 @@ impl Trace {
     }
 }
 
-/// The pool widths a case runs at besides one participant: the seed's pick from
-/// `common::WORKERS`.
-fn parallel(seed: u64) -> usize {
-    common::workers_for(seed)
+/// The pool widths a case runs at besides one participant.
+pub(crate) fn workers() -> impl Strategy<Value = usize> {
+    prop::sample::select(common::WORKERS.to_vec())
 }
 
 fn event_ports(desc: &Desc) -> Vec<EventInputPort> {
@@ -105,7 +115,7 @@ fn scripted(seed: u64, which: usize, workers: usize, inside: bool) -> Trace {
         &desc.kinds,
     );
     let ports = event_ports(&desc);
-    let mut rng = Rng::new(seed ^ 0xC0DE);
+    let mut rng = desc.rng.clone();
     let mut script = Script {
         beat: 0.0,
         playing: !inside,
@@ -174,10 +184,63 @@ fn scripted(seed: u64, which: usize, workers: usize, inside: bool) -> Trace {
     trace.finish(&harness)
 }
 
+/// The graph, committed through an `Editor` (which `reprepare` recompiles
+/// from), rendered through block schedule `which`. With `max_block`, the
+/// second half of the run is re-cut to fit that maximum and, when `reprepare`,
+/// the editor is re-prepared to it at the same rate before that half.
+fn at_max_block(
+    seed: u64,
+    which: usize,
+    workers: usize,
+    max_block: usize,
+    reprepare: bool,
+) -> Trace {
+    let desc = random_graph(seed);
+    let mut harness = Harness::with_workers(MAX_BLOCK, workers);
+    for (&k, kind) in &desc.kinds {
+        harness
+            .editor
+            .insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
+    }
+    let spec = harness.editor.spec_mut();
+    spec.topology.edges = desc.spec.topology.edges.clone();
+    spec.topology.outputs = desc.spec.topology.outputs.clone();
+    spec.topology.inputs = desc.spec.topology.inputs;
+    spec.events = desc.spec.events.clone();
+    harness.editor.commit().expect("a generated graph commits");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    harness.outputs = desc.spec.topology.outputs.len();
+    harness.inputs = desc.spec.topology.inputs.count() as usize;
+
+    let blocks = schedule(which, seed, 400);
+    let (first, rest) = blocks.split_at(blocks.len() / 2);
+    let rest: Vec<usize> = rest
+        .iter()
+        .flat_map(|&n| (0..n.div_ceil(max_block)).map(move |i| (n - i * max_block).min(max_block)))
+        .collect();
+    let (mut trace, mut frame) = (Trace::default(), 0u64);
+    for (half, blocks) in [first, &rest].into_iter().enumerate() {
+        if half == 1 && reprepare {
+            harness
+                .editor
+                .reprepare(common::prepare(max_block))
+                .expect("reprepares");
+            harness.exec.apply_pending();
+            harness.editor.collect();
+        }
+        for &n in blocks {
+            trace.push(&harness.block(n, &input_signal(frame, n)));
+            frame += n as u64;
+        }
+    }
+    trace.finish(&harness)
+}
+
 /// Three graphs, each an edit of the last, rendered in turn.
 fn recompiled(seed: u64, which: usize, workers: usize) -> Trace {
     let first = random_graph(seed);
-    let mut rng = Rng::new(seed ^ 0x5EED);
+    let mut rng = first.rng.clone();
     let second = mutate(&first, &mut rng);
     let third = mutate(&second, &mut rng);
     let mut harness = Harness::with_workers(MAX_BLOCK, workers);
@@ -200,36 +263,49 @@ proptest! {
 
     /// A render is the one-participant render, at every block schedule.
     #[test]
-    fn a_parallel_render_is_the_one_participant_render(seed in any::<u64>(), which in 0usize..5) {
-        prop_assert_eq!(plain(seed, which, 1, false), plain(seed, which, parallel(seed), false));
+    fn a_parallel_render_is_the_one_participant_render(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
+        prop_assert_eq!(plain(seed, which, 1, false), plain(seed, which, workers, false));
     }
 
     /// The same when nodes declare costs and the compiler packs the cheap ones
     /// into tasks.
     #[test]
-    fn a_coarsened_plan_renders_as_one_participant_does(seed in any::<u64>(), which in 0usize..5) {
-        prop_assert_eq!(plain(seed, which, 1, true), plain(seed, which, parallel(seed), true));
+    fn a_coarsened_plan_renders_as_one_participant_does(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
+        prop_assert_eq!(plain(seed, which, 1, true), plain(seed, which, workers, true));
     }
 
     /// The same under commands scheduled by frame and by beat, and a recompile
     /// halfway.
     #[test]
-    fn scheduled_commands_land_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5) {
-        prop_assert_eq!(scripted(seed, which, 1, false), scripted(seed, which, parallel(seed), false));
+    fn scheduled_commands_land_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
+        prop_assert_eq!(scripted(seed, which, 1, false), scripted(seed, which, workers, false));
     }
 
     /// The same with the transport changing inside blocks: a beat resolves
     /// against the transport in force where playback reaches it.
     #[test]
-    fn transport_changes_inside_blocks_land_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5) {
-        prop_assert_eq!(scripted(seed, which, 1, true), scripted(seed, which, parallel(seed), true));
+    fn transport_changes_inside_blocks_land_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
+        prop_assert_eq!(scripted(seed, which, 1, true), scripted(seed, which, workers, true));
     }
 
     /// The same across recompiles: nodes, rings and feedback slots that survive
     /// by key carry their state.
     #[test]
-    fn recompiles_carry_state_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5) {
-        prop_assert_eq!(recompiled(seed, which, 1), recompiled(seed, which, parallel(seed)));
+    fn recompiles_carry_state_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
+        prop_assert_eq!(recompiled(seed, which, 1), recompiled(seed, which, workers));
+    }
+
+    /// A re-prepare to a different `MaxBlock` at the same rate, halfway
+    /// through a run, changes no output: the render is the one that never
+    /// re-prepared, sample for sample, over the same block schedule, with the
+    /// same late, unrouted and dropped counts.
+    #[test]
+    fn a_max_block_change_at_the_same_rate_leaves_the_render_unchanged(seed in any::<u64>(), which in 0usize..5, to in 0usize..3, workers in workers()) {
+        let max_block = [32, 64, 100][to];
+        prop_assert_eq!(
+            at_max_block(seed, which, workers, max_block, true),
+            at_max_block(seed, which, workers, max_block, false)
+        );
     }
 
     /// A tap changes nothing and reads exactly what it names: with an aligned
@@ -239,9 +315,9 @@ proptest! {
     /// summed ones included; the ports tap names the source of a one-source
     /// channel only (a tap of ports names no sum), so it is compared on those.
     #[test]
-    fn an_aligned_tap_of_the_outputs_is_the_output(seed in any::<u64>(), which in 0usize..5) {
+    fn an_aligned_tap_of_the_outputs_is_the_output(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
         let mut traces = Vec::new();
-        for workers in [1, parallel(seed)] {
+        for workers in [1, workers] {
             let desc = random_graph(seed);
             let outputs: Vec<PortSource> = desc
                 .spec
@@ -419,43 +495,72 @@ proptest! {
     }
 }
 
-/// The figures above are not vacuous: over a fixed range of seeds the graphs
-/// hold compensation, a tail along a path, an unbounded tail, and event sources
-/// that hold a node's arrival back.
+/// State continuity: recompiling to the same graph plus an unrelated node
+/// renders exactly what never recompiling renders. The PDC ring, the feedback
+/// slot, and the `Smooth`/`Lag` unit state all have to carry for this to hold.
 #[test]
-fn the_declared_figures_are_exercised() {
-    let (mut compensated, mut tailed, mut unbounded, mut by_events) = (0, 0, 0, 0);
-    for seed in 0..512u64 {
-        let desc = random_graph(seed);
-        let reaching = tails(&desc);
-        compensated += usize::from((0..desc.spec.topology.outputs.len()).any(|c| {
-            channel_departure(&desc, c)
-                < (0..desc.spec.topology.outputs.len())
-                    .map(|d| channel_departure(&desc, d))
-                    .max()
-                    .unwrap_or(0)
-        }));
-        tailed += usize::from(reaching.values().any(|&t| t > 0));
-        unbounded += usize::from(
-            reaching
-                .keys()
-                .any(|k| desc.spec.topology.nodes[k].tail == Tail::Unbounded),
-        );
-        by_events += usize::from(desc.spec.events.iter().any(|(at, es)| {
-            es.iter().any(|e| matches!(e, EventEdge::Direct(from) if departure(&desc, from.node()) > 0 && departure(&desc, at.node()) > 0))
-        }));
+fn a_commit_adding_an_unconnected_node_changes_no_output() {
+    let (a, b, c, mix, orphan) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4), NodeKey(9));
+    let mut kinds = BTreeMap::new();
+    kinds.insert(a, Kind::EnvProbe);
+    kinds.insert(b, Kind::Lag { latency: 37 });
+    kinds.insert(c, Kind::Smooth);
+    kinds.insert(mix, Kind::Sum { inputs: 3 });
+    let mut t = Topology::default();
+    for (&k, kind) in &kinds {
+        t.nodes.insert(k, spec_for(kind));
     }
-    assert!(
-        compensated > 50,
-        "only {compensated} graphs hold compensation"
+    let src = |node| Edge::Direct(PortSource::Node(OutputPort::new(node, 0)));
+    t.edges.insert(InputPort::new(b, 0), vec![src(a)]);
+    t.edges.insert(InputPort::new(c, 0), vec![src(a)]);
+    t.edges.insert(InputPort::new(mix, 0), vec![src(b)]);
+    t.edges.insert(InputPort::new(mix, 1), vec![src(c)]);
+    t.edges.insert(
+        InputPort::new(mix, 2),
+        vec![Edge::Feedback(FeedbackFrom::one_block(
+            OutputPort::new(c, 0),
+            Samples::new(MAX_BLOCK),
+        ))],
     );
-    assert!(tailed > 50, "only {tailed} graphs hold a tail");
-    assert!(
-        unbounded > 50,
-        "only {unbounded} graphs hold an unbounded tail"
+    t.set_outputs(vec![PortSource::Node(OutputPort::new(mix, 0))]);
+    let before = GraphSpec::new(t.clone());
+    let mut after_t = t;
+    let mut kinds_after = kinds.clone();
+    kinds_after.insert(
+        orphan,
+        Kind::Const {
+            value: 1.0,
+            width: 1,
+        },
     );
-    assert!(
-        by_events > 20,
-        "only {by_events} graphs delay a node by an event source"
+    after_t
+        .nodes
+        .insert(orphan, spec_for(&kinds_after[&orphan]));
+    let after = GraphSpec::new(after_t);
+
+    let mut steady = Harness::new(MAX_BLOCK);
+    let mut edited = Harness::new(MAX_BLOCK);
+    steady.switch(&before.validate().unwrap(), &kinds);
+    edited.switch(&before.validate().unwrap(), &kinds);
+    assert_eq!(
+        steady
+            .plan
+            .as_ref()
+            .unwrap()
+            .delay(tutti_graph::DelayKey::Audio {
+                at: InputPort::new(mix, 1),
+                from: PortSource::Node(OutputPort::new(c, 0))
+            }),
+        tutti_units::Samples::new(37),
+        "the edit must land while a PDC ring is full of signal"
     );
+    for block in 0..20u64 {
+        let input = vec![0.0; 50];
+        if block == 7 {
+            edited.switch(&after.validate().unwrap(), &kinds_after);
+        }
+        let x = steady.block(50, &input);
+        let y = edited.block(50, &input);
+        assert_eq!(bits(&x), bits(&y), "block {block}");
+    }
 }

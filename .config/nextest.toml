@@ -2,7 +2,7 @@
 # each minute and terminates it at the fifth, so a hang ends the run with the
 # test's name instead of holding a build slot for hours. The slowest healthy
 # tests take under a minute on CI (a VST3 concurrent-open test about 50 s, the
-# graph's differential crossfades about 25 s, the CLAP live tests up to 17 s);
+# graph's crossfade property about 25 s, the CLAP live tests up to 17 s);
 # five minutes leaves room for a loaded machine. Every profile inherits it.
 [profile.default]
 # A bench is `cargo bench`'s, never a test: a `harness = false` bench runs its
