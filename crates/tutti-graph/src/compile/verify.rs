@@ -676,10 +676,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             if s == EMPTY_SLOT.get() {
                 return Ok(EventSlotCapacity::NONE);
             }
-            if let Some(f) = EventSlotId::new(s)
-                .feedback()
-                .filter(|f| f.index() < plan.event_feedback.len())
-            {
+            if let Some(f) = EventSlotId::new(s).feedback(plan.event_feedback.len()) {
                 let spec = &plan.event_feedback[f];
                 return match spec.key {
                     crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(

@@ -113,8 +113,8 @@ pub(crate) struct Table<I, T> {
     ids: PhantomData<fn(I)>,
 }
 
-/// A slice of rows that only an `I` indexes: what a hot loop holds, so its
-/// pointer and length stay in registers where a `&mut Table` would be reloaded.
+/// A slice of rows that only an `I` indexes: what a hot loop holds as a local,
+/// as it held a plain slice before the ids.
 #[derive(PartialEq, Eq, Debug, bytemuck::TransparentWrapper)]
 #[repr(transparent)]
 #[transparent(Rows<T>)]
@@ -311,10 +311,12 @@ impl EventSlotId {
     /// The slot every unconnected event input reads; never written.
     pub(crate) const EMPTY: Self = Self(0);
 
-    /// The feedback this slot is read from: the null slot is none, and the
-    /// feedback slots follow it (see [`EventFeedbackId::slot`]).
-    pub(crate) fn feedback(self) -> Option<EventFeedbackId> {
-        (self != Self::EMPTY).then(|| EventFeedbackId::from_index(self.index() - 1))
+    /// The feedback this slot is read from, among `feedbacks` of them: the
+    /// null slot and a slot past the feedback slots have none (see
+    /// [`EventFeedbackId::slot`]).
+    pub(crate) fn feedback(self, feedbacks: usize) -> Option<EventFeedbackId> {
+        let id = EventFeedbackId::from_index(self.index().checked_sub(1)?);
+        (id.index() < feedbacks).then_some(id)
     }
 }
 

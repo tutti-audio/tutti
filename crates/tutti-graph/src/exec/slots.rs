@@ -345,7 +345,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         } else {
             [(dst, Role::Write(0)), (src, Role::Read(0))]
         };
-        self.view.split_by(
+        self.view.split(
             &reqs,
             AudioSlotId::get,
             is_write,
@@ -368,7 +368,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         for (k, t) in tagged.iter_mut().enumerate().take(n) {
             *t = (d.slots[k], (k as u8, d.role[k]));
         }
-        self.view.split_by(
+        self.view.split(
             &tagged[..n],
             AudioSlotId::get,
             |(_, role)| role != Direct::READ,
@@ -395,7 +395,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     ) {
-        self.view.split_by(
+        self.view.split(
             reqs,
             AudioSlotId::get,
             is_write,
@@ -422,7 +422,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         } else {
             [(dst, Role::Write(0)), (src, Role::Read(0))]
         };
-        self.view.split_by(
+        self.view.split(
             &reqs,
             AudioSlotId::get,
             is_write,
@@ -465,7 +465,7 @@ impl EventSlots for EventsView<'_> {
         mut read: impl FnMut(u8, &'a EventSlot),
         mut write: impl FnMut(u8, &'a mut EventSlot),
     ) {
-        self.view.split_by(
+        self.view.split(
             reqs,
             EventSlotId::get,
             is_write,
