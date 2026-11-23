@@ -102,7 +102,7 @@ count! {
 
 count! {
     /// A count of undo steps: how many steps of an edit log something
-    /// happened to (merged away when the log is over its cap).
+    /// happened to (dropped when the log is over its cap).
     UndoSteps, "undo steps", add
 }
 

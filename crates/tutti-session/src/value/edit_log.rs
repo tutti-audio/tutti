@@ -85,7 +85,7 @@ struct Step {
 }
 
 struct Steps {
-    cap: usize,
+    cap: UndoSteps,
     steps: VecDeque<Step>,
     coalesced: UndoSteps,
 }
@@ -96,8 +96,8 @@ pub(crate) struct LogSlot {
 }
 
 impl LogSlot {
-    /// Records one landing's marks, which share one gesture, then merges the
-    /// oldest steps away while there are more than the cap.
+    /// Records one landing's marks, which share one gesture, then drops the
+    /// oldest steps while there are more than the cap.
     pub(super) fn push(&self, marks: impl Iterator<Item = RawMark>) {
         let mut log = self.steps.lock();
         for mark in marks {
@@ -117,14 +117,18 @@ impl LogSlot {
 }
 
 impl Steps {
-    /// Drops the oldest step into the one after it until `cap` remain: a
-    /// coalesced step keeps the marks of the newer one, whose `after` holds
-    /// every value the older one set.
+    /// Drops the oldest step until `cap` remain, counting each: the `after` of
+    /// every newer mark still holds the values a dropped step set.
     fn coalesce(&mut self) {
-        while self.steps.len() > self.cap {
+        while self.held() > self.cap {
             self.steps.pop_front();
             self.coalesced += UndoSteps::new(1);
         }
+    }
+
+    /// The undrained steps.
+    fn held(&self) -> UndoSteps {
+        UndoSteps::new(u64::try_from(self.steps.len()).unwrap_or(u64::MAX))
     }
 }
 
@@ -135,9 +139,9 @@ impl Steps {
 /// after it is made; dropping it stops the recording. `Send`, not `Clone`: one
 /// owner drains it.
 ///
-/// Past [`cap`](Self::cap) undrained steps, the oldest step is
-/// merged into the one after it: its marks go, and
-/// [`coalesced`](Self::coalesced) counts it.
+/// Past [`cap`](Self::cap) undrained steps, the oldest step is dropped: its
+/// marks go, and [`coalesced`](Self::coalesced) counts it. The `after` of every
+/// newer mark still holds the values it set.
 ///
 /// ```
 /// fn send<T: Send>() {}
@@ -157,7 +161,7 @@ impl<K: AppKey> EditLog<K> {
     pub(super) fn new(state: &Arc<ValueState<K>>) -> Self {
         let slot = Arc::new(LogSlot {
             steps: Mutex::new(Steps {
-                cap: usize::MAX,
+                cap: UndoSteps::new(u64::MAX),
                 steps: VecDeque::new(),
                 coalesced: UndoSteps::ZERO,
             }),
@@ -169,19 +173,19 @@ impl<K: AppKey> EditLog<K> {
         }
     }
 
-    /// Bounds the undrained steps to `n`, at least one: past it, the oldest
-    /// step merges into the next.
+    /// Bounds the undrained steps to `n`: past it, the oldest step is dropped
+    /// and counted. A cap of zero keeps no step and only counts.
     #[must_use]
-    pub fn cap(self, n: usize) -> Self {
+    pub fn cap(self, n: UndoSteps) -> Self {
         {
             let mut log = self.slot.steps.lock();
-            log.cap = n.max(1);
+            log.cap = n;
             log.coalesce();
         }
         self
     }
 
-    /// The steps merged away so far, over the log's life.
+    /// The steps dropped past the cap so far, over the log's life.
     #[must_use]
     pub fn coalesced(&self) -> UndoSteps {
         self.slot.steps.lock().coalesced

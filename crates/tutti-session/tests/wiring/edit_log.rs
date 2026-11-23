@@ -99,13 +99,13 @@ fn an_open_gesture_captures_its_targets_at_their_base() {
     drop(drag);
 }
 
-/// **The cap merges the oldest undrained steps**: five single sets under `cap(2)`
-/// merge three away, keep two, and the count reads 3.
+/// **The cap drops the oldest undrained steps**: five single sets under a cap of two
+/// drop three, keep two, and the count reads 3.
 #[test]
 fn the_cap_coalesces_the_oldest_steps_and_counts_them() {
     let mut s = detached();
     let lp = filter(&mut s);
-    let mut log = s.edit_log().unwrap().cap(2);
+    let mut log = s.edit_log().unwrap().cap(UndoSteps::new(2));
     assert_eq!(log.coalesced(), UndoSteps::ZERO);
     for hz in [1_100.0, 1_200.0, 1_300.0, 1_400.0, 1_500.0] {
         s.set(lp.cutoff().to(Hz::new(hz))).unwrap();
