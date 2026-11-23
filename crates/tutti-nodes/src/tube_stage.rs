@@ -209,9 +209,10 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-
+    use crate::test_support::{drive_block, prepared, render_chunked, sine};
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::Hz;
     use tutti_units::UnitParam;
 
     const RATE: f64 = 48_000.0;
@@ -268,8 +269,8 @@ mod tests {
         let _ = drive_block(&mut n, &[&x[..64]]);
         let after = render_chunked(&mut n, &[x], 256).remove(0);
         let (a, b) = (
-            amplitude_at(&before[2_400..], 1_000.0, RATE),
-            amplitude_at(&after[2_400..], 1_000.0, RATE),
+            amplitude_at(&before[2_400..], Hz::new(1_000.0), SampleRate::of(RATE)),
+            amplitude_at(&after[2_400..], Hz::new(1_000.0), SampleRate::of(RATE)),
         );
         assert!(b > a && b < 10.0 * a, "{a} -> {b}");
         assert!(!n.param_set().set(UnitParam::Cutoff, 2.0));

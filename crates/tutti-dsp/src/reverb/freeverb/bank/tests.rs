@@ -1,4 +1,5 @@
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::impulse;
 use tutti_units::{Db, Mix, Real, Samples};
 
 use super::*;
@@ -14,12 +15,6 @@ fn controls(room: f64, damp: f64) -> FreeverbControls {
         room: Mix::new(room),
         damp: Mix::new(damp),
     }
-}
-
-fn impulse(len: usize) -> Vec<f32> {
-    let mut x = vec![0.0f32; len];
-    x[0] = 1.0;
-    x
 }
 
 /// `x` through `bank` in blocks of `block`, `ramps` carried across them: `(left, right)`.
@@ -98,7 +93,7 @@ fn a_comb_is_the_feedback_comb_of_its_definition() {
         );
         comb.retune(g as f32, d as f32);
         let len = 6 * l + 3;
-        let x = impulse(len);
+        let x = impulse(Samples::new(len));
         let mut y = vec![0.0f32; len];
         for (y, &x) in y.iter_mut().zip(&x) {
             *y = comb.tick(x);
@@ -127,7 +122,7 @@ fn an_all_pass_is_freeverbs_form() {
     let mut ap =
         AllPassFilter::<f32>::new(NonZeroUsize::new(d).unwrap(), Feedback::new(f64::from(g)))
             .form(AllPassForm::Freeverb);
-    let mut h = impulse(18 * d + 1);
+    let mut h = impulse(Samples::new(18 * d + 1));
     ap.process(&mut h);
     assert!((h[0] + 1.0).abs() < 1e-6, "h[0] = {}", h[0]);
     for k in 1..=17usize {
@@ -224,7 +219,7 @@ fn the_tunings_and_the_stereo_spread_are_freeverbs() {
 #[test]
 fn the_right_channel_sounds_23_frames_after_the_left() {
     let (mut bank, mut ramps) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
-    let (l, r) = run(&mut bank, &mut ramps, &impulse(1_300), 64);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(Samples::new(1_300)), 64);
     assert!(l[..1116].iter().all(|&s| s == 0.0));
     assert!(l[1116].abs() > 0.01);
     assert!(r[..1139].iter().all(|&s| s == 0.0));
@@ -237,7 +232,7 @@ fn the_right_channel_sounds_23_frames_after_the_left() {
 #[test]
 fn the_input_is_scaled_by_the_fixed_gain() {
     let (mut bank, mut ramps) = settled(RATE, &FreeverbControls::GENERAL_MIDI);
-    let (l, _) = run(&mut bank, &mut ramps, &impulse(1_200), 64);
+    let (l, _) = run(&mut bank, &mut ramps, &impulse(Samples::new(1_200)), 64);
     assert!((l[1116] - 0.015).abs() < 1e-6, "{}", l[1116]);
     assert_eq!(FreeverbBank::<f32>::FIXED_GAIN, Gain::new(0.015));
 }
@@ -256,7 +251,7 @@ fn a_comb_falls_sixty_decibels_in_the_schroeder_rt60() {
             CombFilter::<f32>::new(CombForm::Feedback, NonZeroUsize::new(l).unwrap(), feedback);
         let trips = (-3.0 / g.log10()).ceil() as usize + 2;
         let len = (trips + 1) * l;
-        let x = impulse(len);
+        let x = impulse(Samples::new(len));
         let mut y = x;
         comb.process(&mut y);
         let first_below = (1..)
@@ -304,7 +299,7 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
     );
     assert!(tail.get() as f64 > 1.5 * RATE.get(), "past one RT60");
     let len = tail.get() + 20_000;
-    let (l, r) = run(&mut bank, &mut ramps, &impulse(len), 512);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(Samples::new(len)), 512);
     let peak = l.iter().chain(&r).fold(0.0f32, |m, s| m.max(s.abs()));
     let last = |from: usize| {
         l[from..]
@@ -405,13 +400,26 @@ fn a_reset_bank_is_a_fresh_one_and_a_clone_shares_nothing() {
     used.retarget(&mut ramps, &c);
     ramps.jump_to_target();
     assert_eq!(
-        run(&mut used, &mut ramps, &impulse(4_000), 64),
-        run(&mut fresh, &mut fresh_ramps, &impulse(4_000), 64)
+        run(&mut used, &mut ramps, &impulse(Samples::new(4_000)), 64),
+        run(
+            &mut fresh,
+            &mut fresh_ramps,
+            &impulse(Samples::new(4_000)),
+            64
+        )
     );
     let mut copy = used.clone();
     let mut copy_ramps = ramps;
-    let more = run(&mut used, &mut ramps, &impulse(2_000), 64);
-    assert_eq!(run(&mut copy, &mut copy_ramps, &impulse(2_000), 64), more);
+    let more = run(&mut used, &mut ramps, &impulse(Samples::new(2_000)), 64);
+    assert_eq!(
+        run(
+            &mut copy,
+            &mut copy_ramps,
+            &impulse(Samples::new(2_000)),
+            64
+        ),
+        more
+    );
     copy.reset();
     assert!(
         run(&mut used, &mut ramps, &vec![0.0; 100], 64)
@@ -485,7 +493,12 @@ fn the_tail_falls_far_below_its_floor_and_a_huge_input_stays_finite() {
     let Tail::Finite(tail) = bank.tail_of(&c) else {
         panic!("finite")
     };
-    let (l, r) = run(&mut bank, &mut ramps, &impulse(tail.get() * 3), 512);
+    let (l, r) = run(
+        &mut bank,
+        &mut ramps,
+        &impulse(Samples::new(tail.get() * 3)),
+        512,
+    );
     assert!(
         l[tail.get() * 2..]
             .iter()
@@ -515,7 +528,7 @@ fn an_absurd_rate_neither_hangs_nor_allocates_without_bound() {
                 assert_eq!(a.delay().get(), scale(t + spread), "{hz} Hz all-pass");
             }
         }
-        let (l, r) = run(&mut bank, &mut ramps, &impulse(2_000), 64);
+        let (l, r) = run(&mut bank, &mut ramps, &impulse(Samples::new(2_000)), 64);
         assert!(l.iter().chain(&r).all(|s| s.is_finite()), "{hz} Hz");
         assert!(l.iter().chain(&r).any(|&s| s != 0.0), "{hz} Hz sounds");
     }
@@ -538,7 +551,7 @@ fn the_render_schroeder_rt60_lies_between_the_shortest_and_longest_comb_t60() {
     let comb_t60 = |l: f64| -3.0 * l / (RATE.get() * libm::log10(g));
     let (mut bank, mut ramps) = settled(RATE, &c);
     let frames = (4.0 * comb_t60(1640.0) * RATE.get()) as usize;
-    let (l, r) = run(&mut bank, &mut ramps, &impulse(frames), 512);
+    let (l, r) = run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 512);
     let mut energy = vec![0.0f64; frames];
     let mut total = 0.0;
     for i in (0..frames).rev() {

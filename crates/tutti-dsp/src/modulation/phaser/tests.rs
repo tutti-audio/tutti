@@ -1,5 +1,7 @@
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::impulse_at;
+use tutti_units::Samples;
 use tutti_units::{Feedback, Hz, Real, SampleRate};
 
 use super::*;
@@ -59,12 +61,6 @@ fn run_on(
     out
 }
 
-fn impulse(len: usize, at: usize) -> Vec<f32> {
-    let mut x = vec![0.0; len];
-    x[at] = 1.0;
-    x
-}
-
 /// The coefficient of the textbook all-pass `(c + z^-1) / (1 + c z^-1)` tuned to `hz`:
 /// `tan` of the normalised centre, folded into the all-pass form.
 fn textbook_c(hz: f64, sr: f64) -> f64 {
@@ -108,7 +104,7 @@ fn held_response(stages: usize, a: f32, g: Feedback, len: usize) -> Vec<f32> {
         stages,
         &mut [Ramp::new(a)],
         &mut Ramp::new(f32::from_unit(g)),
-        &[impulse(len, 0)],
+        &[impulse_at(Samples::new(len), Samples::new(0))],
         64,
     )
     .remove(0)
@@ -367,7 +363,7 @@ fn a_coefficient_ramp_is_read_a_step_ahead_and_lands_exactly() {
                 2,
                 &mut [ramp],
                 &mut Ramp::new(0.0),
-                &[impulse(n + 1, n)],
+                &[impulse_at(Samples::new(n + 1), Samples::new(n))],
                 block,
             )
             .remove(0);
@@ -396,7 +392,7 @@ fn a_feedback_ramp_is_read_a_step_ahead_and_lands_exactly() {
             2,
             &mut [Ramp::new(complement(0.0))],
             &mut fb,
-            &[impulse(8, 0)],
+            &[impulse_at(Samples::new(8), Samples::new(0))],
             3,
         )
         .remove(0);
@@ -472,7 +468,7 @@ fn a_clone_continues_where_the_original_is() {
         &mut chain,
         &mut coefficients,
         &mut fb,
-        &[impulse(64, 0)],
+        &[impulse_at(Samples::new(64), Samples::new(0))],
         64,
     );
     let mut copy = chain.clone();

@@ -202,7 +202,6 @@ mod tests {
     use crate::filter::test_utils::{bin, gain, generate_sine, render};
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::ChannelLayout;
-
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Hz, UnitAddr, UnitParam};
 

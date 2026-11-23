@@ -1,8 +1,10 @@
 use super::*;
 use crate::Complex64;
-use crate::testing::amplitude_at;
 use core::f64::consts::{FRAC_PI_2, PI, TAU};
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
+use tutti_fixtures::signal::amplitude_at;
+use tutti_units::Hz;
+use tutti_units::SampleRate;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -86,15 +88,15 @@ fn a_sine_shifts_by_the_shift_and_the_image_is_under_the_quadrature_error() {
             ((input + shift).abs(), input - shift)
         };
         let image = image.abs();
-        let w = amplitude_at(y, wanted, RATE.get());
-        let i = amplitude_at(y, image, RATE.get());
+        let w = amplitude_at(y, Hz::new(wanted), RATE);
+        let i = amplitude_at(y, Hz::new(image), RATE);
         assert!(
             w >= half.cos() - 1e-9 && w <= 1.0 + 1e-9,
             "{input} {shift:+}: wanted {w}"
         );
         assert!(i <= half.sin(), "{input} {shift:+}: image {i}");
         assert!(
-            amplitude_at(y, input, RATE.get()) <= half.sin(),
+            amplitude_at(y, Hz::new(input), RATE) <= half.sin(),
             "{input} {shift:+}: the input frequency is gone"
         );
     }
@@ -105,7 +107,7 @@ fn a_sine_shifts_by_the_shift_and_the_image_is_under_the_quadrature_error() {
 #[test]
 fn no_shift_is_a_unit_gain_phase_network() {
     let (y, from) = shifted(1_000.0, 0.0);
-    assert!((amplitude_at(&y[from..], 1_000.0, RATE.get()) - 1.0).abs() < 1e-9);
+    assert!((amplitude_at(&y[from..], Hz::new(1_000.0), RATE) - 1.0).abs() < 1e-9);
 }
 
 /// The carrier's phase runs across blocks: any cut of the input gives the render of one call,

@@ -147,7 +147,6 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{assert_cell_ramps, drive_block, prepared};
-
     use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
 

@@ -5,8 +5,7 @@ mod signals;
 
 pub(crate) use radau::radau5_step;
 pub(crate) use signals::{
-    amplitude_at, butterworth_all_pass, direct_form, lock_in, noise, sine_fit, steady_deviation,
-    uniform,
+    butterworth_all_pass, direct_form, noise, sine_fit, steady_deviation, uniform,
 };
 
 /// The crossover model with a split at each of `frequencies` at `rate`, so
