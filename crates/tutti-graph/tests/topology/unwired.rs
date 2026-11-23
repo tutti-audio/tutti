@@ -9,7 +9,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
-use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, EventEdge,
     EventInputPort, EventOutputPort, Executor, FeedbackFrom, InputPort, Io, Node, NodeBus, NodeKey,
@@ -272,12 +272,12 @@ fn a_driver_on_a_missing_event_output_is_released() {
     assert_eq!(ed.edge_gain(lane), Some(Gain::new(0.25)));
 }
 
-fn stereo() -> BusTopology {
-    BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).expect("stereo")
+fn stereo() -> ChannelTopology {
+    ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).expect("stereo")
 }
 
-fn mono() -> BusTopology {
-    BusTopology::unassigned(ChannelLayout::MONO).expect("mono")
+fn mono() -> ChannelTopology {
+    ChannelTopology::unassigned(ChannelLayout::MONO).expect("mono")
 }
 
 /// A node with a main stereo bus and an aux mono bus on each side, or the

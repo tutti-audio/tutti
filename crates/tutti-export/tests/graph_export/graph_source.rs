@@ -23,7 +23,7 @@
 
 use crate::support;
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig, write_buffers};
-use tutti_buffers::{Bed, BusTopology, ChannelLayout, Float, Interleaved, MaxBlock, Mono};
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Interleaved, MaxBlock, Mono};
 
 use std::sync::Arc;
 use tutti_units::Seconds;
@@ -149,7 +149,7 @@ fn limited() -> GraphBuilder {
             .with_layout(ChannelLayout::STEREO),
     );
     let (lim, _) = g.add_with_controls(tutti_nodes::LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::STEREO).controls(tutti_nodes::LimiterControls {
+        LimiterConfig::new(ChannelTopology::STEREO).controls(tutti_nodes::LimiterControls {
             threshold: Db::new(-6.0),
             ceiling: Db::new(-1.0),
             ..tutti_nodes::LimiterControls::DEFAULT
@@ -848,7 +848,7 @@ fn a_forked_clip_reader_renders_the_tone_at_the_graph_block() {
 /// A one-channel convolver over `ir`, with the default head partition.
 fn convolver(ir: &[f32]) -> tutti_nodes::ConvolverNode<f32> {
     tutti_nodes::ConvolverNode::try_from(tutti_nodes::ConvolverConfig::new(
-        tutti_buffers::BusTopology::MONO,
+        tutti_buffers::ChannelTopology::MONO,
         &[Mono::new(ir)],
     ))
     .expect("one response on a mono bus")

@@ -7,7 +7,7 @@
 //! `ParamSet` before each block, so they take the ramped path (a coefficient
 //! solve every few samples), a solo's mute ramp and a bypass.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::BlockRig;
 use tutti_graph::{IntoNode, ParamNode};
 use tutti_nodes::{
@@ -49,7 +49,7 @@ fn gate<N: IntoNode>(node: N, mut between: impl FnMut(&N::Controls, usize)) {
 #[test]
 fn crossover_node_process_is_allocation_free() {
     let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
         CrossoverControls::try_from(&[Hz::new(120.0), Hz::new(1_000.0), Hz::new(6_000.0)][..])
             .unwrap(),
     ))
@@ -60,7 +60,7 @@ fn crossover_node_process_is_allocation_free() {
 #[test]
 fn crossover_node_with_a_moving_frequency_is_allocation_free() {
     let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-        BusTopology::STEREO,
+        ChannelTopology::STEREO,
         CrossoverControls::try_from(&[Hz::new(200.0), Hz::new(3_000.0)][..]).unwrap(),
     ))
     .unwrap();
@@ -76,7 +76,7 @@ fn crossover_node_with_a_moving_frequency_is_allocation_free() {
 fn multiband_compressor_process_is_allocation_free() {
     for bands in 2..=4 {
         let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             MultibandBands::new(bands).unwrap(),
         ));
         let set = node.param_set();
@@ -94,7 +94,7 @@ fn multiband_compressor_with_moving_params_is_allocation_free() {
     // Four bands: every band param, every crossover and both toggles are
     // written each block (27 ports and 8 toggle cells).
     let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-        BusTopology::default_for(ChannelLayout::from_count(6)).unwrap(),
+        ChannelTopology::default_for(ChannelLayout::from_count(6)).unwrap(),
         MultibandBands::of(4),
     ));
     let mut hz = 120.0f32;

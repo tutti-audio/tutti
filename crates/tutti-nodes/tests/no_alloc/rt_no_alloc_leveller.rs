@@ -1,7 +1,7 @@
 //! The leveller does not allocate per block, with its target and gate moved between blocks and
 //! its window turning over.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{LevellerConfig, LevellerNode};
 use tutti_units::{SampleRate, UnitAddr, UnitParam};
@@ -18,7 +18,7 @@ fn feed(rig: &mut BlockRig) {
 
 #[test]
 fn leveller_process_is_allocation_free_with_the_controls_moving() {
-    let config = LevellerConfig::new(BusTopology::STEREO);
+    let config = LevellerConfig::new(ChannelTopology::STEREO);
     let (mut rig, controls) = BlockRig::new(
         LevellerNode::<f32>::try_from(config).unwrap(),
         SampleRate::SR_48K,

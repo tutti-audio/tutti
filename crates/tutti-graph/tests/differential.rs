@@ -17,7 +17,7 @@ use tutti_buffers::MaxBlock;
 
 use common::{Kind, Pair, Word, bits, input_signal};
 use proptest::prelude::*;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::Topology;
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, NodeBus, NodeKey, TapId, TapOptions, TapSpec,
@@ -2322,7 +2322,7 @@ fn bus_of(width: usize, named: bool) -> Bus {
     let topology = if named {
         ChannelTopology::default_for(layout).expect("fits a bus")
     } else {
-        BusTopology::unassigned(layout).expect("fits a bus")
+        ChannelTopology::unassigned(layout).expect("fits a bus")
     };
     Bus::new(topology, BusRole::Main)
 }

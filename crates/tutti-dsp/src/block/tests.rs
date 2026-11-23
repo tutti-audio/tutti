@@ -13,7 +13,7 @@ use crate::{
 };
 use core::num::NonZeroUsize;
 use tutti_buffers::{
-    BlockSide, BufferError, BusTopology, ChannelLayout, InputOutput, Planes, PlanesMut,
+    BlockSide, BufferError, ChannelLayout, ChannelTopology, InputOutput, Planes, PlanesMut,
 };
 use tutti_units::{Feedback, Hz, SampleRate, Seconds};
 
@@ -232,7 +232,7 @@ fn utility_banks_refuse_a_block_of_another_width() {
 fn delay_banks_refuse_a_block_of_another_width() {
     frames_cannot_differ();
     refuses_another_width(2, |block| {
-        let layout = DelayLayout::new(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)));
+        let layout = DelayLayout::new(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(1.0)));
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(RATE).get()).unwrap();
         DelayBank::<f32>::new(&layout, RATE).process(
             &mut DelayRamps::new(steps),
@@ -266,7 +266,7 @@ fn modulation_banks_refuse_a_block_of_another_width() {
     });
     refuses_another_width(2, |block| {
         let mut complements = [Ramp::new(0.5f32), Ramp::new(0.5f32)];
-        PhaserChain::<f32>::new(Stages::of(2), tutti_buffers::BusTopology::STEREO).process(
+        PhaserChain::<f32>::new(Stages::of(2), tutti_buffers::ChannelTopology::STEREO).process(
             &mut complements,
             &mut Ramp::new(0.0),
             block,

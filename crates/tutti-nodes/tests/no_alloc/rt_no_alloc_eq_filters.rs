@@ -1,7 +1,7 @@
 //! The bell, the tilt and the graphic equalizer do not allocate per block, held and with every control moved
 //! between blocks (a design into the held scratch and the coefficient ramp).
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
@@ -67,7 +67,7 @@ fn tilt_filter_process_is_allocation_free_with_every_control_moving() {
 #[test]
 fn graphic_eq_process_is_allocation_free_with_every_band_moving() {
     for bands in [GraphicBands::Octave, GraphicBands::ThirdOctave] {
-        let config = GraphicEqConfig::new(BusTopology::STEREO, bands);
+        let config = GraphicEqConfig::new(ChannelTopology::STEREO, bands);
         run(GraphicEqNode::from(config), |c, i| {
             for band in 0..bands.count() {
                 let up = (i + band).is_multiple_of(2);

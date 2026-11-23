@@ -199,7 +199,7 @@
 //! ```
 //! use tutti_graph::{Bus, BusRole, Buses, Cost, Cx, InBus, Io, Node, Prepare, Shape, Status};
 //! use tutti_units::{Latency, Samples, Tail};
-//! use tutti_buffers::{BusTopology, ChannelLayout};
+//! use tutti_buffers::{ChannelTopology, ChannelLayout};
 //!
 //! struct Ducker {
 //!     key: InBus,
@@ -207,7 +207,7 @@
 //!
 //! impl Ducker {
 //!     fn ports() -> Shape {
-//!         let mono = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
+//!         let mono = ChannelTopology::unassigned(ChannelLayout::MONO).unwrap();
 //!         let ins = Buses::main(mono)
 //!             .with(Bus::new(mono, BusRole::Sidechain))
 //!             .unwrap();

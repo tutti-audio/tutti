@@ -2,7 +2,7 @@
 
 use std::num::NonZeroU32;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 
 use tutti_units::{Latency, Tail, UnitAddr, UnitParam};
 
@@ -249,10 +249,10 @@ impl Shape {
     }
 
     /// One bus of `topology` in and the same out: output `c` is input `c` on
-    /// the dry path. A stereo processor says [`BusTopology::STEREO`]; one that
+    /// the dry path. A stereo processor says [`ChannelTopology::STEREO`]; one that
     /// knows only a width says so with [`through_unassigned`](Self::through_unassigned).
     #[must_use]
-    pub const fn through(topology: BusTopology) -> Self {
+    pub const fn through(topology: ChannelTopology) -> Self {
         Self::buses(Buses::main(topology), Buses::main(topology))
     }
 
@@ -289,7 +289,7 @@ impl Shape {
 
     /// No audio input, one bus of `topology` out: nothing passes.
     #[must_use]
-    pub const fn source(topology: BusTopology) -> Self {
+    pub const fn source(topology: ChannelTopology) -> Self {
         Self::buses(Buses::NONE, Buses::main(topology))
     }
 
@@ -302,7 +302,7 @@ impl Shape {
 
     /// One bus of `topology` in, no audio output: nothing passes.
     #[must_use]
-    pub const fn sink(topology: BusTopology) -> Self {
+    pub const fn sink(topology: ChannelTopology) -> Self {
         Self::buses(Buses::main(topology), Buses::NONE)
     }
 

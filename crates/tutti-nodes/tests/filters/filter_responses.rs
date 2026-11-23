@@ -6,8 +6,8 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Planes;
 use tutti_graph::contract::{drive_input, prepared};
 use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition};
@@ -154,7 +154,7 @@ fn a_ladder_low_pass_has_unity_dc_a_quarter_at_cutoff_and_falls_24_db_an_octave(
 fn a_crossover_is_6_db_down_at_each_neighbour_at_the_split() {
     let node = || {
         CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
         ))
         .unwrap()

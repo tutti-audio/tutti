@@ -1,5 +1,5 @@
 use super::error::{Result, VbapError};
-use tutti_buffers::{Bed, ChannelTopology, ChannelLayout, Float, Fold, Mono, MonoMut};
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::UnitParam;

@@ -939,7 +939,7 @@ fn shift(mask: u64, span: PortSpan) -> u64 {
 mod tests {
     use super::*;
     use crate::{Bus, BusRole, Buses, Shape};
-    use tutti_buffers::{BusTopology, ChannelLayout};
+    use tutti_buffers::{ChannelLayout, ChannelTopology};
 
     const FRAMES: usize = 4;
 
@@ -947,13 +947,13 @@ mod tests {
     /// port past the buses on each side (a plugin's channels a bus cannot
     /// describe).
     fn shape() -> Shape {
-        let main = Bus::new(BusTopology::STEREO, BusRole::Main);
+        let main = Bus::new(ChannelTopology::STEREO, BusRole::Main);
         let key = Bus::new(
-            BusTopology::unassigned(ChannelLayout::MONO).expect("mono fits"),
+            ChannelTopology::unassigned(ChannelLayout::MONO).expect("mono fits"),
             BusRole::Sidechain,
         );
         let ins = Buses::new(&[main, key]).expect("two buses");
-        Shape::buses(ins, Buses::main(BusTopology::STEREO))
+        Shape::buses(ins, Buses::main(ChannelTopology::STEREO))
             .ports(ChannelLayout::from_count(4), ChannelLayout::from_count(3))
     }
 
@@ -987,9 +987,9 @@ mod tests {
     /// and the bus's handle every band.
     #[test]
     fn a_banded_main_bus_is_band_zero_in_the_flat_view() {
-        let bands = Bus::banded(BusTopology::STEREO, BusRole::Main, 3).expect("three bands");
+        let bands = Bus::banded(ChannelTopology::STEREO, BusRole::Main, 3).expect("three bands");
         let shape = Shape::buses(
-            Buses::main(BusTopology::STEREO),
+            Buses::main(ChannelTopology::STEREO),
             Buses::NONE.with(bands).expect("one bus"),
         );
         assert_eq!(shape.audio_out(), ChannelLayout::from_count(6));

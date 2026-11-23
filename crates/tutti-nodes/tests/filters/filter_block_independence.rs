@@ -9,8 +9,8 @@
 
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
-use tutti_buffers::BusTopology;
 use tutti_buffers::ChannelLayout;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Planes;
 use tutti_dsp::{SvfCoefficients, SvfModel};
 use tutti_graph::contract::{drive_input, prepared};
@@ -380,7 +380,7 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
             let signals = [Some(sweep(200.0, 1_500.0)), Some(sweep(2_500.0, 9_000.0))];
             render(
                 CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::STEREO,
+                    ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
                 ))
                 .unwrap(),
@@ -396,7 +396,7 @@ fn the_crossover_renders_alike_at_every_block_length_with_signals() {
         Box::new(move |block| {
             render(
                 CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::STEREO,
+                    ChannelTopology::STEREO,
                     CrossoverControls::try_from(&[Hz::new(300.0), Hz::new(3_000.0)][..]).unwrap(),
                 ))
                 .unwrap(),
@@ -432,7 +432,7 @@ fn a_crossover_signal_step_is_held_to_the_next_grid_point_then_ramps() {
         let held = cutoff.map(|c| vec![c as f32; 64]);
         let signals = [Some(held.unwrap_or_else(|| signal.clone()))];
         let node = CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             CrossoverControls::try_from(&[Hz::new(old)][..]).unwrap(),
         ))
         .unwrap();

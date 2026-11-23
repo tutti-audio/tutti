@@ -12,7 +12,7 @@
 //! and range edits between blocks.
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_fixtures::midi;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node, ParamNode, ParamSet, TransportPosition};
@@ -101,7 +101,8 @@ fn beat_synced_lfo_process_is_allocation_free() {
 fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
     DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus"),
+            ChannelTopology::default_for(ChannelLayout::from(width))
+                .expect("a test width is one bus"),
             MaxDelay::of(Seconds::new(2.0)),
         ))
         .controls(DelayControls {
@@ -132,14 +133,14 @@ fn wide_6ch_delay_node_process_is_allocation_free() {
 }
 
 /// A bus of `width` channels on the engine's order.
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
 }
 
 #[test]
 fn chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -149,7 +150,7 @@ fn chorus_node_process_is_allocation_free() {
 #[test]
 fn flanger_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::flanger(BusTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::flanger(ChannelTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -159,7 +160,7 @@ fn flanger_node_process_is_allocation_free() {
 #[test]
 fn general_midi_chorus_node_process_is_allocation_free() {
     gate(
-        ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(BusTopology::STEREO)),
+        ModDelayNode::<f32>::from(ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO)),
         0.4,
         2_000,
         |_| {},
@@ -170,7 +171,8 @@ fn general_midi_chorus_node_process_is_allocation_free() {
 fn phaser_node_process_is_allocation_free() {
     // 4-stage phaser. `prepare` sizes the chain, but `process` must reuse it.
     gate(
-        PhaserNode::<f32>::try_from(PhaserConfig::new(BusTopology::MONO, Stages::of(4))).unwrap(),
+        PhaserNode::<f32>::try_from(PhaserConfig::new(ChannelTopology::MONO, Stages::of(4)))
+            .unwrap(),
         0.4,
         2_000,
         |_| {},
@@ -1599,7 +1601,7 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
         NoteDuration::new(NoteValue::SIXTEENTH).triplet(),
         NoteDuration::new(NoteValue::of(64)).dotted(),
     ];
-    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
+    let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
         .interpolation(InterpolationMode::CubicHermite)
         .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
         .build()

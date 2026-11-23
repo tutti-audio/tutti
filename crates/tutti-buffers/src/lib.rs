@@ -62,7 +62,6 @@ extern crate alloc;
 mod ambisonic;
 mod bed;
 mod bounds;
-mod bus;
 mod channels;
 mod convert;
 mod edge;
@@ -84,7 +83,6 @@ pub use ambisonic::{
     AmbisonicOrdering,
 };
 pub use bed::Bed;
-pub use bus::{BusTooWide, BusTopology};
 pub use channels::{
     ChannelIndex, ChannelIndexOutOfRange, ChannelLayout, LayoutError, MAX_CHANNELS,
 };
