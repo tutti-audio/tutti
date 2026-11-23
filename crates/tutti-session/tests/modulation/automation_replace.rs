@@ -46,6 +46,11 @@ fn replaced_keeps_automation(replacement: impl FnOnce(ProbeUnit) -> Replacement<
         "the declaration is still held"
     );
     assert_eq!(s.get(target).unwrap(), first, "the target still reads");
+    assert_eq!(
+        *render(&mut side, 4_096, 128)[0].last().unwrap(),
+        800.0,
+        "the kept curve drives the incoming node's param, not its knob (400)"
+    );
     let second = Arc::new(hold(600.0));
     s.set(target.to(Arc::clone(&second)))
         .expect("the target still writes");
