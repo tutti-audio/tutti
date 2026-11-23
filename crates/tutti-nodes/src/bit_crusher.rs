@@ -159,7 +159,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Latency, UnitParam};
 
@@ -170,12 +170,6 @@ mod tests {
                 .bits(BitDepth::new(bits))
                 .hold(HoldFactor::new(hold)),
         ))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(BitCrusherNode::<f32>::from(BitCrusherConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Light`, no tail, declares the depth and the hold

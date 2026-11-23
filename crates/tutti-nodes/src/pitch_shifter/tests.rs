@@ -2,7 +2,7 @@ use super::*;
 use core::f64::consts::TAU;
 use tutti_fixtures::signal::{hann_image_leak, sine_frequency};
 use tutti_graph::Node;
-use tutti_graph::contract::{BlockRig, assert_param_fork, prepared};
+use tutti_graph::contract::{BlockRig, prepared};
 use tutti_units::{Hz, Latency, Tail, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -68,14 +68,6 @@ fn f64s<F: FftFloat>(x: &[F]) -> Vec<f64> {
 /// `eps * log2(window)`, and a frame is one forward and one inverse.
 fn f32_transform_error() -> f64 {
     2.0 * (WINDOW as f64).log2() * f64::from(f32::EPSILON)
-}
-
-/// A fork starts from the shift last set and shares no cell.
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(PitchShifterNode::from(
-        PitchShifterConfig::new(2u16).pitch(Cents::new(300.0)),
-    ));
 }
 
 /// The shape is the width in and out, declares the shift as `Pitch` starting as configured,

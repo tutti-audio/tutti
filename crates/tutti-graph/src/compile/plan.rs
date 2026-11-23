@@ -688,13 +688,20 @@ pub(crate) struct Direct {
     pub(crate) count: u8,
     /// The distinct slots, ascending; unused entries are the null slot.
     pub(crate) slots: [AudioSlotId; 4],
-    /// Per slot: the output channel it is, or [`Direct::READ`] for a slot
-    /// only read.
-    pub(crate) role: [u8; 4],
-    /// Per input channel: the index into `slots` it reads, or
-    /// [`Direct::IN_PLACE`] when the channel is aliased in place (it is then
-    /// in its output's buffer).
-    pub(crate) input: [u8; 2],
+    /// Per slot: the output channel it is, or a slot only read.
+    pub(crate) role: [DirectRole; 4],
+    /// Per input channel: the index into `slots` it reads, or `None` when
+    /// the channel is aliased in place (it is then in its output's buffer).
+    pub(crate) input: [Option<u8>; 2],
+}
+
+/// What a [`Direct`] node does with one of its slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum DirectRole {
+    /// A slot only read.
+    Read,
+    /// The slot is this output channel.
+    Out(u8),
 }
 
 impl Direct {
@@ -702,24 +709,20 @@ impl Direct {
     /// source, mono to stereo, stereo to mono, and stereo to stereo. The
     /// one-output shapes with at most one input have their own forms.
     pub(crate) const SHAPES: [(usize, usize); 4] = [(0, 2), (1, 2), (2, 1), (2, 2)];
-    /// `role` of a slot that is only read.
-    pub(crate) const READ: u8 = u8::MAX;
-    /// `input` of a channel aliased in place.
-    pub(crate) const IN_PLACE: u8 = u8::MAX;
 
     /// The direct borrow for these ports, if the shape has one.
     fn lower(ain: &[AudioSlotId], aout: &[AudioSlotId], in_place: InPlaceMask) -> Option<Self> {
         if !Self::SHAPES.contains(&(ain.len(), aout.len())) {
             return None;
         }
-        let mut entries: Vec<(AudioSlotId, u8)> = aout
+        let mut entries: Vec<(AudioSlotId, DirectRole)> = aout
             .iter()
             .enumerate()
-            .map(|(c, &s)| (s, c as u8))
+            .map(|(c, &s)| (s, DirectRole::Out(c as u8)))
             .collect();
         for (c, &s) in ain.iter().enumerate() {
-            if !in_place.get(c) && !entries.contains(&(s, Self::READ)) {
-                entries.push((s, Self::READ));
+            if !in_place.get(c) && !entries.contains(&(s, DirectRole::Read)) {
+                entries.push((s, DirectRole::Read));
             }
         }
         entries.sort_unstable();
@@ -728,8 +731,8 @@ impl Direct {
             outs: aout.len() as u8,
             count: entries.len() as u8,
             slots: [ZERO_SLOT; 4],
-            role: [0; 4],
-            input: [Self::IN_PLACE; 2],
+            role: [DirectRole::Read; 4],
+            input: [None; 2],
         };
         for (i, &(s, r)) in entries.iter().enumerate() {
             d.slots[i] = s;
@@ -737,10 +740,12 @@ impl Direct {
         }
         for (c, &s) in ain.iter().enumerate() {
             if !in_place.get(c) {
-                d.input[c] = entries
-                    .iter()
-                    .position(|&e| e == (s, Self::READ))
-                    .expect("every read was entered") as u8;
+                d.input[c] = Some(
+                    entries
+                        .iter()
+                        .position(|&e| e == (s, DirectRole::Read))
+                        .expect("every read was entered") as u8,
+                );
             }
         }
         Some(d)
@@ -1569,7 +1574,7 @@ mod tests {
                         assert!(slots.windows(2).all(|w| w[0] < w[1]), "{d:?}");
                         for (c, &s) in aout.iter().enumerate() {
                             let mine: Vec<usize> = (0..count)
-                                .filter(|&i| role[i] != Direct::READ && usize::from(role[i]) == c)
+                                .filter(|&i| role[i] == DirectRole::Out(c as u8))
                                 .collect();
                             assert_eq!(mine.len(), 1, "{d:?}");
                             assert_eq!(slots[mine[0]], s, "{d:?}");
@@ -1583,16 +1588,16 @@ mod tests {
                         reads.sort_unstable();
                         reads.dedup();
                         let read_slots: Vec<AudioSlotId> = (0..count)
-                            .filter(|&i| role[i] == Direct::READ)
+                            .filter(|&i| role[i] == DirectRole::Read)
                             .map(|i| slots[i])
                             .collect();
                         assert_eq!(read_slots, reads, "no read is missing or extra: {d:?}");
                         for (c, &s) in ain.iter().enumerate() {
                             if in_place.get(c) {
-                                assert_eq!(d.input[c], Direct::IN_PLACE, "{d:?}");
+                                assert_eq!(d.input[c], None, "{d:?}");
                             } else {
-                                let r = usize::from(d.input[c]);
-                                assert_eq!((role[r], slots[r]), (Direct::READ, s), "{d:?}");
+                                let r = usize::from(d.input[c].expect("a read input"));
+                                assert_eq!((role[r], slots[r]), (DirectRole::Read, s), "{d:?}");
                             }
                         }
                     }

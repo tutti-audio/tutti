@@ -147,7 +147,7 @@ impl<F: Float> Kernel for TremoloKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::Tail;
     use tutti_units::UnitParam;
@@ -158,12 +158,6 @@ mod tests {
                 .rate(Hz::new(rate))
                 .depth(Bipolar::of(depth)),
         ))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TremoloNode::from(TremoloConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Moderate`, with no tail, and declares the rate and

@@ -51,7 +51,6 @@ use tutti_units::{Amplitude, Samples};
 
 use super::alive::Alive;
 use crate::compile::ids::AudioSlotId;
-use crate::exec::SILENT;
 use crate::exec::slots::{AudioSlots, SlotFlags};
 use tutti_buffers::Float;
 
@@ -174,7 +173,7 @@ pub(crate) fn meter_op<F: Float, A: AudioSlots<F> + ?Sized, Fl: SlotFlags + ?Siz
         return;
     };
     for (lane, &src) in meter.lanes.iter_mut().zip(srcs) {
-        let stats = if flags.get(src) & SILENT != 0 {
+        let stats = if flags.get(src).is_silent() {
             BlockStats::default()
         } else {
             block_stats(arena.slot(src, frames))

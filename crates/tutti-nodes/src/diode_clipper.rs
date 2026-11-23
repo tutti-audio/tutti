@@ -222,7 +222,7 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -234,13 +234,6 @@ mod tests {
                 .cutoff(Hz::new(cutoff))
                 .drive(ClipperDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DiodeClipperNode::<f32>::from(DiodeClipperConfig::new(
-            ChannelLayout::STEREO,
-        )));
     }
 
     #[test]

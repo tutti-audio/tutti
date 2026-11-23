@@ -80,7 +80,7 @@ impl<F: Float> Link<F> {
     /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
     pub(super) fn main_output_fade_ended(&self) -> u64 {
-        self.channels.main_output_fade_ended.get().0
+        self.channels.readings.main_output_fade_ended.get().0
     }
 
     /// The sequence number the next commit sends with.
@@ -174,6 +174,7 @@ impl<F: Float> Link<F> {
     /// Refusals since the last call that no loss names.
     pub(super) fn take_unreported(&mut self) -> u64 {
         self.channels
+            .readings
             .unreported
             .take_since(&mut self.unreported_seen)
     }
@@ -185,7 +186,7 @@ impl<F: Float> Link<F> {
 
     /// The executor's play clock, as it last published it.
     pub(super) fn play_reading(&self) -> crate::PlayReading {
-        self.channels.play.read()
+        self.channels.readings.play.get().0
     }
 
     /// Commits sent and not yet handed back.

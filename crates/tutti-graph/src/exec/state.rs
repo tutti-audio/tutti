@@ -6,7 +6,7 @@ use tutti_rt::CappedVec;
 use tutti_units::Tail;
 
 use super::commit::{Crossfade, NodeBox};
-use super::node_op::{CONSTANT, SILENT};
+use super::node_op::Flags;
 use crate::NodeKey;
 use crate::compile::ids::{Generation, PlanUnitId, Table};
 use crate::edges::event_tap::EventTapWriter;
@@ -214,11 +214,8 @@ impl Inject {
 /// whole, so the old one is freed on the control side.
 pub(super) struct State<F: Float = f32> {
     pub(super) arena: Arena<F>,
-    /// Per audio slot, what is known about its block: [`SILENT`] and
-    /// [`CONSTANT`] bits. One byte per slot, so a node's input masks are
-    /// built with a load and two shifts per channel. The parallel executor
-    /// runs on a shared atomic copy (`par.rs`).
-    pub(super) flags: Vec<u8>,
+    /// Per audio slot, what is known about its block: [`Flags`]. The parallel executor runs on a shared atomic copy (`par.rs`).
+    pub(super) flags: Vec<Flags>,
     pub(super) events: Vec<EventSlot>,
     pub(super) rings: Vec<Option<Ring<F>>>,
     pub(super) audio_fb: Vec<Option<AudioRing<F>>>,
@@ -248,7 +245,7 @@ impl<F: Float> State<F> {
     pub(super) fn empty(max_block: usize) -> Self {
         Self {
             arena: Arena::new(1, max_block),
-            flags: vec![SILENT | CONSTANT],
+            flags: vec![Flags::SILENCE],
             events: Vec::new(),
             rings: Vec::new(),
             audio_fb: Vec::new(),

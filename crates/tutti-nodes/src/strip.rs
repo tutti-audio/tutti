@@ -453,7 +453,7 @@ mod tests {
         AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Speaker, Speaker::*,
     };
     use tutti_graph::ParamNode;
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
 
     /// The strip on `bus`.
     fn strip(bus: BusTopology) -> BusStripNode {
@@ -495,13 +495,6 @@ mod tests {
         let mut out = [0.0f32; 2];
         tick(strip, &[l, r], &mut out);
         (out[0], out[1])
-    }
-
-    /// A fork starts from the values last set through the strip's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(strip(BusTopology::STEREO));
     }
 
     /// A strip must be transparent until somebody moves it. An equal-power

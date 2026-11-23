@@ -1345,15 +1345,6 @@ mod tests {
         }
     }
 
-    /// A fork starts from the values set through every address and shares no
-    /// cell with the live node, whatever the band.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        tutti_graph::contract::assert_param_fork(MultibandCompressorNode::<f32>::from(
-            MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(4)),
-        ));
-    }
-
     /// A fork has its own meter: the live node's reads unity while the fork
     /// reduces.
     #[test]

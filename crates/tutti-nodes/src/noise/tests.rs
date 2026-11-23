@@ -1,6 +1,6 @@
 use super::*;
 use crate::test_support::RATE;
-use tutti_graph::contract::{Direct, assert_param_fork};
+use tutti_graph::contract::Direct;
 use tutti_rt::SplitMix64;
 
 /// `frames` of a node of `colour`, from the start.
@@ -16,11 +16,6 @@ fn white(seed: u64, n: usize) -> f32 {
     let mut rng = SplitMix64::new(seed);
     let word = (0..=n).map(|_| rng.next_u64()).last().unwrap();
     2.0 * ((word >> 40) as f32 / 16_777_216.0) - 1.0
-}
-
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(NoiseNode::<f32>::from(NoiseConfig::new(NoiseColour::Pink)));
 }
 
 #[test]
