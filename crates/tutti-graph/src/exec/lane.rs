@@ -137,16 +137,16 @@ impl Declick {
     }
 
     /// A fade of `len` frames about to run its first frame.
-    pub(crate) const fn started(len: Samples) -> Self {
-        Self {
-            len,
-            at: Some(Samples::ZERO),
-        }
+    pub(crate) fn started(len: Samples) -> Self {
+        let mut d = Self::idle(len);
+        d.restart();
+        d
     }
 
-    /// Run again from the first frame.
+    /// Run again from the first frame. A fade of no frames has none to run,
+    /// and stays idle.
     pub(crate) fn restart(&mut self) {
-        self.at = Some(Samples::ZERO);
+        self.at = (self.len > Samples::ZERO).then_some(Samples::ZERO);
     }
 
     /// End the fade where it is: it no longer runs.
@@ -207,5 +207,34 @@ impl Declick {
     #[inline]
     pub(crate) fn between<F: Float>(self, start: F, goal: F, j: Samples) -> F {
         fade_in(Self::LAW, start, goal, j, self.len)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A declick of no frames never runs: starting or restarting it leaves it
+    /// idle, so no block reads a gain over a zero length.
+    #[test]
+    fn a_zero_length_declick_never_runs() {
+        assert!(!Declick::started(Samples::ZERO).running());
+        let mut d = Declick::idle(Samples::ZERO);
+        d.restart();
+        assert!(!d.running());
+        assert!(Declick::started(Samples::new(1)).running());
+    }
+
+    /// A fade carried to a shorter length keeps its progress and runs one
+    /// last block, then stops.
+    #[test]
+    fn a_relengthed_fade_past_its_length_runs_one_more_block() {
+        let mut d = Declick::started(Samples::new(240));
+        d.advance(Samples::new(200));
+        let mut d = d.relength(Samples::new(120));
+        assert_eq!((d.running(), d.done()), (true, Samples::new(200)));
+        d.advance(Samples::new(64));
+        assert!(!d.running());
+        assert_eq!(d.done(), Samples::new(120));
     }
 }
