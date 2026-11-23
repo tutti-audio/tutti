@@ -112,152 +112,160 @@ impl Report {
     }
 }
 
-/// The gates that read only files (and git), as a recipe names them.
+/// What a gate reads when it runs: the checkout's files and its root.
+pub(crate) struct Run<'a> {
+    tree: RealTree,
+    root: &'a Path,
+    /// The recipe's own arguments (`check-paths <crate> <module>...`).
+    args: &'a [String],
+}
+
+/// A gate that reads only files (and git), as a recipe names it.
+pub(crate) struct GateDef {
+    /// The recipe's name; the row's key.
+    pub(crate) recipe: &'static str,
+    /// The name `--dry-run` shows after `gate`.
+    shown: &'static str,
+    /// Whether the `gates` recipe runs it (`check-conformance` needs the spec
+    /// sources and is a step of `ci` alone).
+    pub(crate) local: bool,
+    run: fn(&Run) -> Report,
+}
+
+const fn gate(recipe: &'static str, local: bool, run: fn(&Run) -> Report) -> GateDef {
+    GateDef {
+        recipe,
+        shown: recipe,
+        local,
+        run,
+    }
+}
+
+/// Every gate, in the order the `gates` recipe runs them.
+pub(crate) const GATES: &[GateDef] = &[
+    GateDef {
+        shown: "check-canonical-paths",
+        ..gate("check-paths", true, |r| {
+            canonical_paths::check(&r.tree, r.args)
+        })
+    },
+    gate("check-session", true, |r| {
+        session::check(&r.tree, &RealCargo(r.root.to_path_buf()))
+    }),
+    gate("check-guards", true, |r| {
+        guards::check(&r.tree, guards::MIN_SEEN)
+    }),
+    gate("check-ffi", true, |r| ffi::check(&r.tree)),
+    gate("check-errors", true, |r| {
+        errors::check(&r.tree, errors::ALLOW)
+    }),
+    gate("check-layout", true, |r| layout::check(&r.tree)),
+    gate("check-range-types", true, |r| {
+        range_types::check(&r.tree, range_types::EXCEPTIONS)
+    }),
+    gate("check-hosting", true, |r| hosting::check(&r.tree)),
+    gate("check-lints", true, |r| {
+        lints::check(&r.tree, lints::UNLINTED)
+    }),
+    gate("check-value-traits", true, |r| {
+        value_traits::check(&r.tree, value_traits::ALLOW, value_traits::MIN_FILES)
+    }),
+    gate("check-submodule-pins", true, |r| {
+        submodule_pins::check(&RealGit(r.root.to_path_buf()), submodule_pins::PINS)
+    }),
+    gate("check-pointers", true, |r| pointers::check(&r.tree)),
+    gate("check-comments", true, |r| comments::check(&r.tree)),
+    gate("check-platform-seam", true, |r| {
+        platform_seam::check(&r.tree, platform_seam::ALLOW)
+    }),
+    gate("check-platform", true, |r| {
+        platform::check(&r.tree, platform::MIN_FILES)
+    }),
+    gate("check-prose-names", true, |r| prose_names::check(&r.tree)),
+    gate("check-passive-tests", true, |r| {
+        passive_tests::check(&r.tree)
+    }),
+    gate("check-alloc-binaries", true, |r| {
+        alloc_binaries::check(&r.tree, alloc_binaries::EXEMPT)
+    }),
+    gate("check-buffers", true, |r| {
+        let mut report = buffers::check(&r.tree, buffers::MIN_FILES);
+        let loops = buffers_loops::check(&r.tree, buffers_loops::MIN_FILES);
+        report.out.extend(loops.out);
+        report.findings.extend(loops.findings);
+        report
+    }),
+    gate("check-building", true, |r| {
+        building::check(&r.tree, building::ALLOW, building::MIN_SITES)
+    }),
+    gate("check-umbrella", true, |r| umbrella::check(&r.tree)),
+    gate("check-logging", true, |r| {
+        logging::check(&r.tree, logging::ALLOW)
+    }),
+    gate("check-test-time", true, |r| test_time::check(&r.tree)),
+    gate("check-session-api", true, |r| {
+        session_api::check(&r.tree, session_api::MIN_FILES)
+    }),
+    gate("check-values", true, |r| {
+        values::check(&r.tree, values::MIN_FILES, values::MIN_UNITS)
+    }),
+    gate("check-width", true, |r| {
+        width::check(&r.tree, width::EDGES, width::MIN_FILES)
+    }),
+    gate("check-conformance", false, |r| {
+        let sys = clap_sys_tree(&r.tree);
+        let require =
+            conformance::Require::parse(std::env::var("TUTTI_CONFORMANCE").ok().as_deref());
+        conformance::check(
+            &r.tree,
+            sys.as_ref().map(|t| t as &dyn Tree).map_err(Clone::clone),
+            &midi_spec_text,
+            &sf2_spec_text,
+            require,
+        )
+    }),
+];
+
+/// A gate a recipe plans: the row of [`GATES`] it names and its arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Gate {
-    /// `check-paths [<crate> <module>...]`.
-    CanonicalPaths(Vec<String>),
-    RangeTypes,
-    SubmodulePins,
-    /// The repo layout, the layering and the codec boundary.
-    Layout,
-    /// `unsafe` lives only in the crates that hold it.
-    Ffi,
-    /// Every error type derives `thiserror::Error`.
-    Errors,
-    /// Every host callback runs under the panic guard.
-    Guards,
-    /// Every hosting impl is listed in the plugin contract.
-    Hosting,
-    /// `tutti-session` reaches no Bevy crate and re-exports no crate whole.
-    Session,
-    /// The session's public API has no `run` or `*_blocking`, and the main-thread proof stays in its rows.
-    SessionApi,
-    /// Every workspace member takes the workspace lints, and `missing_debug_implementations` denies.
-    Lints,
-    /// A fieldless public `Eq` enum is `Hash`.
-    ValueTraits,
-    /// Prose outside `docs/` points at no `file.rs:N`; under `docs/` the line exists.
-    Pointers,
-    /// Prose names crate paths, design-doc sections and items that exist (the item names a per-file ratchet).
-    ProseNames,
-    /// A `#[test]` asserts something (a per-file ratchet).
-    PassiveTests,
-    /// No comment holds more citations of design docs, audits, pull requests,
-    /// commits, mutation runs or `CLAUDE.md` than its baseline.
-    Comments,
-    /// An allocation test is a module of its area binary, not a binary of its own.
-    AllocBinaries,
-    /// A platform cfg stands only on a `mod` declaration.
-    PlatformSeam,
-    /// `Instant` and `SystemTime::now` come from `tutti_platform`, never std.
-    Platform,
-    /// The spec inventories are well formed, tags name rows, CLAP matches `clap-sys`.
-    Conformance,
-    /// A public item names audio with a fixed sample format only as a row of the list.
-    Buffers,
-    /// A configured thing is built one way, bar the rows of the baseline.
-    Building,
-    /// A value is written with `set` on a target, bar the rows of the baseline.
-    Values,
-    /// The `tutti` umbrella re-exports no crate whole and offers each item at one path.
-    Umbrella,
-    /// Logging is `tracing`: no `log` dependency, and nothing prints outside a `main`.
-    Logging,
-    /// A test asserts no wall-clock time and sleeps for no event (a per-file ratchet).
-    TestTime,
-    /// A quantity has one width and data is generic over `F`, bar the rows of the baseline.
-    Width,
+pub(crate) struct Gate {
+    recipe: &'static str,
+    args: Vec<String>,
 }
 
 impl Gate {
+    /// The gate the recipe `name` is, or `None` when it is not a gate.
+    pub(crate) fn of(name: &str, args: &[String]) -> Option<Gate> {
+        GATES.iter().find(|g| g.recipe == name).map(|g| Gate {
+            recipe: g.recipe,
+            args: args.to_vec(),
+        })
+    }
+
+    fn def(&self) -> &'static GateDef {
+        GATES
+            .iter()
+            .find(|g| g.recipe == self.recipe)
+            .expect("a Gate is made from a row of GATES")
+    }
+
     pub(crate) fn display(&self) -> String {
-        match self {
-            Gate::CanonicalPaths(a) if a.is_empty() => "gate check-canonical-paths".to_owned(),
-            Gate::CanonicalPaths(a) => format!("gate check-canonical-paths {}", a.join(" ")),
-            Gate::RangeTypes => "gate check-range-types".to_owned(),
-            Gate::SubmodulePins => "gate check-submodule-pins".to_owned(),
-            Gate::Layout => "gate check-layout".to_owned(),
-            Gate::Ffi => "gate check-ffi".to_owned(),
-            Gate::Errors => "gate check-errors".to_owned(),
-            Gate::Guards => "gate check-guards".to_owned(),
-            Gate::Hosting => "gate check-hosting".to_owned(),
-            Gate::Session => "gate check-session".to_owned(),
-            Gate::SessionApi => "gate check-session-api".to_owned(),
-            Gate::Lints => "gate check-lints".to_owned(),
-            Gate::ValueTraits => "gate check-value-traits".to_owned(),
-            Gate::Pointers => "gate check-pointers".to_owned(),
-            Gate::ProseNames => "gate check-prose-names".to_owned(),
-            Gate::PassiveTests => "gate check-passive-tests".to_owned(),
-            Gate::Comments => "gate check-comments".to_owned(),
-            Gate::AllocBinaries => "gate check-alloc-binaries".to_owned(),
-            Gate::PlatformSeam => "gate check-platform-seam".to_owned(),
-            Gate::Platform => "gate check-platform".to_owned(),
-            Gate::Conformance => "gate check-conformance".to_owned(),
-            Gate::Buffers => "gate check-buffers".to_owned(),
-            Gate::Building => "gate check-building".to_owned(),
-            Gate::Values => "gate check-values".to_owned(),
-            Gate::Umbrella => "gate check-umbrella".to_owned(),
-            Gate::Logging => "gate check-logging".to_owned(),
-            Gate::TestTime => "gate check-test-time".to_owned(),
-            Gate::Width => "gate check-width".to_owned(),
+        let shown = self.def().shown;
+        if self.args.is_empty() {
+            format!("gate {shown}")
+        } else {
+            format!("gate {shown} {}", self.args.join(" "))
         }
     }
 
     pub(crate) fn run(&self, root: &Path) -> Report {
-        let tree = RealTree {
-            root: root.to_path_buf(),
-        };
-        match self {
-            Gate::CanonicalPaths(args) => canonical_paths::check(&tree, args),
-            Gate::RangeTypes => range_types::check(&tree, range_types::EXCEPTIONS),
-            Gate::SubmodulePins => {
-                submodule_pins::check(&RealGit(root.to_path_buf()), submodule_pins::PINS)
-            }
-            Gate::Layout => layout::check(&tree),
-            Gate::Ffi => ffi::check(&tree),
-            Gate::Errors => errors::check(&tree, errors::ALLOW),
-            Gate::Guards => guards::check(&tree, guards::MIN_SEEN),
-            Gate::Hosting => hosting::check(&tree),
-            Gate::Session => session::check(&tree, &RealCargo(root.to_path_buf())),
-            Gate::SessionApi => session_api::check(&tree, session_api::MIN_FILES),
-            Gate::Lints => lints::check(&tree, lints::UNLINTED),
-            Gate::ValueTraits => {
-                value_traits::check(&tree, value_traits::ALLOW, value_traits::MIN_FILES)
-            }
-            Gate::Pointers => pointers::check(&tree),
-            Gate::ProseNames => prose_names::check(&tree),
-            Gate::PassiveTests => passive_tests::check(&tree),
-            Gate::Comments => comments::check(&tree),
-            Gate::Umbrella => umbrella::check(&tree),
-            Gate::Buffers => {
-                let mut r = buffers::check(&tree, buffers::MIN_FILES);
-                let loops = buffers_loops::check(&tree, buffers_loops::MIN_FILES);
-                r.out.extend(loops.out);
-                r.findings.extend(loops.findings);
-                r
-            }
-            Gate::Building => building::check(&tree, building::ALLOW, building::MIN_SITES),
-            Gate::Values => values::check(&tree, values::MIN_FILES, values::MIN_UNITS),
-            Gate::Logging => logging::check(&tree, logging::ALLOW),
-            Gate::TestTime => test_time::check(&tree),
-            Gate::Width => width::check(&tree, width::EDGES, width::MIN_FILES),
-            Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::EXEMPT),
-            Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
-            Gate::Platform => platform::check(&tree, platform::MIN_FILES),
-            Gate::Conformance => {
-                let sys = clap_sys_tree(&tree);
-                let require =
-                    conformance::Require::parse(std::env::var("TUTTI_CONFORMANCE").ok().as_deref());
-                conformance::check(
-                    &tree,
-                    sys.as_ref().map(|t| t as &dyn Tree).map_err(Clone::clone),
-                    &midi_spec_text,
-                    &sf2_spec_text,
-                    require,
-                )
-            }
-        }
+        (self.def().run)(&Run {
+            tree: RealTree {
+                root: root.to_path_buf(),
+            },
+            root,
+            args: &self.args,
+        })
     }
 }
 
