@@ -2,8 +2,9 @@
 //! stepped under `assert_no_alloc` with its controls moved before each block.
 
 use std::cell::Cell;
-use tutti_graph::IntoNode;
-use tutti_graph::contract::BlockRig;
+use tutti_buffers::{BusTopology, ChannelLayout, Planes, PlanesMut};
+use tutti_graph::contract::{BlockRig, Direct};
+use tutti_graph::{IntoNode, Node};
 use tutti_units::SampleRate;
 
 thread_local! {
@@ -85,13 +86,15 @@ pub mod feeds {
         }
     }
 
-    /// A square of half-period 16 frames and amplitude `0.5`: slow enough that a low-pass
-    /// passes some of it.
-    pub fn slow_square(_: usize, frame: usize) -> f32 {
-        if (frame / 16).is_multiple_of(2) {
-            0.5
-        } else {
-            -0.5
+    /// A square of half-period 16 frames and `amplitude`: slow enough that a low-pass passes
+    /// some of it, and broadband enough to drive every band of a splitter.
+    pub fn slow_square(amplitude: f32) -> impl Fn(usize, usize) -> f32 {
+        move |_, frame| {
+            if (frame / 16).is_multiple_of(2) {
+                amplitude
+            } else {
+                -amplitude
+            }
         }
     }
 
@@ -171,33 +174,64 @@ impl Gate {
         mut moves: impl FnMut(&N::Controls, usize),
     ) {
         let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, self.frames);
-        for (c, ch) in rig.inputs_mut().iter_mut().enumerate() {
-            for (i, x) in ch.into_samples_mut().iter_mut().enumerate() {
-                *x = (self.feed)(c, i);
-            }
-        }
+        self.fill(rig.inputs_mut());
         for i in 0..self.warm {
             moves(&controls, i);
             rig.block();
         }
-        let checked = if self.every_channel { usize::MAX } else { 1 };
-        for (c, plane) in rig.output().iter().enumerate().take(checked) {
-            assert!(
-                plane.samples().iter().any(|s| s.abs() > self.floor),
-                "{label}: channel {c} rendered silence; the gate would walk no DSP"
-            );
-        }
+        self.sounds(label, rig.output());
         let mut peak = 0.0f32;
         assert_no_alloc::assert_no_alloc(|| {
             for i in 0..self.blocks {
                 moves(&controls, i);
                 rig.block();
-                for plane in rig.output().iter() {
-                    peak = plane.samples().iter().fold(peak, |m, s| m.max(s.abs()));
-                }
+                peak = peak_of(rig.output(), peak);
             }
         });
-        PEAK.with(|p| p.set(p.get().max(peak)));
+        record(peak);
+    }
+
+    /// `node` through `Direct`, which feeds its param ports: port `k` plays `signals[k]` (one
+    /// value per frame, copied at the feed, so the same frames play each block). Warmed up and
+    /// stepped as [`run`](Self::run) does, with no control moved.
+    pub fn fed<N: Node>(&self, label: &str, node: N, signals: &[Vec<f32>]) {
+        let mut rig = Direct::new(node, SampleRate::SR_48K, self.frames);
+        self.fill(rig.inputs_mut());
+        for (k, signal) in signals.iter().enumerate() {
+            rig.feed(k, Some(signal));
+        }
+        for _ in 0..self.warm {
+            rig.block();
+        }
+        self.sounds(label, rig.output());
+        let mut peak = 0.0f32;
+        assert_no_alloc::assert_no_alloc(|| {
+            for _ in 0..self.blocks {
+                rig.block();
+                peak = peak_of(rig.output(), peak);
+            }
+        });
+        record(peak);
+    }
+
+    /// Writes the feed into every input channel.
+    fn fill(&self, mut inputs: PlanesMut<'_, '_, f32>) {
+        for (c, ch) in inputs.iter_mut().enumerate() {
+            for (i, x) in ch.into_samples_mut().iter_mut().enumerate() {
+                *x = (self.feed)(c, i);
+            }
+        }
+    }
+
+    /// The checked output channels must pass the floor.
+    fn sounds(&self, label: &str, output: Planes<'_, f32>) {
+        let checked = if self.every_channel { usize::MAX } else { 1 };
+        for (c, plane) in output.iter().enumerate().take(checked) {
+            assert!(
+                plane.samples().iter().any(|s| s.abs() > self.floor),
+                "{label}: channel {c} rendered silence; the gate would walk no DSP"
+            );
+        }
     }
 }
 
@@ -209,4 +243,21 @@ pub fn alternate(i: usize, a: f64, b: f64) -> f64 {
 /// `a` on every third `i`, `b` otherwise.
 pub fn every_third(i: usize, a: f64, b: f64) -> f64 {
     if i.is_multiple_of(3) { a } else { b }
+}
+
+/// The largest of `peak` and the output's magnitudes.
+fn peak_of(output: Planes<'_, f32>, peak: f32) -> f32 {
+    output.iter().fold(peak, |m, plane| {
+        plane.samples().iter().fold(m, |m, s| m.max(s.abs()))
+    })
+}
+
+/// Adds a run's `peak` to the thread's [`take_peak`].
+fn record(peak: f32) {
+    PEAK.with(|p| p.set(p.get().max(peak)));
+}
+
+/// A bus of `width` channels on the engine's order.
+pub fn bus(width: u16) -> BusTopology {
+    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
 }
