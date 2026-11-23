@@ -5,7 +5,7 @@
 //! implemented for the session.
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Cx, Fade, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
@@ -62,7 +62,7 @@ fn a_write_reaches_the_cell_the_key_names() {
     // A `Seconds` param is an `f64` cell: the write is exact for a value an
     // `f32` holds.
     let comp = s.graph().add(CompressorNode::<f32>::from(
-        CompressorConfig::new(BusTopology::MONO)
+        CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
                 threshold: Db::new(-20.0),

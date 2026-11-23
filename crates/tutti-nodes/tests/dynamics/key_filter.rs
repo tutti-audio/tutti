@@ -9,8 +9,10 @@
 
 use core::f64::consts::PI;
 use tutti_buffers::Planes;
+use tutti_fixtures::signal::sine;
+use tutti_units::{Amplitude, Samples};
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
@@ -61,13 +63,6 @@ fn amplitude_db(a: f64) -> f64 {
     20.0 * a.log10()
 }
 
-/// `frames` of an amplitude-`a` sine at `f`, from phase 0.
-fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|i| (a * (2.0 * PI * f * i as f64 / FS).sin()) as f32)
-        .collect()
-}
-
 /// `node` over `key` in blocks, its audio the constant [`AUDIO`]; the output.
 fn run<N: Node>(node: &mut N, key: &[f32]) -> Vec<f32> {
     let mut out = Vec::new();
@@ -109,10 +104,20 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
 
 fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
     CompressorNode::<f32>::from(
-        CompressorConfig::new(BusTopology::MONO)
+        CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .key_filter(filter)
             .controls(compressor_controls(cutoff, q)),
+    )
+}
+
+/// `frames` samples of an amplitude-`a` sine at `f` hertz, from phase 0.
+fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
+    sine(
+        Hz::new(f),
+        Amplitude::new(a),
+        SampleRate::of(FS),
+        Samples::new(frames),
     )
 }
 
@@ -269,7 +274,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
     };
     let mut node = prepared(
         CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::MONO)
+            CompressorConfig::new(ChannelTopology::MONO)
                 .key(KeySource::Sidechain)
                 .key_filter(KeyFilter::HighPass)
                 .controls(controls),
@@ -306,7 +311,7 @@ fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
 
 fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32> {
     GateNode::<f32>::from(
-        GateConfig::new(BusTopology::MONO)
+        GateConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .key_filter(filter)
             .controls(gate_controls(threshold, cutoff, q)),
@@ -326,7 +331,7 @@ fn a_high_passed_gate_decides_on_the_filtered_key() {
         let gain = highest_gain(&run(&mut filtered, &key));
         let mut plain = prepared(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(gate_controls(threshold, fc, q)),
             ),
@@ -410,7 +415,7 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
         makeup: Db::new(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
-    let config = CompressorConfig::new(BusTopology::MONO)
+    let config = CompressorConfig::new(ChannelTopology::MONO)
         .key(KeySource::Sidechain)
         .controls(controls);
     let off = CompressorNode::<f32>::from(config);

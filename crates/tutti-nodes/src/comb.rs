@@ -172,7 +172,6 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::Seconds;
 

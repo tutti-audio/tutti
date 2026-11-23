@@ -9,7 +9,7 @@
 //! [`GraphSpec::lowered`](crate::GraphSpec::lowered), which turns a bus edge
 //! into per-port edges; the executor never reads them.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 
 /// Most buses declared per side of one node: a main, a sidechain and two aux.
 ///
@@ -126,7 +126,7 @@ impl OutBus {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Bus {
     /// The speaker each channel of one band feeds, in channel order.
-    pub topology: BusTopology,
+    pub topology: ChannelTopology,
     /// What the bus is for.
     pub role: BusRole,
     /// How many copies of `topology`, at least 1.
@@ -134,11 +134,11 @@ pub struct Bus {
 }
 
 impl Bus {
-    const NONE: Self = Self::new(BusTopology::EMPTY, BusRole::Aux);
+    const NONE: Self = Self::new(ChannelTopology::EMPTY, BusRole::Aux);
 
     /// One copy of `topology`, for `role`.
     #[must_use]
-    pub const fn new(topology: BusTopology, role: BusRole) -> Self {
+    pub const fn new(topology: ChannelTopology, role: BusRole) -> Self {
         Self {
             topology,
             role,
@@ -148,14 +148,14 @@ impl Bus {
 
     /// A [`Main`](BusRole::Main) bus of `topology`.
     #[must_use]
-    pub const fn main(topology: BusTopology) -> Self {
+    pub const fn main(topology: ChannelTopology) -> Self {
         Self::new(topology, BusRole::Main)
     }
 
     /// `bands` copies of `topology`, band-major (a crossover's outputs), or
     /// `None` for no band.
     #[must_use]
-    pub const fn banded(topology: BusTopology, role: BusRole, bands: u8) -> Option<Self> {
+    pub const fn banded(topology: ChannelTopology, role: BusRole, bands: u8) -> Option<Self> {
         if bands == 0 {
             return None;
         }
@@ -198,10 +198,10 @@ impl Bus {
 ///
 /// ```
 /// use tutti_graph::{Bus, BusRole, Buses};
-/// use tutti_buffers::{BusTopology, ChannelLayout, Speaker};
+/// use tutti_buffers::{ChannelTopology, ChannelLayout, Speaker};
 ///
-/// let stereo = BusTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
-/// let key = BusTopology::unassigned(ChannelLayout::MONO).unwrap();
+/// let stereo = ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
+/// let key = ChannelTopology::unassigned(ChannelLayout::MONO).unwrap();
 /// let buses = Buses::NONE
 ///     .with(Bus::main(stereo)).unwrap()
 ///     .with(Bus::new(key, BusRole::Sidechain)).unwrap();
@@ -224,7 +224,7 @@ impl Buses {
 
     /// One [`Main`](BusRole::Main) bus of `topology`.
     #[must_use]
-    pub const fn main(topology: BusTopology) -> Self {
+    pub const fn main(topology: ChannelTopology) -> Self {
         let mut buses = Self::NONE;
         buses.buses[0] = Bus::main(topology);
         buses.len = 1;
@@ -253,7 +253,7 @@ impl Buses {
     /// [`unassigned`](Self::unassigned), or [`NONE`](Self::NONE) past a bus's
     /// width, whose channels are then ports with no bus.
     pub(crate) const fn unplaced(width: ChannelLayout) -> Self {
-        match BusTopology::unassigned(width) {
+        match ChannelTopology::unassigned(width) {
             Some(topology) if width.count() > 0 => Self::main(topology),
             _ => Self::NONE,
         }

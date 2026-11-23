@@ -20,8 +20,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, ChannelLayout, ChannelTopology, InputOutput,
-    MaxBlock, Mono, Planes, PlanesMut,
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, InputOutput, MaxBlock,
+    Mono, Planes, PlanesMut,
 };
 
 use tutti_dsp::MatrixConvolver;
@@ -221,7 +221,7 @@ fn a_linear_phase_node_parks_after_its_response() {
         .unwrap();
     let delay = fir.delay().get();
     let node = ConvolverNode::<f32>::try_from(
-        FirConvolverConfig::new(BusTopology::MONO, &fir).block_size(Samples::new(64)),
+        FirConvolverConfig::new(ChannelTopology::MONO, &fir).block_size(Samples::new(64)),
     )
     .unwrap();
     assert_parks_at_the_tail(node, 64 + delay, delay);
@@ -754,8 +754,10 @@ fn a_gap_inside_one_call_renders_as_blocks_of_64_do() {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// One response per channel, at as many unassigned channels as responses.
@@ -776,7 +778,7 @@ fn folded_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sampl
     block_size: tutti_units::Samples,
 ) -> Result<tutti_nodes::ConvolverNode<F>, tutti_nodes::ConvolverError> {
     let width = tutti_buffers::ChannelLayout::try_from(irs.len()).expect("a test width fits");
-    let bus = tutti_buffers::BusTopology::default_for(width).expect("a test width fits a bus");
+    let bus = tutti_buffers::ChannelTopology::default_for(width).expect("a test width fits a bus");
     tutti_nodes::ConvolverNode::try_from(
         tutti_nodes::ConvolverConfig::new(bus, irs)
             .folded()
@@ -793,9 +795,12 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
-            .true_stereo()
-            .block_size(block_size),
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            &[ll, lr, rl, rr],
+        )
+        .true_stereo()
+        .block_size(block_size),
     )
     .expect("four responses on a stereo pair")
 }

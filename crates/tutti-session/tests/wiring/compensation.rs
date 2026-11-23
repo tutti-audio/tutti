@@ -10,7 +10,7 @@
 //! `a_rerate_keeps_the_published_compensation_in_step_with_the_plan`.
 
 use tutti_buffers::InterleavedMut;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ForkByClone;
 use tutti_nodes::testing::Const;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
@@ -29,7 +29,7 @@ fn detached() -> DetachedSession {
 /// A limiter's lookahead is the latency; the one the engine ships.
 fn limiter() -> LimiterNode<f32> {
     LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::MONO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::MONO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(-0.3),
             ..LimiterControls::DEFAULT

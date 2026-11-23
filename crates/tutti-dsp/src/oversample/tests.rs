@@ -1,11 +1,12 @@
 use core::f64::consts::TAU;
+use tutti_fixtures::signal::amplitude_at;
+use tutti_units::Hz;
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut};
 use tutti_units::{Db, SampleRate, Samples};
 
 use super::*;
-use crate::testing::amplitude_at;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const BASE: f64 = 48_000.0;
@@ -148,7 +149,11 @@ fn a_passband_sine_round_trips_delayed_within_the_ripple() {
                 .map(|n| (f64::from(y[n]) - f64::from(x[n - latency])).abs())
                 .fold(0.0, f64::max);
             assert!(worst < bound, "{factor:?} bin {bin}: {worst} vs {bound}");
-            let gain = amplitude_at(&y[SETTLE..], bin as f64 / WINDOW as f64 * BASE, BASE);
+            let gain = amplitude_at(
+                &y[SETTLE..],
+                Hz::new(bin as f64 / WINDOW as f64 * BASE),
+                SampleRate::of(BASE),
+            );
             assert!(
                 (gain - 1.0).abs() < bound,
                 "{factor:?} bin {bin}: gain {gain}"
@@ -173,7 +178,7 @@ fn the_up_sampler_rejects_its_images() {
         });
         let window = &high[SETTLE * factor.get()..];
         assert!(
-            (amplitude_at(window, f, f_hi) - 1.0).abs() < 1e-4,
+            (amplitude_at(window, Hz::new(f), SampleRate::of(f_hi)) - 1.0).abs() < 1e-4,
             "{factor:?}"
         );
         let mut checked = 0;
@@ -183,7 +188,7 @@ fn the_up_sampler_rejects_its_images() {
                     continue;
                 }
                 checked += 1;
-                let level = db(amplitude_at(window, image, f_hi));
+                let level = db(amplitude_at(window, Hz::new(image), SampleRate::of(f_hi)));
                 assert!(
                     level <= -100.0 + MARGIN_DB,
                     "{factor:?}: image at {image} Hz is {level} dB"
@@ -212,7 +217,7 @@ fn the_down_sampler_rejects_what_would_alias() {
                     n_hi += 1;
                 }
             });
-            let level = db(amplitude_at(&y[SETTLE..], f, BASE));
+            let level = db(amplitude_at(&y[SETTLE..], Hz::new(f), SampleRate::of(BASE)));
             assert!(
                 level <= -100.0 + MARGIN_DB,
                 "{factor:?}: the tone at {g} Hz leaves {level} dB at {f} Hz"

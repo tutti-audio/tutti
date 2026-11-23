@@ -21,7 +21,7 @@ use crate::{ChannelFeed, LatencyGraph, PortFeed};
 use crate::{Edge, EdgeId, InputPort, PortSink, PortSource};
 use crate::{Invalid, Valid};
 use crate::{NodeKey, Topology};
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_units::Samples;
 
 use crate::node::Resolution;
@@ -204,7 +204,7 @@ pub struct GraphSpec {
     /// engine renders is at most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)
     /// wide, which is a bus's width. The session keeps it in step with its main output
     /// declaration.
-    pub main_output: Option<BusTopology>,
+    pub main_output: Option<ChannelTopology>,
     /// The main output's generation: a commit that changes the main output's declaration
     /// carries the next one ([`MainOutputId`](crate::MainOutputId)), and the plan it compiles to reports
     /// it ([`Plan::main_output_id`](crate::Plan::main_output_id)).

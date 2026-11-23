@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Cx, Fade, FadeLaw, Io, Node, ParamNode, ParamSet, Params, Prepare, Shape, Status, Unforkable,
 };
@@ -36,7 +36,7 @@ fn filter(s: &mut DetachedSession, cutoff: f64) -> tutti_session::Key<SvfFilterN
 
 fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>> {
     s.graph().add(CompressorNode::from(
-        CompressorConfig::new(BusTopology::MONO)
+        CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .controls(CompressorControls::DEFAULT),
     ))
@@ -45,7 +45,7 @@ fn compressor(s: &mut DetachedSession) -> tutti_session::Key<CompressorNode<f32>
 /// A node whose `Seconds` params are `f64` cells.
 fn multiband(s: &mut DetachedSession) -> tutti_session::Key<MultibandCompressorNode<f32>> {
     s.graph().add(MultibandCompressorNode::from(
-        MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(2)),
+        MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(2)),
     ))
 }
 

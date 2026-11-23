@@ -5,7 +5,7 @@
 //! The rate is a power of two and the times are whole frames over it, so a
 //! delay in frames is exact in `f64`.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::{impulse, sine};
 use tutti_graph::contract::{drive, prepared};
@@ -64,7 +64,7 @@ fn render(node: DelayNode<f32>, inputs: &[Vec<f32>]) -> Vec<Vec<f32>> {
 fn an_impulse_echoes_at_the_delay_scaled_by_the_feedback_each_period() {
     let (d, g) = (16usize, 0.5f64);
     let node = DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX)).controls(controls(
+        DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX)).controls(controls(
             frames(d as f64),
             g,
             0.0,
@@ -103,7 +103,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
         (InterpolationMode::CubicHermite, w * w * w / 8.0),
     ] {
         let node = DelayNode::<f32>::from(
-            DelayConfig::new(DelayLayout::new(BusTopology::MONO, MAX).interpolation(mode))
+            DelayConfig::new(DelayLayout::new(ChannelTopology::MONO, MAX).interpolation(mode))
                 .controls(controls(frames(delay), 0.0, 0.0)),
         );
         let out = render(node, std::slice::from_ref(&x));
@@ -129,7 +129,7 @@ fn a_fractional_delay_is_a_sine_delayed_by_that_time_within_the_interpolators_er
 #[test]
 fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
     let (n, d, amount) = (6usize, 8usize, 0.5f64);
-    let bus = BusTopology::default_for(6u16.into()).expect("six channels are one bus");
+    let bus = ChannelTopology::default_for(6u16.into()).expect("six channels are one bus");
     // Channel c is fed by channel c - 1.
     let layout = DelayLayout::builder(bus, MAX)
         .routing(FeedbackRouting::ring(bus))
@@ -167,7 +167,7 @@ fn a_ring_routed_echo_steps_to_the_next_channel_scaled_by_the_cross_feedback() {
 fn the_stereo_cross_feedback_ping_pongs_the_echo() {
     let (d, amount) = (8usize, 0.5f64);
     let node = DelayNode::<f32>::from(
-        DelayConfig::new(DelayLayout::new(BusTopology::STEREO, MAX)).controls(controls(
+        DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX)).controls(controls(
             frames(8.0),
             0.0,
             amount,

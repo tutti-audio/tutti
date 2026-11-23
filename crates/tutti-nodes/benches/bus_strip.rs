@@ -21,7 +21,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use tutti_buffers::{BusTopology, ChannelLayout, Float};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Cx, Io, Node, ParamNode, Prepare, Shape, Status};
 use tutti_nodes::{BusStripConfig, BusStripNode};
@@ -93,7 +93,7 @@ fn strip(c: &mut Criterion) {
 
         let mut d = Direct::new(
             BusStripNode::from(BusStripConfig::new(
-                BusTopology::default_for(ChannelLayout::from(width))
+                ChannelTopology::default_for(ChannelLayout::from(width))
                     .expect("a bench width fits a bus"),
             )),
             SR,

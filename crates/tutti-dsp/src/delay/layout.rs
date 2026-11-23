@@ -11,7 +11,7 @@
 //! [`FeedbackRouting::swap`] (a ping-pong) and any other width by [`FeedbackRouting::none`], until
 //! [`DelayLayoutBuilder::routing`] says otherwise.
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_units::{Feedback, Seconds};
 
 use super::max_delay::MaxDelay;
@@ -85,7 +85,7 @@ pub enum DelayTiming {
 /// [`FeedbackRouting`], the others', timed by its [`DelayTiming`].
 #[derive(Clone, Copy, Debug)]
 pub struct DelayLayout {
-    input: BusTopology,
+    input: ChannelTopology,
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: FeedbackRouting,
@@ -97,8 +97,8 @@ impl DelayLayout {
     /// [`InterpolationMode`], its channels linked in seconds and routed by the default for
     /// its width.
     #[must_use]
-    pub fn new(input: BusTopology, max_delay: MaxDelay) -> Self {
-        let routing = if input == BusTopology::STEREO {
+    pub fn new(input: ChannelTopology, max_delay: MaxDelay) -> Self {
+        let routing = if input == ChannelTopology::STEREO {
             FeedbackRouting::swap()
         } else {
             FeedbackRouting::none(input)
@@ -122,7 +122,7 @@ impl DelayLayout {
     /// A [`DelayLayoutBuilder`] for the same delay, to give it a routing, channel times of
     /// its own or times in notes.
     #[must_use]
-    pub const fn builder(input: BusTopology, max_delay: MaxDelay) -> DelayLayoutBuilder {
+    pub const fn builder(input: ChannelTopology, max_delay: MaxDelay) -> DelayLayoutBuilder {
         DelayLayoutBuilder {
             input,
             max_delay,
@@ -134,7 +134,7 @@ impl DelayLayout {
 
     /// The bus the delay is on.
     #[must_use]
-    pub const fn input(&self) -> BusTopology {
+    pub const fn input(&self) -> ChannelTopology {
         self.input
     }
 
@@ -174,7 +174,7 @@ impl DelayLayout {
 /// options cannot see.
 #[derive(Clone, Copy, Debug)]
 pub struct DelayLayoutBuilder {
-    input: BusTopology,
+    input: ChannelTopology,
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: Option<FeedbackRouting>,

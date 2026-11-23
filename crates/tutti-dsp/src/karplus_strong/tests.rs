@@ -1,8 +1,10 @@
 use super::*;
 use crate::Complex64;
-use crate::testing::lock_in;
 use core::f64::consts::TAU;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
+use tutti_fixtures::signal::lock_in;
+use tutti_units::Hz;
+use tutti_units::SampleRate;
 
 const LN_1000: f64 = 3.0 * core::f64::consts::LN_10;
 
@@ -167,7 +169,7 @@ fn check_fall(t60: f64) {
         let window: Vec<f64> = (0..48 * 16)
             .map(|i| h[from + i] * (0.5 - 0.5 * (TAU * i as f64 / (48.0 * 16.0)).cos()))
             .collect();
-        let (re, im) = lock_in(&window, f0, rate);
+        let (re, im) = lock_in(&window, Hz::new(f0), SampleRate::of(rate));
         re.hypot(im)
     };
     let measured = amp(48 * 3) / amp(48 * 2);

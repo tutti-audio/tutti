@@ -31,9 +31,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use tutti_units::Samples;
 
-use crate::compile::ids::{Id, OpId, Table, TableSlice, TaskId};
+use crate::compile::ids::{Id, OpId, PlanUnitId, Table, TableSlice, TaskId};
+use crate::compile::lower::Lowered;
 use crate::compile::plan::{Csr, Span};
+use crate::node::Prepare;
 use crate::node::cost::{GRAIN, TASK_DISPATCH, Work};
+use crate::node::shape::Shape;
 
 /// The task tables.
 pub(super) struct Tasks {
@@ -41,6 +44,27 @@ pub(super) struct Tasks {
     pub(super) task_ops: Vec<OpId>,
     pub(super) succ: Csr,
     pub(super) activation: Table<TaskId, u32>,
+}
+
+/// Prices every lowered op and groups the op DAG into tasks.
+///
+/// Takes the [`Lowered`] ops, the emitted predecessors, the op successors of
+/// the colouring, the units' shapes and the `Prepare` the plan is for;
+/// returns the [`Tasks`]. Every op is in exactly one task and every op
+/// dependency is a task dependency.
+pub(super) fn price_and_group(
+    lowered: &Lowered,
+    preds: &TableSlice<OpId, BTreeSet<OpId>>,
+    succ: &TableSlice<OpId, Vec<OpId>>,
+    shapes: &TableSlice<PlanUnitId, Shape>,
+    prepare: &Prepare,
+) -> Tasks {
+    let work: Table<OpId, Work> = lowered
+        .ops
+        .iter()
+        .map(|op| crate::node::cost::op_work(op, shapes, &lowered.sum_lanes))
+        .collect();
+    coarsen(preds, succ, &work, prepare.max_block().samples())
 }
 
 /// The ops of each group, in ascending op order, and each op's group.

@@ -19,7 +19,7 @@
 //! //! ```
 
 use std::hint::black_box;
-use tutti_buffers::{BusTopology, ChannelLayout, Float, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, MaxBlock};
 use tutti_dsp::LadderSaturation;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -246,7 +246,7 @@ fn brickwall(c: &mut Criterion) {
         "2",
         || {
             BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-                BusTopology::STEREO,
+                ChannelTopology::STEREO,
                 Db::new(-3.0),
             ))
         },
@@ -258,7 +258,7 @@ fn brickwall(c: &mut Criterion) {
         "6",
         || {
             BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-                BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+                ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
                 Db::new(-3.0),
             ))
         },
@@ -270,7 +270,7 @@ fn brickwall(c: &mut Criterion) {
         "6_fed",
         || {
             BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-                BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+                ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
                 Db::new(-3.0),
             ))
         },
@@ -295,7 +295,7 @@ fn delay(c: &mut Criterion) {
         || {
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     MaxDelay::of(Seconds::new(1.0)),
                 ))
                 .controls(delay_at_quarter()),
@@ -310,7 +310,7 @@ fn delay(c: &mut Criterion) {
         || {
             DelayNode::<f32>::from(
                 DelayConfig::new(DelayLayout::new(
-                    BusTopology::default_for(ChannelLayout::from(6u16))
+                    ChannelTopology::default_for(ChannelLayout::from(6u16))
                         .expect("at most one bus wide"),
                     MaxDelay::of(Seconds::new(1.0)),
                 ))
@@ -324,10 +324,11 @@ fn delay(c: &mut Criterion) {
         "delay",
         "2_cross",
         || {
-            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
-                .times(ChannelTimes::try_from(&[Seconds::new(0.3)][..]).expect("a time"))
-                .build()
-                .unwrap();
+            let layout =
+                DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
+                    .times(ChannelTimes::try_from(&[Seconds::new(0.3)][..]).expect("a time"))
+                    .build()
+                    .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
                 cross_feedback: Feedback::new(0.3),
                 ..delay_at_quarter()
@@ -344,7 +345,7 @@ fn limiter(c: &mut Criterion) {
         "2",
         || {
             LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls::DEFAULT),
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls::DEFAULT),
             )
         },
         None,
@@ -356,7 +357,7 @@ fn limiter(c: &mut Criterion) {
         || {
             LimiterNode::<f32>::from(
                 LimiterConfig::new(
-                    BusTopology::default_for(ChannelLayout::from(6u16))
+                    ChannelTopology::default_for(ChannelLayout::from(6u16))
                         .expect("at most one bus wide"),
                 )
                 .controls(LimiterControls::DEFAULT),
@@ -371,7 +372,7 @@ fn limiter(c: &mut Criterion) {
         "limiter",
         "2_quiet",
         || {
-            LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+            LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
                 LimiterControls {
                     threshold: Db::new(6.0),
                     ceiling: Db::new(6.0),
@@ -387,7 +388,7 @@ fn limiter(c: &mut Criterion) {
         "2_fed",
         || {
             LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls::DEFAULT),
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls::DEFAULT),
             )
         },
         Some(threshold_sweep),
@@ -429,7 +430,7 @@ fn dynamics(c: &mut Criterion) {
         "2",
         || {
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(gate_controls()),
             )
@@ -443,7 +444,7 @@ fn dynamics(c: &mut Criterion) {
         || {
             GateNode::<f32>::from(
                 GateConfig::new(
-                    BusTopology::default_for(ChannelLayout::from(6u16))
+                    ChannelTopology::default_for(ChannelLayout::from(6u16))
                         .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
@@ -458,7 +459,7 @@ fn dynamics(c: &mut Criterion) {
         "2_fed",
         || {
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(gate_controls()),
             )
@@ -471,7 +472,7 @@ fn dynamics(c: &mut Criterion) {
         "2",
         || {
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(compressor_controls()),
             )
@@ -485,7 +486,7 @@ fn dynamics(c: &mut Criterion) {
         || {
             CompressorNode::<f32>::from(
                 CompressorConfig::new(
-                    BusTopology::default_for(ChannelLayout::from(6u16))
+                    ChannelTopology::default_for(ChannelLayout::from(6u16))
                         .expect("at most one bus wide"),
                 )
                 .key(KeySource::Sidechain)
@@ -500,7 +501,7 @@ fn dynamics(c: &mut Criterion) {
         "2_fed",
         || {
             CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(compressor_controls()),
             )
@@ -570,7 +571,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")

@@ -8,7 +8,7 @@
 //! frames of 5 ms at 48 kHz.
 
 use tutti_buffers::Speaker;
-use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_buffers::{InterleavedMut, Pull, Source};
 use tutti_graph::Unforkable;
 use tutti_graph::{BusOutputPort, Cx, ForkByClone, Io, Node, NodeBus, Prepare, Shape, Status};
@@ -355,7 +355,7 @@ fn a_hard_redeclare_mid_fade_applies_at_once_and_drops_the_waiting_one() {
 /// Constant `values` on unassigned output channels.
 struct Src {
     values: Vec<f32>,
-    out: BusTopology,
+    out: ChannelTopology,
 }
 
 impl Node for Src {
@@ -392,7 +392,7 @@ fn a_bus_fed_main_output_redeclared_mid_fade_keeps_its_fold_until_the_fade_ends(
         .expect("builds");
     let src = s.graph().add(Unforkable(Src {
         values: vec![0.25, 0.75],
-        out: BusTopology::unassigned(ChannelLayout::STEREO).unwrap(),
+        out: ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap(),
     }));
     s.graph()
         .connect(
