@@ -38,7 +38,8 @@ pub struct NoteName {
 pub struct ParamGroup {
     /// The group's full path: the key.
     pub path: String,
-    /// The group's own name, the last segment of `path`.
+    /// The group's own name: the last segment of `path`, except where the name
+    /// holds a `/`, which is why it is stored.
     pub label: String,
     /// The `path` of the group that holds this one; `None` at the top.
     pub parent: Option<String>,

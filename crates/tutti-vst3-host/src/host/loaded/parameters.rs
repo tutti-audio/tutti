@@ -526,16 +526,18 @@ pub(super) fn build_param_info(
 
 /// A unit's named ancestors, nearest first; a cycle in a plugin's tree ends after
 /// as many steps as there are units.
-fn named_ancestors<'a>(
+fn named_ancestors(
     units: &[Vst3UnitInfo],
-    names: &HashMap<UnitId, &'a str>,
+    names: &HashMap<UnitId, &str>,
     unit: &Vst3UnitInfo,
-) -> Vec<&'a str> {
+) -> Vec<UnitId> {
     let mut named = Vec::new();
     let mut at = unit.parent;
     for _ in 0..units.len() {
         let Some(id) = at else { break };
-        named.extend(names.get(&id).copied());
+        if names.contains_key(&id) {
+            named.push(id);
+        }
         at = units.iter().find(|u| u.id == id).and_then(|u| u.parent);
     }
     named
@@ -550,7 +552,10 @@ pub(crate) fn unit_paths(units: &[Vst3UnitInfo]) -> HashMap<UnitId, String> {
         .iter()
         .filter(|u| names.contains_key(&u.id))
         .map(|u| {
-            let mut path: Vec<&str> = named_ancestors(units, &names, u);
+            let mut path: Vec<&str> = named_ancestors(units, &names, u)
+                .iter()
+                .map(|id| names[id])
+                .collect();
             path.reverse();
             path.push(&u.name);
             (u.id, path.join("/"))
@@ -569,8 +574,11 @@ pub(crate) fn unit_groups(units: &[Vst3UnitInfo]) -> Vec<ParamGroup> {
         .iter()
         .filter_map(|u| {
             let path = paths.get(&u.id)?;
-            let depth = named_ancestors(units, &names, u).len();
-            let parent = path.rsplit_once('/').map(|(parent, _)| parent.to_string());
+            let ancestors = named_ancestors(units, &names, u);
+            // The nearest named ancestor's own path, so a parent is always a listed
+            // path, whatever a label holds.
+            let parent = ancestors.first().map(|id| paths[id].clone());
+            let depth = ancestors.len();
             Some((
                 depth,
                 ParamGroup {
@@ -638,6 +646,23 @@ mod unit_group_tests {
                 named("Voices/Filter", "Filter", Some("Voices")),
             ]
         );
+    }
+
+    /// A label holding a `/` does not split: its unit's parent is the listed path
+    /// of its ancestor, and every parent is some group's path.
+    #[test]
+    fn a_slash_in_a_label_leaves_every_parent_a_listed_path() {
+        let mut units = [unit(1, "A"), unit(2, "B/C"), unit(3, "D")];
+        units[1].parent = Some(UnitId::new(1));
+        units[2].parent = Some(UnitId::new(2));
+        let groups = unit_groups(&units);
+        let by_label = |l: &str| groups.iter().find(|g| g.label == l).unwrap();
+        assert_eq!(by_label("B/C").path, "A/B/C");
+        assert_eq!(by_label("B/C").parent.as_deref(), Some("A"));
+        assert_eq!(by_label("D").parent.as_deref(), Some("A/B/C"));
+        for parent in groups.iter().filter_map(|g| g.parent.as_deref()) {
+            assert!(groups.iter().any(|g| g.path == parent), "{parent}");
+        }
     }
 
     /// Two units that share a label under different parents are two groups with
