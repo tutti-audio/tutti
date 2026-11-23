@@ -608,3 +608,36 @@ fn a_stream_over_bytes_reads_the_frames_the_path_stream_reads() {
         );
     }
 }
+
+/// An AIFF the crate writes reads back sample for sample, in the sample
+/// format it was written in, at every depth AIFF holds as written: the
+/// integer widths and the integer extremes, and `f32` unquantized.
+#[test]
+fn an_aiff_written_reads_back_exactly_at_each_depth() {
+    use tutti_buffers::{I24, Mono, Sample, SampleFormat};
+    use tutti_codec::{Format, Pcm, write_wave};
+    use tutti_units::SampleRate;
+
+    fn round_trip<S: Sample + std::fmt::Debug>(samples: &[S], pcm: Pcm, format: SampleFormat) {
+        let wave = Wave::from_mono(SampleRate::SR_48K, Mono::new(samples));
+        let mut bytes = Vec::new();
+        write_wave(&wave, &mut bytes, Format::Aiff(pcm)).unwrap();
+        assert_eq!(read_wave_metadata(bytes.clone()).unwrap().format, format);
+        assert_eq!(read_wave::<S>(bytes).unwrap(), wave, "{pcm:?}");
+    }
+
+    let int16 = [i16::MIN, -12_345, -1, 0, 1, 12_345, i16::MAX];
+    round_trip(&int16, Pcm::Int16, SampleFormat::I16);
+    let int24 = [
+        I24::MIN,
+        I24::of(-1_234_567),
+        I24::of(-1),
+        I24::of(0),
+        I24::of(1),
+        I24::of(1_234_567),
+        I24::MAX,
+    ];
+    round_trip(&int24, Pcm::Int24, SampleFormat::I24);
+    let float = [-1.0f32, -0.5, -1.0e-7, 0.0, 1.0e-7, 0.123_456_79, 1.0];
+    round_trip(&float, Pcm::Float32, SampleFormat::F32);
+}

@@ -45,9 +45,8 @@ pub(crate) fn unknown_code(code: u32) -> String {
 }
 
 /// Decodes a well-known AudioUnit `OSStatus` into a short description, falling
-/// back to `"unknown error"`. Shared by `AuError::message` and the `Display`
-/// text of `AuError::OsStatus` / `AuError::RenderFailed` so the two cannot
-/// drift.
+/// back to `"unknown error"`. The `Display` text of `AuError::OsStatus` and
+/// `AuError::RenderFailed` reads it.
 pub(crate) fn os_status_message(code: i32) -> &'static str {
     tutti_au_ffi::Status::from_raw(code).message()
 }
@@ -110,9 +109,6 @@ pub use aupreset::{AuPresetIdentity, read_preset_metadata};
 // receives, and `EventAddress` is an argument to every `watch_*` method. All
 // three are unavoidable at the call site, and there is no shared
 // `tutti_plugin_types` notification vocabulary to translate into.
-#[cfg(feature = "testing")]
-#[doc(hidden)]
-pub use listener::emit_gesture;
 pub use listener::{AuEvent, AuParameterListener, EventAddress, notify_all_parameters};
 // Flat-re-exported for the reason `AuParameterListener` is: `RenderNotify` is
 // the handle a host holds, `RenderNotification`/`RenderPhase` are what its

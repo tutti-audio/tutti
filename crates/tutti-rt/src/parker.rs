@@ -54,18 +54,7 @@ use std::time::Duration;
 
 use std::sync::Arc;
 
-use sync::{AtomicBool, Ordering, current, fence, park};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, Ordering, fence};
-    #[cfg(loom)]
-    pub(super) use loom::thread::{Thread, ThreadId, current, park};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::thread::{Thread, ThreadId, current, park};
-}
+use crate::sync::{AtomicBool, Ordering, current, fence, park};
 
 /// The waking side of a parker pair: a wake-up for the one [`Parker`] made
 /// with it. See the module docs (`src/parker.rs`).
@@ -108,7 +97,7 @@ pub struct Unparker {
 pub struct Parker {
     inner: Arc<Inner>,
     /// The thread of the first park.
-    bound: Option<sync::ThreadId>,
+    bound: Option<crate::sync::ThreadId>,
 }
 
 /// The state both sides share. Aligned to two cache lines, so the `parked`
@@ -116,7 +105,7 @@ pub struct Parker {
 #[repr(align(128))]
 struct Inner {
     parked: AtomicBool,
-    thread: std::sync::OnceLock<sync::Thread>,
+    thread: std::sync::OnceLock<crate::sync::Thread>,
 }
 
 /// A parker pair: its waking [`Unparker`] and its one [`Parker`].

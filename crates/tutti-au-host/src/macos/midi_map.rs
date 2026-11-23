@@ -1,81 +1,29 @@
-//! Parameter↔MIDI mapping: the CC→parameter routing table
+//! Parameter-to-MIDI mapping: the CC-to-parameter routing table
 //! (`kAudioUnitProperty_AllParameterMIDIMappings` and its three siblings).
 //!
-//! This is AU's answer to VST3's `IMidiMapping`, and the stakes are the same as
-//! that module states: mod wheel, breath, expression and sustain reach many
-//! instruments *only* through the mapping surface. Where VST3 has the host
-//! *query* a fixed channel × controller grid, AU inverts it — the **host writes
-//! the table into the plugin**, and the plugin does the routing internally
-//! during render. So the host does not need a per-block routing pass here at
-//! all; it needs to be able to read, add, remove and replace the AU's mapping
-//! table, and to drive "learn" mode.
+//! The host writes the table into the plugin and the plugin routes internally
+//! during render, so there is no per-block routing pass here: once a mapping is
+//! installed, the CC arrives through [`send_midi`](crate::processor::AuProcessor::send_midi)
+//! and the AU moves its own parameter. This module reads, adds, removes and
+//! replaces the table and drives "learn" mode.
 //!
-//! That inversion is why there is no `route()` in this module and no audio-path
-//! code: once a mapping is installed, the CC arrives through the ordinary
-//! [`send_midi`](crate::processor::AuProcessor::send_midi) path and the AU moves
-//! its own parameter. Verified end-to-end on macOS 15.6 — see
-//! [`AuLoaded::add_parameter_midi_mapping`](crate::instance::AuLoaded::add_parameter_midi_mapping).
+//! The family is implemented by instrument and music-effect units only; any
+//! other unit answers `kAudioUnitErr_InvalidProperty` (-10879).
 //!
-//! # Honest status on this machine
+//! The deprecated read-only `kAudioUnitProperty_MIDIControlMapping` (17) is not
+//! supported.
 //!
-//! Unlike `MIDIOutputCallbackInfo` (0 of 59 components) and `HostCallbacks`
-//! (accepted by ~35, called by none), **this family is genuinely implemented**,
-//! by exactly two units. Measured on macOS 15.6 across all 59 registered
-//! components (every Apple unit plus TDR Nova, TAL-NoiseMaker, TAL-Reverb-4), at
-//! global/input/output scope, before and after `AudioUnitInitialize`:
+//! # AU deviations from the header
 //!
-//! | unit | property 41 |
-//! |---|---|
-//! | AUSampler (`aumu`/`samp`/`appl`) | read/write, works |
-//! | AUMIDISynth (`aumu`/`msyn`/`appl`) | read/write, works |
-//! | all 57 others (incl. TAL-NoiseMaker, TDR Nova) | `kAudioUnitErr_InvalidProperty` (-10879) |
-//!
-//! The pattern holds: a synth implements it, effects do not. Apple's header says
-//! the properties "normally apply only to … instrument units ('aumu') and music
-//! effects ('aumf')", and that is what the machine shows.
-//!
-//! The full round trip is real, not merely accepted. On AUSampler: adding a
-//! mapping of CC 20 → parameter 900 (`Gain`, range `-96..=12` dB), then sending
-//! CC 20 = 127 and rendering one block, moved the parameter from `0` to `12`.
-//! That is the whole point of the feature and it works.
-//!
-//! # Property 17 (`kAudioUnitProperty_MIDIControlMapping`) is deliberately absent
-//!
-//! The deprecated read-only form is **not** supported, and not as an oversight.
-//! Apple deprecated it in macOS 10.2 in favour of this family, and the measured
-//! answer is unambiguous: **0 of 59 components answer property 17**, at any of
-//! the three scopes, in either lifecycle phase. Shipping a fallback would mean
-//! shipping a decoder for `AudioUnitMIDIControlMapping` that no installed unit
-//! can exercise — untestable against reality, and exactly the "vacuous passing
-//! test" this crate refuses. If a unit that answers only 17 ever turns up, the
-//! sweep in `tests/au_midi_map.rs` will report it as a *hit* and the fallback can
-//! be written then, against a real implementer.
-//!
-//! # Four AU deviations from the header, each of which shapes the API
-//!
-//! Every one of these was measured, and each is the reason a nearby method is
-//! shaped the way it is rather than the obvious way:
-//!
-//! 1. **The table cannot be cleared by writing an empty one.** The header
-//!    implies a set replaces the table, so `set(&[])` reads as "clear". It does
-//!    not: a NULL/0-size write answers `kAudioUnitErr_InvalidPropertyValue`
-//!    (-10851) and a non-NULL/0-length write answers `paramErr` (-50). Both
-//!    leave the table **unchanged**. So [`set_all`] with an empty slice routes
-//!    through *remove* instead — see its docs.
-//! 2. **`HotMap` reads `noErr` when nothing is armed.** The header says an AU
-//!    "should return a `kAudioUnitErr_InvalidPropertyValue` error when the host
-//!    tries to read this property's value" while unarmed. Both implementers
-//!    instead return `noErr` with an all-zero struct. A host cannot use the
-//!    status to tell "no mapping pending" from "mapping complete", which is why
+//! 1. The table cannot be cleared by writing an empty one: a NULL/0-size write
+//!    answers `kAudioUnitErr_InvalidPropertyValue` (-10851) and a non-NULL/0-length
+//!    write answers `paramErr` (-50), both leaving the table unchanged. So
+//!    [`set_all`] with an empty slice routes through *remove* instead.
+//! 2. `HotMap` reads `noErr` with an all-zero struct when nothing is armed, so
 //!    [`hot_map_pending`] decides on `status == 0` rather than on the `Result`.
-//! 3. **Nothing is validated.** A mapping naming parameter id `99999` on a unit
-//!    with ~10 parameters is accepted with `noErr` *and appears in the read-back
-//!    table*; so is `scope: 99`. This is the crate's twice-paid trap — a `noErr`
-//!    proves nothing — so the tests here verify by reading back, and callers
-//!    should not treat a successful add as proof the mapping is meaningful.
-//! 4. **The table comes back reordered.** AUSampler does not return mappings in
-//!    insertion order. Any comparison must be order-insensitive; the tests use
-//!    set containment, not index equality.
+//! 3. Nothing is validated: a mapping naming an unknown parameter id or scope is
+//!    accepted with `noErr` and appears in the read-back table.
+//! 4. The table comes back in no particular order; compare as sets.
 
 use std::mem::size_of;
 use tutti_au_ffi::property::{
@@ -94,18 +42,10 @@ use tutti_au_ffi::Unit;
 
 /// Apple's `AUParameterMIDIMapping` from `AudioUnitProperties.h`.
 ///
-/// Hand-declared for the same reason `midi_out.rs`'s callback struct is:
-/// `coreaudio-sys` does not export it (nor any of the four property ids, nor the
-/// six flag bits — all of them are spelled out in [`crate::types`]). The layout
-/// is pinned by `tests::the_mapping_struct_matches_the_c_abi` against values
-/// read out of a C program compiled against the real header: **32 bytes, align
-/// 4**, with `mStatus` at offset 24 and `reserved3` at 28. A wrong guess here
-/// would not fail loudly — the AU would read the host's `mStatus` out of the
-/// padding and silently map the wrong MIDI message.
-///
-/// The three `reserved*` fields are Apple's, and the header says outright they
-/// "MUST be set to zero". [`AuMidiMapping::to_raw`] is the only constructor and
-/// always zeroes them, which is why they are private.
+/// Hand-declared because `coreaudio-sys` does not export it. Layout pinned by
+/// `tests::the_mapping_struct_matches_the_c_abi`: 32 bytes, align 4, `mStatus`
+/// at offset 24 and `reserved3` at 28. The three `reserved*` fields must be zero;
+/// [`AuMidiMapping::to_raw`] is the only constructor and zeroes them.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct AuParameterMidiMappingRaw {
@@ -166,15 +106,10 @@ impl AuParameterMidiMappingRaw {
 
 /// What MIDI message a mapping triggers on, decoded from `mStatus` / `mData1`.
 ///
-/// A **closed** enum, for the reason `parameters::DisplayCurve` is closed: the
-/// MIDI 1.0 channel-voice status nibbles are a fixed structural set, not an
-/// extensible catalog. Apple's header tabulates exactly these seven commands and
-/// says what `mData1` means for each — which is the real reason this is a typed
-/// enum rather than a `(u8, u8)` pair. `mData1` is a controller id for
-/// `ControlChange`, a *note number* for the three note commands, a patch number
-/// for `ProgramChange`, and **unused** for the two pressure/bend forms. A host
-/// that read `data1` without knowing which of those it held would happily show a
-/// pitch-bend mapping as "CC 0".
+/// `mData1` is a controller id for `ControlChange`, a note number for the three
+/// note commands, a patch number for `ProgramChange`, and unused for the two
+/// pressure/bend forms, which is why this is a typed enum rather than a
+/// `(u8, u8)` pair.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MidiTrigger {
     /// `0x8n` — note off. `mData1` is the note number.
@@ -183,10 +118,6 @@ pub enum MidiTrigger {
         note: u8,
     },
     /// `0x9n` — note on. `mData1` is the note number.
-    ///
-    /// The header notes a note message can drive a continuous parameter, using
-    /// the note number itself as the value ("a note message could be used to set
-    /// the cut off frequency of a filter").
     NoteOn {
         /// Note number, or ignored when [`AuMidiMapping::any_note`] is set.
         note: u8,
@@ -198,8 +129,6 @@ pub enum MidiTrigger {
     },
     /// `0xBn` — control change. `mData1` is the controller id (CC 1 = mod wheel,
     /// CC 2 = breath, CC 11 = expression, CC 64 = sustain).
-    ///
-    /// This is the arm that carries the module's whole reason for existing.
     ControlChange {
         /// Controller number, 0..=127.
         controller: u8,
@@ -209,21 +138,14 @@ pub enum MidiTrigger {
         /// Patch number.
         patch: u8,
     },
-    /// `0xDn` — channel pressure (aftertouch). `mData1` is **unused**; the
-    /// header marks it "0 (Unused)", and this variant carries no payload so a
-    /// caller cannot read a meaningless byte out of it.
+    /// `0xDn` channel pressure. `mData1` is unused; no payload.
     ChannelPressure,
     /// `0xEn` — pitch bend. `mData1` is **unused**, as for
     /// [`ChannelPressure`](Self::ChannelPressure).
     PitchBend,
-    /// A status byte whose high nibble is not one of the seven above — a system
-    /// message (`0xF_`), or a byte with the high bit clear, which is not a status
-    /// byte at all.
-    ///
-    /// Present because this is decoded from a value an **AU** supplied, not one
-    /// the host built: a unit that stores garbage in `mStatus` (and one of them
-    /// stores an out-of-range `mScope` verbatim, so this is not paranoia) must
-    /// not make `AuMidiMapping::from_raw` panic or silently claim "CC 0".
+    /// A status byte whose high nibble is not one of the seven above.
+    /// Decoded from a value an AU supplied, so it must not make
+    /// `AuMidiMapping::from_raw` panic or claim "CC 0".
     Other {
         /// The raw status byte, high nibble and channel both.
         status: u8,
@@ -247,8 +169,7 @@ impl MidiTrigger {
         }
     }
 
-    /// The `mData1` byte this trigger carries, `0` for the two forms whose
-    /// `mData1` the header marks unused.
+    /// The `mData1` byte this trigger carries, `0` for the two unused forms.
     fn data1(&self) -> u8 {
         match self {
             Self::NoteOff { note } | Self::NoteOn { note } | Self::KeyPressure { note } => *note,
@@ -273,10 +194,9 @@ impl MidiTrigger {
         }
     }
 
-    /// Whether the note-number fields are meaningful for this trigger — i.e.
+    /// Whether the note-number fields are meaningful for this trigger, i.e.
     /// whether [`kAUParameterMIDIMapping_AnyNoteFlag`](K_AU_PARAMETER_MIDI_MAPPING_ANY_NOTE)
-    /// can apply. The header restricts that flag to note on / note off /
-    /// polyphonic pressure.
+    /// can apply (note on, note off and polyphonic pressure only).
     pub fn is_note_command(&self) -> bool {
         matches!(
             self,
@@ -285,52 +205,31 @@ impl MidiTrigger {
     }
 }
 
-/// One parameter↔MIDI mapping: which MIDI message drives which parameter, and
+/// One parameter-to-MIDI mapping: which MIDI message drives which parameter, and
 /// how the controller's value is interpreted on the way.
 ///
-/// The flags word is modelled as **five named fields, not one `u32` and not one
-/// `bool`**, because the bits are not variations on "enabled" — three of them
-/// change what an incoming controller value *means*:
-///
-/// * [`sub_range`](Self::sub_range) confines the parameter to a slice of its own
-///   range, so CC 127 no longer means "maximum".
-/// * [`toggle`](Self::toggle) discards the value entirely and *flips* the
-///   parameter.
-/// * [`bipolar`](Self::bipolar) collapses the value to two states with a
-///   threshold at 64/65 (the header's sustain-pedal example), and
-///   [`bipolar_on`](Self::bipolar_on) then decides which end is "on".
-///
-/// A host that stored the flags as an opaque `u32` could not draw the difference
-/// between a continuous knob and a sustain pedal, and one that stored a `bool`
-/// could not represent either.
-///
-/// The two "any" flags widen what matches rather than reinterpreting the value:
-/// [`any_channel`](Self::any_channel) ignores the MIDI channel in the status
-/// byte, [`any_note`](Self::any_note) ignores the note number.
+/// The flags word is five named fields because three of them change what a
+/// controller value *means*: [`sub_range`](Self::sub_range) confines the
+/// parameter to a slice of its range, [`toggle`](Self::toggle) flips it, and
+/// [`bipolar`](Self::bipolar) thresholds it at 64/65 with
+/// [`bipolar_on`](Self::bipolar_on) choosing the "on" end. The two "any" flags
+/// widen what matches: [`any_channel`](Self::any_channel) ignores the channel,
+/// [`any_note`](Self::any_note) the note number.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AuMidiMapping {
-    /// The parameter's scope — `kAudioUnitScope_Global` in every mapping
-    /// measured. Apple's header requires `mScope`, `mElement` and
-    /// `mParameterID` to be "correctly specified" in all usages, and the
-    /// remove path identifies a mapping by exactly these three.
+    /// The parameter's scope. `mScope`, `mElement` and `mParameterID` identify a
+    /// mapping for remove.
     pub scope: Scope,
     /// The parameter's element within `scope`.
     pub element: Element,
-    /// The `AudioUnitParameterID` this mapping drives.
-    ///
-    /// Not validated by the AU: an id no parameter uses is accepted with
-    /// `noErr` and stored (measured — id `99999` on a ~10-parameter unit). A
-    /// caller should cross-check against
+    /// The `AudioUnitParameterID` this mapping drives. The AU does not validate
+    /// it; cross-check against
     /// [`get_parameter_list`](crate::instance::AuLoaded::get_parameter_list).
     pub parameter_id: u32,
     /// The MIDI message that triggers this mapping.
     pub trigger: MidiTrigger,
-    /// MIDI channel, `0..=15`, taken from the low nibble of `mStatus`.
-    ///
-    /// Meaningless when [`any_channel`](Self::any_channel) is set — the AU
-    /// ignores it then — but still preserved on the round trip rather than
-    /// zeroed, because the AU preserves it and a lossy read would make
-    /// "what did I write" untestable.
+    /// MIDI channel, `0..=15`, from the low nibble of `mStatus`. Ignored when
+    /// [`any_channel`](Self::any_channel) is set, but preserved on the round trip.
     pub channel: u8,
     /// `kAUParameterMIDIMapping_AnyChannelFlag`: match this message on **any**
     /// channel, ignoring [`channel`](Self::channel).
@@ -340,35 +239,25 @@ pub struct AuMidiMapping {
     /// [`MidiTrigger::is_note_command`] holds.
     pub any_note: bool,
     /// `kAUParameterMIDIMapping_SubRange`: confine the controller to
-    /// `[min, max]` of the parameter's range instead of its full span.
-    ///
-    /// `None` means the flag is clear and the whole range is used. `Some` also
-    /// carries the two `AudioUnitParameterValue` fields, which are in the
-    /// **parameter's own units** — not normalized — so a dB gain's sub-range is
-    /// written in dB.
+    /// `[min, max]` of the parameter's range. `None` means the whole range;
+    /// `Some` values are in the **parameter's own units**, not normalized.
     pub sub_range: Option<(f32, f32)>,
     /// `kAUParameterMIDIMapping_Toggle`: the mapped message *flips* the
     /// parameter rather than setting it from the controller value. For boolean
     /// parameters.
     pub toggle: bool,
     /// `kAUParameterMIDIMapping_Bipolar`: the parameter takes only two states,
-    /// with the controller thresholded — the header's example is a sustain
-    /// pedal, where 0..64 is "off" and 65..127 is "on".
+    /// with the controller thresholded at 64/65.
     pub bipolar: bool,
     /// `kAUParameterMIDIMapping_Bipolar_On`: which end of the controller maps to
-    /// the parameter's "on" state. The header says this is "only valid if
-    /// `kAUParameterMIDIMapping_Bipolar` is set", so it is meaningless — and
-    /// ignored by the AU — with [`bipolar`](Self::bipolar) clear.
+    /// the parameter's "on" state. Ignored by the AU with [`bipolar`](Self::bipolar)
+    /// clear.
     pub bipolar_on: bool,
 }
 
 impl AuMidiMapping {
-    /// The common case: a control-change message on one channel driving a
-    /// parameter's full range.
-    ///
-    /// This is the shape a "map mod wheel to filter cutoff" gesture produces —
-    /// global scope, element 0, no flags. Reach for the struct literal for
-    /// anything needing sub-range, toggle or bipolar semantics.
+    /// A control-change message on one channel driving a parameter's full range:
+    /// global scope, element 0, no flags.
     pub fn control_change(parameter_id: u32, channel: u8, controller: u8) -> Self {
         Self {
             scope: Scope::GLOBAL,
@@ -385,12 +274,8 @@ impl AuMidiMapping {
         }
     }
 
-    /// The same, matching the controller on **every** channel.
-    ///
-    /// Separate constructor rather than a `channel: Option<u8>` argument because
-    /// the AU still stores a channel nibble alongside the any-channel flag, and
-    /// a caller passing `None` would have no way to know which of the two it had
-    /// set. Sets [`channel`](Self::channel) to 0, which the AU ignores.
+    /// The same, matching the controller on **every** channel; sets
+    /// [`channel`](Self::channel) to 0, which the AU ignores.
     pub fn control_change_any_channel(parameter_id: u32, controller: u8) -> Self {
         Self {
             any_channel: true,
@@ -400,10 +285,8 @@ impl AuMidiMapping {
 
     /// Decodes a mapping the AU handed back.
     ///
-    /// Total — every bit pattern decodes. An unrecognised status byte becomes
-    /// [`MidiTrigger::Other`] rather than a panic or a false `ControlChange`,
-    /// and an out-of-range `scope` is preserved verbatim (one implementer stores
-    /// `scope: 99` when given it, so this is a real shape).
+    /// Total: every bit pattern decodes. An unrecognised status byte becomes
+    /// [`MidiTrigger::Other`] and an out-of-range `scope` is preserved verbatim.
     pub(crate) fn from_raw(raw: &AuParameterMidiMappingRaw) -> Self {
         let sub_range = (raw.flags & K_AU_PARAMETER_MIDI_MAPPING_SUB_RANGE != 0)
             .then_some((raw.sub_range_min, raw.sub_range_max));
@@ -424,8 +307,7 @@ impl AuMidiMapping {
 
     /// Encodes for the AU. The `reserved*` fields are zeroed, as the header
     /// demands; the sub-range values are written only when
-    /// [`sub_range`](Self::sub_range) is `Some`, so a `None` mapping cannot
-    /// leave stale bounds behind.
+    /// [`sub_range`](Self::sub_range) is `Some`.
     pub(crate) fn to_raw(self) -> AuParameterMidiMappingRaw {
         let mut flags = 0u32;
         if self.any_channel {
@@ -465,13 +347,8 @@ impl AuMidiMapping {
     }
 
     /// True when this mapping names the same `(scope, element, parameter_id)` as
-    /// `other`.
-    ///
-    /// This triple — not the whole struct — is what the AU matches on for both
-    /// remove ("the Scope/Element/ParameterID is used to find the mapping to
-    /// remove") and replace ("there can be only one mapping per parameter").
-    /// Verified: adding CC 10 then CC 11 for the same parameter leaves **one**
-    /// mapping, carrying CC 11.
+    /// `other`: the triple the AU matches on for remove and replace (one mapping
+    /// per parameter).
     pub fn targets_same_parameter(&self, other: &Self) -> bool {
         self.scope == other.scope
             && self.element == other.element
@@ -512,15 +389,13 @@ pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
 
 /// Reads the AU's whole mapping table.
 ///
-/// Returns an empty `Vec` when the AU has no mappings installed, which is what a
-/// fresh AUSampler reports (`noErr`, size 0) — distinct from *not implementing
-/// the property*, which is an error.
+/// Returns an empty `Vec` when the AU has no mappings installed, distinct from
+/// not implementing the property, which is an error.
 ///
 /// # Errors
 /// [`AuError::OsStatus`](crate::error::AuError::OsStatus) with
-/// `kAudioUnitErr_InvalidProperty` (-10879) from the 57 of 59 units that do not
-/// implement the property. That refusal is the normal answer for an effect and a
-/// caller should treat it as "this AU does not do MIDI mapping", not as a fault.
+/// `kAudioUnitErr_InvalidProperty` (-10879) from a unit that does not implement
+/// the property.
 pub fn all(unit: &Unit) -> Result<Vec<AuMidiMapping>> {
     let bytes = unit.get_bytes::<AllParameterMidiMappings>(Scope::GLOBAL, Element::ZERO)?;
     Ok(decode_table(&bytes))
@@ -528,12 +403,8 @@ pub fn all(unit: &Unit) -> Result<Vec<AuMidiMapping>> {
 
 /// Decodes a byte buffer of `AUParameterMIDIMapping` structs.
 ///
-/// Split out from [`all`] so the decode is unit-testable without an AU, and so
-/// the truncation rule lives in one place: a buffer whose length is not a
-/// multiple of the struct size is **truncated to whole structs** rather than
-/// rejected. That is the safe reading of a size an AU reported — a partial
-/// trailing struct would be read out of uninitialized bytes, and refusing the
-/// whole table over one bad byte would lose the mappings that did decode.
+/// A buffer whose length is not a multiple of the struct size is truncated to
+/// whole structs rather than rejected.
 fn decode_table(bytes: &[u8]) -> Vec<AuMidiMapping> {
     bytes
         .as_chunks::<RAW_SIZE>()
@@ -567,15 +438,12 @@ fn write_table<P: Property>(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<(
 /// Adds `mappings` to whatever the AU already has, replacing any mapping that
 /// already targets the same parameter.
 ///
-/// A no-op for an empty slice: a zero-length write is `paramErr` (-50) on both
-/// implementers, so it is refused *before* the FFI call rather than surfaced as
-/// a confusing error for an operation that asked for nothing.
+/// A no-op for an empty slice: a zero-length write is `paramErr` (-50).
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
-/// family. Note that a `noErr` return proves **nothing** about the mapping being
-/// meaningful — a parameter id no parameter uses is accepted and stored. Verify
-/// with [`all`] if it matters.
+/// family. A `noErr` return does not prove the mapping is meaningful; verify
+/// with [`all`].
 pub fn add(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
     if mappings.is_empty() {
         return Ok(());
@@ -586,12 +454,8 @@ pub fn add(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 /// Removes the mappings targeting each of `mappings`'
 /// `(scope, element, parameter_id)`.
 ///
-/// Only that triple is matched — the trigger and flags of the argument are
-/// ignored — so a caller can remove a mapping it read back, or construct one
-/// naming just the parameter. A mapping that is not installed is silently
-/// ignored, which the header specifies and both implementers honour (`noErr`).
-///
-/// Empty slice is a no-op, as in [`add`], and for the same `paramErr` reason.
+/// Only that triple is matched. A mapping that is not installed is silently
+/// ignored. An empty slice is a no-op, as in [`add`].
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
@@ -605,19 +469,9 @@ pub fn remove(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 
 /// Replaces the AU's entire mapping table with `mappings`.
 ///
-/// # Why an empty slice takes a different path
-///
-/// The header reads as though writing an empty table clears it. It does not.
-/// Measured on both implementers: a NULL/0-size write answers
-/// `kAudioUnitErr_InvalidPropertyValue` (-10851), a non-NULL/0-length write
-/// answers `paramErr` (-50), and **the table is unchanged either way**. So the
-/// clear is done the only way that works — read the table back and [`remove`]
-/// every entry, which both units accept.
-///
-/// That read-then-remove is not atomic. It cannot be: the AU offers no clear
-/// operation. A mapping the plugin adds itself between the two calls (a hot map
-/// completing) survives the clear. Documented rather than papered over, because
-/// a caller that cares must serialize its own mapping edits.
+/// An empty slice reads the table back and [`remove`]s every entry, because a
+/// zero-length write does not clear it. That is not atomic: a mapping the plugin
+/// adds between the two calls survives the clear.
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
@@ -633,15 +487,9 @@ pub fn set_all(unit: &Unit, mappings: &[AuMidiMapping]) -> Result<()> {
 /// Arms "learn" mode: the AU maps the **next MIDI message it sees** to the
 /// parameter `mapping` names.
 ///
-/// The trigger and channel of `mapping` are ignored by the AU — it fills those
-/// in from whatever arrives — so a caller should supply only the parameter
-/// target. Verified end-to-end: arming parameter 2 on AUSampler and then sending
-/// CC 11 made [`hot_map`] report `ControlChange { controller: 11 }` and grew the
-/// table by one.
-///
-/// The header says the AU fires a notification on this property when the mapping
-/// completes; a host that would rather not poll can watch for it through
-/// [`crate::listener`].
+/// The AU ignores the trigger and channel of `mapping` and fills them from what
+/// arrives. The AU notifies on this property when the mapping completes; watch
+/// for it through [`crate::listener`].
 ///
 /// # Errors
 /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
@@ -657,54 +505,28 @@ pub fn arm_hot_map(unit: &Unit, mapping: &AuMidiMapping) -> Result<()> {
 
 /// Reads the pending or just-completed hot map.
 ///
-/// # Why this returns `Option`, and why the status is not the signal
-///
-/// The header says an AU with no hot map in progress "should return a
-/// `kAudioUnitErr_InvalidPropertyValue` error". **Neither implementer does**:
-/// both answer `noErr` with an all-zero struct, on a completely fresh instance.
-/// So a host branching on the `Result` would read an all-zero mapping as a real
-/// one — "note off, note 0, channel 0" — and offer to bind it.
-///
-/// `None` therefore means "nothing armed or nothing arrived yet", decided on
-/// `mStatus == 0`: zero is not a valid MIDI status byte (the high bit is
-/// always set on a real one), so it cannot collide with a genuine mapping. An
-/// AU that *does* follow the header and errors is also reported as `None`,
-/// since "the property errored" and "nothing is pending" are the same answer to
-/// the caller's question.
-///
-/// A `Some` whose `trigger` is filled in is the completed mapping; the armed
-/// state before any MIDI arrives reads as `None`, because the AU has not put a
-/// status byte in it yet.
+/// `None` means nothing is armed or nothing has arrived yet, decided on
+/// `mStatus == 0`: zero is not a valid MIDI status byte, so it cannot collide
+/// with a genuine mapping. An AU that errors is also reported as `None`.
 pub fn hot_map(unit: &Unit) -> Option<AuMidiMapping> {
     let bytes = unit
         .get_bytes::<HotMapParameterMidiMapping>(Scope::GLOBAL, Element::ZERO)
         .ok()?;
     let raw = AuParameterMidiMappingRaw::from_bytes(bytes.as_slice().try_into().ok()?);
-    // See the docs above: `mStatus == 0` is the only reliable "nothing here"
-    // signal, because the documented error is not delivered.
+    // `mStatus == 0` is the only reliable "nothing here" signal.
     (raw.status != 0).then(|| AuMidiMapping::from_raw(&raw))
 }
 
 /// Whether the AU currently reports a completed hot map waiting to be read.
-///
-/// Thin, but it is the predicate a "learn" UI polls, and having it named here
-/// keeps the `mStatus == 0` rule from being reimplemented (differently) at each
-/// call site.
 pub fn hot_map_pending(unit: &Unit) -> bool {
     hot_map(unit).is_some()
 }
 
-/// Whether this AU implements the parameter↔MIDI mapping family at all.
+/// Whether this AU implements the parameter-to-MIDI mapping family at all.
 ///
-/// The capability gate a host should branch on before offering a MIDI-learn UI,
-/// and the counterpart of [`crate::midi_out::midi_output_info`]. Asks
-/// `AudioUnitGetPropertyInfo` for property 41 rather than reading the table,
-/// because a unit that implements it answers `noErr` with size 0 when it has no
-/// mappings — indistinguishable from an empty read otherwise.
-///
-/// Measured on macOS 15.6: true for exactly 2 of 59 installed components
-/// (AUSampler, AUMIDISynth), false for the other 57 including every effect and
-/// every third-party unit on this machine.
+/// Asks `AudioUnitGetPropertyInfo` for property 41 rather than reading the
+/// table, because a unit that implements it answers `noErr` with size 0 when it
+/// has no mappings.
 pub fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
     unit.property_info::<AllParameterMidiMappings>(Scope::GLOBAL, Element::ZERO)
         .is_ok()
@@ -755,20 +577,9 @@ mod tests {
         );
     }
 
-    /// The C ABI, pinned against values printed by a C program compiled against
-    /// Apple's own `AudioUnitProperties.h` on macOS 15.6:
-    ///
-    /// ```text
-    /// AUParameterMIDIMapping sizeof=32 align=4
-    ///   mScope=0 mElement=4 mParameterID=8 mFlags=12
-    ///   mSubRangeMin=16 mSubRangeMax=20 mStatus=24 mData1=25 reserved3=28
-    /// ```
-    ///
-    /// A wrong layout here is silent: the AU reads the host's `mStatus` out of
-    /// the wrong byte and maps a different MIDI message than the host asked for.
-    /// The byte codec writes every field where the `#[repr(C)]` struct holds it,
-    /// so what the AU reads is the header's `AUParameterMIDIMapping`, and it
-    /// reads back what it wrote.
+    /// The C ABI of `AUParameterMIDIMapping` (`AudioUnitProperties.h`): size 32,
+    /// align 4, `mStatus` at 24, `reserved3` at 28. The byte codec writes every
+    /// field where the `#[repr(C)]` struct holds it and reads back what it wrote.
     #[test]
     fn the_byte_codec_places_every_field_at_its_c_offset() {
         use std::mem::offset_of;

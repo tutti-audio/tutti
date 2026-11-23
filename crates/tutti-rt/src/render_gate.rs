@@ -35,7 +35,7 @@
 //!   [`close`](RenderGate::close) and [`hold_closed`](RenderGate::hold_closed)
 //!   are compare-exchanges (`AcqRel`) of the state bits that carry the count
 //!   along, retried when a render's add or undo moved it. The holder of
-//!   `Opening`, `Closing` or `Held` owns the state bits, so its finish and its
+//!   a [`Transition`] (in `Opening`, `Closing` or `Held`) owns the state bits, so its finish and its
 //!   revert are one `fetch_add` of the difference of the two states
 //!   (`Release`): they need no zero count, and keep a refused `enter`'s add that
 //!   is not yet undone.
@@ -65,16 +65,9 @@
 //!
 //! The model in `tests/render_gate_loom.rs` runs this code.
 
-use sync::{AtomicU64, Ordering};
+use crate::sync::{AtomicU64, Ordering};
 
 use crate::backoff::Backoff;
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
-}
 
 const CLOSED: u64 = 0;
 const OPENING: u64 = 1;
@@ -119,32 +112,25 @@ impl Default for RenderGate {
 #[must_use = "the render is counted in flight only while the guard is held"]
 pub struct GateGuard<'a>(&'a RenderGate);
 
-/// The state bits a control-side guard owns: on drop, they move from `from`
-/// to `to`.
+/// The gate while its state bits belong to the control side: opening
+/// ([`RenderGate::begin_open`]), closing ([`RenderGate::close`]) or held
+/// closed ([`RenderGate::hold_closed`]).
+///
+/// Dropped, it reverts the gate: an opening goes back to `Closed`, a closing
+/// back to `Open`, a hold to `Closed`. [`finish`](Self::finish) takes the gate
+/// to the state the transition was heading for: `Open` after an opening,
+/// `Closed` after a closing; a hold has nowhere further to go, so its finish
+/// is its drop.
 #[derive(Debug)]
-struct Owned<'a> {
+#[must_use = "dropping an unfinished Transition puts the gate back"]
+pub struct Transition<'a> {
     gate: &'a RenderGate,
-    from: u64,
+    /// The state this guard owns.
+    held: u64,
+    /// The state the drop moves the gate to.
     to: u64,
-}
-
-/// The gate while it is being opened ([`RenderGate::begin_open`]); dropped
-/// unfinished, it goes back to `Closed`.
-#[derive(Debug)]
-#[must_use = "dropping an unfinished Opening closes the gate again"]
-pub struct Opening<'a>(Owned<'a>);
-
-/// The gate once its renders have drained ([`RenderGate::close`]); dropped
-/// unfinished, it goes back to `Open`.
-#[derive(Debug)]
-#[must_use = "dropping an unfinished Closing opens the gate again"]
-pub struct Closing<'a>(Owned<'a>);
-
-/// The gate kept closed ([`RenderGate::hold_closed`]) until it drops.
-#[derive(Debug)]
-#[must_use = "the gate is held closed only while the guard is held"]
-pub struct HeldClosed<'a> {
-    _owned: Owned<'a>,
+    /// The state [`finish`](Self::finish) moves the gate to.
+    finished: u64,
 }
 
 impl RenderGate {
@@ -169,9 +155,9 @@ impl RenderGate {
 
     /// `Closed` to `Opening`; `None` in any other state (including `Held`).
     /// Finish it once the plugin is initialised.
-    pub fn begin_open(&self) -> Option<Opening<'_>> {
+    pub fn begin_open(&self) -> Option<Transition<'_>> {
         self.acquire(CLOSED, OPENING)
-            .then(|| Opening(Owned::new(self, OPENING, CLOSED)))
+            .then(|| Transition::new(self, OPENING, CLOSED, OPEN))
     }
 
     /// `Open` to `Closing` at once, so every later [`enter`](Self::enter) is
@@ -182,11 +168,11 @@ impl RenderGate {
     /// reopens the gate, so leave the plugin renderable before dropping it.
     /// Called from a render, or while its own thread holds a [`GateGuard`], it
     /// never returns: it waits for that render.
-    pub fn close(&self) -> Option<Closing<'_>> {
+    pub fn close(&self) -> Option<Transition<'_>> {
         if !self.acquire(OPEN, CLOSING) {
             return None;
         }
-        let closing = Closing(Owned::new(self, CLOSING, OPEN));
+        let closing = Transition::new(self, CLOSING, OPEN, CLOSED);
         let mut backoff = Backoff::new();
         while self.word.load(Ordering::Acquire) >> 3 != 0 {
             backoff.snooze();
@@ -196,10 +182,9 @@ impl RenderGate {
 
     /// `Closed` to `Held`: [`begin_open`](Self::begin_open) refuses until the
     /// guard drops. `None` in any other state.
-    pub fn hold_closed(&self) -> Option<HeldClosed<'_>> {
-        self.acquire(CLOSED, HELD).then(|| HeldClosed {
-            _owned: Owned::new(self, HELD, CLOSED),
-        })
+    pub fn hold_closed(&self) -> Option<Transition<'_>> {
+        self.acquire(CLOSED, HELD)
+            .then(|| Transition::new(self, HELD, CLOSED, CLOSED))
     }
 
     /// The state now; it can have changed by the time it is read.
@@ -241,35 +226,34 @@ impl Drop for GateGuard<'_> {
     }
 }
 
-impl<'a> Owned<'a> {
-    fn new(gate: &'a RenderGate, from: u64, to: u64) -> Self {
-        Self { gate, from, to }
+impl<'a> Transition<'a> {
+    fn new(gate: &'a RenderGate, held: u64, to: u64, finished: u64) -> Self {
+        Self {
+            gate,
+            held,
+            to,
+            finished,
+        }
+    }
+
+    /// The transition completed: the gate goes `Open` after
+    /// [`begin_open`](RenderGate::begin_open) (the plugin is initialised) and
+    /// `Closed` after [`close`](RenderGate::close) (it is uninitialised). After
+    /// [`hold_closed`](RenderGate::hold_closed) it is the same as dropping.
+    pub fn finish(mut self) {
+        self.to = self.finished;
     }
 }
 
-impl Drop for Owned<'_> {
+impl Drop for Transition<'_> {
     fn drop(&mut self) {
         // The holder owns the state bits, so the difference lands them on
         // `to` whatever the count is doing.
         let prev = self
             .gate
             .word
-            .fetch_add(self.to.wrapping_sub(self.from), Ordering::Release);
-        debug_assert_eq!(prev & STATE, self.from, "only the holder moves the state");
-    }
-}
-
-impl Opening<'_> {
-    /// The plugin is initialised: the gate goes `Open`.
-    pub fn finish(mut self) {
-        self.0.to = OPEN;
-    }
-}
-
-impl Closing<'_> {
-    /// The plugin is uninitialised: the gate goes `Closed`.
-    pub fn finish(mut self) {
-        self.0.to = CLOSED;
+            .fetch_add(self.to.wrapping_sub(self.held), Ordering::Release);
+        debug_assert_eq!(prev & STATE, self.held, "only the holder moves the state");
     }
 }
 
@@ -320,6 +304,15 @@ mod tests {
         drop(gate.close().expect("open"));
         assert_eq!(gate.state(), GateState::Open);
         assert!(gate.enter().is_some());
+    }
+
+    /// **Finishing a hold is dropping it**: the gate goes back to `Closed`.
+    #[test]
+    fn finishing_a_held_gate_is_dropping_it() {
+        let gate = RenderGate::new();
+        gate.hold_closed().expect("closed").finish();
+        assert_eq!(gate.state(), GateState::Closed);
+        assert!(gate.begin_open().is_some());
     }
 
     /// **A transition from the wrong state is refused**, and refusals change nothing.

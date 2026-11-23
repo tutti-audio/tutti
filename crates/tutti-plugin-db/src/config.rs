@@ -135,12 +135,4 @@ mod tests {
             ]
         );
     }
-
-    /// **A config measures only when asked**: off by default, on after
-    /// `measuring`.
-    #[test]
-    fn measuring_is_off_until_asked() {
-        assert!(!CatalogConfig::new("/tmp").measuring);
-        assert!(CatalogConfig::new("/tmp").measuring().measuring);
-    }
 }

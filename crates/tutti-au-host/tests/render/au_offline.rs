@@ -420,7 +420,7 @@ fn an_out_of_range_render_quality_is_refused_by_the_host() {
     // through the raw property write rather than the host method, precisely
     // because the host method is what is being justified.
     let enforcing = ENFORCES_RENDER_QUALITY_RANGE.open(RATE, BLOCK);
-    let st = unsafe { raw_set_render_quality(enforcing.raw_unit(), 999) };
+    let st = unsafe { raw_set_render_quality(enforcing.unit().as_raw(), 999) };
     assert_eq!(
         st, PARAM_ERR,
         "{} is recorded as the one unit that enforces the range; it should answer \
@@ -430,7 +430,7 @@ fn an_out_of_range_render_quality_is_refused_by_the_host() {
 
     // AUMatrixReverb: the non-enforcing case, which is the majority.
     let lax = crate::support::corpus::MATRIX_REVERB.open(RATE, BLOCK);
-    let st = unsafe { raw_set_render_quality(lax.raw_unit(), 999) };
+    let st = unsafe { raw_set_render_quality(lax.unit().as_raw(), 999) };
     let read_back = lax.render_quality().unwrap();
     assert_eq!(
         (st, read_back),

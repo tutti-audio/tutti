@@ -126,7 +126,7 @@ fn hold_closed_and_begin_open_are_exclusive() {
                 gate.hold_closed().map(|held| {
                     // While held, no opening is granted.
                     let refused = gate.begin_open().is_none();
-                    drop(held);
+                    held.finish();
                     refused
                 })
             })

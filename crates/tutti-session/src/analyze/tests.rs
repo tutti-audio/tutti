@@ -13,6 +13,8 @@ use tutti_measure::{
 };
 use tutti_units::{Amplitude, Db, Hz, SampleRate, Samples, Seconds};
 
+mod whole_buffer;
+
 use super::{AnalyzeError, MeterBindError};
 
 const CHUNK_FRAMES: usize = super::CHUNK_FRAMES.get();

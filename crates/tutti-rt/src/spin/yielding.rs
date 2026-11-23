@@ -3,13 +3,9 @@
 
 use std::time::Duration;
 
-#[cfg(not(loom))]
-use std::{hint::spin_loop, thread::yield_now};
+use crate::sync::{spin_loop, yield_now};
 #[cfg(not(loom))]
 use tutti_platform::Instant;
-
-#[cfg(loom)]
-use loom::{hint::spin_loop, thread::yield_now};
 
 #[cfg(not(loom))]
 use super::{CLOCK_EVERY, now};

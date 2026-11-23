@@ -289,35 +289,3 @@ pub struct PresetMismatch {
 
 /// Convenience alias for `Result<T, AuError>`.
 pub type Result<T> = std::result::Result<T, AuError>;
-
-impl AuError {
-    /// Returns a human-readable description of the error.
-    ///
-    /// For `OsStatus` errors this decodes well-known AudioUnit status codes
-    /// (e.g. `-10867` → `"uninitialized"`) and falls back to `"unknown error"`.
-    pub fn message(&self) -> &'static str {
-        let code = match self {
-            AuError::OsStatus { code, .. } => *code,
-            AuError::RenderFailed { code, .. } => *code,
-            AuError::NullComponent => return "null component",
-            AuError::ComponentNotRegistered(_) => return "no such Audio Unit is registered",
-            AuError::RequiresAsyncInstantiation => {
-                return "component requires asynchronous instantiation (AUv3 with a view)";
-            }
-            AuError::CfStringAlloc => return "CoreFoundation string allocation failed",
-            AuError::InvalidBuffer(_) => return "invalid buffer",
-            AuError::BlockTooLarge { .. } => return "block larger than the block size",
-            AuError::MissingBus { .. } => return "scratch lacks a bus the render needs",
-            AuError::SampleRateRejected { .. } => return "sample rate rejected",
-            AuError::BlockSizeRejected { .. } => return "block size rejected",
-            AuError::PresetIo(_) => return "preset file I/O failed",
-            AuError::InvalidPreset(_) => return "not a valid .aupreset",
-            AuError::PresetIdentityMismatch(_) => {
-                return "preset belongs to a different Audio Unit";
-            }
-            AuError::LoadFailed(_) => return "failed to load AudioUnit",
-            AuError::BusTooWide { .. } => return "bus wider than a channel layout holds",
-        };
-        os_status_message(code)
-    }
-}

@@ -47,8 +47,6 @@ use crate::preset::AuPreset;
 use crate::ranges::RangeTable;
 use crate::stream::{AuBusLayout, StreamConfig};
 use crate::transport;
-#[cfg(feature = "testing")]
-use crate::types::AudioUnit;
 use crate::watch::PropertyWatch;
 
 /// An AU that has been instantiated but not yet initialized.
@@ -357,15 +355,6 @@ impl AuLoaded {
         self.handle.unit()
     }
 
-    /// The raw `AudioUnit` pointer, for a test that makes an AudioToolbox call
-    /// this crate does not wrap. Using it is the caller's `unsafe`. A render
-    /// made through it is not counted: hold `unit().rendering()` across it, or
-    /// keep it from overlapping `AuMidiOutput::withdraw`.
-    #[cfg(feature = "testing")]
-    pub fn raw_unit(&self) -> AudioUnit {
-        self.unit().as_raw()
-    }
-
     /// Installs the host transport callbacks (`kAudioUnitProperty_HostCallbacks`)
     /// so the AU can pull tempo, beat and transport state during its render,
     /// returning the state the host publishes into.
@@ -571,8 +560,7 @@ impl AuLoaded {
     ///
     /// # Errors
     /// Returns [`AuError::OsStatus`](crate::AuError::OsStatus) if the AU refuses
-    /// `AudioUnitAddRenderNotify`. Measured on macOS 15.6: none of the ~35 Apple
-    /// units nor the three third-party units installed do.
+    /// `AudioUnitAddRenderNotify`.
     pub fn add_render_notify<F>(&self, callback: F) -> Result<crate::render_notify::RenderNotify>
     where
         F: Fn(crate::render_notify::RenderNotification) + Send + Sync + 'static,
@@ -586,7 +574,7 @@ impl AuLoaded {
     /// This instance's unit, wrapped so a render-notify callback can capture it.
     ///
     /// A pre-render callback's whole job is usually to schedule automation on the
-    /// unit that is rendering, but `raw_unit` returns a bare
+    /// unit that is rendering, but the raw `AudioUnit` is a bare
     /// pointer that is neither `Send` nor `Sync`, so capturing it in the callback
     /// does not compile. This is the wrapper that makes it possible — see
     /// [`RenderUnit`](crate::render_notify::RenderUnit) for why the assertion is
@@ -617,9 +605,8 @@ impl AuLoaded {
     ///
     /// # Errors
     /// Returns [`AuError::OsStatus`](crate::AuError::OsStatus) if the AU refuses the call — but note that
-    /// `Ok(())` is not a promise the event does anything. Measured on macOS
-    /// 15.6, a nonexistent parameter id and a ramp on a non-rampable parameter
-    /// both return `noErr`. See
+    /// `Ok(())` is not a promise the event does anything: a nonexistent
+    /// parameter id and a ramp on a non-rampable parameter both return `noErr`. See
     /// [`render_notify::schedule`](crate::render_notify::schedule).
     pub fn schedule_parameters(
         &self,
@@ -647,9 +634,6 @@ impl AuLoaded {
     /// [`AuLoaded::initialize`] keys the render-callback install off. An AU that
     /// refuses `kAudioUnitProperty_ElementCount` also reports `0`, because
     /// "declines to say" and "has none" leave a caller in the same position.
-    ///
-    /// Measured on macOS 15.6: every Apple effect is 1 in / 1 out;
-    /// DLSMusicDevice is 0 in / **2 out**; AUMatrixMixer is 64 in / 4 out.
     pub fn bus_count(&self, direction: BusDirection) -> u32 {
         bus::bus_count(self.unit(), direction)
     }
@@ -672,8 +656,7 @@ impl AuLoaded {
 
     /// Every channel configuration the AU declares it can run.
     ///
-    /// An empty vec means the AU publishes no constraint — which is what all 22
-    /// Apple effects measured on macOS 15.6 do — and must be read as
+    /// An empty vec means the AU publishes no constraint, to be read as
     /// "unconstrained, consult the stream format", never as "supports nothing".
     /// See [`AuChannelConfig`] for why the negative entries stay sentinels.
     pub fn supported_channel_configs(&self) -> Vec<AuChannelConfig> {
@@ -688,9 +671,7 @@ impl AuLoaded {
     /// centre and LFE are indistinguishable and dialog can land in the subwoofer.
     ///
     /// An empty vec means the AU publishes no constraint and must be read as
-    /// "declines to say", never "supports nothing" — see
-    /// `channel_layout::supported_layout_tags` for the measured breakdown (only
-    /// 11 of ~38 units answer at all on macOS 15.6).
+    /// "declines to say", never "supports nothing".
     pub fn supported_layout_tags(&self, direction: BusDirection, bus: u32) -> Vec<AuLayoutTag> {
         channel_layout::supported_layout_tags(self.unit(), direction, bus)
     }
@@ -748,13 +729,6 @@ impl AuLoaded {
     /// `kAudioUnitErr_PropertyNotInUse` (-10850) is a real bus the AU gave no
     /// name, `kAudioUnitErr_InvalidElement` (-10877) is a bus that does not
     /// exist. A host sizing buffers cannot afford to confuse them.
-    ///
-    /// Measured on macOS 15.6: every Apple **mixer** answers -10850 for all of
-    /// its real buses — they publish no element names at all — while
-    /// DLSMusicDevice names its two outputs ("stereo mix", "unused") and the
-    /// third-party effects name theirs (TDR Nova: "Input", "Sidechain",
-    /// "Output"). See `channel_layout::element_name`, which also documents the
-    /// retain-count leak this read would have had.
     pub fn element_name(&self, direction: BusDirection, bus: u32) -> Result<String> {
         channel_layout::element_name(self.unit(), direction, bus)
     }
@@ -763,14 +737,11 @@ impl AuLoaded {
     /// publishes nothing.
     ///
     /// This is the real capability gate for MIDI-out hosting, and the one a host
-    /// should branch on. `None` — "not a MIDI source" — is what **every** AU
-    /// installed on this machine answers (measured: 0 of 138 components), so no
-    /// arpeggiator or step-sequencer AU is available here to exercise the path
-    /// end-to-end.
+    /// should branch on. `None` means "not a MIDI source".
     ///
     /// Note the asymmetry with [`install_midi_output`](Self::install_midi_output):
-    /// 45 of those same units happily **accept** the callback write while
-    /// publishing no output streams, so a successful install proves nothing. See
+    /// a unit can **accept** the callback write while publishing no output
+    /// streams, so a successful install proves nothing. See
     /// [`midi_out::midi_output_info`].
     pub fn midi_output_info(&self) -> Option<MidiOutputInfo> {
         midi_out::midi_output_info(self.unit())
@@ -793,8 +764,7 @@ impl AuLoaded {
     /// full contract is on [`MidiOutSink`].
     ///
     /// # Errors
-    /// [`AuError::OsStatus`](crate::AuError::OsStatus) if the AU refuses the property. Measured on macOS
-    /// 15.6: the output units refuse; the effects, instruments and mixers accept.
+    /// [`AuError::OsStatus`](crate::AuError::OsStatus) if the AU refuses the property.
     ///
     /// # Panics
     /// Never — but note the callback body cannot panic across the FFI boundary
@@ -815,17 +785,14 @@ impl AuLoaded {
     /// saved session.
     ///
     /// # Errors
-    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it,
-    /// though all 52 instantiable units measured on macOS 15.6 do.
+    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it.
     pub fn set_context_name(&self, name: &str) -> Result<()> {
         identity::set_context_name(self.unit(), name)
     }
 
     /// Reads back the name set by [`set_context_name`](Self::set_context_name).
     ///
-    /// All 57 instantiable units measured return the exact string written, so
-    /// a test can assert the write *landed* rather than that it returned
-    /// `noErr`.
+    /// Returns the exact string written.
     ///
     /// # Errors
     /// As [`set_context_name`](Self::set_context_name).
@@ -880,8 +847,7 @@ impl AuLoaded {
     /// supplied one that does not name a file.
     ///
     /// # Errors
-    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it;
-    /// 36 of 52 measured return a usable URL.
+    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement it.
     pub fn icon_location(&self) -> Result<Option<String>> {
         identity::icon_location(self.unit())
     }
@@ -889,30 +855,22 @@ impl AuLoaded {
     /// Whether this AU implements the parameter↔MIDI mapping family at all.
     ///
     /// The capability gate to branch on before offering a MIDI-learn UI, and the
-    /// counterpart of [`midi_output_info`](Self::midi_output_info). Unlike that
-    /// one, this capability **is** implemented on this machine — measured on
-    /// macOS 15.6, `true` for exactly 2 of 59 installed components (AUSampler
-    /// and AUMIDISynth), `false` for the other 57, including every effect and
-    /// every third-party unit installed here.
+    /// counterpart of [`midi_output_info`](Self::midi_output_info).
     pub fn supports_parameter_midi_mapping(&self) -> bool {
         midi_map::supports_parameter_midi_mapping(self.unit())
     }
 
     /// The AU's current parameter↔MIDI mapping table.
     ///
-    /// This is the surface VST3 spells `IMidiMapping`, inverted: the AU owns the
-    /// table and does the routing itself during render, so a host reads and
-    /// writes it rather than consulting it per block. Mod wheel, breath,
-    /// expression and sustain reach many instruments only this way.
+    /// The AU owns the table and does the routing itself during render.
     ///
-    /// Empty means "implements the property, has no mappings" — what a fresh
-    /// AUSampler reports. The order is **the AU's**, not insertion order
-    /// (AUSampler reorders), so compare tables as sets.
+    /// Empty means "implements the property, has no mappings". The order is
+    /// **the AU's**, not insertion order, so compare tables as sets.
     ///
     /// # Errors
     /// [`AuError::OsStatus`](crate::AuError::OsStatus) with `kAudioUnitErr_InvalidProperty` (-10879) from
-    /// the 57 of 59 units that do not implement the family. That is the routine
-    /// answer for an effect, not a fault — branch on
+    /// a unit that does not implement the family, the routine answer for an
+    /// effect; branch on
     /// [`supports_parameter_midi_mapping`](Self::supports_parameter_midi_mapping)
     /// first if the distinction matters.
     pub fn parameter_midi_mappings(&self) -> Result<Vec<AuMidiMapping>> {
@@ -921,21 +879,18 @@ impl AuLoaded {
 
     /// Adds `mappings`, replacing any that already target the same parameter.
     ///
-    /// Verified end-to-end on macOS 15.6, which is what separates this from the
-    /// crate's other "accepted but never called" surfaces: mapping CC 20 to
-    /// AUSampler's parameter 900 (`Gain`, `-96..=12` dB), then sending CC 20 =
-    /// 127 through [`send_midi`](crate::AuProcessor::send_midi) and rendering one block, moved
-    /// the parameter from `0` to `12`. The AU does the routing; the host only
-    /// installs the table.
+    /// The AU does the routing; the host only installs the table, and a CC sent
+    /// through [`send_midi`](crate::AuProcessor::send_midi) then moves the
+    /// parameter.
     ///
-    /// An empty slice is a no-op — a zero-length property write is `paramErr`
-    /// (-50) on both implementers.
+    /// An empty slice is a no-op: a zero-length property write is `paramErr`
+    /// (-50).
     ///
     /// # Errors
     /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
     /// family. **A `noErr` proves nothing about the mapping being meaningful**:
     /// a parameter id no parameter uses is accepted *and* appears in the
-    /// read-back table (measured: id `99999` on a ~10-parameter unit), as is an
+    /// read-back table, as is an
     /// out-of-range scope. Cross-check against
     /// [`get_parameter_list`](Self::get_parameter_list), and verify by reading
     /// [`parameter_midi_mappings`](Self::parameter_midi_mappings) back rather
@@ -1027,13 +982,9 @@ impl AuLoaded {
     /// Returns the plugin-reported processing latency in samples at the current
     /// sample rate.
     ///
-    /// Zero is a real answer here, not a fallback. Measured across every AU
-    /// registered on macOS 15.6 (29 effects, instruments and music effects):
-    /// **all 29 answer, none refuses**, and the ones with no latency answer
-    /// `0.0` — AUDelay, AUSampler, DLSMusicDevice and AUMatrixReverb all do.
-    /// So a zero from this function means the AU said zero. Contrast
-    /// `transport::tail_time`, where refusal is the norm:
-    /// every Apple instrument and mixer rejects `TailTime` with -10879.
+    /// Zero is a real answer here, not a fallback: a zero from this function
+    /// means the AU said zero. Contrast `transport::tail_time`, where refusal is
+    /// common.
     ///
     /// Returns [`Samples`] rather than a bare `u32` so the unit travels with the
     /// value; the AU reports seconds, and the rate scaling is what turns one
@@ -1064,9 +1015,7 @@ impl AuLoaded {
     ///
     /// # Errors
     /// Returns [`AuError::OsStatus`](crate::AuError::OsStatus) when the AU does not implement
-    /// `kAudioUnitProperty_TailTime`. Measured on macOS 15.6, every Apple
-    /// **effect** answers it, while every Apple instrument, mixer and generator
-    /// rejects it with `kAudioUnitErr_InvalidProperty` (-10879).
+    /// `kAudioUnitProperty_TailTime` (`kAudioUnitErr_InvalidProperty`, -10879).
     pub fn get_tail_time(&self) -> Result<Seconds> {
         transport::tail_time(self.unit())
     }
@@ -1084,11 +1033,9 @@ impl AuLoaded {
     /// is what makes a meter drift away from the audio.
     ///
     /// # Errors
-    /// Propagates the AU's refusal. Measured on macOS 15.6, **every one of the
-    /// 39 instantiable registered units refuses** with
-    /// `kAudioUnitErr_InvalidProperty` (-10879), so a caller treating this as
-    /// best-effort should discard the `Result` explicitly rather than expect a
-    /// success. See
+    /// Propagates the AU's refusal (`kAudioUnitErr_InvalidProperty`, -10879), so a
+    /// caller treating this as best-effort should discard the `Result`
+    /// explicitly. See
     /// `transport::set_presentation_latency` for the full measurement and for
     /// why the refusal is not absorbed here.
     pub fn set_presentation_latency(
@@ -1103,12 +1050,9 @@ impl AuLoaded {
     /// Which parameters writing the meta-parameter `id` may silently move.
     ///
     /// `None` means the AU did not answer — **not** that nothing moves. See
-    /// [`parameters::dependents_of`] for why those two must stay distinct, and
-    /// for the measurement that no unit on this machine answers at all despite
-    /// 28 of their parameters carrying a meta flag.
+    /// [`parameters::dependents_of`] for why those two must stay distinct.
     ///
-    /// Global scope, which is where every meta-flagged parameter measured here
-    /// lives; a mixer-hosting caller reaches for
+    /// Global scope; a mixer-hosting caller reaches for
     /// [`parameters::dependents_of_at`] directly, as with the rest of this
     /// crate's per-element parameter surface.
     pub fn dependent_parameters(&self, id: u32) -> Option<Vec<parameters::DependentParam>> {
@@ -1245,8 +1189,7 @@ impl AuLoaded {
     ///
     /// # Errors
     /// [`AuError::OsStatus`](crate::AuError::OsStatus) when the AU does not implement
-    /// `kAudioUnitProperty_OfflineRender` — which on macOS 15.6 is every Apple
-    /// effect and mixer; only the two instruments implement it. The refusal is
+    /// `kAudioUnitProperty_OfflineRender`. The refusal is
     /// propagated rather than reported as `false`, because a host that cannot
     /// tell "in real-time mode" from "has no offline mode" cannot warn the user
     /// that an export may not match the audition.
@@ -1271,18 +1214,14 @@ impl AuLoaded {
     /// Whether the AU is willing to render with its input and output buffers
     /// aliasing the same memory.
     ///
-    /// A host that gets `true` may skip one buffer copy per block per plugin.
-    /// Measured on macOS 15.6, six Apple effects advertise the property and all
-    /// six say yes; no unit on the system says no. See
-    /// `crate::offline::supports_in_place` for the list, and for why this crate
-    /// exposes only the read even though the property is writable.
+    /// A host that gets `true` may skip one buffer copy per block per plugin. See
+    /// `crate::offline::supports_in_place` for why this crate exposes only the
+    /// read even though the property is writable.
     ///
     /// # Errors
     /// [`AuError::OsStatus`](crate::AuError::OsStatus) when the AU does not implement
-    /// `kAudioUnitProperty_InPlaceProcessing`. Not flattened to `false`: since no
-    /// unit measured actually reports `0`, doing so would turn "never mentioned
-    /// it" into "forbids it" and make the host's census of the property a
-    /// fiction.
+    /// `kAudioUnitProperty_InPlaceProcessing`. Not flattened to `false`, which
+    /// would turn "never mentioned it" into "forbids it".
     pub fn supports_in_place_processing(&self) -> Result<bool> {
         crate::offline::supports_in_place(self.unit())
     }
@@ -1301,11 +1240,9 @@ impl AuLoaded {
     ///
     /// # Errors
     /// [`AuError::InvalidBuffer`](crate::AuError::InvalidBuffer) for a value above the maximum — enforced here
-    /// because three of the four units that implement the property accept
-    /// out-of-range values with `noErr` and read them straight back, so the AU's
-    /// own answer cannot be trusted to catch it. [`AuError::OsStatus`](crate::AuError::OsStatus) when the
-    /// AU has no such property. `crate::offline::set_render_quality` carries the
-    /// measured table.
+    /// because AUs accept out-of-range values with `noErr`, so the AU's own
+    /// answer cannot be trusted to catch it. [`AuError::OsStatus`](crate::AuError::OsStatus) when the
+    /// AU has no such property.
     pub fn set_render_quality(&mut self, quality: u32) -> Result<()> {
         crate::offline::set_render_quality(self.unit(), quality)
     }
@@ -1326,11 +1263,9 @@ impl AuLoaded {
     /// `.aupreset` is a user preset by definition, and routing one through the
     /// document property would tell the AU the opposite of the truth.
     ///
-    /// Measured on macOS 15.6: **no** unit on this machine implements property 50 —
-    /// AUDelay, AUDistortion, AUMatrixReverb, AUSpatialMixer and AULowpass all
-    /// answer `kAudioUnitErr_InvalidProperty` (-10879). So the fallback is the path
-    /// actually taken today; the try-first exists because the header mandates it
-    /// and because a third-party unit may well implement it.
+    /// A unit that does not implement property 50 answers
+    /// `kAudioUnitErr_InvalidProperty` (-10879) and the fallback is taken; the
+    /// try-first exists because the header mandates it.
     ///
     /// # Errors
     /// Returns the **fallback's** error if both properties fail, since that is the
@@ -1358,8 +1293,7 @@ impl AuLoaded {
     ///
     /// The identity keys are taken from this AU's own component description, never
     /// invented; see `crate::aupreset::save_preset_file` for why that is what
-    /// makes the file loadable elsewhere, and `crate::aupreset`'s module docs for
-    /// the measured consequence of getting them wrong.
+    /// makes the file loadable elsewhere.
     ///
     /// # Errors
     /// [`AuError::PresetIo`](crate::AuError::PresetIo) if the file cannot be written, [`AuError::OsStatus`](crate::AuError::OsStatus)
@@ -1379,7 +1313,7 @@ impl AuLoaded {
     ///
     /// A preset saved from a different plugin is refused with
     /// [`AuError::PresetIdentityMismatch`](crate::AuError::PresetIdentityMismatch) and this AU is left untouched. That
-    /// check is not redundant with the AU's own: measured on macOS 15.6, an AU
+    /// check is not redundant with the AU's own: an AU
     /// handed a dictionary bearing its own identity keys but another plugin's
     /// `data` blob accepts it and adopts nonsense values. See the
     /// `crate::aupreset` module docs.

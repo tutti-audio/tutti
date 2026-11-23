@@ -24,17 +24,10 @@
 //! than storing zero, so it keeps a refused shared claim's add that is not yet
 //! undone.
 
-use sync::{AtomicU32, Ordering};
+use crate::sync::{AtomicU32, Ordering};
 
 /// The word's atomic: `std`'s in a real build, `loom`'s under `--cfg loom`, so
 /// the models check this code rather than a replica.
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, Ordering};
-}
-
 /// The exclusive bit. Below it: the number of shared claims.
 const EXCLUSIVE: u32 = 1 << 31;
 
