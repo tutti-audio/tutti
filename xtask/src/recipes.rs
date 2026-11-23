@@ -769,13 +769,8 @@ impl Planner<'_> {
                 self.out.push(Step::UmbrellaApi(None));
             }
             "check-no-std" => self.check_no_std(),
-            "check-loom" => self.lines(&[
-                r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
-            ]),
-            "check-wasm" => self.lines(&[
-                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
-                "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,midi-network,serde -- -D warnings",
-            ]),
+            "check-loom" => self.lines(CHECK_LOOM),
+            "check-wasm" => self.lines(CHECK_WASM),
             "book" => {
                 let [out] = Self::params(name, args, [""])?;
                 for example in BOOK_SOUNDS {
@@ -892,23 +887,25 @@ impl Planner<'_> {
                 .env("CFLAGS_x86_64_pc_windows_msvc", cflags.clone()),
             ));
         };
-        win(
-            "--workspace --all-targets --exclude tutti-codec --exclude tutti-export --exclude tutti --exclude tutti-vst3-host --exclude tutti-plugin-server --exclude tutti-plugin-probe --exclude tutti-shared-plugin-vst3-cpp --exclude tutti-plugin-contract --exclude tutti-verify",
-        );
-        for a in [
-            "-p tutti-shared-plugin --all-targets",
-            "-p tutti-export --lib",
-            "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg --all-targets",
-            "-p tutti-plugin -p tutti-plugin-types --features tutti-plugin/clap,tutti-plugin/vst3,tutti-plugin/vst2,tutti-plugin/serde --all-targets",
-            "-p tutti-plugin-db --features serde --all-targets",
-            "-p tutti-vst2-host --all-targets",
-            "-p tutti-vst3-host -p tutti-plugin-server -p tutti-plugin-probe --lib --bins",
-            "-p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
-        ] {
+        for a in WINDOWS {
             win(a);
         }
     }
 }
+
+/// The arguments of each `cargo clippy --target {TARGET}` of `check-windows`: the workspace
+/// minus what Windows cannot build, then the crates built with their features.
+const WINDOWS: &[&str] = &[
+    "--workspace --all-targets --exclude tutti-codec --exclude tutti-export --exclude tutti --exclude tutti-vst3-host --exclude tutti-plugin-server --exclude tutti-plugin-probe --exclude tutti-shared-plugin-vst3-cpp --exclude tutti-plugin-contract --exclude tutti-verify",
+    "-p tutti-shared-plugin --all-targets",
+    "-p tutti-export --lib",
+    "-p tutti-codec --features encode-wav,encode-aiff,encode-flac,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg --all-targets",
+    "-p tutti-plugin -p tutti-plugin-types --features tutti-plugin/clap,tutti-plugin/vst3,tutti-plugin/vst2,tutti-plugin/serde --all-targets",
+    "-p tutti-plugin-db --features serde --all-targets",
+    "-p tutti-vst2-host --all-targets",
+    "-p tutti-vst3-host -p tutti-plugin-server -p tutti-plugin-probe --lib --bins",
+    "-p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests --all-targets",
+];
 
 /// A target with no `std`: a crate that builds for it uses only `core` and `alloc`.
 const NO_STD_TARGET: &str = "aarch64-unknown-none";
@@ -924,6 +921,15 @@ const NO_STD_CRATES: &[(&str, &[&str])] = &[
     ("tutti-buffers", &["serde"]),
     ("tutti-tempo", &["serde"]),
     ("tutti-voicing", &[]),
+];
+
+const CHECK_LOOM: &[&str] = &[
+    r#"RUSTFLAGS="--cfg loom" cargo clippy --locked -p tutti-rt -p tutti-plugin-ipc-ffi -p tutti-winmm-ffi --all-targets -- -D warnings"#,
+];
+
+const CHECK_WASM: &[&str] = &[
+    "cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings",
+    "cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,midi-network,serde -- -D warnings",
 ];
 
 const CHECK_FEATURES: &[&str] = &[
@@ -990,6 +996,27 @@ const LOOM: &[&str] = &[
     r#"RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test last_out_loom"#,
     r#"LOOM_MAX_PREEMPTIONS=3 RUSTFLAGS="--cfg loom" cargo test --locked -p tutti-rt --release --test seq_slots_loom"#,
 ];
+
+/// The hand lists the recipes hold, for the rows `check-layout` checks against the
+/// workspace (`gates/recipe_lists.rs`).
+pub(crate) fn listed() -> crate::gates::Listed {
+    crate::gates::Listed {
+        no_std: NO_STD_CRATES.iter().map(|(c, _)| *c).collect(),
+        commands: [
+            CHECK_FEATURES,
+            TEST_FEATURES,
+            MIRI,
+            RTSAN,
+            LOOM,
+            BENCH,
+            CHECK_LOOM,
+            CHECK_WASM,
+            WINDOWS,
+        ]
+        .concat(),
+        book_sounds: BOOK_SOUNDS,
+    }
+}
 
 /// Adding a bench means adding a line here: there is no sweep that would pick
 /// one up silently (the justfile's contract, which CI mirrors).

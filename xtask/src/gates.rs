@@ -38,6 +38,7 @@ mod prose;
 mod prose_names;
 mod range_types;
 mod ratchet;
+mod recipe_lists;
 mod session;
 mod session_api;
 mod sf2_spec;
@@ -57,6 +58,7 @@ mod values;
 mod vst3_sdk;
 mod width;
 
+pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
 
 use std::fs;
@@ -159,7 +161,13 @@ pub(crate) const GATES: &[GateDef] = &[
     gate("check-errors", true, |r| {
         errors::check(&r.tree, errors::ALLOW)
     }),
-    gate("check-layout", true, |r| layout::check(&r.tree)),
+    gate("check-layout", true, |r| {
+        let mut report = layout::check(&r.tree);
+        let lists = recipe_lists::check(&r.tree, &crate::recipes::listed());
+        report.out.extend(lists.out);
+        report.findings.extend(lists.findings);
+        report
+    }),
     gate("check-range-types", true, |r| {
         range_types::check(&r.tree, range_types::EXCEPTIONS)
     }),
