@@ -41,8 +41,9 @@ pub struct EditMark<K> {
     /// call, a [`Gesture`](crate::Gesture) when it is dropped.
     pub ended: bool,
     /// The saved values as they stood at the landing. For a mark of a gesture
-    /// that is not ended, the gesture's targets are at their base before its
-    /// first write.
+    /// that is not ended, the gesture's targets are at their base before the
+    /// first of its writes the log saw: a log made inside a gesture holds them
+    /// at their value before the next write.
     pub after: SavedValues<K>,
 }
 
@@ -85,7 +86,8 @@ struct Step {
 }
 
 struct Steps {
-    cap: UndoSteps,
+    /// `None` keeps every step.
+    cap: Option<UndoSteps>,
     steps: VecDeque<Step>,
     coalesced: UndoSteps,
 }
@@ -120,7 +122,7 @@ impl Steps {
     /// Drops the oldest step until `cap` remain, counting each: the `after` of
     /// every newer mark still holds the values a dropped step set.
     fn coalesce(&mut self) {
-        while self.held() > self.cap {
+        while self.cap.is_some_and(|cap| self.held() > cap) {
             self.steps.pop_front();
             self.coalesced += UndoSteps::new(1);
         }
@@ -161,7 +163,7 @@ impl<K: AppKey> EditLog<K> {
     pub(super) fn new(state: &Arc<ValueState<K>>) -> Self {
         let slot = Arc::new(LogSlot {
             steps: Mutex::new(Steps {
-                cap: UndoSteps::new(u64::MAX),
+                cap: None,
                 steps: VecDeque::new(),
                 coalesced: UndoSteps::ZERO,
             }),
@@ -179,7 +181,7 @@ impl<K: AppKey> EditLog<K> {
     pub fn cap(self, n: UndoSteps) -> Self {
         {
             let mut log = self.slot.steps.lock();
-            log.cap = n;
+            log.cap = Some(n);
             log.coalesce();
         }
         self
