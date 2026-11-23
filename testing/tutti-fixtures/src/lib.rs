@@ -95,7 +95,7 @@ pub use alloc_count::{ThreadCounting, allocations};
 pub use au::*;
 pub use block_on::{block_on, block_on_within};
 pub use digest::{Fnv, Noise, noise};
-pub use env::{ScopedEnv, cases};
+pub use env::{ScopedEnv, cases, remove_env, set_env};
 #[cfg(feature = "graph")]
 pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};
 #[cfg(not(loom))]

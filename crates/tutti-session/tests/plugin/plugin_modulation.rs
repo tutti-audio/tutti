@@ -43,16 +43,10 @@ const CHUNK: usize = 1_024;
 /// the range.
 const GAIN: u32 = 77;
 
-/// SAFETY: nextest runs each test in its own process, and every variable is
-/// set before the first server is spawned, from the test's own thread.
-fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    unsafe { std::env::set_var(key, value) };
-}
-
 /// A detached stereo session at 48 kHz, the probe's server in the
 /// environment.
 fn detached() -> DetachedSession {
-    set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     Session::builder()
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
@@ -197,10 +191,10 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
     let _ = std::fs::remove_file(&once);
     // The probe of the plugin's file runs before the fault variable is set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
-    set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
-    set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
-    set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_ONCE_FILE", &once);
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK", "8");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
     let mut s = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
@@ -490,7 +484,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
     // The plugin's file is probed before its variables are set; the reference
     // plugin answers `clap.preset-load` only when asked.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
     let mut s = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);
@@ -571,8 +565,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
 
     // The plugin's file is probed before its variables are set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
-    set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "2");
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_APPLY_GAIN", "1");
     let mut s = detached();
     let mut drive = Drive::new();
     let node = add_probe(&mut s);

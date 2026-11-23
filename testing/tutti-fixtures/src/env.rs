@@ -2,15 +2,41 @@
 
 use std::ffi::OsStr;
 
-/// Environment variables a test set, unset again when the guard drops.
+/// Sets `key` to `value` for the rest of the test's process.
 ///
 /// Setting the environment is `unsafe` because another thread of the process
-/// may be reading it. This is the one place the suites do it, and it is safe to
-/// call on the terms every caller is under: nextest runs each test in a
-/// process of its own, and a test sets its variables before it starts a thread
-/// or a plugin that reads them. A test that shares variables with tests in
-/// other processes (the probe's switches) also holds the
-/// [`machine_lock`](fn@crate::machine_lock).
+/// may be reading it. This and [`remove_env`] are the one place the suites do
+/// it, and they are safe to call on the terms every caller is under: nextest
+/// runs each test in a process of its own, and a test sets its variables
+/// before it starts a thread or a plugin that reads them. A test that shares
+/// variables with tests in other processes (the probe's switches) uses a
+/// [`ScopedEnv`] and holds the [`machine_lock`](fn@crate::machine_lock).
+pub fn set_env(key: &str, value: impl AsRef<OsStr>) {
+    #[allow(
+        unsafe_code,
+        reason = "the suites' one environment write; see the function"
+    )]
+    // SAFETY: no other thread of this process reads the environment while a
+    // test sets it (the function's doc: one test per process, set before any
+    // thread starts).
+    unsafe {
+        std::env::set_var(key, value);
+    }
+}
+
+/// Removes `key` from the environment of the test's process, on the terms of
+/// [`set_env`].
+pub fn remove_env(key: &str) {
+    #[allow(unsafe_code, reason = "undoes `set_env`; see its doc")]
+    // SAFETY: as in `set_env`: the threads a test started have stopped reading
+    // the environment by the time it removes a variable.
+    unsafe {
+        std::env::remove_var(key);
+    }
+}
+
+/// Environment variables a test set, unset again when the guard drops, on the
+/// terms of [`set_env`].
 #[derive(Debug, Default)]
 pub struct ScopedEnv(Vec<String>);
 
@@ -22,16 +48,7 @@ impl ScopedEnv {
 
     /// Sets `key` to `value` until the guard drops.
     pub fn set(&mut self, key: &str, value: impl AsRef<OsStr>) {
-        #[allow(
-            unsafe_code,
-            reason = "the suites' one environment write; see the type"
-        )]
-        // SAFETY: no other thread of this process reads the environment while
-        // a test sets it (the type's doc: one test per process, set before any
-        // thread starts).
-        unsafe {
-            std::env::set_var(key, value);
-        }
+        set_env(key, value);
         self.0.push(key.to_owned());
     }
 }
@@ -39,12 +56,7 @@ impl ScopedEnv {
 impl Drop for ScopedEnv {
     fn drop(&mut self) {
         for key in &self.0 {
-            #[allow(unsafe_code, reason = "undoes `set`; see the type")]
-            // SAFETY: as in `set`: the threads a test started have stopped
-            // reading the environment by the time its guard drops.
-            unsafe {
-                std::env::remove_var(key);
-            }
+            remove_env(key);
         }
     }
 }
