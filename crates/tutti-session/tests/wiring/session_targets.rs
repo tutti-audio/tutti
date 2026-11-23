@@ -37,7 +37,11 @@ fn a_tempo_map_written_is_the_map_read_back() {
     s.set(tempo.to(Arc::clone(&map))).unwrap();
     assert_eq!(s.get(tempo).unwrap(), map);
     let _ = s.update();
-    assert_eq!(s.tempo_map(), map, "the engine's map is the one written");
+    assert_eq!(
+        crate::tempo::effective(&s),
+        map,
+        "the engine's map is the one written"
+    );
 
     s.set(tempo.to(TempoMap::constant(Bpm::of(90.0)).unwrap()))
         .unwrap();
@@ -151,7 +155,7 @@ fn a_batch_with_a_refused_click_volume_lands_nothing() {
     assert_eq!(refused.at, 1);
     assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::NotFinite));
     assert_eq!(s.get(tempo).unwrap(), before);
-    assert_eq!(s.tempo_map(), before);
+    assert_eq!(crate::tempo::effective(&s), before);
 }
 
 /// The click's mode is a setting the audio thread reads: a write is read back

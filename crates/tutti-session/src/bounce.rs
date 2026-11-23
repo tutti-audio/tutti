@@ -2050,7 +2050,7 @@ where
 
         // The span: the range named, else the transport's loop, else the end
         // the bounce names; never a guess.
-        let map = self.transport.settings().tempo_map();
+        let map = self.transport.bases.tempo.get();
         // The loop as set: a staged or just sent region counts, not only the
         // one the engine has applied.
         let looped = self
@@ -2197,7 +2197,7 @@ where
                     sample_rate: rate,
                     loop_range: None,
                 })
-                .meter(self.transport.settings().project_meter().current()),
+                .meter(self.transport.bases.meter.get()),
             ))
         });
         // The edit hook's timeline: the same object the renderer advances, or
@@ -2635,7 +2635,7 @@ mod tests {
                     .tempo()
                     .to(tutti_tempo::TempoMap::constant(Bpm::of(90.0)).unwrap()),
             )
-            .expect("not following");
+            .expect("a tempo write is accepted");
         let seen: Arc<Mutex<Option<(tutti_units::Beat, Bpm)>>> = Arc::default();
         let into = Arc::clone(&seen);
         bounced(
@@ -2663,12 +2663,22 @@ mod tests {
     #[test]
     fn a_bounce_after_a_tempo_set_renders_the_new_tempo_without_an_update() {
         let mut session = session();
-        let before = session.tempo_map();
+        let before = session
+            .get(session.transport_handle().tempo().effective())
+            .unwrap();
         let written = Arc::new(tutti_tempo::TempoMap::constant(Bpm::of(75.0)).unwrap());
         session
             .set(session.transport_handle().tempo().to(Arc::clone(&written)))
-            .expect("not following");
-        assert!(Arc::ptr_eq(&session.tempo_map(), &before), "staged only");
+            .expect("a tempo write is accepted");
+        assert!(
+            Arc::ptr_eq(
+                &session
+                    .get(session.transport_handle().tempo().effective())
+                    .unwrap(),
+                &before
+            ),
+            "staged only"
+        );
         let seen: Arc<Mutex<Option<Option<Bpm>>>> = Arc::default();
         let into = Arc::clone(&seen);
         bounced(

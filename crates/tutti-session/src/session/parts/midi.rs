@@ -7,7 +7,6 @@
 )]
 
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tutti_platform::Instant;
 
 use tutti_buffers::Float;
@@ -83,11 +82,6 @@ impl MidiPart {
         }
     }
 
-    /// The flag the tempo target reads, shared with the follower's state.
-    pub(crate) fn following(&self) -> Arc<AtomicBool> {
-        self.state.following_flag()
-    }
-
     /// Registers the MIDI cells in `table`.
     pub(crate) fn provide_values(&self, table: &ValueTable) {
         self.hardware.provide_values(table);
@@ -153,6 +147,7 @@ impl MidiPart {
         let follow = FollowCx {
             settings: transport.settings(),
             meter: transport.settings().project_meter(),
+            bases: &transport.bases,
             playhead,
         };
         let tempo_edited = self.state.follow_phase(&follow, graph, out);
