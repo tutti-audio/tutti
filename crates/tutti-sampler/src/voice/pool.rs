@@ -30,7 +30,6 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::{CappedVec, Mutex, Overflow, RingReader, RingWriter, ring};
-use tutti_timeline::LoopReader;
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -346,7 +345,7 @@ pub struct VoicePool<F: SamplerFloat> {
     /// and not others, which is worse than flushing none.
     pub(crate) clock: Clock,
 
-    /// The transport's loop as the control side knows it, shared with the pool's handles.
+    /// The transport's loop as the pool last rendered it, shared with the pool's handles.
     loops: Arc<LoopFeed>,
 
     /// The lanes every slot's block read renders through, one voice at a
@@ -402,20 +401,6 @@ impl<F: SamplerFloat> VoicePool<F> {
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
             reach: Reach::Live,
         }
-    }
-
-    /// This pool reading the transport's loop through `reader`
-    /// ([`MotionFsm::loop_reader`](tutti_timeline::MotionFsm::loop_reader)).
-    ///
-    /// The pool's handle reads the loop region on its reclaim tick, control-side, and sends a spare
-    /// vocoder to each stretched voice whose window covers the loop's start (see
-    /// [`VoicePoolHandle::follow_loop`], which does the same for a pool no
-    /// transport is bound to). A fork reads no transport: its voices keep the spares
-    /// they were built with.
-    #[must_use]
-    pub fn loops(self, reader: LoopReader) -> Self {
-        self.loops.bind(reader);
-        self
     }
 
     /// The spare vocoders the pool's voices carry.
@@ -1021,6 +1006,7 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.drain_commands();
+        self.loops.publish(cx.env.transport.looping);
         let clock = self.clock.observe_with(cx.env, cx.tempo);
         let frames = io.frames();
         let (_, mut outs) = io.split();

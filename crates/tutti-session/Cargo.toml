@@ -65,7 +65,6 @@ tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
 # The font `load_soundfont` parses (`tutti-soundfont` does not re-export it).
 tutti-sf2 = { version = "0.0.1", path = "../tutti-sf2", optional = true }
-tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
 tutti-export = { version = "0.0.1", path = "../tutti-export", default-features = false, optional = true }
 # `DecodeError` (in `Error::Decode`, whatever decoders are on) and `Format`,
 # the file format a bounce names (`Bounce::format`). No codec feature.
@@ -132,7 +131,8 @@ sampler = ["dep:tutti-sampler", "dep:futures-channel"]
 # `Session::analyze`: an offline analysis job over a wave or a file.
 analyze = ["dep:tutti-measure", "dep:futures-channel"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "dep:tutti-dsp"]
-synth = ["midi", "dep:tutti-polysynth"]
+# The polysynth suites and benches (a dev-dependency); the library names no synth.
+synth = ["midi"]
 # Export. `export` is the offline renderer and WAV, which is pure Rust; FLAC and
 # AIFF are pure Rust and opt-in (`encode-flac`, `encode-aiff`).
 export = ["dep:tutti-export", "dep:tutti-dsp", "dep:futures-channel", "encode-wav"]
@@ -163,6 +163,7 @@ au = ["plugin", "tutti-plugin/au"]
 testing = ["tutti-cpal?/testing"]
 
 [dev-dependencies]
+tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth" }
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
 # Turns `testing` on for this crate's own tests, benches and doctests.

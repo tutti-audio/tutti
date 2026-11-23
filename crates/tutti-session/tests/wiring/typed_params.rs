@@ -1,8 +1,8 @@
 //! Typed params on keys (doc 030, T2, T3, N2, N3): `lp.cutoff()` is a
 //! reference whose value is in the unit the node declares, `Session::set`
 //! takes it with a value of that unit and says why it refused, and a host's
-//! own `ParamNode` is inserted as `Params(node)` with no hand-written
-//! `SessionNode`.
+//! own `ParamNode` is inserted as `Params(node)` with nothing
+//! implemented for the session.
 
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::{BusTopology, ChannelLayout};
@@ -159,7 +159,7 @@ impl ParamNode for Mine {
 tutti_graph::declare_params!([] Mine, n { Cutoff => Hz = &n.cutoff });
 
 /// **A host's `ParamNode` is inserted as `Params(node)` and nothing more**:
-/// no `IntoNode` and no `SessionNode` of its own. Its params are addressed
+/// no `IntoNode` of its own. Its params are addressed
 /// (`set_param` reaches it), its key has the typed method its declaration
 /// gives, and a fork of it starts from the value set.
 #[test]
