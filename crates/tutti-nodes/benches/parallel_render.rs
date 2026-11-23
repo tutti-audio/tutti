@@ -187,10 +187,9 @@ fn tiny(lanes: usize, light: bool, workers: usize) -> Executor {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    // The cost model keeps the declared-light graph on one thread (its
-    // gains pack into two tasks of eight, four tasks in all, too cheap to
-    // spread); the undeclared one spreads a task per gain.
-    assert_eq!(exec.is_parallel(), workers > 1 && !light);
+    // Declared light, the gains pack into two tasks of eight (four tasks in
+    // all); undeclared, a task per gain. Either spreads over a pool.
+    assert_eq!(exec.is_parallel(), workers > 1);
     exec
 }
 
