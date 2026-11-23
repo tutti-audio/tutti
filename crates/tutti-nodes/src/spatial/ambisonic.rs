@@ -417,6 +417,10 @@ impl crate::ControlSet for AmbisonicDecoderSet {
         &[]
     }
 
+    fn units(&self) -> &'static [tutti_graph::DeclaredUnit] {
+        &[]
+    }
+
     fn defaults(&self) {}
 
     fn flatten(&self, _: &(), _: &mut [f64]) {}

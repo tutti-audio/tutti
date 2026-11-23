@@ -410,7 +410,7 @@ fn an_ordinary_corpus_parameter_carries_no_meta_scope() {
 /// The decode reads the struct out of a byte buffer, so a width or ordering
 /// change in the binding silently reinterprets every entry. Pinned here rather
 /// than trusted, the same way `parameters::tests` pins the hand-declared
-/// `ClumpNameRequest` layout.
+/// `NameRequest` layout.
 #[test]
 fn dependent_parameter_matches_the_c_abi() {
     use coreaudio_sys::AUDependentParameter;

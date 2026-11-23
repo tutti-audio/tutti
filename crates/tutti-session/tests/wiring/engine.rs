@@ -200,7 +200,7 @@ fn the_graph_runs_at_the_rate_it_was_built_at() {
 fn the_transport_converts_at_the_sessions_rate() {
     let s = offline_48k();
     assert_eq!(s.sample_rate(), SampleRate::of(RATE));
-    let beat = (s.tempo_map())
+    let beat = (crate::tempo::effective(&s))
         .view(s.sample_rate())
         .frame_at_or_after(Beat::new(1.0));
     assert_eq!(beat.get(), 24_000, "one beat at 120 BPM and 48 kHz");

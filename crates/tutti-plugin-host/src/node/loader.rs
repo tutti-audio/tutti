@@ -4,7 +4,8 @@
 use std::sync::Arc;
 use tutti_buffers::{Float, FloatWidth};
 use tutti_plugin_types::{MainThreadMarker, MainWorkHandle};
-use tutti_rt::PendingSampleRate;
+use tutti_rt::AtomicCell;
+use tutti_units::SampleRate;
 
 use tutti_rt::Mutex;
 
@@ -221,7 +222,7 @@ struct Wired<L: Loaded, F: Float> {
     inner: Arc<Mutex<Instance<L>>>,
     /// Where the audio side parks a rate for the main thread's pump; drained
     /// by the handle's backend.
-    pending_sample_rate: Arc<PendingSampleRate>,
+    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where the backend posts the host's parameter writes the client drains.
     post: super::host_edits::EditPost,
     descriptor: PluginDescriptor,
@@ -276,7 +277,7 @@ where
     // (`Instance::pump`, raised as `PluginInvalidation` through the handle's
     // `on_invalidate`), run on the main thread's tick: `PluginHandle::editor_idle`
     // or the node's `Rebinder::tick`, which the session calls at each update.
-    let pending_sample_rate = Arc::new(PendingSampleRate::new());
+    let pending_sample_rate = Arc::new(AtomicCell::new(None));
     // `loaded.features`, not a local copy, so the node gates its per-block
     // transport send on the exact value the handle reports. One value, read
     // twice, cannot drift into a declared-but-undelivered capability.
@@ -380,7 +381,7 @@ where
         declared,
         wiring.features,
         prepare.rate(),
-        Arc::new(PendingSampleRate::new()),
+        Arc::new(AtomicCell::new(None)),
         None,
         parameters,
         spares,

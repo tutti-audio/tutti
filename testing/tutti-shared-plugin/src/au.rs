@@ -101,12 +101,14 @@ struct MidiMapping {
 }
 const _: () = assert!(std::mem::size_of::<MidiMapping>() == 32);
 
-/// `AudioUnitParameterNameInfo` as `ParameterClumpName` reads it: the clump's
-/// id in, its name out (`{ UInt32; CFStringRef }`, 16 bytes).
+/// `AudioUnitParameterNameInfo` as `ParameterClumpName` and `kAudioUnitProperty_ParameterIDName`
+/// read it: the id in (and the desired length, for `kAudioUnitProperty_ParameterIDName`), the name
+/// out (`{ UInt32; SInt32; CFStringRef }`, 16 bytes).
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ClumpNameInfo {
+struct NameInfo {
     id: u32,
+    length: i32,
     name: sys::CFStringRef,
 }
 
@@ -511,8 +513,11 @@ fn property_shape(
                 false,
             )
         }
-        x if x == sys::kAudioUnitProperty_ParameterClumpName && global => {
-            (std::mem::size_of::<ClumpNameInfo>() as u32, false)
+        x if (x == sys::kAudioUnitProperty_ParameterClumpName
+            || x == sys::kAudioUnitProperty_ParameterIDName)
+            && global =>
+        {
+            (std::mem::size_of::<NameInfo>() as u32, false)
         }
         x if x == sys::kAudioUnitProperty_ParametersForOverview && global => (
             (OVERVIEW.len() * std::mem::size_of::<sys::AudioUnitParameter>()) as u32,
@@ -703,7 +708,7 @@ unsafe extern "C" fn get_property(
                     if io_size.is_null() {
                         return ERR_PARAM;
                     }
-                    let Some(request) = read_property::<ClumpNameInfo>(data, *io_size) else {
+                    let Some(request) = read_property::<NameInfo>(data, *io_size) else {
                         return ERR_INVALID_PROPERTY_VALUE;
                     };
                     let (unit, _, name) = core::UNITS[core::UNITS.len() - 1];
@@ -715,8 +720,37 @@ unsafe extern "C" fn get_property(
                     write_property(
                         data,
                         io_size,
-                        ClumpNameInfo {
+                        NameInfo {
                             id: request.id,
+                            length: request.length,
+                            name: CFRetain(name.as_CFTypeRef()) as sys::CFStringRef,
+                        },
+                    )
+                }
+                x if x == sys::kAudioUnitProperty_ParameterIDName => {
+                    if io_size.is_null() {
+                        return ERR_PARAM;
+                    }
+                    let Some(request) = read_property::<NameInfo>(data, *io_size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let Some(short) = core::SHORT_NAMES.get(request.id as usize) else {
+                        return ERR_INVALID_PARAMETER;
+                    };
+                    // The name cut to the length asked for; a negative length
+                    // (`kAudioUnitParameterName_Full`) asks for the whole name.
+                    let name = match usize::try_from(request.length) {
+                        Ok(length) => short.chars().take(length).collect::<String>(),
+                        Err(_) => (*short).to_string(),
+                    };
+                    let name = CFString::new(&name);
+                    // Copy rule: the caller owns the reference it is given.
+                    write_property(
+                        data,
+                        io_size,
+                        NameInfo {
+                            id: request.id,
+                            length: request.length,
                             name: CFRetain(name.as_CFTypeRef()) as sys::CFStringRef,
                         },
                     )

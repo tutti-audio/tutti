@@ -65,6 +65,10 @@ mod plugin_modulation;
 // The reference VST2 plugin, in process: the project meter it is given.
 #[cfg(feature = "vst2")]
 mod vst2_meter;
+// A plugin's note names and parameter groups through its info:
+// the shared test plugin (CLAP), in a real `plugin-server`.
+#[cfg(feature = "clap")]
+mod plugin_info;
 // A plugin's presets through its info and the session's jobs: a list that loads
 // by id (VST2, in process), one read for a served plugin (VST3, in a real
 // `plugin-server`) and a file that loads by path (CLAP, in a real `plugin-server`).

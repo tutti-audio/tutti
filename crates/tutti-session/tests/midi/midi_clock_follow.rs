@@ -14,10 +14,7 @@ use tutti_platform::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_runtime::{ClockKind, MidiClockDecoder};
-use tutti_session::{
-    FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, SetRefusal,
-    ValueErrorKind,
-};
+use tutti_session::{FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent};
 use tutti_timeline::MotionCommand;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
 use tutti_units::{At, Bpm, Losses, SampleRate};
@@ -298,11 +295,11 @@ fn mtc_quarter_frames_lock_and_play_from_their_position() {
     assert!((beat - 20.0).abs() < 2.0, "near 10 s = beat 20, at {beat}");
 }
 
-/// **A Beat Clock follower owns the tempo; MTC does not**: while it follows,
-/// the session refuses a tempo set and `follow_tempo`, and an MTC follow
-/// refuses neither.
+/// **A Beat Clock follower is the tempo source; MTC is not**: while it follows,
+/// `follow_tempo` is refused, and an MTC follow refuses it. A tempo set lands
+/// in the base either way.
 #[test]
-fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
+fn a_beat_clock_follower_is_the_tempo_source_and_mtc_is_not() {
     let (mut s, _fake) = rig();
     follow(&mut s, ClockKind::Mtc);
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
@@ -313,12 +310,7 @@ fn a_beat_clock_follower_owns_the_tempo_and_mtc_does_not() {
     s.midi().unfollow_tempo().unwrap();
 
     follow(&mut s, ClockKind::BeatClock);
-    assert_eq!(
-        crate::tempo::set_tempo(&mut s, Bpm::of(100.0))
-            .unwrap_err()
-            .kind,
-        ValueErrorKind::Refused(SetRefusal::Following)
-    );
+    assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
     let taken = s.midi().follow_tempo(FollowTempo::new(node, G));
     assert!(matches!(taken, Err(MidiError::TempoSourceTaken)));
 
