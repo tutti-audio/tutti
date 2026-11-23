@@ -25,7 +25,7 @@ const RAMP: Seconds = Seconds::new(0.05);
 // The params a [`VbapPannerNode`] lets the graph modulate, in port order, and the
 // [`VbapPannerConfig`] it is made from: the bus it pans over, and the bearing, height,
 // spread and width at the start.
-tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, VbapPannerConfig, VbapPannerCells {
+tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(Copy, PartialEq)] VbapPannerConfig, VbapPannerCells {
     required { output: BusTopology }
     params {
         Azimuth => azimuth: Azimuth = Azimuth::FRONT,

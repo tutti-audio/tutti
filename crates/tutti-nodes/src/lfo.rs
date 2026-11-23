@@ -17,8 +17,7 @@ use tutti_units::UnitParam;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_rt::Param;
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::{
     BeatsPerCycle, Bipolar, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate,
 };
@@ -96,10 +95,8 @@ impl core::fmt::Display for LfoClock {
 pub struct LfoNode {
     wave: Waveform,
     clock: LfoClock,
-    /// The free-running rate: read only by [`LfoClock::Free`], and declared as
-    /// a param only then.
-    rate: Param<Hz>,
-    depth: Param<Bipolar>,
+    /// The free-running rate and the depth: the rate is a cell only for [`LfoClock::Free`].
+    cells: LfoCells,
     /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
     /// Free-running clock position within its cycle: a [`RunningPhase`], exact for as
@@ -121,83 +118,25 @@ fn lfo_step(rate: f64, per_hz: f64) -> PhaseStep {
     PhaseStep::from(PhaseIncrement::new((rate * per_hz).clamp(-most, most)))
 }
 
-/// What an [`LfoNode`] is made from: its shape, its clock and its starting depth and phase.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LfoConfig {
-    shape: LfoShape,
-    seed: u64,
-    clock: LfoClock,
-    rate: Hz,
-    depth: Bipolar,
-    phase_offset: PhaseIncrement,
-}
-
-impl LfoConfig {
-    /// A free-running LFO of `shape` (seed 0) at a rate of 1 Hz, at full depth and no phase
-    /// offset. Its phase step takes the rate [`Node::prepare`] hands the node.
-    #[must_use]
-    pub const fn new(shape: LfoShape) -> Self {
-        Self {
-            shape,
-            seed: 0,
-            clock: LfoClock::Free,
-            rate: Hz::new(1.0),
-            depth: Bipolar::MAX,
-            phase_offset: PhaseIncrement::new(0.0),
-        }
+// The params an [`LfoNode`] lets the graph modulate, in port order: its depth and,
+// free-running, its rate (a beat-synced node's span is its clock); and the [`LfoConfig`]
+// it is made from: its shape, its clock and its starting depth and phase. Both params
+// are read per frame. The clock is fixed once the node is live (a config option only),
+// so its shape never changes. A config that gives a beat span has no rate cell, whatever
+// rate it was given. A free-running LFO at 1 Hz is the default; a rate of `None` with no
+// beat span is a free clock at no rate cell (not a form a caller writes).
+tutti_graph::declare_params!([] LfoNode, #[derive(Copy, PartialEq)] LfoConfig, LfoCells {
+    required { shape: LfoShape }
+    params {
+        Depth => depth: Bipolar = Bipolar::MAX,
+        Rate => rate: Option<Hz> = Some(Hz::new(1.0)),
     }
-
-    /// The random shapes' seed: seed 0 is the plain sequence, the one a
-    /// [`tutti_modulation::Lfo`] of the same seed produces in a control lane.
-    /// A shape that is not random ignores it.
-    #[must_use]
-    pub const fn seed(mut self, seed: u64) -> Self {
-        self.seed = seed;
-        self
+    options {
+        seed: u64 = 0,
+        beat_sync: Option<BeatsPerCycle> = None,
+        phase_offset: PhaseIncrement = PhaseIncrement::new(0.0)
     }
-
-    /// Runs free at `rate` cycles a second ([`LfoClock::Free`]), at the start.
-    ///
-    /// The clock moves less than half a cycle a frame: a rate of magnitude `sample rate / 2`
-    /// or more runs at just under that, forwards or backwards by its sign, so a random
-    /// shape's cycle index never skips or reverses.
-    #[must_use]
-    pub const fn rate(mut self, rate: Hz) -> Self {
-        self.clock = LfoClock::Free;
-        self.rate = rate;
-        self
-    }
-
-    /// Follows the transport beat, `beats_per_cycle` beats a cycle
-    /// ([`LfoClock::Synced`]): a larger span is slower.
-    #[must_use]
-    pub const fn beat_sync(mut self, beats_per_cycle: BeatsPerCycle) -> Self {
-        self.clock = LfoClock::Synced(beats_per_cycle);
-        self
-    }
-
-    /// The modulation [`Bipolar`] at the start.
-    ///
-    /// Bipolar: a negative depth inverts the wave, so `-1.0` is the same
-    /// shape phase-flipped and `0.0` is flat.
-    #[must_use]
-    pub const fn depth(mut self, depth: Bipolar) -> Self {
-        self.depth = depth;
-        self
-    }
-
-    /// The [`PhaseIncrement`] offset, conventionally `0.0` to `1.0` for one full cycle.
-    ///
-    /// Added to the unwrapped clock position, so any real value is valid: the
-    /// wave takes the phase as the position's `floor`-based fraction, so a
-    /// negative offset lags rather than reading off the front of the shape. An
-    /// offset past a whole cycle also moves a random wave to a later step.
-    #[must_use]
-    pub const fn phase_offset(mut self, offset: PhaseIncrement) -> Self {
-        self.phase_offset = offset;
-        self
-    }
-}
+});
 
 /// The config for a control-rate LFO's declaration: the same shape, seed,
 /// rate and phase. Beat-synced, it produces the values a control lane
@@ -208,22 +147,25 @@ impl From<tutti_modulation::Lfo> for LfoConfig {
     fn from(lfo: tutti_modulation::Lfo) -> Self {
         let config = Self::new(lfo.shape).seed(lfo.seed).phase_offset(lfo.phase);
         match lfo.rate {
-            tutti_modulation::LfoRate::Beats(per_cycle) => config.beat_sync(per_cycle),
-            tutti_modulation::LfoRate::Hz(rate) => config.rate(rate),
+            tutti_modulation::LfoRate::Beats(per_cycle) => config.beat_sync(Some(per_cycle)),
+            tutti_modulation::LfoRate::Hz(rate) => config.rate(Some(rate)),
         }
     }
 }
 
 impl From<LfoConfig> for LfoNode {
-    fn from(config: LfoConfig) -> Self {
+    fn from(mut config: LfoConfig) -> Self {
+        // A beat-synced clock has no rate param: its span is the clock.
+        if config.beat_sync.is_some() {
+            config.rate = None;
+        }
         Self {
             wave: Waveform::Shape {
                 shape: config.shape,
                 seed: config.seed,
             },
-            clock: config.clock,
-            rate: Param::new(config.rate),
-            depth: Param::new(config.depth),
+            clock: config.beat_sync.map_or(LfoClock::Free, LfoClock::Synced),
+            cells: LfoCells::from_config(&config),
             phase_offset: config.phase_offset,
             phase: RunningPhase::START,
             cycle: 0,
@@ -246,15 +188,6 @@ impl LfoNode {
         F::from_design(self.wave.raw_at(cycles + offset.get(), false)) * depth
     }
 }
-
-// The params an [`LfoNode`] lets the graph modulate, in port order: its
-// depth and, free-running, its rate (a beat-synced node's span is its clock).
-// Both are read per frame. The clock is fixed once the node is live (a config option
-// only), so its shape never changes.
-tutti_graph::declare_params!([] LfoNode, n {
-    Depth => Bipolar = &n.depth,
-    Rate => Hz = matches!(n.clock, LfoClock::Free).then_some(&n.rate),
-});
 
 impl<F: Float> Node<F> for LfoNode {
     fn shape(&self) -> Shape {
@@ -279,7 +212,7 @@ impl<F: Float> Node<F> for LfoNode {
         // non-finite driven frame reads the cell instead: a NaN rate would
         // leave the phase NaN for good. The cell crosses into the output's float once
         // per block.
-        let depth_cell = F::from_unit(self.depth.load());
+        let depth_cell = F::from_unit(self.cells.depth.load());
         let depth_signal = self
             .declared_param::<{ UnitParam::Depth as u16 }, _>(&io)
             .frames();
@@ -292,7 +225,11 @@ impl<F: Float> Node<F> for LfoNode {
         let offset = self.phase_offset;
         match self.clock {
             LfoClock::Free => {
-                let rate_cell = self.rate.load().get();
+                let rate_cell = self
+                    .cells
+                    .rate
+                    .as_ref()
+                    .map_or(0.0, |rate| rate.load().get());
                 let rate_signal = self
                     .declared_param::<{ UnitParam::Rate as u16 }, _>(&io)
                     .frames();
@@ -348,41 +285,14 @@ impl<F: Float> Node<F> for LfoNode {
     }
 }
 
-impl<F: Float> ParamNode<F> for LfoNode {
-    /// The depth, and the rate while free-running (a beat-synced node's span is
-    /// its clock).
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with every control cell detached (at its value now), at cycle
-    /// zero: a free-running fork replays the original's values from its
-    /// start.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.rate.detach();
-        fork.depth.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork that starts
-/// from the values last set through it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for LfoNode {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use tutti_buffers::MaxBlock;
+    use tutti_graph::ParamNode;
     use tutti_graph::contract::{Direct, assert_param_fork};
     use tutti_graph::{Renderer, TransportPosition};
+    use tutti_rt::Param;
     use tutti_units::UnitParam;
     use tutti_units::{Beat, Bpm, Samples};
 
@@ -393,7 +303,7 @@ mod tests {
     fn the_shape_declares_depth_and_a_free_running_rate() {
         let free = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .rate(Hz::new(2.0))
+                .rate(Some(Hz::new(2.0)))
                 .depth(Bipolar::of(0.25)),
         );
         assert_eq!(
@@ -404,7 +314,7 @@ mod tests {
         assert_eq!(Node::<f32>::param_base(&free, 1), Some(2.0));
         let synced = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .beat_sync(BeatsPerCycle::of(4.0))
+                .beat_sync(Some(BeatsPerCycle::of(4.0)))
                 .depth(Bipolar::of(0.5)),
         );
         assert_eq!(
@@ -457,24 +367,30 @@ mod tests {
         );
     }
 
-    /// Setting a rate in one clock's unit selects that clock, the last one
-    /// set winning: a free rate leaves beat sync behind and a span replaces a
-    /// free rate.
+    /// A beat span selects the synced clock and leaves no rate cell, whatever
+    /// rate the config was given; with no span the clock is free at that rate.
     #[test]
-    fn setting_a_rate_selects_its_clock() {
+    fn a_beat_span_selects_the_synced_clock() {
+        for config in [
+            LfoConfig::new(LfoShape::Sine)
+                .beat_sync(Some(BeatsPerCycle::of(4.0)))
+                .rate(Some(Hz::new(2.0))),
+            LfoConfig::new(LfoShape::Sine)
+                .rate(Some(Hz::new(2.0)))
+                .beat_sync(Some(BeatsPerCycle::of(4.0))),
+        ] {
+            let lfo = LfoNode::from(config);
+            assert_eq!(lfo.clock(), LfoClock::Synced(BeatsPerCycle::of(4.0)));
+            assert!(lfo.cells.rate.is_none());
+        }
         let lfo = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .beat_sync(BeatsPerCycle::of(4.0))
-                .rate(Hz::new(2.0)),
+                .beat_sync(Some(BeatsPerCycle::of(4.0)))
+                .beat_sync(None)
+                .rate(Some(Hz::new(2.0))),
         );
         assert_eq!(lfo.clock(), LfoClock::Free);
-        assert_eq!(lfo.rate.load(), Hz::new(2.0));
-        let lfo = LfoNode::from(
-            LfoConfig::new(LfoShape::Sine)
-                .rate(Hz::new(2.0))
-                .beat_sync(BeatsPerCycle::of(4.0)),
-        );
-        assert_eq!(lfo.clock(), LfoClock::Synced(BeatsPerCycle::of(4.0)));
+        assert_eq!(lfo.cells.rate.as_ref().map(Param::load), Some(Hz::new(2.0)));
     }
 
     /// A fork starts from the values last set through the node's
@@ -483,7 +399,7 @@ mod tests {
     /// only while free-running.
     #[test]
     fn a_fork_starts_from_the_authored_values_and_shares_nothing() {
-        let free = LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0)));
+        let free = LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(2.0))));
         assert_eq!(
             ParamNode::<f32>::param_set(&free)
                 .params()
@@ -492,7 +408,7 @@ mod tests {
         );
         assert_param_fork(free);
         let synced =
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0))));
         assert_eq!(
             ParamNode::<f32>::param_set(&synced)
                 .params()
@@ -508,7 +424,7 @@ mod tests {
     fn a_source_has_no_ring_out() {
         for lfo in [
             LfoNode::from(LfoConfig::new(LfoShape::Sine)),
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(1.0))),
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(1.0)))),
         ] {
             let shape = Node::<f32>::shape(&lfo);
             assert_eq!(shape.audio_in().count(), 0);
@@ -519,8 +435,9 @@ mod tests {
 
     #[test]
     fn test_beat_synced_lfo() {
-        let lfo =
-            || LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+        let lfo = || {
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0))))
+        };
         // Beat 1.0 of a 4-beat cycle = quarter phase = sine peak.
         let out = render_at(lfo(), stopped_at(1.0), 1);
         assert!((out[0] - 1.0).abs() < 0.01, "Expected 1.0, got {}", out[0]);
@@ -536,7 +453,7 @@ mod tests {
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         // 120 BPM at 48 kHz: 24 000 frames a beat, 96 000 a cycle.
         let out = render_at(
-            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0))),
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0)))),
             rolling,
             3_000,
         );
@@ -551,8 +468,9 @@ mod tests {
     /// keeps its sub-beat detail.
     #[test]
     fn beat_synced_lfo_keeps_sub_beat_precision_at_high_beats() {
-        let lfo =
-            || LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(BeatsPerCycle::of(4.0)));
+        let lfo = || {
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).beat_sync(Some(BeatsPerCycle::of(4.0))))
+        };
         // Same fractional offset (0.5 beat) at beat 0 and at beat 20000.
         let at_edge = render_at(lfo(), stopped_at(0.5), 1)[0];
         let past_edge = render_at(lfo(), stopped_at(20_000.5), 1)[0];
@@ -634,7 +552,7 @@ mod tests {
             LfoNode::from(
                 LfoConfig::new(LfoShape::Random)
                     .seed(seed)
-                    .beat_sync(BeatsPerCycle::of(1.0)),
+                    .beat_sync(Some(BeatsPerCycle::of(1.0))),
             )
         };
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
@@ -664,7 +582,7 @@ mod tests {
             LfoNode::from(
                 LfoConfig::new(LfoShape::Random)
                     .seed(5)
-                    .rate(Hz::new(187.5)),
+                    .rate(Some(Hz::new(187.5))),
             ),
             rate,
             4096,
@@ -694,7 +612,7 @@ mod tests {
     fn random_steps_fall_where_the_rate_says() {
         let w = random(0);
         let free = render(
-            LfoNode::from(LfoConfig::new(LfoShape::Random).rate(Hz::new(187.5))),
+            LfoNode::from(LfoConfig::new(LfoShape::Random).rate(Some(Hz::new(187.5)))),
             48_000.0,
             2048,
         );
@@ -707,7 +625,7 @@ mod tests {
         }
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
         let synced = render_at(
-            LfoNode::from(LfoConfig::new(LfoShape::Random).beat_sync(BeatsPerCycle::of(0.5))),
+            LfoNode::from(LfoConfig::new(LfoShape::Random).beat_sync(Some(BeatsPerCycle::of(0.5)))),
             rolling,
             60_000,
         );
@@ -723,7 +641,7 @@ mod tests {
             assert_ne!(synced[k * 12_000 - 1], synced[k * 12_000], "boundary {k}");
         }
         let smooth = render(
-            LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(187.5))),
+            LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Some(Hz::new(187.5)))),
             48_000.0,
             2048,
         );
@@ -791,7 +709,7 @@ mod tests {
         // -1 Hz at 100 Hz: frame n is at -n / 100 cycles, whose ramp value is
         // `2 frac(-n / 100) - 1`; frame 0 is on the start, the ramp's -1.
         let out = render(
-            LfoNode::from(LfoConfig::new(LfoShape::Sawtooth).rate(Hz::new(-1.0))),
+            LfoNode::from(LfoConfig::new(LfoShape::Sawtooth).rate(Some(Hz::new(-1.0)))),
             100.0,
             250,
         );
@@ -815,7 +733,7 @@ mod tests {
     /// within 0.05 of a cycle boundary have an index no rounding can move.
     fn assert_random_follows(rate: f64, step: f64) {
         let out = render(
-            LfoNode::from(LfoConfig::new(LfoShape::Random).rate(Hz::new(rate))),
+            LfoNode::from(LfoConfig::new(LfoShape::Random).rate(Some(Hz::new(rate)))),
             100.0,
             200,
         );
@@ -864,7 +782,8 @@ mod tests {
     #[test]
     fn in_an_f64_graph_the_lfo_writes_its_wave_unnarrowed() {
         use crate::test_support::{F64_TOLERANCE, RATE, render_f64};
-        let node = LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(RATE.get() / 3.0)));
+        let node =
+            LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(RATE.get() / 3.0))));
         let out = render_f64(node, RATE, &[], 64);
         let mut beyond_f32 = false;
         for (k, &got) in out[0].iter().enumerate() {

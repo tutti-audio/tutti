@@ -64,7 +64,7 @@ pub struct OscillatorNode {
 
 // The params an [`OscillatorNode`] lets the graph modulate, in port order, and the
 // [`OscillatorConfig`] it is made from: its wave, and its frequency and level at the start.
-tutti_graph::declare_params!([] OscillatorNode, OscillatorConfig, OscillatorCells {
+tutti_graph::declare_params!([] OscillatorNode, #[derive(Copy, PartialEq)] OscillatorConfig, OscillatorCells {
     required { wave: OscillatorWave }
     params {
         Frequency => frequency: Hz = Hz::new(440.0),

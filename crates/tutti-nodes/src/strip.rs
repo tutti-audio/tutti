@@ -52,7 +52,7 @@ use tutti_units::{Amplitude, Balance, Tail};
 // The params a [`BusStripNode`] lets the graph modulate, in port order, and the
 // [`BusStripConfig`] it is made from: the bus, and the volume at the start. The balance is
 // present only on a bus with a left/right pair, which `From` decides.
-tutti_graph::declare_params!([] BusStripNode, BusStripConfig, BusStripCells {
+tutti_graph::declare_params!([] BusStripNode, #[derive(Copy, PartialEq)] BusStripConfig, BusStripCells {
     required { input: BusTopology }
     params {
         Volume => volume: Amplitude = Amplitude::UNITY,
