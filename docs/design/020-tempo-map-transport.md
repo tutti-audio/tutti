@@ -757,8 +757,9 @@ The audio thread never sees a map edit.
 - `unfollow_tempo` publishes the base as it stands then (for the maps the follower
   stepped), which may be newer than at follow time. The clock re-seats at its
   current beat, so the playhead does not jump; the tempo from there on is the base's. `MidiEvent::TempoUnfollowed` reports it.
-- **One follower at a time.** Following again replaces the first; the steps laid so
-  far stay over the base and the tempo in force stays until the new source sends one. Two outside tempos have no merge.
+- **One follower at a time.** Following a tempo again replaces the first; the steps laid so
+  far stay over the base and the tempo in force stays until the new source sends one. Following a
+  clock again releases the maps first, so its steps go. Two outside tempos have no merge.
 - Off by default; there is no routing-rule form (routing moves events between nodes,
   this changes the transport).
 - A bounce and a take read the base: one made while following renders the app's
