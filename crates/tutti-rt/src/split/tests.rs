@@ -81,7 +81,7 @@ fn split_refuses_a_write_that_aliases() {
     let s = SplitRw::new(&mut v, 1, &mut t);
     let h = Held::new(4);
     let mut view = s.view(&h);
-    view.split(&[(1, true), (1, false)], |w| w, |_, _| {}, |_, _| {});
+    view.split(&[(1, true), (1, false)], |i| i, |w| w, |_, _| {}, |_, _| {});
 }
 
 /// `split` asks `is_write` once per request, so a closure whose answers
@@ -98,6 +98,7 @@ fn a_stateful_is_write_never_aliases() {
     let (mut reads, mut writes) = (0, 0);
     view.split(
         &[(0, ()), (0, ())],
+        |i| i,
         |()| {
             calls.set(calls.get() + 1);
             calls.get() > 2
@@ -122,7 +123,7 @@ fn a_full_held_leaves_no_claim_behind() {
     let h = Held::new(1);
     let mut view = s.view(&h);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        view.split(&[(0, ()), (1, ())], |()| false, |_, _| {}, |_, _| {});
+        view.split(&[(0, ()), (1, ())], |i| i, |()| false, |_, _| {}, |_, _| {});
     }));
     assert!(r.is_err(), "the second claim does not fit");
     drop(view);
@@ -140,7 +141,7 @@ fn a_full_held_leaves_no_write_claim_behind() {
     let h = Held::new(1);
     let mut view = s.view(&h);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        view.split(&[(0, ()), (1, ())], |()| true, |_, _| {}, |_, _| {});
+        view.split(&[(0, ()), (1, ())], |i| i, |()| true, |_, _| {}, |_, _| {});
     }));
     assert!(r.is_err(), "the second claim does not fit");
     drop(view);
@@ -159,6 +160,7 @@ fn split_hands_each_request_its_chunk() {
     let mut seen = [0u8; 2];
     view.split(
         &[(0, (0, false)), (2, (1, true)), (3, (1, false))],
+        |i| i,
         |(_, w)| w,
         |(k, _), c| seen[k] = c[0],
         |_, c| c[0] = 9,

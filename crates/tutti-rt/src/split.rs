@@ -561,16 +561,18 @@ impl<'v, T> RwView<'v, T> {
         self.try_get_mut(i).unwrap_or_else(|e| panic!("{e}"))
     }
 
-    /// Several chunks at once: each request `(chunk, tag)` is claimed as a
+    /// Several chunks at once: each request `(key, tag)` is claimed as a
     /// write when `is_write(tag)`, else as a read, and then handed to
-    /// `write(tag, ..)` or `read(tag, ..)`.
+    /// `write(tag, ..)` or `read(tag, ..)`. `chunk` gives the chunk index a
+    /// request's key names (`|i| i` for requests keyed by the index itself).
     ///
     /// `is_write` is called exactly once per request, in order, and that
     /// answer alone decides the check, the claim and the reference, so a
     /// closure that answers differently on each call cannot alias.
     ///
-    /// `reqs` must be **sorted by chunk**. Several reads of one chunk share
-    /// it; a written chunk may appear once.
+    /// `reqs` must be **sorted by chunk**, so `chunk` must be monotone with the
+    /// order the caller sorted them by. Several reads of one chunk share it; a
+    /// written chunk may appear once.
     ///
     /// # Panics
     ///
@@ -580,9 +582,10 @@ impl<'v, T> RwView<'v, T> {
     /// so `read` and `write` have already run for the requests before the one
     /// that panics.
     #[track_caller]
-    pub fn split<'s, R: Copy>(
+    pub fn split<'s, I: Copy, R: Copy>(
         &'s mut self,
-        reqs: &[(u32, R)],
+        reqs: &[(I, R)],
+        chunk: impl Fn(I) -> u32,
         is_write: impl Fn(R) -> bool,
         mut read: impl FnMut(R, &'s [T]),
         mut write: impl FnMut(R, &'s mut [T]),
@@ -593,6 +596,7 @@ impl<'v, T> RwView<'v, T> {
         // them all.
         let mut prev: Option<(u32, bool)> = None;
         for &(i, tag) in reqs {
+            let i = chunk(i);
             let write_it = is_write(tag);
             if let Some((pi, pw)) = prev {
                 assert!(pi <= i, "split requests are not sorted");

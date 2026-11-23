@@ -14,7 +14,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use tutti_buffers::Float;
 use tutti_rt::RwView;
 
-use crate::compile::plan::Direct;
+use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::plan::{Direct, ZERO_SLOT};
 use crate::event::types::Event;
 use crate::exec::arena::{Arena, Line, Role, borrow_sorted};
 use crate::node::param_event::ParamEvent;
@@ -27,19 +28,19 @@ use crate::node::param_event::ParamEvent;
 /// measured about 2.5 ns a node.
 pub(crate) trait SlotFlags {
     /// Slot `s`'s flags.
-    fn get(&self, s: u32) -> u8;
+    fn get(&self, s: AudioSlotId) -> u8;
     /// Set slot `s`'s flags.
-    fn set(&mut self, s: u32, v: u8);
+    fn set(&mut self, s: AudioSlotId, v: u8);
 }
 
 impl SlotFlags for [u8] {
     #[inline(always)]
-    fn get(&self, s: u32) -> u8 {
-        self[s as usize]
+    fn get(&self, s: AudioSlotId) -> u8 {
+        self[s.index()]
     }
     #[inline(always)]
-    fn set(&mut self, s: u32, v: u8) {
-        self[s as usize] = v;
+    fn set(&mut self, s: AudioSlotId, v: u8) {
+        self[s.index()] = v;
     }
 }
 
@@ -50,23 +51,23 @@ pub(crate) struct SharedFlags<'a>(pub(crate) &'a [AtomicU8]);
 
 impl SlotFlags for SharedFlags<'_> {
     #[inline]
-    fn get(&self, s: u32) -> u8 {
-        self.0[s as usize].load(Ordering::Relaxed)
+    fn get(&self, s: AudioSlotId) -> u8 {
+        self.0[s.index()].load(Ordering::Relaxed)
     }
     #[inline]
-    fn set(&mut self, s: u32, v: u8) {
-        self.0[s as usize].store(v, Ordering::Relaxed);
+    fn set(&mut self, s: AudioSlotId, v: u8) {
+        self.0[s.index()].store(v, Ordering::Relaxed);
     }
 }
 
 /// The audio slots an op borrows: [`Arena`]'s own methods, by name.
 pub(crate) trait AudioSlots<F: Float> {
     /// Slot `s`'s first `frames` samples.
-    fn slot(&self, s: u32, frames: usize) -> &[F];
+    fn slot(&self, s: AudioSlotId, frames: usize) -> &[F];
     /// Slot `s`'s first `frames` samples, mutably.
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F];
+    fn slot_mut(&mut self, s: AudioSlotId, frames: usize) -> &mut [F];
     /// `src` for reading and `dst` for writing, at once. They must differ.
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]);
+    fn pair(&mut self, src: AudioSlotId, dst: AudioSlotId, frames: usize) -> (&[F], &mut [F]);
     /// A [`Direct`] node's buffers (see [`Arena::direct`]).
     fn direct<const I: usize, const O: usize>(
         &mut self,
@@ -78,25 +79,25 @@ pub(crate) trait AudioSlots<F: Float> {
     fn borrow<'a>(
         &'a mut self,
         frames: usize,
-        reqs: &[(u32, Role)],
+        reqs: &[(AudioSlotId, Role)],
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     );
     /// Copy slot `src` over slot `dst`.
-    fn copy_slot(&mut self, src: u32, dst: u32);
+    fn copy_slot(&mut self, src: AudioSlotId, dst: AudioSlotId);
 }
 
 impl<F: Float> AudioSlots<F> for Arena<F> {
     #[inline(always)]
-    fn slot(&self, s: u32, frames: usize) -> &[F] {
+    fn slot(&self, s: AudioSlotId, frames: usize) -> &[F] {
         Arena::slot(self, s, frames)
     }
     #[inline(always)]
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
+    fn slot_mut(&mut self, s: AudioSlotId, frames: usize) -> &mut [F] {
         Arena::slot_mut(self, s, frames)
     }
     #[inline(always)]
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
+    fn pair(&mut self, src: AudioSlotId, dst: AudioSlotId, frames: usize) -> (&[F], &mut [F]) {
         Arena::pair(self, src, dst, frames)
     }
     #[inline(always)]
@@ -111,29 +112,29 @@ impl<F: Float> AudioSlots<F> for Arena<F> {
     fn borrow<'a>(
         &'a mut self,
         frames: usize,
-        reqs: &[(u32, Role)],
+        reqs: &[(AudioSlotId, Role)],
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     ) {
         Arena::borrow(self, frames, reqs, ins, outs)
     }
     #[inline(always)]
-    fn copy_slot(&mut self, src: u32, dst: u32) {
+    fn copy_slot(&mut self, src: AudioSlotId, dst: AudioSlotId) {
         Arena::copy_slot(self, src, dst)
     }
 }
 
 impl<F: Float, A: AudioSlots<F> + ?Sized> AudioSlots<F> for &mut A {
     #[inline(always)]
-    fn slot(&self, s: u32, frames: usize) -> &[F] {
+    fn slot(&self, s: AudioSlotId, frames: usize) -> &[F] {
         (**self).slot(s, frames)
     }
     #[inline(always)]
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
+    fn slot_mut(&mut self, s: AudioSlotId, frames: usize) -> &mut [F] {
         (**self).slot_mut(s, frames)
     }
     #[inline(always)]
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
+    fn pair(&mut self, src: AudioSlotId, dst: AudioSlotId, frames: usize) -> (&[F], &mut [F]) {
         (**self).pair(src, dst, frames)
     }
     #[inline(always)]
@@ -148,14 +149,14 @@ impl<F: Float, A: AudioSlots<F> + ?Sized> AudioSlots<F> for &mut A {
     fn borrow<'a>(
         &'a mut self,
         frames: usize,
-        reqs: &[(u32, Role)],
+        reqs: &[(AudioSlotId, Role)],
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     ) {
         (**self).borrow(frames, reqs, ins, outs);
     }
     #[inline(always)]
-    fn copy_slot(&mut self, src: u32, dst: u32) {
+    fn copy_slot(&mut self, src: AudioSlotId, dst: AudioSlotId) {
         (**self).copy_slot(src, dst);
     }
 }
@@ -188,20 +189,20 @@ impl EventSlot {
 /// The event slots an op borrows.
 pub(crate) trait EventSlots {
     /// Slot `s`'s events.
-    fn ev(&self, s: u32) -> &Vec<Event>;
+    fn ev(&self, s: EventSlotId) -> &Vec<Event>;
     /// Slot `s`'s events, mutably.
-    fn ev_mut(&mut self, s: u32) -> &mut Vec<Event>;
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event>;
     /// Slot `s`'s param events.
-    fn pev(&self, s: u32) -> &Vec<ParamEvent>;
+    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent>;
     /// Slot `s`.
-    fn slot(&self, s: u32) -> &EventSlot;
+    fn slot(&self, s: EventSlotId) -> &EventSlot;
     /// Slot `s`, mutably.
-    fn slot_mut(&mut self, s: u32) -> &mut EventSlot;
+    fn slot_mut(&mut self, s: EventSlotId) -> &mut EventSlot;
     /// Several slots at once, by requests sorted by slot (see
     /// `arena::borrow_sorted`).
     fn borrow_sorted<'a>(
         &'a mut self,
-        reqs: &[(u32, Role)],
+        reqs: &[(EventSlotId, Role)],
         read: impl FnMut(u8, &'a EventSlot),
         write: impl FnMut(u8, &'a mut EventSlot),
     );
@@ -209,29 +210,29 @@ pub(crate) trait EventSlots {
 
 impl EventSlots for [EventSlot] {
     #[inline(always)]
-    fn ev(&self, s: u32) -> &Vec<Event> {
-        &self[s as usize].events
+    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
+        &self[s.index()].events
     }
     #[inline(always)]
-    fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
-        &mut self[s as usize].events
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
+        &mut self[s.index()].events
     }
     #[inline(always)]
-    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
-        &self[s as usize].params
+    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
+        &self[s.index()].params
     }
     #[inline(always)]
-    fn slot(&self, s: u32) -> &EventSlot {
-        &self[s as usize]
+    fn slot(&self, s: EventSlotId) -> &EventSlot {
+        &self[s.index()]
     }
     #[inline(always)]
-    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
-        &mut self[s as usize]
+    fn slot_mut(&mut self, s: EventSlotId) -> &mut EventSlot {
+        &mut self[s.index()]
     }
     #[inline(always)]
     fn borrow_sorted<'a>(
         &'a mut self,
-        reqs: &[(u32, Role)],
+        reqs: &[(EventSlotId, Role)],
         mut read: impl FnMut(u8, &'a EventSlot),
         mut write: impl FnMut(u8, &'a mut EventSlot),
     ) {
@@ -247,29 +248,29 @@ impl EventSlots for [EventSlot] {
 
 impl<E: EventSlots + ?Sized> EventSlots for &mut E {
     #[inline(always)]
-    fn ev(&self, s: u32) -> &Vec<Event> {
+    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
         (**self).ev(s)
     }
     #[inline(always)]
-    fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
         (**self).ev_mut(s)
     }
     #[inline(always)]
-    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
+    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
         (**self).pev(s)
     }
     #[inline(always)]
-    fn slot(&self, s: u32) -> &EventSlot {
+    fn slot(&self, s: EventSlotId) -> &EventSlot {
         (**self).slot(s)
     }
     #[inline(always)]
-    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
+    fn slot_mut(&mut self, s: EventSlotId) -> &mut EventSlot {
         (**self).slot_mut(s)
     }
     #[inline(always)]
     fn borrow_sorted<'a>(
         &'a mut self,
-        reqs: &[(u32, Role)],
+        reqs: &[(EventSlotId, Role)],
         read: impl FnMut(u8, &'a EventSlot),
         write: impl FnMut(u8, &'a mut EventSlot),
     ) {
@@ -281,7 +282,7 @@ impl<E: EventSlots + ?Sized> EventSlots for &mut E {
 #[inline]
 pub(crate) fn borrow_events<'a, E: EventSlots + ?Sized>(
     events: &'a mut E,
-    reqs: &mut [(u32, Role)],
+    reqs: &mut [(EventSlotId, Role)],
     read: impl FnMut(u8, &'a EventSlot),
     write: impl FnMut(u8, &'a mut EventSlot),
 ) {
@@ -292,8 +293,8 @@ pub(crate) fn borrow_events<'a, E: EventSlots + ?Sized>(
 /// Event slot `src` for reading and `dst` for writing, at once.
 pub(crate) fn event_pair<E: EventSlots + ?Sized>(
     events: &mut E,
-    src: u32,
-    dst: u32,
+    src: EventSlotId,
+    dst: EventSlotId,
 ) -> (&EventSlot, &mut EventSlot) {
     let mut reqs = [(src, Role::Read(0)), (dst, Role::Write(0))];
     let mut input: Option<&EventSlot> = None;
@@ -328,14 +329,14 @@ fn samples_mut<F: Float>(lines: &mut [Line], frames: usize) -> &mut [F] {
 
 impl<F: Float> AudioSlots<F> for ArenaView<'_> {
     #[inline]
-    fn slot(&self, s: u32, frames: usize) -> &[F] {
-        samples(self.view.get(s as usize), frames)
+    fn slot(&self, s: AudioSlotId, frames: usize) -> &[F] {
+        samples(self.view.get(s.index()), frames)
     }
     #[inline]
-    fn slot_mut(&mut self, s: u32, frames: usize) -> &mut [F] {
-        samples_mut(self.view.get_mut(s as usize), frames)
+    fn slot_mut(&mut self, s: AudioSlotId, frames: usize) -> &mut [F] {
+        samples_mut(self.view.get_mut(s.index()), frames)
     }
-    fn pair(&mut self, src: u32, dst: u32, frames: usize) -> (&[F], &mut [F]) {
+    fn pair(&mut self, src: AudioSlotId, dst: AudioSlotId, frames: usize) -> (&[F], &mut [F]) {
         assert_ne!(src, dst, "pair() of one slot");
         let mut s: &[F] = &[];
         let mut d: Option<&mut [F]> = None;
@@ -346,6 +347,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         };
         self.view.split(
             &reqs,
+            AudioSlotId::get,
             is_write,
             |_, l| s = samples(l, frames),
             |_, l| d = Some(samples_mut(l, frames)),
@@ -358,20 +360,17 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         d: &Direct,
     ) -> ([&[F]; I], [&mut [F]; O]) {
         let n = usize::from(d.count);
-        let mut reqs = [(0u32, 0u8); 4];
-        for (k, r) in reqs.iter_mut().enumerate().take(n) {
-            *r = (d.slots[k], d.role[k]);
-        }
         let mut reads: [&[F]; 4] = [&[]; 4];
         let mut outs: [&mut [F]; O] = std::array::from_fn(|_| &mut [][..]);
         // Tag each request with its index into `slots`, so the reads land
         // where `d.input` looks for them.
-        let mut tagged = [(0u32, (0u8, 0u8)); 4];
+        let mut tagged = [(ZERO_SLOT, (0u8, 0u8)); 4];
         for (k, t) in tagged.iter_mut().enumerate().take(n) {
-            *t = (reqs[k].0, (k as u8, reqs[k].1));
+            *t = (d.slots[k], (k as u8, d.role[k]));
         }
         self.view.split(
             &tagged[..n],
+            AudioSlotId::get,
             |(_, role)| role != Direct::READ,
             |(k, _), l| reads[usize::from(k)] = samples(l, frames),
             |(_, role), l| outs[usize::from(role)] = samples_mut(l, frames),
@@ -392,12 +391,13 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
     fn borrow<'a>(
         &'a mut self,
         frames: usize,
-        reqs: &[(u32, Role)],
+        reqs: &[(AudioSlotId, Role)],
         ins: &mut [&'a [F]],
         outs: &mut [&'a mut [F]],
     ) {
         self.view.split(
             reqs,
+            AudioSlotId::get,
             is_write,
             |r, l| {
                 if let Role::Read(port) = r {
@@ -411,7 +411,7 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
             },
         );
     }
-    fn copy_slot(&mut self, src: u32, dst: u32) {
+    fn copy_slot(&mut self, src: AudioSlotId, dst: AudioSlotId) {
         if src == dst {
             return;
         }
@@ -422,8 +422,13 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         } else {
             [(dst, Role::Write(0)), (src, Role::Read(0))]
         };
-        self.view
-            .split(&reqs, is_write, |_, l| s = l, |_, l| d = Some(l));
+        self.view.split(
+            &reqs,
+            AudioSlotId::get,
+            is_write,
+            |_, l| s = l,
+            |_, l| d = Some(l),
+        );
         d.expect("dst borrowed").copy_from_slice(s);
     }
 }
@@ -435,33 +440,34 @@ pub(crate) struct EventsView<'v> {
 
 impl EventSlots for EventsView<'_> {
     #[inline]
-    fn ev(&self, s: u32) -> &Vec<Event> {
-        &self.view.get(s as usize)[0].events
+    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
+        &self.view.get(s.index())[0].events
     }
     #[inline]
-    fn ev_mut(&mut self, s: u32) -> &mut Vec<Event> {
-        &mut self.view.get_mut(s as usize)[0].events
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
+        &mut self.view.get_mut(s.index())[0].events
     }
     #[inline]
-    fn pev(&self, s: u32) -> &Vec<ParamEvent> {
-        &self.view.get(s as usize)[0].params
+    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
+        &self.view.get(s.index())[0].params
     }
     #[inline]
-    fn slot(&self, s: u32) -> &EventSlot {
-        &self.view.get(s as usize)[0]
+    fn slot(&self, s: EventSlotId) -> &EventSlot {
+        &self.view.get(s.index())[0]
     }
     #[inline]
-    fn slot_mut(&mut self, s: u32) -> &mut EventSlot {
-        &mut self.view.get_mut(s as usize)[0]
+    fn slot_mut(&mut self, s: EventSlotId) -> &mut EventSlot {
+        &mut self.view.get_mut(s.index())[0]
     }
     fn borrow_sorted<'a>(
         &'a mut self,
-        reqs: &[(u32, Role)],
+        reqs: &[(EventSlotId, Role)],
         mut read: impl FnMut(u8, &'a EventSlot),
         mut write: impl FnMut(u8, &'a mut EventSlot),
     ) {
         self.view.split(
             reqs,
+            EventSlotId::get,
             is_write,
             |r, v| {
                 if let Role::Read(port) = r {
