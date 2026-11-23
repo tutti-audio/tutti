@@ -160,6 +160,71 @@ struct Run {
     frames: usize,
 }
 
+/// A reader's place in the writer's [`Run`]s: the runs not yet read through,
+/// the frame the next one handed out is, and how much of the current run is
+/// left. `left` is zero when no run is under way, and every sample read has
+/// its run (a run is written before its samples).
+struct RunCursor {
+    /// The writer's runs not yet read through.
+    runs: RingReader<Run>,
+    /// The graph frame of the next frame to hand out, while `left` is not
+    /// zero; once a run is read through, the frame after it.
+    at: Frame,
+    /// Frames of the current run not yet handed out.
+    left: usize,
+}
+
+impl RunCursor {
+    fn new(runs: RingReader<Run>) -> Self {
+        Self {
+            runs,
+            at: Frame::ZERO,
+            left: 0,
+        }
+    }
+
+    /// The graph frame of the next frame to hand out: the next run's start
+    /// when none is under way.
+    fn next_frame(&self) -> Frame {
+        if self.left > 0 {
+            return self.at;
+        }
+        self.runs.peek().map_or(self.at, |run| run.start)
+    }
+
+    /// Frames in the runs before the first gap, counting the one under way.
+    fn contiguous(&self) -> Samples {
+        let mut end = self.at + Samples::new(self.left);
+        let mut run = self.left;
+        for next in self.runs.iter() {
+            if run > 0 && next.start != end {
+                break;
+            }
+            run += next.frames;
+            end = next.start + Samples::new(next.frames);
+        }
+        Samples::new(run)
+    }
+
+    /// Advances over `frames` just handed out, across run boundaries.
+    fn consume(&mut self, mut frames: usize) {
+        while frames > 0 {
+            if self.left == 0 {
+                let Some(run) = self.runs.pop() else {
+                    debug_assert!(false, "a sample was read with no run to place it");
+                    return;
+                };
+                self.at = run.start;
+                self.left = run.frames;
+            }
+            let step = frames.min(self.left);
+            self.at += Samples::new(step);
+            self.left -= step;
+            frames -= step;
+        }
+    }
+}
+
 /// The most blocks a ring holds the start frame of at once, however deep its
 /// lanes: a block that finds this many waiting is refused whole and counted
 /// lost, like one the lanes have no room for. A ring of fewer frames than this
@@ -332,13 +397,8 @@ pub struct TapReader<F: Float = f32> {
     lost: Counter<Samples>,
     /// What `lost` read at the last [`take_lost`](Self::take_lost).
     lost_seen: Cell<Samples>,
-    /// The writer's [`Run`]s not yet read through.
-    runs: RingReader<Run>,
-    /// The graph frame of the next frame to hand out, while `left` is not
-    /// zero; once a run is read through, the frame after it.
-    at: Frame,
-    /// Frames of the current run not yet handed out.
-    left: usize,
+    /// Where the reader is in the writer's runs.
+    cursor: RunCursor,
     /// The editor watches this: when it dies, the reader is gone.
     alive: Alive,
     /// The wait side of the bell the writer rings; `None` for a tap opened
@@ -416,9 +476,7 @@ impl<F: Float> TapReader<F> {
             lanes: cons,
             lost: lost_reader,
             lost_seen: Cell::new(Samples::ZERO),
-            runs: run_cons,
-            at: Frame::ZERO,
-            left: 0,
+            cursor: RunCursor::new(run_cons),
             alive: Alive::default(),
             listener,
             end: Arc::clone(&end),
@@ -482,7 +540,7 @@ impl<F: Float> TapReader<F> {
     /// **Ask before reading the rings**, as for `source_gone`.
     #[must_use]
     pub fn writer_gone(&self) -> bool {
-        self.runs.is_disconnected()
+        self.cursor.runs.is_disconnected()
     }
 
     /// The tap's id, the one [`Editor::close_tap`](crate::Editor::close_tap)
@@ -531,7 +589,7 @@ impl<F: Float> TapReader<F> {
                 }
             });
         }
-        self.consume(frames);
+        self.cursor.consume(frames);
         Ok(Samples::new(frames))
     }
 
@@ -567,7 +625,7 @@ impl<F: Float> TapReader<F> {
             let popped = lane.pop_slice(&mut plane.samples_mut()[..frames]);
             debug_assert_eq!(popped, frames, "available counted every lane");
         }
-        self.consume(frames);
+        self.cursor.consume(frames);
         Ok(Samples::new(frames))
     }
 
@@ -589,10 +647,7 @@ impl<F: Float> TapReader<F> {
     /// frames it was offered from zero, written or lost.
     #[must_use]
     pub fn next_frame(&self) -> Frame {
-        if self.left > 0 {
-            return self.at;
-        }
-        self.runs.peek().map_or(self.at, |run| run.start)
+        self.cursor.next_frame()
     }
 
     /// Frames readable now before the first gap (a block the rings refused):
@@ -600,37 +655,7 @@ impl<F: Float> TapReader<F> {
     /// never inside a read. At most [`available`](Self::available).
     #[must_use]
     pub fn contiguous(&self) -> Samples {
-        let mut end = self.at + Samples::new(self.left);
-        let mut run = self.left;
-        for next in self.runs.iter() {
-            if run > 0 && next.start != end {
-                break;
-            }
-            run += next.frames;
-            end = next.start + Samples::new(next.frames);
-        }
-        Samples::new(run).min(self.available())
-    }
-
-    /// Advances the clock over `frames` just handed out, across run
-    /// boundaries.
-    fn consume(&mut self, mut frames: usize) {
-        while frames > 0 {
-            if self.left == 0 {
-                // A run is written before its samples, so every sample read
-                // has its run.
-                let Some(run) = self.runs.pop() else {
-                    debug_assert!(false, "a sample was read with no run to place it");
-                    return;
-                };
-                self.at = run.start;
-                self.left = run.frames;
-            }
-            let step = frames.min(self.left);
-            self.at += Samples::new(step);
-            self.left -= step;
-            frames -= step;
-        }
+        self.cursor.contiguous().min(self.available())
     }
 
     /// Frames the executor could not push since the last call, and clears the

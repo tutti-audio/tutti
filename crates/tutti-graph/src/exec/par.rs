@@ -221,6 +221,17 @@ pub(crate) struct Par {
     /// executor's own before each block (slot 0, the feedback reads), and
     /// every other slot written by its op before it is read.
     flags: Vec<AtomicU8>,
+    claims: Claims,
+    /// Per plan unit, its run of the (unit-sorted) inject list.
+    inject_spans: IdTable<PlanUnitId, Span>,
+    workers: Vec<Worker>,
+    worker_claims: ClaimTable,
+}
+
+/// One claim table per table of the executor's state, in its order, each
+/// sized to the table it guards: an op claims the entries it touches, and a
+/// second claim of one entry in a block fails.
+struct Claims {
     audio: ClaimTable,
     events: ClaimTable,
     units: ClaimTable,
@@ -232,13 +243,33 @@ pub(crate) struct Par {
     meters: ClaimTable,
     lanes: ClaimTable,
     inject: ClaimTable,
-    /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: IdTable<PlanUnitId, Span>,
     has_inject: ClaimTable,
     has_due: ClaimTable,
     outputs: ClaimTable,
-    workers: Vec<Worker>,
-    worker_claims: ClaimTable,
+}
+
+impl Claims {
+    /// The tables for `plan`, with `store_len` units in the unit store and
+    /// `injects` entries in the inject list. Allocates.
+    fn for_plan(plan: &Plan, store_len: usize, injects: usize) -> Self {
+        let units = plan.units.len();
+        Self {
+            audio: ClaimTable::new(plan.audio_slots as usize),
+            events: ClaimTable::new(plan.event_slots as usize),
+            units: ClaimTable::new(store_len),
+            rings: ClaimTable::new(plan.delays.len()),
+            audio_fb: ClaimTable::new(plan.audio_feedback.len()),
+            event_fb: ClaimTable::new(plan.event_feedback.len()),
+            taps: ClaimTable::new(plan.taps.len()),
+            event_taps: ClaimTable::new(plan.event_taps.len()),
+            meters: ClaimTable::new(plan.meters.len()),
+            lanes: ClaimTable::new(plan.sum_lanes.len()),
+            inject: ClaimTable::new(injects),
+            has_inject: ClaimTable::new(units),
+            has_due: ClaimTable::new(units),
+            outputs: ClaimTable::new(plan.rendered_outputs()),
+        }
+    }
 }
 
 impl Par {
@@ -281,21 +312,8 @@ impl Par {
             spreads,
             graph,
             flags: (0..plan.audio_slots).map(|_| AtomicU8::new(0)).collect(),
-            audio: ClaimTable::new(plan.audio_slots as usize),
-            events: ClaimTable::new(plan.event_slots as usize),
-            units: ClaimTable::new(store_len),
-            rings: ClaimTable::new(plan.delays.len()),
-            audio_fb: ClaimTable::new(plan.audio_feedback.len()),
-            event_fb: ClaimTable::new(plan.event_feedback.len()),
-            taps: ClaimTable::new(plan.taps.len()),
-            event_taps: ClaimTable::new(plan.event_taps.len()),
-            meters: ClaimTable::new(plan.meters.len()),
-            lanes: ClaimTable::new(plan.sum_lanes.len()),
-            inject: ClaimTable::new(n_inject as usize),
+            claims: Claims::for_plan(plan, store_len, n_inject as usize),
             inject_spans,
-            has_inject: ClaimTable::new(units),
-            has_due: ClaimTable::new(units),
-            outputs: ClaimTable::new(plan.rendered_outputs()),
             workers: (0..workers)
                 .map(|_| Worker {
                     held_audio: Held::new(held),
@@ -499,6 +517,12 @@ fn run_spread<F: Float>(
         spreads: _,
         graph,
         flags,
+        claims,
+        inject_spans,
+        workers,
+        worker_claims,
+    } = par;
+    let Claims {
         audio,
         events,
         units,
@@ -510,13 +534,10 @@ fn run_spread<F: Float>(
         meters,
         lanes,
         inject,
-        inject_spans,
         has_inject,
         has_due,
         outputs,
-        workers,
-        worker_claims,
-    } = par;
+    } = claims;
     let aborted = {
         let shared = Shared {
             frame: Frame {
