@@ -3,15 +3,16 @@
 
 use super::node_op::{CONSTANT, SILENT, flag};
 use super::state::Ring;
-use crate::arena::Role;
-use crate::event::{Event, merge_into, merge_params};
-use crate::gain::{self, SumLane, Weight};
-use crate::kernels::{AudioRing, EventFifo};
+use crate::compile::plan::GainPortOp;
+use crate::compile::plan::InputBound;
+use crate::event::merge::{merge_into, merge_params};
+use crate::event::types::Event;
+use crate::exec::arena::Role;
+use crate::exec::rings::{AudioRing, EventFifo};
+use crate::exec::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags, borrow_events, event_pair};
+use crate::model::gain::{self, SumLane, Weight};
 use crate::node::MAX_PORTS;
-use crate::param_event::ParamEvent;
-use crate::plan::GainPortOp;
-use crate::plan::InputBound;
-use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags, borrow_events, event_pair};
+use crate::node::param_event::ParamEvent;
 use tutti_buffers::Float;
 
 /// An audio delay's ring.

@@ -35,19 +35,19 @@ use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
-use crate::arena::Arena;
-use crate::command::overlay_capacity;
-use crate::event::Event;
-use crate::event_tap::EventTapWriter;
-use crate::gain::SumLane;
-use crate::held::{Held, Keys};
-use crate::kernels::{AudioRing, EventFifo};
-use crate::meter::MeterWriter;
-use crate::param::ParamState;
-use crate::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
-use crate::slots::EventSlot;
-use crate::spec::{EventInputPort, EventOutputPort};
-use crate::tap::TapWriter;
+use crate::compile::plan::{DelayKey, FeedbackKey, Op, ParamPortOp, Plan};
+use crate::edges::event_tap::EventTapWriter;
+use crate::edges::meter::MeterWriter;
+use crate::edges::tap::TapWriter;
+use crate::event::types::Event;
+use crate::exec::arena::Arena;
+use crate::exec::command::overlay_capacity;
+use crate::exec::held::{Held, Keys};
+use crate::exec::rings::{AudioRing, EventFifo};
+use crate::exec::slots::EventSlot;
+use crate::model::gain::SumLane;
+use crate::model::spec::{EventInputPort, EventOutputPort};
+use crate::node::param::ParamState;
 
 /// How a ring or FIFO of the new plan gets its state from the executor's old
 /// state.
@@ -600,7 +600,7 @@ impl Stager {
         BTreeSet<FeedbackKey>,
     ) {
         let plan = cx.plan;
-        let keyed = |kind: &[crate::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
+        let keyed = |kind: &[crate::compile::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
             kind.iter().enumerate().map(|(i, f)| (f.key, i)).collect()
         };
         let old_afb = cx.old.map(|p| keyed(&p.audio_feedback)).unwrap_or_default();
@@ -1090,7 +1090,7 @@ fn drives<F: Float>(
     cx: &Cx<'_>,
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
 ) -> Vec<(u32, ParamState<F>)> {
-    let driven_of = |p: &Plan, rec: &crate::plan::NodeRec| {
+    let driven_of = |p: &Plan, rec: &crate::compile::plan::NodeRec| {
         p.param_ports[rec.params.range()]
             .last()
             .is_some_and(ParamPortOp::is_mix)
@@ -1150,7 +1150,7 @@ fn param_slots(plan: &Plan) -> Vec<bool> {
             Op::EventMerge { srcs, dst, .. } => {
                 let any = plan.event_list[srcs.range()]
                     .iter()
-                    .any(|&s| s != crate::plan::EMPTY_SLOT && has[s as usize]);
+                    .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s as usize]);
                 has[dst as usize] |= any;
             }
             _ => {}

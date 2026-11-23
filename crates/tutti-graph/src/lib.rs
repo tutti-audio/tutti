@@ -660,161 +660,124 @@
     )
 )]
 
-mod arena;
-mod builder;
-mod bus;
-mod bus_edge;
-mod command;
 mod compile;
 #[cfg(feature = "contract")]
 pub mod contract;
-mod controls;
-mod cost;
-mod declare;
-mod editor;
+mod edges;
+mod edit;
 mod event;
-mod event_inlet;
-mod event_tap;
 mod exec;
-mod fade;
-mod fork;
-mod gain;
-mod graph;
-mod held;
-mod history;
-mod inlet;
-mod instrument;
-mod io;
-mod kernels;
-mod lane;
-mod latency;
-mod loss;
-mod main_output;
-mod meter;
-mod mode;
+mod model;
 mod node;
-mod par;
-mod param;
-mod param_event;
-mod pass;
-mod plan;
-mod play;
-mod pool;
-mod preroll;
-mod published;
-mod rates;
 #[cfg(feature = "testing")]
 mod reference;
-mod render_mode;
-mod rtlog;
-mod slots;
-mod spec;
-mod tail;
-mod tap;
 #[cfg(feature = "testing")]
 pub mod testing;
-mod time;
-mod values;
-mod wake;
 
-pub use builder::{GraphBuilder, Renderer};
-pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
-pub use controls::{
-    DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
+pub use edges::event_inlet::{
+    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
 };
-pub use cost::Cost;
-pub use declare::{HasParam, HasParams, ParamValue, Scalar};
-pub use editor::{
+pub use edges::event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
+pub use edit::builder::{GraphBuilder, Renderer};
+pub use edit::editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,
     Unwired,
 };
-pub use event::{
-    Event, EventDensity, EventKind, EventOrderError, EventRejected, EventWriter, Harmony,
-    HarmonyKind, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY, SortedEvents, SubBlocks, UmpAt,
+pub use event::sorted::{EventOrderError, SortedEvents, SubBlocks};
+pub use event::types::{Event, EventKind, Harmony, HarmonyKind, UmpAt};
+pub use event::writer::{
+    EventDensity, EventRejected, EventWriter, MAX_EVENT_PORT_CAPACITY, MIN_EVENT_PORT_CAPACITY,
     note_off_room,
 };
-pub use event_inlet::{
-    EventCapacity, EventCapacityError, EventInletNode, EventInletWriter, InletCounts, Stamp,
-};
-pub use event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapEvent};
+pub use exec::command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
+pub use exec::lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use exec::{DEFAULT_EVENT_CAPACITY, Executor, FADE_CAPACITY, MainOutputFade, QUEUE_CAPACITY};
-pub use fade::Fade;
-pub use fork::{
+pub use model::fade::Fade;
+pub use node::controls::{
+    DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
+};
+pub use node::cost::Cost;
+pub use node::declare::{HasParam, HasParams, ParamValue, Scalar};
+pub use node::fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
-pub use lane::{control_in, fade_gains, fade_in, ramp_in};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
-pub use bus::{Bus, BusRole, Buses, InBus, InEvents, MAX_BUSES, OutBus, OutEvents};
-pub use bus_edge::{BusError, BusFeed, BusFold, BusOutputPort, BusSide, Lowering, NodeBus};
-pub use gain::{EdgeFade, EdgeGain, EdgeGainError};
-pub use graph::{
+pub use compile::latency::{
+    ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
+    OutputDelay, PortFeed, delays, plan as latency_plan,
+};
+pub use compile::main_output::{
+    MainOutputBank, MainOutputError, MainOutputId, fold_to_topology, fold_to_topology_with,
+    fold_to_width,
+};
+pub use compile::plan::{
+    Csr, DelayKey, DelaySpec, Delta, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp,
+    InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+};
+pub use compile::preroll::PrerollTable;
+pub use compile::tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
+pub use edges::inlet::{InletNode, InletRing};
+pub use edges::meter::{Level, MeterReader, MeterWriter};
+pub use edges::rtlog::{
+    LogFilter, MAX_FIELDS, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue, TEXT_CAPACITY,
+};
+pub use edges::tap::{TapOptions, TapReader, TapWriter};
+pub use exec::history::TransportHistory;
+pub use exec::loss::EventLoss;
+pub use exec::par::Pool;
+pub use exec::pool::{WorkerPool, WorkerPoolBuilder};
+pub use exec::published::{ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind};
+pub use model::bus_edge::{BusError, BusFeed, BusFold, BusOutputPort, BusSide, Lowering, NodeBus};
+pub use model::gain::{EdgeFade, EdgeGain, EdgeGainError};
+pub use model::graph::{
     Edge, EdgeId, EventTapId, EventTapPort, EventTapSpec, FeedbackFrom, InputPort, Invalid,
     MeterId, MeterSpec, NodeKey, NodeSpec, OutputPort, PortSink, PortSource, TapAlign, TapId,
     TapSpec, Topology, Valid,
 };
-pub use history::TransportHistory;
-pub use inlet::{InletNode, InletRing};
-pub use instrument::InstrumentNode;
-pub use io::{BusInput, BusOutput, Channel, Inputs, Io, Outputs, PortKind};
-pub use latency::{
-    ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
-    OutputDelay, PortFeed, delays, plan as latency_plan,
+pub use model::mode::{MixError, ModeError, NodeMix, NodeMode};
+pub use model::pass::{Pass, PassError};
+pub use model::spec::{
+    EventEdge, EventInputPort, EventOutputPort, GraphInvalid, GraphSpec, ValidGraph,
 };
-pub use loss::EventLoss;
-pub use main_output::{
-    MainOutputBank, MainOutputError, MainOutputId, fold_to_topology, fold_to_topology_with,
-    fold_to_width,
-};
-pub use meter::{Level, MeterReader, MeterWriter};
-pub use mode::{MixError, ModeError, NodeMix, NodeMode};
-pub use node::{
-    Chase, ConstantMask, Cx, Env, InPlaceMask, IntoNode, MAX_PORTS, MAX_TRANSPORT_CHANGES, Node,
-    NodeParts, Prepare, Resolution, Scratch, Shape, SilenceMask, Status, TransportChange,
-    TransportChangeRejected, TransportChanges, TransportPosition, Wired, WiredMask,
-};
-pub use par::Pool;
-pub use param::{
+pub use node::bus::{Bus, BusRole, Buses, InBus, InEvents, MAX_BUSES, OutBus, OutEvents};
+pub use node::instrument::InstrumentNode;
+pub use node::io::{BusInput, BusOutput, Channel, Inputs, Io, Outputs, PortKind};
+pub use node::param::{
     EffectiveCell, MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange,
     ParamRangeCell, ParamRangeError, ParamRangeReader, RangeView,
 };
-pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
-pub use pass::{Pass, PassError};
-pub use plan::{
-    Csr, DelayKey, DelaySpec, Delta, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp,
-    InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+pub use node::param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
+pub use node::play::PlayClock;
+pub use node::rates::SampleRates;
+pub use node::render_mode::RenderMode;
+pub use node::shape::Shape;
+pub use node::time::{
+    BeatCrossings, Continuity, Due, Env, MAX_TRANSPORT_CHANGES, Offset, TransportChange,
+    TransportChangeRejected, TransportChanges, TransportPosition,
 };
-pub use play::PlayClock;
-pub use pool::{WorkerPool, WorkerPoolBuilder};
-pub use preroll::PrerollTable;
-pub use published::{ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind};
-pub use rates::SampleRates;
+pub use node::{
+    Chase, ConstantMask, Cx, InPlaceMask, IntoNode, MAX_PORTS, Node, NodeParts, Prepare,
+    Resolution, Scratch, SilenceMask, Status, Wired, WiredMask,
+};
 #[cfg(feature = "testing")]
 pub use reference::Reference;
-pub use render_mode::RenderMode;
-pub use rtlog::{
-    LogFilter, MAX_FIELDS, RtLevel, RtLogReaders, RtRecord, RtTarget, RtValue, TEXT_CAPACITY,
-};
-pub use spec::{EventEdge, EventInputPort, EventOutputPort, GraphInvalid, GraphSpec, ValidGraph};
-pub use tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};
-pub use tap::{TapOptions, TapReader, TapWriter};
-pub use time::{BeatCrossings, Continuity, Due, Offset};
 pub use tutti_rt::BlockWaits;
 // The reading is a value type, `tutti-units`' (the modulation compiler
 // carries one without naming the graph); the clock that keeps it is here.
+pub use node::wake::Wake;
 pub use tutti_units::PlayReading;
-pub use wake::Wake;
 
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::declare::{
+    pub use crate::exec::published::Sweep;
+    pub use crate::node::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };
-    pub use crate::published::Sweep;
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};

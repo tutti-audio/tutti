@@ -47,7 +47,7 @@ pub(super) const EXCEPTIONS: &[(&str, &str, &str)] = &[
         "permanent: every u32 is a valid RPN word_char",
     ),
     (
-        "crates/tutti-graph/src/time.rs",
+        "crates/tutti-graph/src/node/time.rs",
         "Offset",
         "permanent: any u32 is an offset; the block it falls in is the consumer's to check, as `clamped` does for a wire stamp",
     ),

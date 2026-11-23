@@ -11,13 +11,13 @@ use super::commit::{Crossfade, retire_fade};
 use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
-use crate::history::TransportHistory;
-use crate::loss::Dropped;
-use crate::node::{Env, TransportChanges, TransportPosition};
-use crate::par::Block;
-use crate::plan::Plan;
-use crate::play::PlayClock;
-use crate::slots::SlotFlags;
+use crate::compile::plan::Plan;
+use crate::exec::history::TransportHistory;
+use crate::exec::loss::Dropped;
+use crate::exec::par::Block;
+use crate::exec::slots::SlotFlags;
+use crate::node::play::PlayClock;
+use crate::node::time::{Env, TransportChanges, TransportPosition};
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
 
@@ -350,7 +350,7 @@ impl<F: Float> Executor<F> {
             logs.begin_block();
             // The pool's participants take the plan's tasks when the plan
             // spreads; otherwise the calling thread is the one participant.
-            fade_ended |= crate::par::run_block(
+            fade_ended |= crate::exec::par::run_block(
                 par.as_mut().expect("a staged plan carries its par"),
                 pool.as_ref(),
                 Block {
