@@ -14,7 +14,9 @@ mod bell;
 mod butterworth;
 mod chebyshev;
 mod cookbook;
+mod cut;
 mod elliptic;
+mod eq_controls;
 mod graphic;
 mod jacobi;
 mod k_weighting;
@@ -37,7 +39,11 @@ pub use butterworth::{
 };
 pub use chebyshev::{ChebyshevI, ChebyshevII};
 pub use cookbook::Cookbook;
+pub use cut::{CutAlignment, CutDecayLadder, CutDesign, CutFilterControls, MIN_CUT_CUTOFF};
 pub use elliptic::{Elliptic, EllipticTolerances};
+pub use eq_controls::{
+    BellFilterControls, GraphicEqControls, MAX_EQ_GAIN, MIN_EQ_CENTER, TiltFilterControls,
+};
 pub use graphic::GraphicBands;
 pub use k_weighting::KWeighting;
 pub use tilt::Tilt;
