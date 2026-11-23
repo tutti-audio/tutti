@@ -36,6 +36,7 @@
 //! [`Session::get`]: crate::Session::get
 //! [`Session::update`]: crate::Session::update
 
+mod base;
 mod batch;
 mod controls;
 mod depth;
@@ -52,6 +53,9 @@ mod target;
 mod verbs;
 mod watcher;
 
+#[cfg(feature = "midi")]
+pub(crate) use base::Steps;
+pub(crate) use base::{BaseSlot, Bases};
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};

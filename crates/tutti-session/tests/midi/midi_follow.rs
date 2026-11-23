@@ -11,9 +11,7 @@ use tutti_platform::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_session::{
-    FollowTempo, MidiError, MidiEvent, Session, SessionEvent, SetRefusal, ValueErrorKind,
-};
+use tutti_session::{FollowTempo, MidiError, MidiEvent, Session, SessionEvent};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
@@ -93,7 +91,7 @@ fn until_followed(s: &mut Session) -> Found {
     for _ in 0..LIMIT {
         blocks(s, 1);
         let playhead = s.playhead();
-        let before = s.tempo_map();
+        let before = crate::tempo::effective(s);
         let events: Vec<MidiEvent> = s
             .update()
             .into_iter()
@@ -150,7 +148,7 @@ fn approx(a: Beat, b: Beat) -> bool {
 #[test]
 fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     let (mut s, fake) = rig();
-    let project = s.tempo_map();
+    let project = crate::tempo::effective(&s);
     assert_eq!(project.constant_tempo(), Some(Bpm::of(120.0)));
     follow(&mut s, MidiGroup::FIRST, false);
     play(&s);
@@ -171,7 +169,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
         "ahead of the block the playhead was read in"
     );
 
-    let map = s.tempo_map();
+    let map = crate::tempo::effective(&s);
     assert_eq!(
         map.points(),
         [
@@ -202,7 +200,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
             .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoUnfollowed))),
         "the update reports it"
     );
-    let restored = s.tempo_map();
+    let restored = crate::tempo::effective(&s);
     assert!(Arc::ptr_eq(&restored, &project), "the project's own map");
     let before = s.playhead().beat();
     blocks(&mut s, 4);
@@ -215,7 +213,7 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
 #[test]
 fn without_a_follow_a_flex_tempo_changes_nothing() {
     let (mut s, fake) = rig();
-    let project = s.tempo_map();
+    let project = crate::tempo::effective(&s);
     play(&s);
     blocks(&mut s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
@@ -229,7 +227,7 @@ fn without_a_follow_a_flex_tempo_changes_nothing() {
             "{events:?}"
         );
     }
-    assert!(Arc::ptr_eq(&s.tempo_map(), &project));
+    assert!(Arc::ptr_eq(&crate::tempo::effective(&s), &project));
     assert_eq!(s.playhead().tempo(), Bpm::of(120.0));
 
     // The silence was the follow's: the same message, sent once the session
@@ -269,7 +267,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
     let expected = next_block_beat(&found);
     assert!(approx(beat, expected), "{beat:?} vs {expected:?}");
 
-    let map = s.tempo_map();
+    let map = crate::tempo::effective(&s);
     let points = map.points();
     assert_eq!(points.len(), 2, "{points:?}");
     assert_eq!(
@@ -310,7 +308,7 @@ fn a_step_in_a_project_ramp_cuts_the_ramp() {
 #[test]
 fn a_set_time_signature_lands_on_the_next_bar_line() {
     let (mut s, fake) = rig();
-    let project_tempo = s.tempo_map();
+    let project_tempo = crate::tempo::effective(&s);
     let project_meter = s.transport_handle().meter();
     assert_eq!(s.get(project_meter).unwrap().changes().len(), 1);
     follow(&mut s, MidiGroup::FIRST, true);
@@ -339,19 +337,22 @@ fn a_set_time_signature_lands_on_the_next_bar_line() {
         "the next bar line of 4/4 after beat ~0.1"
     );
     assert_eq!(
-        s.get(project_meter).unwrap().changes(),
+        s.get(project_meter.effective()).unwrap().changes(),
         [
             MeterChange::new(Beat::new(0.0), TimeSignature::of(4, 4)),
             MeterChange::new(Beat::new(4.0), TimeSignature::of(3, 4)),
         ]
     );
     assert!(
-        Arc::ptr_eq(&s.tempo_map(), &project_tempo),
+        Arc::ptr_eq(&crate::tempo::effective(&s), &project_tempo),
         "a meter change is no tempo change"
     );
 
     s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(*s.get(project_meter).unwrap(), MeterMap::default());
+    assert_eq!(
+        *s.get(project_meter.effective()).unwrap(),
+        MeterMap::default()
+    );
 }
 
 /// **The meter is followed only when asked.**
@@ -371,7 +372,7 @@ fn the_meter_is_followed_only_when_asked() {
             .iter()
             .any(|e| matches!(e, MidiEvent::MeterFollowed { .. }))
     );
-    assert_eq!(*s.get(meter).unwrap(), MeterMap::default());
+    assert_eq!(*s.get(meter.effective()).unwrap(), MeterMap::default());
 }
 
 /// **A Group is a cable of its own**: following Group 1 takes its tempo and not
@@ -380,7 +381,7 @@ fn the_meter_is_followed_only_when_asked() {
 #[test]
 fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
     let (mut s, fake) = rig_with(Some(MidiGroup::of(1)));
-    let project = s.tempo_map();
+    let project = crate::tempo::effective(&s);
     follow(&mut s, MidiGroup::of(1), false);
     play(&s);
     blocks(&mut s, 4);
@@ -412,7 +413,7 @@ fn another_group_is_ignored_and_a_second_follow_replaces_the_first() {
         "one follower: one unfollow ends it"
     );
     assert!(
-        Arc::ptr_eq(&s.tempo_map(), &project),
+        Arc::ptr_eq(&crate::tempo::effective(&s), &project),
         "the project's map from before the first follow"
     );
 }
@@ -427,7 +428,7 @@ fn a_repeated_tempo_adds_no_point() {
     blocks(&mut s, 4);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     let _ = until_followed(&mut s);
-    let map = s.tempo_map();
+    let map = crate::tempo::effective(&s);
     send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
     for _ in 0..40 {
         blocks(&mut s, 1);
@@ -439,7 +440,7 @@ fn a_repeated_tempo_adds_no_point() {
             "{events:?}"
         );
     }
-    assert!(Arc::ptr_eq(&s.tempo_map(), &map));
+    assert!(Arc::ptr_eq(&crate::tempo::effective(&s), &map));
 }
 
 /// **The refusals name what was wrong and change nothing**: a Group the input
@@ -463,50 +464,147 @@ fn follow_refusals() {
     );
 }
 
-/// **While a live tempo is followed, the app's own tempo is refused**, so the
-/// map `unfollow_tempo` restores is the one in force when following began:
-/// a write to the `tempo` target is refused with `SetRefusal::Following` and
-/// publishes nothing, and it works again after unfollowing.
+/// **A write to the tempo while following is accepted and lands in the base**:
+/// `get` reads the map written, and the map the engine uses (`effective`) is
+/// the live-step map until the update publishes the rebuilt one.
 #[test]
-fn the_apps_tempo_is_refused_while_following() {
-    let (mut s, _fake) = rig();
-    let project = s.tempo_map();
+fn a_tempo_set_while_following_lands_in_the_base_and_not_yet_in_force() {
+    let (mut s, fake) = rig();
     follow(&mut s, MidiGroup::FIRST, false);
-    let refused = crate::tempo::set_tempo(&mut s, Bpm::of(90.0)).unwrap_err();
-    assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::Following));
-    assert_eq!(refused.at, 0);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
+    let _ = until_followed(&mut s);
+    let live = crate::tempo::effective(&s);
+
+    let tempo = s.transport_handle().tempo();
+    let written = Arc::new(TempoMap::constant(Bpm::of(90.0)).unwrap());
+    assert_eq!(s.set(tempo.to(Arc::clone(&written))), Ok(()));
     assert!(
-        Arc::ptr_eq(&s.tempo_map(), &project),
-        "a refusal publishes nothing"
+        Arc::ptr_eq(&s.get(tempo).unwrap(), &written),
+        "get reads the base written"
     );
-    s.midi().unfollow_tempo().expect("was following");
-    assert_eq!(crate::tempo::set_tempo(&mut s, Bpm::of(90.0)), Ok(()));
+    assert!(
+        Arc::ptr_eq(&crate::tempo::effective(&s), &live),
+        "the map in force is the live-step map until an update publishes"
+    );
 }
 
-/// **A tempo staged before a follow never publishes over what the unfollow
-/// restores**: a write staged and not updated, then a follow and an unfollow
-/// with no update between, leaves the project's map in force after the
-/// update; and a read while following is not the staged map.
+/// **A live step after a base change keeps the new base's points before the
+/// step and drops its points after it.** The base is written while following
+/// as three points, 100 bpm from 0, 150 bpm at half the step's beat `b` and 200
+/// bpm at `b + 1`; the published map is then 100 bpm, 150 bpm from `b / 2`, and
+/// the followed 75 bpm from `b`, with nothing of the 200 bpm point.
 #[test]
-fn a_tempo_staged_before_following_is_dropped_not_published_over_the_restored_map() {
-    let (mut s, _fake) = rig();
-    let project = s.tempo_map();
-    let tempo = s.transport_handle().tempo();
-    let staged = Arc::new(TempoMap::constant(Bpm::of(90.0)).unwrap());
-    s.set(tempo.to(Arc::clone(&staged))).unwrap();
+fn a_live_step_keeps_the_new_bases_points_before_it_and_drops_those_after() {
+    let (mut s, fake) = rig();
+    follow(&mut s, MidiGroup::FIRST, false);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
+    let (_, step) = followed_tempo(&until_followed(&mut s).events);
 
-    let input = s.input();
-    s.midi()
-        .follow_tempo(FollowTempo::new(input, MidiGroup::FIRST))
-        .expect("follows");
-    assert!(
-        !Arc::ptr_eq(&s.get(tempo).unwrap(), &staged),
-        "a read while following is not the staged map"
+    let half = Beat::new(step.get() / 2.0);
+    let base = TempoMap::builder(Bpm::of(100.0))
+        .step_to(half, Bpm::of(150.0))
+        .step_to(Beat::new(step.get() + 1.0), Bpm::of(200.0))
+        .build()
+        .expect("a map");
+    s.set(s.transport_handle().tempo().to(base)).unwrap();
+    let _ = s.update();
+
+    assert_eq!(
+        crate::tempo::effective(&s).points(),
+        [
+            TempoPoint::step(Beat::new(0.0), Bpm::of(100.0)),
+            TempoPoint::step(half, Bpm::of(150.0)),
+            TempoPoint::step(step, Bpm::of(75.0)),
+        ]
     );
+}
+
+/// **After an unfollow the map in force is the base written while following**,
+/// not the map the base was when following began.
+#[test]
+fn unfollowing_publishes_the_base_written_while_following() {
+    let (mut s, fake) = rig();
+    let first = crate::tempo::effective(&s);
+    follow(&mut s, MidiGroup::FIRST, false);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
+    let _ = until_followed(&mut s);
+    assert_eq!(crate::tempo::set_tempo(&mut s, Bpm::of(90.0)), Ok(()));
+
     s.midi().unfollow_tempo().expect("was following");
     let _ = s.update();
+    let in_force = crate::tempo::effective(&s);
     assert!(
-        Arc::ptr_eq(&s.tempo_map(), &project),
-        "the staged map did not publish over the restored one"
+        !Arc::ptr_eq(&in_force, &first),
+        "not the map found at follow"
     );
+    assert!(Arc::ptr_eq(
+        &in_force,
+        &s.get(s.transport_handle().tempo()).unwrap()
+    ));
+    assert_eq!(in_force.constant_tempo(), Some(Bpm::of(90.0)));
+}
+
+/// **A Set Time Signature lands on the next bar line of the base in force
+/// when the base changes.** Asked for at a beat inside the first bar, over a 4/4
+/// base it lands at beat 4; the base then written is 5/4, and the published
+/// meter is 5/4 from 0 and 3/4 from beat 5, the next bar line of 5/4.
+#[test]
+fn a_meter_step_lands_on_the_next_bar_line_over_a_changed_base() {
+    let (mut s, fake) = rig();
+    follow(&mut s, MidiGroup::FIRST, true);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_meter(MidiGroup::FIRST, 3, 2));
+    let found = until_followed(&mut s);
+    assert!(found.playhead.beat().get() < 4.0, "inside the first bar");
+
+    let meter = s.transport_handle().meter();
+    s.set(meter.to(MeterMap::new([MeterChange::new(
+        Beat::new(0.0),
+        TimeSignature::of(5, 4),
+    )])))
+    .unwrap();
+    let _ = s.update();
+    assert_eq!(
+        s.get(meter.effective()).unwrap().changes(),
+        [
+            MeterChange::new(Beat::new(0.0), TimeSignature::of(5, 4)),
+            MeterChange::new(Beat::new(5.0), TimeSignature::of(3, 4)),
+        ]
+    );
+}
+
+/// **A bounce made while following renders the base tempo.** The base is 120
+/// bpm; the followed 75 bpm is in force from the next block's beat. Four beats
+/// at the base are two seconds, 96 000 frames at 48 kHz; at the followed map
+/// they would be longer.
+#[cfg(feature = "export")]
+#[test]
+fn a_bounce_while_following_renders_the_base_tempo() {
+    use tutti_session::{Bounce, Range};
+    let (mut s, fake) = rig();
+    follow(&mut s, MidiGroup::FIRST, false);
+    play(&s);
+    blocks(&mut s, 4);
+    send(&fake, flex_tempo(MidiGroup::FIRST, 75.0));
+    let _ = until_followed(&mut s);
+    assert!(
+        crate::tempo::effective(&s).constant_tempo().is_none(),
+        "the followed map is in force"
+    );
+
+    let bounce = Bounce::new()
+        .main_output_buffers()
+        .range(Range::Beats(Beat::new(0.0), Beat::new(4.0)));
+    let planes = crate::bounced::bounced(&mut s, bounce)
+        .expect("renders")
+        .into_main_output()
+        .into_planes();
+    assert_eq!(planes[0].len(), 2 * RATE as usize);
 }

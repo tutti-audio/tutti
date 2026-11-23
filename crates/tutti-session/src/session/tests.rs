@@ -109,7 +109,7 @@ fn a_read_before_the_update_is_the_pending_value_and_the_audio_side_reads_the_ol
     assert_eq!(*meters.lend(), old_meter, "the block reads the old meter");
     assert_eq!(*tempos.lend(), old_tempo, "and the old tempo");
     assert_eq!(
-        s.tempo_map(),
+        s.get(tempo.effective()).unwrap(),
         Arc::new(old_tempo.clone()),
         "published is unchanged"
     );
@@ -145,45 +145,6 @@ fn a_batch_of_tempo_and_meter_lands_in_one_update() {
         (meters.lend().seq(), tempos.lend().seq()),
         (meter_seq + 1, tempo_seq + 1),
         "both new after it"
-    );
-}
-
-/// **A write the check refuses stages nothing**: a batch whose second item
-/// is refused leaves the first unwritten too, and the update publishes
-/// neither.
-#[cfg(feature = "midi")]
-#[test]
-fn a_refused_write_stages_nothing() {
-    use crate::{SetRefusal, ValueErrorKind};
-    let mut s = detached();
-    let _ = s.update();
-    // A live tempo owns the map: `check` refuses a tempo write.
-    s.midi
-        .following()
-        .store(true, std::sync::atomic::Ordering::Release);
-    let mut meters = s.transport.settings().project_meter().reader();
-    let seq = meters.lend().seq();
-    let tempo_before = s.tempo_map();
-    let (meter, tempo) = (s.transport_handle().meter(), s.transport_handle().tempo());
-
-    let refused = s
-        .set((
-            meter.to(meter_of(7)),
-            tempo.to(TempoMap::constant(tutti_units::Bpm::of(77.0)).unwrap()),
-        ))
-        .unwrap_err();
-    assert_eq!(refused.kind, ValueErrorKind::Refused(SetRefusal::Following));
-    assert_eq!(refused.at, 1);
-    s.midi
-        .following()
-        .store(false, std::sync::atomic::Ordering::Release);
-    let _ = s.update();
-    assert_eq!(meters.lend().seq(), seq, "the meter was not staged");
-    assert!(Arc::ptr_eq(&s.tempo_map(), &tempo_before), "nor the tempo");
-    assert_eq!(
-        *s.get(meter).unwrap(),
-        *meters.lend(),
-        "a read is the map in force"
     );
 }
 

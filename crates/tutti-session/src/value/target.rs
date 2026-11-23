@@ -49,10 +49,10 @@ pub(crate) mod sealed {
         fn store(cell: &Self::Cell, value: &Self::Value);
     }
 
-    /// A target a lane can drive: what it last delivered.
+    /// A target something can move from its base: the value in force.
     pub trait Lane: Store {
-        /// The value the lane delivered on its last block, or `None` while no
-        /// lane drives the target.
+        /// The value the audio thread uses, or `None` while nothing moves the
+        /// target from its base.
         fn delivered(self, params: &Params) -> Option<Self::Value>;
     }
 }
@@ -194,8 +194,11 @@ impl<T: Target, F> fmt::Debug for Modify<T, F> {
 /// [`Session::get`](crate::Session::get): the last frame of the lane that
 /// drives the target, held to the target's range, or the base while no lane
 /// drives it. It is at most one block old, and a lane that delivers a NaN or
-/// an infinity reads as no lane. Only a target a lane can drive has one
-/// ([`ParamTarget`](crate::ParamTarget) and [`GainTarget`](crate::GainTarget)).
+/// an infinity reads as no lane. Only a target something can move has one:
+/// a [`ParamTarget`](crate::ParamTarget) and a [`GainTarget`](crate::GainTarget)
+/// (a lane moves it), and the project's [`TempoTarget`](crate::TempoTarget) and
+/// [`MeterTarget`](crate::MeterTarget), whose effective value is the base with
+/// a followed source's steps laid over it.
 #[must_use = "a read is answered by `Session::get`"]
 pub struct Effective<T: Modulatable> {
     pub(crate) target: T,
