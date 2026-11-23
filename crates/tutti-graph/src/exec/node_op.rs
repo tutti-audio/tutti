@@ -279,7 +279,7 @@ pub(super) fn fading_node_op<
                 fade_gains::<F>(x.law, Samples::new(x.done + i), Samples::new(x.len));
             *y = *y * g_in + o * g_out;
         }
-        st.flags.set(s, 0);
+        st.flags.set(s, Flags::NONE);
     }
     x.done += n;
     // Never skipped while fading: the next block's skip test reads these.
@@ -288,15 +288,49 @@ pub(super) fn fading_node_op<
     x.done >= x.len
 }
 
-/// Per audio slot: every sample of the block is exact `0.0`.
-pub(crate) const SILENT: u8 = 1;
+/// What is known about an audio slot's block: every sample is exact `0.0`
+/// (silent), and the block holds one value throughout (constant). One byte,
+/// so a node's input masks are built with a load and two shifts per channel.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Flags(u8);
 
-/// Per audio slot: the block holds one value throughout.
-pub(super) const CONSTANT: u8 = 2;
+impl Flags {
+    const SILENT: u8 = 1;
+    const CONSTANT: u8 = 2;
 
-#[inline]
-pub(super) fn flag(silent: bool, constant: bool) -> u8 {
-    (silent as u8 * SILENT) | (constant as u8 * CONSTANT)
+    /// Nothing is known.
+    pub(crate) const NONE: Self = Self(0);
+    /// Exact silence, which is constant.
+    pub(crate) const SILENCE: Self = Self(Self::SILENT | Self::CONSTANT);
+
+    #[inline]
+    pub(crate) const fn new(silent: bool, constant: bool) -> Self {
+        Self((silent as u8 * Self::SILENT) | (constant as u8 * Self::CONSTANT))
+    }
+
+    /// Every sample is exact `0.0`.
+    #[inline]
+    pub(crate) const fn is_silent(self) -> bool {
+        self.0 & Self::SILENT != 0
+    }
+
+    /// The block holds one value throughout.
+    #[inline]
+    pub(crate) const fn is_constant(self) -> bool {
+        self.0 & Self::CONSTANT != 0
+    }
+
+    /// The flags as the byte a shared atomic holds.
+    #[inline]
+    pub(crate) const fn to_byte(self) -> u8 {
+        self.0
+    }
+
+    /// The flags a shared atomic's byte held (`to_byte`'s).
+    #[inline]
+    pub(crate) const fn from_byte(byte: u8) -> Self {
+        Self(byte)
+    }
 }
 
 /// A node's input masks from its input slots' flags: one load and two
@@ -309,9 +343,9 @@ pub(super) fn in_masks<Fl: SlotFlags + ?Sized>(
 ) -> (SilenceMask, ConstantMask) {
     let (mut silent, mut constant) = (0u64, 0u64);
     for (c, &s) in (0..64u32).zip(ain) {
-        let f = u64::from(flags.get(s));
-        silent |= (f & u64::from(SILENT)) << c;
-        constant |= ((f & u64::from(CONSTANT)) >> 1) << c;
+        let f = flags.get(s);
+        silent |= u64::from(f.is_silent()) << c;
+        constant |= u64::from(f.is_constant()) << c;
     }
     (SilenceMask(silent), ConstantMask(constant))
 }
@@ -497,7 +531,7 @@ pub(super) fn node_op_with<
     if skip {
         for &s in aout {
             st.arena.slot_mut(s, frames).fill(F::ZERO);
-            st.flags.set(s, SILENT | CONSTANT);
+            st.flags.set(s, Flags::SILENCE);
         }
         for &s in eout {
             st.events.slot_mut(s).clear();
@@ -657,7 +691,7 @@ pub(super) fn node_op_with<
     // A node with no outputs claims nothing by being "all silent": it is a
     // sink, called for its side effects, and a skip would starve them.
     u.last_quiet = !(aout.is_empty() && eout.is_empty())
-        && aout.iter().all(|&s| st.flags.get(s) & SILENT != 0)
+        && aout.iter().all(|&s| st.flags.get(s).is_silent())
         && eout
             .iter()
             .all(|&s| st.events.ev(s).is_empty() && st.events.pev(s).is_empty());
@@ -949,7 +983,7 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
     match status {
         Status::Modified => {
             for &s in aout {
-                flags.set(s, 0);
+                flags.set(s, Flags::NONE);
             }
         }
         Status::Masked {
@@ -957,13 +991,13 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
             constant: cm,
         } => {
             for (c, &s) in aout.iter().enumerate() {
-                flags.set(s, flag(sm.get(c), cm.get(c) || sm.get(c)));
+                flags.set(s, Flags::new(sm.get(c), cm.get(c) || sm.get(c)));
             }
         }
         Status::Silent | Status::Idle => {
             for &s in aout {
                 arena.slot_mut(s, frames).fill(F::ZERO);
-                flags.set(s, SILENT | CONSTANT);
+                flags.set(s, Flags::SILENCE);
             }
         }
         Status::Constant => {
@@ -973,7 +1007,7 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
                 buf.fill(v);
                 flags.set(
                     s,
-                    flag(
+                    Flags::new(
                         v == F::ZERO && Into::<f64>::into(v).is_sign_positive(),
                         true,
                     ),
@@ -990,7 +1024,7 @@ pub(super) fn finish<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
                     }
                     None => {
                         arena.slot_mut(s, frames).fill(F::ZERO);
-                        flags.set(s, SILENT | CONSTANT);
+                        flags.set(s, Flags::SILENCE);
                     }
                 }
             }

@@ -101,7 +101,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// `Backpressure` if the crossfades `delta` starts would take more than
-    /// [`FADE_CAPACITY`](crate::FADE_CAPACITY) slots on the fade-return ring.
+    /// [`FADE_CAPACITY`](crate::FADE_CAPACITY) slots on the return ring.
     fn fade_room(&self, delta: &Delta) -> Result<(), CommitError> {
         self.link.check_fade_room(starting(delta))
     }
@@ -161,7 +161,7 @@ impl<F: Float> Editor<F> {
     /// nothing — when [`QUEUE_CAPACITY`](crate::QUEUE_CAPACITY) commits are out, or when the fades
     /// it starts would put more than [`FADE_CAPACITY`](crate::FADE_CAPACITY) in flight. A running
     /// fade holds neither: its commit comes back when applied, and its slot
-    /// on the fade-return ring is its own.
+    /// on the return ring is its own.
     ///
     /// A commit that changes nothing — the spec and shapes those of the last
     /// commit, no unit pending, no crossfade or latency cut waiting — sends

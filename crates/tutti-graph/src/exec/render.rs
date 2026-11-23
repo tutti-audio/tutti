@@ -6,8 +6,8 @@ use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
 use tutti_units::{Blocks, Samples};
 
-use super::commit::{CommitSeq, Crossfade, Rendered, retire_fade};
-use super::node_op::flag;
+use super::commit::{CommitSeq, Handback, Rendered, retire_fade};
+use super::node_op::Flags;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
 use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, TableSlice};
@@ -29,7 +29,7 @@ use tutti_tempo::TempoMap;
 pub(super) fn end_fades<F: Float>(
     plan: &Plan,
     store: &mut [Option<Unit<F>>],
-    fade_back: &mut RingWriter<Box<Crossfade<F>>>,
+    back: &mut RingWriter<Handback<F>>,
     inject: &mut [Inject],
     has_inject: &mut TableSlice<PlanUnitId, bool>,
     dropped: &mut Dropped,
@@ -42,7 +42,7 @@ pub(super) fn end_fades<F: Float>(
             continue;
         }
         let ended = u.fade.take().expect("checked");
-        retire_fade(fade_back, ended);
+        retire_fade(back, ended);
         if let Some(mut next) = u.queued.take() {
             let incoming = next.waiting.take().expect("a queued fade holds its unit");
             // What the unit that just finished fading in wrote for this one
@@ -218,8 +218,7 @@ impl<F: Float> Executor<F> {
                 inbox:
                     Inbox {
                         queue: _,
-                        back: _,
-                        fade_back,
+                        back,
                         losses,
                         unreported,
                         edge_fades,
@@ -338,7 +337,10 @@ impl<F: Float> Executor<F> {
                 let ring = f.as_ref().expect("built by apply");
                 let is_silent =
                     ring.peek_oldest(arena.slot_mut(AudioSlotId::new(spec.slot), frames));
-                flags.set(AudioSlotId::new(spec.slot), flag(is_silent, is_silent));
+                flags.set(
+                    AudioSlotId::new(spec.slot),
+                    Flags::new(is_silent, is_silent),
+                );
             }
             for (f, spec) in event_fb.iter_mut().zip(&plan.event_feedback) {
                 let fifo = f.as_mut().expect("built by apply");
@@ -390,7 +392,7 @@ impl<F: Float> Executor<F> {
             );
 
             if fade_ended {
-                end_fades(plan, store, fade_back, inject, has_inject, dropped);
+                end_fades(plan, store, back, inject, has_inject, dropped);
             }
             dropped.flush(plan, losses, unreported);
             // An edge whose declick fade ended this block tells the editor,

@@ -1,5 +1,6 @@
 //! The editor's end of the rings to its executor.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::edges::tap::TapEnd;
@@ -7,7 +8,7 @@ use tutti_units::At;
 
 use super::CommitError;
 use crate::exec::command::{CommandId, CommandTx, ScheduleError, Scheduled};
-use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, QUEUE_CAPACITY};
+use crate::exec::{Channels, Commit, Crossfade, FADE_CAPACITY, Handback, QUEUE_CAPACITY};
 use crate::model::gain::EdgeFade;
 use crate::model::spec::EventInputPort;
 use crate::{EdgeId, Executor};
@@ -19,14 +20,18 @@ use tutti_rt::PushError;
 ///
 /// At most [`QUEUE_CAPACITY`] commits are out (sent and not yet handed back),
 /// and the crossfades they start hold at most [`FADE_CAPACITY`] slots on the
-/// fade-return ring, so a push this link makes after its check never fails.
+/// return ring beside them, so a push this link makes after its check never fails.
 pub(super) struct Link<F: Float> {
     channels: Channels<F>,
+    /// What the return ring carried, sorted by kind: the ring is read in
+    /// order, and each kind is handed out by its own pop.
+    landed: VecDeque<Box<Commit<F>>>,
+    faded: VecDeque<Box<Crossfade<F>>>,
     commands: CommandTx,
     /// Commits sent and not yet handed back.
     out: usize,
     /// Crossfades sent (started or waiting) and not yet handed back: the
-    /// fade-return ring's slots in use.
+    /// return ring's slots in use for fades.
     fades_out: usize,
     /// Commits sent, ever: the sequence number of the last one.
     sent: u64,
@@ -49,6 +54,8 @@ impl<F: Float> Link<F> {
     pub(super) fn new(channels: Channels<F>, commands: CommandTx) -> Self {
         Self {
             channels,
+            landed: VecDeque::with_capacity(QUEUE_CAPACITY + 1),
+            faded: VecDeque::with_capacity(FADE_CAPACITY),
             commands,
             out: 0,
             fades_out: 0,
@@ -69,7 +76,7 @@ impl<F: Float> Link<F> {
     }
 
     /// `Backpressure` when `fades` more crossfades would take more than
-    /// [`FADE_CAPACITY`] slots on the fade-return ring.
+    /// [`FADE_CAPACITY`] slots on the return ring.
     pub(super) fn check_fade_room(&self, fades: usize) -> Result<(), CommitError> {
         if self.fades_out + fades > FADE_CAPACITY {
             return Err(CommitError::Backpressure);
@@ -80,7 +87,7 @@ impl<F: Float> Link<F> {
     /// The `seq` of the newest commit whose main output crossfade the executor has
     /// rendered through, 0 before any.
     pub(super) fn main_output_fade_ended(&self) -> u64 {
-        self.channels.main_output_fade_ended.get().0
+        self.channels.readings.main_output_fade_ended.get().0
     }
 
     /// The sequence number the next commit sends with.
@@ -124,9 +131,20 @@ impl<F: Float> Link<F> {
         self.out += 1;
     }
 
+    /// Moves everything on the return ring into the lists the pops read.
+    fn sort_returned(&mut self) {
+        while let Some(back) = self.channels.returned.pop() {
+            match back {
+                Handback::Commit(c) => self.landed.push_back(c),
+                Handback::Fade(x) => self.faded.push_back(x),
+            }
+        }
+    }
+
     /// The next commit the executor handed back, applied.
     pub(super) fn pop_returned(&mut self) -> Option<Box<Commit<F>>> {
-        let done = self.channels.returned.pop()?;
+        self.sort_returned();
+        let done = self.landed.pop_front()?;
         self.out -= 1;
         self.acked += 1;
         self.leaked = self.leaked.saturating_add(done.refused() as u64);
@@ -155,7 +173,8 @@ impl<F: Float> Link<F> {
 
     /// The next crossfade the executor handed back.
     pub(super) fn pop_faded(&mut self) -> Option<Box<Crossfade<F>>> {
-        let x = self.channels.faded.pop()?;
+        self.sort_returned();
+        let x = self.faded.pop_front()?;
         self.fades_out -= 1;
         self.leaked = self.leaked.saturating_add(x.refused() as u64);
         Some(x)
@@ -174,6 +193,7 @@ impl<F: Float> Link<F> {
     /// Refusals since the last call that no loss names.
     pub(super) fn take_unreported(&mut self) -> u64 {
         self.channels
+            .readings
             .unreported
             .take_since(&mut self.unreported_seen)
     }
@@ -185,7 +205,7 @@ impl<F: Float> Link<F> {
 
     /// The executor's play clock, as it last published it.
     pub(super) fn play_reading(&self) -> crate::PlayReading {
-        self.channels.play.read()
+        self.channels.readings.play.get().0
     }
 
     /// Commits sent and not yet handed back.

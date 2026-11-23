@@ -5,11 +5,12 @@
 //! travels as a **commit box** holding the new plan and only the units that
 //! change. [`Editor::new`](crate::Editor::new) builds the editor and the
 //! executor as a pair joined by two preallocated single-producer,
-//! single-consumer rings:
+//! single-consumer rings (the report rings and the scheduled commands' ring
+//! aside):
 //!
 //! ```text
 //!   Editor ──commit()──▶ [ queue, QUEUE_CAPACITY ] ──▶ Executor::process
-//!   Editor ◀─collect()── [ return, QUEUE_CAPACITY+1 ] ◀── (applied box)
+//!   Editor ◀─collect()── [ return, QUEUE_CAPACITY+1+FADE_CAPACITY ] ◀── (applied box, ended fade)
 //! ```
 //!
 //! At the start of every [`process`](Executor::process) the executor pulls
@@ -28,7 +29,8 @@
 //! the moment it is sent until it has drained the box back, and refuses a
 //! commit ([`CommitError::Backpressure`](crate::CommitError)) with
 //! [`QUEUE_CAPACITY`] out — so at most that many boxes are ever in the
-//! return ring, whose capacity is one more. (Were it ever full regardless,
+//! return ring, which holds that many plus one, and the room for the
+//! crossfades below. (Were it ever full regardless,
 //! the executor would leak the box rather than free it on the audio thread.)
 //!
 //! **Where boxes are freed.** Drained boxes are dropped by the editor, on the
@@ -119,11 +121,11 @@
 //! replace while one runs waits in the unit's `queued` slot.
 //!
 //! **A fade does not hold its commit**: the box goes back as soon as it is
-//! applied, like any other. Each crossfade comes back on its own, on a
-//! third ring (the **fade-return ring**, [`FADE_CAPACITY`] long), when it
+//! applied, like any other. Each crossfade comes back on its own, on the
+//! same return ring (with [`FADE_CAPACITY`] slots reserved for them), when it
 //! ends — or is cut, superseded, or placed with nothing to fade from —
 //! carrying its outgoing (or never-run) unit, so that unit is freed on the
-//! control side. The editor reserves a slot on that ring for every fade a
+//! control side. The editor reserves one of those slots for every fade a
 //! commit starts, before sending it, and refuses a commit that would take
 //! more than [`FADE_CAPACITY`] fades in flight; so the push cannot fail.
 //!
@@ -251,10 +253,11 @@ mod state;
 mod update;
 
 pub(crate) use commit::{
-    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
+    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Handback, Opened, Participants, Rendered,
+    channels,
 };
-use node_op::{CONSTANT, flag, run_node_op, run_params};
-pub(crate) use node_op::{Head, OpState, SILENT, node_dispatch};
+pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
+use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
     audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
     output_op, sum_op,
@@ -279,12 +282,13 @@ pub(crate) use state::{Inject, Ring, Unit};
 pub const DEFAULT_EVENT_CAPACITY: usize = 512;
 
 /// Commits that may be out at once: sent and not yet drained back. The
-/// queue holds this many; the return ring one more.
+/// queue holds this many; the return ring one more, beside its slots for
+/// crossfades ([`FADE_CAPACITY`]).
 pub const QUEUE_CAPACITY: usize = 4;
 
 /// Crossfades that may be in flight at once — started or waiting, and not
 /// yet drained back by `Editor::collect` — across the whole graph. The
-/// fade-return ring holds this many, and a commit that would start more is
+/// return ring holds this many slots for them, and a commit that would start more is
 /// refused (`CommitError::Backpressure`) before anything is sent. Each is a
 /// replace with a fade still running or waiting, so the cap is far above
 /// what a session does; it exists so the audio thread's push can never
@@ -370,9 +374,9 @@ pub struct Executor<F: Float = f32> {
 /// pushed as the editor dropped, is freed there.
 struct Inbox<F: Float = f32> {
     queue: RingReader<Box<Commit<F>>>,
-    back: RingWriter<Box<Commit<F>>>,
-    /// Where crossfades go back (see the module docs, "Crossfades").
-    fade_back: RingWriter<Box<Crossfade<F>>>,
+    /// Where applied commits and ended crossfades go back (see the module
+    /// docs, "Crossfades").
+    back: RingWriter<Handback<F>>,
     /// Where each block's log of dropped events goes, for the editor to
     /// drain.
     losses: RingWriter<EventLoss>,
@@ -484,15 +488,15 @@ impl<F: Float> Executor<F> {
         ends: ExecutorEnds<F>,
         commands: CommandRx,
     ) -> Self {
+        let readings = ends.readings;
         Self {
             prepare,
             event_cap: cap,
             inbox: Inbox {
                 queue: ends.queue,
                 back: ends.back,
-                fade_back: ends.fade_back,
                 losses: ends.losses,
-                unreported: ends.unreported,
+                unreported: readings.unreported,
                 edge_fades: ends.edge_fades,
                 commands,
                 applied: 0,
@@ -503,18 +507,18 @@ impl<F: Float> Executor<F> {
             clock: Clock {
                 frame: Frame::ZERO,
                 history: Box::new(TransportHistory::new()),
-                play: PlayState::new(ends.play),
+                play: PlayState::new(readings.play),
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
             parked: CappedVec::with_capacity(0),
             chase: CappedVec::default(),
             pool: None,
-            pool_participants: ends.pool,
-            rendered: ends.rendered,
+            pool_participants: readings.pool,
+            rendered: readings.rendered,
             rendered_blocks: Blocks::ZERO,
             main_output_fade: None,
-            main_output_fade_ended: ends.main_output_fade_ended,
+            main_output_fade_ended: readings.main_output_fade_ended,
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -907,8 +911,8 @@ mod tests {
         let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
         let mut stager = Stager::new(
             DEFAULT_EVENT_CAPACITY,
-            channels.pool.clone(),
-            channels.rendered.clone(),
+            channels.readings.pool.clone(),
+            channels.readings.rendered.clone(),
         );
         let declick = tutti_curve::declick_frames(prepare.sample_rate()).get();
         let mut commit = Commit::build(
