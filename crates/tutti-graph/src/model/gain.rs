@@ -386,13 +386,14 @@ impl<F: Float> SumLane<F> {
         spare: &mut CappedVec<ParamState<F>>,
     ) {
         let Carried { prev, drive, fade } = carried;
+        let len = self.fade.declick.len();
         self.prev = prev;
-        self.fade = fade;
+        self.fade = FadeState {
+            declick: fade.declick.relength(len),
+            ..fade
+        };
         match drive {
-            Some(state)
-                if (self.drive.is_some() || state.busy())
-                    && state.fits(max, self.fade.declick.len()) =>
-            {
+            Some(state) if (self.drive.is_some() || state.busy()) && state.fits(max, len) => {
                 if let Some(old) = self.drive.replace(state) {
                     crate::exec::place(spare, old);
                 }
@@ -724,6 +725,62 @@ mod tests {
         );
         lane.snapshot();
         assert_eq!(lane.weight(8, None), Weight::Unit);
+    }
+
+    /// A lane with a fade in flight, adopted into a plan at half the sample
+    /// rate (a declick of 120 frames, not 240), fades over the new length,
+    /// keeps its progress, and a progress past the new length still runs one
+    /// block at the goal and reports the fade finished.
+    #[test]
+    fn an_adopted_fade_runs_over_the_new_declick_and_keeps_its_progress() {
+        let (cell, mut old) = lane(1.0);
+        cell.store_fade(EdgeFade::In);
+        let adopt = |old: &mut SumLane<f32>| {
+            let mut new = SumLane::<f32>::weighted(cell.clone(), false, 8, Samples::new(120));
+            new.adopt(old.carry(), 8, &mut CappedVec::with_capacity(1));
+            new
+        };
+
+        // 64 of 240 frames done: under the new length, so the fade goes on.
+        old.snapshot();
+        assert!(matches!(old.weight(64, None), Weight::Fade { .. }));
+        let mut kept = adopt(&mut old);
+        assert_eq!(kept.fade.declick.len(), Samples::new(120));
+        assert_eq!(kept.fade.declick.done(), Samples::new(64));
+        kept.snapshot();
+        assert_eq!(
+            kept.weight(32, None),
+            Weight::Fade {
+                start: 0.0,
+                goal: 1.0,
+                k: Samples::new(64),
+                len: Samples::new(120)
+            }
+        );
+        assert_eq!(kept.finished(), None);
+
+        // 200 of 240 done: past the new 120, so the next block is the last,
+        // at the goal, and the fade is reported.
+        let (cell, mut old) = lane(1.0);
+        cell.store_fade(EdgeFade::In);
+        old.snapshot();
+        old.weight(100, None);
+        old.snapshot();
+        old.weight(100, None);
+        let mut late = SumLane::<f32>::weighted(cell, false, 8, Samples::new(120));
+        late.adopt(old.carry(), 8, &mut CappedVec::with_capacity(1));
+        assert_eq!(late.fade.declick.len(), Samples::new(120));
+        late.snapshot();
+        assert_eq!(
+            late.weight(8, None),
+            Weight::Fade {
+                start: 0.0,
+                goal: 1.0,
+                k: Samples::new(200),
+                len: Samples::new(120)
+            }
+        );
+        assert_eq!(late.finished(), Some(EdgeFade::In));
     }
 
     #[test]
