@@ -255,8 +255,8 @@ fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
     )
 }
 
-/// Emits the main inputs and every node's ops, in `order`; `compile` emits the
-/// main outputs, taps, event taps, meters and feedback captures after them.
+/// Emits every op of `graph`: the nodes in `order`, then the main outputs,
+/// taps, event taps and meters, then the feedback captures.
 ///
 /// Takes the checked `units`, the serial `order` and the `timing`; returns the
 /// [`Emitted`] ops. A source is delayed to its sink's arrival (or to the output
