@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! The audio graph of the Tutti engine: a graph described as a value, a pure
 //! compiler from that value to an immutable [`Plan`], and a real-time
-//! [`Executor`] that runs the plan block by block, serially or spread over
+//! [`Executor`] that runs the plan block by block, on one thread or spread over
 //! a [`Pool`]'s threads.
 //!
 //! Use it directly to host audio processors ([`Node`]s) in a graph you build
@@ -69,7 +69,7 @@
 //!      │ compile(&ValidGraph, &Shapes, &Prepare, prev) -> (Plan, Delta)
 //!  Plan               ops, buffer slots, delay and feedback tables   immutable, Send + Sync
 //!      │ Editor::commit ──queue──▶ Executor, which sends the replaced state back
-//!  Executor           owns the units; runs the plan's ops serially, one block per call
+//!  Executor           owns the units; runs the plan's ops, one block per call
 //! ```
 //!
 //! - [`GraphSpec`] is the graph as data: a

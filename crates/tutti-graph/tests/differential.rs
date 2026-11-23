@@ -1,4 +1,4 @@
-//! The differential suite: the serial plan executor against the reference
+//! The differential suite: the plan executor against the reference
 //! interpreter, bit for bit, on random graphs.
 //!
 //! The graphs mix every test node in `common`: generators (`Const` returning

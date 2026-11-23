@@ -1,8 +1,8 @@
 //! The node op of a unit whose mode asks something of it (`mode.rs`): feeding
 //! its bypass line, running a fade between modes, muting, and parking.
 //!
-//! Written once, generic over the slots like every op, so the serial and the
-//! parallel executor run the same code; it touches only the op's own slots and
+//! Written once, generic over the slots like every op, so a block alone and a block
+//! spread over a pool run the same code; it touches only the op's own slots and
 //! its own unit.
 
 use super::*;
@@ -160,13 +160,13 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     // which a bypass closes on its way out.
     if !ein.is_empty() {
         let unit = rec.unit;
-        if st.has_inject[st.at] {
+        if *st.has_inject {
             for inj in st.inject.iter_mut().filter(|i| i.unit == unit) {
                 inj.discard();
             }
-            st.has_inject[st.at] = false;
+            *st.has_inject = false;
         }
-        st.has_due[st.at] = false;
+        *st.has_due = false;
     }
     u.quiet = 0;
     u.last_quiet = false;
