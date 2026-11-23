@@ -674,6 +674,19 @@ pub fn clump_name_at(unit: &Unit, addr: ParamAddress, clump: u32) -> Option<Stri
     unit.parameter_clump_name(addr.scope, addr.element, clump)
 }
 
+/// The length, in characters, a short name is asked at: the width of a narrow
+/// control-surface display.
+pub const SHORT_NAME_LENGTH: i32 = 8;
+
+/// The AU's name for parameter `id` cut to [`SHORT_NAME_LENGTH`]
+/// (`kAudioUnitProperty_ParameterIDName`). `None` when the AU does not
+/// implement the property or answers an empty name; the full name is never a
+/// stand-in.
+pub fn short_name(unit: &Unit, id: u32) -> Option<String> {
+    let addr = ParamAddress::GLOBAL;
+    unit.parameter_short_name(addr.scope, addr.element, id, SHORT_NAME_LENGTH)
+}
+
 /// Which parameters the meta-parameter `id` may move when it is written.
 ///
 /// [`dependents_of_at`] against [`ParamAddress::GLOBAL`], where meta-flagged

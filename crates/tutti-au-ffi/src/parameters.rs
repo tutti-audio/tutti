@@ -6,26 +6,28 @@ use coreaudio_sys as sys;
 use crate::cf::{CfString, take_string};
 use crate::error::Result;
 use crate::property::{
-    Element, ParameterClumpName, ParameterInfo, ParameterStringFromValue, ParameterValueFromString,
-    Scope,
+    Element, ParameterClumpName, ParameterIdName, ParameterInfo, ParameterStringFromValue,
+    ParameterValueFromString, Scope,
 };
 use crate::unit::Unit;
 
-/// `AudioUnitParameterNameInfo`'s two-field form that `ParameterClumpName`
-/// uses: `{ UInt32 inID; CFStringRef outName; }`. Hand-declared because
-/// `coreaudio-sys` does not export it; the layout is pinned by
-/// `clump_name_request_matches_the_c_abi`.
+/// `AudioUnitParameterNameInfo`, the request `ParameterClumpName` and
+/// `kAudioUnitProperty_ParameterIDName` share: `{ UInt32 inID; SInt32 inDesiredLength; CFStringRef
+/// outName; }`. Hand-declared because `coreaudio-sys` does not export it; the
+/// layout is pinned by `name_request_matches_the_c_abi`. The desired length is
+/// read by `kAudioUnitProperty_ParameterIDName` alone.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ClumpNameRequest {
+pub(crate) struct NameRequest {
     in_id: u32,
+    in_desired_length: i32,
     out_name: sys::CFStringRef,
 }
 
-impl crate::plain::Sealed for ClumpNameRequest {}
-// SAFETY: a `u32` and a raw pointer in a `#[repr(C)]` struct: every bit
-// pattern, zero included, is valid.
-unsafe impl crate::plain::Plain for ClumpNameRequest {}
+impl crate::plain::Sealed for NameRequest {}
+// SAFETY: a `u32`, an `i32` and a raw pointer in a `#[repr(C)]` struct: every
+// bit pattern, zero included, is valid.
+unsafe impl crate::plain::Plain for NameRequest {}
 
 impl crate::plain::Sealed for sys::AudioUnitParameterStringFromValue {}
 // SAFETY: a `u32` and two raw pointers in a `#[repr(C)]` struct.
@@ -121,8 +123,9 @@ impl Unit {
         element: Element,
         clump: u32,
     ) -> Option<String> {
-        let request = ClumpNameRequest {
+        let request = NameRequest {
             in_id: clump,
+            in_desired_length: 0,
             out_name: std::ptr::null(),
         };
         let answer = self
@@ -132,6 +135,28 @@ impl Unit {
         // property.
         unsafe { take_string(answer.out_name) }
     }
+
+    /// The unit's name for parameter `id` cut to at most `length` characters,
+    /// or `None` when it refuses or answers empty.
+    pub fn parameter_short_name(
+        &self,
+        scope: Scope,
+        element: Element,
+        id: u32,
+        length: i32,
+    ) -> Option<String> {
+        let request = NameRequest {
+            in_id: id,
+            in_desired_length: length,
+            out_name: std::ptr::null(),
+        };
+        let answer = self
+            .get_in_out::<ParameterIdName>(scope, element, request)
+            .ok()?;
+        // SAFETY: Copy rule, as for every CF object retrieved from an AU
+        // property.
+        unsafe { take_string(answer.out_name) }.filter(|name| !name.is_empty())
+    }
 }
 
 #[cfg(test)]
@@ -139,13 +164,14 @@ mod tests {
     use super::*;
     use std::mem::size_of;
 
-    /// The clump request is hand-declared, so its layout is pinned here:
-    /// `{ UInt32; CFStringRef }` is 16 bytes with the pointer at offset 8.
+    /// The name request is hand-declared, so its layout is pinned here:
+    /// `{ UInt32; SInt32; CFStringRef }` is 16 bytes with the pointer at offset 8.
     #[test]
-    fn clump_name_request_matches_the_c_abi() {
-        assert_eq!(size_of::<ClumpNameRequest>(), 16);
-        assert_eq!(std::mem::offset_of!(ClumpNameRequest, in_id), 0);
-        assert_eq!(std::mem::offset_of!(ClumpNameRequest, out_name), 8);
+    fn name_request_matches_the_c_abi() {
+        assert_eq!(size_of::<NameRequest>(), 16);
+        assert_eq!(std::mem::offset_of!(NameRequest, in_id), 0);
+        assert_eq!(std::mem::offset_of!(NameRequest, in_desired_length), 4);
+        assert_eq!(std::mem::offset_of!(NameRequest, out_name), 8);
     }
 
     #[test]
