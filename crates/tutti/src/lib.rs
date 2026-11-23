@@ -485,8 +485,8 @@ pub mod tempo {
 /// `ParamNode`). The graph's compiler, editor and executor are the session's;
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
-    #[cfg(feature = "export")]
-    pub use tutti_graph::GraphBuilder;
+    // `GraphBuilder` renders a graph with no session; the types its signatures
+    // name come with it.
     pub use tutti_graph::{
         Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ForkByClone, HasParam, HasParams, InBus,
         InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
@@ -502,6 +502,12 @@ pub mod graph {
         Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,
         SubBlocks, TransportChange, TransportChangeRejected, TransportChanges, TransportHistory,
         TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
+    };
+    #[cfg(feature = "export")]
+    pub use tutti_graph::{
+        ChannelFeed, EventTapPort, EventTapSpec, Feed, GraphBuilder, GraphSpec, Lowering,
+        MainOutputBank, MeterSpec, NodeSpec, PortFeed, Renderer, Shapes, TapSpec, Topology, Valid,
+        ValidGraph,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
     pub use tutti_graph::{

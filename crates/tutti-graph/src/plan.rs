@@ -1009,7 +1009,7 @@ pub struct Value {
 /// compiles and ships it.
 ///
 /// Every buffer it names is a **slot**, an index into one of two arenas
-/// (audio and event). Slot 0 of each ([`ZERO_SLOT`], [`EMPTY_SLOT`]) is
+/// (audio and event). Slot 0 of each (`ZERO_SLOT`, `EMPTY_SLOT`) is
 /// never written and is what an unconnected input reads; feedback slots
 /// come next, filled from the feedback state before the first op of each
 /// block; the rest are shared between values whose lifetimes cannot
