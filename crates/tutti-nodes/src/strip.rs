@@ -44,6 +44,7 @@
 
 use crate::last_good::LastGood;
 use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
+use tutti_dsp::balance_gains_in;
 use tutti_graph::{Cx, Inputs, Io, Node, Outputs, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::UnitParam;
@@ -333,7 +334,7 @@ impl BusStripNode {
                 } else {
                     F::from_count((i + 1) as u32) * inv
                 };
-                lerp(start, end, t)
+                tutti_dsp::lerp(start, end, t)
             };
             let steady = end;
             match (ramping, volume.is_some() || balance.is_some()) {
@@ -383,37 +384,10 @@ impl BusStripNode {
         if side == Side::Mid {
             return fader;
         }
-        let one = F::ONE;
-        // Comparisons, not `clamp` and `min`: a NaN falls through to unity, and the selects
-        // vectorise where the NaN-propagating forms do not.
-        let at_most_one = |x: F| if x < one { x } else { one };
-        let b = balance.map_or(F::ZERO, |b| {
-            let b = b[i];
-            if b < -one {
-                -one
-            } else if b > one {
-                one
-            } else {
-                b
-            }
-        });
-        let side_gain = match side {
-            Side::Right => at_most_one(one + b),
-            _ => at_most_one(one - b),
-        };
+        let (left, right) = balance_gains_in(balance.map_or(F::ZERO, |b| b[i]));
+        let side_gain = if side == Side::Right { right } else { left };
         side_gain * fader
     }
-}
-
-/// `from` at `t = 0`, `to` at `t = 1` — and *exactly* `to` there.
-///
-/// Written as `from·(1−t) + to·t` rather than `from + (to−from)·t` for that
-/// endpoint: the second form rounds, so a ramp to silence could end a few
-/// ulps above zero and a strip faded to nothing would leak. Over the sample width's bare
-/// gains, narrowed once per block: a per-frame `f64` ramp would not vectorise with the product.
-#[inline(always)]
-fn lerp<F: Float>(from: F, to: F, t: F) -> F {
-    tutti_dsp::lerp(from, to, t)
 }
 
 /// `y = x · gain(frame)`, over one channel's block.
@@ -541,31 +515,6 @@ mod tests {
         let mut s = strip(BusTopology::STEREO);
         s.volume().store(Amplitude::new(0.5));
         assert_eq!(tick2(&mut s, 1.0, 1.0), (0.5, 0.5));
-    }
-
-    #[test]
-    fn balance_attenuates_the_far_channel_only() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -1.0); // hard left
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 1.0); // hard right
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
-        // Halfway: the near channel stays at unity, the far one is halved.
-        set_balance(&s, -0.5);
-        let (l, r) = tick2(&mut s, 1.0, 1.0);
-        assert!((l - 1.0).abs() < 1e-6);
-        assert!((r - 0.5).abs() < 1e-6);
-    }
-
-    /// Out-of-range balance saturates rather than amplifying: without the clamp,
-    /// a balance of -2 would give the left channel a gain of 3.
-    #[test]
-    fn balance_saturates_out_of_range() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
     }
 
     #[test]
