@@ -65,7 +65,7 @@ impl<F: Float> Executor<F> {
                     };
                     // The unit a cut displaced still owes its keys: they close
                     // in the first block after the resume.
-                    if let Some(stale) = cut_fades(&mut unit, &mut self.inbox.back) {
+                    if let Some(stale) = cut_fades(&mut unit, &mut self.inbox.fade_back) {
                         place(&mut c.spare_held, unit.keys.park(stale));
                     }
                     place(&mut c.retired, (u.key, unit.node));
@@ -234,7 +234,7 @@ impl<F: Float> Executor<F> {
                 place(&mut c.spare_params, u.params);
                 place(&mut c.spare_modes, u.mode);
                 for f in [u.fade, u.queued].into_iter().flatten() {
-                    retire_fade(&mut self.inbox.back, f);
+                    retire_fade(&mut self.inbox.fade_back, f);
                 }
             }
         }
@@ -250,7 +250,7 @@ impl<F: Float> Executor<F> {
                     Generation::new(p.generation),
                     "cutting the unit the delta named"
                 );
-                if let Some(stale) = cut_fades(u, &mut self.inbox.back) {
+                if let Some(stale) = cut_fades(u, &mut self.inbox.fade_back) {
                     place(&mut departed.held, (p.key, stale));
                 }
             }
@@ -297,7 +297,7 @@ impl<F: Float> Executor<F> {
                     if u.fade.is_some() {
                         x.waiting = Some(node);
                         if let Some(q) = u.queued.replace(x) {
-                            retire_fade(&mut self.inbox.back, q);
+                            retire_fade(&mut self.inbox.fade_back, q);
                         }
                         // The tables the waiting unit will write, unless the
                         // unit has them already.
@@ -319,7 +319,7 @@ impl<F: Float> Executor<F> {
                     // Nothing to fade from (reachable only through
                     // `package`): the crossfade goes back unused.
                     if let Some(x) = fade {
-                        retire_fade(&mut self.inbox.back, x);
+                        retire_fade(&mut self.inbox.fade_back, x);
                     }
                 }
             }

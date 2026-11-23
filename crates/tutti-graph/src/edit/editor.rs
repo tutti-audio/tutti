@@ -24,7 +24,7 @@
 //!
 //! A crossfade ([`replace`](crate::Editor::replace)) does **not** hold its commit:
 //! the box comes back as soon as it is applied. The fade's outgoing unit
-//! comes back on its own, on the return ring, when the fade ends (or
+//! comes back on its own, on the fade-return ring, when the fade ends (or
 //! is cut), and `collect` drains that ring too. Each fade a commit starts
 //! takes one of [`FADE_CAPACITY`](crate::FADE_CAPACITY) slots on it, reserved before the commit
 //! is sent; a commit that would need more is `Backpressure` too — a cap no
@@ -833,7 +833,7 @@ impl<F: Float> Editor<F> {
 type BusLanes = BTreeMap<EdgeId, (Gain, EdgeFade)>;
 
 /// The crossfades `delta` starts: one per fade that is not a plain swap.
-/// Each is built into the commit and comes back once on the return
+/// Each is built into the commit and comes back once on the fade-return
 /// ring (`Commit::build`).
 fn starting(delta: &Delta) -> usize {
     delta.fades.iter().filter(|(_, f)| !f.is_cut()).count()

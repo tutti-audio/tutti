@@ -288,45 +288,34 @@ pub(super) fn fading_node_op<
     x.done >= x.len
 }
 
-/// What is known about an audio slot's block: every sample is exact `0.0`
-/// (silent), and the block holds one value throughout (constant). One byte,
-/// so a node's input masks are built with a load and two shifts per channel.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Per audio slot: every sample of the block is exact `0.0` (silent), and the
+/// block holds one value throughout (constant). One byte, so a node's input
+/// masks are built with a load and two shifts per channel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Flags(u8);
 
 impl Flags {
-    const SILENT: u8 = 1;
-    const CONSTANT: u8 = 2;
-
-    /// Nothing is known.
     pub(crate) const NONE: Self = Self(0);
     /// Exact silence, which is constant.
-    pub(crate) const SILENCE: Self = Self(Self::SILENT | Self::CONSTANT);
+    pub(crate) const SILENCE: Self = Self(3);
 
     #[inline]
     pub(crate) const fn new(silent: bool, constant: bool) -> Self {
-        Self((silent as u8 * Self::SILENT) | (constant as u8 * Self::CONSTANT))
+        Self(silent as u8 | (constant as u8) << 1)
     }
-
-    /// Every sample is exact `0.0`.
     #[inline]
     pub(crate) const fn is_silent(self) -> bool {
-        self.0 & Self::SILENT != 0
+        self.0 & 1 != 0
     }
-
-    /// The block holds one value throughout.
     #[inline]
     pub(crate) const fn is_constant(self) -> bool {
-        self.0 & Self::CONSTANT != 0
+        self.0 & 2 != 0
     }
-
-    /// The flags as the byte a shared atomic holds.
+    /// The byte a shared atomic holds.
     #[inline]
     pub(crate) const fn to_byte(self) -> u8 {
         self.0
     }
-
-    /// The flags a shared atomic's byte held (`to_byte`'s).
     #[inline]
     pub(crate) const fn from_byte(byte: u8) -> Self {
         Self(byte)

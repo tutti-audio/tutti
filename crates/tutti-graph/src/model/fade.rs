@@ -30,7 +30,7 @@
 //!   while one waits supersedes the waiting unit, which never ran.
 //! - **The outgoing unit retires on the control thread**, and a fade holds
 //!   no commit. The commit that starts a fade comes back when applied, like
-//!   any other; the crossfade comes back on its own, on the return
+//!   any other; the crossfade comes back on its own, on the fade-return
 //!   ring, when it ends (or is cut or superseded), carrying the outgoing
 //!   unit, and `Editor::collect` frees it and reports its key. A long fade
 //!   therefore blocks no later commit or re-prepare, and a unit removed in
