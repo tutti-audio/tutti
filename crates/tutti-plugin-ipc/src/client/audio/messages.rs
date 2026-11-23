@@ -243,7 +243,7 @@ impl ControlCommand {
     /// Whether the command has no reply: its caller learns nothing of its fate
     /// but from the counts.
     pub(super) fn is_fire_and_forget(&self) -> bool {
-        !self.request.expects_reply()
+        self.call.is_none()
     }
 
     /// Answers a request the queue refused with [`Lost::Busy`], so an awaiting
