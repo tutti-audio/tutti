@@ -276,7 +276,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///     *beat = 1.0;
     /// }
     /// let wave = Wave::from_mono(rate, Mono::new(&clicks));
-    /// let tempo = futures_lite::future::block_on(async { session.analyze(wave, TempoConfig::new()).await })
+    /// let tempo = futures_lite::future::block_on(session.analyze(wave, TempoConfig::new()))
     ///     .unwrap()
     ///     .unwrap();
     /// assert!((tempo.bpm.get() - 120.0).abs() < 1.0, "{}", tempo.bpm);
