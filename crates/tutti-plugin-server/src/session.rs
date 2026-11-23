@@ -530,7 +530,7 @@ mod tests {
 
     use tutti_buffers::FloatWidth;
     use tutti_plugin_ipc::StagedState;
-    use tutti_plugin_types::{IpcResult, ParameterQueue, PluginFormat, PluginId, SampleRate};
+    use tutti_plugin_types::IpcResult;
 
     /// What a test reads of a [`Reaction`].
     trait ReactionExt {
@@ -1218,7 +1218,7 @@ mod tests {
                 main_thread(),
                 ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from("/nonexistent/path/plugin.vst3"),
-                    format: PluginFormat::Vst3,
+                    format: tutti_plugin_types::PluginFormat::Vst3,
                     plugin: None,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -1262,7 +1262,7 @@ mod tests {
             main_thread(),
             ControlRequest::LoadPlugin {
                 path: std::path::PathBuf::from(clap_plugin()),
-                format: PluginFormat::Clap,
+                format: tutti_plugin_types::PluginFormat::Clap,
                 plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
@@ -1287,13 +1287,13 @@ mod tests {
 
     /// The reply to loading the reference CLAP plugin's file choosing `plugin`.
     #[cfg(feature = "clap")]
-    fn load_clap_choosing(plugin: Option<PluginId>) -> ControlReply {
+    fn load_clap_choosing(plugin: Option<tutti_plugin_types::PluginId>) -> ControlReply {
         Rig::new()
             .handle(
                 main_thread(),
                 ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
-                    format: PluginFormat::Clap,
+                    format: tutti_plugin_types::PluginFormat::Clap,
                     plugin,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -1323,7 +1323,7 @@ mod tests {
             .to_str()
             .expect("utf-8");
 
-        let clap = |id: &str| PluginId::Clap(id.into());
+        let clap = |id: &str| tutti_plugin_types::PluginId::Clap(id.into());
         assert_eq!(id_of(load_clap_choosing(None)), clap(first), "no choice");
         assert_eq!(
             id_of(load_clap_choosing(Some(clap(second)))),
@@ -1993,7 +1993,7 @@ mod tests {
                 main_thread(),
                 ControlRequest::LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
-                    format: PluginFormat::Clap,
+                    format: tutti_plugin_types::PluginFormat::Clap,
                     plugin: None,
                     sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                     block_size: 512,
@@ -2013,7 +2013,7 @@ mod tests {
             main_thread(),
             ControlRequest::LoadPlugin {
                 path: std::path::PathBuf::from("/nonexistent/plugin.clap"),
-                format: PluginFormat::Clap,
+                format: tutti_plugin_types::PluginFormat::Clap,
                 plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                 block_size: 512,
@@ -2167,7 +2167,7 @@ mod tests {
                     main_thread(),
                     ControlRequest::LoadPlugin {
                         path: std::path::PathBuf::from(clap_plugin()),
-                        format: PluginFormat::Clap,
+                        format: tutti_plugin_types::PluginFormat::Clap,
                         plugin: None,
                         sample_rate: tutti_plugin_types::SampleRate::SR_44K1,
                         block_size: 512,
@@ -2293,7 +2293,7 @@ mod tests {
             main_thread(),
             ControlRequest::LoadPlugin {
                 path: bundle,
-                format: PluginFormat::Vst3,
+                format: tutti_plugin_types::PluginFormat::Vst3,
                 plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
@@ -2469,7 +2469,7 @@ mod tests {
             main_thread(),
             ControlRequest::LoadPlugin {
                 path: bundle,
-                format: PluginFormat::Vst3,
+                format: tutti_plugin_types::PluginFormat::Vst3,
                 plugin: None,
                 sample_rate: tutti_plugin_types::SampleRate::SR_48K,
                 block_size: 512,
@@ -2490,7 +2490,8 @@ mod tests {
             "reserved at load"
         );
 
-        s.render.reserve_params(1, ParameterQueue::chunk_room(512));
+        s.render
+            .reserve_params(1, tutti_plugin_types::ParameterQueue::chunk_room(512));
         assert!(
             s.drain_async_events(main_thread()).is_empty(),
             "nothing raised yet"
@@ -2531,7 +2532,7 @@ mod tests {
             main_thread(),
             &tutti_fixtures::detached_work(),
             &tutti_plugin_types::PluginRef::file(crate::test_utils::vst3_probe_path()),
-            SampleRate::SR_48K,
+            tutti_plugin_types::SampleRate::SR_48K,
             128,
             FloatWidth::F32,
             None,
