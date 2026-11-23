@@ -677,6 +677,43 @@ pub fn input<'a, F: Float>(
 /// assert_eq!(node.param_set().get(UnitParam::Cutoff), Some(1_000.0));
 /// ```
 ///
+/// A counted entry is never an `Option`: a node has all `N` indices or none of
+/// the kind, so `field[N]: Option<U>` does not compile.
+///
+/// ```compile_fail
+/// use tutti_buffers::{ChannelLayout, Float};
+/// use tutti_graph::{declare_params, Cx, Io, Node, Prepare, Shape, Status};
+/// use tutti_units::Db;
+///
+/// #[derive(Clone)]
+/// struct Bands<F: Float> {
+///     cells: BandsCells,
+///     float: std::marker::PhantomData<fn() -> F>,
+/// }
+///
+/// declare_params!([F: Float] Bands<F>, BandsConfig, BandsCells {
+///     params { Threshold => bands[2]: Option<Db> = None }
+/// });
+///
+/// impl<F: Float> From<BandsConfig> for Bands<F> {
+///     fn from(config: BandsConfig) -> Self {
+///         Self { cells: BandsCells::from_config(&config), float: std::marker::PhantomData }
+///     }
+/// }
+///
+/// impl<F: Float> Node<F> for Bands<F> {
+///     fn shape(&self) -> Shape {
+///         Shape::source_unassigned(ChannelLayout::MONO)
+///             .param_addrs(self.declared_ports().as_slice())
+///     }
+///     fn prepare(&mut self, _: &Prepare) {}
+///     fn process(&mut self, _: &Cx<'_>, _: Io<'_, F>) -> Status {
+///         Status::Modified
+///     }
+///     fn reset(&mut self) {}
+/// }
+/// ```
+///
 /// # Reading a driven param
 ///
 /// `process` reads a param through the declaration, never by a port index:
