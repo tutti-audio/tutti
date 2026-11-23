@@ -1044,7 +1044,7 @@ fn an_offline_session_renders_a_sines_analytic_rms() {
     }
     let _ = s.update();
     let out = pull(&mut s, ChannelLayout::MONO, 48_000, 512);
-    let rms = tutti_fixtures::signal::rms_f64(&out);
+    let rms = tutti_fixtures::signal::rms(&out);
     assert!(
         (rms - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-4,
         "RMS {rms}, a unit sine's is 1/√2"

@@ -281,7 +281,7 @@ fn the_render_does_not_depend_on_where_blocks_fall() {
 /// slow) and falling (below it): nothing in the path narrows it.
 #[test]
 fn an_f64_shaper_at_zero_amounts_is_the_identity() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let rising = wide_signal(2_000);
     let x: Vec<f64> = rising.iter().chain(rising.iter().rev()).copied().collect();
     let mut bank = TransientBank::<f64>::new(RATE, FAST, SLOW);
@@ -296,5 +296,5 @@ fn an_f64_shaper_at_zero_amounts_is_the_identity() {
         .unwrap(),
     )
     .unwrap();
-    assert_close_f64(&out, &x, 0.0);
+    assert_close(&out, &x, 0.0);
 }

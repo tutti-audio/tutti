@@ -465,7 +465,7 @@ fn the_render_is_the_same_bits_in_any_blocks() {
 /// passes the input (`m0 = 1`, `m1 = m2 = 0`) and nothing in the path narrows it.
 #[test]
 fn an_f64_band_with_zero_range_is_the_identity() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(4_800);
     for mode in [DynamicMode::Downward, DynamicMode::Upward] {
         let mut b = DynamicEqBank::<f64>::new(ChannelLayout::MONO, RATE).mode(mode);
@@ -481,6 +481,6 @@ fn an_f64_band_with_zero_range_is_the_identity() {
             .unwrap(),
         )
         .unwrap();
-        assert_close_f64(&out, &x, 0.0);
+        assert_close(&out, &x, 0.0);
     }
 }

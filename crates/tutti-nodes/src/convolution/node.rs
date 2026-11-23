@@ -1980,7 +1980,7 @@ mod in_an_f64_graph {
     use super::*;
     use crate::convolution::test_nodes;
     use crate::test_support::render_f64;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     use tutti_units::SampleRate;
 
     /// A two-tap response `h` of two taps no `f32` holds is `y[n] = h0 x[n - L] + h1 x[n - L - 1]`
@@ -1999,7 +1999,7 @@ mod in_an_f64_graph {
         let want: Vec<f64> = (0..x.len())
             .map(|n| h[0] * at(n, 0) + h[1] * at(n, 1))
             .collect();
-        assert_close_f64(&out, &want, 2.0f64.powi(-40));
+        assert_close(&out, &want, 2.0f64.powi(-40));
     }
 
     /// A one-tap response `h` at the wet gain `1/3` (which no `f32` holds) is `h x[n - L] / 3`,
@@ -2015,7 +2015,7 @@ mod in_an_f64_graph {
         let want: Vec<f64> = (0..x.len())
             .map(|n| n.checked_sub(BLOCK).map_or(0.0, |m| h[0] * x[m] / 3.0))
             .collect();
-        assert_close_f64(&out, &want, 2.0f64.powi(-40));
+        assert_close(&out, &want, 2.0f64.powi(-40));
     }
 
     /// A wet gain cell written infinite reads as the last finite gain, not as a saturated
@@ -2039,6 +2039,6 @@ mod in_an_f64_graph {
         d.block();
         // The latency is one block, so the second block holds the first block's input.
         let want: Vec<f64> = x.iter().map(|v| h[0] * v / 3.0).collect();
-        assert_close_f64(d.output().plane(0).samples(), &want, 2.0f64.powi(-40));
+        assert_close(d.output().plane(0).samples(), &want, 2.0f64.powi(-40));
     }
 }

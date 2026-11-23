@@ -808,10 +808,10 @@ fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
 /// comes out as it went in.
 #[test]
 fn an_f64_open_gate_is_the_identity() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(300);
     let c = controls(-40.0, 0.0, 0.0, 0.0, -80.0);
-    assert_close_f64(&run_f64(&c, &x, &x), &x, 2.0f64.powi(-50));
+    assert_close(&run_f64(&c, &x, &x), &x, 2.0f64.powi(-50));
 }
 
 /// An opening gate's follower is the one-pole `f[n] = f[n-1] + c (1 - f[n-1])`, `c = 1 -
@@ -819,7 +819,7 @@ fn an_f64_open_gate_is_the_identity() {
 /// 10^(range / 20)`: the closed form in `f64`, to 1e-12.
 #[test]
 fn an_f64_gate_opens_along_the_one_pole_closed_form_in_f64() {
-    use tutti_fixtures::signal::assert_close_f64;
+    use tutti_fixtures::signal::assert_close;
     let (tau, range) = (0.002, -60.0);
     let key: Vec<f64> = vec![tutti_fixtures::signal::wide_signal(1)[0]; 2_000];
     let c = controls(-40.0, tau, 0.0, 0.1, range);
@@ -833,7 +833,7 @@ fn an_f64_gate_opens_along_the_one_pole_closed_form_in_f64() {
             x * (r + open * (1.0 - r))
         })
         .collect();
-    assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
+    assert_close(&run_f64(&c, &key, &key), &want, 1e-12);
 }
 
 /// A gate released over 300 s at 192 kHz (a coefficient of `1.7e-8`, under half an ulp of a

@@ -1017,24 +1017,24 @@ fn run_f64(c: &LimiterControls, x: &[f64]) -> Vec<f64> {
 /// bits comes out exactly `L` frames late (the lookahead is the delay) and silent before.
 #[test]
 fn an_f64_limiter_under_its_threshold_delays_by_exactly_the_lookahead() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let len = 3 * L;
     let x = wide_signal(len);
     let want: Vec<f64> = (0..len)
         .map(|n| n.checked_sub(L).map_or(0.0, |k| x[k]))
         .collect();
-    assert_close_f64(&run_f64(&controls(0.0, 0.0, 0.1), &x), &want, 0.0);
+    assert_close(&run_f64(&controls(0.0, 0.0, 0.1), &x), &want, 0.0);
 }
 
 /// A constant signal over the threshold comes out at the ceiling the control holds, to 1e-15:
 /// the oracle is the closed form `10^(-20 / 20)`; the gain is divided in `f64`.
 #[test]
 fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = vec![wide_signal(1)[0]; 3 * L];
     let y = run_f64(&controls(-30.0, -20.0, 0.1), &x);
     // The ceiling is the `f64` converter's value: the control is no longer rounded to `f32`.
-    assert_close_f64(
+    assert_close(
         &y[L..],
         &vec![Db::new(-20.0).to_amplitude().get(); 2 * L],
         1e-15,
@@ -1048,7 +1048,7 @@ fn an_f64_limiter_holds_a_constant_signal_at_the_f64_ceiling() {
 /// form in `f64`, to 1e-12, from the ceiling and quiet gains' closed forms.
 #[test]
 fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (threshold, ceiling, release) = (-6.0f64, -3.0f64, 0.01);
     let (len, switch) = (2_000, 600);
     let quiet = wide_signal(1)[0];
@@ -1067,7 +1067,7 @@ fn an_f64_limiter_releases_along_the_one_pole_closed_form_in_f64() {
     let want: Vec<f64> = (switch + L..len).map(|n| quiet * gains[n - L]).collect();
     let y = run_f64(&controls(threshold, ceiling, release), &x);
     // The closed form is `f64` throughout, so the tolerance is rounding, not `f32`'s.
-    assert_close_f64(&y[switch + L..], &want, 1e-12);
+    assert_close(&y[switch + L..], &want, 1e-12);
 }
 
 /// A limiter released over 300 s at 192 kHz (a coefficient of `1.7e-8`, under half an ulp of an

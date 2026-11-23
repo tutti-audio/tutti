@@ -1054,7 +1054,7 @@ fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> V
 #[test]
 fn an_f64_bank_is_each_curve_in_f64() {
     use std::f64::consts::PI;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(200);
     let (drive, crush) = (1.7f64, 4096.0f64);
     let h = drive;
@@ -1084,7 +1084,7 @@ fn an_f64_bank_is_each_curve_in_f64() {
     for (kind, drive, f) in closed {
         let want: Vec<f64> = x.iter().map(|&x| f(x)).collect();
         let got = through_f64(kind, drive, Antialiasing::Off, &x);
-        assert_close_f64(&got, &want, 2.0f64.powi(-45));
+        assert_close(&got, &want, 2.0f64.powi(-45));
     }
 }
 
@@ -1094,7 +1094,7 @@ fn an_f64_bank_is_each_curve_in_f64() {
 /// signal that alternates in sign so that no step is inside the threshold, to 2^-45.
 #[test]
 fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x: Vec<f64> = wide_signal(200)
         .iter()
         .enumerate()
@@ -1113,7 +1113,7 @@ fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
             before = now;
         }
         let got = through_f64(kind, 1.0, Antialiasing::FirstOrder, &x);
-        assert_close_f64(&got, &want, 2.0f64.powi(-45));
+        assert_close(&got, &want, 2.0f64.powi(-45));
     }
 }
 

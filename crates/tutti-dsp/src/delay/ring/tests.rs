@@ -77,7 +77,7 @@ fn the_ring_holds_its_length_and_clear_silences_it() {
 /// wraps: nothing is narrowed to `f32` on the way through.
 #[test]
 fn an_f64_ring_returns_a_wide_signal_len_frames_later_across_the_wrap() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     const LEN: usize = 5;
     let signal = wide_signal(6 * LEN + 2);
     let mut ring = DelayRing::<f64>::new(LEN);
@@ -92,7 +92,7 @@ fn an_f64_ring_returns_a_wide_signal_len_frames_later_across_the_wrap() {
     let want: Vec<f64> = (0..signal.len())
         .map(|i| if i >= LEN { signal[i - LEN] } else { 0.0 })
         .collect();
-    assert_close_f64(&got, &want, 0.0);
+    assert_close(&got, &want, 0.0);
     assert_ne!(
         signal[0] as f32 as f64, signal[0],
         "the signal needs 29 bits"
@@ -103,7 +103,7 @@ fn an_f64_ring_returns_a_wide_signal_len_frames_later_across_the_wrap() {
 /// one `f64` operation, which an `f32` lerp would miss by about `2^-25`.
 #[test]
 fn an_f64_fractional_read_is_the_mean_of_two_wide_slots_to_f64_rounding() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let signal = wide_signal(8);
     let mut ring = DelayRing::<f64>::new(8);
     signal.iter().for_each(|&x| ring.push(x));
@@ -111,7 +111,7 @@ fn an_f64_fractional_read_is_the_mean_of_two_wide_slots_to_f64_rounding() {
     let want: Vec<f64> = (1..7)
         .map(|d| (signal[8 - d] + signal[8 - d - 1]) / 2.0)
         .collect();
-    assert_close_f64(&got, &want, 2f64.powi(-50));
+    assert_close(&got, &want, 2f64.powi(-50));
 }
 
 /// A read at `100000.3` frames on a long `f64` ring is the closed-form lerp of its two wide

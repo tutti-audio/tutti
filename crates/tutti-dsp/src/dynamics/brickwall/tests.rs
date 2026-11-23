@@ -252,7 +252,7 @@ fn the_output_never_passes_the_ceiling_for_a_square_an_impulse_train_or_a_burst(
 /// closed form `10^(-20 / 20)`, to 1e-15, and under `0 dB` it comes out as it went in.
 #[test]
 fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(64);
     let render = |db: f64| -> Vec<f64> {
         let mut bank = BrickwallBank::<f64>::new();
@@ -269,12 +269,12 @@ fn an_f64_brickwall_clamps_at_the_f64_amplitude_and_passes_what_is_inside() {
         .unwrap();
         y
     };
-    assert_close_f64(
+    assert_close(
         &render(-20.0),
         &vec![Db::new(-20.0).to_amplitude().get(); x.len()],
         1e-15,
     );
-    assert_close_f64(&render(0.0), &x, 0.0);
+    assert_close(&render(0.0), &x, 0.0);
 }
 
 /// A ceiling whose amplitude is past `f32`'s largest finite value (800 dB is `1e40`) passes

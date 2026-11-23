@@ -810,10 +810,10 @@ fn wide_constant(len: usize) -> Vec<f64> {
 /// path narrows it.
 #[test]
 fn an_f64_compressor_under_its_threshold_is_the_identity_at_0_db_makeup() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(300);
     let c = controls(0.0, 6.0, 4.0, 0.002, 0.05, 0.0);
-    assert_close_f64(&run_f64(&c, &x, &x), &x, 0.0);
+    assert_close(&run_f64(&c, &x, &x), &x, 0.0);
 }
 
 /// At a constant key the reduction is the one-pole `y[n] = y[n-1] + c (target - y[n-1])`
@@ -821,7 +821,7 @@ fn an_f64_compressor_under_its_threshold_is_the_identity_at_0_db_makeup() {
 /// `10^(-y[n] / 20)`: the closed form in `f64`, to 1e-12.
 #[test]
 fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
-    use tutti_fixtures::signal::assert_close_f64;
+    use tutti_fixtures::signal::assert_close;
     let (threshold, ratio, tau) = (-30.0, 4.0, 0.002);
     let key = wide_constant(2_000);
     let k = key[0];
@@ -836,7 +836,7 @@ fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
             x * 10f64.powf(-reduction / 20.0)
         })
         .collect();
-    assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
+    assert_close(&run_f64(&c, &key, &key), &want, 1e-12);
 }
 
 /// With instant times the reduction is the curve's at once, so a constant key `L` dB over

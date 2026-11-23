@@ -181,7 +181,7 @@ fn preview_still_sounds_under_an_installed_clip() {
 /// with a rule routing `channel` to the synth: the input node's channel port
 /// is wired to the synth's event input (`Midi::set_routes` → the session's feeds
 /// → an event edge), rendered through the graph.
-fn routed_level(channel: MidiChannel) -> f32 {
+fn routed_level(channel: MidiChannel) -> f64 {
     let (mut s, synth) = rig();
     // The device's inlet, wired to the input node's one event input.
     let (inlet, mut device) = s.graph().open_event_inlet(EventCapacity::of(64));

@@ -52,7 +52,7 @@ fn measured_gain_db(mut render: impl FnMut(f32) -> f32, freq: f64) -> f64 {
         output.push(render(x));
     }
     // Second half only: the first half carries the startup transient.
-    let rms = |v: &[f32]| tutti_fixtures::signal::rms_f64(&v[v.len() / 2..]);
+    let rms = |v: &[f32]| tutti_fixtures::signal::rms(&v[v.len() / 2..]);
     20.0 * (rms(&output) / rms(&input)).log10()
 }
 

@@ -851,7 +851,7 @@ fn a_huge_knee_is_held_and_a_band_returns_to_the_static_curve() {
 #[test]
 fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
     use crate::testing::butterworth_all_pass;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let n = 4_800;
     let x = wide_signal(n);
     let mut k = MultibandBank::<f64>::new(
@@ -874,7 +874,7 @@ fn an_f64_multiband_under_every_threshold_is_the_crossover_sum() {
         .unwrap(),
     )
     .unwrap();
-    assert_close_f64(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
+    assert_close(&out, &butterworth_all_pass(&x, 1_000.0, RATE.get()), 1e-12);
 }
 
 /// A fresh settings value is the do-nothing multiband: the default compressor in every band,
