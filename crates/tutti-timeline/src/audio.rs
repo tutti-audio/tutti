@@ -73,8 +73,9 @@ pub struct TransportAudio {
     control: Control,
     schedule: CommandQueueAudio,
     settings: TransportSettings,
-    /// The published tempo map, lent once per block and only when
-    /// [`seen`](Self::seen) is behind the publisher's count.
+    /// The published tempo map, lent for the calls made outside a block's
+    /// walk (a rate change, a seconds lookup); the walk takes the block's
+    /// one loan from the caller ([`tempo_reader`](Self::tempo_reader)).
     tempo_map: TempoReader,
     /// The publisher's count at the last block that took the map.
     seen: u64,
@@ -156,27 +157,50 @@ impl TransportAudio {
         self.schedule.pending()
     }
 
+    /// The count of tempo-map publishes so far. Read it **before** lending
+    /// the map the block runs on ([`tempo_reader`](Self::tempo_reader)) and
+    /// pass both to [`begin_block`](Self::begin_block): a publish between the
+    /// two is then taken at the next block, never missed.
+    #[must_use]
+    pub fn tempo_generation(&self) -> u64 {
+        self.settings.map_generation.load(Ordering::Acquire)
+    }
+
+    /// A reader of the map the block runs on, for the caller that lends it
+    /// once per block and hands the one loan to every call below and to the
+    /// graph's render (`Executor::render_applied`'s `tempo`), so the block's
+    /// position, its cuts and the nodes' `Cx::tempo` all come from one map.
+    /// Registers a reader: control thread, once.
+    #[must_use]
+    pub fn tempo_reader(&self) -> TempoReader {
+        self.settings.tempo_reader()
+    }
+
     /// Reads the untimed inputs for a block and reports the transport at its
     /// first frame. Once per block: a store from the control thread lands at
-    /// the next block, never at a cut in this one.
-    pub fn begin_block(&mut self) -> tutti_graph::TransportPosition {
-        let tempo = self.tempo_for_block();
+    /// the next block, never at a cut in this one. `map` is the block's map
+    /// and `generation` the count read before it was lent
+    /// ([`tempo_generation`](Self::tempo_generation)); the calls after this
+    /// one in the block take the same `map`.
+    pub fn begin_block(
+        &mut self,
+        generation: u64,
+        map: &TempoMap,
+    ) -> tutti_graph::TransportPosition {
+        let tempo = self.tempo_for_block(generation, map);
         self.control = Control::read(&self.settings, self.motion.loop_region(), tempo);
-        self.begin(true)
+        self.begin(true, map)
     }
 
     /// The tempo this block renders at: the published map's when a publish
-    /// landed since the last block, else the one in force. The map is lent
-    /// only then, once, and the loan ends here.
+    /// landed since the last block, else the one in force.
     ///
     /// A map that changes tempo is taken here too: the clock re-seats on it at
     /// the current beat, and from then on follows it, the
     /// tempo of the block being the walk's and not this scalar.
-    fn tempo_for_block(&mut self) -> Bpm {
-        let published = self.settings.map_generation.load(Ordering::Acquire);
+    fn tempo_for_block(&mut self, published: u64, map: &TempoMap) -> Bpm {
         if published != self.seen {
             self.seen = published;
-            let map = self.tempo_map.lend();
             match map.constant_tempo() {
                 Some(tempo) => {
                     self.stepped = false;
@@ -184,16 +208,29 @@ impl TransportAudio {
                 }
                 None => {
                     self.stepped = true;
-                    self.clock.follow(&map);
+                    self.clock.follow(map);
                 }
             }
         }
         self.control.tempo
     }
 
-    /// Runs `f` on the clock with the map when it changes tempo, lent for the
-    /// call and no longer.
-    fn with_map<R>(&mut self, f: impl FnOnce(&mut TransportClock, Option<&TempoMap>) -> R) -> R {
+    /// Runs `f` on the clock with `map` when it changes tempo.
+    fn with_map<R>(
+        &mut self,
+        map: &TempoMap,
+        f: impl FnOnce(&mut TransportClock, Option<&TempoMap>) -> R,
+    ) -> R {
+        let stepped = self.stepped.then_some(map);
+        f(&mut self.clock, stepped)
+    }
+
+    /// Runs `f` on the clock with the map in force, lent for the call and no
+    /// longer: for the calls made outside a block's walk.
+    fn with_lent_map<R>(
+        &mut self,
+        f: impl FnOnce(&mut TransportClock, Option<&TempoMap>) -> R,
+    ) -> R {
         if self.stepped {
             let map = self.tempo_map.lend();
             f(&mut self.clock, Some(&map))
@@ -202,17 +239,17 @@ impl TransportAudio {
         }
     }
 
-    fn begin(&mut self, take_seek: bool) -> tutti_graph::TransportPosition {
+    fn begin(&mut self, take_seek: bool, map: &TempoMap) -> tutti_graph::TransportPosition {
         let control = self.control;
-        self.with_map(|clock, map| clock.begin(&control, take_seek, map))
+        self.with_map(map, |clock, map| clock.begin(&control, take_seek, map))
     }
 
-    /// The project's tempo map and meter, lent for one rendered block and
-    /// handed to the graph with it (`Executor::render_applied`). Wait-free;
-    /// drop the loans at the block's end, never keep them across blocks.
+    /// The project's meter, lent for one rendered piece and handed to the
+    /// graph with it (`Executor::render_applied`). Wait-free; drop the loan
+    /// at the piece's end, never keep it across blocks.
     #[must_use = "a loan dropped at once lends nothing"]
-    pub fn maps(&mut self) -> (Loan<'_, TempoMap>, Loan<'_, MeterMap>) {
-        (self.tempo_map.lend(), self.meter.lend())
+    pub fn meter(&mut self) -> Loan<'_, MeterMap> {
+        self.meter.lend()
     }
 
     /// The tempo changes inside the next `frames` of the block that began
@@ -229,19 +266,23 @@ impl TransportAudio {
         frames: usize,
         from: &tutti_graph::TransportPosition,
         free: usize,
+        map: &TempoMap,
     ) -> UpcomingTempo {
         if !self.stepped {
             return UpcomingTempo::NONE;
         }
-        self.with_map(|clock, map| clock.ahead(frames, from, map, free))
+        self.with_map(map, |clock, map| clock.ahead(frames, from, map, free))
     }
 
     /// The transport at the clock's current frame, after
     /// [`advance`](Self::advance) stopped at a tempo change from
     /// [`tempo_ahead`](Self::tempo_ahead): the tempo and segment the walk
     /// took there. The inputs read at the block's start stay.
-    pub fn position_after_tempo_change(&mut self) -> tutti_graph::TransportPosition {
-        self.begin(false)
+    pub fn position_after_tempo_change(
+        &mut self,
+        map: &TempoMap,
+    ) -> tutti_graph::TransportPosition {
+        self.begin(false, map)
     }
 
     /// Applies pending command `i` (late or not: counted when late), then
@@ -251,6 +292,7 @@ impl TransportAudio {
         &mut self,
         i: usize,
         late: bool,
+        map: &TempoMap,
     ) -> (Applied, tutti_graph::TransportPosition) {
         let cmd = self.schedule.take(i, late).command();
         self.motion.apply(cmd);
@@ -258,13 +300,18 @@ impl TransportAudio {
         self.control.apply(&cmd, &self.settings);
         // Only a motion command can have requested a seek.
         let seeks = matches!(cmd, TransportCommand::Motion(_));
-        (applied, self.begin(seeks))
+        (applied, self.begin(seeks, map))
     }
 
     /// Advances the playhead `frames` under `from`, the transport the last
     /// [`begin_block`](Self::begin_block) or [`apply_command`](Self::apply_command) reported.
-    pub fn advance(&mut self, frames: usize, from: &tutti_graph::TransportPosition) {
-        self.with_map(|clock, map| clock.advance(frames, from, map));
+    pub fn advance(
+        &mut self,
+        frames: usize,
+        from: &tutti_graph::TransportPosition,
+        map: &TempoMap,
+    ) {
+        self.with_map(map, |clock, map| clock.advance(frames, from, map));
     }
 
     /// The transport time of `beat`, in seconds on the project's tempo map: a
@@ -290,7 +337,7 @@ impl TransportAudio {
     pub fn follow_rate(&mut self, rate: SampleRate) {
         let was = self.clock.sample_rate();
         if rate != was {
-            self.with_map(|clock, map| clock.set_sample_rate(rate, map));
+            self.with_lent_map(|clock, map| clock.set_sample_rate(rate, map));
             self.schedule.rescale(rate.get() / was.get());
         }
     }
@@ -333,6 +380,51 @@ mod tests {
     use crate::{MotionCommand, Timeline};
     use tutti_units::{At, Frame};
 
+    use tutti_graph::TransportPosition;
+
+    /// The block calls with a map lent for each call: a test's block is one
+    /// call, so the map it lends is the one the call reads.
+    trait Lend {
+        fn lend_begin_block(&mut self) -> TransportPosition;
+        fn lend_tempo_ahead(
+            &mut self,
+            frames: usize,
+            from: &TransportPosition,
+            free: usize,
+        ) -> UpcomingTempo;
+        fn lend_apply_command(&mut self, i: usize, late: bool) -> (Applied, TransportPosition);
+        fn lend_advance(&mut self, frames: usize, from: &TransportPosition);
+    }
+
+    impl Lend for TransportAudio {
+        fn lend_begin_block(&mut self) -> TransportPosition {
+            let generation = self.tempo_generation();
+            let mut reader = self.tempo_reader();
+            let map = reader.lend();
+            self.begin_block(generation, &map)
+        }
+        fn lend_tempo_ahead(
+            &mut self,
+            frames: usize,
+            from: &TransportPosition,
+            free: usize,
+        ) -> UpcomingTempo {
+            let mut reader = self.tempo_reader();
+            let map = reader.lend();
+            self.tempo_ahead(frames, from, free, &map)
+        }
+        fn lend_apply_command(&mut self, i: usize, late: bool) -> (Applied, TransportPosition) {
+            let mut reader = self.tempo_reader();
+            let map = reader.lend();
+            self.apply_command(i, late, &map)
+        }
+        fn lend_advance(&mut self, frames: usize, from: &TransportPosition) {
+            let mut reader = self.tempo_reader();
+            let map = reader.lend();
+            self.advance(frames, from, &map);
+        }
+    }
+
     fn constant(bpm: f64) -> std::sync::Arc<TempoMap> {
         std::sync::Arc::new(TempoMap::constant(Bpm::of(bpm)).expect("a tempo"))
     }
@@ -370,7 +462,7 @@ mod tests {
         assert_eq!(next.pending().len(), 1, "carried over");
         assert_eq!(t.motion.scheduled_outstanding(), 1);
         assert!(!t.is_rolling());
-        let _ = next.apply_command(0, false);
+        let _ = next.lend_apply_command(0, false);
         assert_eq!(t.motion.scheduled_outstanding(), 0);
         assert!(t.is_rolling(), "the carried command fired");
     }
@@ -390,10 +482,10 @@ mod tests {
         a.drain_commands();
         assert_eq!(a.pending().len(), 2);
         assert_eq!(t.motion.scheduled_outstanding(), 2);
-        let _ = a.apply_command(0, true);
+        let _ = a.lend_apply_command(0, true);
         assert_eq!(t.motion.scheduled_outstanding(), 1);
         assert_eq!(t.motion.late_command_count(), 1);
-        let _ = a.apply_command(0, false);
+        let _ = a.lend_apply_command(0, false);
         assert_eq!(t.motion.scheduled_outstanding(), 0);
         assert_eq!(t.motion.late_command_count(), 1);
         assert!(!t.is_rolling(), "play then stop");
@@ -405,12 +497,16 @@ mod tests {
     fn a_published_constant_map_is_the_next_blocks_tempo() {
         let t = Transport::new(SampleRate::SR_48K);
         let mut a = t.audio(SampleRate::SR_48K).expect("first");
-        assert_eq!(a.begin_block().tempo, Bpm::of(120.0));
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(120.0));
         t.settings.set_tempo_map(constant(97.25));
-        assert_eq!(a.begin_block().tempo, Bpm::of(97.25));
-        assert_eq!(a.begin_block().tempo, Bpm::of(97.25), "and stays");
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(97.25));
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(97.25), "and stays");
         t.settings.set_tempo(Bpm::of(143.5));
-        assert_eq!(a.begin_block().tempo, Bpm::of(143.5), "set_tempo is a map");
+        assert_eq!(
+            a.lend_begin_block().tempo,
+            Bpm::of(143.5),
+            "set_tempo is a map"
+        );
     }
 
     /// A tempo stored after the block began does not land at a command's cut: the
@@ -423,14 +519,14 @@ mod tests {
         t.motion
             .schedule(At::Frame(Frame::new(100)), MotionCommand::Play)
             .expect("room");
-        let start = a.begin_block();
+        let start = a.lend_begin_block();
         assert_eq!(start.tempo, Bpm::of(120.0));
         a.drain_commands();
         t.settings.set_tempo(Bpm::of(200.0));
-        let (_, at_cut) = a.apply_command(0, false);
+        let (_, at_cut) = a.lend_apply_command(0, false);
         assert!(at_cut.playing, "the command's effect");
         assert_eq!(at_cut.tempo, Bpm::of(120.0), "not the stored tempo");
-        assert_eq!(a.begin_block().tempo, Bpm::of(200.0), "the next block");
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(200.0), "the next block");
     }
 
     /// A rolling transport over `points` (steps), at `rate`.
@@ -447,15 +543,15 @@ mod tests {
             .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
-        let _ = a.begin_block();
-        let _ = a.apply_command(0, false);
+        let _ = a.lend_begin_block();
+        let _ = a.lend_apply_command(0, false);
         (t, a)
     }
 
     /// Roll `frames` as one block, and report the transport at its start.
     fn roll(a: &mut TransportAudio, frames: usize) -> tutti_graph::TransportPosition {
-        let t = a.begin_block();
-        a.advance(frames, &t);
+        let t = a.lend_begin_block();
+        a.lend_advance(frames, &t);
         t
     }
 
@@ -467,8 +563,8 @@ mod tests {
     fn the_look_ahead_finds_a_step_and_cuts_a_block_that_cannot_hold_it() {
         let (_t, mut a) = rolling(48_000.0, &[(0.0, 120.0), (4.0, 60.0)]);
         let _ = roll(&mut a, 96_000 - 100);
-        let t = a.begin_block();
-        let ahead = a.tempo_ahead(512, &t, 8);
+        let t = a.lend_begin_block();
+        let ahead = a.lend_tempo_ahead(512, &t, 8);
         assert_eq!(ahead.limit, None);
         let [change] = ahead.changes.as_slice() else {
             panic!("one change, got {:?}", ahead.changes);
@@ -477,7 +573,7 @@ mod tests {
         assert_eq!(change.to.tempo, Bpm::of(60.0));
         assert_eq!(change.to.beat(), Beat::new(4.0));
         assert_eq!(change.to.tempo, Bpm::of(60.0));
-        let full = a.tempo_ahead(512, &t, 0);
+        let full = a.lend_tempo_ahead(512, &t, 0);
         assert!(full.changes.is_empty());
         assert_eq!(
             full.limit,
@@ -485,12 +581,12 @@ mod tests {
             "the block ends where it would be 1 too many"
         );
         // Moving nothing: the same look again.
-        assert_eq!(a.tempo_ahead(512, &t, 8).changes, ahead.changes);
+        assert_eq!(a.lend_tempo_ahead(512, &t, 8).changes, ahead.changes);
 
         let t = Transport::new(SampleRate::SR_48K);
         let mut c = t.audio(SampleRate::SR_48K).expect("first");
-        let blk = c.begin_block();
-        assert!(c.tempo_ahead(512, &blk, 8).changes.is_empty());
+        let blk = c.lend_begin_block();
+        assert!(c.lend_tempo_ahead(512, &blk, 8).changes.is_empty());
     }
 
     /// A map published while rolling is taken at the next block start without
@@ -505,23 +601,23 @@ mod tests {
             .schedule(At::NextBlock, MotionCommand::Play)
             .expect("room");
         a.drain_commands();
-        let _ = a.begin_block();
-        let _ = a.apply_command(0, false);
+        let _ = a.lend_begin_block();
+        let _ = a.lend_apply_command(0, false);
         let _ = roll(&mut a, 24_000); // beat 1 at 120
         let ended = {
-            let blk = a.begin_block();
+            let blk = a.lend_begin_block();
             blk.beat()
         };
         assert_eq!(ended, Beat::new(1.0));
         t.settings.set_tempo_map(steps(&[(0.0, 90.0), (2.0, 60.0)]));
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert_eq!(blk.beat(), Beat::new(1.0), "no jump");
         assert_eq!(blk.tempo, Bpm::of(90.0), "the map's tempo here");
         // Beat 2 is 32 000 frames on at 90 BPM.
         let _ = roll(&mut a, 31_999);
-        assert_eq!(a.begin_block().tempo, Bpm::of(90.0));
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(90.0));
         let _ = roll(&mut a, 1);
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert_eq!(blk.tempo, Bpm::of(60.0));
         assert_eq!(blk.beat(), Beat::new(2.0));
     }
@@ -547,14 +643,14 @@ mod tests {
         let (_t, mut a) = rolling(48_000.0, &[(0.0, 120.0), (4.0, 60.0), (8.0, 240.0)]);
         // 4 beats at 120, then 2 at 60: beat 6.
         let _ = roll(&mut a, 96_000 + 96_000);
-        assert_eq!(a.begin_block().beat(), Beat::new(6.0));
+        assert_eq!(a.lend_begin_block().beat(), Beat::new(6.0));
         a.follow_rate(SampleRate::SR_96K);
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert_eq!((blk.beat(), blk.tempo), (Beat::new(6.0), Bpm::of(60.0)));
         let _ = roll(&mut a, 191_999);
-        assert_eq!(a.begin_block().tempo, Bpm::of(60.0));
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(60.0));
         let _ = roll(&mut a, 1);
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert_eq!((blk.beat(), blk.tempo), (Beat::new(8.0), Bpm::of(240.0)));
     }
 
@@ -588,11 +684,11 @@ mod tests {
         let b_of = |s: f64| 2.0 * s - 3.0 * s * s / 16.0;
         let (_t, mut a) = rolling_on(48_000.0, map);
         let _ = roll(&mut a, 60_000);
-        let beat = a.begin_block().beat();
+        let beat = a.lend_begin_block().beat();
         assert!(beat.get() > 1.0 && beat.get() < 3.0, "mid-ramp: {beat:?}");
 
         a.follow_rate(SampleRate::SR_96K);
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert_eq!(blk.beat(), beat, "no jump");
         let s = ((4.0 - 0.75 * beat.get()).sqrt() - 2.0) / (-3.0 / 8.0);
         let m = tutti_music::first_frame_at_or_after(s * 96_000.0) as u64;
@@ -605,7 +701,7 @@ mod tests {
 
         // To the cell's edge: on the map's beat, at the next chord.
         let _ = roll(&mut a, ((k + 1) * 128 - m) as usize);
-        let blk = a.begin_block();
+        let blk = a.lend_begin_block();
         assert!((blk.beat().get() - at((k + 1) * 128)).abs() < 1e-10);
         assert!((blk.tempo.get() - chord(k + 1)).abs() < 1e-6);
     }
@@ -616,7 +712,7 @@ mod tests {
     fn a_map_is_followed_without_the_scalar_hysteresis() {
         let (_t, mut a) = rolling(48_000.0, &[(0.0, 120.0), (1.0, 120.0005)]);
         let _ = roll(&mut a, 24_000);
-        assert_eq!(a.begin_block().tempo, Bpm::of(120.0005));
+        assert_eq!(a.lend_begin_block().tempo, Bpm::of(120.0005));
     }
 
     /// A map with steps published before the audio side is taken (an engine
@@ -629,9 +725,9 @@ mod tests {
         let mut a = t.audio(SampleRate::SR_48K).expect("handed back on drop");
         let mut seen = Vec::new();
         for _ in 0..3 {
-            let blk = a.begin_block();
+            let blk = a.lend_begin_block();
             seen.push((blk.tempo, blk.beat()));
-            a.advance(96_000, &blk);
+            a.lend_advance(96_000, &blk);
         }
         // The seat survives the restart on the beat the clock stood on (0:
         // the drop kept the machine rolling at the start).

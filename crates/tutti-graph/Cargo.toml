@@ -33,6 +33,7 @@ tutti-buffers = { version = "0.0.1", path = "../tutti-buffers" }
 # tail vocabulary.
 tutti-units = { version = "0.0.1", path = "../tutti-units" }
 tutti-music = { version = "0.0.1", path = "../tutti-music" }
+# `TempoMap`, lent to nodes once per block (`Cx::tempo`).
 tutti-tempo = { version = "0.0.1", path = "../tutti-tempo" }
 atomic_float = "1.1"
 # `with_no_denormals`, `Scheduling`: the render guard and the pool's helpers' priority.
