@@ -17,7 +17,7 @@ pub fn take_peak() -> f32 {
 }
 
 /// A sample of an input signal: `(channel, frame)`.
-pub type Feed = fn(usize, usize) -> f32;
+pub type Feed = Box<dyn Fn(usize, usize) -> f32>;
 
 /// The input signals the rows feed.
 pub mod feeds {
@@ -73,6 +73,28 @@ pub mod feeds {
         sine(0, frame)
     }
 
+    /// An alternating `+amplitude`, `-amplitude` on every channel: a signal that keeps an
+    /// envelope follower active.
+    pub fn alternating(amplitude: f32) -> impl Fn(usize, usize) -> f32 {
+        move |_, frame| {
+            if frame.is_multiple_of(2) {
+                amplitude
+            } else {
+                -amplitude
+            }
+        }
+    }
+
+    /// A square of half-period 16 frames and amplitude `0.5`: slow enough that a low-pass
+    /// passes some of it.
+    pub fn slow_square(_: usize, frame: usize) -> f32 {
+        if (frame / 16).is_multiple_of(2) {
+            0.5
+        } else {
+            -0.5
+        }
+    }
+
     /// A unit impulse every 32 frames.
     pub fn pulse(_: usize, frame: usize) -> f32 {
         if frame.is_multiple_of(32) { 1.0 } else { 0.0 }
@@ -86,22 +108,25 @@ pub mod feeds {
 }
 
 /// How one row steps its node.
-#[derive(Clone, Copy, Debug)]
 pub struct Gate {
     feed: Feed,
     frames: usize,
+    warm: usize,
+    floor: f32,
     blocks: usize,
     every_channel: bool,
     warm_moves: bool,
 }
 
 impl Gate {
-    /// A gate feeding `feed`: blocks of 64 frames, 16 warm-up blocks, then 240 measured, the
+    /// A gate feeding `feed`: blocks of 64 frames, 16 warm-up blocks (`warm`), then 240 measured, the
     /// first channel's output past `1e-6` after the warm-up.
-    pub fn new(feed: Feed) -> Self {
+    pub fn new(feed: impl Fn(usize, usize) -> f32 + 'static) -> Self {
         Self {
-            feed,
+            feed: Box::new(feed),
             frames: 64,
+            warm: 16,
+            floor: 1e-6,
             blocks: 240,
             every_channel: false,
             warm_moves: false,
@@ -111,6 +136,18 @@ impl Gate {
     /// Blocks of `frames` frames.
     pub fn frames(mut self, frames: usize) -> Self {
         self.frames = frames;
+        self
+    }
+
+    /// The output must pass `floor` in magnitude after the warm-up.
+    pub fn floor(mut self, floor: f32) -> Self {
+        self.floor = floor;
+        self
+    }
+
+    /// `warm` warm-up blocks.
+    pub fn warm(mut self, warm: usize) -> Self {
+        self.warm = warm;
         self
     }
 
@@ -133,11 +170,12 @@ impl Gate {
         self
     }
 
-    /// `node` alone, labelled `label` in a failure: 16 warm-up blocks, the output must sound,
+    /// `node` alone, labelled `label` in a failure: the warm-up blocks, the output must sound,
     /// then the measured blocks run under `assert_no_alloc` with `moves(controls, i)` applied
-    /// before block `i`. The warm-up applies `moves` only after [`warm_moves`](Self::warm_moves).
+    /// before block `i`. The warm-up applies `moves` only after
+    /// [`warm_moves`](Self::warm_moves).
     pub fn run<N: IntoNode>(
-        self,
+        &self,
         label: &str,
         node: N,
         mut moves: impl FnMut(&N::Controls, usize),
@@ -151,9 +189,10 @@ impl Gate {
     }
 
     /// [`run`](Self::run) with `warm` applied before each warm-up block and `measured` before
-    /// each measured one, for a node whose warm-up moves fewer controls than the measured blocks.
+    /// each measured one, for a node whose warm-up moves fewer controls than the measured
+    /// blocks.
     pub fn run_phased<N: IntoNode>(
-        self,
+        &self,
         label: &str,
         node: N,
         mut warm: impl FnMut(&N::Controls, usize),
@@ -169,7 +208,7 @@ impl Gate {
     }
 
     fn drive<N: IntoNode>(
-        self,
+        &self,
         label: &str,
         node: N,
         moves: &mut dyn FnMut(&N::Controls, usize, bool),
@@ -180,14 +219,14 @@ impl Gate {
                 *x = (self.feed)(c, i);
             }
         }
-        for i in 0..16 {
+        for i in 0..self.warm {
             moves(&controls, i, false);
             rig.block();
         }
         let checked = if self.every_channel { usize::MAX } else { 1 };
         for (c, plane) in rig.output().iter().enumerate().take(checked) {
             assert!(
-                plane.samples().iter().any(|s| s.abs() > 1e-6),
+                plane.samples().iter().any(|s| s.abs() > self.floor),
                 "{label}: channel {c} rendered silence; the gate would walk no DSP"
             );
         }
