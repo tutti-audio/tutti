@@ -115,8 +115,9 @@ impl ControlSet for DiodeClipperSet {
         ALL
     }
 
-    fn units(&self) -> Vec<DeclaredUnit> {
-        vec![DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Db>()]
+    fn units(&self) -> &'static [DeclaredUnit] {
+        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Db>()];
+        ALL
     }
 
     fn defaults(&self) -> DiodeClipperControls {

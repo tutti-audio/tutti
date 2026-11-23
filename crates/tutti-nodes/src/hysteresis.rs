@@ -127,8 +127,9 @@ impl ControlSet for HysteresisSet {
         ALL
     }
 
-    fn units(&self) -> Vec<DeclaredUnit> {
-        vec![DeclaredUnit::of::<Db>()]
+    fn units(&self) -> &'static [DeclaredUnit] {
+        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
+        ALL
     }
 
     fn defaults(&self) -> HysteresisControls {

@@ -73,7 +73,7 @@ pub(crate) use program::{
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
 pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
-pub use saved::{SavedValues, ValueHandle};
+pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 #[cfg(feature = "sampler")]

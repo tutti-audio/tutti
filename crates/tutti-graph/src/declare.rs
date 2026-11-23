@@ -329,8 +329,7 @@ pub fn set(walk: impl FnOnce(Visit<'_>) -> bool) -> ParamSet {
     let mut set = ParamSet::builder();
     walk(&mut |row| {
         if let Some(cell) = (row.cell)() {
-            set =
-                std::mem::replace(&mut set, ParamSet::builder()).param_in(row.unit, row.addr, cell);
+            set = std::mem::replace(&mut set, ParamSet::builder()).param(row.unit, row.addr, cell);
         }
         true
     });

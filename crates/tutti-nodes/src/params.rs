@@ -38,7 +38,7 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     fn addrs(&self) -> &'static [UnitAddr];
 
     /// The unit of each cell, in the order of [`addrs`](Self::addrs).
-    fn units(&self) -> Vec<DeclaredUnit>;
+    fn units(&self) -> &'static [DeclaredUnit];
 
     /// The controls a non-finite cell falls back to.
     fn defaults(&self) -> Self::Controls;
@@ -83,8 +83,8 @@ impl ControlSet for NoControls {
         &[]
     }
 
-    fn units(&self) -> Vec<DeclaredUnit> {
-        Vec::new()
+    fn units(&self) -> &'static [DeclaredUnit] {
+        &[]
     }
 
     fn defaults(&self) {}
@@ -250,10 +250,10 @@ macro_rules! control_set {
                 &ALL[..control_set!(@live ALL, $($live)+)]
             }
 
-            fn units(&self) -> Vec<tutti_graph::DeclaredUnit> {
-                let mut all = vec![$(tutti_graph::DeclaredUnit::of::<$unit>()),+];
-                all.truncate(self.addrs().len());
-                all
+            fn units(&self) -> &'static [tutti_graph::DeclaredUnit] {
+                const ALL: &[tutti_graph::DeclaredUnit] =
+                    &[$(tutti_graph::DeclaredUnit::of::<$unit>()),+];
+                &ALL[..self.addrs().len()]
             }
 
             fn control(&self, k: usize) -> $crate::params::Control {
@@ -497,10 +497,10 @@ impl<S: ControlSet> Params<S> {
         let cells = self.cells.iter().cloned();
         self.addrs()
             .iter()
-            .zip(self.set.units())
+            .zip(self.set.units().iter().copied())
             .zip(cells)
             .fold(set, |set, ((&addr, unit), cell)| {
-                set.param_in(unit, addr, cell)
+                set.param(unit, addr, cell)
             })
     }
 
@@ -668,8 +668,9 @@ mod tests {
             const ADDRS: [UnitAddr; 1] = [UnitAddr::first(tutti_units::UnitParam::Cutoff)];
             &ADDRS
         }
-        fn units(&self) -> Vec<DeclaredUnit> {
-            vec![DeclaredUnit::of::<tutti_units::Hz>()]
+        fn units(&self) -> &'static [DeclaredUnit] {
+            const UNITS: [DeclaredUnit; 1] = [DeclaredUnit::of::<tutti_units::Hz>()];
+            &UNITS
         }
         fn defaults(&self) -> f64 {
             0.0

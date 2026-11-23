@@ -115,7 +115,7 @@ fn a_removed_node_fails_the_restore_until_retain_live_drops_it() {
         "nothing landed"
     );
 
-    saved.retain_live(&s).unwrap();
+    saved.retain_live(&s.values()).unwrap();
     assert!(
         saved
             .iter()

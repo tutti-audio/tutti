@@ -26,7 +26,7 @@ use super::target::{
     sealed::{Sealed, Store},
 };
 use super::watcher::StoredChange;
-use crate::{AppKey, Clock, Session};
+use crate::AppKey;
 
 /// The base of every saved target at one instant, read under the value lock, so
 /// a batch is in it whole or not at all: what [`Session::saved_values`] answers
@@ -92,19 +92,19 @@ impl<K> SavedValues<K> {
         Arc::make_mut(&mut self.items).remove(&id)
     }
 
-    /// Keeps the targets that are there now in `values`, the session or a
-    /// [`Values`], and drops the rest: what a lenient restore calls first.
+    /// Keeps the targets that are there now in `values` and drops the rest: what a
+    /// lenient restore calls first (`saved.retain_live(&session.values())`).
     ///
     /// # Errors
     ///
     /// [`Reentrant`](crate::ValueErrorKind::Reentrant) from inside a
     /// `modify`, and [`Closed`](crate::ValueErrorKind::Closed) once the session
     /// is gone.
-    pub fn retain_live(&mut self, values: &impl ValueHandle<K>) -> Result<(), ValueError<K>>
+    pub fn retain_live(&mut self, values: &Values<K>) -> Result<(), ValueError<K>>
     where
         K: AppKey,
     {
-        let state = handle::Sealed::state(values)?;
+        let state = values.state()?;
         let held = state.enter()?;
         let gone: Vec<TargetId> = self
             .items
@@ -149,34 +149,6 @@ impl<K> Stageable for &SavedValues<K> {
     }
 }
 impl<K> IntoAssign<K> for &SavedValues<K> {}
-
-mod handle {
-    use std::sync::Arc;
-
-    use super::{ValueError, ValueState};
-
-    /// The value state a handle reaches.
-    pub trait Sealed<K> {
-        fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>>;
-    }
-}
-
-/// A handle on a session's values: the [`Session`] or a [`Values`]. Sealed.
-pub trait ValueHandle<K>: handle::Sealed<K> {}
-
-impl<K: AppKey> handle::Sealed<K> for Values<K> {
-    fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
-        Self::state(self)
-    }
-}
-impl<K: AppKey> ValueHandle<K> for Values<K> {}
-
-impl<K: AppKey, C: Clock> handle::Sealed<K> for Session<K, C> {
-    fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
-        Ok(Arc::clone(&self.values))
-    }
-}
-impl<K: AppKey, C: Clock> ValueHandle<K> for Session<K, C> {}
 
 impl<K: AppKey> ValueState<K> {
     /// The base of every saved target, read under the value lock.

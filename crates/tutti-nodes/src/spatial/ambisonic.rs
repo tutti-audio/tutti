@@ -417,8 +417,8 @@ impl crate::ControlSet for AmbisonicDecoderSet {
         &[]
     }
 
-    fn units(&self) -> Vec<tutti_graph::DeclaredUnit> {
-        Vec::new()
+    fn units(&self) -> &'static [tutti_graph::DeclaredUnit] {
+        &[]
     }
 
     fn defaults(&self) {}
