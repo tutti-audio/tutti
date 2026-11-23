@@ -7,8 +7,10 @@ use std::ffi::OsStr;
 /// Setting the environment is `unsafe` because another thread of the process
 /// may be reading it. This and [`remove_env`] are the one place the suites do
 /// it, and they are safe to call on the terms every caller is under: nextest
-/// runs each test in a process of its own, and a test sets its variables
-/// before it starts a thread or a plugin that reads them. A test that shares
+/// runs each test in a process of its own, and no other thread of that process
+/// reads the environment during the call. The threads a session starts read it
+/// only when a plugin server is spawned, which the test's own thread does, so
+/// a test may set or remove a variable while its session runs. A test that shares
 /// variables with tests in other processes (the probe's switches) uses a
 /// [`ScopedEnv`] and holds the [`machine_lock`](fn@crate::machine_lock).
 pub fn set_env(key: &str, value: impl AsRef<OsStr>) {
@@ -16,9 +18,9 @@ pub fn set_env(key: &str, value: impl AsRef<OsStr>) {
         unsafe_code,
         reason = "the suites' one environment write; see the function"
     )]
-    // SAFETY: no other thread of this process reads the environment while a
-    // test sets it (the function's doc: one test per process, set before any
-    // thread starts).
+    // SAFETY: no other thread of this process reads the environment during
+    // the call (the function's doc: one test per process, and a session's
+    // threads read it only at a server spawn, which the test's thread does).
     unsafe {
         std::env::set_var(key, value);
     }
@@ -28,8 +30,8 @@ pub fn set_env(key: &str, value: impl AsRef<OsStr>) {
 /// [`set_env`].
 pub fn remove_env(key: &str) {
     #[allow(unsafe_code, reason = "undoes `set_env`; see its doc")]
-    // SAFETY: as in `set_env`: the threads a test started have stopped reading
-    // the environment by the time it removes a variable.
+    // SAFETY: as in `set_env`: no other thread of this process reads the
+    // environment during the call.
     unsafe {
         std::env::remove_var(key);
     }
