@@ -25,8 +25,8 @@ use tutti_buffers::{Float, InterleavedMut};
 use tutti_graph::testing::{self as common, Harness, Kind, Word, bits, input_signal};
 use tutti_graph::{
     Edge, EventEdge, EventInputPort, FeedbackFrom, GraphSpec, InputPort, NodeKey, OutputPort,
-    PortSource, ScheduleError, TapId, TapOptions, TapSpec, Topology, TransportChanges, compile,
-    graph_tail,
+    PortSource, ScheduleError, TapId, TapOptions, TapSpec, Topology, TransportChanges, Unforkable,
+    compile, graph_tail,
 };
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Tail};
 
@@ -184,6 +184,59 @@ fn scripted(seed: u64, which: usize, workers: usize, inside: bool) -> Trace {
     trace.finish(&harness)
 }
 
+/// The graph, committed through an `Editor` (which `reprepare` recompiles
+/// from), rendered through block schedule `which`. With `max_block`, the
+/// second half of the run is re-cut to fit that maximum and, when `reprepare`,
+/// the editor is re-prepared to it at the same rate before that half.
+fn at_max_block(
+    seed: u64,
+    which: usize,
+    workers: usize,
+    max_block: usize,
+    reprepare: bool,
+) -> Trace {
+    let desc = random_graph(seed);
+    let mut harness = Harness::with_workers(MAX_BLOCK, workers);
+    for (&k, kind) in &desc.kinds {
+        harness
+            .editor
+            .insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
+    }
+    let spec = harness.editor.spec_mut();
+    spec.topology.edges = desc.spec.topology.edges.clone();
+    spec.topology.outputs = desc.spec.topology.outputs.clone();
+    spec.topology.inputs = desc.spec.topology.inputs;
+    spec.events = desc.spec.events.clone();
+    harness.editor.commit().expect("a generated graph commits");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    harness.outputs = desc.spec.topology.outputs.len();
+    harness.inputs = desc.spec.topology.inputs.count() as usize;
+
+    let blocks = schedule(which, seed, 400);
+    let (first, rest) = blocks.split_at(blocks.len() / 2);
+    let rest: Vec<usize> = rest
+        .iter()
+        .flat_map(|&n| (0..n.div_ceil(max_block)).map(move |i| (n - i * max_block).min(max_block)))
+        .collect();
+    let (mut trace, mut frame) = (Trace::default(), 0u64);
+    for (half, blocks) in [first, &rest].into_iter().enumerate() {
+        if half == 1 && reprepare {
+            harness
+                .editor
+                .reprepare(common::prepare(max_block))
+                .expect("reprepares");
+            harness.exec.apply_pending();
+            harness.editor.collect();
+        }
+        for &n in blocks {
+            trace.push(&harness.block(n, &input_signal(frame, n)));
+            frame += n as u64;
+        }
+    }
+    trace.finish(&harness)
+}
+
 /// Three graphs, each an edit of the last, rendered in turn.
 fn recompiled(seed: u64, which: usize, workers: usize) -> Trace {
     let first = random_graph(seed);
@@ -240,6 +293,19 @@ proptest! {
     #[test]
     fn recompiles_carry_state_alike_on_any_participant_count(seed in any::<u64>(), which in 0usize..5, workers in workers()) {
         prop_assert_eq!(recompiled(seed, which, 1), recompiled(seed, which, workers));
+    }
+
+    /// A re-prepare to a different `MaxBlock` at the same rate, halfway
+    /// through a run, changes no output: the render is the one that never
+    /// re-prepared, sample for sample, over the same block schedule, with the
+    /// same late, unrouted and dropped counts.
+    #[test]
+    fn a_max_block_change_at_the_same_rate_leaves_the_render_unchanged(seed in any::<u64>(), which in 0usize..5, to in 0usize..3, workers in workers()) {
+        let max_block = [32, 64, 100][to];
+        prop_assert_eq!(
+            at_max_block(seed, which, workers, max_block, true),
+            at_max_block(seed, which, workers, max_block, false)
+        );
     }
 
     /// A tap changes nothing and reads exactly what it names: with an aligned
@@ -433,7 +499,7 @@ proptest! {
 /// renders exactly what never recompiling renders. The PDC ring, the feedback
 /// slot, and the `Smooth`/`Lag` unit state all have to carry for this to hold.
 #[test]
-fn an_unrelated_edit_does_not_disturb_the_running_graph() {
+fn a_commit_adding_an_unconnected_node_changes_no_output() {
     let (a, b, c, mix, orphan) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4), NodeKey(9));
     let mut kinds = BTreeMap::new();
     kinds.insert(a, Kind::EnvProbe);

@@ -47,7 +47,10 @@
 //! `compile` runs it in every debug build, and a test calls it directly on
 //! every random graph.
 
-use crate::compile::ids::{DelayId, EventSlotId, Id, OpId, PlanUnitId, Table, TableSlice, TaskId};
+use crate::compile::ids::{
+    DelayId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
+    TableSlice, TaskId,
+};
 use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
 use crate::node::io::PortKind;
@@ -95,7 +98,9 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
             .chain([a(dst, true)])
             // The driven lanes' event sources: reads of the op.
             .chain(
-                plan.gain_ports[gains.range()]
+                plan.gain_ports
+                    .get(gains.range())
+                    .unwrap_or(&[])
                     .iter()
                     .map(|g| e(g.slot, false)),
             )
@@ -141,9 +146,14 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
     }
 }
 
-/// Every event slot a node op's driven params read.
+/// Every event slot a node op's driven params read. Out-of-range spans read
+/// nothing here; [`verify_params`] reports them.
 fn param_reads(plan: &Plan, params: crate::compile::plan::Span) -> impl Iterator<Item = u32> + '_ {
-    plan.param_ports[params.range()].iter().map(|p| p.slot)
+    plan.param_ports
+        .get(params.range())
+        .unwrap_or(&[])
+        .iter()
+        .map(|p| p.slot)
 }
 
 /// Each sum op adds at least two addends and at most [`MAX_PORTS`] (a wider
@@ -180,13 +190,23 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
                         lanes.len, srcs.len
                     )));
                 }
-                let list = &plan.sum_lanes[lanes.range()];
+                let Some(list) = plan.sum_lanes.get(lanes.range()) else {
+                    return Err(VerifyError(format!(
+                        "weighted sum op {i} names lanes past the {} the plan lists",
+                        plan.sum_lanes.len()
+                    )));
+                };
                 if list.iter().all(Option::is_none) {
                     return Err(VerifyError(format!(
                         "weighted sum op {i} has no weighted lane (a plain sum is `Op::Sum`)"
                     )));
                 }
-                let driven = &plan.gain_ports[gains.range()];
+                let Some(driven) = plan.gain_ports.get(gains.range()) else {
+                    return Err(VerifyError(format!(
+                        "weighted sum op {i} names driven lanes past the {} the plan lists",
+                        plan.gain_ports.len()
+                    )));
+                };
                 for (n, g) in driven.iter().enumerate() {
                     if n > 0 && driven[n - 1].lane >= g.lane {
                         return Err(VerifyError(format!(
@@ -219,12 +239,19 @@ fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
             continue;
         };
         let bad = |what: String| VerifyError(format!("unit {unit}'s params {what}"));
-        let ports = &plan.param_ports[params.range()];
+        let ports = plan
+            .param_ports
+            .get(params.range())
+            .ok_or_else(|| bad("name ports past the table".into()))?;
         if params.start as usize != covered {
             return Err(bad("are not the next run of the table".into()));
         }
         covered += ports.len();
-        let declared = plan.units[PlanUnitId::new(unit)].shape.params;
+        let declared = plan
+            .units
+            .get(PlanUnitId::new(unit))
+            .map(|u| u.shape.params)
+            .unwrap_or_default();
         for (i, p) in ports.iter().enumerate() {
             if i > 0 && ports[i - 1].port >= p.port {
                 return Err(bad("are not in strict port order".into()));
@@ -433,7 +460,14 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
             match (kind, op) {
                 (PortKind::Audio, Op::Capture { feedback, .. })
                 | (PortKind::Event, Op::EventCapture { feedback, .. }) => {
-                    captures[*feedback as usize] += 1;
+                    match captures.get_mut(*feedback as usize) {
+                        Some(c) => *c += 1,
+                        None => {
+                            return Err(VerifyError(format!(
+                                "a capture names {kind:?} feedback {feedback} of {fb_len}"
+                            )));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -483,12 +517,18 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     let tasks = plan.tasks.len();
     let mut found: Table<OpId, Option<TaskId>> = Table::filled(n, None);
     for (t, span) in plan.tasks.iter_enumerated() {
-        let ops = &plan.task_ops[span.range()];
+        let ops = plan
+            .task_ops
+            .get(span.range())
+            .ok_or_else(|| VerifyError(format!("task {t} runs past the task op list")))?;
         for (j, &op) in ops.iter().enumerate() {
-            if found[op].is_some() {
+            let slot = found
+                .get_mut(op)
+                .ok_or_else(|| VerifyError(format!("task {t} names op {op} of {n}")))?;
+            if slot.is_some() {
                 return Err(VerifyError(format!("op {op} is in two tasks")));
             }
-            found[op] = Some(t);
+            *slot = Some(t);
             if j > 0 && ops[j - 1] >= op {
                 return Err(VerifyError(format!(
                     "task {t} runs op {} then op {op}, out of ascending order",
@@ -505,6 +545,9 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
         let op = found.iter().position(Option::is_none);
         return Err(VerifyError(format!("op {op:?} is in no task")));
     };
+    if plan.task_succ.rows() != tasks || plan.task_activation.len() != tasks {
+        return Err(VerifyError("task tables have the wrong length".into()));
+    }
     for a in plan.ops.ids() {
         for &b in plan.op_succ.ids::<OpId, OpId>(a) {
             let (ta, tb) = (task_of[a], task_of[b]);
@@ -519,7 +562,7 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
     for t in plan.tasks.ids() {
         let mut seen = std::collections::BTreeSet::new();
         for &u in plan.task_succ.ids::<TaskId, TaskId>(t) {
-            if !seen.insert(u) || u == t {
+            if u.index() >= tasks || !seen.insert(u) || u == t {
                 return Err(VerifyError(format!("task {t} has a bad successor {u}")));
             }
             indeg[u] += 1;
@@ -551,22 +594,44 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
 
 /// Rule 6: the index tables.
 fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
-    // Each delay and each unit is named by exactly one op: the public ops hold
-    // the raw index, which the compiler took from the table's own id.
+    // The public ops name delays, taps, meters and units by raw index; each
+    // is checked against its table here.
     let mut delay_uses: Table<DelayId, usize> = Table::filled(plan.delays.len(), 0);
     let mut unit_uses: Table<PlanUnitId, usize> = Table::filled(plan.units.len(), 0);
     for op in &plan.ops {
         let d = match *op {
             Op::Delay { delay, .. } | Op::EventDelay { delay, .. } => Some(delay),
             Op::Output { delay, .. } => delay,
+            Op::Tap { tap, .. } => {
+                if plan.taps.get(PlanTapId::new(tap)).is_none() {
+                    return Err(VerifyError(format!("a tap op names tap {tap}")));
+                }
+                None
+            }
+            Op::EventTap { tap, .. } => {
+                if plan.event_taps.get(PlanEventTapId::new(tap)).is_none() {
+                    return Err(VerifyError(format!("an event tap op names tap {tap}")));
+                }
+                None
+            }
+            Op::Meter { meter, .. } => {
+                if plan.meters.get(PlanMeterId::new(meter)).is_none() {
+                    return Err(VerifyError(format!("a meter op names meter {meter}")));
+                }
+                None
+            }
             Op::Node { unit, .. } => {
-                unit_uses[PlanUnitId::new(unit)] += 1;
+                *unit_uses
+                    .get_mut(PlanUnitId::new(unit))
+                    .ok_or_else(|| VerifyError(format!("a node op names unit {unit}")))? += 1;
                 None
             }
             _ => None,
         };
         if let Some(d) = d {
-            delay_uses[DelayId::new(d)] += 1;
+            *delay_uses
+                .get_mut(DelayId::new(d))
+                .ok_or_else(|| VerifyError(format!("an op names delay {d}")))? += 1;
         }
     }
     if let Some((d, uses)) = delay_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
@@ -583,7 +648,12 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // slot all their FIFO can hold at the source's declared rate, a merge
     // the sum of its inputs.
     let block = plan.prepare.max_block().get();
-    let slot_cap = |s: u32| plan.event_slot_capacity[EventSlotId::new(s)];
+    let slot_cap = |s: u32| {
+        plan.event_slot_capacity
+            .get(EventSlotId::new(s))
+            .copied()
+            .unwrap_or_default()
+    };
     for (f, spec) in plan.event_feedback.iter_enumerated() {
         let crate::compile::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
             return Err(VerifyError(format!(
@@ -623,11 +693,17 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 .ok_or_else(|| VerifyError(format!("op {m} reads event slot {s} of no value")))
         };
         op_need[m] = match *op {
-            Op::Node { unit, .. } => {
-                EventSlotCapacity::port(plan.units[PlanUnitId::new(unit)].shape.event_capacity)
-            }
+            Op::Node { unit, .. } => plan
+                .units
+                .get(PlanUnitId::new(unit))
+                .map_or(EventSlotCapacity::NONE, |u| {
+                    EventSlotCapacity::port(u.shape.event_capacity)
+                }),
             Op::EventDelay { delay, .. } => {
-                let d = &plan.delays[DelayId::new(delay)];
+                let d = plan
+                    .delays
+                    .get(DelayId::new(delay))
+                    .ok_or_else(|| VerifyError(format!("op {m} names delay {delay}")))?;
                 let Some(from) = d.key.event_origin() else {
                     return Err(VerifyError(format!(
                         "event delay {delay} is not keyed as events"
@@ -1180,7 +1256,9 @@ mod tests {
 
         // Activation counts that do not match.
         let mut bad = good.clone();
-        bad.task_activation[TaskId::new(0)] += 1;
+        if let Some(a) = bad.task_activation.get_mut(TaskId::new(0)) {
+            *a += 1;
+        }
         assert!(verify(&bad).unwrap_err().0.contains("activation"));
 
         // A delay no op uses.
@@ -1222,6 +1300,130 @@ mod tests {
         let idx = bad.units[PlanUnitId::new(0)].idx;
         bad.units[PlanUnitId::new(1)].idx = idx;
         assert!(verify(&bad).unwrap_err().0.contains("store index"));
+    }
+
+    /// Ids are minted by arithmetic in the compiler, so an index or span past
+    /// its table is a compile error the verifier reports, never a panic on the
+    /// audio thread.
+    #[test]
+    fn the_verifier_rejects_an_index_or_span_past_its_table() {
+        use crate::compile::plan::Span;
+        let good = independent_pair();
+        verify(&good).expect("sound");
+        let err = |p: &Plan| verify(p).expect_err("corrupt").0;
+        let out = good
+            .ops
+            .iter_enumerated()
+            .find(|(_, o)| matches!(o, Op::Output { .. }))
+            .map(|(i, _)| i)
+            .expect("an output");
+        let empty = Span { start: 0, len: 0 };
+
+        // A tap, an event tap and a meter op past their tables.
+        for (op, want) in [
+            (
+                Op::Tap {
+                    tap: 99,
+                    srcs: empty,
+                },
+                "names tap 99",
+            ),
+            (Op::EventTap { tap: 99, src: 0 }, "names tap 99"),
+            (
+                Op::Meter {
+                    meter: 99,
+                    srcs: empty,
+                },
+                "names meter 99",
+            ),
+        ] {
+            let mut bad = good.clone();
+            bad.ops[out] = op;
+            assert!(err(&bad).contains(want), "{}", err(&bad));
+        }
+
+        // A node op past the units, and an output past the delays.
+        let mut bad = good.clone();
+        for op in &mut bad.ops {
+            if let Op::Node { unit, .. } = op {
+                *unit = 99;
+                break;
+            }
+        }
+        assert!(err(&bad).contains("names unit 99"), "{}", err(&bad));
+        let mut bad = good.clone();
+        let Op::Output { channel, src, .. } = good.ops[out] else {
+            unreachable!()
+        };
+        bad.ops[out] = Op::Output {
+            channel,
+            src,
+            delay: Some(99),
+        };
+        assert!(err(&bad).contains("names delay 99"), "{}", err(&bad));
+
+        // A task running past the task op list; task tables of the wrong
+        // length; a successor past the tasks.
+        let mut bad = good.clone();
+        bad.tasks[TaskId::new(0)].len += 99;
+        assert!(err(&bad).contains("past the task op list"), "{}", err(&bad));
+        let mut bad = good.clone();
+        bad.task_activation.push(0);
+        assert!(err(&bad).contains("wrong length"), "{}", err(&bad));
+        let mut bad = good.clone();
+        let mut rows: Vec<Vec<u32>> = (0..bad.tasks.len())
+            .map(|t| bad.task_succ.row(t).to_vec())
+            .collect();
+        rows[0].push(99);
+        bad.task_succ = crate::compile::plan::Csr::from_rows(&rows);
+        assert!(err(&bad).contains("bad successor"), "{}", err(&bad));
+
+        // A weighted sum's lanes and driven lanes past their lists.
+        let sums = summed_pair();
+        let i = sums
+            .ops
+            .iter_enumerated()
+            .find(|(_, o)| matches!(o, Op::Sum { .. }))
+            .map(|(i, _)| i)
+            .expect("a sum");
+        let Op::Sum { srcs, dst } = sums.ops[i] else {
+            unreachable!()
+        };
+        let mut bad = sums.clone();
+        bad.ops[i] = Op::WeightedSum {
+            srcs,
+            dst,
+            lanes: Span { start: 0, len: 2 },
+            gains: empty,
+        };
+        assert!(err(&bad).contains("names lanes past"), "{}", err(&bad));
+        let mut bad = sums.clone();
+        bad.sum_lanes.extend([
+            None,
+            Some(crate::EdgeId {
+                sink: crate::PortSink::Port(crate::InputPort::new(NodeKey(1), 0)),
+                from: crate::Edge::Direct(PortSource::Zero),
+            }),
+        ]);
+        bad.ops[i] = Op::WeightedSum {
+            srcs,
+            dst,
+            lanes: Span { start: 0, len: 2 },
+            gains: Span { start: 0, len: 3 },
+        };
+        assert!(err(&bad).contains("driven lanes past"), "{}", err(&bad));
+
+        // A node's driven ports past the param table.
+        let (driven, _) = modulated_plan();
+        let mut bad = driven.clone();
+        for op in &mut bad.ops {
+            if let Op::Node { params, .. } = op
+                && params.len > 0
+            {
+                params.len += 99;
+            }
+        }
+        assert!(err(&bad).contains("past the table"), "{}", err(&bad));
     }
 
     /// A merge whose slot is smaller than its inputs together is refused —

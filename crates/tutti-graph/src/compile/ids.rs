@@ -212,6 +212,11 @@ impl<I: Id, T> TableSlice<I, T> {
         self.items.get(id.index())
     }
 
+    /// The row at `id`, mutably, if there is one.
+    pub(crate) fn get_mut(&mut self, id: I) -> Option<&mut T> {
+        self.items.get_mut(id.index())
+    }
+
     /// Every id, in order.
     pub(crate) fn ids(&self) -> impl DoubleEndedIterator<Item = I> + use<I, T> {
         (0..self.items.len()).map(I::from_index)
