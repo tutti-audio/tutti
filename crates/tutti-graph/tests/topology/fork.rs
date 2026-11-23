@@ -151,7 +151,11 @@ impl Node for Level {
 impl ParamNode for Level {
     fn param_set(&self) -> ParamSet {
         ParamSet::builder()
-            .param(UnitParam::Volume, self.0.as_atomic())
+            .param(
+                tutti_graph::DeclaredUnit::of::<tutti_units::Amplitude>(),
+                UnitParam::Volume,
+                self.0.as_atomic(),
+            )
             .build()
     }
     fn fork_fresh(&self) -> Self {

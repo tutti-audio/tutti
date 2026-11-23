@@ -17,8 +17,9 @@ use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSet
 use tutti_units::{Amplitude, At};
 
 use super::error::SetRefusal;
+use super::saved::capture;
 use super::state::Params;
-use super::target::{Target, TargetId, sealed, target_builders};
+use super::target::{AnyAssign, Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
 use crate::{ChannelEdge, ModRouteId, ModSourceId, ModTarget};
@@ -94,6 +95,42 @@ pub enum SlotId {
 }
 
 impl SlotId {
+    /// Whether a project saves the value: the one answer, which
+    /// [`SavedValues`](crate::SavedValues) captures by. A policy, a MIDI
+    /// device's latency and a plugin's automation mode are the session's
+    /// setup of a place, not of the project, so a project moved to another
+    /// machine or another plugin does not carry them.
+    pub(crate) const fn saved(self) -> bool {
+        match self {
+            Self::OutputPolicy => false,
+            #[cfg(feature = "midi-hardware")]
+            Self::MidiPolicy => false,
+            #[cfg(feature = "midi")]
+            Self::OutputLatency => false,
+            #[cfg(feature = "plugin")]
+            Self::PluginAutomationMode(_) => false,
+            Self::Tempo
+            | Self::Meter
+            | Self::Loop
+            | Self::ClickVolume
+            | Self::ClickMode
+            | Self::RoutePolarity(_)
+            | Self::RouteCurve(_)
+            | Self::SourceRate(_)
+            | Self::SourceValue(_)
+            | Self::Automation(_)
+            | Self::Mode(_)
+            | Self::Mix(_)
+            | Self::Gain(_)
+            | Self::Range(_)
+            | Self::RouteDepth(_) => true,
+            #[cfg(feature = "midi")]
+            Self::MpeMode | Self::ClipEvents(_) | Self::Harmony(_) => true,
+            #[cfg(feature = "sampler")]
+            Self::Window(_) | Self::Looping(_) | Self::Direction(_) | Self::Speed(_) => true,
+        }
+    }
+
     /// The node the value is of, or `None` for one of the session's own.
     pub(crate) const fn node(self) -> Option<NodeKey> {
         match self {
@@ -160,6 +197,15 @@ impl std::fmt::Debug for NodeSlots {
 pub(crate) struct Erased {
     cell: Box<dyn Any + Send + Sync>,
     stage: Option<Arc<dyn Stage>>,
+    /// The assignment of the value now, made from the cell's value type.
+    capture: fn(SlotId, &(dyn Any + Send + Sync)) -> AnyAssign,
+}
+
+impl Erased {
+    /// The assignment of the value `id` holds now.
+    pub(super) fn capture(&self, id: SlotId) -> AnyAssign {
+        (self.capture)(id, &*self.cell)
+    }
 }
 
 impl std::fmt::Debug for Erased {
@@ -171,10 +217,11 @@ impl std::fmt::Debug for Erased {
 }
 
 /// An atomic slot: its writes land at once.
-pub(crate) fn erase<V: 'static>(slot: SlotCell<V>) -> Erased {
+pub(crate) fn erase<V: Clone + PartialEq + Send + Sync + 'static>(slot: SlotCell<V>) -> Erased {
     Erased {
         cell: Box::new(slot),
         stage: None,
+        capture: capture::<V>,
     }
 }
 
@@ -183,6 +230,7 @@ pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
     Erased {
         cell: Box::new(Arc::clone(&slot) as SlotCell<C::Value>),
         stage: Some(slot),
+        capture: capture::<C::Value>,
     }
 }
 
@@ -695,7 +743,7 @@ target_builders!([T: AtomicWord + PartialEq + Send + Sync + 'static] SettingTarg
 /// reads, checks and replaces it through.
 pub(crate) trait Held: Send + Sync + 'static {
     /// The value in force.
-    type Value: Clone + Send + Sync + 'static;
+    type Value: Clone + PartialEq + Send + Sync + 'static;
 
     /// The value now.
     fn current(&self) -> Self::Value;
