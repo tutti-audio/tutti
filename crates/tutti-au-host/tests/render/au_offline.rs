@@ -102,7 +102,7 @@ fn assert_property_absent<T: std::fmt::Debug>(
 ) {
     match result {
         Err(AuError::OsStatus {
-            code: kAudioUnitErr_InvalidProperty,
+            code: coreaudio_sys::kAudioUnitErr_InvalidProperty,
             ..
         }) => {}
         other => panic!(

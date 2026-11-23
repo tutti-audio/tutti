@@ -83,7 +83,7 @@ fn render_before_initialize_is_refused() {
         matches!(
             err,
             AuError::OsStatus {
-                code: kAudioUnitErr_Uninitialized,
+                code: coreaudio_sys::kAudioUnitErr_Uninitialized,
                 ..
             }
         ),

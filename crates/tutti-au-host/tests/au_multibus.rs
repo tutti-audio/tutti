@@ -77,7 +77,7 @@ const BLOCK: u32 = 512;
 fn assert_invalid_element<T: std::fmt::Debug>(result: Result<T, AuError>, what: &str) {
     match result {
         Err(AuError::OsStatus {
-            code: kAudioUnitErr_InvalidElement,
+            code: coreaudio_sys::kAudioUnitErr_InvalidElement,
             ..
         }) => {}
         Err(other) => panic!(

@@ -435,7 +435,7 @@ fn an_au_without_a_cocoa_view_is_refused_cleanly() {
             matches!(
                 err,
                 AuError::OsStatus {
-                    code: kAudioUnitErr_InvalidProperty,
+                    code: coreaudio_sys::kAudioUnitErr_InvalidProperty,
                     ..
                 }
             ),
