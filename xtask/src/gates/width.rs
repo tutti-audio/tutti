@@ -83,11 +83,11 @@ pub(super) const EDGES: &[(&str, &str)] = &[
         "the `Sample` and `Float` impls",
     ),
     (
-        "crates/tutti-graph/src/lane.rs",
+        "crates/tutti-graph/src/exec/lane.rs",
         "the lane renderer: a control ramp or segment rendered into an `F` lane",
     ),
     (
-        "crates/tutti-graph/src/meter.rs",
+        "crates/tutti-graph/src/edges/meter.rs",
         "the meter folds: a per-block statistic crossing into a reading",
     ),
     (

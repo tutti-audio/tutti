@@ -8,18 +8,18 @@ use tutti_units::Tail;
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};
 use crate::NodeKey;
-use crate::arena::Arena;
-use crate::event::Event;
-use crate::event_tap::EventTapWriter;
-use crate::gain::SumLane;
-use crate::held::{Keys, Tables};
-use crate::kernels::{AudioRing, EventFifo};
-use crate::meter::MeterWriter;
-use crate::mode::ModeState;
-use crate::par::Par;
-use crate::param::ParamState;
-use crate::slots::EventSlot;
-use crate::tap::TapWriter;
+use crate::edges::event_tap::EventTapWriter;
+use crate::edges::meter::MeterWriter;
+use crate::edges::tap::TapWriter;
+use crate::event::types::Event;
+use crate::exec::arena::Arena;
+use crate::exec::held::{Keys, Tables};
+use crate::exec::par::Par;
+use crate::exec::rings::{AudioRing, EventFifo};
+use crate::exec::slots::EventSlot;
+use crate::model::gain::SumLane;
+use crate::model::mode::ModeState;
+use crate::node::param::ParamState;
 
 pub(crate) struct Unit<F: Float = f32> {
     pub(super) generation: u32,
@@ -132,7 +132,7 @@ pub(crate) struct Inject {
     /// empty; a table never overflows, so no note off is lost. With several
     /// cut edges into one sink each table drains in turn, its pedal up
     /// first.
-    pub(super) owed: Vec<crate::held::Held>,
+    pub(super) owed: Vec<crate::exec::held::Held>,
 }
 
 impl Inject {
@@ -143,8 +143,8 @@ impl Inject {
     /// nowhere to go (none: room is made for every table owed).
     pub(super) fn owe(
         &mut self,
-        table: crate::held::Held,
-        spare: &mut CappedVec<crate::held::Held>,
+        table: crate::exec::held::Held,
+        spare: &mut CappedVec<crate::exec::held::Held>,
     ) -> u32 {
         // A table placed here always has a slot: staging counted every cut
         // edge into this sink port and every table that moves to it
@@ -182,7 +182,7 @@ impl Inject {
         let end = self
             .events
             .last()
-            .map_or(crate::time::Offset::ZERO, |e| e.offset);
+            .map_or(crate::node::time::Offset::ZERO, |e| e.offset);
         let start = self.events.len();
         for h in &mut self.owed {
             h.drain_into(&mut self.events);
@@ -203,7 +203,9 @@ impl Inject {
     /// The sink is parked: what was flushed and owed is discarded with the
     /// events it would have been sent.
     pub(super) fn discard(&mut self) {
-        self.owed.iter_mut().for_each(crate::held::Held::clear);
+        self.owed
+            .iter_mut()
+            .for_each(crate::exec::held::Held::clear);
         self.consumed();
     }
 }
@@ -268,9 +270,9 @@ impl<F: Float> State<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::Event;
-    use crate::held::Held;
-    use crate::time::Offset;
+    use crate::event::types::Event;
+    use crate::exec::held::Held;
+    use crate::node::time::Offset;
     use tutti_fixtures::midi;
     use tutti_ump::{MidiChannel, U7};
 

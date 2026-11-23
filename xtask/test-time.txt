@@ -6,7 +6,7 @@
 0 1 crates/tutti-engine/tests/no_alloc/rt_no_alloc_engine.rs
 0 1 crates/tutti-engine/tests/outputs/heard_tap.rs
 0 3 crates/tutti-engine/tests/stream/timer.rs
-0 1 crates/tutti-graph/src/pool.rs
+0 1 crates/tutti-graph/src/exec/pool.rs
 0 1 crates/tutti-graph/tests/executor/parallel.rs
 0 1 crates/tutti-graph/tests/executor/tap.rs
 0 1 crates/tutti-midi-hardware/src/backend/alsa/input.rs

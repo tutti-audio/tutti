@@ -17,5 +17,5 @@
 crates/tutti-dsp/src/fft/real.rs::RealFft::forward_even  not-interleave: complex re/im packing for the half-size FFT
 crates/tutti-dsp/src/fft/real.rs::RealFft::inverse_even  not-interleave: complex re/im packing for the half-size FFT
 crates/tutti-dsp/src/fft/staged.rs::StagedRealFft::inverse_step  not-interleave: complex re/im packing for the half-size FFT
-crates/tutti-graph/src/arena.rs::Arena::leading_mut  not-interleave: slot bookkeeping, the arena's lines per slot (`stride`), not a channel interleave
+crates/tutti-graph/src/exec/arena.rs::Arena::leading_mut  not-interleave: slot bookkeeping, the arena's lines per slot (`stride`), not a channel interleave
 crates/tutti-rt/src/pos_ring.rs::copy_strided  atomic: one channel of the position ring's interleaved atomic slots, read while the writer thread fills others

@@ -9,19 +9,23 @@ use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
 use super::tail_elapsed;
-use crate::arena::Role;
-use crate::command::{Deliveries, Overlay};
-use crate::event::PortCount;
-use crate::event::{Event, EventWriter, SortedEvents, merge_into};
-use crate::history::TransportHistory;
-use crate::io::Io;
-use crate::lane::fade_gains;
-use crate::loss::Dropped;
-use crate::node::{ConstantMask, Cx, Env, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
-use crate::param::{CellValue, ParamInput};
-use crate::plan::{Direct, Form, NodeRec, Plan};
-use crate::rtlog::{LogSink, LogSlots};
-use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
+use crate::compile::plan::{Direct, Form, NodeRec, Plan};
+use crate::edges::rtlog::{LogSink, LogSlots};
+use crate::event::merge::merge_into;
+use crate::event::sorted::SortedEvents;
+use crate::event::types::Event;
+use crate::event::writer::EventWriter;
+use crate::event::writer::PortCount;
+use crate::exec::arena::Role;
+use crate::exec::command::{Deliveries, Overlay};
+use crate::exec::history::TransportHistory;
+use crate::exec::lane::fade_gains;
+use crate::exec::loss::Dropped;
+use crate::exec::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
+use crate::node::io::Io;
+use crate::node::param::{CellValue, ParamInput};
+use crate::node::time::Env;
+use crate::node::{ConstantMask, Cx, InPlaceMask, MAX_PORTS, Node, SilenceMask, Status};
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
 
@@ -160,7 +164,7 @@ pub(super) fn run_node_op<
 /// The outgoing unit runs **first**: an input aliased in place is also the
 /// incoming unit's output, and holds the input only until that unit runs.
 /// It is handed its own output buffers (never in place), no events, and
-/// event writers that accept nothing — see the `fade` module (`src/fade.rs`).
+/// event writers that accept nothing — see the `fade` module (`src/model/fade.rs`).
 /// Only the op's own slots are touched, so the verifier's rules about the op
 /// cover the fade too.
 #[cold]
@@ -378,7 +382,7 @@ pub(super) fn node_op<
 }
 
 /// Run a unit's fused param step (see the `param` module docs,
-/// `src/param.rs`): each declared param, from its source this plan, into
+/// `src/node/param.rs`): each declared param, from its source this plan, into
 /// the unit's param buffers. Off the hot path: only a unit with a driven
 /// param, or one mid-declick, gets here.
 #[inline(never)]
@@ -671,7 +675,7 @@ pub(super) fn node_op_with<
 /// A [`Form::Direct`] node op with `I` inputs and `O` outputs: its port
 /// slots as fixed-size arrays, so `node_op`'s per-port loops fold as they do
 /// for the one-channel forms, and its buffers borrowed by
-/// [`Arena::direct`](crate::arena::Arena::direct).
+/// [`Arena::direct`](crate::exec::arena::Arena::direct).
 #[inline(always)]
 pub(super) fn direct_op<
     const I: usize,
