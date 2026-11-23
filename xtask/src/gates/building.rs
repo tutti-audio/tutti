@@ -867,6 +867,12 @@ pub(super) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-plugin-types/src/parameters.rs",
+        "ParameterInfo::with_short_name",
+        &[Rule::WithPrefix],
+        COPY_WITH_ONE_FIELD,
+    ),
+    ty(
+        "crates/tutti-plugin-types/src/parameters.rs",
         "ParameterInfo::with_steps",
         &[Rule::WithPrefix],
         COPY_WITH_ONE_FIELD,

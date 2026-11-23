@@ -39,14 +39,12 @@ use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use tutti_rt::Mutex;
 
 mod support;
+use coreaudio_sys::{kAudioUnitRenderAction_PostRender, kAudioUnitRenderAction_PreRender};
 use support::corpus::{
     DELAY, DYNAMICS, SPATIAL_MIXER, SPATIAL_MIXER_RAMP_PARAM, all_finite, envelope, peak, render,
     silence,
 };
 use tutti_au_host::render_notify::{ParamEvent, RenderPhase, ScheduleAddress};
-use tutti_au_host::types::{
-    K_AUDIO_UNIT_RENDER_ACTION_POST_RENDER, K_AUDIO_UNIT_RENDER_ACTION_PRE_RENDER,
-};
 
 /// Serializes component discovery and instantiation, as every suite in this
 /// crate does. AudioToolbox tolerates concurrent use of *distinct* units, but
@@ -191,22 +189,22 @@ fn each_half_carries_its_own_phase_flag() {
     let pre = obs.pre_flags.load(Ordering::SeqCst);
     let post = obs.post_flags.load(Ordering::SeqCst);
     assert_ne!(
-        pre & K_AUDIO_UNIT_RENDER_ACTION_PRE_RENDER,
+        pre & kAudioUnitRenderAction_PreRender,
         0,
         "the pre half's flags must have the PreRender bit set"
     );
     assert_eq!(
-        pre & K_AUDIO_UNIT_RENDER_ACTION_POST_RENDER,
+        pre & kAudioUnitRenderAction_PostRender,
         0,
         "the pre half must not also claim PostRender"
     );
     assert_ne!(
-        post & K_AUDIO_UNIT_RENDER_ACTION_POST_RENDER,
+        post & kAudioUnitRenderAction_PostRender,
         0,
         "the post half's flags must have the PostRender bit set"
     );
     assert_eq!(
-        post & K_AUDIO_UNIT_RENDER_ACTION_PRE_RENDER,
+        post & kAudioUnitRenderAction_PreRender,
         0,
         "the post half must not also claim PreRender"
     );

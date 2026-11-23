@@ -11,6 +11,7 @@ use std::mem::ManuallyDrop;
 use std::sync::Arc;
 
 use dpi::Size;
+use vst3::Steinberg::Vst::ChannelContext::{IInfoListener, IInfoListenerTrait};
 use vst3::Steinberg::{
     FUnknown, IBStream, IPlugView, IPluginBaseTrait, TUID,
     Vst::{
@@ -180,6 +181,7 @@ struct Extensions {
     note_expression: Option<ComPtr<INoteExpressionController>>,
     automation_state: Option<ComPtr<IAutomationState>>,
     keyswitch: Option<ComPtr<IKeyswitchController>>,
+    info_listener: Option<ComPtr<IInfoListener>>,
     unit_info: Option<ComPtr<IUnitInfo>>,
     remap_param_id: Option<ComPtr<IRemapParamID>>,
     parameter_function_name: Option<ComPtr<IParameterFunctionName>>,
@@ -378,6 +380,7 @@ impl Parts {
             note_expression: ctrl.as_ref().and_then(|c| c.cast()),
             automation_state: ctrl.as_ref().and_then(|c| c.cast()),
             keyswitch: ctrl.as_ref().and_then(|c| c.cast()),
+            info_listener: ctrl.as_ref().and_then(|c| c.cast()),
             unit_info: ctrl.as_ref().and_then(|c| c.cast()),
             remap_param_id: ctrl.as_ref().and_then(|c| c.cast()),
             parameter_function_name: ctrl.as_ref().and_then(|c| c.cast()),

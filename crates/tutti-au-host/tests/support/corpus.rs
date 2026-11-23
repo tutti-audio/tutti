@@ -632,10 +632,9 @@ pub const WITHOUT_PUSH_RENDER: &[AuRef] = &[
 /// one.
 pub const IMPLEMENTS_PROCESS_MULTIPLE: AuRef = REVERB2;
 
-/// `unimpErr` — the status an AU returns for a dispatch selector it does not
-/// implement. Re-exported from the host crate rather than re-spelled so the two
-/// cannot drift.
-pub const UNIMP_ERR: i32 = tutti_au_host::types::UNIMP_ERR;
+/// `unimpErr` — the classic Mac OS status an AU returns for a dispatch selector
+/// it does not implement. It is a CarbonCore value, not in `coreaudio-sys`.
+pub const UNIMP_ERR: i32 = -4;
 
 /// `kAudioUnitErr_TooManyFramesToProcess`, the AU's own answer to a render wider
 /// than the `MaximumFramesPerSlice` it was initialized at.

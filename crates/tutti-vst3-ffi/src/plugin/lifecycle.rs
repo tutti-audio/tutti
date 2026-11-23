@@ -103,6 +103,7 @@ impl Parts {
             self.ext.note_expression = None;
             self.ext.automation_state = None;
             self.ext.keyswitch = None;
+            self.ext.info_listener = None;
             self.ext.unit_info = None;
             self.ext.remap_param_id = None;
             self.ext.parameter_function_name = None;
