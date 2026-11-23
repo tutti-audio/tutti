@@ -1,15 +1,17 @@
 //! Targets on a hosted plugin: [`PluginParamTarget`] for a parameter's position
-//! and [`PluginAutomationModeTarget`] for the host's automation mode.
+//! [`PluginAutomationModeTarget`] for the host's automation mode and
+//! [`PluginTrackInfoTarget`] for what it says of the plugin's track.
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
-    AutomationMode, ParamAccess, ParamMapping, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
+    AutomationMode, Delivered, MainThreadMarker, ParamAccess, ParamMapping, ParamUnit,
+    ParameterInfo, PlainMap, PlainUnit, TrackInfo,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -570,5 +572,93 @@ impl SlotId {
     /// The slot of the automation mode of the plugin at `node`.
     pub(crate) const fn automation_mode(node: NodeKey) -> Self {
         Self::PluginAutomationMode(node)
+    }
+}
+
+/// What the host says of the track a hosted plugin sits on: the [`Slot`] of its
+/// [`PluginTrackInfoTarget`].
+///
+/// A write is held and owed to the plugin: the main thread's next
+/// [`Phase::Plugins`](crate::Phase::Plugins) delivers it, because only that
+/// thread may.
+pub(crate) struct TrackInfoSlot {
+    info: Mutex<TrackInfo>,
+    owed: AtomicBool,
+}
+
+impl TrackInfoSlot {
+    /// A slot holding the default [`TrackInfo`], which nothing is owed for.
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            info: Mutex::new(TrackInfo::default()),
+            owed: AtomicBool::new(false),
+        })
+    }
+
+    /// Owes the held value to a plugin that has not been told it: a value
+    /// still at its default is what a new plugin starts with.
+    pub(crate) fn resend(&self) {
+        let owed = *self.info.lock() != TrackInfo::default();
+        self.owed.store(owed, Ordering::Release);
+    }
+
+    /// Tells the plugin of `handle` the held value if it is owed. A queue that
+    /// was full leaves it owed for the next call; any other answer settles it.
+    pub(crate) fn deliver(&self, handle: &PluginHandle, main: MainThreadMarker) {
+        if self.owed.swap(false, Ordering::AcqRel) {
+            let info = self.info.lock().clone();
+            if handle.set_track_info(main, &info) == Delivered::Dropped {
+                self.owed.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
+impl Slot<TrackInfo> for TrackInfoSlot {
+    fn load(&self) -> TrackInfo {
+        self.info.lock().clone()
+    }
+
+    fn check(&self, _: &TrackInfo) -> Result<(), SetRefusal> {
+        Ok(())
+    }
+
+    fn store(&self, value: &TrackInfo) {
+        *self.info.lock() = value.clone();
+        self.owed.store(true, Ordering::Release);
+    }
+}
+
+keyed_slot_target!(
+    /// What the host tells a plugin about the track it sits on (its name,
+    /// colour, width and kind), as
+    /// [`Plugin::track_info`](crate::Plugin::track_info) names it. A format with
+    /// no place for it takes it and drops it.
+    ///
+    /// The target holds the [`TrackInfo`] the host last set, which starts as the
+    /// default. A write is delivered to the plugin on the main thread by the
+    /// next [`Session::update`](crate::Session::update) made there, once per
+    /// write; a write the plugin's transport could not take is delivered again
+    /// at the update after. A new plugin at the node is told the held value.
+    /// The value is advisory, like the automation mode's: a write never fails
+    /// for what the plugin does with it, and the plugin does nothing audible.
+    PluginTrackInfoTarget,
+    TrackInfo,
+    NodeKey,
+    PluginTrackInfo
+);
+
+impl PluginTrackInfoTarget {
+    /// The plugin's node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.0
+    }
+}
+
+impl SlotId {
+    /// The slot of the track info of the plugin at `node`.
+    pub(crate) const fn track_info(node: NodeKey) -> Self {
+        Self::PluginTrackInfo(node)
     }
 }

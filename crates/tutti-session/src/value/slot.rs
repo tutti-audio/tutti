@@ -86,6 +86,9 @@ pub enum SlotId {
     /// The automation mode the host tells a plugin.
     #[cfg(feature = "plugin")]
     PluginAutomationMode(NodeKey),
+    /// The track info the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginTrackInfo(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -102,7 +105,7 @@ impl SlotId {
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(node) => Some(node),
+            Self::PluginAutomationMode(node) | Self::PluginTrackInfo(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }

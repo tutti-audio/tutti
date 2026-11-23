@@ -19,7 +19,8 @@ use tutti_plugin_db::Loadable;
 use tutti_plugin_host::PluginHandle;
 use tutti_plugin_ipc::AudioConfig;
 use tutti_plugin_types::{
-    Features, IpcError, MainWorkHandle, PluginFailure, PluginPreset, PresetError,
+    Features, IpcError, MainWorkHandle, NoteName, ParamGroup, PluginFailure, PluginPreset,
+    PresetError,
 };
 use tutti_plugin_types::{PluginDescriptor, PluginId, PluginRef};
 use tutti_rt::Mutex;
@@ -126,6 +127,8 @@ pub struct PluginInfo {
     hosting: ResolvedHosting,
     server_pid: Option<u32>,
     presets: PluginPresets,
+    note_names: Vec<NoteName>,
+    param_groups: Vec<ParamGroup>,
 }
 
 impl PluginInfo {
@@ -167,6 +170,22 @@ impl PluginInfo {
     #[must_use]
     pub const fn presets(&self) -> &PluginPresets {
         &self.presets
+    }
+
+    /// The names the plugin gives to MIDI keys, as the load read them: empty
+    /// for a plugin with none.
+    #[must_use]
+    pub fn note_names(&self) -> &[NoteName] {
+        &self.note_names
+    }
+
+    /// The groups the plugin sorts its parameters into, parents before
+    /// children, as the load read them: empty for a plugin with no tree. A
+    /// parameter's group is [`ParameterInfo::group`](tutti_plugin_types::ParameterInfo::group),
+    /// the `path` of one of these.
+    #[must_use]
+    pub fn param_groups(&self) -> &[ParamGroup] {
+        &self.param_groups
     }
 }
 
@@ -233,6 +252,8 @@ impl Shared {
             hosting: plugin.hosting(),
             server_pid: handle.server_pid(),
             presets,
+            note_names: handle.loaded().note_names.clone(),
+            param_groups: handle.loaded().param_groups.clone(),
         };
         let shared = Self {
             id,

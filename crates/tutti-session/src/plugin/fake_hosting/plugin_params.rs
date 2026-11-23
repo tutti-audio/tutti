@@ -37,6 +37,8 @@ fn cutoff_info() -> ParameterInfo {
         .with_plain_range(20.0, 20_000.0, 1_000.0)
         .with_plain_map(PlainMap::Linear(LinearRange::new(20.0, 20_000.0)))
         .with_measures(Some(ParamUnit::Hertz))
+        .with_short_name("Cut")
+        .with_group("Voices/Filter")
 }
 
 /// What a plugin declares: `cutoff` in hertz over `20..=20000`, `level` in
@@ -272,6 +274,22 @@ fn cutoff(s: &DetachedSession, node: NodeKey) -> crate::PluginParam<'_> {
 
 fn changes(events: Vec<PluginEvent>) -> Vec<PluginChange> {
     events.into_iter().map(|e| e.change).collect()
+}
+
+/// **A parameter's short name and group path reach the app in the listing**
+/// as the plugin declared them, and a parameter that declares neither reads
+/// empty.
+#[test]
+fn a_listed_parameter_carries_its_short_name_and_group() {
+    let (s, node, _, _) = ready();
+    let params = s.plugin_view(node).unwrap().params();
+    let cutoff = params.get(CUTOFF).unwrap().info();
+    assert_eq!(
+        (cutoff.short_name(), cutoff.group()),
+        ("Cut", "Voices/Filter")
+    );
+    let level = params.get(LEVEL).unwrap().info();
+    assert_eq!((level.short_name(), level.group()), ("", ""));
 }
 
 /// **A gesture guard that is dropped in the middle of a drag ends the

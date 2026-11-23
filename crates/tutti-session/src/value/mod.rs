@@ -63,9 +63,11 @@ pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use gesture::Gesture;
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
-pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
+pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry, TrackInfoSlot};
 #[cfg(feature = "plugin")]
-pub use plugin::{PluginAutomationModeTarget, PluginParamTarget, PluginUnit};
+pub use plugin::{
+    PluginAutomationModeTarget, PluginParamTarget, PluginTrackInfoTarget, PluginUnit,
+};
 pub(crate) use program::{
     Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField, RateField,
 };
