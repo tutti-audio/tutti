@@ -60,9 +60,9 @@ use crate::param::ParamIn;
 use crate::spec::{EventInputPort, EventOutputPort};
 
 /// The audio slot every unconnected or `PortSource::Zero` input reads.
-pub const ZERO_SLOT: u32 = 0;
+pub(crate) const ZERO_SLOT: u32 = 0;
 /// The event slot every unconnected event input reads.
-pub const EMPTY_SLOT: u32 = 0;
+pub(crate) const EMPTY_SLOT: u32 = 0;
 
 /// A dense index into the runtime's unit store.
 ///
