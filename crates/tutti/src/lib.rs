@@ -791,10 +791,10 @@ pub mod polysynth {
 #[cfg(feature = "synth")]
 pub mod voicing {
     pub use tutti_voicing::{
-        ChannelState, Glide, Holds, MasterGain, Mode, NoSuchTuning, NoteControl, NoteStart,
-        NoteVoice, Order, Patch, Phase, Release, Retrigger, Steal, TuningCapacity, TuningCount,
-        TuningCountOutOfRange, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId, VoiceSpec,
-        VoiceTable,
+        ChannelState, Glide, Holds, MasterGain, Mode as VoicingMode, NoSuchTuning, NoteControl,
+        NoteStart, NoteVoice, Order, Patch, Phase as VoicePhase, Release, Retrigger, Steal,
+        TuningCapacity, TuningCount, TuningCountOutOfRange, VoiceAllocator, VoiceCommand,
+        VoiceConfig, VoiceId, VoiceSpec, VoiceTable,
     };
 }
 
@@ -931,7 +931,7 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
+        ChannelResponse, Heard, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
         MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
         MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
         NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
