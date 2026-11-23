@@ -28,9 +28,10 @@ use tutti_buffers::Float;
 use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
+use tutti_units::Samples;
 
 use super::commit::{Commit, Participants, Rendered};
-use super::node_op::{CONSTANT, SILENT};
+use super::node_op::Flags;
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
@@ -197,7 +198,7 @@ struct Cx<'a> {
     resumed: bool,
     max_block: usize,
     cap: usize,
-    declick: usize,
+    declick: Samples,
 }
 
 impl Cx<'_> {
@@ -337,7 +338,7 @@ impl Stager {
             resumed: input.resumed,
             max_block: plan.prepare.max_block().get(),
             cap: self.event_cap,
-            declick: declick_frames(plan.prepare.sample_rate()).get(),
+            declick: declick_frames(plan.prepare.sample_rate()),
         };
         self.track(c, &cx);
         let closers = self.closers(c, &cx);
@@ -372,8 +373,8 @@ impl Stager {
         let state = State {
             arena: Arena::new(plan.audio_slots as usize, cx.max_block),
             flags: {
-                let mut v = vec![0u8; plan.audio_slots as usize];
-                v[0] = SILENT | CONSTANT;
+                let mut v = vec![Flags::NONE; plan.audio_slots as usize];
+                v[0] = Flags::SILENCE;
                 v
             },
             events: plan

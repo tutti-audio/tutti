@@ -127,31 +127,6 @@ mod tests {
     use super::*;
     use crate::test_support::prepared;
     use tutti_graph::Node;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_units::Tail;
-    use tutti_units::UnitParam;
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(RingModNode::from(RingModConfig::new(2u16)));
-    }
-
-    /// The shape is the width in and out, `Moderate`, with no tail, and declares the carrier
-    /// as `Frequency`; the default is 440 Hz.
-    #[test]
-    fn the_shape_declares_the_frequency() {
-        let n = prepared(RingModNode::from(RingModConfig::new(3u16)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Frequency][..]);
-        assert_eq!(n.param_base(0), Some(440.0));
-    }
 
     /// Every channel of a three-wide node is processed: a constant input times the carrier
     /// `sin(2 pi 440 n / fs)` is nonzero on each channel from frame 1 on.

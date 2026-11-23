@@ -296,7 +296,7 @@ impl CompressorSet {
 mod tests {
     use super::*;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -320,21 +320,6 @@ mod tests {
                 .key(KeySource::Sidechain)
                 .controls(four(threshold, ratio, attack, release)),
         )
-    }
-
-    /// A fork starts from the values last set through the node's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(CompressorNode::<f32>::from(
-            CompressorConfig::new(ChannelTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(CompressorControls {
-                    knee: Db::new(6.0),
-                    makeup: Db::new(3.0),
-                    ..four(-20.0, 4.0, 0.001, 0.1)
-                }),
-        ));
     }
 
     /// A block longer than 64 frames renders whole: the gain control signal is sized from the

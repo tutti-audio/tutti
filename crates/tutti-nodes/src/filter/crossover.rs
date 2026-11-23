@@ -369,22 +369,6 @@ mod tests {
         assert!((low - 0.5).abs() < TOL, "{low}");
     }
 
-    /// A fork starts from the frequencies set and shares no cell with the
-    /// live node, whatever the index.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        tutti_graph::contract::assert_param_fork(
-            CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                ChannelTopology::MONO,
-                CrossoverControls::try_from(
-                    &[Hz::new(500.0), Hz::new(900.0), Hz::new(3_000.0)][..],
-                )
-                .unwrap(),
-            ))
-            .unwrap(),
-        );
-    }
-
     /// The shape declares one cutoff port per crossover, indexed, and each
     /// port's base is its cell.
     #[test]

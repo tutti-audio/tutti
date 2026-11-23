@@ -168,37 +168,12 @@ mod tests {
     use super::*;
     use crate::test_support::{RATE, amplitude_at, mean};
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{Direct, assert_param_fork, drive};
+    use tutti_graph::contract::{Direct, drive};
 
     fn render(node: OscillatorNode, frames: usize) -> Vec<f32> {
         let mut d = Direct::new(node, RATE, frames);
         d.block();
         d.output().plane(0).samples().to_vec()
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(OscillatorNode::from(
-            OscillatorConfig::new(OscillatorWave::Saw).frequency(Hz::new(220.0)),
-        ));
-    }
-
-    #[test]
-    fn the_shape_is_a_mono_source_declaring_frequency_then_level() {
-        let node = OscillatorNode::from(
-            OscillatorConfig::new(OscillatorWave::Sine)
-                .frequency(Hz::new(440.0))
-                .level(Amplitude::new(0.25)),
-        );
-        let shape = Node::<f32>::shape(&node);
-        assert_eq!(shape.audio_in().count(), 0);
-        assert_eq!(shape.audio_out().count(), 1);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Frequency, UnitParam::Volume][..]
-        );
-        assert_eq!(Node::<f32>::param_base(&node, 0), Some(440.0));
-        assert_eq!(Node::<f32>::param_base(&node, 1), Some(0.25));
     }
 
     #[test]

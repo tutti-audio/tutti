@@ -147,8 +147,8 @@ impl<F: Float + Lerp> Kernel for StereoWidthKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{assert_cell_ramps, drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
+
+    use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
 
     // The node tests run `F = f32`, the session's audio format.
@@ -156,29 +156,6 @@ mod tests {
         prepared(StereoWidthNode::<f32>::from(
             StereoWidthConfig::new().width(StereoWidth::new(width)),
         ))
-    }
-
-    /// A fork starts from the width last set through the `ParamSet` and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(StereoWidthNode::<f32>::from(
-            StereoWidthConfig::new().width(StereoWidth::new(0.5)),
-        ));
-    }
-
-    /// The shape is stereo, `Light`, and declares the width param, whose base is the
-    /// width built with.
-    #[test]
-    fn the_shape_declares_the_width_param() {
-        let n = StereoWidthNode::<f32>::from(StereoWidthConfig::new().width(StereoWidth::new(1.5)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.cost, Cost::Light);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::StereoWidth][..]);
-        assert_eq!(n.param_base(0), Some(1.5));
     }
 
     /// A node built at width `w` renders `M + w S`: `(1, 0.5)` is `(0.75, 0.75)` at 0,

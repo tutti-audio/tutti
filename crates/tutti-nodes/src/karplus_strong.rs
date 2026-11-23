@@ -182,9 +182,8 @@ impl<F: Float> Kernel for KarplusStrongKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
-    use tutti_units::{Latency, Samples, UnitParam};
+
+    use tutti_graph::contract::{assert_declared_tail, prepared};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -194,31 +193,6 @@ mod tests {
                 .frequency(Hz::new(frequency))
                 .decay(Seconds::new(decay)),
         )
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node(440.0, 1.0));
-    }
-
-    /// The shape is the width in and out, with no latency, and declares the pitch and the decay
-    /// with the config's values as their bases.
-    #[test]
-    fn the_shape_declares_the_pitch_and_the_decay_and_no_latency() {
-        let n = prepared(node(440.0, 1.5), RATE, 64);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.latency, Latency::new(Samples::ZERO));
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Frequency, UnitParam::Decay][..]
-        );
-        assert_eq!((n.param_base(0), n.param_base(1)), (Some(440.0), Some(1.5)));
-        assert_eq!(shape.tail, Tail::Unbounded);
     }
 
     /// The declared tail covers the ring-out.

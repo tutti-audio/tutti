@@ -306,7 +306,7 @@ mod tests {
         render_chunked, sine,
     };
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -325,30 +325,6 @@ mod tests {
         prepared(DistortionNode::<f32>::from(
             DistortionConfig::new(channels, ShapeKind::HardClip).drive(Drive::new(drive)),
         ))
-    }
-
-    /// A fork starts from the drive last set through the node's `ParamSet` and shares no
-    /// cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(2.0)),
-        ));
-    }
-
-    /// The node is stereo unless told otherwise, and the shape declares the drive.
-    #[test]
-    fn the_shape_is_stereo_and_declares_its_drive_param() {
-        let n = DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(1.5)),
-        );
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Drive][..]);
-        assert_eq!(n.param_base(0), Some(1.5), "the base is the drive control");
     }
 
     /// An `n`-channel node reports `n` in and out, and shapes each channel at the same

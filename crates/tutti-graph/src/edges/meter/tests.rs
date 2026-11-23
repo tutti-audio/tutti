@@ -238,7 +238,7 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
     meter_op::<f64, _, _>(
         &mut writer,
         &arena,
-        &[0u8][..],
+        &[crate::exec::Flags::NONE][..],
         &[AudioSlotId::new(0)],
         FRAMES,
     );

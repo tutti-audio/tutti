@@ -15,9 +15,10 @@ use tutti_buffers::Float;
 use tutti_rt::{CappedVec, RwView};
 
 use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
-use crate::compile::plan::{Direct, ZERO_SLOT};
+use crate::compile::plan::{Direct, DirectRole, ZERO_SLOT};
 use crate::event::types::Event;
 use crate::exec::arena::{Arena, Line, Role, borrow_sorted};
+use crate::exec::node_op::Flags;
 use crate::node::param_event::ParamEvent;
 
 /// The per-slot silence/constant flags an op reads and writes: a plain
@@ -28,18 +29,18 @@ use crate::node::param_event::ParamEvent;
 /// measured about 2.5 ns a node.
 pub(crate) trait SlotFlags {
     /// Slot `s`'s flags.
-    fn get(&self, s: AudioSlotId) -> u8;
+    fn get(&self, s: AudioSlotId) -> Flags;
     /// Set slot `s`'s flags.
-    fn set(&mut self, s: AudioSlotId, v: u8);
+    fn set(&mut self, s: AudioSlotId, v: Flags);
 }
 
-impl SlotFlags for [u8] {
+impl SlotFlags for [Flags] {
     #[inline(always)]
-    fn get(&self, s: AudioSlotId) -> u8 {
+    fn get(&self, s: AudioSlotId) -> Flags {
         self[s.index()]
     }
     #[inline(always)]
-    fn set(&mut self, s: AudioSlotId, v: u8) {
+    fn set(&mut self, s: AudioSlotId, v: Flags) {
         self[s.index()] = v;
     }
 }
@@ -51,12 +52,12 @@ pub(crate) struct SharedFlags<'a>(pub(crate) &'a [AtomicU8]);
 
 impl SlotFlags for SharedFlags<'_> {
     #[inline]
-    fn get(&self, s: AudioSlotId) -> u8 {
-        self.0[s.index()].load(Ordering::Relaxed)
+    fn get(&self, s: AudioSlotId) -> Flags {
+        Flags::from_byte(self.0[s.index()].load(Ordering::Relaxed))
     }
     #[inline]
-    fn set(&mut self, s: AudioSlotId, v: u8) {
-        self.0[s.index()].store(v, Ordering::Relaxed);
+    fn set(&mut self, s: AudioSlotId, v: Flags) {
+        self.0[s.index()].store(v.to_byte(), Ordering::Relaxed);
     }
 }
 
@@ -364,23 +365,27 @@ impl<F: Float> AudioSlots<F> for ArenaView<'_> {
         let mut outs: [&mut [F]; O] = std::array::from_fn(|_| &mut [][..]);
         // Tag each request with its index into `slots`, so the reads land
         // where `d.input` looks for them.
-        let mut tagged = [(ZERO_SLOT, (0u8, 0u8)); 4];
+        let mut tagged = [(ZERO_SLOT, (0u8, DirectRole::Read)); 4];
         for (k, t) in tagged.iter_mut().enumerate().take(n) {
             *t = (d.slots[k], (k as u8, d.role[k]));
         }
         self.view.split(
             &tagged[..n],
             AudioSlotId::get,
-            |(_, role)| role != Direct::READ,
+            |(_, role)| role != DirectRole::Read,
             |(k, _), l| reads[usize::from(k)] = samples(l, frames),
-            |(_, role), l| outs[usize::from(role)] = samples_mut(l, frames),
+            |(_, role), l| {
+                if let DirectRole::Out(c) = role {
+                    outs[usize::from(c)] = samples_mut(l, frames);
+                }
+            },
         );
         let ins = std::array::from_fn(|c| match d.input[c] {
-            Direct::IN_PLACE => &[][..],
-            r => {
+            None => &[][..],
+            Some(r) => {
                 assert_eq!(
                     d.role[usize::from(r)],
-                    Direct::READ,
+                    DirectRole::Read,
                     "a direct input reads a read slot"
                 );
                 reads[usize::from(r)]

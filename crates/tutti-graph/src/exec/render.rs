@@ -7,7 +7,7 @@ use tutti_rt::RingWriter;
 use tutti_units::{Blocks, Samples};
 
 use super::commit::{CommitSeq, Crossfade, Rendered, retire_fade};
-use super::node_op::flag;
+use super::node_op::Flags;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
 use crate::compile::ids::{AudioSlotId, Id, PlanUnitId, TableSlice};
@@ -70,7 +70,7 @@ pub(super) fn end_fades<F: Float>(
             next.out = Some(std::mem::replace(&mut u.node, incoming));
             u.keys.promote();
             u.fade = Some(next);
-            u.quiet = 0;
+            u.quiet = Samples::ZERO;
             u.last_quiet = false;
             u.last_idle = false;
             u.reported = None;
@@ -338,7 +338,10 @@ impl<F: Float> Executor<F> {
                 let ring = f.as_ref().expect("built by apply");
                 let is_silent =
                     ring.peek_oldest(arena.slot_mut(AudioSlotId::new(spec.slot), frames));
-                flags.set(AudioSlotId::new(spec.slot), flag(is_silent, is_silent));
+                flags.set(
+                    AudioSlotId::new(spec.slot),
+                    Flags::new(is_silent, is_silent),
+                );
             }
             for (f, spec) in event_fb.iter_mut().zip(&plan.event_feedback) {
                 let fifo = f.as_mut().expect("built by apply");

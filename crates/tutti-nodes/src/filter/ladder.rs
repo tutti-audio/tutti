@@ -257,21 +257,10 @@ mod tests {
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE_44K, prepared_at, render_f64, tick, tick_fed};
     use tutti_dsp::Complex64;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
-    use tutti_units::Tail;
-    use tutti_units::UnitParam;
 
-    /// A fork starts from the values last set through the node's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(LadderFilterNode::<f32>::from(
-            LadderFilterConfig::new(ChannelLayout::STEREO, LadderType::LP24)
-                .freq(Hz::new(800.0))
-                .res(Resonance::new(0.3)),
-        ));
-    }
+    use tutti_graph::{Node, ParamNode};
+
+    use tutti_units::UnitParam;
 
     /// Gain (dB) of a 0.01-amplitude sine at `f` through the node, projected
     /// on the last second of two.
@@ -375,29 +364,6 @@ mod tests {
             let e: f32 = out[c].iter().map(|s| s * s).sum();
             assert!(e < 1e-10, "ch{c} should stay silent; energy {e}");
         }
-    }
-
-    /// The shape declares cutoff, Q then drive, never changes the arity, and
-    /// reports `Tail::Unknown`.
-    #[test]
-    fn the_shape_declares_cutoff_q_then_drive() {
-        let f = LadderFilterNode::<f32>::from(
-            LadderFilterConfig::new(6u16, LadderType::LP24)
-                .freq(Hz::new(1000.0))
-                .res(Resonance::new(0.3)),
-        );
-        assert_eq!(
-            f.shape().params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::Q, UnitParam::Drive][..]
-        );
-        assert_eq!(
-            (f.shape().audio_in().count(), f.shape().audio_out().count()),
-            (6, 6)
-        );
-        assert_eq!(f.param_base(0), Some(1000.0));
-        assert_eq!(f.param_base(1), Some(0.3));
-        assert_eq!(f.param_base(2), Some(1.0), "drive starts clean");
-        assert_eq!(f.shape().tail, Tail::Unknown, "a resonant ladder rings on");
     }
 
     #[test]

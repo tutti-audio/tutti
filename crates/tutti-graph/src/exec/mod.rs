@@ -253,8 +253,8 @@ mod update;
 pub(crate) use commit::{
     Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
 };
-use node_op::{CONSTANT, flag, run_node_op, run_params};
-pub(crate) use node_op::{Head, OpState, SILENT, node_dispatch};
+pub(crate) use node_op::{Flags, Head, OpState, node_dispatch};
+use node_op::{run_node_op, run_params};
 pub(crate) use ops::{
     audio_ring, capture_op, delay_op, event_delay_op, event_merge_op, event_ring, main_input,
     output_op, sum_op,
@@ -469,10 +469,10 @@ fn par_for(
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
 /// latency then its tail (`NodeRec::park_after`).
-fn tail_elapsed(park_after: Tail, quiet: u64) -> bool {
+fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
-        Tail::Finite(n) => quiet >= n.get() as u64,
+        Tail::Finite(n) => quiet >= n,
         Tail::Unknown | Tail::Unbounded => false,
     }
 }
@@ -484,6 +484,7 @@ impl<F: Float> Executor<F> {
         ends: ExecutorEnds<F>,
         commands: CommandRx,
     ) -> Self {
+        let readings = ends.readings;
         Self {
             prepare,
             event_cap: cap,
@@ -492,7 +493,7 @@ impl<F: Float> Executor<F> {
                 back: ends.back,
                 fade_back: ends.fade_back,
                 losses: ends.losses,
-                unreported: ends.unreported,
+                unreported: readings.unreported,
                 edge_fades: ends.edge_fades,
                 commands,
                 applied: 0,
@@ -503,18 +504,18 @@ impl<F: Float> Executor<F> {
             clock: Clock {
                 frame: Frame::ZERO,
                 history: Box::new(TransportHistory::new()),
-                play: PlayState::new(ends.play),
+                play: PlayState::new(readings.play),
             },
             dropped: Dropped::new(),
             suspension: Suspension::Running,
             parked: CappedVec::with_capacity(0),
             chase: CappedVec::default(),
             pool: None,
-            pool_participants: ends.pool,
-            rendered: ends.rendered,
+            pool_participants: readings.pool,
+            rendered: readings.rendered,
             rendered_blocks: Blocks::ZERO,
             main_output_fade: None,
-            main_output_fade_ended: ends.main_output_fade_ended,
+            main_output_fade_ended: readings.main_output_fade_ended,
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),
             logs: Logs::new(1),
         }
@@ -907,10 +908,10 @@ mod tests {
         let mut exec = Executor::<f64>::new(prepare, DEFAULT_EVENT_CAPACITY, ends, command_rx);
         let mut stager = Stager::new(
             DEFAULT_EVENT_CAPACITY,
-            channels.pool.clone(),
-            channels.rendered.clone(),
+            channels.readings.pool.clone(),
+            channels.readings.rendered.clone(),
         );
-        let declick = tutti_curve::declick_frames(prepare.sample_rate()).get();
+        let declick = tutti_curve::declick_frames(prepare.sample_rate());
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),
