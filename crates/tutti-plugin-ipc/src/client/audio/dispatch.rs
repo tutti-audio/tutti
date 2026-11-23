@@ -933,13 +933,13 @@ pub(super) fn handle_control(
     // Held until the answer: where the object is read by name, it stays until
     // then.
     let _held = match object {
-        Object::Blob(blob) => Some(ipc::send_attached(stream, id, request, blob)?),
+        Object::Blob(blob) => Some(ipc::send_object(stream, id, request, blob)?),
         Object::Slab(slab) => {
-            ipc::send_attached(stream, id, request, &slab)?;
+            ipc::send_object(stream, id, request, slab)?;
             None
         }
         Object::None | Object::State => {
-            ipc::send_attached(stream, id, request, ())?;
+            ipc::send_object(stream, id, request, ())?;
             None
         }
     };
