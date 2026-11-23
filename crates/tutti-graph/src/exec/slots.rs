@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use tutti_buffers::Float;
-use tutti_rt::RwView;
+use tutti_rt::{CappedVec, RwView};
 
 use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
 use crate::compile::plan::{Direct, ZERO_SLOT};
@@ -165,8 +165,8 @@ impl<F: Float, A: AudioSlots<F> + ?Sized> AudioSlots<F> for &mut A {
 /// beside them (empty of room in a slot no param-writing node reaches).
 #[derive(Debug, Default)]
 pub(crate) struct EventSlot {
-    pub(crate) events: Vec<Event>,
-    pub(crate) params: Vec<ParamEvent>,
+    pub(crate) events: CappedVec<Event>,
+    pub(crate) params: CappedVec<ParamEvent>,
 }
 
 impl EventSlot {
@@ -174,8 +174,8 @@ impl EventSlot {
     /// Control side: allocates.
     pub(crate) fn with_capacity(events: usize, params: usize) -> Self {
         Self {
-            events: Vec::with_capacity(events),
-            params: Vec::with_capacity(params),
+            events: CappedVec::with_capacity(events),
+            params: CappedVec::with_capacity(params),
         }
     }
 
@@ -189,11 +189,11 @@ impl EventSlot {
 /// The event slots an op borrows.
 pub(crate) trait EventSlots {
     /// Slot `s`'s events.
-    fn ev(&self, s: EventSlotId) -> &Vec<Event>;
+    fn ev(&self, s: EventSlotId) -> &CappedVec<Event>;
     /// Slot `s`'s events, mutably.
-    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event>;
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut CappedVec<Event>;
     /// Slot `s`'s param events.
-    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent>;
+    fn pev(&self, s: EventSlotId) -> &CappedVec<ParamEvent>;
     /// Slot `s`.
     fn slot(&self, s: EventSlotId) -> &EventSlot;
     /// Slot `s`, mutably.
@@ -210,15 +210,15 @@ pub(crate) trait EventSlots {
 
 impl EventSlots for [EventSlot] {
     #[inline(always)]
-    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
+    fn ev(&self, s: EventSlotId) -> &CappedVec<Event> {
         &self[s.index()].events
     }
     #[inline(always)]
-    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut CappedVec<Event> {
         &mut self[s.index()].events
     }
     #[inline(always)]
-    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
+    fn pev(&self, s: EventSlotId) -> &CappedVec<ParamEvent> {
         &self[s.index()].params
     }
     #[inline(always)]
@@ -248,15 +248,15 @@ impl EventSlots for [EventSlot] {
 
 impl<E: EventSlots + ?Sized> EventSlots for &mut E {
     #[inline(always)]
-    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
+    fn ev(&self, s: EventSlotId) -> &CappedVec<Event> {
         (**self).ev(s)
     }
     #[inline(always)]
-    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut CappedVec<Event> {
         (**self).ev_mut(s)
     }
     #[inline(always)]
-    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
+    fn pev(&self, s: EventSlotId) -> &CappedVec<ParamEvent> {
         (**self).pev(s)
     }
     #[inline(always)]
@@ -440,15 +440,15 @@ pub(crate) struct EventsView<'v> {
 
 impl EventSlots for EventsView<'_> {
     #[inline]
-    fn ev(&self, s: EventSlotId) -> &Vec<Event> {
+    fn ev(&self, s: EventSlotId) -> &CappedVec<Event> {
         &self.view.get(s.index())[0].events
     }
     #[inline]
-    fn ev_mut(&mut self, s: EventSlotId) -> &mut Vec<Event> {
+    fn ev_mut(&mut self, s: EventSlotId) -> &mut CappedVec<Event> {
         &mut self.view.get_mut(s.index())[0].events
     }
     #[inline]
-    fn pev(&self, s: EventSlotId) -> &Vec<ParamEvent> {
+    fn pev(&self, s: EventSlotId) -> &CappedVec<ParamEvent> {
         &self.view.get(s.index())[0].params
     }
     #[inline]

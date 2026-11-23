@@ -86,7 +86,7 @@ pub(super) struct Gone {
     /// the key, its span of `chase_events` and what its buffer refused.
     pub(super) chased: CappedVec<(NodeKey, std::ops::Range<usize>, u32)>,
     /// The executor's chase buffer, lent for the commit.
-    pub(super) chase_events: Vec<Event>,
+    pub(super) chase_events: CappedVec<Event>,
     /// What a chase held for a successor behind a running fade refused, by
     /// key, counted once the new plan says where the node is.
     pub(super) held_refused: CappedVec<(NodeKey, u32)>,
@@ -119,10 +119,10 @@ pub(crate) enum Ring<F: Float = f32> {
 pub(crate) struct Inject {
     pub(crate) unit: PlanUnitId,
     pub(super) port: u16,
-    pub(super) events: Vec<Event>,
+    pub(super) events: CappedVec<Event>,
     /// Where `events` and the sink's own slot events are merged, sized when
     /// applying so the merge never grows.
-    pub(super) merged: Vec<Event>,
+    pub(super) merged: CappedVec<Event>,
     pub(super) live: bool,
     /// While a commit's flush is written: how many of `events` came before
     /// the closes of the edges it cut.
@@ -133,7 +133,7 @@ pub(crate) struct Inject {
     /// empty; a table never overflows, so no note off is lost. With several
     /// cut edges into one sink each table drains in turn, its pedal up
     /// first.
-    pub(super) owed: Vec<crate::exec::held::Held>,
+    pub(super) owed: CappedVec<crate::exec::held::Held>,
 }
 
 impl Inject {
@@ -153,17 +153,15 @@ impl Inject {
         // merge into whenever its slots are taken, and `owed.capacity() == 0`
         // is never reached with a table in hand.
         let mut lost = 0u32;
-        let left_over = if self.owed.len() < self.owed.capacity() {
-            self.owed.push(table);
+        let Err(left_over) = self.owed.push_within_capacity(table) else {
             return 0;
-        } else if let Some(first) = self.owed.first_mut() {
-            first.merge(&table);
-            table
+        };
+        if let Some(first) = self.owed.first_mut() {
+            first.merge(&left_over);
         } else {
             debug_assert!(false, "room was made for every table owed");
-            table.close_each(|_| lost = lost.saturating_add(1));
-            table
-        };
+            left_over.close_each(|_| lost = lost.saturating_add(1));
+        }
         // Room for every table is made with the commit; were it short, the
         // table leaks rather than frees on the audio thread.
         super::place(spare, left_over);
@@ -185,7 +183,7 @@ impl Inject {
             .last()
             .map_or(crate::node::time::Offset::ZERO, |e| e.offset);
         let start = self.events.len();
-        for h in &mut self.owed {
+        for h in self.owed.iter_mut() {
             h.drain_into(&mut self.events);
         }
         for e in &mut self.events[start..] {
@@ -289,11 +287,11 @@ mod tests {
         Inject {
             unit: PlanUnitId::new(0),
             port: 0,
-            events: Vec::new(),
-            merged: Vec::new(),
+            events: CappedVec::default(),
+            merged: CappedVec::default(),
             live: false,
             closed_from: 0,
-            owed: Vec::with_capacity(room),
+            owed: CappedVec::with_capacity(room),
         }
     }
 
@@ -308,7 +306,7 @@ mod tests {
         assert_eq!(i.owe(holding(61), &mut spare), 0, "merged, not lost");
         assert_eq!(spare.len(), 1, "the merged table goes back");
         assert_eq!(i.owed.len(), 1);
-        assert_eq!(i.owed.capacity(), capacity, "and the Vec did not grow");
+        assert_eq!(i.owed.capacity(), capacity, "and the buffer did not grow");
         let mut closes = Vec::new();
         i.owed[0].close_each(|e| closes.push(e));
         assert_eq!(closes.len(), 2, "both keys are owed");

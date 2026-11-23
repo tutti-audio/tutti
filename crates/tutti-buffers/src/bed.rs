@@ -566,7 +566,7 @@ mod tests {
         let twice = ChannelTopology::new([FrontLeft, FrontRight, BackLeft, SideLeft]).unwrap();
         assert_eq!(Bed::from_topology(&twice), None);
         assert_eq!(
-            Bed::from_topology(&ChannelTopology::unassigned(ChannelLayout::STEREO)),
+            Bed::from_topology(&ChannelTopology::unassigned(ChannelLayout::STEREO).unwrap()),
             None
         );
         let ambisonic =

@@ -344,7 +344,7 @@ mod measurer {
     #[test]
     fn lufs_refuses_an_unplaced_topology_and_peak_does_not() {
         let rendered = sine(2, 0.1);
-        let unplaced = ChannelTopology::unassigned(rendered.layout());
+        let unplaced = ChannelTopology::unassigned(rendered.layout()).unwrap();
         let err = Normalize::lufs(Db::new(-23.0))
             .gain_for_rendered(&rendered, &unplaced)
             .expect_err("two unassigned channels have no angles");

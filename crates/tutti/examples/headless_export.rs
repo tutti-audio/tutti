@@ -21,8 +21,8 @@ use futures_lite::future::block_on;
 use std::future::IntoFuture as _;
 use tutti::graph::{ForkByClone, Node};
 use tutti::{
-    Amplitude, Bounce, ChannelLayout, ChannelTopology, Format, Hz, Interleaved, MainOutput, Pcm,
-    Range, SampleRate, Seconds, Session,
+    Amplitude, Bounce, ChannelLayout, Format, Hz, Interleaved, MainOutput, Pcm, Range, SampleRate,
+    Seconds, Session,
 };
 use tutti_measure::{LoudnessConfig, measure_loudness};
 use tutti_nodes::testing::{Const, Osc};
@@ -92,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let flat = rendered.interleaved();
     // `tutti` exports no path to `Bed`, so the placement is the default layout for
     // two channels, which is a stereo bed.
-    let cfg = LoudnessConfig::new(ChannelTopology::default_for(ChannelLayout::STEREO));
+    let cfg = LoudnessConfig::new(tutti_buffers::Bed::Stereo.topology());
     let loudness = measure_loudness(
         &cfg,
         Interleaved::new(&flat, ChannelLayout::STEREO).unwrap(),

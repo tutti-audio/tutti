@@ -39,7 +39,7 @@ fn a_unassigned_shape_is_one_unassigned_main_bus_of_the_width() {
             assert_eq!(main.role, BusRole::Main);
             assert_eq!(
                 ChannelTopology::from(main.topology),
-                ChannelTopology::unassigned(width(n))
+                ChannelTopology::unassigned(width(n)).unwrap()
             );
             assert_eq!(buses.width(), usize::from(n), "the buses cover the ports");
         }

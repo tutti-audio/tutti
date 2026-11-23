@@ -110,6 +110,7 @@ use crate::{Edge, EdgeId, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_platform::with_no_denormals;
+use tutti_rt::CappedVec;
 use tutti_units::{At, Frame, Gain, Latency, Mix, Normalized, Samples};
 
 use crate::compile::plan::DelayKey;
@@ -1691,40 +1692,51 @@ impl<F: Float> Reference<F> {
             let cap = shape
                 .event_capacity
                 .map_or(usize::MAX, |n| n.get() as usize);
-            let mut writers: Vec<EventWriter<'_>> = ev_bufs
+            // The room a port has, as large as a node writes; a param-writing
+            // node's port has param room, and another's none
+            // (`Shape::param_events`). What the port held (the closes a
+            // parked node owed) is written ahead of the node's.
+            let room = cap.min(1 << 16);
+            let mut capped: Vec<(CappedVec<Event>, CappedVec<ParamEvent>)> = ev_bufs
                 .iter_mut()
                 .map(|b| {
-                    let RefOut { events, params } = b;
-                    // The room a param-writing node's port has, and none for
-                    // another's: `Shape::param_events`. An undeclared
-                    // capacity is as large as a node writes.
-                    params.reserve_exact(if shape.param_events {
-                        cap.min(1 << 16)
-                    } else {
-                        0
-                    });
-                    EventWriter::new(events, params, cap, frames as u32, &drops)
+                    let mut events = CappedVec::with_capacity(room.max(b.events.len()));
+                    events.extend(b.events.drain(..));
+                    let params =
+                        CappedVec::with_capacity(if shape.param_events { room } else { 0 });
+                    (events, params)
                 })
                 .collect();
-            let io = Io::new(
-                self.prepare.max_block(),
-                frames,
-                &in_refs,
-                &mut out_refs,
-                SilenceMask::NONE,
-                ConstantMask::NONE,
-                InPlaceMask::NONE,
-                &ev_refs,
-                &mut writers,
-            )
-            .with_main(shape.main_ports())
-            .params(&param_table);
-            let status = self
-                .units
-                .get_mut(&key)
-                .expect("unit present")
-                .1
-                .process(&cx, io);
+            let status = {
+                let mut writers: Vec<EventWriter<'_>> = capped
+                    .iter_mut()
+                    .map(|(events, params)| {
+                        EventWriter::new(events, params, cap, frames as u32, &drops)
+                    })
+                    .collect();
+                let io = Io::new(
+                    self.prepare.max_block(),
+                    frames,
+                    &in_refs,
+                    &mut out_refs,
+                    SilenceMask::NONE,
+                    ConstantMask::NONE,
+                    InPlaceMask::NONE,
+                    &ev_refs,
+                    &mut writers,
+                )
+                .with_main(shape.main_ports())
+                .params(&param_table);
+                self.units
+                    .get_mut(&key)
+                    .expect("unit present")
+                    .1
+                    .process(&cx, io)
+            };
+            for (b, (events, params)) in ev_bufs.iter_mut().zip(&capped) {
+                b.events = events.to_vec();
+                b.params = params.to_vec();
+            }
             (status, drops.refused.get())
         };
         self.dropped += u64::from(refused);

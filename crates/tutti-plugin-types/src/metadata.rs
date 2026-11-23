@@ -481,7 +481,7 @@ mod tests {
     use tutti_units::SampleRate;
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::default_for(ChannelLayout::STEREO)
+        tutti_buffers::Bed::Stereo.topology()
     }
 
     /// A stereo main input with its placement, a mono aux with none.
@@ -560,7 +560,7 @@ mod tests {
     /// would satisfy the negative half alone.
     #[test]
     fn topology_is_complete_only_when_every_bus_agrees_with_its_count() {
-        let mono = ChannelTopology::default_for(ChannelLayout::MONO);
+        let mono = tutti_buffers::Bed::Mono.topology();
         let bus = |topology: Option<ChannelTopology>| {
             let bus = PluginBus::new(ChannelLayout::STEREO, BusRole::Main);
             match topology {

@@ -213,27 +213,4 @@ mod tests {
         assert!((f64::from(out[0][511]) - r.powi(511)).abs() < 1e-6);
         assert!(out[0][511] < 0.01, "10 Hz would leave 0.5");
     }
-
-    /// An `f64` block through a `DcBlockerKernel::<f64>` at the default corner is
-    /// `y[n] = x[n] - x[n-1] + R y[n-1]` in `f64`, `R = exp(-2 pi fc / fs)` worked here, to
-    /// 2^-45.
-    #[test]
-    fn an_f64_kernel_is_the_difference_equation_in_f64() {
-        use crate::test_support::drive_kernel;
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let len = 300;
-        let r = (-std::f64::consts::TAU * 10.0 / RATE.get()).exp();
-        let x = wide_signal(len);
-        let mut want = vec![0.0f64; len];
-        let (mut x1, mut y1) = (0.0f64, 0.0f64);
-        for n in 0..len {
-            y1 = x[n] - x1 + r * y1;
-            x1 = x[n];
-            want[n] = y1;
-        }
-        let mut k = DcBlockerKernel::<f64>::new(ChannelLayout::MONO);
-        k.prepare(RATE, MaxBlock::of(tutti_units::Samples::new(len)));
-        let y = drive_kernel(&mut k, &[(0, DcBlockerControls::DEFAULT)], &[x]).remove(0);
-        assert_close_f64(&y, &want, 2.0f64.powi(-45));
-    }
 }

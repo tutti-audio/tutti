@@ -123,7 +123,7 @@ mod tests {
             .collect();
         assert_eq!(
             topology_of(&map),
-            ChannelTopology::default_for(ChannelLayout::from(6u16)),
+            tutti_buffers::Bed::Surround51.topology(),
             "CLAP FL FR FC LFE SL SR is the engine's 5.1 order"
         );
     }
