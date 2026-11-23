@@ -3,9 +3,7 @@
 //! parallel executor and allocation-free on every participant. A closed meter
 //! compiles to no op.
 //!
-//! The reference interpreter (`reference.rs`) renders a `Topology`'s outputs
-//! and knows neither taps nor meters: a meter reads the signal and changes
-//! nothing, so there is nothing for it to compare. The properties here are
+//! A meter reads the signal and changes nothing: the properties here are
 //! analytic figures and the one-participant render against the parallel one.
 
 use tutti_graph::testing as common;

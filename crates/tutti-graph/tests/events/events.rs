@@ -1,11 +1,11 @@
-//! Event delivery properties the differential suite cannot see: rules where
-//! the reference and the executor could share one wrong decision.
+//! Event delivery properties, each held to the emitters' own ledger or a
+//! closed form:
 //!
 //! - **Conservation**: every event emitted while an edge exists
 //!   is delivered exactly once to that edge's sink, across recompiles that
 //!   retune, remove, rewire and re-add delays and feedback edges, regenerate
-//!   units, and change the block size — checked on *both* interpreters
-//!   against a ledger kept by the emitters themselves.
+//!   units, and change the block size — checked against a ledger kept by
+//!   the emitters themselves.
 //! - **Wide fan-in**: 65 and 200 sources into one event port compile to
 //!   a merge tree and deliver in `(offset, source order)`.
 //! - **Feedback delays by its declared delay** at any `MaxBlock`, audio and
@@ -25,7 +25,7 @@ use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, GraphSpec,
-    Io, Node, Prepare, Reference, Shape, Shapes, Status, TransportPosition, compile,
+    Io, Node, Prepare, Shape, Shapes, Status, TransportPosition, compile,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, NodeSpec, OutputPort, PortSource};
 use tutti_graph::{NodeKey, Topology};
@@ -191,8 +191,8 @@ fn spec_of(ph: &Phase, emitters: &[(u32, u64)]) -> (GraphSpec, Shapes) {
         g.generations.insert(NodeKey(i as u64), generation);
     }
     // A latency change is a shape change, which needs a new unit: without
-    // the lag in the generation the reference would keep the old `Lag` (and
-    // its old latency) while the executor compiled the new one.
+    // the lag in the generation a regenerated lag would keep its old unit
+    // (and its old latency) while the plan compiled the new one.
     g.generations.insert(LAG, ph.lag as u32 * 2 + ph.lag_gen);
     (g, shapes)
 }
@@ -235,14 +235,13 @@ type Landing = (u16, u32, u64);
 /// compiled arrival latency during it — which is the lag's latency.
 type Spans = Vec<(u64, u64)>;
 
-/// Run the phases through the executor (`true`) or the reference, then drain.
+/// Run the phases through the executor, then drain.
 /// Returns (emissions tagged with phase, deliveries).
 fn run(
     phases: &[Phase],
     emitters: &[(u32, u64)],
-    executor: bool,
 ) -> (Vec<(usize, u32, u64)>, Vec<(u16, u32, u64, u64)>) {
-    let (emitted, got, _, _) = run_scheduled(phases, emitters, executor);
+    let (emitted, got, _, _) = run_scheduled(phases, emitters);
     (emitted, got)
 }
 
@@ -251,7 +250,6 @@ fn run(
 fn run_scheduled(
     phases: &[Phase],
     emitters: &[(u32, u64)],
-    executor: bool,
 ) -> (
     Vec<(usize, u32, u64)>,
     Vec<(u16, u32, u64, u64)>,
@@ -266,7 +264,6 @@ fn run_scheduled(
     let stop = Arc::new(AtomicBool::new(false));
     let prep = prepare(MAX);
     let (mut ed, mut exec): (Editor, Executor) = Editor::with_event_capacity(prep, CAP);
-    let mut reference = Reference::new(prep);
     let mut phase_of: Vec<(usize, u32, u64)> = Vec::new();
     let transport = TransportPosition::default();
     let mut all = phases.to_vec();
@@ -277,23 +274,19 @@ fn run_scheduled(
         }
         let (g, shapes) = spec_of(ph, emitters);
         let valid = g.validate().expect("valid");
-        if executor {
-            let (plan, delta) =
-                compile(&valid, &shapes, &prep, ed.base().map(|p| &**p)).expect("compiles");
-            let placed: BTreeSet<NodeKey> = delta
-                .insert
-                .iter()
-                .map(|p| p.key)
-                .chain(delta.replace.iter().map(|(_, n)| n.key))
-                .collect();
-            let mut units = units_of(ph, emitters, &ledger, &inbox, &stop);
-            units.retain(|k, _| placed.contains(k));
-            ed.package(plan, delta, units).expect("room in the queue");
-            exec.apply_pending();
-            ed.collect();
-        } else {
-            reference.set_graph(&valid, units_of(ph, emitters, &ledger, &inbox, &stop));
-        }
+        let (plan, delta) =
+            compile(&valid, &shapes, &prep, ed.base().map(|p| &**p)).expect("compiles");
+        let placed: BTreeSet<NodeKey> = delta
+            .insert
+            .iter()
+            .map(|p| p.key)
+            .chain(delta.replace.iter().map(|(_, n)| n.key))
+            .collect();
+        let mut units = units_of(ph, emitters, &ledger, &inbox, &stop);
+        units.retain(|k, _| placed.contains(k));
+        ed.package(plan, delta, units).expect("room in the queue");
+        exec.apply_pending();
+        ed.collect();
         spans.push((now, ph.lag as u64));
         for &(port, rel) in &ph.commands {
             let tag = SCHEDULED + landings.len() as u32;
@@ -301,36 +294,26 @@ fn run_scheduled(
             let kind = EventKind::Midi(Ump([tag, target as u32, (target >> 32) as u32, 0]));
             let at = EventInputPort::new(REC, port);
             let when = At::Frame(Frame::new(target));
-            if executor {
-                ed.schedule(when, at, kind)
-                    .expect("room for the test's commands");
-            } else {
-                reference.schedule(when, at, kind);
-            }
+            ed.schedule(when, at, kind)
+                .expect("room for the test's commands");
             landings.push((port, tag, target));
         }
         let before = ledger.lock().unwrap().len();
         for &n in &ph.blocks {
             now += n as u64;
-            if executor {
-                exec.process(n, &transport, &[], &mut []);
-            } else {
-                reference.process(n, &transport, &[], &mut []);
-            }
+            exec.process(n, &transport, &[], &mut []);
         }
         for &(id, f) in &ledger.lock().unwrap()[before..] {
             phase_of.push((k, id, f));
         }
     }
-    if executor {
-        assert_eq!(exec.dropped_event_count(), 0, "nothing was dropped");
-        assert_eq!(
-            exec.unrouted_command_count(),
-            0,
-            "the recorder never went away"
-        );
-        assert_eq!(ed.commands_outstanding(), 0, "every command landed");
-    }
+    assert_eq!(exec.dropped_event_count(), 0, "nothing was dropped");
+    assert_eq!(
+        exec.unrouted_command_count(),
+        0,
+        "the recorder never went away"
+    );
+    assert_eq!(ed.commands_outstanding(), 0, "every command landed");
     let got = inbox.lock().unwrap().to_vec();
     (phase_of, got, landings, spans)
 }
@@ -421,7 +404,7 @@ proptest! {
         phases in proptest::collection::vec(arb_phase(4), 1..4),
     ) {
         let emitters: Vec<(u32, u64)> = vec![(1, 3), (2, 5), (3, 7), (4, 4)];
-        let (emitted, got, landings, spans) = run_scheduled(&phases, &emitters, true);
+        let (emitted, got, landings, spans) = run_scheduled(&phases, &emitters);
         let want = expected(&phases, &emitted, &emitters);
         let have = delivered(&got);
         for p in 0..REC_PORTS {
@@ -474,7 +457,7 @@ fn a_vanishing_event_delay_flushes_instead_of_dropping() {
         ..base.clone()
     };
     let phases = vec![base, zero];
-    let (emitted, got) = run(&phases, &emitters, true);
+    let (emitted, got) = run(&phases, &emitters);
     let want = expected(&phases, &emitted, &emitters);
     assert_eq!(delivered(&got), want);
     // And some of them really were in flight across the edit: delivered at
@@ -745,11 +728,10 @@ fn a_feedback_delay_shorter_than_max_block_is_refused() {
     );
 }
 
-/// Wide fan-in against the reference: a 150-wide fan-in, sources firing on shared and
-/// distinct frames, delivers exactly what the reference's
-/// concatenate-and-stable-sort delivers.
+/// A 150-wide fan-in, sources firing on shared and distinct frames, delivers
+/// the emissions sorted by `(frame, source key)`: the ledger, ordered.
 #[test]
-fn wide_fan_in_matches_the_reference() {
+fn wide_fan_in_delivers_the_ledger_by_frame_then_source() {
     let width = 150usize;
     let mut t = Topology::default();
     let mut shapes = Shapes::new();
@@ -774,52 +756,46 @@ fn wide_fan_in_matches_the_reference() {
     }
     let valid = g.validate().unwrap();
     let prep = prepare(MAX);
-    let run = |executor: bool| {
-        let ledger: Ledger = tutti_fixtures::Record::new();
-        let inbox: Inbox = tutti_fixtures::Record::new();
-        let stop = Arc::new(AtomicBool::new(false));
-        let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-        for i in 0..width {
-            units.insert(
-                NodeKey(i as u64),
-                Box::new(Emitter {
-                    id: i as u32,
-                    period: 4 + (i as u64 % 3),
-                    ledger: ledger.clone(),
-                    stop: Arc::clone(&stop),
-                }),
-            );
-        }
+    let ledger: Ledger = tutti_fixtures::Record::new();
+    let inbox: Inbox = tutti_fixtures::Record::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
+    for i in 0..width {
         units.insert(
-            REC,
-            Box::new(Recorder {
-                ports: 1,
-                inbox: inbox.clone(),
+            NodeKey(i as u64),
+            Box::new(Emitter {
+                id: i as u32,
+                period: 4 + (i as u64 % 3),
+                ledger: ledger.clone(),
+                stop: Arc::clone(&stop),
             }),
         );
-        let (mut ed, mut exec) = Editor::with_event_capacity(prep, 4096);
-        let mut reference = Reference::new(prep);
-        if executor {
-            let (plan, delta) = compile(&valid, &shapes, &prep, None).unwrap();
-            ed.package(plan, delta, units).expect("room in the queue");
-            exec.apply_pending();
-            ed.collect();
-        } else {
-            reference.set_graph(&valid, units);
-        }
-        for n in [MAX, 7, MAX, 1, 20] {
-            if executor {
-                exec.process(n, &TransportPosition::default(), &[], &mut []);
-            } else {
-                reference.process(n, &TransportPosition::default(), &[], &mut []);
-            }
-        }
-
-        inbox.lock().unwrap().to_vec()
-    };
-    let (a, b) = (run(true), run(false));
-    assert!(a.len() > width, "the sources fired");
-    assert_eq!(a, b);
+    }
+    units.insert(
+        REC,
+        Box::new(Recorder {
+            ports: 1,
+            inbox: inbox.clone(),
+        }),
+    );
+    let (mut ed, mut exec) = Editor::with_event_capacity(prep, 4096);
+    let (plan, delta) = compile(&valid, &shapes, &prep, None).unwrap();
+    ed.package(plan, delta, units).expect("room in the queue");
+    exec.apply_pending();
+    ed.collect();
+    for n in [MAX, 7, MAX, 1, 20] {
+        exec.process(n, &TransportPosition::default(), &[], &mut []);
+    }
+    let got = inbox.lock().unwrap().to_vec();
+    let mut want: Vec<(u16, u32, u64, u64)> = ledger
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|&(id, f)| (0, id, f, f))
+        .collect();
+    want.sort_by_key(|&(_, id, f, _)| (f, id));
+    assert!(got.len() > width, "the sources fired");
+    assert_eq!(got, want);
 }
 
 /// A flush keeps its events' spacing: a vanished 40-frame delay holding
@@ -842,7 +818,7 @@ fn a_flush_keeps_the_events_spacing() {
         lag_gen: 1,
         ..base.clone()
     };
-    let (_, got) = run(&[base, zero], &emitters, true);
+    let (_, got) = run(&[base, zero], &emitters);
     let switch = 96u64;
     let flushed: Vec<(u64, u64)> = got
         .iter()
@@ -867,12 +843,12 @@ fn a_flush_keeps_the_events_spacing() {
     assert_eq!(spaced[0].1, switch, "the earliest lands at offset 0");
 }
 
-/// Two flushes into one sink interleave by their spacing, the same way in
-/// both interpreters — including when one-frame blocks clamp them all to
-/// offset 0, where only the order is left to disagree about. (The
+/// Two flushes into one sink interleave by their spacing: delivery order is
+/// emission order (frame, then source) — including when one-frame blocks clamp
+/// them all to offset 0, where only the order is left to show it. (The
 /// conservation property compares sets; this compares order.)
 #[test]
-fn two_flushes_into_one_sink_interleave_identically() {
+fn two_flushes_into_one_sink_interleave_by_emission_frame() {
     let emitters = vec![(1u32, 10u64), (2u32, 10u64)];
     let fed = Phase {
         lag: 0,
@@ -888,12 +864,19 @@ fn two_flushes_into_one_sink_interleave_identically() {
         ..fed.clone()
     };
     let phases = [fed, cut];
-    let (_, a) = run(&phases, &emitters, true);
-    let (_, b) = run(&phases, &emitters, false);
-    let ids: Vec<u32> = a.iter().filter(|e| e.3 >= 192).map(|e| e.1).collect();
+    let (_, a) = run(&phases, &emitters);
+    let flushed: Vec<(u64, u32)> = a
+        .iter()
+        .filter(|e| e.3 >= 192)
+        .map(|e| (e.2, e.1))
+        .collect();
+    let ids: Vec<u32> = flushed.iter().map(|&(_, id)| id).collect();
     assert!(
         ids.windows(2).any(|w| w[0] != w[1]),
         "the flushed events interleave: {ids:?}"
     );
-    assert_eq!(a, b);
+    assert!(
+        flushed.windows(2).all(|w| w[0] <= w[1]),
+        "delivery is in (emission frame, source) order: {flushed:?}"
+    );
 }

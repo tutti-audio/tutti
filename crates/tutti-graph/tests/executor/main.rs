@@ -10,6 +10,11 @@
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
+#[path = "../support/generator.rs"]
+mod generator;
+#[path = "../support/script.rs"]
+mod script;
+
 mod by_hand;
 mod chase;
 mod contract;
@@ -18,6 +23,7 @@ mod executor;
 mod f64_render;
 mod inlet_no_alloc;
 mod inlet_retire;
+mod invariants;
 mod main_output_fade;
 mod meter;
 mod no_denormals;
