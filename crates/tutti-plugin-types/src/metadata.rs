@@ -477,7 +477,8 @@ mod tests {
                 text: "Kick".into(),
             }],
             param_groups: vec![ParamGroup {
-                name: "Filter".into(),
+                path: "Filter".into(),
+                label: "Filter".into(),
                 parent: None,
             }],
         };

@@ -607,7 +607,7 @@ pub fn assert_tables<F: Format>(wiring: &PluginWiring, when: &str) {
     let groups: Vec<_> = wiring
         .param_groups
         .iter()
-        .map(|g| (g.name.as_str(), g.parent.as_deref()))
+        .map(|g| (g.path.as_str(), g.parent.as_deref()))
         .collect();
     assert_eq!(groups, spec.groups, "{}: groups, {when}", F::NAME);
 }

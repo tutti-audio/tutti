@@ -403,7 +403,7 @@ pub struct Surface {
     pub bypass: Bypass,
     /// What the format says `aux`'s group is: the plugin puts it in the
     /// `Filter` unit, at the end of the path `Voices/Oscillator/Filter`, where
-    /// the format has groups. VST3 names the unit, CLAP the whole module path,
+    /// the format has groups. VST3 and CLAP name that whole path,
     /// AU the clump, VST2 has none (and the plugin declares none). The other
     /// parameters have no group.
     pub aux_group: &'static str,
@@ -497,11 +497,11 @@ const CPP_KEYS: [(u8, Option<u8>, &str); 4] = [
     (3, Some(0), "Staccato"),
 ];
 
-/// VST3's units, `Voices` > `Oscillator` > `Filter`.
+/// VST3's units, `Voices` > `Oscillator` > `Filter`, by path.
 const UNIT_GROUPS: [(&str, Option<&str>); 3] = [
     ("Voices", None),
-    ("Oscillator", Some("Voices")),
-    ("Filter", Some("Oscillator")),
+    ("Voices/Oscillator", Some("Voices")),
+    ("Voices/Oscillator/Filter", Some("Voices/Oscillator")),
 ];
 
 /// CLAP's module `Voices/Oscillator/Filter` and its prefixes.
@@ -593,7 +593,7 @@ pub const VST3: Surface = Surface {
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
     bypass: Bypass::Parameter,
-    aux_group: "Filter",
+    aux_group: "Voices/Oscillator/Filter",
     roles: &VST3_ROLES,
     overview: &[],
     mode_steps: ParamSteps::Enumerated(5),
@@ -623,7 +623,7 @@ pub const VST3_CPP: Surface = Surface {
     selects_tail: true,
     infinite_tail: Some(tutti_plugin_types::PluginTail::Unbounded),
     bypass: Bypass::Parameter,
-    aux_group: "Filter",
+    aux_group: "Voices/Oscillator/Filter",
     roles: &VST3_ROLES,
     overview: &[],
     mode_steps: ParamSteps::Enumerated(5),

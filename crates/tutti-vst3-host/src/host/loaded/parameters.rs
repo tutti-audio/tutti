@@ -79,7 +79,7 @@ impl Vst3Loaded {
     /// carrying an invented entry.
     pub fn parameter_list(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         let units = self.units(main);
-        let groups = unit_names(&units);
+        let groups = unit_paths(&units);
 
         let list = (0..self.parameter_count(main))
             .filter_map(|i| {
@@ -459,7 +459,7 @@ fn apply_function_roles(
 pub(super) fn build_param_info(
     info: Vst3ParameterInfo,
     plain: Option<(PlainRange, f64)>,
-    groups: &HashMap<UnitId, &str>,
+    groups: &HashMap<UnitId, String>,
 ) -> ParameterInfo {
     // VST3 reports every one of these, so all six are known.
     const KNOWN: ParamFlags = ParamFlags::AUTOMATABLE
@@ -511,10 +511,7 @@ pub(super) fn build_param_info(
     // alternatives are worse: a lookup that panicked would take down a
     // parameter list over a display label, and one that fell back to a
     // neighbour would mislabel silently.
-    let group = groups
-        .get(&info.unit_id())
-        .map(|n| n.to_string())
-        .unwrap_or_default();
+    let group = groups.get(&info.unit_id()).cloned().unwrap_or_default();
     ParameterInfo::new(ParamId::new(info.id()), info.title_string())
         .with_unit(info.units_string())
         .with_range(range)
@@ -527,37 +524,61 @@ pub(super) fn build_param_info(
         .with_measures(measures)
 }
 
-/// The units that name a group ([`unit_names`]) as a tree, a parent before its
-/// children. A unit's parent is its nearest ancestor that names a group, so an
-/// unnamed or unpublished unit between two is skipped over, and a unit under the
-/// root is at the top.
-pub(crate) fn unit_groups(units: &[Vst3UnitInfo]) -> Vec<ParamGroup> {
+/// A unit's named ancestors, nearest first; a cycle in a plugin's tree ends after
+/// as many steps as there are units.
+fn named_ancestors<'a>(
+    units: &[Vst3UnitInfo],
+    names: &HashMap<UnitId, &'a str>,
+    unit: &Vst3UnitInfo,
+) -> Vec<&'a str> {
+    let mut named = Vec::new();
+    let mut at = unit.parent;
+    for _ in 0..units.len() {
+        let Some(id) = at else { break };
+        named.extend(names.get(&id).copied());
+        at = units.iter().find(|u| u.id == id).and_then(|u| u.parent);
+    }
+    named
+}
+
+/// The path of each unit that names a group ([`unit_names`]): its named
+/// ancestors and its own name, root first, joined with `/`. A `/` inside a name
+/// is kept as written, so a path with one is ambiguous.
+pub(crate) fn unit_paths(units: &[Vst3UnitInfo]) -> HashMap<UnitId, String> {
     let names = unit_names(units);
-    // A unit's named ancestors, nearest first; a cycle in a plugin's tree ends
-    // after as many steps as there are units.
-    let ancestors = |unit: &Vst3UnitInfo| {
-        let mut named = Vec::new();
-        let mut at = unit.parent;
-        for _ in 0..units.len() {
-            let Some(id) = at else { break };
-            named.extend(names.get(&id).copied());
-            at = units.iter().find(|u| u.id == id).and_then(|u| u.parent);
-        }
-        named
-    };
-    let mut groups: Vec<(usize, ParamGroup)> = units
+    units
         .iter()
         .filter(|u| names.contains_key(&u.id))
         .map(|u| {
-            let named = ancestors(u);
-            let parent = named.first().map(|n| (*n).to_string());
-            (
-                named.len(),
+            let mut path: Vec<&str> = named_ancestors(units, &names, u);
+            path.reverse();
+            path.push(&u.name);
+            (u.id, path.join("/"))
+        })
+        .collect()
+}
+
+/// The units that name a group as a tree, a parent before its children, each
+/// identified by its [`unit_paths`] path. A unit's parent is its nearest ancestor
+/// that names a group, so an unnamed or unpublished unit between two is skipped
+/// over, and a unit under the root is at the top.
+pub(crate) fn unit_groups(units: &[Vst3UnitInfo]) -> Vec<ParamGroup> {
+    let names = unit_names(units);
+    let paths = unit_paths(units);
+    let mut groups: Vec<(usize, ParamGroup)> = units
+        .iter()
+        .filter_map(|u| {
+            let path = paths.get(&u.id)?;
+            let depth = named_ancestors(units, &names, u).len();
+            let parent = path.rsplit_once('/').map(|(parent, _)| parent.to_string());
+            Some((
+                depth,
                 ParamGroup {
-                    name: u.name.clone(),
+                    path: path.clone(),
+                    label: u.name.clone(),
                     parent,
                 },
-            )
+            ))
         })
         .collect();
     groups.sort_by_key(|(depth, _)| *depth);
@@ -604,15 +625,41 @@ mod unit_group_tests {
         units[1].name = String::new();
         let groups: Vec<_> = unit_groups(&units)
             .into_iter()
-            .map(|g| (g.name, g.parent))
+            .map(|g| (g.path, g.label, g.parent))
             .collect();
-        let named = |n: &str, p: Option<&str>| (n.to_string(), p.map(str::to_string));
+        let named = |path: &str, label: &str, p: Option<&str>| {
+            (path.to_string(), label.to_string(), p.map(str::to_string))
+        };
         assert_eq!(
             groups,
             [
-                named("Voices", None),
-                named("Amp", None),
-                named("Filter", Some("Voices")),
+                named("Voices", "Voices", None),
+                named("Amp", "Amp", None),
+                named("Voices/Filter", "Filter", Some("Voices")),
+            ]
+        );
+    }
+
+    /// Two units that share a label under different parents are two groups with
+    /// two paths, and each parameter's group is its own unit's path.
+    #[test]
+    fn a_label_under_two_parents_is_two_paths() {
+        let mut units = [unit(1, "A"), unit(2, "B"), unit(3, "Osc"), unit(4, "Osc")];
+        units[2].parent = Some(UnitId::new(1));
+        units[3].parent = Some(UnitId::new(2));
+        let paths = unit_paths(&units);
+        assert_eq!(paths[&UnitId::new(3)], "A/Osc");
+        assert_eq!(paths[&UnitId::new(4)], "B/Osc");
+        let parents: Vec<_> = unit_groups(&units)
+            .into_iter()
+            .filter(|g| g.label == "Osc")
+            .map(|g| (g.path, g.parent))
+            .collect();
+        assert_eq!(
+            parents,
+            [
+                ("A/Osc".to_string(), Some("A".to_string())),
+                ("B/Osc".to_string(), Some("B".to_string())),
             ]
         );
     }

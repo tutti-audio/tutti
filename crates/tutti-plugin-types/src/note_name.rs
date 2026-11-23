@@ -24,38 +24,22 @@ pub struct NoteName {
     pub text: String,
 }
 
-/// One group of parameters: the label [`ParameterInfo::group`](crate::ParameterInfo::group)
-/// carries, and the group that holds it.
+/// One group of parameters, identified by its path.
 ///
-/// VST3's units are a tree, and CLAP's `module` is a `/`-separated path whose
-/// prefixes are the ancestors; VST2 and AU have no tree and declare none.
-/// A parent is named by its `name`, as a parameter names its group.
+/// The path is the group's own and its ancestors' labels, root first, joined with
+/// `/`; it is unique in a plugin's list and is what
+/// [`ParameterInfo::group`](crate::ParameterInfo::group) reads for a parameter in
+/// the group. VST3's units are a tree, and CLAP's `module` is already such a path
+/// whose prefixes are the ancestors; VST2 and AU declare no tree. A label that
+/// itself holds a `/` is kept as the plugin wrote it, so a path with one is
+/// ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParamGroup {
-    /// The group's label: what its parameters' `group` reads.
-    pub name: String,
-    /// The group that holds this one; `None` at the top.
+    /// The group's full path: the key.
+    pub path: String,
+    /// The group's own name, the last segment of `path`.
+    pub label: String,
+    /// The `path` of the group that holds this one; `None` at the top.
     pub parent: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Two groups with one name are two entries: the list is the plugin's, and
-    /// a reader resolves a parent by the first match, in list order.
-    #[test]
-    fn a_group_is_named_by_its_label() {
-        let top = ParamGroup {
-            name: "Voices".into(),
-            parent: None,
-        };
-        let child = ParamGroup {
-            name: "Filter".into(),
-            parent: Some(top.name.clone()),
-        };
-        assert_ne!(top, child);
-        assert_eq!(child.parent.as_deref(), Some("Voices"));
-    }
 }

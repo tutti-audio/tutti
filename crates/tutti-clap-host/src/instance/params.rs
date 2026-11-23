@@ -336,9 +336,10 @@ pub(crate) fn module_groups(
         let mut parent: Option<&str> = None;
         for (end, _) in path.match_indices('/').chain([(path.len(), "")]) {
             let name = &path[..end];
-            if !groups.iter().any(|g| g.name == name) {
+            if !groups.iter().any(|g| g.path == name) {
                 groups.push(tutti_plugin_types::ParamGroup {
-                    name: name.to_string(),
+                    path: name.to_string(),
+                    label: name.rsplit('/').next().unwrap_or(name).to_string(),
                     parent: parent.map(str::to_string),
                 });
             }
@@ -365,7 +366,7 @@ mod grouping_tests {
             .collect();
         let groups: Vec<_> = module_groups(&params)
             .into_iter()
-            .map(|g| (g.name, g.parent))
+            .map(|g| (g.path, g.parent))
             .collect();
         assert_eq!(
             groups,

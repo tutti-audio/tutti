@@ -242,15 +242,16 @@ pub struct ParameterInfo {
     flags: ParamFlags,
     /// Which bits of [`flags`](Self::flags) the format actually reported.
     known: ParamFlags,
-    /// The group this parameter belongs to, as a display label. Empty when the
+    /// The group this parameter belongs to, as a display label (a path for VST3 and CLAP). Empty when the
     /// plugin declared none.
     ///
     /// Every hosted format has a grouping mechanism and no two agree on its
     /// shape: VST3 has a real tree of units, CLAP a `/`-separated module path,
     /// VST2 a numbered category, AU an optional integer clump. What they share
     /// is that each resolves to a *name*, so that is what crosses this
-    /// boundary. A caller wanting VST3's tree reaches into `tutti-vst3-host`,
-    /// which keeps it.
+    /// boundary: for VST3 and CLAP the group's full path, as
+    /// [`ParamGroup::path`](crate::ParamGroup::path) keys it. The tree is
+    /// [`PluginWiring::param_groups`](crate::PluginWiring::param_groups).
     ///
     /// Deliberately a `String` rather than an `Option<String>`, unlike the
     /// [`known`](Self::known) mask beside it: "the format never said" and "the
@@ -430,8 +431,9 @@ impl ParameterInfo {
         &self.unit
     }
 
-    /// The group this parameter belongs to, as a display label; empty when the
-    /// plugin declared none.
+    /// The group this parameter belongs to; empty when the plugin declared none.
+    /// For VST3 and CLAP it is the [`ParamGroup::path`](crate::ParamGroup::path)
+    /// of the group.
     #[must_use]
     pub fn group(&self) -> &str {
         &self.group
