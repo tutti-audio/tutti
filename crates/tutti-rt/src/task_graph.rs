@@ -109,16 +109,9 @@
 //! Both budgets are the pool's ([`BlockWaits`]): `work` takes them per call,
 //! so one graph can run on any pool.
 
-use sync::{AtomicBool, AtomicU32, Ordering};
+use crate::sync::{AtomicBool, AtomicU32, Ordering};
 
 use super::spin::{BlockWaits, SpinThenLeave, SpinThenYield};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-}
 
 /// An empty ready-list entry.
 const EMPTY: u32 = u32::MAX;

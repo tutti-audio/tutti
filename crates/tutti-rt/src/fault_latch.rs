@@ -33,15 +33,8 @@
 //! The model in `tests/fault_latch_loom.rs` runs this code, with a loom ring
 //! standing in for the one the items travel through.
 
+use crate::sync::{AtomicU32, Ordering};
 use core::num::NonZeroU32;
-use sync::{AtomicU32, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, Ordering};
-}
 
 /// Why a producer stopped: a value that packs into a [`NonZeroU32`] and back,
 /// so a [`FaultLatch`] carries it in its one atomic word. `0` is the latch's
