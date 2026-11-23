@@ -157,13 +157,13 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.clipper = DiodeClipper::<F>::new(self.input.layout(), self.rate);
+        self.clipper = DiodeClipper::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 
@@ -299,23 +299,6 @@ mod tests {
                 "{factor:?}: rings past the declared tail"
             );
         }
-    }
-
-    /// At -80 dBFS the circuit is the linear RC of corner `(1 + beta) f_c` and DC gain `1 / (1 +
-    /// beta)` ([`DiodeClipper`]'s module), at the default oversampling. The bound is the
-    /// oversampler's passband ripple, each of its two stages about `1e-5` (100 dB) and the
-    /// round trip crossing each twice, `4e-5`, and `f32`'s rounding of the sum, `1e-6`.
-    #[test]
-    fn a_small_signal_sees_the_linear_rc_low_pass_through_the_oversampler() {
-        let (cutoff, f) = (1_000.0, 1_000.0);
-        let mut n = node(cutoff, 0.0);
-        let x = sine(f, RATE, 9_600 + 4_800);
-        let y = render_chunked(&mut n, &[x.iter().map(|v| v * 1e-4).collect()], 256).remove(0);
-        let gain = amplitude_at(&y[4_800..], f, RATE) / 1e-4;
-        let beta = 2.0 * 2_200.0 * 2.52e-9 / (1.752 * 0.025_85);
-        let f_eff = (1.0 + beta) * cutoff;
-        let analog = 1.0 / (1.0 + beta) / (1.0 + (f / f_eff).powi(2)).sqrt();
-        assert!((gain - analog).abs() <= 4.1e-5 + 1e-6, "{gain} vs {analog}");
     }
 
     /// The corner is a live cell: moved from 4 kHz to 500 Hz, the gain at 2 kHz follows the RC

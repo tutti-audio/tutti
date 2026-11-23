@@ -186,7 +186,7 @@ pub(crate) trait ServerPlugin {
     fn save_state(&mut self, main: MainThreadMarker, state_use: StateUse) -> PluginResult<Vec<u8>>;
     /// The plugin's state as it is, with no Processor brought home: for a
     /// caller that knows no write is waiting for a block (the session's
-    /// barrier, `Session::handle_save_state`), so a save never silences one.
+    /// barrier, the `SaveState` handler), so a save never silences one.
     ///
     /// # Errors
     ///

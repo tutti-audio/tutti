@@ -155,7 +155,9 @@ pub use tutti_timeline::{
 };
 
 // Units, channels, buffers and the musical meter.
-pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
+pub use tutti_buffers::{
+    ChannelLayout, ChannelSet, ChannelTopology, Interleaved, InterleavedMut, MaxBlock,
+};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
     Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Frame, Hz, Losses, Normalized,

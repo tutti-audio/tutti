@@ -284,7 +284,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     ) -> std::result::Result<DeviceRestarted, RestartError> {
         let selector = request.device.clone();
         let max_block = request.max_block;
-        let topology = request.topology.clone();
+        let topology = request.topology;
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
             self.with_device(|session, device| {
@@ -885,26 +885,10 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         Ok(())
     }
 
-    /// Whether the main output in force can be placed on a device of `channels`, as
-    /// `topology` states them or as the engine's order for the width: what a
+    /// Whether the main output in force can be placed on `device`: what a
     /// restart or a clock switch refuses before anything moves.
-    pub(crate) fn check_device(
-        &self,
-        channels: ChannelLayout,
-        topology: Option<&ChannelTopology>,
-    ) -> Result<()> {
-        let placed = topology
-            .cloned()
-            .unwrap_or_else(|| ChannelTopology::default_for(channels));
-        if placed.width() != channels {
-            return Err(tutti_buffers::FoldError::from(
-                tutti_buffers::BufferError::WidthMismatch {
-                    src: placed.width(),
-                    dst: channels,
-                },
-            )
-            .into());
-        }
+    pub(crate) fn check_device(&self, device: &tutti_buffers::ChannelSet) -> Result<()> {
+        let channels = device.width();
         // A map names the main output's own channels, so a device swap does not widen
         // a main output that has one; without it a wider device widens an undeclared
         // main output by the build's rule.
@@ -921,13 +905,14 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
                     crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), channels)
                 };
                 ChannelTopology::default_for(ChannelLayout::clamped(width))
+                    .expect("a main output is at most MAX_CHANNELS wide")
             });
         // The policy in force has to place the main output on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
         policy
             .routing()
-            .fold::<C::Float>(&main_output, &placed)
+            .fold::<C::Float>(&main_output, device)
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     main_output: self.graph.main_output_id(),
@@ -954,12 +939,13 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         topology: Option<ChannelTopology>,
     ) -> Result<()> {
         let rate = spec.sample_rate;
-        // The main output in force has to be placeable on the new device, as the
-        // request states it or as the engine's order for its width: refused
-        // before the graph moves, the stream still stopped, like any refusal
-        // here. The main output a wider device will widen an undeclared one to is
-        // the main output in force.
-        self.check_device(spec.channels, topology.as_ref())?;
+        // The new device is what the request states or the engine's order for
+        // its width. The main output in force has to be placeable on it:
+        // refused before the graph moves, the stream still stopped, like any
+        // refusal here. The main output a wider device will widen an
+        // undeclared one to is the main output in force.
+        let device = crate::policy::device_placement(spec.channels, topology)?;
+        self.check_device(&device.channels)?;
         // The new device's callback size too: a hosted plugin's pipeline
         // follows it, and its declared latency with it.
         self.graph
@@ -980,7 +966,7 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
         // Every refusal above left the engine's device as it was: the new one
         // is placed only now, so a refused restart moves nothing, and a
         // restart onto the old device places it again.
-        self.graph.place_device(spec.channels, topology)?;
+        self.graph.place_device(device)?;
         // The outputs' taps read frames of one rate: reopened at the
         // new one, committed with the rest below.
         if self

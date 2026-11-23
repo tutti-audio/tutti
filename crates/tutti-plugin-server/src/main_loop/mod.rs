@@ -39,13 +39,13 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tutti_platform::{Executor, Instant};
 
-use tutti_plugin_ipc::{ControlFrame, ControlRequest, Request};
+use tutti_plugin_ipc::{ControlFrame, Reaction};
 use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::{IpcError, IpcResult, MainThreadMarker, StateError, Wakeups};
 
 use crate::render::RenderThread;
-use crate::session::{Reaction, Session};
-use crate::transport::{ControlTransport, Incoming};
+use crate::session::Session;
+use crate::transport::ControlTransport;
 
 /// How often the idle tick runs while nothing else wakes the loop: about 30 Hz,
 /// the rate a plugin's editor idle is conventionally driven at.
@@ -262,35 +262,8 @@ pub(crate) fn serve_every(
         if !readable {
             continue;
         }
-        let (id, reaction) = match transport.recv()? {
-            Incoming::Request(Request { id, body }) => {
-                let saving = matches!(body, ControlRequest::SaveState { .. });
-                let reaction = if saving {
-                    crate::server::working(executor, transport, id, false, || {
-                        session.handle(main, body)
-                    })?
-                } else {
-                    session.handle(main, body)?
-                };
-                (id, reaction)
-            }
-            Incoming::SetupSlab { id, layout, slab } => (id, session.setup_slab(&slab, layout)),
-            Incoming::LoadState {
-                id,
-                state_use,
-                state,
-            } => (
-                id,
-                crate::server::working(executor, transport, id, true, || {
-                    session.load_state(main, &state, state_use)
-                }),
-            ),
-            Incoming::StageState { id, state } => (id, session.stage_state(state)),
-            Incoming::StateRefused { id, staging, error } => {
-                (id, session.refuse_state(staging, error))
-            }
-            Incoming::OpenAudio { id, .. } => (id, session.refuse_second_lane()),
-        };
+        let incoming = transport.recv()?;
+        let (id, reaction) = crate::server::react(session, main, executor, transport, incoming);
         match reaction {
             Reaction::Shutdown => return Ok(()),
             Reaction::Reply(reply) => transport.send(&ControlFrame::Reply { id, reply })?,

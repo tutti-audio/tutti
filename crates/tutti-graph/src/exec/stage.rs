@@ -24,13 +24,12 @@
 use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use tutti_buffers::Float;
-use tutti_rt::CappedVec;
+use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
 
-use super::commit::Commit;
+use super::commit::{Commit, Participants, Rendered};
 use super::node_op::{CONSTANT, SILENT};
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
@@ -132,7 +131,7 @@ pub(super) struct Staged<F: Float = f32> {
     pub(super) spare_tables: CappedVec<Held>,
     pub(super) spare_drives: CappedVec<ParamState<F>>,
     /// The executor's chase buffer from this plan on.
-    pub(super) chase: Vec<Event>,
+    pub(super) chase: CappedVec<Event>,
     /// A store with room for the plan's units, when the executor's has none.
     pub(super) store: Option<Vec<Option<Unit<F>>>>,
     /// The store length the plan needs.
@@ -225,9 +224,9 @@ impl Cx<'_> {
 pub(crate) struct Stager {
     event_cap: usize,
     /// Pool participants the executor runs on (`Executor::set_pool`).
-    pool: Arc<AtomicUsize>,
+    pool: Gauge<Participants>,
     /// Blocks the executor has rendered (`Executor::render_applied`).
-    rendered: Arc<AtomicU64>,
+    rendered: Gauge<Rendered>,
     /// The capacity of each event delay's FIFO, by key.
     fifos: BTreeMap<DelayKey, usize>,
     /// The same for event feedback.
@@ -272,7 +271,11 @@ fn fit_fifo(from: Option<(u32, usize)>, want: usize, rate: usize) -> (RingFrom, 
 }
 
 impl Stager {
-    pub(crate) fn new(event_cap: usize, pool: Arc<AtomicUsize>, rendered: Arc<AtomicU64>) -> Self {
+    pub(crate) fn new(
+        event_cap: usize,
+        pool: Gauge<Participants>,
+        rendered: Gauge<Rendered>,
+    ) -> Self {
         Self {
             event_cap,
             pool,
@@ -309,7 +312,7 @@ impl Stager {
         if self.shells.is_empty() || acked < self.shells_seq {
             return;
         }
-        let now = self.rendered.load(Ordering::Acquire);
+        let now = self.rendered.get().0.get();
         match self.shells_seen {
             None => self.shells_seen = Some(now),
             Some(seen) if now >= seen + 2 => {
@@ -358,7 +361,7 @@ impl Stager {
         let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store_len.max(c.delta.store_len as usize);
-        let participants = self.pool.load(Ordering::Acquire);
+        let participants = self.pool.get().0;
         let par = par_for(
             &plan,
             participants,
@@ -439,7 +442,7 @@ impl Stager {
             drives,
             spare_rings: CappedVec::with_capacity(moved),
             spare_tables: CappedVec::with_capacity(tables),
-            chase: Vec::with_capacity(wanted),
+            chase: CappedVec::with_capacity(wanted),
             store,
             store_len,
         }));
@@ -869,11 +872,11 @@ impl Stager {
                 Inject {
                     unit,
                     port,
-                    events: Vec::with_capacity(events),
-                    merged: Vec::with_capacity(events + widest),
+                    events: CappedVec::with_capacity(events),
+                    merged: CappedVec::with_capacity(events + widest),
                     live: false,
                     closed_from: 0,
-                    owed: Vec::with_capacity(owed),
+                    owed: CappedVec::with_capacity(owed),
                 }
             })
             .collect();
@@ -1212,7 +1215,7 @@ fn reserve_returns<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) {
         replaced: CappedVec::with_capacity(replaces),
         chased: CappedVec::with_capacity(replaces),
         held_refused: CappedVec::with_capacity(replaces),
-        chase_events: Vec::new(),
+        chase_events: CappedVec::default(),
     };
     c.spare_held = CappedVec::with_capacity(held + c.gone.spare.capacity() + 4 * c.incoming.len());
 }

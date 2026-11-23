@@ -51,13 +51,13 @@
 //! nothing allocates on the audio thread.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 use tutti_curve::FadeLaw;
 
 use atomic_float::AtomicF64;
 
-use tutti_rt::{CappedVec, ParamCell};
+use tutti_rt::{AtomicCell, CappedVec, ParamCell, atomic_word};
 use tutti_units::{Gain, Samples, UnitAddr, UnitParam};
 
 use crate::exec::lane::{fade_in, ramp_in};
@@ -95,23 +95,7 @@ pub enum EdgeFade {
     Out,
 }
 
-impl EdgeFade {
-    fn bits(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::In => 1,
-            Self::Out => 2,
-        }
-    }
-
-    fn from_bits(bits: u8) -> Self {
-        match bits {
-            1 => Self::In,
-            2 => Self::Out,
-            _ => Self::None,
-        }
-    }
-}
+atomic_word!(EdgeFade { None, In, Out });
 
 /// What the spec holds of an edge's gain lane: the `source` that drives it.
 ///
@@ -196,7 +180,7 @@ pub enum EdgeGainError {
 pub(crate) struct GainCell {
     base: Arc<AtomicF64>,
     range: Arc<ParamRanges>,
-    fade: Arc<AtomicU8>,
+    fade: Arc<AtomicCell<EdgeFade>>,
 }
 
 impl GainCell {
@@ -207,19 +191,19 @@ impl GainCell {
         Self {
             base: Arc::new(AtomicF64::new(base.get())),
             range: ranges,
-            fade: Arc::new(AtomicU8::new(EdgeFade::None.bits())),
+            fade: Arc::new(AtomicCell::new(EdgeFade::None)),
         }
     }
 
     /// Store `fade`. Wait-free.
     pub(crate) fn store_fade(&self, fade: EdgeFade) {
-        self.fade.store(fade.bits(), Ordering::Release);
+        self.fade.store(fade);
     }
 
     /// The fade now. Wait-free.
     #[inline]
     fn load_fade(&self) -> EdgeFade {
-        EdgeFade::from_bits(self.fade.load(Ordering::Acquire))
+        self.fade.load()
     }
 
     /// Store `base`. Wait-free.

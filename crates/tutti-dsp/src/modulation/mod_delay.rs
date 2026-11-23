@@ -197,7 +197,7 @@ impl ModDelayLayout {
     /// The channels.
     #[must_use]
     pub fn width(&self) -> usize {
-        usize::from(self.input.layout().count())
+        usize::from(self.input.width().count())
     }
 
     /// What the delay is swept around and how far.
@@ -223,7 +223,7 @@ impl ModDelayLayout {
     #[must_use]
     pub fn offsets(&self) -> [PhaseIncrement; MAX_MOD_DELAY_CHANNELS] {
         let mut offsets = [PhaseIncrement::new(0.0); MAX_MOD_DELAY_CHANNELS];
-        let layout = self.input.layout();
+        let layout = self.input.width();
         for (c, o) in (0..self.width())
             .filter_map(|c| layout.index(c))
             .zip(&mut offsets)
@@ -263,7 +263,7 @@ impl ModDelayLayoutBuilder {
             sweep,
             stagger,
         } = self;
-        let width = usize::from(input.layout().count());
+        let width = usize::from(input.width().count());
         match stagger.channels() {
             Some(got) if got != width => Err(StaggerError::Length { width, got }),
             _ => Ok(ModDelayLayout {

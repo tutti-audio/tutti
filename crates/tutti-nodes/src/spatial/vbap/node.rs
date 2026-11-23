@@ -1,5 +1,5 @@
 use super::error::{Result, VbapError};
-use tutti_buffers::{Bed, BusTopology, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
+use tutti_buffers::{Bed, BusTopology, ChannelLayout, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::UnitParam;
@@ -191,8 +191,7 @@ impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
     /// [`VbapError::NotABed`] for a bus that places no bed, and
     /// [`VbapError::Geometry`] for a bed whose speakers cannot be panned over: [`Bed::Mono`].
     fn try_from(config: VbapPannerConfig) -> Result<Self> {
-        let bed =
-            Bed::from_topology(&ChannelTopology::from(config.output)).ok_or(VbapError::NotABed)?;
+        let bed = Bed::from_topology(&config.output).ok_or(VbapError::NotABed)?;
         let layout = SpeakerLayout::try_from(bed)?;
         let steps = ramp_steps(SampleRate::SR_48K);
         let mut kernel = VbapKernel::new(layout);
@@ -291,8 +290,8 @@ fn steer<T: Lerp>(ramp: &mut Ramp<T>, target: T, whole: bool, steps: u32) {
 /// The fold of the stereo input to the mono the single-source branch pans.
 fn stereo_to_mono<F: Float>() -> Fold<F> {
     Fold::between(
-        &ChannelTopology::default_for(ChannelLayout::STEREO),
-        &ChannelTopology::default_for(ChannelLayout::MONO),
+        &tutti_buffers::Bed::Stereo.topology(),
+        &tutti_buffers::Bed::Mono.topology(),
     )
     .expect("stereo folds to mono")
 }

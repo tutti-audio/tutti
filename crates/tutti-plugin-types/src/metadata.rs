@@ -481,7 +481,20 @@ mod tests {
     use tutti_units::SampleRate;
 
     fn stereo() -> ChannelTopology {
-        ChannelTopology::default_for(ChannelLayout::STEREO)
+        tutti_buffers::Bed::Stereo.topology()
+    }
+
+    /// A bus wider than a topology holds keeps its true channel count and has no
+    /// placement; one of the widest topology keeps both.
+    #[test]
+    fn a_bus_wider_than_a_topology_keeps_its_width_and_has_no_placement() {
+        let wide = PluginBus::main(ChannelLayout::from(24u16));
+        assert_eq!(wide.channels.count(), 24);
+        assert_eq!(wide.placement(), None);
+        assert_eq!(ChannelTopology::unassigned(wide.channels), None);
+        let widest = ChannelTopology::unassigned(ChannelLayout::from(16u16)).unwrap();
+        let placed = PluginBus::main(widest.width()).placed(widest);
+        assert_eq!(placed.placement(), Some(&widest));
     }
 
     /// A stereo main input with its placement, a mono aux with none.
@@ -560,7 +573,7 @@ mod tests {
     /// would satisfy the negative half alone.
     #[test]
     fn topology_is_complete_only_when_every_bus_agrees_with_its_count() {
-        let mono = ChannelTopology::default_for(ChannelLayout::MONO);
+        let mono = tutti_buffers::Bed::Mono.topology();
         let bus = |topology: Option<ChannelTopology>| {
             let bus = PluginBus::new(ChannelLayout::STEREO, BusRole::Main);
             match topology {

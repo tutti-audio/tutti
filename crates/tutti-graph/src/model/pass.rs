@@ -18,8 +18,8 @@
 //!
 //! Built on the control side (a fold allocates); applied without allocating.
 
-use tutti_buffers::{ChannelTopology, MAX_CHANNELS, Speaker};
 use tutti_buffers::{Float, Fold, FoldError, MonoMut, Planes};
+use tutti_buffers::{MAX_CHANNELS, Speaker};
 
 /// Why a node has no pass: what it would need to declare to be bypassed or
 /// mixed.
@@ -123,11 +123,7 @@ impl<F: Float> Pass<F> {
                 return Ok(Self::by_index(src.band_width()));
             }
         }
-        let fold = Fold::between(
-            &ChannelTopology::from(src.topology),
-            &ChannelTopology::from(dst.topology),
-        )
-        .map_err(PassError::Fold)?;
+        let fold = Fold::between(&src.topology, &dst.topology).map_err(PassError::Fold)?;
         let (inputs, outputs) = (src.band_width(), dst.band_width());
         if fold.is_identity() {
             return Ok(Self {

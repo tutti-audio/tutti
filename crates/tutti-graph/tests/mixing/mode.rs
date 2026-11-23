@@ -374,18 +374,15 @@ fn bused(ins: usize, outs: usize, latency: usize, input: Bus, output: Bus) -> Ki
 }
 
 fn main_bus(topology: ChannelTopology) -> Bus {
-    Bus::new(
-        BusTopology::try_from(&topology).expect("fits a bus"),
-        BusRole::Main,
-    )
+    Bus::new(topology, BusRole::Main)
 }
 
 fn smpte(n: u16) -> Bus {
-    main_bus(ChannelTopology::default_for(ChannelLayout::from_count(n)))
+    main_bus(ChannelTopology::default_for(ChannelLayout::from_count(n)).unwrap())
 }
 
 fn unassigned(n: u16) -> Bus {
-    main_bus(ChannelTopology::unassigned(ChannelLayout::from_count(n)))
+    main_bus(ChannelTopology::unassigned(ChannelLayout::from_count(n)).unwrap())
 }
 
 /// **A bypass is the fold between the main buses.** A node whose `Main` input

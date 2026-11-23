@@ -138,15 +138,13 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
         // grows a wide pair, which is a `tutti-buffers` decision.
         AuLayoutTag::Octagonal | AuLayoutTag::Cube => return None,
     };
-    Some(ChannelTopology::Speakers(Speakers::from_format(
-        positions.iter().copied(),
-    )))
+    // Every tag's table is at most a few channels, inside a topology's width.
+    Speakers::from_format(positions.iter().copied()).map(ChannelTopology::Speakers)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_buffers::ChannelLayout;
 
     /// A decoded tag's width matches the count Apple packs into it.
     ///
@@ -185,12 +183,12 @@ mod tests {
     fn the_audiounit_surround_tags_match_the_engines_order() {
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit5_1),
-            Some(ChannelTopology::default_for(ChannelLayout::from(6u16))),
+            Some(tutti_buffers::Bed::Surround51.topology()),
             "AudioUnit_5_1 is L R C LFE Ls Rs, the engine's own 5.1 order"
         );
         assert_eq!(
             topology_of(AuLayoutTag::AudioUnit7_1),
-            Some(ChannelTopology::default_for(ChannelLayout::from(8u16))),
+            Some(tutti_buffers::Bed::Surround71.topology()),
             "AudioUnit_7_1 is L R C LFE Ls Rs Rls Rrs, the engine's own 7.1 order"
         );
     }

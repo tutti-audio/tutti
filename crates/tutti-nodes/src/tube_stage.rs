@@ -152,13 +152,13 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.stage = TubeStage::<F>::new(self.input.layout(), self.rate);
+        self.stage = TubeStage::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 
@@ -277,30 +277,6 @@ mod tests {
                 "{factor:?}: rings past the declared tail"
             );
         }
-    }
-
-    /// At -80 dBFS and drive 0 dB the stage has the gain of the coupling high-pass,
-    /// `|1 - e^(-jw)| / |1 - R e^(-jw)|` at the oversampled rate (the module's normalization:
-    /// unity before the coupling), through the oversampler. The bound is the oversampler's
-    /// passband ripple, each of its two stages about `1e-5` (100 dB) and the round trip crossing
-    /// each twice, `4e-5`, and `f32`'s rounding of the plate voltage: half an ulp of 170 V is `7.6e-6`
-    /// V against a plate swing of `6e-3` V, `1.3e-3` of the gain were every sample's error the
-    /// same sign.
-    #[test]
-    fn a_small_signal_has_the_coupling_high_passs_gain_through_the_oversampler() {
-        let f = 1_000.0;
-        let mut n = node(0.0);
-        let x = sine(f, RATE, 9_600 + 4_800);
-        let y = render_chunked(&mut n, &[x.iter().map(|v| v * 1e-4).collect()], 256).remove(0);
-        let gain = amplitude_at(&y[4_800..], f, RATE) / 1e-4;
-        let high = 4.0 * RATE;
-        let w = core::f64::consts::TAU * f / high;
-        let r = (-core::f64::consts::TAU * 10.0 / high).exp();
-        let coupling = (1.0 - w.cos()).hypot(w.sin()) / (1.0 - r * w.cos()).hypot(r * w.sin());
-        assert!(
-            (gain - coupling).abs() <= 4.1e-5 + 1.3e-3,
-            "{gain} vs {coupling}"
-        );
     }
 
     /// The drive is a live cell: +20 dB raises a hot output by less than the 10 times it

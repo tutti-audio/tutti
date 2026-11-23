@@ -158,6 +158,38 @@ impl<T> CappedVec<T> {
         self.buf.pop()
     }
 
+    /// Keeps the first `len` items and drops the rest here; a `len` at or past
+    /// [`len`](Self::len) does nothing. Never frees the storage and leaves the
+    /// overflow flag as it is.
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        self.buf.truncate(len);
+    }
+
+    /// Removes and returns the item at `index`, moving the last item into its
+    /// place: O(1), and the order is not kept. Never frees the storage and
+    /// leaves the overflow flag as it is.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not below [`len`](Self::len).
+    #[inline]
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        self.buf.swap_remove(index)
+    }
+
+    /// Removes and returns the item at `index`, shifting the later items down:
+    /// the order is kept, at O(len). Never frees the storage and leaves the
+    /// overflow flag as it is.
+    ///
+    /// # Panics
+    ///
+    /// If `index` is not below [`len`](Self::len).
+    #[inline]
+    pub fn remove(&mut self, index: usize) -> T {
+        self.buf.remove(index)
+    }
+
     /// Counts one refusal in [`refused`](Self::refused) without pushing: the
     /// caller refused a group of items as a whole and dropped it.
     #[inline]

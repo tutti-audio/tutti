@@ -2,6 +2,7 @@
 //! Distinct from wire-format `AudioRequest`/`ControlRequest` and their replies in `protocol/`.
 
 use super::ask::{Ask, Reply};
+use crate::transport::control::{Announced, Announces};
 use crate::{Answered, ControlReply, ControlRequest, SlabHandle, Unanswered};
 use dpi::Size;
 use std::time::Duration;
@@ -175,6 +176,30 @@ pub(super) enum Object {
     Slab(SlabHandle),
     /// A state's blob the server sends after its reply, read on the lane.
     State,
+}
+
+impl Object {
+    /// The request of `announced` and the object it announces, queued together:
+    /// the pair is the one the announcement made.
+    pub(super) fn announced<M: Announces>(announced: Announced<M>) -> (M, Self)
+    where
+        M::Object: Into<Self>,
+    {
+        let (msg, object) = announced.into_parts();
+        (msg, object.into())
+    }
+}
+
+impl From<tutti_plugin_ipc_ffi::Blob> for Object {
+    fn from(blob: tutti_plugin_ipc_ffi::Blob) -> Self {
+        Self::Blob(blob)
+    }
+}
+
+impl From<SlabHandle> for Object {
+    fn from(slab: SlabHandle) -> Self {
+        Self::Slab(slab)
+    }
 }
 
 /// What the lane heard of an answered request: the reply, and the object that

@@ -198,7 +198,7 @@ fn a_wav_order_seven_one_is_permuted_to_the_engines_order() {
         ])
         .unwrap()
     };
-    let engine = ChannelTopology::default_for(ChannelLayout::from(8u16));
+    let engine = tutti_buffers::Bed::Surround71.topology();
     let want: Vec<f32> = engine
         .positions()
         .unwrap()
@@ -404,7 +404,9 @@ fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
     assert_eq!(
         tutti_codec::FileIn::<f32>::open(dir.path().join("placed.wav"))
             .expect("opens")
+            .channel_set()
             .topology()
+            .unwrap()
             .positions()
             .unwrap(),
         f.speakers

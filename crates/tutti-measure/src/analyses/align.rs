@@ -15,9 +15,7 @@
 
 use std::sync::Arc;
 
-use tutti_buffers::{
-    ChannelLayout, ChannelTopology, Float, Fold, FoldError, Mono, MonoMut, Sample, Wave,
-};
+use tutti_buffers::{ChannelLayout, Float, Fold, FoldError, Mono, MonoMut, Sample, Wave};
 use tutti_units::{Confidence, SampleRate, Samples, Seconds};
 
 use crate::analyses::xcorr::{CrossCorrelation, cross_correlate_shaped};
@@ -250,10 +248,17 @@ impl<R: Float> AlignTo<R> {
         if wave.channels() == 1 {
             return Ok(widen(wave.channel(0).samples()));
         }
-        let fold = Fold::<R>::between(
-            wave.topology(),
-            &ChannelTopology::default_for(ChannelLayout::MONO),
-        )?;
+        let mono_topology = tutti_buffers::Bed::Mono.topology();
+        // A wave with no topology is unassigned channels, which no fold takes to one.
+        let fold = match wave.topology() {
+            Some(topology) => Fold::<R>::between(topology, &mono_topology)?,
+            None => {
+                return Err(FoldError::Unassigned {
+                    src: wave.layout(),
+                    dst: ChannelLayout::MONO,
+                });
+            }
+        };
         let mut mono = vec![R::ZERO; wave.len().get()];
         fold.fold_planar_channel(wave.planes(), 0, MonoMut::new(&mut mono))?;
         Ok(widen(&mono))
