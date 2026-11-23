@@ -265,7 +265,7 @@ fn sample_rate_new_refuses_what_is_not_a_finite_positive_rate() {
 /// `of` is `new` that panics, so a literal that is no rate cannot compile into
 /// a constant.
 #[test]
-#[should_panic(expected = "a sample rate is finite and above zero")]
+#[should_panic(expected = "not a sample rate: finite and above zero")]
 fn sample_rate_of_panics_on_zero() {
     let _ = SampleRate::of(0.0);
 }

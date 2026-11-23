@@ -27,8 +27,7 @@
 //! Limits: a helper is matched by its name, so a same-file function of the
 //! name of an active one makes every call of that name active.
 
-use super::lex::{blank, line_of, matching};
-use super::prose::word;
+use super::lex::{blank, line_of, matching, skipped, word};
 use super::ratchet::{self, Found, Wording};
 use super::{Report, Tree};
 use std::collections::BTreeSet;
@@ -65,10 +64,6 @@ pub(super) const HELPERS: &[(&str, &str)] = &[
         "a `verify_*` helper fails the test on a value it does not accept",
     ),
 ];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
 
 fn helper(name: &str) -> bool {
     HELPERS.iter().any(|(pat, _)| match pat.strip_suffix('*') {

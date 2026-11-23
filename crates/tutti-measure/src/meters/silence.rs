@@ -27,6 +27,11 @@ ranged! {
     /// A level in dBFS that is a finite number of decibels: a silence gate's
     /// threshold, a note floor, or an end of a velocity range. A NaN would make a
     /// config unequal to itself, and an infinity is no level.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Db", into = "Db")
+    )]
     FiniteLevel(Db), FiniteLevelError, "a finite level",
     |raw| raw.get().is_finite()
 }

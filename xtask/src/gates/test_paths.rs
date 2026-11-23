@@ -14,13 +14,7 @@
 //! `CARGO_MANIFEST_DIR` is not seen.
 
 use super::Tree;
-use super::lex::line_of;
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
+use super::lex::{line_of, skipped};
 
 /// Any other legitimate use, with the reason.
 const EXEMPT_FILES: &[(&str, &str)] = &[(

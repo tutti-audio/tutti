@@ -715,7 +715,7 @@ impl IntoNode for PluginClient<Bound> {
     fn into_parts(self) -> NodeParts<PluginControls> {
         let fork = ServedFork::of(&self);
         let (node, controls) = self.into_node();
-        NodeParts::new(node, controls, Some(Box::new(fork)))
+        NodeParts::new(node, controls, Some(Box::new(fork)), None)
     }
 }
 
@@ -836,20 +836,20 @@ mod event_route_tests {
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 2,
             edits_refused: 1,
-            refused_off_thread_calls: 4,
+            refused_off_thread_calls: tutti_units::Calls::new(4),
         }));
         assert_eq!(
             controls.server_losses(),
             tutti_plugin_types::ServerLosses {
                 commands_refused: 2,
                 edits_refused: 1,
-                refused_off_thread_calls: 4,
+                refused_off_thread_calls: tutti_units::Calls::new(4),
             }
         );
         route.hear(IpcEvent::ServerLosses(tutti_plugin_types::ServerLosses {
             commands_refused: 5,
             edits_refused: 1,
-            refused_off_thread_calls: 4,
+            refused_off_thread_calls: tutti_units::Calls::new(4),
         }));
         assert_eq!(controls.server_losses().commands_refused, 5);
     }

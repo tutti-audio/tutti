@@ -147,21 +147,16 @@ impl<F: Float> BlockScratch<F> {
     /// Scratch for blocks of up to `frames` frames of `width` channels (see
     /// [`resize`](Self::resize)). Allocates: control thread.
     pub(crate) fn new(frames: usize, width: usize) -> Self {
-        let mut s = Self::empty();
-        s.resize(frames, width);
-        s
-    }
-
-    /// No frames, no width. Allocates the lanes' boxes: control thread.
-    fn empty() -> Self {
-        Self {
+        let mut s = Self {
             out: Lanes::empty(),
             raw: Lanes::empty(),
             prime: Lanes::empty(),
             positions: Vec::new(),
             reads: Vec::new(),
             gather: Gather::empty(),
-        }
+        };
+        s.resize(frames, width);
+        s
     }
 
     /// Scratch sized as `other` is, for a copy of its owner. Allocates:

@@ -435,7 +435,7 @@ impl AudioBridge {
 
     /// The count of chunks the bridge thread skipped as stale, shared: the
     /// pipeline's counters read it beside the batcher's own.
-    pub(crate) fn skipped_cell(&self) -> tutti_rt::Tally<u64> {
+    pub(crate) fn skipped_cell(&self) -> tutti_rt::Tally<tutti_units::Chunks> {
         self.channels.skipped_cell()
     }
 

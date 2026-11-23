@@ -42,6 +42,11 @@ use tutti_units::ranged;
 ranged! {
     /// YIN's absolute threshold on the cumulative mean difference: within
     /// `0.01..=0.5`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Confidence", into = "Confidence")
+    )]
     YinThreshold(Confidence), YinThresholdError, "a YIN threshold within 0.01..=0.5",
     |raw| raw.get() >= 0.01 && raw.get() <= 0.5
 }

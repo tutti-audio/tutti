@@ -916,8 +916,8 @@ fn smpte_is_not_claimed_when_a_plugin_asks_for_it() {
     const PLAYING: i32 = 1 << 1;
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
-    let transport = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true);
+    let transport =
+        tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).playing(true);
     let ctx = ProcessContext {
         transport: Some(&transport),
         ..ProcessContext::new()
@@ -942,8 +942,8 @@ fn a_rejoin_keeps_the_transport_the_plugin_reads() {
     let probe = Probe::acquire();
     let (mut processor, controller) = probe.activate();
     let stopped = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K);
-    let playing = tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_playing(true);
+    let playing =
+        tutti_vst2_host::TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K).playing(true);
     let ctx = |transport| ProcessContext {
         transport: Some(transport),
         ..ProcessContext::new()

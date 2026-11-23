@@ -500,6 +500,7 @@ fn chain_and_add_take_nodes() {
                 })),
                 7,
                 None,
+                None,
             )
         }
     }

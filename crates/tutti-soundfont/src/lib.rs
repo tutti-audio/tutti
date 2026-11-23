@@ -192,7 +192,6 @@ mod region_pair;
 mod render;
 mod soundfont_math;
 mod voice;
-mod voices;
 
 pub use config::{Polyphony, PolyphonyError, SoundFontConfig};
 pub use error::{Error, Result};

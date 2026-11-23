@@ -775,8 +775,8 @@ macro_rules! fake_control {
             }
 
             /// As [`FakePlugin::refuse_off_thread_calls`] counted them.
-            fn refused_off_thread_calls(&self) -> u64 {
-                self.shared.refused_off_thread.load(Ordering::Relaxed)
+            fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+                tutti_units::Calls::new(self.shared.refused_off_thread.load(Ordering::Relaxed))
             }
         }
 

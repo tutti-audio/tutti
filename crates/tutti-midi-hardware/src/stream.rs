@@ -383,8 +383,7 @@ const REPLY_ROOM: usize = 32;
 impl Asking {
     fn new(now: Instant) -> (Self, InquiryAction) {
         let (inquiry, first) = IdentityInquiry::new(LEGACY_GROUP, now);
-        let room = SysexAssembler::room_for(REPLY_ROOM, 1, 1);
-        let assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), REPLY_ROOM, 1);
+        let assembler = SysexAssembler::boxed(REPLY_ROOM, 1, 1);
         (Self { inquiry, assembler }, first)
     }
 

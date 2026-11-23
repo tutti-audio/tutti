@@ -27,6 +27,8 @@
 //!   rides the same door: the tuning programs ([`TuningCapacity`]), RPN 3 and 4 and
 //!   Scale/Octave Tuning reach a voice as the key's tuning (`VoiceCommand::Start`'s `tune`,
 //!   [`VoiceCommand::Tune`]).
+//! - [`VoiceTable`]: the voices an instrument sounds ([`NoteVoice`]), in the slots
+//!   the allocator decides, with its commands carried out in order.
 //! - [`Holds`]: the note gate (key, sustain, sostenuto) as a state machine.
 //! - [`Controller`]: which channel-mode controllers mean the same to every
 //!   instrument.
@@ -46,6 +48,7 @@ mod holds;
 mod master;
 mod per_note;
 mod phase;
+mod table;
 mod tuning;
 mod voicing;
 
@@ -55,6 +58,7 @@ pub use holds::{Holds, Release};
 pub use master::MasterGain;
 pub use per_note::{LIVE_NOTES, NOTE_CONTROLS, NoteControl, NoteEvent, PerNoteState};
 pub use phase::Phase;
+pub use table::{NoteStart, NoteVoice, VoiceTable};
 pub use tuning::{NoSuchTuning, TuningCapacity, TuningCount, TuningCountOutOfRange};
 pub use voicing::{
     Glide, Mode, Order, Patch, Retrigger, Steal, VoiceAllocator, VoiceCommand, VoiceConfig,

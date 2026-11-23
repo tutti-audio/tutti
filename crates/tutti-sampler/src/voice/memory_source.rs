@@ -1468,9 +1468,7 @@ impl<F: Float> Node<F> for MemorySource<F> {
         Shape::source_unassigned(self.channels)
             .tail(self.ring_out(StretchFactor::UNITY))
             // A cubic Hermite read per frame and channel, behind the
-            // placement gate: measured 16–17 ns per frame and channel,
-            // placed or free-running, against `SvfFilterNode`'s 7.2 and
-            // `Heavy`'s 256.
+            // placement gate.
             .cost(tutti_graph::Cost::Moderate)
             // Its gain, as a voice's: block-rate, read on the block's last
             // frame.
