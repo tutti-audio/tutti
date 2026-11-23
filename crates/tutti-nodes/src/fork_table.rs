@@ -1,13 +1,13 @@
 //! A fork of each param node starts from the values last set and shares no cell with the
 //! live node: [`assert_param_fork`] over a node of every kind.
 
-use crate::test_support::for_each_row;
 use crate::*;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::CombDelay;
 use tutti_dsp::{
     Algorithm, FmPatch, OperatorCount, OperatorFrequency, OperatorSpec, Partial, Partials,
 };
+use tutti_fixtures::for_each_row;
 use tutti_graph::ParamNode;
 use tutti_graph::contract::assert_param_fork;
 use tutti_units::{FrequencyRatio, Gain, Metres, Seconds, UnitAddr, UnitParam};

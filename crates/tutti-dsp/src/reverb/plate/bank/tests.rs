@@ -1,4 +1,6 @@
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::impulse;
+use tutti_units::Samples;
 use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
@@ -26,13 +28,6 @@ fn at_rest(rate: SampleRate, c: &PlateControls) -> (PlateBank<f32>, PlateRamps<f
     bank.retarget(&mut ramps, c);
     ramps.jump_to_target();
     (bank, ramps)
-}
-
-/// A unit impulse followed by silence, `frames` long.
-fn impulse(frames: usize) -> Vec<f32> {
-    let mut x = vec![0.0; frames];
-    x[0] = 1.0;
-    x
 }
 
 /// `x` through the bank in calls of `block` frames; the two output channels.
@@ -63,7 +58,7 @@ fn run(
 /// The impulse response of `c` at `rate`, `frames` long.
 fn response(rate: SampleRate, c: &PlateControls, frames: usize) -> [Vec<f32>; 2] {
     let (mut bank, mut ramps) = at_rest(rate, c);
-    run(&mut bank, &mut ramps, &impulse(frames), 480)
+    run(&mut bank, &mut ramps, &impulse(Samples::new(frames)), 480)
 }
 
 /// The Schroeder backward integral of `h` squared, in dB below its total.
@@ -215,7 +210,12 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
                 panic!("finite tails")
             };
             assert!(tail <= ceiling);
-            let [l, r] = run(&mut bank, &mut ramps, &impulse(tail.get() + 48_000), 512);
+            let [l, r] = run(
+                &mut bank,
+                &mut ramps,
+                &impulse(Samples::new(tail.get() + 48_000)),
+                512,
+            );
             let peak = l.iter().chain(&r).fold(0.0f32, |m, x| m.max(x.abs()));
             let late = (l[tail.get()..].iter().chain(&r[tail.get()..]))
                 .fold(0.0f32, |m, x| m.max(x.abs()));
@@ -330,7 +330,7 @@ fn the_modulated_delays_sweep_the_papers_excursion_in_quadrature() {
 fn a_bank_never_retargeted_renders_silence() {
     let mut bank = PlateBank::<f32>::new(SampleRate::SR_48K);
     let mut ramps = bank.ramps();
-    let out = run(&mut bank, &mut ramps, &impulse(2_000), 256);
+    let out = run(&mut bank, &mut ramps, &impulse(Samples::new(2_000)), 256);
     assert!(out.iter().flatten().all(|&x| x == 0.0));
 }
 

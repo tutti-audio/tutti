@@ -696,10 +696,9 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{
-        RATE, amplitude_at, mean, prepared, render_chunked, render_f64, sine, wide_sine,
-    };
+    use crate::test_support::{RATE, mean, prepared, render_chunked, render_f64, sine, wide_sine};
     use core::f64::consts::PI;
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::contract::{Direct, drive};
     use tutti_units::UnitAddr;
 
@@ -822,7 +821,7 @@ mod tests {
     fn gain_at(node: &mut MultibandCompressorNode<f32>, hz: f64) -> f64 {
         let x = sine(hz, FS, SETTLE + WINDOW);
         let out = render_chunked(node, &[x], 512);
-        amplitude_at(&out[0][SETTLE..], hz, FS)
+        amplitude_at(&out[0][SETTLE..], Hz::new(hz), SampleRate::of(FS))
     }
 
     /// An `f32` node holds its crossover in `f32`. A 4-band tree has 3 splits of 3 sections each
@@ -868,7 +867,7 @@ mod tests {
                 unity(&Ctl::new(&n));
                 let x = wide_sine(hz, FS, SETTLE + WINDOW);
                 let out = render_f64(n, RATE, &[&x], x.len());
-                let a = amplitude_at(&out[0][SETTLE..], hz, FS);
+                let a = amplitude_at(&out[0][SETTLE..], Hz::new(hz), SampleRate::of(FS));
                 assert!((a - 1.0).abs() < bound, "{bands} bands at {hz} Hz: {a}");
             }
         }
@@ -922,7 +921,7 @@ mod tests {
             (dc - expected).abs() < 5e-6 * expected,
             "band 0 settled at {dc}, the curve says {expected}"
         );
-        let tone = amplitude_at(y, 3_000.0, FS);
+        let tone = amplitude_at(y, Hz::new(3_000.0), SampleRate::of(FS));
         assert!((tone - 0.01).abs() < 2e-7, "the quiet tone is {tone}");
 
         // The meter reads the reduction the curve gives, and only on band 0.
@@ -966,7 +965,7 @@ mod tests {
         let leak = 1.0 / (1.0 + warp(10_000.0, 1_000.0).powi(4));
         // Band 0's `leak` of the tone runs at -3 dB instead of +6 dB.
         let tol = 0.1 * leak * (g1 - 0.7) + 1e-6;
-        let amp = amplitude_at(y, 10_000.0, FS);
+        let amp = amplitude_at(y, Hz::new(10_000.0), SampleRate::of(FS));
         assert!((amp - 0.1 * g1).abs() < tol, "{amp} vs {}", 0.1 * g1);
     }
 
@@ -1102,7 +1101,7 @@ mod tests {
         };
         let lp = |fc: f64| 1.0 / (1.0 + warp(3_000.0, fc).powi(4));
         let want = 0.2 * hp(120.0) * (lp(1_000.0) + hp(1_000.0) * lp(6_000.0));
-        let amp = amplitude_at(y, 3_000.0, FS);
+        let amp = amplitude_at(y, Hz::new(3_000.0), SampleRate::of(FS));
         assert!((amp - want).abs() < 1e-6, "{amp} vs {want}");
         assert!(
             mean(y).abs() < 1e-6,
@@ -1168,7 +1167,7 @@ mod tests {
         // 150 Hz at 22.05 kHz is 147 samples a period.
         let x = sine(150.0, 22_050.0, 12_000 + 5_880);
         let out = render_chunked(&mut n, &[x], 512);
-        let amp = amplitude_at(&out[0][12_000..], 150.0, 22_050.0);
+        let amp = amplitude_at(&out[0][12_000..], Hz::new(150.0), SampleRate::of(22_050.0));
         assert!((amp - 0.5).abs() < TOL, "{amp}");
     }
 
@@ -1192,7 +1191,7 @@ mod tests {
         };
         let lp = 1.0 / (1.0 + warp(3_000.0, 6_000.0).powi(4));
         let want = 0.2 * hp(120.0) * hp(1_000.0) * lp;
-        let amp = amplitude_at(y, 3_000.0, FS);
+        let amp = amplitude_at(y, Hz::new(3_000.0), SampleRate::of(FS));
         assert!((amp - want).abs() < 1e-6, "{amp} vs {want}");
         assert!(
             mean(y).abs() < 1e-6,
@@ -1631,8 +1630,8 @@ mod tests {
             render_chunked(n, std::slice::from_ref(&x), 500);
             amplitude_at(
                 &render_chunked(n, std::slice::from_ref(&x), 500)[0],
-                120.0,
-                FS,
+                Hz::new(120.0),
+                SampleRate::of(FS),
             )
         };
         for bad in [5_000.0, -1.0, 0.0, f64::NAN] {
@@ -1672,7 +1671,7 @@ mod tests {
         }
         let x4 = warp(10_000.0, 1_000.0).powi(4);
         let want = x4 / (1.0 + x4) * libm::pow(10.0, 6.0 / 20.0);
-        let amp = amplitude_at(&y[SETTLE..], 10_000.0, FS);
+        let amp = amplitude_at(&y[SETTLE..], Hz::new(10_000.0), SampleRate::of(FS));
         assert!((amp - want).abs() < 1e-5, "{amp} vs {want}");
     }
 
@@ -1770,7 +1769,7 @@ mod tests {
             params[port] = Some(&signal[..chunk.len()]);
             y.extend_from_slice(&drive(&mut n, RATE, Planes::new(&[chunk]).unwrap(), &params)[0]);
         }
-        let amp = amplitude_at(&y[SETTLE..], 2_000.0, FS);
+        let amp = amplitude_at(&y[SETTLE..], Hz::new(2_000.0), SampleRate::of(FS));
         assert!((amp - 0.5).abs() < TOL, "{amp}");
     }
 

@@ -201,28 +201,6 @@ pub(crate) fn sine(hz: f64, rate: f64, len: usize) -> Vec<f32> {
         .collect()
 }
 
-/// The complex amplitude of the `hz` component of `x`, as `(re, im)` of
-/// `2/N * sum(x[n] * e^(-j w n))` (a unit sine at phase 0 reads `(0, -1)`).
-///
-/// Exact (no leakage) when `x` spans a whole number of periods of `hz`.
-pub(crate) fn lock_in<S: Sample>(x: &[S], hz: f64, rate: f64) -> (f64, f64) {
-    let w = 2.0 * core::f64::consts::PI * hz / rate;
-    let (mut re, mut im) = (0.0, 0.0);
-    for (n, &v) in x.iter().enumerate() {
-        let a = w * n as f64;
-        re += v.to_f64() * libm::cos(a);
-        im -= v.to_f64() * libm::sin(a);
-    }
-    let k = 2.0 / x.len() as f64;
-    (re * k, im * k)
-}
-
-/// The amplitude of [`lock_in`].
-pub(crate) fn amplitude_at<S: Sample>(x: &[S], hz: f64, rate: f64) -> f64 {
-    let (re, im) = lock_in(x, hz, rate);
-    re.hypot(im)
-}
-
 /// A graph node over whole-signal `inputs` (one `Vec` per input), rendered in
 /// `chunk`-frame blocks through [`drive_block`]; one `Vec` per output. The
 /// node must be [`prepared`] for blocks of `chunk`.
@@ -290,26 +268,4 @@ pub(crate) fn drive_kernel<K: Kernel>(
         }
     }
     out
-}
-
-/// Runs `check` over every labelled row of a table test. A failing row does not stop the
-/// others, and the failure names every failing row with its panic message.
-#[track_caller]
-pub(crate) fn for_each_row<T>(
-    rows: impl IntoIterator<Item = (&'static str, T)>,
-    check: impl Fn(T),
-) {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-    let mut failed = Vec::new();
-    for (label, row) in rows {
-        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| check(row))) {
-            let why = payload
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| payload.downcast_ref::<&str>().copied())
-                .unwrap_or("a non-text panic");
-            failed.push(format!("{label}: {why}"));
-        }
-    }
-    assert!(failed.is_empty(), "failing rows:\n{}", failed.join("\n"));
 }

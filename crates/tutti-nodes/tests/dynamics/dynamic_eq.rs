@@ -3,6 +3,8 @@
 //! 2012, eq. 4 and 5) and of the RBJ bell under the bilinear map, computed here.
 
 use core::f64::consts::PI;
+use tutti_fixtures::signal::sine;
+use tutti_units::{Amplitude, Samples};
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
@@ -19,12 +21,6 @@ const FS: f64 = 48_000.0;
 const RUN: usize = 24_000;
 /// The frames at the end read over: whole periods of every tone below (200, 1000 and 6000 Hz).
 const WINDOW: usize = 4_800;
-
-fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|i| (a * (2.0 * PI * f * i as f64 / FS).sin()) as f32)
-        .collect()
-}
 
 fn amplitude(db: f64) -> f64 {
     10f64.powf(db / 20.0)
@@ -83,6 +79,16 @@ fn de_esser() -> DynamicEqNode<f32> {
 fn render(node: DynamicEqNode<f32>, inputs: &[&[f32]]) -> Vec<f32> {
     let mut node = prepared(node, SR, inputs[0].len());
     drive(&mut node, SR, Planes::new(inputs).unwrap(), &[]).remove(0)
+}
+
+/// `frames` samples of an amplitude-`a` sine at `f` hertz, from phase 0.
+fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
+    sine(
+        Hz::new(f),
+        Amplitude::new(a),
+        SampleRate::of(FS),
+        Samples::new(frames),
+    )
 }
 
 /// A sibilance-band sine is cut by the de-esser's static curve (threshold -24 dB, 6 dB knee,

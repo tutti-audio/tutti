@@ -147,9 +147,7 @@ impl<F: Float> Kernel for TremoloKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
-
     use tutti_graph::{Node, ParamNode};
-
     use tutti_units::UnitParam;
 
     fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
