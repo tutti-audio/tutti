@@ -47,7 +47,12 @@
 
 mod coarsen;
 mod colour;
+pub(crate) mod latency;
+pub(crate) mod main_output;
 mod order;
+pub(crate) mod plan;
+pub(crate) mod preroll;
+pub(crate) mod tail;
 pub(crate) mod verify;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -58,14 +63,15 @@ use crate::{Edge, EdgeId, FeedbackFrom, InputPort, OutputPort, PortSink, PortSou
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
-use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Shape, Wired};
-use crate::param::ParamIn;
-use crate::plan::{
+use crate::compile::plan::{
     Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
     GainPortOp, InputBound, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx,
     Value, ZERO_SLOT,
 };
-use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
+use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
+use crate::node::param::ParamIn;
+use crate::node::shape::Shape;
+use crate::node::{InPlaceMask, MAX_PORTS, Prepare, Resolution, Wired};
 
 pub use verify::VerifyError;
 
@@ -872,7 +878,7 @@ pub fn compile(
                             .event_capacity
                             .is_some_and(|c| {
                                 shape.event_input_capacity.is_some_and(|b| {
-                                    crate::event::note_off_room(c.get() as usize)
+                                    crate::event::writer::note_off_room(c.get() as usize)
                                         <= b.get() as usize
                                 })
                             })
@@ -1578,9 +1584,9 @@ pub fn compile(
     let event_values = lower_values(&em.event, &eslot);
 
     // ---- 7. coarsen, and price the plan (the cost model) -----------------
-    let op_work: Vec<crate::cost::Work> = ops
+    let op_work: Vec<crate::node::cost::Work> = ops
         .iter()
-        .map(|op| crate::cost::op_work(op, &node_shapes, &sum_lanes))
+        .map(|op| crate::node::cost::op_work(op, &node_shapes, &sum_lanes))
         .collect();
     let coarse = coarsen::coarsen(
         &em.preds,

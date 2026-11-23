@@ -14,20 +14,20 @@ use super::stage::Staged;
 use super::state::{Gone, State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
-use crate::arena::Arena;
-use crate::event::Event;
-use crate::event_tap::EventTapWriter;
-use crate::gain::GainCell;
-use crate::held::{Keys, Tables};
-use crate::loss::EventLoss;
-use crate::meter::MeterWriter;
-use crate::mode::{BypassLine, ModeState};
+use crate::compile::plan::{Delta, Plan, UnitIdx};
+use crate::edges::event_tap::EventTapWriter;
+use crate::edges::meter::MeterWriter;
+use crate::edges::tap::TapWriter;
+use crate::event::types::Event;
+use crate::exec::arena::Arena;
+use crate::exec::held::{Keys, Tables};
+use crate::exec::loss::EventLoss;
+use crate::model::gain::GainCell;
+use crate::model::mode::{BypassLine, ModeState};
+use crate::node::param::ParamState;
+use crate::node::play::PlayReader;
+use crate::node::wake::Wake;
 use crate::node::{Node, Prepare};
-use crate::param::ParamState;
-use crate::plan::{Delta, Plan, UnitIdx};
-use crate::play::PlayReader;
-use crate::tap::TapWriter;
-use crate::wake::Wake;
 use crate::{EdgeFade, EdgeId, EventTapId, MeterId, TapId};
 
 /// A unit, owned. Crate-private, so the only code that can replace or drop
@@ -79,7 +79,7 @@ impl<F: Float> DerefMut for NodeBox<F> {
     }
 }
 
-/// One crossfade's own state (see the `fade` module, `src/fade.rs`). Built on
+/// One crossfade's own state (see the `fade` module, `src/model/fade.rs`). Built on
 /// the control side with the commit that asks for it, so its scratch is
 /// allocated there; it travels back in a commit box, so it is freed there
 /// too.
@@ -502,7 +502,7 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
     let (fade_tx, fade_rx) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
     let play = Arc::new(AtomicU64::new(0));
     let unreported = Arc::new(AtomicU64::new(0));
-    let (loss_tx, loss_rx) = ring::<EventLoss>(crate::loss::RING_CAPACITY, Overflow::Refuse);
+    let (loss_tx, loss_rx) = ring::<EventLoss>(crate::exec::loss::RING_CAPACITY, Overflow::Refuse);
     let (fade_end_tx, fade_end_rx) =
         ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
     let pool = Arc::new(AtomicUsize::new(0));

@@ -84,7 +84,7 @@
 //!   survives a new graph, a swap without a fade starts steady, and a swap
 //!   with one keeps it.
 //!
-//! - **Driven params** (see the `param` module docs, `src/param.rs`):
+//! - **Driven params** (see the `param` module docs, `src/node/param.rs`):
 //!   each declared param's state is kept per [`ParamIn`], dropped when its
 //!   unit is swapped (a crossfade keeps it), and on a re-prepare. A port
 //!   whose event source differs from the one it last ran with starts its
@@ -105,29 +105,29 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::MAX_NODE_LATENCY;
 use crate::NodeKey;
-use crate::lane::fade_gains;
+use crate::exec::lane::fade_gains;
 use crate::{Edge, EdgeId, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::Float;
 use tutti_curve::{FadeLaw, declick_frames};
 use tutti_platform::with_no_denormals;
 use tutti_units::{At, Frame, Gain, Latency, Mix, Normalized, Samples};
 
-use crate::command::Scheduled;
-use crate::event::{Event, EventKind, EventWriter, SortedEvents};
-use crate::history::TransportHistory;
-use crate::io::Io;
-use crate::mode::{NodeMix, NodeMode};
-use crate::node::{
-    ConstantMask, Cx, Env, InPlaceMask, Node, Prepare, SilenceMask, Status, TransportChanges,
-    TransportPosition,
-};
-use crate::param::{CellValue, ParamIn, ParamInput, ParamRange};
-use crate::param_event::{ParamEvent, ParamKind};
-use crate::plan::DelayKey;
-use crate::play::PlayClock;
-use crate::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
-use crate::time::Offset;
-use crate::values::GraphValues;
+use crate::compile::plan::DelayKey;
+use crate::event::sorted::SortedEvents;
+use crate::event::types::{Event, EventKind};
+use crate::event::writer::EventWriter;
+use crate::exec::command::Scheduled;
+use crate::exec::history::TransportHistory;
+use crate::model::mode::{NodeMix, NodeMode};
+use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
+use crate::model::values::GraphValues;
+use crate::node::io::Io;
+use crate::node::param::{CellValue, ParamIn, ParamInput, ParamRange};
+use crate::node::param_event::{ParamEvent, ParamKind};
+use crate::node::play::PlayClock;
+use crate::node::time::Offset;
+use crate::node::time::{Env, TransportChanges, TransportPosition};
+use crate::node::{ConstantMask, Cx, InPlaceMask, Node, Prepare, SilenceMask, Status};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, BendValue, CCNumber, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, U7,
@@ -179,7 +179,7 @@ struct RefRamp {
     shape: tutti_curve::Law,
     /// A curve segment's `(position, length)`; `None`: a ramp. Its law is
     /// `shape`.
-    curve: Option<crate::param_event::Timing>,
+    curve: Option<crate::node::param_event::Timing>,
     /// Its value on the last frame evaluated.
     value: f64,
     /// Whether the source has sent an event yet: until it has, the port
@@ -305,7 +305,7 @@ pub struct Reference<F: Float = f32> {
     history: TransportHistory,
     /// The play clock at the next block's first frame (before a start
     /// there), and whether the last block ended playing: written from the
-    /// rules in `src/play.rs`'s module docs, not through its `PlayState`.
+    /// rules in `src/node/play.rs`'s module docs, not through its `PlayState`.
     play: PlayReading,
     play_playing: bool,
 }
@@ -361,7 +361,7 @@ impl<F: Float> Reference<F> {
     ) -> PlayClock {
         if transport.playing && !self.play_playing {
             self.play = PlayReading {
-                epoch: crate::play::fresh_epochs(1),
+                epoch: crate::node::play::fresh_epochs(1),
                 play: Frame::ZERO,
             };
         }
@@ -378,7 +378,7 @@ impl<F: Float> Reference<F> {
             next_epoch: if starts.is_empty() {
                 0
             } else {
-                crate::play::fresh_epochs(starts.len() as u32)
+                crate::node::play::fresh_epochs(starts.len() as u32)
             },
         };
         self.play = match starts.last() {
@@ -434,7 +434,7 @@ impl<F: Float> Reference<F> {
             history: TransportHistory::new(),
             frame: Frame::ZERO,
             play: PlayReading {
-                epoch: crate::play::fresh_epochs(1),
+                epoch: crate::node::play::fresh_epochs(1),
                 play: Frame::ZERO,
             },
             play_playing: false,
@@ -1685,7 +1685,7 @@ impl<F: Float> Reference<F> {
                     SortedEvents::with_both(v, p, frames).expect("the reference sorted them")
                 })
                 .collect();
-            let drops = crate::event::PortCount::default();
+            let drops = crate::event::writer::PortCount::default();
             // The node's declared capacity bounds its writers here as in the
             // executor; undeclared, nothing does.
             let cap = shape
@@ -2073,7 +2073,7 @@ fn ref_port<F: Float>(
                     } else {
                         base(i).into()
                     };
-                    let arrives = Some(now + u64::from(crate::param_event::arrival(timing)));
+                    let arrives = Some(now + u64::from(crate::node::param_event::arrival(timing)));
                     // The piece in flight, sent again: the same values and
                     // law, bit for bit, arriving on the same frame, or both
                     // already at rest on their end. No corner.
@@ -2116,7 +2116,7 @@ fn ref_port<F: Float>(
         } else if let Some(timing) = r.curve {
             // Frames since its event, `0` on the event's own.
             let j = u32::try_from(now - r.at).unwrap_or(u32::MAX);
-            match crate::param_event::segment_progress(timing, j) {
+            match crate::node::param_event::segment_progress(timing, j) {
                 Some(t) => ref_line(param.param, r.from, r.target, r.shape, t),
                 None => r.target,
             }
@@ -2200,7 +2200,7 @@ struct RefMode<F: Float> {
     stale: bool,
     latency: usize,
     /// Which input channel feeds which output channel (`pass.rs`).
-    pass: crate::pass::Pass<F>,
+    pass: crate::model::pass::Pass<F>,
     /// The aligned input: one delay line of the declared latency per passed
     /// channel; empty at latency zero.
     lines: Vec<VecDeque<F>>,
@@ -2234,7 +2234,7 @@ enum RefFrame<F: Float> {
 /// The mode the executor acts on for a cell holding `mode`: a node whose shape
 /// declares its own bypass is never `Bypassed` to the executor (it is called
 /// as in `Active`).
-fn read_mode(shape: &crate::node::Shape, mode: NodeMode) -> NodeMode {
+fn read_mode(shape: &crate::node::shape::Shape, mode: NodeMode) -> NodeMode {
     if shape.own_bypass && mode == NodeMode::Bypassed {
         NodeMode::Active
     } else {
@@ -2254,7 +2254,7 @@ impl<F: Float> RefMode<F> {
     fn new(
         mode: NodeMode,
         mix: F,
-        shape: &crate::node::Shape,
+        shape: &crate::node::shape::Shape,
         latency: usize,
         declick: usize,
     ) -> Self {
@@ -2271,7 +2271,7 @@ impl<F: Float> RefMode<F> {
             warm: 0,
             stale: mode == NodeMode::Bypassed,
             latency,
-            pass: crate::pass::Pass::of_or_nothing(shape),
+            pass: crate::model::pass::Pass::of_or_nothing(shape),
             lines: Vec::new(),
             held_in: (0..shape.event_in).map(|_| RefHeld::default()).collect(),
             owed: BTreeMap::new(),

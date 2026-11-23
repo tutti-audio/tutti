@@ -46,9 +46,9 @@
 //! Run by `compile` in every debug build, and callable directly — the tests
 //! run it on every proptest graph.
 
-use crate::io::PortKind;
+use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
-use crate::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
+use crate::node::io::PortKind;
 
 use super::colour::Reach;
 
@@ -149,7 +149,7 @@ fn accesses(plan: &Plan, op: &Op) -> Vec<Access> {
 
 /// Every event slot a node op's driven params read. Out-of-range spans read
 /// nothing here; [`verify_params`] reports them.
-fn param_reads(plan: &Plan, params: crate::plan::Span) -> impl Iterator<Item = u32> + '_ {
+fn param_reads(plan: &Plan, params: crate::compile::plan::Span) -> impl Iterator<Item = u32> + '_ {
     plan.param_ports
         .get(params.range())
         .unwrap_or(&[])
@@ -653,7 +653,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             .unwrap_or_default()
     };
     for (f, spec) in plan.event_feedback.iter().enumerate() {
-        let crate::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
+        let crate::compile::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
             return Err(VerifyError(format!(
                 "event feedback {f} is not keyed as events"
             )));
@@ -677,7 +677,7 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             if s < fixed {
                 let spec = &plan.event_feedback[(s - 1) as usize];
                 return match spec.key {
-                    crate::plan::FeedbackKey::Event { from, delay, .. } => Ok(
+                    crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(
                         EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block),
                     ),
                     _ => Err(VerifyError(format!("event slot {s} is not event feedback"))),
@@ -813,8 +813,9 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
 mod tests {
     use super::*;
     use crate::compile::{Shapes, compile};
-    use crate::node::{InPlaceMask, Shape};
-    use crate::spec::GraphSpec;
+    use crate::model::spec::GraphSpec;
+    use crate::node::InPlaceMask;
+    use crate::node::shape::Shape;
     use crate::{NodeKey, Topology};
     use crate::{NodeSpec, OutputPort, PortSource};
     use tutti_buffers::ChannelLayout;
@@ -857,8 +858,8 @@ mod tests {
     /// events nothing reads, unordered with node 2. Returns the plan and
     /// node 2's op index.
     fn modulated_plan() -> (Plan, usize) {
-        use crate::param::ParamIn;
-        use crate::spec::EventOutputPort;
+        use crate::model::spec::EventOutputPort;
+        use crate::node::param::ParamIn;
         use tutti_units::UnitParam;
         let generator = Shape::source_unassigned(ChannelLayout::MONO);
         let sender = Shape::source_unassigned(ChannelLayout::MONO).events(0, 1);
@@ -929,13 +930,13 @@ mod tests {
         let mut bad = good.clone();
         for o in &mut bad.ops {
             if let Op::Node { params, .. } = o {
-                *params = crate::plan::Span { start: 0, len: 0 };
+                *params = crate::compile::plan::Span { start: 0, len: 0 };
             }
         }
         bad.nodes
             .recs
             .iter_mut()
-            .for_each(|r| r.params = crate::plan::Span { start: 0, len: 0 });
+            .for_each(|r| r.params = crate::compile::plan::Span { start: 0, len: 0 });
         assert!(
             err(&bad).contains("param ports no node op names"),
             "{}",
@@ -1133,7 +1134,7 @@ mod tests {
         // One addend is an alias, never an op.
         let mut bad = good.clone();
         bad.ops[i] = Op::Sum {
-            srcs: crate::plan::Span {
+            srcs: crate::compile::plan::Span {
                 start: srcs.start,
                 len: 1,
             },
@@ -1147,7 +1148,7 @@ mod tests {
         let first = good.audio_list[srcs.start as usize];
         bad.audio_list.extend(std::iter::repeat_n(first, 65));
         bad.ops[i] = Op::Sum {
-            srcs: crate::plan::Span { start, len: 65 },
+            srcs: crate::compile::plan::Span { start, len: 65 },
             dst,
         };
         assert!(verify(&bad).unwrap_err().0.contains("addends"));
@@ -1165,7 +1166,7 @@ mod tests {
         let mut bad = independent_pair();
         // Cut every edge: the outputs no longer follow their generators.
         let rows = bad.op_succ.rows();
-        bad.op_succ = crate::plan::Csr::from_rows(&vec![Vec::new(); rows]);
+        bad.op_succ = crate::compile::plan::Csr::from_rows(&vec![Vec::new(); rows]);
         assert!(verify(&bad).is_err());
     }
 
@@ -1195,12 +1196,12 @@ mod tests {
         let dup = bad.task_ops[0];
         let start = bad.task_ops.len() as u32;
         bad.task_ops.push(dup);
-        bad.tasks.push(crate::plan::Span { start, len: 1 });
+        bad.tasks.push(crate::compile::plan::Span { start, len: 1 });
         let rows: Vec<Vec<u32>> = (0..bad.tasks.len() - 1)
             .map(|t| bad.task_succ.row(t).to_vec())
             .chain([Vec::new()])
             .collect();
-        bad.task_succ = crate::plan::Csr::from_rows(&rows);
+        bad.task_succ = crate::compile::plan::Csr::from_rows(&rows);
         bad.task_activation.push(0);
         assert!(verify(&bad).unwrap_err().0.contains("two tasks"));
 
@@ -1211,7 +1212,7 @@ mod tests {
             .flat_map(|a| bad.op_succ.row(a).iter().map(move |&b| (a, b)))
             .collect();
         assert!(!edges.is_empty());
-        bad.task_succ = crate::plan::Csr::from_rows(&vec![Vec::new(); bad.tasks.len()]);
+        bad.task_succ = crate::compile::plan::Csr::from_rows(&vec![Vec::new(); bad.tasks.len()]);
         bad.task_activation = vec![0; bad.tasks.len()];
         // Only fails if some edge crossed tasks; the pair's generator → output
         // edges are fused, so add a cross edge by splitting a task.
@@ -1222,12 +1223,13 @@ mod tests {
                 t.tasks[0].len = 1;
                 t.tasks.insert(
                     1,
-                    crate::plan::Span {
+                    crate::compile::plan::Span {
                         start: span.start + 1,
                         len: span.len - 1,
                     },
                 );
-                t.task_succ = crate::plan::Csr::from_rows(&vec![Vec::new(); t.tasks.len()]);
+                t.task_succ =
+                    crate::compile::plan::Csr::from_rows(&vec![Vec::new(); t.tasks.len()]);
                 t.task_activation = vec![0; t.tasks.len()];
             }
             t
@@ -1256,8 +1258,8 @@ mod tests {
 
         // A delay no op uses.
         let mut bad = good.clone();
-        bad.delays.push(crate::plan::DelaySpec {
-            key: crate::plan::DelayKey::Output {
+        bad.delays.push(crate::compile::plan::DelaySpec {
+            key: crate::compile::plan::DelayKey::Output {
                 channel: 0,
                 from: PortSource::Zero,
             },
@@ -1305,9 +1307,9 @@ mod tests {
     /// lowering.
     #[test]
     fn every_node_record_carries_what_the_plan_says() {
-        use crate::arena::Role;
-        use crate::plan::{Direct, Form};
-        use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
+        use crate::compile::plan::{Direct, Form};
+        use crate::exec::arena::Role;
+        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
         use tutti_units::{Latency, Samples, Tail};
         let mono = ChannelLayout::MONO;
         let latent = Latency::new(Samples::new(4));
@@ -1531,7 +1533,7 @@ mod tests {
     /// 5 events, the other takes the default.
     #[test]
     fn the_verifier_rejects_a_merge_slot_too_small() {
-        use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
+        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
         let mut t = Topology::default();
         let mut shapes = Shapes::new();
         let src = Shape::EMPTY.events(0, 1);
@@ -1597,7 +1599,7 @@ mod tests {
     /// units whose shapes agree in all but the tail.
     #[test]
     fn fades_are_checked_against_both_plans() {
-        use crate::fade::Fade;
+        use crate::model::fade::Fade;
         use tutti_curve::FadeLaw;
         let (a, b) = (NodeKey(1), NodeKey(2));
         let generator = || Shape::source_unassigned(ChannelLayout::MONO);
