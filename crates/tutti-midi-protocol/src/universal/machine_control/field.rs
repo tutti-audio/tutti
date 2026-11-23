@@ -90,7 +90,7 @@ wire_enum! {
 
 wire_enum! {
     /// The motion control state a tally names (RP-013 p.56).
-    MotionState {
+    MotionControlState {
         /// `01`.
         Stop = 0x01,
         /// `02`.
@@ -130,7 +130,7 @@ wire_enum! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MotionControlTally {
     /// The most recently activated state.
-    pub state: MotionState,
+    pub state: MotionControlState,
     /// The most recently activated process.
     pub process: MotionProcess,
     /// How the state fared.

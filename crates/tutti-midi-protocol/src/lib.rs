@@ -202,10 +202,11 @@ pub use universal::{
     MmcSignature, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcStopMode, MmcString, MmcSubframes,
     MmcSupportBitmap, MmcSystemMaster, MmcTimeCode, MmcTimeCodeName, MmcTimeCodeSource,
     MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate, MmcUserBitFlags, MmcUserBits,
-    MotionControlTally, MotionProcess, MotionState, MtcAction, MtcFlags, MtcFullMessage, MtcSetUp,
-    MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition, NotMmcSegmentCount,
-    NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes, NotQuarterFramePiece,
-    NotSysexDeviceId, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient, RunReference,
-    SysexDeviceId, Universal, UniversalRead, UniversalReader, VitcInsert, read,
+    MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags, MtcFullMessage,
+    MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition,
+    NotMmcSegmentCount, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
+    NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
+    Recipient, RunReference, SysexDeviceId, Universal, UniversalRead, UniversalReader, VitcInsert,
+    read,
 };
 pub use voice::channel_voice;

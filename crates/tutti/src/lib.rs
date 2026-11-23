@@ -917,12 +917,11 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
-        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
-        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
-        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
-        TimecodeSeconds, TuningFrequency,
+        ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
+        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
+        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
@@ -955,6 +954,13 @@ pub mod midi {
         Voice1,
     };
     pub use tutti_ump::{
+        Articulation, ArticulationError, Classification, ColorSound, CoreSound,
+        CustomClassification, EffectSound, GestureSound, IntervallicTrill, MuteAmount, MuteError,
+        MuteMessage, MuteState, MuteType, NoteArticulation, NoteEnding, NoteOffArticulation,
+        PlayingPosition, ReleaseTime, ReservedMuteType, RunSound, SameNoteSound, ShortSound,
+        StringAssignment, Stroke,
+    };
+    pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,
         FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupChannelIndexOutOfRange,
         GroupSpanOutOfRange, MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange,
@@ -965,6 +971,7 @@ pub mod midi {
     pub use tutti_ump::{
         FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,
     };
+    pub use tutti_ump::{Held, HeldControllers, KeyBitset};
     pub use tutti_ump::{Join, PacketSpan, Spans};
 
     /// The session's one MIDI error: each cause (hardware, send, route) is its
@@ -1031,6 +1038,64 @@ pub mod midi {
         };
         #[cfg(feature = "session")]
         pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
+    }
+
+    /// Universal System Exclusive messages: what `Universal` reads and `Addressed`
+    /// sends (device control, MTC full message and set-up, General MIDI on and off,
+    /// the MIDI Machine Control commands and responses) and what a session's
+    /// `follow_machine_control` reports.
+    pub mod universal {
+        pub use tutti_midi_protocol::{
+            Addressed, Addressee, BadChecksum, GeneralMidiMode, GeneratorAction, GeneratorSetUp,
+            GeneratorTally, Heard, JamMode, JamReference, McpSuccess, McsSuccess, MmcArithmetic,
+            MmcAudioTrack, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand,
+            MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices,
+            MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind,
+            MmcErrorReport, MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse,
+            MmcExtension, MmcFastMode, MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup,
+            MmcInfoField, MmcItem, MmcItems, MmcLifterDefeat, MmcLocate, MmcMantissa,
+            MmcMaskedWrite, MmcMove, MmcName, MmcNames, MmcOtherField, MmcPayload,
+            MmcPlaySpeedReference, MmcPosition, MmcProcedure, MmcProcedureResponse, MmcReassembler,
+            MmcRecordActivity, MmcRecordMode, MmcRecordMonitor, MmcRecordStatus,
+            MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment,
+            MmcSegmentBytes, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection,
+            MmcSequence, MmcShift, MmcShortTimeCode, MmcSign, MmcSignature, MmcSlot, MmcSpeed,
+            MmcStep, MmcStepCount, MmcStopMode, MmcString, MmcSubframes, MmcSupportBitmap,
+            MmcSystemMaster, MmcTimeCode, MmcTimeCodeName, MmcTimeCodeSource, MmcTimeLabel,
+            MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate, MmcUserBitFlags, MmcUserBits,
+            MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
+            MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
+            NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
+            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
+            RunReference, Universal, UniversalRead, UniversalReader, VitcInsert,
+        };
+    }
+
+    /// The MIDI Tuning Standard (M2-101's Universal tuning messages): a key table,
+    /// a key change or an octave offset, and the frequency each carries.
+    pub mod tuning {
+        pub use tutti_midi_protocol::{
+            ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
+            MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency,
+            TuningMessage, TuningName,
+        };
+    }
+
+    /// The typed data of the MIDI-CI Profiles: the Profile definitions an app
+    /// reads from a peer's Profile Details reply and the controllers a Profile
+    /// enables. `DetailsData::decode` reads a reply by its Profile Id and Inquiry
+    /// Target.
+    pub mod profile {
+        pub use tutti_midi_ci::{
+            ArticulationDetails, ArticulationDetailsError, ArticulationFeatures, ArticulationLevel,
+            BitmapPosition, CcFunction, CcPart, CcReset, CcValue, CustomSounds, DefaultCcLevel,
+            Drawbar, DrawbarSetting, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel,
+            DrumSounds, Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel,
+            MutuallyExclusiveSet, NotABitmapPosition, NotADrawbarSetting, NotAGm2ChannelCount,
+            NotAMutuallyExclusiveSet, NotVariationCount, OrganFeatures, OrganLevel, OrganOption,
+            OrganValue, ProfileDetails, RotaryControl, RotarySpeaker, RotaryValue, Sound, SoundSet,
+            SubclassCounts, SuggestedCc, SwitchMeaning, TwoState, VariationCount, VibratoChorus,
+        };
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a
