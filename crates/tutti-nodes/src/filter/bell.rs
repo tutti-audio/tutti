@@ -2,36 +2,13 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{DecayTime, MatchedBell, SimdLanes, Sos, SosError};
+use tutti_dsp::{BellFilterControls, DecayTime, SimdLanes, Sos, SosError};
 use tutti_units::{Db, Hz, Q, SampleRate};
 
 use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
-use super::{eq_center, eq_gain, filter_bus};
+use super::filter_bus;
 use crate::kernel::KernelNode;
-
-/// The quality factors a bell takes: 0.1 to 30.
-const Q_RANGE: (Q, Q) = (Q::new(0.1), Q::new(30.0));
-
-/// The controls of a [`BellFilterNode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BellFilterControls {
-    /// The center, where the gain is reached. Read within 20 Hz and 0.99 of the Nyquist.
-    pub frequency: Hz,
-    /// The quality factor: the narrower, the higher. Read within 0.1 and 30.
-    pub q: Q,
-    /// The gain at the center, a boost above 0 dB and a cut below. Read within 24 dB.
-    pub gain: Db,
-}
-
-impl BellFilterControls {
-    /// 1 kHz, [`Q::BUTTERWORTH`] and 0 dB.
-    pub const DEFAULT: Self = Self {
-        frequency: Hz::new(1_000.0),
-        q: Q::BUTTERWORTH,
-        gain: Db::UNITY,
-    };
-}
 
 /// What a [`BellFilterNode`] is made from: its width and its controls' start.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,7 +28,7 @@ impl BellFilterConfig {
     }
 }
 
-/// A peaking equalizer of any width, a [`MatchedBell`] run as one state-variable section
+/// A peaking equalizer of any width, a [`MatchedBell`](tutti_dsp::MatchedBell) run as one state-variable section
 /// ([`SosBank`](tutti_dsp::SosBank)) in `f64`.
 ///
 /// The analog bell's gain is kept at DC, at the center and at Nyquist, so a center high in
@@ -61,7 +38,7 @@ impl BellFilterConfig {
 /// frames with the state kept, so an automated control ramps and the section stays stable.
 ///
 /// The declared tail is unbounded: the matched cut's poles have no closed-form bound over the
-/// ranges. Each block narrows it to [`MatchedBell::decay_time`] at the controls in force, the
+/// ranges. Each block narrows it to [`MatchedBell::decay_time`](tutti_dsp::MatchedBell::decay_time) at the controls in force, the
 /// first frame from which the tail sum of the impulse response is under the floor, so any
 /// input in `[-1, 1]` that stops is under the floor by then at the controls in force. No latency. A [`KernelNode`]. Made from a
 /// [`BellFilterConfig`] (`BellFilterNode::from`).
@@ -107,30 +84,19 @@ impl Sealed for BellFilterControls {
     const DEFAULT: Self = Self::DEFAULT;
 
     fn held(&self, rate: SampleRate) -> Self {
-        Self {
-            frequency: eq_center(self.frequency, rate),
-            q: self.q.clamp(Q_RANGE.0, Q_RANGE.1),
-            gain: eq_gain(self.gain),
-        }
+        self.held(rate)
     }
 
     fn design_into(&self, rate: SampleRate, into: &mut Sos) -> Result<(), SosError> {
-        MatchedBell::new(self.q, self.gain).design_into(self.frequency, rate, into)
+        self.design_into(rate, into)
     }
 
     fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
-        MatchedBell::new(self.q, self.gain).decay_time(self.frequency, rate, floor)
+        self.decay_time(rate, floor)
     }
 
-    /// Unbounded. The boost's poles are `exp(-zeta w0)` with `zeta = 1 / (2 A Q)`, slowest
-    /// at the lowest center, highest Q and largest boost, but the cut is the boost's
-    /// inverse, whose poles are the boost's zeros, and the matched zeros have no
-    /// closed-form bound on their radius (the numerator is fixed by three magnitudes, not
-    /// by its zeros). A ceiling is a bound over every control, so the shape declares none;
-    /// each block's [`MatchedBell::decay_time`] is a bound at its controls and is what the
-    /// node reports.
-    fn decay_ceiling(_: SampleRate, _: Db) -> Result<DecayTime, SosError> {
-        Ok(DecayTime::Unbounded)
+    fn decay_ceiling(rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
+        Self::decay_ceiling(rate, floor)
     }
 }
 
@@ -144,6 +110,7 @@ mod tests {
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::MaxBlock;
+    use tutti_dsp::MatchedBell;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
@@ -277,30 +244,6 @@ mod tests {
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
         let want = designed(Hz::new(4_000.0), Q::new(2.0), Db::new(12.0), bin(256));
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
-    }
-
-    /// A center, Q and gain past their ranges read as the end of them, bit for bit.
-    #[test]
-    fn controls_out_of_range_are_read_as_the_end_of_it() {
-        let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, q: f64, db: f64| {
-            render(
-                &mut node(config(Hz::new(hz), Q::new(q), Db::new(db))),
-                &input,
-            )
-        };
-        assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
-        assert_eq!(
-            at(90_000.0, 1.0, 6.0),
-            at(RATE.nyquist_scaled(0.99).get(), 1.0, 6.0)
-        );
-        // The lower bound 0.1 is not an `f32`, which the control carries until the control
-        // cells are `f64`, so two figures below it are compared: this pins that the floor
-        // clamps, not that it is 0.1. The upper bound 30 is exact in both.
-        assert_eq!(at(500.0, 0.0, 6.0), at(500.0, 0.05, 6.0));
-        assert_eq!(at(500.0, 900.0, 6.0), at(500.0, 30.0, 6.0));
-        assert_eq!(at(500.0, 1.0, 90.0), at(500.0, 1.0, 24.0));
-        assert_ne!(at(500.0, 1.0, 6.0), at(500.0, 1.0, -6.0));
     }
 
     /// For centers, Q and gains across the ranges the reported tail covers the first frame

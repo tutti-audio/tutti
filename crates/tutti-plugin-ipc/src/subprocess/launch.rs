@@ -580,10 +580,7 @@ fn stage_state(
         }
     };
     let call = config.timeouts.call;
-    let staged = Announced::new(blob, |blob| StageState {
-        len: state.len() as u64,
-        blob,
-    });
+    let staged = Announced::<StageState>::new(blob, state.len() as u64);
     // The object is held until the answer: where it is read by name, it stays
     // until then.
     match launch.call_announced(staged, call, call)? {
@@ -634,7 +631,7 @@ fn setup_shm(
     let (slab, handle) = AudioSlab::create(layout.clone())?;
 
     let call = config.timeouts.call;
-    let setup = Announced::new(handle, |slab| SetupSharedMemory { slab, layout });
+    let setup = Announced::<SetupSharedMemory>::new(handle, layout);
     match launch.call_announced(setup, call, call)? {
         (Ok(SharedMemoryReady), _held) => Ok(slab),
         (Err(other), _held) => Err(unexpected_message("SharedMemoryReady", &other)),
@@ -647,10 +644,7 @@ fn setup_shm(
 fn open_audio_lane(launch: &mut Launch<'_>, config: &IpcConfig) -> IpcResult<ControlStream> {
     let lane = PendingLane::new()?;
     let call = config.timeouts.call;
-    let open = Announced::new(lane, |wire| OpenLane {
-        lane: Lane::Audio,
-        wire,
-    });
+    let open = Announced::<OpenLane>::new(lane, Lane::Audio);
     match launch.call_announced(open, call, call)? {
         (Ok(LaneOpened), lane) => lane.stream(),
         (Err(other), _held) => Err(unexpected_message("LaneOpened", &other)),

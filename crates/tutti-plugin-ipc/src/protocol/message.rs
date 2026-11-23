@@ -91,20 +91,41 @@ pub trait Message: Into<ControlRequest> {
     type Handled: Into<Reaction>;
 }
 
+/// What a handler has of the loop that serves it: the main thread's proof, and
+/// the sink for what a long handling has reached.
+pub struct Handling<'a> {
+    /// The main thread, which handling runs on.
+    pub main: MainThreadMarker,
+    interim: &'a mut dyn FnMut(Working),
+}
+
+impl std::fmt::Debug for Handling<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Handling")
+            .field("main", &self.main)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> Handling<'a> {
+    /// Handling on `main`, with `interim` hearing what a handler reports.
+    pub fn new(main: MainThreadMarker, interim: &'a mut dyn FnMut(Working)) -> Self {
+        Self { main, interim }
+    }
+
+    /// Tells the host a long handling has reached `stage`
+    /// ([`Working::Restoring`]), so what it waits for changes with it.
+    pub fn interim(&mut self, stage: Working) {
+        (self.interim)(stage);
+    }
+}
+
 /// The server's handling of one request: it returns the row's
 /// [`Handled`](Message::Handled), so a handler that answers with another row's
 /// reply does not compile.
-///
-/// `interim` tells the host what a long handling has reached, as
-/// [`Working::Restoring`]: a handler that has nothing to tell ignores it.
 pub trait Handle<M: Message> {
-    /// Handles `msg` on the main thread.
-    fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        msg: M,
-        interim: &mut dyn FnMut(Working),
-    ) -> M::Handled;
+    /// Handles `msg` in the loop `cx` describes.
+    fn handle(&mut self, cx: &mut Handling<'_>, msg: M) -> M::Handled;
 }
 
 /// A request the server answers: its [`Reply`](Message::Reply) is built from, and
@@ -321,24 +342,14 @@ macro_rules! messages {
 
         /// Handles `request` with the handler of its row and returns what the
         /// server's loop does next.
-        pub fn serve<H>(
-            handler: &mut H,
-            main: MainThreadMarker,
-            interim: &mut dyn FnMut(Working),
-            request: ControlRequest,
-        ) -> Reaction
+        pub fn serve<H>(handler: &mut H, cx: &mut Handling<'_>, request: ControlRequest) -> Reaction
         where
             H: $(Handle<$name> +)*
         {
             match request {
                 $(
                     ControlRequest::$name $({ $($field),* })? => {
-                        <H as Handle<$name>>::handle(
-                            handler,
-                            main,
-                            $name $({ $($field),* })?,
-                            interim,
-                        )
+                        <H as Handle<$name>>::handle(handler, cx, $name $({ $($field),* })?)
                         .into()
                     }
                 )*

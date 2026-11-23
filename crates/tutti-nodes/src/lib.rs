@@ -375,21 +375,22 @@ pub use tutti_dsp::DcBlockerControls;
 
 mod filter;
 pub use filter::{
-    BellFilterConfig, BellFilterControls, BellFilterKernel, BellFilterNode, BellFilterSet,
-    CrossoverConfig, CrossoverKernel, CrossoverNode, CrossoverSet, CutAlignment, CutFilterConfig,
-    CutFilterControls, CutFilterKernel, CutFilterNode, CutFilterSet, EqBandConfig, EqBandNode,
-    EqControls, EqKernel, LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet,
-    MIN_CUT_CUTOFF, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet, TiltFilterConfig,
-    TiltFilterControls, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
+    BellFilterConfig, BellFilterKernel, BellFilterNode, BellFilterSet, CrossoverConfig,
+    CrossoverKernel, CrossoverNode, CrossoverSet, CutFilterConfig, CutFilterKernel, CutFilterNode,
+    CutFilterSet, EqBandConfig, EqBandNode, EqControls, EqKernel, LadderFilterConfig,
+    LadderFilterNode, LadderKernel, LadderSet, SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet,
+    TiltFilterConfig, TiltFilterKernel, TiltFilterNode, TiltFilterSet,
 };
 pub use filter::{
     EnvelopeFilterConfig, EnvelopeFilterKernel, EnvelopeFilterNode, EnvelopeFilterSet,
 };
-pub use filter::{
-    GraphicEqConfig, GraphicEqControls, GraphicEqKernel, GraphicEqNode, GraphicEqSet,
-};
+pub use filter::{GraphicEqConfig, GraphicEqKernel, GraphicEqNode, GraphicEqSet};
 pub use tutti_dsp::EnvelopeFilterControls;
 pub use tutti_dsp::GraphicBands;
+pub use tutti_dsp::{
+    BellFilterControls, CutAlignment, CutFilterControls, GraphicEqControls, MIN_CUT_CUTOFF,
+    TiltFilterControls,
+};
 pub use tutti_dsp::{
     ButterworthOrder, CutResponse, EllipticTolerances, PassbandRipple, StopbandAttenuation,
 };

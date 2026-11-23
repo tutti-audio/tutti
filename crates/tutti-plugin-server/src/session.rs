@@ -15,7 +15,8 @@ use crate::served::AnyServer;
 use crate::ties::Ties;
 use dpi::Size;
 use tutti_plugin_ipc::{
-    AudioSlab, ControlReply, ControlRequest, News, Reaction, SlabHandle, SlabLayout, Working, serve,
+    AudioSlab, ControlReply, ControlRequest, Handling, News, Reaction, SlabHandle, SlabLayout,
+    Working, serve,
 };
 use tutti_plugin_ipc_ffi::Ready;
 #[cfg(all(test, feature = "clap"))]
@@ -159,7 +160,7 @@ impl Session {
         msg: ControlRequest,
         interim: &mut dyn FnMut(Working),
     ) -> Reaction {
-        let reaction = serve(self, main, interim, msg);
+        let reaction = serve(self, &mut Handling::new(main, interim), msg);
         // What the message changed that a block reads reaches the render thread
         // before the host is answered, so every block it sends after the answer
         // runs with it.

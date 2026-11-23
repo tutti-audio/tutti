@@ -17,10 +17,11 @@
 use crate::protocol::frame::{decode_body, decode_prefix, write_frame};
 use crate::transport::PendingLane;
 use crate::{
-    BlobWire, ControlRequest, Framed, LaneWire, LoadState, Message, OpenLane, ReqId, Request,
-    SetupSharedMemory, SlabHandle, SlabWire, StageState,
+    BlobWire, ControlRequest, Framed, Lane, LaneWire, LoadState, Message, OpenLane, ReqId, Request,
+    SetupSharedMemory, SlabHandle, SlabLayout, SlabWire, StageState,
 };
 use tutti_plugin_ipc_ffi::{Blob, Connection, Lease, Received};
+use tutti_plugin_types::StateUse;
 use tutti_plugin_types::{IpcError, IpcResult};
 
 use super::sys::Wakeup;
@@ -143,43 +144,74 @@ impl Attached for PendingLane {
     }
 }
 
-/// A request that is followed by an object, and the kind of object it announces.
+/// A request that is followed by an object, and how it is made from that object.
 pub(crate) trait Announces: Message {
     /// The object that follows the request.
     type Object: Attached;
+    /// What the request carries beside the object's wire.
+    type Rest;
+
+    /// The request that announces an object by `wire`, with `rest` of its fields.
+    fn announce(wire: <Self::Object as Attached>::Wire, rest: Self::Rest) -> Self;
 }
 
 impl Announces for SetupSharedMemory {
     type Object = SlabHandle;
+    /// The slab's layout.
+    type Rest = SlabLayout;
+
+    fn announce(slab: SlabWire, layout: SlabLayout) -> Self {
+        Self { slab, layout }
+    }
 }
 
 impl Announces for OpenLane {
     type Object = PendingLane;
+    type Rest = Lane;
+
+    fn announce(wire: LaneWire, lane: Lane) -> Self {
+        Self { lane, wire }
+    }
 }
 
 impl Announces for LoadState {
     type Object = Blob;
+    /// What the state is restored for, and its length.
+    type Rest = (StateUse, u64);
+
+    fn announce(blob: BlobWire, (state_use, len): (StateUse, u64)) -> Self {
+        Self {
+            state_use,
+            len,
+            blob,
+        }
+    }
 }
 
 impl Announces for StageState {
     type Object = Blob;
+    /// The state's length.
+    type Rest = u64;
+
+    fn announce(blob: BlobWire, len: u64) -> Self {
+        Self { len, blob }
+    }
 }
 
-/// A request that announces an object, with that object: the request is made
-/// from the object's own wire, so it cannot announce another.
+/// A request that announces an object, with that object. The request is made by
+/// [`Announces::announce`] from the object's own wire, so the frame names this
+/// object and no other: a caller supplies the object and the request's other
+/// fields, and never a wire.
 pub(crate) struct Announced<M: Announces> {
     msg: M,
     object: M::Object,
 }
 
 impl<M: Announces> Announced<M> {
-    /// `object`, with the request `announce` makes from the object's wire.
-    pub(crate) fn new(
-        object: M::Object,
-        announce: impl FnOnce(<M::Object as Attached>::Wire) -> M,
-    ) -> Self {
+    /// `object`, with the request that announces it and carries `rest`.
+    pub(crate) fn new(object: M::Object, rest: M::Rest) -> Self {
         Self {
-            msg: announce(object.wire()),
+            msg: M::announce(object.wire(), rest),
             object,
         }
     }
@@ -716,10 +748,7 @@ mod tests {
 
         let mut p = pair();
         let mut server = p.take_peer();
-        let announced = Announced::new(handle, |slab| crate::SetupSharedMemory {
-            slab,
-            layout: layout.clone(),
-        });
+        let announced = Announced::<crate::SetupSharedMemory>::new(handle, layout.clone());
         send_attached(&mut p.host, ReqId::new(7), announced).unwrap();
 
         let Request { id, body } = read_frame(&mut server).unwrap();

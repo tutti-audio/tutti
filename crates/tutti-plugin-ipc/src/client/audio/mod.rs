@@ -841,11 +841,10 @@ impl AudioBridge {
         let blob = Blob::create(data).map_err(|e| {
             StateError::Rejected(format!("the state could not be made into an object: {e}"))
         })?;
-        Ok(Announced::new(blob, |blob| LoadState {
-            state_use,
-            len: data.len() as u64,
+        Ok(Announced::<LoadState>::new(
             blob,
-        }))
+            (state_use, data.len() as u64),
+        ))
     }
 
     /// Asks the server `msg` and waits for what `finish` makes of the lane's
@@ -1161,10 +1160,7 @@ impl AudioBridge {
     /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
     /// Control thread; the old slab stays valid until the caller drops it.
     pub(crate) fn setup_shared_memory(&self, slab: SlabHandle, layout: SlabLayout) -> bool {
-        let (msg, object) = Object::announced(Announced::new(slab, |slab| SetupSharedMemory {
-            slab,
-            layout,
-        }));
+        let (msg, object) = Object::announced(Announced::<SetupSharedMemory>::new(slab, layout));
         self.call(msg, Deadline::Query, object).is_ok()
     }
 

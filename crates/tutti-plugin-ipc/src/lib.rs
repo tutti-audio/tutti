@@ -101,7 +101,7 @@ pub use protocol::{
     ArmPluginMidiLearn, AudioReply, AudioRequest, CONTROL_FRAME_BYTES, CloseEditor, ControlFrame,
     ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, Framed,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
-    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Lane,
+    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling, Lane,
     LaneOpened, LoadPlugin, LoadPreset, LoadState, Message, News, OpenEditor, OpenLane,
     PROTOCOL_VERSION, ParameterList, ParameterNormalized, ParameterPlain, ParameterText,
     ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn, PresetList,

@@ -8,23 +8,23 @@ use crate::served::AnyServer;
 use tutti_plugin_ipc::{
     AppMidiMapApplied, ArmPluginMidiLearn, CloseEditor, CurrentPreset, EditorOpened, EditorSized,
     GetCurrentPreset, GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain,
-    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, LoadPlugin,
-    LoadPreset, LoadState, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
+    GetParameterText, GetParameterValueFromText, GetPresetList, GetWiring, Handle, Handling,
+    LoadPlugin, LoadPreset, LoadState, OpenEditor, OpenLane, ParameterList, ParameterNormalized,
     ParameterPlain, ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded,
     PluginMidiLearn, PresetList, PresetLoaded, SampleRateSet, SaveState, SavedState, SetAppMidiMap,
     SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
     SetupSharedMemory, Shutdown, StageState, Stop, Wiring, Working,
 };
 use tutti_plugin_types::{
-    MAX_STATE_BYTES, MainThreadMarker, MidiMapApplied, ParameterQueue, PluginLearnError, PluginRef,
-    ServerError, StateError,
+    MAX_STATE_BYTES, MidiMapApplied, ParameterQueue, PluginLearnError, PluginRef, ServerError,
+    StateError,
 };
 
 impl Handle<LoadPlugin> for Session {
     /// Opens the plugin the message names, replacing the one held.
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         LoadPlugin {
             path,
             format,
@@ -34,8 +34,8 @@ impl Handle<LoadPlugin> for Session {
             preferred_format,
             state: declared,
         }: LoadPlugin,
-        interim: &mut dyn FnMut(Working),
     ) -> Result<PluginLoaded, ServerError> {
+        let main = cx.main;
         // What a host staged for this load, restored before the activation: only
         // when the load declares exactly it. Staged here or declared here and not
         // the other, or of another length, is a host that is out of step with
@@ -58,7 +58,7 @@ impl Handle<LoadPlugin> for Session {
                 });
             }
         }
-        let mut restoring = || interim(Working::Restoring);
+        let mut restoring = || cx.interim(Working::Restoring);
         let (plugin, state_error, seat) = match AnyServer::load(
             main,
             &self.work_handle,
@@ -134,9 +134,8 @@ impl Handle<SaveState> for Session {
     ///   because nothing is playing.
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         SaveState { state_use }: SaveState,
-        _: &mut dyn FnMut(Working),
     ) -> Result<SavedState, ServerError> {
         let settle = self.write_pending && {
             let id = self.render.barrier();
@@ -145,9 +144,9 @@ impl Handle<SaveState> for Session {
         self.write_pending = false;
         let data = match self.plugin.as_mut() {
             Some(p) => match if settle {
-                p.plugin_mut().save_state(main, state_use)
+                p.plugin_mut().save_state(cx.main, state_use)
             } else {
-                p.plugin_mut().save_state_live(main, state_use)
+                p.plugin_mut().save_state_live(cx.main, state_use)
             } {
                 Ok(data) => data,
                 // A plugin that fails to serialise is not a transport problem:
@@ -173,28 +172,18 @@ impl Handle<SaveState> for Session {
 }
 
 impl Handle<SetAutomationState> for Session {
-    fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        SetAutomationState { mode }: SetAutomationState,
-        _: &mut dyn FnMut(Working),
-    ) {
+    fn handle(&mut self, cx: &mut Handling<'_>, SetAutomationState { mode }: SetAutomationState) {
         self.write_pending = true;
         if let Some(plugin) = self.plugin.as_mut() {
-            plugin.plugin_mut().set_automation_state(main, mode);
+            plugin.plugin_mut().set_automation_state(cx.main, mode);
         }
     }
 }
 
 impl Handle<SetTrackInfo> for Session {
-    fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        SetTrackInfo { info }: SetTrackInfo,
-        _: &mut dyn FnMut(Working),
-    ) {
+    fn handle(&mut self, cx: &mut Handling<'_>, SetTrackInfo { info }: SetTrackInfo) {
         if let Some(plugin) = self.plugin.as_mut() {
-            plugin.plugin_mut().set_track_info(main, &info);
+            plugin.plugin_mut().set_track_info(cx.main, &info);
         }
     }
 }
@@ -202,12 +191,11 @@ impl Handle<SetTrackInfo> for Session {
 impl Handle<SetAppMidiMap> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         SetAppMidiMap { app }: SetAppMidiMap,
-        _: &mut dyn FnMut(Working),
     ) -> Result<AppMidiMapApplied, ServerError> {
         let applied = self.plugin.as_mut().map_or(MidiMapApplied::Host, |p| {
-            p.plugin_mut().set_app_midi_map(main, &app)
+            p.plugin_mut().set_app_midi_map(cx.main, &app)
         });
         Ok(AppMidiMapApplied { applied })
     }
@@ -216,15 +204,14 @@ impl Handle<SetAppMidiMap> for Session {
 impl Handle<GetWiring> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetWiring: GetWiring,
-        _: &mut dyn FnMut(Working),
     ) -> Result<Wiring, ServerError> {
         // With no plugin the answer is the refusal, which the host reads as
         // "no wiring" and keeps the one it has.
         match self.plugin.as_mut() {
             Some(p) => Ok(Wiring {
-                wiring: p.plugin_mut().wiring(main),
+                wiring: p.plugin_mut().wiring(cx.main),
             }),
             None => Err(ServerError::NoPlugin),
         }
@@ -234,12 +221,11 @@ impl Handle<GetWiring> for Session {
 impl Handle<ArmPluginMidiLearn> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         ArmPluginMidiLearn { armed }: ArmPluginMidiLearn,
-        _: &mut dyn FnMut(Working),
     ) -> Result<PluginMidiLearn, ServerError> {
         let result = match self.plugin.as_mut() {
-            Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),
+            Some(p) => p.plugin_mut().arm_plugin_midi_learn(cx.main, armed),
             None => Err(PluginLearnError::Lost),
         };
         Ok(PluginMidiLearn { result })
@@ -249,14 +235,13 @@ impl Handle<ArmPluginMidiLearn> for Session {
 impl Handle<GetParameter> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameter { param_id }: GetParameter,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterValue, ServerError> {
         let value = self
             .plugin
             .as_ref()
-            .and_then(|p| p.plugin().parameter(main, param_id));
+            .and_then(|p| p.plugin().parameter(cx.main, param_id));
         Ok(ParameterValue { value })
     }
 }
@@ -264,14 +249,13 @@ impl Handle<GetParameter> for Session {
 impl Handle<GetParameterList> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameterList: GetParameterList,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterList, ServerError> {
         let parameters = self
             .plugin
             .as_ref()
-            .map(|p| p.plugin().parameters(main))
+            .map(|p| p.plugin().parameters(cx.main))
             .unwrap_or_default();
         Ok(ParameterList { parameters })
     }
@@ -280,9 +264,8 @@ impl Handle<GetParameterList> for Session {
 impl Handle<GetPresetList> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetPresetList: GetPresetList,
-        _: &mut dyn FnMut(Working),
     ) -> Result<PresetList, ServerError> {
         // `unwrap_or_default` — an empty list, matching
         // `GetParameterList` above. A request arriving before a plugin
@@ -292,7 +275,7 @@ impl Handle<GetPresetList> for Session {
         let presets = self
             .plugin
             .as_mut()
-            .map(|p| p.plugin_mut().presets(main))
+            .map(|p| p.plugin_mut().presets(cx.main))
             .unwrap_or_default();
         Ok(PresetList { presets })
     }
@@ -301,16 +284,15 @@ impl Handle<GetPresetList> for Session {
 impl Handle<LoadPreset> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         LoadPreset { id }: LoadPreset,
-        _: &mut dyn FnMut(Working),
     ) -> Result<PresetLoaded, ServerError> {
         self.write_pending = true;
         self.forget_informs();
         let ok = self
             .plugin
             .as_mut()
-            .is_some_and(|p| p.plugin_mut().load_preset(main, &id));
+            .is_some_and(|p| p.plugin_mut().load_preset(cx.main, &id));
         self.forget_informs();
         Ok(PresetLoaded { ok })
     }
@@ -319,14 +301,13 @@ impl Handle<LoadPreset> for Session {
 impl Handle<GetCurrentPreset> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetCurrentPreset: GetCurrentPreset,
-        _: &mut dyn FnMut(Working),
     ) -> Result<CurrentPreset, ServerError> {
         let id = self
             .plugin
             .as_mut()
-            .and_then(|p| p.plugin_mut().current_preset(main));
+            .and_then(|p| p.plugin_mut().current_preset(cx.main));
         Ok(CurrentPreset { id })
     }
 }
@@ -334,14 +315,13 @@ impl Handle<GetCurrentPreset> for Session {
 impl Handle<GetParameterPlain> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameterPlain { param_id, value }: GetParameterPlain,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterPlain, ServerError> {
         let plain = self
             .plugin
             .as_ref()
-            .and_then(|p| p.plugin().parameter_plain(main, param_id, value));
+            .and_then(|p| p.plugin().parameter_plain(cx.main, param_id, value));
         Ok(ParameterPlain { plain })
     }
 }
@@ -349,14 +329,13 @@ impl Handle<GetParameterPlain> for Session {
 impl Handle<GetParameterNormalized> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameterNormalized { param_id, plain }: GetParameterNormalized,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterNormalized, ServerError> {
         let value = self
             .plugin
             .as_ref()
-            .and_then(|p| p.plugin().parameter_normalized(main, param_id, plain));
+            .and_then(|p| p.plugin().parameter_normalized(cx.main, param_id, plain));
         Ok(ParameterNormalized { value })
     }
 }
@@ -364,14 +343,13 @@ impl Handle<GetParameterNormalized> for Session {
 impl Handle<GetParameterText> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameterText { param_id, value }: GetParameterText,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterText, ServerError> {
         let text = self
             .plugin
             .as_ref()
-            .and_then(|p| p.plugin().parameter_text(main, param_id, value));
+            .and_then(|p| p.plugin().parameter_text(cx.main, param_id, value));
         Ok(ParameterText { text })
     }
 }
@@ -379,19 +357,18 @@ impl Handle<GetParameterText> for Session {
 impl Handle<GetParameterValueFromText> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         GetParameterValueFromText { param_id, text }: GetParameterValueFromText,
-        _: &mut dyn FnMut(Working),
     ) -> Result<ParameterValueFromText, ServerError> {
         // Reads as a query, but is not one on every format: VST2's
         // `effString2Parameter` writes the parsed value into the plugin
         // as it reads it. The trait takes `&self` because the plugin
         // handle is interior-mutable at the FFI edge, so this stays on
         // the `as_ref` path with the other queries.
-        let value = self
-            .plugin
-            .as_ref()
-            .and_then(|p| p.plugin().parameter_value_from_text(main, param_id, &text));
+        let value = self.plugin.as_ref().and_then(|p| {
+            p.plugin()
+                .parameter_value_from_text(cx.main, param_id, &text)
+        });
         Ok(ParameterValueFromText { value })
     }
 }
@@ -399,9 +376,8 @@ impl Handle<GetParameterValueFromText> for Session {
 impl Handle<SetSampleRate> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         SetSampleRate { rate }: SetSampleRate,
-        _: &mut dyn FnMut(Working),
     ) -> Result<SampleRateSet, ServerError> {
         // A rate no clock can run at is refused by the wire itself: a
         // `SampleRate` does not decode from one.
@@ -409,7 +385,7 @@ impl Handle<SetSampleRate> for Session {
         // the host is told, because a rolled-back plugin would
         // otherwise render at its old rate against the host's blocks.
         let refusal = match self.plugin.as_mut() {
-            Some(plugin) => match plugin.plugin_mut().set_sample_rate(main, rate) {
+            Some(plugin) => match plugin.plugin_mut().set_sample_rate(cx.main, rate) {
                 Ok(()) => None,
                 Err(e) => {
                     tracing::warn!(requested = %rate, "sample rate not applied: {e}");
@@ -424,19 +400,14 @@ impl Handle<SetSampleRate> for Session {
 }
 
 impl Handle<SetRenderMode> for Session {
-    fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        SetRenderMode { mode }: SetRenderMode,
-        _: &mut dyn FnMut(Working),
-    ) {
+    fn handle(&mut self, cx: &mut Handling<'_>, SetRenderMode { mode }: SetRenderMode) {
         // A plugin that has the capability (`Features::RENDER_MODE`) and
         // refuses the mode tells the host as news
         // (`News::RenderModeNotApplied`), through the plugin's poll; one
         // without it is left in its mode and says nothing, since the
         // host has the capability.
         if let Some(plugin) = self.plugin.as_mut()
-            && !plugin.plugin_mut().set_render_mode(main, mode)
+            && !plugin.plugin_mut().set_render_mode(cx.main, mode)
         {
             tracing::debug!(?mode, "plugin did not accept the render mode");
         }
@@ -446,36 +417,31 @@ impl Handle<SetRenderMode> for Session {
 impl Handle<OpenEditor> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         OpenEditor { parent, scale }: OpenEditor,
-        _: &mut dyn FnMut(Working),
     ) -> Result<EditorOpened, ServerError> {
         let result = self
-            .open_editor(main, parent, scale)
+            .open_editor(cx.main, parent, scale)
             .map_err(editor_wire_error);
         Ok(EditorOpened { result })
     }
 }
 
 impl Handle<CloseEditor> for Session {
-    fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        CloseEditor: CloseEditor,
-        _: &mut dyn FnMut(Working),
-    ) {
-        self.close_editor(main);
+    fn handle(&mut self, cx: &mut Handling<'_>, CloseEditor: CloseEditor) {
+        self.close_editor(cx.main);
     }
 }
 
 impl Handle<SetEditorSize> for Session {
     fn handle(
         &mut self,
-        main: MainThreadMarker,
+        cx: &mut Handling<'_>,
         SetEditorSize { size }: SetEditorSize,
-        _: &mut dyn FnMut(Working),
     ) -> Result<EditorSized, ServerError> {
-        let result = self.set_editor_size(main, size).map_err(editor_wire_error);
+        let result = self
+            .set_editor_size(cx.main, size)
+            .map_err(editor_wire_error);
         Ok(EditorSized { result })
     }
 }
@@ -486,9 +452,8 @@ impl Handle<SetEditorSize> for Session {
 impl Handle<LoadState> for Session {
     fn handle(
         &mut self,
-        _: MainThreadMarker,
+        _: &mut Handling<'_>,
         _: LoadState,
-        _: &mut dyn FnMut(Working),
     ) -> Result<tutti_plugin_ipc::StateLoaded, ServerError> {
         Err(ServerError::StateWithoutObject)
     }
@@ -497,9 +462,8 @@ impl Handle<LoadState> for Session {
 impl Handle<StageState> for Session {
     fn handle(
         &mut self,
-        _: MainThreadMarker,
+        _: &mut Handling<'_>,
         _: StageState,
-        _: &mut dyn FnMut(Working),
     ) -> Result<tutti_plugin_ipc::StateStaged, ServerError> {
         Err(ServerError::StateWithoutObject)
     }
@@ -508,9 +472,8 @@ impl Handle<StageState> for Session {
 impl Handle<SetupSharedMemory> for Session {
     fn handle(
         &mut self,
-        _: MainThreadMarker,
+        _: &mut Handling<'_>,
         _: SetupSharedMemory,
-        _: &mut dyn FnMut(Working),
     ) -> Result<tutti_plugin_ipc::SharedMemoryReady, ServerError> {
         Err(ServerError::SlabSetupWithoutSlab)
     }
@@ -519,21 +482,15 @@ impl Handle<SetupSharedMemory> for Session {
 impl Handle<OpenLane> for Session {
     fn handle(
         &mut self,
-        _: MainThreadMarker,
+        _: &mut Handling<'_>,
         _: OpenLane,
-        _: &mut dyn FnMut(Working),
     ) -> Result<tutti_plugin_ipc::LaneOpened, ServerError> {
         Err(ServerError::LaneWithoutEnd)
     }
 }
 
 impl Handle<Shutdown> for Session {
-    fn handle(
-        &mut self,
-        _: MainThreadMarker,
-        Shutdown: Shutdown,
-        _: &mut dyn FnMut(Working),
-    ) -> Stop {
+    fn handle(&mut self, _: &mut Handling<'_>, Shutdown: Shutdown) -> Stop {
         Stop
     }
 }
