@@ -517,9 +517,9 @@ pub(super) fn node_op_with<
     // it holds, whatever it says of itself.
     let skip = skip && !(discards && u.mode.holds_input());
     u.quiet = if quiet_inputs {
-        u.quiet.saturating_add(frames as u64)
+        u.quiet + Samples::new(frames)
     } else {
-        0
+        Samples::ZERO
     };
     // The fused param step: only for a unit with a modulated param, or one
     // still declicking off one; every other unit pays this one branch. Run

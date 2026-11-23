@@ -28,6 +28,7 @@ use tutti_buffers::Float;
 use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
+use tutti_units::Samples;
 
 use super::commit::{Commit, Participants, Rendered};
 use super::node_op::Flags;
@@ -197,7 +198,7 @@ struct Cx<'a> {
     resumed: bool,
     max_block: usize,
     cap: usize,
-    declick: usize,
+    declick: Samples,
 }
 
 impl Cx<'_> {
@@ -337,7 +338,7 @@ impl Stager {
             resumed: input.resumed,
             max_block: plan.prepare.max_block().get(),
             cap: self.event_cap,
-            declick: declick_frames(plan.prepare.sample_rate()).get(),
+            declick: declick_frames(plan.prepare.sample_rate()),
         };
         self.track(c, &cx);
         let closers = self.closers(c, &cx);

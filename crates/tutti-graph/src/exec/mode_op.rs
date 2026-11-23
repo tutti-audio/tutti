@@ -41,7 +41,7 @@ pub(super) fn moded_node_op<
     if want != u.mode.heading() && u.mode.toggle(want) {
         // Un-bypass: its state is stale. Reset before the first call.
         u.node.reset();
-        u.quiet = 0;
+        u.quiet = Samples::ZERO;
         u.last_quiet = false;
         u.last_idle = false;
         u.reported = None;
@@ -176,7 +176,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
         }
         *st.has_due = false;
     }
-    u.quiet = 0;
+    u.quiet = Samples::ZERO;
     u.last_quiet = false;
     u.last_idle = false;
 }

@@ -3,6 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_rt::CappedVec;
+use tutti_units::Samples;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
 use super::stage::{RingFrom, Route, Staged, sort_by_offset};
@@ -306,7 +307,7 @@ impl<F: Float> Executor<F> {
                         place(&mut c.spare_held, staging);
                         x.out = Some(std::mem::replace(&mut u.node, node));
                         u.fade = Some(x);
-                        u.quiet = 0;
+                        u.quiet = Samples::ZERO;
                         u.last_quiet = false;
                         u.last_idle = false;
                         u.reported = None;
