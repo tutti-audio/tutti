@@ -8,6 +8,4 @@
 
 crates  Bank  tutti_sf2,tutti_ump
 crates  Error  tutti_session,tutti_sf2
-crates  EventTapPort  tutti_graph,tutti_session
-crates  Feed  tutti_graph,tutti_nodes
 crates  System  tutti_dsp,tutti_ump
