@@ -16,7 +16,7 @@
 //! one gates them *inside the engine*, where the executor drives them through
 //! its own buffers and the transport advances on the same `process` call.
 
-use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
@@ -54,14 +54,14 @@ fn build_engine_with_chain() -> Engine {
     ed.insert(
         strip,
         "strip",
-        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)),
+        BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO)),
     );
     // The limiter's lookahead ring is sized at the prepared rate, on the
     // control thread, when the commit prepares it: outside the gate.
     ed.insert(
         limiter,
         "limiter",
-        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
             LimiterControls {
                 threshold: Db::new(-1.0),
                 ceiling: Db::new(-0.3),

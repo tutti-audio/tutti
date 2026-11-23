@@ -3,7 +3,7 @@
 //! mute ramp and a bypass).
 
 use crate::harness::{Gate, feeds};
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::ParamNode;
 use tutti_nodes::{
     BAND_PARAMS, CrossoverConfig, CrossoverControls, CrossoverNode, MultibandBands,
@@ -18,7 +18,7 @@ fn crossover() {
     let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();
     let node = |cutoffs: &[Hz]| {
         CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             CrossoverControls::try_from(cutoffs).unwrap(),
         ))
         .unwrap()
@@ -41,7 +41,7 @@ fn multiband() {
     let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();
     for bands in 2..=4 {
         let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             MultibandBands::new(bands).unwrap(),
         ));
         let set = node.param_set();
@@ -55,7 +55,7 @@ fn multiband() {
     // Four bands, 6 wide: every band param, every crossover and both toggles are written each
     // block (27 ports and 8 toggle cells).
     let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-        BusTopology::default_for(ChannelLayout::from_count(6)).unwrap(),
+        ChannelTopology::default_for(ChannelLayout::from_count(6)).unwrap(),
         MultibandBands::of(4),
     ));
     let mut hz = 120.0f32;

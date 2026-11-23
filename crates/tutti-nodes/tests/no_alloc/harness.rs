@@ -2,7 +2,7 @@
 //! stepped under `assert_no_alloc` with its controls moved before each block.
 
 use std::cell::Cell;
-use tutti_buffers::{BusTopology, ChannelLayout, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
 use tutti_units::SampleRate;
@@ -301,6 +301,6 @@ fn record(peak: f32) {
 }
 
 /// A bus of `width` channels on the engine's order.
-pub fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
+pub fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
 }

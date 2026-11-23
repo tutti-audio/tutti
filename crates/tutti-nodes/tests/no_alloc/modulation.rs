@@ -2,7 +2,7 @@
 //! moved and with their param ports fed per frame.
 
 use crate::harness::{Gate, bus, feeds};
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_nodes::{
     DelayConfig, DelayControls, DelayLayout, DelayNode, LfoConfig, LfoNode, LfoShape, MaxDelay,
     ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, Stagger,
@@ -67,17 +67,17 @@ fn held() {
             |_, _| {},
         );
     }
-    let chorus = ModDelayConfig::chorus(BusTopology::STEREO);
+    let chorus = ModDelayConfig::chorus(ChannelTopology::STEREO);
     gate(0.4).run("chorus", ModDelayNode::<f32>::from(chorus), |_, _| {});
-    let flanger = ModDelayConfig::flanger(BusTopology::STEREO);
+    let flanger = ModDelayConfig::flanger(ChannelTopology::STEREO);
     gate(0.4).run("flanger", ModDelayNode::<f32>::from(flanger), |_, _| {});
-    let general_midi = ModDelayConfig::general_midi_chorus(BusTopology::STEREO);
+    let general_midi = ModDelayConfig::general_midi_chorus(ChannelTopology::STEREO);
     gate(0.4).run(
         "general midi chorus",
         ModDelayNode::<f32>::from(general_midi),
         |_, _| {},
     );
-    let four_stage = PhaserConfig::new(BusTopology::MONO, Stages::of(4));
+    let four_stage = PhaserConfig::new(ChannelTopology::MONO, Stages::of(4));
     gate(0.4).run(
         "phaser",
         PhaserNode::<f32>::try_from(four_stage).unwrap(),

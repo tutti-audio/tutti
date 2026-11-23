@@ -5,7 +5,7 @@
 
 use crate::harness::bus;
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_fixtures::midi;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, ParamSet, TransportPosition};
@@ -1264,7 +1264,7 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
         NoteDuration::new(NoteValue::SIXTEENTH).triplet(),
         NoteDuration::new(NoteValue::of(64)).dotted(),
     ];
-    let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
+    let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
         .interpolation(InterpolationMode::CubicHermite)
         .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
         .build()

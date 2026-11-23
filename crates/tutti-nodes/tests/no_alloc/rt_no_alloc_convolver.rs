@@ -165,8 +165,10 @@ fn the_convolver_corners_are_allocation_free_and_finite() {
     }
 }
 
-fn unassigned_bus(width: impl Into<tutti_buffers::ChannelLayout>) -> tutti_buffers::BusTopology {
-    tutti_buffers::BusTopology::unassigned(width.into()).expect("a test width fits a bus")
+fn unassigned_bus(
+    width: impl Into<tutti_buffers::ChannelLayout>,
+) -> tutti_buffers::ChannelTopology {
+    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// One response per channel, at as many unassigned channels as responses.
@@ -189,9 +191,12 @@ fn true_stereo_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::STEREO, &[ll, lr, rl, rr])
-            .true_stereo()
-            .block_size(block_size),
+        tutti_nodes::ConvolverConfig::new(
+            tutti_buffers::ChannelTopology::STEREO,
+            &[ll, lr, rl, rr],
+        )
+        .true_stereo()
+        .block_size(block_size),
     )
     .expect("four responses on a stereo pair")
 }
