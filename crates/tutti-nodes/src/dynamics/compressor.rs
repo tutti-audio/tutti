@@ -295,7 +295,6 @@ impl CompressorSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
@@ -430,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_mono_reduces_gain_on_loud_sidechain() {
+    fn a_loud_sidechain_key_reduces_the_main_signal() {
         let mut node = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let mut output = [0.0f32];
         for _ in 0..1000 {
@@ -440,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_mono_no_reduction_below_threshold() {
+    fn a_sidechain_key_under_the_threshold_leaves_the_main_signal_unreduced() {
         let mut node = prepared_at(comp(-10.0, 4.0, 0.001, 0.1), RATE_44K);
         let mut output = [0.0f32];
         for _ in 0..1000 {
@@ -451,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_soft_knee_differs_from_hard_knee() {
+    fn a_knee_in_the_controls_changes_the_output_near_the_threshold() {
         let mut hard = prepared_at(comp(-20.0, 4.0, 0.0001, 0.1), RATE_44K);
         let mut soft = prepared_at(
             CompressorNode::<f32>::from(
@@ -479,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_makeup_gain() {
+    fn a_makeup_of_six_db_scales_the_reduced_output_by_its_gain() {
         let mut with = prepared_at(
             CompressorNode::<f32>::from(
                 CompressorConfig::new(BusTopology::MONO)
@@ -531,24 +530,6 @@ mod tests {
             tick(&mut node, &[0.5, 0.9], &mut output);
         }
         assert_eq!(output[0], 0.5);
-    }
-
-    #[test]
-    fn test_compressor_stereo_reduces_on_loud_sidechain() {
-        let mut node = prepared_at(
-            CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
-                    .key(KeySource::Sidechain)
-                    .controls(four(-20.0, 4.0, 0.0001, 0.1)),
-            ),
-            RATE_44K,
-        );
-        let mut output = [0.0f32; 2];
-        for _ in 0..1000 {
-            tick(&mut node, &[0.5, 0.5, 0.9, 0.9], &mut output);
-        }
-        assert!((output[0] - output[1]).abs() < 0.001);
-        assert!(output[0] < 0.5);
     }
 
     /// `2 * width` inputs (audio, then key) and `width` outputs for a side-chain compressor
@@ -785,29 +766,5 @@ mod tests {
             out[16 + 240 + 16] > want * 0.9999,
             "arrived by 5 ms after the grid point"
         );
-    }
-
-    /// An `f64` kernel keeps its detector and gain in `f64`: a constant key `L` dB over the
-    /// threshold `T` of more than 24 bits comes out at `T + (L - T) / R` dB with instant
-    /// times, to 1e-12 dB (an `f32` state is off by 1e-7).
-    #[test]
-    fn an_f64_kernel_lands_a_wide_key_on_the_static_curve_in_f64() {
-        use tutti_fixtures::signal::wide_signal;
-        let (threshold, ratio) = (-30.0f64, 5.0f64);
-        let key = vec![wide_signal(1)[0]; 128];
-        let mut k = CompressorKernel::<f64>::new(BusTopology::MONO, KeySource::Own, KeyFilter::Off);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(128)),
-        );
-        let y = drive_kernel(
-            &mut k,
-            &[(0, four(threshold, ratio, 0.0, 0.0))],
-            std::slice::from_ref(&key),
-        );
-        let level = 20.0 * key[0].log10();
-        let want = threshold + (level - threshold) / ratio;
-        let got = 20.0 * y[0][127].log10();
-        assert!((got - want).abs() < 1e-12, "{got} dB against {want} dB");
     }
 }

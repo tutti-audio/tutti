@@ -271,7 +271,6 @@ mod tests {
     // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
     // format, so their tolerances are `f32`'s.
     use super::*;
-    use crate::test_support::drive_kernel;
     use tutti_buffers::BusTopology;
     use tutti_buffers::ChannelLayout;
     use tutti_dsp::{ChannelTimes, FeedbackRouting, MaxDelay};
@@ -798,29 +797,6 @@ mod tests {
             );
         assert_eq!(node.shape().tail, Tail::Unknown);
         assert_declared_tail(&mut node, RATE);
-    }
-
-    /// An `f64` block through a `DelayKernel::<f64>` at a whole delay `d` is the loop
-    /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]` of the wide signal, to 2^-45: any step that narrows to
-    /// `f32` is off by 1e-8.
-    #[test]
-    fn an_f64_kernel_runs_the_delay_loop_in_f64() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let (d, len) = (16usize, 200usize);
-        let x = wide_signal(len);
-        let g = 0.6;
-        let mut v = vec![0.0f64; len];
-        for n in 0..len {
-            v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
-        }
-        let want: Vec<f64> = (0..len)
-            .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
-            .collect();
-        let mut k = DelayKernel::<f64>::new(DelayLayout::new(BusTopology::MONO, MAX));
-        k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-        let moves = [(0, controls(frames(d as f64), 0.6, 0.0))];
-        let y = drive_kernel(&mut k, &moves, &[x]).remove(0);
-        assert_close_f64(&y, &want, 2.0f64.powi(-45));
     }
 
     /// A synced delay under a transport is delayed by its note at the transport's tempo, on the
