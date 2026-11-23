@@ -44,7 +44,7 @@
 //! the same at any participant count, so a wrong estimate never changes a
 //! sample.
 
-use crate::compile::ids::{Id, PlanUnitId, Table};
+use crate::compile::ids::{Id, PlanUnitId, TableSlice};
 use crate::compile::plan::Op;
 use crate::node::shape::Shape;
 use tutti_units::Samples;
@@ -173,7 +173,7 @@ const EVENTS: Work = Work {
 /// plan unit index).
 pub(crate) fn op_work(
     op: &Op,
-    shapes: &Table<PlanUnitId, Shape>,
+    shapes: &TableSlice<PlanUnitId, Shape>,
     sum_lanes: &[Option<crate::EdgeId>],
 ) -> Work {
     match *op {

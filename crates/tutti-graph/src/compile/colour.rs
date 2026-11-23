@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 
 use super::Val;
-use super::ids::{Id, OpId, Table};
+use super::ids::{Id, OpId, Table, TableSlice};
 
 /// Strict reachability over the op DAG.
 pub(crate) struct Reach {
@@ -32,7 +32,7 @@ pub(crate) struct Reach {
 
 impl Reach {
     /// `succ[i]` are op `i`'s successors; every edge must point forward.
-    pub(crate) fn new(succ: &Table<OpId, Vec<OpId>>) -> Self {
+    pub(crate) fn new(succ: &TableSlice<OpId, Vec<OpId>>) -> Self {
         let n = succ.len();
         let words = n.div_ceil(64);
         let mut bits = vec![0u64; n * words];
@@ -71,7 +71,7 @@ fn finished_before(u: &Val, w: OpId, reach: &Reach) -> bool {
 /// Greedy colouring in writer order. `in_place[v] = u` offers `v` the slot of
 /// `u`, taken when legal.
 pub(crate) fn colour<V: Id>(
-    vals: &Table<V, Val>,
+    vals: &TableSlice<V, Val>,
     reach: &Reach,
     in_place: &BTreeMap<V, V>,
 ) -> Colouring<V> {

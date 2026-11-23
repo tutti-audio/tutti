@@ -9,7 +9,7 @@ use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
-use crate::compile::ids::{Id, PlanUnitId};
+use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::event::types::Event;
 use crate::exec::held::Held;
@@ -226,7 +226,8 @@ impl<F: Float> Executor<F> {
             };
             if let Some(u) = self.store.get_mut(p.idx.0 as usize).and_then(Option::take) {
                 debug_assert_eq!(
-                    u.generation, p.generation,
+                    u.generation,
+                    Generation::new(p.generation),
                     "retiring the unit the delta named"
                 );
                 place(&mut c.retired, (p.key, u.node));
@@ -245,7 +246,8 @@ impl<F: Float> Executor<F> {
                 .and_then(Option::as_mut)
             {
                 debug_assert_eq!(
-                    u.generation, p.generation,
+                    u.generation,
+                    Generation::new(p.generation),
                     "cutting the unit the delta named"
                 );
                 if let Some(stale) = cut_fades(u, &mut self.inbox.fade_back) {
@@ -349,7 +351,11 @@ impl<F: Float> Executor<F> {
         place_all(&mut c.spare_held, &mut departed.spare);
         // Units whose mix this plan drives and that have no lane yet.
         for (store, lane) in st.drives.drain(..) {
-            match self.store.get_mut(store as usize).and_then(Option::as_mut) {
+            match self
+                .store
+                .get_mut(store.0 as usize)
+                .and_then(Option::as_mut)
+            {
                 Some(u) => u.mode.drive_with(lane, &mut st.spare_drives),
                 None => place(&mut st.spare_drives, lane),
             }
@@ -510,14 +516,14 @@ impl<F: Float> Executor<F> {
                 None => {
                     if let Some(u) = plan.unit_id(key) {
                         let lost = u32::try_from(events.len()).unwrap_or(u32::MAX);
-                        self.dropped.at_node(u.get(), lost.saturating_add(refused));
+                        self.dropped.at_node(u, lost.saturating_add(refused));
                     }
                 }
             }
         }
         if let Some(op) = old_plan {
             for inj in old.inject.iter_mut().filter(|i| i.live) {
-                let at = EventInputPort::new(op.units[PlanUnitId::new(inj.unit)].key, inj.port);
+                let at = EventInputPort::new(op.units[inj.unit].key, inj.port);
                 if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
                     let mut lost = fill(&mut shell.events, &inj.events);
                     // What was owed there is still owed: the tables move.
@@ -629,7 +635,7 @@ impl<F: Float> Executor<F> {
                             let mut lost = 0u32;
                             owing.for_each(|h| h.close_each(|_| lost = lost.saturating_add(1)));
                             if let Some(u) = plan.unit_id(at.node) {
-                                self.dropped.at_node(u.get(), lost);
+                                self.dropped.at_node(u, lost);
                             }
                         }
                     }
@@ -680,11 +686,11 @@ impl<F: Float> Executor<F> {
         // successor with no event input cannot take is dropped, counted.
         for (key, refused) in departed.held_refused.drain(..) {
             if let Some(u) = plan.unit_id(key) {
-                self.dropped.at_node(u.get(), refused);
+                self.dropped.at_node(u, refused);
             }
         }
         for &u in &st.queued {
-            let unit = &plan.units[PlanUnitId::new(u)];
+            let unit = &plan.units[u];
             if unit.shape.event_in > 0 {
                 continue;
             }
@@ -709,18 +715,18 @@ impl<F: Float> Executor<F> {
 fn flush_target<'a>(
     plan: &Plan,
     inject: &'a mut [Inject],
-    has_inject: &mut [bool],
+    has_inject: &mut TableSlice<PlanUnitId, bool>,
     at: EventInputPort,
-) -> Option<(u32, &'a mut Inject)> {
+) -> Option<(PlanUnitId, &'a mut Inject)> {
     let id = plan.unit_id(at.node)?;
     if at.port >= plan.units[id].shape.event_in {
         return None;
     }
-    let u = id.get();
+    let u = id;
     let i = inject
         .binary_search_by_key(&(u, at.port), |i| (i.unit, i.port))
         .ok()?;
-    has_inject[u as usize] = true;
+    has_inject[u] = true;
     inject[i].live = true;
     Some((u, &mut inject[i]))
 }
