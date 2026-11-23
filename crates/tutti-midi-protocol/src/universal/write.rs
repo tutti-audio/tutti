@@ -19,53 +19,70 @@ use crate::tuning::{
 /// ll` and four bytes a change), the longest message of the grammar.
 pub const UNIVERSAL_MAX_PAYLOAD: usize = 7 + 4 * MAX_KEY_CHANGES;
 
-/// A message a sender cannot name: the variants of [`Universal`] that are only
-/// ever read, or a combination the grammar has no bytes for.
+/// Why an [`Addressed`] message has no payload to write.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("{0} cannot be written")]
-pub struct NotWritable(pub &'static str);
+pub enum NotWritable {
+    /// [`Universal::MachineControlTruncated`]: a command segment cut short,
+    /// which a receiver makes and no sender names (RP-013 p.40 b).
+    #[error("a truncated Machine Control command is only read, never written")]
+    MachineControlTruncated,
+    /// [`Universal::MachineControlResponse`]: a Response (`07`) comes from a
+    /// device, and is read.
+    #[error("a Machine Control response is only read, never written")]
+    MachineControlResponse,
+    /// A Non-Real Time Single Note Tuning Change names its bank (`08 07`); the
+    /// bankless form (`08 02`) is Real Time (CA-020).
+    #[error("a Non-Real Time Single Note Tuning Change names a bank")]
+    NonRealTimeNoteChangeWithoutBank,
+}
 
 /// The payload of one Universal message: the bytes between `F0` and `F7`, held
 /// inline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UniversalPayload {
-    buf: [u8; UNIVERSAL_MAX_PAYLOAD],
+    buf: [U7; UNIVERSAL_MAX_PAYLOAD],
     len: usize,
 }
 
 impl UniversalPayload {
-    /// The bytes.
+    /// The bytes, each seven-bit by type: [`Sysex7Packets::part`] packs them
+    /// as they are.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[U7] {
         &self.buf[..self.len]
     }
 
     fn new() -> Self {
         Self {
-            buf: [0; UNIVERSAL_MAX_PAYLOAD],
+            buf: [U7::of(0); UNIVERSAL_MAX_PAYLOAD],
             len: 0,
         }
     }
 
     // The callers write at most `UNIVERSAL_MAX_PAYLOAD` bytes, the longest message.
-    fn put(&mut self, byte: u8) {
-        self.buf[self.len] = byte;
+    fn put_u7(&mut self, value: U7) {
+        self.buf[self.len] = value;
         self.len += 1;
     }
 
-    fn put_all(&mut self, bytes: impl IntoIterator<Item = u8>) {
+    /// Data bytes of the grammar, written as literals: `U7::of` refuses an
+    /// eight-bit one.
+    fn put_all<const N: usize>(&mut self, bytes: [u8; N]) {
         for byte in bytes {
-            self.put(byte);
+            self.put_u7(U7::of(byte));
         }
     }
 
-    fn put_u7(&mut self, value: U7) {
-        self.put(value.get());
+    fn put_u7s(&mut self, values: impl IntoIterator<Item = U7>) {
+        for value in values {
+            self.put_u7(value);
+        }
     }
 
     /// A 14-bit value, least significant byte first (M1 p.40, p.57).
     fn put_u14_lsb_first(&mut self, value: U14) {
-        self.put_all(value.to_le7());
+        self.put_u7(value.lsb());
+        self.put_u7(value.msb());
     }
 
     /// A 14-bit value, most significant byte first, as MTS sends its fractions.
@@ -80,12 +97,12 @@ impl UniversalPayload {
     }
 
     fn put_name(&mut self, name: &TuningName) {
-        self.put_all(name.bytes().iter().map(|b| b.get()));
+        self.put_u7s(name.bytes().iter().copied());
     }
 
     fn put_offsets(&mut self, offsets: &OctaveOffsets) {
         match offsets {
-            OctaveOffsets::Cents(bytes) => self.put_all(bytes.iter().map(|b| b.get())),
+            OctaveOffsets::Cents(bytes) => self.put_u7s(bytes.iter().copied()),
             OctaveOffsets::Fine(words) => {
                 for word in words {
                     self.put_u14_msb_first(*word);
@@ -97,20 +114,20 @@ impl UniversalPayload {
     /// The checksum a dump ends with: the XOR of every byte before it, masked
     /// to seven bits (the reader checks the same).
     fn put_checksum(&mut self) {
-        let sum = self.as_bytes().iter().fold(0, |acc, b| acc ^ b) & 0x7F;
-        self.put(sum);
+        let sum = self.as_bytes().iter().fold(0, |acc, b| acc ^ b.get());
+        self.put_u7(U7::masked(sum));
     }
 
     fn put_identity(&mut self, identity: &DeviceIdentity) {
         let [a, b, c] = identity.manufacturer.sysex_bytes();
         if identity.manufacturer.is_extended() {
-            self.put_all([a, b, c].map(U7::get));
+            self.put_u7s([a, b, c]);
         } else {
             self.put_u7(a);
         }
-        self.put_all(identity.family.map(U7::get));
-        self.put_all(identity.model.map(U7::get));
-        self.put_all(identity.revision.get().map(U7::get));
+        self.put_u7s(identity.family);
+        self.put_u7s(identity.model);
+        self.put_u7s(identity.revision.get());
     }
 
     fn put_tuning(&mut self, message: &TuningMessage) -> Result<(), NotWritable> {
@@ -119,12 +136,16 @@ impl UniversalPayload {
                 bank: None,
                 program,
             } => {
-                self.put_all([0x08, 0x00, program.get()]);
+                self.put_all([0x08, 0x00]);
+                self.put_u7(*program);
             }
             TuningMessage::DumpRequest {
                 bank: Some(bank),
                 program,
-            } => self.put_all([0x08, 0x03, bank.get(), program.get()]),
+            } => {
+                self.put_all([0x08, 0x03]);
+                self.put_u7s([*bank, *program]);
+            }
             TuningMessage::KeyDump {
                 bank,
                 program,
@@ -132,8 +153,14 @@ impl UniversalPayload {
                 table,
             } => {
                 match bank {
-                    None => self.put_all([0x08, 0x01, program.get()]),
-                    Some(bank) => self.put_all([0x08, 0x04, bank.get(), program.get()]),
+                    None => {
+                        self.put_all([0x08, 0x01]);
+                        self.put_u7(*program);
+                    }
+                    Some(bank) => {
+                        self.put_all([0x08, 0x04]);
+                        self.put_u7s([*bank, *program]);
+                    }
                 }
                 self.put_name(name);
                 for word in table.words() {
@@ -152,7 +179,8 @@ impl UniversalPayload {
                 } else {
                     0x06
                 };
-                self.put_all([0x08, sub, bank.get(), program.get()]);
+                self.put_all([0x08, sub]);
+                self.put_u7s([*bank, *program]);
                 self.put_name(name);
                 self.put_offsets(offsets);
                 self.put_checksum();
@@ -164,16 +192,22 @@ impl UniversalPayload {
                 changes,
             } => {
                 match (timing, bank) {
-                    (Timing::RealTime, None) => self.put_all([0x08, 0x02, program.get()]),
-                    (_, Some(bank)) => self.put_all([0x08, 0x07, bank.get(), program.get()]),
+                    (Timing::RealTime, None) => {
+                        self.put_all([0x08, 0x02]);
+                        self.put_u7(*program);
+                    }
+                    (_, Some(bank)) => {
+                        self.put_all([0x08, 0x07]);
+                        self.put_u7s([*bank, *program]);
+                    }
                     (Timing::NonRealTime, None) => {
-                        return Err(NotWritable("a non-real-time note change with no bank"));
+                        return Err(NotWritable::NonRealTimeNoteChangeWithoutBank);
                     }
                 }
-                // At most `MAX_KEY_CHANGES`, a data byte.
-                self.put(changes.as_slice().len() as u8);
+                // At most `MAX_KEY_CHANGES` (127), a data byte.
+                self.put_u7(U7::masked(changes.as_slice().len() as u8));
                 for change in changes.as_slice() {
-                    self.put(change.key.get());
+                    self.put_u7(U7::masked(change.key.get()));
                     self.put_frequency(change.frequency);
                 }
             }
@@ -188,13 +222,9 @@ impl UniversalPayload {
                 } else {
                     0x09
                 };
-                self.put_all([
-                    0x08,
-                    sub,
-                    (bits >> 14) as u8,
-                    (bits >> 7) as u8 & 0x7F,
-                    bits as u8 & 0x7F,
-                ]);
+                self.put_all([0x08, sub]);
+                // The channels as `ff gg hh`: 15 and 16, then 8 to 14, then 1 to 7.
+                self.put_u7s([bits >> 14, bits >> 7, bits].map(|part| U7::masked(part as u8)));
                 self.put_offsets(offsets);
             }
         }
@@ -203,15 +233,9 @@ impl UniversalPayload {
 }
 
 impl core::ops::Deref for UniversalPayload {
-    type Target = [u8];
+    type Target = [U7];
 
-    fn deref(&self) -> &[u8] {
-        self.as_bytes()
-    }
-}
-
-impl AsRef<[u8]> for UniversalPayload {
-    fn as_ref(&self) -> &[u8] {
+    fn deref(&self) -> &[U7] {
         self.as_bytes()
     }
 }
@@ -227,7 +251,7 @@ const fn class(timing: Timing) -> u8 {
 impl Addressed {
     /// The payload of the message (the bytes between `F0` and `F7`), the
     /// inverse of [`read()`](fn@super::read). It goes out as SysEx7 through
-    /// [`Sysex7Packets::from_payload`](tutti_ump::Sysex7Packets::from_payload).
+    /// [`Sysex7Packets::part`](tutti_ump::Sysex7Packets::part) (`SysexPart::Only`).
     ///
     /// # Errors
     ///
@@ -240,7 +264,7 @@ impl Addressed {
         let mut out = UniversalPayload::new();
         let device = self.to.device_byte();
         let header = |out: &mut UniversalPayload, timing: Timing| {
-            out.put_all([class(timing), device]);
+            out.put_u7s([class(timing), device].map(U7::masked));
         };
         match &self.message {
             Universal::IdentityRequest => {
@@ -293,16 +317,23 @@ impl Addressed {
             Universal::MtcFullMessage(full) => {
                 let mut bytes = full.payload();
                 bytes[1] = device;
-                out.put_all(bytes);
+                out.put_u7s(bytes.map(U7::masked));
             }
             Universal::MachineControl(commands) => {
-                out.put_all(commands.payload(self.to).as_bytes().iter().copied());
+                out.put_u7s(
+                    commands
+                        .payload(self.to)
+                        .as_bytes()
+                        .iter()
+                        .copied()
+                        .map(U7::masked),
+                );
             }
             Universal::MachineControlTruncated(_) => {
-                return Err(NotWritable("MachineControlTruncated"));
+                return Err(NotWritable::MachineControlTruncated);
             }
             Universal::MachineControlResponse(_) => {
-                return Err(NotWritable("MachineControlResponse"));
+                return Err(NotWritable::MachineControlResponse);
             }
         }
         Ok(out)

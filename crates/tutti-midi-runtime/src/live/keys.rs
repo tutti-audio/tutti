@@ -14,7 +14,8 @@ use tutti_graph::{EventCapacity, EventInletWriter, Stamp};
 use tutti_midi_protocol::{Addressed, NotWritable};
 use tutti_rt::PushError;
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Sysex7Packets, Voice2,
+    Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Sysex7Packets, SysexPart,
+    Voice2,
 };
 use tutti_units::Losses;
 
@@ -28,12 +29,10 @@ pub enum SendUniversalError {
     /// The message is only ever read, or has no bytes: nothing was written.
     #[error(transparent)]
     Unwritable(#[from] NotWritable),
-    /// The ring has less room than the message's packets: nothing was written.
-    #[error("the inlet has no room for every packet of the message")]
-    Full,
-    /// The inlet's node is gone: nothing will take the message.
-    #[error("the inlet's node is gone")]
-    Disconnected,
+    /// The ring could not take every packet ([`PushError::Full`], nothing
+    /// written) or its node is gone ([`PushError::Disconnected`]).
+    #[error(transparent)]
+    Push(#[from] PushError),
 }
 
 /// An [`EventInletWriter`] with the key helpers. One producer, as the writer
@@ -141,9 +140,9 @@ impl MidiKeys {
     ///
     /// [`SendUniversalError::Unwritable`] for a message that is only read
     /// ([`Universal::MachineControlResponse`](tutti_midi_protocol::Universal)
-    /// and the truncated command); [`SendUniversalError::Full`] when the ring
-    /// cannot hold every packet; [`SendUniversalError::Disconnected`] once the
-    /// node is dropped. Nothing is written for any of them, and a refusal for
+    /// and the truncated command); [`PushError::Full`] when the ring cannot
+    /// hold every packet and [`PushError::Disconnected`] once the node is
+    /// dropped, both as [`SendUniversalError::Push`]. Nothing is written for any of them, and a refusal for
     /// `Full` is not counted as a loss.
     ///
     /// # Examples
@@ -171,17 +170,13 @@ impl MidiKeys {
         message: Addressed,
     ) -> Result<(), SendUniversalError> {
         let payload = message.payload()?;
-        // A payload is seven-bit by its writer's types.
-        let packets = Sysex7Packets::from_payload(self.group, &payload)
-            .map_err(|_| NotWritable("a payload byte of eight bits"))?;
+        let packets = Sysex7Packets::part(self.group, &payload, SysexPart::Only);
         if packets.len() > self.writer.vacant() {
-            return Err(SendUniversalError::Full);
+            return Err(PushError::Full.into());
         }
         let at = at.into();
         for packet in packets {
-            self.writer
-                .push(at, packet)
-                .map_err(|_| SendUniversalError::Disconnected)?;
+            self.writer.push(at, packet)?;
         }
         Ok(())
     }

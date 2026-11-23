@@ -1814,7 +1814,12 @@ mod write {
     use tutti_ump::U14;
 
     fn payload(to: Recipient, message: Universal) -> Vec<u8> {
-        Addressed { to, message }.payload().unwrap().to_vec()
+        Addressed { to, message }
+            .payload()
+            .unwrap()
+            .iter()
+            .map(|b| b.get())
+            .collect()
     }
 
     fn reads_back(to: Recipient, message: Universal) {
@@ -1951,13 +1956,13 @@ mod write {
                 program: U7::of(0),
                 changes: KeyChanges::new(),
             })),
-            Err(NotWritable(_))
+            Err(NotWritable::NonRealTimeNoteChangeWithoutBank)
         ));
         assert_eq!(
             refused(Universal::MachineControlTruncated(
                 tutti_midi_protocol::MmcCommands::new()
             )),
-            Err(NotWritable("MachineControlTruncated"))
+            Err(NotWritable::MachineControlTruncated)
         );
     }
 }

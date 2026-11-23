@@ -253,7 +253,7 @@ fn a_full_refusal_writes_no_packet() {
     }
     assert_eq!(
         keys.send_universal(Stamp::NextBlock, message),
-        Err(SendUniversalError::Full)
+        Err(SendUniversalError::Push(PushError::Full))
     );
     assert_eq!(keys.vacant(), 1);
     assert_eq!(keys.losses().lost, 0);
@@ -336,7 +336,7 @@ fn a_message_longer_than_the_room_is_refused_whole() {
     let before = keys.vacant();
     assert_eq!(
         keys.send_universal(Stamp::NextBlock, message),
-        Err(SendUniversalError::Full)
+        Err(SendUniversalError::Push(PushError::Full))
     );
     assert_eq!(keys.vacant(), before);
 }
@@ -346,19 +346,19 @@ fn a_message_longer_than_the_room_is_refused_whole() {
 #[test]
 fn a_read_only_message_is_unwritable_and_writes_nothing() {
     let (mut d, mut keys) = rig();
-    for (message, name) in [
+    for (message, refusal) in [
         (
             Universal::MachineControlTruncated(MmcCommands::stop()),
-            "MachineControlTruncated",
+            NotWritable::MachineControlTruncated,
         ),
         (
             Universal::MachineControlResponse(tutti_midi_protocol::MmcFields::new()),
-            "MachineControlResponse",
+            NotWritable::MachineControlResponse,
         ),
     ] {
         assert_eq!(
             keys.send_universal(Stamp::NextBlock, addressed(Recipient::AllCall, message)),
-            Err(SendUniversalError::Unwritable(NotWritable(name)))
+            Err(SendUniversalError::Unwritable(refusal))
         );
     }
     assert_eq!(keys.vacant(), LIVE_INLET_CAPACITY.slots());
