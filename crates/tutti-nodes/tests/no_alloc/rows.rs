@@ -4,7 +4,7 @@
 
 use crate::harness::{Gate, alternate, every_third, feeds};
 use std::sync::Arc;
-use tutti_buffers::{BusTopology, ChannelIndex, ChannelLayout, Interleaved, Mono, Wave};
+use tutti_buffers::{ChannelIndex, ChannelLayout, ChannelTopology, Interleaved, Mono, Wave};
 use tutti_dsp::{
     Algorithm, CombDelay, FmPatch, Inline, MaxGrains, OperatorCount, OperatorFrequency,
     OperatorSpec, Partial, Partials, SvfType, Tap, TapSet, Wavetable,
@@ -269,7 +269,7 @@ fn hysteresis() {
 
 /// 256 blocks of 64 frames cross the window's hop; both targets move.
 fn leveller() {
-    let node = LevellerNode::<f32>::try_from(LevellerConfig::new(BusTopology::STEREO)).unwrap();
+    let node = LevellerNode::<f32>::try_from(LevellerConfig::new(ChannelTopology::STEREO)).unwrap();
     let target = |i: usize| alternate(i, -30.0, -16.0);
     let first = |c: &<LevellerNode<f32> as IntoNode>::Controls, i| {
         c.set(UnitAddr::new(UnitParam::Threshold, 0), target(i));
@@ -489,7 +489,7 @@ fn bell_tilt_graphic_eq() {
         c.set(UnitParam::GainDb, alternate(i, 15.0, -15.0));
     });
     for bands in [GraphicBands::Octave, GraphicBands::ThirdOctave] {
-        let config = GraphicEqConfig::new(BusTopology::STEREO, bands);
+        let config = GraphicEqConfig::new(ChannelTopology::STEREO, bands);
         let node = GraphicEqNode::from(config);
         gate.run(&format!("graphic eq {bands:?}"), node, |c, i| {
             for band in 0..bands.count() {
