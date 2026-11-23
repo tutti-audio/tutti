@@ -474,12 +474,15 @@ impl<F: Float> Executor<F> {
                 new.meters[i] = writer;
             }
         }
+        // A driven state keeps its place across commits that keep the declick
+        // length (not the rate: distinct rates can round to one length).
+        let same_declick = old_plan.is_none_or(|o| o.prepare.declick() == plan.prepare.declick());
         for (i, from) in st.lanes.iter().enumerate() {
             if let Some(carried) = from
                 .and_then(|j| old.lanes.get_mut(j as usize))
                 .map(SumLane::carry)
             {
-                new.lanes[i].adopt(carried, max_block, &mut st.spare_drives);
+                new.lanes[i].adopt(carried, max_block, same_declick, &mut st.spare_drives);
             }
         }
 

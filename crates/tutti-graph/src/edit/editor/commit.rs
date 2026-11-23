@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use tutti_curve::declick_frames;
-
 use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
 use crate::compile::plan::{Delta, Placement, Plan};
@@ -518,10 +516,9 @@ impl<F: Float> Editor<F> {
         let spec = &self.spec;
         let values = &self.values;
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
-        let declick = declick_frames(plan.prepare.sample_rate());
         let params = |key: NodeKey, ports: usize, max: usize| {
             let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declick, declared, values)
+            ranges.state(key, ports, max, declared, values)
         };
         let gains = self.cells.gains.for_plan(&plan, spec, values, bus_weights);
         let modes = |key: NodeKey| modes_cells.state(key, &plan, values);
@@ -549,7 +546,7 @@ impl<F: Float> Editor<F> {
         );
         // Everything applying needs that is a function of the plan is built
         // here, so the audio thread only swaps and moves.
-        let (max, declick) = (plan.prepare.max_block().get(), declick);
+        let max = plan.prepare.max_block().get();
         let mode_cells = &self.cells.modes;
         let old = self.life.plan().map(Arc::clone);
         self.stager.stage(
@@ -561,7 +558,7 @@ impl<F: Float> Editor<F> {
                 mix_lane: &|key| {
                     mode_cells
                         .get(key)
-                        .map(|cell| ParamState::lane(max, declick, cell.ranges()))
+                        .map(|cell| ParamState::lane(max, cell.ranges()))
                 },
             },
         );
