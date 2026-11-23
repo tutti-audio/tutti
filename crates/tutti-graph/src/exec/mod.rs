@@ -196,6 +196,7 @@ use tutti_units::PlayReading;
 use tutti_units::{Frame, Samples, Tail};
 
 use crate::NodeKey;
+use crate::compile::ids::PlanUnitId;
 use crate::compile::plan::Plan;
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
@@ -457,7 +458,7 @@ fn par_for(
     plan: &Plan,
     participants: usize,
     store_len: usize,
-    inject_units: impl Iterator<Item = u32>,
+    inject_units: impl Iterator<Item = PlanUnitId>,
     overlay: usize,
 ) -> Par {
     Par::new(plan, participants, store_len, inject_units, overlay)
@@ -708,6 +709,7 @@ impl<F: Float> Executor<F> {
 
 #[cfg(test)]
 mod tests {
+    use crate::compile::ids::Table;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -774,7 +776,7 @@ mod tests {
             changes: TransportChanges::NONE,
             play: crate::PlayClock::ZERO,
         };
-        let mut has_due = vec![false; plan.units.len()];
+        let mut has_due = Table::filled(plan.units.len(), false);
         exec.inbox
             .commands
             .gather(&env, &plan, exec.inbox.applied, &mut has_due);
