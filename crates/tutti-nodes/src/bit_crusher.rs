@@ -1,12 +1,12 @@
 //! [`BitCrusherNode`]: a sample-and-hold and a quantizer.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BitCrusher, BitCrusherControls, BlockMismatch, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
+use tutti_units::{BitDepth, HoldFactor, SampleRate};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`BitCrusherNode`] is made from: its width and, optionally, its bit depth and hold.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,8 +125,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
 
     /// `width` channels in and out, `Light`: a round and a divide per sample.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a bit crusher is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a bit crusher");
         Shape::through(bus).cost(Cost::Light)
     }
 
@@ -150,10 +149,6 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
     ) -> Result<(), BlockMismatch> {
         self.crusher.process(block)
     }
-
-    fn tail(&self) -> Tail {
-        Tail::None
-    }
 }
 
 #[cfg(test)]
@@ -162,6 +157,7 @@ mod tests {
     use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::Tail;
     use tutti_units::{Latency, UnitParam};
 
     // The node tests run `F = f32`, the session's audio format.

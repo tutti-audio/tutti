@@ -8,7 +8,7 @@ use tutti_dsp::{
     KeyFilter, KeySource, Lerp, SimdLanes,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -228,7 +228,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     /// The input bus, then, for a [`KeySource::Sidechain`], the key bus as wide; one output
     /// bus where the input is.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let main = Buses::main(self.input);
         let inputs = match self.key {
             KeySource::Own => main,
@@ -236,7 +235,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
                 .with(Bus::new(self.input, BusRole::Sidechain))
                 .expect("a main bus and a key are two buses"),
         };
-        Shape::buses(inputs, Buses::NONE.with(output).expect("one bus")).cost(Cost::Moderate)
+        Shape::buses(inputs, Buses::main(self.input)).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
@@ -281,10 +280,6 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
             Some(bank) => bank.process(signals, key, block),
             None => Ok(()),
         }
-    }
-
-    fn tail(&self) -> Tail {
-        Tail::None
     }
 }
 

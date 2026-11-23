@@ -10,7 +10,7 @@
 use core::ops::Range;
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
+use tutti_buffers::{BusTopology, ChannelLayout, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
@@ -43,6 +43,16 @@ impl<'a, F: Float> ControlSignals<'a, F> {
     pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
     }
+}
+
+/// The bus of `width` unnamed channels that `what` is built on.
+///
+/// # Panics
+///
+/// Past a bus's width ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): `what` is one bus.
+#[track_caller]
+pub(crate) fn unassigned_bus(width: ChannelLayout, what: &str) -> BusTopology {
+    BusTopology::unassigned(width).unwrap_or_else(|| panic!("{what} is at most 16 channels wide"))
 }
 
 /// An effect's algorithm with its state, as [`KernelNode`] runs it.
@@ -134,8 +144,11 @@ pub trait Kernel: Clone + Send + 'static {
 
     /// How long it rings after its input stops, once prepared: the most it can, over every
     /// control. A finite or unbounded tail is a ceiling the node enforces (see
-    /// [`KernelNode`]); [`Tail::Unknown`] and [`Tail::None`] are only declared.
-    fn tail(&self) -> Tail;
+    /// [`KernelNode`]); [`Tail::Unknown`] and [`Tail::None`] are only declared. The default is
+    /// [`Tail::None`], for a kernel with no ring-out.
+    fn tail(&self) -> Tail {
+        Tail::None
+    }
 
     /// How long it rings at `controls`, at most [`tail`](Self::tail), erring long: what the
     /// node narrows its tail to. A kernel whose ring-out does not follow its controls leaves

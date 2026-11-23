@@ -6,10 +6,10 @@ use tutti_dsp::{
     Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
     ShapeKind, WaveshaperBank, WaveshaperControls,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
 
 /// Waveshaping distortion of any width: `N` audio inputs and `N` outputs, every channel
@@ -132,8 +132,7 @@ impl DistortionConfig {
 
 impl<F: Float + Lerp> From<DistortionConfig> for DistortionNode<F> {
     fn from(config: DistortionConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a waveshaper is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a waveshaper");
         Self::with_kernel(
             DistortionKernel::<F>::new(&config, input),
             DistortionSet,
@@ -213,7 +212,6 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     /// Antialiasing makes every curve at least `Moderate`: the curve and its antiderivatives
     /// run in `f64`.
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
         let cost = match (self.factor, self.kind) {
             (Some(_), _) => Cost::Heavy,
             (None, ShapeKind::Softsign | ShapeKind::HardClip)
@@ -223,11 +221,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             }
             (None, _) => Cost::Moderate,
         };
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(cost)
+        Shape::through(self.input).cost(cost)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {

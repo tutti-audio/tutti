@@ -6,7 +6,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{AdditiveBank, AdditiveControls, BlockMismatch, COEFF_INTERVAL, Partials};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Amplitude, Hz, SampleRate, Tail};
+use tutti_units::{Amplitude, Hz, SampleRate};
 
 use crate::kernel::{ControlSignals, Kernel, KernelConfig, KernelNode};
 
@@ -131,10 +131,6 @@ impl<F: Float> Kernel for AdditiveKernel<F> {
             None => out.samples_mut().fill(F::ZERO),
         }
         Ok(())
-    }
-
-    fn tail(&self) -> Tail {
-        Tail::None
     }
 }
 
