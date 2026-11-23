@@ -83,7 +83,7 @@ use crate::key::{
     BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet,
     Removal, SetSources, Wire,
 };
-use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
+use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
     ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key, MainInput,
     MainOutput, NoSuchNode, OutputPort, RemoveError, SessionNode, SetRateError,
@@ -247,11 +247,16 @@ struct Held {
 }
 
 impl Held {
-    /// Registers the params and slots under `node`.
-    fn provide(&self, values: &ValueTable, node: NodeKey) {
+    /// Registers the params under `node`, seeded from `outgoing`, and the slots.
+    fn provide(&self, values: &ValueTable, node: NodeKey, outgoing: &Outgoing) {
         if let Some(set) = &self.params {
-            values.address(node, self.owner, set.clone());
+            values.address(node, self.owner, set.clone(), outgoing);
         }
+        self.provide_slots(values, node);
+    }
+
+    /// Registers the slots under `node`.
+    fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
         (self.slots)(values, node, self.controls.as_ref());
     }
 }
@@ -279,8 +284,12 @@ pub(crate) enum OnShape {
 
 /// What the controls under a key were when a replacement parked: the
 /// outgoing node's, or the incoming one an earlier parked replacement put
-/// there (`None`: a node with no controls).
-struct Stash(Option<Held>);
+/// there (`None`: a node with no controls), with the params they were
+/// addressed as.
+struct Stash {
+    controls: Option<Held>,
+    params: Outgoing,
+}
 
 /// The executor, while this side still holds it, and what a local render
 /// needs beside it.
@@ -915,7 +924,7 @@ impl<F: Float> Graph<F> {
     /// ```
     pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
         let (key, placed) = self.place(self.bound(node));
-        self.address::<N>(key.erase(), placed);
+        self.address::<N>(key.erase(), placed, &Outgoing::default());
         key
     }
 
@@ -1074,7 +1083,12 @@ impl<F: Float> Graph<F> {
 
     /// Keeps what the node's parts said of it under `node`: its params and
     /// reclaimer, and its slots ([`SessionNode::slots`]).
-    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, placed: Kept<N::Controls>) {
+    fn address<N: SessionNode<F>>(
+        &mut self,
+        node: NodeKey,
+        placed: Kept<N::Controls>,
+        outgoing: &Outgoing,
+    ) {
         let Kept {
             controls,
             params,
@@ -1088,7 +1102,7 @@ impl<F: Float> Graph<F> {
             slots: Self::slots::<N>,
         };
         if let Some(entry) = self.nodes.get_mut(&node) {
-            held.provide(&self.values, node);
+            held.provide(&self.values, node, outgoing);
             entry.controls = Some(held);
         }
         self.values.bind_lanes(node, |param| {
@@ -1517,6 +1531,14 @@ impl<F: Float> Graph<F> {
     /// answer for it. The outgoing node plays on, as it was, until the swap
     /// lands.
     ///
+    /// **The incoming node keeps the values the outgoing one was set to.** At
+    /// the call, under the value lock, each param the two declare at one
+    /// address in one unit takes the outgoing node's value when both were
+    /// declared at the same initial value and the value is finite; a changed
+    /// declaration keeps its new initial. An address the incoming node lacks is
+    /// dropped (a call on it is `NoSuchTarget`). The seeding is no app write:
+    /// no watcher sees it and no edit-log mark is made.
+    ///
     /// (`plugin`) A hosted plugin replaced this way is no longer hosted: its
     /// record is dropped, so its health, snapshots and render mode stop
     /// (a replacement plugin goes in with
@@ -1554,9 +1576,9 @@ impl<F: Float> Graph<F> {
         }
         match self.place_unit(node, unit, fade, OnShape::Refuse) {
             Ok(()) => {
-                self.retire_outgoing(node);
+                let outgoing = self.retire_outgoing(node);
                 self.drop_plugin_record(node);
-                self.address::<N>(node, placed);
+                self.address::<N>(node, placed, &outgoing);
             }
             Err(SwapRefused::Busy(unit)) => self.park_typed::<N>(node, unit, placed, fade),
             Err(SwapRefused::Failed(refused)) => return Err(refused),
@@ -1574,10 +1596,14 @@ impl<F: Float> Graph<F> {
         placed: Kept<N::Controls>,
         fade: Option<Fade>,
     ) {
-        let outgoing = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
-        self.values.retire(node);
-        self.address::<N>(node, placed);
-        self.park(node, Box::new(Swap(unit)), fade, Some(Stash(outgoing)));
+        let stash = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
+        let outgoing = self.values.retire_keeping(node);
+        self.address::<N>(node, placed, &outgoing);
+        let stash = Stash {
+            controls: stash,
+            params: outgoing,
+        };
+        self.park(node, Box::new(Swap(unit)), fade, Some(stash));
     }
 
     /// Registers the plugin hosted at `node` with the value table, as its
@@ -1614,7 +1640,7 @@ impl<F: Float> Graph<F> {
         on_shape: OnShape,
     ) -> Result<N::Controls, SwapRefused<N>> {
         let controls = self.place_unit(node, incoming, fade, on_shape)?;
-        self.retire_outgoing(node);
+        drop(self.retire_outgoing(node));
         Ok(controls)
     }
 
@@ -1679,14 +1705,17 @@ impl<F: Float> Graph<F> {
 
     /// The outgoing node's controls at `node`, which a swap that took
     /// replaced: its values go, and the controls are held until the outgoing
-    /// unit has left the render.
-    fn retire_outgoing(&mut self, node: NodeKey) {
-        if let Some(entry) = self.nodes.get_mut(&node) {
-            self.values.retire(node);
-            if let Some(held) = entry.controls.take() {
-                self.retiring.push((node, held.controls));
-            }
+    /// unit has left the render. Its params, which the incoming node's are
+    /// seeded from, are handed back.
+    fn retire_outgoing(&mut self, node: NodeKey) -> Outgoing {
+        let Some(entry) = self.nodes.get_mut(&node) else {
+            return Outgoing::default();
+        };
+        let outgoing = self.values.retire_keeping(node);
+        if let Some(held) = entry.controls.take() {
+            self.retiring.push((node, held.controls));
         }
+        outgoing
     }
 
     /// Drops the retiring controls of the nodes whose units the editor handed
@@ -1848,7 +1877,11 @@ impl<F: Float> Graph<F> {
             let Parked { swap, stash, .. } = parked;
             match swap.swap(self, node, fade) {
                 Ok(()) => {
-                    if let Some(Stash(Some(outgoing))) = stash {
+                    if let Some(Stash {
+                        controls: Some(outgoing),
+                        ..
+                    }) = stash
+                    {
                         self.retiring.push((node, outgoing.controls));
                     }
                     out.push(Retried::Landed { node });
@@ -1889,9 +1922,10 @@ impl<F: Float> Graph<F> {
             return;
         };
         self.values.retire(node);
-        entry.controls = stash.0;
+        entry.controls = stash.controls;
+        self.values.reinstate(node, stash.params);
         if let Some(held) = &entry.controls {
-            held.provide(&self.values, node);
+            held.provide_slots(&self.values, node);
         }
     }
 
@@ -2292,7 +2326,9 @@ impl<F: Float> Graph<F> {
         // rest, and the entry's, are of incoming nodes that never ran.
         let mut stashes = stashes.into_iter();
         match stashes.next() {
-            Some(Stash(outgoing)) => {
+            Some(Stash {
+                controls: outgoing, ..
+            }) => {
                 if let Some(held) = outgoing {
                     self.retiring.push((node, held.controls));
                 }

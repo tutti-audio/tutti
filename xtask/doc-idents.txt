@@ -15,7 +15,6 @@
 2 crates/tutti-au-host/src/macos/processor.rs
 2 crates/tutti-au-host/src/macos/ranges.rs
 2 crates/tutti-au-host/src/macos/topology.rs
-6 crates/tutti-au-host/src/macos/types.rs
 1 crates/tutti-au-host/tests/au_api_surface.rs
 2 crates/tutti-au-host/tests/au_async_instantiation.rs
 3 crates/tutti-au-host/tests/au_aupreset.rs

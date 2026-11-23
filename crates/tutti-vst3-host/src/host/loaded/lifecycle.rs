@@ -289,23 +289,8 @@ impl Vst3Loaded {
         self.plugin.handler().dropped_notifications()
     }
 
-    /// Arms or disarms VST3 MIDI learn (`IMidiLearn`).
-    ///
-    /// While armed, the realtime path captures incoming MIDI CCs and the next
-    /// [`poll_plugin_notifications`](Self::poll_plugin_notifications) forwards
-    /// them to the plugin's `IMidiLearn::onLiveMIDIControllerInput` — letting the
-    /// plugin bind the moved controller to whatever parameter the user is
-    /// editing in its own UI. Typically: arm on right-click-knob → "MIDI learn",
-    /// let the user move a controller, observe the resulting
-    /// `kMidiCCAssignmentChanged` restart, then disarm.
-    ///
-    /// No observable effect if the plugin doesn't implement `IMidiLearn`.
-    pub fn arm_midi_learn(&mut self, _main: MainThreadMarker, armed: bool) {
-        self.midi_learn.arm(armed);
-    }
-
     /// Whether VST3 MIDI learn is currently armed. See
-    /// [`arm_midi_learn`](Self::arm_midi_learn).
+    /// [`Control::arm_plugin_midi_learn`](tutti_plugin_types::Control::arm_plugin_midi_learn).
     #[must_use]
     pub fn is_midi_learn_armed(&self) -> bool {
         self.midi_learn.is_armed()

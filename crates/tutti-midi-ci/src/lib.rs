@@ -59,6 +59,7 @@ mod pe;
 mod process;
 mod process_initiator;
 mod profile;
+mod profile_details;
 mod read;
 mod rotary;
 mod status;
@@ -146,6 +147,7 @@ pub use profile::{
     SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
     SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
 };
+pub use profile_details::ProfileDetails;
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
 pub use status::{Ack, AckStatus, Nak, NakStatus};
 pub use text::MessageText;

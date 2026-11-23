@@ -31,6 +31,7 @@ use super::buffers::{blocks, item_end, split_top, squash};
 use super::lex::{
     blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges,
 };
+use super::ratchet;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -248,51 +249,31 @@ fn scan(path: &str, src: &str, units: &BTreeSet<String>) -> BTreeSet<Site> {
 }
 
 /// `(rule, key, reason)` rows of the baseline.
-fn parse(text: &str) -> Result<BTreeMap<(Rule, String), String>, Vec<String>> {
-    let mut rows = BTreeMap::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
+fn read(tree: &dyn Tree) -> Result<BTreeMap<(Rule, String), String>, Report> {
+    let rows = ratchet::read_rows(tree, "check-values", LIST, |at, line, errors| {
         let row = (|| {
             let (rule, rest) = line.split_once(char::is_whitespace)?;
             let rule = Rule::parse(rule)?;
             let (key, reason) = rest.trim_start().split_once(char::is_whitespace)?;
             let reason = reason.trim();
-            (key.contains("::") && !reason.is_empty()).then(|| ((rule, key.to_owned()), reason))
+            (key.contains("::") && !reason.is_empty())
+                .then(|| ((rule, key.to_owned()), reason.to_owned()))
         })();
-        match row {
-            Some((k, reason)) => {
-                rows.insert(k, reason.to_owned());
-            }
-            None => errors.push(format!(
-                "{LIST}:{}: not `<rule>  <file>::<Owner>::<fn>  <reason>`: {line}",
-                n + 1
-            )),
+        if row.is_none() {
+            errors.push(format!(
+                "{LIST}:{at}: not `<rule>  <file>::<Owner>::<fn>  <reason>`: {line}"
+            ));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        row
+    })?;
+    Ok(rows.into_iter().collect())
 }
 
 pub(super) fn check(tree: &dyn Tree, min_files: usize, min_units: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(LIST) else {
-        r.fail(format!("check-values: FAIL: {LIST} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-values: FAIL ({LIST} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let units = units(tree);
     let files: Vec<String> = tree
@@ -536,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_or_missing_list_fails() {
+    fn a_malformed_list_fails() {
         for list in [
             "setter  x.rs::S::f\n",
             "wrong  x.rs::S::f  r\n",
@@ -545,8 +526,6 @@ mod tests {
             let r = run(&[], list);
             assert!(fails_on(&r, "malformed"), "{list}");
         }
-        let r = check(&Mem::with(&[(SESSION, "")]), 0, 0);
-        assert!(fails_on(&r, "is missing"));
     }
 
     #[test]

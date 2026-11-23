@@ -19,7 +19,7 @@ use tutti_units::{Amplitude, At};
 use super::error::SetRefusal;
 use super::saved::capture;
 use super::state::Params;
-use super::target::{AnyAssign, Target, TargetId, sealed, target_builders};
+use super::target::{AnyAssign, Modulatable, Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
 use crate::{ChannelEdge, ModRouteId, ModSourceId, ModTarget};
@@ -87,6 +87,9 @@ pub enum SlotId {
     /// The automation mode the host tells a plugin.
     #[cfg(feature = "plugin")]
     PluginAutomationMode(NodeKey),
+    /// The track info the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginTrackInfo(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -94,7 +97,7 @@ pub enum SlotId {
 impl SlotId {
     /// Whether a project saves the value: the one answer, which
     /// [`SavedValues`](crate::SavedValues) captures by. A policy, a MIDI
-    /// device's latency and a plugin's automation mode are the session's
+    /// device's latency and a plugin's automation mode and track info are the session's
     /// setup of a place, not of the project, so a project moved to another
     /// machine or another plugin does not carry them.
     pub(crate) const fn saved(self) -> bool {
@@ -105,7 +108,7 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::OutputLatency => false,
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(_) => false,
+            Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
             Self::Tempo
             | Self::Meter
             | Self::Loop
@@ -139,7 +142,7 @@ impl SlotId {
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(node) => Some(node),
+            Self::PluginAutomationMode(node) | Self::PluginTrackInfo(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -151,6 +154,12 @@ impl SlotId {
 pub trait Slot<V>: Send + Sync + 'static {
     /// The value now.
     fn load(&self) -> V;
+
+    /// The value the audio thread uses: the stored one, unless a live source
+    /// moves it from the base ([`BaseSlot`](super::base::BaseSlot)).
+    fn effective(&self) -> V {
+        self.load()
+    }
 
     /// Whether `value` may be stored.
     fn check(&self, value: &V) -> Result<(), SetRefusal>;
@@ -172,13 +181,13 @@ impl NodeSlots {
     /// `slot` as the value `id` names.
     #[cfg(any(feature = "midi", feature = "sampler"))]
     pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        Self(vec![(id, erase_staged(slot))])
+        Self(vec![(id, erase_staged::<C::Value, _>(slot))])
     }
 
     /// These slots and `slot` as the value `id` names.
     #[cfg(feature = "sampler")]
     pub(crate) fn and<C: Held>(mut self, id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        self.0.push((id, erase_staged(slot)));
+        self.0.push((id, erase_staged::<C::Value, _>(slot)));
         self
     }
 }
@@ -222,12 +231,15 @@ pub(crate) fn erase<V: Clone + PartialEq + Send + Sync + 'static>(slot: SlotCell
     }
 }
 
-/// A [`PublishedSlot`]: its writes wait for [`Params::publish_pending`].
-pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
+/// A staging slot, such as a [`PublishedSlot`]: its writes wait for
+/// [`Params::publish_pending`].
+pub(crate) fn erase_staged<V: Clone + PartialEq + Send + Sync + 'static, S: Slot<V> + Stage>(
+    slot: Arc<S>,
+) -> Erased {
     Erased {
-        cell: Box::new(Arc::clone(&slot) as SlotCell<C::Value>),
+        cell: Box::new(Arc::clone(&slot) as SlotCell<V>),
         stage: Some(slot),
-        capture: capture::<C::Value>,
+        capture: capture::<V>,
     }
 }
 
@@ -236,10 +248,6 @@ pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
 pub(crate) trait Stage: Send + Sync + 'static {
     /// Publishes the pending value, if there is one.
     fn publish_pending(&self);
-
-    /// Drops the pending value, if there is one.
-    #[cfg(feature = "midi")]
-    fn discard_pending(&self);
 }
 
 impl Params {
@@ -249,16 +257,6 @@ impl Params {
             .cell
             .downcast_ref::<SlotCell<V>>()
             .cloned()
-    }
-
-    /// Drops the pending value of each slot in `ids`.
-    #[cfg(feature = "midi")]
-    pub(super) fn discard_pending(&self, ids: &[SlotId]) {
-        for id in ids {
-            if let Some(stage) = self.slots.get(id).and_then(|erased| erased.stage.as_ref()) {
-                stage.discard_pending();
-            }
-        }
     }
 
     /// Publishes every pending value, in [`SlotId`] order: the tempo before
@@ -275,7 +273,15 @@ impl Params {
 /// Writes the target, `Target`, `Store` and builders of a slot target whose
 /// value type is fixed.
 macro_rules! slot_target {
+    (moved $(#[$meta:meta])* $name:ident, $value:ty, $id:expr) => {
+        slot_target!(@define [$(#[$meta])*] $name, $value, $id);
+        target_builders!(moved [] $name);
+    };
     ($(#[$meta:meta])* $name:ident, $value:ty, $id:expr) => {
+        slot_target!(@define [$(#[$meta])*] $name, $value, $id);
+        target_builders!([] $name);
+    };
+    (@define [$(#[$meta:meta])*] $name:ident, $value:ty, $id:expr) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub struct $name(());
@@ -311,36 +317,59 @@ macro_rules! slot_target {
                 cell.store(value);
             }
         }
-        target_builders!([] $name);
     };
 }
 
 slot_target!(
+    moved
     /// The project's tempo: the map the engine takes at the first block after
     /// the next [`Session::update`](crate::Session::update), as
     /// `session.transport_handle().tempo()` names it.
     ///
     /// A constant tempo is a one-step map, `tempo.to(TempoMap::constant(bpm)?)`;
-    /// a map by value works as it stands. A write is staged, a later one
-    /// replacing it, and published with the meter and the other staged values
-    /// by the update; a read answers the staged map, else the one in force.
-    /// A write is refused with [`SetRefusal::Following`] while the session
-    /// follows a live tempo.
+    /// a map by value works as it stands. The value is the **base**, the map
+    /// the app writes: a write is read back at once, and the update publishes
+    /// it with the meter and the other staged values. A live tempo the session
+    /// follows ([`Midi::follow_tempo`](crate::Midi::follow_tempo)) lies over
+    /// the base: [`effective`](Self::effective) reads the map the engine uses,
+    /// the base up to the first live step and the live steps after it, and the
+    /// base while nothing is followed.
     TempoTarget,
     Arc<TempoMap>,
     SlotId::Tempo
 );
 
 slot_target!(
+    moved
     /// The project's meter, which the metronome and every hosted plugin read
-    /// once per block, as `session.transport_handle().meter()` names it. A
-    /// write is staged and published by the next
-    /// [`Session::update`](crate::Session::update), as the tempo's is; a read
-    /// answers the staged meter, else the one in force.
+    /// once per block, as `session.transport_handle().meter()` names it. The
+    /// value is the **base**, as the tempo's is: a write is read back at once
+    /// and published by the next [`Session::update`](crate::Session::update),
+    /// and [`effective`](Self::effective) reads the meter in force, with the
+    /// time signatures a followed source set.
     MeterTarget,
     Arc<MeterMap>,
     SlotId::Meter
 );
+
+impl Modulatable for TempoTarget {}
+impl Modulatable for MeterTarget {}
+
+impl sealed::Lane for TempoTarget {
+    fn delivered(self, params: &Params) -> Option<Arc<TempoMap>> {
+        params
+            .slot::<Arc<TempoMap>>(SlotId::Tempo)
+            .map(|cell| cell.effective())
+    }
+}
+
+impl sealed::Lane for MeterTarget {
+    fn delivered(self, params: &Params) -> Option<Arc<MeterMap>> {
+        params
+            .slot::<Arc<MeterMap>>(SlotId::Meter)
+            .map(|cell| cell.effective())
+    }
+}
 
 slot_target!(
     /// The loop region: its bounds, kept while looping is disarmed, and
@@ -790,18 +819,13 @@ impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
 }
 
 impl<C: Held> Stage for PublishedSlot<C> {
-    #[cfg(feature = "midi")]
-    fn discard_pending(&self) {
-        *self.pending.lock() = None;
-    }
-
     fn publish_pending(&self) {
         let mut pending = self.pending.lock();
         let Some(value) = pending.take() else {
             return;
         };
-        // A value written before the check's ground changed (a live tempo
-        // took the map) is dropped, as its write would now be refused.
+        // A value the check no longer accepts is dropped, as its write would
+        // now be refused.
         if self.cell.check(&value).is_ok() && !self.cell.replace(&value) {
             *pending = Some(value);
         }
@@ -811,8 +835,6 @@ impl<C: Held> Stage for PublishedSlot<C> {
 /// The tempo map, in the transport's settings.
 pub(crate) struct TempoCell {
     pub settings: TransportSettings,
-    /// Whether a live tempo owns the map.
-    pub following: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Held for TempoCell {
@@ -820,13 +842,6 @@ impl Held for TempoCell {
 
     fn current(&self) -> Arc<TempoMap> {
         self.settings.tempo_map()
-    }
-
-    fn check(&self, _: &Arc<TempoMap>) -> Result<(), SetRefusal> {
-        if self.following.load(Ordering::Acquire) {
-            return Err(SetRefusal::Following);
-        }
-        Ok(())
     }
 
     fn replace(&self, value: &Arc<TempoMap>) -> bool {

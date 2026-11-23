@@ -46,6 +46,9 @@ coreaudio-sys = "0.2"
 # Every raw AudioToolbox, CoreAudio and CoreFoundation call; this crate forbids
 # `unsafe`.
 tutti-au-ffi = { version = "0.0.1", path = "../tutti-au-ffi" }
+# A main-thread mapping write the host could not undo is logged, not counted:
+# no counter an app reads carries that fact.
+tracing.workspace = true
 
 [dev-dependencies]
 # The transport tests build meter and loop values.

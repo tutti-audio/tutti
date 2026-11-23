@@ -320,7 +320,9 @@ pub use version::{EmptyVersionText, PluginVersion, VersionText};
 // Exported as `PluginResult` only: the bare name `Result` shadows std's under a
 // glob import.
 pub use deadline::Deadline;
-pub use error::{Delivered, PluginError, PresetError, Result as PluginResult, StateError};
+pub use error::{
+    Delivered, PluginError, PluginLearnError, PresetError, Result as PluginResult, StateError,
+};
 pub use features::{FeatureReport, Features};
 pub use harmony::{
     ChordChanges, ChordValue, HARMONY_CAPACITY, NoteExpressionIntChanges, NoteExpressionIntValue,
@@ -353,7 +355,7 @@ pub use wire_error::{FrameTooLarge, ResultError, SlabAccessError, SlabLayoutErro
 // `NoteExpressionVec` is the alias the change list is built from, so a caller
 // assembling one has to name it.
 pub use bypass::{BypassWrite, OwnBypass, bypass_parameter, bypass_value, is_bypassed};
-pub use control_role::{Axis, ControlRole, MidiAssignment, MidiSource};
+pub use control_role::{Axis, ControlRole, MidiAssignment, MidiMapApplied, MidiSource};
 pub use locate::{Helper, Locator};
 pub use note_expression::{
     NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,

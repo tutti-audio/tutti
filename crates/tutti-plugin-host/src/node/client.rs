@@ -23,7 +23,6 @@ use crate::node_losses::LossCounts;
 use crate::param_delivery::chunk_offset;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tutti_buffers::Float;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
@@ -36,8 +35,8 @@ use arrayvec::ArrayVec;
 use tutti_buffers::{BusTopology, ChannelLayout};
 use tutti_graph::{Bus, Buses, Cx, InEvents, Offset, OutEvents, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
+use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
-use tutti_rt::PendingSampleRate;
 use tutti_tempo::TempoView;
 use tutti_timeline::TempoReader;
 use tutti_units::{SampleRate, Samples};
@@ -156,7 +155,7 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// the out-of-process client gets from its command queue.
     ///
     /// Shared with the control backend, which drains it.
-    pub(super) pending_sample_rate: Arc<PendingSampleRate>,
+    pub(super) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
     /// A fork's rate could not be told to the plugin (its `prepare` ran off the
@@ -496,13 +495,13 @@ impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
 }
 
 /// Park `rate` for the main thread to dispatch. Audio-thread safe: one
-/// `Relaxed` store, no lock and no allocation.
+/// `Release` store, no lock and no allocation.
 ///
 /// Last write wins. A rate superseded before anyone drained it never reached
 /// the plugin, so dropping it loses nothing — the plugin only needs to hear the
 /// rate it is about to run at.
-pub(super) fn queue_sample_rate(cell: &PendingSampleRate, rate: SampleRate) {
-    cell.set(rate, Ordering::Relaxed);
+pub(super) fn queue_sample_rate(cell: &AtomicCell<Option<SampleRate>>, rate: SampleRate) {
+    cell.store(Some(rate));
 }
 
 /// Dispatch a pending rate, if any, and report whether one reached the plugin.
@@ -514,10 +513,10 @@ pub(super) fn queue_sample_rate(cell: &PendingSampleRate, rate: SampleRate) {
 /// thread has handed it back.
 pub(super) fn drain_sample_rate<L: Loaded>(
     main: MainThreadMarker,
-    cell: &PendingSampleRate,
+    cell: &AtomicCell<Option<SampleRate>>,
     inner: &Mutex<Instance<L>>,
 ) -> bool {
-    let Some(rate) = cell.take(Ordering::Relaxed) else {
+    let Some(rate) = cell.swap(None) else {
         return false;
     };
     // A refusal is kept in the instance and reported by the control side's next
@@ -545,7 +544,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         declared: Declared,
         features: Features,
         sample_rate: SampleRate,
-        pending_sample_rate: Arc<PendingSampleRate>,
+        pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
         counters: Option<Arc<crate::DeliveryCounters>>,
         parameters: impl IntoIterator<Item = ParamId>,
         spares: usize,

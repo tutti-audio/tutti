@@ -57,13 +57,29 @@ pub enum MidiSource {
     PolyPressure,
 }
 
+/// Who applies the app's controller entries after
+/// [`Control::set_app_midi_map`](crate::Control::set_app_midi_map).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum MidiMapApplied {
+    /// The plugin applies the entries itself (AU: they are in the unit's own
+    /// mapping table); the host sends it the MIDI and translates nothing.
+    Plugin,
+    /// The plugin cannot take the entries; the host's node translates each
+    /// mapped message into a parameter change.
+    Host,
+}
+
 /// One entry of the controller table a plugin declares: a MIDI message and
 /// the parameter it drives.
 ///
 /// VST3 (`IMidiMapping`) lists a parameter per channel and controller; AU
 /// (`kAudioUnitProperty_AllParameterMIDIMappings`) lists mappings that name
-/// a channel or any. CLAP declares none. The host never applies one: it is
-/// the plugin's suggestion.
+/// a channel or any. CLAP declares none. The VST3 host applies the table the
+/// plugin declares (it turns each mapped controller into a parameter change);
+/// an AU applies its own table inside the unit. The app's entries are handed to
+/// the plugin with [`Control::set_app_midi_map`](crate::Control::set_app_midi_map).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MidiAssignment {

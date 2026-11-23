@@ -71,10 +71,6 @@ pub enum SetRefusal {
     /// blend would be a guess.
     #[error(transparent)]
     Unplaced(#[from] tutti_graph::PassError),
-    /// The session follows a live tempo, which owns the tempo map: an app's
-    /// write would be overwritten at the next message.
-    #[error("a live tempo is followed")]
-    Following,
     /// The call names one target in two value types (a plugin parameter as a
     /// position and in a unit), so its writes have no one value to land.
     #[error("the call names one target in two value types")]

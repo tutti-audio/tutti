@@ -13,7 +13,9 @@ use std::sync::{Arc, Weak};
 use tutti_rt::Mutex;
 
 use super::batch::{Batch, Failure, Stageable};
+use super::edit_log::{LogSlot, RawMark};
 use super::error::{ValueError, ValueErrorKind};
+use super::saved::Captured;
 use super::state::{Params, ValueState};
 use super::target::{
     Assign, Target, TargetId,
@@ -195,13 +197,14 @@ impl Stored {
 }
 
 /// How a landing is grouped into gestures: the one rule `Feed::land` applies.
-#[derive(Clone, Copy)]
 pub(super) enum Grouping {
     /// A batch, or a restore of a saved map: two or more moved targets are one
     /// new gesture, which ends with the call; one moved target is no gesture.
     Batch,
     /// A write of an open [`Gesture`](crate::Gesture): its changes, not ended.
-    Open(GestureId),
+    /// The capture is the saved values before the write, taken by
+    /// [`Feed::capture_before`] when the gesture's first write is made.
+    Open(GestureId, Option<Captured>),
     /// The end of a [`Gesture`](crate::Gesture): its changes, ended.
     End(GestureId),
 }
@@ -261,6 +264,11 @@ struct FeedInner {
     /// The next gesture id.
     next: u64,
     watchers: Vec<Weak<WatchSlot>>,
+    /// The edit logs listening: the capture of `after` runs only while one is.
+    logs: Vec<Weak<LogSlot>>,
+    /// The saved values before the first write of each open gesture that was
+    /// captured while a log listened.
+    open: BTreeMap<GestureId, Captured>,
 }
 
 impl fmt::Debug for Feed {
@@ -285,6 +293,24 @@ impl Feed {
         self.inner.lock().watchers.retain(|w| !w.ptr_eq(&weak));
     }
 
+    /// A slot that records every landing as marks.
+    pub(super) fn subscribe_log(&self, slot: &Arc<LogSlot>) {
+        self.inner.lock().logs.push(Arc::downgrade(slot));
+    }
+
+    pub(super) fn unsubscribe_log(&self, slot: &Arc<LogSlot>) {
+        let weak = Arc::downgrade(slot);
+        self.inner.lock().logs.retain(|l| !l.ptr_eq(&weak));
+    }
+
+    /// The saved values now, for the first write of the open gesture `id`
+    /// while an edit log listens; `None` with no log or once captured.
+    pub(super) fn capture_before(&self, params: &Params, id: GestureId) -> Option<Captured> {
+        let inner = self.inner.lock();
+        let listening = inner.logs.iter().any(|l| l.strong_count() > 0);
+        (listening && !inner.open.contains_key(&id)).then(|| params.captured())
+    }
+
     /// The id of a new gesture.
     pub(super) fn open(&self) -> GestureId {
         let mut inner = self.inner.lock();
@@ -297,7 +323,7 @@ impl Feed {
     /// watcher that has not read since an earlier change keeps that change's
     /// base. The one path every landing takes, so a watcher's read sees all of
     /// one landing or none.
-    pub(super) fn land(&self, landed: Stored, grouping: Grouping) {
+    pub(super) fn land(&self, params: &Params, landed: Stored, grouping: Grouping) {
         if landed.landings.is_empty() {
             return;
         }
@@ -308,7 +334,7 @@ impl Feed {
                 inner.next += 1;
                 Gestured { id, ended: true }
             }),
-            Grouping::Open(id) => Some(Gestured { id, ended: false }),
+            Grouping::Open(id, _) => Some(Gestured { id, ended: false }),
             Grouping::End(id) => Some(Gestured { id, ended: true }),
         };
         inner.watchers.retain(|w| w.strong_count() > 0);
@@ -328,6 +354,41 @@ impl Feed {
                     pending.insert(landing.id, record);
                 }
             }
+        }
+        inner.logs.retain(|l| l.strong_count() > 0);
+        if inner.logs.is_empty() {
+            inner.open.clear();
+            return;
+        }
+        let now = params.captured();
+        let after = match grouping {
+            Grouping::Batch => now,
+            Grouping::End(id) => {
+                inner.open.remove(&id);
+                now
+            }
+            Grouping::Open(id, before) => {
+                let base = inner
+                    .open
+                    .entry(id)
+                    .or_insert_with(|| before.unwrap_or_else(|| Arc::clone(&now)));
+                let mut held = (*now).clone();
+                for landing in &landed.landings {
+                    if let Some(assign) = base.get(&landing.id) {
+                        held.insert(landing.id, assign.clone());
+                    }
+                }
+                Arc::new(held)
+            }
+        };
+        for slot in inner.logs.iter().filter_map(Weak::upgrade) {
+            slot.push(landed.landings.iter().map(|landing| RawMark {
+                id: landing.id,
+                by: landed.by,
+                gesture: gesture.as_ref().map(|g| g.id),
+                ended: gesture.as_ref().is_none_or(|g| g.ended),
+                after: Arc::clone(&after),
+            }));
         }
     }
 

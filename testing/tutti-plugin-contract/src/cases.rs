@@ -8,12 +8,13 @@ use tutti_buffers::InputOutput;
 use tutti_graph::Offset;
 use tutti_graph::UmpAt;
 use tutti_plugin_types::{
-    BusRole, BypassWrite, Control, Controller, Loaded, OwnBypass, ParamFlags, ParamWriteError,
-    ParameterChanges, PluginBus, PluginIo, PluginPreset, PluginTail, PluginWiring, PresetId,
-    ProcessContext, ProcessOutput, Processor, Reopen, Samples, TransportChange, TransportInfo,
+    BusRole, BypassWrite, Control, Controller, Loaded, MidiAssignment, OwnBypass, ParamFlags,
+    ParamWriteError, ParameterChanges, PluginBus, PluginIo, PluginLearnError, PluginPreset,
+    PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput, Processor, Reopen, Samples,
+    TransportChange, TransportInfo,
 };
 use tutti_plugin_types::{ParamEdit, ParamMapping, PlainMap, Request};
-use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity};
+use tutti_ump::{CCNumber, MidiChannel, MidiGroup, NoteVelocity};
 use tutti_units::Normalized;
 
 use crate::spec::{self, Mode, Param};
@@ -511,7 +512,7 @@ pub fn the_bypass_parameter_is_not_a_listed_control<F: Format>() {
 /// no other's), the roles of VST3's function names, the AU overview's
 /// shortlist, and the shape a control surface draws (`mode` is a
 /// five-position selector, the others continuous), loaded and active alike.
-/// Spec: clap.ext.params.get_info, vst3.IUnitInfo.getUnitInfo, vst3.IParameterFunctionName.getParameterIDFromFunctionName, au.prop.ParameterClumpName, au.prop.ParametersForOverview, au.prop.ParameterInfo
+/// Spec: clap.ext.params.get_info, vst3.IUnitInfo.getUnitInfo, vst3.IParameterFunctionName.getParameterIDFromFunctionName, au.prop.ParameterClumpName, au.prop.ParameterIDName, au.prop.ParametersForOverview, au.prop.ParameterInfo
 pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
     fn check<F: Format, C: Control + ?Sized>(c: &C, when: &str) {
         let spec = F::SURFACE;
@@ -610,6 +611,111 @@ pub fn assert_tables<F: Format>(wiring: &PluginWiring, when: &str) {
         .map(|g| (g.path.as_str(), g.parent.as_deref()))
         .collect();
     assert_eq!(groups, spec.groups, "{}: groups, {when}", F::NAME);
+}
+
+/// The app's controller entries are applied by who the format says
+/// ([`spec::Surface::app_map`]) and never change the table the plugin declares:
+/// the wiring lists the plugin's entries before, during and after each set (an
+/// AU holds the app's entries in its own table, and an entry for a parameter the
+/// plugin maps replaces the plugin's there only for as long as it is set; the
+/// unit's own table is read back in tutti-au-host's tests).
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+///
+/// Spec: au.prop.AllParameterMIDIMappings, au.prop.AddParameterMIDIMapping, au.prop.RemoveParameterMIDIMapping
+pub fn an_app_midi_map_is_applied_by_who_the_format_says<F: Format>() {
+    fn check<F: Format, C: Control + ?Sized>(c: &mut C, when: &str) {
+        let main = main_thread();
+        let spec = F::SURFACE;
+        let sets: [&[MidiAssignment]; 4] = [
+            &[],
+            &[spec::APP_ENTRY],
+            &[spec::APP_ENTRY, spec::APP_OVERRIDE],
+            &[],
+        ];
+        for app in sets {
+            assert_eq!(
+                c.set_app_midi_map(main, app),
+                spec.app_map,
+                "{}: who applies {app:?}, {when}",
+                F::NAME
+            );
+            assert_eq!(
+                c.wiring(main).assignments,
+                spec.assignments,
+                "{}: the declared table after {app:?}, {when}",
+                F::NAME
+            );
+        }
+    }
+    let mut loaded = F::load();
+    check::<F, _>(&mut loaded, "loaded");
+    let mut active = activate(loaded, BLOCK);
+    check::<F, _>(active.controller_mut(), "active");
+}
+
+/// The plugin's own MIDI learn is armed where the plugin has one and refused as
+/// unsupported where it has none ([`spec::Surface::plugin_learn`]). Where armed,
+/// a live controller reaches the plugin from the main thread only after the
+/// host's tick, and none reaches it once disarmed.
+///
+/// # Panics
+///
+/// Panics when an assertion of the case fails.
+///
+/// Spec: vst3.IMidiLearn.onLiveMIDIControllerInput
+pub fn the_plugins_own_midi_learn_is_armed_or_refused<F: Format>() {
+    let main = main_thread();
+    let controller = |c: u8| {
+        let address = tutti_ump::Address::new(MidiGroup::FIRST, MidiChannel::of(0));
+        let ump = midi::cc(address, CCNumber::of(c), 0x8000_0000);
+        [(Offset::of(Samples::new(0), Samples::new(BLOCK)), ump)]
+    };
+    let mut a = active_in::<F>(Mode::Silent);
+    match F::SURFACE.plugin_learn {
+        spec::PluginLearn::Refused => {
+            for armed in [true, false] {
+                assert_eq!(
+                    a.controller_mut().arm_plugin_midi_learn(main, armed),
+                    Err(PluginLearnError::Unsupported),
+                    "{}: arming {armed}",
+                    F::NAME
+                );
+            }
+        }
+        spec::PluginLearn::MovesAux => {
+            let aux = |a: &Active<F::L>| read(a.controller(), Param::Aux).expect("aux is listed");
+            assert_eq!(aux(&a), 0.25, "aux starts at its default");
+            assert_eq!(a.controller_mut().arm_plugin_midi_learn(main, true), Ok(()));
+            let ctx_events = controller(spec::LEARNED_CONTROLLER);
+            a.render(
+                &silence(BLOCK),
+                BLOCK,
+                &ProcessContext::new().midi(&ctx_events),
+            );
+            assert_eq!(
+                aux(&a),
+                0.25,
+                "the plugin is told from the main thread, not the block"
+            );
+            Control::flush_edits(a.controller_mut(), main);
+            assert_eq!(aux(&a), f64::from(spec::LEARNED_CONTROLLER) / 127.0);
+            assert_eq!(
+                a.controller_mut().arm_plugin_midi_learn(main, false),
+                Ok(())
+            );
+            let later = controller(spec::LEARNED_CONTROLLER + 1);
+            a.render(&silence(BLOCK), BLOCK, &ProcessContext::new().midi(&later));
+            Control::flush_edits(a.controller_mut(), main);
+            assert_eq!(
+                aux(&a),
+                f64::from(spec::LEARNED_CONTROLLER) / 127.0,
+                "a controller after the disarm is not told"
+            );
+        }
+    }
 }
 
 /// `got` is `want` to the format's own representation (`Format::PARAM_VALUE_TOLERANCE`,

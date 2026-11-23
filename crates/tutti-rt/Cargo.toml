@@ -29,11 +29,11 @@ atomic_float = { version = "1.1", default-features = false, features = ["atomic_
 # reaches the audio thread through. A general-purpose crate that names no tutti
 # crate; it comes from crates.io.
 arc-lend = "0.2.1"
-# The byte views behind `SeqWriter<T>` and `PackedAtomic<T>`: a `NoUninit +
+# The byte views behind `SeqWriter<T>`: a `NoUninit +
 # AnyBitPattern` value to and from its bytes with no `unsafe`.
 bytemuck = { version = "1.16", features = ["derive"] }
 
-# `PosRing`'s, `PackedAtomic`'s, `SeqWriter`/`SeqReader`'s and `AudioThreadCell`'s
+# `PosRing`'s, `AtomicCell`'s, `SeqWriter`/`SeqReader`'s and `AudioThreadCell`'s
 # atomics become loom's under `--cfg loom`, so the models in `tests/*_loom.rs`
 # check the shipped protocols rather than replicas.
 # Only that flag pulls this in; a normal build never sees loom.

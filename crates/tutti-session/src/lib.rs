@@ -371,8 +371,8 @@ pub use value::{
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 pub use value::{
-    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
-    Watcher,
+    Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
+    SavedValues, Watchable, Watcher,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -380,7 +380,8 @@ pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTar
 pub use value::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 #[cfg(feature = "plugin")]
 pub use value::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
+    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginTrackInfoTarget,
+    PluginUnit, UnitError,
 };
 #[cfg(feature = "device")]
 pub use watch::{Backoff, DevicePolicy, DeviceWatch, Follow, FollowEvent};

@@ -35,11 +35,12 @@ use std::collections::BTreeSet;
 /// `<count> <path>` lines: each file's passive tests when the gate began.
 pub(crate) const BASELINE: &str = "xtask/passive-tests.txt";
 
-const WORDING: Wording = Wording {
+const WORDING: Wording<1> = Wording {
     gate: "check-passive-tests",
     baseline: BASELINE,
-    noun: "passive tests",
+    nouns: ["passive tests"],
     headline: "a test asserts nothing; pin a property or delete it",
+    paste: false,
 };
 
 const ROOTS: [&str; 3] = ["crates", "testing", "xtask"];
@@ -275,7 +276,10 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
             .into_iter()
             .map(|(line, name)| format!("    {path}:{line}: `{name}` asserts nothing"))
             .collect();
-        found.push(Found { path, sites });
+        found.push(Found {
+            path,
+            sites: [sites],
+        });
     }
     ratchet::settle(&WORDING, &baseline, found)
 }
@@ -366,14 +370,13 @@ mod tests {
     }
 
     #[test]
-    fn a_file_over_its_baseline_fails_with_each_test_and_a_missing_baseline_fails() {
-        let files = [(
-            "crates/a/src/lib.rs",
-            "#[test]\nfn a() {}\n#[test]\nfn b() { assert!(1 < 2); }\n#[test]\nfn c() {}\n",
-        )];
+    fn each_passive_test_is_a_site_naming_it() {
         let r = check(&Mem::with(&[
             (BASELINE, "1 crates/a/src/lib.rs\n"),
-            files[0],
+            (
+                "crates/a/src/lib.rs",
+                "#[test]\nfn a() {}\n#[test]\nfn b() { assert!(1 < 2); }\n#[test]\nfn c() {}\n",
+            ),
         ]));
         assert_eq!(
             r.findings,
@@ -384,6 +387,5 @@ mod tests {
                 "    crates/a/src/lib.rs:6: `c` asserts nothing",
             ]
         );
-        assert!(!check(&Mem::with(&files)).passed());
     }
 }

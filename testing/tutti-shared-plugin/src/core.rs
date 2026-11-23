@@ -62,8 +62,8 @@
 //! - **Key names.** CLAP (`note-name`), VST3 (`IKeyswitchController`, one switch
 //!   for each key) and VST2 (`effGetMidiKeyName`, in every program) name the keys
 //!   of [`NOTE_NAMES`]. AU declares none.
-//! - **Short names.** VST3's `shortTitle` and VST2's `shortLabel` are
-//!   [`SHORT_NAMES`]; CLAP and AU have no short name.
+//! - **Short names.** VST3's `shortTitle`, VST2's `shortLabel` and AU's
+//!   `kAudioUnitProperty_ParameterIDName` are [`SHORT_NAMES`]; CLAP has no short name.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.
@@ -994,6 +994,14 @@ impl Core {
     pub fn log_automation(&self, raw: u32) {
         self.automation_last.store(raw, Relaxed);
         self.automation_n.fetch_add(1, Relaxed);
+    }
+
+    /// Records a mapping the host wrote into the AU's table, before the table
+    /// changes: `add` for an added entry, otherwise a removed one. The `id` is the
+    /// entry's parameter and the `value` its `status << 8 | data1`.
+    pub fn log_mapping(&self, add: bool, parameter_id: u32, status: u8, data1: u8) {
+        let word = u32::from(status) << 8 | u32::from(data1);
+        self.log(if add { 11 } else { 12 }, 0, parameter_id, f64::from(word));
     }
 
     fn log(&self, kind: u64, offset: u32, id: u32, value: f64) {

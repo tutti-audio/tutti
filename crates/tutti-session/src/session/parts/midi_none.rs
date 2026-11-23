@@ -6,8 +6,6 @@
     expect(dead_code, reason = "a device restart (feature `device`) is the user")
 )]
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tutti_platform::Instant;
 
 use tutti_buffers::Float;
@@ -38,11 +36,6 @@ impl Followed {
 impl MidiPart {
     pub(crate) fn new<F: Float>(_: &mut Parts<F>, _: &Options) -> Self {
         Self
-    }
-
-    /// No tempo is followed.
-    pub(crate) fn following(&self) -> Arc<AtomicBool> {
-        Arc::default()
     }
 
     /// No MIDI cell to register.

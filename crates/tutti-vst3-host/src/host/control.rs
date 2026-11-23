@@ -10,7 +10,7 @@ use tutti_plugin_types::{
     PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
     Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
-use tutti_plugin_types::{Delivered, MainThreadMarker, TrackInfo};
+use tutti_plugin_types::{Delivered, MainThreadMarker, PluginLearnError, TrackInfo};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -509,6 +509,32 @@ impl Control for Vst3Loaded {
 
     fn rebuild_midi_mapping(&mut self, main: MainThreadMarker) {
         self.rebuild_midi_cc_mapping(main);
+    }
+
+    /// Forwards the controllers the realtime path captured while learn was armed
+    /// to the plugin's `IMidiLearn`, on this (main) thread as the SDK requires.
+    fn flush_edits(&mut self, _main: MainThreadMarker) {
+        self.midi_learn.forward_pending();
+    }
+
+    /// Arms the plugin's `IMidiLearn`. While armed, the realtime path captures
+    /// incoming controllers and the next
+    /// [`flush_edits`](Control::flush_edits) (or
+    /// [`poll_plugin_notifications`](Vst3Loaded::poll_plugin_notifications))
+    /// forwards them to `onLiveMIDIControllerInput`, so the plugin binds the
+    /// controller to the parameter its own editor is learning and raises
+    /// `kMidiCCAssignmentChanged`. [`Unsupported`](PluginLearnError::Unsupported)
+    /// for a plugin without `IMidiLearn`.
+    fn arm_plugin_midi_learn(
+        &mut self,
+        _main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        if !self.midi_learn.plugin_learns() {
+            return Err(PluginLearnError::Unsupported);
+        }
+        self.midi_learn.arm(armed);
+        Ok(())
     }
 
     /// What the plugin has asked of the host since the last take, as the

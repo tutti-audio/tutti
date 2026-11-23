@@ -158,11 +158,12 @@ fn comment_text(path: &str, raw: String) -> Option<String> {
     }
 }
 
-const WORDING: Wording = Wording {
+const WORDING: Wording<1> = Wording {
     gate: "check-comments",
     baseline: BASELINE,
-    noun: "citations",
+    nouns: ["citations"],
     headline: "a comment gained a citation; state the fact instead",
+    paste: false,
 };
 
 pub(super) fn check(tree: &dyn Tree) -> Report {
@@ -189,19 +190,18 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                 sites.push(format!("    {path}:{}: cites {what}", n + 1));
             }
         }
-        found.push(Found { path, sites });
+        found.push(Found {
+            path,
+            sites: [sites],
+        });
     }
     ratchet::settle(&WORDING, &baseline, found)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
-
-    fn run(files: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files))
-    }
 
     #[test]
     fn each_citation_kind_is_counted_and_spec_sections_are_not() {
@@ -231,57 +231,23 @@ mod tests {
     }
 
     #[test]
-    fn a_file_over_its_baseline_fails_with_each_site() {
-        let r = run(&[
-            (BASELINE, "1 crates/a/src/lib.rs\n"),
-            (
-                "crates/a/src/lib.rs",
-                "// doc 013\nfn f() {}\n/// design 015 §5\nconst S: &str = \"doc 014\";\n",
-            ),
-        ]);
-        assert_eq!(
-            r.findings,
-            [
-                "check-comments: FAIL (a comment gained a citation; state the fact instead):",
-                "  crates/a/src/lib.rs: 2 citations, baseline 1",
-                "    crates/a/src/lib.rs:1: cites a design doc",
-                "    crates/a/src/lib.rs:3: cites a design doc",
-            ]
-        );
-    }
-
-    #[test]
-    fn a_file_under_its_baseline_passes_and_reports_the_slack() {
-        let r = run(&[
-            (BASELINE, "3 crates/a/src/lib.rs\n"),
-            ("crates/a/src/lib.rs", "// doc 013\n"),
-        ]);
-        assert!(r.passed());
-        assert_eq!(
-            r.out,
-            [
-                "check-comments: OK",
-                "check-comments: 1 citations in 1 baseline files (3 total in xtask/comment-citations.txt)",
-                "check-comments: xtask/comment-citations.txt can drop by 2; lower it to the current counts",
-            ]
-        );
-    }
-
-    #[test]
     fn manifest_and_workflow_comments_are_read_and_their_strings_are_not() {
-        let r = run(&[
-            (BASELINE, ""),
-            (
-                "crates/a/Cargo.toml",
-                "# doc 013\nname = \"doc 014 # design 015\" # PR #12\n",
-            ),
-            (
-                ".github/workflows/ci.yml",
-                "run: echo 'doc 016' # design 017\n",
-            ),
-            ("Cargo.toml", "members = [] # doc 018\n"),
-            ("crates/a/README.md", "doc 019\n"),
-        ]);
+        let r = run_gate(
+            check,
+            &[
+                (BASELINE, ""),
+                (
+                    "crates/a/Cargo.toml",
+                    "# doc 013\nname = \"doc 014 # design 015\" # PR #12\n",
+                ),
+                (
+                    ".github/workflows/ci.yml",
+                    "run: echo 'doc 016' # design 017\n",
+                ),
+                ("Cargo.toml", "members = [] # doc 018\n"),
+                ("crates/a/README.md", "doc 019\n"),
+            ],
+        );
         assert_eq!(
             r.findings[1..],
             [
@@ -294,11 +260,5 @@ mod tests {
                 "    crates/a/Cargo.toml:2: cites a pull request",
             ]
         );
-    }
-
-    #[test]
-    fn a_missing_or_malformed_baseline_fails() {
-        assert!(!run(&[]).passed());
-        assert!(!run(&[(BASELINE, "many crates/a/src/lib.rs\n")]).passed());
     }
 }

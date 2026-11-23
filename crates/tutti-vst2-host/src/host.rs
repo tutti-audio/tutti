@@ -54,7 +54,7 @@ use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use tutti_plugin_types::{
     AutomationMode, MainThreadMarker, Request, RescanScope, WireMidi, WrittenValues, sysex_packets,
 };
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_rt::{AtomicRequestFlags, Tally, TallyWriter, tally};
 use tutti_ump::MidiGroup;
 use tutti_units::{Normalized, SampleRate};
@@ -173,7 +173,7 @@ pub(crate) struct HostState {
     /// The rate the plugin was last told (`effSetSampleRate`), as `f64` bits.
     /// Answers `audioMasterGetSampleRate`, and is written before the opcode is
     /// dispatched for the same reason as [`block_size`](Self::block_size).
-    sample_rate: AtomicSampleRate,
+    sample_rate: AtomicCell<SampleRate>,
     /// Whether the host is rendering offline, answered back through
     /// `audioMasterGetCurrentProcessLevel`.
     ///
@@ -295,7 +295,7 @@ impl HostState {
             time_info,
             written: std::sync::OnceLock::new(),
             block_size: AtomicU64::new(block_size as u64),
-            sample_rate: AtomicSampleRate::new(default_sample_rate),
+            sample_rate: AtomicCell::new(default_sample_rate),
             offline: std::sync::atomic::AtomicBool::new(false),
             process_thread: AtomicUsize::new(0),
             automation: AtomicU8::new(0),
@@ -322,7 +322,7 @@ impl HostState {
     /// Records the rate the plugin is about to be told, for
     /// `audioMasterGetSampleRate`.
     pub(crate) fn set_sample_rate(&self, rate: SampleRate) {
-        self.sample_rate.store(rate, Ordering::Release);
+        self.sample_rate.store(rate);
     }
 
     /// The requests the plugin raised, for the main thread to take.
@@ -561,7 +561,7 @@ impl Host for HostState {
     /// `effSetSampleRate` must read the figure being set.
     fn get_sample_rate(&self) -> f32 {
         // `audioMasterGetSampleRate` answers a C `float`.
-        self.sample_rate.load(Ordering::Acquire).get() as f32
+        self.sample_rate.load().get() as f32
     }
 
     /// The level of the thread asking (`audioMasterGetCurrentProcessLevel`): from inside the

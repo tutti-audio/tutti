@@ -31,7 +31,7 @@
 //! port instead), so the cell holds what the user set, and a fork of the
 //! node starts from it ([`ParamFork`]) without a second, "authored" copy.
 
-use std::any::Any;
+use std::any::{Any, TypeId};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -61,6 +61,8 @@ struct Slot {
 #[derive(Clone, Copy)]
 pub struct DeclaredUnit {
     value: fn(f64) -> Arc<dyn Any + Send + Sync>,
+    /// The unit's type, as a function so `of` stays `const`.
+    type_id: fn() -> TypeId,
 }
 
 impl DeclaredUnit {
@@ -69,6 +71,7 @@ impl DeclaredUnit {
     pub const fn of<U: ParamValue>() -> Self {
         Self {
             value: |cell| Arc::new(U::from_cell(cell)),
+            type_id: TypeId::of::<U>,
         }
     }
 
@@ -78,6 +81,14 @@ impl DeclaredUnit {
         (self.value)(cell)
     }
 }
+
+/// Two declarations of one unit `U`.
+impl PartialEq for DeclaredUnit {
+    fn eq(&self, other: &Self) -> bool {
+        (self.type_id)() == (other.type_id)()
+    }
+}
+impl Eq for DeclaredUnit {}
 
 impl std::fmt::Debug for DeclaredUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -359,6 +370,17 @@ mod tests {
     use super::*;
     use tutti_rt::Param;
     use tutti_units::{Hz, Q};
+
+    /// **A declared unit is equal to another declaration of the same unit and
+    /// to no other unit.**
+    #[test]
+    fn declared_units_are_equal_when_they_declare_one_unit() {
+        assert_eq!(DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Hz>());
+        assert_ne!(
+            DeclaredUnit::of::<Hz>(),
+            DeclaredUnit::of::<tutti_units::Seconds>()
+        );
+    }
 
     fn set() -> (Param<Hz>, Param<Q>, ParamSet) {
         let cutoff = Param::new(Hz::new(1000.0));

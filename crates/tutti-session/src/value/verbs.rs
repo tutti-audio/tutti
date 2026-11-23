@@ -2,6 +2,7 @@
 //! [`Session::values`].
 
 use super::batch::{IntoAssign, IntoRead};
+use super::edit_log::EditLog;
 use super::error::ValueError;
 use super::gesture::Gesture;
 use super::saved::SavedValues;
@@ -154,6 +155,39 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// ```
     pub fn gesture<W: IntoTargets>(&self, targets: W) -> Result<Gesture<K, W>, ValueError<K>> {
         self.values.gesture(targets)
+    }
+
+    /// An [`EditLog`] of every landing from now on: one [`EditMark`](crate::EditMark)
+    /// per target a `set`, a [`Gesture`] or a restore moved, each with the
+    /// saved values at that landing. Writes the session makes itself make
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`Reentrant`](crate::ValueErrorKind::Reentrant) from inside a
+    /// `modify`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_buffers::ChannelLayout;
+    /// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+    /// use tutti_session::Session;
+    /// use tutti_units::Hz;
+    ///
+    /// let mut session = Session::builder().build().unwrap();
+    /// let filter = session
+    ///     .graph()
+    ///     .add(SvfFilterNode::<f32>::from(
+    ///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass),
+    ///     ));
+    /// let mut log = session.edit_log().unwrap();
+    /// session.set(filter.cutoff().to(Hz::new(800.0))).unwrap();
+    /// let mark = log.drain().next().unwrap();
+    /// assert!(mark.ended && mark.gesture.is_none());
+    /// ```
+    pub fn edit_log(&self) -> Result<EditLog<K>, ValueError<K>> {
+        self.values.edit_log()
     }
 
     /// The base of every saved target at one instant: a [`SavedValues`] that
