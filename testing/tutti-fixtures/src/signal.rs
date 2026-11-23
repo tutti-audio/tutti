@@ -1,8 +1,9 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
-//! an impulse, the tone readings [`lock_in`] and [`amplitude_at`], the level readings [`peak`], [`peak_planes`], [`rms`] and
-//! [`rms_f64`], the bit patterns of a render ([`bits`]), the impulse responses
-//! [`decay_ir`] and [`room_ir`], and a float WAV on disk ([`write_wav_f32`],
-//! [`read_wav_f32`]), and the narrowing check [`wide_signal`] with [`assert_close_f64`].
+//! an impulse, the tone readings [`lock_in`] and [`amplitude_at`], the level
+//! readings [`peak`], [`peak_planes`], [`rms`] and [`rms_f64`], the bit patterns
+//! of a render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`],
+//! and a float WAV on disk ([`write_wav_f32`], [`read_wav_f32`]), and the
+//! narrowing check [`wide_signal`] with [`assert_close_f64`].
 //!
 //! A stretched step edge's smear is [`stretched_edge_spread`].
 //!

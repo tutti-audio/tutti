@@ -3,9 +3,10 @@
 //! [`check_range_contract`] and [`check_range_serde`], the checks a range-checked
 //! type keeps its contract and its serde form by, and [`check_round_trip`], a
 //! value's JSON spelling pinned both ways; [`noise`], a seeded stimulus, and
-//! [`Fnv`], a bit hash; [`wait_until`] and its [`HANG_GUARD`], a bounded wait for another thread,
-//! [`for_each_row`], a table test's row runner, and [`unique_name`], a name for what the OS
-//! shares; [`macos_major`], the macOS release a test runs on; and [`sf2`], a SoundFont built in memory.
+//! [`Fnv`], a bit hash; [`wait_until`] and its [`HANG_GUARD`], a bounded wait
+//! for another thread, [`for_each_row`], a table test's row runner, and
+//! [`unique_name`], a name for what the OS shares; [`macos_major`], the macOS
+//! release a test runs on; and [`sf2`], a SoundFont built in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.

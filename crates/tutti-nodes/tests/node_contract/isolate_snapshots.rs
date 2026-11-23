@@ -965,6 +965,5 @@ fn a_fork_is_a_snapshot_of_every_nodes_controls() {
         ("convolver", convolver),
         ("tube_stage", tube_stage),
     ];
-    assert!(!rows.is_empty(), "the table has rows");
     tutti_fixtures::for_each_row(rows.iter().copied(), |row| row());
 }

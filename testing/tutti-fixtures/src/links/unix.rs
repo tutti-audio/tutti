@@ -15,8 +15,9 @@ pub(crate) fn stage(real: &Path, staging: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use crate::publish_with_extension;
     use std::io::Write;
+
+    use crate::publish_with_extension;
 
     /// **A link already naming the artifact is not republished.** The
     /// link's own inode is the witness: a republish renames a fresh symlink
