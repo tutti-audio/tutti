@@ -6,7 +6,7 @@
 //! sound, the core that decides when they start and end, and the mix.
 //!
 //! A message goes to [`VoiceAllocator::step`], which says which voices to start,
-//! release or cut; [`Voices`] does it. What a note becomes is the preset's
+//! release or cut; [`VoiceTable`] does it. What a note becomes is the preset's
 //! ([`PresetPatch`]); how a voice sounds is the voice's own.
 //!
 //! The player renders five planes, not a mix: the dry pair, the chorus send
@@ -23,7 +23,7 @@ use tutti_graph::SampleRates;
 use tutti_midi_protocol::{Universal, UniversalReader};
 use tutti_ump::{Address, CCNumber, Message, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Amplitude, SampleRate, Seconds, Semitones};
-use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig};
+use tutti_voicing::{MasterGain, VoiceAllocator, VoiceConfig, VoiceTable};
 
 use crate::channel::Channel;
 use crate::config::SoundFontConfig;
@@ -31,7 +31,7 @@ use crate::error::{Error, Result};
 use crate::patch::PresetPatch;
 use crate::render::Render;
 use crate::soundfont_math::NON_AUDIBLE;
-use crate::voices::Voices;
+use crate::voice::Voice;
 use tutti_ump::ControlValue;
 
 // The controllers `ump` has no name for: the least significant half of a 14-bit
@@ -195,8 +195,7 @@ pub(crate) struct Player<F: Float + SimdLanes> {
     channels: Vec<Channel>,
     /// The program changes that named a preset the font lacks.
     missing: MissingPresets,
-    allocator: VoiceAllocator,
-    voices: Voices<F>,
+    voices: VoiceTable<Voice<F>>,
     /// The Group's Universal System Exclusive, reassembled and filtered by
     /// device id.
     universal: UniversalReader,
@@ -278,8 +277,7 @@ impl<F: Float + SimdLanes> Player<F> {
             default_preset,
             channels,
             missing: MissingPresets::default(),
-            allocator: VoiceAllocator::new(voice_config(polyphony.voices())),
-            voices: Voices::new(&render, polyphony.get()),
+            voices: VoiceTable::new(voice_config(polyphony.voices()), || Voice::new(&render)),
             universal,
             master_applied: MasterGain::UNITY,
             block: std::array::from_fn(|_| vec![F::ZERO; render.block_len()]),
@@ -380,8 +378,7 @@ impl<F: Float + SimdLanes> Player<F> {
         let Some(heard) = self.universal.push(ump) else {
             return;
         };
-        let commands = self.allocator.universal(heard);
-        self.voices.execute(commands, &self.config.font);
+        self.voices.universal(heard, &self.config.font);
         if matches!(heard.message, Universal::GeneralMidi(_)) {
             for (i, channel) in self.channels.iter_mut().enumerate() {
                 *channel = Channel::new(i == PERCUSSION_CHANNEL.index());
@@ -428,11 +425,8 @@ impl<F: Float + SimdLanes> Player<F> {
             font: &self.config.font,
             preset: self.preset_of(channel),
         };
-        let voices = &self.voices;
-        let commands = self
-            .allocator
-            .step(channel, message, &patch, |id| voices.level(id));
-        self.voices.execute(commands, &self.config.font);
+        self.voices
+            .step(channel, message, &patch, &self.config.font);
     }
 
     /// What a Control Change sets in the channel.
@@ -460,7 +454,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// the pedals and keys: a fork's start.
     pub(crate) fn release_all(&mut self) {
         self.voices.release_all();
-        self.allocator.forget_notes();
+        self.voices.forget_notes();
     }
 
     /// Cuts every voice, forgets the pedals and keys, and returns every
@@ -470,7 +464,7 @@ impl<F: Float + SimdLanes> Player<F> {
     /// sends.
     pub(crate) fn reset(&mut self) {
         self.voices.clear();
-        self.allocator.forget_notes();
+        self.voices.forget_notes();
         for channel in (0..MidiChannel::COUNT).filter_map(MidiChannel::new) {
             self.apply(
                 channel,
@@ -526,7 +520,7 @@ impl<F: Float + SimdLanes> Player<F> {
             let address = Address { group, channel };
             info.chase(&mut |v| emit(Message::Midi2(address, v).into()));
         }
-        self.allocator.chase(group, &mut emit);
+        self.voices.allocator().chase(group, &mut emit);
     }
 
     /// The planes written into since the last call: the others were exact
@@ -543,15 +537,13 @@ impl<F: Float + SimdLanes> Player<F> {
 
     fn render_block(&mut self) {
         let bends = std::array::from_fn(|i| {
-            MidiChannel::new(i as u8)
-                .map_or(Semitones::new(0.0), |c| self.allocator.channel_pitch(c))
+            MidiChannel::new(i as u8).map_or(Semitones::new(0.0), |c| {
+                self.voices.allocator().channel_pitch(c)
+            })
         });
-        self.voices.process(
-            self.config.font.sample_pool(),
-            &self.channels,
-            self.allocator.channels(),
-            &bends,
-        );
+        let (data, channels) = (self.config.font.sample_pool(), &self.channels);
+        self.voices
+            .retain(|voice, allocator| voice.process(data, channels, allocator.channels(), &bends));
 
         for plane in &mut self.block {
             plane.fill(F::ZERO);
@@ -559,7 +551,7 @@ impl<F: Float + SimdLanes> Player<F> {
         self.block_heard = Heard::default();
         // The Master Volume and Balance (M1 p.57) ramp across the chunk with
         // the voices' own gains, on every plane: the sends carry them too.
-        let (from, to) = (self.master_applied, self.allocator.master_gain());
+        let (from, to) = (self.master_applied, self.voices.allocator().master_gain());
         self.master_applied = to;
         // The master gains cross to the chunk's float once per chunk.
         let master = |gain: Amplitude| F::from_unit(MASTER_VOLUME * gain.get());
@@ -628,8 +620,7 @@ impl<F: Float + SimdLanes> Player<F> {
         player.missing = self.missing.clone();
         // The core's channel state (wheel, sensitivity); its notes are not
         // the new player's, which has no voice.
-        player.allocator = self.allocator.clone();
-        player.allocator.forget_notes();
+        player.voices = self.voices.fork(|| Voice::new(&player.render));
         player.master_applied = self.master_applied;
         Some(player)
     }
