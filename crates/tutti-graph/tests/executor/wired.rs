@@ -268,7 +268,7 @@ fn a_commit_reports_the_nodes_whose_wiring_moved_and_no_others() {
 }
 
 #[test]
-fn the_parallel_executor_reads_the_serial_masks() {
+fn the_parallel_executor_reads_the_one_participant_masks() {
     let serial = scenario(1);
     for workers in WORKERS {
         assert_eq!(scenario(workers), serial, "{workers} workers");

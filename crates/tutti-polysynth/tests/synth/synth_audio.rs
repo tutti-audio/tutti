@@ -24,9 +24,10 @@ use support::{BLOCK, Hand};
 use tutti_fixtures::midi;
 use tutti_fixtures::signal::peak;
 use tutti_fixtures::signal::rms;
-use tutti_polysynth::{Adsr, Order, OscillatorType, PolySynth, Steal, SynthConfig, VoiceMode};
+use tutti_polysynth::{Adsr, OscillatorType, PolySynth, SynthConfig, VoiceMode};
 use tutti_ump::{MidiChannel, MidiGroup, NoteVelocity, Ump};
 use tutti_units::{Amplitude, Normalized, Seconds};
+use tutti_voicing::{Order, Steal};
 
 const SR: f64 = 48_000.0;
 

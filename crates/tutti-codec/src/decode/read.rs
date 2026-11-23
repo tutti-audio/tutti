@@ -29,16 +29,16 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::packet::Packet;
 
 use super::error::convert;
-use super::placement::{empty_wave, topology_of};
+use super::placement::channels_of;
 use super::riff_guard;
 use crate::DecodeError;
-use tutti_buffers::{ChannelLayout, ChannelTopology, Placement};
+use tutti_buffers::{ChannelSet, Placement};
 
 /// Container metadata read from an audio file without decoding any audio.
 ///
 /// Returned by [`read_wave_metadata`]. The fields are the container's raw
-/// answers (the rate it states), and the topology it names, the one a full read would
-/// give the [`Wave`]. It carries a [`ChannelTopology`], which owns its list of
+/// answers (the rate it states), and the channels it names, the ones a full read would
+/// give the [`Wave`]. It carries a [`ChannelSet`], which owns its list of
 /// speakers, so this is `Clone` and not `Copy`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaveMetadata {
@@ -48,19 +48,19 @@ pub struct WaveMetadata {
     /// The file's sample rate. A container that states none, or 0, is
     /// [`DecodeError::NoSampleRate`].
     pub sample_rate: SampleRate,
-    /// Which speaker each channel feeds, in the order the samples are in (as
-    /// [`Wave::topology`] and [`FileIn::topology`](crate::FileIn::topology)
-    /// give it): a lone channel is the centre, a speaker the vocabulary has no
-    /// name for is [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a
-    /// container that states a count and no placement is
-    /// [`ChannelTopology::default_for`] ([`placement`](Self::placement)). A caller deciding whether a file
-    /// can be placed asks this before it loads or opens the file.
-    pub topology: Option<ChannelTopology>,
-    /// The file's width, which its [`topology`](Self::topology) has when it is at
-    /// most [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels.
-    pub layout: ChannelLayout,
-    /// Whether the container stated [`topology`](Self::topology) or only a
-    /// channel count it took the default layout for.
+    /// The file's channels, which speaker each feeds in the order the samples
+    /// are in (as [`Wave::channel_set`] and
+    /// [`FileIn::channel_set`](crate::FileIn::channel_set) give it): a lone
+    /// channel is the centre, a speaker the vocabulary has no name for is
+    /// [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a container
+    /// that states a count and no placement is [`ChannelSet::default_for`]
+    /// ([`placement`](Self::placement)). A file wider than
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) has no topology. A caller
+    /// deciding whether a file can be placed asks this before it loads or
+    /// opens the file.
+    pub channel_set: ChannelSet,
+    /// Whether the container stated [`channel_set`](Self::channel_set) or only
+    /// a channel count it took the default layout for.
     pub placement: Placement,
     /// The format the file's samples are held in: what [`read_wave`] and
     /// [`FileIn`](crate::FileIn) give back exactly, with no conversion, when
@@ -96,10 +96,10 @@ fn native_format(params: &AudioCodecParameters) -> SampleFormat {
 }
 
 impl WaveMetadata {
-    /// The file's channel count: the width of its [`topology`](Self::topology).
+    /// The file's channel count: the width of its [`channel_set`](Self::channel_set).
     #[must_use]
     pub fn channels(&self) -> usize {
-        usize::from(self.layout.count())
+        usize::from(self.channel_set.width().count())
     }
 }
 
@@ -372,12 +372,11 @@ pub fn read_wave_metadata(src: impl Into<Asset>) -> Result<WaveMetadata, DecodeE
 /// The metadata of a probed container's first audio track.
 fn metadata_of(reader: Box<dyn FormatReader>) -> Result<WaveMetadata, DecodeError> {
     let (track, params) = first_audio_track(&*reader)?;
-    let (layout, topology, placement) = topology_of(params.channels.as_ref());
+    let (channel_set, placement) = channels_of(params.channels.as_ref());
     Ok(WaveMetadata {
         total_frames: total_frames_of(track, params),
         sample_rate: sample_rate_of(params)?,
-        topology,
-        layout,
+        channel_set,
         placement,
         format: native_format(params),
     })
@@ -447,11 +446,11 @@ impl<S: Sample> WaveDecode<S> {
         let total_frames = total_frames_of(track, params);
         let sample_rate = sample_rate_of(params)?;
         let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
-        let (layout, topology, placement) = topology_of(params.channels.as_ref());
+        let (channel_set, placement) = channels_of(params.channels.as_ref());
 
         // Pre-allocate using the metadata frame count when available (WAV, FLAC).
         let wave = total_frames.map(|total| {
-            let mut wave = empty_wave(layout, topology, placement, sample_rate);
+            let mut wave = Wave::with_placement(channel_set, placement, sample_rate);
             wave.reserve(Samples::new(reserved_frames(total, wave.channels())));
             wave
         });
@@ -495,8 +494,8 @@ impl<S: Sample> WaveDecode<S> {
                 none => {
                     let spec = self.decoder.spec();
                     let rate = SampleRate::from_hz(spec.rate()).ok_or(DecodeError::NoSampleRate)?;
-                    let (layout, topology, placement) = topology_of(Some(spec.channels()));
-                    none.insert(empty_wave(layout, topology, placement, rate))
+                    let (channel_set, placement) = channels_of(Some(spec.channels()));
+                    none.insert(Wave::with_placement(channel_set, placement, rate))
                 }
             };
 

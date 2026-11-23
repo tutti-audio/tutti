@@ -7,7 +7,7 @@
 //! (which sizes the delay lines and the block scratch) runs when the rig is
 //! built, outside the gate; the gate walks only `process`. And control
 //! lanes (`ControlLaneNode`, automation-only ones too) driving
-//! param ports through a graph, serial and on a pool: four automation
+//! param ports through a graph, with no pool and on a pool: four automation
 //! lanes, and 200 lanes of every layer kind with republishes, knob writes
 //! and range edits between blocks.
 
@@ -500,7 +500,7 @@ fn lane_block(
 /// wired to a param port never allocates on the audio thread: curve
 /// segments at breakpoints, loop wraps inside blocks, the linear fallback
 /// for a range-clamped piece and for a curve with no pieces, ragged blocks;
-/// serial, and on a pool whose helpers run under the gate too.
+/// one-participant, and on a pool whose helpers run under the gate too.
 #[test]
 fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
     use std::sync::Arc;
@@ -538,7 +538,7 @@ fn event_lanes_are_allocation_free_serial_and_on_a_pool() {
     }
 }
 
-/// The lanes render bit for bit the same serial and on pools of 2, 3, 4
+/// The lanes render bit for bit the same with no pool and on pools of 2, 3, 4
 /// and 8 participants, under ragged blocks with loop wraps inside them.
 ///
 /// It does not test a property of the lane: a lane's state is
@@ -825,7 +825,7 @@ fn lanes_loop() -> Option<tutti_music::LoopRange> {
     tutti_music::LoopRange::new(tutti_units::Beat::new(0.5), tutti_units::Beat::new(1.7))
 }
 
-/// 200 control lanes render bit for bit the same serial and
+/// 200 control lanes render bit for bit the same with no pool and
 /// on pools of 2, 3, 4 and 8 participants, under ragged blocks with loop
 /// wraps inside them, republishes of every program, knob writes and range
 /// edits between blocks.
@@ -884,7 +884,7 @@ fn two_hundred_lanes_render_the_same_serial_and_parallel() {
     }
 }
 
-/// 200 control lanes never allocate on the audio thread, serial and on a
+/// 200 control lanes never allocate on the audio thread, with no pool and on a
 /// pool whose helpers run under the gate too, with a republish of every
 /// program, knob writes and range edits between gated blocks (on the
 /// control thread, outside the gate).
@@ -1166,7 +1166,7 @@ fn signal_block(
 }
 
 /// Followers and note envelopes into lanes render bit for bit the same
-/// serial and on pools of 2, 3, 4 and 8, under ragged blocks with a play
+/// with no pool and on pools of 2, 3, 4 and 8, under ragged blocks with a play
 /// start inside one.
 ///
 /// It does not test a property of the sources: each node's
@@ -1220,7 +1220,7 @@ fn signal_sources_render_the_same_serial_and_parallel() {
 }
 
 /// Followers and note envelopes (and the lanes they feed) never allocate
-/// on the audio thread, serial and on a pool whose helpers run under the
+/// on the audio thread, with no pool and on a pool whose helpers run under the
 /// gate too, through a play start inside a block.
 #[test]
 #[cfg_attr(miri, ignore = "threaded worker pools")]

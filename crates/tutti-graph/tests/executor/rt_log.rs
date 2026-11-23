@@ -1,6 +1,6 @@
 //! Logging from the audio thread: a node's `Io::log` reaches the control
 //! side's `RtLogReaders`, with the node and the frame the executor fills in,
-//! coalesced, gated and merged by frame, on the serial executor and on the
+//! coalesced, gated and merged by frame, on the one-participant executor and on the
 //! parallel one, which renders the same samples with logging on.
 
 use tutti_graph::testing as common;
@@ -321,7 +321,8 @@ fn busy() -> Vec<Vec<Act>> {
 }
 
 #[test]
-fn a_parallel_render_with_logging_on_is_bit_identical_to_the_serial_one_and_logs_the_same() {
+fn a_parallel_render_with_logging_on_is_bit_identical_to_the_one_participant_one_and_logs_the_same()
+{
     let blocks = [64usize, 17, 64, 12, 33];
     let run = |pool: Option<std::sync::Arc<dyn tutti_graph::Pool>>| {
         let parallel = pool.is_some();

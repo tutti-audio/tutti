@@ -7,7 +7,7 @@
 //! with. The app drains it on a thread of its own ([`Analyzer::pending`]); the
 //! session starts none.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Float, Pull, Source};
+use tutti_buffers::{ChannelLayout, ChannelSet, Float, Pull, Source};
 use tutti_graph::{MissingSource, TapReader};
 use tutti_measure::{Measure, StreamMeter};
 use tutti_units::{SampleRate, Samples};
@@ -88,7 +88,7 @@ where
     ) -> Result<Self, AnalyzerError> {
         let layout = ChannelLayout::from_count(width);
         let meter = analysis.measure(A::Context::from_audio(rate, layout))?;
-        let mut chunk = Chunk::new(layout, ChannelTopology::default_for(layout).as_ref());
+        let mut chunk = Chunk::new(&ChannelSet::default_for(layout));
         // An empty chunk shows whether the meter's view of this width exists.
         chunk.fill(Samples::ZERO)?;
         <<A::Meter as StreamMeter>::Input<'_> as View<'_, F>>::view(&mut chunk)?;

@@ -1,12 +1,12 @@
 //! [`BitCrusherNode`]: a sample-and-hold and a quantizer.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BitCrusher, BitCrusherControls, BlockMismatch, COEFF_INTERVAL};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{BitDepth, HoldFactor, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`BitCrusherNode`] is made from: its width and, optionally, its bit depth and hold.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,8 +125,7 @@ impl<F: Float> Kernel for BitCrusherKernel<F> {
 
     /// `width` channels in and out, `Light`: a round and a divide per sample.
     fn shape(&self) -> Shape {
-        let bus = ChannelTopology::unassigned(self.width)
-            .expect("a bit crusher is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a bit crusher");
         Shape::through(bus).cost(Cost::Light)
     }
 

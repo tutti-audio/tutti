@@ -336,7 +336,7 @@ fn a_chase_past_its_declared_capacity_is_counted() {
 }
 
 /// A render across swaps (cut and crossfade, and a replace queued behind a
-/// running fade, on several keys) is bit for bit the serial one on every
+/// running fade, on several keys) is bit for bit the one-participant one on every
 /// worker count.
 #[test]
 fn a_chase_renders_bit_identically_in_parallel() {

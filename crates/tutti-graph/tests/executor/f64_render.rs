@@ -227,9 +227,9 @@ fn an_f64_graph_hosts_a_param_node_and_forks_it_from_its_value() {
     );
 }
 
-/// Params nodes on a parallel `f64` executor render bit for bit what the serial one does.
+/// Params nodes on a parallel `f64` executor render bit for bit what the one-participant one does.
 #[test]
-fn the_parallel_f64_render_of_param_nodes_is_bit_identical_to_the_serial_one() {
+fn the_parallel_f64_render_of_param_nodes_is_bit_identical_to_the_one_participant_one() {
     let render = |workers: usize| {
         let (g, sets) = gain_graph(8);
         let mut r = g.renderer(prepare()).expect("builds at f64");

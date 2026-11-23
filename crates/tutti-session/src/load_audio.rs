@@ -126,7 +126,7 @@ impl<F: Float> LoadAudio<F> {
                 let wide = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
                 let bytes = facts.frames.map_or(u64::MAX, |frames| {
                     wide(frames.get())
-                        .saturating_mul(u64::from(facts.layout.count()))
+                        .saturating_mul(u64::from(facts.channel_set.width().count()))
                         .saturating_mul(wide(size_of::<F>()))
                 });
                 if facts.streamable && bytes > above {

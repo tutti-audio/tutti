@@ -13,7 +13,7 @@ use tutti_dsp::{
     PhaserControls, Ramp, Stages, Stagger, StaggerError, Steps, SweepRange, allpass_complement,
     sweep_hz,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Bipolar, Feedback, Hz, PhaseIncrement, SampleRate, Tail};
 
 use super::sweep_clock::{SEGMENT, SweepClock};
@@ -275,12 +275,7 @@ impl<F: Float + Lerp> Kernel for PhaserKernel<F> {
     const CUT_ALWAYS: bool = true;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     /// Prepares for `rate`: the sweep's top is held at 0.90 of Nyquist there (the authored

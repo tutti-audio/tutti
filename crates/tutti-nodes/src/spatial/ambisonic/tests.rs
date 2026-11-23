@@ -1,7 +1,7 @@
 use tutti_dsp::Harmonics;
 use tutti_graph::contract::{BlockRig, assert_param_fork};
 use tutti_graph::{IntoNode, Node};
-use tutti_units::{SampleRate, UnitParam};
+use tutti_units::{SampleRate, Tail, UnitParam};
 
 use super::*;
 use crate::test_support::prepared;

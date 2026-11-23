@@ -48,8 +48,7 @@
 use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
-#[cfg(test)]
-use tutti_buffers::ChannelTopology;
+use tutti_buffers::ChannelSet;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
 use tutti_platform::Asset;
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
@@ -73,12 +72,10 @@ pub(crate) const HISTORY_FRAMES: u64 = 4;
 pub(crate) struct Ring<F: RingFloat> {
     region_id: StreamId,
     asset: Asset,
-    channels: ChannelLayout,
-    /// Which speaker each of the file's channels feeds. The ring itself is at
+    /// The file's channels, which speaker each feeds. The ring itself is at
     /// the file's width and order; the placement the voice reads it by is built
-    /// when the stream opens (`Opened::place`), so only tests read this.
-    #[cfg(test)]
-    topology: Option<ChannelTopology>,
+    /// when the stream opens (`Opened::place`), so only tests read the speakers.
+    channels: ChannelSet,
     /// Glances at the window and where the reader plays (the writer's
     /// `watch`): no sample is read through it.
     core: Arc<PosRing<F>>,
@@ -112,13 +109,13 @@ impl<F: RingFloat> Ring<F> {
 
     /// Declared width — the file's own layout.
     pub(crate) fn channels(&self) -> ChannelLayout {
-        self.channels
+        nonempty(self.channels.width())
     }
 
-    /// The speakers the file's channels feed, in the ring's order (tests).
+    /// The file's channels, in the ring's order (tests).
     #[cfg(test)]
-    pub(crate) fn topology(&self) -> Option<&ChannelTopology> {
-        self.topology.as_ref()
+    pub(crate) fn channel_set(&self) -> &ChannelSet {
+        &self.channels
     }
 
     /// Slots, in frames.
@@ -278,7 +275,7 @@ impl<F: RingFloat> RegionOut<F> {
 
     /// Declared ring width — the file's own layout.
     pub(crate) fn channels(&self) -> ChannelLayout {
-        self.ring.channels
+        self.ring.channels()
     }
 
     /// Frames held ahead of where the reader plays.
@@ -348,7 +345,7 @@ impl<F: RingFloat> RegionOut<F> {
         if let Some(hook) = &self.read_hook {
             hook(self.ring.region_id, at);
         }
-        let channels = self.ring.channels;
+        let channels = self.ring.channels();
         #[cfg(codec)]
         if let Some(decoder) = self.decoder.as_mut() {
             let ch = usize::from(self.writer.layout().count());
@@ -459,14 +456,11 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let layout = nonempty(channels.into());
-        let topology = ChannelTopology::default_for(layout);
         Self::for_file(
             region_id,
             asset,
             capacity,
-            layout,
-            #[cfg(test)]
-            topology,
+            ChannelSet::default_for(layout),
             None,
             fade_frames,
         )
@@ -478,25 +472,22 @@ impl RegionBuffer {
         region_id: StreamId,
         asset: impl Into<Asset>,
         capacity: usize,
-        layout: ChannelLayout,
-        #[cfg(test)] topology: Option<ChannelTopology>,
+        channels: ChannelSet,
         len: Option<Samples>,
         fade_frames: Samples,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
-        let channels = nonempty(layout);
+        let width = nonempty(channels.width());
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),
             None => (Mapping::unbounded(), Arrangement::unbounded()),
         };
-        let (writer, reader) = PosRing::new(frames, channels, HISTORY_FRAMES)
+        let (writer, reader) = PosRing::new(frames, width, HISTORY_FRAMES)
             .expect("`nonempty` gave a layout of at least one channel");
         let ring = Arc::new(Ring {
             region_id,
             asset: asset.into(),
             channels,
-            #[cfg(test)]
-            topology,
             core: writer.watch(),
             fade_frames,
             control: Publisher::new(RingControl::new(RingMap::plain(arrangement, 0), None)),

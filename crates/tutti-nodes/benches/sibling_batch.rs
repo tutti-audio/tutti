@@ -1,7 +1,7 @@
 //! Same-kind siblings run as one call: what batching `N` sibling nodes of
 //! one kind into one kernel call would save, at the graph level.
 //!
-//! Each case is one block of `frames` through an `Executor` (serial, no
+//! Each case is one block of `frames` through an `Executor` (one-participant, no
 //! pool), `members` siblings of one kind, every member reading the main
 //! input and writing graph outputs of its own (no sum, so nothing but the
 //! members and the copies differs between rows). Rows, per kind:

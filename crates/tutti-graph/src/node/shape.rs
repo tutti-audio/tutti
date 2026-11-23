@@ -100,7 +100,7 @@ pub struct Shape {
     /// and per node ([`Editor::take_event_losses`](crate::Editor::take_event_losses)).
     /// What the node is sent stays in frame order: note-offs first decides
     /// which events survive the cut, not their order. The cut falls on the same
-    /// events on the serial and the parallel executor. Each input's merge slot is sized `min(bound, what its edges
+    /// events on the one-participant and the parallel executor. Each input's merge slot is sized `min(bound, what its edges
     /// can send)` on the control side, and the cut over everything is made in
     /// buffers sized at a commit, so nothing allocates on the audio thread
     /// however the edges change.

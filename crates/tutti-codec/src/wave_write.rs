@@ -60,10 +60,7 @@ pub fn write_wave<'a, S: Sample>(
     dest: impl Into<Destination<'a>>,
     format: Format,
 ) -> Result<()> {
-    let spec = match wave.topology() {
-        Some(topology) => Spec::new(format, *topology, wave.sample_rate()),
-        None => Spec::of_width(format, wave.layout(), wave.sample_rate()),
-    };
+    let spec = Spec::of_channels(format, wave.channel_set(), wave.sample_rate());
     match dest.into() {
         Destination::Path(staged) => {
             check_planned(&spec, wave.len())?;

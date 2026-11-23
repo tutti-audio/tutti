@@ -1,6 +1,6 @@
 //! The reference interpreter: the oracle the plan executor is checked against.
 //!
-//! A naive interpreter (serial, copy every edge, no colouring) that the
+//! A naive interpreter (one-participant, copy every edge, no colouring) that the
 //! optimised executor must match bit for bit on randomly generated
 //! topologies. Everything here is written to be *obviously*
 //! right rather than fast, and — the point — **independently** of the compiler:

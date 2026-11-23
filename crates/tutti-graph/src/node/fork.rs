@@ -688,7 +688,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 ///
 /// The explicit spelling of "this node cannot be forked" — a node on a live
 /// device ring, a unit too large to keep a second copy of, a test node that
-/// never forks — now that a bare [`Node`] has no `IntoNode` of its own and
+/// never forks — because a bare [`Node`] has no `IntoNode` of its own and
 /// cannot be inserted without saying ([`IntoNode`]'s docs). The other
 /// answer is [`ForkByClone`]. Also takes an already boxed `Box<dyn Node>`.
 ///

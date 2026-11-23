@@ -1,12 +1,12 @@
 //! [`RingModNode`]: the input multiplied by a sine carrier.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, RingModControls, RingModulator};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`RingModNode`] is made from: its width and its starting carrier frequency.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,11 +53,13 @@ pub type RingModNode<F> = KernelNode<RingModKernel<F>>;
 
 impl<F: Float> From<RingModConfig> for RingModNode<F> {
     fn from(config: RingModConfig) -> Self {
-        Self::with_kernel(
-            RingModKernel::new(config.width),
-            RingModSet,
-            config.controls,
-        )
+        // A placeholder rate: an unprepared node renders nothing.
+        let kernel = RingModKernel {
+            width: config.width,
+            modulator: RingModulator::new(SampleRate::SR_48K),
+            float: core::marker::PhantomData,
+        };
+        Self::with_kernel(kernel, RingModSet, config.controls)
     }
 }
 
@@ -83,17 +85,6 @@ pub struct RingModKernel<F: Float> {
     float: core::marker::PhantomData<fn() -> F>,
 }
 
-impl<F: Float> RingModKernel<F> {
-    /// A modulator at a placeholder rate: an unprepared node renders nothing.
-    fn new(width: ChannelLayout) -> Self {
-        Self {
-            width,
-            modulator: RingModulator::new(SampleRate::SR_48K),
-            float: core::marker::PhantomData,
-        }
-    }
-}
-
 impl<F: Float> Kernel for RingModKernel<F> {
     type Float = F;
     type Set = RingModSet;
@@ -102,8 +93,7 @@ impl<F: Float> Kernel for RingModKernel<F> {
 
     /// `width` channels in and out, `Moderate`: a sine per sample and channel.
     fn shape(&self) -> Shape {
-        let bus = ChannelTopology::unassigned(self.width)
-            .expect("a ring modulator is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a ring modulator");
         Shape::through(bus).cost(Cost::Moderate)
     }
 
@@ -138,6 +128,7 @@ mod tests {
     use crate::test_support::prepared;
     use tutti_graph::Node;
     use tutti_graph::contract::assert_param_fork;
+    use tutti_units::Tail;
     use tutti_units::UnitParam;
 
     /// A fork starts from the controls last set and shares no cell.

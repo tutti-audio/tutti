@@ -1,12 +1,12 @@
 //! [`FrequencyShifterNode`]: single-sideband modulation by a shift in hertz.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, FrequencyShifterBank, FrequencyShifterControls};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`FrequencyShifterNode`] is made from: its width and its starting shift.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,8 +104,7 @@ impl<F: Float> Kernel for FrequencyShifterKernel<F> {
 
     /// `width` channels in and out, `Moderate`: eight all-passes and two sines per sample.
     fn shape(&self) -> Shape {
-        let bus = ChannelTopology::unassigned(self.width)
-            .expect("a frequency shifter is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a frequency shifter");
         Shape::through(bus).cost(Cost::Moderate)
     }
 

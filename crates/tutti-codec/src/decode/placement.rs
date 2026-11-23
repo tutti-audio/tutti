@@ -8,8 +8,8 @@
 
 use symphonia::core::audio::{Channels, Position};
 use tutti_buffers::{
-    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Placement, Speaker,
-    Speakers,
+    AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelSet, ChannelTopology, Placement,
+    Speaker, Speakers,
 };
 
 /// The speaker of one symphonia position flag.
@@ -42,24 +42,23 @@ fn speaker(flag: Position) -> Speaker {
 /// A container that states no channels at all is stereo by default; a track
 /// whose decoder then reports another set is read from that set.
 ///
-/// The width comes with the topology, which is `None` past
-/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels, where no topology is held.
-pub(super) fn topology_of(
-    channels: Option<&Channels>,
-) -> (ChannelLayout, Option<ChannelTopology>, Placement) {
+/// The channels are a [`ChannelSet`]: past
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels no topology is held,
+/// and the width is all it states.
+pub(super) fn channels_of(channels: Option<&Channels>) -> (ChannelSet, Placement) {
     let unassigned = |count: usize, placement| {
-        let width = ChannelLayout::clamped(count);
-        (width, ChannelTopology::unassigned(width), placement)
+        (
+            ChannelSet::unassigned(ChannelLayout::clamped(count)),
+            placement,
+        )
     };
     let default = |count: usize| {
-        let width = ChannelLayout::clamped(count);
         (
-            width,
-            ChannelTopology::default_for(width),
+            ChannelSet::default_for(ChannelLayout::clamped(count)),
             Placement::Default,
         )
     };
-    let stated = |topology: ChannelTopology| (topology.width(), Some(topology), Placement::Stated);
+    let stated = |topology: ChannelTopology| (ChannelSet::from(topology), Placement::Stated);
     match channels {
         Some(channels) if channels.count() == 1 => stated(Bed::Mono.topology()),
         // A positioned set wider than a topology holds keeps its width and no topology.
@@ -78,19 +77,6 @@ pub(super) fn topology_of(
         Some(Channels::Custom(labels)) => unassigned(labels.len(), Placement::Stated),
         Some(channels) if channels.count() > 0 => default(channels.count()),
         Some(_) | None => default(2),
-    }
-}
-
-/// An empty wave of the width, placed as `topology` and `placement` say.
-pub(super) fn empty_wave<S: tutti_buffers::Sample>(
-    width: ChannelLayout,
-    topology: Option<ChannelTopology>,
-    placement: Placement,
-    rate: tutti_units::SampleRate,
-) -> tutti_buffers::Wave<S> {
-    match topology {
-        Some(topology) => tutti_buffers::Wave::with_placement(topology, placement, rate),
-        None => tutti_buffers::Wave::unplaced(width, placement, rate),
     }
 }
 

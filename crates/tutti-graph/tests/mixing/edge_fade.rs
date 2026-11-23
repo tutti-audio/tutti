@@ -222,10 +222,10 @@ fn a_fade_reversed_midway_continues_from_the_weight_it_had() {
 }
 
 /// **The parallel executor renders a graph in the middle of fades exactly as
-/// the serial one**, bit for bit, across blocks of different lengths, with
+/// the one-participant one**, bit for bit, across blocks of different lengths, with
 /// fades in, out and a weight moved under it.
 #[test]
-fn parallel_equals_serial_for_a_graph_mid_fade() {
+fn parallel_equals_one_participant_for_a_graph_mid_fade() {
     fn run(workers: usize) -> Vec<u32> {
         let values: Vec<f32> = (1..=8).map(|i| i as f32 * 0.37 - 1.1).collect();
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));

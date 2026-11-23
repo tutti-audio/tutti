@@ -10,7 +10,7 @@ use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, BrickwallBank, BrickwallControls, BrickwallSignals, COEFF_INTERVAL,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -129,12 +129,7 @@ impl<F: Float> Kernel for BrickwallKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Light)
+        Shape::through(self.input).cost(Cost::Light)
     }
 
     fn prepare(&mut self, _: SampleRate, _: MaxBlock) {}

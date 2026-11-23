@@ -2,7 +2,7 @@
 //! a plain read is `Moderate`, a stretched voice and a pool are `Heavy`.
 //! Declaring one changes only the parallel schedule: sibling reads pack into
 //! fewer tasks than undeclared ones, and the render on a pool is bit for bit
-//! the serial one.
+//! the one-participant one.
 
 use tutti_buffers::Interleaved;
 use tutti_sampler::VoiceWindow;
@@ -186,7 +186,7 @@ fn each_node_declares_its_class() {
 /// bus and each on outputs of its own: the reads pack into fewer tasks
 /// than the same reads declaring nothing, each stretched voice keeps a
 /// task of its own, the plan spreads from a one-frame block, and on a pool
-/// of two and of four the render is bit for bit the serial one.
+/// of two and of four the render is bit for bit the one-participant one.
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_reads_pack_and_render_bit_identically() {

@@ -12,7 +12,7 @@
 //! is read and no more; how much of a file to keep resident is the caller's
 //! policy.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::ChannelSet;
 use tutti_platform::Asset;
 use tutti_units::{SampleRate, Samples};
 
@@ -40,18 +40,16 @@ pub struct SampleFacts {
     /// rate; the ratio between the two is the [`SrcRatio`](tutti_units::SrcRatio)
     /// the streaming path carries.
     pub sample_rate: SampleRate,
-    /// The file's channel count. Multiply by [`frames`](Self::frames) to size an
-    /// interleaved buffer.
-    pub layout: ChannelLayout,
-    /// Which speaker each channel of the file feeds, in sample order; `None` for a
-    /// file wider than a topology holds.
+    /// The file's channels: their count (multiply by [`frames`](Self::frames)
+    /// to size an interleaved buffer) and which speaker each feeds, in sample
+    /// order; a file wider than a topology holds has no topology.
     ///
     /// What a voice over this file would place by: a channel no speaker names
     /// is [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a
     /// memory voice over such a file is refused
     /// ([`PlaceError`](crate::PlaceError)). A host that wants to say so before
     /// it loads the file reads it here.
-    pub topology: Option<ChannelTopology>,
+    pub channel_set: ChannelSet,
     /// Whether this build's streamer can stream this file.
     ///
     /// The sampler's verdict, not a property of the file alone. False when the
@@ -114,9 +112,8 @@ pub fn probe(asset: impl Into<Asset>) -> Result<SampleFacts, SampleProbeError> {
     Ok(SampleFacts {
         frames: meta.total_frames.map(|f| Samples::new(f as usize)),
         sample_rate: meta.sample_rate,
-        layout: meta.layout,
         streamable: streamable(&asset, &meta),
-        topology: meta.topology,
+        channel_set: meta.channel_set,
     })
 }
 
@@ -179,7 +176,7 @@ mod tests {
         let facts = probe(&path).expect("readable");
         assert_eq!(facts.frames, Some(Samples::new(4800)));
         assert_eq!(facts.sample_rate, SampleRate::SR_48K);
-        assert_eq!(facts.layout.count(), 2);
+        assert_eq!(facts.channel_set.width().count(), 2);
         assert!(
             facts.streamable,
             "a local PCM wav has a frame count and seeks"

@@ -81,6 +81,7 @@
 //!
 //! [`other_sources`]: LatencyGraph::other_sources
 
+use crate::compile::order::{Sorted, sort_nodes};
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use tutti_units::{SampleRate, Samples, Seconds};
@@ -364,7 +365,7 @@ pub fn delays<G: LatencyGraph>(g: &G, rate: SampleRate) -> Delays<G::Node> {
         return Delays::default();
     }
 
-    let order = topological_order(g, &latency);
+    let order = topological_order(g);
 
     // Forward pass: worst-case arrival time at each node, over everything
     // that feeds it.
@@ -459,62 +460,30 @@ fn predecessors<G: LatencyGraph>(g: &G, node: G::Node) -> impl Iterator<Item = G
         .chain(g.other_sources(node))
 }
 
-/// When a signal finishes leaving `node`: its input arrival plus its own latency.
-fn departure<N: Copy + Eq + Hash>(
+/// When a signal finishes leaving `node`: its input arrival plus its own
+/// figure (a latency here, a tail in [`tail`](crate::compile::tail)).
+///
+/// `Samples`' saturating `Add`. Each node's own figure is clamped (to
+/// `MAX_NODE_LATENCY`, or counted unbounded past `MAX_NODE_TAIL`), so
+/// overflowing would take ~4e13 chained nodes; the clamp is what makes the
+/// sum safe, and saturation is the right answer if it ever were reached.
+pub(crate) fn departure<N: Copy + Eq + Hash>(
     node: N,
     arrival: &HashMap<N, Samples>,
-    latency: &HashMap<N, Samples>,
+    own: &HashMap<N, Samples>,
 ) -> Samples {
     let at = arrival.get(&node).copied().unwrap_or_default();
-    let own = latency.get(&node).copied().unwrap_or_default();
-    // `Samples`' saturating `Add`. `MAX_NODE_LATENCY` clamps each node, so
-    // overflowing would take ~4e13 chained nodes; the clamp is what makes the
-    // sum safe, and saturation is the right answer if it ever were reached.
+    let own = own.get(&node).copied().unwrap_or_default();
     at + own
 }
 
-/// Kahn's algorithm. Nodes in a cycle are appended in iteration order rather
-/// than dropped — a cyclic audio graph is already broken, but silently losing
-/// nodes here would be worse than compensating them approximately.
-fn topological_order<G: LatencyGraph>(g: &G, latency: &HashMap<G::Node, Samples>) -> Vec<G::Node> {
-    let count = latency.len();
-    let known: HashSet<G::Node> = latency.keys().copied().collect();
-
-    let mut in_degree: HashMap<G::Node, usize> = known.iter().map(|&n| (n, 0)).collect();
-    let mut dependents: HashMap<G::Node, Vec<G::Node>> = HashMap::with_capacity(count);
-
-    for &node in &known {
-        for src in predecessors(g, node) {
-            if known.contains(&src) {
-                dependents.entry(src).or_default().push(node);
-                *in_degree.entry(node).or_insert(0) += 1;
-            }
-        }
-    }
-
-    let mut queue: Vec<G::Node> = in_degree
-        .iter()
-        .filter(|&(_, &deg)| deg == 0)
-        .map(|(&n, _)| n)
-        .collect();
-
-    let mut order = Vec::with_capacity(count);
-    while let Some(node) = queue.pop() {
-        order.push(node);
-        for &dep in dependents.get(&node).into_iter().flatten() {
-            let deg = in_degree.entry(dep).or_insert(0);
-            *deg = deg.saturating_sub(1);
-            if *deg == 0 {
-                queue.push(dep);
-            }
-        }
-    }
-
-    if order.len() < count {
-        let placed: HashSet<G::Node> = order.iter().copied().collect();
-        order.extend(known.iter().copied().filter(|n| !placed.contains(n)));
-    }
-
+/// The nodes in dependency order. Nodes in a cycle are appended in node order
+/// rather than dropped — a cyclic audio graph is already broken, but silently
+/// losing nodes here would be worse than compensating them approximately.
+fn topological_order<G: LatencyGraph>(g: &G) -> Vec<G::Node> {
+    let nodes: Vec<G::Node> = g.nodes().collect();
+    let Sorted { mut order, cyclic } = sort_nodes(&nodes, |node| predecessors(g, node));
+    order.extend(cyclic);
     order
 }
 

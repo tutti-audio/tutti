@@ -932,8 +932,8 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
         .unwrap();
     let placed = session.output_device().unwrap();
     assert_eq!(
-        (placed.placement, placed.topology),
-        (Placement::Stated, Some(wired))
+        (placed.placement, placed.channels),
+        (Placement::Stated, tutti_buffers::ChannelSet::from(wired))
     );
 
     // A statement of the wrong width is refused, and the old one stands.
@@ -1260,16 +1260,7 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         policy.map,
         "never reset to the identity"
     );
-    assert_eq!(
-        session
-            .output_device()
-            .unwrap()
-            .topology
-            .unwrap()
-            .width()
-            .count(),
-        6
-    );
+    assert_eq!(session.output_device().unwrap().channels.width().count(), 6);
 
     // A map the new device has places for, and the restart goes through.
     let mut fits = policy;
@@ -1281,14 +1272,5 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
     session
         .restart_on(spec(4), driver, None, None)
         .expect("outputs 3 and 4 are there");
-    assert_eq!(
-        session
-            .output_device()
-            .unwrap()
-            .topology
-            .unwrap()
-            .width()
-            .count(),
-        4
-    );
+    assert_eq!(session.output_device().unwrap().channels.width().count(), 4);
 }

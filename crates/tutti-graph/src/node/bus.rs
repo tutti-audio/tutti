@@ -5,7 +5,9 @@
 //! where its channels sit: bus `b` is the run of ports after the earlier
 //! buses'. Nothing
 //! about a port changes: a bus is what a fold between two declared layouts
-//! will be built from, and nothing the compiler or the executor reads yet.
+//! is built from. The compiler reads buses only through
+//! [`GraphSpec::lowered`](crate::GraphSpec::lowered), which turns a bus edge
+//! into per-port edges; the executor never reads them.
 
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 
