@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common::{Kind, Pair, RingingNode, SpecBehaviour, TestNode, bits, prepare};
+use common::{Harness, Kind, RingingNode, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::FoldError;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology, Speaker};
 use tutti_graph::{
@@ -34,7 +34,7 @@ use tutti_ump::Ump;
 use tutti_units::{Latency, Samples, Tail};
 
 const BLOCK: usize = 64;
-/// The most a block here is: what every `Pair` is prepared for.
+/// The most a block here is: what every `Harness` is prepared for.
 const MAX_BLOCK: usize = 128;
 /// `DECLICK` at the rig's 48 kHz.
 const FADE: usize = 240;
@@ -57,7 +57,7 @@ fn direct(node: u64) -> Edge {
 
 /// `(g_in, g_out)` of frame `k` of a mode fade: the one function the doc names.
 fn gains(k: usize) -> (f32, f32) {
-    // The law's two gains sum to one: the mode's pair is the incoming `f32` weight and its complement.
+    // The law's two gains sum to one: the mode's harness is the incoming `f32` weight and its complement.
     let inn = FadeLaw::EqualAmplitude
         .gains(Samples::new(k), Samples::new(FADE))
         .1
@@ -65,10 +65,10 @@ fn gains(k: usize) -> (f32, f32) {
     (inn, 1.0 - inn)
 }
 
-/// A `Pair` over `kinds` (keys `1..`), wired by `wire`, with `modes` set
+/// A `Harness` over `kinds` (keys `1..`), wired by `wire`, with `modes` set
 /// before the first block (a unit starts steady in its mode).
 struct Rig {
-    pair: Pair,
+    harness: Harness,
     frame: u64,
 }
 
@@ -89,25 +89,25 @@ impl Rig {
         t.inputs = ChannelLayout::from_count(inputs);
         wire(&mut t);
         let spec = GraphSpec::new(t);
-        let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+        let mut harness = Harness::with_workers(MAX_BLOCK, workers);
         for &(n, m) in modes {
-            pair.start_mode(key(n), m);
+            harness.start_mode(key(n), m);
         }
-        pair.switch(&spec.validate().expect("valid"), &map);
-        Self { pair, frame: 0 }
+        harness.switch(&spec.validate().expect("valid"), &map);
+        Self { harness, frame: 0 }
     }
 
     fn mode(&mut self, n: u64, mode: NodeMode) {
-        self.pair.set_mode(key(n), mode);
+        self.harness.set_mode(key(n), mode);
     }
 
     /// Render `blocks` (each a block length) of the signal `x`; the
     /// executor's outputs.
     fn run(&mut self, blocks: &[usize], x: &dyn Fn(u64) -> f32) -> Vec<Vec<f32>> {
-        let mut all: Vec<Vec<f32>> = vec![Vec::new(); self.pair.outputs];
+        let mut all: Vec<Vec<f32>> = vec![Vec::new(); self.harness.outputs];
         for &n in blocks {
             let input: Vec<f32> = (0..n as u64).map(|i| x(self.frame + i)).collect();
-            let (a, _) = self.pair.block(n, &input);
+            let a = self.harness.block(n, &input);
             for (all, a) in all.iter_mut().zip(a) {
                 all.extend(a);
             }
@@ -295,7 +295,7 @@ impl Rig {
 
 /// **The channel mapping: by index at one width, by speaker across widths.**
 /// A node built from widths names no placement, so its bypass passes output
-/// `c` = input `c` only where the widths agree (a pair of different widths is
+/// `c` = input `c` only where the widths agree (a harness of different widths is
 /// refused, `a_bypass_with_no_pass_is_refused`). A mono centre under a stereo
 /// output is heard on both sides at gain 1, not on the left alone: the fold
 /// between the main buses (the general case is
@@ -318,7 +318,7 @@ fn a_bypass_is_by_index_at_one_width_and_by_speaker_across() {
                     0.0
                 }
             };
-            // A mono centre into a stereo pair: both sides, at gain 1.
+            // A mono centre into a stereo harness: both sides, at gain 1.
             let mut rig = Rig::new(
                 workers,
                 &[bused(1, 2, latency, smpte(1), smpte(2))],
@@ -391,7 +391,7 @@ fn unassigned(n: u16) -> Bus {
 /// its first two channels: `L = FL + 3dB*FC + 3dB*SL`, `R = FR + 3dB*FC +
 /// 3dB*SR`, the LFE dropped. Main input `c` is the signal scaled by `2^-c`,
 /// so every channel is distinct. (Those are `Fold::contributions`' rows for
-/// the pair, written out; a rounding of the sum differs, so the comparison is
+/// the harness, written out; a rounding of the sum differs, so the comparison is
 /// to `1e-5`.)
 ///
 /// The same holds for a node that runs at `Mix::DRY` (all of the aligned
@@ -416,7 +416,7 @@ fn a_bypass_is_the_fold_between_the_main_buses() {
                 if parked { &modes } else { &[] },
             );
             if !parked {
-                rig.pair.set_mix(key(1), tutti_units::Mix::DRY);
+                rig.harness.set_mix(key(1), tutti_units::Mix::DRY);
             }
             let got = rig.frames(256, &wave);
             let input = |c: u32, f: u64| {
@@ -447,9 +447,9 @@ fn a_bypass_is_the_fold_between_the_main_buses() {
 }
 
 /// **A bypass of a node with no pass is refused**, with the reason, and nothing
-/// changes: a stereo pair into a centre and an LFE has no place for the left
+/// changes: a stereo harness into a centre and an LFE has no place for the left
 /// (`PassError::Fold`); six channels into two built from widths name no
-/// placement, and six unplaced channels into a named stereo pair say nothing of
+/// placement, and six unplaced channels into a named stereo harness say nothing of
 /// where each goes (`PassError::Unplaced`: by index, the first two inputs would
 /// be a guess). Any other mode, and a bypass at one width, is not refused.
 #[test]

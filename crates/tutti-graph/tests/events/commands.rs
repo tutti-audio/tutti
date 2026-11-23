@@ -663,8 +663,8 @@ fn continuous(from: f64, tempo: f64, blocks: usize) -> Vec<TransportPosition> {
 }
 
 /// Beat → frame resolution, checked against a table worked out by hand —
-/// independent of both interpreters, which share `Env::due_at_arrival` and
-/// the `BeatCrossings` (so a bug there would pass the differential). Covers tempo,
+/// independent of the code under test, which resolves through `Env::due_at_arrival` and
+/// the `BeatCrossings`. Covers tempo,
 /// a loop wrap, a stopped transport, a seek over the beat and back, a beat
 /// crossed before it was scheduled (late), and an arrival shift.
 #[test]

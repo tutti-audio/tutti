@@ -13,22 +13,7 @@ use tutti_graph::{
     Edge, EventEdge, EventInputPort, EventOutputPort, InputPort, NodeKey, OutputPort, PortSource,
 };
 
-use crate::generator::{Desc, MAX_BLOCK, Rng, random_graph, shape};
-
-/// Declared costs for `desc`'s nodes, a pure function of the seed: about
-/// two in three declare `Cost::Light`, a few `Cost::Moderate`, the rest
-/// nothing (`Cost::Heavy`) — so cheap siblings pack beside heavy tasks that keep the plan parallel.
-fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
-    let mut rng = Rng::new(seed ^ 0xC057);
-    desc.kinds
-        .keys()
-        .filter_map(|&k| match rng.below(6) {
-            0..=3 => Some((k, tutti_graph::Cost::Light)),
-            4 => Some((k, tutti_graph::Cost::Moderate)),
-            _ => None,
-        })
-        .collect()
-}
+use crate::generator::{Desc, MAX_BLOCK, Rng, random_costs, random_graph, shape};
 
 /// Add a direct back edge — audio or event — from a node to one created no
 /// later than it, closing a cycle no feedback edge breaks.

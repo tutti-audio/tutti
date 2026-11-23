@@ -12,7 +12,7 @@ use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
 
-use common::{Kind, Pair, SpecBehaviour, driver_value, input_signal, prepare};
+use common::{Harness, Kind, SpecBehaviour, driver_value, input_signal, prepare};
 use tutti_graph::{
     CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource, Forked,
     GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
@@ -81,7 +81,7 @@ struct Rig {
     spec: GraphSpec,
     at: Where,
     sink: u64,
-    /// The range a pair starts a lane with.
+    /// The range a harness starts a lane with.
     range: Option<(EdgeId, ParamRange)>,
 }
 
@@ -144,26 +144,26 @@ fn at_port(node: u64) -> InputPort {
 
 /// Render `blocks` blocks on `workers` participants.
 fn render(rig: &Rig, workers: usize, blocks: usize) -> Vec<f32> {
-    let mut pair = Pair::with_workers(BLOCK, workers);
+    let mut harness = Harness::with_workers(BLOCK, workers);
     if let Some((id, range)) = rig.range {
-        pair.start_edge_gain_range(id, range);
+        harness.start_edge_gain_range(id, range);
     }
-    pair.switch(&rig.graph(), &rig.kinds);
+    harness.switch(&rig.graph(), &rig.kinds);
     let mut got = Vec::new();
     for b in 0..blocks {
         let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         got.extend(&a[0]);
     }
     got
 }
 
-/// `blocks` more blocks of `pair`.
-fn run(pair: &mut Pair, blocks: usize) -> Vec<f32> {
+/// `blocks` more blocks of `harness`.
+fn run(harness: &mut Harness, blocks: usize) -> Vec<f32> {
     let mut got = Vec::new();
     for b in 0..blocks {
         let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         got.extend(&a[0]);
     }
     got
@@ -249,17 +249,17 @@ fn a_driven_lane_is_clamped_to_its_range() {
 fn narrowing_a_driven_lanes_range_clamps_the_value_and_leaves_the_base() {
     let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Output);
     let id = rig.drive(1, 2);
-    let mut pair = Pair::new(BLOCK);
-    pair.start_edge_gain(id, amp(0.75));
-    pair.switch(&rig.graph(), &rig.kinds);
+    let mut harness = Harness::new(BLOCK);
+    harness.start_edge_gain(id, amp(0.75));
+    harness.switch(&rig.graph(), &rig.kinds);
 
-    let before = run(&mut pair, 2);
+    let before = run(&mut harness, 2);
     for (n, &g) in before.iter().enumerate() {
         let w = stepped(n, 0).expect("step");
         assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {n}");
     }
-    pair.set_edge_gain_range(id, ParamRange::of(0.0, 0.5));
-    let narrowed = run(&mut pair, 4);
+    harness.set_edge_gain_range(id, ParamRange::of(0.0, 0.5));
+    let narrowed = run(&mut harness, 4);
     for (i, &g) in narrowed.iter().enumerate() {
         let w = stepped(2 * BLOCK + i, 0).expect("step").clamp(0.0, 0.5);
         assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "frame {i}");
@@ -268,12 +268,16 @@ fn narrowing_a_driven_lanes_range_clamps_the_value_and_leaves_the_base() {
         narrowed.contains(&0.0) && narrowed.contains(&0.5),
         "the range bites at both ends"
     );
-    assert_eq!(pair.editor.edge_gain(id), Some(amp(0.75)), "the base stays");
+    assert_eq!(
+        harness.editor.edge_gain(id),
+        Some(amp(0.75)),
+        "the base stays"
+    );
 
     // The source goes: past its declick the lane reads the unclamped base.
     rig.spec.disconnect_edge_gain(id, lane_out(2));
-    pair.switch(&rig.graph(), &rig.kinds);
-    let after = run(&mut pair, 12);
+    harness.switch(&rig.graph(), &rig.kinds);
+    let after = run(&mut harness, 12);
     assert!(
         after[after.len() - BLOCK..]
             .iter()
@@ -302,15 +306,15 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     let id = rig.drive(1, 2);
     let held = driver_value(0, 1 << 20) as f32;
 
-    let mut pair = Pair::new(BLOCK);
-    pair.start_edge_gain(id, amp(base));
-    pair.switch(&rig.graph(), &rig.kinds);
-    let got = run(&mut pair, 2);
+    let mut harness = Harness::new(BLOCK);
+    harness.start_edge_gain(id, amp(base));
+    harness.switch(&rig.graph(), &rig.kinds);
+    let got = run(&mut harness, 2);
     assert!(got.iter().all(|&x| x == held), "held at the step: {held}");
     rig.spec.disconnect_edge_gain(id, lane_out(2));
-    pair.switch(&rig.graph(), &rig.kinds);
+    harness.switch(&rig.graph(), &rig.kinds);
     let d = common::declick();
-    let got = run(&mut pair, d / BLOCK + 2);
+    let got = run(&mut harness, d / BLOCK + 2);
     for (j, &g) in got.iter().enumerate() {
         let w = if j < d {
             let (out, inn) = common::smooth_gains(j, d);
@@ -339,12 +343,12 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_edge() {
     );
     rig.drive(1, 2);
     let held = driver_value(0, 1 << 20) as f32;
-    let mut pair = Pair::new(BLOCK);
-    pair.switch(&rig.graph(), &rig.kinds);
+    let mut harness = Harness::new(BLOCK);
+    harness.switch(&rig.graph(), &rig.kinds);
     for round in 0..3 {
-        let (a, _) = pair.block(BLOCK, &input_signal(0, BLOCK));
+        let a = harness.block(BLOCK, &input_signal(0, BLOCK));
         assert!(a[0].iter().all(|&x| x == held), "round {round}");
-        pair.switch(&rig.graph(), &rig.kinds);
+        harness.switch(&rig.graph(), &rig.kinds);
     }
 }
 

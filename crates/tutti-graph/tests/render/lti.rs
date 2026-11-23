@@ -28,7 +28,7 @@ use tutti_graph::{
 use tutti_units::Samples;
 
 use crate::generator::{MAX_BLOCK, Rng, schedule, spec_for};
-use crate::rig::Rig;
+use tutti_graph::testing::Harness;
 
 /// Frames a case renders: a feedback loop of the generator's longest delay
 /// closes a few times within it.
@@ -384,12 +384,12 @@ fn renders_its_series<F: Word>(seed: u64, which: usize) {
     let valid = GraphSpec::new(built.topology)
         .validate()
         .expect("built graphs are valid");
-    let mut rig = Rig::<F>::new(MAX_BLOCK);
-    rig.switch(&valid, &built.kinds);
+    let mut harness = Harness::<F>::with_format(MAX_BLOCK);
+    harness.switch(&valid, &built.kinds);
     let input: Vec<f64> = input_signal::<f64>(0, FRAMES);
     let mut frame = 0;
     for n in schedule(which, seed, FRAMES) {
-        let got = rig.block(n, &input_signal::<F>(frame as u64, n));
+        let got = harness.block(n, &input_signal::<F>(frame as u64, n));
         for (c, channel) in got.iter().enumerate() {
             for (i, &y) in channel.iter().enumerate() {
                 let f = frame + i;
