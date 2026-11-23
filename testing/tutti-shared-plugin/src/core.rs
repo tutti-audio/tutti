@@ -996,6 +996,14 @@ impl Core {
         self.automation_n.fetch_add(1, Relaxed);
     }
 
+    /// Records a mapping the host wrote into the AU's table, before the table
+    /// changes: `add` for an added entry, otherwise a removed one. The `id` is the
+    /// entry's parameter and the `value` its `status << 8 | data1`.
+    pub fn log_mapping(&self, add: bool, parameter_id: u32, status: u8, data1: u8) {
+        let word = u32::from(status) << 8 | u32::from(data1);
+        self.log(if add { 11 } else { 12 }, 0, parameter_id, f64::from(word));
+    }
+
     fn log(&self, kind: u64, offset: u32, id: u32, value: f64) {
         self.log_words(
             kind << 32 | u64::from(offset),

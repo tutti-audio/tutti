@@ -556,7 +556,11 @@ fn transact(plan: &Plan, mut write: impl FnMut(&Op) -> bool) -> Written {
     if plan.forward.iter().all(&mut write) {
         return Written::Applied;
     }
-    let restored = plan.undo.iter().fold(true, |ok, op| write(op) && ok);
+    // Every undo write runs, whether or not an earlier one was refused.
+    let mut restored = true;
+    for op in &plan.undo {
+        restored &= write(op);
+    }
     if restored {
         Written::Refused
     } else {
