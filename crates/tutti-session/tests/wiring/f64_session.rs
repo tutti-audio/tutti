@@ -81,7 +81,7 @@ fn an_f64_session_renders_a_figure_f32_rounds_away_through_a_set_gain() {
 }
 
 /// **Lanes of gains sum exactly at `f64`, and the pool renders them bit for bit
-/// as the serial render does.** The lanes' gains `0.125 * (k + 1)` sum to 4.5 of
+/// as the one-participant render does.** The lanes' gains `0.125 * (k + 1)` sum to 4.5 of
 /// `FINE`.
 #[test]
 fn an_f64_session_sums_its_lanes_exactly_and_the_parallel_render_is_bit_identical() {

@@ -238,6 +238,10 @@ fn compact(groups: &[Option<Vec<u32>>]) -> Vec<Vec<u32>> {
 
 /// `groups` in a topological order of the DAG between them (Kahn, ties to
 /// the lower first op, so deterministic).
+///
+/// This is not `order::kahn`: it pops the ready group with the lowest first
+/// op across the whole ready set, where `order::kahn`'s stack pops the newest
+/// ready batch first, and the two orders differ.
 fn topological(groups: Vec<Vec<u32>>, succ: &[Vec<u32>]) -> Vec<Vec<u32>> {
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
@@ -417,7 +421,7 @@ mod tests {
         false
     }
 
-    /// The review's case: input → HA (heavy) and X (light); HA → a1, a2;
+    /// Input → HA (heavy) and X (light); HA → a1, a2;
     /// X → b1, b2 (all light); b1 → HB1, b2 → HB2 (heavy); every leaf to
     /// an output. Packing by level made {a1, a2, b1, b2} one task, so HB1
     /// and HB2 waited for HA, and the critical path doubled. Siblings only:
@@ -508,13 +512,8 @@ mod tests {
             n in 2usize..40,
             seed in any::<u64>(),
         ) {
-            let mut x = seed | 1;
-            let mut next = move || {
-                x ^= x << 13;
-                x ^= x >> 7;
-                x ^= x << 17;
-                x
-            };
+            let mut rng = tutti_rt::SplitMix64::new(seed);
+            let mut next = move || rng.next_u64();
             let mut edges = Vec::new();
             for b in 1..n as u32 {
                 for _ in 0..1 + next() % 3 {

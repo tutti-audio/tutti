@@ -588,7 +588,7 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// commit is applied**, before the block's first task runs: the events
     /// reach the successor at offset 0 of its first block, ahead of every
     /// other event there (they travel as flushed events, see the module
-    /// docs of the executor), so a parallel render sees what a serial one
+    /// docs of the executor), so a parallel render sees what a one-participant one
     /// does. The successor is chased whatever its type; one with no event
     /// input drops them, and the drop is counted
     /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).

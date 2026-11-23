@@ -159,7 +159,7 @@ fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
 /// Light gains beside heavy ones off one input, all summed: the light ones
 /// pack (into fewer tasks than gains), each heavy one keeps a task of its
 /// own, and at every participant count and ragged block lengths the
-/// render is bit for bit the serial one.
+/// render is bit for bit the one-participant one.
 #[test]
 fn packed_siblings_render_bit_identically() {
     let build = |workers: usize| {

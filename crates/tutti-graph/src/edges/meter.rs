@@ -39,7 +39,7 @@
 //!
 //! The op writes only the cells' atomics, and a lane has exactly one writer by
 //! construction (lane `i` is source `i` of the meter's one op), so the cells
-//! need no claim: the serial and parallel executors run the same
+//! need no claim: the one-participant and parallel executors run the same
 //! [`meter_op`] and leave the same bits.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};

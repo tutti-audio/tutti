@@ -3,7 +3,7 @@
 //! analytic figures and invariants of the render (never another reference
 //! render).
 //!
-//! The serial ==
+//! The one-participant ==
 //! parallel and no-allocation gates are in `rt_no_alloc_modulation.rs`,
 //! beside the gated pool they share.
 
