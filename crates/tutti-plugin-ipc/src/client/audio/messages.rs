@@ -415,6 +415,28 @@ pub(super) const UNSOLICITED_TRANSPORT: usize = 64;
 /// How many parameter events [`Unsolicited`] holds between two drains.
 pub(super) const UNSOLICITED_PARAMS: usize = 128;
 
+/// A slot that holds the newest of what is put in, until it is taken.
+///
+/// A put into a held slot replaces it and says so, so the caller counts what
+/// was lost. Putting and taking never allocate beyond the value itself.
+struct Latest<T>(Option<T>);
+
+impl<T> Latest<T> {
+    const fn new() -> Self {
+        Self(None)
+    }
+
+    /// Holds `value`; whether it replaced one not yet taken.
+    fn put(&mut self, value: T) -> bool {
+        self.0.replace(value).is_some()
+    }
+
+    /// The held value, leaving the slot empty.
+    fn take(&mut self) -> Option<T> {
+        self.0.take()
+    }
+}
+
 /// The unsolicited events read off the control stream while a command waited
 /// for its reply, held until its lane's loop hands them to the listener.
 ///
@@ -465,15 +487,12 @@ pub(super) struct Unsolicited {
     /// What a late answer is applied to, when it is read.
     lifecycle: Option<super::lifecycle::Lifecycle>,
     reloaded: bool,
-    /// Why the last rebuild's state was not restored, until drained; a later
-    /// one replaces it.
-    state_not_restored: Option<String>,
-    /// The mode the plugin last did not take, until drained; a later one
-    /// replaces it.
-    render_mode_not_applied: Option<tutti_plugin_types::RenderMode>,
-    /// Why the plugin last would not stop, until drained; a later one replaces
-    /// it.
-    would_not_stop: Option<String>,
+    /// Why the last rebuild's state was not restored.
+    state_not_restored: Latest<String>,
+    /// The mode the plugin last did not take.
+    render_mode_not_applied: Latest<tutti_plugin_types::RenderMode>,
+    /// Why the plugin last would not stop.
+    would_not_stop: Latest<String>,
     /// The server's latest cumulative losses, until drained.
     server_losses: Option<ServerLosses>,
     io: bool,
@@ -500,9 +519,9 @@ impl Unsolicited {
             rate: None,
             lifecycle: None,
             reloaded: false,
-            state_not_restored: None,
-            render_mode_not_applied: None,
-            would_not_stop: None,
+            state_not_restored: Latest::new(),
+            render_mode_not_applied: Latest::new(),
+            would_not_stop: Latest::new(),
             server_losses: None,
             io: false,
             io_layout: None,
@@ -599,25 +618,19 @@ impl Unsolicited {
     /// A rebuilt plugin's refusal of its saved state. One already held is
     /// replaced and counted with the dropped events.
     pub(super) fn state_not_restored(&mut self, reason: String) {
-        if self.state_not_restored.replace(reason).is_some() {
-            self.dropped += 1;
-        }
+        self.dropped += u64::from(self.state_not_restored.put(reason));
     }
 
     /// A render mode the plugin did not take. One already held is replaced and
     /// counted with the dropped events.
     pub(super) fn render_mode_not_applied(&mut self, mode: tutti_plugin_types::RenderMode) {
-        if self.render_mode_not_applied.replace(mode).is_some() {
-            self.dropped += 1;
-        }
+        self.dropped += u64::from(self.render_mode_not_applied.put(mode));
     }
 
     /// A restart the plugin would not make. One already held is replaced and
     /// counted with the dropped events.
     pub(super) fn would_not_stop(&mut self, reason: String) {
-        if self.would_not_stop.replace(reason).is_some() {
-            self.dropped += 1;
-        }
+        self.dropped += u64::from(self.would_not_stop.put(reason));
     }
 
     /// The server's cumulative losses, replacing any held: a figure that is
