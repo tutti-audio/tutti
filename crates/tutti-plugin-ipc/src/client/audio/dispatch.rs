@@ -902,7 +902,7 @@ pub(super) fn host_edit_changes(channels: &Channels) -> ParameterChanges {
 /// blocks'**, and the plugin's unsolicited news (the server's main thread).
 ///
 /// A tell is written and done. An answered request waits for its one reply
-/// within its [`Deadline`] and hands what came to its call: the lane names no
+/// within its [`Deadline`](super::messages::Deadline) and hands what came to its call: the lane names no
 /// message, and a request's object (a state, a slab) goes and comes through
 /// [`Object`].
 pub(super) fn handle_control(
