@@ -68,6 +68,26 @@ fn through_server<F: Format>(path: PathBuf) {
         .map(|v| v.get());
     assert_eq!(level, Some(0.5), "a parameter read across the boundary");
 
+    // The app's controller entries and the plugin's own learn are asked of the
+    // served plugin, which answers as the format does.
+    let main = main_thread();
+    assert_eq!(
+        handle.set_app_midi_map(main, &[spec::APP_ENTRY]),
+        F::SURFACE.app_map,
+        "{}: who applies an app entry, across the boundary",
+        F::NAME
+    );
+    let learn = handle.arm_plugin_midi_learn(main, true);
+    match F::SURFACE.plugin_learn {
+        spec::PluginLearn::Refused => {
+            assert_eq!(
+                learn,
+                Err(tutti_plugin_types::PluginLearnError::Unsupported)
+            );
+        }
+        spec::PluginLearn::MovesAux => assert_eq!(learn, Ok(())),
+    }
+
     // The conversion is the format's, asked across the boundary: each figure is
     // the spec's for the format (`spec::Tone`), never a line the client draws.
     let tone = F::SURFACE.tone;

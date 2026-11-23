@@ -16,11 +16,12 @@ use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, OwnBypass, ParamEdit,
-    ParamFlags, ParamGroup, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange,
-    PluginPreset, PluginResult, PluginTail, PluginVersion, PluginWiring, PresetId,
-    RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps, taken,
+    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, MidiAssignment,
+    MidiMapApplied, OwnBypass, ParamEdit, ParamFlags, ParamGroup, ParamMapping, ParamSteps,
+    ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
+    PluginError, PluginId, PluginParamRange, PluginPreset, PluginResult, PluginTail, PluginVersion,
+    PluginWiring, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
+    taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -321,6 +322,23 @@ impl Control for AuLoaded {
             // AU names no keys.
             note_names: Vec::new(),
             param_groups: clump_groups(&<Self as Control>::parameters(self, main)),
+        }
+    }
+
+    /// Writes the app's entries into the unit's own mapping table, which routes
+    /// them during render: [`Plugin`](MidiMapApplied::Plugin) when the unit takes
+    /// them, [`Host`](MidiMapApplied::Host) for a unit without the mapping family
+    /// (most effects). The plugin's declared entries stay;
+    /// [`wiring`](Self::wiring) reads the table, so it lists both.
+    fn set_app_midi_map(
+        &mut self,
+        _main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        if self.write_app_midi_map(app) {
+            MidiMapApplied::Plugin
+        } else {
+            MidiMapApplied::Host
         }
     }
 

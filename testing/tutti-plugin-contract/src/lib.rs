@@ -67,6 +67,8 @@ macro_rules! contract {
             the_bypass_parameter_is_not_a_listed_control,
             a_control_carries_what_the_plugin_declares_of_it,
             the_plugins_declared_tables_are_listed,
+            an_app_midi_map_is_applied_by_who_the_format_says,
+            the_plugins_own_midi_learn_is_armed_or_refused,
             parameter_conversion_is_the_formats_own,
             parameter_round_trip,
             unlisted_parameter_is_none,

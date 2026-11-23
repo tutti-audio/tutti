@@ -401,6 +401,67 @@ pub(crate) fn declared(table: &[AuMidiMapping]) -> Vec<MidiAssignment> {
         .collect()
 }
 
+impl AuMidiMapping {
+    /// The entry that drives `assignment.param` from its message: global scope,
+    /// element 0, no flags but the one that matches any channel (or any key for
+    /// polyphonic pressure) where the assignment names none.
+    fn of_assignment(assignment: &MidiAssignment) -> Self {
+        let trigger = match assignment.source {
+            MidiSource::ControlChange(controller) => MidiTrigger::ControlChange {
+                controller: controller.get(),
+            },
+            MidiSource::ChannelPressure => MidiTrigger::ChannelPressure,
+            MidiSource::PitchBend => MidiTrigger::PitchBend,
+            MidiSource::ProgramChange => MidiTrigger::ProgramChange { patch: 0 },
+            MidiSource::PolyPressure => MidiTrigger::KeyPressure { note: 0 },
+        };
+        Self {
+            trigger,
+            channel: assignment.channel.map_or(0, MidiChannel::get),
+            any_channel: assignment.channel.is_none(),
+            any_note: matches!(trigger, MidiTrigger::KeyPressure { .. }),
+            ..Self::control_change(assignment.param.get(), 0, 0)
+        }
+    }
+}
+
+/// The app's entries as written into a unit's table, and the entries of the
+/// plugin's own that they replaced.
+///
+/// The unit keeps one mapping per `(scope, element, parameter_id)`: adding an
+/// entry replaces the plugin's for that parameter, and removing it removes
+/// whatever holds the triple. So the plugin's replaced entries are kept here and
+/// put back when the app's set changes, and a plugin entry no app entry names is
+/// never written.
+#[derive(Debug, Default)]
+pub(crate) struct AppMap {
+    applied: Vec<AuMidiMapping>,
+    replaced: Vec<AuMidiMapping>,
+}
+
+impl AppMap {
+    /// Replaces the app's entries in the unit's table with `app`: the last set is
+    /// removed, the plugin's entries it replaced come back, and `app` is added.
+    ///
+    /// # Errors
+    /// `kAudioUnitErr_InvalidProperty` from a unit that does not implement the
+    /// family (most effects); its table is then untouched.
+    pub(crate) fn set(&mut self, unit: &Unit, app: &[MidiAssignment]) -> Result<()> {
+        remove(unit, &self.applied)?;
+        self.applied.clear();
+        add(unit, &self.replaced)?;
+        self.replaced.clear();
+        let entries: Vec<AuMidiMapping> = app.iter().map(AuMidiMapping::of_assignment).collect();
+        self.replaced = all(unit)?
+            .into_iter()
+            .filter(|held| entries.iter().any(|e| e.targets_same_parameter(held)))
+            .collect();
+        add(unit, &entries)?;
+        self.applied = entries;
+        Ok(())
+    }
+}
+
 /// Reads the AU's whole mapping table.
 ///
 /// Returns an empty `Vec` when the AU has no mappings installed, distinct from
@@ -549,6 +610,27 @@ pub fn supports_parameter_midi_mapping(unit: &Unit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An assignment written into the unit reads back as the same assignment,
+    /// on its channel or on any.
+    #[test]
+    fn an_assignment_becomes_the_entry_that_declares_it_back() {
+        let table = [
+            MidiAssignment {
+                channel: MidiChannel::new(3),
+                source: MidiSource::ControlChange(U7::of(74)),
+                param: ParamId::new(900),
+            },
+            MidiAssignment {
+                channel: None,
+                source: MidiSource::PitchBend,
+                param: ParamId::new(901),
+            },
+        ];
+        let entries = table.map(|a| AuMidiMapping::of_assignment(&a));
+        assert_eq!(declared(&entries), table);
+        assert!(entries[1].any_channel && !entries[0].any_channel);
+    }
 
     /// A Control Change mapping is an assignment on its channel, or on any
     /// channel when the flag is set; a note or program trigger is none, and a

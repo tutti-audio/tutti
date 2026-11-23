@@ -347,7 +347,11 @@ pub struct PluginWiring {
     pub own_bypass: Option<OwnBypass>,
     /// The controller table the plugin declares (VST3 `IMidiMapping`, AU
     /// `kAudioUnitProperty_AllParameterMIDIMappings`): empty for a format or a
-    /// plugin with none. The plugin's suggestion; nothing applies it.
+    /// plugin with none. VST3's host applies it (it turns each mapped controller
+    /// into a parameter change) and an AU applies its own table inside the unit;
+    /// [`Control::rebuild_midi_mapping`](crate::Control::rebuild_midi_mapping)
+    /// re-reads it, and [`Control::wiring`](crate::Control::wiring) answers the
+    /// table read last.
     #[cfg_attr(feature = "serde", serde(default))]
     pub assignments: Vec<MidiAssignment>,
     /// The names the plugin gives to MIDI keys (CLAP `note-name`, VST3

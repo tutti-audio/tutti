@@ -21,8 +21,9 @@ use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
-    SampleRate, ServerError, StateError, StateUse, Wakeups, WindowHandle,
+    MidiMapApplied, ParameterQueue, PluginError, PluginFormat, PluginId, PluginLearnError,
+    PluginRef, PluginResult, RateRefusalCause, SampleRate, ServerError, StateError, StateUse,
+    Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -306,6 +307,19 @@ impl Session {
                     plugin.plugin_mut().set_track_info(main, &info);
                 }
                 Ok(Reaction::None)
+            }
+            M::SetAppMidiMap { app } => {
+                let applied = self.plugin.as_mut().map_or(MidiMapApplied::Host, |p| {
+                    p.plugin_mut().set_app_midi_map(main, &app)
+                });
+                Ok(ControlReply::AppMidiMapApplied { applied }.into())
+            }
+            M::ArmPluginMidiLearn { armed } => {
+                let result = match self.plugin.as_mut() {
+                    Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),
+                    None => Err(PluginLearnError::Lost),
+                };
+                Ok(ControlReply::PluginMidiLearn { result }.into())
             }
             M::GetParameter { param_id } => {
                 let value = self

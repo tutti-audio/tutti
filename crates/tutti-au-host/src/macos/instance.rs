@@ -25,8 +25,8 @@ use std::sync::Arc;
 use tutti_au_ffi::property::{BypassEffect, ClassInfo, ClassInfoFromDocument, Latency};
 use tutti_au_ffi::{AuEditor, Element, HostCallbacks, Scope, TransportState, Unit};
 use tutti_plugin_types::{
-    AtomicRequestFlags, ChannelLayout, MainThreadMarker, MainWorkHandle, PluginDescriptor,
-    TransportInfo,
+    AtomicRequestFlags, ChannelLayout, MainThreadMarker, MainWorkHandle, MidiAssignment,
+    PluginDescriptor, TransportInfo,
 };
 use tutti_units::Seconds;
 use tutti_units::{SampleRate, Samples};
@@ -95,6 +95,9 @@ pub struct AuLoaded {
     /// written at construction on: behind `Features::RENDER_MODE` and
     /// `render_mode_support`, since the property is optional.
     mode_accepted: bool,
+    /// The app's entries in the unit's mapping table
+    /// ([`Control::set_app_midi_map`](tutti_plugin_types::Control::set_app_midi_map)).
+    pub(crate) app_midi_map: midi_map::AppMap,
     /// The last latency read that succeeded: what a refusal answers, since a
     /// unit that stops answering keeps what it last reported rather than being
     /// silently recompensated to zero, which would move audio.
@@ -224,6 +227,7 @@ impl AuLoaded {
             descriptor,
             offline: false,
             mode_accepted,
+            app_midi_map: midi_map::AppMap::default(),
             last_latency: Cell::new(Samples::ZERO),
             origin: tutti_plugin_types::PluginRef::file(""),
             work: work.clone(),
@@ -897,6 +901,13 @@ impl AuLoaded {
     /// than by this call's status.
     pub fn add_parameter_midi_mapping(&mut self, mappings: &[AuMidiMapping]) -> Result<()> {
         midi_map::add(self.unit(), mappings)
+    }
+
+    /// Writes the app's controller entries into the unit's table in place of the
+    /// last set, keeping the plugin's own entries
+    /// ([`AppMap::set`](midi_map::AppMap::set)); whether the unit took them.
+    pub(crate) fn write_app_midi_map(&mut self, app: &[MidiAssignment]) -> bool {
+        self.app_midi_map.set(self.handle.unit(), app).is_ok()
     }
 
     /// Removes the mappings targeting each argument's

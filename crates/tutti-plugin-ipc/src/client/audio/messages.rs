@@ -187,6 +187,15 @@ pub(super) enum ControlCommand {
         reply: Reply<std::result::Result<Option<Size>, EditorError>>,
     },
     CloseEditor,
+    /// The app's controller entries; answered with who applies them.
+    SetAppMidiMap {
+        app: Vec<tutti_plugin_types::MidiAssignment>,
+        reply: Reply<tutti_plugin_types::MidiMapApplied>,
+    },
+    ArmPluginMidiLearn {
+        armed: bool,
+        reply: Reply<std::result::Result<(), tutti_plugin_types::PluginLearnError>>,
+    },
     SetEditorSize {
         size: Size,
         reply: Reply<std::result::Result<Size, EditorError>>,

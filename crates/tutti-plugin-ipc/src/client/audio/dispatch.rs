@@ -1045,6 +1045,32 @@ pub(super) fn handle_control(
             );
             reply.send(ok);
         }
+        ControlCommand::SetAppMidiMap { app, reply } => {
+            // No answer: nothing was applied by the plugin, so the host's node
+            // must (and a lost plugin hears nothing either way).
+            let applied = match query(
+                lane,
+                inbox,
+                lifecycle,
+                ControlRequest::SetAppMidiMap { app },
+            )? {
+                Some(ControlReply::AppMidiMapApplied { applied }) => applied,
+                _ => tutti_plugin_types::MidiMapApplied::Host,
+            };
+            reply.send(applied);
+        }
+        ControlCommand::ArmPluginMidiLearn { armed, reply } => {
+            let result = match query(
+                lane,
+                inbox,
+                lifecycle,
+                ControlRequest::ArmPluginMidiLearn { armed },
+            )? {
+                Some(ControlReply::PluginMidiLearn { result }) => result,
+                _ => Err(tutti_plugin_types::PluginLearnError::Lost),
+            };
+            reply.send(result);
+        }
         ControlCommand::GetCurrentPreset { reply } => {
             let value = match query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)? {
                 Some(ControlReply::CurrentPreset { id }) => id,

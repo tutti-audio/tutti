@@ -206,7 +206,10 @@ pub(crate) mod wire;
 ///   varint).
 /// - **Version 63** adds to a plugin's wiring the names it gives to MIDI keys and
 ///   the groups it sorts its parameters into, and to a parameter its short name.
-pub const PROTOCOL_VERSION: u32 = 63;
+/// - **Version 64** appends the host's `SetAppMidiMap` and `ArmPluginMidiLearn`
+///   and the server's `AppMidiMapApplied` and `PluginMidiLearn` answers: the app's
+///   controller entries and the plugin's own MIDI learn.
+pub const PROTOCOL_VERSION: u32 = 64;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -545,6 +548,10 @@ mod tests {
         assert_eq!(control(ControlRequest::GetPresetList), 11);
         assert_eq!(control(ControlRequest::GetCurrentPreset), 13);
         assert_eq!(control(ControlRequest::CloseEditor), 20);
+        assert_eq!(
+            control(ControlRequest::ArmPluginMidiLearn { armed: true }),
+            25
+        );
 
         let reply = |m: ControlReply| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(reply(ControlReply::ParameterValue { value: None }), 1);
