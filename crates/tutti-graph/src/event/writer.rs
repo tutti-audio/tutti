@@ -4,6 +4,8 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
 
+use tutti_rt::CappedVec;
+
 use crate::event::types::Event;
 use crate::node::param_event::ParamEvent;
 
@@ -144,11 +146,11 @@ pub(crate) struct PortCount {
 pub struct EventWriter<'a> {
     // `None` only for a detached writer, which the executor uses to fill the
     // unused tail of its fixed-size port table and never hands to a node.
-    buf: Option<&'a mut Vec<Event>>,
+    buf: Option<&'a mut CappedVec<Event>>,
     // The port's param events: the preallocated buffer beside `buf`, empty
     // of room when no node upstream of it writes any
     // ([`Shape::param_events`](crate::Shape::param_events)).
-    params: Option<&'a mut Vec<ParamEvent>>,
+    params: Option<&'a mut CappedVec<ParamEvent>>,
     cap: usize,
     // `note_off_room(cap)`, computed once.
     room: usize,
@@ -174,8 +176,8 @@ impl<'a> EventWriter<'a> {
     /// events are accepted (a note-off, [`note_off_room`] of them), and only
     /// at offsets `< frames`.
     pub(crate) fn new(
-        buf: &'a mut Vec<Event>,
-        params: &'a mut Vec<ParamEvent>,
+        buf: &'a mut CappedVec<Event>,
+        params: &'a mut CappedVec<ParamEvent>,
         cap: usize,
         frames: u32,
         dropped: &'a PortCount,

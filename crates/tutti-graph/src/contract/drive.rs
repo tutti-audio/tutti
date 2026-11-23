@@ -2,6 +2,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Planes};
+use tutti_rt::CappedVec;
 use tutti_units::{Frame, Latency, SampleRate, Samples, Tail, UnitAddr};
 
 use crate::contract::rig::or_empty;
@@ -194,11 +195,11 @@ fn drive_block<F: Float>(
             SortedEvents::with_both(list, plist, frames).expect("sorted events inside the block")
         })
         .collect();
-    let mut out_events: Vec<Vec<Event>> = (0..usize::from(shape.event_out))
-        .map(|_| Vec::with_capacity(HAND_EVENT_CAPACITY))
+    let mut out_events: Vec<CappedVec<Event>> = (0..usize::from(shape.event_out))
+        .map(|_| CappedVec::with_capacity(HAND_EVENT_CAPACITY))
         .collect();
-    let mut out_params: Vec<Vec<ParamEvent>> = (0..usize::from(shape.event_out))
-        .map(|_| Vec::with_capacity(param_room(&shape)))
+    let mut out_params: Vec<CappedVec<ParamEvent>> = (0..usize::from(shape.event_out))
+        .map(|_| CappedVec::with_capacity(param_room(&shape)))
         .collect();
     let dropped = crate::event::writer::PortCount::default();
     let mut writers: Vec<EventWriter<'_>> = out_events
@@ -236,8 +237,8 @@ fn drive_block<F: Float>(
     };
     Driven {
         audio: out,
-        events: out_events,
-        params: out_params,
+        events: out_events.iter().map(|e| e.to_vec()).collect(),
+        params: out_params.iter().map(|p| p.to_vec()).collect(),
         reported_tail: reported.get(),
         status: Some(status),
     }

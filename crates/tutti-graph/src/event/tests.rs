@@ -1,4 +1,5 @@
 use tutti_buffers::MaxBlock;
+use tutti_rt::CappedVec;
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
 use tutti_units::Samples;
 
@@ -20,8 +21,8 @@ fn ev(offset: u32, tag: u32) -> Event {
 fn merge_orders_by_offset_then_source() {
     let a = [ev(0, 1), ev(3, 2), ev(9, 3)];
     let b = [ev(3, 10), ev(4, 11)];
-    let mut out = Vec::with_capacity(8);
-    let dropped = merge_into(&[&a, &b], &mut out, 8);
+    let mut out = CappedVec::with_capacity(8);
+    let dropped = merge_into(&[&a, &b], &mut out);
     assert_eq!(dropped, 0);
     let tags: Vec<u32> = out
         .iter()
@@ -38,8 +39,8 @@ fn merge_orders_by_offset_then_source() {
 fn merge_counts_what_did_not_fit() {
     let a = [ev(0, 1), ev(1, 2), ev(2, 3)];
     let b = [ev(0, 4), ev(5, 5)];
-    let mut out = Vec::with_capacity(8);
-    assert_eq!(merge_into(&[&a, &b], &mut out, 3), 2);
+    let mut out = CappedVec::with_capacity(3);
+    assert_eq!(merge_into(&[&a, &b], &mut out), 2);
     assert_eq!(out.len(), 3);
 }
 
@@ -78,9 +79,9 @@ fn sorted_events_are_sorted_and_in_block() {
 /// The writer enforces the three invariants a consumer relies on.
 #[test]
 fn writer_rejects_out_of_order_out_of_block_and_overflow() {
-    let mut buf = Vec::with_capacity(4);
+    let mut buf = CappedVec::with_capacity(4);
     let dropped = PortCount::default();
-    let mut params = Vec::new();
+    let mut params = CappedVec::default();
     let mut w = EventWriter::new(&mut buf, &mut params, 2, 16, &dropped);
     assert_eq!(w.push(ev(5, 0)), Ok(()));
     assert_eq!(w.push(ev(4, 0)), Err(EventRejected::OutOfOrder));
@@ -217,10 +218,10 @@ fn off(offset: u32) -> Event {
 fn a_merge_that_must_cut_keeps_its_note_offs() {
     let a = [ev(0, 1), ev(1, 2), off(2)];
     let b = [ev(0, 3), off(3)];
-    let mut out = Vec::with_capacity(3);
-    let dropped = merge_into(&[&a, &b], &mut out, 3);
+    let mut out = CappedVec::with_capacity(3);
+    let dropped = merge_into(&[&a, &b], &mut out);
     assert_eq!(dropped, 2);
-    assert_eq!(out, vec![ev(0, 1), off(2), off(3)]);
+    assert_eq!(out.as_slice(), [ev(0, 1), off(2), off(3)]);
 }
 
 /// A merge that fits is the plain merge, note-offs or not.
@@ -228,9 +229,9 @@ fn a_merge_that_must_cut_keeps_its_note_offs() {
 fn a_merge_that_fits_cuts_nothing() {
     let a = [ev(0, 1), off(2)];
     let b = [off(1), ev(3, 3)];
-    let mut out = Vec::with_capacity(4);
-    assert_eq!(merge_into(&[&a, &b], &mut out, 4), 0);
-    assert_eq!(out, vec![ev(0, 1), off(1), off(2), ev(3, 3)]);
+    let mut out = CappedVec::with_capacity(4);
+    assert_eq!(merge_into(&[&a, &b], &mut out), 0);
+    assert_eq!(out.as_slice(), [ev(0, 1), off(1), off(2), ev(3, 3)]);
 }
 
 /// A writer at its capacity refuses a note-on and takes a note-off, up
@@ -238,9 +239,9 @@ fn a_merge_that_fits_cuts_nothing() {
 /// counted once.
 #[test]
 fn a_writer_at_capacity_takes_note_offs_to_its_room() {
-    let mut buf = Vec::with_capacity(16);
+    let mut buf = CappedVec::with_capacity(16);
     let dropped = PortCount::default();
-    let mut params = Vec::new();
+    let mut params = CappedVec::default();
     let mut w = EventWriter::new(&mut buf, &mut params, 2, 16, &dropped);
     w.push(ev(0, 1)).unwrap();
     w.push(ev(1, 2)).unwrap();

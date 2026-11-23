@@ -1,36 +1,37 @@
 //! The merge of several sorted event sources into one port's events.
 
+use tutti_rt::CappedVec;
+
 use crate::event::types::Event;
 use crate::node::param_event::ParamEvent;
 use crate::node::time::Offset;
 
 /// Merge `sources` (each sorted by offset) into `out`, ordered by
-/// `(offset, source index)`. At most `cap` events land; the rest are counted.
+/// `(offset, source index)`. At most `out`'s room lands; the rest are counted.
 ///
 /// A k-way merge rather than concatenate-and-sort: the stable sort that would
 /// give the same order allocates, and the unstable one does not give it.
 ///
 /// When the sources hold more than `cap`, the note-offs keep their room: the
 /// others are cut (the later ones first) so that every note-off lands, up to
-/// `cap`. Order is that of the merge either way. A merge slot holds all its
+/// the room. Order is that of the merge either way. A merge slot holds all its
 /// sources unless the merge is a node's input under its declared bound
-/// (`Shape::event_input_capacity`), which is the one merge that cuts; the
-/// caller charges the returned count.
-pub(crate) fn merge_into(sources: &[&[Event]], out: &mut Vec<Event>, cap: usize) -> u32 {
-    let room = cap.saturating_sub(out.len());
-    merge_walk(sources, room, |_, e| out.push(e))
+/// (`Shape::event_input_capacity`), which is the one merge that cuts (it walks
+/// the sources itself, with [`merge_walk`]); the caller charges the returned
+/// count.
+pub(crate) fn merge_into(sources: &[&[Event]], out: &mut CappedVec<Event>) -> u32 {
+    let room = out.remaining();
+    merge_walk(sources, room, |_, e| {
+        out.push(e);
+    })
 }
 
 /// Merge the param events of `sources` (each sorted by offset) into `out`,
 /// ordered by `(offset, source index)`: the merge of [`merge_into`] with no
-/// note-off to keep. At most `cap` land; the rest are counted, the later
-/// ones first.
-pub(crate) fn merge_params(
-    sources: &[&[ParamEvent]],
-    out: &mut Vec<ParamEvent>,
-    cap: usize,
-) -> u32 {
-    let room = cap.saturating_sub(out.len());
+/// note-off to keep. At most `out`'s room lands; the rest are counted, the
+/// later ones first.
+pub(crate) fn merge_params(sources: &[&[ParamEvent]], out: &mut CappedVec<ParamEvent>) -> u32 {
+    let room = out.remaining();
     let mut heads = [0usize; 2 * crate::MAX_PORTS];
     let heads = &mut heads[..sources.len()];
     let (mut kept, mut dropped) = (0usize, 0u32);

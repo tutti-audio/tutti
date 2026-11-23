@@ -510,18 +510,13 @@ pub(super) fn node_op_with<
         // what does not is clamped to its last frame. Merged with this
         // block's own events, ties to the flushed ones (they are older).
         for inj in st.inject.iter_mut().filter(|i| i.live && i.unit == unit) {
-            for e in &mut inj.events {
+            for e in inj.events.iter_mut() {
                 e.offset = e.offset.clamp_to(frames);
             }
             inj.drain_owed();
             let slot = ein[inj.port as usize];
             inj.merged.clear();
-            let cap_total = inj.merged.capacity();
-            merge_into(
-                &[&inj.events, st.events.ev(slot)],
-                &mut inj.merged,
-                cap_total,
-            );
+            merge_into(&[&inj.events, st.events.ev(slot)], &mut inj.merged);
         }
     }
 

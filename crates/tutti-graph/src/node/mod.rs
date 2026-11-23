@@ -72,14 +72,14 @@ pub const MAX_PORTS: usize = 64;
 /// counts every refusal; nothing grows.
 #[derive(Debug)]
 pub struct Chase<'a> {
-    buf: &'a mut Vec<crate::Event>,
+    buf: &'a mut tutti_rt::CappedVec<crate::Event>,
     limit: usize,
     refused: u32,
 }
 
 impl<'a> Chase<'a> {
     /// A chase over `buf`, which takes `capacity` more messages.
-    pub(crate) fn new(buf: &'a mut Vec<crate::Event>, capacity: usize) -> Self {
+    pub(crate) fn new(buf: &'a mut tutti_rt::CappedVec<crate::Event>, capacity: usize) -> Self {
         let limit = (buf.len() + capacity).min(buf.capacity());
         Self {
             buf,

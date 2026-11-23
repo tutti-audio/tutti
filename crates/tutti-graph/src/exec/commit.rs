@@ -4,11 +4,15 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::AtomicU64;
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
-use tutti_rt::{CappedVec, ControlDrop, Overflow, PushError, RingReader, RingWriter, ring};
+use tutti_rt::{
+    CappedVec, ControlDrop, Counter, CounterWriter, Gauge, GaugeWriter, Overflow, PushError,
+    Reading, RingReader, RingWriter, counter, gauge, ring,
+};
+use tutti_units::Blocks;
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -459,6 +463,48 @@ pub(super) fn cut_fades<F: Float>(
     stale
 }
 
+/// The pool participants the executor runs on, as a gauge reads them: `0` is
+/// no pool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Participants(pub(crate) usize);
+
+impl Reading for Participants {
+    fn to_bits(self) -> u64 {
+        self.0 as u64
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self(usize::try_from(bits).unwrap_or(usize::MAX))
+    }
+}
+
+/// The blocks the executor has rendered, as a gauge reads them: a count the
+/// audio thread keeps and sets each block, so the editor's read pairs with
+/// that store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Rendered(pub(crate) Blocks);
+
+impl Reading for Rendered {
+    fn to_bits(self) -> u64 {
+        self.0.get()
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self(Blocks::new(bits))
+    }
+}
+
+/// A commit's `seq`, as a gauge reads it: `0` is no commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommitSeq(pub(crate) u64);
+
+impl Reading for CommitSeq {
+    fn to_bits(self) -> u64 {
+        self.0
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+}
+
 /// The queue pair between an editor and its executor.
 pub(crate) struct Channels<F: Float = f32> {
     pub(crate) to_executor: RingWriter<Box<Commit<F>>>,
@@ -470,16 +516,16 @@ pub(crate) struct Channels<F: Float = f32> {
     /// Where the executor says which ports lost events.
     pub(crate) losses: RingReader<EventLoss>,
     /// Refusals the log and the ring could not name.
-    pub(crate) unreported: Arc<AtomicU64>,
+    pub(crate) unreported: Counter<u64>,
     /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
     pub(crate) edge_fades: RingReader<(EdgeId, EdgeFade)>,
     /// The executor's pool participants, and the blocks it has rendered
     /// (`Stager`).
-    pub(crate) pool: Arc<AtomicUsize>,
-    pub(crate) rendered: Arc<AtomicU64>,
+    pub(crate) pool: Gauge<Participants>,
+    pub(crate) rendered: Gauge<Rendered>,
     /// The `seq` of the commit whose main output crossfade the executor last
     /// finished (`Editor::finish_fades`).
-    pub(crate) main_output_fade_ended: Arc<AtomicU64>,
+    pub(crate) main_output_fade_ended: Gauge<CommitSeq>,
 }
 
 /// The executor's ends of the rings.
@@ -489,11 +535,11 @@ pub(crate) struct ExecutorEnds<F: Float = f32> {
     pub(super) fade_back: RingWriter<Box<Crossfade<F>>>,
     pub(super) play: Arc<AtomicU64>,
     pub(super) losses: RingWriter<EventLoss>,
-    pub(super) unreported: Arc<AtomicU64>,
+    pub(super) unreported: CounterWriter<u64>,
     pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
-    pub(super) pool: Arc<AtomicUsize>,
-    pub(super) rendered: Arc<AtomicU64>,
-    pub(super) main_output_fade_ended: Arc<AtomicU64>,
+    pub(super) pool: GaugeWriter<Participants>,
+    pub(super) rendered: GaugeWriter<Rendered>,
+    pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
 }
 
 /// Build the rings: the editor's ends and the executor's.
@@ -502,13 +548,13 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
     let (back_tx, back_rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
     let (fade_tx, fade_rx) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
     let play = Arc::new(AtomicU64::new(0));
-    let unreported = Arc::new(AtomicU64::new(0));
+    let (unreported_tx, unreported_rx) = counter::<u64>();
     let (loss_tx, loss_rx) = ring::<EventLoss>(crate::exec::loss::RING_CAPACITY, Overflow::Refuse);
     let (fade_end_tx, fade_end_rx) =
         ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
-    let pool = Arc::new(AtomicUsize::new(0));
-    let rendered = Arc::new(AtomicU64::new(0));
-    let main_output_fade_ended = Arc::new(AtomicU64::new(0));
+    let (pool_tx, pool_rx) = gauge(Participants(0));
+    let (rendered_tx, rendered_rx) = gauge(Rendered(Blocks::ZERO));
+    let (fade_ended_tx, fade_ended_rx) = gauge(CommitSeq(0));
     (
         Channels {
             to_executor: tx,
@@ -516,11 +562,11 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
             faded: fade_rx,
             play: PlayReader(Arc::clone(&play)),
             losses: loss_rx,
-            unreported: Arc::clone(&unreported),
+            unreported: unreported_rx,
             edge_fades: fade_end_rx,
-            pool: Arc::clone(&pool),
-            rendered: Arc::clone(&rendered),
-            main_output_fade_ended: Arc::clone(&main_output_fade_ended),
+            pool: pool_rx,
+            rendered: rendered_rx,
+            main_output_fade_ended: fade_ended_rx,
         },
         ExecutorEnds {
             queue: rx,
@@ -528,11 +574,11 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
             fade_back: fade_tx,
             play,
             losses: loss_tx,
-            unreported,
+            unreported: unreported_tx,
             edge_fades: fade_end_tx,
-            pool,
-            rendered,
-            main_output_fade_ended,
+            pool: pool_tx,
+            rendered: rendered_tx,
+            main_output_fade_ended: fade_ended_tx,
         },
     )
 }
