@@ -490,7 +490,15 @@ pub fn gauge<U: Reading>(initial: U) -> (GaugeWriter<U>, Gauge<U>) {
 /// A cumulative count, read by any thread. It only grows.
 ///
 /// `Clone`: every clone reads the same cell. Nothing resets on read, so a
-/// reader that wants a delta keeps the last value it saw.
+/// reader that wants a delta keeps the last value it saw
+/// ([`take_since`](Self::take_since)).
+///
+/// A count orders nothing else: the writer adds with `Relaxed` stores, so
+/// reading a total says nothing about other memory the writer touched before
+/// it. Only the writer's drop is ordered, so after [`is_closed`](Self::is_closed)
+/// the totals are final. A value that tells a reader other data is ready, such
+/// as "this may now be freed", is a [`Gauge`], whose `Release` set pairs with
+/// its `Acquire` read.
 ///
 /// ```
 /// use tutti_rt::counter;
