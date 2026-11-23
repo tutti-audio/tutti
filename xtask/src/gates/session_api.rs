@@ -254,17 +254,11 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate, with_rows};
     use super::*;
 
     const ED: &str = "crates/tutti-session/src/editor.rs";
     const OK_ROW: &str = "crates/tutti-session/src/editor.rs::Editor  holds the proof";
-
-    fn run(files: &[(&str, &str)], allow: &str) -> Report {
-        let mut all: Vec<(&str, &str)> = files.to_vec();
-        all.push((ALLOW, allow));
-        check(&Mem::with(&all), 0)
-    }
 
     #[test]
     fn a_public_run_or_blocking_fn_fails_with_its_line() {
@@ -275,23 +269,35 @@ mod tests {
             "impl S { pub const fn x_blocking() {} }",
             "impl S { pub unsafe extern \"C\" fn run() {} }",
         ] {
-            let r = run(&[("crates/tutti-session/src/a.rs", src)], "");
+            let r = run_gate(
+                |t| check(t, 0),
+                &with_rows(&[("crates/tutti-session/src/a.rs", src)], &[(ALLOW, "")]),
+            );
             assert!(!r.passed(), "{src}");
             assert!(r.findings.iter().any(|l| l.contains("a.rs:")), "{src}");
         }
-        let r = run(
-            &[(
-                "crates/tutti-session/src/a.rs",
-                "impl S {\n pub fn run(&self) {}\n}",
-            )],
-            "",
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(
+                    "crates/tutti-session/src/a.rs",
+                    "impl S {\n pub fn run(&self) {}\n}",
+                )],
+                &[(ALLOW, "")],
+            ),
         );
         assert!(r.findings.iter().any(|l| l.contains("a.rs:2: pub fn run")));
     }
 
     #[test]
     fn a_consuming_run_passes_and_a_borrowing_or_free_run_fails() {
-        let at = |src: &str| run(&[("crates/tutti-session/src/a.rs", src)], "").passed();
+        let at = |src: &str| {
+            run_gate(
+                |t| check(t, 0),
+                &with_rows(&[("crates/tutti-session/src/a.rs", src)], &[(ALLOW, "")]),
+            )
+            .passed()
+        };
         for ok in [
             "impl W { pub fn run(self) {} }",
             "impl W { pub fn run(mut self) {} }",
@@ -318,7 +324,10 @@ mod tests {
                    pub fn blocking() {}\npub fn run_to(x: u8) {}\n// pub fn run() {}\n\
                    const S: &str = \"pub fn run() {}\";\n\
                    #[cfg(test)]\nmod t { pub fn run() {} }";
-        let r = run(&[("crates/tutti-session/src/a.rs", src)], "");
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[("crates/tutti-session/src/a.rs", src)], &[(ALLOW, "")]),
+        );
         assert!(r.passed(), "{:?}", r.findings);
     }
 
@@ -333,7 +342,10 @@ mod tests {
             "pub enum T { A(MainThreadMarker), B }",
             "pub struct T<F: Fn(u8) -> u8> where F: Send { pub m: MainThreadMarker, f: F }",
         ] {
-            let r = run(&[("crates/tutti-session/src/a.rs", body)], "");
+            let r = run_gate(
+                |t| check(t, 0),
+                &with_rows(&[("crates/tutti-session/src/a.rs", body)], &[(ALLOW, "")]),
+            );
             assert!(!r.passed(), "{body}");
             assert!(
                 r.findings.iter().any(|l| l.contains("a.rs::T")),
@@ -352,19 +364,31 @@ mod tests {
                    pub fn f(main: MainThreadMarker) {}\n\
                    pub struct F<'a>(&'a u8);\n\
                    impl X { fn g(&self, m: MainThreadMarker) {} }";
-        let r = run(&[("crates/tutti-session/src/a.rs", src)], "");
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[("crates/tutti-session/src/a.rs", src)], &[(ALLOW, "")]),
+        );
         assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
     fn an_allowed_type_passes_and_a_stale_row_fails() {
         let held = "pub struct Editor { main: MainThreadMarker }";
-        let r = run(&[(ED, held)], OK_ROW);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[(ED, held)], &[(ALLOW, OK_ROW)]),
+        );
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run(&[(ED, "pub struct Editor { x: u8 }")], OK_ROW);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[(ED, "pub struct Editor { x: u8 }")], &[(ALLOW, OK_ROW)]),
+        );
         assert!(!r.passed());
         assert!(r.findings.iter().any(|l| l.contains("editor.rs::Editor")));
-        let r = run(&[(ED, held)], "# none\n");
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[(ED, held)], &[(ALLOW, "# none\n")]),
+        );
         assert!(!r.passed());
     }
 
@@ -372,33 +396,54 @@ mod tests {
     fn an_allowed_fn_passes_and_a_stale_fn_row_fails() {
         let a = "crates/tutti-session/src/a.rs";
         let row = "crates/tutti-session/src/a.rs::run  the spawner's door";
-        let r = run(&[(a, "impl T { pub fn run(&self) {} }")], row);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(&[(a, "impl T { pub fn run(&self) {} }")], &[(ALLOW, row)]),
+        );
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run(&[(a, "impl T { pub(crate) fn run(&self) {} }")], row);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(a, "impl T { pub(crate) fn run(&self) {} }")],
+                &[(ALLOW, row)],
+            ),
+        );
         assert!(!r.passed());
         let b = "crates/tutti-session/src/b.rs";
-        let r = run(&[(a, "pub fn run() {}"), (b, "pub fn run() {}")], row);
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(a, "pub fn run() {}"), (b, "pub fn run() {}")],
+                &[(ALLOW, row)],
+            ),
+        );
         assert_eq!(r.findings.iter().filter(|l| l.contains("b.rs:")).count(), 1);
         assert!(!r.findings.iter().any(|l| l.contains("a.rs:")));
     }
 
     #[test]
     fn an_allow_row_is_for_one_file_and_type() {
-        let r = run(
-            &[(
-                "crates/tutti-session/src/other.rs",
-                "pub struct Editor { m: MainThreadMarker }",
-            )],
-            OK_ROW,
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(
+                    "crates/tutti-session/src/other.rs",
+                    "pub struct Editor { m: MainThreadMarker }",
+                )],
+                &[(ALLOW, OK_ROW)],
+            ),
         );
         assert_eq!(r.findings.iter().filter(|l| l.starts_with("  ")).count(), 2);
     }
 
     #[test]
     fn a_row_without_a_reason_fails() {
-        let r = run(
-            &[(ED, "pub struct Editor { m: MainThreadMarker }")],
-            "x.rs::Editor\n",
+        let r = run_gate(
+            |t| check(t, 0),
+            &with_rows(
+                &[(ED, "pub struct Editor { m: MainThreadMarker }")],
+                &[(ALLOW, "x.rs::Editor\n")],
+            ),
         );
         assert!(r.findings.iter().any(|l| l.contains("malformed")));
     }

@@ -200,12 +200,8 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
-
-    fn run(files: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files))
-    }
 
     #[test]
     fn each_citation_kind_is_counted_and_spec_sections_are_not() {
@@ -236,19 +232,22 @@ mod tests {
 
     #[test]
     fn manifest_and_workflow_comments_are_read_and_their_strings_are_not() {
-        let r = run(&[
-            (BASELINE, ""),
-            (
-                "crates/a/Cargo.toml",
-                "# doc 013\nname = \"doc 014 # design 015\" # PR #12\n",
-            ),
-            (
-                ".github/workflows/ci.yml",
-                "run: echo 'doc 016' # design 017\n",
-            ),
-            ("Cargo.toml", "members = [] # doc 018\n"),
-            ("crates/a/README.md", "doc 019\n"),
-        ]);
+        let r = run_gate(
+            check,
+            &[
+                (BASELINE, ""),
+                (
+                    "crates/a/Cargo.toml",
+                    "# doc 013\nname = \"doc 014 # design 015\" # PR #12\n",
+                ),
+                (
+                    ".github/workflows/ci.yml",
+                    "run: echo 'doc 016' # design 017\n",
+                ),
+                ("Cargo.toml", "members = [] # doc 018\n"),
+                ("crates/a/README.md", "doc 019\n"),
+            ],
+        );
         assert_eq!(
             r.findings[1..],
             [

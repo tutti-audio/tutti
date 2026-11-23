@@ -1966,14 +1966,10 @@ pub(super) fn pruned(
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate};
     use super::*;
 
     const F: &str = "crates/a/src/lib.rs";
-
-    fn run(list: &str, src: &str, allow: &[Allow]) -> Report {
-        check(&Mem::with(&[(LIST, list), (F, src)]), allow, 0)
-    }
 
     fn rules(src: &str) -> Vec<(String, &'static str)> {
         scan(F, src)
@@ -2196,10 +2192,12 @@ mod tests {
     #[test]
     fn an_option_arg_row_with_no_violation_is_stale_and_fails() {
         let list = "a  option-arg  crates/a/src/lib.rs::T::pool\n";
-        let r = run(
-            list,
-            "impl T { pub fn pool(self, p: u8) -> Self { self } }",
-            &[],
+        let r = run_gate(
+            |t| check(t, &[], 0),
+            &[
+                (LIST, list),
+                (F, "impl T { pub fn pool(self, p: u8) -> Self { self } }"),
+            ],
         );
         assert!(!r.passed());
     }
@@ -2433,27 +2431,32 @@ mod tests {
     #[test]
     fn a_public_field_config_needs_a_row_and_an_allow_row_or_a_baseline_row_covers_it() {
         let src = "pub struct SynthConfig { pub gain: f32 }";
-        let r = run("", src, &[]);
+        let r = run_gate(|t| check(t, &[], 0), &[(LIST, ""), (F, src)]);
         assert!(!r.passed());
         assert_eq!(
             r.findings[1],
             "  a  pub-field-config  crates/a/src/lib.rs::SynthConfig"
         );
         let row = "a  pub-field-config  crates/a/src/lib.rs::SynthConfig\n";
-        assert!(run(row, src, &[]).passed());
+        assert!(run_gate(|t| check(t, &[], 0), &[(LIST, row), (F, src)]).passed());
         let allow = [ty(F, "SynthConfig", FIELDS, "the protocol's own fields")];
-        assert!(run("", src, &allow).passed());
-        assert!(!run(row, src, &allow).passed());
+        assert!(run_gate(|t| check(t, &allow, 0), &[(LIST, ""), (F, src)]).passed());
+        assert!(!run_gate(|t| check(t, &allow, 0), &[(LIST, row), (F, src)]).passed());
         let other = [ty(F, "OtherConfig", FIELDS, "x")];
-        assert!(!run("", src, &other).passed());
+        assert!(!run_gate(|t| check(t, &other, 0), &[(LIST, ""), (F, src)]).passed());
     }
 
     #[test]
     fn a_public_field_config_row_with_no_violation_is_stale_and_fails() {
-        let r = run(
-            "a  pub-field-config  crates/a/src/lib.rs::SynthConfig\n",
-            "pub struct SynthConfig { gain: f32 }",
-            &[],
+        let r = run_gate(
+            |t| check(t, &[], 0),
+            &[
+                (
+                    LIST,
+                    "a  pub-field-config  crates/a/src/lib.rs::SynthConfig\n",
+                ),
+                (F, "pub struct SynthConfig { gain: f32 }"),
+            ],
         );
         assert!(!r.passed());
         assert!(r.findings[0].contains("names no violation"));
@@ -2471,7 +2474,7 @@ mod tests {
     #[test]
     fn a_violation_without_a_row_fails_and_names_the_row_to_write() {
         let src = "impl T { pub fn with_x(self) -> Self { self } }";
-        let r = run("", src, &[]);
+        let r = run_gate(|t| check(t, &[], 0), &[(LIST, ""), (F, src)]);
         assert!(!r.passed());
         assert_eq!(
             r.findings[1],
@@ -2482,7 +2485,13 @@ mod tests {
     #[test]
     fn a_baselined_violation_passes_with_its_count() {
         let src = "impl T { pub fn with_x(self) -> Self { self } }";
-        let r = run("a  with-prefix  crates/a/src/lib.rs::T::with_x\n", src, &[]);
+        let r = run_gate(
+            |t| check(t, &[], 0),
+            &[
+                (LIST, "a  with-prefix  crates/a/src/lib.rs::T::with_x\n"),
+                (F, src),
+            ],
+        );
         assert!(r.passed());
         assert_eq!(
             r.out[1],
@@ -2492,10 +2501,12 @@ mod tests {
 
     #[test]
     fn a_row_with_no_violation_is_stale_and_fails() {
-        let r = run(
-            "a  with-prefix  crates/a/src/lib.rs::T::with_x\n",
-            "pub fn f() {}",
-            &[],
+        let r = run_gate(
+            |t| check(t, &[], 0),
+            &[
+                (LIST, "a  with-prefix  crates/a/src/lib.rs::T::with_x\n"),
+                (F, "pub fn f() {}"),
+            ],
         );
         assert!(!r.passed());
         assert_eq!(
@@ -2506,7 +2517,13 @@ mod tests {
 
     #[test]
     fn a_clean_tree_passes() {
-        let r = run("", "impl T { pub fn x(self) -> Self { self } }", &[]);
+        let r = run_gate(
+            |t| check(t, &[], 0),
+            &[
+                (LIST, ""),
+                (F, "impl T { pub fn x(self) -> Self { self } }"),
+            ],
+        );
         assert!(r.passed());
         assert_eq!(r.out[0], "check-building: OK");
     }
@@ -2520,15 +2537,20 @@ mod tests {
             rules: &[],
             reason: "r",
         }];
-        assert!(run("", src, &allow).passed());
-        let r = run(
-            "a  with-prefix  crates/a/src/lib.rs::Shape::with_cost\n",
-            src,
-            &allow,
+        assert!(run_gate(|t| check(t, &allow, 0), &[(LIST, ""), (F, src)]).passed());
+        let r = run_gate(
+            |t| check(t, &allow, 0),
+            &[
+                (
+                    LIST,
+                    "a  with-prefix  crates/a/src/lib.rs::Shape::with_cost\n",
+                ),
+                (F, src),
+            ],
         );
         assert!(!r.passed());
         let other = "impl Other { pub fn with_cost(self, c: u8) -> Self { self } }";
-        assert!(!run("", other, &allow).passed());
+        assert!(!run_gate(|t| check(t, &allow, 0), &[(LIST, ""), (F, other)]).passed());
     }
 
     #[test]
@@ -2538,17 +2560,22 @@ mod tests {
                    impl From<AlignConfig> for AlignNode { fn from(c: AlignConfig) -> Self { todo!() } }\n\
                    impl From<OtherConfig> for OtherNode { fn from(c: OtherConfig) -> Self { todo!() } }";
         let allow = [ty("crates/a/", "AlignConfig", WIDTH, "r")];
-        let r = run("", src, &allow);
+        let r = run_gate(|t| check(t, &allow, 0), &[(LIST, ""), (F, src)]);
         assert!(!r.passed());
         assert_eq!(
             r.findings[1],
             "  a  config-width  crates/a/src/lib.rs::OtherConfig::new"
         );
         assert!(
-            run(
-                "a  config-width  crates/a/src/lib.rs::OtherConfig::new\n",
-                src,
-                &allow
+            run_gate(
+                |t| check(t, &allow, 0),
+                &[
+                    (
+                        LIST,
+                        "a  config-width  crates/a/src/lib.rs::OtherConfig::new\n"
+                    ),
+                    (F, src)
+                ]
             )
             .passed()
         );
@@ -2575,24 +2602,34 @@ mod tests {
         let src = "impl Wave { pub fn read(p: &str) -> Result<Self, E> { todo!() }\n\
                    pub fn from_bytes(b: Vec<u8>) -> Result<Self, E> { todo!() } }";
         let allow = [ty("crates/a/", "Wave::read", CTOR, "r")];
-        let r = run("", src, &allow);
+        let r = run_gate(|t| check(t, &allow, 0), &[(LIST, ""), (F, src)]);
         assert_eq!(
             r.findings[1],
             "  a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes"
         );
         assert!(
-            run(
-                "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\n",
-                src,
-                &allow
+            run_gate(
+                |t| check(t, &allow, 0),
+                &[
+                    (
+                        LIST,
+                        "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\n"
+                    ),
+                    (F, src)
+                ]
             )
             .passed()
         );
         let gone = [ty("crates/a/", "Wave::gone", CTOR, "r")];
-        let r = run(
-            "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\na  ctor-result  crates/a/src/lib.rs::Wave::read\n",
-            src,
-            &gone,
+        let r = run_gate(
+            |t| check(t, &gone, 0),
+            &[
+                (
+                    LIST,
+                    "a  ctor-result  crates/a/src/lib.rs::Wave::from_bytes\na  ctor-result  crates/a/src/lib.rs::Wave::read\n",
+                ),
+                (F, src),
+            ],
         );
         assert!(r.findings[0].contains("ALLOW covers no violation"));
     }
@@ -2601,15 +2638,17 @@ mod tests {
     fn an_allow_row_that_covers_no_violation_fails() {
         let src = "impl T { pub fn x(self) -> Self { self } }";
         let idle = [ty("crates/a/", "Gone", CTOR, "r")];
-        let r = run("", src, &idle);
+        let r = run_gate(|t| check(t, &idle, 0), &[(LIST, ""), (F, src)]);
         assert!(!r.passed());
         assert!(r.findings[0].contains("ALLOW covers no violation"));
         assert_eq!(r.findings[1], "  crates/a/ Gone: r");
         let wrong_rule = "impl Gone { pub fn with_x(self) -> Self { self } }";
-        let r = run(
-            "a  with-prefix  crates/a/src/lib.rs::Gone::with_x\n",
-            wrong_rule,
-            &idle,
+        let r = run_gate(
+            |t| check(t, &idle, 0),
+            &[
+                (LIST, "a  with-prefix  crates/a/src/lib.rs::Gone::with_x\n"),
+                (F, wrong_rule),
+            ],
         );
         assert!(!r.passed(), "{:?}", r.findings);
     }
@@ -2623,7 +2662,7 @@ mod tests {
             rules: &[Rule::ConfigWidth],
             reason: "r",
         }];
-        let r = run("", src, &one_rule);
+        let r = run_gate(|t| check(t, &one_rule, 0), &[(LIST, ""), (F, src)]);
         assert_eq!(
             r.findings[1],
             "  a  ctor-result  crates/a/src/lib.rs::XConfig::new"
@@ -2660,7 +2699,7 @@ mod tests {
             "b with-prefix crates/a/src/lib.rs::T::f\n",
             "a with-prefix crates/a/src/lib.rs::T::f\na with-prefix crates/a/src/lib.rs::T::f\n",
         ] {
-            let r = run(list, "", &[]);
+            let r = run_gate(|t| check(t, &[], 0), &[(LIST, list), (F, "")]);
             assert!(!r.passed(), "{list}");
             assert!(r.findings[0].contains("malformed"));
         }
