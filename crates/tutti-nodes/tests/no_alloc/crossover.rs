@@ -15,7 +15,7 @@ use tutti_units::{Hz, UnitAddr, UnitParam};
 pub const ROWS: &[fn()] = &[crossover, multiband];
 
 fn crossover() {
-    let gate = Gate::new(feeds::slow_square(0.8));
+    let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();
     let node = |cutoffs: &[Hz]| {
         CrossoverNode::<f32>::try_from(CrossoverConfig::new(
             BusTopology::STEREO,
@@ -38,7 +38,7 @@ fn crossover() {
 }
 
 fn multiband() {
-    let gate = Gate::new(feeds::slow_square(0.8));
+    let gate = Gate::new(feeds::slow_square(0.8)).warm_moves();
     for bands in 2..=4 {
         let node = MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
             BusTopology::STEREO,

@@ -89,7 +89,10 @@ fn held() {
 /// the phaser's control points are re-solved, the cross-fed delay reads every tap before
 /// writing any line, all on preallocated scratch.
 fn controls_moving() {
-    let gate = Gate::new(feeds::alternating(0.5)).warm(32).blocks(2_000);
+    let gate = Gate::new(feeds::alternating(0.5))
+        .warm(32)
+        .blocks(2_000)
+        .warm_moves();
     let t = |i: usize| (i % 50) as f32 / 50.0;
     // A cross-fed stereo delay whose time and both feedbacks move, the ramps in flight on
     // every block.
