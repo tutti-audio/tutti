@@ -910,7 +910,8 @@ impl AudioBridge {
     /// Queues `msg` and returns the [`Answer`] **the control lane's thread
     /// fills** with what `finish` makes of the lane's outcome, at the server's
     /// reply or at the request's deadline. A lane that ends drops the request
-    /// unanswered, which cancels the answer, as does a full queue. The request
+    /// unanswered, which cancels the answer, as does `finish` returning `None`
+    /// (a query refused by a full queue: not an answer it can give). The request
     /// takes no slot and queues behind one in flight, and the lane waits for
     /// `flush` (the audio lane's answer to the host's writes) before it sends.
     fn answer_with<T: Send + 'static>(
@@ -919,18 +920,25 @@ impl AudioBridge {
         deadline: Deadline,
         flush: Option<Ask<bool>>,
         object: Object,
-        finish: impl FnOnce(Outcome) -> T + Send + 'static,
+        finish: impl FnOnce(Outcome) -> Option<T> + Send + 'static,
     ) -> Answer<T> {
         let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
-            reply.send(finish(Err(Lost::Crashed)));
+            if let Some(value) = finish(Err(Lost::Crashed)) {
+                reply.send(value);
+            }
             return answer;
         }
         let call = Call {
             flush,
             deadline,
             object,
-            done: Box::new(move |outcome| reply.send(finish(outcome))),
+            // `None` drops the reply unanswered, which cancels the answer.
+            done: Box::new(move |outcome| {
+                if let Some(value) = finish(outcome) {
+                    reply.send(value);
+                }
+            }),
         };
         self.queue(ControlCommand::ask(msg, call));
         answer
@@ -943,7 +951,7 @@ impl AudioBridge {
         deadline: Deadline,
         flush: Option<Ask<bool>>,
         object: Object,
-        finish: impl FnOnce(std::result::Result<M::Reply, Lost>) -> T + Send + 'static,
+        finish: impl FnOnce(std::result::Result<M::Reply, Lost>) -> Option<T> + Send + 'static,
     ) -> Answer<T> {
         self.answer_with(msg, deadline, flush, object, move |outcome| {
             finish(typed::<M>(outcome))
@@ -975,7 +983,7 @@ impl AudioBridge {
         // The server may take as long as a plugin takes to build its window; the
         // lane answers with its own refusal at `Timeouts::editor`.
         self.call(OpenEditor { parent, scale }, Deadline::Editor, Object::None)
-            .map_err(editor_lost)?
+            .map_err(|lost| editor_lost(lost, self.lifecycle.is_crashed()))?
             .result
     }
 
@@ -996,7 +1004,7 @@ impl AudioBridge {
         size: Size,
     ) -> std::result::Result<Size, EditorError> {
         self.call(SetEditorSize { size }, Deadline::Editor, Object::None)
-            .map_err(editor_lost)?
+            .map_err(|lost| editor_lost(lost, self.lifecycle.is_crashed()))?
             .result
     }
 
@@ -1058,7 +1066,7 @@ impl AudioBridge {
             Deadline::State,
             flush,
             Object::State,
-            |outcome| outcome.map(|received| received.object).map_err(state_lost),
+            |outcome| Some(outcome.map(|received| received.object).map_err(state_lost)),
         )
     }
 
@@ -1073,7 +1081,9 @@ impl AudioBridge {
     ) -> Answer<std::result::Result<(), StateError>> {
         match self.state_message(data, state_use) {
             Ok((msg, blob)) => {
-                self.call_answer(msg, Deadline::State, None, Object::Blob(blob), state_loaded)
+                self.call_answer(msg, Deadline::State, None, Object::Blob(blob), |a| {
+                    Some(state_loaded(a))
+                })
             }
             Err(error) => Answer::ready(Err(error)),
         }
@@ -1089,7 +1099,7 @@ impl AudioBridge {
             Deadline::Query,
             None,
             Object::None,
-            preset_loaded,
+            |a| Some(preset_loaded(a)),
         )
     }
 
@@ -1104,7 +1114,7 @@ impl AudioBridge {
             Deadline::Query,
             None,
             Object::None,
-            |list| list.ok().map(|list| list.parameters),
+            |list| unless_refused(list).map(|list| list.ok().map(|list| list.parameters)),
         )
     }
 
@@ -1118,7 +1128,7 @@ impl AudioBridge {
             Deadline::Query,
             flush,
             Object::None,
-            |read| read.ok().and_then(|read| read.value),
+            |read| unless_refused(read).map(|read| read.ok().and_then(|read| read.value)),
         )
     }
 
@@ -1134,7 +1144,7 @@ impl AudioBridge {
             Deadline::Query,
             None,
             Object::None,
-            |read| read.ok().and_then(|read| read.value),
+            |read| unless_refused(read).map(|read| read.ok().and_then(|read| read.value)),
         )
     }
 
@@ -1467,6 +1477,28 @@ mod tests {
         );
     }
 
+    /// **A query the full queue refused is cancelled, not answered `None`**: an
+    /// app must not read a request that was never asked as the plugin's "none".
+    #[test]
+    fn a_refused_ask_cancels_its_answer_and_is_not_read_as_none() {
+        let bridge = bridge_without_a_lane();
+        while bridge
+            .channels
+            .push_control(ControlCommand::tell(crate::CloseEditor))
+        {}
+        assert!(
+            futures_lite::future::block_on(bridge.parameters_answer()).is_none(),
+            "cancelled"
+        );
+        assert_eq!(
+            futures_lite::future::block_on(
+                bridge.load_preset_answer(PresetId::Location("/x".into()))
+            ),
+            Some(Err(PresetError::Busy)),
+            "a preset load says Busy"
+        );
+    }
+
     /// **The host's wait outlasts the bridge's deadline by the margin, so a bridge
     /// that answers at its own deadline is still heard.** The bridge gives up on
     /// the server at `Timeouts::param` and replies into the `ask` then (a late
@@ -1533,6 +1565,15 @@ fn typed<M: Answered>(outcome: Outcome) -> std::result::Result<M::Reply, Lost> {
     M::Reply::try_from(outcome?.reply).map_err(Lost::of)
 }
 
+/// An answer to a query, or `None` when the queue refused it: a query that was
+/// never asked has no answer, and must not read as the plugin's own "none".
+fn unless_refused<R>(answer: std::result::Result<R, Lost>) -> Option<std::result::Result<R, Lost>> {
+    match answer {
+        Err(Lost::Busy) => None,
+        other => Some(other),
+    }
+}
+
 /// A state request's failure as the error its caller reads.
 fn state_lost(lost: Lost) -> StateError {
     match lost {
@@ -1553,9 +1594,11 @@ fn state_loaded(
 }
 
 /// An editor request's failure as the error its caller reads.
-fn editor_lost(lost: Lost) -> EditorError {
+fn editor_lost(lost: Lost, crashed: bool) -> EditorError {
     match lost {
         Lost::Busy => EditorError::Busy,
+        // A lane that dropped the request without a crash is a request not served.
+        Lost::Crashed if !crashed => EditorError::Busy,
         Lost::Crashed => EditorError::PluginCrashed,
         Lost::NoAnswer { after } => EditorError::NoAnswer { after },
         Lost::Server(error) => EditorError::Server(error),
