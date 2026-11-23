@@ -39,7 +39,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 
 pub use audio::{Applied, AudioTaken, TransportAudio};
 pub use handle::Transport;
-pub use loop_region::{LoopEdit, LoopReader, LoopRegion};
+pub use loop_region::{LoopEdit, LoopRegion};
 pub use motion::{AfterLocate, FadeOut, MotionCommand, MotionFsm, MotionState};
 pub use offline::{OfflineTimeline, OfflineTimelineConfig};
 pub use project_meter::{

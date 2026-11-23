@@ -23,7 +23,8 @@ use tutti_nodes::{
 use tutti_soundfont::SoundFontUnit;
 use tutti_units::Amplitude;
 
-use crate::{InstrumentHandle, Key, OutputPort, ParamTarget, RemoveError, Session, SessionNode};
+use crate::{InstrumentHandle, Key, OutputPort, ParamTarget, RemoveError, Session};
+use tutti_graph::IntoNode;
 
 /// A SoundFont unit wired to its chorus and reverb, and what they sum to.
 ///
@@ -116,8 +117,8 @@ impl<F: Float + SimdLanes + Lerp> GeneralMidi<F> {
 impl<K: crate::AppKey, C: crate::Clock> Session<K, C>
 where
     C::Float: SimdLanes + Lerp,
-    ModDelayNode<C::Float>: SessionNode<C::Float>,
-    FreeverbNode<C::Float>: SessionNode<C::Float>,
+    ModDelayNode<C::Float>: IntoNode<C::Float, Controls: Send + 'static> + Send + 'static,
+    FreeverbNode<C::Float>: IntoNode<C::Float, Controls: Send + 'static> + Send + 'static,
 {
     /// Adds `unit` with a General MIDI chorus and reverb, and a fader that
     /// sums the three.

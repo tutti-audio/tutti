@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tutti_buffers::{Float, Planes};
 
 use tutti_graph::{Env, Node, Prepare, TransportChanges, TransportPosition, contract};
+use tutti_music::LoopRange;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
 use crate::Loop;
@@ -59,6 +60,8 @@ pub struct MockTransport {
     /// `f64` bits — `AtomicF64` is not in std.
     beat: AtomicU64,
     tempo: AtomicU64,
+    /// The loop the transport reports, if armed.
+    looping: tutti_rt::Mutex<Option<LoopRange>>,
 }
 
 impl MockTransport {
@@ -68,6 +71,7 @@ impl MockTransport {
             playing: AtomicBool::new(true),
             beat: AtomicU64::new(beat.get().to_bits()),
             tempo: AtomicU64::new(tempo.get().to_bits()),
+            looping: tutti_rt::Mutex::new(None),
         })
     }
 
@@ -88,6 +92,13 @@ impl MockTransport {
     /// Jumps the playhead — a seek or a scrub, seen by the next block.
     pub fn set_beat(&self, beat: Beat) {
         self.beat.store(beat.get().to_bits(), Ordering::Relaxed);
+    }
+
+    /// Arms the transport's loop over `looping` (`None`: not looping), as the next
+    /// block's `Env` carries it. The playhead does not wrap: a test that wants a wrap
+    /// moves it with [`set_beat`](Self::set_beat).
+    pub fn set_loop(&self, looping: Option<LoopRange>) {
+        *self.looping.lock() = looping;
     }
 
     /// A seek: [`set_beat`](Self::set_beat), by the name a host uses.
@@ -123,7 +134,12 @@ impl MockTransport {
 
     /// The transport as a block's `Env` carries it: here, now.
     pub fn transport(&self) -> TransportPosition {
-        TransportPosition::new(self.is_rolling(), self.tempo(), self.beat(), None)
+        TransportPosition::new(
+            self.is_rolling(),
+            self.tempo(),
+            self.beat(),
+            *self.looping.lock(),
+        )
     }
 
     /// A block of `frames` at `rate` starting where the playhead stands.

@@ -125,3 +125,18 @@ fn a_rate_loads_what_was_stored_and_swap_answers_the_old_one() {
     assert_eq!(SampleRate::from_word(0), None);
     assert_eq!(SampleRate::from_word((-1.0f64).to_bits()), None);
 }
+
+/// An optional beat survives the word for every finite beat, zero and negatives
+/// included, and `None` is a word no finite beat has.
+#[test]
+fn an_optional_beat_round_trips_and_none_is_no_beat() {
+    let cell = AtomicCell::new(None::<Beat>);
+    assert_eq!(cell.load(), None);
+    for raw in [0.0, -0.0, -3.5, 1.0e-300, 1.0e12] {
+        let beat = Beat::new(raw);
+        cell.store(Some(beat));
+        assert_eq!(cell.load(), Some(beat));
+    }
+    assert_eq!(<Option<Beat>>::from_word(f64::NAN.to_bits()), None);
+    assert_eq!(<Option<Beat>>::from_word(f64::INFINITY.to_bits()), None);
+}

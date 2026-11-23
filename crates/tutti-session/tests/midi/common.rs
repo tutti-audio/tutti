@@ -8,7 +8,7 @@ use tutti_graph::UmpAt;
 use tutti_graph::{Cx, EventKind, IntoNode, Io, Node, NodeKey, NodeParts, Prepare, Shape, Status};
 use tutti_midi_runtime::{MidiOut, Outgoing, Taken, TimedMidiEvent};
 use tutti_rt::Mutex;
-use tutti_session::{Session, SessionNode};
+use tutti_session::Session;
 use tutti_ump::{Message, MidiChannel, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, BeatDuration};
 
@@ -51,8 +51,6 @@ impl IntoNode for Tap {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-
-impl SessionNode for Tap {}
 
 /// An offline session at 48 kHz, stereo: the builder's MIDI nodes in.
 pub fn offline() -> Session {

@@ -225,7 +225,7 @@ fn a_loop_set_while_a_stretching_voice_plays_does_not_allocate() {
 }
 
 /// A spare vocoder arrives and leaves without the audio thread allocating or freeing: the
-/// handle builds it when the loop is set (outside the guard), the drain moves it into the
+/// handle builds it on its tick once a block has carried the loop (outside the guard), the drain moves it into the
 /// slot and, when the loop moves off, out to the retirement ring, and the handle frees it.
 #[test]
 fn a_spare_vocoder_arrives_and_retires_without_allocating() {
@@ -233,10 +233,14 @@ fn a_spare_vocoder_arrives_and_retires_without_allocating() {
     let region = LoopRange::new(Beat::new(0.125), Beat::new(0.376)).expect("a loop");
     let (mut rig, handle) = stretching_rig(64, None);
     for _ in 0..3 {
-        handle.follow_loop(Some(region));
+        rig.t.set_loop(Some(region));
+        guarded(&mut rig, 4);
+        tutti_rt::Reclaim::reclaim(&handle);
         guarded(&mut rig, 4);
         assert_eq!(tutti_sampler::testing::spare_count(rig.node()), 1);
-        handle.follow_loop(None);
+        rig.t.set_loop(None);
+        guarded(&mut rig, 4);
+        tutti_rt::Reclaim::reclaim(&handle);
         guarded(&mut rig, 4);
         assert_eq!(tutti_sampler::testing::spare_count(rig.node()), 0);
         assert_eq!(handle.collect_retired(), 1);
