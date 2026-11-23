@@ -420,6 +420,20 @@ pub enum ControlRequest {
         /// where the descriptor follows, and the pipe's checked name on Windows.
         wire: LaneWire,
     },
+    /// The app's controller entries, replacing the last set
+    /// ([`Control::set_app_midi_map`](tutti_plugin_types::Control::set_app_midi_map)).
+    /// Answered by [`ControlReply::AppMidiMapApplied`].
+    SetAppMidiMap {
+        /// The entries.
+        app: Vec<tutti_plugin_types::MidiAssignment>,
+    },
+    /// Arms or disarms the plugin's own MIDI learn
+    /// ([`Control::arm_plugin_midi_learn`](tutti_plugin_types::Control::arm_plugin_midi_learn)).
+    /// Answered by [`ControlReply::PluginMidiLearn`].
+    ArmPluginMidiLearn {
+        /// Arm (`true`) or disarm.
+        armed: bool,
+    },
 }
 
 /// What the server answers a [`ControlRequest`] with.
@@ -584,6 +598,16 @@ pub enum ControlReply {
     /// The server holds its end of the lane an
     /// [`OpenLane`](ControlRequest::OpenLane) opened and serves it.
     LaneOpened,
+    /// Who applies the entries of a [`ControlRequest::SetAppMidiMap`].
+    AppMidiMapApplied {
+        /// The plugin's answer.
+        applied: tutti_plugin_types::MidiMapApplied,
+    },
+    /// Answers a [`ControlRequest::ArmPluginMidiLearn`].
+    PluginMidiLearn {
+        /// Armed, or why not.
+        result: Result<(), tutti_plugin_types::PluginLearnError>,
+    },
 }
 
 /// What the plugin says unprompted, on the control connection.

@@ -4,8 +4,8 @@
 //! plugin's own copy is the spec in `tutti-shared-plugin`'s `core` module.
 
 use tutti_plugin_types::{
-    AutomationMode, Axis, ChannelLayout, ControlRole, MidiAssignment, MidiSource, ParamSteps,
-    Samples, Widths,
+    AutomationMode, Axis, ChannelLayout, ControlRole, MidiAssignment, MidiMapApplied, MidiSource,
+    ParamSteps, Samples, Widths,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::Normalized;
@@ -119,6 +119,38 @@ pub enum Bypass {
 /// table (VST3 `IMidiMapping`, AU's mapping table): Control Change
 /// 74 on channel 0 drives `level`.
 pub const MAPPED_CONTROLLER: u8 = 74;
+
+/// The entry an app adds beside the plugin's own table: Control Change 21 on
+/// channel 2 drives `aux`.
+pub const APP_ENTRY: MidiAssignment = MidiAssignment {
+    channel: Some(MidiChannel::of(2)),
+    source: MidiSource::ControlChange(U7::of(21)),
+    param: Param::Aux.id(),
+};
+
+/// The entry an app gives for a parameter the plugin's table already drives:
+/// Control Change 22 on channel 0 drives `level`. A unit keeps one mapping per
+/// parameter, so where the unit applies the entries it takes the place of the
+/// plugin's.
+pub const APP_OVERRIDE: MidiAssignment = MidiAssignment {
+    channel: Some(MidiChannel::of(0)),
+    source: MidiSource::ControlChange(U7::of(22)),
+    param: Param::Level.id(),
+};
+
+/// The controller a live learn is told of, in the cases of the plugin's own
+/// learn.
+pub const LEARNED_CONTROLLER: u8 = 21;
+
+/// What arming the plugin's own MIDI learn does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PluginLearn {
+    /// The format or the plugin has none: the arm is refused as unsupported.
+    Refused,
+    /// The plugin takes each live controller and moves `aux` to the
+    /// controller number over 127 (the C++ plugin's `IMidiLearn`).
+    MovesAux,
+}
 
 /// The normalized value the write cases send: `level` takes it where a write is
 /// allowed, and the meter is refused it.
@@ -421,6 +453,12 @@ pub struct Surface {
     /// The controller table the plugin declares. Empty where the format has no
     /// such table: CLAP and VST2.
     pub assignments: &'static [MidiAssignment],
+    /// Who applies the app's controller entries: the unit in an AU, which holds
+    /// them in its own table beside the plugin's, and the host's node for every
+    /// other format.
+    pub app_map: MidiMapApplied,
+    /// What arming the plugin's own learn does.
+    pub plugin_learn: PluginLearn,
     /// The names the plugin gives to MIDI keys, `(key, channel, name)`: the
     /// drum pads CLAP, the Rust VST3 plugin and VST2 name for every channel,
     /// the C++ plugin's keyswitches on channel 0. AU declares none.
@@ -542,6 +580,8 @@ pub const CLAP: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[],
+    app_map: MidiMapApplied::Host,
+    plugin_learn: PluginLearn::Refused,
     note_names: &DRUM_KEYS,
     groups: &MODULE_GROUPS,
     short_names: false,
@@ -571,6 +611,8 @@ pub const VST2: Surface = Surface {
     mode_steps: ParamSteps::Unknown,
     continuous_steps: ParamSteps::Unknown,
     assignments: &[],
+    app_map: MidiMapApplied::Host,
+    plugin_learn: PluginLearn::Refused,
     note_names: &DRUM_KEYS,
     groups: &[],
     short_names: true,
@@ -601,6 +643,8 @@ pub const VST3: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    app_map: MidiMapApplied::Host,
+    plugin_learn: PluginLearn::Refused,
     note_names: &DRUM_KEYS,
     groups: &UNIT_GROUPS,
     short_names: true,
@@ -631,6 +675,8 @@ pub const VST3_CPP: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    app_map: MidiMapApplied::Host,
+    plugin_learn: PluginLearn::MovesAux,
     note_names: &CPP_KEYS,
     groups: &UNIT_GROUPS,
     short_names: false,
@@ -664,6 +710,8 @@ pub const AU: Surface = Surface {
     mode_steps: ParamSteps::Enumerated(5),
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
+    app_map: MidiMapApplied::Plugin,
+    plugin_learn: PluginLearn::Refused,
     note_names: &[],
     groups: &[("Filter", None)],
     short_names: true,

@@ -22,7 +22,9 @@ use tutti_plugin_types::{
     LayoutSupport, PluginBus, PluginDescriptor, PluginPreset, PluginWiring, PresetError, PresetId,
     PresetSupport,
 };
-use tutti_plugin_types::{MainThreadMarker, StateUse};
+use tutti_plugin_types::{
+    MainThreadMarker, MidiAssignment, MidiMapApplied, PluginLearnError, StateUse,
+};
 #[cfg(doc)]
 use tutti_plugin_types::{PluginInvalidation, PluginRefresh, TransportRequest};
 use tutti_units::Normalized;
@@ -940,6 +942,39 @@ impl PluginHandle {
             return Delivered::PluginDead;
         };
         lent(control, |c| c.set_track_info(main, info)).unwrap_or(Delivered::PluginDead)
+    }
+
+    /// Hands the plugin the app's controller entries, replacing the last set,
+    /// and says who applies them ([`Control::set_app_midi_map`]). A handle with no
+    /// route to the plugin answers [`Host`](MidiMapApplied::Host).
+    pub fn set_app_midi_map(
+        &self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        let Some(control) = self.control.as_deref() else {
+            return MidiMapApplied::Host;
+        };
+        lent(control, |c| c.set_app_midi_map(main, app)).unwrap_or(MidiMapApplied::Host)
+    }
+
+    /// Arms or disarms the plugin's own MIDI learn
+    /// ([`Control::arm_plugin_midi_learn`]).
+    ///
+    /// # Errors
+    ///
+    /// The plugin's refusal, or [`Lost`](PluginLearnError::Lost) when the handle
+    /// has no route to it.
+    pub fn arm_plugin_midi_learn(
+        &self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        let Some(control) = self.control.as_deref() else {
+            return Err(PluginLearnError::Lost);
+        };
+        lent(control, |c| c.arm_plugin_midi_learn(main, armed))
+            .unwrap_or(Err(PluginLearnError::Lost))
     }
 
     // ---- Signals (plugin -> host) -------------------------------------------

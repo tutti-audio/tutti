@@ -125,6 +125,22 @@ pub enum PresetError {
     },
 }
 
+/// Why [`Control::arm_plugin_midi_learn`](crate::Control::arm_plugin_midi_learn)
+/// did not arm the plugin's own MIDI learn.
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
+pub enum PluginLearnError {
+    /// The plugin has no learn of its own: its format has none (CLAP, VST2, AU,
+    /// whose host-driven learn names a parameter), or the plugin does not
+    /// implement it (VST3 `IMidiLearn`).
+    #[error("the plugin has no MIDI learn of its own")]
+    Unsupported,
+    /// The plugin is gone, so nothing was asked.
+    #[error("the plugin is lost")]
+    Lost,
+}
+
 /// Why restoring a plugin's saved state failed.
 ///
 /// Separate from [`PluginError::State`] rather than reusing it, because the two

@@ -71,7 +71,8 @@ fn midi_learn_forwards_from_the_main_thread() {
     let before = inst.get_parameter(AUX);
     assert_eq!(before, 0.25, "aux starts at its default");
 
-    inst.loaded_mut().arm_midi_learn(main_thread(), true);
+    tutti_plugin_types::Control::arm_plugin_midi_learn(inst.loaded_mut(), main_thread(), true)
+        .expect("the twin implements IMidiLearn");
     assert!(inst.loaded().is_midi_learn_armed());
 
     // Feed CCs through the *audio* path; the host must capture them there and
@@ -121,7 +122,8 @@ fn midi_learn_forwards_from_the_main_thread() {
         f64::from(CCNumber::PAN.get()) / 127.0,
         "the poll forwards the captured controllers in order, so the last one (PAN) wins"
     );
-    inst.loaded_mut().arm_midi_learn(main_thread(), false);
+    tutti_plugin_types::Control::arm_plugin_midi_learn(inst.loaded_mut(), main_thread(), false)
+        .expect("the twin implements IMidiLearn");
     assert!(!inst.loaded().is_midi_learn_armed());
 }
 
