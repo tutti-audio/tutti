@@ -25,7 +25,9 @@ use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_buffers::{Float, Fold, InterleavedMut, Planes, PlanesMut, Sample, interleave};
+use tutti_buffers::{
+    Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample, interleave,
+};
 use tutti_graph::{RtLogReaders, fold_to_width};
 use tutti_timeline::RenderClock;
 use tutti_units::Samples;
@@ -69,24 +71,30 @@ impl FileChannels<'_> {
                 .into(),
             );
         }
+        // A graph wider than a topology holds has none: its channels are
+        // unassigned, so they go by index.
+        let from = match main_output {
+            Some(main_output) => Some(main_output.clone()),
+            None => ChannelTopology::default_for(graph),
+        };
         let Some(topology) = self.topology else {
-            let fold = match main_output {
-                Some(main_output) => fold_to_width(main_output, self.layout),
-                None => fold_to_width(&ChannelTopology::default_for(graph), self.layout),
+            let fold = match &from {
+                Some(from) => fold_to_width(from, self.layout),
+                None => Fold::by_index(graph, self.layout),
             };
             return fold.map_err(|e| ConfigError::Placement(e).into());
         };
-        let from = match main_output {
-            Some(main_output) => main_output.clone(),
-            None => ChannelTopology::default_for(graph),
-        };
         // A file that names no speaker takes the graph's channels by index,
         // as it says; `between` never pads by a guess.
-        if topology.is_unassigned() {
-            return Fold::by_index(from.width(), topology.width())
-                .map_err(|e| ConfigError::Placement(e).into());
-        }
-        Fold::between(&from, topology).map_err(|e| ConfigError::Placement(e).into())
+        let fold = match &from {
+            _ if topology.is_unassigned() => Fold::by_index(graph, topology.width()),
+            Some(from) => Fold::between(from, topology),
+            None => Err(FoldError::Unassigned {
+                src: graph,
+                dst: topology.width(),
+            }),
+        };
+        fold.map_err(|e| ConfigError::Placement(e).into())
     }
 }
 

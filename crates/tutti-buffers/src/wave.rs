@@ -40,8 +40,9 @@ pub struct Wave<S: Sample = f32> {
     sample_rate: SampleRate,
     /// Length in frames. 0 if there are no channels.
     len: Samples,
-    /// Which speaker each channel feeds; its width is the channel count.
-    topology: ChannelTopology,
+    /// Which speaker each channel feeds, when the width has a topology (at most
+    /// [`MAX_CHANNELS`](crate::MAX_CHANNELS) channels).
+    topology: Option<ChannelTopology>,
     /// Whether `topology` was stated or guessed from the count.
     placement: Placement,
 }
@@ -60,7 +61,7 @@ impl<S: Sample> PartialEq for Wave<S> {
 }
 
 /// What a bare channel count is taken to mean: [`ChannelTopology::default_for`].
-fn default_for(channels: usize) -> (ChannelTopology, Placement) {
+fn default_for(channels: usize) -> (Option<ChannelTopology>, Placement) {
     let layout = ChannelLayout::try_from(channels).expect("a wave has at most u16::MAX channels");
     (ChannelTopology::default_for(layout), Placement::Default)
 }
@@ -126,7 +127,20 @@ impl<S: Sample> Wave<S> {
             vec: vec![Vec::new(); usize::from(topology.width().count())],
             sample_rate,
             len: Samples::ZERO,
-            topology,
+            topology: Some(topology),
+            placement,
+        }
+    }
+
+    /// Creates an empty wave of `width` channels with no topology, reporting
+    /// `placement` as the basis of that: for a width past
+    /// [`MAX_CHANNELS`](crate::MAX_CHANNELS), which no topology holds.
+    pub fn unplaced(width: ChannelLayout, placement: Placement, sample_rate: SampleRate) -> Self {
+        Self {
+            vec: vec![Vec::new(); usize::from(width.count())],
+            sample_rate,
+            len: Samples::ZERO,
+            topology: None,
             placement,
         }
     }
@@ -220,14 +234,16 @@ impl<S: Sample> Wave<S> {
         }
     }
 
-    /// Returns which speaker each channel feeds.
+    /// Returns which speaker each channel feeds, or `None` for a wave wider than
+    /// [`MAX_CHANNELS`](crate::MAX_CHANNELS), which no topology holds (its width is
+    /// [`layout`](Self::layout)).
     ///
     /// A decoded file states its own; a wave built from a count carries the
     /// assumption [`new`](Self::new) describes. Its length is
     /// [`channels`](Self::channels).
     #[inline]
-    pub fn topology(&self) -> &ChannelTopology {
-        &self.topology
+    pub fn topology(&self) -> Option<&ChannelTopology> {
+        self.topology.as_ref()
     }
 
     /// Returns whether [`topology`](Self::topology) was stated or the default layout for
@@ -238,10 +254,10 @@ impl<S: Sample> Wave<S> {
     }
 
     /// Returns the width, as a [`ChannelLayout`]: the length of the
-    /// [`topology`](Self::topology).
+    /// [`topology`](Self::topology) when it has one.
     #[inline]
     pub fn layout(&self) -> ChannelLayout {
-        self.topology.width()
+        ChannelLayout::from_count(self.vec.len() as u16)
     }
 
     /// Returns the rate the samples were recorded at.

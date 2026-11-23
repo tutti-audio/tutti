@@ -116,17 +116,61 @@ pub enum MainOutputError {
 /// known: a device, a file, a node's outputs.
 ///
 /// The destination is taken to be the engine's own order for its width
-/// ([`ChannelTopology::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4. A
+/// ([`ChannelTopology::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4,
+/// and unassigned channels past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS). A
 /// destination that states its placement is [`fold_to_topology`].
 ///
 /// # Errors
 ///
-/// As [`fold_to_topology`].
+/// As [`fold_to_width_with`].
 pub fn fold_to_width<F: Float>(
     src: &ChannelTopology,
     dst: ChannelLayout,
 ) -> Result<Fold<F>, FoldError> {
-    fold_to_topology(src, &ChannelTopology::default_for(dst))
+    fold_to_width_with(
+        src,
+        dst,
+        ChannelTopology::default_for(dst).as_ref(),
+        FoldLevels::default(),
+    )
+}
+
+/// [`fold_to_topology_with`] into a destination of `dst` channels whose
+/// topology is `dst_topology` when it has one: a destination wider than
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) has none, and is unassigned
+/// channels, taken by index.
+///
+/// # Errors
+///
+/// As [`fold_to_topology_with`].
+pub fn fold_to_width_with<F: Float>(
+    src: &ChannelTopology,
+    dst: ChannelLayout,
+    dst_topology: Option<&ChannelTopology>,
+    levels: FoldLevels,
+) -> Result<Fold<F>, FoldError> {
+    match dst_topology {
+        Some(dst) => fold_to_topology_with(src, dst, levels),
+        None => {
+            refuse_unnamed(src)?;
+            Fold::by_index(src.width(), dst)
+        }
+    }
+}
+
+/// [`FoldError::Unnamed`] for a source with an [`Unknown`](Speaker::Unknown)
+/// channel, whatever the destination.
+fn refuse_unnamed(src: &ChannelTopology) -> Result<(), FoldError> {
+    match src
+        .positions()
+        .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
+    {
+        Some(channel) => Err(FoldError::Unnamed {
+            end: FoldEnd::Source,
+            channel,
+        }),
+        None => Ok(()),
+    }
 }
 
 /// Builds the fold from `src` into `dst`. A mono source lands on the centre of
@@ -169,15 +213,7 @@ pub fn fold_to_topology_with<F: Float>(
     dst: &ChannelTopology,
     levels: FoldLevels,
 ) -> Result<Fold<F>, FoldError> {
-    if let Some(channel) = src
-        .positions()
-        .and_then(|list| list.iter().position(|p| matches!(p, Speaker::Unknown(_))))
-    {
-        return Err(FoldError::Unnamed {
-            end: FoldEnd::Source,
-            channel,
-        });
-    }
+    refuse_unnamed(src)?;
     // An ambisonic source is as unplaced as unassigned channels: by index.
     if src.is_unassigned() || src.ambisonic().is_some() || dst.is_unassigned() {
         Fold::by_index(src.width(), dst.width())

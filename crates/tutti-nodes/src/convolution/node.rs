@@ -299,7 +299,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
             IrLayout::Folded => Some(
                 Fold::<F>::between(
                     &ChannelTopology::from(input),
-                    &ChannelTopology::default_for(ChannelLayout::MONO),
+                    &tutti_buffers::Bed::Mono.topology(),
                 )
                 .map_err(|source| ConvolverError::NoFold {
                     width: n_in.count(),
@@ -1384,8 +1384,8 @@ mod direct_sum {
             let mut mono = vec![0.0f32; FRAMES];
             if x.len() == 2 {
                 Fold::between(
-                    &ChannelTopology::default_for(ChannelLayout::STEREO),
-                    &ChannelTopology::default_for(ChannelLayout::MONO),
+                    &tutti_buffers::Bed::Stereo.topology(),
+                    &tutti_buffers::Bed::Mono.topology(),
                 )
                 .expect("stereo folds to mono")
                 .fold_planar_channel(Planes::from_vecs(&x).unwrap(), 0, MonoMut::new(&mut mono))
@@ -1485,8 +1485,8 @@ mod direct_sum {
         let x = signal(6, 700);
         let got = render(node, &x);
         let to_mono = Fold::between(
-            &ChannelTopology::default_for(ChannelLayout::from(6u16)),
-            &ChannelTopology::default_for(ChannelLayout::MONO),
+            &tutti_buffers::Bed::Surround51.topology(),
+            &tutti_buffers::Bed::Mono.topology(),
         )
         .unwrap();
         let mono: Vec<f32> = (0..700)

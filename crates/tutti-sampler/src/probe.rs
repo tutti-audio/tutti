@@ -43,14 +43,15 @@ pub struct SampleFacts {
     /// The file's channel count. Multiply by [`frames`](Self::frames) to size an
     /// interleaved buffer.
     pub layout: ChannelLayout,
-    /// Which speaker each channel of the file feeds, in sample order.
+    /// Which speaker each channel of the file feeds, in sample order; `None` for a
+    /// file wider than a topology holds.
     ///
     /// What a voice over this file would place by: a channel no speaker names
     /// is [`Speaker::Unknown`](tutti_buffers::Speaker::Unknown), and a
     /// memory voice over such a file is refused
     /// ([`PlaceError`](crate::PlaceError)). A host that wants to say so before
     /// it loads the file reads it here.
-    pub topology: ChannelTopology,
+    pub topology: Option<ChannelTopology>,
     /// Whether this build's streamer can stream this file.
     ///
     /// The sampler's verdict, not a property of the file alone. False when the
@@ -113,7 +114,7 @@ pub fn probe(asset: impl Into<Asset>) -> Result<SampleFacts, SampleProbeError> {
     Ok(SampleFacts {
         frames: meta.total_frames.map(|f| Samples::new(f as usize)),
         sample_rate: meta.sample_rate,
-        layout: meta.topology.width(),
+        layout: meta.layout,
         streamable: streamable(&asset, &meta),
         topology: meta.topology,
     })

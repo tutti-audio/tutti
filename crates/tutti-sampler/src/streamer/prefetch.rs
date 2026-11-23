@@ -47,8 +47,10 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::ChannelLayout;
+#[cfg(test)]
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
-use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_platform::Asset;
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_units::Samples;
@@ -76,7 +78,7 @@ pub(crate) struct Ring<F: RingFloat> {
     /// the file's width and order; the placement the voice reads it by is built
     /// when the stream opens (`Opened::place`), so only tests read this.
     #[cfg(test)]
-    topology: ChannelTopology,
+    topology: Option<ChannelTopology>,
     /// Glances at the window and where the reader plays (the writer's
     /// `watch`): no sample is read through it.
     core: Arc<PosRing<F>>,
@@ -115,8 +117,8 @@ impl<F: RingFloat> Ring<F> {
 
     /// The speakers the file's channels feed, in the ring's order (tests).
     #[cfg(test)]
-    pub(crate) fn topology(&self) -> &ChannelTopology {
-        &self.topology
+    pub(crate) fn topology(&self) -> Option<&ChannelTopology> {
+        self.topology.as_ref()
     }
 
     /// Slots, in frames.
@@ -355,7 +357,7 @@ impl<F: RingFloat> RegionOut<F> {
                 return false;
             }
             // Frames read before a fault are kept; the rest is silence.
-            let Ok(view) = InterleavedMut::new(&mut *out, decoder.topology().width()) else {
+            let Ok(view) = InterleavedMut::new(&mut *out, self.writer.layout()) else {
                 // `out` is not whole frames of the file's width: nothing read,
                 // and the refill's `false` faults the stream as a decode fault.
                 out.fill(F::ZERO);
@@ -458,7 +460,16 @@ impl RegionBuffer {
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let layout = nonempty(channels.into());
         let topology = ChannelTopology::default_for(layout);
-        Self::for_file(region_id, asset, capacity, topology, None, fade_frames)
+        Self::for_file(
+            region_id,
+            asset,
+            capacity,
+            layout,
+            #[cfg(test)]
+            topology,
+            None,
+            fade_frames,
+        )
     }
 
     /// `RegionBuffer::with_capacity` for a file `len` long (`None`: not known), whose
@@ -467,11 +478,12 @@ impl RegionBuffer {
         region_id: StreamId,
         asset: impl Into<Asset>,
         capacity: usize,
-        topology: ChannelTopology,
+        layout: ChannelLayout,
+        #[cfg(test)] topology: Option<ChannelTopology>,
         len: Option<Samples>,
         fade_frames: Samples,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
-        let channels = nonempty(topology.width());
+        let channels = nonempty(layout);
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
         let (mapping, arrangement) = match len {
             Some(len) => (Mapping::plain(len), Arrangement::plain(len)),

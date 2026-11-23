@@ -168,30 +168,38 @@ pub(super) fn build_stream<F: RingFloat>(
     shared: &Handles<F>,
     config: &BufferConfig,
 ) -> Result<(Record<F>, Opened<F>), PlaceError> {
-    let (file_length, file_sr, file_topology, decoder, resident): (_, _, _, Option<Decoder<F>>, _) =
-        match source {
-            // Decoder metadata carries the header's integer rate.
-            #[cfg(codec)]
-            Source::Stream(meta, decoder) => (
-                meta.total_frames.unwrap_or(0),
-                meta.sample_rate,
-                decoder.topology().clone(),
-                Some(*decoder),
-                None,
-            ),
-            Source::Whole(wave) => (
-                wave.len().get() as u64,
-                wave.sample_rate(),
-                wave.topology().clone(),
-                None,
-                Some(wave),
-            ),
-        };
+    let (file_length, file_sr, file_layout, file_topology, decoder, resident): (
+        _,
+        _,
+        _,
+        _,
+        Option<Decoder<F>>,
+        _,
+    ) = match source {
+        // Decoder metadata carries the header's integer rate.
+        #[cfg(codec)]
+        Source::Stream(meta, decoder) => (
+            meta.total_frames.unwrap_or(0),
+            meta.sample_rate,
+            meta.layout,
+            decoder.topology().cloned(),
+            Some(*decoder),
+            None,
+        ),
+        Source::Whole(wave) => (
+            wave.len().get() as u64,
+            wave.sample_rate(),
+            wave.layout(),
+            wave.topology().cloned(),
+            None,
+            Some(wave),
+        ),
+    };
 
     // Where the file's channels go in the voice, built (and so refused) now,
     // before a ring exists to free again.
-    let width = voice_width(width.unwrap_or_else(|| file_topology.width()))?;
-    let place = Place::for_topology(&file_topology, width)?;
+    let width = voice_width(width.unwrap_or(file_layout))?;
+    let place = Place::for_topology(file_layout, file_topology.as_ref(), width)?;
 
     // Sizing only: a rate that moves before the ratio is set below changes the
     // ring's depth, never what it plays.
@@ -206,6 +214,8 @@ pub(super) fn build_stream<F: RingFloat>(
         id,
         asset.clone(),
         buffer_capacity,
+        file_layout,
+        #[cfg(test)]
         file_topology,
         Some(Samples::new(file_length as usize)),
         config.seek_crossfade_frames,

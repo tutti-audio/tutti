@@ -712,7 +712,7 @@ pub use compile::latency::{
 };
 pub use compile::main_output::{
     MainOutputBank, MainOutputError, MainOutputId, fold_to_topology, fold_to_topology_with,
-    fold_to_width,
+    fold_to_width, fold_to_width_with,
 };
 pub use compile::plan::{
     Csr, DelayKey, DelaySpec, Delta, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp,

@@ -870,9 +870,9 @@ fn a_restart_onto_a_device_that_cannot_place_the_declared_main_output_is_refused
     };
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
-        .main_output_topology(tutti_buffers::ChannelTopology::unassigned(
-            ChannelLayout::QUAD,
-        ))
+        .main_output_topology(
+            tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap(),
+        )
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(wide(48_000.0), driver)
         .expect("four buses place on six channels");
@@ -933,7 +933,7 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
     let placed = session.output_device().unwrap();
     assert_eq!(
         (placed.placement, placed.topology),
-        (Placement::Stated, wired)
+        (Placement::Stated, Some(wired))
     );
 
     // A statement of the wrong width is refused, and the old one stands.
@@ -970,7 +970,7 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
 #[test]
 fn a_refused_declaration_is_retried_on_a_restart() {
     use tutti_session::MainOutputTopologyStatus;
-    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
+    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap();
     let (driver, _stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(tutti_cpal::DeviceSelector::Default)
@@ -1013,8 +1013,8 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         ChannelLayout::from(6u16),
         tutti_buffers::SampleFormat::F32,
     );
-    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD);
-    let stereo = tutti_buffers::ChannelTopology::default_for(ChannelLayout::STEREO);
+    let buses = tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap();
+    let stereo = tutti_buffers::Bed::Stereo.topology();
     let (driver, stream) = ManualStreamDriver::new();
     let mut session = Session::builder()
         .device(tutti_cpal::DeviceSelector::Default)
@@ -1268,7 +1268,16 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         policy.map,
         "never reset to the identity"
     );
-    assert_eq!(session.output_device().unwrap().topology.width().count(), 6);
+    assert_eq!(
+        session
+            .output_device()
+            .unwrap()
+            .topology
+            .unwrap()
+            .width()
+            .count(),
+        6
+    );
 
     // A map the new device has places for, and the restart goes through.
     let mut fits = policy;
@@ -1280,5 +1289,14 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
     session
         .restart_on(spec(4), driver, None, None)
         .expect("outputs 3 and 4 are there");
-    assert_eq!(session.output_device().unwrap().topology.width().count(), 4);
+    assert_eq!(
+        session
+            .output_device()
+            .unwrap()
+            .topology
+            .unwrap()
+            .width()
+            .count(),
+        4
+    );
 }

@@ -249,10 +249,10 @@ impl FileTarget {
 
     /// The speakers the file's channels feed: the stated topology, or
     /// [`ChannelTopology::default_for`] for its width ([`placement`](Self::placement)
-    /// says which).
-    pub(crate) fn effective_topology(&self) -> ChannelTopology {
+    /// says which); `None` past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
+    pub(crate) fn effective_topology(&self) -> Option<ChannelTopology> {
         match &self.width {
-            Width::Placed(topology) => topology.clone(),
+            Width::Placed(topology) => Some(topology.clone()),
             Width::Count(layout) => ChannelTopology::default_for(*layout),
         }
     }
@@ -319,20 +319,42 @@ impl From<BufferTarget> for Target {
 /// checks it against the tap's width and the target's layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement {
-    topology: ChannelTopology,
+    layout: ChannelLayout,
+    topology: Option<ChannelTopology>,
 }
 
 impl Placement {
     /// Lanes that are the channels of `topology`.
     #[must_use]
     pub fn new(topology: ChannelTopology) -> Self {
-        Self { topology }
+        Self {
+            layout: topology.width(),
+            topology: Some(topology),
+        }
     }
 
-    /// What the lanes are.
+    /// `layout` lanes in the engine's order for the width
+    /// ([`ChannelTopology::default_for`]); past
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) they have no topology and are
+    /// unassigned channels.
     #[must_use]
-    pub fn topology(&self) -> &ChannelTopology {
-        &self.topology
+    pub fn of_width(layout: ChannelLayout) -> Self {
+        Self {
+            layout,
+            topology: ChannelTopology::default_for(layout),
+        }
+    }
+
+    /// How many lanes.
+    #[must_use]
+    pub fn layout(&self) -> ChannelLayout {
+        self.layout
+    }
+
+    /// What the lanes are, when the width has a topology.
+    #[must_use]
+    pub fn topology(&self) -> Option<&ChannelTopology> {
+        self.topology.as_ref()
     }
 }
 

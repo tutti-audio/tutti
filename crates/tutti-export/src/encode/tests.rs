@@ -123,9 +123,7 @@ fn the_topology_reaches_the_file() {
         (4, None, 0x33),
         (
             4,
-            Some(tutti_buffers::ChannelTopology::unassigned(
-                ChannelLayout::QUAD,
-            )),
+            Some(tutti_buffers::ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
             0,
         ),
         (6, None, 0x60F),

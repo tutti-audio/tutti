@@ -177,11 +177,11 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
             return Err(RenderError::UnsupportedChannels);
         }
         if let crate::Feed::Tap { reader, lanes } = output.feed()
-            && reader.layout() != lanes.topology().width()
+            && reader.layout() != lanes.layout()
         {
             return Err(target_error(TargetError::Lanes {
                 lanes: reader.layout(),
-                placement: lanes.topology().width(),
+                placement: lanes.layout(),
             }));
         }
         let Some(file) = file else { continue };
@@ -190,12 +190,15 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
             && matches!(normalize.mode(), Normalize::Lufs { .. })
         {
             // Loudness is weighted by placement: refused here, not after the render.
-            if tutti_measure::Measure::<f32>::measure(
-                &tutti_measure::LoudnessConfig::new(file.effective_topology()),
-                tutti_units::SampleRate::SR_48K,
-            )
-            .is_err()
-            {
+            // A width with no topology has no placement.
+            let placed = file.effective_topology().is_some_and(|topology| {
+                tutti_measure::Measure::<f32>::measure(
+                    &tutti_measure::LoudnessConfig::new(topology),
+                    tutti_units::SampleRate::SR_48K,
+                )
+                .is_ok()
+            });
+            if !placed {
                 return Err(target_error(TargetError::UnplacedLoudness {
                     channels: file.channels(),
                 }));
@@ -250,9 +253,9 @@ fn open_lanes<F: FftFloat>(
         let (fold, tap) = match feed {
             crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
-                let width = lanes.topology().width();
+                let width = lanes.layout();
                 let fold = channels
-                    .fold_from(usize::from(width.count()), Some(lanes.topology()))
+                    .fold_from(usize::from(width.count()), lanes.topology())
                     .map_err(|e| match e {
                         RenderError::InvalidConfig(ConfigError::Placement(why)) => {
                             RenderError::Target {
@@ -539,8 +542,11 @@ fn measure<F: FftFloat>(
         sample_rate: out_rate,
         reason,
     };
-    let mut measurer = Measurer::new(out_rate, &waiting.target.effective_topology(), normalize)
-        .map_err(unmeasurable)?;
+    let topology = waiting
+        .target
+        .effective_topology()
+        .ok_or_else(|| unmeasurable(Unmeasured::Placement))?;
+    let mut measurer = Measurer::new(out_rate, &topology, normalize).map_err(unmeasurable)?;
     let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, layout)?;
     let mut staging: Vec<F> = Vec::new();
     let mut replay = waiting.spill.replay()?;

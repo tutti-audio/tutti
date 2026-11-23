@@ -214,7 +214,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k51);
         assert_eq!(
             decoded,
-            ChannelTopology::default_for(ChannelLayout::from(6u16)),
+            tutti_buffers::Bed::Surround51.topology(),
             "VST3's k51 and the engine's SMPTE 5.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -297,7 +297,7 @@ mod tests {
         let decoded = from_arrangement(SpeakerArr::k71Music);
         assert_eq!(
             decoded,
-            ChannelTopology::default_for(ChannelLayout::from(8u16)),
+            tutti_buffers::Bed::Surround71.topology(),
             "k71Music and the engine's SMPTE 7.1 must be the same channel order"
         );
         assert_eq!(decoded.lfe_index(), Some(3));
@@ -373,7 +373,7 @@ mod tests {
     /// placement range — while the engine's one-channel bus is `FrontCenter`.
     #[test]
     fn the_mono_marker_decodes_to_the_engines_mono() {
-        let engine_mono = ChannelTopology::default_for(ChannelLayout::MONO);
+        let engine_mono = tutti_buffers::Bed::Mono.topology();
         assert_ne!(
             SpeakerArr::kMono,
             kSpeakerC,

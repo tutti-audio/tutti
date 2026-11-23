@@ -1132,7 +1132,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
     fn check_placement(&self, main_output: usize, device: ChannelLayout) -> Result<()> {
-        let placed = match &self.opts.device_topology {
+        let placed: Option<ChannelTopology> = match &self.opts.device_topology {
             Some(stated) if stated.width() != device => {
                 return Err(tutti_buffers::FoldError::from(
                     tutti_buffers::BufferError::WidthMismatch {
@@ -1142,7 +1142,7 @@ impl<C: Clock> SessionBuilder<C> {
                 )
                 .into());
             }
-            Some(stated) => stated.clone(),
+            Some(stated) => Some(stated.clone()),
             None => ChannelTopology::default_for(device),
         };
         match &self.opts.main_output {
@@ -1150,14 +1150,23 @@ impl<C: Clock> SessionBuilder<C> {
             // here so a refused main output builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
-            Some(declared) => Graph::<C::Float>::check_main_output(declared, Some(&placed))?,
+            Some(declared) => {
+                Graph::<C::Float>::check_main_output(declared, Some((device, placed.as_ref())))?
+            }
             None => {
                 let width = ChannelLayout::try_from(main_output).map_err(|e| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
-                tutti_graph::fold_to_topology::<C::Float>(
-                    &ChannelTopology::default_for(width),
-                    &placed,
+                tutti_graph::fold_to_width_with::<C::Float>(
+                    &ChannelTopology::default_for(width).ok_or(
+                        tutti_buffers::FoldError::Unplaced {
+                            channel: MAX_CHANNELS,
+                            speaker: tutti_buffers::Speaker::Unassigned,
+                        },
+                    )?,
+                    device,
+                    placed.as_ref(),
+                    tutti_buffers::FoldLevels::default(),
                 )?;
             }
         }

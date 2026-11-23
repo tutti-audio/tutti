@@ -1158,7 +1158,10 @@ mod tests {
             StreamId::of(1),
             std::path::PathBuf::new(),
             LEN,
-            tutti_buffers::ChannelTopology::new([tutti_buffers::Speaker::FrontCenter]).unwrap(),
+            ChannelLayout::MONO,
+            Some(
+                tutti_buffers::ChannelTopology::new([tutti_buffers::Speaker::FrontCenter]).unwrap(),
+            ),
             Some(Samples::new(LEN)),
             Samples::new(0),
         );

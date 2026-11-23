@@ -242,7 +242,11 @@ fn the_probe_agrees_with_the_full_load() {
         let w = read_wave::<f32>(asset(name)).expect("load");
         let meta = read_wave_metadata(asset(name)).expect("probe");
         assert_eq!(meta.channels(), w.channels(), "{name}: probed width");
-        assert_eq!(meta.topology, *w.topology(), "{name}: probed topology");
+        assert_eq!(
+            meta.topology.as_ref(),
+            w.topology(),
+            "{name}: probed topology"
+        );
         assert_eq!(meta.sample_rate, w.sample_rate(), "{name}: probed rate");
         assert_eq!(
             meta.total_frames,

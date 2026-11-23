@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker::*};
+use tutti_buffers::{ChannelTopology, Speaker::*};
 use tutti_codec::{DecodeError, FileIn, read_wave};
 
 fn asset(name: &str) -> PathBuf {
@@ -53,7 +53,8 @@ fn topology_of_mask(channels: u16, mask: u32) -> ChannelTopology {
     read_wave::<f32>(extensible(channels, mask))
         .expect("decodes")
         .topology()
-        .clone()
+        .cloned()
+        .expect("a topology")
 }
 
 /// The mask a WAVE header states is the topology, speaker for speaker: quad
@@ -82,7 +83,7 @@ fn a_wave_mask_names_each_channels_speaker() {
     );
     assert_eq!(
         topology_of_mask(6, 0x60F),
-        ChannelTopology::default_for(ChannelLayout::from(6u16))
+        tutti_buffers::Bed::Surround51.topology()
     );
     assert_eq!(
         topology_of_mask(3, 0x7).positions().unwrap(),
@@ -106,10 +107,10 @@ fn a_mask_bit_past_the_standard_speakers_is_refused() {
 #[test]
 fn channel_n_of_the_samples_is_entry_n_of_the_topology() {
     let wave = read_wave::<f32>(extensible(6, 0x3F)).expect("decodes");
-    let at = wave.topology().index_of(LowFrequency).unwrap();
+    let at = wave.topology().unwrap().index_of(LowFrequency).unwrap();
     assert_eq!(at, 3);
     assert!((wave.at(at, 0) - 0.04).abs() < 1e-6);
-    let centre = wave.topology().index_of(FrontCenter).unwrap();
+    let centre = wave.topology().unwrap().index_of(FrontCenter).unwrap();
     assert!((wave.at(centre, 0) - 0.03).abs() < 1e-6);
 }
 
@@ -138,7 +139,11 @@ fn the_fixtures_state_their_speakers() {
     ] {
         let path = asset(name);
         let wave = read_wave::<f32>(&path).expect(name);
-        assert_eq!(wave.topology().positions().unwrap(), expected, "{name}");
+        assert_eq!(
+            wave.topology().unwrap().positions().unwrap(),
+            expected,
+            "{name}"
+        );
         assert_eq!(wave.channels(), expected.len(), "{name}");
         let stream = FileIn::<f32>::open(&path).expect(name);
         assert_eq!(stream.topology(), wave.topology(), "{name}: stream");
@@ -177,7 +182,14 @@ fn a_vorbis_six_decodes_in_the_topologys_order() {
         let x = &wave.channel(c).samples()[rate / 4..rate * 3 / 4];
         x.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count()
     };
-    for (c, &speaker) in wave.topology().positions().unwrap().iter().enumerate() {
+    for (c, &speaker) in wave
+        .topology()
+        .unwrap()
+        .positions()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
         let expected = hz(speaker) / 2;
         assert!(
             crossings(c).abs_diff(expected) <= 1,

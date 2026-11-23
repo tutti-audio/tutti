@@ -700,7 +700,7 @@ fn the_weight_follows_the_speaker_in_a_reordered_topology() {
 fn a_topology_without_angles_is_refused_by_name() {
     let rate = SampleRate::SR_48K;
     let ambisonic: ChannelTopology = AmbisonicFormat::ambix(AmbisonicOrder::of(1)).into();
-    let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16));
+    let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap();
     assert_eq!(
         Measure::<f32>::measure(&LoudnessConfig::new(ambisonic.clone()), rate).unwrap_err(),
         MeterError::AmbisonicLoudness

@@ -81,7 +81,9 @@ pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 /// What a device's channels are, and whether that was stated or guessed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeviceEntry {
-    topology: ChannelTopology,
+    width: ChannelLayout,
+    /// `None` for a device wider than a topology holds: unassigned channels.
+    topology: Option<ChannelTopology>,
     placement: Placement,
 }
 
@@ -117,11 +119,14 @@ impl<F: Float> MainOutputFolds<F> {
                 default = ChannelTopology::default_for(
                     ChannelLayout::try_from(width)
                         .expect("a main output width is within MAX_CHANNELS"),
-                );
+                )
+                .expect("a main output width is within MAX_CHANNELS");
                 &default
             }
         };
-        routing.fold(main_output, &device.topology).map(Some)
+        routing
+            .fold(main_output, device.width, device.topology.as_ref())
+            .map(Some)
     }
 
     /// The folds of every main output width this main output has into `device`. A width the
@@ -205,6 +210,7 @@ impl<F: Float> OutputFolds<F> {
         }
         self.set_device(
             DeviceEntry {
+                width: device,
                 topology: ChannelTopology::default_for(device),
                 placement: Placement::Default,
             },
@@ -320,8 +326,9 @@ impl<F: Float> OutputFolds<F> {
 /// ([`OutputControl::device`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputPlacement {
-    /// The device's channels.
-    pub topology: ChannelTopology,
+    /// The device's channels; `None` for a device wider than a topology holds,
+    /// whose channels are unassigned.
+    pub topology: Option<ChannelTopology>,
     /// Whether the caller stated it, or the engine took the width's order.
     pub placement: Placement,
 }
@@ -483,10 +490,12 @@ impl<F: Float> OutputControl<F> {
                 .into());
             }
             Some(topology) => DeviceEntry {
-                topology,
+                width: device,
+                topology: Some(topology),
                 placement: Placement::Stated,
             },
             None => DeviceEntry {
+                width: device,
                 topology: ChannelTopology::default_for(device),
                 placement: Placement::Default,
             },
@@ -559,7 +568,10 @@ impl<F: Float> OutputControl<F> {
             // A refusal of the fold itself is the call's; a map that does not
             // fit leaves the pair with no fold, which a commit names.
             if let Err(RoutingError::Fold(refused)) =
-                self.cell.current().routing.fold::<F>(main_output, &placed)
+                self.cell
+                    .current()
+                    .routing
+                    .fold::<F>(main_output, device, placed.as_ref())
             {
                 return Err(refused.into());
             }

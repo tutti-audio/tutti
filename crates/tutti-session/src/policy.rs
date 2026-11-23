@@ -117,8 +117,10 @@ impl Policy for OutputPolicy {
 pub(crate) struct OutputFacts {
     /// The device's width.
     pub device: ChannelLayout,
-    /// What the device is, for a fold.
-    pub placed: ChannelTopology,
+    /// What the device is, for a fold; `None` past
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), where its channels are
+    /// unassigned.
+    pub placed: Option<ChannelTopology>,
     /// The main output the next commit renders.
     pub main_output: ChannelTopology,
 }
@@ -149,7 +151,7 @@ pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
         // render: whether it has a place does not depend on the sample format.
         policy
             .routing()
-            .fold::<f32>(&facts.main_output, &facts.placed)
+            .fold::<f32>(&facts.main_output, facts.device, facts.placed.as_ref())
             .map_err(OutputPolicyError::from)?;
         Ok::<(), SetRefusal>(())
     })

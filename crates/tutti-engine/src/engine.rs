@@ -2261,7 +2261,7 @@ mod tests {
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 0.0, 0.0, 43.0, 44.0]);
 
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
         declare(&mut ed, &control, buses, six).expect("buses place by index");
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
 
@@ -2290,7 +2290,7 @@ mod tests {
         let folded = [61.0 + m * 63.0 + m * 65.0, 62.0 + m * 63.0 + m * 66.0];
         assert_eq!(first_frame(&engine, 2), folded);
         let control = engine.output_control();
-        let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
+        let five_one = tutti_buffers::Bed::Surround51.topology();
         declare(&mut ed, &control, Some(five_one), ChannelLayout::STEREO).expect("5.1 into stereo");
         assert_eq!(first_frame(&engine, 2), folded);
         // The same six channels declared with the front pair swapped.
@@ -2331,9 +2331,9 @@ mod tests {
         assert_eq!(first_frame(&engine, 8), quad_on_eight);
         let mut id = ed.spec().main_output_id;
         for main_output in [
-            ChannelTopology::unassigned(ChannelLayout::QUAD),
-            ChannelTopology::default_for(ChannelLayout::from(6u16)),
-            ChannelTopology::default_for(eight),
+            ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap(),
+            tutti_buffers::Bed::Surround51.topology(),
+            ChannelTopology::default_for(eight).unwrap(),
         ] {
             id = id.next();
             control
@@ -2346,7 +2346,7 @@ mod tests {
         control
             .publish_main_output(
                 id,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 eight,
             )
             .unwrap();
@@ -2386,7 +2386,7 @@ mod tests {
             declare(
                 &mut ed.borrow_mut(),
                 &control,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 six,
             )
             .unwrap();
@@ -2409,7 +2409,7 @@ mod tests {
         let six = ChannelLayout::from(6u16);
         let _ = first_frame(&engine, 6);
         let control = engine.output_control();
-        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD));
+        let buses = Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
         declare(&mut ed, &control, buses, six).unwrap();
         let before = engine.blocks().get().silenced;
         assert_eq!(first_frame(&engine, 6), [41.0, 42.0, 43.0, 44.0, 0.0, 0.0]);
@@ -2453,7 +2453,7 @@ mod tests {
             });
             for i in 0..2_000 {
                 let main_output =
-                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD));
+                    (i % 2 == 0).then(|| ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap());
                 let id = ed.spec().main_output_id.next();
                 match control.publish_main_output(id, main_output, six) {
                     Ok(()) => {
@@ -2859,7 +2859,7 @@ mod tests {
         control
             .publish_main_output(
                 id,
-                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16))),
+                Some(ChannelTopology::unassigned(ChannelLayout::from(2u16)).unwrap()),
                 three,
             )
             .unwrap();
@@ -2901,7 +2901,7 @@ mod tests {
         control.state_device(stereo, Some(swapped.clone())).unwrap();
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);
-        assert_eq!(placed.topology, swapped);
+        assert_eq!(placed.topology, Some(swapped.clone()));
         assert_eq!(first_frame_after_fade(&engine, 2), [22.0, 21.0]);
         // Taken back: the width's order.
         control.state_device(stereo, None).unwrap();
@@ -3678,7 +3678,7 @@ mod tests {
         control
             .publish_main_output(
                 ed.spec().main_output_id.next(),
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::from(6u16),
             )
             .unwrap();
@@ -3706,7 +3706,7 @@ mod tests {
         assert_eq!(
             control.publish_main_output(
                 next,
-                Some(ChannelTopology::unassigned(ChannelLayout::QUAD)),
+                Some(ChannelTopology::unassigned(ChannelLayout::QUAD).unwrap()),
                 ChannelLayout::STEREO
             ),
             Err(tutti_graph::MainOutputError::Fold(FoldError::Unplaced {

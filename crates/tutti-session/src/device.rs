@@ -895,8 +895,10 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
     ) -> Result<()> {
         let placed = topology
             .cloned()
-            .unwrap_or_else(|| ChannelTopology::default_for(channels));
-        if placed.width() != channels {
+            .or_else(|| ChannelTopology::default_for(channels));
+        if let Some(placed) = &placed
+            && placed.width() != channels
+        {
             return Err(tutti_buffers::FoldError::from(
                 tutti_buffers::BufferError::WidthMismatch {
                     src: placed.width(),
@@ -921,13 +923,14 @@ impl<K: crate::AppKey, C: Clock> Session<K, C> {
                     crate::main_output_width(ChannelLayout::clamped(self.graph.outputs()), channels)
                 };
                 ChannelTopology::default_for(ChannelLayout::clamped(width))
+                    .expect("a main output is at most MAX_CHANNELS wide")
             });
         // The policy in force has to place the main output on the new device too: a
         // device a map does not fit is refused, never reset to the identity;
         // the host sets a new map.
         policy
             .routing()
-            .fold::<C::Float>(&main_output, &placed)
+            .fold::<C::Float>(&main_output, channels, placed.as_ref())
             .map_err(|refusal| match refusal {
                 tutti_engine::RoutingError::Fold(source) => Error::Unplaceable {
                     main_output: self.graph.main_output_id(),

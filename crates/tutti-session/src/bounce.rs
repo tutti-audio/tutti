@@ -2116,8 +2116,10 @@ where
                 return Err(BounceConfigError::StemChannelMissing { node, channel }.into());
             }
             let lanes = ChannelLayout::from_count(ports.len().try_into().unwrap_or(u16::MAX));
-            let placement =
-                Placement::new(topology.unwrap_or_else(|| ChannelTopology::default_for(lanes)));
+            let placement = match topology {
+                Some(topology) => Placement::new(topology),
+                None => Placement::of_width(lanes),
+            };
             let layout = layout.unwrap_or(lanes);
             let target: Target = match kind {
                 StemTo::File(FileStem { path, format, gain }) => {

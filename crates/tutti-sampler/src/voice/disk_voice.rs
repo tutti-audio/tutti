@@ -91,7 +91,7 @@ impl<F: SamplerFloat> DiskSource<F> {
     ) -> Self {
         let width =
             crate::voice_width(consumer.channels()).expect("a test ring's width is a voice's");
-        let place = Place::for_topology(consumer.topology(), width)
+        let place = Place::for_topology(consumer.channels(), consumer.topology(), width)
             .expect("a test ring is placeable at its own width");
         let control = consumer.control_reader();
         Self::with_reader(

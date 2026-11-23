@@ -167,7 +167,7 @@ fn a_device_that_will_not_open_returns_the_session_running_on_its_old_clock() {
 fn a_main_output_the_device_cannot_place_is_refused_before_the_timer_stops() {
     let mut s = system_builder()
         .outputs(ChannelLayout::from(6u16))
-        .main_output_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)))
+        .main_output_topology(ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap())
         .build()
         .expect("builds");
     play(&s);
@@ -417,7 +417,15 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
         live.get(live.policy::<OutputPolicy>()).unwrap().map,
         fits.map
     );
-    assert_eq!(live.output_device().unwrap().topology.width().count(), 4);
+    assert_eq!(
+        live.output_device()
+            .unwrap()
+            .topology
+            .unwrap()
+            .width()
+            .count(),
+        4
+    );
 }
 
 // --- A start that fails after the old stream stopped ---

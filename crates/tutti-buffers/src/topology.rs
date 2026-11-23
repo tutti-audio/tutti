@@ -34,7 +34,7 @@
 //! B-format `W X Y Z` is not four speaker feeds, and is not modelled as four
 //! invented [`Speaker`]s: it is [`ChannelTopology::Ambisonic`].
 
-use crate::{AmbisonicFormat, Bed, ChannelLayout};
+use crate::{AmbisonicFormat, Bed, ChannelLayout, MAX_CHANNELS};
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -299,12 +299,13 @@ impl Speakers {
         Self { list: out }
     }
 
-    /// `width` channels that feed no speaker.
+    /// `width` channels that feed no speaker, or `None` past [`MAX_CHANNELS`]: a
+    /// wider signal keeps its [`ChannelLayout`] and has no topology.
     #[must_use]
-    pub fn unassigned(width: ChannelLayout) -> Self {
-        Self {
+    pub fn unassigned(width: ChannelLayout) -> Option<Self> {
+        (usize::from(width.count()) <= MAX_CHANNELS).then(|| Self {
             list: vec![Speaker::Unassigned; usize::from(width.count())],
-        }
+        })
     }
 
     /// The speaker each channel feeds, in channel order.
@@ -481,14 +482,15 @@ impl ChannelTopology {
         self.speakers().is_some_and(Speakers::is_unassigned)
     }
 
-    /// `width` channels that feed no speaker.
+    /// `width` channels that feed no speaker, or `None` past [`MAX_CHANNELS`].
     ///
     /// For an edge whose channels are numbered rather than placed (a 16-input
     /// interface, a multitrack file). A fold maps them one to one and never
-    /// through a surround matrix.
+    /// through a surround matrix. A signal wider than [`MAX_CHANNELS`] keeps its
+    /// width and has no topology, which a fold reads as unassigned.
     #[must_use]
-    pub fn unassigned(width: ChannelLayout) -> Self {
-        Self::Speakers(Speakers::unassigned(width))
+    pub fn unassigned(width: ChannelLayout) -> Option<Self> {
+        Speakers::unassigned(width).map(Self::Speakers)
     }
 
     /// What a bare width is taken to mean at an edge that cannot know (a
@@ -501,8 +503,10 @@ impl ChannelTopology {
     /// topology instead. The quad is a guess a four-channel device or main output
     /// invites over B-format; an unlisted width names no speaker, so a fold
     /// places each channel by index.
+    ///
+    /// `None` past [`MAX_CHANNELS`], where a signal has no topology.
     #[must_use]
-    pub fn default_for(width: ChannelLayout) -> Self {
+    pub fn default_for(width: ChannelLayout) -> Option<Self> {
         let bed = match width.count() {
             1 => Bed::Mono,
             2 => Bed::Stereo,
@@ -512,7 +516,7 @@ impl ChannelTopology {
             12 => Bed::Surround714,
             _ => return Self::unassigned(width),
         };
-        bed.topology()
+        Some(bed.topology())
     }
 
     /// The [`Bed`] this is, up to a side/back counterpart, or `None`: see
@@ -755,11 +759,32 @@ mod tests {
         );
     }
 
+    /// A width past [`MAX_CHANNELS`] has no topology from the width-only
+    /// constructors, and sixteen is the widest that has one.
+    #[test]
+    fn a_width_past_the_cap_has_no_topology() {
+        for width in [17u16, 32, u16::MAX] {
+            let w = ChannelLayout::from(width);
+            assert_eq!(ChannelTopology::unassigned(w), None, "{width}");
+            assert_eq!(ChannelTopology::default_for(w), None, "{width}");
+            assert_eq!(Speakers::unassigned(w), None, "{width}");
+        }
+        let sixteen = ChannelLayout::from(16u16);
+        assert_eq!(
+            ChannelTopology::unassigned(sixteen).unwrap().width(),
+            sixteen
+        );
+        assert_eq!(
+            ChannelTopology::default_for(sixteen).unwrap().width(),
+            sixteen
+        );
+    }
+
     /// The default 5.1 puts the LFE at index 3, pinned as an absolute index
     /// (the number the downmix skips) rather than through `lfe_index` alone.
     #[test]
     fn the_default_51_order_puts_lfe_at_index_three() {
-        let t = ChannelTopology::default_for(ChannelLayout::from(6u16));
+        let t = crate::Bed::Surround51.topology();
         assert_eq!(
             t.positions().unwrap(),
             &[
@@ -786,27 +811,31 @@ mod tests {
             (8, Bed::Surround71),
             (12, Bed::Surround714),
         ] {
-            let t = ChannelTopology::default_for(ChannelLayout::from(width));
+            let t = ChannelTopology::default_for(ChannelLayout::from(width)).unwrap();
             assert_eq!(t, bed.topology(), "width {width}");
             assert_eq!(t.width().count(), width);
         }
         for width in [0u16, 3, 5, 7, 9, 10, 11, 13, 16] {
             let w = ChannelLayout::from(width);
             assert_eq!(
-                ChannelTopology::default_for(w),
-                ChannelTopology::unassigned(w)
+                ChannelTopology::default_for(w).unwrap(),
+                ChannelTopology::unassigned(w).unwrap()
             );
         }
-        assert!(!ChannelTopology::default_for(ChannelLayout::EMPTY).is_unassigned());
+        assert!(
+            !ChannelTopology::default_for(ChannelLayout::EMPTY)
+                .unwrap()
+                .is_unassigned()
+        );
     }
 
     /// 7.1 extends 5.1 without moving its prefix; 7.1.4 extends 7.1 with the
     /// four heights.
     #[test]
     fn the_default_orders_extend_each_other() {
-        let five = ChannelTopology::default_for(ChannelLayout::from(6u16));
-        let seven = ChannelTopology::default_for(ChannelLayout::from(8u16));
-        let atmos = ChannelTopology::default_for(ChannelLayout::from(12u16));
+        let five = crate::Bed::Surround51.topology();
+        let seven = crate::Bed::Surround71.topology();
+        let atmos = crate::Bed::Surround714.topology();
         assert_eq!(&seven.positions().unwrap()[..6], five.positions().unwrap());
         assert_eq!(
             &seven.positions().unwrap()[6..],
@@ -828,12 +857,16 @@ mod tests {
     /// placed speaker.
     #[test]
     fn unassigned_channels_are_counted_named_and_unplaced() {
-        let d = ChannelTopology::unassigned(ChannelLayout::from(6u16));
+        let d = ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap();
         assert_eq!(d.width().count(), 6);
         assert!(d.is_unassigned() && d.is_fully_named());
         assert_eq!(d.index_of(Speaker::FrontCenter), None);
         assert!(!Bed::Surround51.topology().is_unassigned());
-        assert!(!ChannelTopology::unassigned(ChannelLayout::EMPTY).is_unassigned());
+        assert!(
+            !ChannelTopology::unassigned(ChannelLayout::EMPTY)
+                .unwrap()
+                .is_unassigned()
+        );
         assert!(!topology(&[Speaker::Unassigned, Speaker::Unknown(1)]).is_unassigned());
         assert!(!topology(&[Speaker::Unassigned, Speaker::Unknown(1)]).is_fully_named());
     }

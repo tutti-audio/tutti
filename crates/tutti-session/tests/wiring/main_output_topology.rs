@@ -54,7 +54,7 @@ fn offline(builder: SessionBuilder, device: u16) -> Result<Session, Error> {
 }
 
 fn buses(n: u16) -> ChannelTopology {
-    ChannelTopology::unassigned(ChannelLayout::from(n))
+    ChannelTopology::new(vec![Speaker::Unassigned; usize::from(n)]).unwrap()
 }
 
 /// Four declared buses on a six-wide device stay at 0..4. The main output is the
@@ -74,7 +74,7 @@ fn a_declared_unassigned_main_output_keeps_its_buses_by_index() {
 /// six gives, so only the swapped declaration shows the engine read it.)
 #[test]
 fn a_declared_surround_main_output_folds_by_the_surround_rules() {
-    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
+    let five_one = tutti_buffers::Bed::Surround51.topology();
     let mut s = offline(Session::builder().main_output_topology(five_one), 2).unwrap();
     assert_eq!(s.graph_ref().outputs(), 6);
     feed(&mut s, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
@@ -328,7 +328,7 @@ fn the_output_device_reads_stated_or_default() {
     assert_eq!(placed.placement, Placement::Default);
     assert_eq!(
         placed.topology,
-        ChannelTopology::default_for(ChannelLayout::from(6u16))
+        Some(tutti_buffers::Bed::Surround51.topology())
     );
 
     let wired = ChannelTopology::new([
@@ -343,7 +343,7 @@ fn the_output_device_reads_stated_or_default() {
     let stated = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
-    assert_eq!(placed.topology, wired);
+    assert_eq!(placed.topology, Some(wired));
 
     let detached = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(detached.output_device(), None, "no engine, no device");
@@ -367,7 +367,7 @@ fn a_stated_device_receives_the_main_output_by_speaker() {
 /// built, naming the widths, and builds nothing.
 #[test]
 fn a_statement_of_another_width_than_the_device_is_refused() {
-    let five_one = ChannelTopology::default_for(ChannelLayout::from(6u16));
+    let five_one = tutti_buffers::Bed::Surround51.topology();
     match offline(Session::builder().device_topology(five_one), 2) {
         Err(Error::Output(FoldError::Buffer(tutti_buffers::BufferError::WidthMismatch {
             src,

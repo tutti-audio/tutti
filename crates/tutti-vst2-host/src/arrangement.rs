@@ -219,7 +219,7 @@ pub(crate) fn topology_of(arrangement: &SpeakerArrangement) -> Option<ChannelTop
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout};
+    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed};
     use tutti_vst2_ffi::SpeakerArrangementType as Kind;
 
     /// The engine's own beds map to the SDK's named arrangements: `kSpeakerArrMono`,
@@ -280,12 +280,12 @@ mod tests {
     /// A layout wider than an arrangement holds is refused with its width.
     #[test]
     fn a_layout_past_the_arrangement_width_is_refused() {
-        let wide = ChannelTopology::unassigned(ChannelLayout::from(65u16));
+        let wide = ChannelTopology::new([Speaker::Unassigned; 65]).unwrap();
         assert_eq!(
             arrangement_of(&wide).unwrap_err(),
             ArrangementError::TooWide(65)
         );
-        let widest = ChannelTopology::unassigned(ChannelLayout::from(64u16));
+        let widest = ChannelTopology::new([Speaker::Unassigned; 64]).unwrap();
         assert!(arrangement_of(&widest).is_ok());
     }
 

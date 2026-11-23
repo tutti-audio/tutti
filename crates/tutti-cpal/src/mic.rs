@@ -455,9 +455,10 @@ impl<F: Float> MicIn<F> {
 
     /// Which speaker each delivered channel feeds: none, they are numbered
     /// device inputs ([`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned)).
-    /// [`Fold::between`] this to the topology a mic should be placed in.
+    /// [`Fold::between`] this to the topology a mic should be placed in. `None`
+    /// for a mic wider than a topology holds.
     #[must_use]
-    pub fn topology(&self) -> ChannelTopology {
+    pub fn topology(&self) -> Option<ChannelTopology> {
         ChannelTopology::unassigned(self.tap.layout())
     }
 

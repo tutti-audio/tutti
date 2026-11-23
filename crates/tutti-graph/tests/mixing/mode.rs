@@ -381,11 +381,11 @@ fn main_bus(topology: ChannelTopology) -> Bus {
 }
 
 fn smpte(n: u16) -> Bus {
-    main_bus(ChannelTopology::default_for(ChannelLayout::from_count(n)))
+    main_bus(ChannelTopology::default_for(ChannelLayout::from_count(n)).unwrap())
 }
 
 fn unassigned(n: u16) -> Bus {
-    main_bus(ChannelTopology::unassigned(ChannelLayout::from_count(n)))
+    main_bus(ChannelTopology::unassigned(ChannelLayout::from_count(n)).unwrap())
 }
 
 /// **A bypass is the fold between the main buses.** A node whose `Main` input

@@ -88,8 +88,10 @@ pub struct FileIn<S: Sample = f32> {
     reader: Box<dyn FormatReader>,
     decoder: PacketDecoder<S>,
     track_id: u32,
-    /// Which speaker each channel feeds; its length is the interleave stride.
-    topology: ChannelTopology,
+    /// The interleave stride: the file's width.
+    layout: ChannelLayout,
+    /// Which speaker each channel feeds, when the width has a topology.
+    topology: Option<ChannelTopology>,
     /// Whether the container stated `topology` or only its channel count.
     placement: Placement,
     sample_rate: SampleRate,
@@ -159,10 +161,10 @@ impl<S: Sample> FileIn<S> {
 
     /// Which speaker each channel of the interleaved frames feeds, in channel
     /// order: what the container names, or [`ChannelTopology::default_for`] for
-    /// the count it states (see [`read_wave`](crate::read_wave)). Its width is
-    /// [`layout`](Source::layout)'s.
-    pub fn topology(&self) -> &ChannelTopology {
-        &self.topology
+    /// the count it states (see [`read_wave`](crate::read_wave)); `None` for a
+    /// file wider than a topology holds. Its width is [`layout`](Source::layout)'s.
+    pub fn topology(&self) -> Option<&ChannelTopology> {
+        self.topology.as_ref()
     }
 
     /// Whether [`topology`](Self::topology) was stated by the container or
@@ -173,10 +175,7 @@ impl<S: Sample> FileIn<S> {
 
     /// Frames held in `leftover`, consumed or not.
     fn leftover_frames(&self) -> usize {
-        self.topology
-            .width()
-            .from_interleaved_len(self.leftover.len())
-            .get()
+        self.layout.from_interleaved_len(self.leftover.len()).get()
     }
 
     /// Returns whether [`seek`](Self::seek) can serve arbitrary positions:
@@ -214,7 +213,7 @@ impl<S: Sample> FileIn<S> {
         // no container this build reads yields a zero-channel track, and a
         // fixture cannot be built or stubbed (symphonia's `Channels` come from
         // the demuxer).
-        let (topology, placement) = topology_of(params.channels.as_ref());
+        let (layout, topology, placement) = topology_of(params.channels.as_ref());
 
         let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
 
@@ -232,6 +231,7 @@ impl<S: Sample> FileIn<S> {
             reader,
             decoder,
             track_id,
+            layout,
             topology,
             placement,
             sample_rate,
@@ -296,7 +296,7 @@ impl<S: Sample> FileIn<S> {
             self.origin_ts.get_or_insert(ts);
             // A packet whose channel count disagrees with `open`'s is refused:
             // the read's stride is the file's width.
-            let layout = self.topology.width();
+            let layout = self.layout;
             let packet_width = self.decoder.planes().len();
             if packet_width != usize::from(layout.count()) {
                 return Err(DecodeError::ChannelsChanged {
@@ -352,9 +352,9 @@ impl<S: Sample> FileIn<S> {
         &mut self,
         out: InterleavedMut<'_, S>,
     ) -> Result<Samples, DecodeError> {
-        if out.layout() != self.topology.width() {
+        if out.layout() != self.layout {
             return Err(DecodeError::Width {
-                file: self.topology.width(),
+                file: self.layout,
                 view: out.layout(),
             });
         }
@@ -382,7 +382,7 @@ impl<S: Sample> FileIn<S> {
     /// [`fill_sequential_interleaved`](Self::fill_sequential_interleaved),
     /// keeping the frames filled before a decode error.
     fn fill(&mut self, mut out: InterleavedMut<'_, S>) -> (usize, Option<DecodeError>) {
-        let layout = self.topology.width();
+        let layout = self.layout;
         let capacity_frames = out.frames().get();
         let mut filled = 0usize;
 
@@ -555,7 +555,7 @@ impl<S: Sample> Source for FileIn<S> {
 
     /// The file's own width, which is what [`pull`](Self::pull) produces.
     fn layout(&self) -> ChannelLayout {
-        self.topology.width()
+        self.layout
     }
 
     /// `out` holds `out.len()` frames, and the count is that many FRAMES at

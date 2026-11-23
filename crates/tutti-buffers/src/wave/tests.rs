@@ -105,7 +105,7 @@ fn a_count_takes_the_default_layout_and_a_topology_is_kept_as_stated() {
         let w = Wave::<f32>::new(usize::from(n), SampleRate::SR_48K);
         assert_eq!(
             w.topology(),
-            &ChannelTopology::default_for(ChannelLayout::from(n)),
+            ChannelTopology::default_for(ChannelLayout::from(n)).as_ref(),
             "{n}"
         );
         assert_eq!(w.placement(), Placement::Default, "{n}");
@@ -114,6 +114,7 @@ fn a_count_takes_the_default_layout_and_a_topology_is_kept_as_stated() {
         assert_eq!(
             Wave::<f32>::new(n, SampleRate::SR_48K)
                 .topology()
+                .unwrap()
                 .positions()
                 .unwrap(),
             vec![Speaker::Unassigned; n],
@@ -123,6 +124,7 @@ fn a_count_takes_the_default_layout_and_a_topology_is_kept_as_stated() {
     assert!(
         Wave::<f32>::new(0, SampleRate::SR_48K)
             .topology()
+            .unwrap()
             .positions()
             .unwrap()
             .is_empty()
@@ -130,14 +132,32 @@ fn a_count_takes_the_default_layout_and_a_topology_is_kept_as_stated() {
     assert_eq!(
         Wave::from_mono(SampleRate::SR_48K, Mono::new(&[0.5f32]))
             .topology()
+            .unwrap()
             .positions()
             .unwrap(),
         [Speaker::FrontCenter]
     );
     let quad = Wave::<f32>::with_topology(crate::Bed::Quad.topology(), SampleRate::SR_48K);
     assert_eq!(quad.channels(), 4);
-    assert_eq!(quad.topology(), &crate::Bed::Quad.topology());
+    assert_eq!(quad.topology(), Some(&crate::Bed::Quad.topology()));
     assert_eq!(quad.placement(), Placement::Stated);
+}
+
+/// A wave wider than a topology holds keeps its width and has no topology, from
+/// a count and from an explicit placement.
+#[test]
+fn a_wide_wave_keeps_its_width_and_has_no_topology() {
+    let w = Wave::<f32>::new(20, SampleRate::SR_48K);
+    assert_eq!((w.channels(), w.layout().count()), (20, 20));
+    assert_eq!((w.topology(), w.placement()), (None, Placement::Default));
+    let stated = Wave::<f32>::unplaced(
+        ChannelLayout::from(40u16),
+        Placement::Stated,
+        SampleRate::SR_48K,
+    );
+    assert_eq!((stated.channels(), stated.topology()), (40, None));
+    assert_eq!(stated.placement(), Placement::Stated);
+    assert_ne!(w, Wave::<f32>::new(21, SampleRate::SR_48K));
 }
 
 /// A wave wider than a layout holds is refused, not given the wrapped width.

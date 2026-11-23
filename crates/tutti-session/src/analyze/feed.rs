@@ -57,12 +57,19 @@ pub struct Chunk<'w, S: Float> {
 }
 
 impl<'w, S: Float> Chunk<'w, S> {
-    /// An empty chunk of audio placed as `topology` says.
-    pub(crate) fn new(topology: &ChannelTopology) -> Self {
+    /// An empty chunk of `layout` audio placed as `topology` says; audio wider
+    /// than a topology holds has none, and no fold takes it to mono.
+    pub(crate) fn new(layout: ChannelLayout, topology: Option<&ChannelTopology>) -> Self {
         Self {
             held: Layout::Interleaved,
-            layout: topology.width(),
-            to_mono: Fold::between(topology, &ChannelTopology::default_for(ChannelLayout::MONO)),
+            layout,
+            to_mono: match topology {
+                Some(topology) => Fold::between(topology, &tutti_buffers::Bed::Mono.topology()),
+                None => Err(FoldError::Unassigned {
+                    src: layout,
+                    dst: ChannelLayout::MONO,
+                }),
+            },
             data: Vec::new(),
             interleaved: Vec::new(),
             planes: Vec::new(),

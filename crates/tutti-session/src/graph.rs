@@ -3051,6 +3051,7 @@ impl<F: Float> Graph<F> {
                 let source = tutti_buffers::ChannelTopology::from(out_topology);
                 let placed = if source.is_unassigned() {
                     tutti_buffers::ChannelTopology::default_for(source.width())
+                        .expect("a bus is at most MAX_CHANNELS wide")
                 } else {
                     source
                 };
@@ -3573,7 +3574,7 @@ impl<F: Float> Graph<F> {
     /// has a place on the device ([`fold_to_width`](tutti_graph::fold_to_width)).
     pub(crate) fn check_main_output(
         main_output: &tutti_buffers::ChannelTopology,
-        device: Option<&tutti_buffers::ChannelTopology>,
+        device: Option<(ChannelLayout, Option<&tutti_buffers::ChannelTopology>)>,
     ) -> Result<(), tutti_buffers::FoldError> {
         use tutti_buffers::{BufferError, FoldError};
         let width = usize::from(main_output.width().count());
@@ -3590,8 +3591,13 @@ impl<F: Float> Graph<F> {
                     .unwrap_or(tutti_buffers::Speaker::Unassigned),
             });
         }
-        if let Some(device) = device {
-            tutti_graph::fold_to_topology::<f32>(main_output, device)?;
+        if let Some((device, topology)) = device {
+            tutti_graph::fold_to_width_with::<f32>(
+                main_output,
+                device,
+                topology,
+                tutti_buffers::FoldLevels::default(),
+            )?;
         }
         Ok(())
     }
@@ -3608,9 +3614,18 @@ impl<F: Float> Graph<F> {
 
     /// The device the engine renders into and what it is for a fold; `None`
     /// with no engine.
-    pub(crate) fn placed_device(&self) -> Option<(ChannelLayout, tutti_buffers::ChannelTopology)> {
+    ///
+    /// The topology is what was stated for the device, else the engine's order for
+    /// its width; `None` past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
+    pub(crate) fn placed_device(
+        &self,
+    ) -> Option<(ChannelLayout, Option<tutti_buffers::ChannelTopology>)> {
         let placed = self.output.as_ref()?;
-        Some((placed.device, self.placed_topology()?))
+        let topology = placed.control.device(placed.device).map_or_else(
+            || tutti_buffers::ChannelTopology::default_for(placed.device),
+            |p| p.topology,
+        );
+        Some((placed.device, topology))
     }
 
     /// Publishes the device and the main output the output policy is checked
@@ -3637,17 +3652,8 @@ impl<F: Float> Graph<F> {
     pub(crate) fn main_output_in_force(&self) -> tutti_buffers::ChannelTopology {
         self.main_output.clone().unwrap_or_else(|| {
             tutti_buffers::ChannelTopology::default_for(ChannelLayout::clamped(self.outputs()))
+                .expect("a graph's outputs are at most MAX_CHANNELS wide")
         })
-    }
-
-    /// What the device the engine renders into is for a fold: what was stated
-    /// for it, else the engine's order for its width. `None` with no engine.
-    fn placed_topology(&self) -> Option<tutti_buffers::ChannelTopology> {
-        let placed = self.output.as_ref()?;
-        Some(placed.control.device(placed.device).map_or_else(
-            || tutti_buffers::ChannelTopology::default_for(placed.device),
-            |p| p.topology,
-        ))
     }
 
     /// Moves the engine to a new output device of `device` channels, stated
@@ -3757,21 +3763,33 @@ impl<F: Float> Graph<F> {
         &self,
         main_output: &Option<tutti_buffers::ChannelTopology>,
     ) -> Result<usize, tutti_graph::MainOutputError> {
-        let placed = self.placed_topology();
+        let placed = self.placed_device();
         Ok(match main_output {
             Some(main_output) => {
-                Self::check_main_output(main_output, placed.as_ref())?;
+                Self::check_main_output(
+                    main_output,
+                    placed
+                        .as_ref()
+                        .map(|(width, topology)| (*width, topology.as_ref())),
+                )?;
                 usize::from(main_output.width().count())
             }
             None => {
-                if let Some(placed) = &placed {
+                if let Some((device, placed)) = &placed {
                     let outputs = self.outputs();
                     let width = ChannelLayout::try_from(outputs).map_err(|e| {
                         tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                     })?;
-                    tutti_graph::fold_to_topology::<f32>(
-                        &tutti_buffers::ChannelTopology::default_for(width),
-                        placed,
+                    tutti_graph::fold_to_width_with::<f32>(
+                        &tutti_buffers::ChannelTopology::default_for(width).ok_or(
+                            tutti_buffers::FoldError::Unplaced {
+                                channel: tutti_buffers::MAX_CHANNELS,
+                                speaker: tutti_buffers::Speaker::Unassigned,
+                            },
+                        )?,
+                        *device,
+                        placed.as_ref(),
+                        tutti_buffers::FoldLevels::default(),
                     )?;
                 }
                 self.outputs()
