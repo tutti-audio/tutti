@@ -426,10 +426,12 @@ pub struct Surface {
     /// the C++ plugin's keyswitches on channel 0. AU declares none.
     pub note_names: &'static [(u8, Option<u8>, &'static str)],
     /// The groups the plugin declares, `(name, parent)`, a parent first: VST3's
-    /// unit tree, CLAP's module path and its prefixes. VST2 and AU have no tree.
+    /// unit tree, CLAP's module path and its prefixes, AU's one flat clump.
+    /// VST2 has no tree.
     pub groups: &'static [(&'static str, Option<&'static str>)],
     /// Whether the format reports a parameter's short name ([`short_name`]):
-    /// VST3's `shortTitle` of the Rust plugin and VST2's `shortLabel`.
+    /// VST3's `shortTitle` of the Rust plugin, VST2's `shortLabel` and AU's
+    /// `ParameterIDName`.
     pub short_names: bool,
     /// Whether the format reports a parameter's read-only bit: every format but
     /// VST2, whose `effGetParameterProperties` has none. Where `true`, the
@@ -663,8 +665,8 @@ pub const AU: Surface = Surface {
     continuous_steps: ParamSteps::Continuous,
     assignments: &[assignment(Some(MidiChannel::of(0)))],
     note_names: &[],
-    groups: &[],
-    short_names: false,
+    groups: &[("Filter", None)],
+    short_names: true,
     reports_access: true,
     reports_automatable: false,
     preset_ids: PresetIds::Numbered,

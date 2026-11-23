@@ -507,7 +507,17 @@ impl sealed::Sealed for ParameterClumpName {}
 
 impl Property for ParameterClumpName {
     const ID: u32 = sys::kAudioUnitProperty_ParameterClumpName;
-    type Value = crate::parameters::ClumpNameRequest;
+    type Value = crate::parameters::NameRequest;
+}
+
+/// The crate-private property `ParameterIDName`.
+pub(crate) struct ParameterIdName;
+
+impl sealed::Sealed for ParameterIdName {}
+
+impl Property for ParameterIdName {
+    const ID: u32 = sys::kAudioUnitProperty_ParameterIDName;
+    type Value = crate::parameters::NameRequest;
 }
 
 /// `AudioUnitMIDIProtocol`: The `MIDIProtocolID` the unit takes its MIDI in
