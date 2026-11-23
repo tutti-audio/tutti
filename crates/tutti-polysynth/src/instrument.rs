@@ -28,7 +28,7 @@ use tutti_buffers::{BusTopology, Float};
 use tutti_graph::{Chase, Cx, EventKind, InEvents, Io, Node, Prepare, Shape, Status};
 use tutti_midi_protocol::{SysexDeviceId, UniversalReader, channel_voice};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump};
-use tutti_units::{Amplitude, Real, SampleRate, Samples, Tail, UnitParam};
+use tutti_units::{Amplitude, Real, SampleRate, Samples, Semitones, Tail, UnitParam};
 use tutti_voicing::{NoteVoice, Patch, VoiceAllocator, VoiceConfig, VoiceSpec, VoiceTable};
 
 /// A note voice a [`NoteInstrument`] renders: made from its config at a rate, summed into a
@@ -44,9 +44,12 @@ pub trait InstrumentVoice: NoteVoice<Context = ()> + Clone + Debug + Send + 'sta
     /// the graph's rate is not the one it was built for.
     fn new(config: &Self::Config, rate: SampleRate) -> Self;
 
-    /// Adds the note's next `out.len()` frames to `out`, with the channel's pitch from
-    /// `allocator` on it. No allocation.
-    fn render(&mut self, allocator: &VoiceAllocator, out: &mut [Self::Float]);
+    /// The channel the voice's note is on.
+    fn channel(&self) -> MidiChannel;
+
+    /// Adds the note's next `out.len()` frames to `out`, with `bend`, its channel's pitch, on
+    /// it. No allocation.
+    fn render(&mut self, bend: Semitones, out: &mut [Self::Float]);
 
     /// Whether the note has ended and the voice may be reused.
     fn is_finished(&self) -> bool;
@@ -169,7 +172,7 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
     fn render_span(&mut self, left: &mut [V::Float], right: &mut [V::Float], volume: Amplitude) {
         left.fill(V::Float::ZERO);
         self.voices.retain(|voice, allocator| {
-            voice.render(allocator, left);
+            voice.render(allocator.channel_pitch(voice.channel()), left);
             !voice.is_finished()
         });
         right.copy_from_slice(left);

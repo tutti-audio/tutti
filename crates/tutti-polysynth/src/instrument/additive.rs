@@ -2,8 +2,8 @@
 
 use tutti_buffers::{Float, MonoMut};
 use tutti_dsp::{AdditiveBank, AdditiveControls, EnvelopeStages, Partials};
-use tutti_units::{Hz, Normalized, SampleRate, Seconds};
-use tutti_voicing::VoiceAllocator;
+use tutti_ump::MidiChannel;
+use tutti_units::{Hz, Normalized, SampleRate, Seconds, Semitones};
 
 use super::InstrumentVoice;
 use super::note::{Note, note_voice};
@@ -73,10 +73,12 @@ impl<F: Float> InstrumentVoice for AdditiveVoice<F> {
         }
     }
 
-    fn render(&mut self, allocator: &VoiceAllocator, out: &mut [F]) {
-        let frequency = self
-            .note
-            .frequency(allocator.channel_pitch(self.note.channel()));
+    fn channel(&self) -> MidiChannel {
+        self.note.channel()
+    }
+
+    fn render(&mut self, bend: Semitones, out: &mut [F]) {
+        let frequency = self.note.frequency(bend);
         if frequency != self.frequency {
             self.frequency = frequency;
             self.bank.retarget(&AdditiveControls {

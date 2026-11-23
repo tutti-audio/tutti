@@ -4,8 +4,8 @@ use tutti_buffers::Float;
 use tutti_dsp::{
     EnvelopeStages, LowestPitch, WaveguideControls, WaveguidePositions, WaveguideString,
 };
-use tutti_units::{Hz, SampleRate, Seconds};
-use tutti_voicing::VoiceAllocator;
+use tutti_ump::MidiChannel;
+use tutti_units::{Hz, SampleRate, Seconds, Semitones};
 
 use super::InstrumentVoice;
 use super::note::{Note, Strike, gate, note_voice};
@@ -112,10 +112,12 @@ impl<F: Float> InstrumentVoice for WaveguideVoice<F> {
         }
     }
 
-    fn render(&mut self, allocator: &VoiceAllocator, out: &mut [F]) {
-        let frequency = self
-            .note
-            .frequency(allocator.channel_pitch(self.note.channel()));
+    fn channel(&self) -> MidiChannel {
+        self.note.channel()
+    }
+
+    fn render(&mut self, bend: Semitones, out: &mut [F]) {
+        let frequency = self.note.frequency(bend);
         if frequency != self.frequency {
             self.frequency = frequency;
             self.string.retarget(&WaveguideControls {
