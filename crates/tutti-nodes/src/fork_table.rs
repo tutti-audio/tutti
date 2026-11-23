@@ -3,7 +3,7 @@
 
 use crate::test_support::for_each_row;
 use crate::*;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::CombDelay;
 use tutti_dsp::{
     Algorithm, FmPatch, OperatorCount, OperatorFrequency, OperatorSpec, Partial, Partials,
@@ -91,11 +91,13 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
             ))
         }),
         ("strip", || {
-            assert_param_fork(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)))
+            assert_param_fork(BusStripNode::from(BusStripConfig::new(
+                ChannelTopology::STEREO,
+            )))
         }),
         ("gate", || {
             assert_param_fork(GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(GateControls {
                         threshold: Db::new(-30.0),
@@ -109,7 +111,7 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
         }),
         ("compressor", || {
             assert_param_fork(CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         threshold: Db::new(-20.0),
@@ -124,7 +126,7 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
         }),
         ("multiband_compressor", || {
             assert_param_fork(MultibandCompressorNode::<f32>::from(
-                MultibandCompressorConfig::new(BusTopology::STEREO, MultibandBands::of(4)),
+                MultibandCompressorConfig::new(ChannelTopology::STEREO, MultibandBands::of(4)),
             ))
         }),
         ("pitch_shifter", || {
@@ -177,7 +179,7 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
         ("crossover", || {
             assert_param_fork(
                 CrossoverNode::<f32>::try_from(CrossoverConfig::new(
-                    BusTopology::MONO,
+                    ChannelTopology::MONO,
                     CrossoverControls::try_from(
                         &[Hz::new(500.0), Hz::new(900.0), Hz::new(3_000.0)][..],
                     )
@@ -223,7 +225,7 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
         }),
         ("graphic_eq", || {
             let node = GraphicEqNode::<f32>::from(GraphicEqConfig::new(
-                BusTopology::default_for(ChannelLayout::MONO).expect("mono is a bus"),
+                ChannelTopology::default_for(ChannelLayout::MONO).expect("mono is a bus"),
                 GraphicBands::Octave,
             ));
             assert!(

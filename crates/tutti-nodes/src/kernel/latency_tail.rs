@@ -5,7 +5,7 @@
 
 use crate::{ControlSignals, Kernel, KernelNode, NoControls};
 use tutti_buffers::Planes;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::contract::{Driven, assert_declared_tail, drive_input, prepared};
 use tutti_graph::{Buses, Node, ParamNode, Shape};
@@ -48,8 +48,8 @@ impl Kernel for Echo {
 
     fn shape(&self) -> Shape {
         Shape::buses(
-            Buses::main(BusTopology::MONO),
-            Buses::main(BusTopology::MONO),
+            Buses::main(ChannelTopology::MONO),
+            Buses::main(ChannelTopology::MONO),
         )
     }
 

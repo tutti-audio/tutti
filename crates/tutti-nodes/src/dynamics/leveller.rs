@@ -2,7 +2,7 @@
 //! short-term loudness.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank,
     LevellerControls, SimdLanes, SosCoefficients, channel_weights,
@@ -15,7 +15,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`LevellerNode`] is made from: the bus it levels and the controls it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LevellerConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     controls: LevellerControls,
 }
 
@@ -24,7 +24,7 @@ impl LevellerConfig {
     /// [`LevellerControls::DEFAULT`]: -23 LUFS, up to 12 dB of boost and of cut, a gate at
     /// -50 LUFS, a 0.5 s attack and a 2 s release.
     #[must_use]
-    pub fn new(input: BusTopology) -> Self {
+    pub fn new(input: ChannelTopology) -> Self {
         Self {
             input,
             controls: LevellerControls::DEFAULT,
@@ -139,14 +139,14 @@ control_set! {
 /// The leveller as a [`Kernel`]: a [`LevellerBank`] at the prepared rate over the bus's weights.
 #[derive(Clone, Debug)]
 pub struct LevellerKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     weights: ChannelWeights,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<LevellerBank<F>>,
 }
 
 impl<F: Float + SimdLanes> LevellerKernel<F> {
-    fn new(input: BusTopology, weights: ChannelWeights) -> Self {
+    fn new(input: ChannelTopology, weights: ChannelWeights) -> Self {
         Self {
             input,
             weights,

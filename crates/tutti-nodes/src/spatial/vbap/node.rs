@@ -1,5 +1,5 @@
 use super::error::{Result, VbapError};
-use tutti_buffers::{Bed, BusTopology, ChannelLayout, Float, Fold, Mono, MonoMut};
+use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Float, Fold, Mono, MonoMut};
 use tutti_dsp::{COEFF_INTERVAL, Lerp, Ramp, SpeakerLayout, VbapGains, VbapKernel};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_units::UnitParam;
@@ -26,7 +26,7 @@ const RAMP: Seconds = Seconds::new(0.05);
 // [`VbapPannerConfig`] it is made from: the bus it pans over, and the bearing, height,
 // spread and width at the start.
 tutti_graph::declare_params!([F: Float] VbapPannerNode<F>, #[derive(Copy, PartialEq)] VbapPannerConfig, VbapPannerCells {
-    required { output: BusTopology }
+    required { output: ChannelTopology }
     params {
         Azimuth => azimuth: Azimuth = Azimuth::FRONT,
         Elevation => elevation: Elevation = Elevation::LEVEL,
@@ -184,7 +184,7 @@ impl<F: Float> TryFrom<VbapPannerConfig> for VbapPannerNode<F> {
     /// one, silent.
     ///
     /// The refusal is of the one bus: a placement VBAP can pan over is a [`Bed`] with at
-    /// least two speakers, which `BusTopology` cannot say.
+    /// least two speakers, which `ChannelTopology` cannot say.
     ///
     /// # Errors
     ///

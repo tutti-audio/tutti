@@ -33,7 +33,7 @@
 //!   `Option` wrapper counts).
 //! - `config-width`: no receiver, return type `Self` or the owner (no wrapper: an
 //!   `Option` or `Result` return is not rule 2's "returning `Self`", and `ctor-result`
-//!   counts the `Result`), on a *node config*, whose first parameter is not a `ChannelLayout` or `BusTopology`
+//!   counts the `Result`), on a *node config*, whose first parameter is not a `ChannelLayout` or `ChannelTopology`
 //!   (the last path segment of a type, or of an `impl Into<_>` or a `T: Into<_>` bound
 //!   named in the generics or the `where` clause). A function with no parameter has no
 //!   first one. A node config is a `*Config` owner that the shipped tree converts into

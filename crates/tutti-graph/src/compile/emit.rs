@@ -1,17 +1,25 @@
-//! The ops before colouring: values, the op types that name them, and the
-//! helpers that emit delays, sums and merges.
+//! Compiler pass 5: the ops, in the serial order, before slots exist.
+//!
+//! Every value is written by one op and read by the ops that name it; each op
+//! records its predecessors. The delay rings of latency compensation, the sums
+//! of fan-in and the merges of event fan-in are ops of their own.
 
 use std::collections::BTreeSet;
 
-use crate::EdgeId;
+use crate::NodeMix;
 use crate::compile::ids::{
     AudioFeedbackId, AudioValueId, DelayId, EventFeedbackId, EventValueId, Id, OpId,
     PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
 };
-use crate::compile::plan::{DelayKey, DelaySpec, FeedbackKey, InputBound};
-use crate::model::spec::EventOutputPort;
+use crate::compile::plan::{DelayKey, DelaySpec, FeedbackKey, InputBound, ParamPortOp};
+use crate::compile::shapes::Units;
+use crate::compile::timing::Timing;
+use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, ValidGraph};
 use crate::node::MAX_PORTS;
-use tutti_units::Samples;
+use crate::node::param::ParamIn;
+use crate::node::shape::Shape;
+use crate::{Edge, EdgeId, FeedbackFrom, InputPort, NodeKey, OutputPort, PortSink, PortSource};
+use tutti_units::{Latency, Samples};
 
 /// Where an audio input reads from, before colouring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,13 +130,25 @@ pub(crate) struct Val {
     pub(crate) readers: Vec<OpId>,
 }
 
-/// What the op-emission pass produces for the colouring pass.
+/// What the op-emission pass hands on: the ops in emission order, the values
+/// they write and read, and the tables ops name by id.
+///
+/// Every op's predecessors precede it (`preds[op]` holds smaller ids only),
+/// every value's writer precedes its readers, and each feedback and tap table
+/// is the one its ops index.
 pub(super) struct Emitted {
     pub(super) pre: Table<OpId, Pre>,
     pub(super) audio: Table<AudioValueId, Val>,
     pub(super) event: Table<EventValueId, Val>,
     pub(super) preds: Table<OpId, BTreeSet<OpId>>,
     pub(super) delays: Table<DelayId, DelaySpec>,
+    /// The audio feedback edges, ascending: the slots after the null slot.
+    pub(super) audio_feedback: Table<AudioFeedbackId, FeedbackKey>,
+    /// The event feedback edges, ascending.
+    pub(super) event_feedback: Table<EventFeedbackId, FeedbackKey>,
+    pub(super) taps: Table<PlanTapId, crate::TapId>,
+    pub(super) event_taps: Table<PlanEventTapId, crate::EventTapId>,
+    pub(super) meters: Table<PlanMeterId, (crate::MeterId, usize)>,
 }
 
 impl Emitted {
@@ -197,15 +217,446 @@ impl Emitted {
             self.read_event(v, op);
         }
     }
+
+    /// Pushes `op` and records that it reads each of `srcs`.
+    pub(super) fn push_reading(&mut self, op: Pre, srcs: &[ARef]) -> OpId {
+        let id = self.push(op);
+        for &src in srcs {
+            self.read_aref(src, id);
+        }
+        id
+    }
+}
+
+/// The audio feedback key of `f`: the edge, and the generation of its source.
+fn audio_feedback_key(graph: &ValidGraph, f: FeedbackFrom) -> FeedbackKey {
+    FeedbackKey::Audio {
+        from: f.from,
+        generation: graph.generation(f.from.node),
+        delay: f.delay,
+    }
+}
+
+/// The event feedback key of the edge from `from` into `at`.
+fn event_feedback_key(
+    graph: &ValidGraph,
+    at: EventInputPort,
+    from: EventOutputPort,
+    delay: Samples,
+) -> FeedbackKey {
+    FeedbackKey::Event {
+        at,
+        from,
+        generation: graph.generation(from.node),
+        delay,
+    }
 }
 
 /// The position of `key` in the sorted feedback `list`.
-pub(super) fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
+fn fb_index<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
     F::from_index(
         list.as_slice()
             .binary_search(&key)
             .expect("feedback keys are collected before they are read"),
     )
+}
+
+/// Emits the main inputs and every node's ops, in `order`; `compile` emits the
+/// main outputs, taps, event taps, meters and feedback captures after them.
+///
+/// Takes the checked `units`, the serial `order` and the `timing`; returns the
+/// [`Emitted`] ops. A source is delayed to its sink's arrival (or to the output
+/// time) by a ring of its own when the two differ; a fan-in is summed or merged
+/// in source order, so two specs that list the same sources differently emit
+/// the same ops.
+pub(super) fn nodes<'a>(
+    graph: &'a ValidGraph,
+    units: &'a Units,
+    order: &[PlanUnitId],
+    timing: &'a Timing,
+) -> Emitter<'a> {
+    let topology = graph.topology();
+    let audio_feedback: Table<AudioFeedbackId, FeedbackKey> = topology
+        .edges
+        .values()
+        .flatten()
+        .filter_map(|e| match *e {
+            Edge::Feedback(f) => Some(audio_feedback_key(graph, f)),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let event_feedback: Table<EventFeedbackId, FeedbackKey> = graph
+        .events()
+        .iter()
+        .flat_map(|(&at, sources)| {
+            sources.iter().filter_map(move |e| match *e {
+                EventEdge::Feedback { from, delay } => Some((at, from, delay)),
+                EventEdge::Direct(_) => None,
+            })
+        })
+        .map(|(at, from, delay)| event_feedback_key(graph, at, from, delay))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Main inputs actually read, each copied into a slot once: the first audio
+    // values, in channel order.
+    let main_inputs: Vec<u16> = topology
+        .edges
+        .values()
+        .flatten()
+        .filter_map(|e| match *e {
+            Edge::Direct(PortSource::MainInput(ch)) => Some(ch),
+            _ => None,
+        })
+        .chain(topology.outputs.iter().flatten().filter_map(|s| match *s {
+            PortSource::MainInput(ch) => Some(ch),
+            _ => None,
+        }))
+        .collect::<BTreeSet<u16>>()
+        .into_iter()
+        .collect();
+    let mut emitter = Emitter {
+        graph,
+        units,
+        timing,
+        em: Emitted {
+            pre: Table::default(),
+            audio: Table::default(),
+            event: Table::default(),
+            preds: Table::default(),
+            delays: Table::default(),
+            audio_feedback,
+            event_feedback,
+            taps: Table::default(),
+            event_taps: Table::default(),
+            meters: Table::default(),
+        },
+        main_inputs,
+        node_ops: Table::filled(units.keys.len(), None),
+    };
+    for channel in emitter.main_inputs.clone() {
+        emitter.em.push_audio(|dst| Pre::MainInput { channel, dst });
+    }
+    for &n in order {
+        emitter.node(n);
+    }
+    emitter
+}
+
+/// The emission in progress: the read-only graph, and the ops so far.
+pub(super) struct Emitter<'a> {
+    graph: &'a ValidGraph,
+    units: &'a Units,
+    timing: &'a Timing,
+    pub(super) em: Emitted,
+    /// The main input channels read, ascending: channel `main_inputs[i]` is
+    /// the audio value `i`.
+    main_inputs: Vec<u16>,
+    /// The `Pre::Node` op of each unit already emitted.
+    node_ops: Table<PlanUnitId, Option<OpId>>,
+}
+
+impl Emitter<'_> {
+    /// The ports of the emitted node `key`: its audio outputs, event outputs
+    /// and event inputs; `None` for a node not emitted.
+    pub(super) fn node_ports(
+        &self,
+        key: NodeKey,
+    ) -> Option<(&[AudioValueId], &[EventValueId], &[ERef])> {
+        let op = self.node_ops[self.units.get(key)?]?;
+        match &self.em.pre[op] {
+            Pre::Node {
+                aout, eout, ein, ..
+            } => Some((aout, eout, ein)),
+            _ => unreachable!("a unit's op is its node"),
+        }
+    }
+
+    /// The value an audio output port writes, if the node and port exist.
+    pub(super) fn audio_out(&self, port: OutputPort) -> Option<AudioValueId> {
+        let (aout, _, _) = self.node_ports(port.node)?;
+        aout.get(usize::from(port.port)).copied()
+    }
+
+    /// The value an event output port writes, if the node and port exist.
+    pub(super) fn event_out(&self, port: EventOutputPort) -> Option<EventValueId> {
+        let (_, eout, _) = self.node_ports(port.node)?;
+        eout.get(usize::from(port.port)).copied()
+    }
+
+    /// What an event input reads, after its sources' delays and merge.
+    pub(super) fn event_in(&self, at: EventInputPort) -> Option<ERef> {
+        let (_, _, ein) = self.node_ports(at.node)?;
+        ein.get(usize::from(at.port)).copied()
+    }
+
+    /// The value a main input channel is copied into, if it is read.
+    pub(super) fn main_input(&self, channel: u16) -> Option<AudioValueId> {
+        self.main_inputs
+            .binary_search(&channel)
+            .ok()
+            .map(AudioValueId::from_index)
+    }
+
+    /// When the node `key` departs.
+    pub(super) fn departure(&self, key: NodeKey) -> Latency {
+        self.timing.departure[self.units.unit(key)]
+    }
+
+    /// The value `source` reads and when it departs; `None` for silence and
+    /// for a port that does not exist.
+    pub(super) fn source(&self, source: PortSource) -> Option<(AudioValueId, Latency)> {
+        match source {
+            PortSource::Node(p) => Some((self.audio_out(p)?, self.departure(p.node))),
+            PortSource::MainInput(ch) => Some((self.main_input(ch)?, Latency::ZERO)),
+            PortSource::Zero => None,
+        }
+    }
+
+    /// The value of an event output, a port a checked graph names.
+    pub(super) fn event_source(&self, from: EventOutputPort) -> EventValueId {
+        self.event_out(from)
+            .expect("a source is emitted before its readers")
+    }
+
+    /// The audio value of `source` through its PDC delay to the time `to`,
+    /// keyed `key`; a port a checked graph names.
+    pub(super) fn align_source(&mut self, source: PortSource, to: Latency, key: DelayKey) -> ARef {
+        let (v, dep) = self
+            .source(source)
+            .expect("a validated edge reads a port of its source");
+        align_audio(&mut self.em, v, dep.gap_to(to), key)
+    }
+
+    /// The event value of `from` through its PDC delay to the time `to`,
+    /// keyed `key`.
+    pub(super) fn align_event_source(
+        &mut self,
+        from: EventOutputPort,
+        to: Latency,
+        key: DelayKey,
+    ) -> EventValueId {
+        let v = self.event_source(from);
+        let by = self.departure(from.node).gap_to(to);
+        align_event(&mut self.em, v, by, key)
+    }
+
+    /// The node `n`: its inputs (sums, merges, the delays they need), its
+    /// driven params, then the op itself.
+    pub(super) fn node(&mut self, n: PlanUnitId) {
+        let key = self.units.keys[n];
+        let shape = self.units.shapes[n];
+        let ain = self.audio_inputs(n, key, &shape);
+        let ein = self.event_inputs(n, key, &shape);
+        let params = self.params(n, key, &shape);
+        let reads: Vec<EventValueId> = params.iter().map(|p| p.value).collect();
+
+        let at = self.em.next_op();
+        let aout: Vec<AudioValueId> = (0..shape.audio_out().count())
+            .map(|_| self.em.audio_value(at))
+            .collect();
+        let eout: Vec<EventValueId> = (0..shape.event_out)
+            .map(|_| self.em.event_value(at))
+            .collect();
+        let op = self.em.push(Pre::Node {
+            unit: n,
+            ain: ain.clone(),
+            aout,
+            ein: ein.clone(),
+            eout,
+            params,
+        });
+        debug_assert_eq!(op, at);
+        self.node_ops[n] = Some(op);
+        for r in ain {
+            self.em.read_aref(r, op);
+        }
+        for r in ein {
+            self.em.read_eref(r, op);
+        }
+        for v in reads {
+            self.em.read_event(v, op);
+        }
+    }
+
+    /// Audio inputs: every source of a port through its own PDC delay when it
+    /// needs one, then the sum in **source order** (`Edge`'s `Ord`, not the
+    /// order the spec listed them in), so two specs that list the same sources
+    /// differently render alike. One source is the value itself, none is
+    /// silence.
+    pub(super) fn audio_inputs(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<ARef> {
+        let (graph, timing) = (self.graph, self.timing);
+        let arrival = timing.arrival[n];
+        (0..shape.audio_in().count())
+            .map(|port| {
+                let at = InputPort::new(key, port);
+                let mut sources: Vec<Edge> =
+                    graph.topology().edges.get(&at).cloned().unwrap_or_default();
+                sources.sort();
+                let mut refs: Vec<Addend> = Vec::with_capacity(sources.len());
+                for edge in sources {
+                    let r = match edge {
+                        // Silence adds nothing, bit for bit (the sum starts at
+                        // `+0.0`); `validate` refuses it in a set, so this is a
+                        // raw write's.
+                        Edge::Direct(PortSource::Zero) => continue,
+                        // A main input arrives at zero: it is a merge-point
+                        // source like any other (see the module docs of
+                        // `compile`, step 4).
+                        Edge::Direct(from) => {
+                            self.align_source(from, arrival, DelayKey::Audio { at, from })
+                        }
+                        Edge::Feedback(f) => ARef::Fb(fb_index(
+                            audio_feedback_key(graph, f),
+                            &self.em.audio_feedback,
+                        )),
+                    };
+                    // An edge with a gain entry is a weighted lane.
+                    let id = EdgeId {
+                        sink: PortSink::Port(at),
+                        from: edge,
+                    };
+                    let gain = graph.gains().get(&id);
+                    // Its driving lane, aligned to this node's arrival like a
+                    // param's source (a silent addend has none: nothing is
+                    // added).
+                    let drive =
+                        gain.and_then(|g| g.source)
+                            .filter(|_| r != ARef::Zero)
+                            .map(|from| GainDrive {
+                                from,
+                                value: self.align_event_source(
+                                    from,
+                                    arrival,
+                                    DelayKey::EdgeGain { id, from },
+                                ),
+                            });
+                    refs.push(Addend {
+                        r,
+                        lane: gain.map(|_| id),
+                        drive,
+                    });
+                }
+                sum_chain(&mut self.em, refs)
+            })
+            .collect()
+    }
+
+    /// Event inputs: delay each source that needs it, then merge fan-in in
+    /// **source order**, `(source NodeKey, source port)` — not the order the
+    /// edges were listed in. The tie-break at equal offsets is then a property
+    /// of the wiring alone: two specs that list the same sources differently
+    /// merge alike, so a host that rebuilds its spec from an unordered store
+    /// (the ECS) cannot reorder a chord by accident. Sources are distinct
+    /// (`GraphSpec::validate`), so the order is total.
+    pub(super) fn event_inputs(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<ERef> {
+        let (graph, units, timing) = (self.graph, self.units, self.timing);
+        let arrival = timing.arrival[n];
+        (0..shape.event_in)
+            .map(|port| {
+                let at = EventInputPort::new(key, port);
+                let mut sources: Vec<EventEdge> =
+                    graph.events().get(&at).cloned().unwrap_or_default();
+                sources.sort_by_key(|e| e.from());
+                let refs: Vec<ERef> = sources
+                    .iter()
+                    .map(|e| match *e {
+                        EventEdge::Feedback { from, delay } => ERef::Fb(fb_index(
+                            event_feedback_key(graph, at, from, delay),
+                            &self.em.event_feedback,
+                        )),
+                        EventEdge::Direct(from) => ERef::Val(self.align_event_source(
+                            from,
+                            arrival,
+                            DelayKey::Event { at, from },
+                        )),
+                    })
+                    .collect();
+                // A lone undelayed writer whose port cannot hold more than the
+                // bound needs no merge to keep it.
+                let lone_within_bound = match sources[..] {
+                    [EventEdge::Direct(from)] => {
+                        refs[..] == [ERef::Val(self.event_source(from))]
+                            && units.shape_of(from.node).event_capacity.is_some_and(|c| {
+                                shape.event_input_capacity.is_some_and(|b| {
+                                    crate::event::writer::note_off_room(c.get() as usize)
+                                        <= b.get() as usize
+                                })
+                            })
+                    }
+                    _ => false,
+                };
+                let bound = shape
+                    .event_input_capacity
+                    .filter(|_| !lone_within_bound)
+                    // The public bound names its unit by raw index until the
+                    // plan is narrowed.
+                    .map(|capacity| InputBound {
+                        capacity,
+                        unit: n.get(),
+                    });
+                merge_tree(&mut self.em, refs, bound)
+            })
+            .collect()
+    }
+
+    /// Driven params, in port order, then the node's mix (its port is past
+    /// every declared index): each source through its PDC delay when it needs
+    /// one, exactly as an input is (see the `param` module docs).
+    pub(super) fn params(&mut self, n: PlanUnitId, key: NodeKey, shape: &Shape) -> Vec<PPort> {
+        let graph = self.graph;
+        let arrival = self.timing.arrival[n];
+        let declared = shape
+            .params
+            .as_slice()
+            .iter()
+            .enumerate()
+            .map(|(k, &param)| (k as u16, param));
+        let mix = std::iter::once((ParamPortOp::MIX_PORT, NodeMix::ADDR));
+        declared
+            .chain(mix)
+            .filter_map(|(port, param)| {
+                let at = ParamIn { node: key, param };
+                let from = graph.params().get(&at).copied()?;
+                let value =
+                    self.align_event_source(from, arrival, DelayKey::ParamEvent { at, from });
+                Some(PPort {
+                    port,
+                    param,
+                    from,
+                    value,
+                })
+            })
+            .collect()
+    }
+
+    /// The lanes of a tap or meter: one per source, silence for a port that
+    /// does not exist (a node replaced by a narrower one, a removed node, a
+    /// main input past the declared width). An aligned lane is delayed to the
+    /// graph's output time by a ring keyed `key(lane, source)`; a raw one
+    /// reads the source as it leaves its node.
+    pub(super) fn lanes(
+        &mut self,
+        sources: &[PortSource],
+        align: crate::TapAlign,
+        key: impl Fn(usize, PortSource) -> DelayKey,
+    ) -> Vec<ARef> {
+        let total = self.timing.total;
+        sources
+            .iter()
+            .enumerate()
+            .map(|(lane, &source)| match self.source(source) {
+                Some((v, dep)) if align == crate::TapAlign::ToOutput => {
+                    align_audio(&mut self.em, v, dep.gap_to(total), key(lane, source))
+                }
+                Some((v, _)) => ARef::Val(v),
+                None => ARef::Zero,
+            })
+            .collect()
+    }
 }
 
 /// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
@@ -347,7 +798,7 @@ pub(super) fn sum_chain(em: &mut Emitted, refs: Vec<Addend>) -> ARef {
 /// keeps at most that many events, and a single source goes through it too:
 /// the bound holds whatever the edges are. The runs below it hold all their
 /// sources.
-pub(super) fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
+fn merge_tree(em: &mut Emitted, refs: Vec<ERef>, bound: Option<InputBound>) -> ERef {
     match refs.len() {
         0 => ERef::Empty,
         1 if bound.is_none() || refs[0] == ERef::Empty => refs[0],

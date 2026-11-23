@@ -1,6 +1,6 @@
 //! [`FirConvolverConfig`]: a linear-phase filter through the convolver.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{Fir, LinearPhaseDesign, MatchedBell, Sos, Tilt};
 use tutti_graph::Node;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples, Tail};
@@ -29,8 +29,8 @@ fn design(bands: &[Sos]) -> Fir {
 }
 
 /// `width` channels on the engine's placement, as a bus.
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(ChannelLayout::from_count(width)).expect("a test width fits a bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(ChannelLayout::from_count(width)).expect("a test width fits a bus")
 }
 
 fn node(width: u16, fir: &Fir) -> ConvolverNode<f64> {
@@ -140,7 +140,7 @@ fn a_bus_of_no_channels_is_refused_by_name() {
     let fir = design(&bands());
     assert_eq!(
         ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(BusTopology::EMPTY, &fir).block_size(Samples::new(BLOCK))
+            FirConvolverConfig::new(ChannelTopology::EMPTY, &fir).block_size(Samples::new(BLOCK))
         )
         .unwrap_err(),
         ConvolverError::NoChannels

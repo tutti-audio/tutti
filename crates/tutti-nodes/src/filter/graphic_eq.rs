@@ -1,7 +1,7 @@
 //! [`GraphicEqNode`]: a graphic equalizer, a bank of cookbook peaking bells at the ISO 266
 //! octave or third-octave centers run as one [`SosBank`](tutti_dsp::SosBank) cascade.
 
-use tutti_buffers::{BusTopology, Float, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, Float, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, DecayTime, GraphicBands, GraphicEqControls, MAX_EQ_GAIN, SimdLanes,
     SosCoefficients, TAIL_FLOOR,
@@ -15,14 +15,14 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// What a [`GraphicEqNode`] is made from: its input bus and its band spacing. It starts flat.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GraphicEqConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     bands: GraphicBands,
 }
 
 impl GraphicEqConfig {
     /// A graphic equalizer on the bus `input` with the bands `bands`, every gain 0 dB.
     #[must_use]
-    pub fn new(input: BusTopology, bands: GraphicBands) -> Self {
+    pub fn new(input: ChannelTopology, bands: GraphicBands) -> Self {
         Self { input, bands }
     }
 }
@@ -46,7 +46,7 @@ pub type GraphicEqNode<F> = KernelNode<GraphicEqKernel<F>>;
 /// The graphic equalizer as a [`Kernel`].
 #[derive(Clone, Debug)]
 pub struct GraphicEqKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     bands: GraphicBands,
     sos: RampedSos<F>,
     rate: SampleRate,
@@ -56,7 +56,7 @@ pub struct GraphicEqKernel<F: Float + SimdLanes> {
 
 impl<F: Float + SimdLanes> GraphicEqKernel<F> {
     /// A flat kernel on the bus `input`, at a placeholder 48 kHz until `prepare`.
-    fn new(input: BusTopology, bands: GraphicBands) -> Self {
+    fn new(input: ChannelTopology, bands: GraphicBands) -> Self {
         let mut kernel = Self {
             input,
             bands,
@@ -206,8 +206,8 @@ mod tests {
     use tutti_graph::{Node, ParamNode};
     use tutti_units::{Hz, UnitAddr, UnitParam};
 
-    fn mono() -> BusTopology {
-        BusTopology::default_for(ChannelLayout::MONO).expect("mono is a bus")
+    fn mono() -> ChannelTopology {
+        ChannelTopology::default_for(ChannelLayout::MONO).expect("mono is a bus")
     }
 
     fn band(i: usize) -> UnitAddr {

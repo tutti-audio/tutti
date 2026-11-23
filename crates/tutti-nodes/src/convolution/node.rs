@@ -15,8 +15,8 @@
 //! running state.
 
 use tutti_buffers::{
-    AmbisonicFormat, BusTopology, ChannelLayout, Fold, FoldError, InputOutput, MAX_CHANNELS, Mono,
-    MonoMut, Planes, PlanesMut, Sample,
+    AmbisonicFormat, ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput, MAX_CHANNELS,
+    Mono, MonoMut, Planes, PlanesMut, Sample,
 };
 use tutti_graph::{
     Buses, Cx, Inputs, IntoNode, Io, MAX_PORTS, Node, NodeParts, Outputs, ParamNode, ParamSet,
@@ -168,20 +168,20 @@ impl<F: FftFloat> Engine<F> {
 /// An IR carries no rate and nothing resamples it (see [`ConvolverNode`]).
 ///
 /// ```
-/// use tutti_buffers::{BusTopology, Mono};
+/// use tutti_buffers::{ChannelTopology, Mono};
 /// use tutti_nodes::{ConvolverConfig, ConvolverNode};
 /// use tutti_units::Samples;
 ///
 /// let ir = [1.0_f32, 0.5, 0.25];
 /// let node = ConvolverNode::<f32>::try_from(
-///     ConvolverConfig::new(BusTopology::STEREO, &[Mono::new(&ir)]).block_size(Samples::new(64)),
+///     ConvolverConfig::new(ChannelTopology::STEREO, &[Mono::new(&ir)]).block_size(Samples::new(64)),
 /// )
 /// .unwrap();
 /// assert_eq!(node.latency_samples().get(), 64);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct ConvolverConfig<'a, S: Sample> {
-    output: BusTopology,
+    output: ChannelTopology,
     irs: &'a [Mono<'a, S>],
     layout: IrLayout,
     block_size: Samples,
@@ -192,7 +192,7 @@ impl<'a, S: Sample> ConvolverConfig<'a, S> {
     /// A convolver onto the bus `output`, one channel to one channel: `irs` is one response
     /// for each channel, or one response alone, which every channel shares.
     #[must_use]
-    pub fn new(output: BusTopology, irs: &'a [Mono<'a, S>]) -> Self {
+    pub fn new(output: ChannelTopology, irs: &'a [Mono<'a, S>]) -> Self {
         Self {
             output,
             irs,
@@ -350,7 +350,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
 /// # Example
 ///
 /// ```
-/// use tutti_buffers::BusTopology;
+/// use tutti_buffers::ChannelTopology;
 /// use tutti_dsp::{LinearPhaseDesign, MatchedBell, Tilt};
 /// use tutti_nodes::{ConvolverNode, FirConvolverConfig};
 /// use tutti_units::{Db, Hz, Q, SampleRate, Samples};
@@ -361,13 +361,13 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
 ///     Tilt::new(Db::new(-3.0)).design(Hz::new(4_000.0), rate).unwrap(),
 /// ];
 /// let fir = LinearPhaseDesign::new(Hz::new(100.0)).design(rate, &bands).unwrap();
-/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(BusTopology::STEREO, &fir))
+/// let node = ConvolverNode::<f32>::try_from(FirConvolverConfig::new(ChannelTopology::STEREO, &fir))
 ///     .unwrap();
 /// assert_eq!(node.latency_samples().get(), 512 + (fir.len().get() - 1) / 2);
 /// ```
 #[derive(Clone, Copy, Debug)]
 pub struct FirConvolverConfig<'a> {
-    input: BusTopology,
+    input: ChannelTopology,
     fir: &'a Fir,
     block_size: Samples,
 }
@@ -375,7 +375,7 @@ pub struct FirConvolverConfig<'a> {
 impl<'a> FirConvolverConfig<'a> {
     /// A filter on the bus `input` applying `fir`, with a block of 512 frames.
     #[must_use]
-    pub fn new(input: BusTopology, fir: &'a Fir) -> Self {
+    pub fn new(input: ChannelTopology, fir: &'a Fir) -> Self {
         Self {
             input,
             fir,
@@ -456,9 +456,9 @@ pub struct ConvolverNode<F: FftFloat + Lerp> {
     engine: Engine<F>,
     layout: IrLayout,
     /// The input bus: the layout's input for the output bus.
-    inputs: BusTopology,
+    inputs: ChannelTopology,
     /// The output bus, the config's.
-    outputs: BusTopology,
+    outputs: ChannelTopology,
     /// The wet path's linear gain, floored at 0.
     gain: Param<Amplitude>,
     /// The latency the node declares: the engine's block plus [`declared_delay`](Self::declared_delay).
@@ -505,8 +505,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
     fn assemble(
         engine: Engine<F>,
         layout: IrLayout,
-        inputs: BusTopology,
-        outputs: BusTopology,
+        inputs: ChannelTopology,
+        outputs: ChannelTopology,
         fold: Option<Fold<F>>,
     ) -> Self {
         let latency_samples = engine.latency();
@@ -932,7 +932,7 @@ mod tests {
     #[test]
     fn a_node_of_no_channels_is_refused() {
         let empty = |irs: &[Mono<'_, f32>], folded: bool| {
-            let config = ConvolverConfig::new(BusTopology::EMPTY, irs);
+            let config = ConvolverConfig::new(ChannelTopology::EMPTY, irs);
             let config = if folded { config.folded() } else { config };
             ConvolverNode::<f32>::try_from(config).err()
         };
@@ -955,7 +955,8 @@ mod tests {
         assert_eq!(build(3), None);
         assert_eq!(build(1), None);
         let config = |n: usize| {
-            ConvolverNode::<f32>::try_from(ConvolverConfig::new(BusTopology::STEREO, &irs(n))).err()
+            ConvolverNode::<f32>::try_from(ConvolverConfig::new(ChannelTopology::STEREO, &irs(n)))
+                .err()
         };
         assert_eq!(config(2), None);
         assert_eq!(config(1), None);
@@ -1691,7 +1692,7 @@ mod layouts {
         let make = || {
             prepared(
                 ConvolverNode::<f32>::try_from(
-                    ConvolverConfig::new(BusTopology::STEREO, &views(&[l.clone(), r.clone()]))
+                    ConvolverConfig::new(ChannelTopology::STEREO, &views(&[l.clone(), r.clone()]))
                         .block_size(Samples::new(BLOCK)),
                 )
                 .unwrap(),
@@ -1755,7 +1756,7 @@ mod layouts {
         let one = [1.0f32];
         let irs = |n: usize| vec![Mono::new(&one[..]); n];
         let foa = AmbisonicFormat::ambix(tutti_buffers::AmbisonicOrder::of(1));
-        let build = |output: BusTopology, layout: IrLayout, n: usize| {
+        let build = |output: ChannelTopology, layout: IrLayout, n: usize| {
             let irs = irs(n);
             let config = ConvolverConfig::new(output, &irs);
             let config = match layout {
@@ -1768,22 +1769,25 @@ mod layouts {
         };
 
         assert_eq!(
-            build(BusTopology::STEREO, IrLayout::PerChannel, 3),
+            build(ChannelTopology::STEREO, IrLayout::PerChannel, 3),
             Some(ConvolverError::IrCount { want: 2, got: 3 })
         );
         assert_eq!(
-            build(BusTopology::STEREO, IrLayout::TrueStereo, 2),
+            build(ChannelTopology::STEREO, IrLayout::TrueStereo, 2),
             Some(ConvolverError::IrCount { want: 4, got: 2 })
         );
         assert_eq!(
-            build(BusTopology::STEREO, IrLayout::Ambisonic(foa), 4),
+            build(ChannelTopology::STEREO, IrLayout::Ambisonic(foa), 4),
             Some(ConvolverError::IrCount { want: 8, got: 4 })
         );
         assert_eq!(
-            build(BusTopology::MONO, IrLayout::TrueStereo, 1),
+            build(ChannelTopology::MONO, IrLayout::TrueStereo, 1),
             Some(ConvolverError::TrueStereoWidth { width: 1 })
         );
-        assert_eq!(build(BusTopology::STEREO, IrLayout::TrueStereo, 4), None);
+        assert_eq!(
+            build(ChannelTopology::STEREO, IrLayout::TrueStereo, 4),
+            None
+        );
     }
 
     /// First-order ambisonic in, stereo out: eight paths, each its own tap. An impulse on

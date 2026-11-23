@@ -1,7 +1,7 @@
 //! The waveshaper [`DistortionNode`]: seven curves ([`ShapeKind`]) at a drive.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
     ShapeKind, WaveshaperBank, WaveshaperControls,
@@ -164,7 +164,7 @@ impl DistortionSet {
 #[derive(Clone, Debug)]
 pub struct DistortionKernel<F: Float> {
     kind: ShapeKind,
-    input: BusTopology,
+    input: ChannelTopology,
     /// The bank, at the rate it shapes at: the oversampled one when there is oversampling.
     bank: WaveshaperBank<F>,
     /// Whether the first retarget after `prepare` has been applied.
@@ -180,7 +180,7 @@ pub struct DistortionKernel<F: Float> {
 impl<F: Float + Lerp> DistortionKernel<F> {
     /// A waveshaper of `config`'s curve on the bus `input`. Its rate until `prepare` is a
     /// placeholder: an unprepared node renders nothing.
-    fn new(config: &DistortionConfig, input: BusTopology) -> Self {
+    fn new(config: &DistortionConfig, input: ChannelTopology) -> Self {
         Self {
             kind: config.kind,
             input,
