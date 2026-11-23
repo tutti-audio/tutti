@@ -45,17 +45,10 @@
 
 use std::sync::Arc;
 
+use crate::sync::{AtomicU32, Ordering, fence};
 use bytemuck::{Pod, Zeroable};
-use sync::{AtomicU32, Ordering, fence};
 
 use crate::{SeqReader, SeqWriter};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, Ordering, fence};
-}
 
 /// A slot's cell: the value and the epoch of the write that stored it. Packed,
 /// so the cell has no padding for any `T` and is plain bytes (`Pod`).

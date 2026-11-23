@@ -4,7 +4,6 @@ use crate::error::{EncodeError, Result};
 #[cfg(encode)]
 use crate::format::Format;
 use crate::spec::Spec;
-#[cfg(encode)]
 use crate::writer::FormatWriter;
 use std::io::{BufWriter, Seek, Write};
 use std::path::PathBuf;
@@ -71,6 +70,29 @@ enum Inner<W: Write + Seek> {
     Never(std::convert::Infallible, std::marker::PhantomData<W>),
 }
 
+/// Runs `$body` on whichever format's writer `$inner` holds: the one place the
+/// variants are listed beside their features.
+macro_rules! each_format {
+    ($inner:expr, $w:ident => $body:expr) => {
+        match $inner {
+            #[cfg(feature = "encode-wav")]
+            Inner::Wav($w) => $body,
+            #[cfg(feature = "encode-aiff")]
+            Inner::Aiff($w) => $body,
+            #[cfg(feature = "encode-flac")]
+            Inner::Flac($w) => $body,
+            #[cfg(not(encode))]
+            Inner::Never(never, _) => absurd(never),
+        }
+    };
+}
+
+/// Stands for any value of the uninhabited type, however it is held.
+#[cfg(not(encode))]
+fn absurd(never: impl std::borrow::Borrow<std::convert::Infallible>) -> ! {
+    match *never.borrow() {}
+}
+
 impl<W: Write + Seek> Inner<W> {
     #[cfg_attr(not(encode), expect(unused_variables))]
     fn open(spec: &Spec, sink: W) -> Result<Self> {
@@ -86,6 +108,22 @@ impl<W: Write + Seek> Inner<W> {
                 crate::flac::FlacWriter::create(spec, depth, level, sink)?,
             ))),
         }
+    }
+}
+
+impl<W: Write + Seek> FormatWriter for Inner<W> {
+    type Sink = W;
+
+    fn limit_frames(&mut self, frames: u64) {
+        each_format!(self, w => w.limit_frames(frames))
+    }
+
+    fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
+        each_format!(self, w => w.write(block))
+    }
+
+    fn finish(self) -> Result<W> {
+        each_format!(self, w => w.finish())
     }
 }
 
@@ -121,21 +159,8 @@ impl<W: Write + Seek> Encoder<W> {
     /// raises the limit the format's 32-bit sizes set, and other formats are
     /// unbounded. For a caller that records into a space it knows.
     #[must_use]
-    #[cfg_attr(
-        not(feature = "encode-wav"),
-        allow(unused_mut, unused_variables, unreachable_code)
-    )]
     pub fn limit_frames(mut self, frames: u64) -> Self {
-        match &mut self.inner {
-            #[cfg(feature = "encode-wav")]
-            Inner::Wav(w) => w.limit_frames(frames),
-            #[cfg(feature = "encode-aiff")]
-            Inner::Aiff(_) => {}
-            #[cfg(feature = "encode-flac")]
-            Inner::Flac(_) => {}
-            #[cfg(not(encode))]
-            Inner::Never(never, _) => match *never {},
-        }
+        self.inner.limit_frames(frames);
         self
     }
 
@@ -157,7 +182,7 @@ impl<W: Write + Seek> Encoder<W> {
     pub fn write<S: Sample>(&mut self, block: Interleaved<'_, S>) -> Result<()> {
         let written = self.write_block(block);
         if let Err(e) = &written {
-            self.first_error.get_or_insert_with(|| e.clone());
+            self.first_error.get_or_insert_with(|| e.duplicate());
         }
         written
     }
@@ -169,16 +194,7 @@ impl<W: Write + Seek> Encoder<W> {
                 got: block.layout(),
             });
         }
-        match &mut self.inner {
-            #[cfg(feature = "encode-wav")]
-            Inner::Wav(w) => w.write(block),
-            #[cfg(feature = "encode-aiff")]
-            Inner::Aiff(w) => w.write(block),
-            #[cfg(feature = "encode-flac")]
-            Inner::Flac(w) => w.write(block),
-            #[cfg(not(encode))]
-            Inner::Never(never, _) => match *never {},
-        }
+        self.inner.write(block)
     }
 
     /// Closes the file: back-patches its sizes and flushes the sink. Returns
@@ -193,47 +209,15 @@ impl<W: Write + Seek> Encoder<W> {
     ///
     /// [`EncodeError::Io`] or [`EncodeError::Encoding`] when closing fails.
     pub fn finish(self) -> Result<W> {
-        Ok(self.finalize()?.commit())
-    }
-
-    /// Closes the file as [`finish`](Self::finish) does and returns it as a
-    /// [`Finalized`].
-    ///
-    /// # Errors
-    ///
-    /// As [`finish`](Self::finish).
-    pub fn finalize(self) -> Result<Finalized<W>> {
-        let mut sink: W = match self.inner {
-            #[cfg(feature = "encode-wav")]
-            Inner::Wav(w) => w.finish()?,
-            #[cfg(feature = "encode-aiff")]
-            Inner::Aiff(w) => w.finish()?,
-            #[cfg(feature = "encode-flac")]
-            Inner::Flac(w) => w.finish()?,
-            #[cfg(not(encode))]
-            Inner::Never(never, _) => match never {},
-        };
+        let mut sink = self.inner.finish()?;
         // A buffered sink reports a failed write only when it is flushed, and
         // a writer that does not flush would lose it to the sink's `Drop`.
         sink.flush()?;
-        Ok(Finalized { sink })
+        Ok(sink)
     }
 
     /// Discards the encoder, dropping the sink with what was written.
     pub fn abort(self) {}
-}
-
-/// An encoder's closed sink ([`Encoder::finalize`]).
-#[derive(Debug)]
-pub struct Finalized<W> {
-    sink: W,
-}
-
-impl<W> Finalized<W> {
-    /// The sink, positioned at the end of the file.
-    pub fn commit(self) -> W {
-        self.sink
-    }
 }
 
 /// An encoder that writes a file beside its path and moves it into place
@@ -418,7 +402,7 @@ fn patched(temp: PathBuf, spec: &Spec) -> Unfinished {
 /// back as a [`FinalizedFile`].
 fn close(mut encoder: Encoder<BufWriter<StagedFile>>) -> Result<FinalizedFile> {
     let first_error = encoder.first_error.take();
-    let sink = encoder.finalize()?.commit();
+    let sink = encoder.finish()?;
     if let Some(error) = first_error {
         return Err(error);
     }

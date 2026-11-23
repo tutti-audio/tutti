@@ -5,7 +5,8 @@ use super::*;
 #[test]
 fn the_sweep_runs_from_min_to_max_by_lfo_and_depth() {
     let (lo, hi) = (Hz::new(200.0), Hz::new(4_000.0));
-    let at = |lfo: f64, depth: f64| sweep_hz(lo, hi, Bipolar::clamped(lfo), Depth::of(depth)).get();
+    let at =
+        |lfo: f64, depth: f64| sweep_hz(lo, hi, Bipolar::clamped(lfo), Bipolar::of(depth)).get();
     // Depth 1: the whole range.
     assert_eq!(at(-1.0, 1.0), 200.0);
     assert_eq!(at(0.0, 1.0), 2_100.0);
@@ -24,7 +25,7 @@ fn the_sweep_runs_from_min_to_max_by_lfo_and_depth() {
 fn an_empty_range_is_a_fixed_frequency() {
     let f = Hz::new(440.0);
     assert_eq!(
-        sweep_hz(f, f, Bipolar::clamped(0.7), Depth::of(1.0)).get(),
+        sweep_hz(f, f, Bipolar::clamped(0.7), Bipolar::of(1.0)).get(),
         440.0
     );
 }

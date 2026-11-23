@@ -10,7 +10,7 @@ use std::any::TypeId;
 
 use tutti_session::HasParam;
 use tutti_units::{
-    Amplitude, Azimuth, Balance, BitDepth, Cents, CompressionRatio, Db, Depth, Drive, Elevation,
+    Amplitude, Azimuth, Balance, Bipolar, BitDepth, Cents, CompressionRatio, Db, Drive, Elevation,
     Feedback, HoldFactor, Hz, Metres, Mix, ModulationIndex, Normalized, Q, Resonance, Seconds,
     Semitones, Spread, StereoWidth, UnitParam,
 };
@@ -102,24 +102,24 @@ units! {
             DelayTime => Seconds, Feedback => Feedback, CrossFeedback => Feedback
         }
         tutti_nodes::ModDelayNode<f32> { Rate => Hz, Depth => Seconds, Feedback => Feedback }
-        tutti_nodes::PhaserNode<f32> { Rate => Hz, Depth => Depth, Feedback => Feedback }
-        tutti_nodes::LfoNode { Depth => Depth, Rate => Hz }
+        tutti_nodes::PhaserNode<f32> { Rate => Hz, Depth => Bipolar, Feedback => Feedback }
+        tutti_nodes::LfoNode { Depth => Bipolar, Rate => Hz }
         tutti_nodes::OscillatorNode { Frequency => Hz, Volume => Amplitude }
         tutti_nodes::NoiseNode<f32> { Volume => Amplitude }
         tutti_nodes::WavetableNode<f32> { Frequency => Hz, Volume => Amplitude, Position => Normalized }
         tutti_nodes::FreeverbNode<f32> { RoomSize => Mix, Damping => Mix }
         tutti_nodes::ConvolverNode<f32> { Volume => Amplitude }
         tutti_nodes::PlateReverbNode<f32> {
-            Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Depth,
+            Decay => Seconds, Damping => Mix, DelayTime => Seconds, Cutoff => Hz, Depth => Bipolar,
             Diffusion => Mix
         }
         tutti_nodes::FdnNode<f32> {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
-            Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
+            Depth => Bipolar, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db, Freeze => bool
         }
         tutti_nodes::ShimmerNode<f32> {
             Decay => Seconds, RoomSize => Mix, Diffusion => Mix, DelayTime => Seconds,
-            Depth => Depth, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db,
+            Depth => Bipolar, Rate => Hz, StereoSpread => StereoWidth, GainDb => Db,
             Pitch => Cents, Feedback => Feedback
         }
         tutti_nodes::SpringReverbNode<f32> { Decay => Seconds, Cutoff => Hz, Diffusion => Mix }

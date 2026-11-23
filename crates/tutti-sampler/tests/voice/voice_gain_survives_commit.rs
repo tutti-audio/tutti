@@ -37,13 +37,13 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    EventOutputPort, ForkTarget, ParamIn, ParamRange, Prepare, Standalone, TransportPosition,
+    EventOutputPort, ForkTarget, ParamIn, ParamRange, Prepare, Renderer, TransportPosition,
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
 use tutti_units::{
-    Amplitude, Beat, BeatsPerCycle, Bpm, Depth, Frame, PhaseIncrement, SampleRate, Samples,
+    Amplitude, Beat, BeatsPerCycle, Bipolar, Bpm, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
 };
 
@@ -79,7 +79,7 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// transport renders silence, and every gain comparison in this file would
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
-fn solo_voice() -> Standalone<VoiceNodeHandle<f32>> {
+fn solo_voice() -> (Renderer, NodeKey, VoiceNodeHandle<f32>) {
     let voice = Voice {
         source: VoiceSource::Memory(
             MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
@@ -87,17 +87,17 @@ fn solo_voice() -> Standalone<VoiceNodeHandle<f32>> {
         ),
         play: Playback::default(),
     };
-    let mut solo = Standalone::new(
+    let (mut solo, key, handle) = Renderer::alone(
         VoiceNode::with_channels(voice, ChannelLayout::MONO)
             .expect("a finite gain and a nonempty width"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
-    solo.renderer_mut().set_transport_fn(rolling);
-    solo
+    solo.set_transport_fn(rolling);
+    (solo, key, handle)
 }
 
 /// Every sample of the next block.
-fn block(solo: &mut Standalone<VoiceNodeHandle<f32>>) -> Vec<f32> {
+fn block(solo: &mut Renderer) -> Vec<f32> {
     solo.render(BLOCK).swap_remove(0)
 }
 
@@ -113,7 +113,7 @@ fn all_at(samples: &[f32], gain: f32) -> bool {
 /// would not. This makes the baseline explicit.
 #[test]
 fn a_voice_at_unity_renders_its_wave() {
-    let mut s = solo_voice();
+    let (mut s, ..) = solo_voice();
     let out = block(&mut s);
     assert!(
         all_at(&out, 1.0),
@@ -130,28 +130,23 @@ fn a_voice_at_unity_renders_its_wave() {
 /// a sampler voice; and through the typed door, `set_gain`.
 #[test]
 fn a_gain_set_through_the_controls_reaches_the_running_voice() {
-    let mut s = solo_voice();
+    let (mut s, _, voice) = solo_voice();
     assert!(all_at(&block(&mut s), 1.0), "unity before the edit");
-    assert!(s.controls().params().set(UnitParam::Volume, 0.25));
+    assert!(voice.params().set(UnitParam::Volume, 0.25));
     let after = block(&mut s);
     assert!(
         all_at(&after, 0.25),
         "every sample of the next block at the new gain; got {:?}",
         &after[..4]
     );
-    s.renderer_mut()
-        .editor_mut()
-        .commit()
-        .expect("an unrelated commit");
+    s.editor_mut().commit().expect("an unrelated commit");
     assert!(
         all_at(&block(&mut s), 0.25),
         "the value did not survive the commit"
     );
-    s.controls()
-        .set_gain(Amplitude::new(0.5))
-        .expect("a finite gain");
+    voice.set_gain(Amplitude::new(0.5)).expect("a finite gain");
     assert!(all_at(&block(&mut s), 0.5), "the typed door");
-    assert_eq!(s.controls().gain(), Amplitude::new(0.5));
+    assert_eq!(voice.gain(), Amplitude::new(0.5));
 }
 
 /// A gain cell a host wrote a NaN or an infinity into leaves the voice at the
@@ -160,13 +155,13 @@ fn a_gain_set_through_the_controls_reaches_the_running_voice() {
 #[test]
 fn a_non_finite_gain_write_leaves_the_voice_at_its_gain() {
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-        let mut s = solo_voice();
-        assert!(s.controls().params().set(UnitParam::Volume, 0.25));
+        let (mut s, _, voice) = solo_voice();
+        assert!(voice.params().set(UnitParam::Volume, 0.25));
         assert!(all_at(&block(&mut s), 0.25));
-        s.controls().params().set(UnitParam::Volume, f64::from(bad));
+        voice.params().set(UnitParam::Volume, f64::from(bad));
         let held = block(&mut s);
         assert!(all_at(&held, 0.25), "gain = {bad}: got {:?}", &held[..4]);
-        s.controls().params().set(UnitParam::Volume, 0.5);
+        voice.params().set(UnitParam::Volume, 0.5);
         assert!(all_at(&block(&mut s), 0.5), "gain = {bad} then 0.5");
     }
 }
@@ -183,17 +178,16 @@ fn a_non_finite_gain_write_leaves_the_voice_at_its_gain() {
 /// into the cell standing in for the driver) went with its subject.
 #[test]
 fn a_fork_starts_from_the_gain_last_set_and_shares_nothing() {
-    let mut s = solo_voice();
-    s.controls().params().set(UnitParam::Volume, 0.25);
+    let (s, _, voice) = solo_voice();
+    voice.params().set(UnitParam::Volume, 0.25);
     let (fork_editor, fork_exec) = s
-        .renderer_mut()
         .editor()
         .fork(
             ForkTarget::MainOutput,
             Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
         )
         .expect("a memory voice forks");
-    s.controls().params().set(UnitParam::Volume, 0.75);
+    voice.params().set(UnitParam::Volume, 0.75);
     let mut fork = tutti_graph::Renderer::new(fork_editor, fork_exec);
     fork.set_transport_fn(rolling);
     let out = fork.render(BLOCK).swap_remove(0);
@@ -211,8 +205,8 @@ fn a_fork_starts_from_the_gain_last_set_and_shares_nothing() {
 /// renders as before.
 #[test]
 fn an_unowned_param_is_ignored() {
-    let mut s = solo_voice();
-    assert!(!s.controls().params().set(UnitParam::Pan, 0.0));
+    let (mut s, _, voice) = solo_voice();
+    assert!(!voice.params().set(UnitParam::Pan, 0.0));
     assert!(
         all_at(&block(&mut s), 1.0),
         "a Pan write must leave a voice's gain alone"
@@ -227,18 +221,14 @@ fn an_unowned_param_is_ignored() {
 /// .
 #[test]
 fn a_lane_drives_the_voice_gain_around_its_cell() {
-    let mut s = solo_voice();
-    s.controls().params().set(UnitParam::Volume, 0.25);
-    let knob = s
-        .controls()
-        .params()
-        .cell(UnitParam::Volume)
-        .expect("the gain");
+    let (mut s, key, voice) = solo_voice();
+    voice.params().set(UnitParam::Volume, 0.25);
+    let knob = voice.params().cell(UnitParam::Volume).expect("the gain");
     let at = ParamIn {
-        node: s.key(),
+        node: key,
         param: UnitParam::Volume.into(),
     };
-    drive_volume(s.renderer_mut().editor_mut(), at, knob.clone(), 0.5);
+    drive_volume(s.editor_mut(), at, knob.clone(), 0.5);
 
     let out = block(&mut s);
     assert!(
@@ -251,7 +241,7 @@ fn a_lane_drives_the_voice_gain_around_its_cell() {
         0.25,
         "the lane never writes the knob"
     );
-    s.controls().params().set(UnitParam::Volume, 0.5);
+    voice.params().set(UnitParam::Volume, 0.5);
     let out = block(&mut s);
     assert!(
         all_at(&out, 1.0),
@@ -277,7 +267,7 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
         },
         wave: tutti_modulation::Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },
@@ -305,19 +295,19 @@ fn drive_volume(ed: &mut tutti_graph::Editor, at: ParamIn, knob: tutti_rt::Param
 /// cell still holds 0.25.
 #[test]
 fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
-    let mut s = Standalone::new(
+    let (mut s, key, controls) = Renderer::alone(
         MemorySource::with_channels(flat_wave(48_000), ChannelLayout::MONO)
             .expect("a placeable wave"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
-    s.renderer_mut().set_transport_fn(rolling);
-    assert!(s.controls().set(UnitParam::Volume, 0.25));
-    let knob = s.controls().cell(UnitParam::Volume).expect("the gain");
+    s.set_transport_fn(rolling);
+    assert!(controls.set(UnitParam::Volume, 0.25));
+    let knob = controls.cell(UnitParam::Volume).expect("the gain");
     let at = ParamIn {
-        node: s.key(),
+        node: key,
         param: UnitParam::Volume.into(),
     };
-    drive_volume(s.renderer_mut().editor_mut(), at, knob.clone(), 0.5);
+    drive_volume(s.editor_mut(), at, knob.clone(), 0.5);
     let out = s.render(BLOCK).swap_remove(0);
     assert!(
         all_at(&out, 0.75),

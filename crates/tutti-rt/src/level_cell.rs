@@ -40,24 +40,7 @@
 //!
 //! The model in `tests/level_cell_loom.rs` runs this code.
 
-use sync::{Arc, AtomicU64, AtomicUsize, Ordering, fence};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::Arc;
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::Arc;
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering, fence};
-}
-
-#[cfg(not(loom))]
-use std::thread::yield_now;
-
-#[cfg(loom)]
-use loom::thread::yield_now;
+use crate::sync::{Arc, AtomicU64, AtomicUsize, Ordering, fence, yield_now};
 
 /// What the writer folded in since the last take.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

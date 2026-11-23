@@ -9,15 +9,8 @@
 
 use std::marker::PhantomData;
 
+use crate::sync::{AtomicU64, Ordering};
 use bytemuck::{AnyBitPattern, NoUninit};
-use sync::{AtomicU64, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
-}
 
 /// Bytes in the word.
 const WORD: usize = std::mem::size_of::<u64>();

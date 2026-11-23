@@ -95,7 +95,7 @@
 //!   `DeviceId`. Off by default so an offline render, a CI job or a server builds
 //!   without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//! - `decode-wav`, `decode-aiff`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
 //!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
@@ -157,7 +157,7 @@ pub use tutti_timeline::{
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
-    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Losses, Normalized,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Frame, Hz, Losses, Normalized,
     ParamId, Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
@@ -231,7 +231,7 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -453,8 +453,8 @@ pub mod types {
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
-        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
+        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
+        Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
         FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
         ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
         ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
@@ -594,6 +594,7 @@ pub mod session {
         feature = "sampler",
         any(
             feature = "decode-wav",
+            feature = "decode-aiff",
             feature = "decode-flac",
             feature = "decode-mp3",
             feature = "decode-ogg"
@@ -642,6 +643,7 @@ pub mod codec {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -666,6 +668,7 @@ pub mod sampler {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"

@@ -14,7 +14,7 @@
 //!
 //! Consequence worth knowing: chorus and flanger take their depth in
 //! [`Seconds`](tutti_units::Seconds) of delay sweep, while the phaser's is a
-//! unitless [`Depth`](tutti_units::Depth) fraction of its frequency range.
+//! unitless [`Bipolar`](tutti_units::Bipolar) fraction of its frequency range.
 
 mod mod_delay;
 mod phaser;

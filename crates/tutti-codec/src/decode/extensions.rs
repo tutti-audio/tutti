@@ -63,7 +63,7 @@ pub fn decodable_extensions() -> &'static [&'static str] {
 /// What stays hand-written is the **feature → reader** mapping below, because
 /// that is tutti's own knowledge and not symphonia's: nothing upstream can know
 /// that this crate's `decode-wav` resolves to `symphonia/{wav,pcm}` and never
-/// `symphonia/aiff`.
+/// `symphonia/aiff`, which `decode-aiff` alone enables.
 ///
 /// A `LazyLock` rather than a `const`, because `ProbeableFormat::probe_data` is only
 /// reachable through a trait method. The work is a few slice copies, once per
@@ -94,15 +94,12 @@ static EXTENSIONS: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock:
         };
     }
 
-    // One arm per *feature*. AIFF's absence is the case worth stating: symphonia
-    // has an `AiffReader` in the very crate that provides `WavReader`
-    // (`symphonia-format-riff`), but this crate's `decode-wav` enables `symphonia/wav`
-    // and `symphonia/pcm` only — never `symphonia/aiff`. So no current build
-    // decodes AIFF, however much the format resembles WAV, and listing it would
-    // be exactly the lie this module exists to stop. Adding it is one line in
-    // this crate's `Cargo.toml` plus an arm here.
+    // One arm per *feature*: `decode-wav` is `WavReader` alone, and AIFF, which
+    // shares its crate, is listed only with `decode-aiff`.
     #[cfg(feature = "decode-wav")]
     add!(symphonia::default::formats::WavReader<'static>);
+    #[cfg(feature = "decode-aiff")]
+    add!(symphonia::default::formats::AiffReader<'static>);
     #[cfg(feature = "decode-flac")]
     add!(symphonia::default::formats::FlacReader<'static>);
     #[cfg(feature = "decode-mp3")]

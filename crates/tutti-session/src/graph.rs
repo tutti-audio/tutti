@@ -4071,7 +4071,7 @@ pub trait ModKeys {
     fn depth(
         &self,
         route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
         let _ = route;
         None
     }
@@ -4162,7 +4162,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn depth(
         &self,
         route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
         self.keys.depth(route)
     }
 }

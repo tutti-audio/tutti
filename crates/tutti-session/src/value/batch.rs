@@ -85,6 +85,15 @@ impl<'a> Batch<'a> {
         Stored::new(landings)
     }
 
+    /// The failure of the item being staged as a whole, naming no target.
+    pub(super) fn refuse(&self, kind: ValueErrorKind) -> Failure {
+        Failure {
+            at: self.index,
+            target: None,
+            kind,
+        }
+    }
+
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
         Failure {
             at: self.index,
@@ -104,7 +113,7 @@ impl<'a> Batch<'a> {
 
     /// Stages the value `make` builds from the target's value so far in this
     /// batch, or from its base when it has none.
-    fn apply<T: Store>(
+    pub(super) fn apply<T: Store>(
         &mut self,
         target: T,
         make: impl FnOnce(&T::Value) -> T::Value,
@@ -164,7 +173,7 @@ impl<'a> Batch<'a> {
     }
 
     /// Counts an item that stages nothing (`None`).
-    fn skip(&mut self) {
+    pub(super) fn skip(&mut self) {
         self.index += 1;
     }
 }

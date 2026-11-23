@@ -17,9 +17,10 @@ use tutti_units::UnitAddr;
 use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
+use super::gesture::{Deferred, Ending, Gesture};
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
 use super::target::AnyTarget;
-use super::watcher::{Feed, IntoTargets, Watcher};
+use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
 use crate::AppKey;
 
 /// What one node's params are written through, and what they were declared at.
@@ -87,6 +88,8 @@ pub struct ValueTable {
     queue: Arc<Queue>,
     /// Every change a write made, for the watchers.
     feed: Feed,
+    /// The ends of gestures dropped while this thread held the lock.
+    deferred: Deferred,
 }
 
 impl fmt::Debug for ValueTable {
@@ -132,7 +135,18 @@ impl ValueTable {
         }
         let guard = self.params.lock();
         HELD.with(|held| held.borrow_mut().push(token));
-        Some(Held { guard, token })
+        let held = Held { guard, token };
+        self.deferred.land(held.params(), &self.feed);
+        Some(held)
+    }
+
+    /// Lands what `ending` records, now under the value lock, or with the
+    /// call this thread is inside when it holds the lock already.
+    pub(crate) fn finish(&self, ending: Ending) {
+        match self.enter() {
+            Some(held) => ending(held.params(), &self.feed),
+            None => self.deferred.push(ending),
+        }
     }
 
     /// The feed of changes a write made.
@@ -442,7 +456,8 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        self.table.feed().land(batch.store());
+        self.table.feed().land(batch.store(), Grouping::Batch);
+        self.table.deferred.land(held.params(), self.table.feed());
         Ok(())
     }
 
@@ -456,6 +471,11 @@ impl<K: AppKey> ValueState<K> {
     /// The feed of changes the writes make.
     pub(super) fn feed(&self) -> &Feed {
         self.table.feed()
+    }
+
+    /// Lands `ending`, as [`ValueTable::finish`] does.
+    pub(super) fn finish(&self, ending: Ending) {
+        self.table.finish(ending);
     }
 
     /// Publishes every value a write staged since the last call. Control
@@ -526,6 +546,16 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.state()?.watch(targets)
+    }
+
+    /// [`Session::gesture`](crate::Session::gesture), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::gesture`](crate::Session::gesture), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn gesture<W: IntoTargets>(&self, targets: W) -> Result<Gesture<K, W>, ValueError<K>> {
+        self.state()?.gesture(targets)
     }
 }
 

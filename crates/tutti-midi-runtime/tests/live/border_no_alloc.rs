@@ -243,10 +243,10 @@ fn bend_range(device: &mut EventInletWriter, block: u64) {
         .unwrap();
 }
 
-/// The input node fans a member channel's bend range out over its zone
-/// without allocating, and every member's port carries it.
-#[test]
-fn the_mpe_bend_range_fan_out_processes_without_allocating() {
+/// An MPE input node over a lower zone of 15 members, `drive`n for 51
+/// 512-frame blocks (the first a warm-up); the events reaching port `(1, port)`
+/// over the last 50 blocks.
+fn mpe_events_reaching(port: u16, drive: fn(&mut EventInletWriter, u64)) -> usize {
     let (mut ed, mut exec) = Editor::new(Prepare::new(
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(512)),
@@ -254,20 +254,28 @@ fn the_mpe_bend_range_fan_out_processes_without_allocating() {
     let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
     ed.insert(NodeKey(1), "in", MidiInputNode::new().mpe(&mode));
     let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 1, &[(1, 15)]);
+    let mut out = common::sink(&mut ed, 1, &[(1, port)]);
     ed.commit().unwrap();
     let t = TransportPosition::default();
     let mut drain = [(0, Ump([0; 4])); 256];
-    bend_range(&mut dev, 0);
+    drive(&mut dev, 0);
     exec.process(512, &t, &[], &mut []);
     let _ = out.poll_into(&mut drain);
 
     let mut reached = 0;
     for b in 1..=50 {
-        bend_range(&mut dev, b);
+        drive(&mut dev, b);
         exec.process(512, &t, &[], &mut []);
         reached += out.poll_into(&mut drain);
     }
+    reached
+}
+
+/// The input node fans a member channel's bend range out over its zone
+/// without allocating, and every member's port carries it.
+#[test]
+fn the_mpe_bend_range_fan_out_processes_without_allocating() {
+    let reached = mpe_events_reaching(15, bend_range);
     assert_eq!(reached, 50, "the last member's port carries one per block");
 }
 
@@ -302,27 +310,7 @@ fn gesture(device: &mut EventInletWriter, block: u64) {
 /// without allocating, block after block.
 #[test]
 fn the_mpe_expression_paths_process_without_allocating() {
-    let (mut ed, mut exec) = Editor::new(Prepare::new(
-        SampleRate::SR_48K,
-        MaxBlock::of(Samples::new(512)),
-    ));
-    let mode = Publisher::new(tutti_fixtures::midi::lower_zone(15));
-    ed.insert(NodeKey(1), "in", MidiInputNode::new().mpe(&mode));
-    let mut dev = device(&mut ed, 4);
-    let mut out = common::sink(&mut ed, 1, &[(1, 2)]);
-    ed.commit().unwrap();
-    let t = TransportPosition::default();
-    let mut drain = [(0, Ump([0; 4])); 256];
-    gesture(&mut dev, 0);
-    exec.process(512, &t, &[], &mut []);
-    let _ = out.poll_into(&mut drain);
-
-    let mut reached = 0;
-    for b in 1..=50 {
-        gesture(&mut dev, b);
-        exec.process(512, &t, &[], &mut []);
-        reached += out.poll_into(&mut drain);
-    }
+    let reached = mpe_events_reaching(2, gesture);
     assert!(reached > 0, "channel 2's port carries the gesture");
 }
 

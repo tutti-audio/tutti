@@ -1193,7 +1193,7 @@ enum StagedClosed {
     #[error("{source}")]
     Failed {
         #[source]
-        source: tutti_codec::EncodeError,
+        source: Arc<tutti_codec::EncodeError>,
         unfinished: tutti_codec::Unfinished,
     },
 }
@@ -1219,9 +1219,10 @@ impl<S: Sample> Sink for StagedSink<S> {
     fn finalize(self) -> Result<(), Self::Error> {
         self.encoder.finish_keeping().map_err(|kept| match kept {
             tutti_codec::Kept::Commit(commit) => StagedClosed::Commit(commit),
-            tutti_codec::Kept::Unfinished { source, unfinished } => {
-                StagedClosed::Failed { source, unfinished }
-            }
+            tutti_codec::Kept::Unfinished { source, unfinished } => StagedClosed::Failed {
+                source: Arc::new(source),
+                unfinished,
+            },
         })
     }
 }
@@ -1232,7 +1233,7 @@ fn closing_failed(error: SinkClosed) -> TakeError {
     match error.downcast_ref::<StagedClosed>() {
         Some(StagedClosed::Commit(commit)) => TakeError::Commit(commit.clone()),
         Some(StagedClosed::Failed { source, unfinished }) => TakeError::Sink {
-            source: Arc::new(source.clone()),
+            source: Arc::clone(source) as SinkClosed,
             unfinished: Some(unfinished.clone()),
         },
         None => TakeError::Sink {
