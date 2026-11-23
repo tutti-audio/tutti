@@ -26,6 +26,7 @@
 //! [`Editor::take_event_losses`]: crate::Editor::take_event_losses
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
+use crate::compile::ids::{DelayId, FeedbackId};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
@@ -158,7 +159,7 @@ impl Dropped {
         // A tap of an input merges several sources, so its loss is nobody's.
         let from = match plan
             .delays
-            .get(delay as usize)
+            .get(DelayId::new(delay))
             .and_then(|d| d.key.event_origin())
         {
             Some(crate::EventTapPort::Out(from)) => Some(from),
@@ -170,7 +171,11 @@ impl Dropped {
     /// As [`charge_delay`](Self::charge_delay), for the plan's event feedback
     /// `feedback`.
     pub(crate) fn charge_feedback(&mut self, plan: &Plan, feedback: u32, count: u64) {
-        let from = match plan.event_feedback.get(feedback as usize).map(|f| f.key) {
+        let from = match plan
+            .event_feedback
+            .get(FeedbackId::new(feedback))
+            .map(|f| f.key)
+        {
             Some(FeedbackKey::Event { from, .. }) => Some(from),
             _ => None,
         };

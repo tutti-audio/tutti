@@ -21,6 +21,7 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
+use crate::compile::ids::{DelayId, PlanUnitId};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -203,12 +204,8 @@ struct Cx<'a> {
 impl Cx<'_> {
     /// The plan unit index of the input `at`, when the plan has it.
     fn sink_of(&self, at: EventInputPort) -> Option<u32> {
-        let u = self
-            .plan
-            .units
-            .binary_search_by_key(&at.node, |u| u.key)
-            .ok()?;
-        (at.port < self.plan.units[u].shape.event_in).then_some(u as u32)
+        let u = self.plan.unit_id(at.node)?;
+        (at.port < self.plan.units[u].shape.event_in).then_some(u.get())
     }
 
     /// Whether a unit of the old plan comes back after a re-prepare: it is
@@ -344,7 +341,7 @@ impl Stager {
         let to_close: BTreeSet<DelayKey> = closers
             .iter()
             .filter_map(|k| match k.route {
-                Route::Delay(i) => Some(plan.delays[i as usize].key),
+                Route::Delay(i) => Some(plan.delays[DelayId::new(i)].key),
                 _ => None,
             })
             .collect();
@@ -356,7 +353,8 @@ impl Stager {
         let mut flush = self.flush(c, &cx, closers);
         let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
-        let slot_capacity = |i: usize| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
+        let slot_capacity =
+            |i: usize| plan.event_slot_capacity.as_slice()[i].events(cx.cap) + sizes.extra[i];
         let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store_len.max(c.delta.store_len as usize);
@@ -557,7 +555,7 @@ impl Stager {
                             from: j.map_or(0, |j| j as u32),
                         });
                     }
-                    Some(j) if cx.old.is_some_and(|p| p.delays[j].len == d.len) => {
+                    Some(j) if cx.old.is_some_and(|p| p.delays.as_slice()[j].len == d.len) => {
                         rings.push(None);
                         from.push(RingFrom::Keep {
                             from: j as u32,
@@ -603,8 +601,14 @@ impl Stager {
         let keyed = |kind: &[crate::compile::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
             kind.iter().enumerate().map(|(i, f)| (f.key, i)).collect()
         };
-        let old_afb = cx.old.map(|p| keyed(&p.audio_feedback)).unwrap_or_default();
-        let old_efb = cx.old.map(|p| keyed(&p.event_feedback)).unwrap_or_default();
+        let old_afb = cx
+            .old
+            .map(|p| keyed(p.audio_feedback.as_slice()))
+            .unwrap_or_default();
+        let old_efb = cx
+            .old
+            .map(|p| keyed(p.event_feedback.as_slice()))
+            .unwrap_or_default();
         let mut audio_from = Vec::with_capacity(plan.audio_feedback.len());
         let audio = plan
             .audio_feedback
@@ -854,7 +858,7 @@ impl Stager {
                 let drain = if owed > 0 { widest.max(cx.cap) } else { 0 };
                 let events = r.flush + r.room + drain;
                 shells.push(Shell {
-                    key: cx.plan.units[unit as usize].key,
+                    key: cx.plan.units[PlanUnitId::new(unit)].key,
                     port,
                     flush: r.flush + drain,
                     room: r.room,
@@ -927,7 +931,7 @@ impl Sizes {
         let plan = cx.plan;
         let extra = widen(cx, &rings.extra, &feedback.extra);
         let widest = (0..plan.event_slot_capacity.len())
-            .map(|i| plan.event_slot_capacity[i].events(cx.cap) + extra[i])
+            .map(|i| plan.event_slot_capacity.as_slice()[i].events(cx.cap) + extra[i])
             .max()
             .unwrap_or(0);
         let drained = flush
@@ -1113,7 +1117,7 @@ fn drives<F: Float>(
         .iter()
         .filter(|r| driven_of(cx.plan, r))
         .filter_map(|r| {
-            let key = cx.plan.units[r.unit as usize].key;
+            let key = cx.plan.units[PlanUnitId::new(r.unit)].key;
             (placed.contains(&key) || !old_driven.contains(&r.store))
                 .then(|| mix_lane(key).map(|lane| (r.store, lane)))
                 .flatten()
@@ -1136,7 +1140,7 @@ fn param_slots(plan: &Plan) -> Vec<bool> {
     // Ops run in topological order, so a merge comes after what feeds it.
     for op in &plan.ops {
         match *op {
-            Op::Node { unit, .. } if plan.units[unit as usize].shape.param_events => {
+            Op::Node { unit, .. } if plan.units[PlanUnitId::new(unit)].shape.param_events => {
                 let rec = &plan.nodes.recs[unit as usize];
                 let [_, _, _, eout] = rec.ports(&plan.nodes.slots);
                 for &s in eout {
@@ -1150,7 +1154,7 @@ fn param_slots(plan: &Plan) -> Vec<bool> {
             Op::EventMerge { srcs, dst, .. } => {
                 let any = plan.event_list[srcs.range()]
                     .iter()
-                    .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s as usize]);
+                    .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s.index()]);
                 has[dst as usize] |= any;
             }
             _ => {}
@@ -1179,7 +1183,7 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Vec<usize> {
             Op::EventMerge { srcs, dst, .. } => {
                 let sum = plan.event_list[srcs.range()]
                     .iter()
-                    .map(|&s| extra[s as usize])
+                    .map(|&s| extra[s.index()])
                     .sum::<usize>();
                 let e = &mut extra[dst as usize];
                 *e = (*e).max(sum);

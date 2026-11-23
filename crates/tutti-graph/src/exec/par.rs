@@ -87,6 +87,7 @@
 
 mod access;
 
+use crate::compile::ids::TaskId;
 use access::{
     Audio, Claimed, ClaimedAudio, ClaimedEvents, Events, Exclusive, ExclusiveAudio, Mode, Table,
 };
@@ -249,7 +250,7 @@ impl Par {
         overlay: usize,
     ) -> Self {
         let graph = TaskGraph::new(
-            &plan.task_activation,
+            plan.task_activation.as_slice(),
             &plan.task_succ.offsets,
             &plan.task_succ.targets,
         );
@@ -630,9 +631,9 @@ impl<F: Float> Shared<'_, '_, F> {
             };
             let r = catch_unwind(AssertUnwindSafe(|| {
                 self.graph.work(who, self.waits, |t| {
-                    let span = self.frame.plan.tasks[t as usize];
+                    let span = self.frame.plan.tasks[TaskId::new(t)];
                     for &op in &self.frame.plan.task_ops[span.range()] {
-                        cx.run_op(&self.frame, &self.frame.plan.ops[op as usize]);
+                        cx.run_op(&self.frame, &self.frame.plan.ops[op]);
                     }
                 });
             }));
@@ -695,7 +696,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &mut a,
                     flags,
                     &e,
-                    &fx.plan.audio_list[srcs.range()],
+                    fx.plan.audio_slots(srcs),
                     &mut [],
                     &[],
                     dst,
@@ -717,7 +718,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &mut a,
                     flags,
                     &e,
-                    &fx.plan.audio_list[srcs.range()],
+                    fx.plan.audio_slots(srcs),
                     &mut lanes,
                     &fx.plan.gain_ports[gains.range()],
                     dst,
@@ -732,7 +733,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
             }
             Op::EventMerge { srcs, dst, bound } => {
                 let mut e = self.events.slots();
-                let lost = event_merge_op(&fx.plan.event_list[srcs.range()], dst, bound, &mut e);
+                let lost = event_merge_op(fx.plan.event_slots(srcs), dst, bound, &mut e);
                 self.dropped.charge_merge(bound, lost);
             }
             Op::Node { unit, .. } => {
@@ -796,7 +797,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     crate::edges::tap::tap_op::<F, _>(
                         tap,
                         &a,
-                        &fx.plan.audio_list[srcs.range()],
+                        fx.plan.audio_slots(srcs),
                         fx.env.frame,
                         frames,
                     );
@@ -817,7 +818,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                         meter,
                         &a,
                         flags,
-                        &fx.plan.audio_list[srcs.range()],
+                        fx.plan.audio_slots(srcs),
                         frames,
                     );
                 }

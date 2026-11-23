@@ -51,6 +51,10 @@ use crate::{EdgeId, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::compile::VerifyError;
+use crate::compile::ids::{
+    AudioSlotId, DelayId, EventSlotId, FeedbackId, Id, OpId, PlanEventTapId, PlanMeterId,
+    PlanTapId, PlanUnitId, Table, TaskId, ValueId, raw,
+};
 use crate::exec::arena::Role;
 use crate::model::fade::Fade;
 use crate::model::spec::{EventInputPort, EventOutputPort};
@@ -60,9 +64,9 @@ use crate::node::shape::Shape;
 use crate::node::{InPlaceMask, Prepare, Wired};
 
 /// The audio slot every unconnected or `PortSource::Zero` input reads.
-pub(crate) const ZERO_SLOT: u32 = 0;
+pub(crate) const ZERO_SLOT: AudioSlotId = AudioSlotId::new(0);
 /// The event slot every unconnected event input reads.
-pub(crate) const EMPTY_SLOT: u32 = 0;
+pub(crate) const EMPTY_SLOT: EventSlotId = EventSlotId::new(0);
 
 /// A dense index into the runtime's unit store.
 ///
@@ -81,6 +85,16 @@ pub struct Span {
 }
 
 impl Span {
+    /// Appends `items` to `list` and returns the run they occupy.
+    pub(crate) fn extend<T>(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
+        let start = list.len();
+        list.extend(items);
+        Self {
+            start: start as u32,
+            len: (list.len() - start) as u32,
+        }
+    }
+
     pub(crate) fn range(self) -> std::ops::Range<usize> {
         self.start as usize..(self.start + self.len) as usize
     }
@@ -822,8 +836,8 @@ impl NodeTables {
     /// unit-use count rather than here.
     pub(crate) fn lower(
         ops: &[Op],
-        audio_list: &[u32],
-        event_list: &[u32],
+        audio_list: &[AudioSlotId],
+        event_list: &[EventSlotId],
         units: &[PlanUnit],
     ) -> Self {
         let mut recs: Vec<Option<NodeRec>> = vec![None; units.len()];
@@ -845,10 +859,10 @@ impl NodeTables {
             let Some(pu) = units.get(unit as usize) else {
                 continue;
             };
-            let ain = &audio_list[audio_in.range()];
-            let aout = &audio_list[audio_out.range()];
-            let ein = &event_list[event_in.range()];
-            let eout = &event_list[event_out.range()];
+            let ain = raw(&audio_list[audio_in.range()]);
+            let aout = raw(&audio_list[audio_out.range()]);
+            let ein = raw(&event_list[event_in.range()]);
+            let eout = raw(&event_list[event_out.range()]);
 
             let ports = slots.len() as u32;
             slots.extend_from_slice(ain);
@@ -966,6 +980,12 @@ pub struct Csr {
 }
 
 impl Csr {
+    /// The rows of a table of typed successor lists.
+    pub(crate) fn from_ids<R: Id, T: Id>(rows: &Table<R, Vec<T>>) -> Self {
+        let raw_rows: Vec<Vec<u32>> = rows.iter().map(|row| raw(row).to_vec()).collect();
+        Self::from_rows(&raw_rows)
+    }
+
     pub(crate) fn from_rows(rows: &[Vec<u32>]) -> Self {
         let mut offsets = Vec::with_capacity(rows.len() + 1);
         let mut targets = Vec::new();
@@ -980,6 +1000,11 @@ impl Csr {
     /// Row `i`.
     pub fn row(&self, i: usize) -> &[u32] {
         &self.targets[self.offsets[i] as usize..self.offsets[i + 1] as usize]
+    }
+
+    /// Row `r`, as the ids of a kind its targets name.
+    pub(crate) fn ids<R: Id, T: Id>(&self, r: R) -> &[T] {
+        bytemuck::cast_slice(self.row(r.index()))
     }
 
     /// Number of rows.
@@ -1024,9 +1049,9 @@ pub struct Value {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub(crate) prepare: Prepare,
-    pub(crate) ops: Vec<Op>,
-    pub(crate) audio_list: Vec<u32>,
-    pub(crate) event_list: Vec<u32>,
+    pub(crate) ops: Table<OpId, Op>,
+    pub(crate) audio_list: Vec<AudioSlotId>,
+    pub(crate) event_list: Vec<EventSlotId>,
     /// Every event edge, `(source port, sink port)`, direct and feedback,
     /// sorted: what the executor compares across a commit to close the held
     /// keys of an edge that ended (`held.rs`), and the sources an input tap's
@@ -1035,24 +1060,24 @@ pub struct Plan {
     /// from this list and refuses a plan where they do not.
     pub(crate) event_edges: Vec<(EventOutputPort, EventInputPort)>,
     pub(crate) op_succ: Csr,
-    pub(crate) tasks: Vec<Span>,
-    pub(crate) task_ops: Vec<u32>,
+    pub(crate) tasks: Table<TaskId, Span>,
+    pub(crate) task_ops: Vec<OpId>,
     pub(crate) task_succ: Csr,
-    pub(crate) task_activation: Vec<u32>,
+    pub(crate) task_activation: Table<TaskId, u32>,
     pub(crate) audio_slots: u32,
     pub(crate) event_slots: u32,
-    pub(crate) event_slot_capacity: Vec<EventSlotCapacity>,
-    pub(crate) audio_feedback: Vec<FeedbackSpec>,
-    pub(crate) event_feedback: Vec<FeedbackSpec>,
-    pub(crate) delays: Vec<DelaySpec>,
-    pub(crate) taps: Vec<crate::TapId>,
+    pub(crate) event_slot_capacity: Table<EventSlotId, EventSlotCapacity>,
+    pub(crate) audio_feedback: Table<FeedbackId, FeedbackSpec>,
+    pub(crate) event_feedback: Table<FeedbackId, FeedbackSpec>,
+    pub(crate) delays: Table<DelayId, DelaySpec>,
+    pub(crate) taps: Table<PlanTapId, crate::TapId>,
     /// The event taps the topology names, by id. An op names one by its index
     /// here; a tap whose port does not exist has an entry and no op, so its
     /// writer is carried across plans and resumes when the port returns.
-    pub(crate) event_taps: Vec<crate::EventTapId>,
+    pub(crate) event_taps: Table<PlanEventTapId, crate::EventTapId>,
     /// The meters the plan measures, with their lane counts.
-    pub(crate) meters: Vec<(crate::MeterId, usize)>,
-    pub(crate) units: Vec<PlanUnit>,
+    pub(crate) meters: Table<PlanMeterId, (crate::MeterId, usize)>,
+    pub(crate) units: Table<PlanUnitId, PlanUnit>,
     pub(crate) store_len: u32,
     pub(crate) order: Vec<NodeKey>,
     pub(crate) main_inputs: u16,
@@ -1069,9 +1094,9 @@ pub struct Plan {
     /// has a bank): the total of the plan the main output change was made from, kept
     /// by a plan that continues the same crossfade.
     pub(crate) bank_total: Latency,
-    pub(crate) audio_values: Vec<Value>,
-    pub(crate) event_values: Vec<Value>,
-    pub(crate) value_readers: Vec<u32>,
+    pub(crate) audio_values: Table<ValueId, Value>,
+    pub(crate) event_values: Table<ValueId, Value>,
+    pub(crate) value_readers: Vec<OpId>,
     pub(crate) param_ports: Vec<ParamPortOp>,
     /// The driven lanes of every [`Op::WeightedSum`], flattened (its `gains`
     /// span indexes this).
@@ -1122,6 +1147,18 @@ impl Plan {
         crate::compile::verify::verify_fades(prev, self, delta)
     }
 
+    /// The audio slots of `span` in [`audio_list`](Self::audio_list), as the raw
+    /// values the ops carry.
+    pub(crate) fn audio_slots(&self, span: Span) -> &[u32] {
+        &raw(&self.audio_list)[span.range()]
+    }
+
+    /// The event slots of `span` in [`event_list`](Self::event_list), as raw
+    /// values.
+    pub(crate) fn event_slots(&self, span: Span) -> &[u32] {
+        &raw(&self.event_list)[span.range()]
+    }
+
     /// What this plan was compiled for. An executor refuses a plan prepared
     /// for anything else.
     pub fn prepare(&self) -> &Prepare {
@@ -1130,17 +1167,17 @@ impl Plan {
 
     /// The ops, in serial order.
     pub fn ops(&self) -> &[Op] {
-        &self.ops
+        self.ops.as_slice()
     }
 
     /// The flattened audio slot lists [`Op`] spans index.
     pub fn audio_list(&self) -> &[u32] {
-        &self.audio_list
+        raw(&self.audio_list)
     }
 
     /// The flattened event slot lists [`Op`] spans index.
     pub fn event_list(&self) -> &[u32] {
-        &self.event_list
+        raw(&self.event_list)
     }
 
     /// The flattened lane lists of [`Op::WeightedSum`]: per addend, the edge
@@ -1158,18 +1195,18 @@ impl Plan {
     /// a run of op indices (into [`task_ops`](Self::task_ops)), ascending,
     /// that execute back to back on one thread.
     pub fn tasks(&self) -> &[Span] {
-        &self.tasks
+        self.tasks.as_slice()
     }
 
     /// Op indices, grouped by task.
     pub fn task_ops(&self) -> &[u32] {
-        &self.task_ops
+        raw(&self.task_ops)
     }
 
     /// Distinct predecessor tasks of each task — the initial activation count
     /// a parallel executor's per-task counter starts from.
     pub fn task_activation(&self) -> &[u32] {
-        &self.task_activation
+        self.task_activation.as_slice()
     }
 
     /// Arena size in slots for `kind`, including the null slot (0) and the
@@ -1184,7 +1221,7 @@ impl Plan {
     /// How many events each event slot holds per block (see the module
     /// docs), by slot index.
     pub fn event_slot_capacity(&self) -> &[EventSlotCapacity] {
-        &self.event_slot_capacity
+        self.event_slot_capacity.as_slice()
     }
 
     /// What event output port `port` declared it writes per block
@@ -1263,19 +1300,19 @@ impl Plan {
     /// Feedback slots of `kind`.
     pub fn feedback(&self, kind: PortKind) -> &[FeedbackSpec] {
         match kind {
-            PortKind::Audio => &self.audio_feedback,
-            PortKind::Event => &self.event_feedback,
+            PortKind::Audio => self.audio_feedback.as_slice(),
+            PortKind::Event => self.event_feedback.as_slice(),
         }
     }
 
     /// Every PDC delay.
     pub fn delays(&self) -> &[DelaySpec] {
-        &self.delays
+        self.delays.as_slice()
     }
 
     /// Every node, in key order.
     pub fn units(&self) -> &[PlanUnit] {
-        &self.units
+        self.units.as_slice()
     }
 
     /// The unit store length this plan needs.
@@ -1335,14 +1372,14 @@ impl Plan {
     /// slot, writer and readers.
     pub fn values(&self, kind: PortKind) -> &[Value] {
         match kind {
-            PortKind::Audio => &self.audio_values,
-            PortKind::Event => &self.event_values,
+            PortKind::Audio => self.audio_values.as_slice(),
+            PortKind::Event => self.event_values.as_slice(),
         }
     }
 
     /// The flattened reader lists [`Value::readers`] spans index.
     pub fn value_readers(&self) -> &[u32] {
-        &self.value_readers
+        raw(&self.value_readers)
     }
 
     /// Every modulated param port, grouped by node op (the `params` span of
@@ -1359,10 +1396,16 @@ impl Plan {
 
     /// The unit compiled for `key`.
     pub fn unit(&self, key: NodeKey) -> Option<&PlanUnit> {
+        self.unit_id(key).map(|id| &self.units[id])
+    }
+
+    /// Where the unit compiled for `key` sits in [`units`](Self::units).
+    pub(crate) fn unit_id(&self, key: NodeKey) -> Option<PlanUnitId> {
         self.units
+            .as_slice()
             .binary_search_by_key(&key, |u| u.key)
             .ok()
-            .map(|i| &self.units[i])
+            .map(PlanUnitId::from_index)
     }
 
     /// The PDC delay on `key`, or zero.
@@ -1375,13 +1418,13 @@ impl Plan {
 
     /// Which channels of `key` were aliased in place.
     pub fn in_place(&self, key: NodeKey) -> InPlaceMask {
-        let Some(pos) = self.units.iter().position(|u| u.key == key) else {
+        let Some((pos, _)) = self.units.iter_enumerated().find(|(_, u)| u.key == key) else {
             return InPlaceMask::NONE;
         };
         self.ops
             .iter()
             .find_map(|op| match *op {
-                Op::Node { unit, in_place, .. } if unit as usize == pos => Some(in_place),
+                Op::Node { unit, in_place, .. } if PlanUnitId::new(unit) == pos => Some(in_place),
                 _ => None,
             })
             .unwrap_or(InPlaceMask::NONE)

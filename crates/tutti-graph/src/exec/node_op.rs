@@ -1,6 +1,7 @@
 //! Running a node op: its params, its mode and any crossfade, and the call
 //! into the node.
 
+use crate::compile::ids::PlanUnitId;
 use std::cell::Cell;
 use tutti_buffers::Float;
 
@@ -525,7 +526,9 @@ pub(super) fn node_op_with<
     // A node declaring an input bound is sent at most that many events on its
     // inputs together, whatever the edges, flushed events and scheduled
     // commands brought: the cut is the earliest by frame, note-offs first.
-    let bound = h.plan.units[unit as usize].shape.event_input_capacity;
+    let bound = h.plan.units[PlanUnitId::new(unit)]
+        .shape
+        .event_input_capacity;
     if !discards && let Some(bound) = bound {
         let (inject, events) = (&*st.inject, &*st.events);
         let base = |port: u16| input_events(inject, events, unit, ein[port as usize], port);
@@ -624,7 +627,11 @@ pub(super) fn node_op_with<
         params,
     };
     let status = call_node(&call, &mut *u.node, st);
-    log.flush(h.plan.units[unit as usize].key, h.env.frame, &mut *st.sink);
+    log.flush(
+        h.plan.units[PlanUnitId::new(unit)].key,
+        h.env.frame,
+        &mut *st.sink,
+    );
     // This call's report, or the ceiling when it made none.
     u.reported = reported
         .get()
