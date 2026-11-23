@@ -8,12 +8,15 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_midi_file::{ReadRepair, TimelineDrop};
+use tutti_midi_file::{MidiFile, ReadRepair, Tick, TimelineDrop, Track};
 use tutti_music::TimeSignature;
 use tutti_session::{
     DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
 };
 use tutti_tempo::TempoMap;
+use tutti_ump::{
+    Flex, FlexTempo, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
+};
 use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 
 fn session() -> DetachedSession {
@@ -101,6 +104,66 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
     let tempo = loaded.tempo().expect("one timeline");
     assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
+}
+
+/// A MIDI 2.0 Clip File (M2-116) loads as its notes over its Flex Data tempo: at
+/// 96 ticks a quarter, a note from tick 0 to 96 is beat 0 to 1, one from tick 192
+/// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a
+/// second.
+#[test]
+fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
+    let division = TicksPerQuarterNote::of(96);
+    let track = Track::new()
+        .push(
+            Tick(0),
+            Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
+        )
+        .unwrap()
+        .note(
+            Tick(0),
+            Tick(96),
+            MidiChannel::FIRST,
+            NoteNumber::of(60),
+            U7::of(100),
+        )
+        .note(
+            Tick(192),
+            Tick(288),
+            MidiChannel::FIRST,
+            NoteNumber::of(64),
+            U7::of(100),
+        )
+        .ending_at(Tick(288));
+    let mut bytes = Vec::new();
+    MidiFile::clip(division, track)
+        .expect("a clip")
+        .write(&mut bytes)
+        .expect("a Vec takes the write");
+    assert!(bytes.starts_with(b"SMF2CLIP"));
+
+    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
+
+    // The Set Tempo message and two notes, a note-on and a note-off each.
+    assert_eq!(loaded.track(0).unwrap().events.len(), 5);
+    let view = loaded
+        .file()
+        .timebase()
+        .metrical()
+        .expect("a metrical clip");
+    let notes = loaded.file().tracks()[0].notes();
+    let beats: Vec<_> = notes
+        .iter()
+        .map(|n| (view.beat_at(n.start), view.beat_at(n.end)))
+        .collect();
+    assert_eq!(
+        beats,
+        [
+            (Beat::new(0.0), Beat::new(1.0)),
+            (Beat::new(2.0), Beat::new(3.0))
+        ]
+    );
+    let seconds = loaded.tempo().unwrap().seconds_at(Beat::new(2.0));
+    assert!((seconds.get() - 1.0).abs() < 1e-9, "{seconds:?}");
 }
 
 /// A format 1 file lands each track as a clip over the file's one tempo map

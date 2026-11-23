@@ -10,14 +10,12 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tutti_midi_ci::{
-    CallError, MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeEncoding, PeResource,
-    PeState, PeStatus, Place, RequestRefused, ResourceFailure, ResourceGet, ResourceSet,
-    ResourceTarget, StateId,
+    MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeResource, PeState, Place,
+    RequestRefused, ResourceFailure, StateId,
 };
 use tutti_midi_device::SavedDevice;
-use tutti_midi_hardware::PropertyCall;
 
-use super::{InputRequest, ListedPeer, ListedResource, PeFailure, PeerReply, listing};
+use super::{GetProperty, ListedPeer, ListedResource, PeFailure, PeerReply, SetProperty, refusal};
 use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 
 /// Resolves when the device answers, on the session's MIDI-CI task, with no
@@ -31,7 +29,7 @@ use crate::{OtherPeer, PeerError, PeerState, SavedPeer};
 #[derive(Debug)]
 #[must_use = "a save is answered only when it is awaited"]
 pub struct SavePeerState {
-    reply: PeerReply<PeData>,
+    reply: GetProperty,
     /// The device the state is of: taken when the future resolves.
     device: Option<SavedDevice>,
 }
@@ -76,7 +74,7 @@ impl Future for SavePeerState {
 #[derive(Debug)]
 #[must_use = "a restore is answered only when it is awaited"]
 pub struct RestorePeerState {
-    reply: PeerReply<PeStatus>,
+    reply: SetProperty,
 }
 
 impl Future for RestorePeerState {
@@ -92,11 +90,7 @@ impl ListedPeer {
     fn state_resource(&self) -> Result<ListedResource, PeerError<PeFailure>> {
         self.resources()
             .and_then(|peer| peer.listed().find(|l| *l.resource() == PeResource::State))
-            .ok_or(not_sent(RequestRefused::NotListed(PeResource::State)))
-    }
-
-    fn full_state() -> Result<ResourceTarget, RequestRefused> {
-        ResourceTarget::entry(PeResource::State, StateId::FULL_STATE.resource_id())
+            .ok_or(refusal(RequestRefused::NotListed(PeResource::State)))
     }
 
     /// Saves the device's state: a Get of its State resource's `fullState`
@@ -110,19 +104,14 @@ impl ListedPeer {
     /// one that is no longer listed to [`PeerError::Disconnected`].
     #[must_use = "a save is answered only when it is awaited"]
     pub fn save_state(&self) -> SavePeerState {
-        let reply = self
-            .state_resource()
-            .and_then(|resource| {
-                let get = Self::full_state()
-                    .map(|target| ResourceGet::new(target).encoded(encoding_of(&resource)))
-                    .map_err(not_sent)?;
-                Ok(resource.link.reply(
-                    resource.peer.ask(PropertyCall::Get(get)),
-                    listing(&resource.entry),
-                    InputRequest::Get,
-                ))
-            })
-            .unwrap_or_else(PeerReply::failed);
+        let reply = self.state_resource().map_or_else(
+            |refused| GetProperty::new(PeerReply::failed(refused)),
+            |resource| {
+                resource
+                    .with_res_id(StateId::FULL_STATE.resource_id())
+                    .fetch()
+            },
+        );
         SavePeerState {
             reply,
             device: Some(self.device.clone()),
@@ -148,33 +137,11 @@ impl ListedPeer {
                     PeState::from_wire(Some(state.media_type()), state.bytes()).map_err(|e| {
                         PeerError::Refused(PeFailure::Unreadable(ResourceFailure::from(e)))
                     })?;
-                let set = Self::full_state()
-                    .and_then(|target| ResourceSet::full(target, PeData::State(body)))
-                    .map(|set| set.encoded(encoding_of(&resource)))
-                    .map_err(not_sent)?;
-                Ok(resource.link.reply(
-                    resource.peer.ask(PropertyCall::Set(set)),
-                    listing(&resource.entry),
-                    InputRequest::Set,
-                ))
+                Ok(resource
+                    .with_res_id(StateId::FULL_STATE.resource_id())
+                    .write(PeData::State(body)))
             })
-            .unwrap_or_else(PeerReply::failed);
+            .unwrap_or_else(|failed| SetProperty::new(PeerReply::failed(failed)));
         Ok(RestorePeerState { reply })
     }
-}
-
-/// The encoding a call of the State resource is made in: ASCII where its entry
-/// takes it, the first it lists otherwise.
-fn encoding_of(resource: &ListedResource) -> PeEncoding {
-    let listed = resource.entry().encodings();
-    if listed.contains(&PeEncoding::Ascii) {
-        PeEncoding::Ascii
-    } else {
-        listed.first().copied().unwrap_or(PeEncoding::Ascii)
-    }
-}
-
-/// A call that was not sent because the rules of the Resource refuse it.
-fn not_sent(refused: RequestRefused) -> PeerError<PeFailure> {
-    PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused)))
 }
