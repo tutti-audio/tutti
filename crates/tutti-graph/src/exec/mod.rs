@@ -251,7 +251,7 @@ mod state;
 mod update;
 
 pub(crate) use commit::{
-    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, channels,
+    Channels, Commit, CommitSeq, Crossfade, ExecutorEnds, Opened, Participants, Rendered, channels,
 };
 use node_op::{CONSTANT, flag, run_node_op, run_params};
 pub(crate) use node_op::{Head, OpState, SILENT, node_dispatch};
@@ -346,7 +346,9 @@ pub struct Executor<F: Float = f32> {
     /// state of a plan with it (0: none).
     pool_participants: GaugeWriter<Participants>,
     /// Blocks rendered with a plan, for the editor's bounds (`Stager`).
-    rendered: CounterWriter<Blocks>,
+    rendered: GaugeWriter<Rendered>,
+    /// What `rendered` last published.
+    rendered_blocks: Blocks,
     /// How far the main output change the running plan crossfades has got: `Some`
     /// while its fade runs (`main_output_fade`).
     main_output_fade: Option<MainOutputFadeRun>,
@@ -510,6 +512,7 @@ impl<F: Float> Executor<F> {
             pool: None,
             pool_participants: ends.pool,
             rendered: ends.rendered,
+            rendered_blocks: Blocks::ZERO,
             main_output_fade: None,
             main_output_fade_ended: ends.main_output_fade_ended,
             stash: std::collections::VecDeque::with_capacity(QUEUE_CAPACITY),

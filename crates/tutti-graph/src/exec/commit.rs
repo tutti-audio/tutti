@@ -477,6 +477,21 @@ impl Reading for Participants {
     }
 }
 
+/// The blocks the executor has rendered, as a gauge reads them: a count the
+/// audio thread keeps and sets each block, so the editor's read pairs with
+/// that store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Rendered(pub(crate) Blocks);
+
+impl Reading for Rendered {
+    fn to_bits(self) -> u64 {
+        self.0.get()
+    }
+    fn from_bits(bits: u64) -> Self {
+        Self(Blocks::new(bits))
+    }
+}
+
 /// A commit's `seq`, as a gauge reads it: `0` is no commit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct CommitSeq(pub(crate) u64);
@@ -507,7 +522,7 @@ pub(crate) struct Channels<F: Float = f32> {
     /// The executor's pool participants, and the blocks it has rendered
     /// (`Stager`).
     pub(crate) pool: Gauge<Participants>,
-    pub(crate) rendered: Counter<Blocks>,
+    pub(crate) rendered: Gauge<Rendered>,
     /// The `seq` of the commit whose main output crossfade the executor last
     /// finished (`Editor::finish_fades`).
     pub(crate) main_output_fade_ended: Gauge<CommitSeq>,
@@ -523,7 +538,7 @@ pub(crate) struct ExecutorEnds<F: Float = f32> {
     pub(super) unreported: CounterWriter<u64>,
     pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
     pub(super) pool: GaugeWriter<Participants>,
-    pub(super) rendered: CounterWriter<Blocks>,
+    pub(super) rendered: GaugeWriter<Rendered>,
     pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
 }
 
@@ -538,7 +553,7 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
     let (fade_end_tx, fade_end_rx) =
         ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
     let (pool_tx, pool_rx) = gauge(Participants(0));
-    let (rendered_tx, rendered_rx) = counter::<Blocks>();
+    let (rendered_tx, rendered_rx) = gauge(Rendered(Blocks::ZERO));
     let (fade_ended_tx, fade_ended_rx) = gauge(CommitSeq(0));
     (
         Channels {

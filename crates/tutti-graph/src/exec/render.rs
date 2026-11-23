@@ -6,7 +6,7 @@ use tutti_platform::with_no_denormals;
 use tutti_rt::RingWriter;
 use tutti_units::{Blocks, Samples};
 
-use super::commit::{CommitSeq, Crossfade, retire_fade};
+use super::commit::{CommitSeq, Crossfade, Rendered, retire_fade};
 use super::node_op::flag;
 use super::state::{Inject, State, Unit};
 use super::{Clock, Executor, Inbox, Suspension};
@@ -242,6 +242,7 @@ impl<F: Float> Executor<F> {
                 pool,
                 pool_participants: _,
                 rendered,
+                rendered_blocks,
                 main_output_fade,
                 main_output_fade_ended,
                 stash: _,
@@ -413,7 +414,8 @@ impl<F: Float> Executor<F> {
                 }
             }
             *frame += Samples::new(frames);
-            rendered.add(Blocks::new(1));
+            *rendered_blocks += Blocks::new(1);
+            rendered.set(Rendered(*rendered_blocks));
         });
     }
 }

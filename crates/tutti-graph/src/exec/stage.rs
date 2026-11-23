@@ -25,12 +25,11 @@ use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tutti_buffers::Float;
-use tutti_rt::{CappedVec, Counter, Gauge};
-use tutti_units::Blocks;
+use tutti_rt::{CappedVec, Gauge};
 
 use tutti_curve::declick_frames;
 
-use super::commit::{Commit, Participants};
+use super::commit::{Commit, Participants, Rendered};
 use super::node_op::{CONSTANT, SILENT};
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
@@ -227,7 +226,7 @@ pub(crate) struct Stager {
     /// Pool participants the executor runs on (`Executor::set_pool`).
     pool: Gauge<Participants>,
     /// Blocks the executor has rendered (`Executor::render_applied`).
-    rendered: Counter<Blocks>,
+    rendered: Gauge<Rendered>,
     /// The capacity of each event delay's FIFO, by key.
     fifos: BTreeMap<DelayKey, usize>,
     /// The same for event feedback.
@@ -275,7 +274,7 @@ impl Stager {
     pub(crate) fn new(
         event_cap: usize,
         pool: Gauge<Participants>,
-        rendered: Counter<Blocks>,
+        rendered: Gauge<Rendered>,
     ) -> Self {
         Self {
             event_cap,
@@ -313,7 +312,7 @@ impl Stager {
         if self.shells.is_empty() || acked < self.shells_seq {
             return;
         }
-        let now = self.rendered.get().get();
+        let now = self.rendered.get().0.get();
         match self.shells_seen {
             None => self.shells_seen = Some(now),
             Some(seen) if now >= seen + 2 => {
