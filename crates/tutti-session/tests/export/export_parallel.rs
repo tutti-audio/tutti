@@ -1,4 +1,4 @@
-//! An export on a worker pool renders bit for bit what the serial export
+//! An export on a worker pool renders bit for bit what the one-participant export
 //! does (doc 013, "The parallel executor").
 //!
 //! The graph is a fan-out: eight independent branches (each a sine of its own
@@ -157,7 +157,7 @@ fn export_with(workers: Workers, stems: &[usize]) -> (Vec<Rendered>, usize) {
 /// The export on four workers is the export on one, to the bit, and it did
 /// run on more than one thread (so the comparison is of a parallel render).
 ///
-/// The thread-count assertions are what make the comparison one of a serial against a
+/// The thread-count assertions are what make the comparison one of a one-participant against a
 /// parallel render: with no pool, `ran_on` is 1 for both.
 #[test]
 fn a_parallel_export_is_bit_identical_to_the_serial_one() {
@@ -187,7 +187,7 @@ fn a_parallel_export_is_bit_identical_to_the_serial_one() {
     }
 }
 
-/// **The stems of an export on four workers are the serial export's, to the
+/// **The stems of an export on four workers are the one-participant export's, to the
 /// bit**, with the main output: a stem is a tap on the pool's fork, read after each
 /// block, so what a helper thread rendered must be what the caller alone does.
 /// Three stems (two branches and the sum) and the main output, compared plane for

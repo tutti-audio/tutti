@@ -49,7 +49,7 @@ mod coarsen;
 mod colour;
 pub(crate) mod latency;
 pub(crate) mod main_output;
-mod order;
+pub(crate) mod order;
 pub(crate) mod plan;
 pub(crate) mod preroll;
 pub(crate) mod tail;
@@ -649,7 +649,9 @@ pub fn compile(
     }
 
     // ---- 3. order ---------------------------------------------------------
-    let order = order::kahn(&keys, &preds);
+    let order = order::kahn(&preds);
+    debug_assert!(order.cyclic.is_empty(), "the SCC pass left a cycle");
+    let order = order.order;
 
     // ---- 4. latency -------------------------------------------------------
     // One solve: `crate::delays` over the checked graph. The

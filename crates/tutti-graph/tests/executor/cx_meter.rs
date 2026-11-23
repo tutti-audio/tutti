@@ -1,5 +1,5 @@
 //! `Cx::meter` and `Cx::tempo`: the project's meter and tempo map, lent by the
-//! host for a block, reach every node, on the serial executor and on every
+//! host for a block, reach every node, on the one-participant executor and on every
 //! participant of a pool.
 //!
 //! Each meter probe writes the beats per bar of the meter it reads at beat 9,
@@ -47,7 +47,7 @@ impl Node for Probe {
     fn reset(&mut self) {}
 }
 
-/// One block of `PROBES` probes of `read` on `workers` participants (serial
+/// One block of `PROBES` probes of `read` on `workers` participants (one-participant
 /// for one), rendered with `meter` and `tempo`: each probe's output.
 fn render(
     workers: usize,
@@ -85,7 +85,7 @@ fn render(
     chans
 }
 
-/// **A node reads the meter the block was lent, serial or on a pool**, and
+/// **A node reads the meter the block was lent, with no pool or on a pool**, and
 /// none when the host lends none.
 #[test]
 fn a_node_reads_the_meter_the_block_was_lent() {
@@ -109,7 +109,7 @@ fn a_node_reads_the_meter_the_block_was_lent() {
     }
 }
 
-/// **A node reads the tempo map the block was lent, serial or on a pool**, and
+/// **A node reads the tempo map the block was lent, with no pool or on a pool**, and
 /// none when the host lends none. 120 BPM, then 90 from beat 8: 90 at beat 9.
 #[test]
 fn a_node_reads_the_tempo_map_the_block_was_lent() {

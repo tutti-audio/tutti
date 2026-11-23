@@ -1,6 +1,6 @@
 //! The VBAP panner declares `Cost::Moderate`; the HRTF renderer stays `Heavy`. Declaring a
 //! class changes only the parallel schedule: sibling panners pack into fewer tasks than
-//! undeclared ones, and the render on a pool is bit for bit the serial one.
+//! undeclared ones, and the render on a pool is bit for bit the one-participant one.
 
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -148,7 +148,7 @@ fn a_panner_is_moderate() {
 /// Twelve `Moderate` panners beside two undeclared ones: the moderate ones
 /// pack into fewer tasks than the same panners declaring nothing, the plan
 /// still spreads, and on a pool of two and of four the render is bit for
-/// bit the serial one.
+/// bit the one-participant one.
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_panners_pack_and_render_bit_identically() {

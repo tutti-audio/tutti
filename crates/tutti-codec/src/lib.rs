@@ -30,7 +30,7 @@
 //!   `Destination::create_new`) or into a borrowed writer.
 //! - Decoding is plain functions and types of our own, no trait: `read_wave`
 //!   decodes a path or bytes (any `impl Into<tutti_platform::Asset>`) into a `Wave` (a resident, planar sample buffer),
-//!   `Wave::topology` and `FileIn::topology` say which speaker each channel feeds,
+//!   `Wave::channel_set` and `FileIn::channel_set` say which speaker each channel feeds,
 //!   `read_wave_metadata` reads a header (and the sample format the file holds
 //!   its samples in), and `FileIn` streams a file as a `Source` with a sample-accurate `seek`. Both
 //!   are generic over the sample format `S` they hand back: the file's own

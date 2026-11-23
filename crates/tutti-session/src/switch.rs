@@ -132,7 +132,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// to be placeable on the new channels, and the graph has to be able to
     /// re-prepare.
     fn check_switch(&self, channels: ChannelLayout) -> Result<()> {
-        self.check_device(channels, None)?;
+        self.check_device(&tutti_buffers::ChannelSet::default_for(channels))?;
         self.check_restart(None)
     }
 }

@@ -38,9 +38,10 @@
 //! assert_eq!(valid.get().topo_order(), Ok(vec![osc, gain]));
 //! ```
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
 use crate::compile::latency::{ChannelFeed, Feed, LatencyGraph, PortFeed};
+use crate::compile::order::{Sorted, sort_nodes};
 use crate::compile::tail::TailGraph;
 use crate::model::spec::{EventInputPort, EventOutputPort};
 use tutti_buffers::ChannelLayout;
@@ -915,56 +916,18 @@ impl Topology {
             })
     }
 
-    /// Kahn's algorithm over the direct edges. `Err` carries the nodes left in
-    /// the cycle.
+    /// The compiler's topological sort over the direct edges, in node-key order.
+    /// `Err` carries the nodes left in the cycle.
+    ///
+    /// Keys iterate sorted, which makes `topo_order` a *function* of the value
+    /// rather than merely one valid answer, so a test can assert the exact vector.
     fn acyclic_order(&self) -> Result<Vec<NodeKey>, Vec<NodeKey>> {
-        let mut in_degree: BTreeMap<NodeKey, usize> = self.nodes.keys().map(|&k| (k, 0)).collect();
-        let mut dependents: HashMap<NodeKey, Vec<NodeKey>> = HashMap::new();
-
-        for &node in self.nodes.keys() {
-            for pred in self.direct_preds(node) {
-                if self.nodes.contains_key(&pred) {
-                    dependents.entry(pred).or_default().push(node);
-                    *in_degree.get_mut(&node).expect("keyed from nodes") += 1;
-                }
-            }
-        }
-
-        // Seeding from a `BTreeMap` keeps the queue deterministic, which is what
-        // makes `topo_order` a *function* of the value rather than merely one
-        // valid answer — so a test can assert the exact vector.
-        let mut queue: Vec<NodeKey> = in_degree
-            .iter()
-            .filter(|&(_, &d)| d == 0)
-            .map(|(&k, _)| k)
-            .rev()
-            .collect();
-
-        let mut order = Vec::with_capacity(self.nodes.len());
-        while let Some(n) = queue.pop() {
-            order.push(n);
-            let mut ready = Vec::new();
-            for &dep in dependents.get(&n).into_iter().flatten() {
-                let d = in_degree.get_mut(&dep).expect("keyed from nodes");
-                *d -= 1;
-                if *d == 0 {
-                    ready.push(dep);
-                }
-            }
-            ready.sort_unstable();
-            queue.extend(ready.into_iter().rev());
-        }
-
-        if order.len() == self.nodes.len() {
+        let keys: Vec<NodeKey> = self.nodes.keys().copied().collect();
+        let Sorted { order, cyclic } = sort_nodes(&keys, |node| self.direct_preds(node));
+        if cyclic.is_empty() {
             Ok(order)
         } else {
-            let placed: HashSet<NodeKey> = order.iter().copied().collect();
-            Err(self
-                .nodes
-                .keys()
-                .copied()
-                .filter(|k| !placed.contains(k))
-                .collect())
+            Err(cyclic)
         }
     }
 

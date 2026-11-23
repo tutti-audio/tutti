@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use tutti_buffers::FoldLevels;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_engine::{OutputLevels, OutputMap, Routing, RoutingError};
 use tutti_rt::Mutex;
 
@@ -110,17 +110,42 @@ impl Policy for OutputPolicy {
     }
 }
 
+/// The output device of `width` channels as the engine takes it: `stated` when
+/// the host knows its wiring ([`Placement::Stated`](tutti_buffers::Placement::Stated)),
+/// else the engine's order for the width
+/// ([`Placement::Default`](tutti_buffers::Placement::Default)).
+///
+/// # Errors
+///
+/// [`BufferError::WidthMismatch`](tutti_buffers::BufferError::WidthMismatch)
+/// (as a [`FoldError`](tutti_buffers::FoldError)) when `stated` is not `width`
+/// channels wide.
+pub(crate) fn device_placement(
+    width: ChannelLayout,
+    stated: Option<ChannelTopology>,
+) -> Result<tutti_engine::OutputPlacement, tutti_buffers::FoldError> {
+    match stated {
+        Some(topology) if topology.width() != width => {
+            Err(tutti_buffers::BufferError::WidthMismatch {
+                src: topology.width(),
+                dst: width,
+            }
+            .into())
+        }
+        Some(topology) => Ok(tutti_engine::OutputPlacement::stated(ChannelSet::from(
+            topology,
+        ))),
+        None => Ok(tutti_engine::OutputPlacement::default_for(width)),
+    }
+}
+
 /// What the device and the main output are, as the graph last placed them: what an
 /// [`OutputPolicy`] is checked against. The graph publishes it at each
 /// change; it is `None` with no engine.
 #[derive(Clone, Debug)]
 pub(crate) struct OutputFacts {
-    /// The device's width.
-    pub device: ChannelLayout,
-    /// What the device is, for a fold; `None` past
-    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), where its channels are
-    /// unassigned.
-    pub placed: Option<ChannelTopology>,
+    /// The device's channels, as a fold places them.
+    pub device: ChannelSet,
     /// The main output the next commit renders.
     pub main_output: ChannelTopology,
 }
@@ -134,10 +159,10 @@ pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
     Cell::new(OutputPolicy::default(), move |policy| {
         let facts = facts.lock();
         let facts = facts.as_ref().ok_or(OutputPolicyError::Detached)?;
-        if policy.outputs.len() > usize::from(facts.device.count()) {
+        if policy.outputs.len() > usize::from(facts.device.width().count()) {
             return Err(OutputPolicyError::StripPast {
                 output: policy.outputs.len() - 1,
-                device: facts.device,
+                device: facts.device.width(),
             }
             .into());
         }
@@ -151,7 +176,7 @@ pub(crate) fn output_cell(facts: FactsCell) -> Arc<Cell<OutputPolicy>> {
         // render: whether it has a place does not depend on the sample format.
         policy
             .routing()
-            .fold::<f32>(&facts.main_output, facts.device, facts.placed.as_ref())
+            .fold::<f32>(&facts.main_output, &facts.device)
             .map_err(OutputPolicyError::from)?;
         Ok::<(), SetRefusal>(())
     })

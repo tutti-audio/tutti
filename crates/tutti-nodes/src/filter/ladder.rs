@@ -16,7 +16,7 @@ use tutti_dsp::{
     BlockMismatch, LadderBank, LadderBlend, LadderControls, LadderModel, LadderSaturation,
     LadderType, Ramp, SimdLanes,
 };
-use tutti_graph::{Bus, BusRole, Buses, Shape};
+use tutti_graph::Shape;
 use tutti_units::{Drive, Hz, Resonance, SampleRate, Tail};
 
 use super::filter_bus;
@@ -191,11 +191,7 @@ impl<F: Float + SimdLanes> Kernel for LadderKernel<F> {
     const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
+        Shape::through(self.input)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

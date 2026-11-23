@@ -4,7 +4,7 @@
 //! Every figure is analytic: the steady states are the input (delayed by the
 //! declared latency) or silence, bit for bit, and a fade is the formula the
 //! doc gives written out here with `FadeLaw::EqualAmplitude`'s gains.
-//! A render is compared with another only as serial against parallel.
+//! A render is compared with another only as one-participant against parallel.
 
 #![allow(
     clippy::needless_range_loop,
@@ -123,7 +123,7 @@ impl Rig {
     }
 }
 
-/// Serial, and parallel on two and four participants.
+/// One-participant, and parallel on two and four participants.
 const WORKERS: [usize; 3] = [1, 2, 4];
 
 /// A signal that is never zero and never repeats within a test.
@@ -1274,7 +1274,7 @@ fn a_bypassed_source_closes_its_notes() {
 
 /// **The mode snapshot is per block**: a `set_mode` that lands while a block
 /// runs — here from an upstream node's `process`, before the node's own op —
-/// reaches no op of that block, and the fade starts on the next. Serial and
+/// reaches no op of that block, and the fade starts on the next. One-participant and
 /// parallel.
 #[test]
 fn a_mode_stored_mid_block_lands_on_the_next_block() {

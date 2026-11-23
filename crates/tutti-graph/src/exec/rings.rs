@@ -417,7 +417,7 @@ impl EventFifo {
     }
 
     /// Queue this block's `input`. Returns how many were dropped.
-    pub(crate) fn push(&mut self, input: &[Event]) -> u32 {
+    fn push_events(&mut self, input: &[Event]) -> u32 {
         let mut dropped = 0;
         let start = self.clock;
         for e in input {
@@ -446,7 +446,7 @@ impl EventFifo {
 
     /// Emit into `out` what falls due in the block of `frames` starting at
     /// the FIFO's clock. Stops, without dropping, when `out` is full.
-    pub(crate) fn pop_due(&mut self, out: &mut Vec<Event>, frames: usize) {
+    fn pop_due_events(&mut self, out: &mut Vec<Event>, frames: usize) {
         let start = self.clock;
         let end = start + frames as u64;
         while let Some(&(t, e)) = self.q.front() {
@@ -465,14 +465,14 @@ impl EventFifo {
 
     /// Queue this block's `input`, events and param events. Returns how many
     /// were dropped.
-    pub(crate) fn push_slot(&mut self, input: &EventSlot) -> u32 {
-        self.push(&input.events) + self.push_params(&input.params)
+    pub(crate) fn push(&mut self, input: &EventSlot) -> u32 {
+        self.push_events(&input.events) + self.push_params(&input.params)
     }
 
     /// Emit into `out` what falls due in the block of `frames`, events and
     /// param events.
-    pub(crate) fn pop_due_slot(&mut self, out: &mut EventSlot, frames: usize) {
-        self.pop_due(&mut out.events, frames);
+    pub(crate) fn pop_due(&mut self, out: &mut EventSlot, frames: usize) {
+        self.pop_due_events(&mut out.events, frames);
         self.pop_due_params(&mut out.params, frames);
     }
 
@@ -492,7 +492,7 @@ impl EventFifo {
     }
 
     /// Emit into `out` the param events that fall due in the block of
-    /// `frames`, as [`pop_due`](Self::pop_due) does events.
+    /// `frames`, as [`pop_due_events`](Self::pop_due_events) does events.
     fn pop_due_params(&mut self, out: &mut Vec<ParamEvent>, frames: usize) {
         let start = self.clock;
         let end = start + frames as u64;
@@ -526,10 +526,10 @@ impl EventFifo {
     /// input before this block's, at the same length, so it falls due no
     /// later.
     pub(crate) fn run(&mut self, input: &EventSlot, out: &mut EventSlot, frames: usize) -> u32 {
-        self.pop_due_slot(out, frames);
+        self.pop_due(out, frames);
         self.pour();
-        let dropped = self.push_slot(input);
-        self.pop_due_slot(out, frames);
+        let dropped = self.push(input);
+        self.pop_due(out, frames);
         self.advance(frames);
         dropped
     }
@@ -540,6 +540,24 @@ mod tests {
     use super::*;
     use crate::node::param_event::ParamRamp;
     use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Ump, Voice1};
+
+    /// [`EventFifo::push`] of a list of events.
+    fn push_events(f: &mut EventFifo, events: &[Event]) -> u32 {
+        f.push(&EventSlot {
+            events: events.to_vec(),
+            params: Vec::new(),
+        })
+    }
+
+    /// [`EventFifo::pop_due`] into the events `out`, which keeps its capacity.
+    fn pop_due_events(f: &mut EventFifo, out: &mut Vec<Event>, frames: usize) {
+        let mut slot = EventSlot {
+            events: std::mem::take(out),
+            params: Vec::new(),
+        };
+        f.pop_due(&mut slot, frames);
+        *out = slot.events;
+    }
 
     /// [`EventFifo::run`] over a list of events and the `out` it fills.
     fn run(f: &mut EventFifo, input: &[Event], out: &mut Vec<Event>, frames: usize) -> u32 {
@@ -600,8 +618,8 @@ mod tests {
     fn a_transfer_into_too_small_a_fifo_counts_its_loss_and_never_grows() {
         let mut old = EventFifo::sized(Samples::new(64), 4, 8);
         let queued: Vec<Event> = (0..4).map(|i| note(0, false, i)).collect();
-        old.push(&queued);
-        old.push(&[note(0, true, 10)]);
+        push_events(&mut old, &queued);
+        push_events(&mut old, &[note(0, true, 10)]);
         let mut new = EventFifo::sized(Samples::new(64), 4, 8);
         // Room for three: shrink it by building one that holds three.
         new.q = VecDeque::with_capacity(3);
@@ -624,7 +642,10 @@ mod tests {
     #[test]
     fn a_transfer_into_a_queue_of_note_offs_counts_what_does_not_fit() {
         let mut old = EventFifo::sized(Samples::new(64), 4, 8);
-        old.push(&[note(0, true, 1), note(0, true, 2), note(0, true, 3)]);
+        push_events(
+            &mut old,
+            &[note(0, true, 1), note(0, true, 2), note(0, true, 3)],
+        );
         let mut new = EventFifo::sized(Samples::new(64), 4, 8);
         new.q = VecDeque::with_capacity(2);
         let room = new.q.capacity();
@@ -659,7 +680,7 @@ mod tests {
         let mut f = EventFifo::sized(Samples::new(64), 2, 64);
         let limit = f.limit;
         let backlog: Vec<Event> = (0..limit as u32).map(|i| note(i, false, i)).collect();
-        f.push(&backlog);
+        push_events(&mut f, &backlog);
         // Shorter: the whole backlog is overdue.
         f.retune(Samples::new(1));
         f.resize(2, 64);
@@ -760,14 +781,14 @@ mod tests {
         let limit = f.limit;
         let cap = f.q.capacity();
         let ons: Vec<Event> = (0..cap as u32 + 5).map(|i| note(0, false, i)).collect();
-        let dropped = f.push(&ons);
+        let dropped = push_events(&mut f, &ons);
         assert_eq!(f.q.len(), limit, "note-ons stop at the limit");
         assert_eq!(dropped as usize, ons.len() - limit);
         // Fill the reserve with note-offs, then one more.
         let offs: Vec<Event> = (0..(cap - limit) as u32 + 1)
             .map(|i| note(0, true, i))
             .collect();
-        f.push(&offs);
+        push_events(&mut f, &offs);
         let kept_offs = f.pending().filter(Event::is_note_off).count();
         assert_eq!(kept_offs, offs.len(), "every note-off is kept");
         assert!(f.q.len() <= cap, "and the FIFO never grew");
@@ -783,7 +804,7 @@ mod tests {
         f.retune(Samples::new(1));
         f.resize(4, 8);
         let offs: Vec<Event> = (0..200).map(|i| note(0, true, i)).collect();
-        f.push(&offs);
+        push_events(&mut f, &offs);
         assert_eq!(f.pending().count(), EventFifo::bound(1, 4, 8));
     }
 
@@ -795,15 +816,15 @@ mod tests {
         let burst: Vec<Event> = (0..5)
             .map(|i| Event::midi(Offset::ZERO, Ump([i, 0, 0, 0])))
             .collect();
-        f.push(&burst);
+        push_events(&mut f, &burst);
         let mut out = Vec::with_capacity(2);
-        f.pop_due(&mut out, 8);
+        pop_due_events(&mut f, &mut out, 8);
         f.advance(8);
         assert_eq!(out.len(), 2, "the slot takes two");
         let mut got = out.clone();
         for _ in 0..3 {
             out.clear();
-            f.pop_due(&mut out, 8);
+            pop_due_events(&mut f, &mut out, 8);
             f.advance(8);
             assert!(
                 out.iter().all(|e| e.offset == Offset::ZERO),

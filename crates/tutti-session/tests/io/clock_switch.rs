@@ -417,15 +417,7 @@ fn the_output_policy_carries_over_and_a_card_the_map_does_not_fit_is_refused() {
         live.get(live.policy::<OutputPolicy>()).unwrap().map,
         fits.map
     );
-    assert_eq!(
-        live.output_device()
-            .unwrap()
-            .topology
-            .unwrap()
-            .width()
-            .count(),
-        4
-    );
+    assert_eq!(live.output_device().unwrap().channels.width().count(), 4);
 }
 
 // --- A start that fails after the old stream stopped ---

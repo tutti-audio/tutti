@@ -46,10 +46,7 @@ pub(crate) fn output_rate(target: &FileTarget, render_rate: SampleRate) -> Sampl
 /// the output rate.
 fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
     let rate = output_rate(target, source_rate);
-    match target.width.topology() {
-        Some(topology) => Spec::new(target.format(), *topology, rate),
-        None => Spec::of_width(target.format(), target.channels(), rate),
-    }
+    Spec::of_channels(target.format(), target.channel_set(), rate)
 }
 
 /// The file of `target`, begun: written to a temporary beside its path (which
@@ -501,8 +498,7 @@ pub(crate) fn write_planes<F: FftFloat>(
     } else {
         Some(
             crate::render::FileChannels {
-                layout: target.channels(),
-                topology: target.width.topology(),
+                channels: target.channel_set(),
             }
             .fold_from(rendered.channels(), None)?,
         )

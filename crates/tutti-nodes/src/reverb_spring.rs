@@ -5,14 +5,14 @@
 //! reaches them.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, SpringControls, SpringLayout, SpringLength, SpringReverb, SpringStages,
 };
 use tutti_graph::{MAX_NODE_TAIL, Shape};
 use tutti_units::{Hz, Mix, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`SpringReverbNode`] is made from: its width, its layout and where its controls
 /// start.
@@ -163,8 +163,7 @@ impl<F: Float> Kernel for SpringReverbKernel<F> {
 
     /// `width` channels in and out; `Heavy` (the default cost), as the stages are many.
     fn shape(&self) -> Shape {
-        let bus = BusTopology::unassigned(self.width)
-            .expect("a spring reverb is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a spring reverb");
         Shape::through(bus)
     }
 

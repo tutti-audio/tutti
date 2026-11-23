@@ -3,7 +3,7 @@
 //!
 //! From the spec: each figure is analytic (the fold's own table, written out
 //! here), never another render. A render is compared with another only as the
-//! parallel executor against the serial one.
+//! parallel executor against the one-participant one.
 
 use common::spec_of;
 use tutti_fixtures::signal::bits as bits_of;
@@ -187,7 +187,7 @@ impl Rig {
         got
     }
 
-    /// Serial and parallel renders, which must be bit for bit the same.
+    /// One-participant and parallel renders, which must be bit for bit the same.
     fn render_both(&self, blocks: usize) -> Vec<Vec<f32>> {
         let serial = self.render(1, blocks);
         let parallel = self.render(4, blocks);
@@ -243,7 +243,7 @@ fn weighted_fold(terms: &[(f64, &[f32])], i: usize) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Stereo into mono is `0.5 L + 0.5 R`, exactly: two weighted lanes of `0.5`
-/// into the one channel, summed in source order, serial and parallel alike.
+/// into the one channel, summed in source order, one-participant and parallel alike.
 #[test]
 fn stereo_into_mono_is_half_left_plus_half_right() {
     let rig = fold_rig(2, 1);
@@ -972,7 +972,7 @@ fn main_output_rig(src: usize, dst: usize) -> Rig {
 /// 5.1 into a declared stereo main output is the fold's ITU table on the output
 /// channels: each side takes its front, the centre at -3 dB and its
 /// surround at -3 dB, the LFE dropped, as lanes of the outputs' sums in
-/// source-port order; serial and parallel agree.
+/// source-port order; one-participant and parallel agree.
 #[test]
 fn five_one_into_a_stereo_main_output_follows_the_itu_rows() {
     let rig = main_output_rig(6, 2);
