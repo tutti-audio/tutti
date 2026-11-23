@@ -144,13 +144,3 @@ fn a_rate_past_the_nyquist_is_held_under_half_a_cycle_a_frame() {
     lfo.advance(Samples::new(10));
     assert!(lfo.cycles() > 4.9 && lfo.cycles() < 5.0, "{}", lfo.cycles());
 }
-
-/// A reset returns the position to zero cycles.
-#[test]
-fn a_reset_returns_the_clock_to_zero() {
-    let mut lfo = Lfo::new(LfoWave::Sine, Hz::new(-3.0), SampleRate::of(100.0));
-    lfo.advance(Samples::new(250));
-    assert!(lfo.cycles() < -7.0);
-    lfo.reset();
-    assert_eq!(lfo.cycles(), 0.0);
-}

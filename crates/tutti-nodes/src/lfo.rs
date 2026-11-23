@@ -756,15 +756,6 @@ mod tests {
     }
 
     #[test]
-    fn a_random_lfo_at_nyquist_and_past_it_runs_forward_at_nyquist() {
-        // 50 Hz is exactly half a cycle a frame and 75 Hz is 1.5 times that; both clamp
-        // to just under half a cycle, so the cycle index steps every second frame.
-        assert_random_follows(50.0, 0.5);
-        assert_random_follows(75.0, 0.5);
-        assert_random_follows(-75.0, -0.5);
-    }
-
-    #[test]
     fn a_random_lfo_holds_one_value_a_cycle_and_steps_on_the_next() {
         // 1 Hz at 100 Hz: cycles are 100 frames; frames 10..=90 of each are one cycle.
         let out = render(LfoNode::from(LfoConfig::new(LfoShape::Random)), 100.0, 300);

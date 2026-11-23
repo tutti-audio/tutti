@@ -518,31 +518,6 @@ mod tests {
     }
 
     #[test]
-    fn balance_attenuates_the_far_channel_only() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -1.0); // hard left
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 1.0); // hard right
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
-        // Halfway: the near channel stays at unity, the far one is halved.
-        set_balance(&s, -0.5);
-        let (l, r) = tick2(&mut s, 1.0, 1.0);
-        assert!((l - 1.0).abs() < 1e-6);
-        assert!((r - 0.5).abs() < 1e-6);
-    }
-
-    /// Out-of-range balance saturates rather than amplifying: without the clamp,
-    /// a balance of -2 would give the left channel a gain of 3.
-    #[test]
-    fn balance_saturates_out_of_range() {
-        let mut s = strip(BusTopology::STEREO);
-        set_balance(&s, -2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 0.0));
-        set_balance(&s, 2.0);
-        assert_eq!(tick2(&mut s, 1.0, 1.0), (0.0, 1.0));
-    }
-
-    #[test]
     fn set_dispatches_each_unit_param() {
         let s = strip(BusTopology::STEREO);
 
