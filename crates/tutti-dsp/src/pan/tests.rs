@@ -64,3 +64,31 @@ fn a_pan_out_of_range_is_the_nearer_end_and_nan_is_the_centre() {
         assert_eq!(gains(f64::NAN, law), gains(0.0, law));
     }
 }
+
+/// The balance law at `f64` is `Balance::gains` bit for bit across the range, past its ends
+/// (the nearer end), and at NaN and the infinities (unity, the ends); the analytic points are
+/// `(1, 1)` at centre, `(1, 0)` hard left and `(0, 1)` hard right.
+#[test]
+fn the_balance_law_in_a_width_is_the_units_law() {
+    use tutti_units::Balance;
+    for b in [
+        -2.0,
+        -1.0,
+        -0.75,
+        -0.1,
+        0.0,
+        0.3,
+        1.0,
+        1.5,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+    ] {
+        let (l, r) = Balance::new(b).gains();
+        assert_eq!(balance_gains_in(b), (l.get(), r.get()), "{b}");
+    }
+    assert_eq!(balance_gains_in(0.0_f32), (1.0, 1.0));
+    assert_eq!(balance_gains_in(-1.0_f32), (1.0, 0.0));
+    assert_eq!(balance_gains_in(1.0_f32), (0.0, 1.0));
+    assert_eq!(balance_gains_in(f32::NAN), (1.0, 1.0));
+}

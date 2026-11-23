@@ -365,7 +365,7 @@ pub use oversample::{
     BlockTooLong, Oversampler, Oversampling, OversamplingFactor, OversamplingPlan, Passband,
     PassbandError,
 };
-pub use pan::{PanLaw, pan_gains};
+pub use pan::{PanLaw, balance_gains_in, pan_gains};
 pub use polarity::{ChannelOutOfRange, Polarity};
 pub use ramp::{Lerp, Ramp, Steps};
 pub use resample::{
