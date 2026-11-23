@@ -69,7 +69,7 @@ fn declared() -> Vec<ParameterInfo> {
 /// The plugin: what it declares now, the value of each, and every value the
 /// host set, in order. Plain values map linearly over the declared range.
 #[derive(Default)]
-struct Fake {
+pub(super) struct Fake {
     infos: Mutex<Vec<ParameterInfo>>,
     values: Mutex<HashMap<ParamId, Normalized>>,
     sets: Mutex<Vec<(ParamId, Normalized)>>,
@@ -79,7 +79,7 @@ struct Fake {
 }
 
 impl Fake {
-    fn new() -> Arc<Self> {
+    pub(super) fn new() -> Arc<Self> {
         let fake = Arc::new(Self::default());
         *fake.infos.lock() = declared();
         for (id, value) in [

@@ -926,6 +926,8 @@ pub(crate) struct HostedPlugin {
     /// What the host says of the plugin's track, which the main thread's
     /// `Phase::Plugins` delivers.
     track: Arc<crate::value::TrackInfoSlot>,
+    /// The app's MIDI map, which the main thread's `Phase::Plugins` delivers.
+    midi_map: Arc<crate::value::MidiMapSlot>,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
@@ -1209,6 +1211,7 @@ impl HostedPlugin {
             answers: None,
             node,
             track: crate::value::TrackInfoSlot::new(),
+            midi_map: crate::value::MidiMapSlot::new(),
             banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
@@ -1438,6 +1441,7 @@ impl HostedPlugin {
         self.told = false;
         // The incoming plugin has been told nothing of its track.
         self.track.resend();
+        self.midi_map.resend();
         self.snapshot = None;
         self.snapshot_from = None;
         self.withheld = None;
@@ -1549,7 +1553,7 @@ impl HostedPlugin {
         let mode = self
             .takes_automation_mode()
             .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
-        table.provide_plugin(node, entry, mode, self.track.clone());
+        table.provide_plugin(node, entry, mode, self.track.clone(), self.midi_map.clone());
     }
 
     /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
@@ -1763,6 +1767,14 @@ impl<'a> Plugin<'a> {
     #[must_use]
     pub fn track_info(&self) -> crate::PluginTrackInfoTarget {
         crate::PluginTrackInfoTarget::new(self.node)
+    }
+
+    /// The target of the app's controller map of the plugin: which MIDI
+    /// messages drive which parameters, beside the table the plugin declares
+    /// ([`PluginInfo::assignments`]).
+    #[must_use]
+    pub fn midi_map(&self) -> crate::PluginMidiMapTarget {
+        crate::PluginMidiMapTarget::new(self.node)
     }
 
     /// The target of the automation mode the host tells the plugin, or `None`
@@ -2582,6 +2594,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }
             if let Some(main) = cx.main {
                 hosted.track.deliver(&hosted.handle, main);
+                hosted.midi_map.deliver(&hosted.handle, main);
             }
             match hosted.liveness.observe(cause.is_none(), now) {
                 LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,
