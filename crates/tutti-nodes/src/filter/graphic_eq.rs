@@ -2,28 +2,15 @@
 //! octave or third-octave centers run as one [`SosBank`](tutti_dsp::SosBank) cascade.
 
 use tutti_buffers::{BusTopology, Float, InputOutput, MaxBlock};
-use tutti_dsp::{BlockMismatch, DecayTime, GraphicBands, SimdLanes, SosCoefficients, TAIL_FLOOR};
+use tutti_dsp::{
+    BlockMismatch, DecayTime, GraphicBands, GraphicEqControls, MAX_EQ_GAIN, SimdLanes,
+    SosCoefficients, TAIL_FLOOR,
+};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
 use super::ramped::{RAMP_STEPS, RampedSos};
-use super::{MAX_EQ_GAIN, eq_gain};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
-
-/// The controls of a [`GraphicEqNode`]: the gain of each band, lowest first. The bands past
-/// the spacing's [`count`](GraphicBands::count) are not read.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GraphicEqControls {
-    /// The gain at each band's center, a boost above 0 dB and a cut below. Read within 24 dB.
-    pub gains: [Db; GraphicBands::MAX_COUNT],
-}
-
-impl GraphicEqControls {
-    /// Every band at 0 dB: a flat response.
-    pub const FLAT: Self = Self {
-        gains: [Db::UNITY; GraphicBands::MAX_COUNT],
-    };
-}
 
 /// What a [`GraphicEqNode`] is made from: its input bus and its band spacing. It starts flat.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -97,7 +84,7 @@ impl<F: Float + SimdLanes> GraphicEqKernel<F> {
     /// the design refuses. No allocation.
     fn design(&mut self, controls: &GraphicEqControls) -> SosCoefficients<F> {
         let (bands, rate) = (self.bands, self.rate);
-        let gains = controls.gains.map(eq_gain);
+        let gains = controls.held().gains;
         self.sos
             .design(|into| bands.design_into(&gains, rate, into))
     }
@@ -212,7 +199,6 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
 mod tests {
     // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
     use super::*;
-    use crate::filter::MAX_EQ_GAIN;
     use crate::filter::test_utils::{bin, gain, generate_sine, render};
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::ChannelLayout;
