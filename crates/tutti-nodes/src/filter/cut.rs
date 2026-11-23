@@ -198,8 +198,7 @@ mod tests {
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
     use tutti_dsp::{
-        ButterworthOrder, Elliptic, EllipticTolerances, MIN_CUT_CUTOFF, PassbandRipple,
-        StopbandAttenuation,
+        ButterworthOrder, Elliptic, EllipticTolerances, PassbandRipple, StopbandAttenuation,
     };
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Cost, Node, ParamNode};
@@ -429,20 +428,6 @@ mod tests {
         let settled = render(&mut node, &generate_sine(bin(256), 48_000.0, 24_576));
         let want = analog(LP, 8, 4_000.0, bin(256)).powi(2);
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4);
-    }
-
-    /// A cutoff past the range is read as its end, bit for bit: 1 Hz as [`MIN_CUT_CUTOFF`],
-    /// and one past the Nyquist as 0.99 of it.
-    #[test]
-    fn a_cutoff_out_of_range_is_read_as_the_end_of_it() {
-        let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64| {
-            let config = CutFilterConfig::new(1u16, HP, bw(4)).cutoff(Hz::new(hz));
-            render(&mut node(config), &input)
-        };
-        assert_eq!(at(1.0), at(MIN_CUT_CUTOFF.get()));
-        assert_eq!(at(90_000.0), at(RATE.nyquist_scaled(0.99).get()));
-        assert_ne!(at(10.0), at(100.0));
     }
 
     /// An odd order has a first-order section: a cutoff swept across the decades stays

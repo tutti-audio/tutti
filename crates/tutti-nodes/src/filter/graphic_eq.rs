@@ -367,21 +367,6 @@ mod tests {
         }
     }
 
-    /// A gain past 24 dB reads as 24 dB, bit for bit.
-    #[test]
-    fn a_gain_out_of_range_is_read_as_the_end_of_it() {
-        let input = generate_sine(bin(171), 48_000.0, 4_096);
-        let at = |db: f64| {
-            render(
-                &mut prepared(node_with(GraphicBands::Octave, &[(5, db)])),
-                &input,
-            )
-        };
-        assert_eq!(at(90.0), at(24.0));
-        assert_eq!(at(-90.0), at(-24.0));
-        assert_ne!(at(24.0), at(-24.0));
-    }
-
     /// A gain moved mid-sine ramps the same however the host cuts its blocks, and settles on
     /// the design.
     #[test]

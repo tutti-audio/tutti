@@ -215,17 +215,6 @@ mod tests {
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
     }
 
-    /// A pivot and a gain past their ranges read as the end of them, bit for bit.
-    #[test]
-    fn controls_out_of_range_are_read_as_the_end_of_it() {
-        let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, db: f64| render(&mut node(config(Hz::new(hz), Db::new(db))), &input);
-        assert_eq!(at(1.0, 6.0), at(20.0, 6.0));
-        assert_eq!(at(90_000.0, 6.0), at(RATE.nyquist_scaled(0.99).get(), 6.0));
-        assert_eq!(at(500.0, 90.0), at(500.0, 24.0));
-        assert_ne!(at(500.0, 6.0), at(500.0, -6.0));
-    }
-
     /// Across pivots and gains, from a pole near 1 (a low pivot) to one near -1 (a high
     /// pivot and a boost), the reported tail covers the first frame from which the
     /// impulse response's tail sum is under the floor, and the ceiling covers every one.

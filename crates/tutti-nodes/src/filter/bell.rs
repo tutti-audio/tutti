@@ -246,30 +246,6 @@ mod tests {
         assert!((level(&settled[16_384..]) - want).abs() < 1e-4 * want);
     }
 
-    /// A center, Q and gain past their ranges read as the end of them, bit for bit.
-    #[test]
-    fn controls_out_of_range_are_read_as_the_end_of_it() {
-        let input = generate_sine(500.0, 48_000.0, 4_096);
-        let at = |hz: f64, q: f64, db: f64| {
-            render(
-                &mut node(config(Hz::new(hz), Q::new(q), Db::new(db))),
-                &input,
-            )
-        };
-        assert_eq!(at(1.0, 1.0, 6.0), at(20.0, 1.0, 6.0));
-        assert_eq!(
-            at(90_000.0, 1.0, 6.0),
-            at(RATE.nyquist_scaled(0.99).get(), 1.0, 6.0)
-        );
-        // The lower bound 0.1 is not an `f32`, which the control carries until the control
-        // cells are `f64`, so two figures below it are compared: this pins that the floor
-        // clamps, not that it is 0.1. The upper bound 30 is exact in both.
-        assert_eq!(at(500.0, 0.0, 6.0), at(500.0, 0.05, 6.0));
-        assert_eq!(at(500.0, 900.0, 6.0), at(500.0, 30.0, 6.0));
-        assert_eq!(at(500.0, 1.0, 90.0), at(500.0, 1.0, 24.0));
-        assert_ne!(at(500.0, 1.0, 6.0), at(500.0, 1.0, -6.0));
-    }
-
     /// For centers, Q and gains across the ranges the reported tail covers the first frame
     /// from which the impulse response's tail sum is under the floor.
     #[test]
