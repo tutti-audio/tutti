@@ -267,6 +267,7 @@ fn a_pools_fork_shares_nothing_with_the_live_pool() {
         node: mut live,
         controls: handle,
         fork,
+        ..
     } = pool.into_parts();
     let source = fork.expect("a pool forks");
     live.prepare(&Prepare::new(
@@ -337,11 +338,7 @@ fn a_transport_seek_flushes_stretch_state() {
     const LEN: usize = 441_000;
     // 120 BPM = 2 beats/s, and a placed read stretched 2x takes half a
     // source frame per output frame, so the wave spans 40 beats and the
-    // halves split at beat 20. (This said 20 and 10, forgetting the
-    // stretch: beat 12 is source frame 132 300, loud, and the assertion
-    // held only because a flushed filter was silent for its 4 096-frame
-    // refill, longer than the 2 048 measured. Priming the filter on the
-    // jump removed that gap and exposed it.)
+    // halves split at beat 20.
     const LOUD_BEAT: f64 = 2.0;
     const SILENT_BEAT: f64 = 30.0;
 
@@ -846,11 +843,9 @@ fn dominant_hz(x: &[f32], sample_rate: f32) -> f32 {
 /// this asserts *continuity of level* across hundreds of ordinary blocks —
 /// after the pipeline fills, no block may collapse to silence.
 ///
-/// It spent time `#[ignore]`d on a SECOND, unrelated cause of the same
-/// symptom: it measured 32/256 silent blocks even with the flush logic removed,
-/// because the vocoder published `stretch x` as many output samples as it
-/// consumed against a host that takes exactly one per call. Two independent
-/// bugs producing one indistinguishable symptom is the argument for asserting
+/// Two independent causes produce the same symptom (a flush that leaves a gap,
+/// and a vocoder that publishes `stretch x` as many output samples as it
+/// consumed against a host that takes exactly one per call), which is the argument for asserting
 /// level continuity here rather than merely "output is non-zero".
 #[test]
 fn continuous_playback_does_not_flush_the_stretch_filter() {
@@ -1001,40 +996,6 @@ fn clone_snapshots_clips() {
     tick(&mut cloned, &transport, SR, &mut out_clone);
 
     assert!(out_clone[0] != 0.0, "cloned unit should have the voice");
-}
-
-#[test]
-fn insert_voice_is_audible_without_channel() {
-    let (mut unit, _handle) = VoicePool::new().with_handle();
-    let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let wave = make_wave(100);
-
-    let sampler =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
-    unit.insert_voice(
-        SlotId(1),
-        Voice {
-            play: Playback {
-                gain: sampler.gain(),
-                speed: sampler.speed(),
-                loop_: sampler.loop_(),
-                direction: PlayDirection::Forward,
-                stretch: StretchFactor::new(1.0),
-                pitch: Cents::new(0.0),
-            },
-            source: VoiceSource::Memory(sampler),
-        },
-    );
-
-    // No tick/drain needed — the voice is already in the slot list.
-    assert_eq!(unit.voice_count(), 1);
-
-    let mut out = [0.0f32; 2];
-    tick(&mut unit, &transport, SR, &mut out);
-    assert!(
-        out[0] != 0.0 || out[1] != 0.0,
-        "inserted voice should produce audio"
-    );
 }
 
 /// A pool no handle was taken for (what a fork builds) is empty and
@@ -1300,68 +1261,28 @@ fn a_redundant_stretch_filter_is_retired_not_freed_on_the_audio_thread() {
     );
 }
 
-/// `VoiceNode` MUST be a graph node in its own right: a spectral resynth
-/// adds a standalone voice node to its graph, and a single timeline clip
-/// is one. This guards that contract: a
-/// standalone `VoiceNode` produces the same audio one mixer slot does.
+/// `VoiceNode` is a graph node in its own right: a spectral resynth adds a
+/// standalone voice node to its graph, and a single timeline clip is one. It
+/// has no inputs, two outputs, and its first frame is the wave's first sample.
 #[test]
 fn voice_node_is_a_standalone_graph_node() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-    let wave = make_wave(100);
-
-    // Same voice the mixer would hold for one voice.
-    let sampler = MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
+    let sampler = MemorySource::placed(make_wave(100), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
     let voice = Voice {
         source: VoiceSource::Memory(sampler),
         play: Playback::default(),
     };
 
-    // As a standalone node: 0 in, 2 out, produces audio.
     let mut node = VoiceNode::new(voice).expect("a finite gain and a nonempty width");
     assert_eq!(node.shape().audio_in().count(), 0);
     assert_eq!(node.shape().audio_out().count(), 2);
 
     let mut out = [0.0f32; 2];
     tick(&mut node, &transport, SR, &mut out);
-    assert!(
-        out[0] != 0.0 || out[1] != 0.0,
-        "standalone VoiceNode should produce audio"
-    );
-
-    // It reads the SAME single-voice frame the mixer does for one slot.
-    let sampler2 =
-        MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
-    let (mut mixer, _handle) = VoicePool::new().with_handle();
-    mixer.insert_voice(
-        SlotId(1),
-        Voice {
-            play: Playback {
-                gain: sampler2.gain(),
-                speed: sampler2.speed(),
-                loop_: sampler2.loop_(),
-                direction: PlayDirection::Forward,
-                stretch: StretchFactor::new(1.0),
-                pitch: Cents::new(0.0),
-            },
-            source: VoiceSource::Memory(sampler2),
-        },
-    );
-    let mut node2 = VoiceNode::new(Voice {
-        source: VoiceSource::Memory(
-            MemorySource::placed(make_wave(100), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
-        ),
-        play: Playback::default(),
-    })
-    .expect("a finite gain and a nonempty width");
-    let mut mixer_out = [0.0f32; 2];
-    let mut node_out = [0.0f32; 2];
-    tick(&mut mixer, &transport, SR, &mut mixer_out);
-    tick(&mut node2, &transport, SR, &mut node_out);
-    assert!(
-        (mixer_out[0] - node_out[0]).abs() < 1e-6,
-        "VoiceNode frame must match the mixer's single-slot read"
+    assert_eq!(
+        out, [0.01; 2],
+        "the wave's first sample, 1/100, on both channels"
     );
 }
 

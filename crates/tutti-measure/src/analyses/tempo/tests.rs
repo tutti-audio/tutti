@@ -565,3 +565,38 @@ fn an_absurd_range_is_refused() {
         Err(TempoEstimateError::InsufficientInput { .. })
     ));
 }
+
+/// A meter of a 120 BPM click train reads 120 BPM and beats on its clicks, in
+/// any chunking; a zero hop is refused when the meter is made.
+#[test]
+fn the_tempo_and_beat_meters_read_the_click_train() {
+    let x = clicks(120.0, 0.3, 10.0);
+    let rate = SampleRate::of(RATE);
+    let cfg = TempoConfig::new();
+    let tempo = crate::measure::chunk_independent(&cfg, rate, &x).unwrap();
+    assert!(
+        (tempo.bpm.get() - 120.0).abs() <= tolerance(120.0),
+        "{}",
+        tempo.bpm
+    );
+    assert!(tempo.confidence.get() > 0.9);
+
+    let grid = crate::measure::chunk_independent(&BeatConfig::new(cfg), rate, &x).unwrap();
+    let hop = geometry().hop().get() as f64;
+    let worst = miss(&grid, &click_samples(120.0, 0.3, 10.0))
+        .into_iter()
+        .fold(0.0, f64::max);
+    assert!(worst <= hop, "a beat is {worst} samples off");
+
+    let mut meter = Measure::<f64>::measure(&cfg, rate).unwrap();
+    assert_eq!(
+        meter.push(Mono::new(&[f64::NAN]), &mut Vec::new()),
+        Err(MeterError::NonFiniteInput)
+    );
+
+    let zero = cfg.framing(Framing::new(Samples::new(1024), Samples::new(0)));
+    assert!(matches!(
+        Measure::<f64>::measure(&zero, rate),
+        Err(MeterError::Framing(FramingError::ZeroHop))
+    ));
+}

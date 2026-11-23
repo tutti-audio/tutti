@@ -359,8 +359,7 @@ mod tests {
         assert!(cache.get(&c).is_some());
     }
 
-    /// Re-inserting a resident path promotes it too — `insert`'s early-return
-    /// arm refreshes the stamp rather than leaving it stale.
+    /// Re-inserting a resident path makes it the most recently used.
     #[test]
     fn reinsert_of_a_resident_path_promotes_it() {
         let cache = LruCache::new(2, u64::MAX);
@@ -374,7 +373,10 @@ mod tests {
 
         cache.insert(c.clone(), make_wave(10));
 
-        assert!(cache.get(&a).is_some(), "re-insert refreshed a's stamp");
+        assert!(
+            cache.get(&a).is_some(),
+            "re-insert made a the most recently used"
+        );
         assert!(cache.get(&b).is_none(), "b is now least recently used");
     }
 

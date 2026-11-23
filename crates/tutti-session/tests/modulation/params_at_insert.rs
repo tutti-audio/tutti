@@ -4,7 +4,7 @@
 //! The insertion paths are `Graph::add` and `Graph::replace`; these pin
 //! them: a lane finds a native param's knob
 //! through the node's `ParamSet`, which the insertion keeps by key
-//! (`SessionNode::params`, `set_node_params`). They stand at the insertion
+//! (`NodeParts::params`, `set_node_params`). They stand at the insertion
 //! paths rather than at a fixture that addresses by hand, because a path that
 //! forgot to would leave every hand-built suite green. The nodes are the
 //! suites' own `ProbeUnit` of `Drive` (a host's `ParamNode`) and an engine
