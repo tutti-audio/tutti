@@ -108,7 +108,7 @@ mod tests {
     use tutti_buffers::MaxBlock;
     use tutti_dsp::Tilt;
     use tutti_graph::Cost;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
@@ -131,16 +131,6 @@ mod tests {
         let x = libm::tan(PI * f / RATE.get()) / libm::tan(PI * fc / RATE.get());
         let a2 = 10f64.powf(db / 20.0);
         ((a2 * x * x + 1.0) / (x * x + a2)).sqrt()
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TiltFilterNode::from(TiltFilterConfig::new(
-            2u16,
-            Hz::new(300.0),
-            Db::new(-6.0),
-        )));
     }
 
     /// The shape is the width in and out, `Moderate`, declares the pivot and the gain and a

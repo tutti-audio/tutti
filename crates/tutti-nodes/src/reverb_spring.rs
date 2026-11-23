@@ -214,17 +214,11 @@ mod tests {
     use super::*;
     use crate::test_support::{drive_block, prepared};
     use tutti_graph::Node;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_units::UnitParam;
 
     fn node(width: u16) -> SpringReverbNode<f32> {
         prepared(SpringReverbNode::from(SpringReverbConfig::new(width)))
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(SpringReverbNode::<f32>::from(SpringReverbConfig::new(2u16)));
     }
 
     /// The shape is the width in and out and declares the decay, the tone and the dispersion

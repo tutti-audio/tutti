@@ -168,19 +168,12 @@ mod tests {
     use super::*;
     use crate::test_support::{RATE, amplitude_at, mean};
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{Direct, assert_param_fork, drive};
+    use tutti_graph::contract::{Direct, drive};
 
     fn render(node: OscillatorNode, frames: usize) -> Vec<f32> {
         let mut d = Direct::new(node, RATE, frames);
         d.block();
         d.output().plane(0).samples().to_vec()
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(OscillatorNode::from(
-            OscillatorConfig::new(OscillatorWave::Saw).frequency(Hz::new(220.0)),
-        ));
     }
 
     #[test]

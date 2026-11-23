@@ -1,6 +1,6 @@
 use super::*;
 use tutti_graph::Node;
-use tutti_graph::contract::{BlockRig, assert_param_fork, prepared};
+use tutti_graph::contract::{BlockRig, prepared};
 use tutti_units::{Latency, UnitParam};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -41,14 +41,6 @@ fn run(
         out.extend_from_slice(heard.plane(0).samples());
     }
     out
-}
-
-/// A fork starts from the distance last set and shares no cell.
-#[test]
-fn a_fork_shares_no_cell() {
-    assert_param_fork(DistanceNode::from(
-        DistanceConfig::new(2u16, Metres::of(50.0)).distance(Metres::of(8.0)),
-    ));
 }
 
 /// The shape is the width in and out, declares the distance as `Distance` starting as

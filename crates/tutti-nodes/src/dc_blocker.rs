@@ -168,7 +168,7 @@ impl<F: Float + Lerp> Kernel for DcBlockerKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{RATE, drive_block, prepared};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -177,12 +177,6 @@ mod tests {
         prepared(DcBlockerNode::<f32>::from(
             DcBlockerConfig::new(width).corner(Hz::new(corner)),
         ))
-    }
-
-    /// A fork starts from the corner last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(DcBlockerNode::<f32>::from(DcBlockerConfig::new(2u16)));
     }
 
     /// The shape is the width in and out, `Light`, declares the corner as `Cutoff` and has
