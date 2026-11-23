@@ -795,8 +795,8 @@ pub mod polysynth {
     };
 }
 
-/// The note logic an instrument is played by (`tutti-voicing`): the allocator, its
-/// configuration and steal rule, and the voice a note-playing instrument implements.
+/// The note logic an instrument is played by (`tutti-voicing`): the voice configuration and
+/// steal rule, and the voice a note-playing instrument implements.
 /// Feature `synth`.
 #[cfg(feature = "synth")]
 pub mod voicing {
