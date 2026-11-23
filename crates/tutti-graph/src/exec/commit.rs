@@ -11,7 +11,7 @@ use tutti_rt::{
     CappedVec, ControlDrop, Counter, CounterWriter, Gauge, GaugeWriter, Overflow, PushError,
     Reading, RingReader, RingWriter, counter, gauge, ring,
 };
-use tutti_units::{Blocks, PlayReading};
+use tutti_units::{Blocks, PlayReading, Samples};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -454,7 +454,7 @@ pub(super) fn cut_fades<F: Float>(
     if let Some(f) = u.fade.take() {
         retire_fade(fade_back, f);
         // A cut is a step: never skip the next call on stale flags.
-        u.quiet = 0;
+        u.quiet = Samples::ZERO;
         u.last_quiet = false;
         u.last_idle = false;
         u.reported = None;

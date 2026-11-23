@@ -530,7 +530,7 @@ impl<F: Float> Editor<F> {
         let spec = &self.spec;
         let values = &self.values;
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
-        let declick = declick_frames(plan.prepare.sample_rate()).get();
+        let declick = declick_frames(plan.prepare.sample_rate());
         let params = |key: NodeKey, ports: usize, max: usize| {
             let declared = plan.unit(key).map(|u| u.shape.params);
             ranges.state(key, ports, max, declick, declared, values)

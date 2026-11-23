@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use tutti_curve::declick_frames;
+use tutti_units::Samples;
 
 use super::BusLanes;
 use crate::compile::plan::Plan;
@@ -152,7 +153,7 @@ impl RangeCells {
         key: NodeKey,
         ports: usize,
         max: usize,
-        declick: usize,
+        declick: Samples,
         declared: Option<ParamPorts>,
         values: &GraphValues,
     ) -> ParamState<F> {
@@ -306,7 +307,7 @@ impl ModeCells {
             cell.clone(),
             shape,
             plan.prepare.max_block().get(),
-            declick_frames(plan.prepare.sample_rate()).get(),
+            declick_frames(plan.prepare.sample_rate()),
         )
     }
 }

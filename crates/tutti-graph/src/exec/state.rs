@@ -3,7 +3,7 @@
 
 use tutti_buffers::Float;
 use tutti_rt::CappedVec;
-use tutti_units::Tail;
+use tutti_units::{Samples, Tail};
 
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::Flags;
@@ -26,7 +26,7 @@ pub(crate) struct Unit<F: Float = f32> {
     pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// Consecutive frames of fully silent input, saturating.
-    pub(super) quiet: u64,
+    pub(super) quiet: Samples,
     /// Whether the last call (or skip) left every output silent and wrote no
     /// event.
     pub(super) last_quiet: bool,
@@ -61,7 +61,7 @@ impl<F: Float> Unit<F> {
         Self {
             generation,
             node,
-            quiet: 0,
+            quiet: Samples::ZERO,
             last_quiet: false,
             last_idle: false,
             reported: None,

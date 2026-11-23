@@ -469,10 +469,10 @@ fn par_for(
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
 /// latency then its tail (`NodeRec::park_after`).
-fn tail_elapsed(park_after: Tail, quiet: u64) -> bool {
+fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
     match park_after {
         Tail::None => true,
-        Tail::Finite(n) => quiet >= n.get() as u64,
+        Tail::Finite(n) => quiet >= n,
         Tail::Unknown | Tail::Unbounded => false,
     }
 }
@@ -911,7 +911,7 @@ mod tests {
             channels.readings.pool.clone(),
             channels.readings.rendered.clone(),
         );
-        let declick = tutti_curve::declick_frames(prepare.sample_rate()).get();
+        let declick = tutti_curve::declick_frames(prepare.sample_rate());
         let mut commit = Commit::build(
             1,
             Arc::clone(&plan),

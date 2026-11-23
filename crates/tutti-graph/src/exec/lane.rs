@@ -109,3 +109,87 @@ pub fn fade_in<F: Float>(law: FadeLaw, start: F, goal: F, j: Samples, len: Sampl
     let (out, inn) = fade_gains::<F>(law, j, len);
     start * out + goal * inn
 }
+
+/// The progress of one declick fade of [`FadeLaw::EqualAmplitude`]: how many
+/// of its `len` frames have run. Every fade that declicks (an edge's weight,
+/// a unit's mode weights, a param port's source change) counts its frames
+/// here and reads its gains from here; what it fades between stays its own.
+///
+/// A fade is *running* while `done < len`; a new one is idle until
+/// [`restart`](Self::restart)ed, and [`cut`](Self::cut) ends one early.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Declick {
+    len: Samples,
+    done: Samples,
+}
+
+impl Declick {
+    /// The fade law every declick runs.
+    const LAW: FadeLaw = FadeLaw::EqualAmplitude;
+
+    /// A fade of `len` frames that is not running.
+    pub(crate) const fn idle(len: Samples) -> Self {
+        Self { len, done: len }
+    }
+
+    /// A fade of `len` frames about to run its first frame.
+    pub(crate) const fn started(len: Samples) -> Self {
+        Self {
+            len,
+            done: Samples::ZERO,
+        }
+    }
+
+    /// Run again from the first frame.
+    pub(crate) fn restart(&mut self) {
+        self.done = Samples::ZERO;
+    }
+
+    /// End the fade where it is: it no longer runs.
+    pub(crate) fn cut(&mut self) {
+        self.done = self.len;
+    }
+
+    /// Whether frames of the fade are left to run.
+    pub(crate) fn running(self) -> bool {
+        self.done < self.len
+    }
+
+    /// The fade's length.
+    pub(crate) fn len(self) -> Samples {
+        self.len
+    }
+
+    /// The frames run so far: the fade's frame the next block starts at.
+    pub(crate) fn done(self) -> Samples {
+        self.done
+    }
+
+    /// The frames left to run.
+    pub(crate) fn remaining(self) -> Samples {
+        self.len.remaining_after(self.done)
+    }
+
+    /// `frames` more have run; the count stops at the length.
+    pub(crate) fn advance(&mut self, frames: Samples) {
+        self.done = (self.done + frames).min(self.len);
+    }
+
+    /// The last frame run: the one before [`done`](Self::done).
+    pub(crate) fn last_frame(self) -> Samples {
+        self.done.remaining_after(Samples::new(1))
+    }
+
+    /// `(out, in)`: the gains of fade frame `j`.
+    #[inline]
+    pub(crate) fn gains<F: Float>(self, j: Samples) -> (F, F) {
+        fade_gains(Self::LAW, j, self.len)
+    }
+
+    /// `start` moved to `goal` at fade frame `j`, and exactly `goal` from the
+    /// fade's length on.
+    #[inline]
+    pub(crate) fn between<F: Float>(self, start: F, goal: F, j: Samples) -> F {
+        fade_in(Self::LAW, start, goal, j, self.len)
+    }
+}
