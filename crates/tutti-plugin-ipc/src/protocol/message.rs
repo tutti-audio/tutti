@@ -2,7 +2,7 @@
 //!
 //! `messages!` turns one table of rows into every type a control message has on
 //! the wire: a struct per request, a struct per reply, the [`ControlRequest`] and
-//! [`ControlReply`](super::ControlReply) enums over them, and each request's [`Message`] impl. The
+//! [`ControlReply`] enums over them, and each request's [`Message`] impl. The
 //! table is `envelope.rs`'s, and its row order is the wire's.
 
 use super::envelope::{ControlReply, ControlRequest};
@@ -15,13 +15,13 @@ pub trait Message: Into<ControlRequest> {
     /// nothing answers.
     type Reply;
     /// Whether the server answers the request. A request that is answered has a
-    /// `Reply` that is built from, and only from, the [`ControlReply`](super::ControlReply) variant of
+    /// `Reply` that is built from, and only from, the [`ControlReply`] variant of
     /// the same name.
     const REPLIES: bool;
 }
 
 /// A request the server answers: its [`Reply`](Message::Reply) is built from, and
-/// only from, the [`ControlReply`](super::ControlReply) of its row, so a call
+/// only from, the [`ControlReply`] of its row, so a call
 /// that asks it gets that reply or a refusal and never another kind.
 pub trait Answered: Message<Reply: TryFrom<ControlReply, Error = ControlReply>> {}
 
@@ -49,7 +49,7 @@ pub trait Unanswered: Message<Reply = ()> {}
 ///
 /// It declares, for every row, a `pub struct` for the request and one for the
 /// reply (docs and field attributes carried through), a variant of the same
-/// name and fields in [`ControlRequest`] and in [`ControlReply`](super::ControlReply) (which ends in
+/// name and fields in [`ControlRequest`] and in [`ControlReply`] (which ends in
 /// `Error`, the failure any request may be answered with), `From<Request> for
 /// ControlRequest`, `From<Reply> for ControlReply`, `TryFrom<ControlReply>` for
 /// the reply (the one place a reply's variant is matched), and [`Message`] for
