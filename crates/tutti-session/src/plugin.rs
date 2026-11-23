@@ -776,9 +776,7 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
             PluginChange::TailChanged { tail }
         }
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
-        PluginSignal::Invalidate(PluginInvalidation::MidiMapChanged) => {
-            PluginChange::MidiMapChanged
-        }
+        PluginSignal::Invalidate(PluginInvalidation::MidiMap) => PluginChange::MidiMapChanged,
         PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
             PluginChange::StateNotRestored { reason }
         }
@@ -2605,7 +2603,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             let redeclared = heard.iter().any(|notice| {
                 matches!(
                     notice,
-                    PluginSignal::Invalidate(PluginInvalidation::MidiMapChanged)
+                    PluginSignal::Invalidate(PluginInvalidation::MidiMap)
                 )
             });
             if let (true, Some(main)) = (redeclared, cx.main) {

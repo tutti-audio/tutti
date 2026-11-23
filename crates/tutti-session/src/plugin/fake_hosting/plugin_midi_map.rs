@@ -268,7 +268,7 @@ fn a_redeclared_table_replaces_the_declared_one_and_is_reported_once() {
         entry(None, cc(7), LEVEL),
     ];
     fake.declare_midi_map(&declared);
-    invalidate.fire(PluginInvalidation::MidiMapChanged);
+    invalidate.fire(PluginInvalidation::MidiMap);
     let out = s.update_on(tutti_fixtures::main_thread());
     let changed = out
         .iter()

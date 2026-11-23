@@ -193,7 +193,7 @@ fn a_redeclared_table_is_the_nodes_after_the_tick() {
     assert!(
         matches!(
             changes.reports.as_slice(),
-            [tutti_plugin_types::PluginInvalidation::MidiMapChanged]
+            [tutti_plugin_types::PluginInvalidation::MidiMap]
         ),
         "the handle's subscribers are told once: {:?}",
         changes.reports
