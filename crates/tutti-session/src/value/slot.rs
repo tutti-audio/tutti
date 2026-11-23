@@ -97,7 +97,7 @@ pub enum SlotId {
 impl SlotId {
     /// Whether a project saves the value: the one answer, which
     /// [`SavedValues`](crate::SavedValues) captures by. A policy, a MIDI
-    /// device's latency and a plugin's automation mode are the session's
+    /// device's latency and a plugin's automation mode and track info are the session's
     /// setup of a place, not of the project, so a project moved to another
     /// machine or another plugin does not carry them.
     pub(crate) const fn saved(self) -> bool {
@@ -108,7 +108,7 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::OutputLatency => false,
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(_) => false,
+            Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
             Self::Tempo
             | Self::Meter
             | Self::Loop

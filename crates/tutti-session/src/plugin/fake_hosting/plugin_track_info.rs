@@ -108,3 +108,12 @@ fn a_removed_plugin_has_no_track_info_target() {
     s.graph().remove(node).expect("the node is removed");
     assert!(s.get(target).is_err(), "the target went with its plugin");
 }
+
+/// **Track info is not saved**: it is the host's setup of the plugin's place,
+/// like the automation mode, so a preset made of it holds nothing.
+#[test]
+fn track_info_is_not_a_saved_value() {
+    let (s, node, _fake) = hosting();
+    let target = s.plugin_view(node).unwrap().track_info();
+    assert!(s.values_of([target.to(drums()).erase()]).is_empty());
+}
