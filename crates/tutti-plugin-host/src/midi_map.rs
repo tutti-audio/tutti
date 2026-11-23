@@ -160,7 +160,7 @@ impl MidiTable {
             Voice2::ChannelPressure(pressure) => {
                 (MidiSource::ChannelPressure, pressure.normalized())
             }
-            Voice2::PitchBend(bend) => (MidiSource::PitchBend, unit_of(bend.bipolar())),
+            Voice2::PitchBend(bend) => (MidiSource::PitchBend, bend_as_unit(bend.bipolar())),
             _ => return false,
         };
         let Some(param) = self.lookup(channel, source) else {
@@ -174,9 +174,8 @@ impl MidiTable {
 }
 
 /// A bend on the parameter's `0..=1` scale: the bottom of the bend is 0, the
-/// centre 0.5 and the top 1. Neither `tutti-units` nor `tutti-midi-protocol`
-/// has this conversion between `Bipolar` and `Normalized`.
-fn unit_of(bend: Bipolar) -> Normalized {
+/// centre 0.5 and the top 1.
+fn bend_as_unit(bend: Bipolar) -> Normalized {
     Normalized::clamped((bend.get() + 1.0) / 2.0)
 }
 
