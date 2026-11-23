@@ -59,7 +59,7 @@ pub enum MidiSource {
 
 /// Who applies the app's controller entries after
 /// [`Control::set_app_midi_map`](crate::Control::set_app_midi_map).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum MidiMapApplied {
@@ -68,6 +68,7 @@ pub enum MidiMapApplied {
     Plugin,
     /// The plugin cannot take the entries; the host's node translates each
     /// mapped message into a parameter change.
+    #[default]
     Host,
 }
 

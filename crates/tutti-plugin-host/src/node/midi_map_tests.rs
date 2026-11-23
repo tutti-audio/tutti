@@ -41,7 +41,8 @@ fn cc74(param: ParamId) -> MidiAssignment {
 }
 
 /// A node over a fake declaring parameters 1 and 2 and the controller table
-/// `declared`, ticked once so the map is engaged.
+/// `declared`, built as an out-of-process node is: over an activated plugin, never
+/// pumped.
 fn rig(
     declared: &[MidiAssignment],
 ) -> (
@@ -88,7 +89,6 @@ fn rig_answering(
     let inner = Arc::clone(&client.inner);
     let slot = client.midi_map();
     let unit = Direct::new(client.bind(tempo()), SR, BLOCK);
-    inner.lock().pump(main);
     (fake, unit, inner, slot)
 }
 
@@ -128,7 +128,8 @@ fn cc(channel: u8, controller: CCNumber, word: u32) -> tutti_ump::Ump {
 }
 
 /// **A controller the plugin declared moves its parameter by the controller's
-/// value over the 32-bit full scale, and the plugin is not also sent it as MIDI**;
+/// value over the 32-bit full scale, and the plugin is not also sent it as MIDI**,
+/// from the first block of a node that was never pumped (an export's fork);
 /// a controller and a note nothing maps reach the plugin as MIDI.
 #[test]
 fn a_declared_controller_moves_its_parameter_and_leaves_the_plugins_midi() {
@@ -151,28 +152,28 @@ fn a_declared_controller_moves_its_parameter_and_leaves_the_plugins_midi() {
 
 /// **An app entry from the handle's path replaces the declared one for its
 /// channel and message and the node follows from its next block**, and an entry
-/// answered by the plugin (an AU) is translated by nobody.
+/// answered by the plugin (an AU) is not translated by the node.
 #[test]
 fn the_apps_entry_replaces_the_declared_one_unless_the_plugin_applies_it() {
     let (fake, mut unit, _inner, slot) = rig(&[cc74(LEVEL)]);
-    slot.set_app(&[cc74(OTHER)], MidiMapApplied::Host);
+    slot.replace_app(&[cc74(OTHER)], MidiMapApplied::Host);
     let word = u32::MAX;
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, word))]);
     assert_eq!(params(&fake), [(OTHER, 1.0)]);
 
     fake.clear_calls();
-    slot.set_app(&[cc74(OTHER)], MidiMapApplied::Plugin);
+    slot.replace_app(&[cc74(OTHER)], MidiMapApplied::Plugin);
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, word))]);
-    assert!(params(&fake).is_empty(), "the unit applies its own tables");
     assert_eq!(
-        midi_seen(&fake),
-        1,
-        "the message reaches the plugin as MIDI"
+        params(&fake),
+        [(LEVEL, 1.0)],
+        "the app's entry is the plugin's, the declared one is still the host's"
     );
+    assert_eq!(midi_seen(&fake), 0);
 }
 
-/// **A plugin that answers `Plugin` to the engaging call has its declared table
-/// left to itself.**
+/// **A plugin whose wiring says it applies its own declared table has it left to
+/// itself.**
 #[test]
 fn a_plugin_that_applies_its_own_table_is_not_translated() {
     let (fake, mut unit, _inner, _slot) = rig_answering(&[cc74(LEVEL)], MidiMapApplied::Plugin);

@@ -259,12 +259,11 @@ where
 
         // The app's controller entries, which the fork's plugin and node take
         // as the live ones did.
-        let app = self.midi_map.app();
-        if !app.is_empty() {
+        if let Some((app, _)) = self.midi_map.app() {
             let mut instance = fork.inner.lock();
             let slot = instance.midi_map();
             if let Some(control) = instance.control() {
-                slot.set_app(&app, control.set_app_midi_map(main, &app));
+                slot.replace_app(&app, control.set_app_midi_map(main, &app));
             }
         }
 

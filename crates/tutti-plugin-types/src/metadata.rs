@@ -354,6 +354,14 @@ pub struct PluginWiring {
     /// table read last.
     #[cfg_attr(feature = "serde", serde(default))]
     pub assignments: Vec<MidiAssignment>,
+    /// Who applies [`assignments`](Self::assignments): the host's node
+    /// ([`Host`](crate::MidiMapApplied::Host): VST3, whose host must, and the
+    /// formats that declare none) or the plugin itself
+    /// ([`Plugin`](crate::MidiMapApplied::Plugin): an AU's unit routes its own
+    /// table). Known at load, so a node translates the declared table from its
+    /// first block with no call to the plugin.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub assignments_applied: crate::MidiMapApplied,
     /// The names the plugin gives to MIDI keys (CLAP `note-name`, VST3
     /// `IKeyswitchController`, VST2 `effGetMidiKeyName`): empty for a plugin
     /// with none. The plugin's programs are
@@ -475,6 +483,7 @@ mod tests {
                 source: crate::MidiSource::PitchBend,
                 param: tutti_units::ParamId::new(9),
             }],
+            assignments_applied: crate::MidiMapApplied::Plugin,
             note_names: vec![NoteName {
                 key: tutti_ump::NoteNumber::of(36),
                 channel: None,

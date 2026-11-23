@@ -528,9 +528,9 @@ impl<L: ServerSide> Server<L> {
             Notice::ParamTitlesChanged => {
                 self.events.push(News::PluginParamTitlesChanged);
             }
-            // The wire announces the declared controller table once, at load: the
-            // host's map refreshes only for an in-process plugin.
-            Notice::MidiMapChanged => {}
+            Notice::MidiMapChanged => {
+                self.events.push(News::PluginMidiMapChanged);
+            }
             Notice::Reloaded => {
                 // A reload may change the buses: the host is told them first,
                 // so its picture is current when it re-reads everything.

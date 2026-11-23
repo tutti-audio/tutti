@@ -215,6 +215,7 @@ macro_rules! served_control {
                 let mut wiring = self.wiring_now();
                 if let Some(live) = self.link.bridge.audio().wiring() {
                     wiring.assignments = live.assignments;
+                    wiring.assignments_applied = live.assignments_applied;
                 }
                 wiring
             }

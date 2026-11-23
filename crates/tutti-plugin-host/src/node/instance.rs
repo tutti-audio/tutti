@@ -221,6 +221,7 @@ impl<L: Loaded> Instance<L> {
         width: FloatWidth,
     ) -> IpcResult<(Self, Rt<L::Processor>)> {
         let widths = loaded.widths();
+        let wiring = tutti_plugin_types::Control::wiring(&loaded, main);
         let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
             .ok_or(IpcError::BlockUnsupported { frames: block_size })?;
@@ -238,7 +239,7 @@ impl<L: Loaded> Instance<L> {
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
-            midi_map: MidiMapSlot::new(),
+            midi_map: MidiMapSlot::new(&wiring),
             midi_map_stale: false,
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
@@ -248,7 +249,6 @@ impl<L: Loaded> Instance<L> {
         // What the activation read is the baseline, not a change.
         this.changes = Changes::default();
         this.reports.clear();
-        this.engage_midi_map(main);
         Ok((this, rt))
     }
 
@@ -281,7 +281,7 @@ impl<L: Loaded> Instance<L> {
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
-            midi_map: MidiMapSlot::new(),
+            midi_map: MidiMapSlot::new(wiring),
             midi_map_stale: false,
         };
         this.publish_figures();
@@ -384,23 +384,10 @@ impl<L: Loaded> Instance<L> {
         self.midi_map.clone()
     }
 
-    /// Reads the plugin's declared table and asks who applies the app's entries
-    /// (`set_app_midi_map` with none, which writes nothing), engaging the map. An
-    /// answer the app already gave stands. Main thread.
-    fn engage_midi_map(&mut self, main: MainThreadMarker) {
-        let known = self.midi_map.applied();
-        let Some(control) = self.lifecycle.control() else {
-            return;
-        };
-        let declared = control.wiring(main).assignments;
-        let applied = known.unwrap_or_else(|| control.set_app_midi_map(main, &[]));
-        self.midi_map.engage(declared, applied);
-    }
-
     /// Takes the table the plugin declares now. Main thread.
     fn declare_midi_map(&mut self, main: MainThreadMarker) {
         if let Some(control) = self.lifecycle.control() {
-            self.midi_map.declare(control.wiring(main).assignments);
+            self.midi_map.declare(&control.wiring(main));
         }
     }
 
@@ -720,11 +707,6 @@ impl<L: Loaded> Instance<L> {
     /// counts and latency may both have moved), and reports what an activation
     /// read. Main thread: a re-read dispatches `effGetTailSize`.
     pub(super) fn pump(&mut self, main: MainThreadMarker) -> Changes {
-        // A node adopted over a served plugin has no main thread at its
-        // construction: its map is engaged by the first tick.
-        if !self.midi_map.is_engaged() {
-            self.engage_midi_map(main);
-        }
         self.midi_map.reclaim();
         let mut asked = Vec::new();
         if let Some(control) = self.lifecycle.control() {

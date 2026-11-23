@@ -1408,6 +1408,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         News::ParameterChanged { edit } => inbox.param(edit),
         News::PluginParamValuesChanged => inbox.resync(ResyncKind::ParamValues),
         News::PluginParamTitlesChanged => inbox.resync(ResyncKind::ParamTitles),
+        News::PluginMidiMapChanged => inbox.midi_map_changed(),
         News::PluginIoChanged { layout } => {
             if let Some(layout) = layout {
                 inbox.io_layout(layout);

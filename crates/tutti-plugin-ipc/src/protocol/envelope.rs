@@ -728,6 +728,9 @@ pub enum News {
         /// the server refused.
         refused_off_thread_calls: tutti_units::Calls,
     },
+    /// Plugin re-declared its controller table (VST3 `kMidiCCAssignmentChanged`).
+    /// The host asks for the wiring again ([`ControlRequest::GetWiring`]).
+    PluginMidiMapChanged,
 }
 
 /// One frame the server sends on the control connection: an answer, a sign of

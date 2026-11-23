@@ -320,12 +320,17 @@ impl Shared {
         self.log.push(Call::Wiring);
         let outputs = ChannelLayout::try_from(self.outputs.load(Ordering::Relaxed))
             .expect("a fake plugin has few outputs");
+        let (assignments, assignments_applied) = {
+            let map = self.midi_map.lock();
+            (map.declared.clone(), map.applied)
+        };
         PluginWiring {
             inputs: vec![PluginBus::main(ChannelLayout::STEREO)],
             outputs: vec![PluginBus::main(outputs)],
             latency_samples: Samples::new(self.latency.load(Ordering::Relaxed)),
             tail: self.tail(),
-            assignments: self.midi_map.lock().declared.clone(),
+            assignments,
+            assignments_applied,
             ..PluginWiring::default()
         }
     }
@@ -409,8 +414,9 @@ impl FakePlugin {
         self.0.midi_map.lock().declared = table.to_vec();
     }
 
-    /// Makes the fake answer `applied` to `Control::set_app_midi_map`, as an AU
-    /// answers `Plugin`.
+    /// Makes the fake say `applied` applies its declared table
+    /// ([`PluginWiring::assignments_applied`]) and answer it to
+    /// `Control::set_app_midi_map`, as an AU does with `Plugin`.
     pub fn apply_midi_map(&self, applied: MidiMapApplied) {
         self.0.midi_map.lock().applied = applied;
     }

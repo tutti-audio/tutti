@@ -12,15 +12,15 @@
 //!
 //! # What is translated
 //!
-//! [`Control::set_app_midi_map`] answers who applies the app's entries. On
-//! [`Host`](MidiMapApplied::Host) the map is the plugin's declared table
-//! ([`PluginWiring::assignments`](tutti_plugin_types::PluginWiring::assignments))
-//! and the app's entries together, the app's replacing a declared entry for the
-//! same channel and message (a later entry replaces an earlier one, and an
-//! entry for any channel covers all 16). On [`Plugin`](MidiMapApplied::Plugin)
-//! (an AU: the unit applies both tables itself) the map is empty, because a
-//! second application would be audible. Until the node has asked, the map is
-//! empty too.
+//! The wiring says who applies the plugin's declared table
+//! ([`PluginWiring::assignments_applied`]): the host for VST3 (and for the formats
+//! that declare none), the unit for an AU, so the node translates it from its
+//! first block with no call to the plugin. [`Control::set_app_midi_map`] answers
+//! who applies the app's entries. The map is the declared table the host applies
+//! and the app's entries the host applies, together, the app's replacing a
+//! declared entry for the same channel and message. What the plugin applies
+//! (an AU's unit applies both its tables) is left out, because a second
+//! application would be audible.
 //!
 //! The table holds Control Changes 0 to 127, channel pressure and pitch bend,
 //! the controllers VST3 can drive a parameter with. A program change or polyphonic
@@ -53,7 +53,9 @@
 use std::sync::Arc;
 
 use tutti_midi_protocol::channel_voice;
-use tutti_plugin_types::{MidiAssignment, MidiMapApplied, MidiSource};
+use tutti_plugin_types::{
+    MidiAssignment, MidiMapApplied, MidiSource, PluginWiring, effective_midi_map,
+};
 use tutti_rt::{Loan, Mutex, Publisher, Reader};
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
 use tutti_units::{Normalized, ParamId};
@@ -100,26 +102,33 @@ impl MidiTable {
         }
     }
 
-    /// The effective table of `declared` and `app`, and how many of their
-    /// entries have no row in it ([`MidiMapSlot::untranslatable`]). Entries are
-    /// applied in order, `app` after `declared`, so the later one replaces an
-    /// earlier one on the same channel and message. Allocates: control side.
+    /// The table of [`effective_midi_map`]`(declared, app)`, and how many of its
+    /// entries have no row in it ([`MidiMapSlot::untranslatable`]).
+    ///
+    /// **Channel precedence**: an entry naming a channel wins on that channel over
+    /// an any-channel entry for the same message, so the any-channel entries are
+    /// written first and the named ones over them; among entries of one kind the
+    /// later one wins. Allocates: control side.
     fn effective(declared: &[MidiAssignment], app: &[MidiAssignment]) -> (Self, usize) {
         let mut table = Self::empty();
         let mut untranslatable = 0;
-        for entry in declared.iter().chain(app) {
-            let mut translatable = false;
-            for channel in MidiChannel::all() {
-                if entry.channel.is_some_and(|only| only != channel) {
-                    continue;
+        for any_channel in [true, false] {
+            for entry in effective_midi_map(declared, app)
+                .filter(|entry| entry.channel.is_none() == any_channel)
+            {
+                let mut translatable = false;
+                for channel in MidiChannel::all() {
+                    if entry.channel.is_some_and(|only| only != channel) {
+                        continue;
+                    }
+                    if let Some(i) = index(channel, entry.source) {
+                        table.slots[i] = Some(entry.param);
+                        table.empty = false;
+                        translatable = true;
+                    }
                 }
-                if let Some(i) = index(channel, entry.source) {
-                    table.slots[i] = Some(entry.param);
-                    table.empty = false;
-                    translatable = true;
-                }
+                untranslatable += usize::from(!translatable);
             }
-            untranslatable += usize::from(!translatable);
         }
         (table, untranslatable)
     }
@@ -169,13 +178,16 @@ impl MidiTable {
 
 /// What the control side keeps of the map.
 struct State {
-    /// The plugin's declared table; `None` until the instance has read it.
-    declared: Option<Vec<MidiAssignment>>,
+    /// The plugin's declared table.
+    declared: Vec<MidiAssignment>,
+    /// Who applies `declared` ([`PluginWiring::assignments_applied`]).
+    declared_applied: MidiMapApplied,
     /// The app's entries, as last set.
     app: Vec<MidiAssignment>,
-    /// Who applies the app's entries; `None` until the plugin was asked.
-    applied: Option<MidiMapApplied>,
-    /// Entries of `declared` and `app` the table has no row for.
+    /// Who applies `app`; `None` until the app sets some (the plugin is asked
+    /// then, with them).
+    app_applied: Option<MidiMapApplied>,
+    /// Entries of the translated tables the table has no row for.
     untranslatable: usize,
 }
 
@@ -199,17 +211,24 @@ impl std::fmt::Debug for MidiMapSlot {
 }
 
 impl MidiMapSlot {
-    /// A slot that translates nothing until the instance engages it. Allocates.
-    pub(crate) fn new() -> Self {
+    /// A slot over the table `wiring` declares, translated from the first block
+    /// when the host applies it. Allocates.
+    #[must_use]
+    pub fn new(wiring: &PluginWiring) -> Self {
+        let state = State {
+            declared: wiring.assignments.clone(),
+            declared_applied: wiring.assignments_applied,
+            app: Vec::new(),
+            app_applied: None,
+            untranslatable: 0,
+        };
+        let (table, untranslatable) = Self::compile(&state);
+        let mut state = state;
+        state.untranslatable = untranslatable;
         Self {
             shared: Arc::new(Shared {
-                state: Mutex::new(State {
-                    declared: None,
-                    app: Vec::new(),
-                    applied: None,
-                    untranslatable: 0,
-                }),
-                cell: Publisher::new(MidiTable::empty()),
+                state: Mutex::new(state),
+                cell: Publisher::new(table),
             }),
         }
     }
@@ -222,46 +241,32 @@ impl MidiMapSlot {
         }
     }
 
-    /// Whether the instance has read the declared table and the plugin has said
-    /// who applies the app's entries.
-    pub(crate) fn is_engaged(&self) -> bool {
-        let state = self.shared.state.lock();
-        state.declared.is_some() && state.applied.is_some()
-    }
-
-    /// Who applies the app's entries, once the plugin was asked.
-    pub(crate) fn applied(&self) -> Option<MidiMapApplied> {
-        self.shared.state.lock().applied
-    }
-
-    /// Takes the plugin's declared table and who applies the app's entries,
-    /// and publishes. Control side.
-    pub(crate) fn engage(&self, declared: Vec<MidiAssignment>, applied: MidiMapApplied) {
+    /// Takes the plugin's re-read declared table and who applies it, and
+    /// publishes. Control side.
+    pub(crate) fn declare(&self, wiring: &PluginWiring) {
         let mut state = self.shared.state.lock();
-        state.declared = Some(declared);
-        state.applied = Some(applied);
-        self.publish(&mut state);
-    }
-
-    /// Takes the plugin's re-read declared table and publishes. Control side.
-    pub(crate) fn declare(&self, declared: Vec<MidiAssignment>) {
-        let mut state = self.shared.state.lock();
-        state.declared = Some(declared);
+        state.declared = wiring.assignments.clone();
+        state.declared_applied = wiring.assignments_applied;
         self.publish(&mut state);
     }
 
     /// Replaces the app's entries, as `applied` says who applies them, and
-    /// publishes. Control side.
-    pub(crate) fn set_app(&self, app: &[MidiAssignment], applied: MidiMapApplied) {
+    /// publishes. Control side. Public for `tutti-plugin`'s fork of an
+    /// out-of-process node.
+    pub fn replace_app(&self, app: &[MidiAssignment], applied: MidiMapApplied) {
         let mut state = self.shared.state.lock();
         state.app = app.to_vec();
-        state.applied = Some(applied);
+        state.app_applied = Some(applied);
         self.publish(&mut state);
     }
 
-    /// The app's entries, as last set. Control side.
-    pub(crate) fn app(&self) -> Vec<MidiAssignment> {
-        self.shared.state.lock().app.clone()
+    /// The app's entries and who applies them, as last set; `None` before the
+    /// app set any. Control side. Public for `tutti-plugin`'s fork of an
+    /// out-of-process node.
+    #[must_use]
+    pub fn app(&self) -> Option<(Vec<MidiAssignment>, MidiMapApplied)> {
+        let state = self.shared.state.lock();
+        Some((state.app.clone(), state.app_applied?))
     }
 
     /// Entries of the declared table and the app's that no controller of the
@@ -277,13 +282,24 @@ impl MidiMapSlot {
         self.shared.cell.reclaim();
     }
 
-    fn publish(&self, state: &mut State) {
-        let (table, untranslatable) = match (state.applied, &state.declared) {
-            (Some(MidiMapApplied::Host), Some(declared)) => {
-                MidiTable::effective(declared, &state.app)
-            }
-            _ => (MidiTable::empty(), 0),
+    /// The table the entries the host applies make: the declared ones when the
+    /// host applies them, the app's when the plugin answered `Host` to them.
+    fn compile(state: &State) -> (MidiTable, usize) {
+        let declared: &[MidiAssignment] = if state.declared_applied == MidiMapApplied::Host {
+            &state.declared
+        } else {
+            &[]
         };
+        let app: &[MidiAssignment] = if state.app_applied == Some(MidiMapApplied::Host) {
+            &state.app
+        } else {
+            &[]
+        };
+        MidiTable::effective(declared, app)
+    }
+
+    fn publish(&self, state: &mut State) {
+        let (table, untranslatable) = Self::compile(state);
         state.untranslatable = untranslatable;
         self.shared.cell.publish(table);
     }
@@ -389,10 +405,21 @@ mod tests {
         assert_eq!(t.lookup(MidiChannel::of(0), cc(1)), Some(ParamId::new(1)));
         assert_eq!(t.lookup(MidiChannel::of(1), cc(74)), None);
 
+        // An any-channel app entry covers the channels no entry names; a declared
+        // entry naming a channel wins there (channel precedence).
         let omni = table(&declared, &[assign(None, cc(74), 2)]);
-        for channel in MidiChannel::all() {
-            assert_eq!(omni.lookup(channel, cc(74)), Some(ParamId::new(2)));
-        }
+        assert_eq!(
+            omni.lookup(MidiChannel::of(0), cc(74)),
+            Some(ParamId::new(1))
+        );
+        assert_eq!(
+            omni.lookup(MidiChannel::of(3), cc(74)),
+            Some(ParamId::new(1))
+        );
+        assert_eq!(
+            omni.lookup(MidiChannel::of(5), cc(74)),
+            Some(ParamId::new(2))
+        );
         assert_eq!(
             omni.lookup(MidiChannel::of(0), cc(1)),
             Some(ParamId::new(1))
@@ -508,35 +535,40 @@ mod tests {
         assert_eq!(counters.snapshot().points_dropped, 1);
     }
 
-    /// **The slot publishes on the answer**: empty until engaged, the effective
-    /// table for a host answer, empty again for a plugin's, and the app's entries
-    /// replace the last set.
+    /// **The slot translates what the host applies**: the declared table from the
+    /// first block, the app's entries over it, and neither where the plugin applies it.
     #[test]
-    fn the_slot_translates_only_for_a_host_answer() {
-        let slot = MidiMapSlot::new();
+    fn the_slot_translates_what_the_host_applies() {
+        let wiring = |applied| PluginWiring {
+            assignments: vec![assign(Some(0), cc(74), 1)],
+            assignments_applied: applied,
+            ..PluginWiring::default()
+        };
+        let slot = MidiMapSlot::new(&wiring(MidiMapApplied::Host));
         let mut translator = slot.translator();
-        let declared = vec![assign(Some(0), cc(74), 1)];
-        assert!(
-            translator.lend().empty,
-            "nothing before the plugin is asked"
-        );
-        slot.engage(declared.clone(), MidiMapApplied::Host);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(74)),
-            Some(ParamId::new(1))
+            Some(ParamId::new(1)),
+            "the declared table from the first block"
         );
-        slot.set_app(&[assign(Some(0), cc(74), 2)], MidiMapApplied::Host);
+        slot.replace_app(&[assign(Some(0), cc(74), 2)], MidiMapApplied::Host);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(74)),
             Some(ParamId::new(2))
         );
-        slot.set_app(&[], MidiMapApplied::Host);
+        slot.replace_app(&[], MidiMapApplied::Host);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(74)),
             Some(ParamId::new(1))
         );
-        slot.set_app(&[assign(Some(0), cc(1), 2)], MidiMapApplied::Plugin);
-        assert!(translator.lend().empty, "an AU applies its own tables");
+        slot.replace_app(&[assign(Some(0), cc(1), 2)], MidiMapApplied::Plugin);
+        assert_eq!(
+            translator.lend().lookup(MidiChannel::of(0), cc(1)),
+            None,
+            "an entry the plugin applies is not translated"
+        );
+        slot.declare(&wiring(MidiMapApplied::Plugin));
+        assert!(translator.lend().empty, "an AU applies its own table");
         slot.reclaim();
     }
 }

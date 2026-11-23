@@ -210,8 +210,9 @@ pub(crate) mod wire;
 ///   and the server's `AppMidiMapApplied` and `PluginMidiLearn` answers: the app's
 ///   controller entries and the plugin's own MIDI learn.
 /// - **Version 65** appends the host's `GetWiring` and the server's `Wiring`
-///   answer: the plugin's wiring read now, so a table the plugin re-declares
-///   reaches the host.
+///   answer: the plugin's wiring read now, a wiring that carries who applies its
+///   declared controller table (`assignments_applied`), and the server's
+///   `PluginMidiMapChanged` news, which makes the host read it again.
 pub const PROTOCOL_VERSION: u32 = 65;
 
 /// Largest frame body the control connection carries, either way, in bytes.

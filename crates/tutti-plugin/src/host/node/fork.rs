@@ -222,6 +222,8 @@ pub(crate) struct ServedFork {
     /// this one at the gather, on the control thread, where a registration
     /// may allocate.
     tempo: tutti_timeline::TempoReader,
+    /// The live node's controller map, whose app entries the fork carries.
+    midi_map: tutti_plugin_host::MidiMapSlot,
 }
 
 impl ServedFork {
@@ -237,6 +239,7 @@ impl ServedFork {
             origin: client.origin.clone(),
             features: client.loaded.features,
             controls: client.controls.clone(),
+            midi_map: client.midi_map.clone(),
         }
     }
 
@@ -280,6 +283,7 @@ impl ServedFork {
             sample_rate: self.controls.sample_rate(),
             sources: self.controls.sources_now(),
             tempo: self.tempo.clone(),
+            midi_map: self.midi_map.app(),
             mode,
         })
     }
@@ -305,6 +309,12 @@ struct Capture {
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
     tempo: tutti_timeline::TempoReader,
+    /// The live node's app controller entries and who applies them at the
+    /// gather; the fork's node translates them as the live one does.
+    midi_map: Option<(
+        Vec<tutti_plugin_types::MidiAssignment>,
+        tutti_plugin_types::MidiMapApplied,
+    )>,
     /// The render mode the fork's graph is built for (`ForkSource::fork`'s):
     /// an offline graph's fork is told offline at build.
     mode: RenderMode,
@@ -357,6 +367,9 @@ impl Capture {
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
+        if let Some((app, applied)) = &self.midi_map {
+            fork.state.client.midi_map().replace_app(app, *applied);
+        }
         fork.state.client.adopt_wait_switch(switch);
         if self.snapshot.offline(self.mode) {
             // Advisory: a plugin without the concept keeps rendering as it
@@ -522,6 +535,7 @@ mod tests {
             features: Features::PRESET_LOAD,
             controls,
             tempo: tempo(4.0),
+            midi_map: tutti_plugin_host::MidiMapSlot::new(&Default::default()),
         }
     }
 

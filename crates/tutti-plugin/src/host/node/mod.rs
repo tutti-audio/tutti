@@ -264,6 +264,8 @@ impl EventRoute {
             // The wake it raises is bound through `Control::bind_wake` and
             // raised by `Ipc` before this listener runs.
             IpcEvent::ProcessRequested => {}
+            // Asked for again by the node's pump (`Request::MidiCcAssignmentChanged`).
+            IpcEvent::MidiMapChanged => {}
             // Fired above.
             IpcEvent::StateNotRestored { .. }
             | IpcEvent::RenderModeNotApplied { .. }

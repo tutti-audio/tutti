@@ -988,7 +988,7 @@ impl PluginHandle {
         // The node translates what the plugin did not take: published for its
         // next block.
         if let Some(slot) = &self.midi_map {
-            slot.set_app(app, applied);
+            slot.replace_app(app, applied);
         }
         applied
     }

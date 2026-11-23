@@ -288,6 +288,9 @@ pub enum IpcEvent {
     /// (preset load, param-title change, IO change, full reload). Carries no
     /// payload — the host re-reads from the plugin in response.
     Resync(ResyncKind),
+    /// The plugin re-declared its controller table: the host asks for the wiring
+    /// again. Carries no payload.
+    MidiMapChanged,
     /// The plugin asked to be processed again (CLAP's `request_process`, after
     /// it slept). Carries no payload: the host wakes the node it parked.
     ProcessRequested,
@@ -417,6 +420,7 @@ pub(super) struct Unsolicited {
     io_layout: Option<tutti_plugin_types::Layout>,
     param_titles: bool,
     param_values: bool,
+    midi_map: bool,
     process_requested: bool,
     /// Transport requests, oldest first. Every one counts, so none is merged:
     /// past [`UNSOLICITED_TRANSPORT`] the oldest is dropped.
@@ -443,6 +447,7 @@ impl Unsolicited {
             io_layout: None,
             param_titles: false,
             param_values: false,
+            midi_map: false,
             process_requested: false,
             transport: std::collections::VecDeque::with_capacity(UNSOLICITED_TRANSPORT),
             dropped: 0,
@@ -560,6 +565,11 @@ impl Unsolicited {
         self.server_losses = Some(losses);
     }
 
+    /// The plugin re-declared its controller table; a second adds nothing.
+    pub(super) fn midi_map_changed(&mut self) {
+        self.midi_map = true;
+    }
+
     /// A resync request; a second of the same kind adds nothing.
     pub(super) fn resync(&mut self, kind: ResyncKind) {
         *match kind {
@@ -600,6 +610,7 @@ impl Unsolicited {
         let rate = self.rate.take().map(IpcEvent::RateRefusal);
         let process =
             std::mem::take(&mut self.process_requested).then_some(IpcEvent::ProcessRequested);
+        let midi_map = std::mem::take(&mut self.midi_map).then_some(IpcEvent::MidiMapChanged);
         let unrestored = self
             .state_not_restored
             .take()
@@ -626,6 +637,7 @@ impl Unsolicited {
             .chain(transport)
             .chain(rate)
             .chain(refresh.into_iter().flatten())
+            .chain(midi_map)
             .chain(process)
     }
 

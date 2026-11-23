@@ -254,6 +254,9 @@ impl Events {
                 self.audio.invalidate_host_edits();
                 self.ask(Request::IoChanged);
             }
+            // The declared controller table is read again, through the request
+            // the plugin raises for it in process: the pump re-reads the wiring.
+            IpcEvent::MidiMapChanged => self.ask(Request::MidiCcAssignmentChanged),
             IpcEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
                     wake.raise();
