@@ -52,12 +52,8 @@ fn mul_add_is_a_product_and_a_sum<L: Lane>() {
 }
 
 #[test]
-fn a_comparison_selects_and_counts_its_lanes_at_f32() {
+fn a_comparison_selects_and_counts_its_lanes_at_both_widths() {
     masks_select_and_count_lanes::<f32x8>();
-}
-
-#[test]
-fn a_comparison_selects_and_counts_its_lanes_at_f64() {
     masks_select_and_count_lanes::<f64x4>();
 }
 

@@ -3,6 +3,7 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
+use tutti_fixtures::midi::ms;
 use tutti_platform::Instant;
 use tutti_units::Losses;
 
@@ -15,10 +16,6 @@ use tutti_midi_network::{
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
 
 fn datagram(command: &Command) -> Vec<u8> {
     let mut b = DatagramBuilder::new();

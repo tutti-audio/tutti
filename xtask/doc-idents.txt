@@ -140,8 +140,7 @@
 1 testing/tutti-shared-plugin/src/vst3.rs
 1 testing/tutti-shared-plugin-vst3-cpp/build.rs
 9 testing/tutti-vst2-test-plugin/README.md
-3 xtask/src/gates/doc_idents.rs
-1 xtask/src/gates/doc_refs.rs
 1 xtask/src/gates/guards.rs
 1 xtask/src/gates/midi_spec.rs
+4 xtask/src/gates/prose_names.rs
 1 xtask/src/gates/vst3_sdk.rs

@@ -102,3 +102,87 @@ impl Rig {
 pub(crate) fn started() -> crate::Started {
     crate::Started::new()
 }
+
+/// A backend with no OS behind it and nothing to open: its watch is the closure
+/// it was built with, its lists are what [`inputs`](Self::inputs) and
+/// [`unlistable`](Self::unlistable) set (empty by default), and every open is
+/// refused.
+pub(crate) struct Stub {
+    watch: Box<dyn Fn(crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>> + Send + Sync>,
+    inputs: Result<Vec<crate::OsEndpoint>, &'static str>,
+    outputs: Result<Vec<crate::OsEndpoint>, &'static str>,
+}
+
+impl Stub {
+    /// A backend whose watch is `watch`.
+    pub(crate) fn new(
+        watch: impl Fn(crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self {
+            watch: Box::new(watch),
+            inputs: Ok(Vec::new()),
+            outputs: Ok(Vec::new()),
+        }
+    }
+
+    /// A backend that hands its watch's `ChangeSink` to `slot` and watches nothing.
+    pub(crate) fn capturing(slot: &Arc<tutti_rt::Mutex<Option<crate::ChangeSink>>>) -> Self {
+        let slot = Arc::clone(slot);
+        Self::new(move |sink| {
+            *slot.lock() = Some(sink);
+            Ok(Box::new(crate::endpoints::NoWatch))
+        })
+    }
+
+    /// A backend whose watch seeds `inputs`, which it also lists.
+    pub(crate) fn inputs(inputs: Vec<crate::OsEndpoint>) -> Self {
+        let seed = inputs.clone();
+        let mut stub = Self::new(move |sink| {
+            sink.seed(crate::devices::reporter::os_devices(&seed, &[]))?;
+            Ok(Box::new(crate::endpoints::NoWatch))
+        });
+        stub.inputs = Ok(inputs);
+        stub
+    }
+
+    /// As `self`, its OS unable to list either direction: both fail with `why`.
+    pub(crate) fn unlistable(mut self, why: &'static str) -> Self {
+        self.inputs = Err(why);
+        self.outputs = Err(why);
+        self
+    }
+}
+
+impl crate::MidiEndpoints for Stub {
+    fn watch(&self, sink: crate::ChangeSink) -> crate::Result<Box<dyn crate::Watch>> {
+        (self.watch)(sink)
+    }
+    fn inputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        self.inputs
+            .clone()
+            .map_err(crate::MidiHardwareError::Unsupported)
+    }
+    fn outputs(&self) -> crate::Result<Vec<crate::OsEndpoint>> {
+        self.outputs
+            .clone()
+            .map_err(crate::MidiHardwareError::Unsupported)
+    }
+    fn open_input(
+        &self,
+        _: crate::Started,
+        _: tutti_midi_device::EndpointId,
+        _: crate::InputProducerHandle,
+    ) -> crate::Result<Box<dyn crate::InputConnection>> {
+        Err(crate::MidiHardwareError::Unsupported("refused"))
+    }
+    fn open_output(
+        &self,
+        _: crate::Started,
+        _: tutti_midi_device::EndpointId,
+    ) -> crate::Result<Box<dyn crate::DeviceOut>> {
+        Err(crate::MidiHardwareError::Unsupported("refused"))
+    }
+}

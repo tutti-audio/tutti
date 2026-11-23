@@ -12,6 +12,7 @@ use crate::{Delivered, HardwareMidiInputs};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
+use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
     Capabilities, EndpointId, FunctionBlock, MAX_ATTEMPTS, MidiDeviceId, PortDirection,
@@ -20,8 +21,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType,
-    SoftwareRevision, Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType, Stream,
+    Sysex8StreamCount, SysexAssembler, SysexStep,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -459,16 +460,6 @@ fn identity_reply(device: u8) -> Vec<Ump> {
     sysex(&[
         0x7E, device, 0x06, 0x02, 0x41, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
     ])
-}
-
-fn identity() -> tutti_ump::DeviceIdentity {
-    use tutti_ump::{ManufacturerId, U7};
-    tutti_ump::DeviceIdentity {
-        manufacturer: ManufacturerId::new(0x41).unwrap(),
-        family: [U7::of(1), U7::of(2)],
-        model: [U7::of(3), U7::of(4)],
-        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-    }
 }
 
 fn reply_at(wire: &Wire, packets: Vec<Ump>, ms: u64) {

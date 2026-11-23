@@ -8,16 +8,10 @@
 //! tuning offsets are what a voice is told, `tutti_voicing::VoiceCommand::Start`).
 
 use tutti_midi_protocol::{KeyTable, TuningFrequency};
+use tutti_music::Note;
 use tutti_ump::NoteNumber;
 use tutti_units::{Cents, FrequencyRatio, Hz, Semitones};
 
-// A second copy of A440. `Note::A4_HZ` is the engine's canonical one but is
-// private to `tutti-music`, and widening its visibility is a bigger change
-// than this file should make on its way past. The value is fixed by
-// definition, so the duplication is inert — unlike the *conversions* that used
-// to sit beside it, which are now `Semitones::to_pitch_ratio` and
-// `Cents::to_pitch_ratio`.
-pub(crate) const A4_FREQ: Hz = Hz::new(440.0);
 const A4_NOTE: NoteNumber = NoteNumber::of(69);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -46,7 +40,7 @@ impl ScaleDegree {
 /// sounds from equal temperament (`tutti_voicing::VoiceCommand::Start`'s `tune`), so
 /// the scale itself is no state of a voice.
 pub(crate) fn key_freq(note: f64, tune: Semitones) -> Hz {
-    A4_FREQ * (Semitones::new(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
+    Note::A4_HZ * (Semitones::new(note - f64::from(A4_NOTE.get())) + tune).to_pitch_ratio()
 }
 
 tutti_units::ranged! {
@@ -95,7 +89,7 @@ impl Tuning {
     /// 12-tone equal temperament with A4 (note 69) at 440 [`Hz`] — the default,
     /// and the tuning every ratio-based interval below is measured against.
     pub fn equal_temperament() -> Self {
-        Self::resolve(Self::twelve_tone_degrees(), A4_FREQ, A4_NOTE)
+        Self::resolve(Self::twelve_tone_degrees(), Note::A4_HZ, A4_NOTE)
     }
 
     /// 12-tone equal temperament pinned to an arbitrary reference.
@@ -140,7 +134,7 @@ impl Tuning {
         let unplayable = self
             .freq_table
             .iter()
-            .position(|hz| FrequencyRatio::new(*hz / A4_FREQ).is_none());
+            .position(|hz| FrequencyRatio::new(*hz / Note::A4_HZ).is_none());
         match unplayable {
             None => Ok(self),
             Some(note) => Err(TuningError::Unplayable {
@@ -180,7 +174,7 @@ impl Tuning {
             .iter()
             .map(|r| ScaleDegree::from_ratio(FrequencyRatio::of(*r)))
             .collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE)
+        Self::resolve(degrees, Note::A4_HZ, A4_NOTE)
     }
 
     /// Pythagorean tuning: twelve degrees stacked from pure 3/2 fifths, rooted
@@ -209,7 +203,7 @@ impl Tuning {
             .iter()
             .map(|r| ScaleDegree::from_ratio(FrequencyRatio::of(*r)))
             .collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE)
+        Self::resolve(degrees, Note::A4_HZ, A4_NOTE)
     }
 
     fn recompute_table(&mut self) {
@@ -256,7 +250,7 @@ impl Tuning {
             // interval over A4 above that note. Every key has a ratio to A4
             // (`checked` refused a tuning without one); a key without one would
             // stay `NO_CHANGE`, the word that sets nothing.
-            if let Some(ratio) = FrequencyRatio::new(hz / A4_FREQ) {
+            if let Some(ratio) = FrequencyRatio::new(hz / Note::A4_HZ) {
                 let above_a4 = Semitones::from_pitch_ratio(ratio);
                 *word =
                     TuningFrequency::nearest(above_a4 + Semitones::new(f64::from(A4_NOTE.get())));
@@ -311,7 +305,7 @@ impl TryFrom<&[Cents]> for Tuning {
             return Err(TuningError::EmptyScale);
         }
         let degrees = cents.iter().map(|c| ScaleDegree::from_cents(*c)).collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
+        Self::resolve(degrees, Note::A4_HZ, A4_NOTE).checked()
     }
 }
 
@@ -333,7 +327,7 @@ impl TryFrom<&[FrequencyRatio]> for Tuning {
             return Err(TuningError::EmptyScale);
         }
         let degrees = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
-        Self::resolve(degrees, A4_FREQ, A4_NOTE).checked()
+        Self::resolve(degrees, Note::A4_HZ, A4_NOTE).checked()
     }
 }
 

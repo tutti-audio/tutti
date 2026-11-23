@@ -7,18 +7,14 @@
 
 use dpi::Size;
 use tutti_plugin_types::{
-    ContentScale, Control, Editor, EditorCapabilities, EditorError, EditorWindow, InProcess,
-    MainThreadMarker, MainWorkHandle, ParamEdit, PluginError, PluginRef, PluginResult,
-    WindowHandle,
+    ContentScale, Control, Editor, EditorCapabilities, EditorWindow, InProcess, MainThreadMarker,
+    MainWorkHandle, ParamEdit, PluginRef, PluginResult, WindowHandle,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
+use crate::control::editor_error;
 use crate::instance::AuLoaded;
-
-fn editor_error(reason: String) -> PluginError {
-    PluginError::Editor(EditorError::PluginError(reason))
-}
 
 /// An Audio Unit loaded for its editor alone: never initialized, it shows the
 /// Cocoa view and holds the state mirrored into it.
@@ -126,7 +122,7 @@ impl EditorWindow for AuEditorInstance {
     }
 
     fn set_editor_size(&mut self, _main: MainThreadMarker, _requested: Size) -> PluginResult<Size> {
-        Err(editor_error("set_editor_size not supported".into()))
+        Err(editor_error("set_editor_size not supported"))
     }
 
     /// Nothing asked: this surface never queues a resize request.

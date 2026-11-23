@@ -15,6 +15,7 @@ use super::table::{FileRow, PluginDb, RowChange};
 use serde::de::{Error as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::ser::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 /// The version of the record layout [`PluginDb`] serializes and deserializes.
@@ -45,31 +46,23 @@ pub enum InvalidDb {
 
 /// A path as the record holds it: text, or the raw bytes of a name that is not
 /// UTF-8. Externally tagged, so a format with no self-description reads it.
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 enum StoredPath<'a> {
-    Text(&'a str),
-    Bytes(&'a [u8]),
-}
-
-#[derive(Deserialize)]
-enum StoredPathOwned {
-    Text(String),
-    Bytes(Vec<u8>),
+    Text(Cow<'a, str>),
+    Bytes(Cow<'a, [u8]>),
 }
 
 impl<'a> StoredPath<'a> {
     fn of(path: &'a Path) -> Option<Self> {
         match path.to_str() {
-            Some(text) => Some(Self::Text(text)),
-            None => os_path::raw_bytes(path).map(Self::Bytes),
+            Some(text) => Some(Self::Text(Cow::Borrowed(text))),
+            None => os_path::raw_bytes(path).map(|bytes| Self::Bytes(Cow::Borrowed(bytes))),
         }
     }
-}
 
-impl StoredPathOwned {
     fn into_path(self) -> PathBuf {
         match self {
-            Self::Text(text) => PathBuf::from(text),
+            Self::Text(text) => PathBuf::from(text.into_owned()),
             Self::Bytes(bytes) => os_path::from_bytes(&bytes),
         }
     }
@@ -88,7 +81,7 @@ struct Out<'a> {
 /// never a decoding error. A refused record holds no rows.
 pub(crate) struct Raw {
     version: u64,
-    files: Vec<(StoredPathOwned, FileRow)>,
+    files: Vec<(StoredPath<'static>, FileRow)>,
 }
 
 #[derive(Deserialize)]

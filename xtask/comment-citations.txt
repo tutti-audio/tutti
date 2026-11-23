@@ -73,9 +73,9 @@
 1 crates/tutti-units/src/units/amounts.rs
 1 crates/tutti-vst2-host/src/host.rs
 3 xtask/src/gates/comments.rs
-2 xtask/src/gates/doc_refs.rs
 1 xtask/src/gates/layout.rs
 1 xtask/src/gates/prose.rs
+2 xtask/src/gates/prose_names.rs
 1 xtask/src/gates/range_types.rs
 1 xtask/src/gates.rs
 1 xtask/src/gates/session.rs

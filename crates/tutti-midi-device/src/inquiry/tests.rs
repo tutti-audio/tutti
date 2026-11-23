@@ -1,14 +1,6 @@
 use super::*;
-use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
-fn identity() -> DeviceIdentity {
-    DeviceIdentity {
-        manufacturer: ManufacturerId::new(0x41).unwrap(),
-        family: [U7::of(1), U7::of(2)],
-        model: [U7::of(3), U7::of(4)],
-        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-    }
-}
+use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
 /// M1 p.40: the request is `F0 7E 7F 06 01 F7`. As SysEx7 UMP (M2-104 §7.7) the
 /// payload `7E 7F 06 01` is one complete packet of four bytes: type 3, the

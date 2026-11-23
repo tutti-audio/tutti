@@ -103,9 +103,8 @@ jobs:
       - run: cargo xtask check-hosting
       - run: cargo xtask check-lints
       - run: cargo xtask check-value-traits
-      - run: cargo xtask check-doc-refs
       - run: cargo xtask check-pointers
-      - run: cargo xtask check-doc-idents
+      - run: cargo xtask check-prose-names
       - run: cargo xtask check-passive-tests
       - run: cargo xtask check-comments
       - run: cargo xtask check-alloc-binaries
@@ -113,7 +112,6 @@ jobs:
       - run: cargo xtask check-width
       - run: cargo xtask check-building
       - run: cargo xtask check-values
-      - run: cargo xtask check-units-bare
       - run: cargo xtask check-logging
       - run: cargo xtask check-test-time
       - run: cargo xtask check-platform-seam
