@@ -124,6 +124,7 @@ serde = [
     "dep:serde",
     "tutti-ump/serde",
     "tutti-plugin?/serde",
+    "tutti-plugin-types?/serde",
     "tutti-midi-device?/serde",
     "tutti-midi-ci?/serde",
 ]

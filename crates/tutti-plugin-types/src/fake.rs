@@ -293,6 +293,8 @@ struct Shared {
     /// (`FakePlugin::answer_track_info`).
     track_infos: Mutex<Vec<crate::TrackInfo>>,
     track_answer: Mutex<crate::Delivered>,
+    /// What `set_app_midi_map` was handed, in order.
+    app_midi_maps: Mutex<Vec<Vec<crate::MidiAssignment>>>,
 }
 
 impl Shared {
@@ -369,6 +371,7 @@ impl FakePlugin {
             declared: Mutex::new(Vec::new()),
             mirror_failure: Mutex::new(None),
             track_infos: Mutex::new(Vec::new()),
+            app_midi_maps: Mutex::new(Vec::new()),
             track_answer: Mutex::new(crate::Delivered::Yes),
         });
         (
@@ -568,6 +571,13 @@ impl FakePlugin {
         self.0.track_infos.lock().clone()
     }
 
+    /// Every set of the app's controller entries the plugin was handed, in
+    /// order.
+    #[must_use]
+    pub fn app_midi_maps(&self) -> Vec<Vec<crate::MidiAssignment>> {
+        self.0.app_midi_maps.lock().clone()
+    }
+
     /// Makes `set_track_info` answer `answer`; the default is
     /// [`Delivered::Yes`](crate::Delivered::Yes).
     pub fn answer_track_info(&self, answer: crate::Delivered) {
@@ -656,6 +666,15 @@ macro_rules! fake_control {
             ) -> crate::Delivered {
                 self.shared.track_infos.lock().push(info.clone());
                 *self.shared.track_answer.lock()
+            }
+
+            fn set_app_midi_map(
+                &mut self,
+                _main: MainThreadMarker,
+                app: &[crate::MidiAssignment],
+            ) -> crate::MidiMapApplied {
+                self.shared.app_midi_maps.lock().push(app.to_vec());
+                crate::MidiMapApplied::Host
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
