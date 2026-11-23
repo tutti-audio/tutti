@@ -95,7 +95,7 @@
 //!   `DeviceId`. Off by default so an offline render, a CI job or a server builds
 //!   without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//! - `decode-wav`, `decode-aiff`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
 //!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
@@ -594,6 +594,7 @@ pub mod session {
         feature = "sampler",
         any(
             feature = "decode-wav",
+            feature = "decode-aiff",
             feature = "decode-flac",
             feature = "decode-mp3",
             feature = "decode-ogg"
@@ -642,6 +643,7 @@ pub mod codec {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -666,6 +668,7 @@ pub mod sampler {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"

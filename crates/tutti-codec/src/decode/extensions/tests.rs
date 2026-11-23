@@ -82,17 +82,12 @@ fn a_wav_build_decodes_wav_and_its_container_alias() {
     assert!(can_decode("wave"));
 }
 
-/// AIFF is *not* decodable, and this pins it so the next person to assume
-/// otherwise gets a red test rather than a browser row that fails on click.
-///
-/// It reads like WAV and symphonia can do it, but this crate's `decode-wav` feature
-/// maps to `["symphonia/wav", "symphonia/pcm"]` — `symphonia/aiff` is never
-/// turned on. Delete this test when the feature is added, not before.
-#[cfg(feature = "decode-wav")]
+/// `decode-aiff` alone lists AIFF, and `decode-wav` does not: the build reads
+/// AIFF exactly when the feature is on.
 #[test]
-fn aiff_is_not_decodable_however_much_it_looks_like_wav() {
-    assert!(!can_decode("aiff"));
-    assert!(!can_decode("aif"));
+fn aiff_is_decodable_exactly_with_its_feature() {
+    assert_eq!(can_decode("aiff"), cfg!(feature = "decode-aiff"));
+    assert_eq!(can_decode("aif"), cfg!(feature = "decode-aiff"));
 }
 
 // No test for the codec-free build: this crate's test targets always have

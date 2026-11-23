@@ -26,6 +26,11 @@ pub(crate) trait FormatWriter: Sized {
     /// The sink the file is written to, handed back by [`finish`](Self::finish).
     type Sink;
 
+    /// Lowers the number of frames the file may hold to `frames`, for a format
+    /// whose container has a size limit. A format without one holds any count
+    /// and ignores this.
+    fn limit_frames(&mut self, _frames: u64) {}
+
     /// Writes one block of any [`Sample`] format, converting each value to the
     /// file's width by the rule in [`Sample`]; a value already in the file's
     /// format is unchanged. An empty block writes nothing.

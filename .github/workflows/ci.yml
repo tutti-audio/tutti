@@ -157,7 +157,7 @@ jobs:
       - name: clippy (wasm32)
         run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti-platform -p tutti-rt -p tutti --lib -- -D warnings
       - name: clippy (wasm32, web features)
-        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,serde -- -D warnings
+        run: cargo clippy --locked --target wasm32-unknown-unknown -p tutti --lib --features sampler,soundfont,synth,analyze,decode-wav,decode-aiff,decode-flac,decode-mp3,decode-ogg,encode-wav,encode-flac,encode-aiff,export,record,midi,serde -- -D warnings
       # The web suite runs under node: what a web session supports with no tutti thread (an offline build, a
       # bounce and a WAV in memory, the app's own `analyze` and `load_midi`). A debug build, which builds sooner than
       # release and is the profile whose big stack frames crash wasm. `wasm-bindgen-cli` is pinned to the version
