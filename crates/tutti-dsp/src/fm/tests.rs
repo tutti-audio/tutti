@@ -1,11 +1,11 @@
 use core::f64::consts::TAU;
+use tutti_fixtures::signal::lock_in;
 
 use tutti_buffers::{MaxBlock, MonoMut};
 use tutti_units::{Amplitude, FrequencyRatio, Hz, ModulationIndex, SampleRate, Samples};
 
 use super::*;
 use crate::OversamplingFactor;
-use crate::testing::lock_in;
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// A window of whole periods of every multiple of 10 Hz at 48 kHz.
@@ -79,7 +79,7 @@ fn ripple(factor: OversamplingFactor) -> f64 {
 /// The amplitude `J`, signed, of the line at `hz` in a window of whole periods of `x[n] = J sin(w
 /// (n - delay))`: the line reads `(re, im) = (-J sin(w delay), -J cos(w delay))`.
 fn line(window: &[f64], hz: f64, delay: f64) -> f64 {
-    let (re, im) = lock_in(window, hz, RATE.get());
+    let (re, im) = lock_in(window, Hz::new(hz), RATE);
     let wd = TAU * hz * delay / RATE.get();
     -im * wd.cos() - re * wd.sin()
 }
@@ -261,7 +261,7 @@ fn carriers_are_heard_at_their_levels_and_modulators_are_not() {
         &controls(1_000.0, 0.0, 0.0),
     );
     let out = render(&mut v, 2 * WINDOW);
-    let (re, im) = lock_in(&out[WINDOW..], 1_000.0, RATE.get());
+    let (re, im) = lock_in(&out[WINDOW..], Hz::new(1_000.0), RATE);
     assert!(re.hypot(im) <= ripple(OversamplingFactor::X2));
 }
 

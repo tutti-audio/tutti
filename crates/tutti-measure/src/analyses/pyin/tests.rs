@@ -2,7 +2,9 @@ use super::*;
 use crate::AboveNyquist;
 use crate::analyses::yin::{PitchEstimate, yin_track};
 use crate::test_rng::uniform;
+use tutti_fixtures::signal::sine;
 use tutti_rt::SplitMix64;
+use tutti_units::{Amplitude, Hz, Samples};
 
 const RATE: SampleRate = SampleRate::of(16_000.0);
 /// A 10 ms hop at 16 kHz.
@@ -40,13 +42,6 @@ fn two_harmonics(f0: f64, a1: impl Fn(usize) -> f64, len: usize) -> Vec<f32> {
         .collect()
 }
 
-fn tone(freq: f64, len: usize) -> Vec<f32> {
-    let w = core::f64::consts::TAU * freq / RATE.get();
-    (0..len)
-        .map(|n| (0.5 * libm::sin(n as f64 * w)) as f32)
-        .collect()
-}
-
 /// A steady sine is voiced at its frequency on every frame. The bound is the
 /// grid's half step (5 cents) plus the parabola's error on d': the weight
 /// 1 / tau of the cumulative mean tilts the dip by at most half a sample over
@@ -56,7 +51,15 @@ fn a_steady_sine_is_its_frequency_within_half_a_grid_step() {
     for freq in [110.0, 300.0, 440.0, 700.0] {
         let tau = RATE.get() / freq;
         let bound = 5.0 + 1731.2 * 0.5 / (tau * tau);
-        let frames = track(&PyinConfig::new(), &tone(freq, 16_000));
+        let frames = track(
+            &PyinConfig::new(),
+            &sine(
+                Hz::new(freq),
+                Amplitude::new(0.5),
+                RATE,
+                Samples::new(16_000),
+            ),
+        );
         assert_eq!(frames.len(), (16_000 - FRAME) / HOP + 1);
         for (i, f) in frames.iter().enumerate() {
             let got = f.frequency.unwrap_or_else(|| panic!("{freq} Hz frame {i}"));
@@ -89,7 +92,7 @@ fn silence_and_white_noise_are_unvoiced() {
 #[test]
 fn a_gap_is_unvoiced_between_voiced_tones() {
     let (gap_from, gap_to, len) = (6400, 11_200, 19_200);
-    let mut x = tone(440.0, len);
+    let mut x = sine(Hz::new(440.0), Amplitude::new(0.5), RATE, Samples::new(len));
     x[gap_from..gap_to].fill(0.0);
     let frames = track(&PyinConfig::new(), &x);
     for i in frames_within(0, gap_from, frames.len()) {
@@ -258,7 +261,15 @@ fn a_band_above_nyquist_a_short_buffer_and_a_huge_grid_are_refused() {
 #[test]
 fn the_pyin_meter_tracks_the_tone_and_refuses_what_it_cannot_hold() {
     let cfg = PyinConfig::new().hop(hop());
-    let x: Vec<f64> = tone(220.0, 4000).iter().map(|&s| f64::from(s)).collect();
+    let x: Vec<f64> = sine(
+        Hz::new(220.0),
+        Amplitude::new(0.5),
+        RATE,
+        Samples::new(4000),
+    )
+    .iter()
+    .map(|&s| f64::from(s))
+    .collect();
     let track = crate::measure::chunk_independent(&cfg, RATE, &x).unwrap();
     let voiced: Vec<f64> = track
         .iter()

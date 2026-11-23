@@ -965,16 +965,5 @@ fn a_fork_is_a_snapshot_of_every_nodes_controls() {
         ("convolver", convolver),
         ("tube_stage", tube_stage),
     ];
-    let mut failed = Vec::new();
-    for &(name, row) in rows {
-        if let Err(payload) = std::panic::catch_unwind(row) {
-            let why = payload
-                .downcast_ref::<String>()
-                .map(String::as_str)
-                .or_else(|| payload.downcast_ref::<&str>().copied())
-                .unwrap_or("a non-text panic");
-            failed.push(format!("{name}: {why}"));
-        }
-    }
-    assert!(failed.is_empty(), "failing rows:\n{}", failed.join("\n"));
+    tutti_fixtures::for_each_row(rows.iter().copied(), |row| row());
 }

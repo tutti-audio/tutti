@@ -5,9 +5,11 @@ use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_units::{CompressionRatio, Seconds};
 
 use super::*;
-use crate::testing::{amplitude_at, lock_in};
 use crate::{Complex32, Complex64, Lti, RealFft};
 use tutti_buffers::InputOutput;
+use tutti_fixtures::signal::{amplitude_at, lock_in};
+use tutti_units::Hz;
+use tutti_units::SampleRate;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -228,8 +230,8 @@ fn unity_bands_sum_to_the_analytic_all_pass_response() {
             k.retarget(&unity(&freqs));
             let x = tone(f, 1.0, SETTLE + WINDOW);
             let out = run(&mut k, &[&x]).remove(0);
-            let (xr, xi) = lock_in(&x[SETTLE..], f, RATE.get());
-            let (yr, yi) = lock_in(&out[SETTLE..], f, RATE.get());
+            let (xr, xi) = lock_in(&x[SETTLE..], Hz::new(f), RATE);
+            let (yr, yi) = lock_in(&out[SETTLE..], Hz::new(f), RATE);
             let got = Complex64::new(yr, yi) / Complex64::new(xr, xi);
             let want = freqs
                 .iter()
@@ -330,7 +332,7 @@ fn a_tone_in_a_band_settles_on_that_bands_static_curve() {
             let weighted: f64 = (0..4)
                 .map(|j| band_magnitude(j, &splits, f) * if j == b { gain } else { 1.0 })
                 .sum();
-            let amp = amplitude_at(&out[4_800..], f, RATE.get());
+            let amp = amplitude_at(&out[4_800..], Hz::new(f), RATE);
             assert!(
                 (amp - a * weighted).abs() < 2e-5,
                 "band {b}, knee {knee}: output {amp} vs {}",
@@ -364,7 +366,7 @@ fn a_loud_band_follows_the_static_curve_and_a_quiet_band_is_left_alone() {
         (dc - want).abs() < 5e-6 * want,
         "band 0 settled at {dc}, the curve says {want}"
     );
-    let amp = amplitude_at(&out[0][SETTLE..], 5_000.0, RATE.get());
+    let amp = amplitude_at(&out[0][SETTLE..], Hz::new(5_000.0), RATE);
     assert!((amp - 0.01).abs() < 2e-5, "the quiet band is {amp}");
     let reading = k.take_reading();
     let deepest = reading.band(0).unwrap().get();
@@ -427,7 +429,7 @@ fn solo_leaves_only_the_soloed_bands() {
         let mut k = bank(1, 3);
         k.retarget(&set);
         let out = run(&mut k, &[&x]);
-        let got = amplitude_at(&out[0][SETTLE..], tone_hz, RATE.get());
+        let got = amplitude_at(&out[0][SETTLE..], Hz::new(tone_hz), RATE);
         assert!((got - want).abs() < 1e-5, "{soloed:?}: {got} vs {want}");
     }
 }

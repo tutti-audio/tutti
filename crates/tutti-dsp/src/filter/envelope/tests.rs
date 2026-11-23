@@ -1,24 +1,17 @@
 use tutti_buffers::{Planes, PlanesMut};
+use tutti_fixtures::signal::sine;
+use tutti_units::{Amplitude, Samples};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
 use super::*;
-use crate::testing::amplitude_at;
 use tutti_buffers::InputOutput;
+use tutti_fixtures::signal::amplitude_at;
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
 
 const RATE: SampleRate = SampleRate::SR_48K;
 const TONE: f64 = 1_000.0;
-
-/// A sine of `hz` and `amplitude`, `frames` long, from phase 0.
-fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|n| {
-            (amplitude * (2.0 * core::f64::consts::PI * hz * n as f64 / RATE.get()).sin()) as f32
-        })
-        .collect()
-}
 
 /// A bank of `ty` at `RATE` set to `controls`.
 fn bank(ty: SvfType, controls: &EnvelopeFilterControls) -> EnvelopeFilterBank<f32> {
@@ -63,7 +56,7 @@ fn magnitude(ty: SvfType, cutoff: f64, q: Q, hz: f64) -> f64 {
 fn measured_gain(x: &[f32], y: &[f32]) -> f64 {
     let tail = 4_800; // 100 periods of 1 kHz at 48 kHz
     let from = x.len() - tail;
-    amplitude_at(&y[from..], TONE, RATE.get()) / amplitude_at(&x[from..], TONE, RATE.get())
+    amplitude_at(&y[from..], Hz::new(TONE), RATE) / amplitude_at(&x[from..], Hz::new(TONE), RATE)
 }
 
 fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
@@ -96,7 +89,12 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
         ] {
             let q = Q::new(2.0);
             let mut b = bank(ty, &controls(base, depth, q.get()));
-            let x = sine(TONE, amplitude, 96_000);
+            let x = sine(
+                Hz::new(TONE),
+                Amplitude::new(amplitude),
+                RATE,
+                Samples::new(96_000),
+            );
             let y = run(&mut b, &x, 480);
             let env = 2.0 * amplitude / core::f64::consts::PI;
             let cutoff = base * (depth / 12.0 * env).exp2();
@@ -123,7 +121,12 @@ fn zero_depth_is_a_fixed_svf_at_base() {
     let q = Q::new(2.0);
     for amplitude in [0.1, 0.9] {
         let mut b = bank(SvfType::LowPass, &controls(700.0, 0.0, q.get()));
-        let x = sine(TONE, amplitude, 48_000);
+        let x = sine(
+            Hz::new(TONE),
+            Amplitude::new(amplitude),
+            RATE,
+            Samples::new(48_000),
+        );
         let y = run(&mut b, &x, 333);
         let want = magnitude(SvfType::LowPass, 700.0, q, TONE);
         let got = measured_gain(&x, &y);
@@ -134,7 +137,12 @@ fn zero_depth_is_a_fixed_svf_at_base() {
 /// The grid is the stream's: any cut of a stream into blocks renders the same samples.
 #[test]
 fn the_render_does_not_depend_on_where_blocks_fall() {
-    let x = sine(TONE, 0.7, 6_000);
+    let x = sine(
+        Hz::new(TONE),
+        Amplitude::new(0.7),
+        RATE,
+        Samples::new(6_000),
+    );
     let reference = run(
         &mut bank(SvfType::BandPass, &controls(600.0, 24.0, 4.0)),
         &x,
@@ -158,7 +166,16 @@ fn the_controls_are_held_in_range() {
         SvfType::LowPass,
         &controls(f64::NAN, f64::INFINITY, f64::NAN),
     );
-    let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
+    let y = run(
+        &mut b,
+        &sine(
+            Hz::new(TONE),
+            Amplitude::new(0.5),
+            RATE,
+            Samples::new(2_000),
+        ),
+        128,
+    );
     assert!(y.iter().all(|s| s.is_finite()));
     assert_eq!(b.cutoff_at(1.0), EnvelopeFilterControls::DEFAULT.base);
     // Ten octaves above 1 kHz is past the Nyquist: the cutoff stops just short of it.
@@ -182,7 +199,12 @@ fn a_level_over_full_scale_reads_as_one() {
     let env =
         (4.0 * (1.0 - sqrt3 / 2.0) + 2.0 * core::f64::consts::PI / 3.0) / core::f64::consts::PI;
     let mut b = bank(SvfType::LowPass, &controls(500.0, 24.0, q.get()));
-    let x = sine(TONE, 2.0, 96_000);
+    let x = sine(
+        Hz::new(TONE),
+        Amplitude::new(2.0),
+        RATE,
+        Samples::new(96_000),
+    );
     let y = run(&mut b, &x, 480);
     let cutoff = 500.0 * (24.0 / 12.0 * env).exp2();
     let want = magnitude(SvfType::LowPass, cutoff, q, TONE);
@@ -248,8 +270,8 @@ fn the_attack_and_the_release_are_told_apart() {
         let y = run(&mut b, &x, 480);
         let cutoff = |env: f64| base * (depth / 12.0 * env).exp2();
         let gain = |from: usize| {
-            amplitude_at(&y[from..from + 480], TONE, RATE.get())
-                / amplitude_at(&x[from..from + 480], TONE, RATE.get())
+            amplitude_at(&y[from..from + 480], Hz::new(TONE), RATE)
+                / amplitude_at(&x[from..from + 480], Hz::new(TONE), RATE)
         };
         // Up: the window centred 65 ms after the step.
         let up = 2_880;

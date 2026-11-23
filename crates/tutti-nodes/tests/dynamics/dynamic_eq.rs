@@ -3,6 +3,8 @@
 //! 2012, eq. 4 and 5) and of the RBJ bell under the bilinear map, computed here.
 
 use core::f64::consts::PI;
+use tutti_fixtures::signal::sine;
+use tutti_units::{Amplitude, Samples};
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Planes;
@@ -19,12 +21,6 @@ const FS: f64 = 48_000.0;
 const RUN: usize = 24_000;
 /// The frames at the end read over: whole periods of every tone below (200, 1000 and 6000 Hz).
 const WINDOW: usize = 4_800;
-
-fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|i| (a * (2.0 * PI * f * i as f64 / FS).sin()) as f32)
-        .collect()
-}
 
 fn amplitude(db: f64) -> f64 {
     10f64.powf(db / 20.0)
@@ -92,7 +88,12 @@ fn render(node: DynamicEqNode<f32>, inputs: &[&[f32]]) -> Vec<f32> {
 #[test]
 fn the_de_esser_cuts_a_sibilance_tone_by_its_static_curve() {
     for level in [-40.0, -30.0, -26.0, -24.0, -20.0, -14.0, -8.0, -2.0] {
-        let x = tone(6_000.0, amplitude(level), RUN);
+        let x = sine(
+            Hz::new(6_000.0),
+            Amplitude::new(amplitude(level)),
+            SampleRate::of(FS),
+            Samples::new(RUN),
+        );
         let y = render(de_esser(), &[&x]);
         let got = db(component(&y, 6_000.0) / component(&x, 6_000.0));
         let want = -reduction(level, -24.0, 6.0, 4.0).min(10.0);
@@ -107,7 +108,12 @@ fn the_de_esser_cuts_a_sibilance_tone_by_its_static_curve() {
 /// 6 kHz is far under the threshold, so the band stays flat and the tone passes at unity.
 #[test]
 fn the_de_esser_passes_a_low_tone() {
-    let x = tone(200.0, amplitude(-6.0), RUN);
+    let x = sine(
+        Hz::new(200.0),
+        Amplitude::new(amplitude(-6.0)),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
     let y = render(de_esser(), &[&x]);
     let got = db(component(&y, 200.0) / component(&x, 200.0));
     assert!(got.abs() < 0.01, "{got} dB");
@@ -118,8 +124,18 @@ fn the_de_esser_passes_a_low_tone() {
 /// within 0.1 dB of unity at Q 2 and a 10 dB cut.
 #[test]
 fn the_de_esser_cuts_the_sibilance_and_leaves_the_voice() {
-    let hiss = tone(6_000.0, amplitude(-12.0), RUN);
-    let voice = tone(200.0, amplitude(-8.0), RUN);
+    let hiss = sine(
+        Hz::new(6_000.0),
+        Amplitude::new(amplitude(-12.0)),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
+    let voice = sine(
+        Hz::new(200.0),
+        Amplitude::new(amplitude(-8.0)),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
     let x: Vec<f32> = hiss.iter().zip(&voice).map(|(a, b)| a + b).collect();
     let y = render(de_esser(), &[&x]);
     // The voice's own contribution to the key is the band-pass's skirt at 200 Hz, 1/30 of
@@ -147,7 +163,12 @@ fn an_upward_band_boosts_a_quiet_band_by_the_mirrored_curve() {
         .attack(Seconds::new(0.001))
         .release(Seconds::new(0.02));
     for level in [-50.0, -36.0, -26.0, -20.0, -10.0] {
-        let x = tone(1_000.0, amplitude(level), RUN);
+        let x = sine(
+            Hz::new(1_000.0),
+            Amplitude::new(amplitude(level)),
+            SampleRate::of(FS),
+            Samples::new(RUN),
+        );
         let y = render(DynamicEqNode::<f32>::from(config), &[&x]);
         let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));
         let want = reduction(2.0 * -20.0 - level, -20.0, 0.0, 3.0).min(9.0);
@@ -169,8 +190,18 @@ fn a_side_chain_key_sets_the_cut_of_the_signal() {
         .key(KeySource::Sidechain);
     let node = DynamicEqNode::<f32>::from(config);
     assert_eq!(node.shape().audio_in().count(), 2, "a signal and a key");
-    let x = tone(1_000.0, 0.05, RUN);
-    let key = tone(1_000.0, amplitude(-6.0), RUN);
+    let x = sine(
+        Hz::new(1_000.0),
+        Amplitude::new(0.05),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
+    let key = sine(
+        Hz::new(1_000.0),
+        Amplitude::new(amplitude(-6.0)),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
     let y = render(node, &[&x, &key]);
     let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));
     let want = -reduction(-6.0, -20.0, 0.0, 4.0);
@@ -184,7 +215,12 @@ fn an_unwired_side_chain_leaves_a_downward_band_flat() {
         .threshold(Db::new(-20.0))
         .ratio(CompressionRatio::new(4.0))
         .key(KeySource::Sidechain);
-    let x = tone(1_000.0, 0.5, RUN);
+    let x = sine(
+        Hz::new(1_000.0),
+        Amplitude::new(0.5),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
     let silence = vec![0.0f32; RUN];
     let y = render(DynamicEqNode::<f32>::from(config), &[&x, &silence]);
     assert!(db(component(&y, 1_000.0) / component(&x, 1_000.0)).abs() < 0.01);
@@ -199,7 +235,12 @@ fn an_unwired_side_chain_gives_an_upward_band_its_full_range() {
         .ratio(CompressionRatio::new(4.0))
         .range(Db::new(9.0))
         .key(KeySource::Sidechain);
-    let x = tone(1_000.0, 0.1, RUN);
+    let x = sine(
+        Hz::new(1_000.0),
+        Amplitude::new(0.1),
+        SampleRate::of(FS),
+        Samples::new(RUN),
+    );
     let silence = vec![0.0f32; RUN];
     let y = render(DynamicEqNode::<f32>::from(config), &[&x, &silence]);
     let got = db(component(&y, 1_000.0) / component(&x, 1_000.0));

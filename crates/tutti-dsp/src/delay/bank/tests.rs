@@ -1,6 +1,8 @@
 use tutti_buffers::BusTopology;
 use tutti_buffers::{Mono, Planes, PlanesMut};
+use tutti_fixtures::signal::impulse;
 use tutti_music::{NoteDuration, NoteValue};
+use tutti_units::Samples;
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
 
 use super::*;
@@ -112,12 +114,6 @@ fn runner(layout: &DelayLayout, c: &DelayControls) -> Rig {
     Rig::at(layout, c, BINARY)
 }
 
-fn impulse(len: usize) -> Vec<f32> {
-    let mut x = vec![0.0; len];
-    x[0] = 1.0;
-    x
-}
-
 /// An impulse is heard exactly `d` frames later, in each interpolation mode, at every
 /// whole delay: the line is `d` frames long and nothing else is heard.
 #[test]
@@ -129,7 +125,7 @@ fn an_impulse_arrives_at_exactly_the_delay() {
     ] {
         for d in [1usize, 2, 3, 16, 100, 513] {
             let mut k = runner(&mono(mode), &controls(d as f64 / 1024.0, 0.0, 0.0));
-            let y = k.run(&[impulse(d + 40)]).remove(0);
+            let y = k.run(&[impulse(Samples::new(d + 40))]).remove(0);
             for (i, &s) in y.iter().enumerate() {
                 let want = f32::from(i == d);
                 assert_eq!(s, want, "{mode:?}, delay {d}, frame {i}");
@@ -153,7 +149,7 @@ fn a_fractional_delay_blends_the_frames_around_it_by_the_fraction() {
             &mono(InterpolationMode::Linear),
             &controls(d / 1024.0, 0.0, 0.0),
         );
-        let y = k.run(&[impulse(40)]).remove(0);
+        let y = k.run(&[impulse(Samples::new(40))]).remove(0);
         for (i, &s) in y.iter().enumerate() {
             let want = if i == at {
                 1.0 - f
@@ -177,7 +173,7 @@ fn feedback_decays_by_the_gain_each_trip() {
         &mono(InterpolationMode::Linear),
         &controls(d as f64 / 1024.0, g, 0.0),
     );
-    let y = k.run(&[impulse(d * 12 + 5)]).remove(0);
+    let y = k.run(&[impulse(Samples::new(d * 12 + 5))]).remove(0);
     for (i, &s) in y.iter().enumerate() {
         let want = if i >= d && i % d == 0 {
             g.powi((i / d - 1) as i32)
@@ -202,7 +198,7 @@ fn a_ping_pong_splits_into_a_common_and_a_differential_mode() {
     let (d, g, c) = (8usize, 0.3f64, 0.4f64);
     let mut k = runner(&stereo(), &controls(d as f64 / 1024.0, g, c));
     let len = d * 10 + 3;
-    let y = k.run(&[impulse(len), vec![0.0; len]]);
+    let y = k.run(&[impulse(Samples::new(len)), vec![0.0; len]]);
     for n in 0..9usize {
         let (sum, diff) = ((g + c).powi(n as i32), (g - c).powi(n as i32));
         for (ch, want) in [(0, (sum + diff) / 2.0), (1, (sum - diff) / 2.0)] {
@@ -230,7 +226,7 @@ fn a_ping_pong_splits_into_a_common_and_a_differential_mode() {
 /// each channel comes back at its own delay.
 #[test]
 fn channel_times_are_linked_or_each_their_own() {
-    let both = vec![impulse(60), impulse(60)];
+    let both = vec![impulse(Samples::new(60)), impulse(Samples::new(60))];
     let heard = |y: &[Vec<f32>]| {
         y.iter()
             .map(|c| c.iter().position(|&s| s != 0.0).unwrap())
@@ -254,7 +250,7 @@ fn channel_times_are_linked_or_each_their_own() {
     let wide = DelayLayout::new(bus(6), MAX);
     let mut k = runner(&wide, &controls(10.0 / 1024.0, 0.0, 0.9));
     let mut x = vec![vec![0.0; 60]; 6];
-    x[3] = impulse(60);
+    x[3] = impulse(Samples::new(60));
     let y = k.run(&x);
     for (ch, c) in y.iter().enumerate() {
         assert_eq!(c.iter().any(|&s| s != 0.0), ch == 3, "channel {ch}");
@@ -345,7 +341,7 @@ fn a_time_signal_is_the_delay_of_each_frame() {
     }
     // The longest: an impulse swept to 1e9 s is heard 1024 frames on, not before and not
     // never.
-    let mut x = impulse(1_300);
+    let mut x = impulse(Samples::new(1_300));
     x[0] = 1.0;
     let signal = vec![1e9f32; 1_300];
     let mut k = runner(&family, &controls(20.0 / 1024.0, 0.0, 0.0));
@@ -371,7 +367,7 @@ fn a_feedback_signal_is_the_feedback_of_each_frame() {
         let signal = vec![level; len];
         let mut k = runner(&family, &controls(d as f64 / 1024.0, 0.5, 0.0));
         let y = k
-            .run_in(&[impulse(len)], [None, Some(&signal)], 64)
+            .run_in(&[impulse(Samples::new(len))], [None, Some(&signal)], 64)
             .remove(0);
         for (i, &s) in y.iter().enumerate() {
             let want = if i >= d && i % d == 0 && (i / d == 1 || g > 0.0) {
@@ -400,7 +396,7 @@ fn a_feedback_ramps_over_five_milliseconds_counted_on_the_stream() {
         let c = |fb| controls(d as f64 / rate.get(), fb, 0.0);
         let mut k = Rig::at(&family, &c(0.2), rate);
         k.retarget(&c(0.8));
-        let y = k.run(&[impulse(2 * d + 8)]).remove(0);
+        let y = k.run(&[impulse(Samples::new(2 * d + 8))]).remove(0);
         let got = f64::from(y[2 * d]);
         assert!((got - want).abs() < 1e-5, "D {d}: {got}, want {want}");
     }
@@ -418,7 +414,7 @@ fn a_hostile_time_is_a_delay_within_the_line() {
         (0.5, Some(512)),
     ] {
         let mut k = runner(&mono(InterpolationMode::Linear), &controls(time, 0.0, 0.0));
-        let y = k.run(&[impulse(1_100)]).remove(0);
+        let y = k.run(&[impulse(Samples::new(1_100))]).remove(0);
         assert_eq!(y.iter().position(|&s| s != 0.0), want, "{time}");
     }
 }
@@ -433,7 +429,7 @@ fn a_feedback_past_the_stable_range_is_the_greatest_stable_one() {
             &mono(InterpolationMode::Linear),
             &controls(d as f64 / 1024.0, ask, 0.0),
         );
-        let y = k.run(&[impulse(d * 4 + 1)]).remove(0);
+        let y = k.run(&[impulse(Samples::new(d * 4 + 1))]).remove(0);
         let g = if g == 0.99 {
             Feedback::MAX_STABLE.get()
         } else {
@@ -512,7 +508,7 @@ fn noise(seed: usize, len: usize) -> Vec<f32> {
 #[test]
 fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
     let mut k = runner(&mono(InterpolationMode::Linear), &controls(1e9, 0.0, 0.0));
-    k.run(&[impulse(100)]);
+    k.run(&[impulse(Samples::new(100))]);
     let mut copy = k.bank.clone();
     let silence = vec![0.0f32; 1_100];
     let mut out = vec![0.0f32; 1_100];

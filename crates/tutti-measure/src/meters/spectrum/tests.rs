@@ -4,7 +4,9 @@ use crate::test_rng::uniform;
 use crate::{AboveNyquist, FramingError};
 use std::f64::consts::TAU;
 use tutti_dsp::{HopSize, WindowLength};
+use tutti_fixtures::signal::sine;
 use tutti_rt::SplitMix64;
+use tutti_units::Hz;
 use tutti_units::Samples;
 use tutti_units::{Amplitude, SampleRate};
 
@@ -46,12 +48,6 @@ fn push_frames(state: &mut SpectrumMeter<f32>, block: &[f32]) -> bool {
     !frames.is_empty()
 }
 
-fn tone(len: usize, freq: f64, amp: f64) -> Vec<f32> {
-    (0..len)
-        .map(|i| (amp * (TAU * freq * i as f64 / RATE).sin()) as f32)
-        .collect()
-}
-
 /// Feeds `signal` a hop at a time (so at most one frame completes per
 /// call), returning the state and the levels after each frame.
 fn run(cfg: &SpectrumConfig, signal: &[f32]) -> (SpectrumMeter<f32>, Vec<Vec<Db>>) {
@@ -79,7 +75,15 @@ fn argmax(levels: &[Db]) -> usize {
 fn a_bin_centred_sine_reads_its_amplitude() {
     let size = 1536; // 1 kHz is bin 32 at 48 kHz
     let cfg = config(size, size / 4);
-    let (state, frames) = run(&cfg, &tone(size * 3, 1000.0, 0.5));
+    let (state, frames) = run(
+        &cfg,
+        &sine(
+            Hz::new(1000.0),
+            Amplitude::new(0.5),
+            SampleRate::of(RATE),
+            Samples::new(size * 3),
+        ),
+    );
     let want = Db::from_amplitude(Amplitude::new(0.5)).get();
     for levels in &frames {
         assert_eq!(argmax(levels), 32);
@@ -117,7 +121,15 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
     assert!((loss(0.5) - -1.4236).abs() < 1e-3);
     for d in [0.1, 0.25, 0.4, 0.5] {
         let freq = (32.0 + d) * RATE / size as f64;
-        let (_, frames) = run(&cfg, &tone(size, freq, 0.5));
+        let (_, frames) = run(
+            &cfg,
+            &sine(
+                Hz::new(freq),
+                Amplitude::new(0.5),
+                SampleRate::of(RATE),
+                Samples::new(size),
+            ),
+        );
         let levels = &frames[0];
         let peak = levels[argmax(levels)].get();
         let want = Db::from_amplitude(Amplitude::new(0.5)).get() + loss(d);
@@ -135,7 +147,20 @@ fn an_off_centre_sine_loses_the_scalloping_figure() {
 fn two_tones_resolve_to_two_peaks() {
     let size = 1536;
     let cfg = config(size, size / 2);
-    let (a, b) = (tone(size * 2, 1000.0, 0.5), tone(size * 2, 5000.0, 0.1));
+    let (a, b) = (
+        sine(
+            Hz::new(1000.0),
+            Amplitude::new(0.5),
+            SampleRate::of(RATE),
+            Samples::new(size * 2),
+        ),
+        sine(
+            Hz::new(5000.0),
+            Amplitude::new(0.1),
+            SampleRate::of(RATE),
+            Samples::new(size * 2),
+        ),
+    );
     let mix: Vec<f32> = a.iter().zip(&b).map(|(x, y)| x + y).collect();
     let (_, frames) = run(&cfg, &mix);
     for levels in &frames {
@@ -305,7 +330,12 @@ fn release_follows_the_analytic_exponential_and_attack_is_instant() {
     let tau = Seconds::new(0.1);
     let cfg = config(size, hop).smoothing(Smoothing::Release(SpectrumTime::of(tau)));
     let (quiet, loud_end) = (size * 2, size * 6);
-    let mut signal = tone(loud_end, 1000.0, 0.5);
+    let mut signal = sine(
+        Hz::new(1000.0),
+        Amplitude::new(0.5),
+        SampleRate::of(RATE),
+        Samples::new(loud_end),
+    );
     signal[..quiet].iter_mut().for_each(|s| *s *= 0.02);
     signal.resize(loud_end + size * 4, 0.0);
     let (_, frames) = run(&cfg, &signal);
@@ -340,7 +370,12 @@ fn peaks_hold_then_decay_at_the_configured_rate() {
     let cfg = config(size, hop)
         .peak_hold(SpectrumTime::of(hold))
         .peak_decay(PeakDecay::of(decay));
-    let mut signal = tone(size * 3, 1000.0, 0.5);
+    let mut signal = sine(
+        Hz::new(1000.0),
+        Amplitude::new(0.5),
+        SampleRate::of(RATE),
+        Samples::new(size * 3),
+    );
     signal.resize(size * 3 + size * 40, 0.0);
 
     let mut state = meter(&cfg);
@@ -546,7 +581,15 @@ fn a_sine_inside_a_band_reads_the_noise_bandwidth_excess() {
         per_octave: BandsPerOctave::of(1),
         band: band(700.0, 2800.0),
     });
-    let (state, frames) = run(&cfg, &tone(size, 1000.0, 0.5));
+    let (state, frames) = run(
+        &cfg,
+        &sine(
+            Hz::new(1000.0),
+            Amplitude::new(0.5),
+            SampleRate::of(RATE),
+            Samples::new(size),
+        ),
+    );
     let want = Db::from_amplitude(Amplitude::new(0.5)).get() + Db::from_power(1.5).get();
     let band = state
         .frequencies()
@@ -726,7 +769,15 @@ fn no_level_reads_under_the_configured_floor() {
     let mut state = meter(&cfg);
     push_frames(&mut state, &vec![0.0f32; 1000]);
     assert!(state.levels().iter().all(|&l| l == Db::new(-60.0)));
-    push_frames(&mut state, &tone(1000, 1000.0, 1e-6));
+    push_frames(
+        &mut state,
+        &sine(
+            Hz::new(1000.0),
+            Amplitude::new(1e-6),
+            SampleRate::of(RATE),
+            Samples::new(1000),
+        ),
+    );
     assert!(state.levels().iter().all(|&l| l == Db::new(-60.0)));
 }
 
@@ -787,7 +838,12 @@ fn input_is_checked_and_state_stays_finite() {
 #[test]
 fn the_trait_fold_over_uneven_chunks_yields_every_frame_and_the_whole_stream_levels() {
     let cfg = config(256, 64);
-    let x = tone(1000, 1500.0, 0.5);
+    let x = sine(
+        Hz::new(1500.0),
+        Amplitude::new(0.5),
+        SampleRate::of(RATE),
+        Samples::new(1000),
+    );
     let (items, levels) = fold_uneven(&cfg, SampleRate::of(RATE), x.len(), |meter, at, out| {
         meter.push(Mono::new(&x[at]), out)
     })

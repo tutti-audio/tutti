@@ -166,8 +166,9 @@ impl<F: Float> Node<F> for OscillatorNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{RATE, amplitude_at, mean};
+    use crate::test_support::{RATE, mean};
     use tutti_buffers::Planes;
+    use tutti_fixtures::signal::amplitude_at;
     use tutti_graph::contract::{Direct, drive};
 
     fn render(node: OscillatorNode, frames: usize) -> Vec<f32> {
@@ -253,7 +254,7 @@ mod tests {
             ),
             48 * 100,
         );
-        assert!(amplitude_at(&out, 1_000.0, 48_000.0) < 0.003);
+        assert!(amplitude_at(&out, Hz::new(1_000.0), SampleRate::of(48_000.0)) < 0.003);
     }
 
     #[test]
