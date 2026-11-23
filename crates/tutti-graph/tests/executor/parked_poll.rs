@@ -226,11 +226,11 @@ fn four_holders(workers: usize) -> (Vec<Vec<u32>>, Vec<(usize, usize)>) {
     )
 }
 
-/// **Parked polls run on the pool, and the render is bit for bit the serial
+/// **Parked polls run on the pool, and the render is bit for bit the one-participant
 /// one:** the two bypassed holders are polled every parked block, the other two
 /// never, on every worker count.
 #[test]
-fn a_parked_poll_on_the_pool_renders_what_the_serial_executor_does() {
+fn a_parked_poll_on_the_pool_renders_what_the_one_participant_executor_does() {
     let (serial, serial_counts) = four_holders(1);
     assert!(
         serial_counts[1].1 > 0 && serial_counts[3].1 > 0,

@@ -141,8 +141,8 @@ fn a_known_sine_reads_its_peak_and_rms() {
     );
 }
 
-/// The loud part sits past frame 8192, which the old stereo scratch dropped
-/// in a release build, so a meter of the head read silence.
+/// The loud part sits past frame 8192: a meter that dropped it would read the
+/// head's silence.
 #[test]
 fn a_block_past_8192_frames_is_metered_whole() {
     let frames = 8192 + 1024;

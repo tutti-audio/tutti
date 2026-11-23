@@ -1,6 +1,6 @@
 //! Events a port cannot hold: a note-off is taken before a note-on is, every
 //! loss is counted exactly and charged to the output port that had it, and
-//! the parallel executor reports the same losses as the serial one.
+//! the parallel executor reports the same losses as the one-participant one.
 //!
 //! All figures are counted by hand from the nodes below, never from another
 //! render.
@@ -206,7 +206,7 @@ fn a_loss_is_charged_to_its_port() {
 }
 
 /// The parallel executor reports the same totals, and here the same set of
-/// losses, as the serial one, whatever the worker count: each worker's log is
+/// losses, as the one-participant one, whatever the worker count: each worker's log is
 /// added to the block's. Four writers over capacity on different ports, so
 /// the tasks spread. The entries are compared **sorted**: in a parallel block
 /// they come in the order the workers finished, and a block that lost at more
@@ -214,7 +214,7 @@ fn a_loss_is_charged_to_its_port() {
 /// totals and the render are exact and identical; the order and truncation of
 /// entries are not promised to match.
 #[test]
-fn the_parallel_losses_are_the_serial_ones() {
+fn the_parallel_losses_are_the_one_participant_ones() {
     let scripts = |n: u32| {
         vec![
             Script {
@@ -356,7 +356,7 @@ impl Bounded {
 /// 11 events past a bound of 8. The merge orders by frame, ties to the lower
 /// source: frames 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5. The node is sent the first
 /// 8 of them, and the 3 past them are counted once each block, the same on the
-/// serial executor and on every worker count.
+/// one-participant executor and on every worker count.
 #[test]
 fn a_declared_input_bound_keeps_the_earliest_and_counts_the_rest() {
     for workers in std::iter::once(1).chain(common::WORKERS) {
@@ -861,7 +861,7 @@ impl Node for Trace {
 /// two latest note-ons do not, and the node is sent frames 0, 1, 20, 21. In
 /// the next block a note-off scheduled onto frame 30 joins them in the joint
 /// cut, which keeps it too and cuts one more note-on: frames 0, 20, 21, 30.
-/// Both are non-decreasing in frame, serial and parallel.
+/// Both are non-decreasing in frame, one-participant and parallel.
 #[test]
 fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
     use tutti_units::{At, Frame};

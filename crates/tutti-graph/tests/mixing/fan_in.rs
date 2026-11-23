@@ -7,7 +7,7 @@
 //! Every topology is hand-built (the session API is PR 4). Figures are
 //! analytic: the expected value is the fold written out in the test. Where a
 //! render is compared with another, it is the parallel executor against the
-//! serial one.
+//! one-participant one.
 
 use common::spec_of;
 use tutti_graph::testing as common;
@@ -98,7 +98,7 @@ fn render(
     got
 }
 
-/// Serial and parallel (four participants) renders, which must be bit for bit
+/// One-participant and parallel (four participants) renders, which must be bit for bit
 /// the same.
 fn render_both(t: &Topology, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
     let serial = render(t, kinds, 1, blocks);
@@ -137,7 +137,7 @@ fn fan_in(values: &[f32], at_port: bool) -> (Topology, BTreeMap<NodeKey, Kind>) 
 }
 
 /// A sum is the left fold over the sources in key order: three known
-/// constants, at a port and at an output channel, serial and parallel.
+/// constants, at a port and at an output channel, one-participant and parallel.
 ///
 /// The values are chosen so the order and the grouping show: `2^24 + 1`
 /// rounds back to `2^24`, so `((0 + 2^24) + 1) + 1` is `2^24`, the reverse

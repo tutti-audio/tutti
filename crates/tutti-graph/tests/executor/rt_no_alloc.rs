@@ -4,7 +4,7 @@
 //! landing (on time, late, and still waiting), writers refusing past a declared event capacity, and block lengths that change
 //! every call.
 //!
-//! Each gate runs twice: on the serial executor and on the parallel one
+//! Each gate runs twice: on the one-participant executor and on the parallel one
 //! (`src/par.rs`), whose every participant — the helper
 //! threads as well as the caller — runs its share of each block inside
 //! `RtScope` (the graph is prepared `Realtime`), so an allocation or a
@@ -39,7 +39,7 @@ use tutti_units::{At, Beat, Frame, Latency, Samples, Tail};
 
 /// Run `exec`'s blocks on a [`common::TestPool`] of `workers` participants
 /// whose every participant runs its share inside `RtScope` — the
-/// parallel path, helpers included (`1`: serial, no pool). Set before the
+/// parallel path, helpers included (`1`: one-participant, no pool). Set before the
 /// first commit is applied, so the parallel state is built with the plan,
 /// outside the gate, as applying is.
 fn use_pool(exec: &mut tutti_graph::Executor, workers: usize) {
@@ -742,7 +742,7 @@ fn parallel_declared_event_capacities_are_allocation_free() {
 /// More places lose events than a block's log holds (64) and the control side
 /// never drains the ring (256 entries): 80 writers, each two events over its
 /// port, 100 blocks. The log fills every block, the ring fills in the fourth,
-/// and nothing allocates on any participant, serial or parallel. What no entry
+/// and nothing allocates on any participant, one-participant or parallel. What no entry
 /// names is counted instead, so entries plus the unreported count are exactly
 /// the total.
 fn losses_past_the_log_and_the_ring_are_allocation_free_on(workers: usize) {
@@ -1439,7 +1439,7 @@ fn direct_driving_events_does_not_allocate() {
 }
 
 /// Reporting a tail and parking on it never allocates: pulses into ringers
-/// that narrow their ceiling every block, through the serial executor and a
+/// that narrow their ceiling every block, through the one-participant executor and a
 /// pool whose every participant runs inside the gate.
 fn reporting_nodes_are_allocation_free_on(workers: usize) {
     use common::{Burst, RingingNode};
@@ -3148,7 +3148,7 @@ fn parallel_retiring_and_re_preparing_a_key_holding_unit_allocates_nothing() {
 /// **A pool set while a commit is in flight**: the commit was staged for no
 /// pool, `set_pool` re-stages it with the parallel state for this one, and
 /// applying it allocates and frees nothing; then the pool goes and the commit
-/// is re-staged serial. This covers the re-staged path. The race, a commit
+/// is re-staged with no pool. This covers the re-staged path. The race, a commit
 /// staged for the old pool by another thread while `set_pool` runs, cannot be
 /// reproduced deterministically; its answer (the unused parallel state goes
 /// back in the commit box) is the same hand-back.

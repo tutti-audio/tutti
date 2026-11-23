@@ -6,7 +6,7 @@
 //! The reference interpreter (`reference.rs`) renders a `Topology`'s outputs
 //! and knows neither taps nor meters: a meter reads the signal and changes
 //! nothing, so there is nothing for it to compare. The properties here are
-//! analytic figures and the serial render against the parallel one.
+//! analytic figures and the one-participant render against the parallel one.
 
 use tutti_graph::testing as common;
 
@@ -162,7 +162,7 @@ fn a_constant_reads_exactly_per_channel() {
 
 /// The meter op on the audio thread allocates nothing, with the meter enabled,
 /// over many blocks, and the meter really read (a gate around a meter that
-/// measured nothing would pass). Serial; the parallel gate is below.
+/// measured nothing would pass). One-participant; the parallel gate is below.
 #[test]
 fn measuring_is_allocation_free_with_the_meter_enabled() {
     let mut r = rig(1, true);
@@ -515,7 +515,7 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
 
 /// **A meter changes no output bit.** With latency on two of three main output
 /// paths, ragged blocks, stopped blocks and a seek, the outputs are identical
-/// with no meter, a main output meter, an aligned track meter and both, serial and
+/// with no meter, a main output meter, an aligned track meter and both, one-participant and
 /// on a pool of three inside `assert_no_alloc`.
 #[test]
 fn a_meter_changes_no_output_bit() {
@@ -788,7 +788,7 @@ fn a_fork_meters_its_own_render_and_leaves_the_live_meter_alone() {
 }
 
 /// Six chains with different gains and lags, summed in no way: every output
-/// has its own signal. Metered by a main output and a track meter, serial and then
+/// has its own signal. Metered by a main output and a track meter, one-participant and then
 /// on a pool; the readings of every block are identical bit for bit.
 fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     let values: Vec<f32> = (0..6).map(|k| 0.1 + 0.13 * k as f32).collect();
@@ -820,7 +820,7 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     read
 }
 
-/// The parallel render's readings are bit-identical to the serial one at
+/// The parallel render's readings are bit-identical to the one-participant one at
 /// several worker counts, with every participant inside `RtScope`.
 #[test]
 fn the_parallel_meters_are_bit_identical_and_allocation_free() {

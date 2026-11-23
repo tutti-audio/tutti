@@ -5453,7 +5453,7 @@ latent sibling was off by the upstream latency.
   executor's one history, read-only: `par::run_block`'s shared block state
   and each worker's `Head` carry the same `&TransportHistory`, and
   `observe` runs on the audio thread before `pool.run`, so nothing reads it
-  while it is written. `the_parallel_render_reads_the_same_history_as_the_serial_one`
+  while it is written. `the_parallel_render_reads_the_same_history_as_the_one_participant_one`
   (`tests/events/arrival_transport.rs`) renders four latent probes on 1 to 4
   participants and asserts every output bit-identical to the serial render.
 - **The plugin node** reads `Cx::transport_at` for each chunk
@@ -6615,7 +6615,7 @@ Where the build chose:
   there. It is a new `Weight::Fade` of the existing lane, not a new op: the
   kernels, `par.rs`'s claims and `CONSTANT` (a fading addend is not constant)
   are the lane's, so a parallel render equals the serial one bit for bit
-  (`edge_fade::parallel_equals_serial_for_a_graph_mid_fade`) and a block mid-fade
+  (`edge_fade::parallel_equals_one_participant_for_a_graph_mid_fade`) and a block mid-fade
   allocates nothing (`rt_no_alloc::{fading_edges,parallel_fading_edges}_are_allocation_free`).
 - **The end is reported on a ring, not in the commit box.** A commit's box
   returns only with a commit; a lane reports its ended fade when it ends. The

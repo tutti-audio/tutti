@@ -352,7 +352,7 @@ impl<'a, F: Float> Io<'a, F> {
     /// (feature `contract`) checks it. Audio thread: one store into the
     /// unit's own record, no allocation; the plan is untouched, and nothing
     /// but the task that runs the node reads it, so a pooled render parks the
-    /// same blocks a serial one does.
+    /// same blocks a one-participant one does.
     #[inline]
     pub fn report_tail(&self, tail: Tail) {
         if let Some(cell) = self.tail {
