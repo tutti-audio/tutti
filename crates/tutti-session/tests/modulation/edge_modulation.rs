@@ -230,10 +230,10 @@ fn an_edge_target_keys_apart_and_goes_with_its_node() {
 /// over; the base reads unity throughout.
 #[test]
 fn a_gain_reads_its_effective_value_beside_its_base() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let edge = mixer(&mut s);
     settle(&mut s);
-    let _ = render(&mut s, 2);
+    let _ = render(&mut s, 2, BLOCK);
     let target = gain(&s, edge);
     assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
 
@@ -241,15 +241,15 @@ fn a_gain_reads_its_effective_value_beside_its_base() {
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
-    let _ = render(&mut s, 12);
+    let _ = render(&mut s, 12, BLOCK);
     assert_eq!(s.get(target.effective()).unwrap(), Gain::new(1.5));
     assert_eq!(s.get(target).unwrap(), Gain::UNITY, "the base stays");
 
     s.mods_mut().remove_route(route).unwrap();
     settle(&mut s);
-    let _ = render(&mut s, 12);
+    let _ = render(&mut s, 12, BLOCK);
     assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
 }

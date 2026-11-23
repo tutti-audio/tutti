@@ -4,7 +4,7 @@
 //! into a cutoff of knob 500 over `0..=1000` is `500 + 0.4 * 0.5 * 1000 = 700`.
 
 use tutti_session::{DetachedSession, RouteSpec};
-use tutti_units::{Depth, Hz};
+use tutti_units::{Bipolar, Hz};
 
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{main_output, render, rig, settle};
@@ -39,7 +39,7 @@ fn a_lane_moves_the_effective_value_and_never_the_base() {
         .unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, probe.cutoff(), Depth::of(0.4)))
+        .route(RouteSpec::new(source, probe.cutoff(), Bipolar::of(0.4)))
         .unwrap();
     settle(&mut s);
     let _ = render(&mut side, 1_024, 128);
