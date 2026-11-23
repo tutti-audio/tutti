@@ -389,7 +389,11 @@ mod tests {
             "crates/tutti-midi-hardware/Cargo.toml",
             "[dependencies]\nsys = { package = \"libc\", version = \"0.2\" }\n",
         );
-        assert!(r.findings[1].contains("`libc`"), "{:?}", r.findings);
+        assert!(
+            r.findings.iter().any(|l| l.contains("`libc`")),
+            "{:?}",
+            r.findings
+        );
         let r = with(
             clean(),
             "crates/tutti-midi-hardware/Cargo.toml",
