@@ -33,6 +33,12 @@ impl DetailsData {
     /// The data of a reply to an inquiry for `target` of `profile`, typed, or
     /// `None` when the pair names no typed data here or the data is not
     /// well-formed for it.
+    ///
+    /// It covers the Registered Target `Number of MIDI Channels` of any Profile,
+    /// the Drawbar Organ (M2-121), Default Drum Note Map (M2-125) and Note On
+    /// Orchestral Articulation (M2-123) Profiles. The MPE Profile's reply
+    /// (M2-120) is `tutti_midi_protocol`'s `MpeFeatures::from_data`: this crate
+    /// does not depend on that one.
     #[must_use]
     pub fn decode(&self, profile: ProfileId, target: InquiryTarget) -> Option<ProfileDetails> {
         if target == InquiryTarget::NUMBER_OF_CHANNELS {

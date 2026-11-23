@@ -284,7 +284,7 @@ fn motion_tally(d: &[u8]) -> Option<MotionControlTally> {
         return None;
     }
     Some(MotionControlTally {
-        state: MmcMotionState::from_wire(state)?,
+        state: MotionControlState::from_wire(state)?,
         process: MotionProcess::from_wire(process)?,
         state_success: McsSuccess::from_wire(status & 7)?,
         process_success: McpSuccess::from_wire(status >> 4 & 7)?,

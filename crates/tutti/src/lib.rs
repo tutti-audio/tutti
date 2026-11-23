@@ -877,12 +877,11 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
-        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
-        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
-        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
-        TimecodeSeconds, TuningFrequency,
+        ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
+        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
+        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
         ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
@@ -1001,35 +1000,44 @@ pub mod midi {
         pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
     }
 
-    /// Machine control and the other Universal System Exclusive messages (M2-101
-    /// section on MMC, MTC full message, General MIDI on/off, device control):
-    /// what a session's `follow_machine_control` reports and what a host sends to
-    /// an output.
-    pub mod machine_control {
+    /// Universal System Exclusive messages: what `Universal` reads and `Addressed`
+    /// sends (device control, MTC full message and set-up, General MIDI on and off,
+    /// the MIDI Machine Control commands and responses) and what a session's
+    /// `follow_machine_control` reports.
+    pub mod universal {
         pub use tutti_midi_protocol::{
-            Addressed, Addressee, BadChecksum, ChannelMask, GeneralMidiMode, GeneratorAction,
-            GeneratorSetUp, GeneratorTally, Heard, InvalidKeyChanges, JamMode, JamReference,
-            KeyChange, KeyChanges, McpSuccess, McsSuccess, MmcArithmetic, MmcAudioTrack, MmcBytes,
-            MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
-            MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices, MmcDirection,
-            MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind, MmcErrorReport, MmcEvent,
-            MmcEventDirection, MmcEventFlags, MmcEventResponse, MmcExtension, MmcFastMode,
-            MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup, MmcInfoField, MmcItem, MmcItems,
-            MmcLifterDefeat, MmcLocate, MmcMantissa, MmcMaskedWrite, MmcMotionState, MmcMove,
-            MmcName, MmcNames, MmcOtherField, MmcPayload, MmcPlaySpeedReference, MmcPosition,
-            MmcProcedure, MmcProcedureResponse, MmcReassembler, MmcRecordActivity, MmcRecordMode,
-            MmcRecordMonitor, MmcRecordStatus, MmcReservedCommand, MmcResolvedPlayMode,
-            MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentPlace, MmcSegments,
-            MmcSegmentsRefused, MmcSelection, MmcSequence, MmcShift, MmcShortTimeCode, MmcSign,
-            MmcSignature, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcStopMode, MmcString,
-            MmcSubframes, MmcSupportBitmap, MmcSystemMaster, MmcTimeCode, MmcTimeCodeName,
-            MmcTimeCodeSource, MmcTimeLabel, MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate,
-            MmcUserBitFlags, MmcUserBits, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
+            Addressed, Addressee, BadChecksum, GeneralMidiMode, GeneratorAction, GeneratorSetUp,
+            GeneratorTally, Heard, JamMode, JamReference, McpSuccess, McsSuccess, MmcArithmetic,
+            MmcAudioTrack, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand,
+            MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices,
+            MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind,
+            MmcErrorReport, MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse,
+            MmcExtension, MmcFastMode, MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup,
+            MmcInfoField, MmcItem, MmcItems, MmcLifterDefeat, MmcLocate, MmcMantissa,
+            MmcMaskedWrite, MmcMove, MmcName, MmcNames, MmcOtherField, MmcPayload,
+            MmcPlaySpeedReference, MmcPosition, MmcProcedure, MmcProcedureResponse, MmcReassembler,
+            MmcRecordActivity, MmcRecordMode, MmcRecordMonitor, MmcRecordStatus,
+            MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment,
+            MmcSegmentBytes, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection,
+            MmcSequence, MmcShift, MmcShortTimeCode, MmcSign, MmcSignature, MmcSlot, MmcSpeed,
+            MmcStep, MmcStepCount, MmcStopMode, MmcString, MmcSubframes, MmcSupportBitmap,
+            MmcSystemMaster, MmcTimeCode, MmcTimeCodeName, MmcTimeCodeSource, MmcTimeLabel,
+            MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate, MmcUserBitFlags, MmcUserBits,
+            MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
             MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
             NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-            NotQuarterFramePiece, OctaveOffsets, QuarterFrame, QuarterFrameCycle,
-            QuarterFramePiece, Recipient, RunReference, Timing, TuningMessage, TuningName,
-            Universal, UniversalRead, UniversalReader, VitcInsert,
+            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
+            RunReference, Universal, UniversalRead, UniversalReader, VitcInsert,
+        };
+    }
+
+    /// The MIDI Tuning Standard (M2-101's Universal tuning messages): a key table,
+    /// a key change or an octave offset, and the frequency each carries.
+    pub mod tuning {
+        pub use tutti_midi_protocol::{
+            ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
+            MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency,
+            TuningMessage, TuningName,
         };
     }
 

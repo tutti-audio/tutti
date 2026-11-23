@@ -106,8 +106,9 @@ fn an_articulation_reply_is_130_bytes_and_its_custom_reply_96() {
 #[test]
 fn the_profile_id_and_target_decide_never_the_length() {
     let organ = data(&[0b1]);
-    // The same one byte under another Profile, another target or another
-    // Level of nothing is not an organ reply.
+    // The same one byte under the drum Profile, the MPE Profile, an unknown
+    // Version of the organ Profile, an unknown target or the articulation
+    // Profile is not an organ reply.
     assert_eq!(organ.decode(id(0x20, 0x03, 0x01, 0x01), FEATURES), None);
     assert_eq!(organ.decode(id(0x31, 0x00, 0x01, 0x01), FEATURES), None);
     assert_eq!(organ.decode(id(0x20, 0x01, 0x02, 0x01), FEATURES), None);
@@ -125,4 +126,31 @@ fn the_profile_id_and_target_decide_never_the_length() {
 
     // A reserved bit is not read as a reply.
     assert_eq!(data(&[0b10_0000]).decode(ORGAN, FEATURES), None);
+}
+
+#[test]
+fn a_reply_of_the_wrong_length_is_none_whatever_the_profile() {
+    // Table 8 is four bytes; M2-123 §9.1 is 130 and §9.2 is 96.
+    assert_eq!(
+        data(&[0x01, 0x00, 0x04]).decode(ORGAN, InquiryTarget::NUMBER_OF_CHANNELS),
+        None
+    );
+    assert_eq!(
+        data(&[0u8; 129]).decode(ProfileId::ARTICULATION, FEATURES),
+        None
+    );
+    assert_eq!(
+        data(&[0u8; 95]).decode(ProfileId::ARTICULATION, InquiryTarget::new(U7::of(0x40))),
+        None
+    );
+}
+
+#[test]
+fn a_drum_reply_under_an_unknown_target_is_none() {
+    let mut drum = [0u8; 10];
+    drum[0] = 1;
+    assert_eq!(
+        data(&drum).decode(id(0x20, 0x03, 0x01, 0x01), InquiryTarget::new(U7::of(0x40))),
+        None
+    );
 }

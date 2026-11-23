@@ -608,12 +608,12 @@ mod machine_control {
     use tutti_midi_protocol::{
         MMC_MAX_DATA, McpSuccess, McsSuccess, MmcCodeStatus, MmcCommand, MmcCommandReassembler,
         MmcCommands, MmcDirection, MmcErrorCode, MmcErrorKind, MmcEventDirection, MmcEventFlags,
-        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcMantissa, MmcMotionState, MmcName,
-        MmcPosition, MmcProcedure, MmcResponseReassembler, MmcSegment, MmcSegmentBytes,
-        MmcSegmentCount, MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused,
-        MmcSelection, MmcShift, MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep,
-        MmcStepCount, MmcSubframes, MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail,
-        MmcUpdate, MotionControlTally, MotionProcess, MtcRate, MtcTimeCode,
+        MmcFields, MmcGroup, MmcInfoField, MmcLocate, MmcMantissa, MmcName, MmcPosition,
+        MmcProcedure, MmcResponseReassembler, MmcSegment, MmcSegmentBytes, MmcSegmentCount,
+        MmcSegmentError, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection, MmcShift,
+        MmcShortTimeCode, MmcSign, MmcSlot, MmcSpeed, MmcStep, MmcStepCount, MmcSubframes,
+        MmcTimeCode, MmcTimeCodeName, MmcTimeLabel, MmcTimeTail, MmcUpdate, MotionControlState,
+        MotionControlTally, MotionProcess, MtcRate, MtcTimeCode,
     };
 
     fn framed(device: u8, sub_id: u8, data: &[u8]) -> Vec<u8> {
@@ -1142,7 +1142,7 @@ mod machine_control {
         assert_eq!(
             rewind,
             MotionControlTally {
-                state: MmcMotionState::Rewind,
+                state: MotionControlState::Rewind,
                 process: MotionProcess::Locate,
                 state_success: McsSuccess::Achieved,
                 process_success: McpSuccess::Active,
@@ -1610,7 +1610,7 @@ mod machine_control {
         let [MmcInfoField::MotionControlTally(tally)] = done.iter().collect::<Vec<_>>()[..] else {
             panic!()
         };
-        assert_eq!(tally.state, MmcMotionState::Rewind);
+        assert_eq!(tally.state, MotionControlState::Rewind);
     }
 
     /// A string splits into 45-byte segments (a message holds 48 bytes, and
