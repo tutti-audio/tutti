@@ -8,6 +8,7 @@ use tutti_units::Tail;
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::{CONSTANT, SILENT};
 use crate::NodeKey;
+use crate::compile::ids::{Generation, PlanUnitId, Table};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -22,7 +23,7 @@ use crate::model::mode::ModeState;
 use crate::node::param::ParamState;
 
 pub(crate) struct Unit<F: Float = f32> {
-    pub(super) generation: u32,
+    pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// Consecutive frames of fully silent input, saturating.
     pub(super) quiet: u64,
@@ -51,7 +52,7 @@ pub(crate) struct Unit<F: Float = f32> {
 
 impl<F: Float> Unit<F> {
     pub(super) fn new(
-        generation: u32,
+        generation: Generation,
         node: NodeBox<F>,
         params: ParamState<F>,
         mode: ModeState<F>,
@@ -116,7 +117,7 @@ pub(crate) enum Ring<F: Float = f32> {
 /// Built on the control side with room for everything that can flow in
 /// (`stage.rs`); `live` is whether anything was flushed into it.
 pub(crate) struct Inject {
-    pub(crate) unit: u32,
+    pub(crate) unit: PlanUnitId,
     pub(super) port: u16,
     pub(super) events: Vec<Event>,
     /// Where `events` and the sink's own slot events are merged, sized when
@@ -234,9 +235,9 @@ pub(super) struct State<F: Float = f32> {
     /// across blocks, or a plain addend's none.
     pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,
-    pub(super) has_inject: Vec<bool>,
+    pub(super) has_inject: Table<PlanUnitId, bool>,
     /// Plan units with a scheduled command landing this block.
-    pub(super) has_due: Vec<bool>,
+    pub(super) has_due: Table<PlanUnitId, bool>,
     /// The room of the buffer where a node's scheduled events are merged into
     /// its inputs, one per participant (`command::overlay_capacity`).
     pub(super) overlay: usize,
@@ -259,8 +260,8 @@ impl<F: Float> State<F> {
             meters: Vec::new(),
             lanes: Vec::new(),
             inject: Vec::new(),
-            has_inject: Vec::new(),
-            has_due: Vec::new(),
+            has_inject: Table::default(),
+            has_due: Table::default(),
             overlay: 0,
             par: None,
         }
@@ -270,6 +271,7 @@ impl<F: Float> State<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
     use crate::event::types::Event;
     use crate::exec::held::Held;
     use crate::node::time::Offset;
@@ -285,7 +287,7 @@ mod tests {
 
     fn inject(room: usize) -> Inject {
         Inject {
-            unit: 0,
+            unit: PlanUnitId::new(0),
             port: 0,
             events: Vec::new(),
             merged: Vec::new(),

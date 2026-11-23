@@ -42,6 +42,7 @@ use tutti_rt::{Bell, ControlDrop, FaultLatch, Listener};
 use tutti_rt::{Overflow, RingReader, RingWriter, ring};
 use tutti_units::{Frame, Samples};
 
+use crate::compile::ids::AudioSlotId;
 use crate::exec::slots::AudioSlots;
 use tutti_buffers::Float;
 
@@ -290,7 +291,7 @@ impl<F: Float> TapWriter<F> {
 pub(crate) fn tap_op<F: Float, A: AudioSlots<F>>(
     tap: &mut TapWriter<F>,
     arena: &A,
-    srcs: &[u32],
+    srcs: &[AudioSlotId],
     start: Frame,
     frames: usize,
 ) {
@@ -697,6 +698,7 @@ impl<F: Float> Source for TapReader<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
     use crate::exec::arena::Arena;
 
     /// **A closed writer ends its reader**: the reader drains what was
@@ -833,9 +835,17 @@ mod tests {
         let mut arena = Arena::<f64>::new(1, FRAMES);
         // Not representable in `f32`: a narrowing would be visible.
         let block: Vec<f64> = (0..FRAMES).map(|i| 0.1 * (i + 1) as f64).collect();
-        arena.slot_mut(0, FRAMES).copy_from_slice(&block);
+        arena
+            .slot_mut(AudioSlotId::new(0), FRAMES)
+            .copy_from_slice(&block);
         let (mut reader, mut writer) = TapReader::<f64>::pair(1, Samples::new(1024));
-        tap_op::<f64, _>(&mut writer, &arena, &[0], Frame::ZERO, FRAMES);
+        tap_op::<f64, _>(
+            &mut writer,
+            &arena,
+            &[AudioSlotId::new(0)],
+            Frame::ZERO,
+            FRAMES,
+        );
         let mut out = vec![0.0f64; FRAMES];
         assert_eq!(
             reader

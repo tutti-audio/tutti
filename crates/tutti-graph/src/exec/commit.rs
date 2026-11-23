@@ -14,6 +14,7 @@ use super::stage::Staged;
 use super::state::{Gone, State, Unit};
 use super::{EDGE_FADE_CAPACITY, FADE_CAPACITY, QUEUE_CAPACITY};
 use crate::NodeKey;
+use crate::compile::ids::Generation;
 use crate::compile::plan::{Delta, Plan, UnitIdx};
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
@@ -126,7 +127,7 @@ impl<F: Float> Crossfade<F> {
 pub(super) struct Incoming<F: Float = f32> {
     pub(super) key: NodeKey,
     pub(super) idx: UnitIdx,
-    pub(super) generation: u32,
+    pub(super) generation: Generation,
     pub(super) node: NodeBox<F>,
     /// The crossfade it arrives with, over the unit at its key.
     pub(super) fade: Option<Box<Crossfade<F>>>,
@@ -270,7 +271,7 @@ impl<F: Float> Commit<F> {
                 Incoming {
                     key: p.key,
                     idx: p.idx,
-                    generation: p.generation,
+                    generation: Generation::new(p.generation),
                     node: NodeBox::new(unit, wakes(p.key)),
                     fade,
                     params,
