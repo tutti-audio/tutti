@@ -45,8 +45,8 @@ pub struct UniversalPayload {
 }
 
 impl UniversalPayload {
-    /// The bytes, each seven-bit by type: [`Sysex7Packets::part`] packs them
-    /// as they are.
+    /// The bytes, each seven-bit by type:
+    /// [`Sysex7Packets::part`](tutti_ump::Sysex7Packets::part) packs them as they are.
     #[must_use]
     pub fn as_bytes(&self) -> &[U7] {
         &self.buf[..self.len]
