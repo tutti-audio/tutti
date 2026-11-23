@@ -231,8 +231,8 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
-    Watcher,
+    Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
+    SavedValues, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -467,7 +467,7 @@ pub mod types {
         SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
         UnitParam, UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs};
+    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is

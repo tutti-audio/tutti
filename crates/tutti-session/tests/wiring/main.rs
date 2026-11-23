@@ -18,6 +18,7 @@ mod compensation;
 mod connect;
 mod declick;
 mod edge_gain;
+mod edit_log;
 mod engine;
 mod event_ports;
 mod f64_session;
