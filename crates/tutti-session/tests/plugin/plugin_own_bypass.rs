@@ -29,9 +29,7 @@ fn plugin_file() -> std::path::PathBuf {
 }
 
 fn session_with_plugin() -> (Session, tutti_session::Key<tutti_session::AnyPlugin>) {
-    // SAFETY: nextest runs each test in its own process, and this is set from
-    // the test's own thread before the first server is spawned.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let mut s = Session::builder()
         .sample_rate(SampleRate::SR_48K)
         .max_block(MaxBlock::of(Samples::new(BLOCK)))

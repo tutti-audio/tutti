@@ -35,16 +35,14 @@
 //! volume cell. Neither takes `&mut` of anything in the graph.
 
 use tutti_buffers::BusTopology;
-use tutti_graph::NodeKey;
 use tutti_graph::{EventInletNode, InstrumentNode};
+use tutti_graph::{IntoNode, NodeKey};
 use tutti_midi_runtime::{LIVE_INLET_CAPACITY, MidiKeys};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_ump::MidiGroup;
 use tutti_units::Amplitude;
 
-use crate::{
-    Feeder, Graph, Key, MainOutput, OutputPort, ParamTarget, RemoveError, Session, SessionNode,
-};
+use crate::{Feeder, Graph, Key, MainOutput, OutputPort, ParamTarget, RemoveError, Session};
 
 /// The type of an instrument's key when the session was given a node by its
 /// [`NodeKey`] ([`Session::instrument`]), so its type is not known. A [`Key`]
@@ -209,7 +207,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// no event input or lacks the output its main pair names, or the wire's
     /// [`ConnectError`](crate::ConnectError) (the instrument is removed again in
     /// both cases).
-    pub fn add_instrument<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument<
+        I: InstrumentNode<C::Float> + IntoNode<C::Float, Controls: Send + 'static> + Send + 'static,
+    >(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {
@@ -236,7 +236,9 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// [`Error::NotInstrument`](crate::Error::NotInstrument) when its shape has
     /// no event input or lacks the output its main pair names (the node is
     /// removed again).
-    pub fn add_instrument_unwired<I: InstrumentNode<C::Float> + SessionNode<C::Float>>(
+    pub fn add_instrument_unwired<
+        I: InstrumentNode<C::Float> + IntoNode<C::Float, Controls: Send + 'static> + Send + 'static,
+    >(
         &mut self,
         instrument: I,
     ) -> Result<InstrumentHandle<I>, crate::Error> {

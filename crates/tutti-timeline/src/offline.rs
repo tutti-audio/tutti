@@ -387,6 +387,11 @@ impl super::RenderClock for OfflineTimeline {
     fn meter(&self) -> Option<&MeterMap> {
         self.meter.as_deref()
     }
+
+    /// The map the timeline was given: its render's nodes place by it.
+    fn tempo(&self) -> Option<&TempoMap> {
+        Some(&self.tempo_map)
+    }
 }
 
 #[cfg(test)]

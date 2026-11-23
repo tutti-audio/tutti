@@ -1831,10 +1831,4 @@ impl Mods<'_> {
     pub fn key(&mut self, target: impl Into<ModTarget>) -> TargetKey {
         self.own.key_of(target.into())
     }
-
-    /// Whether nothing is declared.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.own.is_empty()
-    }
 }

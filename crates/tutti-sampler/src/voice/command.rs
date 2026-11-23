@@ -25,9 +25,8 @@ use tutti_buffers::Wave;
 use tutti_dsp::PhaseVocoder;
 use tutti_graph::ParamSet;
 use tutti_music::LoopRange;
-use tutti_rt::Param;
+use tutti_rt::{AtomicCell, Param};
 use tutti_rt::{Mutex, Publisher, PushError, RingReader, RingWriter};
-use tutti_timeline::LoopReader;
 use tutti_units::{Amplitude, Beat, Cents, PlaybackRate, StretchFactor};
 
 /// Voice slots a pool reserves, and the most its `AddVoice` drain will hold.
@@ -802,8 +801,8 @@ pub struct VoicePoolHandle<F: SamplerFloat> {
     pub(crate) live: Arc<Mutex<HashMap<SlotId, Live>>>,
     /// The last stamp [`stamp`](Self::stamp) gave an add; shared by every clone.
     pub(crate) stamps: Arc<std::sync::atomic::AtomicU64>,
-    /// The transport's loop as the control side knows it, which decides which voices
-    /// carry a spare vocoder (see [`follow_loop`](Self::follow_loop)).
+    /// The transport's loop as the pool last rendered it, which decides which voices
+    /// carry a spare vocoder: the loop of the pool's last rendered block.
     pub(crate) loops: Arc<LoopFeed>,
 }
 
@@ -851,48 +850,35 @@ impl Live {
     }
 }
 
-/// What the control side knows of the transport's loop: the start of the loop while
-/// looping is armed, and where to read it from.
+/// The start of the transport's loop while looping is armed, as the pool last rendered it.
 ///
-/// Shared by a pool and its handles. The loop's start is what decides which voices carry
-/// a spare vocoder, and a handle writes it ([`VoicePoolHandle::follow_loop`]) or
-/// reads it from the transport the pool is bound to ([`VoicePool::loops`](crate::VoicePool::loops)) on its
-/// reclaim tick. The audio thread never reads this: it reads the loop from its block's
-/// `Env`, and a spare arrives through the command ring.
-#[derive(Default)]
+/// Shared by a pool and its handles. The pool's audio side stores the start its block's
+/// transport carries ([`publish`](Self::publish), one atomic store per block); the handle
+/// reads it on its reclaim tick, where it decides which voices carry a spare vocoder. So
+/// the start is the loop of the audio actually rendered, and a pool that renders nothing
+/// leaves it as it was.
+#[derive(Debug)]
 pub(crate) struct LoopFeed {
-    start: Mutex<Option<Beat>>,
-    reader: Mutex<Option<LoopReader>>,
+    start: AtomicCell<Option<Beat>>,
 }
 
-impl std::fmt::Debug for LoopFeed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LoopFeed")
-            .field("start", &*self.start.lock())
-            .field("bound", &self.reader.lock().is_some())
-            .finish()
+impl Default for LoopFeed {
+    fn default() -> Self {
+        Self {
+            start: AtomicCell::new(None),
+        }
     }
 }
 
 impl LoopFeed {
-    /// Reads the loop from `reader` from now on.
-    pub(crate) fn bind(&self, reader: LoopReader) {
-        *self.reader.lock() = Some(reader);
+    /// The loop's start as the pool's last block carried it.
+    pub(crate) fn start(&self) -> Option<Beat> {
+        self.start.load()
     }
 
-    /// The loop's start as last written or read.
-    fn start(&self) -> Option<Beat> {
-        *self.start.lock()
-    }
-
-    fn set(&self, start: Option<Beat>) {
-        *self.start.lock() = start;
-    }
-
-    /// Reads the bound transport's loop, if one is bound.
-    fn read(&self) -> Option<Option<Beat>> {
-        let reader = self.reader.lock().clone()?;
-        Some(reader.read().active().map(|range| range.start()))
+    /// Records `looping`'s start (`None`: not looping). Audio thread.
+    pub(crate) fn publish(&self, looping: Option<LoopRange>) {
+        self.start.store(looping.map(|range| range.start()));
     }
 }
 
@@ -1191,24 +1177,6 @@ impl<F: SamplerFloat> VoicePoolHandle<F> {
             self.reconcile_spares(&mut live);
         }
         Ok(())
-    }
-
-    /// Tells the handle where the transport's loop starts (`None`: not looping), so
-    /// that only the stretched voices whose window covers the start carry a spare
-    /// vocoder, the one a voice primes for a loop wrap with.
-    ///
-    /// A pool bound to a transport ([`VoicePool::loops`](crate::VoicePool::loops)) reads the loop itself on its
-    /// reclaim tick; this is for a pool no transport is bound to. The handle builds a
-    /// spare for each voice the loop newly covers and sends it through the command ring,
-    /// and takes the spare of each voice it no longer covers back through the
-    /// retirement ring ([`collect_retired`](Self::collect_retired) frees it). A voice
-    /// the ring has no room for is retried on the next call or tick; until its spare
-    /// arrives, a wrap it meets flushes as a seek does.
-    ///
-    /// Control thread.
-    pub fn follow_loop(&self, region: Option<LoopRange>) {
-        self.loops.set(region.map(|range| range.start()));
-        self.reconcile_spares(&mut self.live());
     }
 
     /// The voices holding a spare the handle sent them.
@@ -1529,10 +1497,7 @@ impl<F: SamplerFloat> tutti_rt::Reclaim for VoiceNodeHandle<F> {
 impl<F: SamplerFloat> tutti_rt::Reclaim for VoicePoolHandle<F> {
     fn reclaim(&self) -> usize {
         self.collect_retired();
-        // The transport's loop as it stands now, and any spare a full ring held back.
-        if let Some(start) = self.loops.read() {
-            self.loops.set(start);
-        }
+        // The loop the pool last rendered, and any spare a full ring held back.
         self.reconcile_spares(&mut self.live());
         let streams: Vec<_> = self.streams().values().cloned().collect();
         streams.iter().map(|s| s.lock().reclaim()).sum()
@@ -1567,7 +1532,8 @@ mod tests {
         // Every retirement slot taken, as 64 uncollected retirements would hold them.
         while handle.room.reserve(MAX_RESIDENT_VOICES) {}
         let range = LoopRange::new(Beat::new(0.0), Beat::new(1.0)).expect("a loop");
-        handle.follow_loop(Some(range));
+        handle.loops.publish(Some(range));
+        tutti_rt::Reclaim::reclaim(&handle);
         assert_eq!(handle.spares_sent(), 0, "nothing was sent");
         let deferred = handle.drops().spares_deferred;
         assert!(deferred >= 1, "the refusal is counted");

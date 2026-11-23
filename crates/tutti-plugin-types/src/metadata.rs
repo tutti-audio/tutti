@@ -9,7 +9,10 @@ use tutti_units::{SampleRate, Samples};
 
 use crate::Measured;
 
-use crate::{ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, OwnBypass};
+use crate::{
+    ChannelLayout, ChannelTopology, FeatureReport, Features, MidiAssignment, NoteName, OwnBypass,
+    ParamGroup,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -291,7 +294,7 @@ impl Processing {
 /// persisted (unlike the catalog [`PluginDescriptor`](crate::PluginDescriptor),
 /// which is). Carries what the audio graph needs to wire the node: the buses
 /// and placement, latency, tail, and the [`Features`] capability flags.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PluginWiring {
     /// The input buses, in bus-index order; see [`PluginBuses`].
@@ -344,9 +347,61 @@ pub struct PluginWiring {
     pub own_bypass: Option<OwnBypass>,
     /// The controller table the plugin declares (VST3 `IMidiMapping`, AU
     /// `kAudioUnitProperty_AllParameterMIDIMappings`): empty for a format or a
-    /// plugin with none. The plugin's suggestion; nothing applies it.
+    /// plugin with none. VST3's host applies it (it turns each mapped controller
+    /// into a parameter change) and an AU applies its own table inside the unit;
+    /// [`Control::rebuild_midi_mapping`](crate::Control::rebuild_midi_mapping)
+    /// re-reads it, and [`Control::wiring`](crate::Control::wiring) answers the
+    /// table read last.
     #[cfg_attr(feature = "serde", serde(default))]
     pub assignments: Vec<MidiAssignment>,
+    /// Who applies [`assignments`](Self::assignments): the host's node
+    /// ([`Host`](crate::MidiMapApplied::Host): VST3, whose host must, and the
+    /// formats that declare none) or the plugin itself
+    /// ([`Plugin`](crate::MidiMapApplied::Plugin): an AU's unit routes its own
+    /// table). Known at load, so a node translates the declared table from its
+    /// first block with no call to the plugin.
+    ///
+    /// A wiring written before the field existed reads as
+    /// [`Host`](crate::MidiMapApplied::Host).
+    #[cfg_attr(feature = "serde", serde(default = "applied_by_the_host"))]
+    pub assignments_applied: crate::MidiMapApplied,
+    /// The names the plugin gives to MIDI keys (CLAP `note-name`, VST3
+    /// `IKeyswitchController`, VST2 `effGetMidiKeyName`): empty for a plugin
+    /// with none. The plugin's programs are
+    /// [`Control::presets`](crate::Control::presets), not here.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub note_names: Vec<NoteName>,
+    /// The groups the plugin sorts its parameters into, parents before
+    /// children: empty for a format or a plugin with no tree.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub param_groups: Vec<ParamGroup>,
+}
+
+/// What a wiring written before `assignments_applied` existed says: the host
+/// applies the declared table.
+#[cfg(feature = "serde")]
+fn applied_by_the_host() -> crate::MidiMapApplied {
+    crate::MidiMapApplied::Host
+}
+
+/// A wiring of no buses and nothing declared; the host applies the (empty)
+/// declared table.
+impl Default for PluginWiring {
+    fn default() -> Self {
+        Self {
+            inputs: PluginBuses::default(),
+            outputs: PluginBuses::default(),
+            latency_samples: Samples::default(),
+            tail: PluginTail::default(),
+            features: Features::default(),
+            probed: Features::default(),
+            own_bypass: None,
+            assignments: Vec::new(),
+            assignments_applied: crate::MidiMapApplied::Host,
+            note_names: Vec::new(),
+            param_groups: Vec::new(),
+        }
+    }
 }
 
 impl PluginWiring {
@@ -457,6 +512,17 @@ mod tests {
                 channel: tutti_ump::MidiChannel::new(3),
                 source: crate::MidiSource::PitchBend,
                 param: tutti_units::ParamId::new(9),
+            }],
+            assignments_applied: crate::MidiMapApplied::Plugin,
+            note_names: vec![NoteName {
+                key: tutti_ump::NoteNumber::of(36),
+                channel: None,
+                text: "Kick".into(),
+            }],
+            param_groups: vec![ParamGroup {
+                path: "Filter".into(),
+                label: "Filter".into(),
+                parent: None,
             }],
         };
         let bytes = postcard::to_allocvec(&loaded).unwrap();

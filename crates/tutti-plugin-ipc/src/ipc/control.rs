@@ -10,10 +10,10 @@ use dpi::Size;
 use tutti_plugin_types::{
     Answer, AnyThread, AutomationMode, AutomationModeError, BypassWrite, ContentScale, Control,
     Delivered, EditorCapabilities, EditorOpened, EditorPresence, EditorWindow, Features, Health,
-    MainThreadMarker, OwnBypass, ParameterInfo, PipelineCounts, PluginDescriptor, PluginError,
-    PluginFailure, PluginPreset, PluginResult, PluginWiring, PresetId, ProcessWake, RateRefusal,
-    RenderMode, RenderModeSupport, Request, StateError, StateUse, TerminationReason, TrackInfo,
-    UnknownParam, WindowHandle, bypass_value,
+    MainThreadMarker, MidiAssignment, MidiMapApplied, OwnBypass, ParameterInfo, PipelineCounts,
+    PluginDescriptor, PluginError, PluginFailure, PluginLearnError, PluginPreset, PluginResult,
+    PluginWiring, PresetId, ProcessWake, RateRefusal, RenderMode, RenderModeSupport, Request,
+    StateError, StateUse, TerminationReason, TrackInfo, UnknownParam, WindowHandle, bypass_value,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -210,7 +210,14 @@ macro_rules! served_control {
             }
 
             fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
-                self.wiring_now()
+                // The buses are the activation's; the declared controller table is
+                // the server's, read now.
+                let mut wiring = self.wiring_now();
+                if let Some(live) = self.link.bridge.audio().wiring() {
+                    wiring.assignments = live.assignments;
+                    wiring.assignments_applied = live.assignments_applied;
+                }
+                wiring
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
@@ -342,6 +349,24 @@ macro_rules! served_control {
             /// plugin is gone ([`PluginDead`](Delivered::PluginDead)).
             fn set_track_info(&mut self, _main: MainThreadMarker, info: &TrackInfo) -> Delivered {
                 self.link.bridge.audio().set_track_info(info)
+            }
+
+            /// Sent to the server's plugin, which answers who applies the
+            /// entries.
+            fn set_app_midi_map(
+                &mut self,
+                _main: MainThreadMarker,
+                app: &[MidiAssignment],
+            ) -> MidiMapApplied {
+                self.link.bridge.audio().set_app_midi_map(app)
+            }
+
+            fn arm_plugin_midi_learn(
+                &mut self,
+                _main: MainThreadMarker,
+                armed: bool,
+            ) -> Result<(), PluginLearnError> {
+                self.link.bridge.audio().arm_plugin_midi_learn(armed)
             }
 
             /// What the server's `ProcessRequested` raises, from the bridge's

@@ -28,7 +28,7 @@
 use super::Report;
 use super::Tree;
 use super::lex::skipped;
-use super::use_tree::placed_uses;
+use super::use_tree::{Leaf, placed_uses};
 use std::collections::BTreeMap;
 
 pub(super) const SRC: &str = "crates/tutti/src";
@@ -62,14 +62,41 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     r
 }
 
-fn items(tree: &dyn Tree) -> Report {
-    let mut r = Report::default();
+/// One `pub use` leaf of a crate's source: the file, its `file:line`, the
+/// inline modules the statement sits in, and the leaf.
+pub(super) struct Export {
+    pub(super) path: String,
+    pub(super) place: String,
+    pub(super) module: Vec<String>,
+    pub(super) leaf: Leaf,
+}
+
+/// The `.rs` files under `dir` and every `pub use` leaf in them.
+pub(super) fn exports(tree: &dyn Tree, dir: &str) -> (usize, Vec<Export>) {
     let files: Vec<String> = tree
-        .files(SRC, &skipped)
+        .files(dir, &skipped)
         .into_iter()
         .filter(|p| p.ends_with(".rs"))
         .collect();
-    if files.is_empty() {
+    let mut out = Vec::new();
+    for path in &files {
+        let src = tree.read(path).unwrap_or_default();
+        for u in placed_uses(&src) {
+            out.push(Export {
+                path: path.clone(),
+                place: format!("{path}:{}", u.line),
+                module: u.module,
+                leaf: u.leaf,
+            });
+        }
+    }
+    (files.len(), out)
+}
+
+fn items(tree: &dyn Tree) -> Report {
+    let mut r = Report::default();
+    let (nfiles, uses) = exports(tree, SRC);
+    if nfiles == 0 {
         r.fail("check-umbrella: FAIL");
         r.fail(format!("  {SRC} holds no .rs file; was the crate moved?"));
         return r;
@@ -78,33 +105,35 @@ fn items(tree: &dyn Tree) -> Report {
     let mut bad: Vec<String> = Vec::new();
     // Item path -> every export of it.
     let mut seen: BTreeMap<String, Vec<At>> = BTreeMap::new();
-    for path in &files {
-        let src = tree.read(path).unwrap_or_default();
-        for u in placed_uses(&src) {
-            let place = format!("{path}:{}", u.line);
-            if u.leaf.whole {
-                bad.push(format!(
-                    "{place}: re-exports a crate or module whole (`{}`); list each item by name",
-                    u.leaf.name
-                ));
-                continue;
-            }
-            if u.leaf.name == "_" {
-                continue;
-            }
-            let mut module = file_module(path);
-            module.extend(u.module);
-            let module = if module.is_empty() {
-                "the root".to_owned()
-            } else {
-                module.join("::")
-            };
-            seen.entry(u.leaf.item()).or_default().push(At {
-                module,
-                name: u.leaf.name,
-                place,
-            });
+    for Export {
+        path,
+        place,
+        module,
+        leaf,
+    } in uses
+    {
+        if leaf.whole {
+            bad.push(format!(
+                "{place}: re-exports a crate or module whole (`{}`); list each item by name",
+                leaf.name
+            ));
+            continue;
         }
+        if leaf.name == "_" {
+            continue;
+        }
+        let mut full = file_module(&path);
+        full.extend(module);
+        let module = if full.is_empty() {
+            "the root".to_owned()
+        } else {
+            full.join("::")
+        };
+        seen.entry(leaf.item()).or_default().push(At {
+            module,
+            name: leaf.name,
+            place,
+        });
     }
     for (item, at) in &seen {
         if at.len() > 1 {
@@ -135,8 +164,8 @@ fn items(tree: &dyn Tree) -> Report {
         r.say(format!(
             "check-umbrella: ok (tutti re-exports no crate whole and {} items sit at one path each; {} file{})",
             seen.len(),
-            files.len(),
-            if files.len() == 1 { "" } else { "s" }
+            nfiles,
+            if nfiles == 1 { "" } else { "s" }
         ));
     } else {
         r.fail("check-umbrella: FAIL");

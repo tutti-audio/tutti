@@ -203,6 +203,29 @@ impl Parts {
         Some(Vst3KeyswitchInfo::from_c(&raw))
     }
 
+    /// `IInfoListener::setChannelContextInfos` with the channel's `name` and
+    /// colour (`argb`, alpha in the top byte). A controller without the interface, or
+    /// one that refuses, is told nothing more: the host has no other way to say it. Raw numbers here: the format's attribute
+    /// list holds integers and UTF-16.
+    pub fn set_channel_context(
+        &self,
+        main: MainThreadMarker,
+        name: Option<&str>,
+        argb: Option<u32>,
+    ) {
+        let _scope = self.scoped(main);
+        let Some(listener) = &self.ext.info_listener else {
+            return;
+        };
+        let list = crate::com::AttributeList::channel_context(name, argb);
+        let Some(list) = list.to_com_ptr::<vst3::Steinberg::Vst::IAttributeList>() else {
+            return;
+        };
+        // SAFETY: `list` is a live attribute list that outlives the call. A refusal is
+        // the plugin's: there is nothing to retry.
+        unsafe { listener.setChannelContextInfos(list.as_ptr()) };
+    }
+
     /// `IRemapParamID::getCompatibleParamID`: the id the plugin now gives to a
     /// parameter a plugin identified by `plugin_to_replace_uid` once had as
     /// `old_param_id`.

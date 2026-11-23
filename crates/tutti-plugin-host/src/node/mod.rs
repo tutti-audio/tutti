@@ -22,6 +22,8 @@ mod graph;
 mod host_edits;
 mod instance;
 mod loader;
+#[cfg(test)]
+mod midi_map_tests;
 mod off_main_wait;
 mod rebind;
 mod width_error;

@@ -6,7 +6,7 @@
 //!
 //! | `Graph` | the editor |
 //! |---|---|
-//! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept ([`SessionNode`]) |
+//! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept |
 //! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
 //! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
@@ -48,6 +48,7 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
+use tutti_graph::ErasedPublished;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
@@ -83,10 +84,10 @@ use crate::key::{
     BusEnd, BusInputPort, BusWire, Disconnection, Fanin, InEnd, Inlet, MainSink, OutEnd, Outlet,
     Removal, SetSources, Wire,
 };
-use crate::value::{GainTarget, GainTargetError, ValueTable, Write};
+use crate::value::{GainTarget, GainTargetError, Outgoing, ValueTable, Write};
 use crate::{
     ChannelEdge, ConnectError, Connection, DeclarationError, InletError, InputPort, Key, MainInput,
-    MainOutput, NoSuchNode, OutputPort, RemoveError, SessionNode, SetRateError,
+    MainOutput, NoSuchNode, OutputPort, RemoveError, SetRateError,
 };
 
 /// The largest block a device's graph is prepared for.
@@ -223,18 +224,14 @@ struct Entry {
     /// removal or a swap moves its controls to the graph's retiring list,
     /// dropped once the outgoing node has left the render, so a handle whose
     /// last drop releases something (a voice's stream) holds it while the node
-    /// still renders. `None` for a node placed without [`SessionNode`]. Read
+    /// still renders. `None` for a node placed without [`add`](Graph::add) (a bound plugin). Read
     /// by [`Graph::controls`] and [`Graph::reclaim`].
     controls: Option<Held>,
 }
 
-/// How a node's slots are put under its key
-/// ([`SessionNode::slots`], for the type that made the controls).
-type Slots = fn(&ValueTable, NodeKey, &(dyn Any + Send));
-
 /// What a node's parts said of it ([`NodeParts`]): its controls, its params
-/// by address and what frees what its cells retired, with the type that made
-/// them. A swap that is refused when it lands addresses them again to give
+/// by address, its published values and what frees what its cells retired,
+/// with the type that made them. A swap that is refused when it lands addresses them again to give
 /// the outgoing node its values back.
 struct Held {
     controls: Box<dyn Any + Send>,
@@ -243,16 +240,22 @@ struct Held {
     params: Option<ParamSet>,
     /// Run by [`Graph::reclaim`].
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
-    slots: Slots,
+    /// Registered as the node's slots, each under its kind.
+    published: Vec<ErasedPublished>,
 }
 
 impl Held {
-    /// Registers the params and slots under `node`.
-    fn provide(&self, values: &ValueTable, node: NodeKey) {
+    /// Registers the params under `node`, seeded from `outgoing`, and the slots.
+    fn provide(&self, values: &ValueTable, node: NodeKey, outgoing: &Outgoing) {
         if let Some(set) = &self.params {
-            values.address(node, self.owner, set.clone());
+            values.address(node, self.owner, set.clone(), outgoing);
         }
-        (self.slots)(values, node, self.controls.as_ref());
+        self.provide_slots(values, node);
+    }
+
+    /// Registers the published values under `node`.
+    fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
+        values.provide_node(node, &self.published);
     }
 }
 
@@ -261,6 +264,7 @@ pub(crate) struct Kept<C> {
     controls: C,
     params: Option<ParamSet>,
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
+    published: Vec<ErasedPublished>,
 }
 
 /// What a swap does with a fade over a node that does not fit the running
@@ -279,8 +283,12 @@ pub(crate) enum OnShape {
 
 /// What the controls under a key were when a replacement parked: the
 /// outgoing node's, or the incoming one an earlier parked replacement put
-/// there (`None`: a node with no controls).
-struct Stash(Option<Held>);
+/// there (`None`: a node with no controls), with the params they were
+/// addressed as.
+struct Stash {
+    controls: Option<Held>,
+    params: Outgoing,
+}
 
 /// The executor, while this side still holds it, and what a local render
 /// needs beside it.
@@ -328,7 +336,7 @@ struct Swap<N, F: Float>(Unit<N, F>);
 
 impl<F: Float, N> ErasedSwap<F> for Swap<N, F>
 where
-    N: SessionNode<F>,
+    N: IntoNode<F, Controls: Send + 'static> + Send + 'static,
 {
     fn swap(
         self: Box<Self>,
@@ -510,12 +518,11 @@ pub struct Graph<F: Float = f32> {
     /// fade out keeps rendering until then, and its controls (a voice's
     /// stream) live as long.
     retiring: Vec<(NodeKey, Box<dyn Any + Send>)>,
-    /// The session's timeline as a node reads it: the template each plugin and each
-    /// sampler node inserted through the graph is bound with (its readers cloned: a node
-    /// lends the tempo map once per block and a fork clones its reader on the control
-    /// side; [`SessionNode::bind_timeline`]). The tempo's publisher is the session's
+    /// The session's tempo map as a plugin reads it: each plugin inserted through the
+    /// graph is bound with a clone of it. The tempo's publisher is the session's
     /// `TransportSettings`, whose `Reclaim` sweep already covers the cell.
-    pub(crate) timeline: crate::TimelineView,
+    #[cfg(feature = "plugin")]
+    pub(crate) tempo: tutti_timeline::TempoReader,
     /// A re-prepare resumed in the update's collect: its plan's figures are
     /// published at the commit.
     resumed: bool,
@@ -634,7 +641,7 @@ impl<F: Float> Graph<F> {
         rate: SampleRate,
         max_block: MaxBlock,
         quantum: Option<MaxBlock>,
-        timeline: crate::TimelineView,
+        #[cfg(feature = "plugin")] tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
         let topology = &mut editor.spec_mut().topology;
@@ -687,7 +694,8 @@ impl<F: Float> Graph<F> {
             #[cfg(feature = "plugin")]
             graveyard: crate::plugin::Graveyard::default(),
             retiring: Vec::new(),
-            timeline,
+            #[cfg(feature = "plugin")]
+            tempo,
             resumed: false,
             compensation: Arc::default(),
             latency: Samples::new(0),
@@ -698,11 +706,6 @@ impl<F: Float> Graph<F> {
     /// device's callback size when the session knows it.
     pub(crate) fn prepared(&self) -> Prepare {
         *self.editor.prepare()
-    }
-
-    /// `node` bound to the session's timeline.
-    fn bound<N: SessionNode<F>>(&self, node: N) -> N {
-        node.bind_timeline(&self.timeline)
     }
 
     pub(crate) fn set_render_workers(&mut self, workers: crate::Workers) {
@@ -892,36 +895,46 @@ impl<F: Float> Graph<F> {
 
     /// Adds `node` to the graph, unwired, and returns its key: **the one way a
     /// node enters**. Its fork source goes to the editor, so an export forks it
-    /// as its type says; it is prepared at the graph's rate. What the node's [`NodeParts`] say of it is kept: its params are addressed
+    /// as its type says; it is prepared at the graph's rate. What the node's
+    /// [`NodeParts`] say of it is kept: its params are addressed
     /// ([`NodeParts::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
-    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), its slots
-    /// are the type's ([`SessionNode::slots`]), and
-    /// it reads the session's tempo map ([`SessionNode::bind_timeline`]). A node
-    /// that is only an [`IntoNode`] does not compile here: a host's own is
-    /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
-    /// [`Unforkable`](tutti_graph::Unforkable), or is a
-    /// [`Params`](tutti_graph::Params), or implements [`SessionNode`]. Writing
-    /// the node is `tutti_graph`'s crate guide ("Writing a node").
+    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), and its published
+    /// values are its slots ([`NodeParts::published`]). Any [`IntoNode`] whose controls are
+    /// `Send + 'static` enters: a host's own is wrapped as
+    /// [`ForkByClone`](tutti_graph::ForkByClone) or
+    /// [`Unforkable`](tutti_graph::Unforkable), is a [`Params`](tutti_graph::Params), or
+    /// is its own `IntoNode`, with nothing implemented for the session. Writing the node
+    /// is `tutti_graph`'s crate guide ("Writing a node").
     ///
     /// The graph keeps the node's controls for the node's life and an app never
     /// holds them: every value of the node is a target on its key.
     ///
-    /// ```compile_fail
-    /// # use tutti_session::{Graph, SessionNode};
-    /// fn cells<N: SessionNode<f32>>(graph: &mut Graph, node: N) {
-    ///     let (key, controls) = graph.add(node);
+    /// ```
+    /// # use tutti_graph::IntoNode;
+    /// # use tutti_session::Graph;
+    /// fn cells<N: IntoNode<f32, Controls: Send + 'static> + Send + 'static>(
+    ///     graph: &mut Graph,
+    ///     node: N,
+    /// ) {
+    ///     let _key = graph.add(node);
     /// }
     /// ```
-    pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
-        let (key, placed) = self.place(self.bound(node));
-        self.address::<N>(key.erase(), placed);
+    pub fn add<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(
+        &mut self,
+        node: N,
+    ) -> Key<N> {
+        let (key, placed) = self.place(node);
+        self.address::<N>(key.erase(), placed, &Outgoing::default());
         key
     }
 
     /// The controls [`add`](Self::add) kept for the node at `key`; `None` when
     /// the node is gone.
-    pub(crate) fn controls<N: SessionNode<F>>(&self, key: &Key<N>) -> Option<&N::Controls> {
+    pub(crate) fn controls<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(
+        &self,
+        key: &Key<N>,
+    ) -> Option<&N::Controls> {
         self.nodes
             .get(&key.erase())?
             .controls
@@ -948,7 +961,7 @@ impl<F: Float> Graph<F> {
     /// last band.
     pub fn gain_reduction<N>(&self, key: &Key<N>, band: usize) -> Option<tutti_units::Db>
     where
-        N: SessionNode<F, Controls = tutti_nodes::MultibandControls>,
+        N: IntoNode<F, Controls = tutti_nodes::MultibandControls> + Send + 'static,
     {
         let controls = self.controls(key)?;
         (band < controls.bands()).then(|| controls.gain_reduction_db(band))
@@ -956,7 +969,7 @@ impl<F: Float> Graph<F> {
 
     /// Puts `node` in the editor under a fresh key, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
-    /// are not a [`SessionNode`] (a bound plugin).
+    /// are not an [`add`](Self::add) node (a bound plugin).
     pub(crate) fn place<N: IntoNode<F>>(&mut self, node: N) -> (Key<N>, Kept<N::Controls>) {
         let id = NodeKey::fresh();
         let (unit, placed) = Self::split(node);
@@ -977,6 +990,7 @@ impl<F: Float> Graph<F> {
             fork,
             params,
             reclaimer,
+            published,
         } = node.into_parts();
         (
             NodeParts::new(node, (), fork, None),
@@ -984,6 +998,7 @@ impl<F: Float> Graph<F> {
                 controls,
                 params,
                 reclaimer,
+                published,
             },
         )
     }
@@ -1072,37 +1087,35 @@ impl<F: Float> Graph<F> {
         self.values.clone()
     }
 
-    /// Keeps what the node's parts said of it under `node`: its params and
-    /// reclaimer, and its slots ([`SessionNode::slots`]).
-    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, placed: Kept<N::Controls>) {
+    /// Keeps what the node's parts said of it under `node`: its params,
+    /// reclaimer and published values.
+    fn address<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(
+        &mut self,
+        node: NodeKey,
+        placed: Kept<N::Controls>,
+        outgoing: &Outgoing,
+    ) {
         let Kept {
             controls,
             params,
             reclaimer,
+            published,
         } = placed;
         let held = Held {
             controls: Box::new(controls),
             owner: std::any::TypeId::of::<N>(),
             params,
             reclaimer,
-            slots: Self::slots::<N>,
+            published,
         };
         if let Some(entry) = self.nodes.get_mut(&node) {
-            held.provide(&self.values, node);
+            held.provide(&self.values, node, outgoing);
             entry.controls = Some(held);
         }
         self.values.bind_lanes(node, |param| {
             self.editor
                 .param_effective_cell(tutti_graph::ParamIn { node, param })
         });
-    }
-
-    /// [`address`](Self::address)'s step for the slots of an `N`.
-    fn slots<N: SessionNode<F>>(values: &ValueTable, node: NodeKey, controls: &(dyn Any + Send)) {
-        let controls = controls
-            .downcast_ref::<N::Controls>()
-            .expect("controls are held with the slots of their own type");
-        values.provide_node(N::slots(node, controls));
     }
 }
 
@@ -1141,7 +1154,7 @@ impl Graph {
             client.controls(),
             client.answers(),
         );
-        let tempo = self.timeline.tempo().clone();
+        let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
@@ -1247,7 +1260,7 @@ impl Graph {
         let controls = client.controls();
         let plugin = client.plugin().clone();
         let answers = client.answers();
-        let tempo = self.timeline.tempo().clone();
+        let tempo = self.tempo.clone();
         let bound = client.bind(tempo);
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         match self.swap_unit(node, bound, fade, on_shape) {
@@ -1311,7 +1324,7 @@ impl Graph {
         let handle = plugin.handle().clone();
         let controls = plugin.node_controls();
         let plugin_ref = plugin.plugin().clone();
-        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.timeline.tempo().clone());
+        let (bound, rebinder) = (*plugin).bind_with_rebinder(self.tempo.clone());
         match self.swap_unit(node, bound, fade, on_shape) {
             Ok(_) => {
                 match self.plugins.get_mut(&node) {
@@ -1517,6 +1530,14 @@ impl<F: Float> Graph<F> {
     /// answer for it. The outgoing node plays on, as it was, until the swap
     /// lands.
     ///
+    /// **The incoming node keeps the values the outgoing one was set to.** At
+    /// the call, under the value lock, each param the two declare at one
+    /// address in one unit takes the outgoing node's value when both were
+    /// declared at the same initial value and the value is finite; a changed
+    /// declaration keeps its new initial. An address the incoming node lacks is
+    /// dropped (a call on it is `NoSuchTarget`). The seeding is no app write:
+    /// no watcher sees it and no edit-log mark is made.
+    ///
     /// (`plugin`) A hosted plugin replaced this way is no longer hosted: its
     /// record is dropped, so its health, snapshots and render mode stop
     /// (a replacement plugin goes in with
@@ -1532,8 +1553,7 @@ impl<F: Float> Graph<F> {
         replacement: Replacement<N>,
     ) -> Result<Key<N>, ReplaceRefused>
     where
-        N: SessionNode<F>,
-        N::Controls: Send + 'static,
+        N: IntoNode<F, Controls: Send + 'static> + Send + 'static,
     {
         let node = node.into();
         let Replacement { incoming, fade } = replacement;
@@ -1543,7 +1563,7 @@ impl<F: Float> Graph<F> {
         if !self.nodes.contains_key(&node) {
             return Err(ReplaceRefused::NoSuchNode(node));
         }
-        let (parts, placed) = Self::split(self.bound(incoming));
+        let (parts, placed) = Self::split(incoming);
         let unit = Unit::<N, F> {
             parts,
             node: std::marker::PhantomData,
@@ -1554,9 +1574,9 @@ impl<F: Float> Graph<F> {
         }
         match self.place_unit(node, unit, fade, OnShape::Refuse) {
             Ok(()) => {
-                self.retire_outgoing(node);
+                let outgoing = self.retire_outgoing(node);
                 self.drop_plugin_record(node);
-                self.address::<N>(node, placed);
+                self.address::<N>(node, placed, &outgoing);
             }
             Err(SwapRefused::Busy(unit)) => self.park_typed::<N>(node, unit, placed, fade),
             Err(SwapRefused::Failed(refused)) => return Err(refused),
@@ -1567,17 +1587,21 @@ impl<F: Float> Graph<F> {
     /// Parks `unit` behind a re-prepare, with its controls addressed under
     /// `node` now: the outgoing controls wait in the parked swap until it
     /// lands or is refused.
-    fn park_typed<N: SessionNode<F>>(
+    fn park_typed<N: IntoNode<F, Controls: Send + 'static> + Send + 'static>(
         &mut self,
         node: NodeKey,
         unit: Unit<N, F>,
         placed: Kept<N::Controls>,
         fade: Option<Fade>,
     ) {
-        let outgoing = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
-        self.values.retire(node);
-        self.address::<N>(node, placed);
-        self.park(node, Box::new(Swap(unit)), fade, Some(Stash(outgoing)));
+        let stash = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
+        let outgoing = self.values.retire_keeping(node);
+        self.address::<N>(node, placed, &outgoing);
+        let stash = Stash {
+            controls: stash,
+            params: outgoing,
+        };
+        self.park(node, Box::new(Swap(unit)), fade, Some(stash));
     }
 
     /// Registers the plugin hosted at `node` with the value table, as its
@@ -1614,7 +1638,7 @@ impl<F: Float> Graph<F> {
         on_shape: OnShape,
     ) -> Result<N::Controls, SwapRefused<N>> {
         let controls = self.place_unit(node, incoming, fade, on_shape)?;
-        self.retire_outgoing(node);
+        drop(self.retire_outgoing(node));
         Ok(controls)
     }
 
@@ -1679,14 +1703,17 @@ impl<F: Float> Graph<F> {
 
     /// The outgoing node's controls at `node`, which a swap that took
     /// replaced: its values go, and the controls are held until the outgoing
-    /// unit has left the render.
-    fn retire_outgoing(&mut self, node: NodeKey) {
-        if let Some(entry) = self.nodes.get_mut(&node) {
-            self.values.retire(node);
-            if let Some(held) = entry.controls.take() {
-                self.retiring.push((node, held.controls));
-            }
+    /// unit has left the render. Its params, which the incoming node's are
+    /// seeded from, are handed back.
+    fn retire_outgoing(&mut self, node: NodeKey) -> Outgoing {
+        let Some(entry) = self.nodes.get_mut(&node) else {
+            return Outgoing::default();
+        };
+        let outgoing = self.values.retire_keeping(node);
+        if let Some(held) = entry.controls.take() {
+            self.retiring.push((node, held.controls));
         }
+        outgoing
     }
 
     /// Drops the retiring controls of the nodes whose units the editor handed
@@ -1848,7 +1875,11 @@ impl<F: Float> Graph<F> {
             let Parked { swap, stash, .. } = parked;
             match swap.swap(self, node, fade) {
                 Ok(()) => {
-                    if let Some(Stash(Some(outgoing))) = stash {
+                    if let Some(Stash {
+                        controls: Some(outgoing),
+                        ..
+                    }) = stash
+                    {
                         self.retiring.push((node, outgoing.controls));
                     }
                     out.push(Retried::Landed { node });
@@ -1889,9 +1920,10 @@ impl<F: Float> Graph<F> {
             return;
         };
         self.values.retire(node);
-        entry.controls = stash.0;
+        entry.controls = stash.controls;
+        self.values.reinstate(node, stash.params);
         if let Some(held) = &entry.controls {
-            held.provide(&self.values, node);
+            held.provide_slots(&self.values, node);
         }
     }
 
@@ -2292,7 +2324,9 @@ impl<F: Float> Graph<F> {
         // rest, and the entry's, are of incoming nodes that never ran.
         let mut stashes = stashes.into_iter();
         match stashes.next() {
-            Some(Stash(outgoing)) => {
+            Some(Stash {
+                controls: outgoing, ..
+            }) => {
                 if let Some(held) = outgoing {
                     self.retiring.push((node, held.controls));
                 }
@@ -4177,28 +4211,21 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
 #[cfg(all(test, feature = "plugin"))]
 mod tail_tests {
     use super::*;
-    use std::sync::Arc;
     use tutti_graph::ForkByClone;
     use tutti_nodes::testing::Const;
-    use tutti_tempo::TempoMap;
-    use tutti_units::Bpm;
 
     fn graph() -> Graph {
         graph_at(SampleRate::SR_48K)
     }
 
     fn graph_at(rate: SampleRate) -> Graph {
-        let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
         Graph::new(
             ChannelLayout::STEREO,
             2,
             rate,
             MaxBlock::of(Samples::new(64)),
             None,
-            crate::TimelineView::new(
-                tutti_timeline::TempoReader::fixed(Arc::new(map)),
-                tutti_timeline::LoopReader::disarmed(),
-            ),
+            test_tempo(),
         )
     }
 
@@ -4315,28 +4342,29 @@ mod tail_tests {
     }
 }
 
+/// A tempo reader over a constant 120 BPM, for a graph built by hand.
+#[cfg(all(test, feature = "plugin"))]
+fn test_tempo() -> tutti_timeline::TempoReader {
+    let map = tutti_tempo::TempoMap::constant(tutti_units::Bpm::of(120.0)).expect("a tempo");
+    tutti_timeline::TempoReader::fixed(Arc::new(map))
+}
+
 #[cfg(test)]
 mod main_output_fade_tests {
     use super::*;
-    use std::sync::Arc;
     use tutti_buffers::Bed;
     use tutti_graph::{FadeLaw, ForkByClone, MainOutputId, OutputPort, PortSource};
     use tutti_nodes::testing::Const;
-    use tutti_tempo::TempoMap;
-    use tutti_units::Bpm;
 
     fn graph() -> (Graph, NodeKey) {
-        let map = TempoMap::constant(Bpm::of(120.0)).expect("a tempo");
         let mut g = Graph::new(
             ChannelLayout::STEREO,
             2,
             SampleRate::SR_48K,
             MaxBlock::of(Samples::new(64)),
             None,
-            crate::TimelineView::new(
-                tutti_timeline::TempoReader::fixed(Arc::new(map)),
-                tutti_timeline::LoopReader::disarmed(),
-            ),
+            #[cfg(feature = "plugin")]
+            test_tempo(),
         );
         let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);

@@ -85,8 +85,14 @@ const MAPPED_CONTROLLER: u8 = 74;
 /// export.
 const PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS: u32 = 41;
 
+/// `kAudioUnitProperty_AddParameterMIDIMapping` and
+/// `kAudioUnitProperty_RemoveParameterMIDIMapping`.
+const PROPERTY_ADD_PARAMETER_MIDI_MAPPING: u32 = 42;
+const PROPERTY_REMOVE_PARAMETER_MIDI_MAPPING: u32 = 43;
+
 /// Apple's `AUParameterMIDIMapping`: 32 bytes, align 4.
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct MidiMapping {
     scope: u32,
     element: u32,
@@ -101,12 +107,39 @@ struct MidiMapping {
 }
 const _: () = assert!(std::mem::size_of::<MidiMapping>() == 32);
 
-/// `AudioUnitParameterNameInfo` as `ParameterClumpName` reads it: the clump's
-/// id in, its name out (`{ UInt32; CFStringRef }`, 16 bytes).
+impl MidiMapping {
+    /// The entry the unit declares: Control Change [`MAPPED_CONTROLLER`] on
+    /// channel 0 drives `level`.
+    fn declared() -> Self {
+        Self {
+            scope: sys::kAudioUnitScope_Global,
+            element: 0,
+            parameter_id: core::LEVEL,
+            flags: 0,
+            sub_range_min: 0.0,
+            sub_range_max: 0.0,
+            status: 0xB0,
+            data1: MAPPED_CONTROLLER,
+            reserved: [0; 6],
+        }
+    }
+
+    /// Whether both name the same `(scope, element, parameter_id)`: the unit
+    /// keeps one mapping per such triple.
+    fn same_parameter(&self, other: &Self) -> bool {
+        (self.scope, self.element, self.parameter_id)
+            == (other.scope, other.element, other.parameter_id)
+    }
+}
+
+/// `AudioUnitParameterNameInfo` as `ParameterClumpName` and `kAudioUnitProperty_ParameterIDName`
+/// read it: the id in (and the desired length, for `kAudioUnitProperty_ParameterIDName`), the name
+/// out (`{ UInt32; SInt32; CFStringRef }`, 16 bytes).
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct ClumpNameInfo {
+struct NameInfo {
     id: u32,
+    length: i32,
     name: sys::CFStringRef,
 }
 
@@ -269,6 +302,9 @@ struct Ctl {
     buffers: Option<Buffers>,
     /// `kAudioUnitProperty_OfflineRender`: kept and read back, never acted on.
     offline: u32,
+    /// The unit's mapping table: its declared entry until the host writes
+    /// another, one entry per parameter.
+    mappings: Vec<MidiMapping>,
 }
 
 /// What one render copies out of [`Ctl`] before it calls anything.
@@ -418,6 +454,43 @@ unsafe fn write_property<T>(data: *mut c_void, io_size: *mut u32, value: T) -> s
     0
 }
 
+/// Writes `table` as the property's bytes, which may be none.
+unsafe fn write_table(
+    data: *mut c_void,
+    io_size: *mut u32,
+    table: &[MidiMapping],
+) -> sys::OSStatus {
+    let need = std::mem::size_of_val(table) as u32;
+    if io_size.is_null() {
+        return ERR_PARAM;
+    }
+    // SAFETY: `io_size` is non-null and the host's.
+    if unsafe { *io_size } < need || (data.is_null() && need > 0) {
+        return ERR_INVALID_PROPERTY_VALUE;
+    }
+    for (n, entry) in table.iter().enumerate() {
+        // SAFETY: `data` holds `*io_size >= need` writable bytes, entry `n` of them.
+        unsafe { std::ptr::write_unaligned(data.cast::<MidiMapping>().add(n), *entry) };
+    }
+    // SAFETY: `io_size` is non-null and the host's.
+    unsafe { *io_size = need };
+    0
+}
+
+/// The entries of a mapping write: whole records, at least one.
+unsafe fn read_table(data: *const c_void, size: u32) -> Option<Vec<MidiMapping>> {
+    let each = std::mem::size_of::<MidiMapping>();
+    if data.is_null() || size == 0 || !(size as usize).is_multiple_of(each) {
+        return None;
+    }
+    Some(
+        (0..size as usize / each)
+            // SAFETY: `data` holds `size` readable bytes, a whole number of records.
+            .map(|n| unsafe { std::ptr::read_unaligned(data.cast::<MidiMapping>().add(n)) })
+            .collect(),
+    )
+}
+
 unsafe fn read_property<T: Copy>(data: *const c_void, size: u32) -> Option<T> {
     if data.is_null() || (size as usize) < std::mem::size_of::<T>() {
         return None;
@@ -511,15 +584,25 @@ fn property_shape(
                 false,
             )
         }
-        x if x == sys::kAudioUnitProperty_ParameterClumpName && global => {
-            (std::mem::size_of::<ClumpNameInfo>() as u32, false)
+        x if (x == sys::kAudioUnitProperty_ParameterClumpName
+            || x == sys::kAudioUnitProperty_ParameterIDName)
+            && global =>
+        {
+            (std::mem::size_of::<NameInfo>() as u32, false)
         }
         x if x == sys::kAudioUnitProperty_ParametersForOverview && global => (
             (OVERVIEW.len() * std::mem::size_of::<sys::AudioUnitParameter>()) as u32,
             false,
         ),
-        x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS && global => {
-            (std::mem::size_of::<MidiMapping>() as u32, false)
+        x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS && global => (
+            (lock(&i.ctl).mappings.len() * std::mem::size_of::<MidiMapping>()) as u32,
+            true,
+        ),
+        x if (x == PROPERTY_ADD_PARAMETER_MIDI_MAPPING
+            || x == PROPERTY_REMOVE_PARAMETER_MIDI_MAPPING)
+            && global =>
+        {
+            (std::mem::size_of::<MidiMapping>() as u32, true)
         }
         x if x == sys::kAudioUnitProperty_ClassInfo && global => {
             (std::mem::size_of::<sys::CFPropertyListRef>() as u32, true)
@@ -549,7 +632,6 @@ fn property_shape(
             (std::mem::size_of::<sys::CFStringRef>() as u32, false)
         }
         _ => {
-            let _ = i;
             return Err(ERR_INVALID_PROPERTY);
         }
     })
@@ -703,7 +785,7 @@ unsafe extern "C" fn get_property(
                     if io_size.is_null() {
                         return ERR_PARAM;
                     }
-                    let Some(request) = read_property::<ClumpNameInfo>(data, *io_size) else {
+                    let Some(request) = read_property::<NameInfo>(data, *io_size) else {
                         return ERR_INVALID_PROPERTY_VALUE;
                     };
                     let (unit, _, name) = core::UNITS[core::UNITS.len() - 1];
@@ -715,8 +797,37 @@ unsafe extern "C" fn get_property(
                     write_property(
                         data,
                         io_size,
-                        ClumpNameInfo {
+                        NameInfo {
                             id: request.id,
+                            length: request.length,
+                            name: CFRetain(name.as_CFTypeRef()) as sys::CFStringRef,
+                        },
+                    )
+                }
+                x if x == sys::kAudioUnitProperty_ParameterIDName => {
+                    if io_size.is_null() {
+                        return ERR_PARAM;
+                    }
+                    let Some(request) = read_property::<NameInfo>(data, *io_size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let Some(short) = core::SHORT_NAMES.get(request.id as usize) else {
+                        return ERR_INVALID_PARAMETER;
+                    };
+                    // The name cut to the length asked for; a negative length
+                    // (`kAudioUnitParameterName_Full`) asks for the whole name.
+                    let name = match usize::try_from(request.length) {
+                        Ok(length) => short.chars().take(length).collect::<String>(),
+                        Err(_) => (*short).to_string(),
+                    };
+                    let name = CFString::new(&name);
+                    // Copy rule: the caller owns the reference it is given.
+                    write_property(
+                        data,
+                        io_size,
+                        NameInfo {
+                            id: request.id,
+                            length: request.length,
                             name: CFRetain(name.as_CFTypeRef()) as sys::CFStringRef,
                         },
                     )
@@ -731,22 +842,10 @@ unsafe extern "C" fn get_property(
                     }
                     write_property(data, io_size, list)
                 }
-                x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS => write_property(
-                    data,
-                    io_size,
-                    MidiMapping {
-                        scope: sys::kAudioUnitScope_Global,
-                        element: 0,
-                        parameter_id: core::LEVEL,
-                        flags: 0,
-                        sub_range_min: 0.0,
-                        sub_range_max: 0.0,
-                        // Control Change on channel 0.
-                        status: 0xB0,
-                        data1: MAPPED_CONTROLLER,
-                        reserved: [0; 6],
-                    },
-                ),
+                x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS => {
+                    let table = lock(&i.ctl).mappings.clone();
+                    write_table(data, io_size, &table)
+                }
                 x if x == sys::kAudioUnitProperty_SupportedNumChannels => write_property(
                     data,
                     io_size,
@@ -926,6 +1025,31 @@ unsafe extern "C" fn set_property(
                     let value = if bypass != 0 { 1.0 } else { 0.0 };
                     i.core.log_set_param(core::BYPASS, value);
                     i.core.set_param(core::BYPASS, value);
+                    0
+                }
+                // The mapping table: what the host sends is recorded before the table
+                // changes, and an entry replaces the one for its parameter.
+                x if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS
+                    || x == PROPERTY_ADD_PARAMETER_MIDI_MAPPING
+                    || x == PROPERTY_REMOVE_PARAMETER_MIDI_MAPPING =>
+                {
+                    let Some(entries) = read_table(data, size) else {
+                        return ERR_INVALID_PROPERTY_VALUE;
+                    };
+                    let removes = x == PROPERTY_REMOVE_PARAMETER_MIDI_MAPPING;
+                    for e in &entries {
+                        i.core
+                            .log_mapping(!removes, e.parameter_id, e.status, e.data1);
+                    }
+                    if x == PROPERTY_ALL_PARAMETER_MIDI_MAPPINGS {
+                        ctl.mappings.clear();
+                    }
+                    for e in entries {
+                        ctl.mappings.retain(|held| !held.same_parameter(&e));
+                        if !removes {
+                            ctl.mappings.push(e);
+                        }
+                    }
                     0
                 }
                 // Accepted and not kept: the presentation latency the host
@@ -1724,6 +1848,7 @@ pub unsafe extern "C" fn TuttiSharedAuFactory(
             listeners: Vec::new(),
             buffers: None,
             offline: 0,
+            mappings: vec![MidiMapping::declared()],
         }),
         names: [
             CFString::new("Shared Plugin Main Input"),

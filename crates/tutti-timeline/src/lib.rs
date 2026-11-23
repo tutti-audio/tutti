@@ -39,7 +39,7 @@ use tutti_buffers::{Float, Planes, PlanesMut};
 
 pub use audio::{Applied, AudioTaken, TransportAudio};
 pub use handle::Transport;
-pub use loop_region::{LoopEdit, LoopReader, LoopRegion};
+pub use loop_region::{LoopEdit, LoopRegion};
 pub use motion::{AfterLocate, FadeOut, MotionCommand, MotionFsm, MotionState};
 pub use offline::{OfflineTimeline, OfflineTimelineConfig};
 pub use project_meter::{
@@ -124,12 +124,19 @@ pub trait RenderClock: Send + Sync {
     fn meter(&self) -> Option<&tutti_music::MeterMap> {
         None
     }
+
+    /// The tempo map the graph's nodes read through `Cx::tempo` while it
+    /// renders under this clock. `None` (the default) is no map: a node takes
+    /// the tempo of the block's transport as it stands.
+    fn tempo(&self) -> Option<&tutti_tempo::TempoMap> {
+        None
+    }
 }
 
 /// Renders one block through `exec` under `clock`, then advances the clock by
 /// it: [`graph_piece`](RenderClock::graph_piece),
 /// `Executor::apply_pending` and `Executor::render_applied` (lending the
-/// clock's [`meter`](RenderClock::meter)), then [`advance`](RenderClock::advance),
+/// clock's [`meter`](RenderClock::meter) and [`tempo`](RenderClock::tempo)), then [`advance`](RenderClock::advance),
 /// again for each piece — the one order that keeps every reader of the clock
 /// on the frame the graph renders (emit-then-advance, as above). The block is
 /// the frames of `outputs`, so it needs at least one output plane (a view
@@ -186,6 +193,7 @@ pub fn render_graph<F: Float>(
             &table_in[..ni],
             &mut table_out[..no],
             clock.meter(),
+            clock.tempo(),
         );
         clock.advance(tutti_units::Samples::new(n));
         done += n;

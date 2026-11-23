@@ -24,6 +24,7 @@ use tutti_rt::Mutex;
 use tutti_rt::Rt;
 
 use super::rebind::{RebindError, Settlement};
+use crate::MidiMapSlot;
 
 use tutti_plugin_types::ParamEdit;
 use tutti_plugin_types::PluginTail;
@@ -155,6 +156,12 @@ pub(super) struct Instance<L: Loaded> {
     lost: Arc<Lost>,
     /// The latency and tail as of the last step, for a node's `shape`.
     figures: Arc<Figures>,
+    /// The controller map the node translates by: the plugin's declared table
+    /// and the app's entries, published to every node over this instance.
+    midi_map: MidiMapSlot,
+    /// The plugin re-read its declared table (or was rebuilt) since the map
+    /// last took it.
+    midi_map_stale: bool,
 }
 
 impl<L: InProcess> Instance<L> {
@@ -214,6 +221,7 @@ impl<L: Loaded> Instance<L> {
         width: FloatWidth,
     ) -> IpcResult<(Self, Rt<L::Processor>)> {
         let widths = loaded.widths();
+        let wiring = tutti_plugin_types::Control::wiring(&loaded, main);
         let prepare = MaxBlock::new(Samples::new(block_size))
             .map(|block| Prepare::new(sample_rate, block).with_format(widths.negotiate(width)))
             .ok_or(IpcError::BlockUnsupported { frames: block_size })?;
@@ -231,6 +239,8 @@ impl<L: Loaded> Instance<L> {
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
+            midi_map: MidiMapSlot::new(&wiring),
+            midi_map_stale: false,
         };
         let refused = this.drive(main, Event::Op(HostOp::Activate(prepare)));
         if let Some(trouble) = refused {
@@ -271,6 +281,8 @@ impl<L: Loaded> Instance<L> {
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
+            midi_map: MidiMapSlot::new(wiring),
+            midi_map_stale: false,
         };
         this.publish_figures();
         (this, rt)
@@ -297,6 +309,7 @@ impl<L: Loaded> Instance<L> {
         let mut trouble = None;
         let changes = &mut self.changes;
         let reports = &mut self.reports;
+        let midi_map_stale = &mut self.midi_map_stale;
         // The lifecycle takes the state by value and hands the next back; a
         // fresh state is no allocation, so the one held is moved, not cloned.
         let state = std::mem::replace(&mut self.state, Lifecycle::<L>::initial_state());
@@ -328,12 +341,16 @@ impl<L: Loaded> Instance<L> {
                             reason: Arc::new(reason),
                         });
                     }
+                    Notice::MidiMapChanged | Notice::Reloaded => *midi_map_stale = true,
                     Notice::ParamValuesChanged
                     | Notice::NoteExpressionChanged
-                    | Notice::ParamTitlesChanged
-                    | Notice::Reloaded => {}
+                    | Notice::ParamTitlesChanged => {}
                 });
         self.publish_figures();
+        if std::mem::take(&mut self.midi_map_stale) {
+            self.declare_midi_map(main);
+            self.reports.push(PluginInvalidation::MidiMap);
+        }
         if self.lifecycle.is_poisoned() {
             let source = trouble.as_ref().map_or_else(
                 || {
@@ -361,6 +378,18 @@ impl<L: Loaded> Instance<L> {
     /// it is in its life. `None` once it is lost.
     pub(super) fn control(&mut self) -> Option<&mut dyn tutti_plugin_types::Control> {
         self.lifecycle.control()
+    }
+
+    /// The controller map the nodes over this instance translate by.
+    pub(super) fn midi_map(&self) -> MidiMapSlot {
+        self.midi_map.clone()
+    }
+
+    /// Takes the table the plugin declares now. Main thread.
+    fn declare_midi_map(&mut self, main: MainThreadMarker) {
+        if let Some(control) = self.lifecycle.control() {
+            self.midi_map.declare(&control.wiring(main));
+        }
     }
 
     /// The latency and tail as the state last read them.
@@ -679,6 +708,7 @@ impl<L: Loaded> Instance<L> {
     /// counts and latency may both have moved), and reports what an activation
     /// read. Main thread: a re-read dispatches `effGetTailSize`.
     pub(super) fn pump(&mut self, main: MainThreadMarker) -> Changes {
+        self.midi_map.reclaim();
         let mut asked = Vec::new();
         if let Some(control) = self.lifecycle.control() {
             control.take_requests(main, &mut asked);

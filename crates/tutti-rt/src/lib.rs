@@ -22,10 +22,9 @@
 //!   that shares one behind an `Arc` puts it in an [`AudioThreadCell`].
 //!   [`CappedVec`] is the same with a cap chosen at construction, for a count
 //!   known only at run time.
-//! - [`PackedAtomic`] — a value of up to eight bytes in one atomic word, so a
-//!   reader never pairs one write's field with another's.
-//! - [`AtomicCell`] / [`AtomicWord`] — a mode or switch set (a fieldless enum,
-//!   [`atomic_word!`]) in one atomic word, stored by its encoding.
+//! - [`AtomicCell`] / [`AtomicWord`] — a value in one atomic word, stored by its
+//!   encoding (a fieldless enum by [`atomic_word!`], an integer, a pair of
+//!   `u32`s), so a reader never pairs one write's field with another's.
 //! - [`SeqWriter`] / [`SeqReader`] — a sequence lock for a `Pod` value one
 //!   writer overwrites in place and any thread copies whole.
 //! - [`seq_slots()`] — an array of those, one slot per index, that one reader
@@ -41,8 +40,8 @@
 //!
 //! - [`Param`] / [`Param64`] / [`ParamCell`] — a unit held in an atomic cell:
 //!   shared and cloned by handle ([`Param`], addressed without its unit as a
-//!   [`ParamCell`]) or inline ([`Param64`]); [`AtomicSampleRate`] and
-//!   [`PendingSampleRate`] carry a `SampleRate` the same way.
+//!   [`ParamCell`]) or inline ([`Param64`]); an [`AtomicCell`] carries a
+//!   `SampleRate` the same way.
 //! - [`Mint`] and [`id!`] — a lock-free counter of unique non-zero numbers from 1,
 //!   and the macro that writes an id type minted from one.
 //! - [`SplitMix64`] — the pseudo-random generator: a seeded stream of
@@ -169,7 +168,6 @@
     )
 )]
 
-mod atomic_rate;
 mod backoff;
 mod capped_vec;
 mod cell;
@@ -192,7 +190,6 @@ mod job_gate;
 mod last_out;
 mod level_cell;
 mod mint;
-mod packed_atomic;
 mod param;
 mod pos_ring;
 mod reclaim;
@@ -211,7 +208,6 @@ mod task_graph;
 mod vec;
 
 pub use atomic_cell::{AtomicCell, AtomicWord};
-pub use atomic_rate::{AtomicSampleRate, PendingSampleRate};
 #[cfg(loom)]
 pub use bells::Ticker;
 pub use bells::{Bell, Bells, BellsHandle, Listener};
@@ -232,7 +228,6 @@ pub use job_gate::JobGate;
 pub use last_out::{LastOut, Party};
 pub use level_cell::{LevelReader, LevelSpan, LevelWriter, level_cell};
 pub use mint::Mint;
-pub use packed_atomic::PackedAtomic;
 pub use param::{Param, Param64, ParamCell};
 pub use parker::{Parker, Unparker, parker};
 pub use pos_ring::{

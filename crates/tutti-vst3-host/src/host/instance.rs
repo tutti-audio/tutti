@@ -29,7 +29,6 @@ use tutti_vst3_ffi::{
 };
 
 use super::loaded::{Activation, Vst3Loaded};
-use super::midi_mapping::CcRoute;
 use super::processor::{AudioIO, InputStaging, OutputStaging, ProcessConfig};
 
 /// Floor of the pre-reserved capacity for param-change queues. One slot per
@@ -259,14 +258,6 @@ impl<T: Vst3Sample> Staged<T> {
                 emitted_lost: 0,
                 emitted_param_changes,
             },
-            cc: Box::new(CcRoute::following(
-                loaded.midi_cc.reader(),
-                // Only a plugin with an `IMidiMapping` can publish a mapping
-                // later, so only it reserves the routing scratch.
-                loaded.plugin.has_midi_mapping(main),
-                chunk_queues,
-                chunk_room,
-            )),
             midi_learn: loaded.midi_learn.producer(),
         };
 

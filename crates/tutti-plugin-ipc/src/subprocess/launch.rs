@@ -508,7 +508,7 @@ fn load_plugin(
             loaded,
             negotiated_format,
             state_error,
-        } => Ok((id, descriptor, loaded, negotiated_format, state_error)),
+        } => Ok((id, descriptor, *loaded, negotiated_format, state_error)),
         ControlReply::Error {
             error: ServerError::Load { stage, reason },
         } => Err(IpcError::LoadFailed {
@@ -552,9 +552,9 @@ fn stage_state(
     // Held until the answer: where the object is read by name, it stays until then.
     let _lease = ipc::send_blob(&mut launch.stream, id, body, blob)?;
     match launch.answer(id)? {
-        ControlReply::StateLoaded { error: None } => Ok(Ok(())),
-        ControlReply::StateLoaded { error: Some(e) } => Ok(Err(e)),
-        other => Err(unexpected_message("StateLoaded", &other)),
+        ControlReply::StateStaged { error: None } => Ok(Ok(())),
+        ControlReply::StateStaged { error: Some(e) } => Ok(Err(e)),
+        other => Err(unexpected_message("StateStaged", &other)),
     }
 }
 

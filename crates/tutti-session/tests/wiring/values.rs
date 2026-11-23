@@ -417,7 +417,7 @@ impl ParamNode for Slow {
 
 tutti_graph::declare_params!([] Slow, n { Cutoff => Seconds = &n.cutoff });
 
-fn swap<N: tutti_session::SessionNode>(
+fn swap<N: tutti_graph::IntoNode<f32, Controls: Send + 'static> + Send + 'static>(
     s: &mut DetachedSession,
     key: tutti_session::Key<SvfFilterNode<f32>>,
     incoming: N,

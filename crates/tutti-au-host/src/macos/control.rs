@@ -16,11 +16,12 @@ use tutti_au_ffi::{AuEditor, Scope};
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AuComponentType, BypassWrite, ContentScale, Control, EditorCapabilities, EditorError,
-    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, OwnBypass, ParamEdit,
-    ParamFlags, ParamMapping, ParamSteps, ParamWriteError, ParameterInfo, PluginBus, PluginBuses,
-    PluginClass, PluginDescriptor, PluginError, PluginId, PluginParamRange, PluginPreset,
-    PluginResult, PluginTail, PluginVersion, PluginWiring, PresetId, RenderModeSupport, Request,
-    RescanScope, StateUse, WindowHandle, Wraps, taken,
+    EditorPresence, EditorWindow, Features, FourCc, MainThreadMarker, MidiAssignment,
+    MidiMapApplied, OwnBypass, ParamEdit, ParamFlags, ParamGroup, ParamMapping, ParamSteps,
+    ParamWriteError, ParameterInfo, PluginBus, PluginBuses, PluginClass, PluginDescriptor,
+    PluginError, PluginId, PluginParamRange, PluginPreset, PluginResult, PluginTail, PluginVersion,
+    PluginWiring, PresetId, RenderModeSupport, Request, RescanScope, StateUse, WindowHandle, Wraps,
+    taken,
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
@@ -94,6 +95,22 @@ fn read_only_flags(writable: bool, meter_read_only: bool) -> ParamFlags {
     } else {
         ParamFlags::READ_ONLY
     }
+}
+
+/// The groups `params` name: one root group per distinct clump name, in first
+/// use. A clump has no parent, and two clumps with one name are one path.
+fn clump_groups(params: &[ParameterInfo]) -> Vec<ParamGroup> {
+    let mut groups: Vec<ParamGroup> = Vec::new();
+    for path in params.iter().map(|p| p.group()).filter(|g| !g.is_empty()) {
+        if !groups.iter().any(|g| g.path == path) {
+            groups.push(ParamGroup {
+                path: path.to_string(),
+                label: path.to_string(),
+                parent: None,
+            });
+        }
+    }
+    groups
 }
 
 /// A host-side error as the shared vocabulary's.
@@ -285,7 +302,7 @@ impl Control for AuLoaded {
         self.descriptor()
     }
 
-    fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
+    fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         PluginWiring {
             inputs: self.buses(BusDirection::Input),
             outputs: self.buses(BusDirection::Output),
@@ -298,10 +315,34 @@ impl Control for AuLoaded {
             own_bypass: self.is_bypassed().is_ok().then_some(OwnBypass::Property),
             // A unit that does not implement the mapping family (most effects)
             // refuses the read and declares none.
+            // The plugin's own table: the unit's, less what the app wrote.
             assignments: self
                 .parameter_midi_mappings()
-                .map(|table| crate::midi_map::declared(&table))
+                .map(|table| crate::midi_map::declared(&self.app_midi_map.plugins_own(&table)))
                 .unwrap_or_default(),
+            // The unit routes its own table during render.
+            assignments_applied: MidiMapApplied::Plugin,
+            // AU names no keys.
+            note_names: Vec::new(),
+            param_groups: clump_groups(&<Self as Control>::parameters(self, main)),
+        }
+    }
+
+    /// Writes the app's entries into the unit's own mapping table, which routes
+    /// them during render: [`Plugin`](MidiMapApplied::Plugin) when the unit takes
+    /// them, [`Host`](MidiMapApplied::Host) for a unit without the mapping family
+    /// (most effects), or when it refuses a write partway: its table is then put
+    /// back as it was, so no entry is applied twice. The plugin's declared entries
+    /// stay, and [`wiring`](Self::wiring) lists only them.
+    fn set_app_midi_map(
+        &mut self,
+        _main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        if self.write_app_midi_map(app) {
+            MidiMapApplied::Plugin
+        } else {
+            MidiMapApplied::Host
         }
     }
 
@@ -369,6 +410,7 @@ impl Control for AuLoaded {
                     .with_plain_map(ParamBounds::of(p.range.min, p.range.max).plain_map())
                     .with_flags(ParamFlags::READ_ONLY, flags)
                     .with_group(group)
+                    .with_short_name(parameters::short_name(unit, p.id).unwrap_or_default())
                     // The unit code is a closed enumeration, so it types the
                     // parameter exactly.
                     .with_measures(crate::unit_measures(p.unit_code))
@@ -678,6 +720,33 @@ mod tests {
             au_selector(&PresetId::Location("/x.clap-preset".into())),
             None,
             "a CLAP preset path must not yield an AU selector"
+        );
+    }
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    /// A clump is a root group, and two parameters in clumps of one name share
+    /// the one group.
+    /// Spec: au.prop.ParameterClumpName
+    #[test]
+    fn clumps_of_one_name_are_one_root_group() {
+        let params: Vec<_> = [("Filter", 1), ("", 2), ("Amp", 3), ("Filter", 4)]
+            .into_iter()
+            .map(|(group, id)| ParameterInfo::new(ParamId::new(id), "p").with_group(group))
+            .collect();
+        let groups: Vec<_> = clump_groups(&params)
+            .into_iter()
+            .map(|g| (g.path, g.label, g.parent))
+            .collect();
+        assert_eq!(
+            groups,
+            [
+                ("Filter".to_string(), "Filter".to_string(), None),
+                ("Amp".to_string(), "Amp".to_string(), None),
+            ]
         );
     }
 }

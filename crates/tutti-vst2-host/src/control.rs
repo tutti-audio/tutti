@@ -6,10 +6,11 @@ use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorPresence, EditorWindow, Features, KeyEvent,
-    KeyUse, ModifierConvention, ParamAccess, ParamEdit, ParamWriteError, ParameterInfo, PluginBus,
-    PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginPreset, PluginResult,
+    KeyUse, ModifierConvention, NoteName, ParamAccess, ParamEdit, ParamWriteError, ParameterInfo,
+    PluginBus, PluginBuses, PluginClass, PluginDescriptor, PluginError, PluginPreset, PluginResult,
     PluginWiring, PresetId, RenderMode, RenderModeSupport, Request, StateUse, Widths, WindowHandle,
 };
+use tutti_ump::NoteNumber;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -138,6 +139,23 @@ impl Control for Vst2Loaded {
             // confirm a write of `effSetBypass`: the executor's bypass serves it.
             own_bypass: None,
             assignments: Vec::new(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
+            // The current program's names on channel 0, for every channel: the
+            // opcode names a key of a program and takes the channel as a scope
+            // plugins do not distinguish.
+            note_names: self
+                .midi_key_names(main, 0, self.current_program(main))
+                .into_iter()
+                .filter_map(|n| {
+                    Some(NoteName {
+                        key: u8::try_from(n.key_number).ok().and_then(NoteNumber::new)?,
+                        channel: None,
+                        text: n.name,
+                    })
+                })
+                .filter(|n| !n.text.is_empty())
+                .collect(),
+            param_groups: Vec::new(),
         }
     }
 

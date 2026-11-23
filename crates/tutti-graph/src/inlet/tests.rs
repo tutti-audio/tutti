@@ -210,6 +210,7 @@ fn process_over(node: &mut InletNode, planes: usize, frames: usize, fill: f32) -
         arrival: tutti_units::Latency::ZERO,
         history: crate::TransportHistory::none(),
         meter: None,
+        tempo: None,
     };
     let max = Prepare::new(RATE, MaxBlock::of(Samples::new(frames))).max_block();
     let io = Io::new(

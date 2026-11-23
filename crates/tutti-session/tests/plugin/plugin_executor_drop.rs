@@ -26,9 +26,7 @@ const HANG_GUARD: Duration = Duration::from_secs(60);
 /// the drop must finish.
 #[test]
 fn a_session_drop_ends_the_lanes_of_a_plugin_a_render_feeds() {
-    // SAFETY: nextest runs each test in its own process, and the server's path
-    // is set before the first server is spawned, from the test's own thread.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let rendering = Arc::new(AtomicBool::new(true));
     let (dropped_tx, dropped_rx) = mpsc::channel();
     // A session is not `Send`: its whole life is on this thread, so the test

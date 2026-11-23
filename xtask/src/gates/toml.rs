@@ -70,6 +70,38 @@ impl Toml {
         t
     }
 
+    /// The root manifest's `[workspace] members`.
+    pub(super) fn workspace_members(&self) -> Vec<String> {
+        self.value("workspace", "members")
+            .map(strings)
+            .unwrap_or_default()
+    }
+
+    /// The package's name, from `[package] name`.
+    pub(super) fn package_name(&self) -> Option<String> {
+        strings(self.value("package", "name")?).into_iter().next()
+    }
+
+    /// Every key of every dependency table as written (a `package =` rename is
+    /// not applied), `[workspace.dependencies]` and `[dependencies.name]` tables
+    /// included.
+    pub(super) fn dependency_keys(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for s in &self.sections {
+            if s.header.ends_with("dependencies") {
+                out.extend(
+                    s.entries
+                        .iter()
+                        .map(|(k, _)| unquote(k.split('.').next().unwrap_or(k)))
+                        .filter(|k| !k.is_empty()),
+                );
+            } else if let Some((_, name)) = s.header.split_once("dependencies.") {
+                out.push(name.to_owned());
+            }
+        }
+        out
+    }
+
     pub(super) fn section(&self, header: &str) -> Option<&Section> {
         self.sections.iter().find(|s| s.header == header)
     }
@@ -175,6 +207,18 @@ fn unquote(s: &str) -> String {
     s.trim().trim_matches(['"', '\'']).to_owned()
 }
 
+/// The `key = value` entries of an inline table value (`{ a = 1, b = true }`).
+pub(super) fn inline_entries(value: &str) -> Vec<(String, String)> {
+    value
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .split(',')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.trim().to_owned(), v.trim().to_owned()))
+        .collect()
+}
+
 /// The quoted strings of a value, in order.
 pub(super) fn strings(value: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -268,6 +312,28 @@ f = "1"
                 ("d".to_owned(), Kind::Dev),
                 ("e".to_owned(), Kind::Build),
                 ("real".to_owned(), Kind::Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_keys_are_the_keys_as_written_workspace_table_included() {
+        assert_eq!(
+            Toml::parse(M).dependency_keys(),
+            ["a", "b", "c", "d", "e", "f"]
+        );
+        assert_eq!(Toml::parse(M).package_name().as_deref(), Some("p"));
+    }
+
+    #[test]
+    fn members_and_inline_tables() {
+        let t = Toml::parse("[workspace]\nmembers = [\n  \"x\", # c\n  \"y/z\",\n]\n");
+        assert_eq!(t.workspace_members(), ["x", "y/z"]);
+        assert_eq!(
+            inline_entries("{ workspace = true, a = \"b\" }"),
+            [
+                ("workspace".to_owned(), "true".to_owned()),
+                ("a".to_owned(), "\"b\"".to_owned())
             ]
         );
     }

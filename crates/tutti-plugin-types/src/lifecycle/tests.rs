@@ -36,6 +36,7 @@ enum Fx {
     ParamValues,
     ParamTitles,
     MidiMapping,
+    MidiMapChangedNotice,
     NoteExprNotice,
     Reloaded,
     StateNotRestoredNotice,
@@ -66,6 +67,7 @@ fn tag(effect: &Effect) -> Fx {
         Effect::Notify(Notice::ParamValuesChanged) => Fx::ParamValues,
         Effect::Notify(Notice::ParamTitlesChanged) => Fx::ParamTitles,
         Effect::Notify(Notice::NoteExpressionChanged) => Fx::NoteExprNotice,
+        Effect::Notify(Notice::MidiMapChanged) => Fx::MidiMapChangedNotice,
         Effect::Notify(Notice::Reloaded) => Fx::Reloaded,
         Effect::Notify(Notice::StateNotRestored { .. }) => Fx::StateNotRestoredNotice,
         Effect::Notify(Notice::Refused { .. }) => Fx::RefusedNotice,
@@ -1598,7 +1600,14 @@ fn a_midi_mapping_or_note_expression_change_needs_no_restart() {
         let s = req(active(rules, prep(1)), Request::MidiCcAssignmentChanged);
         let s = req(s, Request::NoteExpressionChanged);
         let (s, fx) = go(s, Event::Tick);
-        assert_eq!(fx, [Fx::MidiMapping, Fx::NoteExprNotice]);
+        assert_eq!(
+            fx,
+            [
+                Fx::MidiMapping,
+                Fx::MidiMapChangedNotice,
+                Fx::NoteExprNotice
+            ]
+        );
         assert!(go(s, Event::Tick).1.is_empty());
     }
 }
@@ -1619,7 +1628,14 @@ fn a_mapping_change_beside_a_restart_is_rebuilt_after_the_activation() {
     let (s, fx) = reply(s, Reply::Activated);
     assert_eq!(
         fx,
-        [Fx::Latency, Fx::Tail, Fx::Layout, Fx::Lend, Fx::MidiMapping]
+        [
+            Fx::Latency,
+            Fx::Tail,
+            Fx::Layout,
+            Fx::Lend,
+            Fx::MidiMapping,
+            Fx::MidiMapChangedNotice
+        ]
     );
     assert!(go(s, Event::Tick).1.is_empty());
 }

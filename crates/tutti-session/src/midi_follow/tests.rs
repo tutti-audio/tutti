@@ -150,19 +150,15 @@ fn a_tempo_step_lands_on_the_beat_at_its_placed_frame() {
 
     let settings = TransportSettings::new();
     let meter = ProjectMeter::new(MeterMap::default());
+    let bases = Bases::of(&settings);
     let cx = FollowCx {
         settings: &settings,
         meter: &meter,
+        bases: &bases,
         playhead: Playhead::default(),
     };
-    let mut overlay = Overlay::new(map(120.0), Arc::new(MeterMap::default()));
     let mut out = Vec::new();
-    overlay.apply_tempos(
-        &[(Bpm::of(90.0), Frame::new(96_960))],
-        &stand,
-        &cx,
-        &mut out,
-    );
+    cx.apply_tempos(&[(Bpm::of(90.0), Frame::new(96_960))], &stand, &mut out);
     let published = settings.tempo_map();
     assert_eq!(published.tempo_at(Beat::new(4.03)), Bpm::of(120.0));
     assert_eq!(published.tempo_at(Beat::new(4.05)), Bpm::of(90.0));

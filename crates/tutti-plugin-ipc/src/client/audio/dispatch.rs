@@ -1045,6 +1045,40 @@ pub(super) fn handle_control(
             );
             reply.send(ok);
         }
+        ControlCommand::SetAppMidiMap { app, reply } => {
+            // No matching reply means the plugin is lost: the server may have
+            // applied the map, but the plugin is gone, so the host's node
+            // answers for it.
+            let applied = match query(
+                lane,
+                inbox,
+                lifecycle,
+                ControlRequest::SetAppMidiMap { app },
+            )? {
+                Some(ControlReply::AppMidiMapApplied { applied }) => applied,
+                _ => tutti_plugin_types::MidiMapApplied::Host,
+            };
+            reply.send(applied);
+        }
+        ControlCommand::ArmPluginMidiLearn { armed, reply } => {
+            let result = match query(
+                lane,
+                inbox,
+                lifecycle,
+                ControlRequest::ArmPluginMidiLearn { armed },
+            )? {
+                Some(ControlReply::PluginMidiLearn { result }) => result,
+                _ => Err(tutti_plugin_types::PluginLearnError::Lost),
+            };
+            reply.send(result);
+        }
+        ControlCommand::GetWiring { reply } => {
+            let wiring = match query(lane, inbox, lifecycle, ControlRequest::GetWiring)? {
+                Some(ControlReply::Wiring { wiring }) => Some(wiring),
+                _ => None,
+            };
+            reply.send(wiring);
+        }
         ControlCommand::GetCurrentPreset { reply } => {
             let value = match query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)? {
                 Some(ControlReply::CurrentPreset { id }) => id,
@@ -1374,6 +1408,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         News::ParameterChanged { edit } => inbox.param(edit),
         News::PluginParamValuesChanged => inbox.resync(ResyncKind::ParamValues),
         News::PluginParamTitlesChanged => inbox.resync(ResyncKind::ParamTitles),
+        News::PluginMidiMapChanged => inbox.midi_map_changed(),
         News::PluginIoChanged { layout } => {
             if let Some(layout) = layout {
                 inbox.io_layout(layout);

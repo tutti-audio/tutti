@@ -6,7 +6,7 @@
 use crate::common::{Seen, blocks, offline, tap};
 use tutti_graph::{Cx, Event, IntoNode, Io, Node, NodeParts, Offset, Prepare, Shape, Status};
 use tutti_midi_runtime::{MidiInputPorts, TimedMidiEvent};
-use tutti_session::{MidiRouteRule, Session, SessionNode};
+use tutti_session::{MidiRouteRule, Session};
 use tutti_ump::{Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump, Voice2};
 use tutti_units::{Beat, BeatDuration};
 
@@ -41,8 +41,6 @@ impl IntoNode for Src {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-impl SessionNode for Src {}
-
 fn is_off(w: &[u32; 4]) -> bool {
     Ump(*w).is_note_off()
 }
@@ -187,8 +185,6 @@ impl IntoNode for GroupSrc {
         IntoNode::into_parts(tutti_graph::Unforkable(self))
     }
 }
-impl SessionNode for GroupSrc {}
-
 /// **A route by Group, cut with two notes held across it, hears one Note Off for
 /// each at offset 0 of the next block, and then nothing.** Group 2's channel 0
 /// reaches `A`; Group 1's reaches nobody (a note of Group 1 is not heard).

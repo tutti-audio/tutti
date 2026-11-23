@@ -44,6 +44,7 @@
 use super::lex::{
     blank, find_word_from, is_test_file, line_of, matching, skipped, test_ranges, word, word_char,
 };
+use super::ratchet::{self, Found, Wording};
 use super::use_tree::inline_mods;
 use super::{Report, Tree};
 use std::collections::BTreeMap;
@@ -54,61 +55,13 @@ pub(crate) const BASELINE: &str = "xtask/test-time.txt";
 const GATE: &str = "check-test-time";
 const ROOTS: [&str; 3] = ["crates", "testing", "xtask"];
 
-/// A file's counts.
-#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
-struct Counts {
-    compares: usize,
-    sleeps: usize,
-}
-
-/// The sites of one file, as printable lines.
-#[derive(Default)]
-struct Sites {
-    compares: Vec<String>,
-    sleeps: Vec<String>,
-}
-
-impl Sites {
-    fn counts(&self) -> Counts {
-        Counts {
-            compares: self.compares.len(),
-            sleeps: self.sleeps.len(),
-        }
-    }
-}
-
-fn parse(text: &str) -> Result<BTreeMap<String, Counts>, String> {
-    let mut map = BTreeMap::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut it = line.splitn(3, ' ');
-        let row = (|| {
-            let c = it.next()?.parse::<usize>().ok()?;
-            let s = it.next()?.parse::<usize>().ok()?;
-            let p = it.next()?.trim();
-            (!p.is_empty()).then(|| {
-                (
-                    p.to_owned(),
-                    Counts {
-                        compares: c,
-                        sleeps: s,
-                    },
-                )
-            })
-        })();
-        let (path, counts) = row.ok_or_else(|| {
-            format!(
-                "{BASELINE}:{}: not `<comparisons> <sleeps> <path>`: {line}",
-                n + 1
-            )
-        })?;
-        map.insert(path, counts);
-    }
-    Ok(map)
-}
+const WORDING: Wording<2> = Wording {
+    gate: GATE,
+    baseline: BASELINE,
+    nouns: ["wall-clock comparisons", "sleeps"],
+    headline: "a test asserts wall-clock time or sleeps; wait on the event, and let a time limit only guard a hang",
+    paste: true,
+};
 
 fn skip_ws(b: &[u8], mut i: usize) -> usize {
     while b.get(i).is_some_and(u8::is_ascii_whitespace) {
@@ -594,7 +547,8 @@ pub(super) fn cfg_test_files(
     found
 }
 
-fn scan(path: &str, text: &str, whole: bool) -> Sites {
+/// The comparison sites and the sleep sites of one file.
+fn scan(path: &str, text: &str, whole: bool) -> [Vec<String>; 2] {
     let code = blank(text);
     let ranges = if whole {
         vec![(0, code.len())]
@@ -602,10 +556,10 @@ fn scan(path: &str, text: &str, whole: bool) -> Sites {
         test_ranges(&code)
     };
     let in_test = |at: usize| ranges.iter().any(|&(s, e)| at >= s && at <= e);
-    let mut out = Sites::default();
+    let mut out = [Vec::new(), Vec::new()];
     for (at, label) in wall_clock(&code) {
         if in_test(at) {
-            out.compares.push(format!(
+            out[0].push(format!(
                 "    {path}:{}: compares {label}",
                 line_of(&code, at)
             ));
@@ -613,25 +567,16 @@ fn scan(path: &str, text: &str, whole: bool) -> Sites {
     }
     for at in sleeps(&code) {
         if in_test(at) {
-            out.sleeps
-                .push(format!("    {path}:{}: sleeps", line_of(&code, at)));
+            out[1].push(format!("    {path}:{}: sleeps", line_of(&code, at)));
         }
     }
     out
 }
 
 pub(super) fn check(tree: &dyn Tree) -> Report {
-    let mut r = Report::default();
-    let baseline = match tree.read(BASELINE).map(|t| parse(&t)) {
-        Some(Ok(b)) => b,
-        Some(Err(e)) => {
-            r.fail(format!("{GATE}: FAIL: {e}"));
-            return r;
-        }
-        None => {
-            r.fail(format!("{GATE}: FAIL: {BASELINE} is missing"));
-            return r;
-        }
+    let baseline = match ratchet::load(tree, &WORDING) {
+        Ok(b) => b,
+        Err(r) => return r,
     };
     let mut paths: Vec<String> = ROOTS
         .iter()
@@ -640,104 +585,42 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
         .collect();
     paths.sort();
     paths.dedup();
-    let mut over = Vec::new();
-    let mut current: BTreeMap<String, Counts> = BTreeMap::new();
-    let mut slack = 0;
-    let mut scanned = std::collections::BTreeSet::new();
     let files: BTreeMap<String, String> = paths
         .into_iter()
         .filter_map(|p| tree.read(&p).map(|t| (p, t)))
         .collect();
     let reached = cfg_test_files(&files);
-    for (path, text) in &files {
-        scanned.insert(path.clone());
-        let s = scan(path, text, is_test_file(path) || reached.contains(path));
-        let (n, allowed) = (s.counts(), baseline.get(path).copied().unwrap_or_default());
-        if n != Counts::default() {
-            current.insert(path.clone(), n);
-        }
-        for (count, base, noun, list) in [
-            (
-                n.compares,
-                allowed.compares,
-                "wall-clock comparisons",
-                s.compares,
-            ),
-            (n.sleeps, allowed.sleeps, "sleeps", s.sleeps),
-        ] {
-            if count > base {
-                over.push(format!("  {path}: {count} {noun}, baseline {base}"));
-                over.extend(list);
-            } else {
-                slack += base - count;
-            }
-        }
-    }
-    let gone: Vec<&String> = baseline.keys().filter(|p| !scanned.contains(*p)).collect();
-    for p in &gone {
-        let c = baseline[*p];
-        slack += c.compares + c.sleeps;
-    }
-    if over.is_empty() {
-        r.say(format!("{GATE}: OK"));
-    } else {
-        r.fail(format!(
-            "{GATE}: FAIL (a test asserts wall-clock time or sleeps; wait on the event, and let a time limit only guard a hang):"
-        ));
-        for line in over {
-            r.fail(line);
-        }
-    }
-    for p in &gone {
-        r.say(format!(
-            "{GATE}: {BASELINE} names {p}, which no longer exists; remove the row"
-        ));
-    }
-    let total = |m: &BTreeMap<String, Counts>| {
-        m.values().fold(Counts::default(), |a, c| Counts {
-            compares: a.compares + c.compares,
-            sleeps: a.sleeps + c.sleeps,
+    let found = files
+        .iter()
+        .map(|(path, text)| Found {
+            path: path.clone(),
+            sites: scan(path, text, is_test_file(path) || reached.contains(path)),
         })
-    };
-    let (have, base) = (total(&current), total(&baseline));
-    r.say(format!(
-        "{GATE}: {} comparisons and {} sleeps in {} files ({} and {} in {} files of {BASELINE})",
-        have.compares,
-        have.sleeps,
-        current.len(),
-        base.compares,
-        base.sleeps,
-        baseline.len(),
-    ));
-    if slack > 0 {
-        r.say(format!(
-            "{GATE}: {BASELINE} can drop by {slack}; lower it to the current counts"
-        ));
-    }
-    if slack > 0 || !r.passed() {
-        r.say(format!("{GATE}: {BASELINE} for the current counts:"));
-        for (path, c) in &current {
-            r.say(format!("{} {} {path}", c.compares, c.sleeps));
-        }
-    }
-    r
+        .collect();
+    ratchet::settle(&WORDING, &baseline, found)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
 
-    fn run(files: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files))
+    #[derive(Default, PartialEq, Debug)]
+    struct Counts {
+        compares: usize,
+        sleeps: usize,
     }
 
-    fn sites(path: &str, text: &str) -> Sites {
+    fn sites(path: &str, text: &str) -> [Vec<String>; 2] {
         scan(path, text, is_test_file(path))
     }
 
     fn counts(path: &str, src: &str) -> Counts {
-        sites(path, src).counts()
+        let [compares, sleeps] = sites(path, src);
+        Counts {
+            compares: compares.len(),
+            sleeps: sleeps.len(),
+        }
     }
 
     const LIB: &str = "crates/a/src/lib.rs";
@@ -748,17 +631,8 @@ mod tests {
                    #[cfg(test)]\nmod tests {\n#[test]\nfn t() {\nlet t0 = Instant::now();\n\
                    assert!(t0.elapsed() < Duration::from_millis(5));\n}\n}\n";
         let s = sites(LIB, src);
-        assert_eq!(
-            s.counts(),
-            Counts {
-                compares: 1,
-                sleeps: 0
-            }
-        );
-        assert_eq!(
-            s.compares,
-            ["    crates/a/src/lib.rs:7: compares `.elapsed()`"]
-        );
+        assert_eq!(s[1].len(), 0);
+        assert_eq!(s[0], ["    crates/a/src/lib.rs:7: compares `.elapsed()`"]);
     }
 
     #[test]
@@ -828,15 +702,18 @@ mod tests {
     }
 
     #[test]
-    fn a_file_over_its_baseline_fails_with_each_site() {
-        let r = run(&[
-            (BASELINE, "1 1 crates/a/tests/t.rs\n"),
-            (
-                "crates/a/tests/t.rs",
-                "fn a() { assert!(t.elapsed() < D); }\nfn b() { if u.elapsed() > D {} }\n\
-                 fn c() { thread::sleep(D); }\n",
-            ),
-        ]);
+    fn each_site_is_named_with_its_kind() {
+        let r = run_gate(
+            check,
+            &[
+                (BASELINE, "1 0 crates/a/tests/t.rs\n"),
+                (
+                    "crates/a/tests/t.rs",
+                    "fn a() { assert!(t.elapsed() < D); }\nfn b() { if u.elapsed() > D {} }\n\
+                 fn c() { thread::sleep(D); thread::sleep(D); }\n",
+                ),
+            ],
+        );
         assert_eq!(
             r.findings,
             [
@@ -844,90 +721,12 @@ mod tests {
                 "  crates/a/tests/t.rs: 2 wall-clock comparisons, baseline 1",
                 "    crates/a/tests/t.rs:1: compares `.elapsed()`",
                 "    crates/a/tests/t.rs:2: compares `.elapsed()`",
+                "  crates/a/tests/t.rs: 2 sleeps, baseline 0",
+                "    crates/a/tests/t.rs:3: sleeps",
+                "    crates/a/tests/t.rs:3: sleeps",
             ]
         );
-        assert!(r.out.contains(&"2 1 crates/a/tests/t.rs".to_owned()));
-    }
-
-    #[test]
-    fn a_sleep_over_its_baseline_fails_naming_the_kind() {
-        let r = run(&[
-            (BASELINE, "0 1 crates/a/tests/t.rs\n"),
-            (
-                "crates/a/tests/t.rs",
-                "fn a() { thread::sleep(D); thread::sleep(D); }\n",
-            ),
-        ]);
-        assert_eq!(r.findings[1], "  crates/a/tests/t.rs: 2 sleeps, baseline 1");
-        assert_eq!(r.findings[2], "    crates/a/tests/t.rs:1: sleeps");
-    }
-
-    #[test]
-    fn a_file_under_its_baseline_passes_and_reports_the_slack() {
-        let r = run(&[
-            (BASELINE, "3 2 crates/a/tests/t.rs\n"),
-            (
-                "crates/a/tests/t.rs",
-                "fn a() { assert!(t.elapsed() < D); }\n",
-            ),
-        ]);
-        assert!(r.passed());
-        assert_eq!(
-            r.out,
-            [
-                "check-test-time: OK",
-                "check-test-time: 1 comparisons and 0 sleeps in 1 files (3 and 2 in 1 files of xtask/test-time.txt)",
-                "check-test-time: xtask/test-time.txt can drop by 4; lower it to the current counts",
-                "check-test-time: xtask/test-time.txt for the current counts:",
-                "1 0 crates/a/tests/t.rs",
-            ]
-        );
-    }
-
-    #[test]
-    fn an_unlisted_file_with_a_count_fails() {
-        let r = run(&[
-            (BASELINE, ""),
-            ("crates/a/tests/t.rs", "fn a() { thread::sleep(D); }\n"),
-        ]);
-        assert_eq!(r.findings[1], "  crates/a/tests/t.rs: 1 sleeps, baseline 0");
-    }
-
-    #[test]
-    fn a_missing_or_malformed_baseline_fails() {
-        assert!(!run(&[]).passed());
-        assert!(!run(&[(BASELINE, "many 0 crates/a/tests/t.rs\n")]).passed());
-        assert!(!run(&[(BASELINE, "1 crates/a/tests/t.rs\n")]).passed());
-    }
-
-    #[test]
-    fn a_zero_site_file_with_a_row_adds_its_slack_once() {
-        let r = run(&[
-            (BASELINE, "3 2 crates/a/tests/t.rs\n"),
-            ("crates/a/tests/t.rs", "fn a() {}\n"),
-        ]);
-        assert!(r.passed());
-        assert!(
-            r.out
-                .contains(&"check-test-time: xtask/test-time.txt can drop by 5; lower it to the current counts".to_owned()),
-            "{:?}",
-            r.out
-        );
-    }
-
-    #[test]
-    fn a_deleted_file_adds_its_slack_once_and_is_named() {
-        let r = run(&[
-            (BASELINE, "3 2 crates/a/tests/gone.rs\n"),
-            (LIB, "fn f() {}\n"),
-        ]);
-        assert!(r.passed());
-        assert!(r.out.contains(
-            &"check-test-time: xtask/test-time.txt can drop by 5; lower it to the current counts".to_owned()
-        ));
-        assert!(r.out.contains(
-            &"check-test-time: xtask/test-time.txt names crates/a/tests/gone.rs, which no longer exists; remove the row".to_owned()
-        ));
+        assert!(r.out.contains(&"2 2 crates/a/tests/t.rs".to_owned()));
     }
 
     #[test]
@@ -965,7 +764,7 @@ mod tests {
 
     #[test]
     fn a_clean_tree_passes() {
-        let r = run(&[(BASELINE, ""), (LIB, "fn f() {}\n")]);
+        let r = run_gate(check, &[(BASELINE, ""), (LIB, "fn f() {}\n")]);
         assert!(r.passed());
         assert_eq!(r.out[0], "check-test-time: OK");
     }
@@ -976,7 +775,7 @@ mod tests {
     fn failing(files: &[(&str, &str)]) -> Vec<String> {
         let mut all = vec![(BASELINE, "")];
         all.extend_from_slice(files);
-        run(&all).findings
+        run_gate(check, &all).findings
     }
 
     #[test]

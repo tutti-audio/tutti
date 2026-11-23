@@ -1,15 +1,18 @@
 //! Targets on a hosted plugin: [`PluginParamTarget`] for a parameter's position
-//! and [`PluginAutomationModeTarget`] for the host's automation mode.
+//! [`PluginAutomationModeTarget`] for the host's automation mode and
+//! [`PluginTrackInfoTarget`] for what it says of the plugin's track and
+//! [`PluginMidiMapTarget`] for the app's controller map.
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tutti_graph::NodeKey;
 use tutti_plugin_host::{ParamReporter, PluginHandle, PluginParamValues};
 use tutti_plugin_types::{
-    AutomationMode, ParamAccess, ParamMapping, ParamUnit, ParameterInfo, PlainMap, PlainUnit,
+    AutomationMode, Delivered, MainThreadMarker, MidiAssignment, ParamAccess, ParamMapping,
+    ParamUnit, ParameterInfo, PlainMap, PlainUnit, TrackInfo, effective_midi_map,
 };
 use tutti_rt::Mutex;
 use tutti_units::{
@@ -476,6 +479,15 @@ impl PluginEntry {
         ))
     }
 
+    /// Whether the plugin lists `id`: the parameters the session read.
+    fn declares(&self, id: ParamId) -> Result<(), PluginParamRefusal> {
+        match &self.declared {
+            None => Err(PluginParamRefusal::NotRead),
+            Some(listed) if listed.contains_key(&id) => Ok(()),
+            Some(_) => Err(PluginParamRefusal::UnknownParam(id)),
+        }
+    }
+
     /// Whether the host may write `id`.
     fn writable(&self, id: ParamId) -> Result<(), PluginParamRefusal> {
         match self.param(id).map(|declared| declared.access) {
@@ -570,5 +582,306 @@ impl SlotId {
     /// The slot of the automation mode of the plugin at `node`.
     pub(crate) const fn automation_mode(node: NodeKey) -> Self {
         Self::PluginAutomationMode(node)
+    }
+}
+
+/// What the host says of the track a hosted plugin sits on: the [`Slot`] of its
+/// [`PluginTrackInfoTarget`].
+///
+/// A write is held and owed to the plugin: the main thread's next
+/// [`Phase::Plugins`](crate::Phase::Plugins) delivers it, because only that
+/// thread may.
+pub(crate) struct TrackInfoSlot {
+    info: Mutex<TrackInfo>,
+    owed: AtomicBool,
+}
+
+impl TrackInfoSlot {
+    /// A slot holding the default [`TrackInfo`], which nothing is owed for.
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            info: Mutex::new(TrackInfo::default()),
+            owed: AtomicBool::new(false),
+        })
+    }
+
+    /// Owes the held value to a plugin that has not been told it: a value
+    /// still at its default is what a new plugin starts with.
+    pub(crate) fn resend(&self) {
+        let owed = *self.info.lock() != TrackInfo::default();
+        self.owed.store(owed, Ordering::Release);
+    }
+
+    /// Tells the plugin of `handle` the held value if it is owed. A queue that
+    /// was full leaves it owed for the next call; any other answer settles it.
+    pub(crate) fn deliver(&self, handle: &PluginHandle, main: MainThreadMarker) {
+        if self.owed.swap(false, Ordering::AcqRel) {
+            let info = self.info.lock().clone();
+            if handle.set_track_info(main, &info) == Delivered::Dropped {
+                self.owed.store(true, Ordering::Release);
+            }
+        }
+    }
+}
+
+impl Slot<TrackInfo> for TrackInfoSlot {
+    fn load(&self) -> TrackInfo {
+        self.info.lock().clone()
+    }
+
+    fn check(&self, _: &TrackInfo) -> Result<(), SetRefusal> {
+        Ok(())
+    }
+
+    fn store(&self, value: &TrackInfo) {
+        *self.info.lock() = value.clone();
+        self.owed.store(true, Ordering::Release);
+    }
+}
+
+keyed_slot_target!(
+    /// What the host tells a plugin about the track it sits on (its name,
+    /// colour, width and kind), as
+    /// [`Plugin::track_info`](crate::Plugin::track_info) names it. A format with
+    /// no place for it takes it and drops it.
+    ///
+    /// The target holds the [`TrackInfo`] the host last set, which starts as the
+    /// default. A write is delivered to the plugin on the main thread by the
+    /// next [`Session::update`](crate::Session::update) made there, once per
+    /// write; a write the plugin's transport could not take is delivered again
+    /// at the update after. A new plugin at the node is told the held value.
+    /// The value is advisory, like the automation mode's: a write never fails
+    /// for what the plugin does with it, and the plugin does nothing audible.
+    PluginTrackInfoTarget,
+    TrackInfo,
+    NodeKey,
+    PluginTrackInfo
+);
+
+impl PluginTrackInfoTarget {
+    /// The plugin's node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.0
+    }
+}
+
+impl SlotId {
+    /// The slot of the track info of the plugin at `node`.
+    pub(crate) const fn track_info(node: NodeKey) -> Self {
+        Self::PluginTrackInfo(node)
+    }
+}
+
+/// The controller map the app gives a plugin: which MIDI message drives which
+/// parameter, beside the table the plugin declares
+/// ([`Plugin::assignments`](crate::Plugin::assignments)).
+///
+/// An entry is keyed by its channel (`None` for any) and its source; a map
+/// names each key once ([`PluginMidiMapTarget`] refuses a duplicate). The map
+/// is the app's alone: the plugin's own table is never copied into it, and
+/// [`effective`](Self::effective) reads the two together.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(try_from = "Vec<MidiAssignment>", into = "Vec<MidiAssignment>")
+)]
+#[non_exhaustive]
+pub struct MidiMap {
+    assignments: Vec<MidiAssignment>,
+}
+
+impl MidiMap {
+    /// The map of `assignments`, in order.
+    #[must_use]
+    pub fn new(assignments: impl IntoIterator<Item = MidiAssignment>) -> Self {
+        Self {
+            assignments: assignments.into_iter().collect(),
+        }
+    }
+
+    /// The app's entries, in the order given.
+    #[must_use]
+    pub fn assignments(&self) -> &[MidiAssignment] {
+        &self.assignments
+    }
+
+    /// What drives what once the app's entries are laid over `declared`, the
+    /// plugin's own table ([`effective_midi_map`]).
+    pub fn effective<'a>(
+        &'a self,
+        declared: &'a [MidiAssignment],
+    ) -> impl Iterator<Item = MidiAssignment> + 'a {
+        effective_midi_map(declared, &self.assignments)
+    }
+
+    /// Refuses a map that names one channel and source twice.
+    fn distinct(&self) -> Result<(), PluginParamRefusal> {
+        let twice = self.assignments.iter().enumerate().find(|&(at, a)| {
+            self.assignments[..at]
+                .iter()
+                .any(|b| b.channel == a.channel && b.source == a.source)
+        });
+        match twice {
+            Some((_, a)) => Err(PluginParamRefusal::DuplicateMidiEntry {
+                channel: a.channel,
+                message: a.source,
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The wire form of a map is its entries. A list that names a channel and
+/// source twice is not a map.
+impl TryFrom<Vec<MidiAssignment>> for MidiMap {
+    type Error = PluginParamRefusal;
+
+    fn try_from(assignments: Vec<MidiAssignment>) -> Result<Self, PluginParamRefusal> {
+        let map = Self { assignments };
+        map.distinct()?;
+        Ok(map)
+    }
+}
+
+impl From<MidiMap> for Vec<MidiAssignment> {
+    fn from(map: MidiMap) -> Self {
+        map.assignments
+    }
+}
+
+/// The app's MIDI map of a hosted plugin: the [`Slot`] of its
+/// [`PluginMidiMapTarget`].
+///
+/// A write is held and owed to the plugin: the main thread's next
+/// [`Phase::Plugins`](crate::Phase::Plugins) delivers it, because only that
+/// thread may.
+pub(crate) struct MidiMapSlot {
+    map: Mutex<MidiMap>,
+    owed: AtomicBool,
+}
+
+impl MidiMapSlot {
+    /// A slot holding the empty map, which nothing is owed for.
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            map: Mutex::new(MidiMap::default()),
+            owed: AtomicBool::new(false),
+        })
+    }
+
+    /// Owes the held map to a plugin that has not been given it: an empty map
+    /// is what a new plugin starts with.
+    pub(crate) fn resend(&self) {
+        let owed = !self.map.lock().assignments.is_empty();
+        self.owed.store(owed, Ordering::Release);
+    }
+
+    /// Hands the plugin of `handle` the held map if it is owed, once.
+    pub(crate) fn deliver(&self, handle: &PluginHandle, main: MainThreadMarker) {
+        if self.owed.swap(false, Ordering::AcqRel) {
+            let map = self.map.lock().clone();
+            // Who applies the entries is the plugin host's node, which acts on
+            // the answer where the plugin's control gave it.
+            let _ = handle.set_app_midi_map(main, map.assignments());
+        }
+    }
+}
+
+impl Slot<MidiMap> for MidiMapSlot {
+    fn load(&self) -> MidiMap {
+        self.map.lock().clone()
+    }
+
+    fn check(&self, value: &MidiMap) -> Result<(), SetRefusal> {
+        Ok(value.distinct()?)
+    }
+
+    fn store(&self, value: &MidiMap) {
+        *self.map.lock() = value.clone();
+        self.owed.store(true, Ordering::Release);
+    }
+}
+
+/// The app's controller map of a hosted plugin ([`MidiMap`]), as
+/// [`Plugin::midi_map`](crate::Plugin::midi_map) names it.
+///
+/// `set(target.to(map))` replaces the app's map and `get` reads it back. A
+/// write is refused at the call, with nothing delivered, when an entry names a
+/// parameter the plugin does not list
+/// ([`PluginParamRefusal::UnknownParam`]; [`NotRead`](PluginParamRefusal::NotRead)
+/// before the listing is read) or two entries share a channel and source
+/// ([`PluginParamRefusal::DuplicateMidiEntry`]). The map is delivered to the
+/// plugin on the main thread by the next [`Session::update`](crate::Session::update)
+/// made there, once per write; a new plugin at the node is given the held map.
+/// The map is saved with the project's values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PluginMidiMapTarget(NodeKey);
+
+impl PluginMidiMapTarget {
+    pub(crate) const fn new(node: NodeKey) -> Self {
+        Self(node)
+    }
+
+    /// The plugin's node.
+    #[must_use]
+    pub const fn node(self) -> NodeKey {
+        self.0
+    }
+}
+
+impl sealed::Sealed for PluginMidiMapTarget {
+    fn id(self) -> TargetId {
+        TargetId::Slot(SlotId::PluginMidiMap(self.0))
+    }
+}
+impl Target for PluginMidiMapTarget {
+    type Value = MidiMap;
+}
+
+/// What a MIDI map is written through: the plugin's table entry, which lists
+/// its parameters, and the map's slot.
+pub struct MidiMapCell {
+    entry: Arc<PluginEntry>,
+    slot: SlotCell<MidiMap>,
+}
+
+impl std::fmt::Debug for MidiMapCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MidiMapCell")
+            .field("entry", &self.entry)
+            .finish_non_exhaustive()
+    }
+}
+
+impl sealed::Store for PluginMidiMapTarget {
+    type Cell = MidiMapCell;
+
+    fn resolve(self, params: &Params) -> Option<(MidiMapCell, MidiMap)> {
+        let entry = params.plugin(self.0)?;
+        let slot = params.slot::<MidiMap>(SlotId::PluginMidiMap(self.0))?;
+        let base = slot.load();
+        Some((MidiMapCell { entry, slot }, base))
+    }
+
+    fn check(cell: &MidiMapCell, value: &MidiMap) -> Result<(), SetRefusal> {
+        for assignment in value.assignments() {
+            cell.entry.declares(assignment.param)?;
+        }
+        cell.slot.check(value)
+    }
+
+    fn store(cell: &MidiMapCell, value: &MidiMap) {
+        cell.slot.store(value);
+    }
+}
+
+target_builders!([] PluginMidiMapTarget);
+
+impl SlotId {
+    /// The slot of the app's MIDI map of the plugin at `node`.
+    pub(crate) const fn midi_map(node: NodeKey) -> Self {
+        Self::PluginMidiMap(node)
     }
 }

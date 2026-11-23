@@ -2,10 +2,7 @@
 //!
 //! A `pub` enum whose variants are all unit variants and that derives both
 //! `PartialEq` and `Eq` must derive `Hash` too, so it can key a `HashMap` or a
-//! `HashSet`. An enum that cannot is a row in [`ALLOW`]: `(file, type, reason)`,
-//! the reason starting `permanent:` (the type must not be `Hash`) or `temporary:`
-//! (a lane owes the derive). A row that no longer matches a violation is stale
-//! and fails.
+//! `HashSet`.
 //!
 //! Every `crates/*/src/**/*.rs` is read with comments and literals blanked, a
 //! `#[cfg(test)]` item is skipped, and an attribute list is read across lines.
@@ -18,9 +15,6 @@ use std::collections::BTreeSet;
 
 /// The fewest source files a real run reads; fewer means the walk is broken.
 pub(super) const MIN_FILES: usize = 100;
-
-/// `(file, type, reason)`.
-pub(super) const ALLOW: &[(&str, &str, &str)] = &[];
 
 /// The attribute bodies (`derive(Debug)`) written before `at`, and whether the
 /// item is introduced by a bare `pub`.
@@ -167,7 +161,7 @@ fn scan(file: &str, text: &str, out: &mut Vec<Found>) {
     }
 }
 
-pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str, &str)], min_files: usize) -> Report {
+pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut bad: Vec<String> = Vec::new();
     let mut found = Vec::new();
     let mut files = 0;
@@ -191,30 +185,9 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str, &str)], min_files: us
         ));
     }
 
-    for (file, name, reason) in allow {
-        if !(reason.starts_with("permanent:") || reason.starts_with("temporary:")) {
-            bad.push(format!(
-                "ALLOW {file} {name}: the reason must start `permanent:` or `temporary:`"
-            ));
-        }
-        let hit = found
-            .iter()
-            .any(|f| f.file == *file && f.name == *name && !f.hash);
-        if !hit {
-            bad.push(format!(
-                "ALLOW {file} {name}: stale (the enum is gone, derives Hash, or is no longer a fieldless Eq enum); remove the row"
-            ));
-        }
-    }
     for f in found.iter().filter(|f| !f.hash) {
-        if allow
-            .iter()
-            .any(|(file, n, _)| *file == f.file && *n == f.name)
-        {
-            continue;
-        }
         bad.push(format!(
-            "{}:{}: `pub enum {}` derives PartialEq and Eq but not Hash (derive it, or add a row to ALLOW in xtask/src/gates/value_traits.rs)",
+            "{}:{}: `pub enum {}` derives PartialEq and Eq but not Hash (derive it)",
             f.file, f.line, f.name
         ));
     }
@@ -222,9 +195,8 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str, &str)], min_files: us
     let mut r = Report::default();
     if bad.is_empty() {
         r.say(format!(
-            "check-value-traits: ok ({} fieldless Eq enums, {} allowed)",
-            found.len(),
-            allow.len()
+            "check-value-traits: ok ({} fieldless Eq enums)",
+            found.len()
         ));
     } else {
         r.fail("check-value-traits: FAIL");
@@ -237,27 +209,23 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str, &str)], min_files: us
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::{Mem, run_gate};
     use super::*;
-
-    fn run(src: &str, allow: &[(&str, &str, &str)]) -> Report {
-        let m = Mem::with(&[("crates/c/src/lib.rs", src)]);
-        check(&m, allow, 1)
-    }
-
-    const F: &str = "crates/c/src/lib.rs";
 
     #[test]
     fn a_walk_that_reads_too_few_files_fails() {
-        let r = check(&Mem::default(), &[], 5);
+        let r = check(&Mem::default(), 5);
         assert!(r.findings[1].contains("the scan is broken"));
     }
 
     #[test]
     fn a_fieldless_eq_enum_without_hash_is_flagged() {
-        let r = run(
-            "#[derive(Debug, PartialEq, Eq)]\npub enum Mode { A, B }\n",
-            &[],
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(Debug, PartialEq, Eq)]\npub enum Mode { A, B }\n",
+            )],
         );
         assert_eq!(r.findings[0], "check-value-traits: FAIL");
         assert!(r.findings[1].contains("crates/c/src/lib.rs:2: `pub enum Mode`"));
@@ -265,9 +233,12 @@ mod tests {
 
     #[test]
     fn a_derive_with_hash_passes() {
-        let r = run(
-            "#[derive(Debug, PartialEq, Eq, Hash)]\npub enum Mode { A, B }\n",
-            &[],
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(Debug, PartialEq, Eq, Hash)]\npub enum Mode { A, B }\n",
+            )],
         );
         assert!(r.passed(), "{:?}", r.findings);
         assert!(r.out[0].contains("1 fieldless Eq enums"));
@@ -275,26 +246,44 @@ mod tests {
 
     #[test]
     fn a_hash_written_as_a_path_counts() {
-        let r = run(
-            "#[derive(PartialEq, Eq, std::hash::Hash)]\npub enum Mode { A }\n",
-            &[],
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(PartialEq, Eq, std::hash::Hash)]\npub enum Mode { A }\n",
+            )],
         );
         assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
     fn an_enum_that_is_not_eq_is_skipped() {
-        let r = run("#[derive(PartialEq)]\npub enum E { A }\n", &[]);
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(PartialEq)]\npub enum E { A }\n",
+            )],
+        );
         assert!(r.passed(), "{:?}", r.findings);
-        let r = run("#[derive(Debug, Clone)]\npub enum E { A }\n", &[]);
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(Debug, Clone)]\npub enum E { A }\n",
+            )],
+        );
         assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
     fn an_enum_with_a_data_variant_is_skipped() {
-        let r = run(
-            "#[derive(PartialEq, Eq)]\npub enum E { A, B(u8), C { x: u8 } }\n",
-            &[],
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(PartialEq, Eq)]\npub enum E { A, B(u8), C { x: u8 } }\n",
+            )],
         );
         assert!(r.passed(), "{:?}", r.findings);
         assert!(r.out[0].contains("0 fieldless"));
@@ -302,9 +291,12 @@ mod tests {
 
     #[test]
     fn discriminants_and_variant_attributes_are_still_unit_variants() {
-        let r = run(
-            "#[derive(PartialEq, Eq)]\n#[repr(u8)]\npub enum E {\n    #[doc = \"x\"]\n    A = 1,\n    B = 2,\n}\n",
-            &[],
+        let r = run_gate(
+            |t| check(t, 1),
+            &[(
+                "crates/c/src/lib.rs",
+                "#[derive(PartialEq, Eq)]\n#[repr(u8)]\npub enum E {\n    #[doc = \"x\"]\n    A = 1,\n    B = 2,\n}\n",
+            )],
         );
         assert!(r.findings[1].contains("`pub enum E`"));
     }
@@ -312,9 +304,12 @@ mod tests {
     #[test]
     fn a_non_pub_enum_is_skipped() {
         for vis in ["", "pub(crate) "] {
-            let r = run(
-                &format!("#[derive(PartialEq, Eq)]\n{vis}enum E {{ A }}\n"),
-                &[],
+            let r = run_gate(
+                |t| check(t, 1),
+                &[(
+                    "crates/c/src/lib.rs",
+                    &format!("#[derive(PartialEq, Eq)]\n{vis}enum E {{ A }}\n"),
+                )],
             );
             assert!(r.passed(), "{vis}: {:?}", r.findings);
         }
@@ -323,9 +318,9 @@ mod tests {
     #[test]
     fn a_multi_line_derive_and_stacked_attributes_are_read() {
         let flagged = "#[derive(\n    Debug,\n    PartialEq,\n    Eq,\n)]\n#[non_exhaustive]\npub enum E { A }\n";
-        assert!(!run(flagged, &[]).passed());
+        assert!(!run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", flagged)]).passed());
         let hashed = "#[derive(\n    Debug,\n    PartialEq,\n    Eq,\n    Hash,\n)]\n#[non_exhaustive]\npub enum E { A }\n";
-        assert!(run(hashed, &[]).passed());
+        assert!(run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", hashed)]).passed());
     }
 
     #[test]
@@ -335,55 +330,33 @@ mod tests {
                 "#[derive(PartialEq, Eq{hash})]\n#[cfg_attr(feature = \"x\", derive(Debug))]\n#[non_exhaustive]\npub enum E {{\n    #[serde(rename = \"a\")]\n    A,\n    #[cfg_attr(x, doc = \"(y)\")]\n    B,\n}}\n"
             )
         };
-        assert!(!run(&between(""), &[]).passed());
-        assert!(run(&between(", Hash"), &[]).passed());
+        assert!(!run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", &between(""))]).passed());
+        assert!(
+            run_gate(
+                |t| check(t, 1),
+                &[("crates/c/src/lib.rs", &between(", Hash"))]
+            )
+            .passed()
+        );
         // An attribute inside a field is not a leading one: the variant has data.
         let data = "#[derive(PartialEq, Eq)]\npub enum E { A(#[serde(skip)] u8), B }\n";
-        assert!(run(data, &[]).passed());
+        assert!(run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", data)]).passed());
     }
 
     #[test]
     fn a_cfg_test_module_is_skipped() {
         let src =
             "#[cfg(test)]\nmod tests {\n    #[derive(PartialEq, Eq)]\n    pub enum E { A }\n}\n";
-        assert!(run(src, &[]).passed());
+        assert!(run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", src)]).passed());
         let after = "#[cfg(test)]\nmod tests {}\n#[derive(PartialEq, Eq)]\npub enum E { A }\n";
-        assert!(!run(after, &[]).passed());
+        assert!(!run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", after)]).passed());
     }
 
     #[test]
     fn comments_and_strings_are_not_code() {
         let src = "// #[derive(PartialEq, Eq)]\n// pub enum E { A }\nconst S: &str = \"pub enum E { A }\";\n";
-        let r = run(src, &[]);
+        let r = run_gate(|t| check(t, 1), &[("crates/c/src/lib.rs", src)]);
         assert!(r.passed(), "{:?}", r.findings);
         assert!(r.out[0].contains("0 fieldless"));
-    }
-
-    #[test]
-    fn an_allowed_enum_passes() {
-        let r = run(
-            "#[derive(PartialEq, Eq)]\npub enum E { A }\n",
-            &[(F, "E", "permanent: a key would hide a bug")],
-        );
-        assert!(r.passed(), "{:?}", r.findings);
-        assert!(r.out[0].contains("1 allowed"));
-    }
-
-    #[test]
-    fn a_stale_allow_row_fails() {
-        let allow = [(F, "E", "temporary: a lane adds Hash")];
-        let gone = run("pub fn f() {}\n", &allow);
-        assert!(gone.findings[1].contains("stale"));
-        let hashed = run("#[derive(PartialEq, Eq, Hash)]\npub enum E { A }\n", &allow);
-        assert!(hashed.findings[1].contains("stale"));
-    }
-
-    #[test]
-    fn an_allow_reason_must_say_permanent_or_temporary() {
-        let r = run(
-            "#[derive(PartialEq, Eq)]\npub enum E { A }\n",
-            &[(F, "E", "because")],
-        );
-        assert!(r.findings[1].contains("must start `permanent:` or `temporary:`"));
     }
 }

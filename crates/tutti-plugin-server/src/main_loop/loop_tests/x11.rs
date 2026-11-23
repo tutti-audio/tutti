@@ -118,10 +118,10 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     assert_eq!(cap.create_balance, 0, "every create is destroyed");
 }
 
-/// **A plugin that goes while its editor is open takes the editor with it, and
+/// **A plugin that a load replaces while its editor is open takes the editor with it, and
 /// the host is told**: the server closed it on its own account.
 #[test]
-fn unloading_a_plugin_closes_its_editor_and_says_so() {
+fn replacing_a_plugin_closes_its_editor_and_says_so() {
     let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
     let _shape = GuiShape::embeddable();
     let probe = crate::test_utils::clap();
@@ -132,7 +132,7 @@ fn unloading_a_plugin_closes_its_editor_and_says_so() {
             parent: Some(0x40_0001),
             scale: ContentScale::IDENTITY,
         }),
-        Step::Send(ControlRequest::UnloadPlugin),
+        Step::Send(load_message()),
         Until::step(|heard| {
             heard
                 .iter()

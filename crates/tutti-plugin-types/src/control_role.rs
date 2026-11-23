@@ -57,13 +57,29 @@ pub enum MidiSource {
     PolyPressure,
 }
 
+/// Who applies the app's controller entries after
+/// [`Control::set_app_midi_map`](crate::Control::set_app_midi_map).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum MidiMapApplied {
+    /// The plugin applies the entries itself (AU: they are in the unit's own
+    /// mapping table); the host sends it the MIDI and translates nothing.
+    Plugin,
+    /// The plugin cannot take the entries; the host's node translates each
+    /// mapped message into a parameter change.
+    Host,
+}
+
 /// One entry of the controller table a plugin declares: a MIDI message and
 /// the parameter it drives.
 ///
 /// VST3 (`IMidiMapping`) lists a parameter per channel and controller; AU
 /// (`kAudioUnitProperty_AllParameterMIDIMappings`) lists mappings that name
-/// a channel or any. CLAP declares none. The host never applies one: it is
-/// the plugin's suggestion.
+/// a channel or any. CLAP declares none. The VST3 host applies the table the
+/// plugin declares (it turns each mapped controller into a parameter change);
+/// an AU applies its own table inside the unit. The app's entries are handed to
+/// the plugin with [`Control::set_app_midi_map`](crate::Control::set_app_midi_map).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MidiAssignment {
@@ -73,4 +89,23 @@ pub struct MidiAssignment {
     pub source: MidiSource,
     /// The parameter it drives.
     pub param: ParamId,
+}
+
+/// The table a plugin's controllers follow once the app's entries are laid over
+/// `declared`, the plugin's own: the declared entries no app entry shares a
+/// channel and source with, in their order, then the app's entries in theirs.
+///
+/// An app entry wins per `(channel, source)`, where `None` (any channel) and a
+/// channel are different keys. A message on a channel that matches an entry
+/// naming that channel and an any-channel entry drives the one naming the
+/// channel.
+pub fn effective_midi_map<'a>(
+    declared: &'a [MidiAssignment],
+    app: &'a [MidiAssignment],
+) -> impl Iterator<Item = MidiAssignment> + 'a {
+    let kept = declared.iter().copied().filter(|d| {
+        !app.iter()
+            .any(|a| a.channel == d.channel && a.source == d.source)
+    });
+    kept.chain(app.iter().copied())
 }

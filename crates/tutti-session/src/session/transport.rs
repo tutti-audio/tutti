@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use tutti_graph::{NodeKey, PrerollTable};
 use tutti_platform::monotonic_ns;
-use tutti_tempo::TempoMap;
 use tutti_timeline::{FadeOut, MotionCommand, TimedError};
 use tutti_units::{At, Beat, SampleRate, Samples};
 
@@ -16,12 +15,6 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     #[must_use]
     pub fn sample_rate(&self) -> SampleRate {
         self.transport.sample_rate()
-    }
-
-    /// The project's tempo map as last published.
-    #[must_use]
-    pub fn tempo_map(&self) -> Arc<TempoMap> {
-        self.transport.settings().tempo_map()
     }
 
     /// The playhead, in one read: its beat, the graph frame, the transport

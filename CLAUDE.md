@@ -119,8 +119,8 @@ std only. A rule the compiler already enforces is not a gate.
 - A cheap node declares its cost (`Shape::cost`); one that declares none is `Heavy`.
 - Op code reaches the arena, event slots, units, rings and outputs only through
   `AudioSlots`/`EventSlots` or a claim, which keeps `tutti-graph` `#![forbid(unsafe_code)]`.
-- A parallel render is bit-identical to the serial one; a parallel test compares against
-  the serial render bit for bit.
+- A render is bit-identical at any participant count; the plan verifier proves schedule
+  independence, and one test compares 1 against N participants bit for bit.
 - Never make memory safety depend on an exact float result (nodes run inside
   `with_no_denormals`).
 - A node never latches a NaN or an infinity from its input: a block that wrote one is
@@ -231,7 +231,7 @@ touched.
   std's; a crate below `tutti-rt` or a test plugin allows it at its root with the reason.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
-  one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
+  one word is an `AtomicCell`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
 - A value the audio thread reads whole is a `tutti_rt::AtomicCell<T>` over an `AtomicWord`
   (`atomic_word!`); a node declares it in `declare_params!`'s `settings` block.
 - An id type is written with `tutti_rt::id!` and minted from a `tutti_rt::Mint`.
@@ -367,12 +367,12 @@ adapter is [tutti-audio/bevy-tutti](https://github.com/tutti-audio/bevy-tutti).
 0. `tutti-platform`
 1. `tutti-units`, `tutti-plugin-ipc-ffi`
 2. `tutti-music`, `tutti-buffers`
-3. `tutti-ump`
+3. `tutti-ump`, `tutti-tempo`
 4. `tutti-alsa-ffi`, `tutti-coremidi-ffi`, `tutti-winmm-ffi`, `tutti-midi-protocol`,
    `tutti-midi-ci`, `tutti-curve`
 5. `tutti-rt`, `tutti-midi-device`
 6. `tutti-midi-network`, `tutti-graph`, `tutti-dsp`, `tutti-modulation`, `tutti-codec`,
-   `tutti-tempo`, `tutti-voicing`, `tutti-sf2`
+   `tutti-voicing`, `tutti-sf2`
 7. `tutti-timeline`, `tutti-plugin-types`, `tutti-measure`
 8. `tutti-engine`, `tutti-nodes`, `tutti-midi-runtime`, `tutti-midi-file`, `tutti-clap-ffi`,
    `tutti-vst3-ffi`, `tutti-au-ffi`, `tutti-vst2-ffi`, `tutti-plugin-db`, `tutti-plugin-ipc`

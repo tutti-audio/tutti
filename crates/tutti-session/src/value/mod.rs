@@ -36,9 +36,11 @@
 //! [`Session::get`]: crate::Session::get
 //! [`Session::update`]: crate::Session::update
 
+mod base;
 mod batch;
 mod controls;
 mod depth;
+mod edit_log;
 mod error;
 mod gesture;
 mod param;
@@ -46,49 +48,58 @@ mod param;
 mod plugin;
 mod program;
 mod range;
+mod saved;
 mod slot;
 mod state;
 mod target;
 mod verbs;
 mod watcher;
 
+#[cfg(feature = "midi")]
+pub(crate) use base::Steps;
+pub(crate) use base::{BaseSlot, Bases};
 pub use batch::{IntoAssign, IntoRead};
 pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
+pub use edit_log::{EditLog, EditMark};
 #[cfg(feature = "plugin")]
 pub use error::{PluginParamRefusal, UnitError};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
 pub use gesture::Gesture;
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
-pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
+pub(crate) use plugin::{
+    AutomationModeSlot, CarriedParam, MidiMapSlot, PluginEntry, TrackInfoSlot,
+};
 #[cfg(feature = "plugin")]
-pub use plugin::{PluginAutomationModeTarget, PluginParamTarget, PluginUnit};
+pub use plugin::{
+    MidiMap, PluginAutomationModeTarget, PluginMidiMapTarget, PluginParamTarget,
+    PluginTrackInfoTarget, PluginUnit,
+};
 pub(crate) use program::{
     Automation, AutomationCell, AutomationField, Declared, Edited, Field, MacroField, RateField,
 };
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
 pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
+pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
-#[cfg(feature = "sampler")]
-pub(crate) use slot::SpeedCell;
 pub(crate) use slot::{
     Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
 };
 pub use slot::{
-    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, NodeSlots, OutputPolicyTarget,
-    SettingTarget, TempoTarget,
+    ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, OutputPolicyTarget, SettingTarget,
+    TempoTarget,
 };
 #[cfg(feature = "midi")]
 pub use slot::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]
 pub use slot::{DirectionTarget, LoopingTarget, SpeedTarget, WindowTarget};
 pub use state::Values;
-pub(crate) use state::{ValueState, ValueTable};
+pub(crate) use state::{Outgoing, ValueState, ValueTable};
 pub(crate) use target::target_builders;
 pub use target::{
     AnyAssign, AnyTarget, Assign, Effective, Info, Modify, Modulatable, ScalarTarget, Target,

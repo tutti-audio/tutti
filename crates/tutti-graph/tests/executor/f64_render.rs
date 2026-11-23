@@ -164,7 +164,11 @@ impl<F: Float> Node<F> for Gain {
 impl<F: Float> ParamNode<F> for Gain {
     fn param_set(&self) -> ParamSet {
         ParamSet::builder()
-            .param(UnitParam::Volume, self.0.as_atomic())
+            .param(
+                tutti_graph::DeclaredUnit::of::<tutti_units::Amplitude>(),
+                UnitParam::Volume,
+                self.0.as_atomic(),
+            )
             .build()
     }
     fn fork_fresh(&self) -> Self {

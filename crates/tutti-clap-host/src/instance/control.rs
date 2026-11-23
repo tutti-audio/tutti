@@ -290,6 +290,7 @@ impl Control for ClapLoaded {
     fn wiring(&self, main: MainThreadMarker) -> PluginWiring {
         self.measured(main);
         let layout = self.layout(main);
+        let params = self.parameter_list(main);
         let latency_samples = if self.flags.active {
             self.latency_samples(main)
         } else {
@@ -302,8 +303,11 @@ impl Control for ClapLoaded {
             tail: self.tail_figure(main),
             features: self.features(main),
             probed: probed::CLAP,
-            own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
+            own_bypass: bypass_parameter(&params).map(OwnBypass::Parameter),
             assignments: Vec::new(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
+            note_names: self.declared_note_names(main),
+            param_groups: super::params::module_groups(&params),
         }
     }
 

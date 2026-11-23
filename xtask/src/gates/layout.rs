@@ -20,7 +20,8 @@
 //! the point (a layer alone would let a layer-1 crate depend on any layer-0
 //! one), and a few named bans follow in [`check`].
 //!
-//! The codec libraries are `tutti-codec`'s alone, and `winnow` is named in
+//! The codec libraries are `tutti-codec`'s alone, `coreaudio_sys` is named in
+//! [`COREAUDIO_HOMES`]'s library code alone, and `winnow` is named in
 //! [`WINNOW_HOMES`]'s parser modules alone; in `tutti-codec`'s manifest a
 //! `decode-*` feature enables no encoder library and an `encode-*` feature no
 //! `symphonia`.
@@ -49,7 +50,7 @@ pub(super) const LAYERS: &[&[&str]] = &[
     &["tutti-platform"],
     &["tutti-units", "tutti-plugin-ipc-ffi"],
     &["tutti-music", "tutti-buffers"],
-    &["tutti-ump"],
+    &["tutti-ump", "tutti-tempo"],
     &[
         "tutti-alsa-ffi",
         "tutti-coremidi-ffi",
@@ -65,7 +66,6 @@ pub(super) const LAYERS: &[&[&str]] = &[
         "tutti-dsp",
         "tutti-modulation",
         "tutti-codec",
-        "tutti-tempo",
         "tutti-voicing",
         "tutti-sf2",
     ],
@@ -222,6 +222,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-units",
             "tutti-rt",
             "tutti-ump",
+            "tutti-midi-protocol",
             "tutti-plugin-ipc-ffi",
             "tutti-platform",
         ],
@@ -295,6 +296,7 @@ const ONLY: &[(&str, &[&str])] = &[
             "tutti-rt",
             "tutti-ump",
             "tutti-curve",
+            "tutti-tempo",
             "tutti-platform",
         ],
     ),
@@ -330,6 +332,21 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// A crate that names `coreaudio_sys`, and the paths of its library code (`src/`;
+/// a directory prefix or a file) that may. `tutti-au-ffi` is the binding's own
+/// crate and names it anywhere; `tutti-au-host` names it in its macOS module and
+/// its unit-code file alone, never in `tests/`.
+pub(super) const COREAUDIO_HOMES: &[(&str, &[&str])] = &[
+    ("tutti-au-ffi", &["crates/tutti-au-ffi/src/"]),
+    (
+        "tutti-au-host",
+        &[
+            "crates/tutti-au-host/src/macos/",
+            "crates/tutti-au-host/src/unit_code.rs",
+        ],
+    ),
+];
+
 /// A crate whose code outside tests names none of these words, and why. A word
 /// ending in `*` bans every identifier it starts. Comments and literals are
 /// not code; a type that merely shares a name is a finding too.
@@ -353,10 +370,7 @@ fn layer_of(name: &str) -> Option<usize> {
 /// The workspace members' manifests, from the root's `members` list.
 pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
     let root = Toml::parse(&tree.read("Cargo.toml").unwrap_or_default());
-    let members = root
-        .value("workspace", "members")
-        .map(strings)
-        .unwrap_or_default();
+    let members = root.workspace_members();
     if members.is_empty() {
         bad.push("Cargo.toml: no workspace members found; the scan is broken".into());
     }
@@ -367,10 +381,7 @@ pub(super) fn packages(tree: &dyn Tree, bad: &mut Vec<String>) -> Vec<Pkg> {
             continue;
         };
         let toml = Toml::parse(&text);
-        let Some(name) = toml
-            .value("package", "name")
-            .and_then(|v| strings(v).into_iter().next())
-        else {
+        let Some(name) = toml.package_name() else {
             bad.push(format!("{dir}/Cargo.toml: no package name"));
             continue;
         };
@@ -552,6 +563,39 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                     modules.join(", ")
                 ));
             }
+        }
+    }
+
+    // `coreaudio_sys` is named in its homes' listed library code alone.
+    for (krate, paths) in COREAUDIO_HOMES {
+        if !by_name.contains_key(krate) {
+            bad.push(format!(
+                "COREAUDIO_HOMES names {krate}, which is not a workspace member; move the row with the crate"
+            ));
+            continue;
+        }
+        let naming: Vec<String> = tree
+            .files(&format!("crates/{krate}/src"), &skipped)
+            .into_iter()
+            .filter(|p| p.ends_with(".rs"))
+            .filter(|p| blank(&tree.read(p).unwrap_or_default()).contains("coreaudio_sys"))
+            .collect();
+        for path in naming
+            .iter()
+            .filter(|n| !paths.iter().any(|p| n.starts_with(p)))
+        {
+            bad.push(format!(
+                "{path} names coreaudio_sys outside {}",
+                paths.join(", ")
+            ));
+        }
+        for path in paths
+            .iter()
+            .filter(|p| !naming.iter().any(|n| n.starts_with(*p)))
+        {
+            bad.push(format!(
+                "COREAUDIO_HOMES lists {path}, which names coreaudio_sys in no file; remove the row"
+            ));
         }
     }
 
@@ -760,7 +804,18 @@ mod tests {
                 format!("{dir}/Cargo.toml"),
                 format!("[package]\nname = \"{name}\"\n{body}"),
             );
+            // The AU crates name `coreaudio_sys` in their listed homes.
+            let named = "use coreaudio_sys as sys;\n";
+            let homes: &[&str] = match *name {
+                "tutti-au-ffi" => &["lib.rs"],
+                "tutti-au-host" => &["unit_code.rs", "macos/types.rs"],
+                _ => &[],
+            };
             m.files.insert(format!("{dir}/src/lib.rs"), String::new());
+            for home in homes {
+                m.files
+                    .insert(format!("{dir}/src/{home}"), named.to_owned());
+            }
         }
         m
     }
@@ -777,6 +832,8 @@ mod tests {
                 "[dependencies]\ntutti-units.path = \"../tutti-units\"\n",
             ),
             ("testing/tutti-fixtures", "tutti-fixtures", ""),
+            ("crates/tutti-au-ffi", "tutti-au-ffi", ""),
+            ("crates/tutti-au-host", "tutti-au-host", ""),
         ]
     }
 
@@ -885,7 +942,7 @@ mod tests {
     fn a_layered_workspace_passes() {
         let r = run(&base());
         assert!(r.passed(), "{:?}", r.findings);
-        assert_eq!(r.out[0], "check-layout: ok (6 members, 51 ranked)");
+        assert_eq!(r.out[0], "check-layout: ok (8 members, 51 ranked)");
     }
 
     #[test]
@@ -1206,6 +1263,70 @@ mod tests {
                 .findings
                 .iter()
                 .any(|l| l.contains("crates/tutti-midi-ci/src/lib.rs names winnow outside"))
+        );
+    }
+
+    #[test]
+    fn coreaudio_sys_is_named_only_in_its_homes() {
+        let mut m = ws(&base());
+        // The AU host's library code names it in its macOS module and its unit-code file.
+        m.files.insert(
+            "crates/tutti-au-host/src/lib.rs".into(),
+            "// coreaudio_sys\n".into(),
+        );
+        m.files.insert(
+            "crates/tutti-au-host/src/macos/types.rs".into(),
+            "use coreaudio_sys as sys;\n".into(),
+        );
+        m.files.insert(
+            "crates/tutti-au-host/tests/probe.rs".into(),
+            "use coreaudio_sys as sys;\n".into(),
+        );
+        assert!(check(&m).passed(), "{:?}", check(&m).findings);
+        // Anywhere else in its library code, it is a finding; the binding crate may name it anywhere.
+        m.files.insert(
+            "crates/tutti-au-host/src/lib.rs".into(),
+            "use coreaudio_sys as sys;\n".into(),
+        );
+        m.files.insert(
+            "crates/tutti-au-ffi/src/deep/mod.rs".into(),
+            "use coreaudio_sys as sys;\n".into(),
+        );
+        let f = check(&m).findings;
+        assert!(
+            f.iter()
+                .any(|l| l.contains("crates/tutti-au-host/src/lib.rs names coreaudio_sys outside")),
+            "{f:?}"
+        );
+        assert_eq!(f.len(), 2, "{f:?}"); // the header and the one finding
+    }
+
+    #[test]
+    fn a_coreaudio_home_that_names_nothing_is_a_stale_row() {
+        let mut m = ws(&base());
+        m.files.insert(
+            "crates/tutti-au-host/src/macos/types.rs".into(),
+            String::new(),
+        );
+        m.files.insert(
+            "crates/tutti-au-host/src/unit_code.rs".into(),
+            String::new(),
+        );
+        let f = check(&m).findings;
+        assert!(
+            f.iter().any(|l| l.contains(
+                "COREAUDIO_HOMES lists crates/tutti-au-host/src/unit_code.rs, which names coreaudio_sys in no file"
+            )),
+            "{f:?}"
+        );
+        // A row whose crate left the workspace is stale too.
+        let mut v = base();
+        v.retain(|m| m.1 != "tutti-au-host");
+        let f = run(&v).findings;
+        assert!(
+            f.iter().any(|l| l
+                .contains("COREAUDIO_HOMES names tutti-au-host, which is not a workspace member")),
+            "{f:?}"
         );
     }
 

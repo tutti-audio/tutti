@@ -59,7 +59,7 @@ use tutti_plugin_types::{
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
     WaitSwitch, Widths,
 };
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
@@ -254,6 +254,9 @@ impl Events {
                 self.audio.invalidate_host_edits();
                 self.ask(Request::IoChanged);
             }
+            // The declared controller table is read again, through the request
+            // the plugin raises for it in process: the pump re-reads the wiring.
+            IpcEvent::MidiMapChanged => self.ask(Request::MidiCcAssignmentChanged),
             IpcEvent::ProcessRequested => {
                 if let Some(wake) = self.wake.get() {
                     wake.raise();
@@ -301,7 +304,7 @@ pub(crate) struct Link {
     answering: Arc<Mutex<Arc<AudioSlab>>>,
     events: Arc<Events>,
     /// The rate the server runs at.
-    rate: AtomicSampleRate,
+    rate: AtomicCell<SampleRate>,
     /// A fork's watch: the latches it reads back, and whether the pipeline
     /// waits for each chunk (an offline fork).
     wait: Mutex<Option<Watch>>,
@@ -393,11 +396,11 @@ impl Link {
     }
 
     pub(crate) fn rate(&self) -> SampleRate {
-        self.rate.load(Ordering::Acquire)
+        self.rate.load()
     }
 
     pub(crate) fn set_rate(&self, rate: SampleRate) {
-        self.rate.store(rate, Ordering::Release);
+        self.rate.store(rate);
     }
 
     pub(crate) fn watch(&self) -> Option<Watch> {
@@ -550,7 +553,7 @@ impl Ipc {
             counters,
             answering,
             events,
-            rate: AtomicSampleRate::new(rate),
+            rate: AtomicCell::new(rate),
             wait: Mutex::new(None),
         };
         Self {
@@ -809,6 +812,17 @@ impl Ipc {
 }
 
 impl IpcController {
+    /// Hands the server's plugin the app's controller entries and returns who
+    /// applies them ([`Control::set_app_midi_map`](tutti_plugin_types::Control::set_app_midi_map)
+    /// with no main-thread marker, which the wire does not need): for a fork
+    /// built off the main thread.
+    pub fn hand_app_midi_map(
+        &self,
+        app: &[tutti_plugin_types::MidiAssignment],
+    ) -> tutti_plugin_types::MidiMapApplied {
+        self.link.bridge.audio().set_app_midi_map(app)
+    }
+
     /// What `Control::wiring` answers: the buses of the activation this
     /// controller belongs to, or the ones announced last for a view of none.
     pub(crate) fn wiring_now(&self) -> PluginWiring {

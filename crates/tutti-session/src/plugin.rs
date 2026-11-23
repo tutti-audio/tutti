@@ -624,6 +624,9 @@ pub enum PluginChange {
     /// The plugin's parameter list or its titles, units or flags changed:
     /// re-read the descriptors.
     ParamTitlesChanged,
+    /// The plugin re-declared its controller table, or was rebuilt in place:
+    /// [`Plugin::assignments`] reads the new one.
+    MidiMapChanged,
     /// Reading the plugin's parameters panicked, once: the read is not made
     /// again, and the parameters stay unread
     /// ([`PluginParams::is_ready`](crate::PluginParams::is_ready) is `false`)
@@ -773,6 +776,7 @@ fn change_of(notice: PluginSignal) -> Option<PluginChange> {
             PluginChange::TailChanged { tail }
         }
         PluginSignal::Invalidate(PluginInvalidation::Io) => PluginChange::IoChanged,
+        PluginSignal::Invalidate(PluginInvalidation::MidiMap) => PluginChange::MidiMapChanged,
         PluginSignal::Invalidate(PluginInvalidation::StateNotRestored { reason }) => {
             PluginChange::StateNotRestored { reason }
         }
@@ -923,6 +927,14 @@ pub(crate) struct HostedPlugin {
     /// What the node counts and holds (its meter cell and delivery counters).
     /// The project meter is installed only for a plugin the session added.
     pub(crate) node: NodeControls,
+    /// What the host says of the plugin's track, which the main thread's
+    /// `Phase::Plugins` delivers.
+    track: Arc<crate::value::TrackInfoSlot>,
+    /// The app's MIDI map, which the main thread's `Phase::Plugins` delivers.
+    midi_map: Arc<crate::value::MidiMapSlot>,
+    /// The controller table the plugin declares: read at the load, and again
+    /// when the plugin re-declares it ([`PluginChange::MidiMapChanged`]).
+    assignments: Vec<tutti_plugin_types::MidiAssignment>,
     /// What the plugins this record held before the current one lost, as
     /// [`Plugin::losses`] counts: banked when a plugin or its node is replaced,
     /// so the record's count only grows.
@@ -1198,6 +1210,7 @@ impl HostedPlugin {
     ) -> Self {
         let (notices, hearing) = hear(&handle);
         let (mirror, read) = tutti_plugin_host::PluginParamValues::start(&handle);
+        let assignments = handle.loaded().assignments.clone();
         Self {
             placement,
             plugin,
@@ -1205,6 +1218,9 @@ impl HostedPlugin {
             controls: None,
             answers: None,
             node,
+            track: crate::value::TrackInfoSlot::new(),
+            midi_map: crate::value::MidiMapSlot::new(),
+            assignments,
             banked: tutti_units::Losses::NONE,
             banked_blocks: tutti_plugin_host::BlockLosses::default(),
             panicked_round_trips: tutti_rt::tally(),
@@ -1417,6 +1433,8 @@ impl HostedPlugin {
         self.mirror = mirror;
         self.param_read = Some(read);
         self.mirror_token = Arc::new(());
+        // The incoming plugin declares a table of its own.
+        self.assignments = handle.loaded().assignments.clone();
         // A gesture on the outgoing plugin ends here: it is not this one.
         self.gate.end();
         self.gate = Gate::default();
@@ -1432,6 +1450,9 @@ impl HostedPlugin {
         self.hang = HangDetector::default();
         self.status = PluginLiveness::Healthy;
         self.told = false;
+        // The incoming plugin has been told nothing of its track.
+        self.track.resend();
+        self.midi_map.resend();
         self.snapshot = None;
         self.snapshot_from = None;
         self.withheld = None;
@@ -1543,7 +1564,7 @@ impl HostedPlugin {
         let mode = self
             .takes_automation_mode()
             .then(|| crate::value::AutomationModeSlot::cell(self.handle.clone()));
-        table.provide_plugin(node, entry, mode);
+        table.provide_plugin(node, entry, mode, self.track.clone(), self.midi_map.clone());
     }
 
     /// The IPC timeouts the plugin was loaded with, which bound its loops' round trips; the
@@ -1752,6 +1773,32 @@ impl<'a> Plugin<'a> {
         PluginParams::new(self.node, self.hosted)
     }
 
+    /// The target of what the host tells the plugin about the track it sits on.
+    /// A format with no place for it takes it and drops it.
+    #[must_use]
+    pub fn track_info(&self) -> crate::PluginTrackInfoTarget {
+        crate::PluginTrackInfoTarget::new(self.node)
+    }
+
+    /// The controller table the plugin declares (VST3 `IMidiMapping`, AU's
+    /// parameter MIDI mappings): empty for a plugin with none. Read at the
+    /// load and again whenever the plugin re-declares it
+    /// ([`PluginChange::MidiMapChanged`]). The app's own entries are
+    /// [`midi_map`](Self::midi_map), and
+    /// [`MidiMap::effective`](crate::MidiMap::effective) reads the two together.
+    #[must_use]
+    pub fn assignments(&self) -> &'a [tutti_plugin_types::MidiAssignment] {
+        &self.hosted.assignments
+    }
+
+    /// The target of the app's controller map of the plugin: which MIDI
+    /// messages drive which parameters, beside the table the plugin declares
+    /// ([`assignments`](Self::assignments)).
+    #[must_use]
+    pub fn midi_map(&self) -> crate::PluginMidiMapTarget {
+        crate::PluginMidiMapTarget::new(self.node)
+    }
+
     /// The target of the automation mode the host tells the plugin, or `None`
     /// for a plugin whose format has no such channel
     /// ([`Features::AUTOMATION_STATE`](tutti_plugin_types::Features) clear).
@@ -1877,8 +1924,7 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             Err(plugin) => {
                 let node_controls = plugin.node_controls();
                 node_controls.set_meter(meter);
-                let (bound, rebinder) =
-                    (*plugin).bind_with_rebinder(self.graph.timeline.tempo().clone());
+                let (bound, rebinder) = (*plugin).bind_with_rebinder(self.graph.tempo.clone());
                 let (node, _) = self.graph.place(bound);
                 let hosted = HostedPlugin::new(handle, loaded_ref, node_controls);
                 self.graph.plugins.insert(node.erase(), hosted);
@@ -2550,6 +2596,18 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             }) {
                 hosted.reread_params();
             }
+            // A table the plugin re-declared is read now, where the main
+            // thread is at hand; the handle answers the load's copy when it
+            // has no route to the plugin.
+            let redeclared = heard.iter().any(|notice| {
+                matches!(
+                    notice,
+                    PluginSignal::Invalidate(PluginInvalidation::MidiMap)
+                )
+            });
+            if let (true, Some(main)) = (redeclared, cx.main) {
+                hosted.assignments = hosted.handle.wiring(main).assignments;
+            }
             out.extend(
                 heard
                     .into_iter()
@@ -2566,6 +2624,10 @@ impl<K: crate::AppKey, C: crate::Clock<Float = f32>> Session<K, C> {
             if matches!(hosted.status, PluginLiveness::Recovering { .. }) {
                 self.drive_reload(node, now, out, &mut gave_up);
                 continue;
+            }
+            if let Some(main) = cx.main {
+                hosted.track.deliver(&hosted.handle, main);
+                hosted.midi_map.deliver(&hosted.handle, main);
             }
             match hosted.liveness.observe(cause.is_none(), now) {
                 LivenessVerdict::Healthy => hosted.status = PluginLiveness::Healthy,

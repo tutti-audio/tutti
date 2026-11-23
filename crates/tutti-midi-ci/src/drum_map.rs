@@ -42,6 +42,14 @@ impl DrumNoteMapLevel {
         ))
     }
 
+    /// The level `profile` is the Id of, or `None` for any other Profile.
+    #[must_use]
+    pub fn of_profile(profile: ProfileId) -> Option<Self> {
+        [Self::MeetsMinimum, Self::Partial]
+            .into_iter()
+            .find(|level| level.profile() == profile)
+    }
+
     /// The level of the Profile enabled on `channel` in `table`, or `None`
     /// when neither level is. The Profile works on a Channel (M2-125 §3), so
     /// only a channel address counts.

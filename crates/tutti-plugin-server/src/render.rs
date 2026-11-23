@@ -218,8 +218,6 @@ pub(crate) enum ToRender {
         /// the sample format blocks are rendered in.
         scratch: Box<AudioScratch>,
     },
-    /// The slab is gone (an unload).
-    DropSlab,
     /// The sample format changed: scratch of the slab's shape in the new one.
     Scratch(Box<AudioScratch>),
     /// The plugin's parameter output, held in fixed storage: a queue per
@@ -387,12 +385,6 @@ impl RenderLink {
         self.send(ToRender::Slab { slab, scratch })?;
         self.slab_layout = Some(layout);
         Ok(())
-    }
-
-    /// Detaches the slab (an unload).
-    pub(crate) fn detach_slab(&mut self) {
-        self.slab_layout = None;
-        self.tell(ToRender::DropSlab);
     }
 
     /// Renders in `format` from the next block on: scratch of the slab's shape
@@ -716,11 +708,6 @@ impl RenderSide {
                     let old_scratch = self.pipeline.install_scratch(scratch);
                     self.give_back(Back::Scratch(old_scratch));
                     if let Some(old) = self.slab.replace(slab) {
-                        self.give_back(Back::Slab(old));
-                    }
-                }
-                ToRender::DropSlab => {
-                    if let Some(old) = self.slab.take() {
                         self.give_back(Back::Slab(old));
                     }
                 }
@@ -2162,8 +2149,8 @@ mod tests {
         let (mut link, side) = link().expect("bells");
         assert_eq!(link.losses().commands_refused, 0);
         drop(side);
-        link.tell(ToRender::DropSlab);
-        link.tell(ToRender::DropSlab);
+        link.tell(ToRender::Barrier(0));
+        link.tell(ToRender::Barrier(0));
         assert_eq!(link.losses().commands_refused, 2);
         assert_eq!(link.losses().edits_refused, 0, "another count");
     }

@@ -27,11 +27,10 @@ use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
 use crate::{PlaceError, SamplerFloat};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, ForkCause, ForkSource, Forked, IntoNode, Io, Node, NodeParts, ParamSet, Prepare,
-    RenderMode, Shape, Status,
+    Cx, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io, Node, NodeParts, ParamSet,
+    Prepare, PublishedKind, RenderMode, Shape, Status,
 };
 use tutti_rt::{Param, Publisher, Reader};
-use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, PlaybackRate, Tail, UnitParam};
 
 /// Why a [`VoiceNode`] cannot be built over a voice.
@@ -125,9 +124,6 @@ pub struct VoiceNode<F: SamplerFloat> {
     /// The transport as the voice reads it, kept across blocks so a jump is
     /// flushed where it happens.
     clock: Clock,
-    /// The project's tempo map, when the node reads one: lent once per block
-    /// to its clock ([`tempo`](Self::tempo)).
-    tempo: Option<TempoReader>,
     /// The block read's lanes (`PlaybackSlot::render_into`), built here and
     /// sized from `Prepare::max_block` in `prepare`, on the control thread.
     scratch: BlockScratch<F>,
@@ -193,7 +189,6 @@ impl<F: SamplerFloat> VoiceNode<F> {
             stream: None,
             gain,
             clock: Clock::new(),
-            tempo: None,
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
             reach: Reach::Live,
         })
@@ -234,19 +229,6 @@ impl<F: SamplerFloat> VoiceNode<F> {
         )?;
         node.stream = Some(stream);
         Ok(node)
-    }
-
-    /// This node reading the project's tempo map through `tempo`
-    /// ([`TransportSettings::tempo_reader`](tutti_timeline::TransportSettings::tempo_reader)).
-    /// Over a map whose tempo changes, how long a placed voice has played is
-    /// the map's seconds between its start and the playhead, not the beats
-    /// over the tempo of the moment; see
-    /// [`VoicePool::tempo`](super::VoicePool::tempo). It matters
-    /// only when the voice is placed on the transport. A fork reads the same map.
-    #[must_use]
-    pub fn tempo(mut self, tempo: TempoReader) -> Self {
-        self.tempo = Some(tempo);
-        self
     }
 
     /// This node with a fresh steering cell, and the handle that drives
@@ -472,11 +454,7 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
             self.declared_param::<{ UnitParam::Volume as u16 }, _>(&io)
                 .last_frame(),
         );
-        // Lent for the block and given back after it: the render borrows the
-        // whole node.
-        let mut reader = self.tempo.take();
-        let map = reader.as_mut().map(TempoReader::lend);
-        let clock = self.clock.observe_with(cx.env, map.as_deref());
+        let clock = self.clock.observe_with(cx.env, cx.tempo);
         let frames = io.frames();
         let (_, mut outs) = io.split();
         // Every output this node declares, not only the `n` the read writes:
@@ -499,8 +477,6 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
             if let VoiceSource::Disk(disk) = &mut self.slot.voice.source {
                 disk.flush();
             }
-            drop(map);
-            self.tempo = reader;
             return Status::Modified;
         }
         // One piece: in a graph, `prepare` sized the scratch for every block.
@@ -510,8 +486,6 @@ impl<F: SamplerFloat> Node<F> for VoiceNode<F> {
         } else {
             self.render_in_pieces(&clock, frames, n, &mut refs[..n]);
         }
-        drop(map);
-        self.tempo = reader;
         Status::Modified
     }
 
@@ -575,8 +549,6 @@ struct VoiceNodeFork<F: SamplerFloat> {
     /// gain last set (a modulation lane sends its composite to the
     /// port and never writes the cell).
     params: ParamSet,
-    /// The tempo map the live node reads, which a fork reads too.
-    tempo: Option<TempoReader>,
 }
 
 impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
@@ -600,7 +572,6 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         // A driven gain that is not finite refuses the fork, as the node's own
         // constructor does.
         let mut node = VoiceNode::with_channels(voice, self.channels).map_err(ForkCause::new)?;
-        node.tempo = self.tempo.clone();
         node.reach = Reach::Frozen;
         let forked = Forked::new(Box::new(node));
         Ok(match health {
@@ -624,9 +595,12 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             direction: handle.direction.clone(),
             speed: handle.speed.clone(),
             params: handle.params.clone(),
-            tempo: node.tempo.clone(),
         };
         let params = handle.params().clone();
+        let window = handle.window.clone();
+        let looping = handle.looping.clone();
+        let direction = handle.direction.clone();
+        let speed = handle.speed.clone();
         NodeParts::new(
             Box::new(node),
             handle.clone(),
@@ -634,8 +608,49 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             Some(Box::new(handle)),
         )
         .params(params)
+        .published::<Self, WindowKind>(Arc::new(window))
+        .published::<Self, LoopingKind>(Arc::new(looping))
+        .published::<Self, DirectionKind>(Arc::new(direction))
+        .published::<Self, SpeedKind>(Arc::new(speed))
     }
 }
+
+/// The kind of a voice's window on the transport: `sampler.window()`.
+#[derive(Clone, Copy, Debug)]
+pub enum WindowKind {}
+
+impl PublishedKind for WindowKind {
+    type Value = Option<VoiceWindow>;
+}
+
+/// The kind of a voice's loop: `sampler.looping()`.
+#[derive(Clone, Copy, Debug)]
+pub enum LoopingKind {}
+
+impl PublishedKind for LoopingKind {
+    type Value = Option<Loop>;
+}
+
+/// The kind of a voice's direction: `sampler.direction()`.
+#[derive(Clone, Copy, Debug)]
+pub enum DirectionKind {}
+
+impl PublishedKind for DirectionKind {
+    type Value = PlayDirection;
+}
+
+/// The kind of a voice's varispeed: `sampler.speed()`.
+#[derive(Clone, Copy, Debug)]
+pub enum SpeedKind {}
+
+impl PublishedKind for SpeedKind {
+    type Value = PlaybackRate;
+}
+
+impl<F: SamplerFloat> HasPublished<WindowKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<LoopingKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<DirectionKind> for VoiceNode<F> {}
+impl<F: SamplerFloat> HasPublished<SpeedKind> for VoiceNode<F> {}
 
 #[cfg(test)]
 mod tests {

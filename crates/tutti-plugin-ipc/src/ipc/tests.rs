@@ -393,6 +393,13 @@ fn mock_with(
                 ControlRequest::GetCurrentPreset => {
                     reply_control(&served, id, &ControlReply::CurrentPreset { id: None })
                 }
+                ControlRequest::GetWiring => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::Wiring {
+                        wiring: tutti_plugin_types::PluginWiring::default(),
+                    },
+                ),
                 ControlRequest::GetParameterList
                     if !listing.load(std::sync::atomic::Ordering::Relaxed) =>
                 {
@@ -1416,6 +1423,35 @@ fn a_resync_with_a_changed_list_flips_the_answer() {
         Err(ParamWriteError::ReadOnly(ParamId::new(3)))
     );
     assert!(list_asks(&server) >= 2, "the list was asked again");
+}
+
+/// **A re-declared controller table is a request for the host to read the
+/// wiring again**: the server's news reaches the listener and raises the request
+/// the node's pump turns into a re-read, and the wiring a controller answers
+/// carries the table the server reports now.
+#[test]
+fn news_of_a_re_declared_table_is_a_request_to_read_the_wiring_again() {
+    let _machine = machine_lock();
+    let (ipc, server) = mock();
+    let arrived: Arc<Log<()>> = Arc::default();
+    let heard = Arc::clone(&arrived);
+    ipc.forward_events(Some(Arc::new(move |event| {
+        if matches!(event, IpcEvent::MidiMapChanged) {
+            heard.push(());
+        }
+    })));
+    let (_processor, mut controller) = activate(ipc, 32);
+    server.say(News::PluginMidiMapChanged);
+    assert!(
+        arrived.wait_for(|log| !log.is_empty()),
+        "the news never arrived"
+    );
+    let mut asked = Vec::new();
+    controller.take_requests(main_thread(), &mut asked);
+    assert!(
+        asked.contains(&Request::MidiCcAssignmentChanged),
+        "{asked:?}"
+    );
 }
 
 /// **A write settles the news the bridge has not delivered yet**: with the

@@ -211,6 +211,9 @@ pub struct Engine<F: Float = f32> {
     folds: AudioThreadCell<Reader<OutputFolds<F>>>,
     /// The gain each device output is ramped to, published beside the folds.
     stage: AudioThreadCell<Reader<StageTargets>>,
+    /// The audio thread's reader of the project's tempo map, lent once per
+    /// segment: the one loan the segment's walk and render both read.
+    tempo: AudioThreadCell<tutti_timeline::TempoReader>,
 }
 
 impl<F: Float> std::fmt::Debug for Engine<F> {
@@ -274,12 +277,14 @@ struct RoutingRun {
     done: usize,
 }
 
-/// What the control side published, lent for one segment: the folds and the
-/// gains the outputs ramp to.
+/// What the control side published, lent for one segment: the folds, the
+/// gains the outputs ramp to and the tempo map the segment's walk ran on, so
+/// the nodes' `Cx::tempo` is the map their transport position came from.
 #[derive(Clone, Copy)]
 struct Lent<'a, F: Float> {
     folds: &'a OutputFolds<F>,
     stage: &'a StageTargets,
+    tempo: &'a tutti_tempo::TempoMap,
 }
 
 /// The main output banks a plan renders at most: the main output's channels and, while a
@@ -392,11 +397,12 @@ impl<F: Float> GraphRender<F> {
         rate: SampleRate,
         frames: usize,
         first: &GraphTransport,
+        map: &tutti_tempo::TempoMap,
     ) {
         let beat = first.beat();
         let pose = Pose {
             beat,
-            seconds: self.transport.seconds_at(beat, first.tempo),
+            seconds: self.transport.seconds_at(beat, first.tempo, map),
             tempo: first.tempo,
             playing: first.playing,
             span: Samples::new(frames),
@@ -517,6 +523,7 @@ impl<F: Float> Engine<F> {
         editor.set_main_output_gate(Arc::new(output.clone()));
         let folds = AudioThreadCell::new(output.cell().reader());
         let stage = AudioThreadCell::new(output.stage().reader());
+        let tempo = AudioThreadCell::new(audio.tempo_reader());
         Ok(Self {
             graph: AudioThreadCell::new(GraphRender {
                 exec: Box::new(executor),
@@ -546,6 +553,7 @@ impl<F: Float> Engine<F> {
             output,
             folds,
             stage,
+            tempo,
         })
     }
 
@@ -711,6 +719,7 @@ impl<F: Float> Engine<F> {
         // its `settle`, below.
         let mut reader = self.folds.borrow_mut();
         let mut stages = self.stage.borrow_mut();
+        let mut tempos = self.tempo.borrow_mut();
         let declared = reader.lend().has_device(out_ch);
         // Refused only while the control side holds the graph
         // (`apply_pending` racing a callback): this block is silent.
@@ -731,16 +740,21 @@ impl<F: Float> Engine<F> {
             let (bound, rate) = g.settle();
             let began = (done == 0).then(|| g.dates.date(None));
             let len = (frames - done).min(bound);
-            let t = g.transport.begin_block();
+            // The segment's one loan of the tempo map, read before it is lent
+            // (a publish in the gap is the next segment's), and handed to
+            // everything the segment does with the map.
+            let generation = g.transport.tempo_generation();
+            let map = tempos.lend();
+            let t = g.transport.begin_block(generation, &map);
             if let Some(os_ns) = began {
-                g.publish_call(os_ns, rate, frames, &t);
+                g.publish_call(os_ns, rate, frames, &t, &map);
             }
             // The tempo steps inside the block, if the map has any; a block
             // that would need more than it holds ends before the first that
             // does not fit, and the loop carries on from there.
             let ahead = g
                 .transport
-                .tempo_ahead(len, &t, tutti_graph::MAX_TRANSPORT_CHANGES);
+                .tempo_ahead(len, &t, tutti_graph::MAX_TRANSPORT_CHANGES, &map);
             let len = ahead.limit.unwrap_or(len);
             budget.add(Samples::new(len), rate);
             // Kept current, so a later `process` tells a late beat from one
@@ -753,7 +767,7 @@ impl<F: Float> Engine<F> {
                 changes: ahead.changes,
                 play: tutti_graph::PlayClock::ZERO,
             });
-            g.transport.advance(len, &t);
+            g.transport.advance(len, &t, &map);
             // Lent after `settle` installed the plan this segment renders:
             // the main output's folds were published before the commit that
             // carries its id, so a snapshot taken now holds them. The loan
@@ -762,6 +776,7 @@ impl<F: Float> Engine<F> {
             let lent = Lent {
                 folds: &folds,
                 stage: &stage,
+                tempo: &map,
             };
             unplaced |= !g.render(output, lent, out_ch, done, len, &t, &ahead.changes);
             self.heard(output, output_layout, done, len);
@@ -856,6 +871,7 @@ impl<F: Float> Engine<F> {
         // reached only under the graph borrow (here, or `apply_pending`'s).
         let mut reader = self.folds.borrow_mut();
         let mut stages = self.stage.borrow_mut();
+        let mut tempos = self.tempo.borrow_mut();
         let declared = reader.lend().has_device(out_ch);
         let graph = self.graph.try_borrow_mut();
         let (true, Some(mut graph)) = (declared, graph) else {
@@ -879,6 +895,11 @@ impl<F: Float> Engine<F> {
                 changes: TransportChanges::NONE,
             };
             let aim = self.fader.borrow().aim;
+            // The segment's one loan of the tempo map: the walk and the
+            // render below read it, and a publish after it is the next
+            // segment's (the count is read first, so none is missed).
+            let generation = g.transport.tempo_generation();
+            let map = tempos.lend();
             let walk = self.walk(
                 Track {
                     transport: &mut g.transport,
@@ -889,10 +910,11 @@ impl<F: Float> Engine<F> {
                 rate,
                 aim,
                 &mut pieces,
+                (generation, &map),
             );
             let changes = pieces.changes;
             if let Some(os_ns) = began {
-                g.publish_call(os_ns, rate, frames, &walk.start);
+                g.publish_call(os_ns, rate, frames, &walk.start, &map);
             }
             // The walk cut the block short where a tempo step did not fit
             // its changes; the rest is the next iteration's block.
@@ -904,6 +926,7 @@ impl<F: Float> Engine<F> {
             let lent = Lent {
                 folds: &folds,
                 stage: &stage,
+                tempo: &map,
             };
             unplaced |= !g.render(output, lent, out_ch, done, len, &walk.start, &changes);
             let mut fader = self.fader.borrow_mut();
@@ -939,6 +962,7 @@ impl<F: Float> Engine<F> {
         rate: SampleRate,
         mut aim: Option<Frame>,
         pieces: &mut GraphPieces,
+        (generation, map): (u64, &tutti_tempo::TempoMap),
     ) -> Walk {
         let Track {
             transport,
@@ -946,7 +970,7 @@ impl<F: Float> Engine<F> {
         } = track;
         let fade = fade_frames(rate);
         let mut walk = Walk {
-            start: transport.begin_block(),
+            start: transport.begin_block(generation, map),
             gain: GainPlan::new(),
             frames,
         };
@@ -963,7 +987,7 @@ impl<F: Float> Engine<F> {
             // look). They cost no more than the block's changes can hold: a
             // step past that ends the block here, and the rest is the next
             // one's. A constant map has none, and this is nothing.
-            let ahead = transport.tempo_ahead(frames - cursor, &t, pieces.free());
+            let ahead = transport.tempo_ahead(frames - cursor, &t, pieces.free(), map);
             if let Some(end) = ahead.limit {
                 frames = cursor + end;
             }
@@ -1014,9 +1038,9 @@ impl<F: Float> Engine<F> {
                         changes: TransportChanges::NONE,
                         ..env
                     });
-                    transport.advance(s, &t);
+                    transport.advance(s, &t, map);
                     cursor += s;
-                    t = transport.position_after_tempo_change();
+                    t = transport.position_after_tempo_change(map);
                     if let Some(o) = Offset::new(Samples::new(cursor), Samples::new(frames)) {
                         pieces.change(o, t);
                     }
@@ -1034,10 +1058,10 @@ impl<F: Float> Engine<F> {
                     block_len: Samples::new(at - cursor),
                     ..env
                 });
-                transport.advance(at - cursor, &t);
+                transport.advance(at - cursor, &t, map);
                 cursor = at;
             }
-            let (applied, now) = transport.apply_command(i, late);
+            let (applied, now) = transport.apply_command(i, late, map);
             if applied.declicked() {
                 // A jump clears the fader's aim.
                 walk.gain.push(cursor, Gain::Jump);
@@ -1058,7 +1082,7 @@ impl<F: Float> Engine<F> {
             play: tutti_graph::PlayClock::ZERO,
         });
         *crossings = base;
-        transport.advance(frames - cursor, &t);
+        transport.advance(frames - cursor, &t, map);
         walk.frames = frames;
         walk
     }
@@ -1498,7 +1522,8 @@ impl<F: Float> GraphRender<F> {
                 .next()
                 .expect("a chunk for the new main output's gains"),
         };
-        // The project's meter, lent once for this block and dropped with it.
+        // The project's meter, lent once for this block and dropped with it;
+        // the tempo map is the segment's, lent before its walk.
         {
             let meter = self.transport.meter();
             self.exec.render_applied(
@@ -1508,6 +1533,7 @@ impl<F: Float> GraphRender<F> {
                 &[],
                 &mut outs[..rendered.min(MAIN_OUTPUT_BANKS * MAX_CHANNELS)],
                 Some(&*meter),
+                Some(lent.tempo),
             );
         }
         // The block that ends the fade is the old main output's last: from here the
@@ -1910,6 +1936,9 @@ mod tests {
             changes: TransportChanges::NONE,
         };
         let mut crossings = BeatCrossings::new();
+        let mut tempos = engine.tempo.borrow_mut();
+        let generation = render.transport.tempo_generation();
+        let map = tempos.lend();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
@@ -1920,6 +1949,7 @@ mod tests {
             SampleRate::SR_48K,
             None,
             &mut pieces,
+            (generation, &map),
         );
         assert_eq!(walk.gain.len, 0, "nothing planned");
         let mut out = vec![0.25f32; 512];
@@ -1935,6 +1965,7 @@ mod tests {
                 tutti_timeline::MotionCommand::stop(),
             )
             .expect("room");
+        let generation = render.transport.tempo_generation();
         let walk = engine.walk(
             Track {
                 transport: &mut render.transport,
@@ -1945,6 +1976,7 @@ mod tests {
             SampleRate::SR_48K,
             None,
             &mut pieces,
+            (generation, &map),
         );
         assert_eq!(walk.gain.len, 1);
         assert_eq!(walk.gain.items[0], (0, Gain::Aim(Some(Frame::new(700)))));
@@ -2034,8 +2066,8 @@ mod tests {
     }
 
     /// One graph block as `process_segment` runs it, with `between` run after
-    /// `settle` and before `render`: the control thread's commit landing in
-    /// the gap.
+    /// the walk and before `render`: the control thread's commit or publish
+    /// landing in the gap.
     fn block_with(engine: &Engine, out_ch: usize, between: impl FnOnce()) -> Vec<f32> {
         block_of(engine, out_ch, 8, between)
     }
@@ -2052,15 +2084,19 @@ mod tests {
         let folds = reader.lend();
         let mut stages = engine.stage.borrow_mut();
         let stage = stages.lend();
+        let mut tempos = engine.tempo.borrow_mut();
+        let generation = g.transport.tempo_generation();
+        let map = tempos.lend();
+        let t = g.transport.begin_block(generation, &map);
+        g.transport.advance(len, &t, &map);
         between();
-        let t = g.transport.begin_block();
-        g.transport.advance(len, &t);
         let mut out = vec![-9.0f32; len * out_ch];
         g.render(
             &mut out,
             Lent {
                 folds: &folds,
                 stage: &stage,
+                tempo: &map,
             },
             out_ch,
             0,
@@ -2933,6 +2969,59 @@ mod tests {
             tutti_graph::Status::Modified
         }
         fn reset(&mut self) {}
+    }
+
+    /// Left: the tempo of the map the node is lent; right: the tempo of the
+    /// block's transport.
+    struct TempoProbe;
+
+    impl tutti_graph::Node for TempoProbe {
+        fn shape(&self) -> tutti_graph::Shape {
+            tutti_graph::Shape::source_unassigned(ChannelLayout::STEREO)
+                .tail(tutti_units::Tail::Unbounded)
+        }
+        fn prepare(&mut self, _: &Prepare) {}
+        fn process(
+            &mut self,
+            cx: &tutti_graph::Cx<'_>,
+            mut io: tutti_graph::Io<'_>,
+        ) -> tutti_graph::Status {
+            let lent = cx.tempo.map_or(-1.0, |m| {
+                m.tempo_at(tutti_units::Beat::new(0.0)).get() as f32
+            });
+            io.output(0).fill(lent);
+            io.output(1).fill(cx.env.transport.tempo.get() as f32);
+            tutti_graph::Status::Modified
+        }
+        fn reset(&mut self) {}
+    }
+
+    /// **The map a node is lent is the map its block's transport came from.**
+    /// A tempo published between the block's walk and its render (90 after 120)
+    /// reaches neither: the block's nodes read 120 through `Cx::tempo` and in
+    /// `Env::transport`, and the next block reads 90 through both.
+    #[test]
+    fn a_tempo_published_mid_block_reaches_the_next_block_through_both_the_map_and_the_transport() {
+        use tutti_graph::{NodeKey, OutputPort, PortSource};
+        let transport = Transport::new(SampleRate::SR_48K);
+        let (mut ed, exec) = Editor::new(Prepare::new(
+            SampleRate::SR_48K,
+            MaxBlock::of(Samples::new(8)),
+        ));
+        ed.insert(NodeKey(1), "probe", tutti_graph::Unforkable(TempoProbe));
+        ed.spec_mut()
+            .topology
+            .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))));
+        ed.commit().expect("commits");
+        let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
+        transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
+        let _ = block_with(&engine, 2, || {});
+        let first = block_with(&engine, 2, || {
+            transport.settings().set_tempo(tutti_units::Bpm::of(90.0))
+        });
+        assert_eq!(first, [120.0, 120.0].repeat(8), "the block's own map");
+        let next = block_with(&engine, 2, || {});
+        assert_eq!(next, [90.0, 90.0].repeat(8), "the published map, next");
     }
 
     /// Feeds the constant at key 1 to channel `channel` of a `width`-wide

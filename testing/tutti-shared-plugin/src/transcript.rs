@@ -50,6 +50,12 @@ pub enum Kind {
     /// block (negative when it began in an earlier one), the `value` its start
     /// value, and [`Logged::ramp`] the rest.
     Ramp,
+    /// An AU mapping the host added to the unit's table: the `id` is its
+    /// parameter, the `value` its `status << 8 | data1`.
+    Mapped,
+    /// An AU mapping the host removed from the unit's table, recorded as
+    /// [`Kind::Mapped`] is.
+    Unmapped,
 }
 
 /// The part of a ramped parameter event beyond a point.
@@ -228,6 +234,8 @@ impl Transcript {
                     8 => Kind::KeyDown,
                     9 => Kind::KeyUp,
                     10 => Kind::Ramp,
+                    11 => Kind::Mapped,
+                    12 => Kind::Unmapped,
                     other => panic!("the transcript holds event kind {other}"),
                 };
                 let id_word = c.u64();

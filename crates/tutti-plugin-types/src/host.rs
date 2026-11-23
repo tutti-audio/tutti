@@ -34,7 +34,10 @@ use crate::{
     PluginPreset, PluginResult, PluginTail, PluginWiring, PresetId, ProcessContext, ProcessOutput,
     ProcessWake, SampleRate, Samples, WindowHandle,
 };
-use crate::{Delivered, ParamEdit, ParameterChanges, bypass_parameter, bypass_value, is_bypassed};
+use crate::{
+    Delivered, MidiAssignment, MidiMapApplied, ParamEdit, ParameterChanges, PluginLearnError,
+    bypass_parameter, bypass_value, is_bypassed,
+};
 use crate::{
     MainThreadMarker, Prepare, RenderMode, RenderModeSupport, Request, RescanScope, RestartRules,
     StateUse, TimerId, TrackInfo, Wakeups, Widths,
@@ -290,13 +293,53 @@ pub trait Control: EditorWindow {
         Delivered::Yes
     }
 
+    /// Hands the plugin the app's controller entries, replacing the set given
+    /// last (an empty `app` removes them), and says who applies them.
+    ///
+    /// The default keeps nothing and answers [`Host`](MidiMapApplied::Host): the
+    /// host's node translates each mapped message. A format whose plugin routes
+    /// MIDI to its own parameters (AU) writes the entries into its table, never
+    /// touching the entries the plugin declares, and answers
+    /// [`Plugin`](MidiMapApplied::Plugin). A unit that refuses a write partway
+    /// answers `Host` after putting its table back; if that fails too it still
+    /// answers `Host`, holds part of the set until the next call converges it,
+    /// and a mapped message can be applied twice in between.
+    fn set_app_midi_map(
+        &mut self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        let _ = (main, app);
+        MidiMapApplied::Host
+    }
+
+    /// Arms (`true`) or disarms the plugin's own MIDI learn, where the plugin
+    /// picks the parameter itself (VST3 `IMidiLearn`): the next controllers
+    /// reach the plugin, which rebinds and asks the host to
+    /// [`rebuild_midi_mapping`](Self::rebuild_midi_mapping).
+    ///
+    /// # Errors
+    ///
+    /// The default refuses with [`Unsupported`](PluginLearnError::Unsupported), as
+    /// a plugin without a learn of its own does.
+    fn arm_plugin_midi_learn(
+        &mut self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        let _ = (main, armed);
+        Err(PluginLearnError::Unsupported)
+    }
+
     /// Reads parameters again after a rescan the plugin asked for.
     fn rescan_parameters(&mut self, main: MainThreadMarker, scope: RescanScope) {
         let _ = (main, scope);
     }
 
     /// Rebuilds the host's MIDI controller-to-parameter mapping from the plugin
-    /// (VST3 `kMidiCCAssignmentChanged`).
+    /// (VST3 `kMidiCCAssignmentChanged`); [`wiring`](Self::wiring) answers the
+    /// table it read from then on. A served plugin's wiring is asked of its
+    /// server (`GetWiring`), so a caller of one sees the refresh.
     fn rebuild_midi_mapping(&mut self, main: MainThreadMarker) {
         let _ = main;
     }
@@ -866,6 +909,22 @@ impl<W: Wraps> Control for W {
 
     fn rebuild_midi_mapping(&mut self, main: MainThreadMarker) {
         self.plugin_mut().rebuild_midi_mapping(main);
+    }
+
+    fn set_app_midi_map(
+        &mut self,
+        main: MainThreadMarker,
+        app: &[MidiAssignment],
+    ) -> MidiMapApplied {
+        self.plugin_mut().set_app_midi_map(main, app)
+    }
+
+    fn arm_plugin_midi_learn(
+        &mut self,
+        main: MainThreadMarker,
+        armed: bool,
+    ) -> Result<(), PluginLearnError> {
+        self.plugin_mut().arm_plugin_midi_learn(main, armed)
     }
 
     fn flush_edits(&mut self, main: MainThreadMarker) {

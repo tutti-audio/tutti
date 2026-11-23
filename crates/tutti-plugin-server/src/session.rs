@@ -21,8 +21,9 @@ use tutti_plugin_ipc_ffi::Ready;
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
     EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
-    ParameterQueue, PluginError, PluginFormat, PluginId, PluginRef, PluginResult, RateRefusalCause,
-    SampleRate, ServerError, StateError, StateUse, Wakeups, WindowHandle,
+    MidiMapApplied, ParameterQueue, PluginError, PluginFormat, PluginId, PluginLearnError,
+    PluginRef, PluginResult, RateRefusalCause, SampleRate, ServerError, StateError, StateUse,
+    Wakeups, WindowHandle,
 };
 
 /// What [`Session::handle`] asks the transport loop to do.
@@ -286,14 +287,6 @@ impl Session {
                 state,
                 interim,
             ),
-            M::UnloadPlugin => {
-                self.discard_staged();
-                self.drop_plugin(main);
-                self.rate_refused = None;
-                self.render.detach_slab();
-                Ok(Reaction::None)
-            }
-
             M::SetAutomationState { mode } => {
                 self.write_pending = true;
                 if let Some(plugin) = self.plugin.as_mut() {
@@ -306,6 +299,32 @@ impl Session {
                     plugin.plugin_mut().set_track_info(main, &info);
                 }
                 Ok(Reaction::None)
+            }
+            M::SetAppMidiMap { app } => {
+                let applied = self.plugin.as_mut().map_or(MidiMapApplied::Host, |p| {
+                    p.plugin_mut().set_app_midi_map(main, &app)
+                });
+                Ok(ControlReply::AppMidiMapApplied { applied }.into())
+            }
+            M::GetWiring => {
+                // With no plugin the answer is the refusal, which the host reads as
+                // "no wiring" and keeps the one it has.
+                Ok(match self.plugin.as_mut() {
+                    Some(p) => ControlReply::Wiring {
+                        wiring: p.plugin_mut().wiring(main),
+                    },
+                    None => ControlReply::Error {
+                        error: tutti_plugin_types::ServerError::NoPlugin,
+                    },
+                }
+                .into())
+            }
+            M::ArmPluginMidiLearn { armed } => {
+                let result = match self.plugin.as_mut() {
+                    Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),
+                    None => Err(PluginLearnError::Lost),
+                };
+                Ok(ControlReply::PluginMidiLearn { result }.into())
             }
             M::GetParameter { param_id } => {
                 let value = self
@@ -679,7 +698,7 @@ impl Session {
         control.set_editor_size(main, size)
     }
 
-    /// Lets the plugin go (an unload, or a load that replaces it), closing its
+    /// Lets the plugin go (a load that replaces it, or the end), closing its
     /// editor first and telling the host it did.
     ///
     /// The Processor is brought home from the render thread before the plugin
@@ -800,7 +819,7 @@ impl Session {
         Ok(ControlReply::PluginLoaded {
             id,
             descriptor: Box::new(descriptor),
-            loaded,
+            loaded: Box::new(loaded),
             negotiated_format: negotiated,
             state_error: state_error.map(StateError::from),
         }
@@ -871,17 +890,20 @@ impl Session {
     /// `LoadPlugin`.
     pub(crate) fn stage_state(&mut self, state: Vec<u8>) -> Reaction {
         self.staged = Some(state);
-        ControlReply::StateLoaded { error: None }.into()
+        ControlReply::StateStaged { error: None }.into()
     }
 
     /// Answers a state whose object the transport refused (`error` says why),
     /// the stream still in step. A refused stage leaves nothing staged: the next
     /// load must not restore a stage left by an earlier request.
     pub(crate) fn refuse_state(&mut self, staging: bool, error: StateError) -> Reaction {
+        let error = Some(error);
         if staging {
             self.discard_staged();
+            ControlReply::StateStaged { error }.into()
+        } else {
+            ControlReply::StateLoaded { error }.into()
         }
-        ControlReply::StateLoaded { error: Some(error) }.into()
     }
 
     /// Applies `state`, which arrived as an object, to the plugin that is open.
@@ -1044,10 +1066,6 @@ mod tests {
     #[cfg(feature = "clap")]
     use tutti_units::Normalized;
     use tutti_units::ParamId;
-
-    fn assert_none(r: Reaction) {
-        assert!(matches!(r, Reaction::None), "got {r:?}");
-    }
 
     /// What a save in the middle of steady playback did to the blocks around it.
     #[cfg(feature = "clap")]
@@ -1295,6 +1313,27 @@ mod tests {
         }
     }
 
+    /// **A wiring asked of a server with no plugin is refused, not answered with
+    /// an empty wiring**: the host reads the refusal as "no wiring" and keeps the
+    /// one it has.
+    #[test]
+    fn a_wiring_ask_with_no_plugin_is_refused() {
+        let mut s = Rig::new();
+        let reply = s
+            .handle(main_thread(), ControlRequest::GetWiring)
+            .expect("answered")
+            .into_reply();
+        assert!(
+            matches!(
+                reply,
+                ControlReply::Error {
+                    error: tutti_plugin_types::ServerError::NoPlugin
+                }
+            ),
+            "{reply:?}"
+        );
+    }
+
     /// **A block with no plugin loaded is answered, refused**: the host reads
     /// silence for it. A reset has no answer and no plugin to reach, and is
     /// not an error.
@@ -1374,20 +1413,12 @@ mod tests {
             }
             other => panic!("expected the refusal, got {other:?}"),
         }
-        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
-        let _ = s.refuse_state(true, not_sealed());
+        assert_state_staged(s.stage_state(vec![1, 2, 3]));
+        match s.refuse_state(true, not_sealed()).into_reply() {
+            ControlReply::StateStaged { error } => assert_eq!(error, Some(not_sealed())),
+            other => panic!("expected the stage's refusal, got {other:?}"),
+        }
         assert!(s.staged.is_none(), "a refused stage left the earlier one");
-    }
-
-    #[test]
-    fn unload_plugin_clears_shm() {
-        let mut s = Rig::new();
-        let r = s
-            .handle(main_thread(), ControlRequest::UnloadPlugin)
-            .unwrap();
-        assert_none(r);
-        assert!(s.plugin.is_none());
-        assert!(!s.side().has_slab());
     }
 
     /// **A plugin's request to be processed, made on a thread of its own, rings
@@ -2449,12 +2480,12 @@ mod tests {
         ));
 
         let mut s = Rig::new();
-        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
+        assert_state_staged(s.stage_state(vec![1, 2, 3]));
         assert_mismatch(load_declaring(&mut s, None));
         assert!(s.staged.is_none(), "and the stage is gone");
 
         let mut s = Rig::new();
-        assert_state_loaded_reply(s.stage_state(vec![1, 2, 3]));
+        assert_state_staged(s.stage_state(vec![1, 2, 3]));
         assert_mismatch(load_declaring(
             &mut s,
             Some(StagedState {
@@ -2475,21 +2506,11 @@ mod tests {
         }
     }
 
-    fn assert_state_loaded_reply(r: Reaction) {
+    fn assert_state_staged(r: Reaction) {
         match r.into_reply() {
-            ControlReply::StateLoaded { error: None } => {}
+            ControlReply::StateStaged { error: None } => {}
             other => panic!("expected a staged state, got {other:?}"),
         }
-    }
-
-    /// **A stage belongs to the load that declares it**: an unload that comes
-    /// between discards it.
-    #[test]
-    fn a_stage_does_not_outlive_the_next_request() {
-        let mut s = Rig::new();
-        assert_state_loaded_reply(s.stage_state(vec![1]));
-        let _ = s.handle(main_thread(), ControlRequest::UnloadPlugin);
-        assert!(s.staged.is_none(), "an unload discards the stage");
     }
 
     /// **A state staged before a load is restored by the load**, before the
@@ -2505,7 +2526,7 @@ mod tests {
         let own = save_state_bytes(&mut source);
 
         let mut s = Rig::new();
-        assert_state_loaded(stage_state_bytes(&mut s, &own));
+        assert_state_staged(stage_state_bytes(&mut s, &own));
         assert!(s.staged.is_some(), "the state waits for the load");
         assert_eq!(
             load_reply(
@@ -2521,7 +2542,7 @@ mod tests {
         assert!(s.staged.is_none(), "and the load consumed it");
 
         let mut s = Rig::new();
-        assert_state_loaded(stage_state_bytes(&mut s, &[1, 2, 3]));
+        assert_state_staged(stage_state_bytes(&mut s, &[1, 2, 3]));
         assert!(
             matches!(
                 load_reply(
@@ -2575,7 +2596,7 @@ mod tests {
             (heard, reply)
         };
         let mut s = Rig::new();
-        assert_state_loaded(stage_state_bytes(&mut s, &own));
+        assert_state_staged(stage_state_bytes(&mut s, &own));
         let (heard, reply) = load(
             &mut s,
             Some(StagedState {
@@ -2646,21 +2667,6 @@ mod tests {
             r,
             ControlReply::SampleRateSet { refusal: None, .. }
         ));
-    }
-
-    #[test]
-    #[cfg(feature = "clap")]
-    fn unload_loaded_plugin() {
-        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
-        let (mut s, _shm) = load_clap(FloatWidth::F32);
-        assert!(s.plugin.is_some());
-        assert!(s.side().has_slab());
-        let r = s
-            .handle(main_thread(), ControlRequest::UnloadPlugin)
-            .unwrap();
-        assert_none(r);
-        assert!(s.plugin.is_none());
-        assert!(!s.side().has_slab());
     }
 
     #[test]

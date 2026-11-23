@@ -18,10 +18,12 @@
 //!   pipeline latency constant.
 
 use std::num::NonZeroU32;
+use std::sync::Arc;
 
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
 use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
+use tutti_tempo::TempoMap;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, InEvents, OutEvents, PortSpan};
@@ -38,6 +40,8 @@ use crate::time::Offset;
 use crate::wake::Wake;
 use tutti_buffers::Float;
 use tutti_rt::Reclaim;
+
+use crate::published::{ErasedPublished, HasPublished, Published, PublishedKind};
 use tutti_units::PlayReading;
 
 /// Most audio channels, or event ports, on one side of one node.
@@ -192,9 +196,8 @@ pub struct Shape {
     /// until something is connected to it, and the node must then answer
     /// [`Node::param_base`] for it.
     pub params: ParamPorts,
-    /// About how much work the node does per sample and channel: the compiler's
-    /// cost model packs cheap siblings into one task and keeps a graph too
-    /// cheap to spread on one thread. [`Cost::Heavy`] unless set with
+    /// About how much work the node does per sample and channel: the compiler
+    /// packs cheap siblings into one task. [`Cost::Heavy`] unless set with
     /// [`cost`](Self::cost): a node that declares nothing is assumed
     /// worth a thread of its own. A speed hint only — it never changes a
     /// sample.
@@ -1501,6 +1504,13 @@ pub struct Cx<'a> {
     /// block, read at any beat the block visits, so a loop wrap and any
     /// number of meter changes inside the block are exact.
     pub meter: Option<&'a MeterMap>,
+    /// The project's tempo map for this block, lent once per block by the
+    /// host that renders it, or `None` where the host has none (a hand-built
+    /// `Cx`): a node placing something by beat then takes the tempo of the
+    /// block's transport ([`Env::transport`]) as it stands. One map per
+    /// block, read at any beat the block visits, so how long a placed voice
+    /// has played through a tempo step or ramp is the map's seconds.
+    pub tempo: Option<&'a TempoMap>,
 }
 
 impl Cx<'_> {
@@ -1638,8 +1648,8 @@ pub trait Node<F: Float = f32>: Send + 'static {
     /// Processor) would otherwise never hand it back.
     ///
     /// The contract is narrow: answer pending handoffs only. It runs at the node's place in the
-    /// schedule, on the thread that would have run `process`, so the parallel
-    /// executor sees what the serial one does. It is never called for a node
+    /// schedule, on the thread that would have run `process`, so every
+    /// participant count sees the same. It is never called for a node
     /// that is not parked, nor for one the executor skips as idle (that one is
     /// woken through its [`Wake`] and processed). Audio thread: must not allocate, lock or block.
     ///
@@ -1816,6 +1826,9 @@ pub struct NodeParts<C, F: Float = f32> {
     /// What frees the values the node's published cells retired; `None` for a
     /// node that publishes nothing.
     pub reclaimer: Option<Box<dyn Reclaim + Send>>,
+    /// The node's published values, one per cell, each under its kind; empty
+    /// for a node that publishes nothing.
+    pub published: Vec<ErasedPublished>,
 }
 
 impl<C, F: Float> NodeParts<C, F> {
@@ -1847,6 +1860,7 @@ impl<C, F: Float> NodeParts<C, F> {
             fork,
             params: None,
             reclaimer,
+            published: Vec::new(),
         }
     }
 
@@ -1855,6 +1869,19 @@ impl<C, F: Float> NodeParts<C, F> {
     #[must_use]
     pub fn params(mut self, params: ParamSet) -> Self {
         self.params = Some(params);
+        self
+    }
+
+    /// The node's published value of the kind `K`, read and replaced through
+    /// `cell`, whose value is `K::Value`. `N` is the node that declares the
+    /// kind ([`HasPublished`]). The cell's publisher belongs in the node's
+    /// reclaimer too.
+    #[must_use]
+    pub fn published<N: HasPublished<K>, K: PublishedKind>(
+        mut self,
+        cell: Arc<dyn Published<Value = K::Value>>,
+    ) -> Self {
+        self.published.push(ErasedPublished::new::<K>(cell));
         self
     }
 }

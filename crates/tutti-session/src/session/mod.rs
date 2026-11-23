@@ -290,18 +290,24 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         click: Arc<tutti_nodes::ClickSettings>,
     ) {
         use crate::value::{
-            ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotId, TempoCell,
+            BaseSlot, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotId, TempoCell,
         };
+        let bases = &self.transport.bases;
         table.provide_staged(
             SlotId::Tempo,
-            PublishedSlot::new(TempoCell {
-                settings: self.transport.settings().clone(),
-                following: self.midi.following(),
-            }),
+            BaseSlot::new(
+                TempoCell {
+                    settings: self.transport.settings().clone(),
+                },
+                bases.tempo.clone(),
+            ),
         );
         table.provide_staged(
             SlotId::Meter,
-            PublishedSlot::new(self.transport.settings().project_meter().clone()),
+            BaseSlot::new(
+                self.transport.settings().project_meter().clone(),
+                bases.meter.clone(),
+            ),
         );
         table.provide_staged(
             SlotId::Loop,

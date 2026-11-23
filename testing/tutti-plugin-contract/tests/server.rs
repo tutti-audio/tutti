@@ -40,6 +40,9 @@ fn through_server<F: Format>(path: PathBuf) {
     let pid = handle.server_pid().expect("the plugin lives in a server");
     assert_ne!(pid, std::process::id(), "a process other than this one");
 
+    // The tables the plugin declared ride the load reply.
+    tutti_plugin_contract::assert_tables::<F>(handle.loaded(), "served");
+
     let state = handle
         .save_state(tutti_plugin_types::StateUse::Project)
         .expect("saves");
@@ -64,6 +67,35 @@ fn through_server<F: Format>(path: PathBuf) {
         .flatten()
         .map(|v| v.get());
     assert_eq!(level, Some(0.5), "a parameter read across the boundary");
+
+    // The wiring is asked of the server, not the load copy: the declared
+    // controller table read across the boundary is the format's own.
+    assert_eq!(
+        handle.wiring(main_thread()).assignments,
+        F::SURFACE.assignments,
+        "{}: the declared table, read from the server now",
+        F::NAME
+    );
+
+    // The app's controller entries and the plugin's own learn are asked of the
+    // served plugin, which answers as the format does.
+    let main = main_thread();
+    assert_eq!(
+        handle.set_app_midi_map(main, &[spec::APP_ENTRY]),
+        F::SURFACE.app_map,
+        "{}: who applies an app entry, across the boundary",
+        F::NAME
+    );
+    let learn = handle.arm_plugin_midi_learn(main, true);
+    match F::SURFACE.plugin_learn {
+        spec::PluginLearn::Refused => {
+            assert_eq!(
+                learn,
+                Err(tutti_plugin_types::PluginLearnError::Unsupported)
+            );
+        }
+        spec::PluginLearn::MovesAux => assert_eq!(learn, Ok(())),
+    }
 
     // The conversion is the format's, asked across the boundary: each figure is
     // the spec's for the format (`spec::Tone`), never a line the client draws.
@@ -387,4 +419,232 @@ fn vst3_value_keeps_its_f64_width_across_the_process_boundary() {
 #[test]
 fn vst3_cpp_value_keeps_its_f64_width_across_the_process_boundary() {
     a_served_value_keeps_its_f64_width::<Vst3Cpp>(bundle_of(&vst3_cpp_module()));
+}
+
+/// The shared plugin's `IMidiMapping` (CC 74 on channel 0 to `level`) applied by
+/// the plugin node, with the real plugin: a MIDI 2.0 Control Change reaches it as
+/// a `level` point of the word over the full 32-bit scale (M2-115), and the plugin
+/// holds that level.
+mod node_midi_map {
+    use super::*;
+    use tutti_buffers::{MaxBlock, Planes};
+    use tutti_graph::{
+        EventCapacity, EventInletNode, EventInletWriter, GraphBuilder, Renderer, Stamp,
+    };
+    use tutti_plugin::{Bound, PluginClient};
+    use tutti_plugin_contract::Kind;
+    use tutti_plugin_host::PluginHandle;
+    use tutti_plugin_types::{ChannelLayout, StateUse};
+    use tutti_units::Samples;
+
+    /// The word of the Control Change sent: a quarter of the 32-bit scale.
+    const WORD: u32 = 0x4000_0000;
+
+    fn expected() -> f64 {
+        f64::from(WORD) / f64::from(u32::MAX)
+    }
+
+    fn cc74() -> tutti_ump::Ump {
+        tutti_fixtures::midi::cc(
+            tutti_ump::MidiChannel::of(0),
+            tutti_ump::CCNumber::BRIGHTNESS,
+            WORD,
+        )
+    }
+
+    /// What the plugin recorded of `level`: the points it was handed and the
+    /// level it holds.
+    fn level_points<F: Format>(handle: &PluginHandle) -> (Vec<f64>, f64) {
+        let state = handle.save_state(StateUse::Project).expect("saves");
+        let t = Transcript::parse(&F::extract_blob(&state));
+        let points = t
+            .of(Kind::Param)
+            .filter(|e| e.id == Param::Level.id().get())
+            .map(|e| e.value)
+            .collect();
+        (points, t.level)
+    }
+
+    /// A bound client as the only node of a graph, with an event inlet.
+    fn graph(client: PluginClient<Bound>) -> (Renderer, EventInletWriter, usize) {
+        let (inputs, outputs) = (client.inputs(), client.outputs());
+        let layout = |n: usize| ChannelLayout::from_count(u16::try_from(n).expect("a few ports"));
+        let mut g = GraphBuilder::new(layout(inputs), layout(outputs));
+        let (key, _controls) = g.add_with_controls(client);
+        g.pipe_input(key).pipe_output(key);
+        let (inlet, writer) = EventInletNode::pair(EventCapacity::of(256));
+        let from = g.add(inlet);
+        g.connect_events(from, 0, key, 0);
+        let prepare =
+            tutti_graph::Prepare::new(SampleRate::of(RATE), MaxBlock::of(Samples::new(BLOCK)));
+        (
+            g.renderer(prepare).expect("a one-plugin graph compiles"),
+            writer,
+            inputs,
+        )
+    }
+
+    fn render(renderer: &mut Renderer, inputs: usize) {
+        let silence = vec![0.0f32; BLOCK];
+        let refs: Vec<&[f32]> = (0..inputs).map(|_| silence.as_slice()).collect();
+        renderer.render_input(Planes::new(&refs).expect("planes"));
+    }
+
+    /// Sends the controller and renders until the plugin has recorded a `level`
+    /// point: the served pipeline delivers a block or two late.
+    fn drive<F: Format>(client: PluginClient<Bound>, handle: &PluginHandle) -> (Vec<f64>, f64) {
+        let (mut renderer, mut writer, inputs) = graph(client);
+        writer.push(Stamp::NextBlock, cc74()).expect("room");
+        let guard = HangGuard::new();
+        loop {
+            guard.check("the controller never reached the plugin as a parameter");
+            render(&mut renderer, inputs);
+            let (points, level) = level_points::<F>(handle);
+            if !points.is_empty() {
+                return (points, level);
+            }
+        }
+    }
+
+    fn unpumped<F: Format>(path: PathBuf) {
+        // SAFETY: set before any thread of this test reads it.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        let client = PluginClient::new(
+            IpcConfig::new(),
+            tutti_fixtures::executor(),
+            &tutti_fixtures::detached_work(),
+            &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(path)),
+            SampleRate::SR_48K,
+        )
+        .unwrap_or_else(|e| panic!("{}: the server loads the plugin: {e:?}", F::NAME));
+        let handle = client.handle();
+        // The live node, then a fork of it: neither is ever pumped, so the
+        // table is the load-time wiring's.
+        let fork = client
+            .fork_instance(tutti_fixtures::tempo())
+            .expect("forks");
+        let fork_handle = fork.handle();
+        let live = client.bind(tutti_fixtures::tempo());
+        let (points, level) = drive::<F>(live, &handle);
+        assert!(
+            points.iter().all(|p| (p - expected()).abs() < 1e-6),
+            "{}: served, the points are {points:?}, want {}",
+            F::NAME,
+            expected()
+        );
+        assert!(
+            (level - expected()).abs() < 1e-6,
+            "{}: the plugin holds {level}",
+            F::NAME
+        );
+        let (points, level) = drive::<F>(fork, &fork_handle);
+        assert!(
+            points.iter().all(|p| (p - expected()).abs() < 1e-6),
+            "{}: a fork that is never pumped: {points:?}",
+            F::NAME
+        );
+        assert!(
+            (level - expected()).abs() < 1e-6,
+            "{}: the fork holds {level}",
+            F::NAME
+        );
+    }
+
+    /// **A served fork is handed the app's entries by its own plugin**: an entry
+    /// the app set on the live node (CC 21 on channel 2 to `level`) moves the
+    /// fork's `level`, a table only the fork's own answer publishes.
+    #[test]
+    fn a_served_fork_hands_the_app_entries_to_its_own_plugin() {
+        // SAFETY: set before any thread of this test reads it.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        let client = PluginClient::new(
+            IpcConfig::new(),
+            tutti_fixtures::executor(),
+            &tutti_fixtures::detached_work(),
+            &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
+                bundle_of(&vst3_module()),
+            )),
+            SampleRate::SR_48K,
+        )
+        .expect("the server loads the plugin");
+        let handle = client.handle();
+        let entry = tutti_plugin_types::MidiAssignment {
+            channel: Some(tutti_ump::MidiChannel::of(2)),
+            source: tutti_plugin_types::MidiSource::ControlChange(tutti_ump::U7::of(21)),
+            param: Param::Level.id(),
+        };
+        handle.set_app_midi_map(main_thread(), &[entry]);
+        let fork = client
+            .fork_instance(tutti_fixtures::tempo())
+            .expect("forks");
+        let fork_handle = fork.handle();
+        let (mut renderer, mut writer, inputs) = graph(fork);
+        writer
+            .push(
+                Stamp::NextBlock,
+                tutti_fixtures::midi::cc(
+                    tutti_ump::MidiChannel::of(2),
+                    tutti_ump::CCNumber::new(21).expect("a controller"),
+                    WORD,
+                ),
+            )
+            .expect("room");
+        let guard = HangGuard::new();
+        loop {
+            guard.check("the app's entry never moved the fork's level");
+            render(&mut renderer, inputs);
+            let (points, _) = level_points::<Vst3>(&fork_handle);
+            if let Some(point) = points.first() {
+                assert!((point - expected()).abs() < 1e-6, "{points:?}");
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn a_served_vst3_node_translates_its_declared_controller_from_its_first_block() {
+        unpumped::<Vst3>(bundle_of(&vst3_module()));
+    }
+
+    #[test]
+    fn a_served_vst3_cpp_node_translates_its_declared_controller_from_its_first_block() {
+        unpumped::<Vst3Cpp>(bundle_of(&vst3_cpp_module()));
+    }
+
+    /// In process, through `load_client`: the same figure.
+    #[test]
+    fn an_in_process_vst3_node_translates_its_declared_controller() {
+        use tutti_graph::contract::Direct;
+        let main = main_thread();
+        let (client, handle) = tutti_plugin_host::load_client::<tutti_vst3_host::Vst3Loaded, f32>(
+            main,
+            &tutti_fixtures::pumped_work(),
+            &tutti_plugin_types::PluginRef::file(bundle_of(&vst3_module())),
+            SampleRate::SR_48K,
+        )
+        .expect("loads");
+        let mut unit = Direct::new(
+            client.bind(tutti_fixtures::tempo()),
+            SampleRate::SR_48K,
+            BLOCK,
+        );
+        let port = tutti_graph::Node::shape(&*unit.node)
+            .event_input(0)
+            .expect("an event input");
+        unit.events(
+            port,
+            &[tutti_graph::Event::midi(
+                tutti_graph::Offset::of(Samples::new(3), Samples::new(BLOCK)),
+                cc74(),
+            )],
+        );
+        unit.block();
+        let (points, level) = level_points::<Vst3>(&handle);
+        assert_eq!(points.len(), 1, "one point: {points:?}");
+        assert!((points[0] - expected()).abs() < 1e-6);
+        assert!(
+            (level - expected()).abs() < 1e-6,
+            "the plugin holds {level}"
+        );
+    }
 }

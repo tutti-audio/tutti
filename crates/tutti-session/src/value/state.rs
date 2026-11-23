@@ -7,19 +7,22 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{EffectiveCell, NodeKey, ParamSet, PassError};
+use tutti_graph::{DeclaredUnit, EffectiveCell, ErasedPublished, NodeKey, ParamSet, PassError};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
+use super::edit_log::EditLog;
 use super::error::{ValueError, ValueErrorKind};
 use super::gesture::{Deferred, Ending, Gesture};
-use super::slot::{self, NodeSlots, SlotCell, SlotId};
-use super::target::AnyTarget;
+use super::saved::SavedValues;
+use super::slot::{self, SlotCell, SlotId};
+use super::target::{AnyAssign, AnyTarget};
 use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
 use crate::AppKey;
 
@@ -36,6 +39,11 @@ struct NodeParams {
     /// the cells (`bind_lanes`).
     lanes: Vec<(UnitAddr, EffectiveCell)>,
 }
+
+/// The params a node had when a replace took its key: what the incoming
+/// node's params are seeded from ([`ValueTable::address`]).
+#[derive(Default, Debug)]
+pub(crate) struct Outgoing(Option<NodeParams>);
 
 /// The key-to-cell table, behind the value lock.
 #[derive(Default, Debug)]
@@ -58,6 +66,32 @@ impl Params {
     pub fn cell(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<ParamCell> {
         let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.set.cell(addr)
+    }
+
+    /// `addr`'s cell on `node` with the unit the node declares it in, when
+    /// the node is of the type `owner` names and declares one.
+    pub(super) fn unit_cell(
+        &self,
+        node: NodeKey,
+        addr: UnitAddr,
+        owner: TypeId,
+    ) -> Option<(ParamCell, DeclaredUnit)> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
+        Some((node.set.cell(addr)?, node.set.unit(addr)?))
+    }
+
+    /// Every native param a declaration gave a unit, with the value in its
+    /// cell: the node, the address, the node type and the cell's raw.
+    pub(super) fn native_params(
+        &self,
+    ) -> impl Iterator<Item = (NodeKey, UnitAddr, TypeId, f64)> + '_ {
+        self.nodes.iter().flat_map(|(node, params)| {
+            params.set.params().filter_map(move |addr| {
+                params.set.unit(addr)?;
+                let raw = params.set.get(addr)?;
+                Some((*node, addr, params.owner, raw))
+            })
+        })
     }
 
     /// What `addr`'s lane on `node` last delivered, as the raw of its unit:
@@ -84,6 +118,29 @@ impl Params {
     pub fn seed(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<f64> {
         let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.seeds.iter().find(|(a, _)| *a == addr).map(|(_, v)| *v)
+    }
+}
+
+/// Copies `from`'s value at `addr` into `set`'s cell, when both declare the
+/// param in one unit at one declared value and the value is finite, as a
+/// write requires ([`ParamTarget`](crate::ParamTarget)'s check). `declared`
+/// is the incoming declaration's value: both seeds are the declaration's
+/// initial in the cell's own `f64`, so they are compared as that.
+fn seed_from(from: &NodeParams, set: &ParamSet, addr: UnitAddr, declared: f64) {
+    let (Some(old), Some(new)) = (from.set.cell(addr), set.cell(addr)) else {
+        return;
+    };
+    let same_unit = matches!(
+        (from.set.unit(addr), set.unit(addr)),
+        (Some(a), Some(b)) if a == b
+    );
+    let same_declaration = from
+        .seeds
+        .iter()
+        .any(|&(a, seed)| a == addr && seed.to_bits() == declared.to_bits());
+    let live = old.load(Ordering::Acquire);
+    if same_unit && same_declaration && live.is_finite() {
+        new.store(live, Ordering::Release);
     }
 }
 
@@ -177,27 +234,50 @@ impl ValueTable {
         Arc::clone(&self.output)
     }
 
-    /// Addresses `node`'s params, replacing any it had. Control thread.
-    pub(crate) fn address(&self, node: NodeKey, owner: TypeId, set: ParamSet) {
-        let seeds = set
+    /// Addresses `node`'s params, replacing any it had, and seeds each from
+    /// the `outgoing` node's value at the same address, under the value lock
+    /// and through the cells alone: no write reaches the feed, so no watcher
+    /// and no edit-log mark sees it. A carried value equals the one the last
+    /// mark's saved values hold for that address. Control thread.
+    ///
+    /// An address takes the outgoing node's value when both nodes declare it
+    /// in one unit, both declared it at the same value, and the value is one
+    /// a write accepts (finite). A declaration that changed keeps its new
+    /// initial, and an address the incoming node lacks is dropped with the
+    /// outgoing params.
+    pub(crate) fn address(&self, node: NodeKey, owner: TypeId, set: ParamSet, outgoing: &Outgoing) {
+        let seeds: Vec<(UnitAddr, f64)> = set
             .params()
-            .filter_map(|addr| {
-                Some((
-                    addr,
-                    set.cell(addr)?.load(std::sync::atomic::Ordering::Acquire),
-                ))
-            })
+            .filter_map(|addr| Some((addr, set.cell(addr)?.load(Ordering::Acquire))))
             .collect();
-        let old = self.params.lock().nodes.insert(
-            node,
-            NodeParams {
-                owner,
-                set,
-                seeds,
-                lanes: Vec::new(),
-            },
-        );
+        let old = {
+            let mut params = self.params.lock();
+            if let Some(from) = &outgoing.0 {
+                for &(addr, declared) in &seeds {
+                    seed_from(from, &set, addr, declared);
+                }
+            }
+            params.nodes.insert(
+                node,
+                NodeParams {
+                    owner,
+                    set,
+                    seeds,
+                    lanes: Vec::new(),
+                },
+            )
+        };
         drop(old);
+    }
+
+    /// Puts `outgoing` back under `node` whole, as it was: a replace that
+    /// failed leaves the node it did not replace its params, seeds and lanes.
+    /// Control thread.
+    pub(crate) fn reinstate(&self, node: NodeKey, outgoing: Outgoing) {
+        if let Some(params) = outgoing.0 {
+            let old = self.params.lock().nodes.insert(node, params);
+            drop(old);
+        }
     }
 
     /// Binds the delivered-value cells `cell` names to `node`'s params, as
@@ -226,21 +306,28 @@ impl ValueTable {
 
     /// Registers the session's own value `id`, held in `slot`. Once, as the
     /// session is built.
-    pub(crate) fn provide<V: 'static>(&self, id: SlotId, slot: SlotCell<V>) {
+    pub(crate) fn provide<V: Clone + PartialEq + Send + Sync + 'static>(
+        &self,
+        id: SlotId,
+        slot: SlotCell<V>,
+    ) {
         self.params.lock().slots.insert(id, slot::erase(slot));
     }
 
     /// Registers the session's own staging value `id`, held in `slot`. Once,
     /// as the session is built.
-    pub(crate) fn provide_staged<C: slot::Held>(
+    pub(crate) fn provide_staged<
+        V: Clone + PartialEq + Send + Sync + 'static,
+        S: slot::Slot<V> + slot::Stage,
+    >(
         &self,
         id: SlotId,
-        slot: Arc<slot::PublishedSlot<C>>,
+        slot: Arc<S>,
     ) {
         self.params
             .lock()
             .slots
-            .insert(id, slot::erase_staged(slot));
+            .insert(id, slot::erase_staged::<V, S>(slot));
     }
 
     /// Forgets the slots `ids` name, with what was written to them and not
@@ -255,15 +342,6 @@ impl ValueTable {
         drop(gone);
     }
 
-    /// Drops what was written to the slots `ids` name and not yet published.
-    /// Control thread.
-    #[cfg(feature = "midi")]
-    pub(crate) fn discard_pending(&self, ids: &[SlotId]) {
-        if let Some(held) = self.enter() {
-            held.params().discard_pending(ids);
-        }
-    }
-
     /// Publishes every value written since the last call and not yet
     /// published ([`Slot::store`](slot::Slot::store) on a staging slot), all
     /// together under the value lock. Control thread.
@@ -273,10 +351,14 @@ impl ValueTable {
         }
     }
 
-    /// Registers the values of a node, from its [`NodeSlots`]. Control
-    /// thread.
-    pub(crate) fn provide_node(&self, slots: NodeSlots) {
-        self.params.lock().slots.extend(slots.0);
+    /// Registers the published values of `node`, from what its parts said of
+    /// it. Control thread.
+    pub(crate) fn provide_node(&self, node: NodeKey, published: &[ErasedPublished]) {
+        self.params.lock().slots.extend(
+            published
+                .iter()
+                .filter_map(|entry| slot::slot_of(node, entry)),
+        );
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the
@@ -395,14 +477,17 @@ impl ValueTable {
     }
 
     /// Registers the plugin hosted at `node`, replacing the entry it had: its
-    /// parameter targets, and its automation mode where the plugin takes one
-    /// (`mode`). Control thread.
+    /// parameter targets, its automation mode where the plugin takes one
+    /// (`mode`), its track info (`track`) and the app's MIDI map (`midi_map`).
+    /// Control thread.
     #[cfg(feature = "plugin")]
     pub(crate) fn provide_plugin(
         &self,
         node: NodeKey,
         entry: super::PluginEntry,
         mode: Option<SlotCell<tutti_plugin_types::AutomationMode>>,
+        track: SlotCell<tutti_plugin_types::TrackInfo>,
+        midi_map: SlotCell<super::MidiMap>,
     ) {
         let mut params = self.params.lock();
         let slot = SlotId::automation_mode(node);
@@ -412,6 +497,12 @@ impl ValueTable {
                 Some(mode) => params.slots.insert(slot, slot::erase(mode)),
                 None => params.slots.remove(&slot),
             },
+            params
+                .slots
+                .insert(SlotId::track_info(node), slot::erase(track)),
+            params
+                .slots
+                .insert(SlotId::midi_map(node), slot::erase(midi_map)),
         );
         drop(params);
         drop(old);
@@ -439,6 +530,13 @@ impl ValueTable {
 
     /// Forgets `node`'s params and slots: its targets are gone.
     pub(crate) fn retire(&self, node: NodeKey) {
+        drop(self.retire_keeping(node));
+    }
+
+    /// [`retire`](Self::retire), handing back the params the node had, for
+    /// the node that replaces it to be seeded from
+    /// ([`address`](Self::address)). Control thread.
+    pub(crate) fn retire_keeping(&self, node: NodeKey) -> Outgoing {
         let (gone, slots, plugin) = {
             let mut params = self.params.lock();
             #[cfg(feature = "plugin")]
@@ -452,7 +550,8 @@ impl ValueTable {
                 .collect();
             (gone, slots, plugin)
         };
-        drop((gone, slots, plugin));
+        drop((slots, plugin));
+        Outgoing(gone)
     }
 
     /// `addr`'s cell on `node`, whatever its type, for the graph's own use.
@@ -508,7 +607,9 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        self.table.feed().land(batch.store(), Grouping::Batch);
+        self.table
+            .feed()
+            .land(held.params(), batch.store(), Grouping::Batch);
         self.table.deferred.land(held.params(), self.table.feed());
         Ok(())
     }
@@ -564,7 +665,7 @@ impl<K: AppKey> Values<K> {
         }
     }
 
-    fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
+    pub(super) fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
         self.state
             .upgrade()
             .ok_or_else(|| whole_call(ValueErrorKind::Closed))
@@ -590,6 +691,29 @@ impl<K: AppKey> Values<K> {
         self.state()?.get(read)
     }
 
+    /// [`Session::saved_values`](crate::Session::saved_values), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::saved_values`](crate::Session::saved_values), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn saved_values(&self) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?.saved_values()
+    }
+
+    /// [`Session::values_of`](crate::Session::values_of), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn values_of(
+        &self,
+        items: impl IntoIterator<Item = AnyAssign>,
+    ) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?;
+        Ok(ValueState::values_of(items))
+    }
+
     /// [`Session::watch`](crate::Session::watch), from this handle.
     ///
     /// # Errors
@@ -598,6 +722,16 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.state()?.watch(targets)
+    }
+
+    /// [`Session::edit_log`](crate::Session::edit_log), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::edit_log`](crate::Session::edit_log), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn edit_log(&self) -> Result<EditLog<K>, ValueError<K>> {
+        self.state()?.edit_log()
     }
 
     /// [`Session::gesture`](crate::Session::gesture), from this handle.

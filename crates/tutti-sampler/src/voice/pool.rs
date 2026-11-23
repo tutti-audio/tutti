@@ -30,7 +30,6 @@ use tutti_graph::{
     Status,
 };
 use tutti_rt::{CappedVec, Mutex, Overflow, RingReader, RingWriter, ring};
-use tutti_timeline::{LoopReader, TempoReader};
 use tutti_units::{SampleRate, Tail};
 
 // ---------------------------------------------------------------------------
@@ -346,11 +345,7 @@ pub struct VoicePool<F: SamplerFloat> {
     /// and not others, which is worse than flushing none.
     pub(crate) clock: Clock,
 
-    /// The project's tempo map, when the pool reads one:
-    /// lent once per block to the clock every slot's placement reads. Without
-    /// one, a voice takes the tempo of the transport as the block carries it.
-    tempo: Option<TempoReader>,
-    /// The transport's loop as the control side knows it, shared with the pool's handles.
+    /// The transport's loop as the pool last rendered it, shared with the pool's handles.
     loops: Arc<LoopFeed>,
 
     /// The lanes every slot's block read renders through, one voice at a
@@ -402,41 +397,10 @@ impl<F: SamplerFloat> VoicePool<F> {
             render_mode: RenderMode::Realtime,
             channels,
             clock: Clock::new(),
-            tempo: None,
             loops: Arc::default(),
             scratch: BlockScratch::new(UNPREPARED_FRAMES, channels.count() as usize),
             reach: Reach::Live,
         }
-    }
-
-    /// This pool reading the project's tempo map through `tempo`
-    /// ([`TransportSettings::tempo_reader`](tutti_timeline::TransportSettings::tempo_reader)).
-    ///
-    /// A placed voice plays at its own speed from the frame the playhead
-    /// reaches its start, so over a map whose tempo changes (steps, ramps)
-    /// how long it has played is the map's seconds between its start and
-    /// the playhead, not the beats over the tempo of the moment: without the
-    /// map a voice is re-seated at every change as though it had started at
-    /// the new tempo. A voice with no map (and a constant one) keeps the
-    /// transport's tempo, bit for bit. A fork reads the same map.
-    #[must_use]
-    pub fn tempo(mut self, tempo: TempoReader) -> Self {
-        self.tempo = Some(tempo);
-        self
-    }
-
-    /// This pool reading the transport's loop through `reader`
-    /// ([`MotionFsm::loop_reader`](tutti_timeline::MotionFsm::loop_reader)).
-    ///
-    /// The pool's handle reads the loop region on its reclaim tick, control-side, and sends a spare
-    /// vocoder to each stretched voice whose window covers the loop's start (see
-    /// [`VoicePoolHandle::follow_loop`], which does the same for a pool no
-    /// transport is bound to). A fork reads no transport: its voices keep the spares
-    /// they were built with.
-    #[must_use]
-    pub fn loops(self, reader: LoopReader) -> Self {
-        self.loops.bind(reader);
-        self
     }
 
     /// The spare vocoders the pool's voices carry.
@@ -1001,7 +965,6 @@ impl<F: SamplerFloat> Clone for VoicePool<F> {
             sample_rate: self.sample_rate,
             render_mode: self.render_mode,
             clock: Clock::new(),
-            tempo: self.tempo.clone(),
             loops: Arc::default(),
             channels: self.channels,
             scratch: BlockScratch::sized_like(&self.scratch),
@@ -1043,11 +1006,8 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         self.drain_commands();
-        // Lent for the block and given back after it: `render_in_pieces`
-        // borrows the whole pool.
-        let mut reader = self.tempo.take();
-        let map = reader.as_mut().map(TempoReader::lend);
-        let clock = self.clock.observe_with(cx.env, map.as_deref());
+        self.loops.publish(cx.env.transport.looping);
+        let clock = self.clock.observe_with(cx.env, cx.tempo);
         let frames = io.frames();
         let (_, mut outs) = io.split();
         for ch in outs.iter_mut() {
@@ -1073,8 +1033,6 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
         } else {
             self.render_in_pieces(&clock, frames, n, &mut refs[..n]);
         }
-        drop(map);
-        self.tempo = reader;
         Status::Modified
     }
 
@@ -1091,7 +1049,6 @@ impl<F: SamplerFloat> Node<F> for VoicePool<F> {
 /// reached it (see "As a graph node").
 struct PoolFork<F: SamplerFloat> {
     channels: ChannelLayout,
-    tempo: Option<TempoReader>,
     /// The voices the pool held when it became a node, by slot.
     voices: Vec<(SlotId, Voice<F>)>,
     /// Shared with the handle: whether a command has been queued since.
@@ -1112,7 +1069,6 @@ impl<F: SamplerFloat> ForkSource<F> for PoolFork<F> {
             return Err(ForkCause::new(PoolCommanded));
         }
         let mut pool = VoicePool::from_parts(self.channels);
-        pool.tempo = self.tempo.clone();
         for (id, voice) in &self.voices {
             pool.insert_voice(*id, voice.fork_copy(mode)?);
         }
@@ -1127,7 +1083,6 @@ impl<F: SamplerFloat> IntoNode<F> for VoicePool<F> {
     fn into_parts(self) -> NodeParts<VoicePoolHandle<F>, F> {
         let fork = PoolFork {
             channels: self.channels,
-            tempo: self.tempo.clone(),
             voices: self
                 .voices
                 .iter()

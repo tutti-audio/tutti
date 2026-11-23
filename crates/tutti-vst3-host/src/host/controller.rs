@@ -336,11 +336,9 @@ impl Wraps for Vst3Controller {
 
     /// Applies what the plugin's `outputParameterChanges` reported to the edit
     /// controller (`setParamNormalized`, on this thread, as the portal's
-    /// "Processor and Controller" section has it), and lets the retired
-    /// midi-mapping tables go.
+    /// "Processor and Controller" section has it).
     fn tick(&mut self, main: MainThreadMarker) {
         self.apply_reports(main);
-        self.loaded_mut().midi_cc.reclaim();
         // A tick is a control-side moment: plugins whose last holder was a
         // Processor are destroyed here, not on its thread.
         super::shell::reap();

@@ -71,10 +71,6 @@ pub enum SetRefusal {
     /// blend would be a guess.
     #[error(transparent)]
     Unplaced(#[from] tutti_graph::PassError),
-    /// The session follows a live tempo, which owns the tempo map: an app's
-    /// write would be overwritten at the next message.
-    #[error("a live tempo is followed")]
-    Following,
     /// The call names one target in two value types (a plugin parameter as a
     /// position and in a unit), so its writes have no one value to land.
     #[error("the call names one target in two value types")]
@@ -113,6 +109,14 @@ pub enum PluginParamRefusal {
     /// The parameter's declaration no longer reads as the target's unit.
     #[error(transparent)]
     Unit(#[from] UnitError),
+    /// A MIDI map names one channel and source twice.
+    #[error("the MIDI map names channel {channel:?} and {message:?} twice")]
+    DuplicateMidiEntry {
+        /// The channel both entries name; `None` is any channel.
+        channel: Option<tutti_ump::MidiChannel>,
+        /// The message both entries name.
+        message: tutti_plugin_types::MidiSource,
+    },
 }
 
 /// Why a plugin parameter is not a target in a tutti unit

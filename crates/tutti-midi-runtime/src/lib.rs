@@ -208,7 +208,8 @@ pub use live::{
     ArrivalClock, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter, InputId,
     InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
     MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts, MidiKeys,
-    MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
+    MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, SendUniversalError,
+    compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
@@ -222,8 +223,9 @@ pub use output_plan::{
     OutputPlan, OutputTerms, Placement, SendAt,
 };
 pub use schedule::{
-    CLIP_EVENT_DENSITY, ClipEvents, HARMONY_EVENT_DENSITY, HarmonyChanges, HarmonyChangesError,
-    HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, TimedHarmony, TimedMidiEvent,
+    CLIP_EVENT_DENSITY, ClipEvents, ClipEventsKind, HARMONY_EVENT_DENSITY, HarmonyChanges,
+    HarmonyChangesError, HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls,
+    MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
     ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,

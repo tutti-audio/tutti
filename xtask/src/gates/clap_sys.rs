@@ -266,10 +266,6 @@ mod tests {
     use super::*;
     use crate::gates::fake::Mem;
 
-    fn tree(files: &[(&str, &str)]) -> Mem {
-        Mem::with(files)
-    }
-
     fn ids(items: &[Item]) -> Vec<(&str, &str, &str)> {
         items
             .iter()
@@ -291,7 +287,7 @@ pub struct clap_host_params {
 
     #[test]
     fn extension_vtables_give_plugin_and_host_ids_by_maturity() {
-        let t = tree(&[
+        let t = Mem::with(&[
             ("src/ext/params.rs", PARAMS),
             (
                 "src/ext/draft/tuning.rs",
@@ -314,7 +310,7 @@ pub struct clap_host_params {
     fn a_struct_with_a_function_pointer_inside_an_unrelated_name_is_not_taken() {
         // `clap_param_info` has an `Option<fn>` field but lives in params.rs:
         // it is no vtable of the module, so the extractor refuses to place it.
-        let t = tree(&[(
+        let t = Mem::with(&[(
             "src/ext/params.rs",
             "pub struct clap_param_info { pub cb: Option<unsafe extern \"C\" fn(a: u32) -> u32>, }",
         )]);
@@ -323,7 +319,7 @@ pub struct clap_host_params {
 
     #[test]
     fn core_factory_and_event_items() {
-        let t = tree(&[
+        let t = Mem::with(&[
             (
                 "src/plugin.rs",
                 "pub struct clap_plugin_descriptor { pub id: *const u8, }\npub struct clap_plugin { pub init: Option<unsafe extern \"C\" fn(p: *const clap_plugin) -> bool>, pub desc: u32, }",
@@ -350,18 +346,18 @@ pub struct clap_host_params {
 
     #[test]
     fn an_unplaceable_vtable_or_unknown_constant_fails_by_name() {
-        let t = tree(&[(
+        let t = Mem::with(&[(
             "src/process.rs",
             "pub struct clap_odd { pub f: Option<unsafe extern \"C\" fn()>, }",
         )]);
         assert!(extract(&t).unwrap_err().contains("clap_odd"));
-        let t = tree(&[("src/events.rs", "pub const CLAP_EVENT_X: u8 = 1;\n")]);
+        let t = Mem::with(&[("src/events.rs", "pub const CLAP_EVENT_X: u8 = 1;\n")]);
         assert!(extract(&t).unwrap_err().contains("CLAP_EVENT_X"));
     }
 
     #[test]
     fn a_duplicate_id_is_an_error() {
-        let t = tree(&[(
+        let t = Mem::with(&[(
             "src/ext/log.rs",
             "pub struct clap_host_log { pub a: Option<unsafe extern \"C\" fn()>, }\npub struct clap_host_log { pub a: Option<unsafe extern \"C\" fn()>, }",
         )]);
@@ -370,12 +366,12 @@ pub struct clap_host_params {
 
     #[test]
     fn an_empty_crate_is_an_error() {
-        assert!(extract(&tree(&[])).is_err());
+        assert!(extract(&Mem::with(&[])).is_err());
     }
 
     #[test]
     fn helper_tables_and_sub_vtables_are_named_by_part() {
-        let t = tree(&[
+        let t = Mem::with(&[
             (
                 "src/ext/context_menu.rs",
                 "pub struct clap_context_menu_builder { pub add_item: Option<unsafe extern \"C\" fn()>, }",

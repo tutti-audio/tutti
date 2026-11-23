@@ -36,16 +36,11 @@ const FIRE: usize = 100;
 
 /// The server's path, and the plugin in `TagPassthrough` (`1`): it adds its
 /// tag to what it is given, so an active plugin is never silent.
-///
-/// SAFETY: nextest runs each test in its own process, and both are set before
-/// the first server is spawned, from the test's own thread.
 fn set_server() {
     // The plugin's file is probed before its variables are set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    unsafe {
-        std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-        std::env::set_var("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
-    }
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    tutti_fixtures::set_env("TUTTI_CLAP_PROBE_RENDER_MODE", "1");
 }
 
 /// `1.0` at absolute frame [`FIRE`], `+0.0` everywhere else.

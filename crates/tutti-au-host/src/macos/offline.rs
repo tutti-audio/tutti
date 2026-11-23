@@ -32,7 +32,7 @@ use tutti_au_ffi::property::{InPlaceProcessing, OfflineRender, RenderQuality};
 use tutti_au_ffi::{Element, Scope};
 
 use crate::error::{AuError, Result};
-use crate::types::*;
+use coreaudio_sys::AudioUnitRenderActionFlags;
 
 /// The inclusive maximum this host will write to
 /// `kAudioUnitProperty_RenderQuality`.

@@ -231,7 +231,8 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+    Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
+    SavedValues, Watchable, Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -247,16 +248,17 @@ pub use tutti_session::{
 pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{
+    MidiMap, PluginAutomationModeTarget, PluginMidiMapTarget, PluginParamRefusal,
+    PluginParamTarget, PluginTrackInfoTarget, PluginUnit, UnitError,
+};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream, OpeningStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
-#[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginUnit, UnitError,
-};
 
 // --- the modules ------------------------------------------------------------
 
@@ -451,7 +453,7 @@ pub mod types {
         AtomicCell, AtomicWord, Count, Counter, CounterWriter, Drained, Gauge, GaugeWriter,
         LevelSpan, PosFrame, Reading, Reclaim, RingFloat, RingSample, Tally, TallyWriter, Words,
     };
-    pub use tutti_rt::{AtomicSampleRate, Mint, Param, Param64, ParamCell};
+    pub use tutti_rt::{Mint, Param, Param64, ParamCell};
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
@@ -465,7 +467,7 @@ pub mod types {
         SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
         UnitParam, UnitParamOutOfRange, Velocity,
     };
-    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs};
+    pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }
 
 /// The project's tempo (`tutti-tempo`): `TempoMap`, the points and builder it is
@@ -480,14 +482,16 @@ pub mod tempo {
 /// What a node author names (`tutti-graph`): the `Node` contract and the
 /// shape, io and prepare values it takes, the wrappers that insert a node
 /// (`ForkByClone`, `Unforkable`) and the param declaration (`declare_params!`,
-/// `ParamNode`). The graph's compiler, editor and executor are the session's;
+/// `ParamNode`), and with `export` the offline `GraphBuilder` and its
+/// `Renderer`. The graph's compiler, editor and executor are the session's;
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, InEvents,
-        Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
-        ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
+        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
+        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
+        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
+        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -500,6 +504,12 @@ pub mod graph {
         TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
+    pub use tutti_graph::{
+        FADE_CAPACITY, MAX_BUSES, MAX_EVENT_PORT_CAPACITY, MAX_NODE_LATENCY, MAX_NODE_TAIL,
+        MAX_PORTS, MAX_TRANSPORT_CHANGES, MIN_EVENT_PORT_CAPACITY, QUEUE_CAPACITY,
+    };
+    #[cfg(feature = "export")]
+    pub use tutti_graph::{GraphBuilder, Renderer};
 }
 
 /// The session's host plumbing (`tutti-session`): what a host that runs the
@@ -549,16 +559,15 @@ pub mod session {
         BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
-        MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
-        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError,
-        Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted, Wire,
-        main_output_width,
+        MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
+        OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SetRateError,
+        SetSources, Taps, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
-        AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
-        TimedError, Timeline,
+        AudioTaken, LoopEdit, OfflineTimeline, OfflineTimelineConfig, OfflineTransport, TimedError,
+        Timeline,
     };
 
     #[cfg(feature = "export")]
@@ -663,6 +672,7 @@ pub mod sampler {
         StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
         StreamStatus, VoiceNodeHandle,
     };
+    pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
         ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
@@ -827,7 +837,8 @@ pub mod plugin {
         UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
-        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, PluginPreset,
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, MidiAssignment, MidiSource,
+        NoteName, ParamGroup, PluginPreset, TrackInfo, TrackKind,
     };
     pub use tutti_plugin_types::{
         EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,
@@ -914,20 +925,21 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
-        ChannelResponse, InvalidKeyTable, InvalidMpeZones, KeyTable, Mcm, MemberCount,
-        MmcSegmentCount, MmcSegmentError, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones,
-        MtcRate, NotFrequencyData, NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId,
-        NotTimecodeHours, NotTimecodeMinutes, NotTimecodeSeconds, PitchBendSensitivity, Recipient,
-        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
-        TimecodeSeconds, TuningFrequency,
+        ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
+        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
+        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
-        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
-        SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError,
+        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
+        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
+    pub use tutti_midi_runtime::{
+        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
@@ -952,6 +964,13 @@ pub mod midi {
         Voice1,
     };
     pub use tutti_ump::{
+        Articulation, ArticulationError, Classification, ColorSound, CoreSound,
+        CustomClassification, EffectSound, GestureSound, IntervallicTrill, MuteAmount, MuteError,
+        MuteMessage, MuteState, MuteType, NoteArticulation, NoteEnding, NoteOffArticulation,
+        PlayingPosition, ReleaseTime, ReservedMuteType, RunSound, SameNoteSound, ShortSound,
+        StringAssignment, Stroke,
+    };
+    pub use tutti_ump::{
         CCNumberOutOfRange, ChordTypeOutOfRange, DeltaTicksOutOfRange, FirstGroupOutOfRange,
         FunctionBlockCountOutOfRange, FunctionBlockIdOutOfRange, GroupChannelIndexOutOfRange,
         GroupSpanOutOfRange, MidiChannelOutOfRange, MidiGroupOutOfRange, MpeChannelsOutOfRange,
@@ -962,6 +981,7 @@ pub mod midi {
     pub use tutti_ump::{
         FlexTextError, LyricKind, NotASoftwareRevision, PlainTextKind, SoftwareRevision,
     };
+    pub use tutti_ump::{Held, HeldControllers, KeyBitset};
     pub use tutti_ump::{Join, PacketSpan, Spans};
 
     /// The session's one MIDI error: each cause (hardware, send, route) is its
@@ -1028,6 +1048,65 @@ pub mod midi {
         };
         #[cfg(feature = "session")]
         pub use tutti_session::{MidiNetwork, NetworkError, NetworkEvent, OpenClient, OpenHost};
+    }
+
+    /// Universal System Exclusive messages: what `Universal` reads and `Addressed`
+    /// sends (device control, MTC full message and set-up, General MIDI on and off,
+    /// the MIDI Machine Control commands and responses) and what a session's
+    /// `follow_machine_control` reports.
+    pub mod universal {
+        pub use tutti_midi_protocol::{
+            Addressed, Addressee, BadChecksum, GeneralMidiMode, GeneratorAction, GeneratorSetUp,
+            GeneratorTally, Heard, JamMode, JamReference, McpSuccess, McsSuccess, MmcArithmetic,
+            MmcAudioTrack, MmcBytes, MmcBytesRefused, MmcChaseMode, MmcCodeStatus, MmcCommand,
+            MmcCommandReassembler, MmcCommandSuccess, MmcCommands, MmcControlDisable, MmcDevices,
+            MmcDirection, MmcErrorCode, MmcErrorCommand, MmcErrorFlags, MmcErrorKind,
+            MmcErrorReport, MmcEvent, MmcEventDirection, MmcEventFlags, MmcEventResponse,
+            MmcExtension, MmcFastMode, MmcFields, MmcFragment, MmcGlobalMonitor, MmcGroup,
+            MmcInfoField, MmcItem, MmcItems, MmcLifterDefeat, MmcLocate, MmcMantissa,
+            MmcMaskedWrite, MmcMove, MmcName, MmcNames, MmcOtherField, MmcPayload,
+            MmcPlaySpeedReference, MmcPosition, MmcProcedure, MmcProcedureResponse, MmcReassembler,
+            MmcRecordActivity, MmcRecordMode, MmcRecordMonitor, MmcRecordStatus,
+            MmcReservedCommand, MmcResolvedPlayMode, MmcResponseReassembler, MmcSegment,
+            MmcSegmentBytes, MmcSegmentPlace, MmcSegments, MmcSegmentsRefused, MmcSelection,
+            MmcSequence, MmcShift, MmcShortTimeCode, MmcSign, MmcSignature, MmcSlot, MmcSpeed,
+            MmcStep, MmcStepCount, MmcStopMode, MmcString, MmcSubframes, MmcSupportBitmap,
+            MmcSystemMaster, MmcTimeCode, MmcTimeCodeName, MmcTimeCodeSource, MmcTimeLabel,
+            MmcTimeTail, MmcTrack, MmcTrackBitmap, MmcUpdate, MmcUserBitFlags, MmcUserBits,
+            MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
+            MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
+            NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
+            NotQuarterFramePiece, NotWritable, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
+            Recipient, RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
+            UniversalRead, UniversalReader, VitcInsert,
+        };
+    }
+
+    /// The MIDI Tuning Standard (M2-101's Universal tuning messages): a key table,
+    /// a key change or an octave offset, and the frequency each carries.
+    pub mod tuning {
+        pub use tutti_midi_protocol::{
+            ChannelMask, InvalidKeyChanges, InvalidKeyTable, KeyChange, KeyChanges, KeyTable,
+            MAX_KEY_CHANGES, NotFrequencyData, OctaveOffsets, Timing, TuningFrequency,
+            TuningMessage, TuningName,
+        };
+    }
+
+    /// The typed data of the MIDI-CI Profiles: the Profile definitions an app
+    /// reads from a peer's Profile Details reply and the controllers a Profile
+    /// enables. `DetailsData::decode` reads a reply by its Profile Id and Inquiry
+    /// Target.
+    pub mod profile {
+        pub use tutti_midi_ci::{
+            ArticulationDetails, ArticulationDetailsError, ArticulationFeatures, ArticulationLevel,
+            BitmapPosition, CcFunction, CcPart, CcReset, CcValue, CustomSounds, DefaultCcLevel,
+            Drawbar, DrawbarSetting, DrumControl, DrumFeatures, DrumInstrument, DrumNoteMapLevel,
+            DrumSounds, Gm2ChannelCount, Gm2FunctionBlock, Gm2Role, Gm2SingleChannel,
+            MutuallyExclusiveSet, NotABitmapPosition, NotADrawbarSetting, NotAGm2ChannelCount,
+            NotAMutuallyExclusiveSet, NotVariationCount, OrganFeatures, OrganLevel, OrganOption,
+            OrganValue, ProfileDetails, RotaryControl, RotarySpeaker, RotaryValue, Sound, SoundSet,
+            SubclassCounts, SuggestedCc, SwitchMeaning, TwoState, VariationCount, VibratoChorus,
+        };
     }
 
     /// MIDI-CI Property Exchange (M2-103 and its resource specifications): a

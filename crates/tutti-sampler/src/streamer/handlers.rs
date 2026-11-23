@@ -7,8 +7,7 @@
 
 use std::sync::Arc;
 
-use std::sync::atomic::Ordering;
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_units::{SampleRate, Samples, SrcRatio};
 
 use super::cache::LruCache;
@@ -84,22 +83,23 @@ impl<F: RingFloat> Handles<F> {
 /// which the control side sends after storing the rate here. A stream built
 /// between the store and the command reads the new rate either way, and the
 /// command re-derives it to the same ratio, so no lock orders the two.
+// The `SessionRate` command sent after a store orders the streamer's read of it.
 #[derive(Clone)]
-pub(crate) struct SessionRate(Arc<AtomicSampleRate>);
+pub(crate) struct SessionRate(Arc<AtomicCell<SampleRate>>);
 
 impl SessionRate {
     pub(crate) fn new(rate: SampleRate) -> Self {
-        Self(Arc::new(AtomicSampleRate::new(rate)))
+        Self(Arc::new(AtomicCell::new(rate)))
     }
 
     pub(crate) fn get(&self) -> SampleRate {
-        self.0.load(Ordering::SeqCst)
+        self.0.load()
     }
 
     /// Move the rate. Control thread; the streamer re-derives its ratios when
     /// it is told ([`StreamerCommand::SessionRate`]).
     pub(super) fn set(&self, rate: SampleRate) {
-        self.0.store(rate, Ordering::SeqCst);
+        self.0.store(rate);
     }
 }
 

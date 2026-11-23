@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::NodeKey;
+use tutti_graph::{ErasedPublished, NodeKey};
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
@@ -17,8 +17,9 @@ use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSet
 use tutti_units::{Amplitude, At};
 
 use super::error::SetRefusal;
+use super::saved::capture;
 use super::state::Params;
-use super::target::{Target, TargetId, sealed, target_builders};
+use super::target::{AnyAssign, Modulatable, Target, TargetId, sealed, target_builders};
 use tutti_modulation::TargetKey;
 
 use crate::{ChannelEdge, ModRouteId, ModSourceId, ModTarget};
@@ -86,11 +87,55 @@ pub enum SlotId {
     /// The automation mode the host tells a plugin.
     #[cfg(feature = "plugin")]
     PluginAutomationMode(NodeKey),
+    /// The track info the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginTrackInfo(NodeKey),
+    /// The app's MIDI map of a plugin.
+    #[cfg(feature = "plugin")]
+    PluginMidiMap(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
 
 impl SlotId {
+    /// Whether a project saves the value: the one answer, which
+    /// [`SavedValues`](crate::SavedValues) captures by. A policy, a MIDI
+    /// device's latency and a plugin's automation mode and track info are the session's
+    /// setup of a place, not of the project, so a project moved to another
+    /// machine or another plugin does not carry them.
+    pub(crate) const fn saved(self) -> bool {
+        match self {
+            Self::OutputPolicy => false,
+            #[cfg(feature = "midi-hardware")]
+            Self::MidiPolicy => false,
+            #[cfg(feature = "midi")]
+            Self::OutputLatency => false,
+            #[cfg(feature = "plugin")]
+            Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
+            #[cfg(feature = "plugin")]
+            Self::PluginMidiMap(_) => true,
+            Self::Tempo
+            | Self::Meter
+            | Self::Loop
+            | Self::ClickVolume
+            | Self::ClickMode
+            | Self::RoutePolarity(_)
+            | Self::RouteCurve(_)
+            | Self::SourceRate(_)
+            | Self::SourceValue(_)
+            | Self::Automation(_)
+            | Self::Mode(_)
+            | Self::Mix(_)
+            | Self::Gain(_)
+            | Self::Range(_)
+            | Self::RouteDepth(_) => true,
+            #[cfg(feature = "midi")]
+            Self::MpeMode | Self::ClipEvents(_) | Self::Harmony(_) => true,
+            #[cfg(feature = "sampler")]
+            Self::Window(_) | Self::Looping(_) | Self::Direction(_) | Self::Speed(_) => true,
+        }
+    }
+
     /// The node the value is of, or `None` for one of the session's own.
     pub(crate) const fn node(self) -> Option<NodeKey> {
         match self {
@@ -102,7 +147,9 @@ impl SlotId {
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(node) => Some(node),
+            Self::PluginAutomationMode(node)
+            | Self::PluginTrackInfo(node)
+            | Self::PluginMidiMap(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
@@ -115,6 +162,12 @@ pub trait Slot<V>: Send + Sync + 'static {
     /// The value now.
     fn load(&self) -> V;
 
+    /// The value the audio thread uses: the stored one, unless a live source
+    /// moves it from the base ([`BaseSlot`](super::base::BaseSlot)).
+    fn effective(&self) -> V {
+        self.load()
+    }
+
     /// Whether `value` may be stored.
     fn check(&self, value: &V) -> Result<(), SetRefusal>;
 
@@ -125,38 +178,20 @@ pub trait Slot<V>: Send + Sync + 'static {
 /// The cell a slot target lands through.
 pub type SlotCell<V> = Arc<dyn Slot<V>>;
 
-/// The values of a node that the session's verbs reach, besides its params:
-/// what [`SessionNode::slots`](crate::SessionNode::slots) answers, kept under
-/// the node's key until the node is removed or replaced.
-#[derive(Default)]
-pub struct NodeSlots(pub(crate) Vec<(SlotId, Erased)>);
-
-impl NodeSlots {
-    /// `slot` as the value `id` names.
-    #[cfg(any(feature = "midi", feature = "sampler"))]
-    pub(crate) fn of<C: Held>(id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        Self(vec![(id, erase_staged(slot))])
-    }
-
-    /// These slots and `slot` as the value `id` names.
-    #[cfg(feature = "sampler")]
-    pub(crate) fn and<C: Held>(mut self, id: SlotId, slot: Arc<PublishedSlot<C>>) -> Self {
-        self.0.push((id, erase_staged(slot)));
-        self
-    }
-}
-
-impl std::fmt::Debug for NodeSlots {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeSlots").finish_non_exhaustive()
-    }
-}
-
 /// What a slot is registered as: the type-erased [`SlotCell`] of its value,
 /// and, for a staging slot, the handle the update publishes it through.
 pub(crate) struct Erased {
     cell: Box<dyn Any + Send + Sync>,
     stage: Option<Arc<dyn Stage>>,
+    /// The assignment of the value now, made from the cell's value type.
+    capture: fn(SlotId, &(dyn Any + Send + Sync)) -> AnyAssign,
+}
+
+impl Erased {
+    /// The assignment of the value `id` holds now.
+    pub(super) fn capture(&self, id: SlotId) -> AnyAssign {
+        (self.capture)(id, &*self.cell)
+    }
 }
 
 impl std::fmt::Debug for Erased {
@@ -168,18 +203,23 @@ impl std::fmt::Debug for Erased {
 }
 
 /// An atomic slot: its writes land at once.
-pub(crate) fn erase<V: 'static>(slot: SlotCell<V>) -> Erased {
+pub(crate) fn erase<V: Clone + PartialEq + Send + Sync + 'static>(slot: SlotCell<V>) -> Erased {
     Erased {
         cell: Box::new(slot),
         stage: None,
+        capture: capture::<V>,
     }
 }
 
-/// A [`PublishedSlot`]: its writes wait for [`Params::publish_pending`].
-pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
+/// A staging slot, such as a [`PublishedSlot`]: its writes wait for
+/// [`Params::publish_pending`].
+pub(crate) fn erase_staged<V: Clone + PartialEq + Send + Sync + 'static, S: Slot<V> + Stage>(
+    slot: Arc<S>,
+) -> Erased {
     Erased {
-        cell: Box::new(Arc::clone(&slot) as SlotCell<C::Value>),
+        cell: Box::new(Arc::clone(&slot) as SlotCell<V>),
         stage: Some(slot),
+        capture: capture::<V>,
     }
 }
 
@@ -188,10 +228,6 @@ pub(crate) fn erase_staged<C: Held>(slot: Arc<PublishedSlot<C>>) -> Erased {
 pub(crate) trait Stage: Send + Sync + 'static {
     /// Publishes the pending value, if there is one.
     fn publish_pending(&self);
-
-    /// Drops the pending value, if there is one.
-    #[cfg(feature = "midi")]
-    fn discard_pending(&self);
 }
 
 impl Params {
@@ -201,16 +237,6 @@ impl Params {
             .cell
             .downcast_ref::<SlotCell<V>>()
             .cloned()
-    }
-
-    /// Drops the pending value of each slot in `ids`.
-    #[cfg(feature = "midi")]
-    pub(super) fn discard_pending(&self, ids: &[SlotId]) {
-        for id in ids {
-            if let Some(stage) = self.slots.get(id).and_then(|erased| erased.stage.as_ref()) {
-                stage.discard_pending();
-            }
-        }
     }
 
     /// Publishes every pending value, in [`SlotId`] order: the tempo before
@@ -227,7 +253,15 @@ impl Params {
 /// Writes the target, `Target`, `Store` and builders of a slot target whose
 /// value type is fixed.
 macro_rules! slot_target {
+    (moved $(#[$meta:meta])* $name:ident, $value:ty, $id:expr) => {
+        slot_target!(@define [$(#[$meta])*] $name, $value, $id);
+        target_builders!(moved [] $name);
+    };
     ($(#[$meta:meta])* $name:ident, $value:ty, $id:expr) => {
+        slot_target!(@define [$(#[$meta])*] $name, $value, $id);
+        target_builders!([] $name);
+    };
+    (@define [$(#[$meta:meta])*] $name:ident, $value:ty, $id:expr) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub struct $name(());
@@ -263,36 +297,59 @@ macro_rules! slot_target {
                 cell.store(value);
             }
         }
-        target_builders!([] $name);
     };
 }
 
 slot_target!(
+    moved
     /// The project's tempo: the map the engine takes at the first block after
     /// the next [`Session::update`](crate::Session::update), as
     /// `session.transport_handle().tempo()` names it.
     ///
     /// A constant tempo is a one-step map, `tempo.to(TempoMap::constant(bpm)?)`;
-    /// a map by value works as it stands. A write is staged, a later one
-    /// replacing it, and published with the meter and the other staged values
-    /// by the update; a read answers the staged map, else the one in force.
-    /// A write is refused with [`SetRefusal::Following`] while the session
-    /// follows a live tempo.
+    /// a map by value works as it stands. The value is the **base**, the map
+    /// the app writes: a write is read back at once, and the update publishes
+    /// it with the meter and the other staged values. A live tempo the session
+    /// follows ([`Midi::follow_tempo`](crate::Midi::follow_tempo)) lies over
+    /// the base: [`effective`](Self::effective) reads the map the engine uses,
+    /// the base up to the first live step and the live steps after it, and the
+    /// base while nothing is followed.
     TempoTarget,
     Arc<TempoMap>,
     SlotId::Tempo
 );
 
 slot_target!(
+    moved
     /// The project's meter, which the metronome and every hosted plugin read
-    /// once per block, as `session.transport_handle().meter()` names it. A
-    /// write is staged and published by the next
-    /// [`Session::update`](crate::Session::update), as the tempo's is; a read
-    /// answers the staged meter, else the one in force.
+    /// once per block, as `session.transport_handle().meter()` names it. The
+    /// value is the **base**, as the tempo's is: a write is read back at once
+    /// and published by the next [`Session::update`](crate::Session::update),
+    /// and [`effective`](Self::effective) reads the meter in force, with the
+    /// time signatures a followed source set.
     MeterTarget,
     Arc<MeterMap>,
     SlotId::Meter
 );
+
+impl Modulatable for TempoTarget {}
+impl Modulatable for MeterTarget {}
+
+impl sealed::Lane for TempoTarget {
+    fn delivered(self, params: &Params) -> Option<Arc<TempoMap>> {
+        params
+            .slot::<Arc<TempoMap>>(SlotId::Tempo)
+            .map(|cell| cell.effective())
+    }
+}
+
+impl sealed::Lane for MeterTarget {
+    fn delivered(self, params: &Params) -> Option<Arc<MeterMap>> {
+        params
+            .slot::<Arc<MeterMap>>(SlotId::Meter)
+            .map(|cell| cell.effective())
+    }
+}
 
 slot_target!(
     /// The loop region: its bounds, kept while looping is disarmed, and
@@ -533,58 +590,44 @@ node_slot_target!(
     Speed
 );
 
-/// Where a sampler node's value targets are reached from its key: a voice node
-/// and a clip are the same node underneath.
-#[cfg(feature = "sampler")]
-macro_rules! sampler_keys {
-    ($($node:ty),*) => {$(
-        impl<F: tutti_sampler::SamplerFloat> crate::Key<$node> {
-            /// The window the voice plays on the transport.
+/// Generates a [`Key`](crate::Key)'s method for each published kind, from the
+/// node's [`HasPublished`](tutti_graph::HasPublished): only a node that
+/// publishes the kind has the method.
+macro_rules! published_methods {
+    ($($(#[$cfg:meta])* $name:ident, $target:ident => $kind:ty, $doc:literal;)+) => {
+        impl<N: ?Sized> crate::Key<N> {$(
+            #[doc = $doc]
+            $(#[$cfg])*
             #[must_use]
-            pub const fn window(self) -> WindowTarget {
-                WindowTarget::new(self.erase())
+            pub const fn $name(self) -> $target
+            where
+                N: tutti_graph::HasPublished<$kind>,
+            {
+                $target::new(self.erase())
             }
-
-            /// The voice's loop.
-            #[must_use]
-            pub const fn looping(self) -> LoopingTarget {
-                LoopingTarget::new(self.erase())
-            }
-
-            /// Which way the voice plays.
-            #[must_use]
-            pub const fn direction(self) -> DirectionTarget {
-                DirectionTarget::new(self.erase())
-            }
-
-            /// The voice's varispeed.
-            #[must_use]
-            pub const fn speed(self) -> SpeedTarget {
-                SpeedTarget::new(self.erase())
-            }
-        }
-    )*};
+        )+}
+    };
 }
 
-#[cfg(feature = "sampler")]
-sampler_keys!(tutti_sampler::VoiceNode<F>, tutti_sampler::Clip<F>);
-
-#[cfg(feature = "midi")]
-impl crate::Key<tutti_midi_runtime::MidiClipNode> {
-    /// The events the clip plays.
-    #[must_use]
-    pub const fn events(self) -> ClipEventsTarget {
-        ClipEventsTarget::new(self.erase())
-    }
-}
-
-#[cfg(feature = "midi")]
-impl crate::Key<tutti_midi_runtime::HarmonyNode> {
-    /// The chord and scale changes the node sends.
-    #[must_use]
-    pub const fn changes(self) -> HarmonyTarget {
-        HarmonyTarget::new(self.erase())
-    }
+published_methods! {
+    #[cfg(feature = "midi")]
+    events, ClipEventsTarget => tutti_midi_runtime::ClipEventsKind,
+        "The events the clip plays (only a node that publishes them has this method).";
+    #[cfg(feature = "midi")]
+    changes, HarmonyTarget => tutti_midi_runtime::HarmonyChangesKind,
+        "The chord and scale changes the node sends (only a node that publishes them has this method).";
+    #[cfg(feature = "sampler")]
+    window, WindowTarget => tutti_sampler::WindowKind,
+        "The window the voice plays on the transport (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    looping, LoopingTarget => tutti_sampler::LoopingKind,
+        "The voice's loop (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    direction, DirectionTarget => tutti_sampler::DirectionKind,
+        "Which way the voice plays (only a node that publishes it has this method).";
+    #[cfg(feature = "sampler")]
+    speed, SpeedTarget => tutti_sampler::SpeedKind,
+        "The voice's varispeed (only a node that publishes it has this method).";
 }
 
 #[cfg(feature = "midi")]
@@ -692,7 +735,7 @@ target_builders!([T: AtomicWord + PartialEq + Send + Sync + 'static] SettingTarg
 /// reads, checks and replaces it through.
 pub(crate) trait Held: Send + Sync + 'static {
     /// The value in force.
-    type Value: Clone + Send + Sync + 'static;
+    type Value: Clone + PartialEq + Send + Sync + 'static;
 
     /// The value now.
     fn current(&self) -> Self::Value;
@@ -742,29 +785,85 @@ impl<C: Held> Slot<C::Value> for PublishedSlot<C> {
 }
 
 impl<C: Held> Stage for PublishedSlot<C> {
-    #[cfg(feature = "midi")]
-    fn discard_pending(&self) {
-        *self.pending.lock() = None;
-    }
-
     fn publish_pending(&self) {
         let mut pending = self.pending.lock();
         let Some(value) = pending.take() else {
             return;
         };
-        // A value written before the check's ground changed (a live tempo
-        // took the map) is dropped, as its write would now be refused.
+        // A value the check no longer accepts is dropped, as its write would
+        // now be refused.
         if self.cell.check(&value).is_ok() && !self.cell.replace(&value) {
             *pending = Some(value);
         }
     }
 }
 
+/// A node's published cell as a slot's control side: what the node handed its
+/// [`NodeParts`](tutti_graph::NodeParts) as a [`Published`](tutti_graph::Published).
+#[cfg(any(feature = "midi", feature = "sampler"))]
+pub(crate) struct NodeCell<V>(Arc<dyn tutti_graph::Published<Value = V>>);
+
+#[cfg(any(feature = "midi", feature = "sampler"))]
+impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
+    type Value = V;
+
+    fn current(&self) -> V {
+        self.0.current()
+    }
+
+    fn replace(&self, value: &V) -> bool {
+        self.0.replace(value);
+        true
+    }
+}
+
+/// `cell` as the slot of its value type.
+#[cfg(any(feature = "midi", feature = "sampler"))]
+fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(
+    cell: Arc<dyn tutti_graph::Published<Value = V>>,
+) -> Erased {
+    erase_staged::<V, _>(PublishedSlot::new(NodeCell(cell)))
+}
+
+/// The slot a node's published cell is registered as under `node`, when its
+/// kind is one the session knows (each kind here has the value type its
+/// session target holds): a node that publishes another kind has nothing that
+/// can address its value, and is left out.
+#[cfg_attr(
+    not(any(feature = "midi", feature = "sampler")),
+    allow(unused_variables)
+)]
+pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId, Erased)> {
+    #[cfg(feature = "midi")]
+    {
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::ClipEventsKind>() {
+            return Some((SlotId::ClipEvents(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_midi_runtime::HarmonyChangesKind>() {
+            return Some((SlotId::Harmony(node), node_cell(cell)));
+        }
+    }
+    #[cfg(feature = "sampler")]
+    {
+        if let Some(cell) = entry.cell::<tutti_sampler::WindowKind>() {
+            return Some((SlotId::Window(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::LoopingKind>() {
+            return Some((SlotId::Looping(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::DirectionKind>() {
+            return Some((SlotId::Direction(node), node_cell(cell)));
+        }
+        if let Some(cell) = entry.cell::<tutti_sampler::SpeedKind>() {
+            return Some((SlotId::Speed(node), node_cell(cell)));
+        }
+    }
+    None
+}
+
 /// The tempo map, in the transport's settings.
 pub(crate) struct TempoCell {
     pub settings: TransportSettings,
-    /// Whether a live tempo owns the map.
-    pub following: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Held for TempoCell {
@@ -772,13 +871,6 @@ impl Held for TempoCell {
 
     fn current(&self) -> Arc<TempoMap> {
         self.settings.tempo_map()
-    }
-
-    fn check(&self, _: &Arc<TempoMap>) -> Result<(), SetRefusal> {
-        if self.following.load(Ordering::Acquire) {
-            return Err(SetRefusal::Following);
-        }
-        Ok(())
     }
 
     fn replace(&self, value: &Arc<TempoMap>) -> bool {
@@ -849,37 +941,9 @@ impl Held for LoopCell {
     }
 }
 
-#[cfg(feature = "midi")]
-impl Held for tutti_midi_runtime::MidiClipControls {
-    type Value = Arc<tutti_midi_runtime::ClipEvents>;
-
-    fn current(&self) -> Self::Value {
-        Self::current(self)
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        self.set(Arc::clone(value));
-        true
-    }
-}
-
-#[cfg(feature = "midi")]
-impl Held for tutti_midi_runtime::HarmonyControls {
-    type Value = Arc<tutti_midi_runtime::HarmonyChanges>;
-
-    fn current(&self) -> Self::Value {
-        Self::current(self)
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        self.set(Arc::clone(value));
-        true
-    }
-}
-
 /// A published cell of a `Copy` value: written through the cell itself, which
 /// publishes when the value differs.
-#[cfg(any(feature = "midi", feature = "sampler"))]
+#[cfg(feature = "midi")]
 impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T> {
     type Value = T;
 
@@ -890,45 +954,6 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_rt::Publisher<T
     fn replace(&self, value: &T) -> bool {
         if *tutti_rt::Publisher::current(self) != *value {
             self.publish(*value);
-        }
-        true
-    }
-}
-
-/// A sampler voice's loop or direction cell: written through the cell, which
-/// publishes when the value differs and wakes the streamer of a streamed voice.
-#[cfg(feature = "sampler")]
-impl<T: Copy + PartialEq + Send + Sync + 'static> Held for tutti_sampler::ControlCell<T> {
-    type Value = T;
-
-    fn current(&self) -> T {
-        *tutti_sampler::ControlCell::current(self)
-    }
-
-    fn replace(&self, value: &T) -> bool {
-        if *tutti_sampler::ControlCell::current(self) != *value {
-            self.publish(*value);
-        }
-        true
-    }
-}
-
-/// A sampler voice's speed cell: a published rate. A `PlaybackRate` is already
-/// one both tiers play, so it takes the default `check`.
-#[cfg(feature = "sampler")]
-pub(crate) struct SpeedCell(pub tutti_rt::Publisher<tutti_units::PlaybackRate>);
-
-#[cfg(feature = "sampler")]
-impl Held for SpeedCell {
-    type Value = tutti_units::PlaybackRate;
-
-    fn current(&self) -> Self::Value {
-        *self.0.current()
-    }
-
-    fn replace(&self, value: &Self::Value) -> bool {
-        if *self.0.current() != *value {
-            self.0.publish(*value);
         }
         true
     }
@@ -1085,7 +1110,7 @@ mod tests {
         let controls =
             tutti_graph::IntoNode::<f32>::into_parts(tutti_midi_runtime::MidiClipNode::new([]))
                 .controls;
-        let slot = PublishedSlot::new(controls.clone());
+        let slot = PublishedSlot::new(NodeCell(Arc::new(controls.clone())));
         let before = controls.current();
         slot.store(&Arc::new(tutti_midi_runtime::ClipEvents::default()));
         slot.publish_pending();
