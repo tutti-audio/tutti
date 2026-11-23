@@ -38,8 +38,7 @@ pub const SYSEX_MESSAGE_CAPACITY: usize = SYSEX7_MAX_PAYLOAD + 2;
 /// never grows it, so every call on the audio thread is allocation-free.
 #[must_use]
 pub fn sysex_assembler() -> SysexAssembler<Box<[u8]>> {
-    let room = SysexAssembler::room_for(SYSEX_MESSAGE_CAPACITY, MIDI_STACK_CAPACITY, 1);
-    SysexAssembler::new(vec![0; room].into_boxed_slice(), SYSEX_MESSAGE_CAPACITY, 1)
+    SysexAssembler::boxed(SYSEX_MESSAGE_CAPACITY, MIDI_STACK_CAPACITY, 1)
 }
 
 /// A SysEx message without its `0xF0` and `0xF7` delimiters, if it has them:

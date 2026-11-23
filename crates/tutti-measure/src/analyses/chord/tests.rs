@@ -3,7 +3,7 @@ use crate::test_rng::uniform;
 use crate::{FramingError, TooManyFrames};
 use tutti_dsp::{BinCount, FrameCount};
 use tutti_rt::SplitMix64;
-use tutti_units::Cents;
+use tutti_units::{Cents, Hz};
 
 fn framing(window: usize, hop: usize) -> Framing {
     Framing::new(Samples::new(window), Samples::new(hop))
@@ -363,4 +363,55 @@ fn spans_follow_the_chromas_own_framing() {
         assert!((spans[0].span.end().get() as f64 - boundary).abs() <= 1.0);
         assert_eq!(spans[1].span.end(), Samples::new(11 * hop + window));
     }
+}
+
+/// A meter of a C major triad reads one C major span from the start to the end
+/// of the audio, in any chunking; a chroma band above Nyquist is refused when
+/// the meter is made, for a chord and a key alike.
+#[test]
+fn the_chord_meter_reads_the_triad_and_refuses_a_chroma_it_cannot_hold() {
+    let rate = SampleRate::of(22_050.0);
+    let x = crate::test_rng::tones(22_050.0, &[261.626, 329.628, 391.995], 44_100);
+    let spans = crate::measure::chunk_independent(&cfg(), rate, &x).unwrap();
+    assert_eq!(roots(&spans), [(PitchClass::C, ChordQuality::Major)]);
+    assert_eq!(spans[0].span.start(), Samples::new(0));
+    let last = (Framing::new(Samples::new(4096), Samples::new(1024)))
+        .frames_for(Samples::new(x.len()))
+        .get()
+        - 1;
+    assert_eq!(spans[0].span.end(), Samples::new(last * 1024 + 4096));
+
+    let above = crate::meters::chroma::FrequencyBand::new(
+        tutti_units::Hz::new(100.0),
+        tutti_units::Hz::new(20_000.0),
+    )
+    .unwrap();
+    let chroma = crate::ChromaConfig::new().band(above);
+    assert!(matches!(
+        Measure::<f64>::measure(&cfg().chroma(chroma), rate),
+        Err(MeterError::Nyquist(_))
+    ));
+    assert!(matches!(
+        Measure::<f64>::measure(
+            &crate::KeyConfig::new(crate::KeyProfile::Krumhansl).chroma(chroma),
+            rate
+        ),
+        Err(MeterError::Nyquist(_))
+    ));
+}
+
+/// A chord meter refuses the push that would make more chroma frames than one
+/// call analyses, at a window of 64 samples and a hop of one.
+#[test]
+fn the_chord_meter_refuses_more_chroma_frames_than_one_call_analyses() {
+    let rate = SampleRate::of(22_050.0);
+    let dense = ChromaConfig::new()
+        .framing(framing(64, 1))
+        .band(crate::FrequencyBand::new(Hz::new(400.0), Hz::new(8000.0)).unwrap());
+    let mut meter = Measure::<f64>::measure(&cfg().chroma(dense), rate).unwrap();
+    let long = vec![0.0f64; 64 + crate::meters::chroma::MAX_FRAMES.get()];
+    assert!(matches!(
+        meter.push(Mono::new(&long), &mut Vec::new()),
+        Err(MeterError::TooManyFrames(_))
+    ));
 }

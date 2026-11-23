@@ -18,7 +18,7 @@ fn an_integer_buffer_correlates_at_its_nominal_level() {
             .collect()
     };
     let r = super::cross_correlate(Mono::new(&ints(&late)), Mono::new(&ints(&base)));
-    assert_eq!(r.peak().unwrap().lag, 40);
+    assert_eq!(r.peak().unwrap().lag(), 40);
 }
 
 fn noise(len: usize, seed: u64) -> Vec<f64> {
@@ -56,15 +56,15 @@ fn a_delayed_copy_peaks_at_its_delay_in_either_direction() {
     let mut late = vec![0.0f64; delay];
     late.extend_from_slice(&base);
     let r = cross_correlate(&late, &base);
-    assert_eq!(r.peak().unwrap().lag, 123);
+    assert_eq!(r.peak().unwrap().lag(), 123);
 
     let r = cross_correlate(&base, &late);
-    assert_eq!(r.peak().unwrap().lag, -123);
+    assert_eq!(r.peak().unwrap().lag(), -123);
 
     // The longest lag in range still lands where it should.
     let tail: Vec<f64> = base[600..].to_vec();
     let r = cross_correlate(&base, &tail);
-    assert_eq!(r.peak().unwrap().lag, 600);
+    assert_eq!(r.peak().unwrap().lag(), 600);
 }
 
 /// A buffer against itself peaks at lag zero with its energy, and the
@@ -75,8 +75,8 @@ fn autocorrelation_peaks_at_zero_with_the_energy_and_is_symmetric() {
     let r = cross_correlate(&x, &x);
     let energy: f64 = x.iter().map(|v| v * v).sum();
     let peak = r.peak().unwrap();
-    assert_eq!(peak.lag, 0);
-    assert!((peak.value - energy).abs() < energy * 1e-4);
+    assert_eq!(peak.lag(), 0);
+    assert!((peak.value() - energy).abs() < energy * 1e-4);
     for lag in 1..=512 {
         let (p, n) = (r.at(lag).unwrap(), r.at(-lag).unwrap());
         assert!((p - n).abs() < energy * 1e-4, "lag {lag}: {p} vs {n}");
@@ -91,8 +91,8 @@ fn peak_within_respects_the_bound() {
     let mut late = vec![0.0f64; 100];
     late.extend_from_slice(&base);
     let r = cross_correlate(&late, &base);
-    assert_eq!(r.peak_within(Samples::new(100)).unwrap().lag, 100);
-    assert_ne!(r.peak_within(Samples::new(99)).unwrap().lag, 100);
+    assert_eq!(r.peak_within(Samples::new(100)).unwrap().lag(), 100);
+    assert_ne!(r.peak_within(Samples::new(99)).unwrap().lag(), 100);
     assert_eq!(r.peak_within(Samples::new(usize::MAX)), r.peak());
     assert_eq!(cross_correlate(&[], &base).peak(), None);
     assert_eq!(cross_correlate(&base, &[]).values().len(), 0);

@@ -21,16 +21,8 @@
 //! public-api`, which this repo does not run.
 
 use super::Tree;
-use super::lex::{blank, find_word_from, line_of};
+use super::lex::{blank, find_word_from, line_of, skipped, word_char};
 use std::collections::BTreeSet;
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
-
-fn is_word(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
 
 /// The start offsets of every line.
 fn line_starts(text: &str) -> Vec<usize> {
@@ -48,7 +40,7 @@ fn indent(text: &str, at: usize) -> usize {
 /// Whether `s` starts with the keyword `kw` at a word boundary.
 fn keyword<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
     let rest = s.strip_prefix(kw)?;
-    (!rest.starts_with(is_word)).then_some(rest)
+    (!rest.starts_with(word_char)).then_some(rest)
 }
 
 /// To just before the first `{` or `;`, or the end.
@@ -90,7 +82,7 @@ fn pub_item_end(text: &str, at: usize) -> Option<usize> {
 /// `pub \w+:[^,\n]*`.
 fn pub_field_end(text: &str, at: usize) -> Option<usize> {
     let rest = text[at..].strip_prefix("pub ")?;
-    let n = rest.find(|c: char| !is_word(c)).unwrap_or(rest.len());
+    let n = rest.find(|c: char| !word_char(c)).unwrap_or(rest.len());
     if n == 0 || !rest[n..].starts_with(':') {
         return None;
     }
@@ -137,7 +129,7 @@ fn impls_for_private_type(text: &str, at: usize, end: usize) -> bool {
     let name: String = header[for_at + 5..]
         .trim_start()
         .chars()
-        .take_while(|&c| is_word(c))
+        .take_while(|&c| word_char(c))
         .collect();
     !name.is_empty()
         && line_starts(text).into_iter().any(|ls| {
@@ -147,7 +139,7 @@ fn impls_for_private_type(text: &str, at: usize, end: usize) -> bool {
                 .filter_map(|kw| keyword(line, kw))
                 .any(|rest| {
                     let rest = rest.trim_start();
-                    rest.starts_with(&name) && !rest[name.len()..].starts_with(is_word)
+                    rest.starts_with(&name) && !rest[name.len()..].starts_with(word_char)
                 })
         })
 }
@@ -247,7 +239,7 @@ fn type_aliases(text: &str) -> Vec<(String, &str)> {
         if r2.len() == r.len() {
             continue;
         }
-        let name: String = r2.chars().take_while(|&c| is_word(c)).collect();
+        let name: String = r2.chars().take_while(|&c| word_char(c)).collect();
         if name.is_empty() {
             continue;
         }
@@ -296,7 +288,7 @@ fn imported_names(stmt: &str) -> BTreeSet<String> {
     let mut from = 0;
     while let Some(at) = find_word_from(stmt, "as", from) {
         let rest = stmt[at + 2..].trim_start();
-        let name: String = rest.chars().take_while(|&c| is_word(c)).collect();
+        let name: String = rest.chars().take_while(|&c| word_char(c)).collect();
         if !name.is_empty() && rest.len() != stmt[at + 2..].len() {
             names.insert(name);
         }
@@ -323,7 +315,7 @@ fn names_in_file(code: &str, rel: &str, bad: &mut Vec<String>) -> BTreeSet<Strin
                 let seg: String = stmt[..end]
                     .chars()
                     .rev()
-                    .take_while(|&c| is_word(c))
+                    .take_while(|&c| word_char(c))
                     .collect::<Vec<_>>()
                     .into_iter()
                     .rev()
