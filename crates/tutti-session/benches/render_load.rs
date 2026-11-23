@@ -79,7 +79,7 @@
 //! ```
 
 use std::sync::Arc;
-use tutti_buffers::{BusTopology, ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Mono};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock, Mono};
 use tutti_nodes::{
     BusStripConfig, BusStripNode, ConvolverConfig, ConvolverNode, LimiterConfig, LimiterControls,
     LimiterNode,
@@ -324,12 +324,12 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
     let tracks: Vec<_> = strips
         .into_iter()
         .map(|src| {
-            let strip = s
-                .graph()
-                .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+            let strip = s.graph().add(BusStripNode::from(BusStripConfig::new(
+                ChannelTopology::STEREO,
+            )));
             connect_stereo(&mut s, strip, 0, src);
             if reverb {
-                let send = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
+                let send = BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO));
                 send.volume().store(Db::new(-12.0).to_amplitude());
                 let send = s.graph().add(send);
                 connect_stereo(&mut s, send, 0, src);
@@ -344,7 +344,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         let (l, r) = (ir(1), ir(2));
         let conv = s.graph().add(
             ConvolverNode::try_from(
-                ConvolverConfig::new(BusTopology::STEREO, &[Mono::new(&l), Mono::new(&r)])
+                ConvolverConfig::new(ChannelTopology::STEREO, &[Mono::new(&l), Mono::new(&r)])
                     .block_size(Samples::new(PARTITION)),
             )
             .unwrap(),
@@ -352,21 +352,21 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
         for send in &sends {
             add_stereo(&mut s, conv, *send);
         }
-        let ret = s
-            .graph()
-            .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+        let ret = s.graph().add(BusStripNode::from(BusStripConfig::new(
+            ChannelTopology::STEREO,
+        )));
         connect_stereo(&mut s, ret, 0, conv);
         sums.push(ret);
     }
 
-    let master = s
-        .graph()
-        .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let master = s.graph().add(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::STEREO,
+    )));
     for strip in &sums {
         add_stereo(&mut s, master, *strip);
     }
     let limiter = s.graph().add(LimiterNode::<f32>::from(
-        LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+        LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls {
             threshold: Db::new(-1.0),
             ceiling: Db::new(0.0),
             ..LimiterControls::DEFAULT

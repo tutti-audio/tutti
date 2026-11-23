@@ -1,4 +1,4 @@
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Mono, Planes, PlanesMut};
 use tutti_music::{NoteDuration, NoteValue};
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds};
@@ -22,23 +22,23 @@ fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
     }
 }
 
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(width.into()).expect("a test width is one bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 fn mono(mode: InterpolationMode) -> DelayLayout {
-    DelayLayout::new(BusTopology::MONO, MAX).interpolation(mode)
+    DelayLayout::new(ChannelTopology::MONO, MAX).interpolation(mode)
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.
 fn stereo() -> DelayLayout {
-    DelayLayout::new(BusTopology::STEREO, MAX)
+    DelayLayout::new(ChannelTopology::STEREO, MAX)
 }
 
 /// A stereo delay with no routing between the channels and a time of its own for the right.
 fn stereo_apart(right: f64) -> DelayLayout {
-    DelayLayout::builder(BusTopology::STEREO, MAX)
-        .routing(FeedbackRouting::none(BusTopology::STEREO))
+    DelayLayout::builder(ChannelTopology::STEREO, MAX)
+        .routing(FeedbackRouting::none(ChannelTopology::STEREO))
         .times(ChannelTimes::try_from(&[Seconds::new(right)][..]).unwrap())
         .build()
         .unwrap()
@@ -243,8 +243,8 @@ fn channel_times_are_linked_or_each_their_own() {
     );
     assert_eq!(heard(&k.run(&both)), [10, 40]);
     // Linked: every channel follows the control.
-    let linked = DelayLayout::builder(BusTopology::STEREO, MAX)
-        .routing(FeedbackRouting::none(BusTopology::STEREO))
+    let linked = DelayLayout::builder(ChannelTopology::STEREO, MAX)
+        .routing(FeedbackRouting::none(ChannelTopology::STEREO))
         .build()
         .unwrap();
     let mut k = runner(&linked, &controls(10.0 / 1024.0, 0.0, 0.0));
@@ -635,7 +635,7 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
 
 /// A mono synced delay of `note` that holds up to four seconds.
 fn synced(note: NoteDuration) -> DelayLayout {
-    DelayLayout::builder(BusTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
+    DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
         .synced(NoteTimes::all(note))
         .build()
         .unwrap()

@@ -10,7 +10,7 @@
 use core::f64::consts::PI;
 use tutti_buffers::Planes;
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
@@ -109,7 +109,7 @@ fn compressor_controls(cutoff: f64, q: f64) -> CompressorControls {
 
 fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
     CompressorNode::<f32>::from(
-        CompressorConfig::new(BusTopology::MONO)
+        CompressorConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .key_filter(filter)
             .controls(compressor_controls(cutoff, q)),
@@ -269,7 +269,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
     };
     let mut node = prepared(
         CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::MONO)
+            CompressorConfig::new(ChannelTopology::MONO)
                 .key(KeySource::Sidechain)
                 .key_filter(KeyFilter::HighPass)
                 .controls(controls),
@@ -306,7 +306,7 @@ fn gate_controls(threshold: f64, cutoff: f64, q: f64) -> GateControls {
 
 fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32> {
     GateNode::<f32>::from(
-        GateConfig::new(BusTopology::MONO)
+        GateConfig::new(ChannelTopology::MONO)
             .key(KeySource::Sidechain)
             .key_filter(filter)
             .controls(gate_controls(threshold, cutoff, q)),
@@ -326,7 +326,7 @@ fn a_high_passed_gate_decides_on_the_filtered_key() {
         let gain = highest_gain(&run(&mut filtered, &key));
         let mut plain = prepared(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(gate_controls(threshold, fc, q)),
             ),
@@ -410,7 +410,7 @@ fn off_declares_no_controls_and_a_filter_declares_two_more() {
         makeup: Db::new(3.0),
         ..compressor_controls(2_000.0, 1.5)
     };
-    let config = CompressorConfig::new(BusTopology::MONO)
+    let config = CompressorConfig::new(ChannelTopology::MONO)
         .key(KeySource::Sidechain)
         .controls(controls);
     let off = CompressorNode::<f32>::from(config);

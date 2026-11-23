@@ -4,7 +4,7 @@
 //! Every figure is analytic: a source writes a constant exactly representable
 //! value, and a fold's gain is the fold's stated rule, not another render's.
 
-use tutti_buffers::{BusTopology, ChannelLayout, InterleavedMut, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InterleavedMut, MaxBlock};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::{BusStripConfig, BusStripNode};
 use tutti_session::{MainOutput, OutputPort, Session, SessionBuilder, ValueErrorKind};
@@ -13,7 +13,7 @@ use tutti_units::{Balance, Samples};
 /// Constant `values` on its output channels, declaring `out` as its bus.
 struct Src {
     values: Vec<f32>,
-    out: BusTopology,
+    out: ChannelTopology,
 }
 
 impl Node for Src {
@@ -59,9 +59,11 @@ fn a_mono_source_reaches_both_sides_of_a_stereo_strip() {
     let g = s.graph();
     let src = g.add(Unforkable(Src {
         values: vec![0.5],
-        out: BusTopology::MONO,
+        out: ChannelTopology::MONO,
     }));
-    let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let strip = g.add(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::STEREO,
+    )));
     g.connect(src.bus_output(0), strip.bus_input(0))
         .expect("a mono bus folds onto a stereo one")
         .unfaded();
@@ -82,9 +84,11 @@ fn a_stereo_strip_feeds_a_declared_surround_main_output() {
     let g = s.graph();
     let src = g.add(Unforkable(Src {
         values: vec![0.25, 0.75],
-        out: BusTopology::STEREO,
+        out: ChannelTopology::STEREO,
     }));
-    let strip = g.add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
+    let strip = g.add(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::STEREO,
+    )));
     g.connect(src, strip).expect("same width").unfaded();
     g.connect(strip.bus_output(0), MainOutput)
         .expect("a placed stereo bus folds onto 5.1")
@@ -97,12 +101,12 @@ fn a_stereo_strip_feeds_a_declared_surround_main_output() {
 #[test]
 fn a_strip_without_a_pair_refuses_a_balance_by_name() {
     let mut s = offline(Session::builder(), 2);
-    let stereo = s
-        .graph()
-        .add(BusStripNode::from(BusStripConfig::new(BusTopology::STEREO)));
-    let mono = s
-        .graph()
-        .add(BusStripNode::from(BusStripConfig::new(BusTopology::MONO)));
+    let stereo = s.graph().add(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::STEREO,
+    )));
+    let mono = s.graph().add(BusStripNode::from(BusStripConfig::new(
+        ChannelTopology::MONO,
+    )));
     s.set(stereo.balance().to(Balance::new(0.5)))
         .expect("a stereo strip balances");
     assert_eq!(

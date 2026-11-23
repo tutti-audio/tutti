@@ -24,7 +24,7 @@ pub use waveguide::{WaveguideVoice, WaveguideVoiceConfig};
 use core::fmt::Debug;
 use core::marker::PhantomData;
 
-use tutti_buffers::{BusTopology, Float};
+use tutti_buffers::{ChannelTopology, Float};
 use tutti_graph::{Chase, Cx, EventKind, InEvents, Io, Node, Prepare, Shape, Status};
 use tutti_midi_protocol::{SysexDeviceId, UniversalReader, channel_voice};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump};
@@ -125,7 +125,7 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
     /// The rate the voices are built for until the graph prepares the node: 44.1 kHz.
     const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
 
-    const PORTS: Shape = Shape::source(BusTopology::STEREO).events(1, 0);
+    const PORTS: Shape = Shape::source(ChannelTopology::STEREO).events(1, 0);
     const EVENTS: InEvents = Self::PORTS
         .event_input(0)
         .expect("declared one event input");

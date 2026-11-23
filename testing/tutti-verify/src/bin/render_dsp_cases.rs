@@ -17,7 +17,7 @@ use std::f64::consts::TAU;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_buffers::{Float, InputOutput, Planes, PlanesMut};
 use tutti_dsp::{
     BlockMismatch, ChunkSize, CrossoverBands, CrossoverBank, CrossoverControls, CrossoverModel,
@@ -224,7 +224,7 @@ fn phaser(dir: &Path, cases: &mut Cases) {
     for stages in [2usize, 4] {
         for fc in [300.0f64, 2_000.0, 10_000.0] {
             let c = allpass_complement(Hz::new(fc), SampleRate::of(RATE));
-            let mut chain = PhaserChain::new(Stages::of(stages), BusTopology::MONO);
+            let mut chain = PhaserChain::new(Stages::of(stages), ChannelTopology::MONO);
             let x = impulse(1.0);
             let mut y = vec![0.0f32; IR_FRAMES];
             let ins = [&x[..]];

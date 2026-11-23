@@ -5,7 +5,7 @@
 // These tests pin the `f32` instantiation, the session's audio format, so their tolerances are `f32`'s.
 
 use std::sync::atomic::Ordering;
-use tutti_buffers::{BusTopology, MaxBlock, Planes};
+use tutti_buffers::{ChannelTopology, MaxBlock, Planes};
 
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, ParamNode, Prepare};
@@ -64,11 +64,11 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
     let longest = MaxDelay::of(MaxDelay::CAP);
     for mut node in [
         DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             longest,
         ))),
         DelayNode::<f32>::from(DelayConfig::new(DelayLayout::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             longest,
         ))),
     ] {
@@ -85,7 +85,7 @@ fn a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds() {
 fn a_delay_with_a_nan_initial_time_starts_at_zero() {
     let node = DelayNode::<f32>::from(
         DelayConfig::new(DelayLayout::new(
-            BusTopology::MONO,
+            ChannelTopology::MONO,
             MaxDelay::of(Seconds::new(0.1)),
         ))
         .controls(DelayControls {
@@ -115,7 +115,7 @@ fn the_strip_holds_off_non_finite_volume_and_balance() {
     ];
     for (name, write) in cells {
         for bad in BAD {
-            let mut node = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
+            let mut node = BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO));
             Node::<f32>::prepare(
                 &mut node,
                 &Prepare::new(RATE, MaxBlock::of(Samples::new(64))),
@@ -178,7 +178,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
         }
     }
     check("limiter", || {
-        let n = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        let n = LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
             LimiterControls {
                 threshold: Db::new(-6.0),
                 ceiling: Db::new(-1.0),
@@ -195,7 +195,7 @@ fn the_limiters_and_the_eq_band_hold_off_non_finite_controls() {
     });
     check("brickwall", || {
         let n = BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             Db::new(-1.0),
         ));
         let cells = vec![(

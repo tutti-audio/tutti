@@ -1,4 +1,4 @@
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_units::{Amplitude, Gain, SampleRate, Samples, Seconds};
 
 use tutti_music::{NoteDuration, NoteValue};
@@ -9,17 +9,17 @@ use crate::delay::times::ChannelTimesError;
 
 const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
-fn bus(width: u16) -> BusTopology {
-    BusTopology::default_for(width.into()).expect("a test width is one bus")
+fn bus(width: u16) -> ChannelTopology {
+    ChannelTopology::default_for(width.into()).expect("a test width is one bus")
 }
 
 /// A stereo delay: the default swap routing, the channels linked in time.
 fn stereo_builder() -> DelayLayoutBuilder {
-    DelayLayout::builder(BusTopology::STEREO, MAX)
+    DelayLayout::builder(ChannelTopology::STEREO, MAX)
 }
 
 fn stereo() -> DelayLayout {
-    DelayLayout::new(BusTopology::STEREO, MAX)
+    DelayLayout::new(ChannelTopology::STEREO, MAX)
 }
 
 /// `MaxDelay` keeps the range-checked shape: `new` refuses what is not a longest delay (not
@@ -81,7 +81,7 @@ fn gains(v: &[f64]) -> Vec<Gain> {
 /// for good) and a row that sums past 1; and it keeps what it is given.
 #[test]
 fn a_routing_refuses_what_it_cannot_hold() {
-    let two = BusTopology::STEREO;
+    let two = ChannelTopology::STEREO;
     assert_eq!(
         FeedbackRouting::builder(two, &gains(&[0.0, 1.0, 1.0])).build(),
         Err(FeedbackRoutingError::Length {
@@ -192,9 +192,9 @@ fn the_routing_presets_are_what_their_names_say() {
         }
     }
     assert!(FeedbackRouting::none(bus(3)).is_none() && !ring.is_none());
-    assert!(FeedbackRouting::ring(BusTopology::MONO).is_none());
+    assert!(FeedbackRouting::ring(ChannelTopology::MONO).is_none());
     assert_eq!(
-        FeedbackRouting::ring(BusTopology::STEREO),
+        FeedbackRouting::ring(ChannelTopology::STEREO),
         FeedbackRouting::swap()
     );
 }
@@ -224,7 +224,7 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
         );
     }
     // The stereo default is the swap whatever the interpolation or maximum.
-    let f = DelayLayout::new(BusTopology::STEREO, MaxDelay::DEFAULT)
+    let f = DelayLayout::new(ChannelTopology::STEREO, MaxDelay::DEFAULT)
         .interpolation(InterpolationMode::None);
     assert_eq!(f.routing(), &FeedbackRouting::swap());
 }

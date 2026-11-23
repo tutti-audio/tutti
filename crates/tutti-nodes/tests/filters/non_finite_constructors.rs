@@ -8,7 +8,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
 
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::drive;
 use tutti_graph::{Node, Prepare};
 use tutti_nodes::*;
@@ -78,7 +78,7 @@ fn sweep() {
             let v = |i: usize, ok: f32| if i == pos { b } else { ok };
             add(probe(&format!("compressor arg{pos}"), b, || {
                 Box::new(CompressorNode::<f32>::from(
-                    CompressorConfig::new(BusTopology::STEREO)
+                    CompressorConfig::new(ChannelTopology::STEREO)
                         .key(KeySource::Sidechain)
                         .controls(CompressorControls {
                             threshold: d(v(0, -12.0)),
@@ -95,7 +95,7 @@ fn sweep() {
             }));
             add(probe(&format!("gate arg{pos}"), b, || {
                 Box::new(GateNode::<f32>::from(
-                    GateConfig::new(BusTopology::STEREO)
+                    GateConfig::new(ChannelTopology::STEREO)
                         .key(KeySource::Sidechain)
                         .controls(GateControls {
                             threshold: d(v(0, -40.0)),
@@ -110,7 +110,7 @@ fn sweep() {
         }
         add(probe("compressor knee", b, || {
             Box::new(CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         knee: d(b),
@@ -120,7 +120,7 @@ fn sweep() {
         }));
         add(probe("compressor makeup", b, || {
             Box::new(CompressorNode::<f32>::from(
-                CompressorConfig::new(BusTopology::STEREO)
+                CompressorConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(CompressorControls {
                         makeup: d(b),
@@ -130,7 +130,7 @@ fn sweep() {
         }));
         add(probe("gate range", b, || {
             Box::new(GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(GateControls {
                         threshold: d(-40.0),
@@ -144,7 +144,7 @@ fn sweep() {
         }));
         add(probe("limiter thr", b, || {
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls {
                     threshold: d(b),
                     ceiling: d(-1.0),
                     ..LimiterControls::DEFAULT
@@ -153,7 +153,7 @@ fn sweep() {
         }));
         add(probe("limiter ceil", b, || {
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls {
                     threshold: d(-6.0),
                     ceiling: d(b),
                     ..LimiterControls::DEFAULT
@@ -164,7 +164,7 @@ fn sweep() {
         // (`a_lookahead_keeps_the_range_checked_shape` in tutti-dsp).
         add(probe("limiter release", b, || {
             Box::new(LimiterNode::<f32>::from(
-                LimiterConfig::new(BusTopology::STEREO).controls(LimiterControls {
+                LimiterConfig::new(ChannelTopology::STEREO).controls(LimiterControls {
                     threshold: d(-6.0),
                     ceiling: d(-1.0),
                     release: s(b),
@@ -173,7 +173,7 @@ fn sweep() {
         }));
         add(probe("brickwall", b, || {
             Box::new(BrickwallLimiterNode::<f32>::from(
-                BrickwallLimiterConfig::new(BusTopology::STEREO, d(b)),
+                BrickwallLimiterConfig::new(ChannelTopology::STEREO, d(b)),
             ))
         }));
         add(probe("eq freq", b, || {
@@ -234,8 +234,11 @@ fn sweep() {
             let controls = CrossoverControls::try_from(splits)
                 .unwrap_or_else(|_| CrossoverControls::try_from(&[Hz::new(1000.0)][..]).unwrap());
             Box::new(
-                CrossoverNode::<f32>::try_from(CrossoverConfig::new(BusTopology::STEREO, controls))
-                    .unwrap(),
+                CrossoverNode::<f32>::try_from(CrossoverConfig::new(
+                    ChannelTopology::STEREO,
+                    controls,
+                ))
+                .unwrap(),
             ) as Box<dyn Node<f32>>
         };
         add(probe("crossover", b, || xo(&[Hz::new(bz)])));
@@ -246,18 +249,21 @@ fn sweep() {
         // huge value by type (`a_delay_with_an_unusable_maximum_is_refused_and_the_longest_builds`).
         add(probe("delay time", b, || {
             Box::new(DelayNode::<f32>::from(
-                DelayConfig::new(DelayLayout::new(BusTopology::MONO, MaxDelay::of(s(0.5))))
-                    .controls(DelayControls {
-                        time: s(b),
-                        feedback: Feedback::new(0.3),
-                        cross_feedback: Feedback::NONE,
-                    }),
+                DelayConfig::new(DelayLayout::new(
+                    ChannelTopology::MONO,
+                    MaxDelay::of(s(0.5)),
+                ))
+                .controls(DelayControls {
+                    time: s(b),
+                    feedback: Feedback::new(0.3),
+                    cross_feedback: Feedback::NONE,
+                }),
             ))
         }));
         // A channel's own time is a `ChannelTimes`, which refuses a time that is not
         // finite or is negative; the delay falls back to linked channels.
         add(probe("delay stereo", b, || {
-            let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(s(0.5)));
+            let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(s(0.5)));
             let layout = match ChannelTimes::try_from(&[s(b)][..]) {
                 Ok(times) => layout.times(times),
                 Err(_) => layout,
