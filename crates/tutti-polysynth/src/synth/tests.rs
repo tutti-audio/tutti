@@ -64,7 +64,7 @@ fn new_configs_are_the_documented_starting_synth() {
     assert_eq!(c.envelope, Adsr::default());
     assert_eq!(c.portamento, None);
     assert_eq!(c.unison, None);
-    assert_eq!(c.allocation_strategy, AllocationStrategy::Oldest);
+    assert_eq!(c.steal, Steal::By(Order::Oldest));
     assert_eq!(c.tuning, Tuning::equal_temperament());
     assert_eq!(c.pitch_bend_range, Semitones::new(2.0));
     assert_eq!(c.group, MidiGroup::FIRST);

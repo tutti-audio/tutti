@@ -267,8 +267,8 @@ impl Note {
         format!("{}{}", self.class.flat_name(), self.octave)
     }
 
-    /// Concert A's frequency. The one tuning constant this module carries.
-    const A4_HZ: Hz = Hz::new(440.0);
+    /// Concert A's frequency: A4 = 440 Hz, the one tuning constant this module carries.
+    pub const A4_HZ: Hz = Hz::new(440.0);
 }
 
 impl core::fmt::Display for Note {

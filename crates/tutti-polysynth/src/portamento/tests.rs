@@ -2,7 +2,7 @@ use super::*;
 use tutti_curve::Exponent;
 
 #[test]
-fn test_no_glide() {
+fn mode_off_jumps_to_the_new_pitch() {
     let config = PortamentoConfig::new().mode(PortamentoMode::Off);
     let mut porta = Portamento::new(config, SampleRate::SR_44K1, Hz::new(440.0));
 
@@ -12,7 +12,7 @@ fn test_no_glide() {
 }
 
 #[test]
-fn test_always_glide() {
+fn always_glides_from_the_old_pitch_and_arrives() {
     let config = PortamentoConfig::new()
         .mode(PortamentoMode::Always)
         // 10ms
@@ -36,7 +36,7 @@ fn test_always_glide() {
 }
 
 #[test]
-fn test_legato_only() {
+fn legato_only_glides_only_on_an_overlapping_note() {
     let config = PortamentoConfig::new()
         .mode(PortamentoMode::LegatoOnly)
         .time(GlideTime::of(Seconds::new(0.01)));
@@ -55,7 +55,7 @@ fn test_legato_only() {
 }
 
 #[test]
-fn test_curve_shapes() {
+fn every_curve_arrives_at_the_target() {
     for curve in [
         Law::Linear,
         Law::PowerIn(Exponent::of(2.0)),

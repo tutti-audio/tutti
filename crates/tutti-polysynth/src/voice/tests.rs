@@ -5,7 +5,7 @@ use tutti_ump::{MidiChannel, NoteId, NoteNumber};
 use tutti_units::Velocity;
 
 #[test]
-fn test_basic_allocation() {
+fn notes_take_the_first_free_slots() {
     let config = SynthVoicesConfig::new().max_voices(NonZeroUsize::new(4).unwrap());
     let mut alloc = SynthVoices::new(config);
 
@@ -39,10 +39,10 @@ fn test_basic_allocation() {
 }
 
 #[test]
-fn test_voice_stealing_oldest() {
+fn a_full_allocator_steals_the_oldest_voice_under_oldest() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::Oldest);
+        .steal(Steal::By(Order::Oldest));
     let mut alloc = SynthVoices::new(config);
 
     // Fill all voices
@@ -73,7 +73,7 @@ fn test_voice_stealing_oldest() {
 }
 
 #[test]
-fn test_release() {
+fn a_release_leaves_the_voice_releasing_until_it_finishes() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -100,7 +100,7 @@ fn test_release() {
 }
 
 #[test]
-fn test_sustain_pedal() {
+fn sustain_holds_a_released_key_until_the_pedal_lifts() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -128,7 +128,7 @@ fn test_sustain_pedal() {
 }
 
 #[test]
-fn test_mono_mode() {
+fn mono_takes_slot_zero_for_every_note() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(4).unwrap())
         .mode(VoiceMode::Mono);
@@ -186,7 +186,7 @@ fn test_mono_mode() {
 }
 
 #[test]
-fn test_legato_mode() {
+fn legato_takes_over_the_sounding_voice_without_a_retrigger() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(4).unwrap())
         .mode(VoiceMode::Legato);
@@ -218,10 +218,10 @@ fn test_legato_mode() {
 }
 
 #[test]
-fn test_no_steal() {
+fn a_full_allocator_under_never_drops_the_note() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::NoSteal);
+        .steal(Steal::Never);
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -251,10 +251,10 @@ fn test_no_steal() {
 }
 
 #[test]
-fn test_voice_stealing_quietest() {
+fn a_full_allocator_steals_the_quietest_voice_under_quietest() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::Quietest);
+        .steal(Steal::By(Order::Quietest));
     let mut alloc = SynthVoices::new(config);
 
     // Allocate two voices
@@ -303,10 +303,10 @@ fn test_voice_stealing_quietest() {
 }
 
 #[test]
-fn test_voice_stealing_highest_note() {
+fn a_full_allocator_steals_the_highest_key_under_highest_note() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::HighestNote);
+        .steal(Steal::By(Order::HighestNote));
     let mut alloc = SynthVoices::new(config);
 
     // Allocate C4 (60) and G4 (67)
@@ -342,10 +342,10 @@ fn test_voice_stealing_highest_note() {
 }
 
 #[test]
-fn test_voice_stealing_lowest_note() {
+fn a_full_allocator_steals_the_lowest_key_under_lowest_note() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::LowestNote);
+        .steal(Steal::By(Order::LowestNote));
     let mut alloc = SynthVoices::new(config);
 
     // Allocate C4 (60) and G4 (67)
@@ -381,10 +381,10 @@ fn test_voice_stealing_lowest_note() {
 }
 
 #[test]
-fn test_voice_stealing_newest() {
+fn a_full_allocator_steals_the_newest_voice_under_newest() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::Newest);
+        .steal(Steal::By(Order::Newest));
     let mut alloc = SynthVoices::new(config);
 
     alloc.allocate(
@@ -419,7 +419,7 @@ fn test_voice_stealing_newest() {
 }
 
 #[test]
-fn test_sostenuto_pedal() {
+fn sostenuto_holds_only_the_keys_down_when_it_pressed() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -472,7 +472,7 @@ fn test_sostenuto_pedal() {
 }
 
 #[test]
-fn test_sostenuto_key_still_held() {
+fn a_key_still_down_when_sostenuto_lifts_keeps_sounding() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -494,7 +494,7 @@ fn test_sostenuto_key_still_held() {
 }
 
 #[test]
-fn test_all_notes_off() {
+fn all_notes_off_releases_only_the_named_channel() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -534,7 +534,7 @@ fn test_all_notes_off() {
 }
 
 #[test]
-fn test_all_sound_off() {
+fn all_sound_off_silences_the_channel_at_once() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -564,7 +564,7 @@ fn test_all_sound_off() {
 }
 
 #[test]
-fn test_reset() {
+fn reset_silences_every_voice_and_drops_the_pedals() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -609,7 +609,7 @@ fn test_reset() {
 }
 
 #[test]
-fn test_retrigger_same_note() {
+fn a_key_struck_again_releases_its_old_voice_and_takes_a_new_one() {
     let config = SynthVoicesConfig::new();
     let mut alloc = SynthVoices::new(config);
 
@@ -641,10 +641,10 @@ fn test_retrigger_same_note() {
 }
 
 #[test]
-fn test_prefer_stealing_releasing_voices() {
+fn a_releasing_voice_is_stolen_before_a_held_one() {
     let config = SynthVoicesConfig::new()
         .max_voices(NonZeroUsize::new(2).unwrap())
-        .strategy(AllocationStrategy::Oldest);
+        .steal(Steal::By(Order::Oldest));
     let mut alloc = SynthVoices::new(config);
 
     // Allocate and release one voice
@@ -716,18 +716,17 @@ fn table(alloc: &SynthVoices) -> Vec<(VoiceId, u8, bool)> {
 ///   the quietest of those; otherwise by strategy, the oldest among equals);
 /// - (f) in mono and legato at most one voice a channel is gated, and it plays
 ///   the most recent held key;
-/// - (g) `NoSteal` at a full allocator drops the note and changes nothing;
+/// - (g) `Steal::Never` at a full allocator drops the note and changes nothing;
 /// - (b) after every key and pedal is let go, nothing is gated.
 #[test]
 fn random_streams_keep_their_invariants() {
-    use AllocationStrategy as S;
     let strategies = [
-        S::Oldest,
-        S::Newest,
-        S::Quietest,
-        S::HighestNote,
-        S::LowestNote,
-        S::NoSteal,
+        Steal::By(Order::Oldest),
+        Steal::By(Order::Newest),
+        Steal::By(Order::Quietest),
+        Steal::By(Order::HighestNote),
+        Steal::By(Order::LowestNote),
+        Steal::Never,
     ];
     let modes = [
         VoiceMode::Poly,
@@ -743,7 +742,7 @@ fn random_streams_keep_their_invariants() {
         let mut alloc = SynthVoices::new(
             SynthVoicesConfig::new()
                 .max_voices(NonZeroUsize::new(max).unwrap())
-                .strategy(strategy)
+                .steal(strategy)
                 .mode(mode),
         );
         // The test's own model of the held keys of each channel.
@@ -782,7 +781,7 @@ fn random_streams_keep_their_invariants() {
                     }
                     // (g) a same-key Replace frees a slot first, so only a note
                     // on another key at a full table must be dropped.
-                    if strategy == S::NoSteal
+                    if strategy == Steal::Never
                         && mode == VoiceMode::Poly
                         && full
                         && !before.iter().any(|b| b.1 == k)
@@ -913,14 +912,7 @@ fn random_streams_keep_their_invariants() {
 /// The slot the strategy names on a full poly allocator (the new note's own
 /// key replaces a same-key voice first, so the table is read as it stands
 /// after that release).
-fn expected_victim(
-    alloc: &SynthVoices,
-    strategy: AllocationStrategy,
-    _id: NoteId,
-    k: u8,
-    c: u8,
-) -> Option<usize> {
-    use AllocationStrategy as S;
+fn expected_victim(alloc: &SynthVoices, steal: Steal, _id: NoteId, k: u8, c: u8) -> Option<usize> {
     let live: Vec<usize> = (0..alloc.slots().len())
         .filter(|&i| !alloc.slots()[i].is_idle())
         .collect();
@@ -950,13 +942,13 @@ fn expected_victim(
     }
     let id = |i: usize| alloc.slots()[i].voice_id().get() as f64;
     let key = |i: usize| f64::from(alloc.slots()[i].note().get());
-    match strategy {
-        S::Oldest => by(&live, &id),
-        S::Newest => by(&live, &|i| -id(i)),
-        S::Quietest => by(&live, &level),
-        S::HighestNote => by(&live, &|i| -key(i)),
-        S::LowestNote => by(&live, &key),
-        S::NoSteal => None,
+    match steal {
+        Steal::By(Order::Oldest) => by(&live, &id),
+        Steal::By(Order::Newest) => by(&live, &|i| -id(i)),
+        Steal::By(Order::Quietest) => by(&live, &level),
+        Steal::By(Order::HighestNote) => by(&live, &|i| -key(i)),
+        Steal::By(Order::LowestNote) => by(&live, &key),
+        Steal::Never => None,
     }
 }
 

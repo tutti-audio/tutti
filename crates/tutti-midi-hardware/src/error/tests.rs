@@ -6,31 +6,32 @@ fn io_cause(error: &MidiHardwareError) -> Option<&std::io::Error> {
     error.source()?.downcast_ref::<std::io::Error>()
 }
 
-/// **A thread that cannot start keeps the OS's refusal as its source**, so a
-/// caller walking `source()` reaches the `io::Error` and its kind.
+/// **A thread that cannot start, and a failed system call, keep the OS's refusal
+/// as their source**, so a caller walking `source()` reaches the `io::Error` and
+/// its kind.
 #[test]
-fn a_spawn_failure_keeps_the_os_refusal_as_its_source() {
-    let error = MidiHardwareError::Spawn {
-        thread: MidiThread::MidiIn,
-        source: std::io::Error::from(std::io::ErrorKind::OutOfMemory),
-    };
-    assert_eq!(
-        io_cause(&error).map(std::io::Error::kind),
-        Some(std::io::ErrorKind::OutOfMemory)
-    );
-}
-
-/// **A failed system call keeps its `io::Error` as the source.**
-#[test]
-fn an_io_failure_keeps_the_os_error_as_its_source() {
-    let error = MidiHardwareError::Io {
-        step: "make a stop pair",
-        source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
-    };
-    assert_eq!(
-        io_cause(&error).map(std::io::Error::kind),
-        Some(std::io::ErrorKind::PermissionDenied)
-    );
+fn an_error_that_the_os_refused_keeps_the_io_error_as_its_source() {
+    use std::io::{Error, ErrorKind};
+    for (case, error, kind) in [
+        (
+            "a spawn failure",
+            MidiHardwareError::Spawn {
+                thread: MidiThread::MidiIn,
+                source: Error::from(ErrorKind::OutOfMemory),
+            },
+            ErrorKind::OutOfMemory,
+        ),
+        (
+            "an io failure",
+            MidiHardwareError::Io {
+                step: "make a stop pair",
+                source: Error::from(ErrorKind::PermissionDenied),
+            },
+            ErrorKind::PermissionDenied,
+        ),
+    ] {
+        assert_eq!(io_cause(&error).map(Error::kind), Some(kind), "{case}");
+    }
 }
 
 /// **A refused seed is the `SeedError` itself**, reachable through `source()`

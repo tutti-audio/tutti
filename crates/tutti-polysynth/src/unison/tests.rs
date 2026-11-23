@@ -14,7 +14,7 @@ fn a_driven_detune_is_floored_at_zero() {
 }
 
 #[test]
-fn test_single_voice() {
+fn a_single_unison_voice_is_centred_at_unit_gain_and_ratio() {
     let config = UnisonConfig::new().voice_count(UnisonVoices::of(1));
     let unison = UnisonEngine::new(config);
 
@@ -27,7 +27,7 @@ fn test_single_voice() {
 }
 
 #[test]
-fn test_detune_spread() {
+fn unison_detune_is_symmetric_about_the_centre_voice() {
     let config = UnisonConfig::new()
         .voice_count(UnisonVoices::of(3))
         // ~1/8 semitone spread
@@ -58,7 +58,7 @@ fn test_detune_spread() {
 }
 
 #[test]
-fn test_stereo_spread() {
+fn a_full_spread_pans_the_outer_voices_hard_left_and_right() {
     let config = UnisonConfig::new()
         .voice_count(UnisonVoices::of(3))
         .detune_cents(CentsSpan::ZERO)
@@ -76,7 +76,7 @@ fn test_stereo_spread() {
 }
 
 #[test]
-fn test_equal_power_amplitude() {
+fn unison_amplitudes_square_to_unity_for_every_count() {
     for count in 1..=8 {
         let config =
             UnisonConfig::new().voice_count(UnisonVoices::new(count).expect("a unison count"));
@@ -99,7 +99,7 @@ fn test_equal_power_amplitude() {
 }
 
 #[test]
-fn test_phase_randomization() {
+fn randomized_phases_lie_in_range_and_differ() {
     let config = UnisonConfig::new()
         .voice_count(UnisonVoices::of(4))
         .phase_randomize(true);
@@ -149,7 +149,7 @@ fn drawn_phases_are_the_same_for_a_seed_and_distinct_per_voice() {
 }
 
 #[test]
-fn test_config_update() {
+fn the_detune_and_spread_atomics_update_the_config() {
     let mut unison = UnisonEngine::new(UnisonConfig::new().voice_count(UnisonVoices::of(5)));
     assert_eq!(unison.voice_count(), UnisonVoices::of(5));
 

@@ -3,7 +3,7 @@ use tutti_midi_protocol::TuningFrequency;
 use tutti_ump::NoteNumber;
 
 #[test]
-fn test_equal_temperament() {
+fn equal_temperament_puts_a4_at_440_and_doubles_per_octave() {
     let tuning = Tuning::equal_temperament();
 
     // A4 should be 440 Hz
@@ -20,7 +20,7 @@ fn test_equal_temperament() {
 }
 
 #[test]
-fn test_custom_reference() {
+fn a_custom_reference_pitch_puts_a4_on_it() {
     let tuning = Tuning::equal_temperament_with_reference(
         ReferencePitch::of(Hz::new(432.0)),
         NoteNumber::of(69),
@@ -31,7 +31,7 @@ fn test_custom_reference() {
 }
 
 #[test]
-fn test_just_intonation() {
+fn the_just_fifth_over_the_reference_is_three_halves() {
     let tuning = Tuning::just_intonation();
 
     // Reference should still be A4 = 440 Hz
@@ -73,7 +73,7 @@ fn the_table_is_frequency_data() {
 }
 
 #[test]
-fn test_from_cents() {
+fn a_cents_scale_repeats_an_octave_up_every_scale_size() {
     // Create quarter-tone scale (24 notes per octave)
     let cents: Vec<Cents> = (0..24).map(|i| Cents::new(f64::from(i) * 50.0)).collect();
     let tuning = Tuning::try_from(cents.as_slice()).unwrap();
@@ -88,7 +88,7 @@ fn test_from_cents() {
 }
 
 #[test]
-fn test_from_ratios() {
+fn a_ratio_scale_repeats_an_octave_up_every_scale_size() {
     // Simple Pythagorean pentatonic
     let ratios = [1.0, 9.0 / 8.0, 81.0 / 64.0, 3.0 / 2.0, 27.0 / 16.0].map(FrequencyRatio::of);
     let tuning = Tuning::try_from(ratios.as_slice()).unwrap();
@@ -107,7 +107,7 @@ fn test_from_ratios() {
 /// octave arithmetic shows up here first: note 0 → 127 must span exactly
 /// 127 semitones.
 #[test]
-fn test_boundary_notes() {
+fn the_end_keys_are_finite_and_span_127_semitones() {
     let tuning = Tuning::equal_temperament();
 
     let low = tuning.note_to_freq(NoteNumber::of(0)).get();
@@ -129,7 +129,7 @@ fn test_boundary_notes() {
 }
 
 #[test]
-fn test_pythagorean_tuning() {
+fn the_pythagorean_fifth_over_the_reference_is_three_halves() {
     let tuning = Tuning::pythagorean();
 
     // Reference should still be A4 = 440 Hz
@@ -147,7 +147,7 @@ fn test_pythagorean_tuning() {
 }
 
 #[test]
-fn test_set_reference_dynamically() {
+fn set_reference_moves_the_reference_and_the_table() {
     let mut tuning = Tuning::equal_temperament();
 
     // Default A4 = 440
@@ -165,7 +165,7 @@ fn test_set_reference_dynamically() {
 }
 
 #[test]
-fn test_different_reference_note() {
+fn a_reference_on_c4_puts_c5_an_octave_above_it() {
     // Use C4 (note 60) as reference at 256 Hz
     let tuning = Tuning::equal_temperament_with_reference(
         ReferencePitch::of(Hz::new(256.0)),
@@ -179,7 +179,7 @@ fn test_different_reference_note() {
 }
 
 #[test]
-fn test_octave_equivalence() {
+fn equal_temperament_doubles_every_twelve_keys() {
     let tuning = Tuning::equal_temperament();
 
     // Any note should be exactly 2x frequency of note 12 semitones below
@@ -198,7 +198,7 @@ fn test_octave_equivalence() {
 }
 
 #[test]
-fn test_just_vs_equal_temperament_difference() {
+fn just_intonation_major_third_is_five_fourths_and_equal_is_not() {
     let just = Tuning::just_intonation();
     let equal = Tuning::equal_temperament();
 
@@ -234,7 +234,7 @@ fn test_just_vs_equal_temperament_difference() {
 }
 
 #[test]
-fn test_very_low_and_high_frequencies() {
+fn equal_temperament_spans_note_0_at_8_18_hz_to_note_127_at_12544_hz() {
     let tuning = Tuning::equal_temperament();
 
     // MIDI note 0 (C-1) should be about 8.18 Hz

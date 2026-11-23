@@ -12,6 +12,8 @@ static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 // The session's modulation loop (`Session::mods`, `ModInput`).
 mod modulation;
+// The value a lane drives a param or an edge's gain to, read beside the base.
+mod effective;
 // A route onto a param on an `f64` session.
 mod f64_modulation;
 // A route onto an edge's gain (doc 013, "Edge gain", G2).

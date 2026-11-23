@@ -29,6 +29,8 @@ tutti-voicing = { version = "0.0.1", path = "../tutti-voicing" }
 
 thiserror = { workspace = true, features = ["std"] }
 tutti-units = { version = "0.0.1", path = "../tutti-units", default-features = false }
+# `FrameProgress`, the counter a glide steps.
+tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 # The render's transcendentals are `libm`'s pure-Rust ones, so a render does not depend on the platform's C math library.
 libm = "0.2.15"
 tutti-ump = { version = "0.0.1", path = "../tutti-ump", default-features = false }

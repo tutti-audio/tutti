@@ -20,8 +20,6 @@ mod comments;
 mod conformance;
 mod conformance_site;
 mod decode_boundary;
-mod doc_idents;
-mod doc_refs;
 mod errors;
 mod ffi;
 mod guards;
@@ -37,6 +35,7 @@ mod platform;
 mod platform_seam;
 mod pointers;
 mod prose;
+mod prose_names;
 mod range_types;
 mod ratchet;
 mod session;
@@ -52,7 +51,6 @@ mod umbrella;
 mod umbrella_api;
 // Read by `check-umbrella`.
 mod umbrella_collisions;
-mod units_bare;
 mod use_tree;
 mod value_traits;
 mod values;
@@ -139,12 +137,10 @@ pub(crate) enum Gate {
     Lints,
     /// A fieldless public `Eq` enum is `Hash`.
     ValueTraits,
-    /// Prose names crate paths and design-doc sections that exist.
-    DocRefs,
     /// Prose outside `docs/` points at no `file.rs:N`; under `docs/` the line exists.
     Pointers,
-    /// A backticked item name in prose is an item the code uses (a per-file ratchet).
-    DocIdents,
+    /// Prose names crate paths, design-doc sections and items that exist (the item names a per-file ratchet).
+    ProseNames,
     /// A `#[test]` asserts something (a per-file ratchet).
     PassiveTests,
     /// No comment holds more citations of design docs, audits, pull requests,
@@ -170,8 +166,6 @@ pub(crate) enum Gate {
     Logging,
     /// A test asserts no wall-clock time and sleeps for no event (a per-file ratchet).
     TestTime,
-    /// `tutti-units` names no allocation and no atomic.
-    UnitsBare,
     /// A quantity has one width and data is generic over `F`, bar the rows of the baseline.
     Width,
 }
@@ -192,9 +186,8 @@ impl Gate {
             Gate::SessionApi => "gate check-session-api".to_owned(),
             Gate::Lints => "gate check-lints".to_owned(),
             Gate::ValueTraits => "gate check-value-traits".to_owned(),
-            Gate::DocRefs => "gate check-doc-refs".to_owned(),
             Gate::Pointers => "gate check-pointers".to_owned(),
-            Gate::DocIdents => "gate check-doc-idents".to_owned(),
+            Gate::ProseNames => "gate check-prose-names".to_owned(),
             Gate::PassiveTests => "gate check-passive-tests".to_owned(),
             Gate::Comments => "gate check-comments".to_owned(),
             Gate::AllocBinaries => "gate check-alloc-binaries".to_owned(),
@@ -207,7 +200,6 @@ impl Gate {
             Gate::Umbrella => "gate check-umbrella".to_owned(),
             Gate::Logging => "gate check-logging".to_owned(),
             Gate::TestTime => "gate check-test-time".to_owned(),
-            Gate::UnitsBare => "gate check-units-bare".to_owned(),
             Gate::Width => "gate check-width".to_owned(),
         }
     }
@@ -233,9 +225,8 @@ impl Gate {
             Gate::ValueTraits => {
                 value_traits::check(&tree, value_traits::ALLOW, value_traits::MIN_FILES)
             }
-            Gate::DocRefs => doc_refs::check(&tree),
             Gate::Pointers => pointers::check(&tree),
-            Gate::DocIdents => doc_idents::check(&tree),
+            Gate::ProseNames => prose_names::check(&tree),
             Gate::PassiveTests => passive_tests::check(&tree),
             Gate::Comments => comments::check(&tree),
             Gate::Umbrella => umbrella::check(&tree),
@@ -250,7 +241,6 @@ impl Gate {
             Gate::Values => values::check(&tree, values::MIN_FILES, values::MIN_UNITS),
             Gate::Logging => logging::check(&tree, logging::ALLOW),
             Gate::TestTime => test_time::check(&tree),
-            Gate::UnitsBare => units_bare::check(&tree, units_bare::MIN_FILES),
             Gate::Width => width::check(&tree, width::EDGES, width::MIN_FILES),
             Gate::AllocBinaries => alloc_binaries::check(&tree, alloc_binaries::EXEMPT),
             Gate::PlatformSeam => platform_seam::check(&tree, platform_seam::ALLOW),
