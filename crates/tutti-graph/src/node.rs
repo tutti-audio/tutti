@@ -22,6 +22,7 @@ use std::num::NonZeroU32;
 use tutti_buffers::{BusTopology, ChannelLayout, MaxBlock};
 
 use tutti_music::{FrameClock, LoopRange, MeterMap, SegmentOrigin};
+use tutti_tempo::TempoMap;
 use tutti_units::{Beat, Bpm, Frame, Latency, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 
 use crate::bus::{Buses, InEvents, OutEvents, PortSpan};
@@ -1501,6 +1502,13 @@ pub struct Cx<'a> {
     /// block, read at any beat the block visits, so a loop wrap and any
     /// number of meter changes inside the block are exact.
     pub meter: Option<&'a MeterMap>,
+    /// The project's tempo map for this block, lent once per block by the
+    /// host that renders it, or `None` where the host has none (a hand-built
+    /// `Cx`): a node placing something by beat then takes the tempo of the
+    /// block's transport ([`Env::transport`]) as it stands. One map per
+    /// block, read at any beat the block visits, so how long a placed voice
+    /// has played through a tempo step or ramp is the map's seconds.
+    pub tempo: Option<&'a TempoMap>,
 }
 
 impl Cx<'_> {

@@ -731,6 +731,7 @@ mod tests {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
             meter: None,
+            tempo: None,
         }
     }
 
@@ -900,6 +901,7 @@ mod tests {
             arrival: Latency::new(Samples::new(100)),
             history: &history,
             meter: None,
+            tempo: None,
         };
         // Offset 50 of the second block hears frame 14 of the first.
         let got = info_at(

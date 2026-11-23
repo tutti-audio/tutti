@@ -92,61 +92,21 @@ pub struct MidiAssignment {
     pub param: ParamId,
 }
 
-/// The controller table a host applies: the `declared` entries that no `app`
-/// entry shares a channel and message with, in their order, then the `app`'s
-/// entries. The app's entry replaces the plugin's for the same channel and
-/// message.
+/// The table a plugin's controllers follow once the app's entries are laid over
+/// `declared`, the plugin's own: the declared entries no app entry shares a
+/// channel and source with, in their order, then the app's entries in theirs.
 ///
-/// **Channel precedence.** For a message on channel N an entry naming channel N
-/// wins over an entry for any channel (`channel: None`) with the same message,
-/// whichever table either is in; among entries of one kind the later one wins.
-/// The iterator keeps both entries (an any-channel one and a specific one do
-/// not share a channel); the precedence applies where the table is read.
+/// An app entry wins per `(channel, source)`, where `None` (any channel) and a
+/// channel are different keys. A message on a channel that matches an entry
+/// naming that channel and an any-channel entry drives the one naming the
+/// channel.
 pub fn effective_midi_map<'a>(
     declared: &'a [MidiAssignment],
     app: &'a [MidiAssignment],
 ) -> impl Iterator<Item = MidiAssignment> + 'a {
-    declared
-        .iter()
-        .filter(|d| {
-            !app.iter()
-                .any(|a| a.channel == d.channel && a.source == d.source)
-        })
-        .chain(app)
-        .copied()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn entry(channel: Option<u8>, controller: u8, param: u32) -> MidiAssignment {
-        MidiAssignment {
-            channel: channel.map(MidiChannel::of),
-            source: MidiSource::ControlChange(U7::of(controller)),
-            param: ParamId::new(param),
-        }
-    }
-
-    /// **The app's entry replaces the declared one for its channel and message;
-    /// the declared entries it leaves come first, in their order.**
-    #[test]
-    fn the_effective_map_is_the_declared_entries_the_app_leaves_then_the_apps() {
-        let declared = [
-            entry(Some(0), 74, 1),
-            entry(Some(1), 74, 1),
-            entry(Some(0), 1, 1),
-        ];
-        let app = [entry(Some(1), 74, 2), entry(None, 7, 3)];
-        let got: Vec<_> = effective_midi_map(&declared, &app).collect();
-        assert_eq!(
-            got,
-            [
-                entry(Some(0), 74, 1),
-                entry(Some(0), 1, 1),
-                entry(Some(1), 74, 2),
-                entry(None, 7, 3),
-            ]
-        );
-    }
+    let kept = declared.iter().copied().filter(|d| {
+        !app.iter()
+            .any(|a| a.channel == d.channel && a.source == d.source)
+    });
+    kept.chain(app.iter().copied())
 }

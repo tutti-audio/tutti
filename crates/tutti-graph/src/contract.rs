@@ -1946,6 +1946,7 @@ fn drive_block<F: Float>(
         arrival: Latency::ZERO,
         history: TransportHistory::none(),
         meter: None,
+        tempo: None,
     };
     let max = prepare.max_block();
     let reported = std::cell::Cell::new(None);
@@ -2637,6 +2638,7 @@ impl<N: Node<F> + ?Sized, F: Float> Direct<N, F> {
             arrival: Latency::ZERO,
             history: TransportHistory::none(),
             meter: None,
+            tempo: None,
         };
         let max = self.prepare.max_block();
         let io = Io::new(

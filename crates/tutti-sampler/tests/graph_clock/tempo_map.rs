@@ -38,7 +38,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::Wave;
 use tutti_engine::Engine;
-use tutti_graph::{Editor, NodeKey, OutputPort, PortSource, Prepare};
+use tutti_graph::{
+    Editor, NodeKey, OutputPort, PortSource, Prepare, TransportChanges, TransportPosition,
+};
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_timeline::{MotionCommand, Transport};
@@ -108,7 +110,7 @@ fn frame_after(x: f64) -> usize {
 
 /// One placed voice (from `start`, for `duration` beats or the whole wave)
 /// played from beat 0 over `map` for `frames`, in blocks of `block`, through
-/// a pool bound to the map; the left channel.
+/// a pool over the engine's map; the left channel.
 fn render(
     map: &Arc<TempoMap>,
     voice: Option<(f64, Option<f64>)>,
@@ -136,7 +138,7 @@ fn render(
                 },
             )
             .expect("a placeable wave");
-            let mut pool = VoicePool::new().tempo(transport.settings().tempo_reader());
+            let mut pool = VoicePool::new();
             pool.insert(SlotId(1), source, Playback::default())
                 .expect("a finite gain and a nonempty width");
             ed.insert(NodeKey(1), "voice", pool);
@@ -249,11 +251,11 @@ fn a_ramp_puts_a_clips_frames_within_the_grid_bound_of_the_maps() {
 }
 
 /// **A constant map is what it was.** A clip from beat 1 at 120 BPM through a
-/// pool bound to a constant map is at source frame `f - 24 000` exactly from
+/// pool over a constant map is at source frame `f - 24 000` exactly from
 /// frame 24 000, at every block size: the voice reads a constant map the way
 /// it reads no map (the beats over the tempo, not the map's seconds). The bits
-/// are held by `block_length_invariance`; this case pins the figure through a
-/// bound reader.
+/// are held by `block_length_invariance`; this case pins the figure through the
+/// engine's lent map.
 #[test]
 fn a_constant_map_keeps_the_clip_where_it_was() {
     let m = map(&[(0.0, 120.0, Transition::Step)]);
@@ -264,6 +266,58 @@ fn a_constant_map_keeps_the_clip_where_it_was() {
             let want = f.checked_sub(24_000).map_or(0.0, |i| i as f32 / SCALE);
             assert_eq!(got.to_bits(), want.to_bits(), "block {block} frame {f}");
         }
+    }
+}
+
+/// **A block lent no map places a clip by the transport's tempo.** An executor
+/// driven by hand (no host to lend a map, so `Cx::tempo` is `None`) over a
+/// transport at 120 BPM puts a pool's clip from beat 1 at source frame
+/// `f - 24 000`, from frame 24 000 (`60 / 120` s a beat at 48 kHz): the tempo of
+/// the block's transport is the only tempo the voice has.
+#[test]
+fn a_block_lent_no_map_places_a_clip_by_the_transports_tempo() {
+    let mut wave = Wave::new(1, SampleRate::of(SR));
+    for i in 0..2 * SR as usize {
+        wave.append(Interleaved::new(&[i as f32 / SCALE], wave.layout()).unwrap())
+            .unwrap();
+    }
+    let (mut ed, mut exec) = Editor::new(Prepare::new(
+        SampleRate::of(SR),
+        MaxBlock::of(Samples::new(MAX_BLOCK)),
+    ));
+    let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(1.0)))
+        .expect("a placeable wave");
+    let mut pool = VoicePool::new();
+    pool.insert(SlotId(1), source, Playback::default())
+        .expect("a finite gain and a nonempty width");
+    ed.insert(NodeKey(1), "voice", pool);
+    ed.spec_mut()
+        .topology
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.commit().expect("commits");
+    const BLOCK: usize = 64;
+    let mut out = Vec::new();
+    let mut left = [0.0f32; BLOCK];
+    let mut right = [0.0f32; BLOCK];
+    for start in (0..48_000).step_by(BLOCK) {
+        let transport = TransportPosition::new(
+            true,
+            Bpm::of(120.0),
+            Beat::new(start as f64 / 24_000.0),
+            None,
+        );
+        exec.process_with_changes(
+            BLOCK,
+            &transport,
+            &TransportChanges::NONE,
+            &[],
+            &mut [&mut left, &mut right],
+        );
+        out.extend_from_slice(&left);
+    }
+    for (f, &got) in out.iter().enumerate() {
+        let want = f.checked_sub(24_000).map_or(0.0, |i| i as f32 / SCALE);
+        assert_eq!(got.to_bits(), want.to_bits(), "frame {f}");
     }
 }
 
@@ -324,7 +378,7 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
     ));
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
         .expect("a placeable wave");
-    let pool = VoicePool::new().tempo(transport.settings().tempo_reader());
+    let pool = VoicePool::new();
     // The handle the insert hands back is the pool's live one.
     let handle = ed.insert(NodeKey(1), "voice", pool).controls;
     handle

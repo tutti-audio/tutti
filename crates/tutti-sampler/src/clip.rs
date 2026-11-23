@@ -7,7 +7,6 @@ use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
 use tutti_graph::{HasParam, IntoNode, NodeParts};
-use tutti_timeline::TempoReader;
 use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{StreamHandle, StreamReader};
@@ -28,8 +27,8 @@ use crate::{
 /// ```
 ///
 /// It plays on the transport, from `at` (beat 0 until set) to the end of the
-/// sample. A node over a clip reads the session's tempo map when the session's graph adds it
-/// (`tutti-session`'s `SessionNode`).
+/// sample. A node over a clip places it by the tempo map its block is lent
+/// (`Cx::tempo`).
 ///
 /// # Two tiers, one clip
 ///
@@ -60,7 +59,6 @@ pub struct Clip<F: SamplerFloat> {
     gain: Amplitude,
     speed: PlaybackRate,
     loop_: Option<Loop>,
-    tempo: Option<TempoReader>,
 }
 
 /// What a clip plays.
@@ -86,7 +84,6 @@ impl<F: SamplerFloat> Clip<F> {
             gain: Amplitude::new(1.0),
             speed: PlaybackRate::UNITY,
             loop_: None,
-            tempo: None,
         }
     }
 
@@ -186,13 +183,6 @@ impl<F: SamplerFloat> Clip<F> {
         self
     }
 
-    /// This clip reading the project's tempo map through `tempo`, as
-    /// [`VoiceNode::tempo`].
-    pub fn tempo(mut self, tempo: TempoReader) -> Self {
-        self.tempo = Some(tempo);
-        self
-    }
-
     /// The node this clip is, placed and set.
     fn into_node(self) -> VoiceNode<F> {
         let Self {
@@ -201,7 +191,6 @@ impl<F: SamplerFloat> Clip<F> {
             gain,
             speed,
             loop_,
-            tempo,
         } = self;
         let play = Playback {
             gain,
@@ -209,7 +198,7 @@ impl<F: SamplerFloat> Clip<F> {
             loop_,
             ..Playback::default()
         };
-        let node = match tier {
+        match tier {
             Tier::Resident { mut source, .. } => {
                 source.set_window(window);
                 source.store_gain(gain);
@@ -229,11 +218,7 @@ impl<F: SamplerFloat> Clip<F> {
             }
         }
         // The clip's gain was checked when set, and its width when it was made.
-        .expect("a clip's gain and width are checked at the call that sets them");
-        match tempo {
-            Some(tempo) => node.tempo(tempo),
-            None => node,
-        }
+        .expect("a clip's gain and width are checked at the call that sets them")
     }
 }
 
