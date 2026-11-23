@@ -5,6 +5,7 @@
 //! Every figure is analytic: constants of exactly representable values, so
 //! `0.5 L + 0.5 R` is exact in `f32`.
 
+use crate::offline::offline;
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_buffers::{FoldError, InterleavedMut};
@@ -17,10 +18,6 @@ use tutti_session::{
 };
 
 const BLOCK: usize = 64;
-
-fn offline() -> Session {
-    Session::builder().build().expect("builds")
-}
 
 fn layout(n: u16) -> ChannelLayout {
     ChannelLayout::from_count(n)

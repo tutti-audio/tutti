@@ -87,6 +87,11 @@ const TINY: f64 = 1e-30;
 ranged! {
     /// How many partials a peak may be, itself included: `1..=16`. 1 folds a
     /// peak to its own class only.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "usize", into = "usize")
+    )]
     HarmonicCount(usize), HarmonicCountError, "a harmonic count within 1..=16",
     |raw| raw >= 1 && raw <= 16
 }
@@ -94,6 +99,11 @@ ranged! {
 ranged! {
     /// The weight of a subharmonic, per order past the first: finite and in
     /// `(0, 1]`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "f64", into = "f64")
+    )]
     HarmonicDecay(f64), HarmonicDecayError, "a harmonic decay within (0, 1]",
     |raw| raw > 0.0 && raw <= 1.0
 }
@@ -102,6 +112,11 @@ ranged! {
     /// How far under a frame's strongest peak a peak is still counted: within
     /// `-120..=0` dB, a practical bound: a peak a million times under the
     /// strongest is below any spectrum's resolution.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Db", into = "Db")
+    )]
     PeakFloor(Db), PeakFloorError, "a peak floor within -120..=0 dB",
     |raw| raw.get() >= -120.0 && raw.get() <= 0.0
 }
@@ -109,6 +124,11 @@ ranged! {
 ranged! {
     /// A fixed offset from A4 = 440 Hz, within `-50..=50` cents: the range a
     /// tuning is read in, since a peak folds to its nearest class.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Cents", into = "Cents")
+    )]
     TuningOffset(Cents), TuningOffsetError, "a tuning offset within -50..=50 cents",
     |raw| raw.get() >= -50.0 && raw.get() <= 50.0
 }
@@ -279,7 +299,7 @@ impl ChromaConfig {
     /// [`FramingError::TooManyOverlaps`](crate::FramingError::TooManyOverlaps) for a hop under a sixty-fourth of the window;
     /// [`MeterError::EmptyFrequencyRange`] when the band holds fewer than three bins;
     /// [`AboveNyquist`](crate::AboveNyquist) when it exceeds half `rate`.
-    fn plan(&self, rate: SampleRate) -> Result<ChromaPlan, MeterError> {
+    pub(crate) fn plan(&self, rate: SampleRate) -> Result<ChromaPlan, MeterError> {
         let geometry = self.framing.geometry(rate)?;
         check_window(geometry.window(), &WINDOWS)?;
         check_overlap(geometry.window(), geometry.hop())?;
@@ -323,7 +343,7 @@ impl Default for ChromaConfig {
 
 /// A [`ChromaConfig`] at one sample rate, its framing and band checked.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct ChromaPlan {
+pub(crate) struct ChromaPlan {
     geometry: StftGeometry,
     min_freq: Hz,
     max_freq: Hz,
@@ -334,6 +354,11 @@ struct ChromaPlan {
 }
 
 impl ChromaPlan {
+    /// The window and hop the frames are cut at.
+    pub(crate) fn framing(&self) -> Framing {
+        Framing::new(self.geometry.window(), self.geometry.hop())
+    }
+
     /// The bins a peak may sit on, `lo..=hi`, each with both neighbours inside
     /// the half spectrum; an error unless the band is valid and holds three.
     fn band_bins(&self) -> Result<(usize, usize), MeterError> {

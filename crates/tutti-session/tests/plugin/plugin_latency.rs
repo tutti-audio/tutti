@@ -183,12 +183,10 @@ fn a_latency_the_plugin_reports_reaches_the_graph() {
     );
 
     let _job = s.bounce(request()).expect("the bounce starts");
-    let deadline = Instant::now() + std::time::Duration::from_secs(10);
-    while diagnostics_of(&s, node).reported_latency() != Samples::new(own + 300) {
-        assert!(Instant::now() < deadline, "the report never arrived");
+    tutti_fixtures::wait_until("the report to arrive", tutti_fixtures::HANG_GUARD, || {
         round_trip(&s, node);
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+        diagnostics_of(&s, node).reported_latency() == Samples::new(own + 300)
+    });
     assert_eq!(
         diagnostics_of(&s, node).latency(),
         Samples::new(own + BLOCK),
@@ -408,13 +406,13 @@ fn a_clock_switch_re_declares_a_plugins_latency_and_keeps_its_handle() {
     s.graph()
         .set_sources(MainOutput::channel(0), [OutputPort::new(node, 0)])
         .unwrap();
-    let _ = s.update();
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    let _ = s.update();
-    assert_eq!(
-        s.graph_ref().node_latency(node).unwrap(),
-        Samples::new(137 + 480),
-        "one timer block"
+    tutti_fixtures::wait_until(
+        "the node's latency to be the plugin's and one timer block",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            let _ = s.update();
+            s.graph_ref().node_latency(node).unwrap() == Samples::new(137 + 480)
+        },
     );
 
     let (driver, stream) = ManualStreamDriver::new();

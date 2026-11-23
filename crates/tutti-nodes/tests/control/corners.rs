@@ -65,7 +65,7 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
     let NodeParts { node, fork, .. } =
         CompressorNode::<f32>::from(CompressorConfig::new(BusTopology::MONO).controls(controls))
             .into_parts();
-    let c = g.add(NodeParts::new(node, (), fork));
+    let c = g.add(NodeParts::new(node, (), fork, None));
     g.connect_input(0, c, 0);
     g.connect_output(c, 0, 0);
     let s = g.add(tutti_graph::Unforkable(Sends(sends)));

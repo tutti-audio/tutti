@@ -31,7 +31,7 @@ use tutti_rt::{
     Counter, Mutex, Overflow, PackedAtomic, Parker, RingReader, RingWriter, Tally, TallyWriter,
     Unparker, parker, ring, tally,
 };
-use tutti_units::{Normalized, ParamId, SampleRate};
+use tutti_units::{Chunks, Normalized, ParamId, SampleRate};
 
 /// How many commands each lane's queue holds before a push fails. The block
 /// queue's size also bounds how many `Process` payloads can be outstanding at
@@ -111,16 +111,16 @@ pub(super) struct Channels {
     /// claim drains at the next), and a control thread that installs a reader or
     /// flushes claims it waiting.
     host_edits: Arc<AudioThreadCell<Option<EditReader>>>,
-    /// How many blocks the bridge thread abandoned on a missed budget, ever:
+    /// How many chunks the bridge thread abandoned on a missed budget, ever:
     /// a loss, and with [`replies`](Self::replies) the hang verdict's input.
-    abandoned: Tally<u64>,
+    abandoned: Tally<Chunks>,
     /// The bridge thread's writer of `abandoned`, minted in `new`.
-    abandoned_writer: TallyWriter<u64>,
+    abandoned_writer: TallyWriter<Chunks>,
     /// How many owed replies the bridge thread collected after abandoning the
-    /// blocks that asked for them, ever: the other half of `abandoned`.
-    late: Tally<u64>,
+    /// chunks that asked for them, ever: the other half of `abandoned`.
+    late: Tally<Chunks>,
     /// The bridge thread's writer of `late`, minted in `new`.
-    late_writer: TallyWriter<u64>,
+    late_writer: TallyWriter<Chunks>,
     /// Commands the audio side could not hand to the bridge thread, ever: a
     /// full command queue refused one, the payload pool had no payload for a
     /// block, or a parameter buffer had no room to come back to. Written
@@ -163,9 +163,9 @@ pub(super) struct Channels {
     /// `MAX_BEHIND` behind the newest submitted, so their slab slot is the
     /// host's again. Shared with the pipeline's counters
     /// (`ChunkCounters::attach_skipped`).
-    skipped: Tally<u64>,
+    skipped: Tally<Chunks>,
     /// The bridge thread's writer of `skipped`, minted in `new`.
-    skipped_writer: TallyWriter<u64>,
+    skipped_writer: TallyWriter<Chunks>,
     /// What became of each of the last [`BATCH_OUTCOMES`] chunks the bridge thread
     /// dealt with, for the batcher to look up.
     fates: Arc<BatchOutcomes>,
@@ -575,14 +575,14 @@ impl Channels {
     /// reply that came after its abandonment, which is also a reply the plugin
     /// gave. Called by the bridge thread only.
     pub(super) fn note_late(&self) {
-        self.late_writer.add(1);
+        self.late_writer.add(Chunks::new(1));
         self.replies.fetch_add(1, Ordering::Release);
     }
 
     /// Record that a block's reply missed its budget and is now owed. Called
     /// by the bridge thread only, before any settle of that reply.
     pub(super) fn note_abandoned(&self) {
-        self.abandoned_writer.add(1);
+        self.abandoned_writer.add(Chunks::new(1));
     }
 
     /// Record that the plugin answered (a reply for a block, on time or
@@ -598,7 +598,7 @@ impl Channels {
         PipelineCounts {
             abandoned: self.abandoned.get(),
             late: self.late.get(),
-            replies: self.replies.load(Ordering::Acquire),
+            replies: Chunks::new(self.replies.load(Ordering::Acquire)),
         }
     }
 
@@ -648,7 +648,7 @@ impl Channels {
     /// Record a chunk skipped as stale. Bridge thread only; a count nothing
     /// branches on.
     pub(super) fn note_skipped(&self) {
-        self.skipped_writer.add(1);
+        self.skipped_writer.add(Chunks::new(1));
     }
 
     /// Record what became of chunk `seq`. Bridge thread only. A chunk not
@@ -666,7 +666,7 @@ impl Channels {
     }
 
     /// The cell [`note_skipped`](Self::note_skipped) counts into.
-    pub(super) fn skipped_cell(&self) -> Tally<u64> {
+    pub(super) fn skipped_cell(&self) -> Tally<Chunks> {
         self.skipped.clone()
     }
 
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(c.fate(4), None);
     }
 
-    /// Abandoned blocks, owed replies collected late and replies are separate
+    /// Abandoned chunks, owed replies collected late and replies are separate
     /// monotonic totals: a poller who sees the first grow while the last does
     /// not has a hang, and a late reply is also a reply.
     #[test]
@@ -987,9 +987,9 @@ mod tests {
             c.note_abandoned();
         }
         let counts = |abandoned, late, replies| PipelineCounts {
-            abandoned,
-            late,
-            replies,
+            abandoned: Chunks::new(abandoned),
+            late: Chunks::new(late),
+            replies: Chunks::new(replies),
         };
         assert_eq!(c.block_counts(), counts(3, 0, 0));
         c.note_replied();

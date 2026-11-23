@@ -31,11 +31,25 @@ pub struct CrossCorrelation {
 /// The strongest lag of a [`CrossCorrelation`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CorrelationPeak {
+    lag: isize,
+    value: f64,
+}
+
+impl CorrelationPeak {
     /// Where the maximum sits, in whole samples; see [`CrossCorrelation`] for
-    /// the sign.
-    pub lag: isize,
+    /// the sign. Signed, where [`Samples`] is a count.
+    #[inline]
+    #[must_use]
+    pub fn lag(&self) -> isize {
+        self.lag
+    }
+
     /// The correlation there, in the units of the product of the two inputs.
-    pub value: f64,
+    #[inline]
+    #[must_use]
+    pub fn value(&self) -> f64 {
+        self.value
+    }
 }
 
 impl CrossCorrelation {

@@ -128,7 +128,8 @@ const STAND_IN_ENV: &str = "TUTTI_LAUNCH_TEST_STAND_IN";
 ///
 /// The server is **this test binary**, re-run on [`stand_in_reports`] (a program
 /// looked up on `PATH` is not one on every runner), under the same
-/// `spawn` a launch uses, and the report is on its standard output.
+/// `spawn` a launch uses, and the report is written to a fifo whose path is
+/// the value of [`STAND_IN_ENV`] (the server's standard output is the host's).
 fn stand_in_report() -> (Vec<String>, Vec<String>) {
     use std::io::{Read as _, Write as _};
 
@@ -145,14 +146,17 @@ fn stand_in_report() -> (Vec<String>, Vec<String>) {
     let leaked = std::fs::File::open("/dev/null").expect("/dev/null opens");
     rustix::io::fcntl_setfd(&leaked, rustix::io::FdFlags::empty()).expect("close-on-exec clears");
     let mut command = Command::new(std::env::current_exe().expect("the test binary's path"));
-    // The pipe's write end is the command's, which the spawn drops: the read
-    // ends at the stand-in's end.
-    let (mut stdout, report_to) = std::io::pipe().expect("the report pipe");
-    command
-        .args(&args)
-        .env(STAND_IN_ENV, "1")
-        .stdout(report_to)
-        .stderr(std::process::Stdio::null());
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "tutti-launch-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    let fifo = dir.join("report");
+    let made = Command::new("mkfifo").arg(&fifo).status().expect("mkfifo");
+    assert!(made.success(), "mkfifo {}", fifo.display());
+    command.args(&args).env(STAND_IN_ENV, &fifo);
     let (server, rendezvous) = crate::transport::spawn(command).expect("the stand-in spawns");
     let guard = ProcessGuard::launched(server, &IpcConfig::new(), tutti_fixtures::executor())
         .expect("the exit thread starts");
@@ -161,8 +165,14 @@ fn stand_in_report() -> (Vec<String>, Vec<String>) {
         .expect("the host's end exists from the spawn");
     host.write_all(&[0x5a])
         .expect("the byte reaches the stand-in");
+    // The stand-in opens the fifo after it listed its descriptors; the read
+    // ends at its end.
     let mut report = String::new();
-    stdout.read_to_string(&mut report).expect("the report");
+    std::fs::File::open(&fifo)
+        .expect("the fifo opens")
+        .read_to_string(&mut report)
+        .expect("the report");
+    std::fs::remove_dir_all(&dir).expect("the directory goes");
     drop(guard);
     drop(leaked);
     let lines = report
@@ -176,17 +186,18 @@ fn stand_in_report() -> (Vec<String>, Vec<String>) {
 /// The body of the stand-in [`stand_in_report`] spawns; a no-op anywhere else.
 #[test]
 fn stand_in_reports() {
-    use std::io::{Read as _, Write as _};
+    use std::fmt::Write as _;
+    use std::io::Read as _;
 
-    if std::env::var_os(STAND_IN_ENV).is_none() {
+    let Some(fifo) = std::env::var_os(STAND_IN_ENV) else {
         return;
-    }
-    let mut out = std::io::stdout().lock();
+    };
+    let mut out = String::new();
     let mut byte = [0u8; 1];
     std::io::stdin()
         .read_exact(&mut byte)
         .expect("the host's byte");
-    writeln!(out, "report: byte {}", byte[0]).expect("the report");
+    writeln!(out, "report: byte {}", byte[0]).expect("a line");
     // The directory's own descriptor is listed while it is read and gone when
     // that ends: only a descriptor `metadata` still finds is the process's.
     let numbers: Vec<String> = std::fs::read_dir("/dev/fd")
@@ -200,15 +211,16 @@ fn stand_in_reports() {
         .collect();
     for n in numbers {
         if std::fs::metadata(format!("/dev/fd/{n}")).is_ok() {
-            writeln!(out, "report: fd {n}").expect("the report");
+            writeln!(out, "report: fd {n}").expect("a line");
         }
     }
     for arg in std::env::args().skip(1) {
-        writeln!(out, "report: arg {arg}").expect("the report");
+        writeln!(out, "report: arg {arg}").expect("a line");
     }
     for (key, _) in std::env::vars_os() {
-        writeln!(out, "report: env {}", key.to_string_lossy()).expect("the report");
+        writeln!(out, "report: env {}", key.to_string_lossy()).expect("a line");
     }
+    std::fs::write(fifo, out).expect("the report");
 }
 
 /// **The server holds descriptors 0, 1 and 2 and nothing else**, even with one

@@ -2,28 +2,19 @@
 //! refused where it is declared (doc 030, T2). Its value afterwards is the
 //! `RangeTarget`'s: it bounds the effective value and never the base.
 
+use crate::common::session;
 use std::sync::Arc;
 
-use tutti_buffers::MaxBlock;
 use tutti_graph::NodeKey;
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{
-    DeclarationError, ParamRef, RangeTarget, RouteError, RouteSpec, Session, SetRefusal,
-    ValueErrorKind,
+    DeclarationError, ParamRef, RangeTarget, RouteError, RouteSpec, SetRefusal, ValueErrorKind,
 };
-use tutti_units::{Depth, Hz, Mix, Q, Samples, UnitParam};
+use tutti_units::{Depth, Hz, Mix, Q, UnitParam};
 
 use crate::common::probe::ProbeUnit;
 use crate::mod_lanes::{main_output, render, rig, settle};
 use tutti_buffers::ChannelLayout;
-
-fn session() -> Session {
-    Session::builder()
-        .outputs(tutti_buffers::ChannelLayout::STEREO)
-        .max_block(MaxBlock::of(Samples::new(256)))
-        .build()
-        .expect("builds")
-}
 
 /// **A range with its start above its end is refused with both bounds, and
 /// nothing is declared**: the route that needs the range is still refused as

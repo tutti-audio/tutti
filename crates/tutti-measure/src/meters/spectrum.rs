@@ -103,12 +103,22 @@ const POWER_EPSILON: f64 = 1e-30;
 
 ranged! {
     /// A time constant or a hold: within `0..=3600` seconds.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Seconds", into = "Seconds")
+    )]
     SpectrumTime(Seconds), SpectrumTimeError, "a spectrum time within 0..=3600 s",
     |raw| raw.get() >= 0.0 && raw.get() <= 3600.0
 }
 
 ranged! {
     /// The level silence and anything quieter reads: within `-300..=0` dB.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Db", into = "Db")
+    )]
     SpectrumFloor(Db), SpectrumFloorError, "a spectrum floor within -300..=0 dB",
     |raw| raw.get() >= -300.0 && raw.get() <= 0.0
 }
@@ -116,18 +126,33 @@ ranged! {
 ranged! {
     /// How fast a held peak falls, in [`Db`] per second: within `0..=10000`. No
     /// unit covers a rate of decibels.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Db", into = "Db")
+    )]
     PeakDecay(Db), PeakDecayError, "a peak decay within 0..=10000 dB per second",
     |raw| raw.get() >= 0.0 && raw.get() <= 10_000.0
 }
 
 ranged! {
     /// Bands per octave: within `1..=48`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "usize", into = "usize")
+    )]
     BandsPerOctave(usize), BandsPerOctaveError, "a band count per octave within 1..=48",
     |raw| raw >= 1 && raw <= 48
 }
 
 ranged! {
     /// The number of log-spaced bands: within `1..=4096`.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "usize", into = "usize")
+    )]
     BandCount(usize), BandCountError, "a band count within 1..=4096",
     |raw| raw >= 1 && raw <= 4096
 }

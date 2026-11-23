@@ -87,6 +87,19 @@ impl ControlValue {
 }
 
 impl ControlValue {
+    /// The data of Registered Controller `index` from its 14-bit MIDI 1.0 form
+    /// (M2-115 section 4.1): zero-extended for an index of 0 to 31 in every
+    /// bank, scaled Min-Center-Max otherwise.
+    #[inline]
+    #[must_use]
+    pub fn from_registered(index: U7, data: U14) -> Self {
+        if scale::zero_extended(index) {
+            Self(u32::from(data.get()) << 18)
+        } else {
+            Self::from(data)
+        }
+    }
+
     /// The value as 7 bits: the top 7 bits, the downscale of M2-115 section 3.4
     /// as a plain right shift.
     #[inline]

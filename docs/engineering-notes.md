@@ -249,7 +249,7 @@ Rules:
   when the only `reclaim` caller was the hardware MIDI port set's owner.
   Every publisher now reclaims on a control-side tick it already has: the
   session's `Phase::Reclaim` sweeps its graph's table (each node's
-  `Reclaimer`, which `SessionNode::reclaimer` hands the graph as the node
+  reclaimer, which the node's `NodeParts::reclaimer` hands the graph as the node
   goes in through `add` or `crossfade` and which leaves with the node:
   clips, harmony, the MIDI input, voices; and each hosted plugin's
   `PluginTimeSignature`, which a `clear_meter` leaves following no project meter)
@@ -451,7 +451,7 @@ despawn system.
 
 Params are `AudioParam<U, const P: u16>` — one generic component per scalar,
 registered with `App::add_audio_param::<U, P>()` and written in the `Params`
-phase through the node's `ParamSet` (`SessionNode::params`); a node without the
+phase through the node's `ParamSet` (`NodeParts::params`); a node without the
 param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 `UnitParam` discriminant in the low), so a node's only param of a kind is the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with
@@ -845,24 +845,24 @@ a separate, opt-in piece.
   between the fork and the exec (`close_range` on Linux, a sweep of `fcntl` calls
   elsewhere and on old kernels), so the helper holds descriptors 0, 1 and 2 only. The
   server cannot do this itself: a pre-main initialiser may own descriptors.
-  **Missing on Windows:** std starts a process with `bInheritHandles` true and no handle
-  list, so every handle of the host marked inheritable reaches the helper (std's own
-  are not; a CRT `_open` without `O_NOINHERIT`, a plugin or a driver DLL can leave
-  some). The fix is a hand-written CreateProcessW with `STARTUPINFOEX` and a
-  PROC_THREAD_ATTRIBUTE_HANDLE_LIST of the standard handles, until
-  CommandExt::inherit_handles is stable (rust-lang/rust#146407).
+  On Windows the spawn is a hand-written `CreateProcessW` with a
+  PROC_THREAD_ATTRIBUTE_HANDLE_LIST of the three standard handles (the host's for
+  the server, `NUL` for the probe), each a duplicate or a fresh open made for the
+  spawn, so no other handle of the host's reaches the helper whatever its inherit
+  flag (std starts a process with `bInheritHandles` true and no list, and
+  CommandExt::inherit_handles is unstable, rust-lang/rust#146407). The command
+  line and the environment block are built by the spawn itself, so a program with
+  no path, a `.bat` or `.cmd`, a NUL, or an `env_clear` is not passed.
 - **A server's end:** the guard's drop sends `Shutdown` and waits
   `Timeouts::shutdown` on the OS's exit wake, then kills. The kill is `SIGKILL`
   of the server's process group on unix (a server leads its own group, so the
   helpers a plugin spawned go with it), and a Job Object with
   kill-on-close on Windows (the kernel ends the server when the host does). A
   server that is not told to shut down (a launch that failed) is killed at once.
-- **Windows binding fails open, with a gap:** if the Job Object cannot be made or
-  the server cannot be assigned to it, the load goes on (refusing every plugin
-  for it is worse) and logs a warning; the server's own watch on the host is
-  then what ends it. The assignment follows the spawn, so a process the server
-  started before it must stay outside the job. Closing that gap takes a
-  suspended spawn and a resume of its main thread, which std does not offer.
+- **Windows binding:** the server starts suspended and is assigned to the Job
+  Object before its main thread runs, so nothing it starts is outside the job. If
+  the job cannot be made or the server cannot be assigned to it, the spawn kills
+  the server and the launch fails with `ServerNotBound`.
 - **The server's own teardown is bounded:** a stopped render thread is given
   3 s, and one still inside the plugin ends the process outright (a plugin that
   never returns from a block cannot be destroyed). A partial audio frame is

@@ -226,7 +226,8 @@ jobs:
       - name: MIDI backend tests
         run: cargo nextest run --locked -p tutti-winmm-ffi -p tutti-midi-hardware --features tutti-winmm-ffi/synth-tests,tutti-midi-hardware/synth-tests
       # The Windows side of the plugin transport: the mapping, the header, the exit watch, and the control
-      # framing over named pipes. Neither suite spawns a server.
+      # framing over named pipes, and the spawn's handle list, job and command line, whose children are the
+      # ffi test binary run again. Neither suite spawns a server.
       - name: Plugin IPC transport tests
         run: cargo nextest run --locked -p tutti-plugin-ipc-ffi -p tutti-plugin-ipc --lib -E "package(tutti-plugin-ipc-ffi) | test(/^transport::/)"
 

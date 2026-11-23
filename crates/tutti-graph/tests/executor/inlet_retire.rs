@@ -93,7 +93,7 @@ impl tutti_graph::Node for DropsInBlock {
 impl tutti_graph::IntoNode for DropsInBlock {
     type Controls = ();
     fn into_parts(self) -> tutti_graph::NodeParts<()> {
-        tutti_graph::NodeParts::new(Box::new(self), (), None)
+        tutti_graph::NodeParts::new(Box::new(self), (), None, None)
     }
 }
 

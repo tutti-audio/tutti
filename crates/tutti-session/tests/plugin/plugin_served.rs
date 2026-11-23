@@ -117,12 +117,12 @@ fn session(recovery: bool) -> Session {
     session_with(recovery.then(RecoveryPolicy::default))
 }
 
-/// One update, a block rendered and a short wait: what moves a plugin's health.
+/// One update and a block rendered: what moves a plugin's health.
 fn pump(s: &mut Session) -> Vec<SessionEvent> {
     let events = s.update();
     let mut out = vec![0.0f32; BLOCK * 2];
     s.render(&mut InterleavedMut::new(&mut out, ChannelLayout::STEREO).unwrap());
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::yield_now();
     events
 }
 
@@ -132,12 +132,13 @@ fn settle_until<K: tutti_session::AppKey, C: tutti_session::Clock<Float = f32>>(
     what: &str,
     mut done: impl FnMut(&mut Session<K, C>) -> bool,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !done(s) {
-        assert!(Instant::now() < deadline, "{what} never happened");
+    tutti_fixtures::wait_until(what, tutti_fixtures::HANG_GUARD, || {
+        if done(s) {
+            return true;
+        }
         let _ = s.update();
-        std::thread::sleep(Duration::from_millis(2));
-    }
+        false
+    });
 }
 
 /// Pumps until `done`.
