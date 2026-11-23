@@ -791,7 +791,10 @@ pub mod polysynth {
 #[cfg(feature = "synth")]
 pub mod voicing {
     pub use tutti_voicing::{
-        Glide, NoteControl, NoteStart, NoteVoice, Order, Steal, VoiceAllocator, VoiceConfig,
+        ChannelState, Glide, Holds, MasterGain, Mode, NoSuchTuning, NoteControl, NoteStart,
+        NoteVoice, Order, Patch, Phase, Release, Retrigger, Steal, TuningCapacity, TuningCount,
+        TuningCountOutOfRange, VoiceAllocator, VoiceCommand, VoiceConfig, VoiceId, VoiceSpec,
+        VoiceTable,
     };
 }
 
