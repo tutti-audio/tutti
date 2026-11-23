@@ -29,8 +29,8 @@ pub(super) enum ERef {
     Fb(EventFeedbackId),
 }
 
-/// An op before colouring: the same shape as [`Op`] with value ids where
-/// slots will go.
+/// An op before colouring: the same shape as [`Op`](crate::Op) with value ids
+/// where slots will go.
 pub(super) enum Pre {
     MainInput {
         channel: u16,
