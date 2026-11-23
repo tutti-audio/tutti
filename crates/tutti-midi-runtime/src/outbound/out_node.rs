@@ -14,7 +14,7 @@
 use tutti_graph::{
     Cx, Event, EventKind, InEvents, Io, Node, Offset, OutEvents, Prepare, Shape, Status, UmpAt,
 };
-use tutti_ump::NoteKey;
+use tutti_ump::KeyBitset;
 
 use crate::ledger::{Class, owed_off};
 use crate::live::DeviceGeneration;
@@ -48,26 +48,17 @@ pub struct MidiOutNode {
     follow: Option<Follow>,
     /// The keys passed on with a Note On and no Note Off since, while the node
     /// follows a retirement: what it ends when the retirement comes.
-    held: Option<Box<[u64; HELD_WORDS]>>,
+    held: Option<Box<KeyBitset>>,
 }
 
-/// One bit per key: 16 Groups, 16 Channels and 128 notes, as a [`NoteKey`]
-/// packs a MIDI 2.0 key.
-const HELD_WORDS: usize = 1 << 9;
-
-/// The bit of a MIDI 2.0 key ([`Class`] reads every note as one) that says so.
-const MIDI2_KEY: u16 = 1 << 15;
-
 /// Notes `raw` as started or ended in `held`.
-fn track(held: &mut [u64; HELD_WORDS], raw: tutti_ump::Ump) {
+fn track(held: &mut KeyBitset, raw: tutti_ump::Ump) {
     match Class::of(raw) {
         Class::On(key) => {
-            let at = bit(key);
-            held[at >> 6] |= 1 << (at & 63);
+            held.insert(key);
         }
         Class::Off(key) => {
-            let at = bit(key);
-            held[at >> 6] &= !(1 << (at & 63));
+            held.remove(key);
         }
         Class::Other => {}
     }
@@ -77,25 +68,16 @@ fn track(held: &mut [u64; HELD_WORDS], raw: tutti_ump::Ump) {
 /// the port took its off; the first refusal (the port is full) leaves the rest
 /// for the next block. A refused off is deferred, not lost: the refusal is given
 /// back at once, so the executor's lost count does not carry it.
-fn end_notes(held: &mut [u64; HELD_WORDS], out: &mut tutti_graph::EventWriter<'_>, at: Offset) {
-    for (word, bits) in held.iter_mut().enumerate() {
-        let mut rest = *bits;
-        while rest != 0 {
-            let low = rest.trailing_zeros() as u16;
-            let key = NoteKey::from_index(MIDI2_KEY | (word as u16) << 6 | low);
-            if out.push(owed_off(key, at)).is_err() {
-                out.recovered();
-                return;
-            }
-            rest &= rest - 1;
-            *bits &= !(1 << low);
+fn end_notes(held: &mut KeyBitset, out: &mut tutti_graph::EventWriter<'_>, at: Offset) {
+    let mut from = 0;
+    while let Some(key) = held.next_from(from) {
+        if out.push(owed_off(key, at)).is_err() {
+            out.recovered();
+            return;
         }
+        held.remove(key);
+        from = u32::from(key.index()) + 1;
     }
-}
-
-/// The key's place in the table.
-fn bit(key: NoteKey) -> usize {
-    usize::from(key.index() & !MIDI2_KEY)
 }
 
 /// A [`DeviceGeneration`] the node reads each block, and the generations of the
@@ -228,7 +210,7 @@ impl MidiOutNode {
             // Nothing stored yet: the first block stores.
             acknowledged: u64::MAX,
         });
-        self.held = Some(Box::new([0; HELD_WORDS]));
+        self.held = Some(Box::new(KeyBitset::new()));
         self
     }
 }
@@ -251,10 +233,7 @@ impl<F: tutti_buffers::Float> Node<F> for MidiOutNode {
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let held = &self.held;
         let phase = self.follow.as_mut().map_or(Phase::Live, |follow| {
-            follow.step(|| {
-                held.as_deref()
-                    .is_some_and(|keys| keys.iter().any(|w| *w != 0))
-            })
+            follow.step(|| held.as_deref().is_some_and(|keys| !keys.is_empty()))
         });
         let mut kept = 0;
         let mut lost = 0;
