@@ -23,6 +23,7 @@ use crate::plan::{Direct, Form, NodeRec, Plan};
 use crate::rtlog::{LogSink, LogSlots};
 use crate::slots::{AudioSlots, EventSlot, EventSlots, SlotFlags};
 use tutti_music::MeterMap;
+use tutti_tempo::TempoMap;
 
 /// [`Op::Node`](crate::Op::Node): run `u` for `h.rec`: the plain op for a unit whose mode asks
 /// nothing of it, else the one that applies its mode. Returns whether a
@@ -219,6 +220,7 @@ pub(super) fn fading_node_op<
             arrival: h.rec.arrival,
             history: h.history,
             meter: h.meter,
+            tempo: h.tempo,
         };
         x.out
             .as_mut()
@@ -322,6 +324,8 @@ pub(crate) struct Head<'p, 'e> {
     pub(crate) history: &'e TransportHistory,
     /// The project's meter for the block: lent by the host, read-only.
     pub(crate) meter: Option<&'e MeterMap>,
+    /// The project's tempo map for the block: lent by the host, read-only.
+    pub(crate) tempo: Option<&'e TempoMap>,
 }
 
 /// What a node op may write besides its own unit: every buffer through `A`
@@ -606,6 +610,7 @@ pub(super) fn node_op_with<
         env: h.env,
         history: h.history,
         meter: h.meter,
+        tempo: h.tempo,
         max: h.max,
         frames,
         rec,
@@ -724,6 +729,7 @@ pub(super) struct Call<'p, 'e, F: Float> {
     env: &'e Env,
     history: &'e TransportHistory,
     meter: Option<&'e MeterMap>,
+    tempo: Option<&'e TempoMap>,
     max: MaxBlock,
     frames: usize,
     rec: &'p NodeRec,
@@ -790,6 +796,7 @@ impl<'p, F: Float> Call<'p, '_, F> {
             arrival: self.rec.arrival,
             history: self.history,
             meter: self.meter,
+            tempo: self.tempo,
         }
     }
 

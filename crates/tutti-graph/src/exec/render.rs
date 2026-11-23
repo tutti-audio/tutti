@@ -25,6 +25,7 @@ use crate::play::PlayClock;
 use crate::rtlog::LogLane;
 use crate::slots::{EventSlots, SlotFlags};
 use tutti_music::MeterMap;
+use tutti_tempo::TempoMap;
 
 /// After a block in which a crossfade reached its end: retire each ended
 /// fade's outgoing unit into the commit that started it, and start the fade
@@ -130,7 +131,7 @@ impl<F: Float> Executor<F> {
     ) {
         with_no_denormals(|| {
             self.apply_pending();
-            self.render_applied(frames, transport, changes, inputs, outputs, None);
+            self.render_applied(frames, transport, changes, inputs, outputs, None, None);
         });
     }
 
@@ -161,7 +162,8 @@ impl<F: Float> Executor<F> {
     ///
     /// `meter` is the project's meter for this block, lent by the host once
     /// for the block and handed to every node through [`Cx::meter`](crate::Cx#structfield.meter) (serial or
-    /// on a pool); `None` where the host has none.
+    /// on a pool); `None` where the host has none. `tempo` is the project's
+    /// tempo map, lent the same way and handed through [`Cx::tempo`](crate::Cx#structfield.tempo).
     ///
     /// # Panics
     ///
@@ -174,6 +176,7 @@ impl<F: Float> Executor<F> {
         inputs: &[&[F]],
         outputs: &mut [&mut [F]],
         meter: Option<&MeterMap>,
+        tempo: Option<&TempoMap>,
     ) {
         let _rt = self.prepare.enter_rt_scope();
         // `move` captures `self` as one pointer; the precise capture of every
@@ -365,6 +368,7 @@ impl<F: Float> Executor<F> {
                         env: &env,
                         history,
                         meter,
+                        tempo,
                         frames,
                         max,
                         cap,
@@ -498,6 +502,7 @@ impl<F: Float> Executor<F> {
                                 env: &env,
                                 history,
                                 meter,
+                                tempo,
                             };
                             st.at = unit as usize;
                             fade_ended |= node_dispatch(u, &head, &mut st);

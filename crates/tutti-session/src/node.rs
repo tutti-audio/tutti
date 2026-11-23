@@ -58,10 +58,10 @@ pub trait SessionNode<F: Float = f32>:
     /// The node reading the session's timeline through `timeline` (a read-only view the
     /// graph hands each node it takes in [`Graph::add`](crate::Graph::add) and
     /// [`Graph::replace`](crate::Graph::replace); the node clones the readers it
-    /// follows). The identity, the default, for a node that reads neither: a sampler node
-    /// takes the tempo map, so a placed voice stays where the map puts it through a step
-    /// or a ramp, and a sampler pool also takes the loop, so the stretched voices under
-    /// it carry the spare vocoder they prime a wrap with.
+    /// follows). The identity, the default, for a node that reads none: a sampler pool
+    /// takes the loop, so the stretched voices under it carry the spare vocoder they
+    /// prime a wrap with. The tempo map reaches a node through `Cx::tempo`, lent with
+    /// each block.
     #[must_use]
     fn bind_timeline(self, timeline: &TimelineView) -> Self
     where
@@ -253,10 +253,6 @@ fn voice_slots<F: tutti_sampler::SamplerFloat>(
 /// gain as set; the placements it replaced freed by its reclaimer.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
-    fn bind_timeline(self, timeline: &TimelineView) -> Self {
-        self.tempo(timeline.tempo().clone())
-    }
-
     fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
         voice_slots(node, controls)
     }
@@ -267,18 +263,13 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoicePool<F> {
     fn bind_timeline(self, timeline: &TimelineView) -> Self {
-        self.tempo(timeline.tempo().clone())
-            .loops(timeline.loops().clone())
+        self.loops(timeline.loops().clone())
     }
 }
 
 /// A bare clip reader as a graph node, its gain addressed by its set.
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {
-    fn bind_timeline(self, timeline: &TimelineView) -> Self {
-        self.tempo(timeline.tempo().clone())
-    }
-}
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySource<F> {}
 
 /// A [`Clip`](tutti_sampler::Clip) as a graph node: the voice node it
 /// builds, its gain addressed by its set, and the placements it replaced (and
@@ -286,10 +277,6 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySou
 /// in the graph.
 #[cfg(feature = "sampler")]
 impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
-    fn bind_timeline(self, timeline: &TimelineView) -> Self {
-        self.tempo(timeline.tempo().clone())
-    }
-
     fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
         voice_slots(node, controls)
     }
@@ -298,11 +285,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
 /// A streamed voice as a graph node; its controls are its
 /// `DiskVoiceControls`.
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {
-    fn bind_timeline(self, timeline: &TimelineView) -> Self {
-        self.tempo(timeline.tempo().clone())
-    }
-}
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::DiskVoice<F> {}
 
 /// The sampler nodes whose controls are a handle with commands:
 /// [`Graph::handle`](crate::Graph::handle) reaches it by key. Sealed to the

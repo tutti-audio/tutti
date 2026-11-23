@@ -207,12 +207,12 @@ impl TransportAudio {
         self.with_map(|clock, map| clock.begin(&control, take_seek, map))
     }
 
-    /// The project's meter, lent for one rendered block and handed to the
-    /// graph with it (`Executor::render_applied`). Wait-free; drop the loan
-    /// at the block's end, never keep it across blocks.
+    /// The project's tempo map and meter, lent for one rendered block and
+    /// handed to the graph with it (`Executor::render_applied`). Wait-free;
+    /// drop the loans at the block's end, never keep them across blocks.
     #[must_use = "a loan dropped at once lends nothing"]
-    pub fn meter(&mut self) -> Loan<'_, MeterMap> {
-        self.meter.lend()
+    pub fn maps(&mut self) -> (Loan<'_, TempoMap>, Loan<'_, MeterMap>) {
+        (self.tempo_map.lend(), self.meter.lend())
     }
 
     /// The tempo changes inside the next `frames` of the block that began

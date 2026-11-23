@@ -1498,9 +1498,9 @@ impl<F: Float> GraphRender<F> {
                 .next()
                 .expect("a chunk for the new main output's gains"),
         };
-        // The project's meter, lent once for this block and dropped with it.
+        // The project's tempo map and meter, lent once for this block and dropped with it.
         {
-            let meter = self.transport.meter();
+            let (tempo, meter) = self.transport.maps();
             self.exec.render_applied(
                 len,
                 transport,
@@ -1508,6 +1508,7 @@ impl<F: Float> GraphRender<F> {
                 &[],
                 &mut outs[..rendered.min(MAIN_OUTPUT_BANKS * MAX_CHANNELS)],
                 Some(&*meter),
+                Some(&*tempo),
             );
         }
         // The block that ends the fade is the old main output's last: from here the

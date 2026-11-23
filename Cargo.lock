@@ -2876,6 +2876,7 @@ dependencies = [
  "tutti-music",
  "tutti-platform",
  "tutti-rt",
+ "tutti-tempo",
  "tutti-ump",
  "tutti-units",
 ]

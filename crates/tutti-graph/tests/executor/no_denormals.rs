@@ -115,6 +115,7 @@ fn render_probes(workers: usize, entry: Entry) {
                     &[&input],
                     &mut outs,
                     None,
+                    None,
                 );
             }
         }
