@@ -1,5 +1,6 @@
-//! A constant project tempo, written through the session's `tempo` target.
+//! The project's tempo, written and read through the session's `tempo` target.
 
+use std::sync::Arc;
 use tutti_session::{Session, ValueError};
 use tutti_tempo::TempoMap;
 use tutti_units::Bpm;
@@ -11,4 +12,11 @@ pub fn set_tempo(session: &mut Session, bpm: Bpm) -> Result<(), ValueError<&'sta
     session.set(session.transport_handle().tempo().to(map))?;
     let _published = session.update();
     Ok(())
+}
+
+/// The tempo map the engine uses: the target's effective value.
+pub fn effective(session: &Session) -> Arc<TempoMap> {
+    session
+        .get(session.transport_handle().tempo().effective())
+        .expect("the tempo target is the session's own")
 }

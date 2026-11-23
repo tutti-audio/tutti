@@ -11,6 +11,7 @@ use tutti_timeline::{Transport, TransportSettings};
 use tutti_units::SampleRate;
 
 use crate::TransportHandle;
+use crate::value::Bases;
 
 /// The transport, the handle with its verbs, and the click that follows the transport.
 #[derive(Debug)]
@@ -22,12 +23,16 @@ pub(crate) struct TransportPart {
     pub(crate) handle: TransportHandle,
     /// The metronome's node, when the builder inserted one.
     pub(crate) click: Option<NodeKey>,
+    /// The base of the tempo and the meter: what the app wrote, under what a
+    /// followed source steps.
+    pub(crate) bases: Bases,
 }
 
 impl TransportPart {
     pub(crate) fn new(transport: Transport, click: Option<NodeKey>) -> Self {
         Self {
             handle: TransportHandle::new(transport.clone()),
+            bases: Bases::of(transport.settings()),
             transport,
             click,
         }

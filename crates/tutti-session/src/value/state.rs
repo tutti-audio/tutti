@@ -263,15 +263,18 @@ impl ValueTable {
 
     /// Registers the session's own staging value `id`, held in `slot`. Once,
     /// as the session is built.
-    pub(crate) fn provide_staged<C: slot::Held>(
+    pub(crate) fn provide_staged<
+        V: Clone + PartialEq + Send + Sync + 'static,
+        S: slot::Slot<V> + slot::Stage,
+    >(
         &self,
         id: SlotId,
-        slot: Arc<slot::PublishedSlot<C>>,
+        slot: Arc<S>,
     ) {
         self.params
             .lock()
             .slots
-            .insert(id, slot::erase_staged(slot));
+            .insert(id, slot::erase_staged::<V, S>(slot));
     }
 
     /// Forgets the slots `ids` name, with what was written to them and not
@@ -284,15 +287,6 @@ impl ValueTable {
                 .collect()
         };
         drop(gone);
-    }
-
-    /// Drops what was written to the slots `ids` name and not yet published.
-    /// Control thread.
-    #[cfg(feature = "midi")]
-    pub(crate) fn discard_pending(&self, ids: &[SlotId]) {
-        if let Some(held) = self.enter() {
-            held.params().discard_pending(ids);
-        }
     }
 
     /// Publishes every value written since the last call and not yet

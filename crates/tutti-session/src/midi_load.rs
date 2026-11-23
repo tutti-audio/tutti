@@ -42,17 +42,17 @@ use crate::unblocked::Unblocked;
 /// A file in SMPTE time (SMF 1.0 section 2.1: ticks are fractions of a second
 /// of `fps * ticks per frame`, 29.97 being 30000/1001) has no beats of its own,
 /// and its Set Tempo events move no tick. Its events keep their seconds, and a
-/// clip is placed in beats over **the session's tempo map as last published
-/// when [`Midi::load_midi`] was called** (a `set` of the tempo not yet followed
-/// by `update` is not in it): an event at `s` seconds lands on
-/// `tempo.beat_at_seconds(s)`, the map the transport plays on. Each track's
+/// clip is placed in beats over **the app's tempo base when
+/// [`Midi::load_midi`] was called**, a staged write included and a followed
+/// source's steps not (the live tempo is not baked into stored beats): an
+/// event at `s` seconds lands on `tempo.beat_at_seconds(s)`. Each track's
 /// [`tempo`](LoadedTrack::tempo) is that map and its
-/// [`meter`](LoadedTrack::meter) the session's meter, so the clip plays at the
+/// [`meter`](LoadedTrack::meter) the app's meter base, so the clip plays at the
 /// same times in the session as in the file for as long as the map stays. Unlike
 /// a metrical file's clip, an SMPTE clip does not follow later tempo changes in
 /// absolute time: it stays on the beats it was placed on.
 ///
-/// It holds the asset, the session's tempo map and meter, and a weak handle to
+/// It holds the asset, the app's tempo and meter bases, and a weak handle to
 /// the session's executor, and nothing else of the session. Dropping it
 /// unawaited reads nothing.
 #[derive(Debug)]
@@ -261,8 +261,8 @@ impl<F: Float> Midi<'_, F> {
         LoadMidi {
             asset: asset.into(),
             executor: self.executor.clone(),
-            tempo: self.settings.tempo_map(),
-            meter: self.meter.clone(),
+            tempo: self.bases.tempo.get(),
+            meter: ProjectMeter::new((*self.bases.meter.get()).clone()),
         }
     }
 }
