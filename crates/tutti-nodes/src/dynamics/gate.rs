@@ -247,7 +247,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.layout()));
+        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.width()));
         self.applied = false;
     }
 

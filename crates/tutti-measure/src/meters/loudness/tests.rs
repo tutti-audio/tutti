@@ -702,11 +702,11 @@ fn a_topology_without_angles_is_refused_by_name() {
     let ambisonic: ChannelTopology = AmbisonicFormat::ambix(AmbisonicOrder::of(1)).into();
     let unplaced = ChannelTopology::unassigned(ChannelLayout::from(3u16)).unwrap();
     assert_eq!(
-        Measure::<f32>::measure(&LoudnessConfig::new(ambisonic.clone()), rate).unwrap_err(),
+        Measure::<f32>::measure(&LoudnessConfig::new(ambisonic), rate).unwrap_err(),
         MeterError::AmbisonicLoudness
     );
     assert_eq!(
-        Measure::<f32>::measure(&LoudnessConfig::new(unplaced.clone()), rate).unwrap_err(),
+        Measure::<f32>::measure(&LoudnessConfig::new(unplaced), rate).unwrap_err(),
         MeterError::UnplacedLoudnessChannels {
             width: ChannelLayout::from(3u16)
         }

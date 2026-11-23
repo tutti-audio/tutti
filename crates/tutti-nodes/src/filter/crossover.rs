@@ -140,7 +140,7 @@ impl<F: Float + SimdLanes> TryFrom<CrossoverConfig> for CrossoverNode<F> {
     fn try_from(config: CrossoverConfig) -> Result<Self, CrossoverError> {
         let CrossoverConfig { input, crossovers } = config;
         let splits = crossovers.splits();
-        let channels = usize::from(input.layout().count());
+        let channels = usize::from(input.width().count());
         let bands = CrossoverBands::new(splits + 1).ok_or(CrossoverError::Bands {
             bands: splits + 1,
             min: 2,
@@ -190,14 +190,14 @@ impl<F: Float + SimdLanes> CrossoverKernel<F> {
         bands: CrossoverBands,
         controls: &CrossoverControls,
     ) -> Result<Self, CrossoverError> {
-        if input.layout().count() == 0 {
+        if input.width().count() == 0 {
             return Err(CrossoverError::Channels { channels: 0 });
         }
         let rate = SampleRate::SR_48K;
         let model = CrossoverModel::designed(bands, controls, rate);
         Ok(Self {
             input,
-            bank: CrossoverBank::new(input.layout()),
+            bank: CrossoverBank::new(input.width()),
             blend: Ramp::new(model.blend()).steps(RAMP_STEPS),
             model,
             applied: false,

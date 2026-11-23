@@ -22,7 +22,7 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The bus of the channels of `order` in AmbiX's ordering and the scaling `normalization`.
 fn bus(order: AmbisonicOrder, normalization: HarmonicNormalization) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::new(
+    ChannelTopology::Ambisonic(AmbisonicFormat::new(
         order,
         AmbisonicOrdering::Acn,
         normalization.into(),
@@ -320,7 +320,7 @@ pub enum AmbisonicError {
 
 /// The order and the scaling of an ambisonic bus the nodes run in.
 fn format_of(bus: BusTopology) -> Result<(AmbisonicOrder, HarmonicNormalization), AmbisonicError> {
-    let format = bus.ambisonic_format().ok_or(AmbisonicError::NotAmbisonic)?;
+    let format = bus.ambisonic().ok_or(AmbisonicError::NotAmbisonic)?;
     let normalization = match (format.ordering(), format.normalization()) {
         (AmbisonicOrdering::Acn, AmbisonicNormalization::Sn3d) => HarmonicNormalization::Sn3d,
         (AmbisonicOrdering::Acn, AmbisonicNormalization::N3d) => HarmonicNormalization::N3d,
@@ -385,8 +385,7 @@ impl<F: Float> TryFrom<AmbisonicDecoderConfig> for AmbisonicDecoderNode<F> {
     /// ([`Bed::Mono`]: the speakers are the layout VBAP pans over).
     fn try_from(config: AmbisonicDecoderConfig) -> Result<Self, AmbisonicError> {
         let (order, normalization) = format_of(config.input)?;
-        let bed = Bed::from_topology(&ChannelTopology::from(config.output))
-            .ok_or(AmbisonicError::NotABed)?;
+        let bed = Bed::from_topology(&config.output).ok_or(AmbisonicError::NotABed)?;
         let layout = SpeakerLayout::try_from(bed)?;
         let decoder = match config.decoding {
             Decoding::Sampling => AmbisonicDecoder::sampling(order, normalization, &layout),

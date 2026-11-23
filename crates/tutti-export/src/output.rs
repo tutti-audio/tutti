@@ -104,7 +104,7 @@ impl Width {
     pub(crate) fn channel_set(&self) -> ChannelSet {
         match self {
             Self::Count(layout) => ChannelSet::default_for(*layout),
-            Self::Placed(topology) => ChannelSet::from(topology.clone()),
+            Self::Placed(topology) => ChannelSet::from(*topology),
         }
     }
 }

@@ -360,7 +360,7 @@ fn a_tap_narrower_than_the_declared_main_output_is_reopened_at_its_width() {
     s.graph().widen_outputs(4).expect("widens");
     let _ = block(&mut s);
     let four = tutti_buffers::Bed::Quad.topology();
-    s.declare_main_output_topology(Some(four.clone()))
+    s.declare_main_output_topology(Some(four))
         .expect("quad")
         .unfaded();
     let mut events = reopened(block(&mut s));
