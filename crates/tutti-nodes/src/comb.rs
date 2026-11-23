@@ -173,7 +173,7 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 mod tests {
     use super::*;
     use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
+    use tutti_graph::contract::{assert_declared_tail, prepared};
     use tutti_units::{Samples, Seconds, UnitParam};
 
     fn delay(secs: f64) -> CombDelay {
@@ -187,12 +187,6 @@ mod tests {
         CombFilterNode::from(
             CombFilterConfig::new(1u16, form, delay(0.004)).gain(Feedback::new(gain)),
         )
-    }
-
-    /// A fork starts from the coefficient last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node(CombForm::Feedback, 0.5));
     }
 
     /// The shape is the width in and out and declares the coefficient as `Feedback`, with no

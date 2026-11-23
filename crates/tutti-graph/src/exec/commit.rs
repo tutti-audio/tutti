@@ -4,7 +4,6 @@
 use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use tutti_buffers::Float;
 
 use tutti_curve::FadeLaw;
@@ -12,7 +11,7 @@ use tutti_rt::{
     CappedVec, ControlDrop, Counter, CounterWriter, Gauge, GaugeWriter, Overflow, PushError,
     Reading, RingReader, RingWriter, counter, gauge, ring,
 };
-use tutti_units::Blocks;
+use tutti_units::{Blocks, PlayReading};
 
 use super::stage::Staged;
 use super::state::{Gone, State, Unit};
@@ -30,7 +29,7 @@ use crate::exec::loss::EventLoss;
 use crate::model::gain::GainCell;
 use crate::model::mode::{BypassLine, ModeState};
 use crate::node::param::ParamState;
-use crate::node::play::PlayReader;
+use crate::node::play::Played;
 use crate::node::wake::Wake;
 use crate::node::{Node, Prepare};
 use crate::{EdgeFade, EdgeId, EventTapId, MeterId, TapId};
@@ -505,20 +504,12 @@ impl Reading for CommitSeq {
     }
 }
 
-/// The queue pair between an editor and its executor.
-pub(crate) struct Channels<F: Float = f32> {
-    pub(crate) to_executor: RingWriter<Box<Commit<F>>>,
-    pub(crate) returned: RingReader<Box<Commit<F>>>,
-    /// Crossfades coming back (see the module docs, "Crossfades").
-    pub(crate) faded: RingReader<Box<Crossfade<F>>>,
+/// The levels and counts the executor publishes, as the editor reads them.
+pub(crate) struct Readings {
     /// The executor's play clock, as it last published it.
-    pub(crate) play: PlayReader,
-    /// Where the executor says which ports lost events.
-    pub(crate) losses: RingReader<EventLoss>,
+    pub(crate) play: Gauge<Played>,
     /// Refusals the log and the ring could not name.
     pub(crate) unreported: Counter<u64>,
-    /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
-    pub(crate) edge_fades: RingReader<(EdgeId, EdgeFade)>,
     /// The executor's pool participants, and the blocks it has rendered
     /// (`Stager`).
     pub(crate) pool: Gauge<Participants>,
@@ -528,18 +519,61 @@ pub(crate) struct Channels<F: Float = f32> {
     pub(crate) main_output_fade_ended: Gauge<CommitSeq>,
 }
 
+/// The executor's ends of [`Readings`]: one writer per reading.
+pub(crate) struct ReadingWriters {
+    pub(super) play: GaugeWriter<Played>,
+    pub(super) unreported: CounterWriter<u64>,
+    pub(super) pool: GaugeWriter<Participants>,
+    pub(super) rendered: GaugeWriter<Rendered>,
+    pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
+}
+
+/// Builds the readings: the executor's writers and the editor's readers.
+fn readings() -> (ReadingWriters, Readings) {
+    let (play_tx, play_rx) = gauge(Played(PlayReading::default()));
+    let (unreported_tx, unreported_rx) = counter::<u64>();
+    let (pool_tx, pool_rx) = gauge(Participants(0));
+    let (rendered_tx, rendered_rx) = gauge(Rendered(Blocks::ZERO));
+    let (fade_ended_tx, fade_ended_rx) = gauge(CommitSeq(0));
+    (
+        ReadingWriters {
+            play: play_tx,
+            unreported: unreported_tx,
+            pool: pool_tx,
+            rendered: rendered_tx,
+            main_output_fade_ended: fade_ended_tx,
+        },
+        Readings {
+            play: play_rx,
+            unreported: unreported_rx,
+            pool: pool_rx,
+            rendered: rendered_rx,
+            main_output_fade_ended: fade_ended_rx,
+        },
+    )
+}
+
+/// The queue pair between an editor and its executor.
+pub(crate) struct Channels<F: Float = f32> {
+    pub(crate) to_executor: RingWriter<Box<Commit<F>>>,
+    pub(crate) returned: RingReader<Box<Commit<F>>>,
+    /// Crossfades coming back (see the module docs, "Crossfades").
+    pub(crate) faded: RingReader<Box<Crossfade<F>>>,
+    /// Where the executor says which ports lost events.
+    pub(crate) losses: RingReader<EventLoss>,
+    /// The edges whose declick fade ended (`EdgeFade`), by the kind that did.
+    pub(crate) edge_fades: RingReader<(EdgeId, EdgeFade)>,
+    pub(crate) readings: Readings,
+}
+
 /// The executor's ends of the rings.
 pub(crate) struct ExecutorEnds<F: Float = f32> {
     pub(super) queue: RingReader<Box<Commit<F>>>,
     pub(super) back: RingWriter<Box<Commit<F>>>,
     pub(super) fade_back: RingWriter<Box<Crossfade<F>>>,
-    pub(super) play: Arc<AtomicU64>,
     pub(super) losses: RingWriter<EventLoss>,
-    pub(super) unreported: CounterWriter<u64>,
     pub(super) edge_fades: RingWriter<(EdgeId, EdgeFade)>,
-    pub(super) pool: GaugeWriter<Participants>,
-    pub(super) rendered: GaugeWriter<Rendered>,
-    pub(super) main_output_fade_ended: GaugeWriter<CommitSeq>,
+    pub(super) readings: ReadingWriters,
 }
 
 /// Build the rings: the editor's ends and the executor's.
@@ -547,38 +581,26 @@ pub(crate) fn channels<F: Float>() -> (Channels<F>, ExecutorEnds<F>) {
     let (tx, rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY, Overflow::Refuse);
     let (back_tx, back_rx) = ring::<Box<Commit<F>>>(QUEUE_CAPACITY + 1, Overflow::Refuse);
     let (fade_tx, fade_rx) = ring::<Box<Crossfade<F>>>(FADE_CAPACITY, Overflow::Refuse);
-    let play = Arc::new(AtomicU64::new(0));
-    let (unreported_tx, unreported_rx) = counter::<u64>();
     let (loss_tx, loss_rx) = ring::<EventLoss>(crate::exec::loss::RING_CAPACITY, Overflow::Refuse);
     let (fade_end_tx, fade_end_rx) =
         ring::<(EdgeId, EdgeFade)>(EDGE_FADE_CAPACITY, Overflow::Refuse);
-    let (pool_tx, pool_rx) = gauge(Participants(0));
-    let (rendered_tx, rendered_rx) = gauge(Rendered(Blocks::ZERO));
-    let (fade_ended_tx, fade_ended_rx) = gauge(CommitSeq(0));
+    let (writers, readings) = readings();
     (
         Channels {
             to_executor: tx,
             returned: back_rx,
             faded: fade_rx,
-            play: PlayReader(Arc::clone(&play)),
             losses: loss_rx,
-            unreported: unreported_rx,
             edge_fades: fade_end_rx,
-            pool: pool_rx,
-            rendered: rendered_rx,
-            main_output_fade_ended: fade_ended_rx,
+            readings,
         },
         ExecutorEnds {
             queue: rx,
             back: back_tx,
             fade_back: fade_tx,
-            play,
             losses: loss_tx,
-            unreported: unreported_tx,
             edge_fades: fade_end_tx,
-            pool: pool_tx,
-            rendered: rendered_tx,
-            main_output_fade_ended: fade_ended_tx,
+            readings: writers,
         },
     )
 }

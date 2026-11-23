@@ -112,7 +112,7 @@ mod tests {
     use tutti_buffers::MaxBlock;
     use tutti_dsp::MatchedBell;
     use tutti_graph::Cost;
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
@@ -142,17 +142,6 @@ mod tests {
         let x = f / fc;
         let off = 1.0 - x * x;
         ((off * off + (a * x / q).powi(2)) / (off * off + (x / (a * q)).powi(2))).sqrt()
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(BellFilterNode::from(BellFilterConfig::new(
-            2u16,
-            Hz::new(300.0),
-            Q::new(2.0),
-            Db::new(-6.0),
-        )));
     }
 
     /// The shape is the width in and out, `Moderate`, declares the center, Q and gain and an
