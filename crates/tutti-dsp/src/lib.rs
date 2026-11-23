@@ -218,6 +218,7 @@ mod karplus_strong;
 mod level;
 mod lfo;
 mod loudness;
+mod metronome;
 mod modal;
 mod modulation;
 mod newton;
@@ -341,6 +342,7 @@ pub use loudness::{ChannelWeight, ChannelWeightError, ChannelWeights, channel_we
 pub use mel::{
     MelBandCount, MelBandCountError, MelConfig, MelError, MelFilterbank, MelNorm, MelScale,
 };
+pub use metronome::Metronome;
 pub use mfcc::Mfcc;
 pub use modal::{MAX_MODES, ModalBank, ModalControls, Mode, ModeCount, ModeCountError, Modes};
 pub use model::{DecayTime, Lti, MaxDecay, MaxDecayError, System, TAIL_FLOOR};
