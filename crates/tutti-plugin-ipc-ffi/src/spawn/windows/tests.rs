@@ -131,7 +131,9 @@ fn standard_is(id: u32, kind: Option<u32>) -> bool {
 /// alone holds it at the host's handle value (the control, which also proves the
 /// child's check can see an inherited handle), while a helper and a leader do
 /// not. The child compares the value with the object it opens by name, so a
-/// handle of its own that shares the value is never taken for the event.
+/// handle of its own that shares the value is never taken for the event; an
+/// open that returns the host's value itself found that slot empty, so it
+/// counts as not inherited.
 #[test]
 fn a_spawned_child_inherits_no_inheritable_handle_of_the_host() {
     const EVENT: &str = "TUTTI_SPAWN_EVENT";
@@ -145,9 +147,12 @@ fn a_spawned_child_inherits_no_inheritable_handle_of_the_host() {
         assert!(!opened.is_null(), "the host's event opens by name");
         // SAFETY: the open succeeded: the handle is open and owned by no one else.
         let opened = unsafe { OwnedHandle::from_raw_handle(opened) };
-        // SAFETY: both arguments are handle values; one that names no object
-        // here compares unequal.
-        unsafe { CompareObjectHandles(event as HANDLE, opened.as_raw_handle()) != 0 }
+        // An open that lands on the host's value found that slot free, so nothing
+        // was inherited there; only a different slot holding the same object is.
+        opened.as_raw_handle() as usize != event
+            // SAFETY: both arguments are handle values; one that names no object
+            // here compares unequal.
+            && unsafe { CompareObjectHandles(event as HANDLE, opened.as_raw_handle()) != 0 }
     });
     let name = format!("Local\\tutti-spawn-inherit-{}", std::process::id());
     let event = inheritable_event(&name);
