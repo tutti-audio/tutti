@@ -2827,6 +2827,7 @@ dependencies = [
  "assert_no_alloc",
  "coreaudio-sys",
  "hound",
+ "libm",
  "raw-window-handle",
  "serde",
  "serde_json",
