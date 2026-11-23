@@ -23,8 +23,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause,
     ForkSource, ForkTarget, Forked, IntoNode, Io, Law, Node, NodeParts, ParamIn, ParamRamp,
-    ParamRange, ParamSegment, Prepare, RenderMode, Schedule, Shape, Status, TransportPosition,
-    Unforkable,
+    ParamRange, ParamSegment, Prepare, RenderMode, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
 use tutti_ump::Ump;
@@ -532,13 +531,8 @@ fn the_graph_spreads() {
     let (_ed, exec) = pair(4);
     let plan = exec.plan().expect("a plan");
     assert!(plan.tasks().len() > 8, "{} tasks", plan.tasks().len());
-    assert_eq!(
-        plan.schedule(4),
-        Schedule::Parallel {
-            wake: 4,
-            from: Samples::new(1)
-        }
-    );
+    let schedule = plan.schedule(4);
+    assert_eq!((schedule.wake, schedule.from), (4, Samples::new(1)));
 }
 
 /// An offline fork (what export renders) renders the same on a pool as
@@ -754,11 +748,9 @@ fn the_executor_waits_by_its_pools_budget() {
     ed.commit().expect("commits");
     exec.apply_pending();
     assert!(exec.is_parallel());
-    assert!(
-        matches!(
-            exec.plan().expect("a plan").schedule(2),
-            Schedule::Parallel { .. }
-        ),
+    assert_eq!(
+        exec.plan().expect("a plan").schedule(2).wake,
+        2,
         "the block spreads"
     );
 

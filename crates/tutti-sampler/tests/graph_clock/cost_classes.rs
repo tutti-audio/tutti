@@ -14,8 +14,7 @@ use tutti_fixtures::signal::plane_bits as bits;
 use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
-    Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, TransportPosition,
-    Unforkable,
+    Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoicePool, VoiceSource, Wave};
@@ -216,7 +215,7 @@ fn moderate_reads_pack_and_render_bit_identically() {
         // From a one-frame block: every ragged block below is spread, so
         // the comparison is never a serial walk against itself.
         assert!(
-            matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
+            plan.schedule(4).from == Samples::new(1),
             "{:?}",
             plan.schedule(4)
         );

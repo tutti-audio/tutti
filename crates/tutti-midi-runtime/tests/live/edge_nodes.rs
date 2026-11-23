@@ -589,10 +589,7 @@ fn a_retiring_out_node_ends_the_notes_it_passed_on_a_pool() {
     let (mut rig, mut lanes, _) = retiring_lanes(LANES, true);
     rig.block(512);
     assert!(
-        matches!(
-            rig.exec.plan().expect("a plan").schedule(4),
-            tutti_graph::Schedule::Parallel { .. }
-        ),
+        rig.exec.plan().expect("a plan").schedule(4).wake > 1,
         "the lanes are spread over the pool"
     );
     for (_, departure) in &mut lanes {

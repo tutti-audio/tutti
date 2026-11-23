@@ -19,7 +19,7 @@
 //!
 //! The calling thread (the audio thread) is the one participant. A block
 //! runs alone with no pool, with a block shorter than the schedule's `from`,
-//! or with a plan whose schedule never spreads. It walks the plan's ops in
+//! or with a plan whose schedule wakes one participant. It walks the plan's ops in
 //! order through plain `&mut` borrows: no task graph, no claim, no pool call.
 //!
 //! # A block spread over a pool
@@ -100,6 +100,7 @@ use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, SplitMut, SplitRw, Tas
 
 use crate::arena::{Arena, Line};
 use crate::command::{Deliveries, Overlay};
+use crate::cost::Schedule;
 use crate::exec::{
     Head, Inject, OpState, Ring, Unit, audio_ring, capture_op, delay_op, event_delay_op,
     event_merge_op, event_ring, main_input, node_dispatch, output_op, sum_op,
@@ -205,12 +206,10 @@ impl Drop for Unclaimed<'_> {
 /// table, built when the plan is applied (with the rest of the executor's
 /// state, `exec.rs`'s `rebuild`) for the pool's participant count.
 pub(crate) struct Par {
-    /// The pool participants this was built for: one when the plan never
-    /// spreads.
+    /// The pool participants this was built for (0: no pool).
     participants: usize,
-    /// Participants a block wakes and the shortest block that spreads
-    /// (`Schedule::Parallel`); `None` when no block does.
-    spread: Option<(usize, usize)>,
+    /// Participants a block wakes, from which block length up.
+    schedule: Schedule,
     graph: TaskGraph,
     /// The per-slot flags, shared by the block's workers: seeded from the
     /// executor's own before each block (slot 0, the feedback reads), and
@@ -243,7 +242,7 @@ impl Par {
     pub(crate) fn new(
         plan: &Plan,
         participants: usize,
-        spread: Option<(usize, usize)>,
+        schedule: Schedule,
         store_len: usize,
         inject_units: impl Iterator<Item = u32>,
         overlay: usize,
@@ -265,13 +264,15 @@ impl Par {
             span.len += 1;
             n_inject += 1;
         }
+        // One worker per participant a block can wake.
+        let workers = schedule.wake;
         // What one op's views can hold at once: a node's ports and the
         // event source of each param it declares, or an event merge's
         // inputs and output.
         let held = 2 * MAX_PORTS + crate::param::MAX_PARAM_PORTS + 1;
         Self {
             participants,
-            spread,
+            schedule,
             graph,
             flags: (0..plan.audio_slots).map(|_| AtomicU8::new(0)).collect(),
             audio: ClaimTable::new(plan.audio_slots as usize),
@@ -289,7 +290,7 @@ impl Par {
             has_inject: ClaimTable::new(units),
             has_due: ClaimTable::new(units),
             outputs: ClaimTable::new(plan.rendered_outputs()),
-            workers: (0..participants.max(1))
+            workers: (0..workers)
                 .map(|_| Worker {
                     held_audio: Held::new(held),
                     held_events: Held::new(held),
@@ -299,7 +300,7 @@ impl Par {
                     panic: None,
                 })
                 .collect(),
-            worker_claims: ClaimTable::new(participants.max(1)),
+            worker_claims: ClaimTable::new(workers),
         }
     }
 }
@@ -307,16 +308,16 @@ impl Par {
 impl Par {
     /// Whether some block length spreads over the pool.
     pub(crate) fn spreads_any(&self) -> bool {
-        self.spread.is_some()
+        self.schedule.wake > 1
     }
 
     /// The participants a block of `frames` wakes on `pool`, or `None` when
     /// the calling thread runs it alone: the cost model's threshold and the
     /// pool this was built for.
     fn wake(&self, frames: usize, pool: &dyn Pool) -> Option<usize> {
-        let (wake, from) = self.spread?;
-        (frames >= from && self.participants == pool.participants())
-            .then(|| wake.clamp(1, pool.participants()))
+        let Schedule { wake, from } = self.schedule;
+        (wake > 1 && frames >= from.get() && self.participants == pool.participants())
+            .then_some(wake)
     }
 }
 
@@ -491,7 +492,7 @@ fn run_spread<F: Float>(
     }
     let Par {
         participants: _,
-        spread: _,
+        schedule: _,
         graph,
         flags,
         audio,

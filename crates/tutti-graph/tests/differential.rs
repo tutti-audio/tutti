@@ -695,18 +695,18 @@ fn the_cost_generator_packs_and_spreads() {
         let plain = compile(&BTreeMap::new());
         if plain.tasks().len() > 1 {
             plain_multi += 1;
-            if plain.schedule(4) == tutti_graph::Schedule::Serial {
+            if plain.schedule(4).wake == 1 {
                 plain_serial += 1;
             }
         }
         let costed = compile(&random_costs(&desc, seed));
         if costed.tasks().len() < plain.tasks().len() {
             packed += 1;
-            if matches!(costed.schedule(4), tutti_graph::Schedule::Parallel { .. }) {
+            if costed.schedule(4).wake > 1 {
                 packed_parallel += 1;
             }
         }
-        if plain.tasks().len() > 1 && costed.schedule(4) == tutti_graph::Schedule::Serial {
+        if plain.tasks().len() > 1 && costed.schedule(4).wake == 1 {
             serial += 1;
         }
     }

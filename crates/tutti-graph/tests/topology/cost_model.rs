@@ -11,7 +11,7 @@ use tutti_graph::testing as common;
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_graph::{Cost, Editor, Executor, Schedule, TransportPosition, Unforkable};
+use tutti_graph::{Cost, Editor, Executor, TransportPosition, Unforkable};
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, Samples};
 
@@ -147,7 +147,7 @@ fn a_tiny_plan_packs_and_renders_serially() {
     let plan = exec.plan().expect("a plan");
     // The input, two packs of eight gains, the sum and its output.
     assert_eq!(plan.tasks().len(), 4, "{:?}", plan.tasks());
-    assert_eq!(plan.schedule(4), Schedule::Serial);
+    assert_eq!(plan.schedule(4).wake, 1);
     assert!(!exec.is_parallel());
 
     let (mut ed, mut exec) = pair(4);
@@ -156,7 +156,7 @@ fn a_tiny_plan_packs_and_renders_serially() {
     let plan = exec.plan().expect("a plan");
     // The input, each gain, the sum and its output.
     assert_eq!(plan.tasks().len(), 18);
-    assert!(matches!(plan.schedule(4), Schedule::Parallel { .. }));
+    assert!(plan.schedule(4).wake > 1);
     assert!(exec.is_parallel());
 }
 
@@ -171,7 +171,7 @@ fn a_cheap_plan_of_several_tasks_renders_serially() {
     let plan = exec.plan().expect("a plan");
     assert!(plan.tasks().len() >= 2, "{:?}", plan.tasks());
     for p in [2, 3, 4, 8] {
-        assert_eq!(plan.schedule(p), Schedule::Serial, "{p} participants");
+        assert_eq!(plan.schedule(p).wake, 1, "{p} participants");
     }
     assert!(!exec.is_parallel());
 }
@@ -184,19 +184,16 @@ fn a_wide_plan_spreads() {
     wide(&mut ed, 8, 8, Some(Cost::Moderate));
     commit(&mut ed, &mut exec);
     let plan = exec.plan().expect("a plan");
-    match plan.schedule(4) {
-        Schedule::Parallel { wake, from } => {
-            assert_eq!(wake, 4);
-            assert!(from <= Samples::new(64), "from {from:?}");
-        }
-        s => panic!("{s:?}"),
-    }
+    let schedule = plan.schedule(4);
+    assert_eq!(schedule.wake, 4);
+    assert!(
+        schedule.from <= Samples::new(64),
+        "from {:?}",
+        schedule.from
+    );
     assert!(exec.is_parallel());
     // A pool of two wakes both.
-    assert!(matches!(
-        plan.schedule(2),
-        Schedule::Parallel { wake: 2, .. }
-    ));
+    assert_eq!(plan.schedule(2).wake, 2);
 }
 
 /// Light gains beside heavy ones off one input, all summed: the light ones
@@ -243,7 +240,7 @@ fn packed_siblings_render_bit_identically() {
         }
         assert!(light_tasks >= 1, "some light gains packed");
         assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
-        assert!(matches!(plan.schedule(4), Schedule::Parallel { .. }));
+        assert!(plan.schedule(4).wake > 1);
         render(&mut exec, 1, 1, &ragged())
     };
     assert!(serial[0].iter().any(|&x| x != 0.0));
@@ -288,9 +285,9 @@ fn blocks_shorter_than_from_run_serially() {
     wide(&mut ed, 4, 4, Some(Cost::Moderate));
     commit(&mut ed, &mut exec);
     let plan = exec.plan().expect("a plan").clone();
-    let Schedule::Parallel { from, .. } = plan.schedule(4) else {
-        panic!("{:?}", plan.schedule(4));
-    };
+    let schedule = plan.schedule(4);
+    assert_eq!(schedule.wake, 4, "{schedule:?}");
+    let from = schedule.from;
     assert!(
         from > Samples::new(1) && from <= Samples::new(MAX_BLOCK),
         "from {from:?}"

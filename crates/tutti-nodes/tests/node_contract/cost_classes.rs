@@ -9,9 +9,7 @@ use tutti_fixtures::signal::plane_bits as bits;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
-use tutti_graph::{
-    Cost, Cx, Editor, Executor, Io, Node, Prepare, Schedule, Shape, Status, WorkerPool,
-};
+use tutti_graph::{Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, WorkerPool};
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{TransportPosition as BlockTransport, Unforkable};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
@@ -172,7 +170,7 @@ fn moderate_clicks_pack_and_render_bit_identically() {
     // From a one-frame block: every ragged block below is spread, so the
     // comparison is never a serial walk against itself.
     assert!(
-        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
+        plan.schedule(4).from == Samples::new(1),
         "{:?}",
         plan.schedule(4)
     );

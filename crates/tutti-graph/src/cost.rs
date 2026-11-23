@@ -15,8 +15,8 @@
 //!   place in the queue.
 //!
 //! [`schedule`] turns those totals into a [`Schedule`] for a pool of `p`
-//! participants: alone, or parallel from some block length up, waking a
-//! given number of participants. It is pure arithmetic on the plan, so a
+//! participants: how many participants a block wakes, from which block
+//! length up. It is pure arithmetic on the plan, so a
 //! test can check it from `compile` alone; the executor evaluates it when a
 //! plan meets a pool (`Executor::set_pool`, or the rebuild that applies a
 //! plan), never per block.
@@ -143,27 +143,32 @@ impl Work {
 }
 
 /// How a plan's blocks run on a pool: what [`Plan::schedule`](crate::Plan::schedule)
-/// decides from the cost model.
+/// decides from the cost model. A block of at least `from` frames runs on
+/// `wake` participants (the caller included); a shorter one runs on the
+/// calling thread alone. A plan that spreading never pays for wakes one
+/// participant, so every block runs alone.
 ///
-/// `#[non_exhaustive]`: a later schedule (per-level wake counts, say) is not
-/// a breaking change; a `match` outside this crate needs a wildcard arm.
+/// `#[non_exhaustive]`: a later field (per-level wake counts, say) is not a
+/// breaking change.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Schedule {
-    /// Every block runs on the calling thread alone: spreading
-    /// would not pay for its dispatch (or there is one task, or one
-    /// participant).
-    Serial,
-    /// Blocks of at least `from` frames spread over `wake` participants
-    /// (the caller included); shorter blocks run on the calling thread alone.
-    Parallel {
-        /// Participants a block wakes, the caller included: at least 2, at
-        /// most the pool's: the plan's average parallelism (work over
-        /// critical path) or its widest level, whichever is more.
-        wake: usize,
-        /// The shortest block that spreads.
-        from: Samples,
-    },
+pub struct Schedule {
+    /// Participants a block of at least `from` frames wakes, the caller
+    /// included: one when spreading never pays (one task, one participant,
+    /// or dispatch costing more than it saves); otherwise at least 2 and at
+    /// most the pool's: the plan's average parallelism (work over critical
+    /// path) or its widest level, whichever is more.
+    pub wake: usize,
+    /// The shortest block that wakes `wake` participants.
+    pub from: Samples,
+}
+
+impl Schedule {
+    /// Every block on one participant.
+    pub(crate) const ALONE: Self = Self {
+        wake: 1,
+        from: Samples::new(0),
+    };
 }
 
 /// Charged to every task on top of its ops: taking it off the ready list,
@@ -280,7 +285,7 @@ pub(crate) fn schedule(
     participants: usize,
 ) -> Schedule {
     if participants < 2 || tasks < 2 || max_block.get() == 0 {
-        return Schedule::Serial;
+        return Schedule::ALONE;
     }
     let w_max = work.at(max_block);
     let c_max = critical.at(max_block).max(1);
@@ -303,7 +308,7 @@ pub(crate) fn schedule(
         par < p.saturating_mul(w)
     };
     if !pays(max_block.get()) {
-        return Schedule::Serial;
+        return Schedule::ALONE;
     }
     let (mut lo, mut hi) = (1usize, max_block.get());
     while lo < hi {
@@ -314,7 +319,7 @@ pub(crate) fn schedule(
             lo = mid + 1;
         }
     }
-    Schedule::Parallel {
+    Schedule {
         wake,
         from: Samples::new(lo),
     }
@@ -329,40 +334,41 @@ mod tests {
     }
 
     #[test]
-    fn one_task_or_one_participant_is_serial() {
+    fn one_task_or_one_participant_wakes_one() {
         let big = w(1_000_000, 1_000);
         assert_eq!(
             schedule(big, w(1, 0), 1, 1, Samples::new(256), 8),
-            Schedule::Serial
+            Schedule::ALONE
         );
         assert_eq!(
             schedule(big, w(1, 0), 64, 64, Samples::new(256), 1),
-            Schedule::Serial
+            Schedule::ALONE
         );
     }
 
     #[test]
-    fn spreads_wide_work_and_keeps_tiny_work_serial() {
+    fn spreads_wide_work_and_keeps_tiny_work_alone() {
         // Eight equal lanes of about 20 µs at 256 frames; it pays from 13
         // frames up (`24 × 79 × f > 27_600 - 24 × 200`).
         let lane = w(200, 79);
         let work = w(8 * lane.fixed, 8 * lane.per_frame);
         let critical = lane.plus(w(TASK_DISPATCH, 0));
-        match schedule(work, critical, 9, 8, Samples::new(256), 4) {
-            Schedule::Parallel { wake, from } => {
-                assert_eq!(wake, 4);
-                assert_eq!(from, Samples::new(13));
-                // `from` is the threshold: it pays there and not one below.
-                let at = |f| schedule(work, critical, 9, 8, Samples::new(f), 4);
-                assert!(matches!(at(from.get()), Schedule::Parallel { .. }));
-                assert_eq!(at(from.get() - 1), Schedule::Serial);
+        let s = schedule(work, critical, 9, 8, Samples::new(256), 4);
+        assert_eq!(
+            s,
+            Schedule {
+                wake: 4,
+                from: Samples::new(13)
             }
-            s => panic!("{s:?}"),
-        }
+        );
+        // `from` is the threshold: it pays there and not one below.
+        let at = |f| schedule(work, critical, 9, 8, Samples::new(f), 4);
+        assert_eq!(at(s.from.get()).wake, 4);
+        assert_eq!(at(s.from.get() - 1), Schedule::ALONE);
         // Sixteen gains' worth: about 10 µs of work in all.
         assert_eq!(
             schedule(w(2_000, 32), w(1_000, 20), 4, 2, Samples::new(256), 4),
-            Schedule::Serial
+            Schedule::ALONE
         );
     }
 
@@ -374,7 +380,7 @@ mod tests {
         let critical = w(100_000, 0);
         assert_eq!(
             schedule(work, critical, 4, 2, Samples::new(64), 8),
-            Schedule::Parallel {
+            Schedule {
                 wake: 2,
                 from: Samples::new(1)
             }
@@ -382,7 +388,7 @@ mod tests {
         // Three tasks on one level: three.
         assert_eq!(
             schedule(work, critical, 4, 3, Samples::new(64), 8),
-            Schedule::Parallel {
+            Schedule {
                 wake: 3,
                 from: Samples::new(1)
             }
@@ -397,7 +403,7 @@ mod tests {
         let task = heavy.plus(w(TASK_DISPATCH, 0));
         assert_eq!(
             schedule(heavy.plus(heavy), task, 2, 2, Samples::new(1), 2),
-            Schedule::Parallel {
+            Schedule {
                 wake: 2,
                 from: Samples::new(1)
             }

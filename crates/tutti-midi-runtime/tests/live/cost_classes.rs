@@ -11,7 +11,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::WorkerPool;
 use tutti_graph::{
     Cost, Cx, Editor, EventCapacity, EventInletNode, EventKind, Executor, ForkByClone, InEvents,
-    Io, Node, Prepare, Schedule, Shape, Status, TransportPosition, Unforkable,
+    Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_midi_runtime::{
@@ -213,7 +213,7 @@ fn light_lanes_pack_and_send_on_the_serial_frames() {
     // From a one-frame block: every ragged block below is spread, so the
     // comparison is never a serial walk against itself.
     assert!(
-        matches!(plan.schedule(4), Schedule::Parallel { from, .. } if from == Samples::new(1)),
+        plan.schedule(4).from == Samples::new(1),
         "{:?}",
         plan.schedule(4)
     );

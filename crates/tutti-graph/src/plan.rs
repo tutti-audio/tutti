@@ -1191,8 +1191,8 @@ impl Plan {
     }
 
     /// How this plan's blocks run on a pool of `participants` (the caller
-    /// included): on the calling thread alone, or spread from some block length up over some
-    /// number of participants. Pure arithmetic on [`work`](Self::work), the
+    /// included): how many participants a block wakes, from which block
+    /// length up (one, for every block, when spreading never pays). Pure arithmetic on [`work`](Self::work), the
     /// costliest path through the task DAG and the task count; the executor
     /// asks it when a plan meets a pool, never per block.
     ///

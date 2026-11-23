@@ -197,7 +197,6 @@ use tutti_units::{Frame, Samples, Tail};
 
 use crate::NodeKey;
 use crate::command::CommandRx;
-use crate::cost::Schedule;
 use crate::event::Event;
 use crate::held::Keys;
 use crate::history::TransportHistory;
@@ -442,10 +441,9 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
     }
 }
 
-/// The per-plan state for `plan` on a pool of `participants` (0: no pool):
-/// spread over the pool when the cost model ([`Plan::schedule`]) says
-/// spreading pays for some block length (which needs more than one
-/// participant and more than one task), else for the calling thread alone.
+/// The per-plan state for `plan` on a pool of `participants` (0: no pool),
+/// with the cost model's [`Plan::schedule`]: how many participants a block
+/// wakes, from which block length up.
 fn par_for(
     plan: &Plan,
     participants: usize,
@@ -453,12 +451,14 @@ fn par_for(
     inject_units: impl Iterator<Item = u32>,
     overlay: usize,
 ) -> Par {
-    let schedule = plan.schedule(participants);
-    let (participants, spread) = match schedule {
-        Schedule::Serial => (1, None),
-        Schedule::Parallel { wake, from } => (participants, Some((wake, from.get()))),
-    };
-    Par::new(plan, participants, spread, store_len, inject_units, overlay)
+    Par::new(
+        plan,
+        participants,
+        plan.schedule(participants),
+        store_len,
+        inject_units,
+        overlay,
+    )
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
