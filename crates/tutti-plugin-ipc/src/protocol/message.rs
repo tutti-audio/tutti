@@ -5,7 +5,7 @@
 //! [`ControlReply`](super::ControlReply) enums over them, and each request's [`Message`] impl. The
 //! table is `envelope.rs`'s, and its row order is the wire's.
 
-use super::envelope::ControlRequest;
+use super::envelope::{ControlReply, ControlRequest};
 
 /// A request the control connection carries, and what answers it.
 ///
@@ -19,6 +19,14 @@ pub trait Message: Into<ControlRequest> {
     /// the same name.
     const REPLIES: bool;
 }
+
+/// A request the server answers: its [`Reply`](Message::Reply) is built from, and
+/// only from, the [`ControlReply`](super::ControlReply) of its row, so a call
+/// that asks it gets that reply or a refusal and never another kind.
+pub trait Answered: Message<Reply: TryFrom<ControlReply, Error = ControlReply>> {}
+
+/// A request nothing answers: only a tell can carry it.
+pub trait Unanswered: Message<Reply = ()> {}
 
 /// Declares the control messages: one row per request, in wire order.
 ///
@@ -45,7 +53,7 @@ pub trait Message: Into<ControlRequest> {
 /// `Error`, the failure any request may be answered with), `From<Request> for
 /// ControlRequest`, `From<Reply> for ControlReply`, `TryFrom<ControlReply>` for
 /// the reply (the one place a reply's variant is matched), and [`Message`] for
-/// the request.
+/// the request, with [`Answered`] or [`Unanswered`] by whether it has a reply.
 ///
 /// A request's wire tag is its row's place among the rows, and a reply's is its
 /// place among the rows that have one: append a row, never reorder them, and bump
@@ -126,12 +134,16 @@ macro_rules! messages {
             type Reply = $reply;
             const REPLIES: bool = true;
         }
+
+        impl Answered for $name {}
     };
     (@impl $name:ident) => {
         impl Message for $name {
             type Reply = ();
             const REPLIES: bool = false;
         }
+
+        impl Unanswered for $name {}
     };
     ($(
         $(#[$meta:meta])*
