@@ -19,7 +19,7 @@ use tutti_graph::{TapAlign, TapOptions};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::MetronomeMode;
 use tutti_nodes::testing::Const;
-use tutti_session::{CloseError, MainInput, MainOutput, MissingSource, OutputPort, Session};
+use tutti_session::{CloseError, MainOutput, MissingSource, OutputPort, Session};
 use tutti_timeline::MotionCommand;
 use tutti_units::{Amplitude, Beat, SampleRate, Samples};
 
@@ -435,16 +435,6 @@ fn opening_a_tap_or_meter_on_a_missing_source_is_refused() {
             node: a.erase(),
             port: 1,
             width: 1
-        })
-    );
-    assert_eq!(
-        s.graph()
-            .meters()
-            .open(&[MainInput::channel(0)], TapAlign::Raw)
-            .err(),
-        Some(MissingSource::MainInput {
-            channel: 0,
-            width: 0
         })
     );
     // An output cannot be wired to a missing port in the first place: the

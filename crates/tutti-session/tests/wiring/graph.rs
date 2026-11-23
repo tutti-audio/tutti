@@ -17,8 +17,8 @@ use tutti_graph::{
 use tutti_nodes::testing::{Const, Osc, Through};
 use tutti_rt::Param;
 use tutti_session::{
-    DetachedSession, Feeder, InputPort, MainInput, MainOutput, OutputPort, RemoveError,
-    ReplaceRefused, Replacement, Session, SessionEvent, main_output_width,
+    DetachedSession, Feeder, InputPort, MainOutput, OutputPort, RemoveError, ReplaceRefused,
+    Replacement, Session, SessionEvent, main_output_width,
 };
 use tutti_units::{Drive, Hz, Real, SampleRate, Samples};
 use tutti_units::{Latency, UnitParam};
@@ -256,18 +256,13 @@ impl<const IN: u16, const OUT: u16> Node for Events<IN, OUT> {
 #[test]
 fn every_source_reads_back_as_written() {
     let mut s = Session::builder()
-        .inputs(ChannelLayout::MONO)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("builds");
     let graph = s.graph();
     let stereo = graph.add(ForkByClone(Const::frame(&[1.0, 2.0])));
     let sink = graph.add(ForkByClone(Through::mono()));
-    for source in [
-        OutputPort::new(stereo, 1),
-        OutputPort::new(stereo, 0),
-        MainInput::channel(0),
-    ] {
+    for source in [OutputPort::new(stereo, 1), OutputPort::new(stereo, 0)] {
         graph
             .set_sources(InputPort::new(sink, 0), [source])
             .unwrap()
@@ -1557,16 +1552,4 @@ fn a_streamed_voice_keeps_sounding_after_the_host_drops_its_handle() {
         s.render(&mut InterleavedMut::new(&mut block, ChannelLayout::STEREO).unwrap());
     }
     assert_eq!(block[1_022], 0.0, "the graph's handle removed the voice");
-}
-
-/// The widest main input a layout holds builds: the count is a
-/// `ChannelLayout`, so one no layout holds cannot be written.
-#[test]
-fn the_widest_input_layout_builds() {
-    assert!(
-        Session::builder()
-            .inputs(ChannelLayout::from_count(u16::MAX))
-            .build_detached(RATE)
-            .is_ok()
-    );
 }

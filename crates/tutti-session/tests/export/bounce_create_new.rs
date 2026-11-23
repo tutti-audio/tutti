@@ -18,7 +18,6 @@ const FRAMES: usize = 480;
 
 fn session() -> DetachedSession {
     Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(RATE)
         .expect("a detached session builds")

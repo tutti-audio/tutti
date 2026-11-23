@@ -148,3 +148,19 @@ fn an_f64_inlet_carries_a_figure_f32_rounds_away() {
         &block[..4]
     );
 }
+
+/// **An inlet does not resample, so a re-prepare to another rate than its
+/// ring's is refused**: the graph keeps its rate, as it does for any node that
+/// does not run at the rate.
+#[test]
+fn a_re_prepare_to_another_rate_than_an_inlets_is_refused() {
+    let mut s = offline();
+    let (ring, _producer) = InletRing::pair(ChannelLayout::STEREO, Samples::new(256), RATE);
+    let _ = s.graph().add_inlet(ring).expect("the graph's rate");
+    let _ = s.update();
+    let refused = s.graph().set_sample_rate(SampleRate::SR_44K1);
+    assert!(
+        refused.is_err(),
+        "the graph re-prepared to 44.1 kHz under a 48 kHz inlet"
+    );
+}

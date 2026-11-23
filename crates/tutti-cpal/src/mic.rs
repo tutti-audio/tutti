@@ -21,15 +21,15 @@
 //!
 //! # Live monitoring
 //!
-//! [`open_with_monitor`](MicIn::open_with_monitor) tees the same capture
-//! callback into a *second*, shallow ring and hands back its reader. Give it to
+//! [`open_with_monitor`](MicIn::open_with_monitor) captures into a shallow
+//! ring instead of a recording ring and hands back its reader. Give it to
 //! `tutti-session`'s `Graph::add_inlet`, which reads the rate off the ring and
 //! refuses one that is not the graph's; the inlet node it makes copies the
 //! ring into the graph. (`tutti-session`'s `Session::add_input` does both
 //! halves, and reopens them after a restart.) Wire that node through effects if you like to hear the
-//! mic live while recording the same input. The two rings are independent: the
-//! recording ring is deep (dropout-resistant, latency irrelevant to a file); the
-//! monitor ring is shallow (low-latency, so you don't hear yourself slapped-back).
+//! mic live. The recording ring is deep (dropout-resistant, latency irrelevant
+//! to a file); the monitor ring is shallow (low-latency, so you don't hear
+//! yourself slapped-back). A capture fills one of them, the one its caller reads.
 //!
 //! # Which inputs
 //!
@@ -107,11 +107,18 @@ struct StreamHandle(
 /// Its [`layout`](Source::layout) is the number of inputs selected, and its
 /// [`channel_set`](Self::channel_set) says they feed no speaker.
 ///
-/// [`open_with_monitor`](Self::open_with_monitor) also returns the reader of a
-/// second, shallow (about 10 ms) ring fed from the same callback, for an inlet
-/// that makes the mic heard live through the graph while it is recorded.
+/// [`open_with_monitor`](Self::open_with_monitor) is the live-monitoring
+/// counterpart: no `MicIn`, a shallow (about 10 ms) ring for an inlet that
+/// makes the mic heard live through the graph.
 pub struct MicIn<F: Float = f32> {
     tap: TapReader<F>,
+    stream: CaptureStream,
+}
+
+/// A running capture stream: the handle that keeps it capturing, and what it
+/// reports. Dropping it stops capture. [`MicIn`] holds one beside its recording
+/// ring; [`MicIn::open_with_monitor`] returns one beside a monitor ring.
+pub struct CaptureStream {
     sample_rate: SampleRate,
     /// How many inputs the device has.
     device_inputs: ChannelLayout,
@@ -120,17 +127,54 @@ pub struct MicIn<F: Float = f32> {
     /// The delay between a frame's capture and its callback, as the callback
     /// last measured it.
     latency: Arc<StreamLatency>,
-    // Held to keep the input stream running; dropped with the source.
+    // Held to keep the input stream running; dropped with the handle.
     _stream: StreamHandle,
+}
+
+impl std::fmt::Debug for CaptureStream {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CaptureStream")
+            .field("sample_rate", &self.sample_rate)
+            .field("faults", &self.faults.count())
+            .field("_stream", &self._stream)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CaptureStream {
+    /// The faults the input stream has reported, shared with its error callback.
+    #[must_use]
+    pub fn faults(&self) -> Arc<StreamFaults> {
+        Arc::clone(&self.faults)
+    }
+
+    /// The delay between a frame's capture and the callback that delivered it,
+    /// as the last callback measured it: the cell a host reads, `None` while
+    /// no callback has reported one. It is the one [`MicConfig::latency`]
+    /// named if it named one.
+    #[must_use]
+    pub fn latency(&self) -> Arc<StreamLatency> {
+        Arc::clone(&self.latency)
+    }
+
+    /// The rate the capture stream runs at (the `graph_rate` it was opened with).
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.sample_rate
+    }
+
+    /// How many inputs the device has.
+    #[must_use]
+    pub fn device_inputs(&self) -> ChannelLayout {
+        self.device_inputs
+    }
 }
 
 impl<F: Float> std::fmt::Debug for MicIn<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MicIn")
-            .field("sample_rate", &self.sample_rate)
             .field("inputs", &self.tap.layout())
-            .field("faults", &self.faults.count())
-            .field("_stream", &self._stream)
+            .field("stream", &self.stream)
             .finish_non_exhaustive()
     }
 }
@@ -233,20 +277,26 @@ impl<F: Float> MicIn<F> {
     /// CPAL; [`DeviceError::Inputs`] for an empty list of inputs or one the device
     /// does not have.
     pub fn open(executor: &Executor, config: &MicConfig, graph_rate: SampleRate) -> Result<Self> {
-        Self::open_inner(executor, config, graph_rate, false).map(|(mic, _)| mic)
+        let (stream, tap) = Self::open_inner(executor, config, graph_rate, |width, rate| {
+            let (reader, rec) = TapReader::pair(
+                usize::from(width.count()),
+                CAPTURE_RING.to_samples_ceil(rate),
+            );
+            (reader, rec)
+        })?;
+        Ok(Self { tap, stream })
     }
 
-    /// Opens the mic like [`open`](Self::open), and also returns the reader of
-    /// a live-monitor ring fed by the same capture callback (one lane a
-    /// selected input).
+    /// Opens the mic like [`open`](Self::open), but feeds a live-monitor ring
+    /// instead of a recording ring: the [`CaptureStream`] keeps the capture
+    /// running, and the [`InletRing`] is the reader of a shallow (about 10 ms)
+    /// ring the capture callback fills, one lane a selected input.
     ///
-    /// Each captured frame goes into both the recording ring (drained by
-    /// [`pull`](Source::pull)) and a shallow monitor ring. Give the
-    /// monitor reader to `Graph::add_inlet` (`tutti-session`), with this mic's
-    /// [`sample_rate`](Self::sample_rate), to hear the mic live, through
-    /// effects if wanted, while recording the same input. The rings are
-    /// independent: when one is full it drops frames without stalling the
-    /// other or the capture thread.
+    /// Give the ring to `Graph::add_inlet` (`tutti-session`), with the
+    /// stream's [`sample_rate`](CaptureStream::sample_rate), to hear the mic
+    /// live, through effects if wanted. When the ring is full the callback
+    /// drops frames without stalling the capture thread. Nothing records, so
+    /// there is no recording ring to fill and lose frames.
     ///
     /// # Errors
     /// As [`open`](Self::open).
@@ -254,20 +304,25 @@ impl<F: Float> MicIn<F> {
         executor: &Executor,
         config: &MicConfig,
         graph_rate: SampleRate,
-    ) -> Result<(Self, InletRing<F>)> {
-        Self::open_inner(executor, config, graph_rate, true).map(Self::with_ring)
+    ) -> Result<(CaptureStream, InletRing<F>)> {
+        Self::open_inner(executor, config, graph_rate, |width, rate| {
+            // The ring carries the rate the stream runs at, so whoever takes it
+            // into a graph can check it there.
+            let (ring, mon) =
+                InletRing::pair(width, config.monitor_depth.to_samples_ceil(rate), rate);
+            (ring, mon)
+        })
     }
 
-    fn with_ring((source, ring): (Self, Option<InletRing<F>>)) -> (Self, InletRing<F>) {
-        (source, ring.expect("a monitor was asked for"))
-    }
-
-    fn open_inner(
+    /// Opens the stream. `feed` builds, from the selected width and the
+    /// stream's rate, the reader the caller keeps and the writer the callback
+    /// fills.
+    fn open_inner<R>(
         executor: &Executor,
         mic: &MicConfig,
         graph_rate: SampleRate,
-        monitor: bool,
-    ) -> Result<(Self, Option<InletRing<F>>)> {
+        feed: impl FnOnce(ChannelLayout, SampleRate) -> (R, TapWriter<F>),
+    ) -> Result<(CaptureStream, R)> {
         let host = DeviceHost::open(mic.host)?;
         let device = host.device(DeviceDirection::Input, &mic.device)?;
         let inputs = mic.inputs.as_deref();
@@ -296,23 +351,8 @@ impl<F: Float> MicIn<F> {
         let width = select.dst_layout();
 
         let faults = Arc::new(StreamFaults::new());
-        let (reader, rec) = TapReader::pair(
-            usize::from(width.count()),
-            CAPTURE_RING.to_samples_ceil(sample_rate),
-        );
-        let (ring, mon) = if monitor {
-            // The ring carries the rate the stream runs at, so whoever takes it
-            // into a graph can check it there.
-            let (ring, writer) = InletRing::pair(
-                width,
-                mic.monitor_depth.to_samples_ceil(sample_rate),
-                sample_rate,
-            );
-            (Some(ring), Some(writer))
-        } else {
-            (None, None)
-        };
-        let capture = Capture::new(select, device_inputs, rec, mon);
+        let (reader, writer) = feed(width, sample_rate);
+        let capture = Capture::new(select, device_inputs, writer);
 
         let sample_format = config.sample_format();
         let cfg: cpal::StreamConfig = config.into();
@@ -407,15 +447,14 @@ impl<F: Float> MicIn<F> {
             Ok(stream)
         })?;
 
-        let mic = Self {
-            tap: reader,
+        let stream = CaptureStream {
             sample_rate,
             device_inputs,
             faults,
             latency,
             _stream: StreamHandle(owned),
         };
-        Ok((mic, ring))
+        Ok((stream, reader))
     }
 
     /// The faults the input stream has reported, shared with its error callback.
@@ -427,7 +466,7 @@ impl<F: Float> MicIn<F> {
     /// as it does the output's.
     #[must_use]
     pub fn faults(&self) -> Arc<StreamFaults> {
-        Arc::clone(&self.faults)
+        self.stream.faults()
     }
 
     /// The delay between a frame's capture and the callback that delivered it,
@@ -436,21 +475,21 @@ impl<F: Float> MicIn<F> {
     /// named if it named one.
     #[must_use]
     pub fn latency(&self) -> Arc<StreamLatency> {
-        Arc::clone(&self.latency)
+        self.stream.latency()
     }
 
     /// Returns the rate the capture stream runs at (the `graph_rate` it was
     /// opened with). A recorder passes this to its sink so the WAV header
     /// matches the frames it is fed.
     pub fn sample_rate(&self) -> SampleRate {
-        self.sample_rate
+        self.stream.sample_rate()
     }
 
     /// How many inputs the device has, of which this mic delivers
     /// [`layout`](Source::layout)'s.
     #[must_use]
     pub fn device_inputs(&self) -> ChannelLayout {
-        self.device_inputs
+        self.stream.device_inputs()
     }
 
     /// The delivered channels: numbered device inputs that feed no speaker
@@ -485,7 +524,7 @@ impl<F: Float> MicIn<F> {
         // `PumpLoop::new` refuses, and this helper exists to be the pairing
         // that always passes.
         FileOut::new(
-            &Spec::of_width(format, Source::layout(self), self.sample_rate),
+            &Spec::of_width(format, Source::layout(self), self.sample_rate()),
             file,
         )
     }
@@ -517,7 +556,7 @@ impl<F: Float> Source for MicIn<F> {
             return Pull::Failed;
         }
         let tap = &mut self.tap;
-        match self.faults.drain(|| {
+        match self.stream.faults.drain(|| {
             // The width was checked above, so the pop is refused never.
             let n = tap.pop_into(out.reborrow()).ok()?;
             (!n.is_zero()).then_some(n)
@@ -547,34 +586,27 @@ struct Capture<F: Float> {
     device: Vec<F>,
     /// A chunk of selected frames, [`CHUNK_FRAMES`] of them.
     chunk: Vec<F>,
-    /// The recording ring's writer.
-    rec: TapWriter<F>,
-    /// The monitor ring's writer, when monitoring.
-    mon: Option<TapWriter<F>>,
+    /// The ring's writer: the recording ring a [`MicIn`] drains, or the
+    /// monitor ring an inlet drains. Only the ring someone reads exists.
+    writer: TapWriter<F>,
 }
 
 impl<F: Float> Capture<F> {
-    fn new(
-        select: Fold<F>,
-        device: ChannelLayout,
-        rec: TapWriter<F>,
-        mon: Option<TapWriter<F>>,
-    ) -> Self {
+    fn new(select: Fold<F>, device: ChannelLayout, writer: TapWriter<F>) -> Self {
         let frames = Samples::new(CHUNK_FRAMES);
         let selected = select.dst_layout();
         Self {
             select,
             device: vec![F::ZERO; device.interleaved_len(frames)],
             chunk: vec![F::ZERO; selected.interleaved_len(frames)],
-            rec,
-            mon,
+            writer,
         }
     }
 
     /// Selects the inputs of every whole device frame in `data` and pushes the
-    /// result to the rings, a chunk of frames at a time. A full ring refuses
-    /// whole frames and counts them lost (the writer does); neither ring can
-    /// stall the other or the caller. Allocation-free.
+    /// result to the ring, a chunk of frames at a time. A full ring refuses
+    /// whole frames and counts them lost (the writer does); it never stalls the
+    /// caller. Allocation-free.
     fn block<T: Copy>(&mut self, data: &[T], convert: fn(T) -> F) {
         let device = self.select.src_layout();
         let selected = self.select.dst_layout();
@@ -596,21 +628,15 @@ impl<F: Float> Capture<F> {
             let Ok(pushed) = Interleaved::new(pushed, selected) else {
                 continue;
             };
-            self.rec.push_interleaved(pushed);
-            // The monitor ring is shallow (~10ms) so it never builds a backlog
-            // of latency, and a full one drops this chunk (the graph consumer
-            // briefly fell behind); the node reads silence for those.
-            if let Some(mon) = &mut self.mon {
-                mon.push_interleaved(pushed);
-            }
+            self.writer.push_interleaved(pushed);
         }
     }
 }
 
 /// Build the `cpal` input stream: the callback runs [`Capture::block`] over
 /// each device buffer. Alloc-free and non-blocking — a full ring drops the
-/// frames (overrun) rather than stall, so neither tap can ever block the RT
-/// input thread or the other tap.
+/// frames (overrun) rather than stall, so the tap can never block the RT
+/// input thread.
 ///
 /// # Selecting, not truncating or folding
 ///

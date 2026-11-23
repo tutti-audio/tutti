@@ -18,7 +18,6 @@ const RATE: f64 = 48_000.0;
 
 fn session() -> DetachedSession {
     let mut session = Session::builder()
-        .inputs(ChannelLayout::EMPTY)
         .outputs_floor(ChannelLayout::STEREO)
         .build_detached(SampleRate::DEFAULT)
         .expect("a detached session builds");

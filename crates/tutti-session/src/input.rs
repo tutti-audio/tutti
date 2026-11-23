@@ -216,10 +216,10 @@ struct Capture {
 
 impl<F: Float> InputOpener<F> for Capture {
     fn open(&mut self, config: &MicConfig, rate: SampleRate) -> tutti_cpal::Result<OpenedInput<F>> {
-        let (mic, ring) = MicIn::<F>::open_with_monitor(&self.executor, config, rate)?;
+        let (stream, ring) = MicIn::<F>::open_with_monitor(&self.executor, config, rate)?;
         Ok(OpenedInput {
             ring,
-            keep: Box::new(mic),
+            keep: Box::new(stream),
             // The monitor ring starts empty.
             lead: Samples::ZERO,
         })
