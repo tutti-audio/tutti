@@ -37,7 +37,7 @@
 //!
 //! which for a toggle from a steady mode is exactly `(g_out, g_in)` of
 //! [`FadeLaw::gains`](crate::FadeLaw::gains), the one function
-//! the executor and the reference share. A term whose weight is zero at both
+//! the executor takes the toggle's weights from. A term whose weight is zero at both
 //! ends of the fade is left out of the sum (`0 * NaN` is `NaN`), and a steady
 //! mode copies (Bypassed), leaves (Active) or zero-fills (Muted), never
 //! multiplies, so a steady bypass is the input bit for bit.

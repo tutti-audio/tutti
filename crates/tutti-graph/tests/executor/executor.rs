@@ -837,7 +837,7 @@ fn applying_refuses_a_plan_for_another_prepare() {
     ed.insert(SRC, "c", Unforkable(const_node(1.0)));
     let valid = ed.spec().validate().unwrap();
     let (plan, delta) = tutti_graph::compile(&valid, ed.shapes(), &prepare(128), None).unwrap();
-    let units = common::units_for(
+    let units = common::units_costed(
         &[(
             SRC,
             Kind::Const {
@@ -846,6 +846,7 @@ fn applying_refuses_a_plan_for_another_prepare() {
             },
         )]
         .into(),
+        &Default::default(),
         [SRC],
     );
     ed.package(plan, delta, units).unwrap();

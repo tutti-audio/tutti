@@ -1610,4 +1610,244 @@ mod tests {
             None
         );
     }
+
+    /// Every node record carries what the plan says: its unit's fields, the
+    /// shape's port counts, the op's slots and sorted borrow runs, and the
+    /// form fixed for its node. A table row is one node: a source with latency
+    /// and a finite tail, an in-place node with an unbounded tail, a split, an
+    /// event source and sink (the general form), a stereo node (direct) and a
+    /// three-channel one (the audio walk). The expected values are read off
+    /// the shapes and the plan's ops, never off the lowering.
+    #[test]
+    fn every_node_record_carries_what_the_plan_says() {
+        use crate::NodeKey;
+        use crate::compile::ids::PlanUnitId;
+        use crate::compile::{Shapes, compile};
+        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
+        use crate::node::shape::Shape;
+        use crate::{NodeSpec, OutputPort, PortSource, Topology};
+        use tutti_buffers::ChannelLayout;
+        use tutti_units::{Latency, Samples, Tail};
+        let mono = ChannelLayout::MONO;
+        let latent = Latency::new(Samples::new(4));
+        let wide = ChannelLayout::from_count(3);
+        // (key, shape, the audio source feeding it, if any).
+        let rows = [
+            (
+                1,
+                Shape::source_unassigned(mono)
+                    .latency(latent)
+                    .tail(Tail::Finite(Samples::new(9))),
+                None,
+            ),
+            (
+                2,
+                Shape::through_unassigned(mono)
+                    .in_place()
+                    .tail(Tail::Unbounded),
+                Some(1),
+            ),
+            (3, Shape::through_unassigned(mono), Some(2)),
+            (
+                4,
+                Shape::EMPTY
+                    .events(0, 1)
+                    .event_capacity(crate::testing::cap_of(5)),
+                None,
+            ),
+            (5, Shape::source_unassigned(mono).events(1, 0), None),
+            (6, Shape::source_unassigned(ChannelLayout::STEREO), None),
+            (7, Shape::through_unassigned(ChannelLayout::STEREO), Some(6)),
+            (8, Shape::source_unassigned(wide), None),
+            (9, Shape::through_unassigned(wide), Some(8)),
+        ];
+        let mut t = Topology::default();
+        let mut shapes = Shapes::new();
+        for &(k, shape, from) in &rows {
+            let key = NodeKey(k);
+            let mut spec = NodeSpec::new("n", shape.audio_in(), shape.audio_out());
+            spec.latency = shape.latency.samples();
+            spec.tail = shape.tail;
+            t.nodes.insert(key, spec);
+            shapes.insert(key, shape);
+            for port in 0..shape.audio_in().count() {
+                let from = NodeKey(from.expect("a node with inputs is fed"));
+                t.edges.insert(
+                    crate::InputPort::new(key, port),
+                    vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                        from, port,
+                    )))],
+                );
+            }
+        }
+        t.set_outputs(
+            [3, 5, 7, 7, 9, 9, 9]
+                .into_iter()
+                .zip([0, 0, 0, 1, 0, 1, 2])
+                .map(|(k, p)| PortSource::Node(OutputPort::new(NodeKey(k), p)))
+                .collect::<Vec<_>>(),
+        );
+        let mut g = GraphSpec::new(t);
+        g.connect_events(
+            EventInputPort::new(NodeKey(5), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(4), 0)),
+        );
+        let prep = crate::node::Prepare::new(
+            tutti_units::SampleRate::SR_48K,
+            tutti_buffers::MaxBlock::of(Samples::new(64)),
+        );
+        let plan = compile(&g.validate().expect("valid"), &shapes, &prep, None)
+            .expect("compiles")
+            .0;
+
+        assert_eq!(plan.nodes.recs.len(), plan.units.len(), "a record a unit");
+        assert_eq!(plan.units.len(), rows.len());
+        let mut forms = Vec::new();
+        for op in &plan.ops {
+            let Op::Node {
+                unit,
+                audio_in,
+                audio_out,
+                event_in,
+                event_out,
+                in_place,
+                params,
+            } = *op
+            else {
+                continue;
+            };
+            let unit = PlanUnitId::new(unit);
+            let rec = &plan.nodes.recs[unit];
+            let pu = &plan.units[unit];
+            let shape = shapes[&pu.key];
+            let at = format!("node {:?}", pu.key);
+            assert_eq!(rec.unit, unit, "{at}");
+            assert_eq!(rec.store, pu.idx, "{at}");
+            assert_eq!(
+                rec.generation,
+                crate::compile::ids::Generation::new(pu.generation),
+                "{at}"
+            );
+            assert_eq!(rec.arrival, pu.arrival, "{at}");
+            assert_eq!(rec.latency, shape.latency.samples(), "{at}");
+            assert_eq!(rec.tail, shape.tail, "{at}");
+            assert_eq!(
+                rec.park_after,
+                Tail::Finite(shape.latency.samples()).then(shape.tail),
+                "{at}"
+            );
+            assert_eq!(rec.event_capacity, shape.event_capacity, "{at}");
+            assert_eq!(rec.in_place, in_place, "{at}");
+            assert_eq!(rec.params, params, "{at}");
+            assert_eq!(rec.declared, shape.params, "{at}");
+            assert_eq!(
+                in_place.get(0),
+                pu.key == NodeKey(2),
+                "only the in-place node is aliased: {at}"
+            );
+
+            let ain = &plan.audio_list[audio_in.range()];
+            let aout = &plan.audio_list[audio_out.range()];
+            let ein = &plan.event_list[event_in.range()];
+            let eout = &plan.event_list[event_out.range()];
+            let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
+            assert_eq!(
+                counts,
+                [
+                    usize::from(shape.audio_in().count()),
+                    usize::from(shape.audio_out().count()),
+                    usize::from(shape.event_in),
+                    usize::from(shape.event_out)
+                ],
+                "{at}"
+            );
+            assert_eq!(
+                counts,
+                [ain.len(), aout.len(), ein.len(), eout.len()],
+                "{at}"
+            );
+            assert_eq!(
+                rec.ports(&plan.nodes),
+                crate::compile::plan::NodePorts {
+                    ain,
+                    aout,
+                    ein,
+                    eout
+                },
+                "{at}"
+            );
+
+            // The requests the op makes, each run sorted.
+            fn sorted<S: Ord>(mut v: Vec<(S, Role)>) -> Vec<(S, Role)> {
+                v.sort_unstable();
+                v
+            }
+            fn reads<S: Copy>(slots: &[S], skip: InPlaceMask) -> Vec<(S, Role)> {
+                slots
+                    .iter()
+                    .enumerate()
+                    .filter(|&(c, _)| !skip.get(c))
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .collect()
+            }
+            fn writes<S: Copy>(slots: &[S]) -> Vec<(S, Role)> {
+                slots
+                    .iter()
+                    .enumerate()
+                    .map(|(c, &s)| (s, Role::Write(c as u8)))
+                    .collect()
+            }
+            assert_eq!(
+                plan.nodes.audio_borrows[rec.borrows.range()],
+                sorted([reads(ain, in_place), writes(aout)].concat()),
+                "{at}"
+            );
+            assert_eq!(
+                plan.nodes.event_borrows[rec.event_borrows.range()],
+                sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
+                "{at}"
+            );
+
+            let width = (ain.len(), aout.len());
+            let want = match pu.key.0 {
+                1 => "Source",
+                2 => "InPlace",
+                3 => "Split",
+                4 | 5 => "General",
+                6 | 7 => "Direct",
+                8 | 9 => "Audio",
+                k => unreachable!("node {k}"),
+            };
+            let got = match rec.form {
+                Form::General => "General",
+                Form::Source { out } => {
+                    assert_eq!(aout, [out], "{at}");
+                    "Source"
+                }
+                Form::Split { input, out } => {
+                    assert_eq!((ain, aout), (&[input][..], &[out][..]), "{at}");
+                    assert_ne!(input, out, "a split never reads and writes one slot");
+                    "Split"
+                }
+                Form::InPlace { slot } => {
+                    assert_eq!((ain, aout), (&[slot][..], &[slot][..]), "{at}");
+                    "InPlace"
+                }
+                Form::Direct(d) => {
+                    assert_eq!((usize::from(d.ins), usize::from(d.outs)), width, "{at}");
+                    "Direct"
+                }
+                Form::Audio => "Audio",
+            };
+            assert_eq!(got, want, "{at}");
+            forms.push(got);
+        }
+        forms.sort_unstable();
+        forms.dedup();
+        assert_eq!(
+            forms,
+            ["Audio", "Direct", "General", "InPlace", "Source", "Split"],
+            "the table holds a node of each form"
+        );
+    }
 }

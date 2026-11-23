@@ -48,7 +48,7 @@ fn node(key: u64) -> PortSource {
 
 /// A fresh editor and executor, the executor on a pool of `workers` when
 /// more than one.
-fn pair(workers: usize) -> (Editor, Executor) {
+fn with_pool(workers: usize) -> (Editor, Executor) {
     let (ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(test_pool(workers)));
@@ -139,7 +139,7 @@ fn ragged() -> Vec<usize> {
 /// task per gain. Both spread over the pool.
 #[test]
 fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
-    let (mut ed, mut exec) = pair(4);
+    let (mut ed, mut exec) = with_pool(4);
     fans(&mut ed, 1, 16, Some(Cost::Light), Some(Cost::Light));
     commit(&mut ed, &mut exec);
     let plan = exec.plan().expect("a plan");
@@ -147,7 +147,7 @@ fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
     assert_eq!(plan.tasks().len(), 4, "{:?}", plan.tasks());
     assert!(exec.is_parallel());
 
-    let (mut ed, mut exec) = pair(4);
+    let (mut ed, mut exec) = with_pool(4);
     fans(&mut ed, 1, 16, None, Some(Cost::Light));
     commit(&mut ed, &mut exec);
     let plan = exec.plan().expect("a plan");
@@ -163,7 +163,7 @@ fn light_gains_pack_and_undeclared_ones_keep_a_task_each() {
 #[test]
 fn packed_siblings_render_bit_identically() {
     let build = |workers: usize| {
-        let (mut ed, mut exec) = pair(workers);
+        let (mut ed, mut exec) = with_pool(workers);
         ed.spec_mut().topology.inputs = ChannelLayout::MONO;
         let s = 1_000_000;
         ed.insert(NodeKey(s), "sum", sum(15, None));

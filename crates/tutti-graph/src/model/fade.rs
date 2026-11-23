@@ -2,8 +2,7 @@
 //! [`Editor::replace`](crate::Editor::replace) asks for, and the
 //! [`FadeLaw`] it follows.
 //!
-//! The rules the executor and the reference interpreter both implement (each
-//! its own way — they share only the gain law below):
+//! The rules the executor implements:
 //!
 //! - **Both units run on the same inputs** for the fade's `duration` frames,
 //!   and the node's output is `outgoing * g_out + incoming * g_in`, sample by
