@@ -394,16 +394,11 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             max_block,
         } = self.config;
         let main_output = self.main_output_width(layout);
-        self.check_placement(main_output, layout)?;
+        let device = self.check_placement(main_output, layout)?;
         let runtime = Self::session_executor()?;
         let mut parts = self.parts(runtime, rate, max_block, None, main_output)?;
         // The width of every block the host pulls.
-        let mut engine = parts.graph.engine(
-            &parts.transport,
-            layout,
-            self.opts.device_topology.clone(),
-            self.dates,
-        )?;
+        let mut engine = parts.graph.engine(&parts.transport, device, self.dates)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let mut taps = fresh_heard_taps(&mut engine);
@@ -502,16 +497,13 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
             max_block,
         } = self.config;
         let main_output = self.main_output_width(layout);
-        self.check_placement(main_output, layout)?;
+        let device = self.check_placement(main_output, layout)?;
         let runtime = Self::session_executor()?;
         let timer = tutti_engine::TimerDriver::new(&runtime.0);
         let mut parts = self.parts(runtime, rate, max_block, Some(max_block), main_output)?;
-        let mut engine = parts.graph.engine(
-            &parts.transport,
-            layout,
-            self.opts.device_topology.clone(),
-            BlockDates::Os,
-        )?;
+        let mut engine = parts
+            .graph
+            .engine(&parts.transport, device, BlockDates::Os)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let readings = (engine.load(), engine.blocks());
@@ -637,7 +629,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         crate::background::require(crate::BackgroundWork::Device)?;
         let spec = audio_engine.stream().spec().clone();
         let main_output = self.main_output_width(spec.channels);
-        self.check_placement(main_output, spec.channels)?;
+        let device = self.check_placement(main_output, spec.channels)?;
         let mut parts = self.parts(
             runtime,
             spec.sample_rate,
@@ -645,12 +637,9 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
             spec.quantum.map(tutti_engine::OutputQuantum::max_block),
             main_output,
         )?;
-        let mut engine = parts.graph.engine(
-            &parts.transport,
-            spec.channels,
-            self.opts.device_topology.clone(),
-            BlockDates::Os,
-        )?;
+        let mut engine = parts
+            .graph
+            .engine(&parts.transport, device, BlockDates::Os)?;
         Self::clock_midi(&parts, &engine);
         self.declare(&mut parts.graph)?;
         let mut session: crate::LiveSession<&'static str, F> = self.session(
@@ -1123,54 +1112,42 @@ impl<C: Clock> SessionBuilder<C> {
 
     /// Refuses a `(main_output, device)` pair whose main output has a channel the device has
     /// no place for, before anything is built: the engine would render it
-    /// silent. A declared main output is placed from its topology (and refused if it
-    /// is empty or wider than the engine renders); an undeclared one is a bare
-    /// width.
+    /// silent, and a stated device topology of another width. Returns the
+    /// device as the engine takes it. A declared main output is placed from
+    /// its topology (and refused if it is empty or wider than the engine
+    /// renders); an undeclared one is a bare width.
     ///
     /// The main output is at least as wide as the device up to [`MAX_CHANNELS`],
     /// so what this refuses of an undeclared main output is a project wider than the
     /// device where either width has no channel order (a 6-channel project on
     /// a 5-channel interface).
-    fn check_placement(&self, main_output: usize, device: ChannelLayout) -> Result<()> {
-        let placed: Option<ChannelTopology> = match &self.opts.device_topology {
-            Some(stated) if stated.width() != device => {
-                return Err(tutti_buffers::FoldError::from(
-                    tutti_buffers::BufferError::WidthMismatch {
-                        src: stated.width(),
-                        dst: device,
-                    },
-                )
-                .into());
-            }
-            Some(stated) => Some(stated.clone()),
-            None => ChannelTopology::default_for(device),
-        };
+    fn check_placement(
+        &self,
+        main_output: usize,
+        device: ChannelLayout,
+    ) -> Result<tutti_engine::OutputPlacement> {
+        let placed = crate::policy::device_placement(device, self.opts.device_topology.clone())?;
         match &self.opts.main_output {
             // The same check `Graph::declare_main_output` makes a step later; made
             // here so a refused main output builds nothing (no engine, no device
             // thread). Removing this arm alone changes no outcome, only
             // how much is built before the refusal.
             Some(declared) => {
-                Graph::<C::Float>::check_main_output(declared, Some((device, placed.as_ref())))?
+                Graph::<C::Float>::check_main_output(declared, Some(&placed.channels))?
             }
             None => {
                 let width = ChannelLayout::try_from(main_output).map_err(|e| {
                     tutti_buffers::FoldError::from(tutti_buffers::BufferError::from(e))
                 })?;
-                tutti_graph::fold_to_width_with::<C::Float>(
-                    &ChannelTopology::default_for(width).ok_or(
-                        tutti_buffers::FoldError::Unplaced {
-                            channel: MAX_CHANNELS,
-                            speaker: tutti_buffers::Speaker::Unassigned,
-                        },
-                    )?,
-                    device,
-                    placed.as_ref(),
+                tutti_graph::fold_to_channels::<C::Float>(
+                    &ChannelTopology::default_for(width)
+                        .expect("a main output width is within MAX_CHANNELS"),
+                    &placed.channels,
                     tutti_buffers::FoldLevels::default(),
                 )?;
             }
         }
-        Ok(())
+        Ok(placed)
     }
 
     /// Declares the builder's main output on the graph the engine was just built

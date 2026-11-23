@@ -847,8 +847,7 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
         StreamId::of(1),
         PathBuf::new(),
         4096,
-        topology.width(),
-        Some(topology),
+        tutti_buffers::ChannelSet::from(topology),
         None,
         Samples::new(0),
     );
@@ -859,8 +858,7 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
         .collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let place = Place::for_topology(reader.channels(), reader.topology(), frame)
-        .expect("a test ring places");
+    let place = Place::for_channels(reader.channel_set(), frame).expect("a test ring places");
     let control = reader.control_reader();
     let inner = DiskSource::with_reader(
         reader,

@@ -146,7 +146,6 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_buffers::ChannelLayout;
 
     /// A decoded tag's width matches the count Apple packs into it.
     ///

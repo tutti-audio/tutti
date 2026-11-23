@@ -21,7 +21,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, MonoMut, Planes, Sample, Wave};
 use tutti_dsp::cubic_hermite;
 use tutti_graph::fold_to_width;
@@ -710,26 +710,22 @@ impl<F: Float> Place<F> {
     ///   than the frame where either has no channel order (10 channels into 8,
     ///   a 5.1 file into 5): its extra channels would be dropped.
     pub fn for_wave<S: Sample>(wave: &Wave<S>, width: ChannelLayout) -> Result<Self, PlaceError> {
-        Self::for_topology(wave.layout(), wave.topology(), width)
+        Self::for_channels(&wave.channel_set(), width)
     }
 
-    /// The placement of a file of `file` channels, feeding `topology` when it has
-    /// one, into a frame of `width` channels: [`for_wave`](Self::for_wave) for a
-    /// source that is not a resident wave (the streaming tier's ring). Refuses and
-    /// places as `for_wave` does; control side, it allocates. A file wider than a
-    /// topology holds is unassigned channels, which only widen.
+    /// The placement of a file of `channels` into a frame of `width` channels:
+    /// [`for_wave`](Self::for_wave) for a source that is not a resident wave
+    /// (the streaming tier's ring). Refuses and places as `for_wave` does;
+    /// control side, it allocates. A file wider than a topology holds is
+    /// unassigned channels, which only widen.
     ///
     /// # Errors
     ///
     /// As [`for_wave`](Self::for_wave).
-    pub fn for_topology(
-        file: ChannelLayout,
-        topology: Option<&ChannelTopology>,
-        width: ChannelLayout,
-    ) -> Result<Self, PlaceError> {
+    pub fn for_channels(channels: &ChannelSet, width: ChannelLayout) -> Result<Self, PlaceError> {
         let frame = ChannelLayout::from_count(width.count().min(crate::MAX_SAMPLER_WIDTH));
-        let Some(topology) = topology else {
-            return Self::folded(Fold::by_index(file, frame)?, frame);
+        let Some(topology) = channels.topology() else {
+            return Self::folded(Fold::by_index(channels.width(), frame)?, frame);
         };
         if let Some(channel) = topology
             .positions()
@@ -1443,7 +1439,7 @@ mod tests {
         .unwrap();
         let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
         assert!(matches!(
-            Place::<f32>::for_topology(twenty.width(), Some(&twenty), frame),
+            Place::<f32>::for_channels(&ChannelSet::from(twenty.clone()), frame),
             Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
         ));
     }

@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{Float, FoldError};
 use tutti_codec::Format;
 use tutti_dsp::DitherShape;
@@ -91,10 +91,20 @@ impl Width {
         }
     }
 
-    pub(crate) fn topology(&self) -> Option<&ChannelTopology> {
+    /// Whether the speakers are stated or the default layout for the width.
+    pub(crate) fn placement(&self) -> tutti_buffers::Placement {
         match self {
-            Self::Count(_) => None,
-            Self::Placed(topology) => Some(topology),
+            Self::Placed(_) => tutti_buffers::Placement::Stated,
+            Self::Count(_) => tutti_buffers::Placement::Default,
+        }
+    }
+
+    /// The channels the target's width stands for: the stated topology, or
+    /// [`ChannelSet::default_for`] the count.
+    pub(crate) fn channel_set(&self) -> ChannelSet {
+        match self {
+            Self::Count(layout) => ChannelSet::default_for(*layout),
+            Self::Placed(topology) => ChannelSet::from(topology.clone()),
         }
     }
 }
@@ -241,20 +251,14 @@ impl FileTarget {
     /// or the default layout for its width ([`ChannelTopology::default_for`]).
     #[must_use]
     pub(crate) fn placement(&self) -> tutti_buffers::Placement {
-        match self.width {
-            Width::Placed(_) => tutti_buffers::Placement::Stated,
-            Width::Count(_) => tutti_buffers::Placement::Default,
-        }
+        self.width.placement()
     }
 
-    /// The speakers the file's channels feed: the stated topology, or
-    /// [`ChannelTopology::default_for`] for its width ([`placement`](Self::placement)
-    /// says which); `None` past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
-    pub(crate) fn effective_topology(&self) -> Option<ChannelTopology> {
-        match &self.width {
-            Width::Placed(topology) => Some(topology.clone()),
-            Width::Count(layout) => ChannelTopology::default_for(*layout),
-        }
+    /// The file's channels: the stated topology, or [`ChannelSet::default_for`]
+    /// its width ([`placement`](Self::placement) says which); no topology past
+    /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
+    pub(crate) fn channel_set(&self) -> ChannelSet {
+        self.width.channel_set()
     }
 }
 
@@ -318,43 +322,40 @@ impl From<BufferTarget> for Target {
 /// Built by whoever opened the tap (the session, for a stem); the pipeline
 /// checks it against the tap's width and the target's layout.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Placement {
-    layout: ChannelLayout,
-    topology: Option<ChannelTopology>,
-}
+pub struct Placement(ChannelSet);
 
 impl Placement {
     /// Lanes that are the channels of `topology`.
     #[must_use]
     pub fn new(topology: ChannelTopology) -> Self {
-        Self {
-            layout: topology.width(),
-            topology: Some(topology),
-        }
+        Self(ChannelSet::from(topology))
     }
 
     /// `layout` lanes in the engine's order for the width
-    /// ([`ChannelTopology::default_for`]); past
+    /// ([`ChannelSet::default_for`]); past
     /// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) they have no topology and are
     /// unassigned channels.
     #[must_use]
     pub fn of_width(layout: ChannelLayout) -> Self {
-        Self {
-            layout,
-            topology: ChannelTopology::default_for(layout),
-        }
+        Self(ChannelSet::default_for(layout))
     }
 
     /// How many lanes.
     #[must_use]
     pub fn layout(&self) -> ChannelLayout {
-        self.layout
+        self.0.width()
     }
 
     /// What the lanes are, when the width has a topology.
     #[must_use]
     pub fn topology(&self) -> Option<&ChannelTopology> {
-        self.topology.as_ref()
+        self.0.topology()
+    }
+
+    /// The lanes as one value: their width and, when it has one, their topology.
+    #[must_use]
+    pub fn channel_set(&self) -> &ChannelSet {
+        &self.0
     }
 }
 

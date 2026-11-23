@@ -191,9 +191,9 @@ fn check_outputs<F: Float>(outputs: &[Output<F>]) -> Result<()> {
         {
             // Loudness is weighted by placement: refused here, not after the render.
             // A width with no topology has no placement.
-            let placed = file.effective_topology().is_some_and(|topology| {
+            let placed = file.channel_set().topology().is_some_and(|topology| {
                 tutti_measure::Measure::<f32>::measure(
-                    &tutti_measure::LoudnessConfig::new(topology),
+                    &tutti_measure::LoudnessConfig::new(topology.clone()),
                     tutti_units::SampleRate::SR_48K,
                 )
                 .is_ok()
@@ -240,16 +240,12 @@ fn open_lanes<F: FftFloat>(
     let mut lanes = Vec::with_capacity(outputs.len());
     for (i, output) in outputs.into_iter().enumerate() {
         let (feed, target) = output.into_parts();
-        let (layout, topology) = match &target {
-            Target::File(f) => (f.channels(), f.width.topology()),
-            Target::Buffers(b) => (b.channels(), b.width.topology()),
+        let (set, placement) = match &target {
+            Target::File(f) => (f.channel_set(), f.placement()),
+            Target::Buffers(b) => (b.width.channel_set(), b.width.placement()),
         };
-        let placement = if topology.is_some() {
-            tutti_buffers::Placement::Stated
-        } else {
-            tutti_buffers::Placement::Default
-        };
-        let channels = FileChannels { layout, topology };
+        let layout = set.width();
+        let channels = FileChannels { channels: set };
         let (fold, tap) = match feed {
             crate::Feed::MainOutput => (channels.fold_from(graph_outputs, main_output)?, None),
             crate::Feed::Tap { reader, lanes } => {
@@ -542,11 +538,11 @@ fn measure<F: FftFloat>(
         sample_rate: out_rate,
         reason,
     };
-    let topology = waiting
-        .target
-        .effective_topology()
+    let channels = waiting.target.channel_set();
+    let topology = channels
+        .topology()
         .ok_or_else(|| unmeasurable(Unmeasured::Placement))?;
-    let mut measurer = Measurer::new(out_rate, &topology, normalize).map_err(unmeasurable)?;
+    let mut measurer = Measurer::new(out_rate, topology, normalize).map_err(unmeasurable)?;
     let mut resampler: Option<Resampler<F>> = resampler_for(&waiting.target, rate, layout)?;
     let mut staging: Vec<F> = Vec::new();
     let mut replay = waiting.spill.replay()?;

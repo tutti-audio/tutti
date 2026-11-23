@@ -91,7 +91,7 @@ impl<F: SamplerFloat> DiskSource<F> {
     ) -> Self {
         let width =
             crate::voice_width(consumer.channels()).expect("a test ring's width is a voice's");
-        let place = Place::for_topology(consumer.channels(), consumer.topology(), width)
+        let place = Place::for_channels(consumer.channel_set(), width)
             .expect("a test ring is placeable at its own width");
         let control = consumer.control_reader();
         Self::with_reader(
@@ -107,7 +107,7 @@ impl<F: SamplerFloat> DiskSource<F> {
     /// map (`None`: silent), `width` wide (at most [`MAX_CHANNELS`],
     /// the widest frame the read path stacks), placing the ring's channels by
     /// `place`: the [`Place`] of the ring's topology into `width`
-    /// ([`Place::for_topology`], built, and so refusing, when the stream was
+    /// ([`Place::for_channels`], built, and so refusing, when the stream was
     /// opened). The file's own width and order give the identity.
     pub(crate) fn with_reader(
         consumer: SharedReader<F>,

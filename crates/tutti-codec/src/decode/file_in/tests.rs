@@ -597,7 +597,7 @@ fn a_caller_can_still_fold_to_stereo_itself() {
 
     let mut stereo = [0.0f32; 2];
     // A file that names no speakers is read in the engine's order for its width.
-    let file = decoder.topology().expect("a topology");
+    let file = decoder.channel_set().topology().expect("a topology");
     let file = if file.is_unassigned() {
         tutti_buffers::ChannelTopology::default_for(file.width()).unwrap()
     } else {

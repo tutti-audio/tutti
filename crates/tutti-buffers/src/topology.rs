@@ -394,7 +394,7 @@ impl From<Speakers> for Vec<Speaker> {
 /// ```
 /// use tutti_buffers::{Bed, ChannelLayout, ChannelTopology, Speaker};
 ///
-/// let bed = ChannelTopology::default_for(ChannelLayout::from(6u16));
+/// let bed = ChannelTopology::default_for(ChannelLayout::from(6u16)).unwrap();
 /// assert_eq!(bed, Bed::Surround51.topology());
 /// assert_eq!(bed.index_of(Speaker::FrontCenter), Some(2));
 /// assert_eq!(bed.lfe_index(), Some(3));

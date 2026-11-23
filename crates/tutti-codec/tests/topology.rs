@@ -146,7 +146,7 @@ fn the_fixtures_state_their_speakers() {
         );
         assert_eq!(wave.channels(), expected.len(), "{name}");
         let stream = FileIn::<f32>::open(&path).expect(name);
-        assert_eq!(stream.topology(), wave.topology(), "{name}: stream");
+        assert_eq!(stream.channel_set(), &wave.channel_set(), "{name}: stream");
     }
 }
 

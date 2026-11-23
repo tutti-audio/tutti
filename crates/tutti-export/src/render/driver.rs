@@ -24,32 +24,31 @@ use crate::render::BlockCursor;
 use crate::{ConfigError, RenderGraph, RtLogSink};
 use std::ops::Range;
 use std::sync::Arc;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
 use tutti_buffers::{
     Float, Fold, FoldError, InterleavedMut, Planes, PlanesMut, Sample, interleave,
 };
-use tutti_graph::{RtLogReaders, fold_to_width};
+use tutti_graph::{RtLogReaders, fold_to_channels};
 use tutti_timeline::RenderClock;
 use tutti_units::Samples;
 
 /// What a target's channels are, for the fold from the graph's outputs or a
-/// tap's lanes: its width, and the speakers they feed when it states them.
-pub(crate) struct FileChannels<'a> {
-    pub(crate) layout: ChannelLayout,
-    pub(crate) topology: Option<&'a ChannelTopology>,
+/// tap's lanes: its width, and the speakers they feed when it has them.
+pub(crate) struct FileChannels {
+    pub(crate) channels: ChannelSet,
 }
 
-impl FileChannels<'_> {
+impl FileChannels {
     /// The fold from a source of `outputs` channels. The source is what it
     /// declared (`main_output`: the graph's main output, or a tap's placement), or else the engine's order for its width (a bare 4 is
-    /// quad); the file the topology it states or else the default layout for
+    /// quad); the file the channels it states or else the default layout for
     /// its width; where either has no order, or the file states unassigned
-    /// channels, the channels go by index ([`fold_to_width`],
+    /// channels, the channels go by index ([`fold_to_channels`],
     /// [`Fold::by_index`]).
     ///
     /// # Errors
     ///
-    /// [`ConfigError::Placement`] when the file's topology cannot take the
+    /// [`ConfigError::Placement`] when the file's channels cannot take the
     /// graph's channels, or the declared main output is
     /// not as wide as the graph, or the graph has more channels than a layout
     /// holds ([`BufferError::Layout`](tutti_buffers::BufferError::Layout)).
@@ -77,22 +76,17 @@ impl FileChannels<'_> {
             Some(main_output) => Some(main_output.clone()),
             None => ChannelTopology::default_for(graph),
         };
-        let Some(topology) = self.topology else {
-            let fold = match &from {
-                Some(from) => fold_to_width(from, self.layout),
-                None => Fold::by_index(graph, self.layout),
-            };
-            return fold.map_err(|e| ConfigError::Placement(e).into());
-        };
-        // A file that names no speaker takes the graph's channels by index,
-        // as it says; `between` never pads by a guess.
-        let fold = match &from {
-            _ if topology.is_unassigned() => Fold::by_index(graph, topology.width()),
-            Some(from) => Fold::between(from, topology),
-            None => Err(FoldError::Unassigned {
+        let fold = match (&from, self.channels.topology()) {
+            (Some(from), _) => {
+                fold_to_channels(from, &self.channels, tutti_buffers::FoldLevels::default())
+            }
+            // A file that names no speaker takes the graph's channels by
+            // index, as it says; `between` never pads by a guess.
+            (None, Some(topology)) if !topology.is_unassigned() => Err(FoldError::Unassigned {
                 src: graph,
                 dst: topology.width(),
             }),
+            (None, _) => Fold::by_index(graph, self.channels.width()),
         };
         fold.map_err(|e| ConfigError::Placement(e).into())
     }

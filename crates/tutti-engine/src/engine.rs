@@ -1673,9 +1673,9 @@ impl<F: Float> GraphRender<F> {
 mod tests {
     use super::*;
     use tutti_buffers::Bed;
-    use tutti_buffers::ChannelTopology;
     use tutti_buffers::MaxBlock;
     use tutti_buffers::Placement;
+    use tutti_buffers::{ChannelSet, ChannelTopology};
     use tutti_graph::Prepare;
     use tutti_timeline::Timeline;
     use tutti_timeline::{MotionCommand, Transport};
@@ -2699,7 +2699,9 @@ mod tests {
         };
         assert!(control.set_routing(to_five.clone()).is_err(), "device 2");
         control
-            .state_device(ChannelLayout::from(8u16), None)
+            .state_device(crate::OutputPlacement::default_for(ChannelLayout::from(
+                8u16,
+            )))
             .unwrap();
         assert_eq!(control.set_routing(to_five), Ok(()));
     }
@@ -2898,25 +2900,24 @@ mod tests {
         // A 2-wide device stated as a left-right swap of the front pair: the
         // main output's left lands on the device's channel 1.
         let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
-        control.state_device(stereo, Some(swapped.clone())).unwrap();
+        control
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(
+                swapped.clone(),
+            )))
+            .unwrap();
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);
-        assert_eq!(placed.topology, Some(swapped.clone()));
+        assert_eq!(placed.channels, ChannelSet::from(swapped));
         assert_eq!(first_frame_after_fade(&engine, 2), [22.0, 21.0]);
         // Taken back: the width's order.
-        control.state_device(stereo, None).unwrap();
+        control
+            .state_device(crate::OutputPlacement::default_for(stereo))
+            .unwrap();
         assert_eq!(
             control.device(stereo).map(|d| d.placement),
             Some(Placement::Default)
         );
         assert_eq!(first_frame_after_fade(&engine, 2), [21.0, 22.0]);
-        // A statement of another width than the device is refused.
-        assert!(matches!(
-            control.state_device(ChannelLayout::from(6u16), Some(swapped)),
-            Err(FoldError::Buffer(
-                tutti_buffers::BufferError::WidthMismatch { .. }
-            ))
-        ));
     }
 
     /// A main output generation's folds are published until a plan of a later main output
@@ -3282,7 +3283,7 @@ mod tests {
         ])
         .unwrap();
         control
-            .state_device(ChannelLayout::from(3u16), Some(swapped))
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
         assert!(!control.has_fold(MainOutputId::GENESIS, 5, ChannelLayout::from(3u16)));
         assert!(control.cell().current().previous().is_some());
@@ -3339,7 +3340,7 @@ mod tests {
         .unwrap();
         engine
             .output_control()
-            .state_device(ChannelLayout::STEREO, Some(swapped))
+            .state_device(crate::OutputPlacement::stated(ChannelSet::from(swapped)))
             .unwrap();
         let n = declick_frames(SampleRate::SR_48K).get();
         let mut out = vec![0.0f32; (n + 8) * 2];

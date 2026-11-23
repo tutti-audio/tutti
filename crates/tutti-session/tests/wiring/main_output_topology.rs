@@ -327,8 +327,8 @@ fn the_output_device_reads_stated_or_default() {
         .expect("an engine renders it");
     assert_eq!(placed.placement, Placement::Default);
     assert_eq!(
-        placed.topology,
-        Some(tutti_buffers::Bed::Surround51.topology())
+        placed.channels,
+        tutti_buffers::ChannelSet::from(tutti_buffers::Bed::Surround51.topology())
     );
 
     let wired = ChannelTopology::new([
@@ -343,7 +343,7 @@ fn the_output_device_reads_stated_or_default() {
     let stated = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
-    assert_eq!(placed.topology, Some(wired));
+    assert_eq!(placed.channels, tutti_buffers::ChannelSet::from(wired));
 
     let detached = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(detached.output_device(), None, "no engine, no device");

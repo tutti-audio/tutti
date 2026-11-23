@@ -64,7 +64,7 @@ use crate::routing::{OutputLevels, Routing, RoutingError, StageTargets};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tutti_buffers::{BufferError, Float, Fold, FoldError};
-use tutti_buffers::{ChannelLayout, ChannelTopology, MAX_CHANNELS, Placement};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, MAX_CHANNELS, Placement};
 use tutti_graph::{MainOutputError, MainOutputId};
 use tutti_rt::{Mutex, Publisher};
 
@@ -81,9 +81,7 @@ pub const MAX_PENDING_MAIN_OUTPUTS: usize = 8;
 /// What a device's channels are, and whether that was stated or guessed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DeviceEntry {
-    width: ChannelLayout,
-    /// `None` for a device wider than a topology holds: unassigned channels.
-    topology: Option<ChannelTopology>,
+    channels: ChannelSet,
     placement: Placement,
 }
 
@@ -124,9 +122,7 @@ impl<F: Float> MainOutputFolds<F> {
                 &default
             }
         };
-        routing
-            .fold(main_output, device.width, device.topology.as_ref())
-            .map(Some)
+        routing.fold(main_output, &device.channels).map(Some)
     }
 
     /// The folds of every main output width this main output has into `device`. A width the
@@ -210,8 +206,7 @@ impl<F: Float> OutputFolds<F> {
         }
         self.set_device(
             DeviceEntry {
-                width: device,
-                topology: ChannelTopology::default_for(device),
+                channels: ChannelSet::default_for(device),
                 placement: Placement::Default,
             },
             slot,
@@ -326,11 +321,32 @@ impl<F: Float> OutputFolds<F> {
 /// ([`OutputControl::device`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputPlacement {
-    /// The device's channels; `None` for a device wider than a topology holds,
-    /// whose channels are unassigned.
-    pub topology: Option<ChannelTopology>,
+    /// The device's channels: a topology up to
+    /// [`MAX_CHANNELS`], unassigned channels past it.
+    pub channels: ChannelSet,
     /// Whether the caller stated it, or the engine took the width's order.
     pub placement: Placement,
+}
+
+impl OutputPlacement {
+    /// A device whose channels the caller states ([`Placement::Stated`]).
+    #[must_use]
+    pub fn stated(channels: ChannelSet) -> Self {
+        Self {
+            channels,
+            placement: Placement::Stated,
+        }
+    }
+
+    /// A device of `width` channels in the engine's order for the width
+    /// ([`ChannelSet::default_for`], [`Placement::Default`]).
+    #[must_use]
+    pub fn default_for(width: ChannelLayout) -> Self {
+        Self {
+            channels: ChannelSet::default_for(width),
+            placement: Placement::Default,
+        }
+    }
 }
 
 /// The control side of the engine's output folds: what the session keeps when
@@ -451,9 +467,8 @@ impl<F: Float> OutputControl<F> {
     }
 
     /// States what a device's channels are: the main outputs fold by speaker into
-    /// `topology` instead of into the engine's order for its width, for the
-    /// device of that many channels. `None` takes the statement back, and the
-    /// device is the engine's order for its width again.
+    /// `device`'s topology, for the device of that many channels, and by index
+    /// into a device wider than a topology holds.
     ///
     /// Replacing a device already held crossfades like
     /// [`set_routing`](Self::set_routing): the audio thread mixes from the old
@@ -461,7 +476,7 @@ impl<F: Float> OutputControl<F> {
     /// main output fade, a fade still running, no old fold; see the module's "A
     /// routing change").
     ///
-    /// A device of `topology`'s width must have been built for first
+    /// A device of `device`'s width must have been built for first
     /// ([`support`](Self::support)) or is added here.
     ///
     /// Control side: it allocates, and publishes the new set for the next
@@ -471,34 +486,15 @@ impl<F: Float> OutputControl<F> {
     ///
     /// # Errors
     ///
-    /// [`FoldError::Buffer`] for a topology of no channels (nothing is
+    /// [`FoldError::Buffer`] for a device of no channels (nothing is
     /// published).
-    pub fn state_device(
-        &self,
-        device: ChannelLayout,
-        topology: Option<ChannelTopology>,
-    ) -> Result<(), FoldError> {
-        let Some(slot) = usize::from(device.count()).checked_sub(1) else {
+    pub fn state_device(&self, device: OutputPlacement) -> Result<(), FoldError> {
+        let Some(slot) = usize::from(device.channels.width().count()).checked_sub(1) else {
             return Err(BufferError::ZeroWidth.into());
         };
-        let entry = match topology {
-            Some(topology) if topology.width() != device => {
-                return Err(BufferError::WidthMismatch {
-                    src: topology.width(),
-                    dst: device,
-                }
-                .into());
-            }
-            Some(topology) => DeviceEntry {
-                width: device,
-                topology: Some(topology),
-                placement: Placement::Stated,
-            },
-            None => DeviceEntry {
-                width: device,
-                topology: ChannelTopology::default_for(device),
-                placement: Placement::Default,
-            },
+        let entry = DeviceEntry {
+            channels: device.channels,
+            placement: device.placement,
         };
         if self.in_use().is_some_and(|(_, d)| d != slot + 1) {
             self.forget_in_use();
@@ -517,14 +513,14 @@ impl<F: Float> OutputControl<F> {
     }
 
     /// What the device of `device` channels is as the engine folds into it:
-    /// its topology and whether it was stated. `None` for a width not held.
+    /// its channels and whether it was stated. `None` for a width not held.
     #[must_use]
     pub fn device(&self, device: ChannelLayout) -> Option<OutputPlacement> {
         let slot = usize::from(device.count()).checked_sub(1)?;
         let folds = self.cell.current();
         let entry = folds.devices.get(slot)?.as_ref()?;
         Some(OutputPlacement {
-            topology: entry.topology.clone(),
+            channels: entry.channels.clone(),
             placement: entry.placement,
         })
     }
@@ -564,14 +560,11 @@ impl<F: Float> OutputControl<F> {
         if let Some(main_output) = &main_output {
             let placed = self
                 .device(device)
-                .map_or_else(|| ChannelTopology::default_for(device), |d| d.topology);
+                .map_or_else(|| ChannelSet::default_for(device), |d| d.channels);
             // A refusal of the fold itself is the call's; a map that does not
             // fit leaves the pair with no fold, which a commit names.
             if let Err(RoutingError::Fold(refused)) =
-                self.cell
-                    .current()
-                    .routing
-                    .fold::<F>(main_output, device, placed.as_ref())
+                self.cell.current().routing.fold::<F>(main_output, &placed)
             {
                 return Err(refused.into());
             }
