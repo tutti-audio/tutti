@@ -31,18 +31,15 @@ fn sine_against_libm<L: Lane>(tolerance: f64) {
 /// The single-precision polynomial stops at the 11th power: its error is the
 /// first omitted term, `(π/2)^13 / 13! ≈ 5.7e-8`, plus the rounding of the evaluation
 /// (a few ulp at unity, `1.2e-7` each); the bound is `2e-6`.
-#[test]
-fn sine_at_f32_matches_libm_within_the_polynomial_and_rounding_error() {
-    sine_against_libm::<f32x8>(2e-6);
-}
-
+///
 /// The double-precision polynomial runs to the 21st power, whose first omitted term is
 /// `(π/2)^23 / 23! ≈ 1.2e-18`. The measured worst error is 2.2e-16, the rounding of the
 /// evaluation (2 ulp of `f64` at unity, `1.1e-16` each); the bound is `2.5e-16`. A
 /// 19th-order polynomial adds its omitted term, `2.6e-16`, at the quarter-wave phases
 /// the sweep includes, and fails it.
 #[test]
-fn sine_at_f64_matches_libm_to_a_few_ulp() {
+fn sine_matches_libm_within_the_polynomials_error_at_both_widths() {
+    sine_against_libm::<f32x8>(2e-6);
     sine_against_libm::<f64x4>(2.5e-16);
 }
 
@@ -126,12 +123,8 @@ fn pink_power_falls_three_db_an_octave<L: Lane>() {
 }
 
 #[test]
-fn pink_noise_at_f32_falls_three_db_an_octave() {
+fn pink_noise_falls_three_db_an_octave_at_both_widths() {
     pink_power_falls_three_db_an_octave::<f32x8>();
-}
-
-#[test]
-fn pink_noise_at_f64_falls_three_db_an_octave() {
     pink_power_falls_three_db_an_octave::<f64x4>();
 }
 

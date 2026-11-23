@@ -5,12 +5,13 @@
 use core::fmt;
 use std::num::NonZeroUsize;
 
-use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
+use crate::{PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
 use tutti_dsp::{LadderSaturation, SvfControls};
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
 use tutti_units::{Amplitude, Bipolar, Hz, Normalized, Q, Resonance, Semitones};
+use tutti_voicing::{Order, Steal};
 
 /// The waveform every sub-voice of every voice generates.
 ///
@@ -270,7 +271,7 @@ pub struct SynthConfig {
     pub(crate) envelope: Adsr,
     pub(crate) portamento: Option<PortamentoConfig>,
     pub(crate) unison: Option<UnisonConfig>,
-    pub(crate) allocation_strategy: AllocationStrategy,
+    pub(crate) steal: Steal,
     pub(crate) tuning: Tuning,
     pub(crate) pitch_bend_range: Semitones,
     pub(crate) filter_mod: FilterModConfig,
@@ -298,7 +299,7 @@ impl SynthConfig {
             envelope: Adsr::default(),
             portamento: None,
             unison: None,
-            allocation_strategy: AllocationStrategy::Oldest,
+            steal: Steal::By(Order::Oldest),
             tuning: Tuning::equal_temperament(),
             pitch_bend_range: Semitones::new(2.0),
             filter_mod: FilterModConfig::new(),
@@ -387,8 +388,8 @@ impl SynthConfig {
     /// Which voice gets taken when all `polyphony` voices are busy and another
     /// note arrives.
     #[must_use]
-    pub fn allocation_strategy(mut self, allocation_strategy: AllocationStrategy) -> Self {
-        self.allocation_strategy = allocation_strategy;
+    pub fn steal(mut self, steal: Steal) -> Self {
+        self.steal = steal;
         self
     }
 

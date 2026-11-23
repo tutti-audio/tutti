@@ -434,7 +434,9 @@ pub mod types {
         Stop,
     };
     pub use tutti_curve::Breakpoint;
-    pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
+    pub use tutti_curve::{
+        Curvature, CurvatureError, Exponent, ExponentError, FrameProgress, Law, Piece,
+    };
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
         InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, Note,
@@ -771,9 +773,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
-        MasterVolume, MasterVolumeOutOfRange, OscillatorType, PolySynth, PortamentoConfig,
-        PortamentoMode, ReferencePitch, ReferencePitchOutOfRange, SvfMode, SvfQ, SvfQOutOfRange,
+        FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane, MasterVolume,
+        MasterVolumeOutOfRange, Order, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
+        ReferencePitch, ReferencePitchOutOfRange, Steal, SvfMode, SvfQ, SvfQOutOfRange,
         SynthConfig, SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices,
         UnisonVoicesError, VoiceMode,
     };

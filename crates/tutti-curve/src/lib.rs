@@ -15,6 +15,8 @@
 //! A [`Piece`] is a value moving from one endpoint to another along a `Law`, read at
 //! a progress: the one formula every consumer evaluates.
 //!
+//! A [`FrameProgress`] is how far a move of some frames has got: what a glide steps.
+//!
 //! A [`Trajectory`] is the least a lane or a recorder needs of automation:
 //! breakpoints in [`Beat`](tutti_units::Beat), each with a value in the unit
 //! the trajectory automates and the `Law` of the piece it starts, read at a beat.
@@ -36,12 +38,14 @@
 extern crate alloc;
 
 mod fade;
+mod frame_progress;
 mod law;
 mod parameter;
 mod piece;
 mod trajectory;
 
 pub use fade::{DECLICK, FadeLaw, declick_frames};
+pub use frame_progress::FrameProgress;
 pub use law::Law;
 pub use parameter::{Curvature, CurvatureError, Exponent, ExponentError};
 pub use piece::Piece;
