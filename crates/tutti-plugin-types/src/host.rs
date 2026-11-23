@@ -300,7 +300,10 @@ pub trait Control: EditorWindow {
     /// host's node translates each mapped message. A format whose plugin routes
     /// MIDI to its own parameters (AU) writes the entries into its table, never
     /// touching the entries the plugin declares, and answers
-    /// [`Plugin`](MidiMapApplied::Plugin).
+    /// [`Plugin`](MidiMapApplied::Plugin). A unit that refuses a write partway
+    /// answers `Host` after putting its table back; if that fails too it still
+    /// answers `Host`, holds part of the set until the next call converges it,
+    /// and a mapped message can be applied twice in between.
     fn set_app_midi_map(
         &mut self,
         main: MainThreadMarker,

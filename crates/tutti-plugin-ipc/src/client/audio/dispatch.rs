@@ -1046,8 +1046,9 @@ pub(super) fn handle_control(
             reply.send(ok);
         }
         ControlCommand::SetAppMidiMap { app, reply } => {
-            // No answer: nothing was applied by the plugin, so the host's node
-            // must (and a lost plugin hears nothing either way).
+            // No matching reply means the plugin is lost: the server may have
+            // applied the map, but the plugin is gone, so the host's node
+            // answers for it.
             let applied = match query(
                 lane,
                 inbox,

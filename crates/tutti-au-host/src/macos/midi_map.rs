@@ -454,7 +454,9 @@ pub(crate) enum Written {
     /// The unit refused, and its table is as it was.
     Refused,
     /// The unit refused partway and the writes that restore its table failed
-    /// too: it may hold some of the entries.
+    /// too: it may hold part of the set, and the plugin's own entries the set
+    /// replaced may be missing, until the next [`AppMap::set`] converges.
+    /// The failed undo is the caller's to log.
     Unrestored,
 }
 
@@ -481,7 +483,7 @@ impl AppMap {
             .filter(|held| !self.applied.iter().any(|a| a.targets_same_parameter(held)))
             .copied()
             .collect();
-        own.extend_from_slice(&self.replaced);
+        add_missing(&mut own, &self.replaced);
         own
     }
 
@@ -519,9 +521,40 @@ impl AppMap {
         }
     }
 
+    /// What a set that ended `written` leaves this map holding. An undo that
+    /// failed leaves the unit holding any part of the new set and of the last, so
+    /// the map holds all of both (and every plugin entry either replaced): the
+    /// next set removes them all, which the unit ignores where absent, puts the
+    /// replaced entries back and writes its own, so the table converges to the
+    /// plugin's own plus that set.
+    fn record(
+        &mut self,
+        written: Written,
+        entries: Vec<AuMidiMapping>,
+        replaced: Vec<AuMidiMapping>,
+    ) {
+        match written {
+            Written::Applied => {
+                self.applied = entries;
+                self.replaced = replaced;
+            }
+            Written::Unrestored => {
+                add_missing(&mut self.applied, &entries);
+                add_missing(&mut self.replaced, &replaced);
+            }
+            Written::Refused => {}
+        }
+    }
+
     /// Replaces the app's entries in the unit's table with `app`. A refusal
     /// partway puts the table back as it was; a set naming a message the table
     /// has no trigger for is refused whole, before anything is written.
+    ///
+    /// When the undo of a refusal fails too ([`Written::Unrestored`]) the unit
+    /// may hold part of the set until the next call, whose writes converge it:
+    /// the answer is still a refusal, so the host's node translates the set as
+    /// well and a mapped message can be applied twice in the meantime. `Plugin`
+    /// would be wrong, as the unit may hold only some of the entries.
     pub(crate) fn set(&mut self, unit: &Unit, app: &[MidiAssignment]) -> Written {
         let Some(entries) = app
             .iter()
@@ -542,11 +575,17 @@ impl AppMap {
             }
             .is_ok()
         });
-        if written == Written::Applied {
-            self.applied = entries;
-            self.replaced = plan.replaced;
-        }
+        self.record(written, entries, plan.replaced);
         written
+    }
+}
+
+/// Appends to `held` the entries of `more` whose parameter it holds none for.
+fn add_missing(held: &mut Vec<AuMidiMapping>, more: &[AuMidiMapping]) {
+    for entry in more {
+        if !held.iter().any(|h| h.targets_same_parameter(entry)) {
+            held.push(*entry);
+        }
     }
 }
 
@@ -807,6 +846,51 @@ mod tests {
             false
         });
         assert_eq!(written, Written::Unrestored);
+    }
+
+    /// After a refusal whose undo failed too, with the unit holding part of the
+    /// new set, the next set leaves the unit holding exactly the plugin's own
+    /// entries and the new set, and the plugin's own table reads as before.
+    #[test]
+    fn a_set_after_an_unrestored_one_converges_to_own_and_the_new_set() {
+        let (own, over, extra) = fixtures();
+        let mut unit = own.clone();
+        let mut app = AppMap::default();
+        let first = app.plan(&unit, &[extra]);
+        transact(&first, |op| {
+            apply(&mut unit, op);
+            true
+        });
+        app.record(Written::Applied, vec![extra], first.replaced);
+
+        // The last write lands and is reported refused, and every undo is.
+        let entries = vec![extra, over];
+        let plan = app.plan(&unit, &entries);
+        let mut calls = 0;
+        let written = transact(&plan, |op| {
+            calls += 1;
+            if calls <= plan.forward.len() {
+                apply(&mut unit, op);
+                calls < plan.forward.len()
+            } else {
+                false
+            }
+        });
+        assert_eq!(written, Written::Unrestored);
+        app.record(written, entries, plan.replaced);
+        assert!(same_set(&unit, &[extra, over]), "the unit holds the strays");
+
+        let next = app.plan(&unit, &[extra]);
+        assert_eq!(
+            transact(&next, |op| {
+                apply(&mut unit, op);
+                true
+            }),
+            Written::Applied
+        );
+        app.record(Written::Applied, vec![extra], next.replaced);
+        assert!(same_set(&unit, &[own[0], extra]), "own and the new set");
+        assert!(same_set(&app.plugins_own(&unit), &own));
     }
 
     /// An assignment written into the unit reads back as the same assignment,
