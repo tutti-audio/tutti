@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{ErasedPublished, NodeKey, Published};
+use tutti_graph::{ErasedPublished, NodeKey};
 use tutti_music::MeterMap;
 use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
@@ -591,7 +591,7 @@ node_slot_target!(
 );
 
 /// Generates a [`Key`](crate::Key)'s method for each published kind, from the
-/// node's [`HasPublished`]: only a node that declares the kind, with the
+/// node's [`HasPublished`](tutti_graph::HasPublished): only a node that declares the kind, with the
 /// value type the session holds it as, has the method.
 macro_rules! published_methods {
     ($($(#[$cfg:meta])* $name:ident, $target:ident => $kind:ident, $value:ty, $doc:literal;)+) => {
@@ -799,9 +799,11 @@ impl<C: Held> Stage for PublishedSlot<C> {
 }
 
 /// A node's published cell as a slot's control side: what the node handed its
-/// [`NodeParts`](tutti_graph::NodeParts) as a [`Published`].
-pub(crate) struct NodeCell<V>(Arc<dyn Published<Value = V>>);
+/// [`NodeParts`](tutti_graph::NodeParts) as a [`Published`](tutti_graph::Published).
+#[cfg(any(feature = "midi", feature = "sampler"))]
+pub(crate) struct NodeCell<V>(Arc<dyn tutti_graph::Published<Value = V>>);
 
+#[cfg(any(feature = "midi", feature = "sampler"))]
 impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
     type Value = V;
 
@@ -818,8 +820,12 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
 /// declaration gives the kind another value type is refused here, at the
 /// call that adds it, with both types named: the table of kinds in
 /// [`slot_of`] fixes each kind's value type.
+#[cfg(any(feature = "midi", feature = "sampler"))]
 fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(entry: &ErasedPublished) -> Erased {
-    let Some(cell) = entry.cell.downcast_ref::<Arc<dyn Published<Value = V>>>() else {
+    let Some(cell) = entry
+        .cell
+        .downcast_ref::<Arc<dyn tutti_graph::Published<Value = V>>>()
+    else {
         panic!(
             "a node publishes {:?} as `{}`, but a session holds that kind as `{}`",
             entry.kind,
