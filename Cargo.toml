@@ -104,10 +104,6 @@ missing_debug_implementations = "deny"
 disallowed_methods = "deny"
 # The lock ban: `clippy.toml` lists std's blocking locks.
 disallowed_types = "deny"
-# Logging is `tracing`: nothing prints outside a program, a test or an example.
-print_stdout = "deny"
-print_stderr = "deny"
-dbg_macro = "deny"
 too_many_arguments = "allow"
 type_complexity = "allow"
 missing_errors_doc = "warn"

@@ -25,11 +25,6 @@
 //! application does: one `use tutti::{..}` from the root (the session's
 //! requests are there, behind the features that gate them). `tutti-session` cannot
 //! name `tutti`, which depends on it.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "an example is a program: its output is its job"
-)]
 
 // The server lookup `tutti-session`'s plugin suite uses (its reference-probe
 // lookup is for that suite).

@@ -13,11 +13,6 @@
 //! ```text
 //! cargo run --example list_devices
 //! ```
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "an example is a program: its output is its job"
-)]
 
 use tutti_midi_device::Endpoint;
 use tutti_midi_hardware::Devices;

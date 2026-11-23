@@ -16,11 +16,6 @@
 //! **Not covered here:** MIDI Time Code out, and the MIDI-CI session
 //! ([`MidiHardwareConfig::ci`](tutti::midi::MidiHardwareConfig::ci) and the peers a
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "an example is a program: its output is its job"
-)]
 
 use tutti::midi::{
     FileEvent, Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiFile, MidiGroup,

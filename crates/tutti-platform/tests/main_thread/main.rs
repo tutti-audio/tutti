@@ -10,11 +10,6 @@
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
 )]
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "the `harness = false` test runner prints each test's name and result as a test harness does"
-)]
 
 use tutti_platform::MainThreadMarker;
 

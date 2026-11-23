@@ -11,11 +11,6 @@
 //! is unverified is the assembly.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_sampler_cases -- <outdir>`
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: its output is its job"
-)]
 
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;

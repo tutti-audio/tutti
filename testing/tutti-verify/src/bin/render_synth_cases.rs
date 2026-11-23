@@ -14,11 +14,6 @@
 //! because the Rust said so.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_synth_cases -- <outdir>`
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: its output is its job"
-)]
 
 use std::path::Path;
 use tutti_polysynth::UnisonVoices;

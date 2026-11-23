@@ -12,11 +12,6 @@
 //! Only tutti-dsp's public API is used: a design's model and its bank, as a node drives them.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_dsp_cases -- <outdir>`
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: its output is its job"
-)]
 
 use std::f64::consts::TAU;
 use std::fmt::Write as _;

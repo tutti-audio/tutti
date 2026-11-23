@@ -1,9 +1,4 @@
 //! The token a test passes where a plugin entry wants the main thread.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "the `harness = false` test runner prints each test's name and result as a test harness does"
-)]
 
 use tutti_platform::MainThreadMarker;
 

@@ -15,11 +15,6 @@
 //! root; what the root does not carry (the node contract, the SVF
 //! filter) is named through `tutti::graph` and `tutti::nodes`; the testing
 //! oscillator is `tutti-nodes`'s, a dev-dependency of this crate.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "an example is a program: its output is its job"
-)]
 
 use tutti::graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti::modulation::{Follower, Lfo};

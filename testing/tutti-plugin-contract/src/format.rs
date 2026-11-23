@@ -1,9 +1,4 @@
 //! A format under test, and the one case it may fail.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "the contract prints its gap marker, which the dashboard and the ratchet read from the test's stdout"
-)]
 
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};

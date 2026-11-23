@@ -738,3 +738,74 @@ pub(crate) mod fake {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fake::run_gate;
+    use super::*;
+
+    type Check = fn(&dyn Tree) -> Report;
+
+    /// A baseline or row-list gate, with the file it reads.
+    fn lists() -> Vec<(&'static str, Check, &'static str)> {
+        vec![
+            ("check-comments", |t| comments::check(t), comments::BASELINE),
+            (
+                "check-passive-tests",
+                |t| passive_tests::check(t),
+                passive_tests::BASELINE,
+            ),
+            (
+                "check-prose-names",
+                |t| prose_names::check(t),
+                prose_names::BASELINE,
+            ),
+            (
+                "check-test-time",
+                |t| test_time::check(t),
+                test_time::BASELINE,
+            ),
+            ("check-buffers", |t| buffers::check(t, 0), buffers::LIST),
+            (
+                "check-buffers",
+                |t| buffers_loops::check(t, 0),
+                buffers_loops::LIST,
+            ),
+            (
+                "check-session-api",
+                |t| session_api::check(t, 0),
+                session_api::ALLOW,
+            ),
+            ("check-width", |t| width::check(t, &[], 0), width::BASELINE),
+            (
+                "check-building",
+                |t| building::check(t, &[], 0),
+                building::LIST,
+            ),
+            ("check-values", |t| values::check(t, 0, 0), values::LIST),
+            (
+                "umbrella-collisions",
+                |t| umbrella_collisions::check(t),
+                umbrella_collisions::BASELINE,
+            ),
+            (
+                "umbrella-collisions",
+                |t| umbrella_collisions::check(t),
+                umbrella_collisions::ALLOW,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_gate_with_its_sources_and_no_baseline_file_fails_naming_it() {
+        let src = [
+            ("crates/a/src/lib.rs", "pub fn f() {}\n"),
+            ("crates/tutti/src/lib.rs", "pub use tutti_a::Hz;\n"),
+        ];
+        for (gate, check, path) in lists() {
+            let r = run_gate(check, &src);
+            let want = format!("{gate}: FAIL: {path} is missing");
+            assert!(r.findings.contains(&want), "{path}: {:?}", r.findings);
+        }
+    }
+}

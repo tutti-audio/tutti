@@ -21,11 +21,6 @@
 //! mode, are unasserted anywhere.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_analysis_cases -- <outdir>`
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: its output is its job"
-)]
 
 use std::f64::consts::TAU;
 use std::fmt::Write as _;

@@ -17,11 +17,6 @@
 //! that a hand-rolled DFT in a test would be reimplementing badly.
 //!
 //! Run: `cargo run --release -p tutti-verify --bin render_export_cases -- <outdir>`
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: its output is its job"
-)]
 
 use tutti_buffers::ChannelLayout;
 use tutti_codec::{FlacLevel, Format, Pcm};

@@ -12,11 +12,6 @@ disallowed-methods = [
     { path = "tutti_platform::spawn_named", allow-invalid = true, reason = "spawn a future on tutti_platform::Executor (spawn, spawn_dedicated)" },
 ]
 
-# A test prints and dbg!s freely; library code does not (`print_stdout`, `print_stderr`,
-# `dbg_macro` deny in the workspace lints).
-allow-print-in-tests = true
-allow-dbg-in-tests = true
-
 # A blocking lock is `tutti_rt::{Mutex, RwLock, Condvar}`, which refuses a wait inside a
 # render in debug builds and recovers a poisoned lock; a test node's record is
 # `tutti_fixtures::Record` or `Shared`. The crates below `tutti-rt` (layer 0) and the test

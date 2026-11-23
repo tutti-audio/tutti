@@ -330,9 +330,7 @@ touched.
   `impl Error for` is a row of the gate's allow-list with its reason (`cargo xtask
   check-errors`), and a `pub` type named `...Error` implements `Error`.
 - Logging is `tracing`: a library never installs a subscriber, and nothing prints
-  (`println!`/`eprintln!`) outside a `main`: clippy holds the macros (`print_stdout`,
-  `print_stderr`, `dbg_macro`), `cargo xtask check-logging` holds the rest (no `log`
-  dependency, no `stdout()`/`stderr()` handle in a library).
+  (`println!`/`eprintln!`) outside a `main`; `cargo xtask check-logging` holds it.
 - Naming: an algorithm uses the theory name, a spec keeps its own, a *frame* is one value
   per channel, a *sample* is one value. A user-facing node API keeps the control word.
 - A comment states what the code does and the invariant it holds, in the present tense;

@@ -16,11 +16,6 @@
 //! A percentile harness, not criterion: the figure is a mean and a p99 per
 //! update, printed. Run it with
 //! `cargo bench -p tutti-session --bench mod_update`.
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a benchmark reports its figures on its own output"
-)]
 
 use std::time::Duration;
 

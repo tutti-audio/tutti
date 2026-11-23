@@ -38,11 +38,6 @@
 //! built without the one a path names reports that as a refusal.
 
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: it reports to its parent process on stderr"
-)]
 
 mod args;
 

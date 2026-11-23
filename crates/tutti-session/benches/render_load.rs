@@ -77,11 +77,6 @@
 //! ```text
 //! cargo bench -p tutti-session --bench render_load --features synth,sampler,midi
 //! ```
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a benchmark reports its figures on its own output"
-)]
 
 use std::sync::Arc;
 use tutti_buffers::{BusTopology, ChannelLayout, Interleaved, InterleavedMut, MaxBlock, Mono};

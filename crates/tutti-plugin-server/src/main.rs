@@ -20,11 +20,6 @@
         reason = "a test starts the threads it races"
     )
 )]
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a program: it reports to its parent process on stderr"
-)]
 
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;

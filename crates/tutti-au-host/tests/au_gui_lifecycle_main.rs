@@ -35,11 +35,6 @@
     clippy::disallowed_methods,
     reason = "a test starts the threads it races, outside any executor"
 )]
-#![allow(
-    clippy::print_stdout,
-    clippy::print_stderr,
-    reason = "a test binary reports on its own output"
-)]
 
 // NOTE: the macOS gate is `#[cfg]` on the *items* below, deliberately not `#![cfg]` on the file. This target is
 // `harness = false`, so cargo links it as a plain binary and requires a `main`
