@@ -378,7 +378,7 @@ pub trait Control: EditorWindow {
     /// that breaks its format's thread rules. Required, because zero is a
     /// claim: a format whose host refuses no callback by thread says `0` in
     /// its own impl.
-    fn refused_off_thread_calls(&self) -> u64;
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls;
 
     /// Gives the plugin's host the [`ProcessWake`] to raise when the plugin
     /// asks to be processed again (CLAP's `request_process`, which a plugin
@@ -907,7 +907,7 @@ impl<W: Wraps> Control for W {
         self.plugin().dropped_reported_edits() + self.lost_reports()
     }
 
-    fn refused_off_thread_calls(&self) -> u64 {
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
         self.plugin().refused_off_thread_calls()
     }
 

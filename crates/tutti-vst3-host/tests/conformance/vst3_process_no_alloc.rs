@@ -114,8 +114,8 @@ fn unsorted_automation() -> ParameterChanges {
 fn process_with_automation_does_not_allocate() {
     let mut inst = load();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_playing(true);
+        .tempo(tutti_units::Bpm::of(120.0))
+        .playing(true);
 
     // Built once, off the audio thread: the assertion is about what the host
     // does per block, not about assembling the automation.
@@ -155,8 +155,8 @@ fn process_with_automation_does_not_allocate() {
 fn process_steady_state_does_not_allocate() {
     let mut inst = load();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_playing(true);
+        .tempo(tutti_units::Bpm::of(120.0))
+        .playing(true);
 
     // Warm up — primes plugin internal state and the host's pooled
     // return buffers (first call grows them to needed capacity).
@@ -171,8 +171,8 @@ fn process_steady_state_does_not_allocate() {
 fn process_with_midi_does_not_allocate() {
     let mut inst = load();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_playing(true);
+        .tempo(tutti_units::Bpm::of(120.0))
+        .playing(true);
 
     let mut out_l = [0.0f32; 64];
     let mut out_r = [0.0f32; 64];
@@ -239,8 +239,8 @@ fn process_with_hundreds_of_events_does_not_allocate() {
 
     let mut inst = load();
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_units::Bpm::of(120.0))
-        .with_playing(true);
+        .tempo(tutti_units::Bpm::of(120.0))
+        .playing(true);
 
     // Built off the audio thread. Four events a frame across the 64-frame
     // block, alternating on and off so no note is left sounding.

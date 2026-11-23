@@ -249,7 +249,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // counter is the event.
     const STALLED_BLOCKS: u64 = 6;
     let deadline = Instant::now() + Duration::from_secs(60);
-    while handle.block_counts().abandoned < STALLED_BLOCKS {
+    while handle.block_counts().abandoned.get() < STALLED_BLOCKS {
         assert!(
             Instant::now() < deadline,
             "the parked plugin's blocks were never abandoned"
@@ -273,7 +273,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
     // --- Release, and let the drain happen.
     release.fire();
     let late_before = bridge.audio().block_counts().late;
-    let mut collected = 0;
+    let mut collected = tutti_units::Chunks::ZERO;
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline {
         let _ = drive_block(&mut client, &mut midi_out);
@@ -282,15 +282,19 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
         await_answer_or(&controls, "the released plugin to answer", || {
             bridge.audio().block_counts().late > late_before
         });
-        collected = bridge.audio().block_counts().late - late_before;
-        if collected > 0 {
+        collected = bridge
+            .audio()
+            .block_counts()
+            .late
+            .saturating_sub(late_before);
+        if collected > tutti_units::Chunks::ZERO {
             break;
         }
     }
 
     // --- The deterministic gate.
     assert!(
-        collected > 0,
+        collected > tutti_units::Chunks::ZERO,
         "no owed reply was collected after the release. Either the budget never elapsed (so \
          nothing was owed, and this test exercised the ordinary path rather than the \
          abandonment one), or the owed replies were never taken back off the \
@@ -323,7 +327,7 @@ fn a_real_plugin_that_stops_answering_is_abandoned_and_later_drained() {
 /// The counter really moves only because a block was abandoned, and an
 /// ordinary run rarely abandons one.
 ///
-/// The control for the test above, and the reason its `collected > 0` assertion is
+/// The control for the test above, and the reason its `collected` non-zero assertion is
 /// worth anything. An identical run with **no** park must show:
 ///
 /// - **`abandoned <= ORDINARY_MISSES`**: an ordinary block misses its budget
@@ -356,7 +360,7 @@ fn an_unstressed_plugin_abandons_few_blocks_and_collects_no_more_than_it_owed() 
         "an unstressed plugin stays alive"
     );
 
-    let abandoned = bridge.audio().block_counts().abandoned;
+    let abandoned = bridge.audio().block_counts().abandoned.get();
     // A quarter of the blocks. The budget is 4 periods (5.3 ms at 64/48k), the
     // probe's work is a passthrough, and each block follows the server's
     // answer to the one before. So an ordinary block is abandoned only if its
@@ -391,7 +395,7 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     let mut midi_out = tutti_plugin_types::MidiEventVec::new();
 
     assert_eq!(
-        handle.block_counts().abandoned,
+        handle.block_counts().abandoned.get(),
         0,
         "nothing is abandoned yet"
     );
@@ -399,8 +403,8 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
     let deadline = Instant::now() + Duration::from_secs(60);
     let replies_at_park = loop {
         let counts = handle.block_counts();
-        if counts.abandoned >= HANG {
-            break counts.replies;
+        if counts.abandoned.get() >= HANG {
+            break counts.replies.get();
         }
         assert!(
             Instant::now() < deadline,
@@ -415,7 +419,7 @@ fn a_parked_plugin_shows_as_abandoned_blocks_with_no_replies_and_can_be_terminat
         let _ = drive_block(&mut client, &mut midi_out);
     }
     assert_eq!(
-        handle.block_counts().replies,
+        handle.block_counts().replies.get(),
         replies_at_park,
         "a parked plugin gave no reply"
     );

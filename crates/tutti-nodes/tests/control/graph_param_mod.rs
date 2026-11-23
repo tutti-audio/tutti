@@ -245,7 +245,7 @@ fn phaser_of_width(w: usize) -> PhaserNode<f32> {
 /// A node's parts, its controls dropped.
 fn parts_of<N: IntoNode>(node: N) -> NodeParts<()> {
     let NodeParts { node, fork, .. } = node.into_parts();
-    NodeParts::new(node, (), fork)
+    NodeParts::new(node, (), fork, None)
 }
 
 /// One modulatable param of one node type: how to build the node at a

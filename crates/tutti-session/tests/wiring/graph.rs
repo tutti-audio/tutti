@@ -1140,8 +1140,7 @@ fn a_removal_a_commit_and_an_update_run_on_any_thread() {
 
 /// A source of zeros whose controls publish to it through a `Publisher`
 /// cell, as a clip or a voice placement does: the node lends once per
-/// block, and its `SessionNode` impl hands the graph a reclaimer over its
-/// controls.
+/// block, and its parts hand the graph a reclaimer over its controls.
 struct Published {
     node: PublishedNode,
     controls: PublishedControls,
@@ -1203,15 +1202,16 @@ impl IntoNode for Published {
     type Controls = PublishedControls;
     fn into_parts(self) -> NodeParts<PublishedControls> {
         let NodeParts { node, fork, .. } = IntoNode::into_parts(Unforkable(self.node));
-        NodeParts::new(node, self.controls, fork)
+        NodeParts::new(
+            node,
+            self.controls.clone(),
+            fork,
+            Some(Box::new(self.controls)),
+        )
     }
 }
 
-impl SessionNode for Published {
-    fn reclaimer(controls: &PublishedControls) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::of(controls)
-    }
-}
+impl SessionNode for Published {}
 
 /// Publishes into `controls`' cell while a borrow on it (a block in
 /// progress) is held, then lets the borrow go: what is left is one retired

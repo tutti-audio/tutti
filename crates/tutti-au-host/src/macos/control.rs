@@ -141,7 +141,10 @@ impl AuLoaded {
             .and_then(crate::topology::topology_of);
         PluginBus::single(layout)
             .into_iter()
-            .map(|bus| bus.placed(placement.clone()))
+            .map(|bus| match &placement {
+                Some(topology) => bus.placed(topology.clone()),
+                None => bus,
+            })
             .collect()
     }
 
@@ -554,8 +557,8 @@ impl Control for AuLoaded {
     }
 
     /// Audio Unit has no host-side main-thread refusal: none is counted.
-    fn refused_off_thread_calls(&self) -> u64 {
-        0
+    fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+        tutti_units::Calls::ZERO
     }
 }
 

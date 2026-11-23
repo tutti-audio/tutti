@@ -34,6 +34,11 @@ use tutti_units::ranged;
 ranged! {
     /// The multiplier on the adaptive threshold: finite and not negative.
     /// Higher rejects more.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Amplitude", into = "Amplitude")
+    )]
     OnsetThreshold(Amplitude), OnsetThresholdError, "an onset threshold of zero or more",
     |raw| raw.get() >= 0.0 && raw.get().is_finite()
 }
@@ -41,12 +46,22 @@ ranged! {
 ranged! {
     /// The gain applied to the detection function before thresholding: finite and above zero,
     /// since a gain of zero detects nothing.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Amplitude", into = "Amplitude")
+    )]
     OnsetSensitivity(Amplitude), OnsetSensitivityError, "an onset sensitivity above zero",
     |raw| raw.get() > 0.0 && raw.get().is_finite()
 }
 
 ranged! {
     /// The shortest spacing between accepted onsets: within `0..=60` seconds.
+    #[cfg_attr(
+        feature = "serde",
+        derive(serde::Serialize, serde::Deserialize),
+        serde(try_from = "Seconds", into = "Seconds")
+    )]
     OnsetGap(Seconds), OnsetGapError, "an onset gap within 0..=60 s",
     |raw| raw.get() >= 0.0 && raw.get() <= 60.0
 }

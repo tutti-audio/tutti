@@ -23,14 +23,8 @@
 //!
 //! Comments and string literals are not code.
 
-use super::lex::{blank, find_word, line_of};
+use super::lex::{blank, find_word, line_of, skipped};
 use super::{Report, Tree};
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// `(crate directory, why it may hold unsafe, the lint it must carry instead)`.
 pub(super) const HOMES: &[(&str, &str, Option<&str>)] = &[

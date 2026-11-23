@@ -371,13 +371,13 @@ fn a_prepare_on_the_main_thread_tells_the_plugin_at_once() {
     assert_eq!(after.resume_count, before.resume_count + 1);
     assert_eq!(
         loaded.unit.controls().block_losses().unlent,
-        0,
+        tutti_units::Blocks::ZERO,
         "no block went without it"
     );
     process_block(&mut loaded.unit, BLOCK);
     assert_eq!(
         loaded.unit.controls().block_losses().unlent,
-        0,
+        tutti_units::Blocks::ZERO,
         "the new Processor renders"
     );
 
@@ -677,7 +677,7 @@ fn a_refused_block_with_no_midi_is_counted() {
     drive_block(&mut loaded.unit);
     assert_eq!(
         loaded.unit.controls().block_losses().entries_refused,
-        0,
+        tutti_units::Blocks::ZERO,
         "a live plugin refuses none"
     );
 
@@ -688,12 +688,12 @@ fn a_refused_block_with_no_midi_is_counted() {
     });
     process_block(&mut loaded.unit, BLOCK);
     assert!(
-        loaded.unit.controls().block_losses().entries_refused > 0,
+        loaded.unit.controls().block_losses().entries_refused > tutti_units::Blocks::ZERO,
         "the plugin's refusal reaches the node"
     );
     assert_eq!(
         loaded.unit.controls().block_losses().failed,
-        0,
+        tutti_units::Blocks::ZERO,
         "the block did not fail"
     );
     drop(loaded.handle);

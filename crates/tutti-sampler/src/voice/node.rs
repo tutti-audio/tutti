@@ -400,15 +400,9 @@ impl<F: SamplerFloat> VoiceNode<F> {
     }
 
     /// What the node declares to the cost model: `Moderate` for a plain
-    /// read, `Heavy` with a vocoder.
-    ///
-    /// Measured: a plain memory voice 13 ns
-    /// per frame and channel, a stretched one 288 (the phase vocoder),
-    /// against `SvfFilterNode`'s 7.2 and `Heavy`'s 256. A node's vocoder is
-    /// built with it or never (`UpdateStretch` reaches only a pool's
-    /// slots), so every read of the shape (at insert and at each
-    /// re-prepare) gives the same class. A disk voice reads through the
-    /// same kernel as a memory one.
+    /// read, `Heavy` with a vocoder. A node's vocoder is built with it or
+    /// never (`UpdateStretch` reaches only a pool's slots), so every read of
+    /// the shape gives the same class.
     fn cost(&self) -> tutti_graph::Cost {
         if self.slot.stretch.is_some() {
             tutti_graph::Cost::Heavy
@@ -632,7 +626,14 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             params: handle.params.clone(),
             tempo: node.tempo.clone(),
         };
-        NodeParts::new(Box::new(node), handle, Some(Box::new(fork)))
+        let params = handle.params().clone();
+        NodeParts::new(
+            Box::new(node),
+            handle.clone(),
+            Some(Box::new(fork)),
+            Some(Box::new(handle)),
+        )
+        .params(params)
     }
 }
 

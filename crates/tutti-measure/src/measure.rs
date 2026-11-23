@@ -18,6 +18,12 @@ use crate::convert::Discard;
 /// `A: Measure<S>` takes views of `S`); a meter converts each chunk to `f64`
 /// block by block on a block scratch and never copies the whole chunk.
 /// What a push allocates is the meter's own doc.
+///
+/// The exception is a whole-buffer analysis (notes, pitch track, tempo, beats,
+/// chords, key, alignment): its meter gathers the stream as `f64`, up to the
+/// most frames the analysis reads, and runs the analysis at
+/// [`finish`](StreamMeter::finish). Its output is a `Result` of the analysis's
+/// own error, since what it refuses is known only at the end.
 pub trait Measure<S: Sample> {
     /// What binding the config to a stream needs.
     type Context;
@@ -86,6 +92,52 @@ pub(crate) fn measure_buffer<S: Sample, M: Measure<S>>(
     let mut meter = cfg.measure(context)?;
     meter.push(input, &mut Discard)?;
     Ok(meter.finish())
+}
+
+/// [`measure_buffer`] for a whole-buffer analysis, whose output is a `Result` of
+/// its own error: a refusal of the meter flattens into that error through
+/// `From<MeterError>`.
+///
+/// # Errors
+///
+/// The analysis's error, from the meter or from the analysis.
+pub(crate) fn measure_whole<S, M, T, E>(
+    cfg: &M,
+    context: M::Context,
+    input: <M::Meter as StreamMeter>::Input<'_>,
+) -> Result<T, E>
+where
+    S: Sample,
+    M: Measure<S>,
+    M::Meter: StreamMeter<Output = Result<T, E>>,
+    E: From<MeterError>,
+{
+    measure_buffer::<S, M>(cfg, context, input)?
+}
+
+/// The output of `cfg` over `samples`, read twice: as one chunk and fed in
+/// uneven chunks. The two must be equal, which is what makes a meter's
+/// reading independent of how the stream is cut; returns the reading.
+#[cfg(test)]
+pub(crate) fn chunk_independent<M>(
+    cfg: &M,
+    context: M::Context,
+    samples: &[f64],
+) -> <M::Meter as StreamMeter>::Output
+where
+    M: Measure<f64>,
+    M::Context: Copy,
+    for<'a> M::Meter: StreamMeter<Input<'a> = tutti_buffers::Mono<'a, f64>>,
+    <M::Meter as StreamMeter>::Output: PartialEq + core::fmt::Debug,
+{
+    let whole = measure_buffer::<f64, M>(cfg, context, tutti_buffers::Mono::new(samples))
+        .expect("the whole buffer is accepted");
+    let (_, chunked) = fold_uneven::<f64, M>(cfg, context, samples.len(), |meter, at, out| {
+        meter.push(tutti_buffers::Mono::new(&samples[at]), out)
+    })
+    .expect("the chunks are accepted");
+    assert_eq!(chunked, whole, "the reading depends on the chunking");
+    whole
 }
 
 /// Drives one meter of `cfg` over a stream of `frames` frames in uneven chunks

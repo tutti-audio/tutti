@@ -257,9 +257,13 @@ fn block_losses(s: &DetachedSession, node: NodeKey) -> tutti_plugin_host::BlockL
 #[test]
 fn block_losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_did_not_render() {
     let (mut s, node, counters, _fake) = hosted();
-    assert_eq!(block_losses(&s, node).unlent, 0);
+    assert_eq!(block_losses(&s, node).unlent, tutti_units::Blocks::ZERO);
     leave_unlent(&counters.controls, 3);
-    assert_eq!(block_losses(&s, node).unlent, 3, "the node's own");
+    assert_eq!(
+        block_losses(&s, node).unlent,
+        tutti_units::Blocks::new(3),
+        "the node's own"
+    );
 
     let rebuilt = Counters::new();
     s.graph
@@ -267,9 +271,13 @@ fn block_losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_did_not_render() {
         .get_mut(&node)
         .unwrap()
         .set_node((*rebuilt.controls).clone());
-    assert_eq!(block_losses(&s, node).unlent, 3, "the rebuild lost nothing");
+    assert_eq!(
+        block_losses(&s, node).unlent,
+        tutti_units::Blocks::new(3),
+        "the rebuild lost nothing"
+    );
     leave_unlent(&rebuilt.controls, 2);
-    assert_eq!(block_losses(&s, node).unlent, 5);
+    assert_eq!(block_losses(&s, node).unlent, tutti_units::Blocks::new(5));
 
     let (incoming, _incoming_fake) = handle();
     let swapped = Counters::new();
@@ -280,11 +288,15 @@ fn block_losses_keep_what_a_rebuilt_node_and_a_swapped_plugin_did_not_render() {
         None,
     );
     drop(outgoing);
-    assert_eq!(block_losses(&s, node).unlent, 5, "the swap lost nothing");
+    assert_eq!(
+        block_losses(&s, node).unlent,
+        tutti_units::Blocks::new(5),
+        "the swap lost nothing"
+    );
     leave_unlent(&swapped.controls, 1);
     assert_eq!(
         block_losses(&s, node).unlent,
-        6,
+        tutti_units::Blocks::new(6),
         "the incoming plugin's add to the outgoing's"
     );
 }
@@ -349,12 +361,12 @@ fn refused_off_thread_calls_are_counted_per_plugin() {
             .diagnostics()
             .refused_off_thread_calls()
     };
-    assert_eq!(read(&s, node), 0);
+    assert_eq!(read(&s, node), tutti_units::Calls::ZERO);
     fake.refuse_off_thread_calls(2);
     other_fake.refuse_off_thread_calls(7);
     assert_eq!(
         read(&s, node),
-        2,
+        tutti_units::Calls::new(2),
         "another plugin's count is not this one's"
     );
 
@@ -367,7 +379,15 @@ fn refused_off_thread_calls_are_counted_per_plugin() {
         None,
     );
     drop(outgoing);
-    assert_eq!(read(&s, node), 2, "the outgoing plugin's count stays");
+    assert_eq!(
+        read(&s, node),
+        tutti_units::Calls::new(2),
+        "the outgoing plugin's count stays"
+    );
     incoming_fake.refuse_off_thread_calls(3);
-    assert_eq!(read(&s, node), 5, "the incoming plugin's adds");
+    assert_eq!(
+        read(&s, node),
+        tutti_units::Calls::new(5),
+        "the incoming plugin's adds"
+    );
 }

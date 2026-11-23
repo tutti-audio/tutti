@@ -386,10 +386,10 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     // Playing, 137.5 BPM, 3/4, a quarter of the way past beat 2.
     let beat0 = 2.25;
     let start = TransportInfo::new(tutti_plugin_types::SampleRate::of(RATE))
-        .with_tempo(tutti_units::Bpm::of(137.5))
-        .with_time_signature(TimeSignature::of(3, 4))
-        .with_playing(true)
-        .with_beat(tutti_units::Beat::new(beat0));
+        .tempo(tutti_units::Bpm::of(137.5))
+        .time_signature(TimeSignature::of(3, 4))
+        .playing(true)
+        .beat(tutti_units::Beat::new(beat0));
     run(&mut au, FRAMES, Some(&start), None).expect("process");
     let (status, beat, tempo, delta, num, den, changed, playing) = pull(&au);
     assert_eq!(status, 0);
@@ -401,14 +401,14 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     assert!(changed, "the first block is a start");
 
     // The next block is where playing leaves the playhead: no locate.
-    let next = start.with_beat(tutti_units::Beat::new(
+    let next = start.beat(tutti_units::Beat::new(
         beat0 + FRAMES as f64 / RATE * 137.5 / 60.0,
     ));
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     assert!(!pull(&au).6, "a continuous block is not a locate");
 
     // A seek is one.
-    let seek = next.with_beat(tutti_units::Beat::new(32.0));
+    let seek = next.beat(tutti_units::Beat::new(32.0));
     run(&mut au, FRAMES, Some(&seek), None).expect("process");
     let (_, beat, _, delta, _, _, changed, _) = pull(&au);
     assert_eq!(beat, 32.0);
@@ -416,7 +416,7 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     assert!(changed, "a seek is reported once");
 
     // Stopped is published too, not skipped.
-    run(&mut au, FRAMES, Some(&seek.with_playing(false)), None).expect("process");
+    run(&mut au, FRAMES, Some(&seek.playing(false)), None).expect("process");
     let (status, _, _, _, _, _, changed, playing) = pull(&au);
     assert_eq!(status, 0);
     assert!(!playing && changed, "a stop is a change");
@@ -426,7 +426,7 @@ fn the_loader_installs_host_callbacks_and_feeds_each_blocks_transport() {
     run(&mut au, FRAMES, Some(&next), None).expect("process");
     run(&mut au, FRAMES, None, None).expect("process");
     assert_eq!(pull(&au).0, CANNOT_DO, "no frozen beat after a gap");
-    let resumed = next.with_beat(tutti_units::Beat::new(next.position.beat.get() + 0.026));
+    let resumed = next.beat(tutti_units::Beat::new(next.position.beat.get() + 0.026));
     run(&mut au, FRAMES, Some(&resumed), None).expect("process");
     let (status, _, _, _, _, _, changed, _) = pull(&au);
     assert_eq!(status, 0);
@@ -490,8 +490,8 @@ fn a_unit_without_the_callbacks_is_not_published_to() {
             .is_none()
     );
     let transport = TransportInfo::new(tutti_plugin_types::SampleRate::SR_48K)
-        .with_tempo(tutti_units::Bpm::of(150.0))
-        .with_playing(true);
+        .tempo(tutti_units::Bpm::of(150.0))
+        .playing(true);
     run(&mut au, 512, Some(&transport), None).expect("a block with a transport renders");
     assert!(au.loaded_ref().and_then(|l| l.transport()).is_none());
 }

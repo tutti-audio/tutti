@@ -33,7 +33,7 @@ fn plain_lag(reference: &[f64], take: &[f64], max_lag: usize) -> isize {
     cross_correlate(Mono::new(take), Mono::new(reference))
         .peak_within(Samples::new(max_lag))
         .unwrap()
-        .lag
+        .lag()
 }
 
 /// `align` at 48 kHz, the rate the tests that do not name one read at.
@@ -124,12 +124,16 @@ fn a_delayed_copy_is_found_at_exactly_its_delay() {
     let x = noise(4096, 1);
     for delay in [0isize, 1, -1, 123, -123, 1500, -1500] {
         let a = find(&x, &shifted(&x, delay), 2000);
-        assert_eq!(a.lag, delay, "delay {delay}");
-        assert!(a.offset.abs() < 0.05, "delay {delay}: offset {}", a.offset);
+        assert_eq!(a.lag(), delay, "delay {delay}");
         assert!(
-            a.confidence.get() > 0.8,
+            a.offset().abs() < 0.05,
+            "delay {delay}: offset {}",
+            a.offset()
+        );
+        assert!(
+            a.confidence().get() > 0.8,
             "delay {delay}: {:?}",
-            a.confidence
+            a.confidence()
         );
     }
 }
@@ -155,7 +159,7 @@ fn scaling_an_input_changes_nothing() {
     let reference = with_tone(x.clone(), 3.0, 480.0, 0.0);
     let take = with_tone(shifted(&x, 77), 3.0, 480.0, 1.3);
     let base = find(&reference, &take, 1000);
-    assert_eq!(base.lag, 77);
+    assert_eq!(base.lag(), 77);
     let scaled = |v: &[f64], g: f64| v.iter().map(|s| s * g).collect::<Vec<f64>>();
     for (gr, gt) in [
         (1000.0f64, 1.0f64),
@@ -165,8 +169,8 @@ fn scaling_an_input_changes_nothing() {
         (1e-6, 1e-6),
     ] {
         let a = find(&scaled(&reference, gr), &scaled(&take, gt), 1000);
-        assert_eq!(a.lag, 77, "gains {gr}, {gt}");
-        let drift = (a.confidence.get() - base.confidence.get()).abs();
+        assert_eq!(a.lag(), 77, "gains {gr}, {gt}");
+        let drift = (a.confidence().get() - base.confidence().get()).abs();
         assert!(drift < 0.02, "gains {gr}, {gt}: drift {drift}");
     }
 }
@@ -184,8 +188,8 @@ fn phat_keeps_the_delay_where_plain_correlation_follows_a_hum() {
         "plain no longer fails"
     );
     let a = find(&reference, &take, 1000);
-    assert_eq!(a.lag, 77);
-    assert!(a.confidence.get() > 0.3, "{:?}", a.confidence);
+    assert_eq!(a.lag(), 77);
+    assert!(a.confidence().get() > 0.3, "{:?}", a.confidence());
 }
 
 /// The same on a source whose spectrum falls 12 dB per octave, with a hum
@@ -202,8 +206,8 @@ fn phat_keeps_the_delay_of_a_steeply_tilted_source_under_a_hum() {
         "plain no longer fails"
     );
     let a = find(&reference, &take, 1000);
-    assert_eq!(a.lag, 77);
-    assert!(a.confidence.get() > 0.5, "{:?}", a.confidence);
+    assert_eq!(a.lag(), 77);
+    assert!(a.confidence().get() > 0.5, "{:?}", a.confidence());
 }
 
 /// A band keeps what two takes share: a narrow common signal under
@@ -242,12 +246,12 @@ fn a_band_limit_leaves_out_what_does_not_correlate() {
     let rate = SampleRate::of(1.0);
     let open = align_at(rate, &reference, &take, &open).unwrap();
     let banded = align_at(rate, &reference, &take, &banded).unwrap();
-    assert_eq!(banded.lag, 77);
+    assert_eq!(banded.lag(), 77);
     assert!(
-        banded.confidence.get() > 2.0 * open.confidence.get(),
+        banded.confidence().get() > 2.0 * open.confidence().get(),
         "banded {:?}, open {:?}",
-        banded.confidence,
-        open.confidence
+        banded.confidence(),
+        open.confidence()
     );
 }
 
@@ -290,8 +294,8 @@ fn a_decaying_filter_on_the_take_keeps_the_lag() {
         })
         .collect();
     let a = find(&x, &take, 1000);
-    assert_eq!(a.lag, 77);
-    assert!(a.confidence.get() > 0.5, "{:?}", a.confidence);
+    assert_eq!(a.lag(), 77);
+    assert!(a.confidence().get() > 0.5, "{:?}", a.confidence());
 }
 
 /// Only lags within the bound are chosen, the bound itself included; a
@@ -300,12 +304,12 @@ fn a_decaying_filter_on_the_take_keeps_the_lag() {
 fn the_max_lag_bound_is_respected() {
     let x = noise(2048, 6);
     let take = shifted(&x, 200);
-    assert_eq!(find(&x, &take, 200).lag, 200);
+    assert_eq!(find(&x, &take, 200).lag(), 200);
     let a = find(&x, &take, 150);
-    assert!(a.lag.abs() <= 150, "lag {}", a.lag);
+    assert!(a.lag().abs() <= 150, "lag {}", a.lag());
     let one = find(&x, &x, 0);
-    assert_eq!(one.lag, 0);
-    assert_eq!(one.confidence, Confidence::NONE);
+    assert_eq!(one.lag(), 0);
+    assert_eq!(one.confidence(), Confidence::NONE);
 }
 
 /// A peak that spans several lags (a band-limited signal, a perfect delay)
@@ -315,8 +319,8 @@ fn a_wide_peak_is_not_its_own_runner_up() {
     let cfg = AlignConfig::new(Samples::new(300)).band(band(1000.0, 4000.0));
     let x = band_noise(4096, 5, 1000.0 / 48_000.0, 4000.0 / 48_000.0);
     let clean = align(&x, &shifted(&x, 40), &cfg).unwrap();
-    assert_eq!(clean.lag, 40);
-    assert!(clean.confidence.get() > 0.7, "{:?}", clean.confidence);
+    assert_eq!(clean.lag(), 40);
+    assert!(clean.confidence().get() > 0.7, "{:?}", clean.confidence());
 
     let (n1, n2) = (noise(4096, 6), noise(4096, 7));
     let reference: Vec<f64> = x.iter().zip(&n1).map(|(a, b)| a + 0.5 * b).collect();
@@ -326,8 +330,8 @@ fn a_wide_peak_is_not_its_own_runner_up() {
         .map(|(a, b)| a + 0.5 * b)
         .collect();
     let noisy = align(&reference, &take, &cfg).unwrap();
-    assert_eq!(noisy.lag, 40);
-    assert!(noisy.confidence.get() > 0.7, "{:?}", noisy.confidence);
+    assert_eq!(noisy.lag(), 40);
+    assert!(noisy.confidence().get() > 0.7, "{:?}", noisy.confidence());
 }
 
 /// The lobe rule on hand-made profiles (peak at index 5, lag = index):
@@ -371,7 +375,11 @@ fn the_lobe_rule_on_made_up_profiles() {
 fn unrelated_noise_has_low_confidence() {
     for seed in 10..14 {
         let a = find(&noise(8192, seed), &noise(8192, seed + 100), 1000);
-        assert!(a.confidence.get() < 0.3, "seed {seed}: {:?}", a.confidence);
+        assert!(
+            a.confidence().get() < 0.3,
+            "seed {seed}: {:?}",
+            a.confidence()
+        );
     }
 }
 
@@ -389,7 +397,7 @@ fn the_offset_is_zero_unless_three_points_bend_down_inside_the_overlap() {
             *bin = Complex64::new(w.cos(), w.sin());
         }
     });
-    assert_eq!(delta_at_one.peak().unwrap().lag, 1);
+    assert_eq!(delta_at_one.peak().unwrap().lag(), 1);
     assert_eq!(parabolic_offset(&delta_at_one, 0), 0.0);
     assert_eq!(parabolic_offset(&delta_at_one, delta_at_one.min_lag()), 0.0);
     assert_eq!(parabolic_offset(&delta_at_one, delta_at_one.max_lag()), 0.0);
@@ -447,5 +455,32 @@ fn delay_converts_and_bad_input_is_refused() {
     assert!(matches!(
         FrequencyBand::try_from(Hz::new(500.0)..=Hz::new(100.0)),
         Err(EmptyFrequencyRange { .. })
+    ));
+}
+
+/// A meter of a take 25 samples late against its reference reads a lag of 25
+/// and a delay of 25 samples in seconds, in any chunking; a reference at
+/// another rate or one that cannot fold to mono is refused when the meter is
+/// made.
+#[test]
+fn the_align_meter_reads_the_known_delay_and_refuses_a_reference_it_cannot_hold() {
+    let reference = noise(4000, 3);
+    let take = shifted(&reference, 25);
+    let config = AlignConfig::new(Samples::new(100));
+    let rate = SampleRate::SR_48K;
+    let measure = AlignTo::new(config, Wave::from_mono(rate, Mono::new(&reference)));
+    let found = crate::measure::chunk_independent(&measure, rate, &take).unwrap();
+    assert_eq!(found.lag(), 25);
+    assert!(found.offset().abs() < 0.05, "{}", found.offset());
+    assert!((found.delay(rate).get() - 25.0 / 48_000.0).abs() < 0.05 / 48_000.0);
+
+    assert!(matches!(
+        Measure::<f64>::measure(&measure, SampleRate::SR_44K1),
+        Err(MeterError::ReferenceRate { .. })
+    ));
+    let three = AlignTo::new(config, Wave::<f64>::new(3, rate));
+    assert!(matches!(
+        Measure::<f64>::measure(&three, rate),
+        Err(MeterError::ReferenceFold(_))
     ));
 }

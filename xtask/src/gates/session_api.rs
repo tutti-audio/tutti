@@ -22,7 +22,7 @@
 //! a row until its lane reshapes it; a row naming no such type or function, or with no
 //! reason, fails.
 
-use super::lex::{blank, find_word_from, matching, test_ranges};
+use super::lex::{blank, find_word_from, matching, skipped_library, test_ranges, word};
 use super::{Report, Tree};
 use std::collections::BTreeSet;
 
@@ -34,14 +34,6 @@ const MARKER: &str = "MainThreadMarker";
 
 /// The fewest files a real run reads; fewer means the walk is broken.
 pub(super) const MIN_FILES: usize = 10;
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "tests" | "benches" | "examples" | "target")
-}
-
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
 
 fn skip_ws(b: &[u8], mut i: usize) -> usize {
     while b.get(i).is_some_and(u8::is_ascii_whitespace) {
@@ -148,7 +140,7 @@ fn scan(tree: &dyn Tree) -> (Found, usize) {
         types: BTreeSet::new(),
     };
     let files: Vec<String> = tree
-        .files(ROOT, &skipped)
+        .files(ROOT, &skipped_library)
         .into_iter()
         .filter(|f| f.ends_with(".rs") && !f.ends_with("/tests.rs"))
         .collect();

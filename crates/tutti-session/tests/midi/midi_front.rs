@@ -40,11 +40,7 @@ impl IntoNode for Probe {
     }
 }
 impl InstrumentNode<f32> for Probe {}
-impl SessionNode for Probe {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for Probe {}
 
 // --- Recording a take --------------------------------------------------------
 

@@ -18,7 +18,7 @@
 //! methods with one id, is an error: it never returns half a set.
 
 use super::Tree;
-use super::lex::matching;
+use super::lex::{self, matching};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Where the SDK headers sit in the repo.
@@ -86,22 +86,10 @@ fn blank_cpp(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn word_byte(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
-
 /// The identifier that starts at `from` after skipping whitespace.
 fn ident_at(code: &str, from: usize) -> Option<(&str, usize)> {
-    let b = code.as_bytes();
-    let mut s = from;
-    while s < b.len() && b[s].is_ascii_whitespace() {
-        s += 1;
-    }
-    let mut e = s;
-    while e < b.len() && word_byte(b[e]) {
-        e += 1;
-    }
-    (e > s).then(|| (&code[s..e], e))
+    let (name, end) = lex::ident_at(code, from);
+    (!name.is_empty()).then_some((name, end))
 }
 
 /// The names `DECLARE_CLASS_IID (Name, ...)` declares in `code`.

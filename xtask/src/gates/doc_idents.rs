@@ -30,8 +30,8 @@
 //! `module::item` passes when both exist anywhere in the workspace; a span
 //! that a line break splits is not read.
 
-use super::lex::{blank, comments};
-use super::prose::{prose, word};
+use super::lex::{self, blank, comments, skipped, word};
+use super::prose::prose;
 use super::ratchet::{self, Found, Wording};
 use super::{Report, Tree};
 use std::collections::BTreeSet;
@@ -233,10 +233,6 @@ fn allowed(path: &str, ident: &str) -> bool {
         .any(|(files, name, _)| files.iter().any(|f| path.starts_with(f)) && name(ident))
 }
 
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
-
 /// Every identifier of `blanked` code, plus the package names of the
 /// manifests, and the names the manifests list as dependencies.
 struct Known {
@@ -389,16 +385,11 @@ fn spans(text: &str) -> Vec<(usize, &str)> {
     out
 }
 
+/// The identifier at the start of `s`: it starts with a letter or `_`.
 fn ident_at(s: &str) -> Option<&str> {
-    let b = s.as_bytes();
-    if !b
-        .first()
-        .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
-    {
-        return None;
-    }
-    let n = b.iter().take_while(|&&c| word(c)).count();
-    Some(&s[..n])
+    let (id, _) = lex::ident_at(s, 0);
+    id.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        .then_some(id)
 }
 
 fn camel(s: &str) -> bool {

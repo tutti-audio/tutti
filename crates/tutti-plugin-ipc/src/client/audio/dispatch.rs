@@ -1406,6 +1406,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
 mod tests {
     use super::*;
     use tutti_plugin_types::Timeouts;
+    use tutti_units::Chunks;
     use tutti_units::ParamId;
 
     fn processed(seq: u64) -> AudioReply {
@@ -1481,14 +1482,18 @@ mod tests {
             replies.pop(),
             Some(AudioResponse::AudioProcessed { seq: 3, .. })
         ));
-        assert_eq!(channels.block_counts().late, 1);
+        assert_eq!(channels.block_counts().late, Chunks::new(1));
 
         let answer = state.hear(processed(4), AudioKey::Block(4), &channels);
         assert!(matches!(
             answer,
             Ok(Some(AudioReply::AudioProcessed { seq: 4, .. }))
         ));
-        assert_eq!(channels.block_counts().late, 1, "an answer is not late");
+        assert_eq!(
+            channels.block_counts().late,
+            Chunks::new(1),
+            "an answer is not late"
+        );
     }
 
     /// **A late acknowledgement of `ApplyParameters` is dropped without
@@ -1505,7 +1510,7 @@ mod tests {
         );
         assert!(matches!(heard, Ok(None)));
         assert!(replies.pop().is_none());
-        assert_eq!(channels.block_counts().late, 0);
+        assert_eq!(channels.block_counts().late, Chunks::ZERO);
     }
 
     /// **A reply to a request this lane never made is the server's fault**: a
