@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
 use tutti_dsp::Wavetable;
@@ -67,7 +67,7 @@ use tutti_units::{
 fn compressor() {
     IsolateRow::new("CompressorNode (stereo)", || {
         CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::STEREO)
+            CompressorConfig::new(ChannelTopology::STEREO)
                 .key(KeySource::Sidechain)
                 .controls(CompressorControls {
                     threshold: Db::new(-20.0),
@@ -104,7 +104,7 @@ fn compressor() {
 fn gate() {
     IsolateRow::new("GateNode (stereo)", || {
         GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
+            GateConfig::new(ChannelTopology::STEREO)
                 .key(KeySource::Sidechain)
                 .controls(GateControls {
                     threshold: Db::new(-15.0),
@@ -136,7 +136,7 @@ fn gate() {
 
 fn limiter() {
     IsolateRow::new("LimiterNode (stereo)", || {
-        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+        LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
             LimiterControls {
                 threshold: Db::new(-6.0),
                 ceiling: Db::new(-3.0),
@@ -159,7 +159,7 @@ fn limiter() {
 fn brickwall_limiter() {
     IsolateRow::new("BrickwallLimiterNode (stereo)", || {
         BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             Db::new(-3.0),
         ))
     })
@@ -171,7 +171,7 @@ fn brickwall_limiter() {
 
 fn delay_line() {
     IsolateRow::new("DelayNode (stereo, ping-pong)", || {
-        let layout = DelayLayout::builder(BusTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
+        let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(1.0)))
             .times(ChannelTimes::try_from(&[Seconds::new(0.07)][..]).unwrap())
             .build()
             .unwrap();
@@ -306,7 +306,7 @@ fn tilt_filter() {
 fn graphic_eq() {
     IsolateRow::new("GraphicEqNode (stereo, octave)", || {
         let node = GraphicEqNode::from(GraphicEqConfig::new(
-            BusTopology::STEREO,
+            ChannelTopology::STEREO,
             GraphicBands::Octave,
         ));
         assert!(
@@ -389,7 +389,7 @@ fn transient_shaper() {
 /// reads from its first 100 ms hop, so each row renders long enough for the gain to move.
 fn leveller_at(target: f64) -> LevellerNode<f32> {
     LevellerNode::<f32>::try_from(
-        LevellerConfig::new(BusTopology::STEREO)
+        LevellerConfig::new(ChannelTopology::STEREO)
             .target(Db::new(target))
             .max_boost(Db::new(9.0))
             .max_cut(Db::new(40.0))
@@ -719,7 +719,7 @@ fn lfo() {
 
 fn chorus() {
     IsolateRow::new("ModDelayNode (stereo chorus)", || {
-        ModDelayNode::<f32>::from(ModDelayConfig::chorus(BusTopology::STEREO))
+        ModDelayNode::<f32>::from(ModDelayConfig::chorus(ChannelTopology::STEREO))
     })
     .control("rate", |c| assert!(c.param_set().set(UnitParam::Rate, 3.0)))
     .control("depth", |c| {
@@ -734,7 +734,7 @@ fn chorus() {
 fn phaser() {
     IsolateRow::new("PhaserNode (stereo, 4 stages)", || {
         PhaserNode::<f32>::try_from(
-            PhaserConfig::new(BusTopology::STEREO, Stages::of(4)).controls(PhaserControls {
+            PhaserConfig::new(ChannelTopology::STEREO, Stages::of(4)).controls(PhaserControls {
                 feedback: Feedback::new(0.3_f64),
                 ..PhaserControls::DEFAULT
             }),
@@ -838,7 +838,7 @@ fn eq_band() {
 
 fn bus_strip() {
     IsolateRow::new("BusStripNode (stereo)", || {
-        BusStripNode::from(BusStripConfig::new(BusTopology::STEREO))
+        BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO))
     })
     .control("volume", |s| s.volume().store(Amplitude::new(0.5)))
     .control("balance", |s| {
@@ -859,7 +859,7 @@ fn fir_convolver() {
         .unwrap();
     IsolateRow::new("ConvolverNode (FirConvolverConfig)", move || {
         ConvolverNode::<f32>::try_from(
-            FirConvolverConfig::new(tutti_buffers::BusTopology::MONO, &fir)
+            FirConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &fir)
                 .block_size(Samples::new(64)),
         )
         .unwrap()
@@ -889,14 +889,14 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
     block_size: tutti_units::Samples,
 ) -> tutti_nodes::ConvolverNode<F> {
     tutti_nodes::ConvolverNode::try_from(
-        tutti_nodes::ConvolverConfig::new(tutti_buffers::BusTopology::MONO, &[ir])
+        tutti_nodes::ConvolverConfig::new(tutti_buffers::ChannelTopology::MONO, &[ir])
             .block_size(block_size),
     )
     .expect("one response on a mono bus")
 }
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
     ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
