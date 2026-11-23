@@ -77,8 +77,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     ///
     /// # Errors
     ///
-    /// [`Error::Output`](crate::Error::Output) when the declaration is empty, wider than the engine
-    /// renders ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)), or the
+    /// [`Error::Output`](crate::Error::Output) when the declaration is empty or the
     /// device cannot place it (an unassigned main output wider than the device, a channel
     /// no speaker names). Nothing is changed.
     pub fn declare_main_output_topology(

@@ -35,7 +35,6 @@
 //! invented [`Speaker`]s: it is [`ChannelTopology::Ambisonic`].
 
 use crate::{AmbisonicFormat, Bed, ChannelLayout, MAX_CHANNELS};
-use alloc::vec;
 use alloc::vec::Vec;
 
 /// Which speaker one channel of a bus feeds.
@@ -216,7 +215,7 @@ impl Speaker {
     }
 }
 
-/// A speaker list that names a speaker twice.
+/// A speaker list a topology cannot hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TopologyError {
@@ -225,16 +224,24 @@ pub enum TopologyError {
     /// one channel.
     #[error("{0:?} feeds more than one channel")]
     Duplicate(Speaker),
+    /// The list is wider than a topology holds, [`MAX_CHANNELS`].
+    #[error("{width} channels is wider than a topology holds ({})", MAX_CHANNELS)]
+    TooWide {
+        /// How many channels the refused list has.
+        width: usize,
+    },
 }
 
 /// The speaker each channel of a bus feeds, in channel order, no named speaker
-/// twice.
+/// twice, at most [`MAX_CHANNELS`] of them.
 ///
 /// `positions()[i]` is the speaker fed by channel `i`, so the length **is** the
 /// channel count: it is derived, never stored beside the list, so the two
 /// cannot drift. [`Speaker::Unassigned`] and each distinct
 /// [`Speaker::Unknown`] may repeat, so a 16-channel discrete interface is
-/// sixteen `Unassigned`.
+/// sixteen `Unassigned`. The speakers live inline and the slots past the
+/// length are always [`Speaker::Unassigned`], so the derived equality and hash
+/// compare the list and nothing else.
 ///
 /// ```
 /// use tutti_buffers::{Speaker, Speakers, TopologyError};
@@ -245,91 +252,129 @@ pub enum TopologyError {
 ///     Speakers::new([Speaker::FrontLeft, Speaker::FrontLeft]),
 ///     Err(TopologyError::Duplicate(Speaker::FrontLeft)),
 /// );
+/// assert_eq!(
+///     Speakers::new([Speaker::Unassigned; 17]),
+///     Err(TopologyError::TooWide { width: 17 }),
+/// );
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(
     feature = "serde",
     derive(serde::Serialize, serde::Deserialize),
     serde(try_from = "Vec<Speaker>", into = "Vec<Speaker>")
 )]
 pub struct Speakers {
-    // A plain `Vec`: a topology is built and read on the control thread (and
-    // rides the plugin-load reply), so storage inline buys nothing.
-    list: Vec<Speaker>,
+    len: u8,
+    list: [Speaker; MAX_CHANNELS],
 }
 
 impl Speakers {
+    /// No channels.
+    pub const EMPTY: Self = Self {
+        len: 0,
+        list: [Speaker::Unassigned; MAX_CHANNELS],
+    };
+
     /// The speakers of an ordered list.
     ///
     /// Takes any iterator so a decode loop can feed it directly.
     ///
     /// # Errors
     ///
-    /// [`TopologyError::Duplicate`] when a named speaker appears twice.
+    /// [`TopologyError::Duplicate`] when a named speaker appears twice, and
+    /// [`TopologyError::TooWide`] past [`MAX_CHANNELS`].
     pub fn new(list: impl IntoIterator<Item = Speaker>) -> Result<Self, TopologyError> {
-        let list: Vec<Speaker> = list.into_iter().collect();
-        for (i, &speaker) in list.iter().enumerate() {
+        let mut out = Self::EMPTY;
+        let mut list = list.into_iter();
+        while let Some(speaker) = list.next() {
+            if out.is_full() {
+                return Err(TopologyError::TooWide {
+                    width: MAX_CHANNELS + 1 + list.count(),
+                });
+            }
             if !matches!(speaker, Speaker::Unassigned | Speaker::Unknown(_))
-                && list[..i].contains(&speaker)
+                && out.as_slice().contains(&speaker)
             {
                 return Err(TopologyError::Duplicate(speaker));
             }
+            out.push(speaker);
         }
-        Ok(Self { list })
+        Ok(out)
     }
 
-    /// The speakers a format reports, never refusing: a named speaker that
-    /// repeats becomes [`Speaker::Unassigned`] in each slot after its first.
+    /// The speakers a format reports, never refusing a repeat: a named speaker
+    /// that repeats becomes [`Speaker::Unassigned`] in each slot after its
+    /// first. `None` when the format reports more than [`MAX_CHANNELS`]
+    /// channels, which no topology holds.
     ///
     /// For a format boundary, which does not get to drop a plugin's whole map
     /// because it names `FrontLeft` twice: every other channel keeps its slot
-    /// and its speaker.
+    /// and its speaker. A bus too wide for a topology is one with no topology,
+    /// its width kept by the caller's [`ChannelLayout`].
     #[must_use]
-    pub fn from_format(list: impl IntoIterator<Item = Speaker>) -> Self {
-        let mut out: Vec<Speaker> = Vec::new();
+    pub fn from_format(list: impl IntoIterator<Item = Speaker>) -> Option<Self> {
+        let mut out = Self::EMPTY;
         for speaker in list {
+            if out.is_full() {
+                return None;
+            }
             let repeated = !matches!(speaker, Speaker::Unassigned | Speaker::Unknown(_))
-                && out.contains(&speaker);
+                && out.as_slice().contains(&speaker);
             out.push(if repeated {
                 Speaker::Unassigned
             } else {
                 speaker
             });
         }
-        Self { list: out }
+        Some(out)
     }
 
     /// `width` channels that feed no speaker, or `None` past [`MAX_CHANNELS`]: a
     /// wider signal keeps its [`ChannelLayout`] and has no topology.
     #[must_use]
-    pub fn unassigned(width: ChannelLayout) -> Option<Self> {
-        (usize::from(width.count()) <= MAX_CHANNELS).then(|| Self {
-            list: vec![Speaker::Unassigned; usize::from(width.count())],
+    pub const fn unassigned(width: ChannelLayout) -> Option<Self> {
+        let count = width.count() as usize;
+        if count > MAX_CHANNELS {
+            return None;
+        }
+        Some(Self {
+            len: count as u8,
+            list: [Speaker::Unassigned; MAX_CHANNELS],
         })
+    }
+
+    const fn is_full(&self) -> bool {
+        self.len as usize == MAX_CHANNELS
+    }
+
+    // The caller has checked there is room.
+    fn push(&mut self, speaker: Speaker) {
+        self.list[usize::from(self.len)] = speaker;
+        self.len += 1;
     }
 
     /// The speaker each channel feeds, in channel order.
     #[must_use]
     pub fn as_slice(&self) -> &[Speaker] {
-        &self.list
+        &self.list[..usize::from(self.len)]
     }
 
     /// The channel count.
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.list.len()
+    pub const fn len(&self) -> usize {
+        self.len as usize
     }
 
     /// Whether there are no channels.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.list.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Which channel feeds `speaker`, or `None` if none does.
     #[must_use]
     pub fn index_of(&self, speaker: Speaker) -> Option<usize> {
-        self.list.iter().position(|&p| p == speaker)
+        self.as_slice().iter().position(|&p| p == speaker)
     }
 
     /// The LFE channel's index, if there is one.
@@ -340,7 +385,7 @@ impl Speakers {
     /// treat that channel differently.
     #[must_use]
     pub fn lfe_index(&self) -> Option<usize> {
-        self.list.iter().position(|p| p.is_lfe())
+        self.as_slice().iter().position(|p| p.is_lfe())
     }
 
     /// Whether no position is [`Unknown`](Speaker::Unknown).
@@ -351,14 +396,17 @@ impl Speakers {
     /// channel counts as named: it is known to feed no speaker.
     #[must_use]
     pub fn is_fully_named(&self) -> bool {
-        !self.list.iter().any(|p| matches!(p, Speaker::Unknown(_)))
+        !self
+            .as_slice()
+            .iter()
+            .any(|p| matches!(p, Speaker::Unknown(_)))
     }
 
     /// Whether the list is not empty and every channel is
     /// [`Unassigned`](Speaker::Unassigned).
     #[must_use]
     pub fn is_unassigned(&self) -> bool {
-        !self.list.is_empty() && self.list.iter().all(|p| p.is_unassigned())
+        !self.is_empty() && self.as_slice().iter().all(|p| p.is_unassigned())
     }
 }
 
@@ -372,14 +420,18 @@ impl TryFrom<Vec<Speaker>> for Speakers {
 
 impl From<Speakers> for Vec<Speaker> {
     fn from(speakers: Speakers) -> Self {
-        speakers.list
+        speakers.as_slice().to_vec()
     }
 }
 
 /// A channel set: speakers, or an ambisonic signal.
 ///
 /// *What* the channels are, as opposed to [`ChannelLayout`]'s *how many*; the
-/// [`width`](Self::width) is derived from either arm.
+/// [`width`](Self::width) is derived from either arm. At most [`MAX_CHANNELS`]
+/// wide (third-order ambisonics is exactly that), and `Copy`: a node's `Shape`
+/// holds one per bus. It may be empty (a bus a plugin declares with no
+/// channels), and then a fold from or to it is a
+/// `tutti_buffers::FoldError::Buffer` of a zero width.
 ///
 /// # A width alone is not a placement
 ///
@@ -388,6 +440,11 @@ impl From<Speakers> for Vec<Speaker> {
 /// or twelve tracks. Only an edge knows, so an edge states a topology, or says
 /// it guessed with [`default_for`](Self::default_for) and reports a [`Placement`].
 /// `tutti_buffers::Fold::between` is the one place two topologies meet.
+///
+/// A wider signal keeps its [`ChannelLayout`] and has no topology: a list past
+/// [`MAX_CHANNELS`] is refused with [`TopologyError::TooWide`], never truncated,
+/// and a width past it has none from [`unassigned`](Self::unassigned) or
+/// [`default_for`](Self::default_for).
 ///
 /// # Examples
 ///
@@ -399,8 +456,9 @@ impl From<Speakers> for Vec<Speaker> {
 /// assert_eq!(bed.index_of(Speaker::FrontCenter), Some(2));
 /// assert_eq!(bed.lfe_index(), Some(3));
 /// assert_eq!(bed.width().count(), 6);
+/// assert!(ChannelTopology::default_for(ChannelLayout::from(17u16)).is_none());
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ChannelTopology {
     /// Speaker feeds, in channel order.
@@ -410,11 +468,30 @@ pub enum ChannelTopology {
 }
 
 impl ChannelTopology {
+    /// No channels.
+    pub const EMPTY: Self = Self::Speakers(Speakers::EMPTY);
+
+    /// One channel at the front centre: a mono source.
+    pub const MONO: Self = {
+        let mut list = [Speaker::Unassigned; MAX_CHANNELS];
+        list[0] = Speaker::FrontCenter;
+        Self::Speakers(Speakers { len: 1, list })
+    };
+
+    /// A stereo pair: front left, front right.
+    pub const STEREO: Self = {
+        let mut list = [Speaker::Unassigned; MAX_CHANNELS];
+        list[0] = Speaker::FrontLeft;
+        list[1] = Speaker::FrontRight;
+        Self::Speakers(Speakers { len: 2, list })
+    };
+
     /// A speaker topology from an ordered list.
     ///
     /// # Errors
     ///
-    /// [`TopologyError::Duplicate`] when a named speaker appears twice.
+    /// [`TopologyError::Duplicate`] when a named speaker appears twice, and
+    /// [`TopologyError::TooWide`] past [`MAX_CHANNELS`].
     pub fn new(list: impl IntoIterator<Item = Speaker>) -> Result<Self, TopologyError> {
         Speakers::new(list).map(Self::Speakers)
     }
@@ -422,18 +499,16 @@ impl ChannelTopology {
     /// The channel count, as a [`ChannelLayout`]: the speaker count, or
     /// `(order + 1)²`.
     #[must_use]
-    pub fn width(&self) -> ChannelLayout {
+    pub const fn width(&self) -> ChannelLayout {
         match self {
-            // A list past `u16::MAX` saturates here rather than panicking in
-            // an accessor; every cap then refuses it.
-            Self::Speakers(s) => ChannelLayout::clamped(s.len()),
+            Self::Speakers(s) => ChannelLayout::from_count(s.len() as u16),
             Self::Ambisonic(f) => f.width(),
         }
     }
 
     /// The speakers, or `None` for an ambisonic set.
     #[must_use]
-    pub fn speakers(&self) -> Option<&Speakers> {
+    pub const fn speakers(&self) -> Option<&Speakers> {
         match self {
             Self::Speakers(s) => Some(s),
             Self::Ambisonic(_) => None,
@@ -448,7 +523,7 @@ impl ChannelTopology {
 
     /// The ambisonic format, or `None` for speakers.
     #[must_use]
-    pub fn ambisonic(&self) -> Option<AmbisonicFormat> {
+    pub const fn ambisonic(&self) -> Option<AmbisonicFormat> {
         match self {
             Self::Speakers(_) => None,
             Self::Ambisonic(f) => Some(*f),
@@ -485,12 +560,16 @@ impl ChannelTopology {
     /// `width` channels that feed no speaker, or `None` past [`MAX_CHANNELS`].
     ///
     /// For an edge whose channels are numbered rather than placed (a 16-input
-    /// interface, a multitrack file). A fold maps them one to one and never
-    /// through a surround matrix. A signal wider than [`MAX_CHANNELS`] keeps its
-    /// width and has no topology, which a fold reads as unassigned.
+    /// interface, a multitrack file), or a node that states only a count. A
+    /// fold maps them one to one and never through a surround matrix. A signal
+    /// wider than [`MAX_CHANNELS`] keeps its width and has no topology, which a
+    /// fold reads as unassigned.
     #[must_use]
-    pub fn unassigned(width: ChannelLayout) -> Option<Self> {
-        Speakers::unassigned(width).map(Self::Speakers)
+    pub const fn unassigned(width: ChannelLayout) -> Option<Self> {
+        match Speakers::unassigned(width) {
+            Some(speakers) => Some(Self::Speakers(speakers)),
+            None => None,
+        }
     }
 
     /// What a bare width is taken to mean at an edge that cannot know (a
@@ -503,6 +582,10 @@ impl ChannelTopology {
     /// topology instead. The quad is a guess a four-channel device or main output
     /// invites over B-format; an unlisted width names no speaker, so a fold
     /// places each channel by index.
+    ///
+    /// For a node or a design built for a width and nothing more (a filter of
+    /// `n` channels): what its bus states is the engine's default layout, said
+    /// once here.
     ///
     /// `None` past [`MAX_CHANNELS`], where a signal has no topology.
     #[must_use]
@@ -747,16 +830,79 @@ mod tests {
     #[test]
     fn a_format_boundary_unassigns_a_repeat_and_keeps_the_rest() {
         use Speaker::*;
-        let s = Speakers::from_format([FrontLeft, FrontRight, FrontLeft, FrontCenter, FrontRight]);
+        let s = Speakers::from_format([FrontLeft, FrontRight, FrontLeft, FrontCenter, FrontRight])
+            .unwrap();
         assert_eq!(
             s.as_slice(),
             &[FrontLeft, FrontRight, Unassigned, FrontCenter, Unassigned]
         );
-        let clean = Speakers::from_format([FrontLeft, Unassigned, Unknown(7), Unassigned]);
+        let clean = Speakers::from_format([FrontLeft, Unassigned, Unknown(7), Unassigned]).unwrap();
         assert_eq!(
             clean.as_slice(),
             &[FrontLeft, Unassigned, Unknown(7), Unassigned]
         );
+    }
+
+    /// A topology holds sixteen channels: `new` and the serde path build a list
+    /// of 16 and refuse 17 with its width, and a format boundary reports a 17-wide
+    /// map as no topology rather than truncating it.
+    #[test]
+    fn a_topology_holds_sixteen_speakers_and_refuses_more() {
+        let sixteen = [Speaker::Unassigned; 16];
+        let seventeen = [Speaker::Unassigned; 17];
+        assert_eq!(Speakers::new(sixteen).unwrap().len(), 16);
+        assert_eq!(
+            ChannelTopology::new(sixteen).ok(),
+            ChannelTopology::unassigned(ChannelLayout::from(16u16))
+        );
+        let refused = TopologyError::TooWide { width: 17 };
+        assert_eq!(Speakers::new(seventeen), Err(refused));
+        assert_eq!(ChannelTopology::new(seventeen), Err(refused));
+        assert_eq!(
+            Speakers::try_from(seventeen.to_vec()),
+            Err(refused),
+            "the wire path agrees with `new`"
+        );
+        assert_eq!(
+            Speakers::new([Speaker::Unassigned; 40]),
+            Err(TopologyError::TooWide { width: 40 })
+        );
+        assert_eq!(Speakers::from_format(sixteen).map(|s| s.len()), Some(16));
+        assert_eq!(Speakers::from_format(seventeen), None);
+        assert_eq!(Speakers::from_format([Speaker::FrontLeft; 17]), None);
+    }
+
+    /// The slots past the length do not leak into equality or hash: a list is
+    /// the same however it was built.
+    #[test]
+    fn spare_slots_are_canonical() {
+        use Speaker::*;
+        let a = topology(&[FrontRight, FrontLeft]);
+        assert_ne!(a, topology(&[FrontRight, FrontLeft, Unassigned]));
+        assert_eq!(topology(&[]), ChannelTopology::EMPTY);
+        assert_eq!(
+            ChannelTopology::unassigned(ChannelLayout::STEREO),
+            ChannelTopology::new([Unassigned, Unassigned]).ok()
+        );
+        assert_eq!(topology(&[FrontCenter]), ChannelTopology::MONO);
+        assert_eq!(topology(&[FrontLeft, FrontRight]), ChannelTopology::STEREO);
+        let mut hashes = std::collections::HashSet::new();
+        hashes.insert(a);
+        assert!(hashes.contains(&topology(&[FrontRight, FrontLeft])));
+    }
+
+    /// An ambisonic format is at most third order, so none is wider than a
+    /// topology holds; every bed fits too.
+    #[test]
+    fn no_ambisonic_format_or_bed_is_wider_than_a_topology() {
+        for order in 0..=3u8 {
+            let format = AmbisonicFormat::ambix(AmbisonicOrder::of(order));
+            assert!(ChannelTopology::from(format).width().count() as usize <= MAX_CHANNELS);
+        }
+        assert!(AmbisonicOrder::new(4).is_none());
+        for bed in Bed::ALL {
+            assert_eq!(bed.topology().width(), bed.width());
+        }
     }
 
     /// A width past [`MAX_CHANNELS`] has no topology from the width-only
@@ -938,6 +1084,20 @@ mod tests {
             serde_json::from_str::<ChannelTopology>(r#"{"Speakers":["FrontLeft","FrontLeft"]}"#)
                 .is_err()
         );
+    }
+
+    /// The wire path agrees with `new`: sixteen speakers decode and seventeen are
+    /// refused, and the wire form is the list.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn the_wire_path_refuses_a_seventeenth_speaker() {
+        let sixteen = format!("[{}]", vec!["\"Unassigned\""; 16].join(","));
+        let seventeen = format!("[{}]", vec!["\"Unassigned\""; 17].join(","));
+        let decoded: Speakers = serde_json::from_str(&sixteen).unwrap();
+        assert_eq!(decoded.len(), 16);
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), sixteen);
+        let refused = serde_json::from_str::<Speakers>(&seventeen).unwrap_err();
+        assert!(refused.to_string().contains("17 channels"), "{refused}");
     }
 
     /// Only the LFE answers `is_lfe`.

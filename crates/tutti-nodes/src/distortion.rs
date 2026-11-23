@@ -225,7 +225,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = self
             .factor
             .and_then(|factor| Oversampled::new(factor, rate, max_block, width));

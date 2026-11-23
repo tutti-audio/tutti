@@ -469,12 +469,9 @@ mod tests {
     fn a_routing_names_the_map_it_breaks_on() {
         let five_one = Bed::Surround51.topology();
         let stereo = Bed::Stereo.topology();
-        let (five_set, stereo_set) = (
-            ChannelSet::from(five_one.clone()),
-            ChannelSet::from(stereo.clone()),
-        );
+        let (five_set, stereo_set) = (ChannelSet::from(five_one), ChannelSet::from(stereo));
         let routing = Routing {
-            monitor: Some(stereo.clone()),
+            monitor: Some(stereo),
             map: OutputMap::channels([2, 3]).unwrap(),
             ..Routing::default()
         };

@@ -204,7 +204,7 @@ impl<F: Float> Kernel for LimiterKernel<F> {
 
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        let (layout, detection) = (self.input.layout(), self.detection);
+        let (layout, detection) = (self.input.width(), self.detection);
         // `prepare` has no refusal path: the up-sampler fails to design only at a rate whose
         // transition width does not fit `f32` (a rate no device has).
         let bank = match detection {

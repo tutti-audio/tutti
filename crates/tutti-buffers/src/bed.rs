@@ -172,11 +172,17 @@ impl Bed {
     }
 
     /// The speakers of the bed in channel order, as a topology.
+    ///
+    /// # Panics
+    ///
+    /// Never: the widest bed is twelve channels, inside [`MAX_CHANNELS`].
     #[must_use]
     pub fn topology(self) -> ChannelTopology {
         let speakers = self.rows().iter().map(|r| r.speaker);
         // The table names no speaker twice (pinned by a test).
-        ChannelTopology::Speakers(crate::Speakers::from_format(speakers))
+        ChannelTopology::Speakers(
+            crate::Speakers::from_format(speakers).expect("a bed fits a topology"),
+        )
     }
 
     /// The channel count.
