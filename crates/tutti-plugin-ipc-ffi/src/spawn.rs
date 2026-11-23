@@ -50,9 +50,7 @@ mod tests {
     use rustix::io::{FdFlags, fcntl_setfd};
     use rustix::process::{Pid, getpgid};
     use std::fs::File;
-    use std::io::pipe;
     use std::os::fd::AsRawFd;
-    use std::path::Path;
     use std::process::Command;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -166,6 +164,8 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod linux {
         use super::*;
+        use std::io::pipe;
+        use std::path::Path;
 
         /// What the shell's descriptors 0, 1 and 2 are, as the kernel names them.
         fn links(how: Spawn, command_with: impl FnMut(&mut Command)) -> Vec<String> {

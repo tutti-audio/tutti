@@ -222,15 +222,26 @@ fn the_switch_starts_off_and_both_ends_see_it() {
 /// `85 * 28/16 + 15/16` (85 whole periods and 5 samples), the peak `3/4`.
 #[test]
 fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
+    use crate::compile::ids::{AudioSlotId, Id};
     use crate::exec::arena::Arena;
     const FRAMES: usize = 600;
     let mut arena = Arena::<f64>::new(1, FRAMES);
-    for (i, x) in arena.slot_mut(0, FRAMES).iter_mut().enumerate() {
+    for (i, x) in arena
+        .slot_mut(AudioSlotId::new(0), FRAMES)
+        .iter_mut()
+        .enumerate()
+    {
         *x = ((i % 7) as f64 - 3.0) / 4.0;
     }
     let (mut reader, mut writer) = MeterReader::pair(MeterId::of(1), 1, 1);
     reader.enable();
-    meter_op::<f64, _, _>(&mut writer, &arena, &[0u8][..], &[0], FRAMES);
+    meter_op::<f64, _, _>(
+        &mut writer,
+        &arena,
+        &[0u8][..],
+        &[AudioSlotId::new(0)],
+        FRAMES,
+    );
     let level = reader.read()[0];
     let sum_sq = 85.0 * 28.0 / 16.0 + 15.0 / 16.0;
     assert_eq!(level.frames, Samples::new(FRAMES));

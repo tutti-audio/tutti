@@ -112,3 +112,35 @@ fn a_reset_returns_to_the_delay() {
     lfo.advance(frames(99));
     assert_eq!(lfo.value(), LfoWave::START);
 }
+
+/// The clock position in cycles is the rate times the frames over the sample rate, exact in
+/// whole cycles, whether the frames came as one chunk or one at a time, running forward or
+/// backward.
+#[test]
+fn the_clock_position_counts_whole_cycles_forward_and_backward() {
+    let rate = SampleRate::of(100.0);
+    for hz in [1.0, 2.5, -1.0, -7.25] {
+        let mut chunk = Lfo::new(LfoWave::Sine, Hz::new(hz), rate);
+        let mut single = chunk;
+        chunk.advance(Samples::new(1_000));
+        for _ in 0..1_000 {
+            single.advance(Samples::new(1));
+        }
+        let want = hz * 10.0;
+        assert!(
+            (chunk.cycles() - want).abs() < 1e-9,
+            "{hz}: {}",
+            chunk.cycles()
+        );
+        assert_eq!(chunk.cycles(), single.cycles(), "{hz}");
+    }
+}
+
+/// A rate of half a cycle a frame or more is held under half a cycle: it never reads as a
+/// step back, so the position keeps moving forward.
+#[test]
+fn a_rate_past_the_nyquist_is_held_under_half_a_cycle_a_frame() {
+    let mut lfo = Lfo::new(LfoWave::Sine, Hz::new(90.0), SampleRate::of(100.0));
+    lfo.advance(Samples::new(10));
+    assert!(lfo.cycles() > 4.9 && lfo.cycles() < 5.0, "{}", lfo.cycles());
+}

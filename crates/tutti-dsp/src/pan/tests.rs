@@ -64,3 +64,33 @@ fn a_pan_out_of_range_is_the_nearer_end_and_nan_is_the_centre() {
         assert_eq!(gains(f64::NAN, law), gains(0.0, law));
     }
 }
+
+/// The balance law `left = min(1, 1 - b)`, `right = min(1, 1 + b)`: unity at centre, the far
+/// side falling linearly to silence at either end, a balance past an end read as that end, and
+/// NaN as unity on both sides. The points are dyadic, so the figures are exact at both widths.
+fn the_balance_law<F: Float>() {
+    let points = [
+        (-f64::INFINITY, (1.0, 0.0)),
+        (-2.0, (1.0, 0.0)),
+        (-1.0, (1.0, 0.0)),
+        (-0.75, (1.0, 0.25)),
+        (-0.5, (1.0, 0.5)),
+        (0.0, (1.0, 1.0)),
+        (0.25, (0.75, 1.0)),
+        (0.5, (0.5, 1.0)),
+        (1.0, (0.0, 1.0)),
+        (1.5, (0.0, 1.0)),
+        (f64::INFINITY, (0.0, 1.0)),
+        (f64::NAN, (1.0, 1.0)),
+    ];
+    for (b, (left, right)) in points {
+        let (l, r) = balance_gains_in(F::from_f64(b));
+        assert_eq!((l.to_f64(), r.to_f64()), (left, right), "{b}");
+    }
+}
+
+#[test]
+fn the_balance_law_in_a_width_holds_at_f32_and_f64() {
+    the_balance_law::<f32>();
+    the_balance_law::<f64>();
+}

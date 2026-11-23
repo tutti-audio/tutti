@@ -26,6 +26,7 @@
 //! [`Editor::take_event_losses`]: crate::Editor::take_event_losses
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
+use crate::compile::ids::{DelayId, EventFeedbackId, Id, PlanUnitId};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
@@ -61,7 +62,7 @@ pub struct EventLoss {
 #[derive(Clone, Copy, Debug)]
 enum Owner {
     /// A unit of the running plan, by index.
-    Unit(u32),
+    Unit(PlanUnitId),
     Key(NodeKey),
 }
 
@@ -124,7 +125,10 @@ impl Dropped {
         lost: u64,
     ) {
         match bound {
-            Some(b) => self.at_node(b.unit, u32::try_from(lost).unwrap_or(u32::MAX)),
+            Some(b) => self.at_node(
+                PlanUnitId::new(b.unit),
+                u32::try_from(lost).unwrap_or(u32::MAX),
+            ),
             None => self.count(lost),
         }
     }
@@ -138,12 +142,12 @@ impl Dropped {
     /// `count` events charged to the plan's unit `unit`, no port: events the
     /// node took in and did not deliver (`Io::count_lost`), or events cut from
     /// its declared input bound before it ran.
-    pub(crate) fn at_node(&mut self, unit: u32, count: u32) {
+    pub(crate) fn at_node(&mut self, unit: PlanUnitId, count: u32) {
         self.note(Owner::Unit(unit), None, count, 0);
     }
 
     /// `count` events lost at output port `port` of the plan's unit `unit`.
-    pub(crate) fn at_port(&mut self, unit: u32, port: u16, count: u32, recovered: u32) {
+    pub(crate) fn at_port(&mut self, unit: PlanUnitId, port: u16, count: u32, recovered: u32) {
         self.note(Owner::Unit(unit), Some(port), count, recovered);
     }
 
@@ -158,7 +162,7 @@ impl Dropped {
         // A tap of an input merges several sources, so its loss is nobody's.
         let from = match plan
             .delays
-            .get(delay as usize)
+            .get(DelayId::new(delay))
             .and_then(|d| d.key.event_origin())
         {
             Some(crate::EventTapPort::Out(from)) => Some(from),
@@ -170,7 +174,11 @@ impl Dropped {
     /// As [`charge_delay`](Self::charge_delay), for the plan's event feedback
     /// `feedback`.
     pub(crate) fn charge_feedback(&mut self, plan: &Plan, feedback: u32, count: u64) {
-        let from = match plan.event_feedback.get(feedback as usize).map(|f| f.key) {
+        let from = match plan
+            .event_feedback
+            .get(EventFeedbackId::new(feedback))
+            .map(|f| f.key)
+        {
             Some(FeedbackKey::Event { from, .. }) => Some(from),
             _ => None,
         };
@@ -229,7 +237,7 @@ impl Dropped {
     ) {
         for e in self.log.drain(..) {
             let node = match e.owner {
-                Owner::Unit(u) => match plan.units().get(u as usize) {
+                Owner::Unit(u) => match plan.units.get(u) {
                     Some(unit) => unit.key,
                     None => {
                         self.unreported += u64::from(e.count.saturating_sub(e.recovered));
@@ -261,6 +269,7 @@ pub(crate) const RING_CAPACITY: usize = 256;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compile::ids::Id;
 
     /// A loss no node owns (a merge's) is unreported, and so is one the full
     /// log has no entry for; the totals have both. 64 places fill the log; a
@@ -269,10 +278,10 @@ mod tests {
     fn what_no_entry_names_is_unreported() {
         let mut d = Dropped::new();
         for u in 0..LOG_CAPACITY as u32 {
-            d.at_port(u, 0, 1, 0);
+            d.at_port(PlanUnitId::new(u), 0, 1, 0);
         }
         assert_eq!(d.unreported, 0);
-        d.at_port(99, 0, 2, 0);
+        d.at_port(PlanUnitId::new(99), 0, 2, 0);
         d.count(5);
         assert_eq!(d.unreported, 7);
         assert_eq!(d.total(), LOG_CAPACITY as u64 + 7);
@@ -282,8 +291,8 @@ mod tests {
     #[test]
     fn a_recovered_refusal_is_not_lost() {
         let mut d = Dropped::new();
-        d.at_port(0, 0, 3, 0);
-        d.at_port(0, 0, 0, 2);
+        d.at_port(PlanUnitId::new(0), 0, 3, 0);
+        d.at_port(PlanUnitId::new(0), 0, 0, 2);
         assert_eq!((d.total(), d.lost()), (3, 1));
     }
 
@@ -291,7 +300,7 @@ mod tests {
     #[test]
     fn a_workers_block_joins_the_blocks() {
         let (mut a, mut b) = (Dropped::new(), Dropped::new());
-        b.at_port(1, 0, 4, 1);
+        b.at_port(PlanUnitId::new(1), 0, 4, 1);
         b.count(2);
         a.absorb(&mut b);
         assert_eq!((a.total(), a.lost(), a.unreported), (6, 5, 2));
@@ -306,14 +315,14 @@ mod tests {
     fn unreported_is_net_of_recoveries() {
         let mut d = Dropped::new();
         for u in 0..LOG_CAPACITY as u32 {
-            d.at_port(u, 0, 1, 0);
+            d.at_port(PlanUnitId::new(u), 0, 1, 0);
         }
-        d.at_port(99, 0, 3, 3);
+        d.at_port(PlanUnitId::new(99), 0, 3, 3);
         assert_eq!(d.unreported, 0);
-        d.at_port(99, 0, 3, 1);
+        d.at_port(PlanUnitId::new(99), 0, 3, 1);
         assert_eq!(d.unreported, 2);
         let mut w = Dropped::new();
-        w.at_port(1, 0, 4, 4);
+        w.at_port(PlanUnitId::new(1), 0, 4, 4);
         d.absorb(&mut w);
         assert_eq!(d.unreported, 2);
     }
