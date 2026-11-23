@@ -7,4 +7,7 @@ static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 mod contract;
 mod cost_classes;
 mod graph_node;
+mod instrument_node;
 mod param_lanes;
+#[path = "../support/mod.rs"]
+mod support;
