@@ -529,12 +529,14 @@ fn load_failure(e: &PluginError) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_ipc::LoadPlugin;
+    #[cfg(feature = "clap")]
+    use tutti_plugin_ipc::PluginLoaded;
     use tutti_plugin_ipc::{
         GetParameter, GetParameterList, GetWiring, OpenLane, ParameterList, ParameterValue,
         SampleRateSet, SaveState, SetSampleRate, SetupSharedMemory, Shutdown, StateLoaded,
         StateStaged,
     };
-    use tutti_plugin_ipc::{LoadPlugin, PluginLoaded};
 
     use tutti_buffers::FloatWidth;
     use tutti_plugin_ipc::StagedState;
