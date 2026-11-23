@@ -7,7 +7,7 @@
 //! - [`Pulse`]: a stereo level on a span of executor frames, a follower's
 //!   input.
 //!
-//! `ProbeUnit` is a [`SessionNode`] whose controls are its `ParamSet`, so
+//! `ProbeUnit` is an `IntoNode` whose controls are its `ParamSet`, so
 //! `Graph::add` addresses its param.
 
 use std::sync::Arc;
@@ -16,7 +16,6 @@ use std::sync::atomic::Ordering;
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
-use tutti_session::SessionNode;
 use tutti_units::{Drive, Hz, UnitParam};
 
 // A probe's kind is chosen when it is built; its type declares the ones the
@@ -140,8 +139,6 @@ impl IntoNode for ProbeUnit {
         tutti_graph::param_parts(self)
     }
 }
-
-impl SessionNode for ProbeUnit {}
 
 /// `level` on executor frames `[from, to)`, else 0, on both channels.
 #[derive(Clone)]

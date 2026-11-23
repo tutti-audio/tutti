@@ -8,7 +8,7 @@
 //! runs this code.
 
 use crate::sync::{AtomicU64, Ordering};
-use tutti_units::SampleRate;
+use tutti_units::{Beat, SampleRate};
 
 /// A value stored in one atomic word by its encoding.
 ///
@@ -202,6 +202,24 @@ impl AtomicWord for Option<SampleRate> {
         match word {
             0 => Some(None),
             bits => SampleRate::from_word(bits).map(Some),
+        }
+    }
+}
+
+/// `None` is the all-ones word, a NaN's bits, which no finite [`Beat`] has; a
+/// `Some` is the beat's `f64` bits, so every finite beat (zero and negatives
+/// included) is its own word. A word whose bits are NaN or infinite, other than
+/// the `None` word, decodes to the outer `None`, and a non-finite beat is
+/// refused at `store`.
+impl AtomicWord for Option<Beat> {
+    fn to_word(self) -> u64 {
+        self.map_or(u64::MAX, |beat| beat.get().to_bits())
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        match word {
+            u64::MAX => Some(None),
+            bits => Beat::finite(f64::from_bits(bits)).map(Some),
         }
     }
 }

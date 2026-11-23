@@ -717,7 +717,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
         UnitAddr::first(UnitParam::Depth),
         1.0,
     )));
-    g.spec_mut().connect_param(
+    g.connect_param(
         ParamIn {
             node: n,
             param: UnitParam::Depth.into(),

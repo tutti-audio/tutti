@@ -14,7 +14,7 @@ use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventOutputPort, ForkByClone, GraphBuilder, Io, Node,
     Prepare, Renderer, Shape, Status, TransportPosition, Unforkable,
 };
-use tutti_graph::{Edge, FeedbackFrom, InputPort, OutputPort, PortSource};
+use tutti_graph::{Edge, FeedbackFrom, GraphSpec, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Frame, Samples};
 
 fn signal(n: usize) -> Vec<f32> {
@@ -64,11 +64,15 @@ fn ch(n: usize) -> ChannelLayout {
     ChannelLayout::try_from(n).expect("a test width is small")
 }
 
+/// The wiring `g` builds: the built editor's spec.
+fn wiring(g: GraphBuilder) -> GraphSpec {
+    g.build(prepare(64)).expect("builds").0.spec().clone()
+}
+
 /// What the builder feeds `node`'s input `port`. An absent edge reads
 /// silence, as an explicit `Zero` does.
-fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> PortSource {
-    match g
-        .spec()
+fn source_of(spec: &GraphSpec, node: NodeKey, port: u16) -> PortSource {
+    match spec
         .topology
         .edges
         .get(&InputPort::new(node, port))
@@ -85,7 +89,7 @@ fn source_of(g: &GraphBuilder, node: NodeKey, port: u16) -> PortSource {
 /// `want` (one entry per node, in the order added: its width and what feeds
 /// each input) and `outputs` say.
 fn assert_wired(
-    g: &GraphBuilder,
+    spec: &GraphSpec,
     want: &[(NodeKey, net_rule::Node)],
     outputs: &[PortSource],
     case: &str,
@@ -93,14 +97,14 @@ fn assert_wired(
     for (key, n) in want {
         for (c, s) in n.sources.iter().enumerate() {
             assert_eq!(
-                source_of(g, *key, c as u16),
+                source_of(spec, *key, c as u16),
                 *s,
                 "{case}: {key:?} input {c}"
             );
         }
     }
     assert_eq!(
-        g.spec().topology.outputs,
+        spec.topology.outputs,
         outputs
             .iter()
             .map(|s| if *s == PortSource::Zero {
@@ -382,10 +386,11 @@ fn pipe_connects_ports_in_order_as_net_pipe_all() {
                 ),
             ];
             let outputs = net_rule::pipe_output(b, 1, 1);
-            assert_wired(&g, &want, &outputs, &case);
+            let mut r = g.renderer(prepare(64)).expect("builds");
+            assert_wired(r.editor().spec(), &want, &outputs, &case);
 
             // And it renders what that wiring carries.
-            let got = g.renderer(prepare(64)).expect("builds").render(100);
+            let got = r.render(100);
             assert_renders(&got, &want, &outputs, 100, &case);
         }
     }
@@ -393,8 +398,12 @@ fn pipe_connects_ports_in_order_as_net_pipe_all() {
     let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
     let (a, b) = (g.add(node(0, 3)), g.add(node(3, 1)));
     g.pipe(a, b);
+    let spec = wiring(g);
     for c in 0..3 {
-        assert_eq!(source_of(&g, b, c), PortSource::Node(OutputPort::new(a, c)));
+        assert_eq!(
+            source_of(&spec, b, c),
+            PortSource::Node(OutputPort::new(a, c))
+        );
     }
 }
 
@@ -417,9 +426,10 @@ fn pipe_output_fans_out_as_net_does() {
             },
         )];
         let outputs = net_rule::pipe_output(key, w, outs);
-        assert_wired(&g, &want, &outputs, &case);
+        let mut r = g.renderer(prepare(64)).expect("builds");
+        assert_wired(r.editor().spec(), &want, &outputs, &case);
 
-        let got = g.renderer(prepare(64)).expect("builds").render(70);
+        let got = r.render(70);
         assert_renders(&got, &want, &outputs, 70, &case);
     }
     // Stereo into six, spelled out.
@@ -430,7 +440,7 @@ fn pipe_output_fans_out_as_net_does() {
         .map(|c| PortSource::Node(OutputPort::new(key, c % 2)))
         .collect();
     assert_eq!(
-        g.spec().topology.outputs,
+        wiring(g).topology.outputs,
         ports
             .iter()
             .map(|s| if *s == PortSource::Zero {
@@ -459,7 +469,7 @@ fn pipe_input_wraps_as_net_does() {
                     sources: net_rule::pipe_input(main_inputs, ins),
                 },
             )];
-            assert_wired(&g, &want, &net_rule::pipe_output(key, 1, 1), &case);
+            assert_wired(&wiring(g), &want, &net_rule::pipe_output(key, 1, 1), &case);
         }
     }
 }
@@ -478,9 +488,10 @@ fn chain_extends_the_series_as_net_does() {
             g.chain(node(ins, outs));
         }
         let (want, outputs) = net_rule::chain(main_inputs, 2, &widths);
-        assert_wired(&g, &want, &outputs, &case);
+        let mut r = g.renderer(prepare(64)).expect("builds");
+        assert_wired(r.editor().spec(), &want, &outputs, &case);
 
-        let got = g.renderer(prepare(64)).expect("builds").render(70);
+        let got = r.render(70);
         assert_renders(&got, &want, &outputs, 70, &case);
     }
 }
@@ -595,15 +606,23 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     let at = InputPort::new(NodeKey(0), 0);
 
     // A builder: a fresh one is empty, a port set to silence is no key.
-    let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
-    let a = g.add(node(1, 1));
-    assert_eq!(g.spec().topology.outputs, vec![vec![], vec![]]);
+    let fresh = || {
+        let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::STEREO);
+        let a = g.add(node(1, 1));
+        (g, a)
+    };
+    let (g, a) = fresh();
+    assert_eq!(wiring(g).topology.outputs, vec![vec![], vec![]]);
+    let (mut g, _) = fresh();
     g.set_source(a, 0, PortSource::MainInput(0));
-    assert_eq!(g.spec().topology.edges.len(), 1);
+    assert_eq!(wiring(g).topology.edges.len(), 1);
+    let (mut g, _) = fresh();
+    g.set_source(a, 0, PortSource::MainInput(0));
     g.disconnect(a, 0);
-    assert!(g.spec().topology.edges.is_empty(), "cleared port: no key");
+    assert!(wiring(g).topology.edges.is_empty(), "cleared port: no key");
+    let (mut g, _) = fresh();
     g.set_output(1, PortSource::Zero);
-    assert_eq!(g.spec().topology.outputs[1], Vec::<PortSource>::new());
+    assert_eq!(wiring(g).topology.outputs[1], Vec::<PortSource>::new());
 
     // `Topology`'s writers.
     let mut t = tutti_graph::Topology::default();
@@ -639,15 +658,23 @@ fn every_writer_normalises_silence_to_the_empty_set() {
 /// is 2, and `sink` reads `1 + (sum of what feeds it)`.
 #[test]
 fn connect_adds_and_set_source_replaces() {
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let one = g.add(node(0, 1));
-    let two = g.add(node(0, 2));
-    let sink = g.add(node(1, 1));
+    // A fresh graph per check: `one` (key 0), `two` (1), `sink` (2).
+    let scene = || {
+        let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+        let one = g.add(node(0, 1));
+        let two = g.add(node(0, 2));
+        let sink = g.add(node(1, 1));
+        (g, one, two, sink)
+    };
+    let (_, one, two, sink) = scene();
     let at = InputPort::new(sink, 0);
     let from_one = PortSource::Node(OutputPort::new(one, 0));
     let from_two = PortSource::Node(OutputPort::new(two, 1));
-    let held = |g: &GraphBuilder| {
-        g.spec()
+    // What `sink`'s input 0 holds after `ops` ran on a fresh graph.
+    let held = |ops: &dyn Fn(&mut GraphBuilder)| {
+        let (mut g, ..) = scene();
+        ops(&mut g);
+        wiring(g)
             .topology
             .edges
             .get(&at)
@@ -659,38 +686,71 @@ fn connect_adds_and_set_source_replaces() {
         sorted.sort();
         sorted
     };
+    let wire_both = |g: &mut GraphBuilder| {
+        g.connect(one, 0, sink, 0).connect(two, 1, sink, 0);
+    };
 
-    g.connect(one, 0, sink, 0).connect(two, 1, sink, 0);
-    assert_eq!(held(&g), both(), "two sources, in the graph's order");
-    g.connect(two, 1, sink, 0);
-    assert_eq!(held(&g).len(), 2, "the same source twice is one");
+    assert_eq!(
+        held(&wire_both),
+        both(),
+        "two sources, in the graph's order"
+    );
+    assert_eq!(
+        held(&|g| {
+            wire_both(g);
+            g.connect(two, 1, sink, 0);
+        })
+        .len(),
+        2,
+        "the same source twice is one"
+    );
 
+    let (mut g, ..) = scene();
+    wire_both(&mut g);
     g.connect_output(sink, 0, 0);
     let mut r = g.renderer(prepare(64)).expect("builds");
     assert_eq!(r.render(8)[0], vec![4.0; 8], "1 + 1 + 2");
 
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
-    let one = g.add(node(0, 1));
-    let two = g.add(node(0, 2));
-    let sink = g.add(node(1, 1));
-    g.connect(one, 0, sink, 0).connect(two, 1, sink, 0);
-    g.set_source(sink, 0, from_one);
+    let replaced = |g: &mut GraphBuilder| {
+        wire_both(g);
+        g.set_source(sink, 0, from_one);
+    };
     assert_eq!(
-        held(&g),
+        held(&replaced),
         vec![Edge::Direct(from_one)],
         "set_source replaces"
     );
-    g.set_sources(sink, 0, &[from_two, from_one]);
-    assert_eq!(held(&g), both(), "set_sources: exactly these");
-    g.disconnect_from(sink, 0, from_two);
-    assert_eq!(held(&g), vec![Edge::Direct(from_one)], "the others stay");
-    g.disconnect_from(sink, 0, from_two);
-    assert_eq!(held(&g).len(), 1, "removing what is not there is a no-op");
+    let set_both = |g: &mut GraphBuilder| {
+        replaced(g);
+        g.set_sources(sink, 0, &[from_two, from_one]);
+    };
+    assert_eq!(held(&set_both), both(), "set_sources: exactly these");
+    let removed = |g: &mut GraphBuilder| {
+        set_both(g);
+        g.disconnect_from(sink, 0, from_two);
+    };
+    assert_eq!(
+        held(&removed),
+        vec![Edge::Direct(from_one)],
+        "the others stay"
+    );
+    assert_eq!(
+        held(&|g| {
+            removed(g);
+            g.disconnect_from(sink, 0, from_two);
+        })
+        .len(),
+        1,
+        "removing what is not there is a no-op"
+    );
 
+    let (mut g, ..) = scene();
+    removed(&mut g);
+    g.disconnect_from(sink, 0, from_two);
     // Output channels sum too: `sink` (2) and `one` (1) into channel 0.
     g.connect_output(sink, 0, 0).connect_output(one, 0, 0);
-    assert_eq!(g.spec().topology.outputs[0].len(), 2);
     let mut r = g.renderer(prepare(64)).expect("builds");
+    assert_eq!(r.editor().spec().topology.outputs[0].len(), 2);
     assert_eq!(r.render(8)[0], vec![3.0; 8], "sink (1 + 1) plus one (1)");
 
     // A feedback edge is added beside the direct one, not instead of it.
@@ -700,7 +760,8 @@ fn connect_adds_and_set_source_replaces() {
     g.connect(one, 0, sink, 0)
         .feedback(sink, 0, sink, 0, Samples::new(64));
     let at = InputPort::new(sink, 0);
-    let edges = &g.spec().topology.edges[&at];
+    let spec = wiring(g);
+    let edges = &spec.topology.edges[&at];
     assert_eq!(edges.len(), 2);
     assert!(matches!(edges[0], Edge::Direct(_)));
     assert!(matches!(edges[1], Edge::Feedback(_)));

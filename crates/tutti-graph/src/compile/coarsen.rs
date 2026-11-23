@@ -1,5 +1,5 @@
 //! Coarsening (compiler step 7): the ops grouped into **tasks**, the units
-//! a parallel executor dispatches, and the cost model's totals over them.
+//! a parallel executor dispatches.
 //!
 //! Three passes, each keeping the task graph acyclic and every op
 //! dependency:
@@ -14,7 +14,7 @@
 //! 3. **Chains again**, over the packed tasks: a packed fan-out between two
 //!    lone tasks (a fan-out of cheap nodes and its sum) becomes one task.
 //!    Fusing a chain only ever removes a hand-over from a path, so this
-//!    pass never lengthens the critical path either: the plan's critical
+//!    pass never lengthens the critical path either: the coarsened critical
 //!    path is never longer than chain fusion alone would give.
 //!
 //! Passes 2 and 3 repeat until a round merges nothing: a pack makes its
@@ -34,16 +34,12 @@ use tutti_units::Samples;
 use crate::cost::{GRAIN, TASK_DISPATCH, Work};
 use crate::plan::{Csr, Span};
 
-/// The task tables and the cost model's totals.
+/// The task tables.
 pub(super) struct Tasks {
     pub(super) tasks: Vec<Span>,
     pub(super) task_ops: Vec<u32>,
     pub(super) succ: Csr,
     pub(super) activation: Vec<u32>,
-    pub(super) work: Work,
-    pub(super) critical: Work,
-    /// The most tasks on one level of the final task DAG.
-    pub(super) width: u32,
 }
 
 /// Group the op DAG (`preds` / `succ` by op, ops numbered topologically)
@@ -80,7 +76,7 @@ pub(super) fn coarsen(
             break;
         }
     }
-    finish(groups, &of, succ, work, max_block)
+    finish(groups, &of, succ)
 }
 
 /// Pass 1 alone: every op its own item, chains fused.
@@ -325,32 +321,16 @@ fn critical(
     (done == groups.len()).then_some(longest)
 }
 
-/// The plan's task tables, and the cost model's totals: the whole block's
-/// work and the critical path ([`critical`]).
-fn finish(
-    groups: Vec<Vec<u32>>,
-    of: &[u32],
-    succ: &[Vec<u32>],
-    work: &[Work],
-    max_block: Samples,
-) -> Tasks {
+/// The plan's task tables.
+fn finish(groups: Vec<Vec<u32>>, of: &[u32], succ: &[Vec<u32>]) -> Tasks {
     let (_, rows) = group_dag(of, succ, groups.len());
     let mut activation = vec![0u32; groups.len()];
-    let mut level = vec![0u32; groups.len()];
     for (t, row) in rows.iter().enumerate() {
         for &s in row {
             debug_assert!(s as usize > t, "tasks are topologically numbered");
             activation[s as usize] += 1;
-            level[s as usize] = level[s as usize].max(level[t] + 1);
         }
     }
-    let critical = critical(&groups, succ, work, max_block).expect("an acyclic task graph");
-    let mut per_level = vec![0u32; groups.len()];
-    for &l in &level {
-        per_level[l as usize] += 1;
-    }
-    let width = per_level.into_iter().max().unwrap_or(0);
-    let total = work.iter().fold(Work::ZERO, |acc, &w| acc.plus(w));
     let mut tasks = Vec::with_capacity(groups.len());
     let mut task_ops = Vec::with_capacity(of.len());
     for ops in &groups {
@@ -366,9 +346,6 @@ fn finish(
         task_ops,
         succ: Csr::from_rows(&rows),
         activation,
-        work: total,
-        critical,
-        width,
     }
 }
 
@@ -406,6 +383,16 @@ mod tests {
     /// The critical path chain fusion alone gives.
     fn chain_only(preds: &[BTreeSet<u32>], succ: &[Vec<u32>], work: &[Work]) -> u64 {
         let (groups, _) = chained(preds, succ);
+        critical(&groups, succ, work, MAX).expect("acyclic").at(MAX)
+    }
+
+    /// The critical path of the coarsened task DAG.
+    fn final_critical(t: &Tasks, succ: &[Vec<u32>], work: &[Work]) -> u64 {
+        let groups: Vec<Vec<u32>> = t
+            .tasks
+            .iter()
+            .map(|s| t.task_ops[s.start as usize..(s.start + s.len) as usize].to_vec())
+            .collect();
         critical(&groups, succ, work, MAX).expect("acyclic").at(MAX)
     }
 
@@ -468,7 +455,7 @@ mod tests {
         let t = coarsen(&preds, &succ, &work, MAX);
         let (ha, hb1, hb2) = (task_of(&t, 1), task_of(&t, 7), task_of(&t, 8));
         assert!(!reaches(&t, ha, hb1) && !reaches(&t, ha, hb2));
-        assert!(t.critical.at(MAX) <= chain_only(&preds, &succ, &work));
+        assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
     }
 
     /// A fan-out of cheap siblings packs, and that shortens the critical
@@ -482,7 +469,7 @@ mod tests {
         work[0] = COPY;
         let t = coarsen(&preds, &succ, &work, MAX);
         assert!(t.tasks.len() < 5, "{} tasks", t.tasks.len());
-        assert!(t.critical.at(MAX) < chain_only(&preds, &succ, &work));
+        assert!(final_critical(&t, &succ, &work) < chain_only(&preds, &succ, &work));
     }
 
     /// Cheap siblings that each fan out to private successors (a track
@@ -546,7 +533,7 @@ mod tests {
                 })
                 .collect();
             let t = coarsen(&preds, &succ, &work, MAX);
-            prop_assert!(t.critical.at(MAX) <= chain_only(&preds, &succ, &work));
+            prop_assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
             let mut seen: Vec<u32> = t.task_ops.clone();
             seen.sort_unstable();
             prop_assert_eq!(seen, (0..n as u32).collect::<Vec<_>>());

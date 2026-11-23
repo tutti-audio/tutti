@@ -1,15 +1,14 @@
 //! A node declared in the cells form of `declare_params!` enters the session
 //! through its `NodeParts`: its params are addressed from the parts, a write
 //! through its key reaches the cell the node reads, and a fork starts from the
-//! values set. The node has no `SessionNode` method of its own: its one empty
-//! impl is the admission the session's `add` still asks of every type. A
-//! `published` value of such a node is written through its key and lands at
-//! the update, with no session impl of the node's type.
+//! values set. The node implements nothing for the session: `add` takes its
+//! `IntoNode`. A `published` value of such a node is written through its key and lands at
+//! the update, with nothing implemented for the session.
 
 use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status, declare_params};
 use tutti_midi_runtime::{ClipEvents, ClipEventsKind, TimedMidiEvent};
-use tutti_session::{DetachedSession, MainOutput, Session, SessionNode};
+use tutti_session::{DetachedSession, MainOutput, Session};
 use tutti_ump::MidiChannel;
 use tutti_units::{Amplitude, Beat, SampleRate};
 
@@ -47,8 +46,6 @@ impl Node for Level {
         self.declared_base(port)
     }
 }
-
-impl SessionNode for Level {}
 
 fn session_with_level() -> (DetachedSession, tutti_session::Key<Level>) {
     let mut s = Session::builder()
@@ -134,8 +131,6 @@ impl Node for Count {
         self.declared_base(port)
     }
 }
-
-impl SessionNode for Count {}
 
 fn events_of(count: u8) -> ClipEvents {
     (0..count)
@@ -263,8 +258,6 @@ impl Node for Silent {
         self.declared_base(port)
     }
 }
-
-impl SessionNode for Silent {}
 
 /// **A node that publishes a kind the session does not know is added and
 /// renders**: the session has nothing that can address the value, and leaves

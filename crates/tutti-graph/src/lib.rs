@@ -477,8 +477,8 @@
 //!
 //! - **Share state outside ports.** Nodes communicate only through ports: two
 //!   nodes sharing an `Arc<Mutex<_>>` or a cursor are unordered when a block's
-//!   tasks run on a worker pool, and the render stops being bit-identical to
-//!   the serial one. Share through an edge, or make it one node.
+//!   tasks run on a worker pool, and the render stops being bit-identical at
+//!   every participant count. Share through an edge, or make it one node.
 //! - **Allocate, lock or block in `process`.** It runs on the audio thread:
 //!   size every buffer in `prepare` (against [`Prepare::max_block`]), and
 //!   publish non-scalar state to it through `tutti_rt`'s `Publisher`, never by
@@ -723,7 +723,7 @@ pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };
-pub use cost::{Cost, Schedule, Work};
+pub use cost::Cost;
 pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,

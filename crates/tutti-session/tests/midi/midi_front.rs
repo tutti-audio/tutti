@@ -12,7 +12,7 @@ use tutti_graph::{
     Status,
 };
 use tutti_midi_runtime::TimedMidiEvent;
-use tutti_session::{MidiError, Session, SessionNode};
+use tutti_session::{MidiError, Session};
 #[cfg(feature = "serde")]
 use tutti_ump::MidiGroup;
 use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, Voice2};
@@ -40,8 +40,6 @@ impl IntoNode for Probe {
     }
 }
 impl InstrumentNode<f32> for Probe {}
-impl SessionNode for Probe {}
-
 // --- Recording a take --------------------------------------------------------
 
 /// A silent stereo source that declares 256 frames of latency, so the graph's

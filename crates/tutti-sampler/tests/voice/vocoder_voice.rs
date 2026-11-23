@@ -688,7 +688,8 @@ fn a_clip_played_from_frame_zero_without_stopping_is_silent_for_the_priming() {
 /// `wave` placed at beat 0 with a vocoder at unity (a voice turned back to 1.0 keeps it),
 /// rendered `frames` frames under a transport that rolls from beat 0 at 120 BPM and wraps
 /// the loop `region_at(block)` names, `None` for no loop; as the host's clock moves it.
-/// `spares`: the handle is told the loop (`false`: it never is, so the voice has no spare).
+/// `spares`: the handle's control tick runs after each block, reading the loop the block
+/// carried (`false`: it never does, so the voice has no spare).
 fn render_looped(
     wave: &Arc<Wave>,
     frames: usize,
@@ -725,11 +726,12 @@ fn render_looped(
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        // The control side knows the loop before the block that wraps under it.
-        if spares {
-            handle.follow_loop(region);
-        }
         let block = contract::drive_input(&mut pool, &env, Planes::default(), &[], &[]).audio;
+        // The control tick after the block that carried the loop sends the spare, ahead
+        // of the block that wraps under it.
+        if spares {
+            tutti_rt::Reclaim::reclaim(&handle);
+        }
         for (channel, plane) in out.iter_mut().zip(&block) {
             channel.extend_from_slice(plane);
         }
@@ -818,40 +820,52 @@ fn only_a_stretched_voice_under_the_loop_carries_a_spare() {
             .add(SlotId(id), source_from(&wave, start), stretch(stretching))
             .expect("the command queue has room in a test");
     }
-    let mut spares = || {
-        // The drain applies the commands at the top of the block.
-        contract::drive_input(
-            &mut pool,
-            &transport.env(BLOCK, SampleRate::of(SR)),
-            Planes::default(),
-            &[],
-            &[],
-        );
+    // A block carries the loop to the handle's feed; the tick sends the spares; the next
+    // block's drain applies them.
+    let mut spares = |region: Option<LoopRange>| {
+        transport.set_loop(region);
+        let block = |pool: &mut VoicePool<f32>| {
+            contract::drive_input(
+                pool,
+                &transport.env(BLOCK, SampleRate::of(SR)),
+                Planes::default(),
+                &[],
+                &[],
+            );
+        };
+        block(&mut pool);
+        tutti_rt::Reclaim::reclaim(&handle);
+        block(&mut pool);
         tutti_sampler::testing::spare_count(&pool)
     };
     let looped = || Some(LoopRange::new(Beat::new(0.25), Beat::new(0.75)).expect("a loop"));
-    assert_eq!(spares(), 0, "no loop: no spare");
-    handle.follow_loop(looped());
-    assert_eq!(spares(), 1, "only voice 1 is stretched under the loop");
-    handle.follow_loop(None);
-    assert_eq!(spares(), 0, "the loop off retires the spare");
+    assert_eq!(spares(None), 0, "no loop: no spare");
+    assert_eq!(
+        spares(looped()),
+        1,
+        "only voice 1 is stretched under the loop"
+    );
+    assert_eq!(spares(None), 0, "the loop off retires the spare");
     assert_eq!(
         handle.collect_retired(),
         1,
         "and the retirement ring hands it back"
     );
-    handle.follow_loop(looped());
-    assert_eq!(spares(), 1, "the loop on sends a new one");
+    assert_eq!(spares(looped()), 1, "the loop on sends a new one");
     let at = |start: f64| VoiceWindow::from(Beat::new(start));
     handle.set_window(SlotId(2), at(0.0)).expect("room");
-    assert_eq!(spares(), 2, "a window moved under the loop gets one");
+    assert_eq!(
+        spares(looped()),
+        2,
+        "a window moved under the loop gets one"
+    );
     handle.set_window(SlotId(1), at(8.0)).expect("room");
-    assert_eq!(spares(), 1, "a window moved off the loop loses it");
+    assert_eq!(spares(looped()), 1, "a window moved off the loop loses it");
     handle
         .set_stretch(SlotId(3), StretchFactor::new(1.5), Cents::new(0.0))
         .expect("room");
     assert_eq!(
-        spares(),
+        spares(looped()),
         2,
         "a voice turned to stretch under the loop gets one"
     );

@@ -34,7 +34,6 @@ use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_rt::Mutex;
 use tutti_rt::Param;
 use tutti_session::BufferMainOutput;
-use tutti_session::SessionNode;
 use tutti_session::{
     Bounce, BounceConfigError, BounceError, BounceLatency, DetachedSession, ExportClock, InputPort,
     MainOutput, OutputPort, PreparedGraph, Range, Session, Stem,
@@ -616,8 +615,6 @@ impl ForkSource for CounterFork {
     }
 }
 
-impl SessionNode for Counter {}
-
 impl IntoNode for Counter {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
@@ -859,8 +856,6 @@ impl ForkSource for SlowFork {
     }
 }
 
-impl SessionNode for Slow {}
-
 impl IntoNode for Slow {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
@@ -1043,8 +1038,6 @@ impl ForkSource for PinnedFork {
 /// `threads`.
 struct PinnedNode(Arc<Threads>);
 
-impl SessionNode for PinnedNode {}
-
 impl IntoNode for PinnedNode {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
@@ -1185,8 +1178,6 @@ impl ForkSource for BrokenFork {
         Ok(ForkBuild::deferred(|| Err(ForkCause::new(NoServer))))
     }
 }
-
-impl SessionNode for Broken {}
 
 impl IntoNode for Broken {
     type Controls = ();

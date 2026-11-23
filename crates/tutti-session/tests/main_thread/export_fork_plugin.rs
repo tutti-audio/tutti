@@ -153,7 +153,7 @@ fn session_with_probe_hosted(mode: u32, hosting: Hosting) -> (DetachedSession, N
 fn feed_with(
     session: &mut DetachedSession,
     probe: NodeKey,
-    node: impl tutti_session::SessionNode<Controls = ()>,
+    node: impl tutti_graph::IntoNode<f32, Controls = ()> + Send + 'static,
 ) {
     let source = session.graph().add(node);
     session

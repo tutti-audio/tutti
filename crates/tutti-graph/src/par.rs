@@ -1,14 +1,15 @@
 //! The op executor: a block's ops run on the calling thread alone, or its
 //! tasks across a [`Pool`]'s threads.
 //!
-//! The plan already carries
-//! everything a schedule needs, computed by the pure compiler: the ops fused
-//! into **tasks** (chains run back to back on one thread), the task DAG as
-//! CSR successor rows, each task's **activation count** (its distinct
-//! predecessor tasks) and the cost model's totals, from which
-//! [`Plan::schedule`] decides — when the plan meets the pool, on the
-//! thread that applies it — whether blocks spread, from which block length,
-//! and how many participants they wake. Nothing is derived per block.
+//! The plan already carries everything a spread block needs, computed by the
+//! pure compiler: the ops fused into **tasks** (chains run back to back on
+//! one thread), the task DAG as CSR successor rows, and each task's
+//! **activation count** (its distinct predecessor tasks). Nothing is
+//! derived per block.
+//!
+//! The app chooses the threads by the pool it sets: with a pool of more than
+//! one participant, every block of a plan with more than one task runs on
+//! all of them. Nothing else decides.
 //!
 //! One op code, `Ctx::run_op`, serves every block. How a participant
 //! borrows what an op touches is a [`Mode`]: through claims
@@ -18,15 +19,15 @@
 //! # A block alone
 //!
 //! The calling thread (the audio thread) is the one participant. A block
-//! runs alone with no pool, with a block shorter than the schedule's `from`,
-//! or with a plan whose schedule never spreads. It walks the plan's ops in
+//! runs alone with no pool, a pool of one participant, or a plan of one
+//! task. It walks the plan's ops in
 //! order through plain `&mut` borrows: no task graph, no claim, no pool call.
 //!
 //! # A block spread over a pool
 //!
 //! 1. The caller arms the block's [`TaskGraph`] — built from the plan's
 //!    tables when the plan was applied — and asks the pool to run one job on
-//!    up to the schedule's `wake` participants, itself as participant 0.
+//!    every participant of the pool, itself as participant 0.
 //! 2. Every participant takes ready tasks and runs each task's ops through
 //!    the same op code, on **claimed views** of the arena and event slots
 //!    (`slots.rs`) and claimed units, delay rings, feedback state and output
@@ -205,12 +206,11 @@ impl Drop for Unclaimed<'_> {
 /// table, built when the plan is applied (with the rest of the executor's
 /// state, `exec.rs`'s `rebuild`) for the pool's participant count.
 pub(crate) struct Par {
-    /// The pool participants this was built for: one when the plan never
-    /// spreads.
+    /// The pool participants this was built for (0: no pool).
     participants: usize,
-    /// Participants a block wakes and the shortest block that spreads
-    /// (`Schedule::Parallel`); `None` when no block does.
-    spread: Option<(usize, usize)>,
+    /// Whether a block spreads over the pool: a pool of more than one
+    /// participant, and a plan of more than one task.
+    spreads: bool,
     graph: TaskGraph,
     /// The per-slot flags, shared by the block's workers: seeded from the
     /// executor's own before each block (slot 0, the feedback reads), and
@@ -243,7 +243,6 @@ impl Par {
     pub(crate) fn new(
         plan: &Plan,
         participants: usize,
-        spread: Option<(usize, usize)>,
         store_len: usize,
         inject_units: impl Iterator<Item = u32>,
         overlay: usize,
@@ -265,13 +264,16 @@ impl Par {
             span.len += 1;
             n_inject += 1;
         }
+        let spreads = participants > 1 && plan.tasks.len() > 1;
+        // One worker per participant a block wakes.
+        let workers = if spreads { participants } else { 1 };
         // What one op's views can hold at once: a node's ports and the
         // event source of each param it declares, or an event merge's
         // inputs and output.
         let held = 2 * MAX_PORTS + crate::param::MAX_PARAM_PORTS + 1;
         Self {
             participants,
-            spread,
+            spreads,
             graph,
             flags: (0..plan.audio_slots).map(|_| AtomicU8::new(0)).collect(),
             audio: ClaimTable::new(plan.audio_slots as usize),
@@ -289,7 +291,7 @@ impl Par {
             has_inject: ClaimTable::new(units),
             has_due: ClaimTable::new(units),
             outputs: ClaimTable::new(plan.rendered_outputs()),
-            workers: (0..participants.max(1))
+            workers: (0..workers)
                 .map(|_| Worker {
                     held_audio: Held::new(held),
                     held_events: Held::new(held),
@@ -299,24 +301,22 @@ impl Par {
                     panic: None,
                 })
                 .collect(),
-            worker_claims: ClaimTable::new(participants.max(1)),
+            worker_claims: ClaimTable::new(workers),
         }
     }
 }
 
 impl Par {
-    /// Whether some block length spreads over the pool.
-    pub(crate) fn spreads_any(&self) -> bool {
-        self.spread.is_some()
+    /// Whether blocks spread over the pool.
+    pub(crate) fn spreads(&self) -> bool {
+        self.spreads
     }
 
-    /// The participants a block of `frames` wakes on `pool`, or `None` when
-    /// the calling thread runs it alone: the cost model's threshold and the
-    /// pool this was built for.
-    fn wake(&self, frames: usize, pool: &dyn Pool) -> Option<usize> {
-        let (wake, from) = self.spread?;
-        (frames >= from && self.participants == pool.participants())
-            .then(|| wake.clamp(1, pool.participants()))
+    /// The participants a block wakes on `pool`, or `None` when the calling
+    /// thread runs it alone: every participant of the pool this was built
+    /// for.
+    fn wake(&self, pool: &dyn Pool) -> Option<usize> {
+        (self.spreads && self.participants == pool.participants()).then_some(self.participants)
     }
 }
 
@@ -405,9 +405,9 @@ struct Shared<'s, 'o, F: Float = f32> {
     waits: BlockWaits,
 }
 
-/// Run one block's ops: spread over `pool`'s participants when the cost
-/// model says this block pays for it (`Plan::schedule`), else on the calling
-/// thread alone. The events dropped are added to `b.dropped`; returns
+/// Run one block's ops: spread over `pool`'s participants when the plan
+/// spreads ([`Par::spreads`]), else on the calling thread alone. The events
+/// dropped are added to `b.dropped`; returns
 /// whether a crossfade ended.
 ///
 /// # Panics
@@ -419,7 +419,7 @@ pub(crate) fn run_block<F: Float>(
     pool: Option<&Arc<dyn Pool>>,
     b: Block<'_, '_, F>,
 ) -> bool {
-    match pool.and_then(|p| par.wake(b.frames, &**p).map(|wake| (p, wake))) {
+    match pool.and_then(|p| par.wake(&**p).map(|wake| (p, wake))) {
         Some((pool, wake)) => run_spread(par, pool, wake, b),
         None => run_alone(par, b),
     }
@@ -491,7 +491,7 @@ fn run_spread<F: Float>(
     }
     let Par {
         participants: _,
-        spread: _,
+        spreads: _,
         graph,
         flags,
         audio,
