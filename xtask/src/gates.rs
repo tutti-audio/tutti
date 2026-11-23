@@ -691,6 +691,23 @@ pub(crate) mod fake {
         }
     }
 
+    /// What `check` reports over the in-memory `files`: the one way a gate's
+    /// test builds its tree.
+    pub(crate) fn run_gate(
+        check: impl FnOnce(&dyn Tree) -> Report,
+        files: &[(&str, &str)],
+    ) -> Report {
+        check(&Mem::with(files))
+    }
+
+    /// `files` followed by `extra`.
+    pub(crate) fn with_rows<'a>(
+        files: &[(&'a str, &'a str)],
+        extra: &[(&'a str, &'a str)],
+    ) -> Vec<(&'a str, &'a str)> {
+        [files, extra].concat()
+    }
+
     /// A `cargo tree` that always answers `Err`.
     pub(crate) struct NoCargo;
 

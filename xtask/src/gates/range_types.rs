@@ -552,17 +552,13 @@ fn attrs_before(text: &str, pos: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
 
     const FILE: &str = "crates/tutti-rt/src/lib.rs";
 
-    fn run(files: &[(&str, &str)], ex: &[(&str, &str, &str)]) -> Report {
-        check(&Mem::with(files), ex)
-    }
-
     fn one(src: &str) -> Report {
-        run(&[(FILE, src)], &[])
+        run_gate(|t| check(t, &[]), &[(FILE, src)])
     }
 
     fn flagged(name: &str, line: usize) -> String {
@@ -654,9 +650,9 @@ mod tests {
     #[test]
     fn crates_and_testing_are_scanned_and_only_rs_files() {
         let bad = "#[derive(serde::Deserialize)] struct P(u8);\n";
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[]),
             &[("testing/t/src/lib.rs", bad), ("crates/c/README.md", bad)],
-            &[],
         );
         assert_eq!(
             r.findings,
@@ -670,14 +666,14 @@ mod tests {
     #[test]
     fn tests_target_and_benches_are_skipped() {
         let bad = "#[derive(serde::Deserialize)] struct P(u8);\n";
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[]),
             &[
                 ("crates/c/tests/t.rs", bad),
                 ("crates/c/src/tests/t.rs", bad),
                 ("crates/c/target/t.rs", bad),
                 ("crates/c/benches/b.rs", bad),
             ],
-            &[],
         );
         assert!(r.passed(), "{:?}", r.findings);
     }
@@ -685,7 +681,7 @@ mod tests {
     #[test]
     fn a_violation_under_examples_is_still_refused() {
         let bad = "#[derive(serde::Deserialize)] struct P(u8);\n";
-        let r = run(&[("crates/c/examples/e.rs", bad)], &[]);
+        let r = run_gate(|t| check(t, &[]), &[("crates/c/examples/e.rs", bad)]);
         assert!(!r.passed(), "{:?}", r.findings);
     }
 
@@ -694,9 +690,9 @@ mod tests {
         for (path, name, _) in EXCEPTIONS {
             let src = format!("#[derive(serde::Deserialize)]\npub struct {name}(u32);\n");
             let only = [(*path, *name, "why")];
-            let r = run(&[(*path, &src)], &only);
+            let r = run_gate(|t| check(t, &only), &[(*path, &src)]);
             assert_eq!(r.out, ["check-range-types: ok (1 excepted)"], "{name}");
-            let r = run(&[("crates/other/src/lib.rs", &src)], &only);
+            let r = run_gate(|t| check(t, &only), &[("crates/other/src/lib.rs", &src)]);
             assert_eq!(
                 r.findings,
                 [
@@ -729,9 +725,9 @@ mod tests {
 
     #[test]
     fn a_stale_exception_is_an_error() {
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[("crates/x.rs", "Gone", "temporary: lane 7")]),
             &[(FILE, "struct A;\n")],
-            &[("crates/x.rs", "Gone", "temporary: lane 7")],
         );
         assert_eq!(
             r.findings,
@@ -745,7 +741,7 @@ mod tests {
     #[test]
     fn the_same_type_excepted_twice_counts_once() {
         let src = "#[derive(serde::Deserialize)] struct P(u8);\n#[derive(serde::Deserialize)] struct P(u8);\n";
-        let r = run(&[(FILE, src)], &[(FILE, "P", "why")]);
+        let r = run_gate(|t| check(t, &[(FILE, "P", "why")]), &[(FILE, src)]);
         assert_eq!(r.out, ["check-range-types: ok (1 excepted)"]);
     }
 
@@ -783,11 +779,11 @@ mod tests {
     #[test]
     fn a_named_exception_passes_and_a_stale_one_fails() {
         let ex = [(FILE, "P", "permanent: every combination is valid")];
-        let r = run(&[(FILE, NAMED)], &ex);
+        let r = run_gate(|t| check(t, &ex), &[(FILE, NAMED)]);
         assert_eq!(r.out, ["check-range-types: ok (1 excepted)"]);
         // The struct gained `try_from`: the exception no longer matches.
         let fixed = NAMED.replace("struct P", "#[serde(try_from = \"R\")]\nstruct P");
-        let r = run(&[(FILE, &fixed)], &ex);
+        let r = run_gate(|t| check(t, &ex), &[(FILE, &fixed)]);
         assert_eq!(
             r.findings,
             [
@@ -796,10 +792,13 @@ mod tests {
             ]
         );
         // The struct no longer derives `Deserialize`.
-        let r = run(&[(FILE, "struct P {\n    a: u8,\n}\n")], &ex);
+        let r = run_gate(|t| check(t, &ex), &[(FILE, "struct P {\n    a: u8,\n}\n")]);
         assert!(!r.passed());
         // The struct is renamed.
-        let r = run(&[(FILE, &NAMED.replace("struct P", "struct Q"))], &ex);
+        let r = run_gate(
+            |t| check(t, &ex),
+            &[(FILE, &NAMED.replace("struct P", "struct Q"))],
+        );
         assert_eq!(r.findings.len(), 3, "{:?}", r.findings);
     }
 }
