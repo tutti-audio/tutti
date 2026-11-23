@@ -200,13 +200,8 @@ impl WriterLoss {
     /// Losses since the last call: a `Counter` never resets, so the reset is
     /// this end's baseline.
     fn take(&mut self) -> u64 {
-        take_since(&self.view, &mut self.taken)
+        self.view.take_since(&mut self.taken)
     }
-}
-
-fn take_since(view: &Counter<u64>, taken: &mut u64) -> u64 {
-    let now = view.get();
-    now - std::mem::replace(taken, now)
 }
 
 /// Whether dropping a queued value would free: debug builds check the thread
