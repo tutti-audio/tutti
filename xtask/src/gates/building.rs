@@ -589,16 +589,8 @@ pub(super) const ALLOW: &[Allow] = &[
         CTOR,
         "reading the platform window handle: the failure is the OS's, not a value's",
     ),
-    ty(
-        "crates/tutti-nodes/",
-        "OscillatorConfig",
-        WIDTH,
-        FIXED_SOURCE,
-    ),
-    ty("crates/tutti-nodes/", "LfoConfig", WIDTH, FIXED_SOURCE),
     ty("crates/tutti-nodes/", "FmConfig", WIDTH, FIXED_SOURCE),
     ty("crates/tutti-nodes/", "AdditiveConfig", WIDTH, FIXED_SOURCE),
-    ty("crates/tutti-nodes/", "NoiseConfig", WIDTH, FIXED_SOURCE),
     ty(
         "crates/tutti-nodes/",
         "ClickNodeConfig",
@@ -639,12 +631,6 @@ pub(super) const ALLOW: &[Allow] = &[
         STEREO_ONLY,
     ),
     ty("crates/tutti-nodes/", "AutoPanConfig", WIDTH, STEREO_ONLY),
-    ty(
-        "crates/tutti-nodes/",
-        "HrtfBinauralConfig",
-        WIDTH,
-        "a stereo-only node: the binaural renderer folds a pair to mono and writes the left and right ear, so the width is not a choice and the config takes none",
-    ),
     ty(
         "crates/tutti-nodes/",
         "PlateReverbConfig",

@@ -2,6 +2,7 @@ use super::*;
 use crate::testing::aim;
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes};
 use tutti_dsp::HRTF_STEP;
+use tutti_graph::ParamNode;
 use tutti_graph::contract::{drive, prepared};
 use tutti_units::UnitParam;
 
@@ -137,8 +138,8 @@ fn a_non_finite_position_is_ignored_and_does_not_stick() {
         (-45.0, f64::INFINITY),
         (-45.0, f64::NEG_INFINITY),
     ] {
-        node.azimuth.store(Azimuth::new(az));
-        node.elevation.store(Elevation::new(el));
+        node.cells.azimuth.store(Azimuth::new(az));
+        node.cells.elevation.store(Elevation::new(el));
         settle(&mut node);
         assert!(
             near(node.aim.current(), (-45.0, 30.0)),
@@ -292,7 +293,7 @@ fn dry_and_wet_leave_together_at_every_blend() {
     for blend in [0.0_f64, 0.5, 1.0] {
         let mut node = make_node();
         aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
-        node.blend.store(Mix::new(blend));
+        node.cells.blend.store(Mix::new(blend));
         Node::reset(&mut node);
         let at = 100;
         let (l, r) = impulse_response(&mut node, at, at + 2 * STEP);
@@ -312,9 +313,9 @@ fn dry_and_wet_leave_together_at_every_blend() {
 fn a_nan_blend_holds_the_last_one() {
     let mut node = make_node();
     aim(&node.param_set(), Azimuth::new(90.0), Elevation::LEVEL);
-    node.blend.store(Mix::new(0.5));
+    node.cells.blend.store(Mix::new(0.5));
     let (l0, _) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
-    node.blend.store(Mix::new(f64::NAN));
+    node.cells.blend.store(Mix::new(f64::NAN));
     let (l, r) = impulse_response(&mut node, 0, 4 * tutti_dsp::HRTF_STEP);
     assert!(
         l.iter().chain(&r).all(|s| s.is_finite()),
@@ -331,16 +332,16 @@ fn a_nan_blend_holds_the_last_one() {
 fn reset_keeps_the_authored_placement() {
     let mut node = make_node();
     aim(&node.param_set(), Azimuth::new(45.0), Elevation::new(10.0));
-    node.blend.store(Mix::new(0.4));
+    node.cells.blend.store(Mix::new(0.4));
 
     Node::reset(&mut node);
 
-    assert_eq!(node.azimuth.load(), Azimuth::new(45.0));
-    assert_eq!(node.elevation.load(), Elevation::new(10.0));
+    assert_eq!(node.cells.azimuth.load(), Azimuth::new(45.0));
+    assert_eq!(node.cells.elevation.load(), Elevation::new(10.0));
     assert!(
-        (node.blend.load().get() - 0.4).abs() < 0.001,
+        (node.cells.blend.load().get() - 0.4).abs() < 0.001,
         "reset changed the blend to {}",
-        node.blend.load().get()
+        node.cells.blend.load().get()
     );
 }
 
@@ -387,13 +388,13 @@ fn clone_shares_the_position_atomics() {
 
     // Set through the original, observe through the clone.
     aim(&node.param_set(), Azimuth::new(45.0), Elevation::new(10.0));
-    assert_eq!(c.azimuth.load(), Azimuth::new(45.0));
-    assert_eq!(c.elevation.load(), Elevation::new(10.0));
+    assert_eq!(c.cells.azimuth.load(), Azimuth::new(45.0));
+    assert_eq!(c.cells.elevation.load(), Elevation::new(10.0));
 
     // And back the other way.
     aim(&c.param_set(), Azimuth::new(-60.0), Elevation::new(-20.0));
-    assert_eq!(node.azimuth.load(), Azimuth::new(-60.0));
-    assert_eq!(node.elevation.load(), Elevation::new(-20.0));
+    assert_eq!(node.cells.azimuth.load(), Azimuth::new(-60.0));
+    assert_eq!(node.cells.elevation.load(), Elevation::new(-20.0));
 }
 
 /// Two graph rates above [`MAX_PREPARED_RATE`] share one prepared set, but
@@ -457,9 +458,9 @@ fn the_ramp_has_a_50_ms_time_constant_in_audio_time() {
 #[test]
 fn the_renderer_declares_its_params() {
     let node = make_node();
-    node.azimuth.store(Azimuth::new(10.0));
-    node.elevation.store(Elevation::new(20.0));
-    node.blend.store(Mix::new(0.3));
+    node.cells.azimuth.store(Azimuth::new(10.0));
+    node.cells.elevation.store(Elevation::new(20.0));
+    node.cells.blend.store(Mix::new(0.3));
     assert_eq!(
         node.shape().params.as_slice(),
         &[UnitParam::Azimuth, UnitParam::Elevation, UnitParam::Wet,][..]

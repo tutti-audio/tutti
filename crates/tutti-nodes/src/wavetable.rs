@@ -8,7 +8,7 @@ use crate::last_good::LastGood;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, Float};
 use tutti_dsp::{Wavetable, WavetableOscillator, WavetableStep};
-use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
+use tutti_graph::{Cx, Io, Node, Prepare, Shape, Status};
 use tutti_rt::Param;
 use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 
@@ -26,7 +26,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// position ([`UnitParam::Position`], a [`Normalized`] position along the table's frames),
 /// all read per frame: a driven control signal's every frame is heard, and a non-finite
 /// driven value holds the last finite one. Made from a [`WavetableConfig`]
-/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`]; a fork starts from the
+/// (`WavetableNode::from`); inserted, its controls are a [`ParamSet`](tutti_graph::ParamSet); a fork starts from the
 /// values last set through it, at phase 0.
 ///
 /// The node renders silence until the graph prepares it at the device rate
@@ -37,7 +37,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 /// ```
 /// # use tutti_buffers::{Mono, Planes};
 /// use tutti_dsp::Wavetable;
-/// use tutti_graph::{GraphBuilder, Params, Prepare};
+/// use tutti_graph::{GraphBuilder, Prepare};
 /// use tutti_nodes::{WavetableConfig, WavetableNode};
 /// use tutti_units::{Hz, SampleRate, Samples};
 /// use tutti_buffers::{ChannelLayout, MaxBlock};
@@ -47,9 +47,9 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 ///     .collect();
 /// let table = Wavetable::new(&[Mono::new(&cycle)]).expect("one frame");
 /// let mut g = GraphBuilder::new(ChannelLayout::MONO, ChannelLayout::MONO);
-/// let tone = g.add_with_controls(Params(WavetableNode::from(
+/// let tone = g.add_with_controls(WavetableNode::from(
 ///     WavetableConfig::new(ChannelLayout::MONO, table).frequency(Hz::new(440.0)),
-/// )));
+/// ));
 /// g.pipe_output(tone.0);
 /// let mut r = g
 ///     .renderer(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))))
@@ -62,9 +62,7 @@ use tutti_units::{Amplitude, Hz, Normalized, SampleRate, Tail, UnitParam};
 pub struct WavetableNode<F: Float> {
     width: ChannelLayout,
     wave: WavetableOscillator<F>,
-    frequency: Param<Hz>,
-    level: Param<Amplitude>,
-    position: Param<Normalized>,
+    cells: WavetableCells<F>,
     /// `None` until [`Node::prepare`]: no value is computed from a guessed rate.
     rate: Option<SampleRate>,
     /// The last finite frequency read from the cell or the port.
@@ -75,67 +73,24 @@ pub struct WavetableNode<F: Float> {
     good_position: LastGood<f64>,
 }
 
-// The params a [`WavetableNode`] lets the graph modulate, in port order.
-tutti_graph::declare_params!([F: Float] WavetableNode<F>, n {
-    Frequency => Hz = &n.frequency,
-    Volume => Amplitude = &n.level,
-    Position => Normalized = &n.position,
+// The params a [`WavetableNode`] lets the graph modulate, in port order, and the
+// [`WavetableConfig`] it is made from: its width, its table and its starting params.
+tutti_graph::declare_params!([F: Float] WavetableNode<F>, WavetableConfig<F: Float>,
+    WavetableCells<F: Float> {
+    required { width: ChannelLayout, table: Arc<Wavetable<F>> }
+    params {
+        Frequency => frequency: Hz = Hz::new(440.0),
+        Volume => level: Amplitude = Amplitude::UNITY,
+        Position => position: Normalized = Normalized::of(0.0),
+    }
 });
-
-/// What a [`WavetableNode`] is made from: its width, its table and its starting params.
-#[derive(Clone, Debug)]
-pub struct WavetableConfig<F: Float> {
-    width: ChannelLayout,
-    table: Arc<Wavetable<F>>,
-    frequency: Hz,
-    level: Amplitude,
-    position: Normalized,
-}
-
-impl<F: Float> WavetableConfig<F> {
-    /// `table` on `width` channels, at 440 Hz, unity
-    /// level and the first frame.
-    #[must_use]
-    pub fn new(width: impl Into<ChannelLayout>, table: Arc<Wavetable<F>>) -> Self {
-        Self {
-            width: width.into(),
-            table,
-            frequency: Hz::new(440.0),
-            level: Amplitude::UNITY,
-            position: Normalized::of(0.0),
-        }
-    }
-
-    /// The frequency, at the start.
-    #[must_use]
-    pub const fn frequency(mut self, frequency: Hz) -> Self {
-        self.frequency = frequency;
-        self
-    }
-
-    /// The level the output is scaled by, at the start.
-    #[must_use]
-    pub const fn level(mut self, level: Amplitude) -> Self {
-        self.level = level;
-        self
-    }
-
-    /// The frame position, at the start.
-    #[must_use]
-    pub const fn position(mut self, position: Normalized) -> Self {
-        self.position = position;
-        self
-    }
-}
 
 impl<F: Float> From<WavetableConfig<F>> for WavetableNode<F> {
     fn from(config: WavetableConfig<F>) -> Self {
         Self {
             width: config.width,
-            wave: WavetableOscillator::new(config.table),
-            frequency: Param::new(config.frequency),
-            level: Param::new(config.level),
-            position: Param::new(config.position),
+            wave: WavetableOscillator::new(config.table.clone()),
+            cells: WavetableCells::from_config(&config),
             rate: None,
             good_frequency: LastGood::new(config.frequency.get(), 0.0),
             good_level: LastGood::new(Amplitude::UNITY.get(), 1.0),
@@ -148,19 +103,19 @@ impl<F: Float> WavetableNode<F> {
     /// A handle on the frequency cell, for a UI or automation to share.
     #[must_use]
     pub fn frequency(&self) -> Param<Hz> {
-        self.frequency.handle()
+        self.cells.frequency.handle()
     }
 
     /// A handle on the level cell, for a UI or automation to share.
     #[must_use]
     pub fn level(&self) -> Param<Amplitude> {
-        self.level.handle()
+        self.cells.level.handle()
     }
 
     /// A handle on the frame position cell, for a UI or automation to share.
     #[must_use]
     pub fn position(&self) -> Param<Normalized> {
-        self.position.handle()
+        self.cells.position.handle()
     }
 }
 
@@ -192,8 +147,8 @@ impl<F: Float> Node<F> for WavetableNode<F> {
         let position = self
             .declared_param::<{ UnitParam::Position as u16 }, _>(&io)
             .frames();
-        let mut hz = self.good_frequency.read(self.frequency.load().get());
-        let mut at = self.good_position.read(self.position.load().get());
+        let mut hz = self.good_frequency.read(self.cells.frequency.load().get());
+        let mut at = self.good_position.read(self.cells.position.load().get());
         let table = Arc::clone(self.wave.table());
         let design = |hz: f64, at: f64| {
             WavetableStep::new(&table, Hz::new(hz), rate, Normalized::clamped(at))
@@ -203,7 +158,7 @@ impl<F: Float> Node<F> for WavetableNode<F> {
         // designed again only where the frequency or the position moved.
         let mut step = design(hz, at);
         let mut gain = if level.is_none() {
-            self.good_level.level(self.level.load().get())
+            self.good_level.level(self.cells.level.load().get())
         } else {
             F::ZERO
         };
@@ -244,33 +199,6 @@ impl<F: Float> Node<F> for WavetableNode<F> {
 
     fn param_base(&self, k: usize) -> Option<f64> {
         self.declared_base(k)
-    }
-}
-
-impl<F: Float> ParamNode<F> for WavetableNode<F> {
-    /// The frequency, the level and the frame position.
-    fn param_set(&self) -> ParamSet {
-        self.declared_set()
-    }
-
-    /// A clone with its cells detached (at their values now), at phase 0.
-    fn fork_fresh(&self) -> Self {
-        let mut fork = self.clone();
-        fork.frequency.detach();
-        fork.level.detach();
-        fork.position.detach();
-        Node::<F>::reset(&mut fork);
-        fork
-    }
-}
-
-/// Inserted with its [`ParamSet`] as its controls and a fork from the values last set through
-/// it ([`tutti_graph::param_parts`]).
-impl<F: Float> IntoNode<F> for WavetableNode<F> {
-    type Controls = ParamSet;
-
-    fn into_parts(self) -> NodeParts<ParamSet, F> {
-        tutti_graph::param_parts(self)
     }
 }
 
