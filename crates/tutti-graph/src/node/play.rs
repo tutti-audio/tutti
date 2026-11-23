@@ -193,6 +193,8 @@ impl PlayState {
 
 /// The play clock as a gauge reads it: packed in one word
 /// ([`PlayReading::pack`]), so the epoch and the count are read together.
+/// The gauge's store releases and its load acquires, as the clock's
+/// publication needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Played(pub(crate) PlayReading);
 
