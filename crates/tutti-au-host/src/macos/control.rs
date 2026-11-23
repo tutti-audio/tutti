@@ -320,7 +320,7 @@ impl Control for AuLoaded {
                 .unwrap_or_default(),
             // AU names no keys.
             note_names: Vec::new(),
-            param_groups: clump_groups(&self.parameters(main)),
+            param_groups: clump_groups(&<Self as Control>::parameters(self, main)),
         }
     }
 

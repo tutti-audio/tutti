@@ -12,10 +12,10 @@ use crate::property::{
 use crate::unit::Unit;
 
 /// `AudioUnitParameterNameInfo`, the request `ParameterClumpName` and
-/// `ParameterIDName` share: `{ UInt32 inID; SInt32 inDesiredLength; CFStringRef
+/// `kAudioUnitProperty_ParameterIDName` share: `{ UInt32 inID; SInt32 inDesiredLength; CFStringRef
 /// outName; }`. Hand-declared because `coreaudio-sys` does not export it; the
 /// layout is pinned by `name_request_matches_the_c_abi`. The desired length is
-/// read by `ParameterIDName` alone.
+/// read by `kAudioUnitProperty_ParameterIDName` alone.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NameRequest {

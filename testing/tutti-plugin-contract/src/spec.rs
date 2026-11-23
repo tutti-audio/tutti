@@ -431,7 +431,7 @@ pub struct Surface {
     pub groups: &'static [(&'static str, Option<&'static str>)],
     /// Whether the format reports a parameter's short name ([`short_name`]):
     /// VST3's `shortTitle` of the Rust plugin, VST2's `shortLabel` and AU's
-    /// `ParameterIDName`.
+    /// `kAudioUnitProperty_ParameterIDName`.
     pub short_names: bool,
     /// Whether the format reports a parameter's read-only bit: every format but
     /// VST2, whose `effGetParameterProperties` has none. Where `true`, the

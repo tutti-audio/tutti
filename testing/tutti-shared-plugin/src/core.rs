@@ -63,7 +63,7 @@
 //!   for each key) and VST2 (`effGetMidiKeyName`, in every program) name the keys
 //!   of [`NOTE_NAMES`]. AU declares none.
 //! - **Short names.** VST3's `shortTitle`, VST2's `shortLabel` and AU's
-//!   `ParameterIDName` are [`SHORT_NAMES`]; CLAP has no short name.
+//!   `kAudioUnitProperty_ParameterIDName` are [`SHORT_NAMES`]; CLAP has no short name.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.

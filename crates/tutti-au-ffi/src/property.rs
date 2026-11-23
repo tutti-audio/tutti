@@ -510,7 +510,7 @@ impl Property for ParameterClumpName {
     type Value = crate::parameters::NameRequest;
 }
 
-/// The crate-private property `ParameterIDName`.
+/// The crate-private property `kAudioUnitProperty_ParameterIDName`.
 pub(crate) struct ParameterIdName;
 
 impl sealed::Sealed for ParameterIdName {}

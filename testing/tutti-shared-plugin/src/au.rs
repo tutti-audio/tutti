@@ -101,8 +101,8 @@ struct MidiMapping {
 }
 const _: () = assert!(std::mem::size_of::<MidiMapping>() == 32);
 
-/// `AudioUnitParameterNameInfo` as `ParameterClumpName` and `ParameterIDName`
-/// read it: the id in (and the desired length, for `ParameterIDName`), the name
+/// `AudioUnitParameterNameInfo` as `ParameterClumpName` and `kAudioUnitProperty_ParameterIDName`
+/// read it: the id in (and the desired length, for `kAudioUnitProperty_ParameterIDName`), the name
 /// out (`{ UInt32; SInt32; CFStringRef }`, 16 bytes).
 #[repr(C)]
 #[derive(Clone, Copy)]
