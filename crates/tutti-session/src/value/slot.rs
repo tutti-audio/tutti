@@ -87,6 +87,9 @@ pub enum SlotId {
     /// The automation mode the host tells a plugin.
     #[cfg(feature = "plugin")]
     PluginAutomationMode(NodeKey),
+    /// The track info the host tells a plugin.
+    #[cfg(feature = "plugin")]
+    PluginTrackInfo(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -94,7 +97,7 @@ pub enum SlotId {
 impl SlotId {
     /// Whether a project saves the value: the one answer, which
     /// [`SavedValues`](crate::SavedValues) captures by. A policy, a MIDI
-    /// device's latency and a plugin's automation mode are the session's
+    /// device's latency and a plugin's automation mode and track info are the session's
     /// setup of a place, not of the project, so a project moved to another
     /// machine or another plugin does not carry them.
     pub(crate) const fn saved(self) -> bool {
@@ -105,7 +108,7 @@ impl SlotId {
             #[cfg(feature = "midi")]
             Self::OutputLatency => false,
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(_) => false,
+            Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
             Self::Tempo
             | Self::Meter
             | Self::Loop
@@ -139,7 +142,7 @@ impl SlotId {
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(node) => Some(node),
+            Self::PluginAutomationMode(node) | Self::PluginTrackInfo(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }

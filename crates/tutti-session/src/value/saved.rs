@@ -35,7 +35,8 @@ use crate::AppKey;
 /// It names its targets by what the session knows them as, not by an app key
 /// yet, so it lives in memory as long as the session does; it has no serde
 /// until the app-key index gives it a stable key. A target a plugin hosts, a
-/// policy, a MIDI device's latency and a plugin's automation mode are not
+/// policy, a MIDI device's latency and a plugin's automation mode and track
+/// info are not
 /// saved. `Clone` is a pointer clone, and `Send + Sync`.
 ///
 /// `session.set(&saved)` lands as one restore: every change a watcher sees is
