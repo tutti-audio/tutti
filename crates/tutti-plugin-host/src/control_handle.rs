@@ -980,17 +980,18 @@ impl PluginHandle {
         main: MainThreadMarker,
         app: &[MidiAssignment],
     ) -> MidiMapApplied {
-        let Some(control) = self.control.as_deref() else {
-            return MidiMapApplied::Host;
+        let ask = |app: &[MidiAssignment]| match self.control.as_deref() {
+            Some(control) => {
+                lent(control, |c| c.set_app_midi_map(main, app)).unwrap_or(MidiMapApplied::Host)
+            }
+            None => MidiMapApplied::Host,
         };
-        let applied =
-            lent(control, |c| c.set_app_midi_map(main, app)).unwrap_or(MidiMapApplied::Host);
         // The node translates what the plugin did not take: published for its
         // next block.
-        if let Some(slot) = &self.midi_map {
-            slot.replace_app(app, applied);
+        match &self.midi_map {
+            Some(slot) => slot.hand_app(app, ask),
+            None => ask(app),
         }
-        applied
     }
 
     /// Arms or disarms the plugin's own MIDI learn

@@ -550,6 +550,57 @@ mod node_midi_map {
         );
     }
 
+    /// **A served fork is handed the app's entries by its own plugin**: an entry
+    /// the app set on the live node (CC 21 on channel 2 to `level`) moves the
+    /// fork's `level`, a table only the fork's own answer publishes.
+    #[test]
+    fn a_served_fork_hands_the_app_entries_to_its_own_plugin() {
+        // SAFETY: set before any thread of this test reads it.
+        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        let client = PluginClient::new(
+            IpcConfig::new(),
+            tutti_fixtures::executor(),
+            &tutti_fixtures::detached_work(),
+            &tutti_plugin_db::Loadable::uncatalogued(tutti_plugin_types::PluginRef::file(
+                bundle_of(&vst3_module()),
+            )),
+            SampleRate::SR_48K,
+        )
+        .expect("the server loads the plugin");
+        let handle = client.handle();
+        let entry = tutti_plugin_types::MidiAssignment {
+            channel: Some(tutti_ump::MidiChannel::of(2)),
+            source: tutti_plugin_types::MidiSource::ControlChange(tutti_ump::U7::of(21)),
+            param: Param::Level.id(),
+        };
+        handle.set_app_midi_map(main_thread(), &[entry]);
+        let fork = client
+            .fork_instance(tutti_fixtures::tempo())
+            .expect("forks");
+        let fork_handle = fork.handle();
+        let (mut renderer, mut writer, inputs) = graph(fork);
+        writer
+            .push(
+                Stamp::NextBlock,
+                tutti_fixtures::midi::cc(
+                    tutti_ump::MidiChannel::of(2),
+                    tutti_ump::CCNumber::new(21).expect("a controller"),
+                    WORD,
+                ),
+            )
+            .expect("room");
+        let guard = HangGuard::new();
+        loop {
+            guard.check("the app's entry never moved the fork's level");
+            render(&mut renderer, inputs);
+            let (points, _) = level_points::<Vst3>(&fork_handle);
+            if let Some(point) = points.first() {
+                assert!((point - expected()).abs() < 1e-6, "{points:?}");
+                break;
+            }
+        }
+    }
+
     #[test]
     fn a_served_vst3_node_translates_its_declared_controller_from_its_first_block() {
         unpumped::<Vst3>(bundle_of(&vst3_module()));

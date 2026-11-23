@@ -294,7 +294,7 @@ impl Processing {
 /// persisted (unlike the catalog [`PluginDescriptor`](crate::PluginDescriptor),
 /// which is). Carries what the audio graph needs to wire the node: the buses
 /// and placement, latency, tail, and the [`Features`] capability flags.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PluginWiring {
     /// The input buses, in bus-index order; see [`PluginBuses`].
@@ -360,7 +360,10 @@ pub struct PluginWiring {
     /// ([`Plugin`](crate::MidiMapApplied::Plugin): an AU's unit routes its own
     /// table). Known at load, so a node translates the declared table from its
     /// first block with no call to the plugin.
-    #[cfg_attr(feature = "serde", serde(default))]
+    ///
+    /// A wiring written before the field existed reads as
+    /// [`Host`](crate::MidiMapApplied::Host).
+    #[cfg_attr(feature = "serde", serde(default = "applied_by_the_host"))]
     pub assignments_applied: crate::MidiMapApplied,
     /// The names the plugin gives to MIDI keys (CLAP `note-name`, VST3
     /// `IKeyswitchController`, VST2 `effGetMidiKeyName`): empty for a plugin
@@ -372,6 +375,33 @@ pub struct PluginWiring {
     /// children: empty for a format or a plugin with no tree.
     #[cfg_attr(feature = "serde", serde(default))]
     pub param_groups: Vec<ParamGroup>,
+}
+
+/// What a wiring written before `assignments_applied` existed says: the host
+/// applies the declared table.
+#[cfg(feature = "serde")]
+fn applied_by_the_host() -> crate::MidiMapApplied {
+    crate::MidiMapApplied::Host
+}
+
+/// A wiring of no buses and nothing declared; the host applies the (empty)
+/// declared table.
+impl Default for PluginWiring {
+    fn default() -> Self {
+        Self {
+            inputs: PluginBuses::default(),
+            outputs: PluginBuses::default(),
+            latency_samples: Samples::default(),
+            tail: PluginTail::default(),
+            features: Features::default(),
+            probed: Features::default(),
+            own_bypass: None,
+            assignments: Vec::new(),
+            assignments_applied: crate::MidiMapApplied::Host,
+            note_names: Vec::new(),
+            param_groups: Vec::new(),
+        }
+    }
 }
 
 impl PluginWiring {

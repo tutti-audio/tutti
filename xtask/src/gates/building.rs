@@ -1004,12 +1004,6 @@ pub(super) const ALLOW: &[Allow] = &[
         "both alignments are everyday uses (a track's level reads `Raw`, a device's output reads `ToOutput`), \
          so the alignment is the call's choice, not an option",
     ),
-    ty(
-        "crates/tutti-plugin-host/src/midi_map.rs",
-        "MidiMapSlot::replace_app",
-        DEFAULT_ENUM,
-        "the plugin's answer to the entries (who applies them) is a fact the call carries, not an option",
-    ),
 ];
 
 /// A violation: its key and rule.

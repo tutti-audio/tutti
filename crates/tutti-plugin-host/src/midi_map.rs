@@ -58,7 +58,7 @@ use tutti_plugin_types::{
 };
 use tutti_rt::{Loan, Mutex, Publisher, Reader};
 use tutti_ump::{Address, MidiChannel, MidiGroup, U7, Ump, Voice2};
-use tutti_units::{Normalized, ParamId};
+use tutti_units::{Bipolar, Normalized, ParamId};
 
 use crate::param_delivery::{ParamDelivery, chunk_offset};
 
@@ -160,10 +160,7 @@ impl MidiTable {
             Voice2::ChannelPressure(pressure) => {
                 (MidiSource::ChannelPressure, pressure.normalized())
             }
-            Voice2::PitchBend(bend) => (
-                MidiSource::PitchBend,
-                Normalized::clamped((bend.bipolar().get() + 1.0) / 2.0),
-            ),
+            Voice2::PitchBend(bend) => (MidiSource::PitchBend, unit_of(bend.bipolar())),
             _ => return false,
         };
         let Some(param) = self.lookup(channel, source) else {
@@ -174,6 +171,13 @@ impl MidiTable {
         params.point(param, chunk_offset(frame), value.get());
         true
     }
+}
+
+/// A bend on the parameter's `0..=1` scale: the bottom of the bend is 0, the
+/// centre 0.5 and the top 1. Neither `tutti-units` nor `tutti-midi-protocol`
+/// has this conversion between `Bipolar` and `Normalized`.
+fn unit_of(bend: Bipolar) -> Normalized {
+    Normalized::clamped((bend.get() + 1.0) / 2.0)
 }
 
 /// What the control side keeps of the map.
@@ -250,23 +254,31 @@ impl MidiMapSlot {
         self.publish(&mut state);
     }
 
-    /// Replaces the app's entries, as `applied` says who applies them, and
-    /// publishes. Control side. Public for `tutti-plugin`'s fork of an
-    /// out-of-process node.
-    pub fn replace_app(&self, app: &[MidiAssignment], applied: MidiMapApplied) {
+    /// Hands the app's entries, replacing the last set, to the plugin through
+    /// `ask`, which answers who applies them, and publishes the entries the host
+    /// applies to the node. The one place the plugin's answer and the node's
+    /// table are paired: the handle and each fork call it with their own
+    /// plugin's ask, never another's answer. Returns the answer. Control side.
+    /// Public for `tutti-plugin`'s fork of an out-of-process node.
+    pub fn hand_app(
+        &self,
+        app: &[MidiAssignment],
+        ask: impl FnOnce(&[MidiAssignment]) -> MidiMapApplied,
+    ) -> MidiMapApplied {
+        let applied = ask(app);
         let mut state = self.shared.state.lock();
         state.app = app.to_vec();
         state.app_applied = Some(applied);
         self.publish(&mut state);
+        applied
     }
 
-    /// The app's entries and who applies them, as last set; `None` before the
-    /// app set any. Control side. Public for `tutti-plugin`'s fork of an
-    /// out-of-process node.
+    /// The app's entries, as last set; `None` before the app set any. Control
+    /// side. Public for `tutti-plugin`'s fork of an out-of-process node.
     #[must_use]
-    pub fn app(&self) -> Option<(Vec<MidiAssignment>, MidiMapApplied)> {
+    pub fn app(&self) -> Option<Vec<MidiAssignment>> {
         let state = self.shared.state.lock();
-        Some((state.app.clone(), state.app_applied?))
+        state.app_applied.map(|_| state.app.clone())
     }
 
     /// Entries of the declared table and the app's that no controller of the
@@ -551,17 +563,17 @@ mod tests {
             Some(ParamId::new(1)),
             "the declared table from the first block"
         );
-        slot.replace_app(&[assign(Some(0), cc(74), 2)], MidiMapApplied::Host);
+        slot.hand_app(&[assign(Some(0), cc(74), 2)], |_| MidiMapApplied::Host);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(74)),
             Some(ParamId::new(2))
         );
-        slot.replace_app(&[], MidiMapApplied::Host);
+        slot.hand_app(&[], |_| MidiMapApplied::Host);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(74)),
             Some(ParamId::new(1))
         );
-        slot.replace_app(&[assign(Some(0), cc(1), 2)], MidiMapApplied::Plugin);
+        slot.hand_app(&[assign(Some(0), cc(1), 2)], |_| MidiMapApplied::Plugin);
         assert_eq!(
             translator.lend().lookup(MidiChannel::of(0), cc(1)),
             None,

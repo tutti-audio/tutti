@@ -156,13 +156,13 @@ fn a_declared_controller_moves_its_parameter_and_leaves_the_plugins_midi() {
 #[test]
 fn the_apps_entry_replaces_the_declared_one_unless_the_plugin_applies_it() {
     let (fake, mut unit, _inner, slot) = rig(&[cc74(LEVEL)]);
-    slot.replace_app(&[cc74(OTHER)], MidiMapApplied::Host);
+    slot.hand_app(&[cc74(OTHER)], |_| MidiMapApplied::Host);
     let word = u32::MAX;
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, word))]);
     assert_eq!(params(&fake), [(OTHER, 1.0)]);
 
     fake.clear_calls();
-    slot.replace_app(&[cc74(OTHER)], MidiMapApplied::Plugin);
+    slot.hand_app(&[cc74(OTHER)], |_| MidiMapApplied::Plugin);
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, word))]);
     assert_eq!(
         params(&fake),
@@ -192,4 +192,32 @@ fn a_redeclared_table_is_the_nodes_after_the_tick() {
     inner.lock().pump(main_thread());
     block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, u32::MAX))]);
     assert_eq!(params(&fake), [(OTHER, 1.0)]);
+}
+
+/// **The entries are handed to the plugin that is asked, and its answer is the one
+/// published**: through the plugin's own `Control`, as a fork does for its own
+/// instance, a plugin answering `Plugin` (an AU) is handed the entries and the
+/// node leaves them out of its table.
+#[test]
+fn the_entries_are_handed_to_the_plugin_and_its_answer_is_published() {
+    let (fake, mut unit, inner, slot) = rig_answering(&[], MidiMapApplied::Plugin);
+    let main = main_thread();
+    let app = [cc74(OTHER)];
+    let answer = {
+        let mut instance = inner.lock();
+        let control = instance.control().expect("alive");
+        slot.hand_app(&app, |app| control.set_app_midi_map(main, app))
+    };
+    assert_eq!(answer, MidiMapApplied::Plugin);
+    assert_eq!(
+        fake.app_midi_maps(),
+        [app.to_vec()],
+        "the plugin was handed them"
+    );
+    block(&mut unit, &[(0, cc(0, CCNumber::BRIGHTNESS, u32::MAX))]);
+    assert!(
+        params(&fake).is_empty(),
+        "the unit applies them, not the node"
+    );
+    assert_eq!(midi_seen(&fake), 1);
 }

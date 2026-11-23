@@ -309,12 +309,9 @@ struct Capture {
     /// A reader of the project's tempo map of the fork's own, registered at
     /// the gather.
     tempo: tutti_timeline::TempoReader,
-    /// The live node's app controller entries and who applies them at the
-    /// gather; the fork's node translates them as the live one does.
-    midi_map: Option<(
-        Vec<tutti_plugin_types::MidiAssignment>,
-        tutti_plugin_types::MidiMapApplied,
-    )>,
+    /// The live node's app controller entries at the gather, which the fork's own
+    /// plugin is handed and answers for.
+    midi_map: Option<Vec<tutti_plugin_types::MidiAssignment>>,
     /// The render mode the fork's graph is built for (`ForkSource::fork`'s):
     /// an offline graph's fork is told offline at build.
     mode: RenderMode,
@@ -367,8 +364,13 @@ impl Capture {
             wait,
         }));
         fork.state.client.seed_delivery(&self.delivered);
-        if let Some((app, applied)) = &self.midi_map {
-            fork.state.client.midi_map().replace_app(app, *applied);
+        // Handed to the fork's own plugin, which answers for itself.
+        if let Some(app) = &self.midi_map {
+            let served = fork.served.clone();
+            fork.state
+                .client
+                .midi_map()
+                .hand_app(app, |app| served.hand_app_midi_map(app));
         }
         fork.state.client.adopt_wait_switch(switch);
         if self.snapshot.offline(self.mode) {
