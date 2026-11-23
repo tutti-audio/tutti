@@ -576,7 +576,7 @@ pub fn a_control_carries_what_the_plugin_declares_of_it<F: Format>() {
 ///
 /// Panics when an assertion of the case fails.
 ///
-/// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings, clap.ext.note-name.get, vst3.IKeyswitchController.getKeyswitchInfo, vst2.opcode.effGetMidiKeyName, vst3.IUnitInfo.getUnitInfo, clap.ext.params.get_info
+/// Spec: vst3.IMidiMapping.getMidiControllerAssignment, au.prop.AllParameterMIDIMappings, clap.ext.note_name.get, vst3.IKeyswitchController.getKeyswitchInfo, vst2.eff.GetMidiKeyName, vst3.IUnitInfo.getUnitInfo, clap.ext.params.get_info
 pub fn the_plugins_declared_tables_are_listed<F: Format>() {
     let loaded = F::load();
     assert_tables::<F>(&loaded.wiring(main_thread()), "loaded");
