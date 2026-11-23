@@ -7,7 +7,7 @@ use tutti_buffers::Float;
 use tutti_curve::declick_frames;
 
 use super::lifecycle::Resume;
-use super::{BusLanes, CommitError, Editor, Fading, SentBank, starting};
+use super::{BusLanes, CommitError, Editor, Fading, starting};
 use crate::compile::plan::{Delta, Placement, Plan};
 use crate::compile::{CompileError, Shapes, compile};
 use crate::exec::Commit;
@@ -135,15 +135,17 @@ impl<F: Float> Editor<F> {
     /// Refuses a main output generation the attached host has no folds for.
     fn check_main_output_published(&self) -> Result<(), CommitError> {
         let outputs = self.spec.topology.outputs.len();
-        match &self.main_output_gate {
-            Some(gate) if outputs > 0 && !gate.published(self.spec.main_output_id, outputs) => {
-                Err(CommitError::MainOutputNotPublished {
-                    main_output: self.spec.main_output_id,
-                    outputs,
-                })
-            }
-            _ => Ok(()),
+        if outputs > 0
+            && !self
+                .main_output
+                .publishes(self.spec.main_output_id, outputs)
+        {
+            return Err(CommitError::MainOutputNotPublished {
+                main_output: self.spec.main_output_id,
+                outputs,
+            });
         }
+        Ok(())
     }
 
     /// The cheap checks of [`validate`](Self::validate), before the spec is
@@ -213,7 +215,7 @@ impl<F: Float> Editor<F> {
             && !self.meters.has_pending()
             // A plan whose main output crossfade has ended is compiled again without
             // the old main output's channels.
-            && !self.bank.is_some_and(|b| b.ended)
+            && !self.main_output.fade_ended()
             && self
                 .life
                 .committed()
@@ -279,7 +281,7 @@ impl<F: Float> Editor<F> {
         self.placements.clear_fades_and_cuts();
         let rewired = Rewired::between(self.base().map(|p| &**p), &plan);
         self.send(plan, delta, units, &weights, None);
-        self.fading = fading;
+        self.main_output.fading = fading;
         self.sync_ranges();
         self.life
             .set_committed(self.spec.clone(), self.shapes.clone());
@@ -317,12 +319,12 @@ impl<F: Float> Editor<F> {
     /// While a crossfade runs the editor holds a clone of the committed spec
     /// and shapes, the old main output's wiring, until it ends.
     pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
-        self.main_output_fade = fade.filter(|f| !f.is_cut());
+        self.main_output.fade = fade.filter(|f| !f.is_cut());
     }
 
     /// The fade a main output change takes ([`set_main_output_fade`](Self::set_main_output_fade)).
     pub fn main_output_fade(&self) -> Option<Fade> {
-        self.main_output_fade
+        self.main_output.fade
     }
 
     /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
@@ -338,13 +340,12 @@ impl<F: Float> Editor<F> {
         let committed = self.life.committed();
         // The crossfade running, when this commit leaves its main output alone and
         // its channels stand.
-        let continuing = self.fading.as_ref().filter(|f| {
-            f.main_output == self.spec.main_output_id
-                && committed.is_some_and(|c| c.spec.main_output_id == self.spec.main_output_id)
-                && !self.bank.is_some_and(|b| b.ended)
-                && f.bank.base == self.spec.topology.outputs.len()
-        });
-        let (fade, was, published) = match (continuing, self.main_output_fade, committed) {
+        let continuing = self.main_output.continuing(
+            self.spec.main_output_id,
+            committed.map(|c| c.spec.main_output_id),
+            self.spec.topology.outputs.len(),
+        );
+        let (fade, was, published) = match (continuing, self.main_output.fade, committed) {
             (Some(f), _, _) => (f.bank.fade, &f.was, true),
             (None, Some(fade), Some(c)) if c.spec.main_output_id != self.spec.main_output_id => {
                 (fade, c, false)
@@ -384,9 +385,8 @@ impl<F: Float> Editor<F> {
         let old_width = before.spec.topology.outputs.len();
         let published = published
             || self
-                .main_output_gate
-                .as_ref()
-                .is_none_or(|gate| gate.published(was.spec.main_output_id, old_width));
+                .main_output
+                .publishes(was.spec.main_output_id, old_width);
         if base == 0 || old_width == 0 || !published {
             let valid = now.spec.validate().map_err(CommitError::Invalid)?;
             return Ok((valid, now.weights(), None));
@@ -492,7 +492,7 @@ impl<F: Float> Editor<F> {
         // caller that lowers it must have).
         let weights = self.lowered().map(|l| l.weights()).unwrap_or_default();
         self.send(plan, delta, units, &weights, None);
-        self.fading = None;
+        self.main_output.fading = None;
         Ok(())
     }
 
@@ -509,23 +509,11 @@ impl<F: Float> Editor<F> {
     ) {
         self.touch();
         let fades = starting(&delta);
-        // A plan that carries the crossfade the last one carried continues
-        // it: the executor keeps its progress, and it ends under the seq that
-        // began it.
-        self.bank = plan.main_output_bank().map(|bank| {
-            let (old, main_output) = (bank.old, plan.main_output_id());
-            self.bank
-                .filter(|b| !b.ended && b.old == old && b.main_output == main_output)
-                .unwrap_or(SentBank {
-                    seq: self.link.next_seq(),
-                    old,
-                    main_output,
-                    ended: false,
-                })
-        });
-        if self.bank.is_none() {
-            self.fading = None;
-        }
+        self.main_output.sent(
+            plan.main_output_bank(),
+            plan.main_output_id(),
+            self.link.next_seq(),
+        );
         let plan = Arc::new(plan);
         let spec = &self.spec;
         let values = &self.values;

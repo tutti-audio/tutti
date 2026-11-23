@@ -239,9 +239,6 @@ pub struct Editor<F: Float = f32> {
     life: Lifecycle<F>,
     /// What the executor's host can take.
     limits: Limits,
-    /// The host that folds the main output into a device, once one is attached: a
-    /// commit whose main output it has no folds for is refused.
-    main_output_gate: Option<std::sync::Arc<dyn MainOutputGate>>,
     /// Events per event slot per block, as the executor was built with: a
     /// fork gets the same.
     event_capacity: usize,
@@ -265,18 +262,112 @@ pub struct Editor<F: Float = f32> {
     /// What the executor will hold once the commits sent are applied: the
     /// bounds each commit's state is built from.
     stager: Stager,
+    /// How a change of the main output's generation is folded and faded.
+    main_output: MainOutputState,
+    /// Where each tap this editor opens takes its bell
+    /// ([`notify_with`](Self::notify_with)); `None` opens taps without one.
+    bells: Option<tutti_rt::BellsHandle>,
+}
+
+/// What the editor holds of the main output's generation: the host that folds
+/// it, the fade a change takes, and the crossfade the plans sent last carry.
+/// `fading` is `Some` only while `bank` is.
+struct MainOutputState {
+    /// The host that folds the main output into a device, once one is attached: a
+    /// commit whose main output it has no folds for is refused.
+    gate: Option<std::sync::Arc<dyn MainOutputGate>>,
     /// How a commit that changes the main output's generation trades the old main output
-    /// for the new ([`set_main_output_fade`](Self::set_main_output_fade)); `None` cuts.
-    main_output_fade: Option<Fade>,
+    /// for the new ([`set_main_output_fade`](Editor::set_main_output_fade)); `None` cuts.
+    fade: Option<Fade>,
     /// The commit sent last that carries an old main output's channels, until a
     /// commit without them follows.
     bank: Option<SentBank>,
     /// The old main output a crossfading plan renders, kept for the commits that
     /// continue the crossfade.
     fading: Option<Fading>,
-    /// Where each tap this editor opens takes its bell
-    /// ([`notify_with`](Self::notify_with)); `None` opens taps without one.
-    bells: Option<tutti_rt::BellsHandle>,
+}
+
+impl MainOutputState {
+    fn new() -> Self {
+        Self {
+            gate: None,
+            fade: None,
+            bank: None,
+            fading: None,
+        }
+    }
+
+    /// Whether the host has folds for main output `id` at `outputs` channels
+    /// (always, when no host is attached).
+    fn publishes(&self, id: crate::MainOutputId, outputs: usize) -> bool {
+        self.gate.as_ref().is_none_or(|g| g.published(id, outputs))
+    }
+
+    /// Whether the plan sent last carries an old main output whose crossfade
+    /// the executor has not been reported through.
+    fn fade_running(&self) -> bool {
+        self.bank.is_some_and(|b| !b.ended)
+    }
+
+    /// Whether the crossfade the plan sent last carries has been rendered
+    /// through: the next commit compiles the old main output away.
+    fn fade_ended(&self) -> bool {
+        self.bank.is_some_and(|b| b.ended)
+    }
+
+    /// The executor has rendered the crossfade of commit `ended` and before
+    /// through: returns whether that ended the one the plan sent last carries.
+    fn finish(&mut self, ended: u64) -> bool {
+        match self.bank.as_mut().filter(|b| !b.ended && b.seq <= ended) {
+            Some(bank) => {
+                bank.ended = true;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The crossfade running, when a commit leaves its main output alone
+    /// (`now` is the spec's main output generation, `current` the committed
+    /// spec's) and its channels (`base` of them) stand.
+    fn continuing(
+        &self,
+        now: crate::MainOutputId,
+        current: Option<crate::MainOutputId>,
+        base: usize,
+    ) -> Option<&Fading> {
+        self.fading.as_ref().filter(|f| {
+            f.main_output == now
+                && current == Some(now)
+                && !self.fade_ended()
+                && f.bank.base == base
+        })
+    }
+
+    /// A plan carrying `bank` (a main output of generation `main_output`) was
+    /// sent as commit `seq`. A plan that carries the crossfade the last one
+    /// carried continues it: the executor keeps its progress, and it ends
+    /// under the seq that began it.
+    fn sent(
+        &mut self,
+        bank: Option<crate::MainOutputBank>,
+        main_output: crate::MainOutputId,
+        seq: u64,
+    ) {
+        self.bank = bank.map(|bank| {
+            self.bank
+                .filter(|b| !b.ended && b.old == bank.old && b.main_output == main_output)
+                .unwrap_or(SentBank {
+                    seq,
+                    old: bank.old,
+                    main_output,
+                    ended: false,
+                })
+        });
+        if self.bank.is_none() {
+            self.fading = None;
+        }
+    }
 }
 
 /// The old main output of a crossfade in progress, as the commit that began it
@@ -389,16 +480,13 @@ impl<F: Float> Editor<F> {
             meters: Outlets::new(),
             life: Lifecycle::Unplanned,
             limits: Limits::NONE,
-            main_output_gate: None,
             event_capacity: cap,
             fork_health: Vec::new(),
             cells: LiveCells::new(),
             values: GraphValues::default(),
             revision: 0,
             stager,
-            main_output_fade: None,
-            bank: None,
-            fading: None,
+            main_output: MainOutputState::new(),
             bells: None,
         };
         (editor, Executor::new(prepare, cap, ends, command_rx))
@@ -454,7 +542,7 @@ impl<F: Float> Editor<F> {
     /// of cannot reach the executor and render silence. The gate stays; a
     /// second call replaces it.
     pub fn set_main_output_gate(&mut self, gate: std::sync::Arc<dyn MainOutputGate>) {
-        self.main_output_gate = Some(gate);
+        self.main_output.gate = Some(gate);
     }
 
     /// What this editor was bounded to with [`set_limits`](Self::set_limits).
