@@ -67,17 +67,14 @@ use crate::{Edge, EdgeId, InputPort, OutputPort, PortSink, PortSource};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
-use crate::compile::emit::{
-    ARef, Addend, ERef, Emitted, GainDrive, Pre, Val, align_audio, align_event, sum_chain,
-};
+use crate::compile::emit::{ARef, ERef, Emitted, Pre, Val};
 use crate::compile::ids::{
-    AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
-    EventValueId, Id, OpId, PlanUnitId, Table, TableSlice,
+    AudioSlotId, AudioValueId, DelayId, EventSlotId, EventValueId, Id, OpId, PlanUnitId, Table,
+    TableSlice,
 };
 use crate::compile::plan::{
-    Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, NodeTables, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
-    ZERO_SLOT,
+    Csr, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, NodeTables,
+    Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value, ZERO_SLOT,
 };
 use crate::model::spec::{EventInputPort, EventOutputPort, ValidGraph};
 use crate::node::param::ParamIn;
@@ -305,262 +302,6 @@ pub fn compile(
     let checked = shapes::check(graph, shapes, prepare)?;
     let order = schedule::order(&schedule::acyclic(graph, &checked)?);
     let timing = timing::solve(graph, &checked, prepare, prev);
-    let mut emitter = emit::nodes(graph, &checked, &order, &timing);
-
-    // The main output channels.
-    let output_refs: Vec<ARef> = {
-        let main_output_meter = topology
-            .meters
-            .values()
-            .any(|spec| matches!(spec, crate::MeterSpec::Outputs))
-            || topology
-                .taps
-                .values()
-                .any(|spec| matches!(spec, crate::TapSpec::Outputs { .. }));
-        let mut output_refs: Vec<ARef> = Vec::with_capacity(topology.outputs.len());
-        for (channel, sources) in topology.outputs.iter().enumerate() {
-            let channel = channel as u16;
-            let mut sources: Vec<PortSource> = sources
-                .iter()
-                .copied()
-                .filter(|s| *s != PortSource::Zero)
-                .collect();
-            sources.sort();
-            let lane_of = |source: PortSource| {
-                let id = EdgeId {
-                    sink: PortSink::Output(channel),
-                    from: Edge::Direct(source),
-                };
-                graph.gains().contains_key(&id).then_some(id)
-            };
-            if sources.len() > 1 || sources.iter().any(|&s| lane_of(s).is_some()) {
-                // A summed channel (or one whose source is weighted): each
-                // source is delayed to the output time on its own, as an op of
-                // its own, then summed; the `Output` op carries no ring.
-                let output_time = timing.output_time(channel);
-                let refs: Vec<Addend> = sources
-                    .iter()
-                    .map(|&source| {
-                        let r = emitter.align_source(
-                            source,
-                            output_time,
-                            DelayKey::Output {
-                                channel,
-                                from: source,
-                            },
-                        );
-                        let lane = lane_of(source);
-                        // Its driving lane, aligned to the output time.
-                        let drive = lane
-                            .and_then(|id| Some((id, graph.gains().get(&id)?.source?)))
-                            .map(|(id, from)| GainDrive {
-                                from,
-                                value: emitter.align_event_source(
-                                    from,
-                                    output_time,
-                                    DelayKey::EdgeGain { id, from },
-                                ),
-                            });
-                        Addend { r, lane, drive }
-                    })
-                    .collect();
-                let src = sum_chain(&mut emitter.em, refs);
-                output_refs.push(src);
-                emitter.em.push_reading(
-                    Pre::Output {
-                        channel,
-                        src,
-                        delay: None,
-                    },
-                    &[src],
-                );
-                continue;
-            }
-            let source = sources.first().copied().unwrap_or(PortSource::Zero);
-            let mut src = match source {
-                PortSource::Zero => ARef::Zero,
-                from => ARef::Val(
-                    emitter
-                        .source(from)
-                        .expect("a validated output reads a port of its source")
-                        .0,
-                ),
-            };
-            let d = if timing.in_bank(channel) {
-                let dep = emitter.source(source).map_or(Latency::ZERO, |(_, dep)| dep);
-                match source {
-                    PortSource::Zero => Samples::ZERO,
-                    _ => dep.gap_to(timing.bank_total),
-                }
-            } else {
-                timing.compensation[usize::from(channel)]
-            };
-            // Delaying silence is silence: a zero channel reports its
-            // compensation (as `latency::plan` does) but gets no ring.
-            let key = DelayKey::Output {
-                channel,
-                from: source,
-            };
-            let mut delay = None;
-            if !d.is_zero() {
-                match src {
-                    ARef::Zero => {}
-                    ARef::Val(v) if main_output_meter => {
-                        src = align_audio(&mut emitter.em, v, d, key);
-                    }
-                    _ => {
-                        delay = Some(emitter.em.delays.push(DelaySpec { key, len: d }));
-                    }
-                }
-            }
-            output_refs.push(src);
-            emitter.em.push_reading(
-                Pre::Output {
-                    channel,
-                    src,
-                    delay,
-                },
-                &[src],
-            );
-        }
-        output_refs
-    };
-
-    // Taps.
-    {
-        for (&tap, spec) in &graph.topology().taps {
-            let srcs: Vec<ARef> = match spec {
-                // What each output channel carries, post-sum and aligned; a
-                // lane past the output count is silence.
-                crate::TapSpec::Outputs { width } => (0..*width)
-                    .map(|c| {
-                        output_refs
-                            .get(c)
-                            .filter(|_| c < timing.main_output_width)
-                            .copied()
-                            .unwrap_or(ARef::Zero)
-                    })
-                    .collect(),
-                crate::TapSpec::Ports { sources, align } => {
-                    emitter.lanes(sources, *align, |lane, from| DelayKey::Tap {
-                        tap,
-                        lane,
-                        from,
-                    })
-                }
-            };
-            let tap = emitter.em.taps.push(tap);
-            emitter.em.push_reading(
-                Pre::Tap {
-                    tap,
-                    srcs: srcs.clone(),
-                },
-                &srcs,
-            );
-        }
-    }
-
-    // Event taps.
-    {
-        for (&tap, spec) in &graph.topology().event_taps {
-            let index = emitter.em.event_taps.push(tap);
-            let Some(from) = spec.source else {
-                continue;
-            };
-            // What the port carries, and when it departs (an output) or
-            // arrives (an input, which an aligned tap delays to the output
-            // time too).
-            let (carried, at_time) = match from {
-                crate::EventTapPort::Out(port) => {
-                    let (Some(v), Some(n)) = (emitter.event_out(port), checked.get(port.node))
-                    else {
-                        continue;
-                    };
-                    (ERef::Val(v), timing.departure[n])
-                }
-                crate::EventTapPort::In(at) => {
-                    let (Some(r), Some(n)) = (emitter.event_in(at), checked.get(at.node)) else {
-                        continue;
-                    };
-                    (r, timing.arrival[n])
-                }
-            };
-            if carried == ERef::Empty {
-                continue;
-            }
-            // A feedback edge's slot is read as the node reads it: it has no
-            // value to delay.
-            let src = match (spec.align, carried) {
-                (crate::TapAlign::ToOutput, ERef::Val(v)) => ERef::Val(align_event(
-                    &mut emitter.em,
-                    v,
-                    at_time.gap_to(timing.total),
-                    DelayKey::EventTap { tap, from },
-                )),
-                _ => carried,
-            };
-            let op = emitter.em.push(Pre::EventTap { tap: index, src });
-            emitter.em.read_eref(src, op);
-        }
-    }
-
-    // Meters.
-    {
-        for (&meter, spec) in &graph.topology().meters {
-            let srcs: Vec<ARef> = match spec {
-                crate::MeterSpec::Outputs => output_refs[..timing.main_output_width].to_vec(),
-                crate::MeterSpec::Ports { sources, align } => {
-                    emitter.lanes(sources, *align, |lane, from| DelayKey::Meter {
-                        meter,
-                        lane,
-                        from,
-                    })
-                }
-            };
-            let meter = emitter.em.meters.push((meter, srcs.len()));
-            emitter.em.push_reading(
-                Pre::Meter {
-                    meter,
-                    srcs: srcs.clone(),
-                },
-                &srcs,
-            );
-        }
-    }
-
-    // Captures.
-    {
-        let audio: Vec<(AudioFeedbackId, OutputPort)> = emitter
-            .em
-            .audio_feedback
-            .iter_enumerated()
-            .map(|(feedback, key)| match *key {
-                FeedbackKey::Audio { from, .. } => (feedback, from),
-                FeedbackKey::Event { .. } => unreachable!("audio feedback keys are audio"),
-            })
-            .collect();
-        for (feedback, from) in audio {
-            let src = emitter
-                .audio_out(from)
-                .expect("a feedback source is emitted before its capture");
-            let op = emitter.em.push(Pre::Capture { feedback, src });
-            emitter.em.read_audio(src, op);
-        }
-        let events: Vec<(EventFeedbackId, EventOutputPort)> = emitter
-            .em
-            .event_feedback
-            .iter_enumerated()
-            .map(|(feedback, key)| match *key {
-                FeedbackKey::Event { from, .. } => (feedback, from),
-                FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
-            })
-            .collect();
-        for (feedback, from) in events {
-            let src = emitter.event_source(from);
-            let op = emitter.em.push(Pre::EventCapture { feedback, src });
-            emitter.em.read_event(src, op);
-        }
-    }
     let Emitted {
         pre,
         audio,
@@ -572,7 +313,7 @@ pub fn compile(
         taps,
         event_taps,
         meters,
-    } = emitter.em;
+    } = emit::emit(graph, &checked, &order, &timing);
 
     // ---- 6. colour --------------------------------------------------------
     let op_count = pre.len();
