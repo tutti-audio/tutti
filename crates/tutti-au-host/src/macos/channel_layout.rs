@@ -503,26 +503,26 @@ mod tests {
         );
         assert_eq!(
             sys::kAudioChannelLayoutTag_AudioUnit_5_1,
-            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_1_A,
+            sys::kAudioChannelLayoutTag_MPEG_5_1_A,
             "AudioUnit_5_1 == MPEG_5_1_A"
         );
         assert_eq!(
             sys::kAudioChannelLayoutTag_AudioUnit_7_1,
-            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_7_1_C,
+            sys::kAudioChannelLayoutTag_MPEG_7_1_C,
             "AudioUnit_7_1 == MPEG_7_1_C"
         );
         assert_eq!(
             sys::kAudioChannelLayoutTag_AudioUnit_5_0,
-            K_AUDIO_CHANNEL_LAYOUT_TAG_MPEG_5_0_B,
+            sys::kAudioChannelLayoutTag_MPEG_5_0_B,
             "AudioUnit_5_0 == MPEG_5_0_B"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_6,
+            sys::kAudioChannelLayoutTag_AudioUnit_6,
             sys::kAudioChannelLayoutTag_Hexagonal,
             "AudioUnit_6 == Hexagonal"
         );
         assert_eq!(
-            K_AUDIO_CHANNEL_LAYOUT_TAG_AUDIO_UNIT_8,
+            sys::kAudioChannelLayoutTag_AudioUnit_8,
             sys::kAudioChannelLayoutTag_Octagonal,
             "AudioUnit_8 == Octagonal"
         );
