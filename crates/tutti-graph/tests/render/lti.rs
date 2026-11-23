@@ -16,23 +16,27 @@
 //! `Σ g^k z^-kp x`. The output channels are aligned to the latest departure
 //! among them.
 //!
+//! The same figures hold through edits that touch no path to an output: a
+//! node inserted, removed or replaced where nothing reads it, and a
+//! `MaxBlock` change at the same rate (`across_unrelated_edits`), at one
+//! participant and on a pool.
+//!
 //! Every figure is dyadic (gains are powers of two, inputs and constants are
 //! multiples of `2^-4`, and a signal's weights are kept within a bound that
 //! fits a mantissa), so `f32` and `f64` renders equal the series exactly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
-use tutti_graph::testing::{Kind, Word, input_signal};
+use tutti_graph::testing::{self as common, Harness, Kind, TestNode, Word, input_signal};
 use tutti_graph::{
     Edge, EdgeGain, EdgeId, FeedbackFrom, GraphSpec, InputPort, NodeKey, NodeMode, OutputPort,
-    PortSink, PortSource, Topology,
+    PortSink, PortSource, Topology, Unforkable,
 };
 use tutti_units::{Gain, Samples};
 
 use crate::generator::{MAX_BLOCK, Rng, schedule, spec_for};
-use tutti_graph::testing::Harness;
 
 /// Frames a case renders: a feedback loop of the generator's longest delay
 /// closes a few times within it.
@@ -447,11 +451,28 @@ fn build(seed: u64) -> Built {
     b.finish()
 }
 
+/// `got`, the block rendered at `frame`, against each output channel's series.
+fn assert_series<F: Word>(built: &Built, input: &[f64], seed: u64, frame: usize, got: &[Vec<F>]) {
+    for (c, channel) in got.iter().enumerate() {
+        for (i, &y) in channel.iter().enumerate() {
+            let f = frame + i;
+            if f >= FRAMES {
+                break;
+            }
+            assert_eq!(
+                y.to_f64(),
+                built.outputs[c].at(f, input),
+                "seed {seed}, channel {c}, frame {f}"
+            );
+        }
+    }
+}
+
 /// The built graph through the executor at sample format `F` and block
 /// schedule `which`, against each output channel's series.
 fn renders_its_series<F: Word>(seed: u64, which: usize) {
     let built = build(seed);
-    let mut spec = GraphSpec::new(built.topology);
+    let mut spec = GraphSpec::new(built.topology.clone());
     let mut harness = Harness::<F>::with_format(MAX_BLOCK);
     for &(id, w) in &built.weights {
         spec.set_edge_gain(id, EdgeGain::default());
@@ -466,20 +487,129 @@ fn renders_its_series<F: Word>(seed: u64, which: usize) {
     let mut frame = 0;
     for n in schedule(which, seed, FRAMES) {
         let got = harness.block(n, &input_signal::<F>(frame as u64, n));
-        for (c, channel) in got.iter().enumerate() {
-            for (i, &y) in channel.iter().enumerate() {
-                let f = frame + i;
-                if f >= FRAMES {
-                    break;
-                }
-                assert_eq!(
-                    y.to_f64(),
-                    built.outputs[c].at(f, &input),
-                    "seed {seed}, channel {c}, frame {f}"
-                );
-            }
-        }
+        assert_series(&built, &input, seed, frame, &got);
         frame += n;
+    }
+}
+
+/// The node the edits insert, remove and replace: it reads main input 0 and
+/// nothing reads it, and its key sorts before every key of the grammar's
+/// (`1`) or after (`1 << 20`).
+fn decoy_key(seed: u64) -> NodeKey {
+    NodeKey(if seed.is_multiple_of(2) { 1 } else { 1 << 20 })
+}
+
+/// An edit that changes no path to an output.
+#[derive(Clone, Copy, Debug)]
+enum Edit {
+    /// The decoy appears, a `Lag` of this many frames.
+    Insert(usize),
+    Remove,
+    /// The decoy is a new unit of this latency.
+    Replace(usize),
+    /// A re-prepare to this `MaxBlock` at the same rate.
+    MaxBlock(usize),
+}
+
+/// The built graph, committed through the editor on `workers` participants.
+fn placed<F: Word>(built: &Built, workers: usize) -> Harness<F> {
+    let mut harness = Harness::<F>::with_format(MAX_BLOCK);
+    if workers > 1 {
+        harness.exec.set_pool(Some(common::test_pool(workers)));
+    }
+    for (&key, kind) in &built.kinds {
+        let unit = Unforkable(TestNode::<F>::in_format(kind.clone()));
+        harness.editor.insert(key, "test", unit);
+    }
+    let spec = harness.editor.spec_mut();
+    spec.topology.edges.clone_from(&built.topology.edges);
+    spec.topology.outputs.clone_from(&built.topology.outputs);
+    spec.topology.inputs = built.topology.inputs;
+    for &(id, _) in &built.weights {
+        spec.set_edge_gain(id, EdgeGain::default());
+    }
+    for &(id, w) in &built.weights {
+        harness.start_edge_gain(id, Gain::new(w));
+    }
+    for &(key, mode) in &built.modes {
+        harness.start_mode(key, mode);
+    }
+    harness.editor.commit().expect("a built graph commits");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    harness.outputs = built.topology.outputs.len();
+    harness.inputs = built.topology.inputs.count() as usize;
+    harness
+}
+
+/// Applies `edit` to the harness's editor and lets the executor take it.
+fn edit<F: Word>(harness: &mut Harness<F>, decoy: NodeKey, edit: Edit) {
+    let lag = |latency: usize| Unforkable(TestNode::<F>::in_format(Kind::Lag { latency }));
+    let ed = &mut harness.editor;
+    match edit {
+        Edit::Insert(latency) | Edit::Replace(latency) => {
+            ed.insert(decoy, "decoy", lag(latency));
+            ed.spec_mut().topology.edges.insert(
+                InputPort::new(decoy, 0),
+                vec![Edge::Direct(PortSource::MainInput(0))],
+            );
+            ed.commit().expect("the decoy commits");
+        }
+        Edit::Remove => {
+            ed.remove(decoy);
+            ed.commit().expect("the removal commits");
+        }
+        Edit::MaxBlock(max_block) => {
+            ed.reprepare(common::prepare(max_block))
+                .expect("reprepares");
+            harness.exec.apply_pending();
+            harness.editor.collect();
+        }
+    }
+    harness.exec.apply_pending();
+    harness.editor.collect();
+}
+
+/// The built graph rendered at block schedule `which` on `workers`
+/// participants while up to three edits that touch no path to an output land
+/// at block boundaries: every block is the figure the graph was built beside.
+/// Past a `MaxBlock` change the blocks are cut to fit it.
+fn across_unrelated_edits<F: Word>(seed: u64, which: usize, workers: usize) {
+    let built = build(seed);
+    let mut harness = placed::<F>(&built, workers);
+    let decoy = decoy_key(seed);
+    let blocks = schedule(which, seed, FRAMES);
+    let mut rng = Rng::new(seed ^ 0xED17);
+    let at: BTreeSet<usize> = (0..1 + rng.below(3))
+        .map(|_| 1 + rng.below(blocks.len() as u64 - 1) as usize)
+        .collect();
+    let (mut present, mut max_block, mut frame) = (false, MAX_BLOCK, 0);
+    let input: Vec<f64> = input_signal::<f64>(0, FRAMES);
+    for (i, &n) in blocks.iter().enumerate() {
+        if at.contains(&i) {
+            let latency = 1 + rng.below(40) as usize;
+            let next = match (rng.below(4), present) {
+                (0, _) => Edit::MaxBlock([32, 64, 100][rng.below(3) as usize]),
+                (_, false) => Edit::Insert(latency),
+                (1, true) => Edit::Remove,
+                (_, true) => Edit::Replace(latency),
+            };
+            match next {
+                Edit::Insert(_) => present = true,
+                Edit::Remove => present = false,
+                Edit::MaxBlock(m) => max_block = m,
+                Edit::Replace(_) => {}
+            }
+            edit(&mut harness, decoy, next);
+        }
+        let mut left = n;
+        while left > 0 {
+            let part = left.min(max_block);
+            let got = harness.block(part, &input_signal::<F>(frame as u64, part));
+            assert_series(&built, &input, seed, frame, &got);
+            frame += part;
+            left -= part;
+        }
     }
 }
 
@@ -498,6 +628,26 @@ proptest! {
     #[test]
     fn a_path_sum_with_compensation_renders_exactly_at_f64(seed in any::<u64>(), which in 0usize..5) {
         renders_its_series::<f64>(seed, which);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
+
+    /// The figures hold through a decoy node inserted, removed or replaced
+    /// and a `MaxBlock` change at the same rate, mid-render, at one
+    /// participant and on a pool, at both sample formats: an edit that touches
+    /// no path to an output moves no sample of it.
+    #[test]
+    fn a_path_sum_survives_edits_that_touch_no_path(
+        seed in any::<u64>(),
+        which in 0usize..5,
+        workers in prop::sample::select(common::WORKERS.to_vec()),
+    ) {
+        for workers in [1, workers] {
+            across_unrelated_edits::<f32>(seed, which, workers);
+            across_unrelated_edits::<f64>(seed, which, workers);
+        }
     }
 }
 

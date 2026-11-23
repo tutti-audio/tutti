@@ -13,7 +13,7 @@ use tutti_graph::{
     Edge, EventEdge, EventInputPort, EventOutputPort, InputPort, NodeKey, OutputPort, PortSource,
 };
 
-use crate::generator::{Desc, MAX_BLOCK, Rng, random_costs, random_graph, shape};
+use crate::generator::{Desc, MAX_BLOCK, Rng, mutate, random_costs, random_graph, shape};
 
 /// Add a direct back edge — audio or event — from a node to one created no
 /// later than it, closing a cycle no feedback edge breaks.
@@ -239,4 +239,31 @@ fn the_generated_plans_have_tasks_fan_in_and_packing() {
     assert!(multi > 100, "only {multi} plans have several tasks");
     assert!(summed > 25, "only {summed} plans sum a fan-in");
     assert!(packed > 25, "only {packed} plans pack further under costs");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
+
+    /// Two compiles of one graph from the same previous plan are the same
+    /// plan and the same delta, from nothing and from a plan an edit
+    /// precedes: what a commit carries is a function of the two graphs.
+    #[test]
+    fn two_compiles_from_the_same_previous_plan_agree(seed in any::<u64>()) {
+        let first = random_graph(seed);
+        let second = mutate(&first, &mut first.rng.clone());
+        let costs = random_costs(&second, seed);
+        let compile = |desc: &Desc, prev: Option<&tutti_graph::Plan>| {
+            tutti_graph::compile(
+                &desc.spec.validate().expect("valid"),
+                &common::shapes_costed(&desc.kinds, &costs),
+                &common::prepare(MAX_BLOCK),
+                prev,
+            )
+            .expect("compiles")
+        };
+        let (plan, delta) = compile(&first, None);
+        prop_assert!(compile(&first, None) == (plan.clone(), delta));
+        let (next, edit) = compile(&second, Some(&plan));
+        prop_assert!(compile(&second, Some(&plan)) == (next, edit));
+    }
 }
