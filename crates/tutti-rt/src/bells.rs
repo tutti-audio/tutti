@@ -108,7 +108,7 @@ mod tick_body;
 
 #[allow(
     clippy::disallowed_types,
-    reason = "loom's and std's locks, for the loom models of a bell"
+    reason = "the waker lock is `crate::sync`'s Mutex: loom's under the bell's loom model, std's otherwise"
 )]
 /// One bell's state, shared by its [`Bell`] clones and its [`Listener`].
 struct State {
