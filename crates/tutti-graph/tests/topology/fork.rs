@@ -121,7 +121,7 @@ impl ForkSource for SharedFork {
 impl IntoNode for Shared {
     type Controls = ();
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts::new(Box::new(self), (), Some(Box::new(SharedFork)))
+        NodeParts::new(Box::new(self), (), Some(Box::new(SharedFork)), None)
     }
 }
 
@@ -151,7 +151,11 @@ impl Node for Level {
 impl ParamNode for Level {
     fn param_set(&self) -> ParamSet {
         ParamSet::builder()
-            .param(UnitParam::Volume, self.0.as_atomic())
+            .param(
+                tutti_graph::DeclaredUnit::of::<tutti_units::Amplitude>(),
+                UnitParam::Volume,
+                self.0.as_atomic(),
+            )
             .build()
     }
     fn fork_fresh(&self) -> Self {
@@ -191,6 +195,7 @@ impl IntoNode for Forkable {
             Box::new(TestNode::new(self.0.clone())),
             (),
             Some(Box::new(KindFork(self.0))),
+            None,
         )
     }
 }
@@ -280,6 +285,7 @@ impl IntoNode for ReadsMode {
             }),
             (),
             Some(Box::new(ModeFork)),
+            None,
         )
     }
 }
@@ -443,7 +449,12 @@ impl IntoNode for Watched {
     }
     fn into_parts(self) -> NodeParts<()> {
         let flag = Arc::clone(&self.0);
-        NodeParts::new(self.into_node().0, (), Some(Box::new(WatchedFork(flag))))
+        NodeParts::new(
+            self.into_node().0,
+            (),
+            Some(Box::new(WatchedFork(flag))),
+            None,
+        )
     }
 }
 
@@ -527,7 +538,7 @@ impl IntoNode for Failing {
         )
     }
     fn into_parts(self) -> NodeParts<()> {
-        NodeParts::new(self.into_node().0, (), Some(Box::new(FailingFork)))
+        NodeParts::new(self.into_node().0, (), Some(Box::new(FailingFork)), None)
     }
 }
 
@@ -1085,7 +1096,7 @@ impl IntoNode for Witnessed {
             How::Default => Box::new(Defaulted(self.0)),
             _ => Box::new(self.0),
         };
-        NodeParts::new(node, (), Some(fork))
+        NodeParts::new(node, (), Some(fork), None)
     }
 }
 

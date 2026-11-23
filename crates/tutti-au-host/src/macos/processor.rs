@@ -30,7 +30,6 @@ use crate::automation::SharedStage;
 use crate::error::{AuError, Result};
 use crate::midi_out::{self, AuMidiOutput, MidiOutSink};
 use crate::ranges::RangeTable;
-use crate::types::K_AUDIO_UNIT_ERR_UNINITIALIZED;
 #[cfg(test)]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 
@@ -799,7 +798,9 @@ impl AuProcessor {
 fn block_reason(error: &AuError) -> &'static str {
     match error {
         AuError::BlockTooLarge { .. } => "the block is longer than the activated block size",
-        AuError::RenderFailed { code, .. } if *code == K_AUDIO_UNIT_ERR_UNINITIALIZED => {
+        AuError::RenderFailed { code, .. }
+            if *code == coreaudio_sys::kAudioUnitErr_Uninitialized =>
+        {
             "the unit is no longer initialized"
         }
         AuError::RenderFailed { .. } => "AudioUnitRender failed",
@@ -876,14 +877,13 @@ mod tests {
     use super::*;
     use crate::component::{ComponentKey, find_component};
     use crate::instance::AuLoaded;
-    use crate::types::K_AUDIO_UNIT_TYPE_EFFECT;
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_plugin_types::{Loaded, MaxBlock, ParameterChanges, Prepare, SampleRate};
     use tutti_units::ParamId;
 
     fn delay() -> (AuProcessor, crate::controller::AuController) {
         let desc = ComponentKey::new(
-            K_AUDIO_UNIT_TYPE_EFFECT,
+            coreaudio_sys::kAudioUnitType_Effect,
             u32::from_be_bytes(*b"dely"),
             u32::from_be_bytes(*b"appl"),
         )

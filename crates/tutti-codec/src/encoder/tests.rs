@@ -401,7 +401,7 @@ fn a_rate_no_header_holds_is_refused_by_every_format() {
 
 /// `finalize` closes a file and leaves it beside its path: the path holds what
 /// it held, the closed file is a complete one under its temporary name, and
-/// `commit` is what moves it. Dropping the `Finalized` instead removes the
+/// `commit` is what moves it. Dropping the `FinalizedFile` instead removes the
 /// temporary and leaves the path alone.
 #[test]
 fn a_finalized_file_waits_for_its_commit() {

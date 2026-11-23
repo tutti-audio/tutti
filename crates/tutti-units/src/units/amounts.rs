@@ -2,15 +2,14 @@ use super::*;
 
 // ── Dimensionless amounts ───────────────────────────────────────────────────
 //
-// Seven types (`Amplitude` is in `level`), because the roles differ in both
+// Six types (`Amplitude` is in `level`), because the roles differ in both
 // range and algebra, which is this module's own test for whether two quantities are the same type:
 //
 //   Amplitude  [0, inf)   scalable      a gain multiplier
 //   Mix        [0, 1]     NOT scalable  a blend position between two signals
 //   Pan        [-1, 1]    NOT scalable  a position on the left/right axis
 //   Feedback   [0, 0.99]  NOT scalable  a recirculation coefficient
-//   Depth      [-1, 1]    signed, range-checked
-//   Bipolar    [-1, 1]    signed, range-checked, a control's own value
+//   Bipolar    [-1, 1]    signed, range-checked: a modulation depth, a bend, a macro
 //   Drive      [0, inf)   NOT scalable  shaper-curve intensity
 //   BitDepth   [1, 32]    NOT scalable  a quantizer's word length, fractional
 //
@@ -71,7 +70,7 @@ unit! {
     /// A control a caller sets. The engine's measured left/right balance is
     /// [`StereoBalance`], a reading; there is no conversion between them. A
     /// balance control on a stereo pair is [`Balance`].
-    /// Distinct from [`Depth`]: a pan position and a modulation amount are
+    /// Distinct from [`Bipolar`]: a pan position and a modulation amount are
     /// different quantities that happen to share a range.
     pub struct Pan(f64): Unit, Ordered, Bounded, Signed;
 }
@@ -217,137 +216,19 @@ impl Feedback {
     }
 }
 
-// `Depth` is a `Unit` (below), which is already a `Quantity`, so it takes the
-// type and its error without the macro's own `Quantity` impl.
-crate::ranged! {
-    @items []
-    /// A bipolar modulation amount, `-1..=1`.
-    ///
-    /// Signed on purpose: a negative depth inverts the modulator, so an LFO at
-    /// `Depth::INVERTED` is the same shape phase-flipped. That is the whole reason
-    /// this is not just an [`Amplitude`] — and the reason it has a sign where `Mix`
-    /// and `Feedback` do not.
-    ///
-    /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
-    /// anything outside `-1..=1`, and so do `TryFrom<f64>` and serde.
-    /// [`of`](Self::of) is for a literal. [`clamped`](Self::clamped) is the one
-    /// saturating constructor, for a value that arrives from a lane or a knob;
-    /// [`Unit::from_raw`] is it too, since a cell holds any float.
-    ///
-    /// ```
-    /// use tutti_units::Depth;
-    ///
-    /// assert_eq!(Depth::new(0.25).map(Depth::get), Some(0.25));
-    /// assert_eq!(Depth::new(1.5), None);
-    /// assert_eq!(Depth::clamped(1.5), Depth::FULL);
-    /// ```
-    #[repr(transparent)]
-    #[derive(Default)]
-    #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-    #[cfg_attr(feature = "serde", serde(try_from = "f64", into = "f64"))]
-    Depth(f64), DepthOutOfRange, "within -1..=1",
-    |raw| raw >= -1.0 && raw <= 1.0
-}
-
-// NOT `Additive` and NOT `Scalable`: a sum or a scaled depth can leave
-// `-1..=1`. Do the arithmetic on the raw number and call `new` (or
-// `clamped`, where saturating is meant).
-impl Depth {
-    /// No modulation.
-    pub const NONE: Depth = Depth(0.0);
-    /// Full positive modulation.
-    pub const FULL: Depth = Depth(1.0);
-    /// Full inverted modulation.
-    pub const INVERTED: Depth = Depth(-1.0);
-
-    /// `raw` constrained into `-1..=1`; NaN is [`NONE`](Self::NONE).
-    #[inline]
-    #[must_use]
-    pub const fn clamped(raw: f64) -> Depth {
-        if raw.is_nan() {
-            Depth::NONE
-        } else if raw < -1.0 {
-            Depth::INVERTED
-        } else if raw > 1.0 {
-            Depth::FULL
-        } else {
-            Depth(raw)
-        }
-    }
-
-    /// Returns the smaller of the two, in this unit.
-    #[inline]
-    #[must_use]
-    pub fn min(self, other: Self) -> Self {
-        Self(self.0.min(other.0))
-    }
-
-    /// Returns the larger of the two, in this unit.
-    #[inline]
-    #[must_use]
-    pub fn max(self, other: Self) -> Self {
-        Self(self.0.max(other.0))
-    }
-
-    /// Clamps into `lo..=hi`, in this unit.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `lo > hi`, matching `f64::clamp`.
-    #[inline]
-    #[must_use]
-    pub fn clamp(self, lo: Self, hi: Self) -> Self {
-        Self(self.0.clamp(lo.0, hi.0))
-    }
-}
-
-impl PartialOrd for Depth {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl core::ops::Neg for Depth {
-    type Output = Self;
-    #[inline]
-    fn neg(self) -> Self {
-        Self(-self.0)
-    }
-}
-
-impl core::fmt::Display for Depth {
-    #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-/// `from_raw` saturates ([`Depth::clamped`]): a parameter cell holds any
-/// float, and a unit's `from_raw` cannot refuse.
-impl Unit for Depth {
-    type Raw = f64;
-    #[inline]
-    fn from_raw(v: f64) -> Self {
-        Self::clamped(v)
-    }
-    #[inline]
-    fn to_raw(self) -> f64 {
-        self.0
-    }
-}
-
 // `Bipolar` is a `Unit` (below), which is already a `Quantity`, so it takes the
 // type and its error without the macro's own `Quantity` impl.
 crate::ranged! {
     @items []
-    /// A signed amount, `-1..=1`: the value of a control with no target of its
-    /// own, such as a macro's position.
+    /// A signed amount, `-1..=1`: the depth of a modulation route, a pitch
+    /// bend, or the value of a control with no target of its own, such as a
+    /// macro's position.
     ///
-    /// The same range and algebra as [`Depth`], with a distinct meaning: the
-    /// stored, automated value of a control that has no route or position of its
-    /// own, where a [`Depth`] is the amount of one modulation route. It negates
-    /// (`-x` is the same amount the other way) and orders.
+    /// Signed on purpose: a negative amount inverts, so an LFO at a depth of
+    /// [`MIN`](Self::MIN) is the same shape phase-flipped. That is the whole
+    /// reason this is not just an [`Amplitude`], and the reason it has a sign
+    /// where `Mix` and `Feedback` do not. It negates (`-x` is the same amount
+    /// the other way) and orders.
     ///
     /// **Range-checked**: [`new`](Self::new) refuses NaN, the infinities and
     /// anything outside `-1..=1`, and so do `TryFrom<f64>` and serde.

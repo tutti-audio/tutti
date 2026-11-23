@@ -2,16 +2,13 @@
 //! clock, so `base` is any instant and only the differences matter.
 
 use super::*;
+use tutti_fixtures::midi::ms;
 
 const R48: SampleRate = SampleRate::SR_48K;
 
 fn base() -> Instant {
     // Far enough from the clock's origin to subtract a second from.
     Instant::now() + Duration::from_secs(3600)
-}
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
 }
 
 fn map_at(t0: Instant, frame: u64) -> ClockMap {
@@ -46,36 +43,24 @@ fn a_time_before_the_anchor_is_extrapolated_back_until_frame_zero() {
     assert_eq!(map.frame_at(t0 - ms(21)), None);
 }
 
-// Before the anchor the offset rounds away from zero too: 10 417 ns back is
-// -0.5000 frame and lands one frame earlier; 10 416 ns back stays on the anchor.
-#[test]
-fn a_time_before_the_anchor_rounds_its_offset_away_from_zero() {
-    let t0 = base();
-    let map = map_at(t0, 4);
-    assert_eq!(
-        map.frame_at(t0 - Duration::from_nanos(10_417)),
-        Some(Frame::new(3))
-    );
-    assert_eq!(
-        map.frame_at(t0 - Duration::from_nanos(10_416)),
-        Some(Frame::new(4))
-    );
-}
-
-// Half a frame rounds away from zero: at 48 kHz a frame is 20 833.33 ns, so
-// 10 417 ns is 0.5000 frame and 10 416 ns is under half.
+// Half a frame rounds away from zero, before the anchor and after it: at
+// 48 kHz a frame is 20 833.33 ns, so 10 417 ns is 0.5000 frame (one frame
+// away) and 10 416 ns is under half (the anchor's frame).
 #[test]
 fn a_time_lands_on_the_nearest_frame() {
     let t0 = base();
-    let map = map_at(t0, 0);
-    assert_eq!(
-        map.frame_at(t0 + Duration::from_nanos(10_417)),
-        Some(Frame::new(1))
-    );
-    assert_eq!(
-        map.frame_at(t0 + Duration::from_nanos(10_416)),
-        Some(Frame::new(0))
-    );
+    for (case, anchor, sign, near, far) in [("after", 0, 1, 0, 1), ("before", 4, -1, 4, 3)] {
+        let map = map_at(t0, anchor);
+        let at = |ns| {
+            if sign > 0 {
+                t0 + Duration::from_nanos(ns)
+            } else {
+                t0 - Duration::from_nanos(ns)
+            }
+        };
+        assert_eq!(map.frame_at(at(10_417)), Some(Frame::new(far)), "{case}");
+        assert_eq!(map.frame_at(at(10_416)), Some(Frame::new(near)), "{case}");
+    }
 }
 
 // The inverse: frame 49 000 is 1 s after the anchor, frame 520 is 10 ms before,

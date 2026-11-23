@@ -9,7 +9,7 @@ use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
 };
 use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
-use tutti_units::{Db, Depth, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
+use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -109,7 +109,7 @@ control_set! {
     RoomSize => Mix = size { whole },
     Diffusion => Mix = diffusion { whole },
     DelayTime => Seconds = pre_delay { whole },
-    Depth => Depth = modulation { whole },
+    Depth => Bipolar = modulation { whole },
     Rate => Hz = rate { whole },
     StereoSpread => StereoWidth = width { whole },
     GainDb => Db = wet { whole },
@@ -249,7 +249,7 @@ mod tests {
         let moves = [(
             0,
             FdnControls {
-                modulation: Depth::of(0.0),
+                modulation: Bipolar::of(0.0),
                 ..FdnControls::DEFAULT
             },
         )];

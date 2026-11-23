@@ -138,6 +138,7 @@ impl Class for Plugin {
         IUnitInfo,
         IParameterFunctionName,
         IAutomationState,
+        IKeyswitchController,
     );
 }
 
@@ -555,6 +556,43 @@ fn default_of(id: u32) -> Option<f64> {
     }
 }
 
+/// One keyswitch for each key of `core::NOTE_NAMES`, on the first event bus, the
+/// same for every channel.
+impl IKeyswitchControllerTrait for Plugin {
+    unsafe fn getKeyswitchCount(&self, bus: i32, _channel: i16) -> i32 {
+        if bus == 0 {
+            core::NOTE_NAMES.len() as i32
+        } else {
+            0
+        }
+    }
+    unsafe fn getKeyswitchInfo(
+        &self,
+        bus: i32,
+        _channel: i16,
+        index: i32,
+        info: *mut KeyswitchInfo,
+    ) -> tresult {
+        let Some(&(key, name)) = usize::try_from(index)
+            .ok()
+            .filter(|_| bus == 0)
+            .and_then(|i| core::NOTE_NAMES.get(i))
+        else {
+            return kInvalidArgument;
+        };
+        // SAFETY: `info` is an out-pointer the host owns for the call.
+        let info = unsafe { &mut *info };
+        info.typeId = sdk(KeyswitchTypeIDs_::kNoteOnKeyswitchTypeID);
+        put_wstring(name, &mut info.title);
+        put_wstring(name, &mut info.shortTitle);
+        info.keyswitchMin = i32::from(key);
+        info.keyswitchMax = i32::from(key);
+        info.keyRemapped = -1;
+        info.unitId = -1;
+        kResultOk
+    }
+}
+
 impl IUnitInfoTrait for Plugin {
     unsafe fn getUnitCount(&self) -> i32 {
         core::UNITS.len() as i32
@@ -703,7 +741,7 @@ impl IEditControllerTrait for Plugin {
         let info = unsafe { &mut *info };
         info.id = index as u32;
         put_wstring(core::NAMES[index as usize], &mut info.title);
-        put_wstring(core::NAMES[index as usize], &mut info.shortTitle);
+        put_wstring(core::SHORT_NAMES[index as usize], &mut info.shortTitle);
         put_wstring("", &mut info.units);
         info.stepCount = match index as u32 {
             core::MODE => (core::MODES - 1) as i32,

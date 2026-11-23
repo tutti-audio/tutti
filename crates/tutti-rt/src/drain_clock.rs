@@ -43,14 +43,7 @@
 
 use std::sync::Arc;
 
-use sync::{AtomicU64, Ordering, fence};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering, fence};
-}
+use crate::sync::{AtomicU64, Ordering, fence};
 
 /// The audio side's half: counts drains. One per clock, not `Clone`.
 #[derive(Debug)]

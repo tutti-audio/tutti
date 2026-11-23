@@ -9,7 +9,7 @@ use tutti_buffers::{InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, FdnControls, FdnLayout, FftFloat, Lerp, MaxDecay};
 use tutti_graph::Shape;
 use tutti_units::{
-    Cents, Db, Depth, Feedback, Hz, Mix, SampleRate, Samples, Seconds, StereoWidth, Tail,
+    Bipolar, Cents, Db, Feedback, Hz, Mix, SampleRate, Samples, Seconds, StereoWidth, Tail,
 };
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -135,7 +135,7 @@ control_set! {
     RoomSize => Mix = size { whole },
     Diffusion => Mix = diffusion { whole },
     DelayTime => Seconds = pre_delay { whole },
-    Depth => Depth = modulation { whole },
+    Depth => Bipolar = modulation { whole },
     Rate => Hz = rate { whole },
     StereoSpread => StereoWidth = width { whole },
     GainDb => Db = wet { whole },

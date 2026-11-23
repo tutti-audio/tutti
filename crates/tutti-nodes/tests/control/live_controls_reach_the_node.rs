@@ -26,7 +26,7 @@
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::Planes;
-use tutti_graph::{Fade, IntoNode, NodeMode, Prepare, Standalone};
+use tutti_graph::{Fade, IntoNode, NodeKey, NodeMode, Prepare, Renderer};
 use tutti_nodes::{EqBandConfig, EqBandNode, SvfType};
 use tutti_units::UnitParam;
 use tutti_units::{Db, Hz, Q, SampleRate, Samples};
@@ -45,7 +45,7 @@ fn band(gain: f64) -> EqBandNode<f32> {
 /// Energy of the band's response to a 1 kHz tone at its centre — the
 /// band's effect on a signal (a +24 dB bell multiplies it by ~250; bypassed
 /// or flat, it is the tone's own).
-fn energy<C>(solo: &mut Standalone<C>) -> f32 {
+fn energy(solo: &mut Renderer) -> f32 {
     let x: Vec<f32> = (0..2048)
         .map(|i| ((std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin()) as f32)
         .collect();
@@ -55,8 +55,8 @@ fn energy<C>(solo: &mut Standalone<C>) -> f32 {
         .sum()
 }
 
-fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
-    Standalone::new(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
+fn solo<N: IntoNode>(node: N) -> (Renderer, NodeKey, N::Controls) {
+    Renderer::alone(node, Prepare::new(RATE, MaxBlock::of(Samples::new(64))))
 }
 
 /// **The instrument works**: an active +24 dB bell and a bypassed one render
@@ -64,11 +64,9 @@ fn solo<N: IntoNode>(node: N) -> Standalone<N::Controls> {
 /// assertions below could compare two identical renders and pass.
 #[test]
 fn the_probe_can_tell_active_from_bypassed() {
-    let active = energy(&mut solo(band(24.0)));
-    let mut off = solo(band(24.0));
-    let key = off.key();
-    off.renderer_mut()
-        .editor_mut()
+    let active = energy(&mut solo(band(24.0)).0);
+    let (mut off, key, _) = solo(band(24.0));
+    off.editor_mut()
         .set_mode(key, NodeMode::Bypassed)
         .expect("the band is there");
     let bypassed = energy(&mut off);
@@ -83,18 +81,15 @@ fn the_probe_can_tell_active_from_bypassed() {
 /// through its `ParamSet` it must ring, and still after an unrelated commit.
 #[test]
 fn a_param_set_through_the_controls_reaches_the_running_node() {
-    let mut s = solo(band(0.0));
+    let (mut s, _, controls) = solo(band(0.0));
     let flat = energy(&mut s);
-    assert!(s.controls().set(UnitParam::GainDb, 24.0));
+    assert!(controls.set(UnitParam::GainDb, 24.0));
     let boosted = energy(&mut s);
     assert!(
         boosted > 10.0 * flat,
         "a +24 dB write through the controls did not reach the audio: {flat} -> {boosted}"
     );
-    s.renderer_mut()
-        .editor_mut()
-        .commit()
-        .expect("an unrelated commit");
+    s.editor_mut().commit().expect("an unrelated commit");
     let after = energy(&mut s);
     assert!(
         (after - boosted).abs() < 1e-3 * boosted,
@@ -108,7 +103,7 @@ fn a_param_set_through_the_controls_reaches_the_running_node() {
 /// change reaches the audio.
 #[test]
 fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
-    let mut s = solo(band(24.0));
+    let (mut s, key, _) = solo(band(24.0));
     let active = energy(&mut s);
     // A high-pass far above the 1 kHz tone: all but nothing of it passes.
     let high_pass = EqBandNode::<f32>::from(
@@ -117,8 +112,7 @@ fn a_by_value_change_reaches_the_audio_by_replacing_the_node() {
             .q(Q::new(0.7))
             .gain(Db::new(0.0)),
     );
-    let key = s.key();
-    let editor = s.renderer_mut().editor_mut();
+    let editor = s.editor_mut();
     editor
         .replace(key, high_pass, Fade::new(Samples::new(1)))
         .expect("same shape");

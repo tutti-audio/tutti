@@ -1265,7 +1265,7 @@ impl<F: Float> IntoNode<F> for ControlLaneNode {
             make: Arc::clone(&self.make),
             native: self.native,
         };
-        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)))
+        NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
     }
 }
 

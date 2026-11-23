@@ -287,7 +287,7 @@ pub use modulation::{
 };
 #[cfg(feature = "sampler")]
 pub use node::Handled;
-pub use node::{Reclaimer, Reclaims, SessionNode};
+pub use node::SessionNode;
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};
@@ -370,7 +370,10 @@ pub use value::{
     PolarityTarget, RangeTarget, RateTarget, ScalarTarget, SetRefusal, SettingTarget, Target,
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
-pub use value::{Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher};
+pub use value::{
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
+    Watcher,
+};
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
 #[cfg(feature = "sampler")]

@@ -11,8 +11,11 @@ use std::any::Any;
 
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
-use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
-use super::watcher::{Stored, StoredChange};
+use super::target::{
+    AnyAssign, Assign, Effective, Info, Modify, Modulatable, Staged, TargetId,
+    sealed::{Lane, Store},
+};
+use super::watcher::{ChangedBy, Stored, StoredChange};
 
 /// An item that failed: its position, and what failed there.
 #[derive(Debug)]
@@ -56,7 +59,7 @@ impl<T: Store> Staged for Slot<T> {
     fn store(self: Box<Self>) -> Option<StoredChange> {
         T::store(&self.cell, &self.value);
         // A value equal to the base is no change.
-        (self.value != self.base).then(|| StoredChange::new(self.id, self.base, self.value))
+        (self.value != self.base).then(|| T::landing(self.id, &self.cell, self.base, self.value))
     }
 }
 
@@ -67,6 +70,8 @@ pub struct Batch<'a> {
     slots: Vec<Box<dyn Staged>>,
     /// The position of the item being staged.
     index: usize,
+    /// Who the landing is by: the app, or a restore of a saved map.
+    by: ChangedBy,
 }
 
 impl<'a> Batch<'a> {
@@ -75,14 +80,30 @@ impl<'a> Batch<'a> {
             params,
             slots: Vec::new(),
             index: 0,
+            by: ChangedBy::App,
         }
+    }
+
+    /// Makes the landing a restore: every change it makes is
+    /// [`ChangedBy::Restore`].
+    pub(super) fn restoring(&mut self) {
+        self.by = ChangedBy::Restore;
     }
 
     /// Stores every target's final value, in the order each was first named,
     /// and answers the targets whose value is not the base they had.
     pub(crate) fn store(self) -> Stored {
         let landings = self.slots.into_iter().filter_map(Staged::store).collect();
-        Stored::new(landings)
+        Stored::new(landings, self.by)
+    }
+
+    /// The failure of the item being staged as a whole, naming no target.
+    pub(super) fn refuse(&self, kind: ValueErrorKind) -> Failure {
+        Failure {
+            at: self.index,
+            target: None,
+            kind,
+        }
     }
 
     fn fail(&self, target: TargetId, kind: ValueErrorKind) -> Failure {
@@ -104,7 +125,7 @@ impl<'a> Batch<'a> {
 
     /// Stages the value `make` builds from the target's value so far in this
     /// batch, or from its base when it has none.
-    fn apply<T: Store>(
+    pub(super) fn apply<T: Store>(
         &mut self,
         target: T,
         make: impl FnOnce(&T::Value) -> T::Value,
@@ -164,7 +185,7 @@ impl<'a> Batch<'a> {
     }
 
     /// Counts an item that stages nothing (`None`).
-    fn skip(&mut self) {
+    pub(super) fn skip(&mut self) {
         self.index += 1;
     }
 }
@@ -201,7 +222,8 @@ pub use seal::stage::Sealed as Stageable;
 /// but keeps its position). Sealed.
 pub trait IntoAssign<K>: Stageable {}
 
-/// What [`Session::get`](crate::Session::get) takes: a target (its base), or
+/// What [`Session::get`](crate::Session::get) takes: a target (its base), its
+/// [`effective`](crate::ParamTarget::effective) value, or
 /// tuples of up to 12 of them (nested too), arrays, `Vec`s and `Option`s. It
 /// answers in the argument's shape. Sealed.
 pub trait IntoRead: Readable {}
@@ -279,6 +301,16 @@ where
     }
 }
 impl<T: Store> IntoRead for Info<T> where Info<T>: Describe {}
+
+impl<T: Store + Lane + Modulatable> Readable for Effective<T> {
+    type Output = T::Value;
+
+    fn read(self, batch: &mut Batch<'_>) -> Result<T::Value, Failure> {
+        let base = batch.read_base(self.target)?;
+        Ok(self.target.delivered(batch.params()).unwrap_or(base))
+    }
+}
+impl<T: Store + Lane + Modulatable> IntoRead for Effective<T> {}
 
 /// What a target's [`Info`] answers.
 pub trait Describe {

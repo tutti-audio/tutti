@@ -61,7 +61,7 @@ use super::Curve;
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Amplitude, Beat, Bpm, SampleRate, Samples};
-/// use tutti_graph::{Prepare, Standalone, TransportPosition};
+/// use tutti_graph::{Prepare, Renderer, TransportPosition};
 /// use tutti_nodes::automation::{AutomationLaneConfig, AutomationLaneNode, Breakpoint, Trajectory};
 ///
 /// let mut trajectory: Trajectory<Amplitude> = Trajectory::new();
@@ -70,10 +70,9 @@ use super::Curve;
 ///
 /// // No inputs, one output (the curve's value).
 /// let lane = AutomationLaneNode::from(AutomationLaneConfig::new(trajectory));
-/// let mut standalone = Standalone::<_, f32>::new(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// standalone.renderer_mut()
-///     .set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.0), None));
-/// let out = standalone.render(1);
+/// let (mut renderer, ..) = Renderer::<f32>::alone(lane, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// renderer.set_transport(TransportPosition::new(false, Bpm::of(120.0), Beat::new(2.0), None));
+/// let out = renderer.render(1);
 /// assert!((out[0][0] - 0.5).abs() < 1e-3, "midpoint of a 0..1 ramp, got {}", out[0][0]);
 /// ```
 pub struct AutomationLaneNode {
@@ -204,7 +203,7 @@ impl<F: Float> IntoNode<F> for AutomationLaneNode {
 
     fn into_parts(self) -> NodeParts<(), F> {
         let fork = LaneFork(self.clone());
-        NodeParts::new(Box::new(self), (), Some(Box::new(fork)))
+        NodeParts::new(Box::new(self), (), Some(Box::new(fork)), None)
     }
 }
 
@@ -224,7 +223,7 @@ mod tests {
     use std::sync::atomic::Ordering;
     use tutti_buffers::MaxBlock;
     use tutti_curve::{Breakpoint, Trajectory};
-    use tutti_graph::{Standalone, TransportPosition};
+    use tutti_graph::{Renderer, TransportPosition};
     use tutti_units::{Bpm, Hz, SampleRate, Samples};
 
     fn ramp_trajectory() -> Trajectory<Hz> {
@@ -238,11 +237,11 @@ mod tests {
     /// `frames` of `lane` through a graph at 48 kHz in one block, the
     /// transport `transport` at the block's start.
     fn render(lane: AutomationLaneNode, transport: TransportPosition, frames: usize) -> Vec<f32> {
-        let mut solo = Standalone::new(
+        let (mut solo, ..) = Renderer::alone(
             lane,
             Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(frames))),
         );
-        solo.renderer_mut().set_transport(transport);
+        solo.set_transport(transport);
         solo.render(frames).remove(0)
     }
 

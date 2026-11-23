@@ -25,23 +25,24 @@
 //! `decode-*` feature enables no encoder library and an `encode-*` feature no
 //! `symphonia`.
 //!
+//! [`NAME_BANS`] holds a crate's source to a list of banned words (`tutti-units`
+//! allocates nothing and shares no state: no `alloc`, `Vec`, `String`, `Box`,
+//! `Arc`, `atomic` or `Atomic*` outside `#[cfg(test)]` items, `tests` directories
+//! and `tests.rs` files; `check-no-std` refuses `alloc` but not
+//! `core::sync::atomic`).
+//!
 //! A rule the layers already state is not stated twice: `tutti-units`,
 //! `tutti-plugin-ipc-ffi` and every other layer-0 crate depend on no workspace
 //! crate because nothing sits below layer 0.
 
+use super::lex::{blank, ident_at, is_test_file, line_of, skipped, test_ranges};
 use super::toml::{Kind, Toml, strings};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
 /// Directories under `crates/` or `testing/` that hold data, not a package: the
 /// spec inventories `check-conformance` reads.
 const DATA_DIRS: &[&str] = &["testing/conformance"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// Lowest first. A normal or build dependency must land in a strictly lower layer.
 pub(super) const LAYERS: &[&[&str]] = &[
@@ -329,6 +330,15 @@ pub(super) const WINNOW_HOMES: &[(&str, &[&str])] = &[
     ),
 ];
 
+/// A crate whose code outside tests names none of these words, and why. A word
+/// ending in `*` bans every identifier it starts. Comments and literals are
+/// not code; a type that merely shares a name is a finding too.
+const NAME_BANS: &[(&str, &[&str], &str)] = &[(
+    "tutti-units",
+    &["alloc", "Vec", "String", "Box", "Arc", "atomic", "Atomic*"],
+    "tutti-units has no allocation and no atomics; the name belongs in a crate above it",
+)];
+
 pub(super) struct Pkg {
     pub(super) name: String,
     pub(super) dir: String,
@@ -536,12 +546,56 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
                 continue;
             }
             let text = tree.read(&path).unwrap_or_default();
-            if super::lex::blank(&text).contains("winnow") {
+            if blank(&text).contains("winnow") {
                 bad.push(format!(
                     "{path} names winnow outside {}",
                     modules.join(", ")
                 ));
             }
+        }
+    }
+
+    // A crate's code names none of its banned words.
+    for (krate, words, why) in NAME_BANS {
+        if !by_name.contains_key(krate) {
+            bad.push(format!(
+                "NAME_BANS names {krate}, which is not a workspace member; move the row with the crate"
+            ));
+            continue;
+        }
+        let mut read = 0;
+        for path in tree.files(&format!("crates/{krate}/src"), &skipped) {
+            if !path.ends_with(".rs") || is_test_file(&path) {
+                continue;
+            }
+            read += 1;
+            let code = blank(&tree.read(&path).unwrap_or_default());
+            let ranges = test_ranges(&code);
+            let mut at = 0;
+            while at < code.len() {
+                let (ident, end) = ident_at(&code, at);
+                if ident.is_empty() {
+                    at += code[at..].chars().next().map_or(1, char::len_utf8);
+                    continue;
+                }
+                let start = end - ident.len();
+                let banned = words.iter().any(|w| match w.strip_suffix('*') {
+                    Some(prefix) => ident.starts_with(prefix),
+                    None => ident == *w,
+                });
+                if banned && !ranges.iter().any(|&(s, e)| start >= s && start <= e) {
+                    bad.push(format!(
+                        "{path}:{}: `{ident}`: {why}",
+                        line_of(&code, start)
+                    ));
+                }
+                at = end;
+            }
+        }
+        if read == 0 {
+            bad.push(format!(
+                "{krate}: no source file under crates/{krate}/src; the scan is broken"
+            ));
         }
     }
 
@@ -735,6 +789,96 @@ mod tests {
         v.retain(|m| m.1 != extra.1);
         v.push(extra);
         run(&v)
+    }
+
+    const UNITS_LIB: &str = "crates/tutti-units/src/lib.rs";
+
+    fn units_with(files: &[(&str, &str)]) -> Report {
+        let mut m = ws(&base());
+        for (path, text) in files {
+            m.files.insert((*path).to_owned(), (*text).to_owned());
+        }
+        check(&m)
+    }
+
+    #[test]
+    fn a_tutti_units_without_sources_fails_the_scan() {
+        let mut m = ws(&base());
+        m.files.remove(UNITS_LIB);
+        let r = check(&m);
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("tutti-units: no source file under crates/tutti-units/src")),
+            "{:?}",
+            r.findings
+        );
+    }
+
+    #[test]
+    fn a_name_ban_on_a_crate_that_is_not_a_member_is_a_stale_row() {
+        let members: Vec<_> = base()
+            .into_iter()
+            .filter(|&(_, name, _)| name != "tutti-units")
+            .map(|(dir, name, _)| (dir, name, ""))
+            .collect();
+        let r = run(&members);
+        assert!(
+            r.findings
+                .iter()
+                .any(|l| l.contains("NAME_BANS names tutti-units, which is not a workspace member")),
+            "{:?}",
+            r.findings
+        );
+    }
+
+    #[test]
+    fn every_banned_name_in_tutti_units_fails_with_its_line() {
+        for (src, name) in [
+            ("extern crate alloc;\n", "alloc"),
+            ("use alloc::borrow::ToOwned;\n", "alloc"),
+            ("fn f(_: Vec<u8>) {}\n", "Vec"),
+            ("fn f(_: String) {}\n", "String"),
+            ("fn f(_: Box<u8>) {}\n", "Box"),
+            ("fn f(_: Arc<u8>) {}\n", "Arc"),
+            ("use core::sync::atomic::Ordering;\n", "atomic"),
+            ("struct C(core::sync::atomic::AtomicU64);\n", "AtomicU64"),
+        ] {
+            let r = units_with(&[(UNITS_LIB, &format!("\n{src}"))]);
+            assert!(
+                r.findings
+                    .iter()
+                    .any(|l| l.contains(&format!("{UNITS_LIB}:2: `{name}`"))),
+                "{src}: {:?}",
+                r.findings
+            );
+        }
+    }
+
+    #[test]
+    fn prose_literals_tests_longer_names_and_other_crates_pass_in_tutti_units() {
+        let src = "/// A `Vec` of `Arc`s in prose.\n\
+                   fn f() -> &'static str { \"String Box alloc atomic\" }\n\
+                   struct Vector; struct Stringly; struct Allocation; struct Atomically;\n\
+                   #[cfg(test)]\nmod tests { fn t(_: Vec<u8>) {} }\n";
+        // A name that merely starts with "Atomic" is the one deliberate over-match.
+        let r = units_with(&[(UNITS_LIB, src)]);
+        assert_eq!(r.findings.len(), 2, "{:?}", r.findings);
+        assert!(r.findings[1].contains("`Atomically`"));
+        let src = src.replace("struct Atomically;", "");
+        let r = units_with(&[
+            (UNITS_LIB, &src),
+            (
+                "crates/tutti-units/src/units/tests.rs",
+                "fn t(_: Vec<u8>) {}\n",
+            ),
+            (
+                "crates/tutti-units/src/units/x/tests/a.rs",
+                "fn t(_: Vec<u8>) {}\n",
+            ),
+            ("crates/tutti-ump/src/lib.rs", "fn t(_: Vec<u8>) {}\n"),
+        ]);
+        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]

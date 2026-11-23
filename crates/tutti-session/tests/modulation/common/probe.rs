@@ -106,10 +106,20 @@ impl Node for ProbeUnit {
 
 impl ParamNode for ProbeUnit {
     fn param_set(&self) -> ParamSet {
-        let set = ParamSet::builder().param(self.param, Arc::clone(&self.knob));
+        let set = ParamSet::builder().param(
+            tutti_graph::DeclaredUnit::of::<Hz>(),
+            self.param,
+            Arc::clone(&self.knob),
+        );
         match self.extra {
             None => set.build(),
-            Some(extra) => set.param(extra, Arc::clone(&self.other)).build(),
+            Some(extra) => set
+                .param(
+                    tutti_graph::DeclaredUnit::of::<Hz>(),
+                    extra,
+                    Arc::clone(&self.other),
+                )
+                .build(),
         }
     }
 
@@ -131,15 +141,7 @@ impl IntoNode for ProbeUnit {
     }
 }
 
-impl SessionNode for ProbeUnit {
-    fn params(controls: &ParamSet) -> Option<ParamSet> {
-        Some(controls.clone())
-    }
-
-    fn reclaimer(_: &ParamSet) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for ProbeUnit {}
 
 /// `level` on executor frames `[from, to)`, else 0, on both channels.
 #[derive(Clone)]

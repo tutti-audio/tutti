@@ -90,25 +90,20 @@ mod tests {
     // `ticks` inverts `duration` at Apple Silicon's base: a second is 24 000 000
     // ticks, 125 ns is 3, and a duration saturates rather than wraps.
     #[test]
-    fn ticks_invert_duration() {
+    fn ticks_invert_duration_and_are_nanos_by_the_bases_ratio() {
         let base = Timebase::new(125, 3).unwrap();
         assert_eq!(base.ticks(Duration::from_secs(1)), 24_000_000);
         assert_eq!(base.ticks(Duration::from_nanos(125)), 3);
         assert_eq!(base.ticks(base.duration(123_456_789)), 123_456_789);
         assert_eq!(base.ticks(Duration::MAX), u64::MAX);
-    }
-
-    // `ticks` is `nanos * denom / numer`, pinned at Apple Silicon's 125/3 and an
-    // Intel Mac's 1/1.
-    #[test]
-    fn ticks_of_literal_nanoseconds() {
-        let apple = Timebase::new(125, 3).unwrap();
+        // `ticks` is `nanos * denom / numer`, pinned at Apple Silicon's 125/3 and
+        // an Intel Mac's 1/1.
         assert_eq!(
-            apple.ticks(Duration::from_nanos(50_000_000_000)),
+            base.ticks(Duration::from_nanos(50_000_000_000)),
             1_200_000_000
         );
         assert_eq!(
-            apple.ticks(Duration::from_nanos(49_990_000_000)),
+            base.ticks(Duration::from_nanos(49_990_000_000)),
             1_199_760_000
         );
         let intel = Timebase::new(1, 1).unwrap();

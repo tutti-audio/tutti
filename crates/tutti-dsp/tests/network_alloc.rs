@@ -63,7 +63,7 @@ fn freeverb_retargets_and_renders_without_allocating() {
 fn the_fdn_retargets_and_renders_without_allocating() {
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
     use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay};
-    use tutti_units::{Db, Depth, Hz, StereoWidth};
+    use tutti_units::{Bipolar, Db, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
     let layout = FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap();
@@ -82,7 +82,7 @@ fn the_fdn_retargets_and_renders_without_allocating() {
             size: Mix::new(k),
             diffusion: Mix::new(1.0 - k),
             pre_delay: Seconds::new(0.05 * k),
-            modulation: Depth::of(k),
+            modulation: Bipolar::of(k),
             rate: Hz::new(0.1 + k),
             width: StereoWidth::new(2.0 * k),
             wet: Db::new(-12.0 * k),

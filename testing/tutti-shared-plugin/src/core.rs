@@ -38,7 +38,7 @@
 //! What the plugin says of its parameters, in each format that has the concept:
 //!
 //! - **Group.** `aux` is in the group `Filter`: VST3's unit `Filter`, the
-//!   innermost of `Voices` > `Oscillator` > `Filter` (the units are declared and
+//!   innermost of "Voices" > `Oscillator` > `Filter` (the units are declared and
 //!   hold nothing else), CLAP's module `Voices/Oscillator/Filter`, AU's clump 3
 //!   named `Filter`. The others have none; VST2 declares none.
 //! - **Roles** (VST3's `IParameterFunctionName`, asked per unit): the dry/wet mix
@@ -54,11 +54,16 @@
 //!   in AU and `effSetBypass` in VST2 (neither a parameter). A write reaches the transcript as
 //!   `bypass`'s point, `1` bypassed. The plugin renders the same either way.
 //! - **Programs.** VST3 declares the program list [`PROGRAM_LIST`] in the unit
-//!   `Voices`, and selects a program through [`PROGRAM`], a stepped parameter in
+//!   "Voices", and selects a program through [`PROGRAM`], a stepped parameter in
 //!   that unit flagged `kIsProgramChange` (two steps for three programs). VST2
 //!   declares the same programs by number (`numPrograms`, the program names and
 //!   the current program, [`Core::program`]), and AU as factory presets numbered
 //!   `0`, `1` and `2`. CLAP declares none.
+//! - **Key names.** CLAP (`note-name`), VST3 (`IKeyswitchController`, one switch
+//!   for each key) and VST2 (`effGetMidiKeyName`, in every program) name the keys
+//!   of [`NOTE_NAMES`]. AU declares none.
+//! - **Short names.** VST3's `shortTitle` and VST2's `shortLabel` are
+//!   [`SHORT_NAMES`]; CLAP and AU have no short name.
 //! - **Controller table.** VST3's `IMidiMapping` and AU's
 //!   mapping table each declare one mapping: Control Change 74 on
 //!   channel 0 drives `level`.
@@ -255,15 +260,15 @@ pub const BYPASS: u32 = 5;
 /// program is [`Core::program`].
 pub const PROGRAM: u32 = 6;
 /// The module CLAP puts `aux` in: the path of the `Filter` unit VST3 puts it in
-/// (`Voices` > `Oscillator` > `Filter`).
+/// ("Voices" > `Oscillator` > `Filter`).
 pub const AUX_MODULE: &str = "Voices/Oscillator/Filter";
 /// The unit tree VST3 declares, `(id, parent, name)`, the root being unit `0`:
-/// `Voices` > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
+/// "Voices" > `Oscillator` > `Filter`. Only `aux` is in a unit, [`AUX_UNIT`].
 pub const UNITS: [(i32, i32, &str); 3] = [(1, 0, "Voices"), (2, 1, "Oscillator"), (3, 2, "Filter")];
 /// The program list VST3 declares: its id, its name and its programs, in
 /// order. The unit [`PROGRAM_UNIT`] selects it.
 pub const PROGRAM_LIST: (i32, &str, [&str; 3]) = (1, "Factory", ["Init", "Pad", "Lead"]);
-/// The unit that selects [`PROGRAM_LIST`] and holds [`PROGRAM`]: `Voices`.
+/// The unit that selects [`PROGRAM_LIST`] and holds [`PROGRAM`]: "Voices".
 pub const PROGRAM_UNIT: i32 = 1;
 /// The unit `aux` is in.
 pub const AUX_UNIT: i32 = 3;
@@ -285,6 +290,10 @@ pub const LISTED_IDS: [u32; 6] = [LEVEL, AUX, MODE, TONE, METER, BYPASS];
 pub const LISTED: u32 = LISTED_IDS.len() as u32;
 /// The ids VST3 lists, in list order: [`LISTED_IDS`] and [`PROGRAM`].
 pub const VST3_LISTED_IDS: [u32; 7] = [LEVEL, AUX, MODE, TONE, METER, BYPASS, PROGRAM];
+/// The keys the plugin names, `(key, name)`: a drum kit's two pads.
+pub const NOTE_NAMES: [(u8, &str); 2] = [(36, "Kick"), (38, "Snare")];
+/// Parameter short names, by id, where the format has one.
+pub const SHORT_NAMES: [&str; 7] = ["lvl", "aux", "mod", "tne", "mtr", "byp", "prg"];
 /// Parameter names, by id.
 pub const NAMES: [&str; 7] = ["level", "aux", "mode", "tone", "meter", "bypass", "program"];
 /// The plain value of `TONE` at its normalized minimum, its largest.

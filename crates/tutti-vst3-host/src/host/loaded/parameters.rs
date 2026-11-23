@@ -6,7 +6,8 @@ use crate::types::{PlainRange, ProcessContextRequirements, UnitId};
 use tutti_plugin_types::AutomationMode;
 use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::ParamUnit;
-use tutti_plugin_types::{Axis, ControlRole};
+use tutti_plugin_types::{Axis, ControlRole, NoteName, ParamGroup};
+use tutti_ump::{MidiChannel, NoteNumber};
 
 impl Vst3Loaded {
     // VST3 enumerates parameters by index (`getParameterInfo`) and addresses
@@ -78,7 +79,7 @@ impl Vst3Loaded {
     /// carrying an invented entry.
     pub fn parameter_list(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         let units = self.units(main);
-        let groups = unit_names(&units);
+        let groups = unit_paths(&units);
 
         let list = (0..self.parameter_count(main))
             .filter_map(|i| {
@@ -231,6 +232,48 @@ impl Vst3Loaded {
         index: u32,
     ) -> Option<Vst3KeyswitchInfo> {
         self.plugin.keyswitch_info(main, bus_index, channel, index)
+    }
+
+    /// The plugin's key names for the first event input bus: each keyswitch's
+    /// title on every key of its range. A list the plugin gives every channel
+    /// alike is for every channel; one that differs by channel is named for
+    /// each, and a channel with none adds none.
+    pub(crate) fn declared_note_names(&self, main: MainThreadMarker) -> Vec<NoteName> {
+        let per_channel: Vec<Vec<(u8, String)>> = MidiChannel::all()
+            .map(|channel| {
+                let channel = i16::from(channel.get());
+                (0..self.keyswitch_count(main, 0, channel))
+                    .filter_map(|i| self.keyswitch_info(main, 0, channel, i))
+                    .flat_map(|k| {
+                        let (min, max) = (k.keyswitch_min.max(0), k.keyswitch_max.min(127));
+                        let title = k.title_string();
+                        (min..=max)
+                            .filter_map(move |key| Some((u8::try_from(key).ok()?, title.clone())))
+                    })
+                    .collect()
+            })
+            .collect();
+        let name = |key, channel, text: &String| {
+            Some(NoteName {
+                key: NoteNumber::new(key)?,
+                channel,
+                text: text.clone(),
+            })
+        };
+        if per_channel.windows(2).all(|w| w[0] == w[1]) {
+            return per_channel[0]
+                .iter()
+                .filter_map(|(key, text)| name(*key, None, text))
+                .collect();
+        }
+        MidiChannel::all()
+            .zip(&per_channel)
+            .flat_map(|(channel, names)| {
+                names
+                    .iter()
+                    .filter_map(move |(key, text)| name(*key, Some(channel), text))
+            })
+            .collect()
     }
 
     /// Asks the plugin (via `IRemapParamID`) for the parameter ID in *this*
@@ -416,7 +459,7 @@ fn apply_function_roles(
 pub(super) fn build_param_info(
     info: Vst3ParameterInfo,
     plain: Option<(PlainRange, f64)>,
-    groups: &HashMap<UnitId, &str>,
+    groups: &HashMap<UnitId, String>,
 ) -> ParameterInfo {
     // VST3 reports every one of these, so all six are known.
     const KNOWN: ParamFlags = ParamFlags::AUTOMATABLE
@@ -468,10 +511,7 @@ pub(super) fn build_param_info(
     // alternatives are worse: a lookup that panicked would take down a
     // parameter list over a display label, and one that fell back to a
     // neighbour would mislabel silently.
-    let group = groups
-        .get(&info.unit_id())
-        .map(|n| n.to_string())
-        .unwrap_or_default();
+    let group = groups.get(&info.unit_id()).cloned().unwrap_or_default();
     ParameterInfo::new(ParamId::new(info.id()), info.title_string())
         .with_unit(info.units_string())
         .with_range(range)
@@ -480,7 +520,77 @@ pub(super) fn build_param_info(
         // (`normalizedParamToPlain`, whatever its shape).
         .with_flags(KNOWN, reported)
         .with_group(group)
+        .with_short_name(info.short_title_string())
         .with_measures(measures)
+}
+
+/// A unit's named ancestors, nearest first; a cycle in a plugin's tree ends after
+/// as many steps as there are units.
+fn named_ancestors(
+    units: &[Vst3UnitInfo],
+    names: &HashMap<UnitId, &str>,
+    unit: &Vst3UnitInfo,
+) -> Vec<UnitId> {
+    let mut named = Vec::new();
+    let mut at = unit.parent;
+    for _ in 0..units.len() {
+        let Some(id) = at else { break };
+        if names.contains_key(&id) {
+            named.push(id);
+        }
+        at = units.iter().find(|u| u.id == id).and_then(|u| u.parent);
+    }
+    named
+}
+
+/// The path of each unit that names a group ([`unit_names`]): its named
+/// ancestors and its own name, root first, joined with `/`. A `/` inside a name
+/// is kept as written, so a path with one is ambiguous.
+pub(crate) fn unit_paths(units: &[Vst3UnitInfo]) -> HashMap<UnitId, String> {
+    let names = unit_names(units);
+    units
+        .iter()
+        .filter(|u| names.contains_key(&u.id))
+        .map(|u| {
+            let mut path: Vec<&str> = named_ancestors(units, &names, u)
+                .iter()
+                .map(|id| names[id])
+                .collect();
+            path.reverse();
+            path.push(&u.name);
+            (u.id, path.join("/"))
+        })
+        .collect()
+}
+
+/// The units that name a group as a tree, a parent before its children, each
+/// identified by its [`unit_paths`] path. A unit's parent is its nearest ancestor
+/// that names a group, so an unnamed or unpublished unit between two is skipped
+/// over, and a unit under the root is at the top.
+pub(crate) fn unit_groups(units: &[Vst3UnitInfo]) -> Vec<ParamGroup> {
+    let names = unit_names(units);
+    let paths = unit_paths(units);
+    let mut groups: Vec<(usize, ParamGroup)> = units
+        .iter()
+        .filter_map(|u| {
+            let path = paths.get(&u.id)?;
+            let ancestors = named_ancestors(units, &names, u);
+            // The nearest named ancestor's own path, so a parent is always a listed
+            // path, whatever a label holds.
+            let parent = ancestors.first().map(|id| paths[id].clone());
+            let depth = ancestors.len();
+            Some((
+                depth,
+                ParamGroup {
+                    path: path.clone(),
+                    label: u.name.clone(),
+                    parent,
+                },
+            ))
+        })
+        .collect();
+    groups.sort_by_key(|(depth, _)| *depth);
+    groups.into_iter().map(|(_, group)| group).collect()
 }
 
 #[cfg(test)]
@@ -506,6 +616,77 @@ mod unit_group_tests {
         let groups = unit_names(&units);
         assert_eq!(groups.get(&UnitId::new(1)).copied(), Some("Filter"));
         assert_eq!(groups.get(&UnitId::new(2)).copied(), Some("Amp"));
+    }
+
+    /// A unit's parent is its nearest named ancestor, a parent comes before its
+    /// children, and a unit under an unnamed unit skips over it.
+    #[test]
+    fn units_become_a_tree_of_groups_a_parent_first() {
+        let mut units = [
+            unit(3, "Filter"),
+            unit(2, "Hidden"),
+            unit(1, "Voices"),
+            unit(4, "Amp"),
+        ];
+        units[0].parent = Some(UnitId::new(2));
+        units[1].parent = Some(UnitId::new(1));
+        units[1].name = String::new();
+        let groups: Vec<_> = unit_groups(&units)
+            .into_iter()
+            .map(|g| (g.path, g.label, g.parent))
+            .collect();
+        let named = |path: &str, label: &str, p: Option<&str>| {
+            (path.to_string(), label.to_string(), p.map(str::to_string))
+        };
+        assert_eq!(
+            groups,
+            [
+                named("Voices", "Voices", None),
+                named("Amp", "Amp", None),
+                named("Voices/Filter", "Filter", Some("Voices")),
+            ]
+        );
+    }
+
+    /// A label holding a `/` does not split: its unit's parent is the listed path
+    /// of its ancestor, and every parent is some group's path.
+    #[test]
+    fn a_slash_in_a_label_leaves_every_parent_a_listed_path() {
+        let mut units = [unit(1, "A"), unit(2, "B/C"), unit(3, "D")];
+        units[1].parent = Some(UnitId::new(1));
+        units[2].parent = Some(UnitId::new(2));
+        let groups = unit_groups(&units);
+        let by_label = |l: &str| groups.iter().find(|g| g.label == l).unwrap();
+        assert_eq!(by_label("B/C").path, "A/B/C");
+        assert_eq!(by_label("B/C").parent.as_deref(), Some("A"));
+        assert_eq!(by_label("D").parent.as_deref(), Some("A/B/C"));
+        for parent in groups.iter().filter_map(|g| g.parent.as_deref()) {
+            assert!(groups.iter().any(|g| g.path == parent), "{parent}");
+        }
+    }
+
+    /// Two units that share a label under different parents are two groups with
+    /// two paths, and each parameter's group is its own unit's path.
+    #[test]
+    fn a_label_under_two_parents_is_two_paths() {
+        let mut units = [unit(1, "A"), unit(2, "B"), unit(3, "Osc"), unit(4, "Osc")];
+        units[2].parent = Some(UnitId::new(1));
+        units[3].parent = Some(UnitId::new(2));
+        let paths = unit_paths(&units);
+        assert_eq!(paths[&UnitId::new(3)], "A/Osc");
+        assert_eq!(paths[&UnitId::new(4)], "B/Osc");
+        let parents: Vec<_> = unit_groups(&units)
+            .into_iter()
+            .filter(|g| g.label == "Osc")
+            .map(|g| (g.path, g.parent))
+            .collect();
+        assert_eq!(
+            parents,
+            [
+                ("A/Osc".to_string(), Some("A".to_string())),
+                ("B/Osc".to_string(), Some("B".to_string())),
+            ]
+        );
     }
 
     /// The root unit names no group.

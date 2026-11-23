@@ -140,6 +140,14 @@ impl<U: ParamValue> sealed::Store for ParamTarget<U> {
     }
 }
 
+impl<U: ParamValue> sealed::Lane for ParamTarget<U> {
+    fn delivered(self, params: &Params) -> Option<U> {
+        params
+            .lane(self.node, self.addr, self.owner)
+            .map(U::from_cell)
+    }
+}
+
 target_builders!(moved [U: ParamValue] ParamTarget<U>);
 
 /// What a control shows of a native param ([`ParamTarget::info`]).

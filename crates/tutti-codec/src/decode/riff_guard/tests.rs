@@ -299,8 +299,8 @@ fn a_bad_mp3_sync_before_a_wave_header_does_not_hide_it() {
     assert!(guard(&bytes).is_err());
 }
 
-/// A `FORM` prefix: AIFF is not read here, so the probe scans on to
-/// the WAVE header.
+/// A `FORM` prefix is no anchor to the guard (an AIFF holds no `fmt ` chunk
+/// to check), so it scans on to the WAVE header.
 #[test]
 fn a_form_marker_does_not_hide_a_later_wave_header() {
     let mut bytes = b"FORM".to_vec();

@@ -8,7 +8,7 @@
 
 use tutti_curve::Law;
 
-use tutti_units::{Depth, Phase, Real};
+use tutti_units::{Bipolar, Phase, Real};
 
 // =========================================================================
 // Value vocabulary
@@ -157,12 +157,12 @@ impl core::fmt::Display for LfoShape {
 /// at no input to 1 at full input, and none leaves `[0, 1]` on the way, so the
 /// offset never exceeds `depth`. `Hold` is 0 until the input is exactly full.
 ///
-/// The return is a bare `R`, not a [`Depth`]: it is an offset in the
+/// The return is a bare `R`, not a [`Bipolar`]: it is an offset in the
 /// *target's* units — Hz for a cutoff, linear gain for a fader — which the
 /// caller has already scaled by the target's range. Only the input amount is a
-/// `Depth`.
+/// `Bipolar`.
 #[inline]
-pub fn shape<R: Real>(x: R, depth: Depth, polarity: Polarity, curve: Law) -> R {
+pub fn shape<R: Real>(x: R, depth: Bipolar, polarity: Polarity, curve: Law) -> R {
     // The depth crosses into the signal's lane once per call.
     let depth = R::from_unit(depth);
     match polarity {

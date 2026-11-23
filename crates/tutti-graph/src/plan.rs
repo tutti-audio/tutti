@@ -727,10 +727,8 @@ impl Direct {
 /// plus the [`PlanUnit`] lookup it replaces.
 ///
 /// Derived from `ops`, `audio_list`, `event_list` and `units` alone
-/// ([`NodeTables::lower`]). `verify` checks every record against its op
-/// directly, without re-running the lowering (rule 7), so the executor,
-/// which reads only this, runs what the verifier checked — even if the
-/// lowering has a bug.
+/// ([`NodeTables::lower`]), the one place that builds a record. The
+/// executor reads only this.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NodeRec {
     /// Index into [`Plan::units`].
@@ -1473,5 +1471,76 @@ impl Delta {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.insert.is_empty() && self.retire.is_empty() && self.replace.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every stereo shape, over each way its slots can fall: a lowered
+    /// direct form lists its distinct slots ascending, gives each output
+    /// channel exactly one entry holding that channel's slot, and sends each
+    /// input channel to a read entry holding its slot (or marks it in place).
+    /// The expected table is read off the ports, not off `Direct::lower`.
+    #[test]
+    fn a_direct_lowering_borrows_exactly_the_ports_buffers_in_ascending_slot_order() {
+        const OUT: [[u32; 2]; 4] = [[10, 20], [20, 10], [30, 5], [7, 8]];
+        const IN: [[u32; 2]; 4] = [[50, 60], [60, 50], [50, 50], [4, 40]];
+        let mut lowered = 0;
+        for (ins, outs) in Direct::SHAPES {
+            for out in OUT {
+                for input in IN {
+                    for mask in 0..1u8 << ins {
+                        let mut ain = input[..ins].to_vec();
+                        let mut in_place = InPlaceMask::NONE;
+                        for c in (0..ins).filter(|&c| mask >> c & 1 == 1) {
+                            // An in-place channel reads the slot it writes.
+                            if c >= outs {
+                                continue;
+                            }
+                            ain[c] = out[c];
+                            in_place = in_place.with(c);
+                        }
+                        let aout = &out[..outs];
+                        let d = Direct::lower(&ain, aout, in_place).expect("a stereo shape");
+                        lowered += 1;
+                        let count = usize::from(d.count);
+                        let (slots, role) = (&d.slots[..count], &d.role[..count]);
+                        assert!(slots.windows(2).all(|w| w[0] < w[1]), "{d:?}");
+                        for (c, &s) in aout.iter().enumerate() {
+                            let mine: Vec<usize> = (0..count)
+                                .filter(|&i| role[i] != Direct::READ && usize::from(role[i]) == c)
+                                .collect();
+                            assert_eq!(mine.len(), 1, "{d:?}");
+                            assert_eq!(slots[mine[0]], s, "{d:?}");
+                        }
+                        let mut reads: Vec<u32> = ain
+                            .iter()
+                            .enumerate()
+                            .filter(|&(c, _)| !in_place.get(c))
+                            .map(|(_, &s)| s)
+                            .collect();
+                        reads.sort_unstable();
+                        reads.dedup();
+                        let read_slots: Vec<u32> = (0..count)
+                            .filter(|&i| role[i] == Direct::READ)
+                            .map(|i| slots[i])
+                            .collect();
+                        assert_eq!(read_slots, reads, "no read is missing or extra: {d:?}");
+                        for (c, &s) in ain.iter().enumerate() {
+                            if in_place.get(c) {
+                                assert_eq!(d.input[c], Direct::IN_PLACE, "{d:?}");
+                            } else {
+                                let r = usize::from(d.input[c]);
+                                assert_eq!((role[r], slots[r]), (Direct::READ, s), "{d:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(lowered > 100, "the enumeration ran: {lowered}");
+        assert_eq!(Direct::lower(&[1, 2, 3], &[4, 5], InPlaceMask::NONE), None);
     }
 }

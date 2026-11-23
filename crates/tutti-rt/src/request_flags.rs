@@ -24,14 +24,7 @@
 //!
 //! The model in `tests/request_flags_loom.rs` runs this code.
 
-use sync::{AtomicU32, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, Ordering};
-}
+use crate::sync::{AtomicU32, Ordering};
 
 /// Flags in an [`AtomicRequestFlags`].
 pub(crate) const REQUEST_FLAGS: u8 = 32;

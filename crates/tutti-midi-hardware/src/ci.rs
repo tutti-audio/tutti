@@ -770,8 +770,7 @@ impl Running {
             .collect();
         let max = MAX_SYSEX.get() as usize;
         let lanes = members.len().max(1);
-        let room = SysexAssembler::room_for(max, 1, lanes);
-        let assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
+        let assembler = SysexAssembler::boxed(max, 1, lanes);
         let mut running = Self {
             identity,
             members,
@@ -852,8 +851,7 @@ impl Running {
         // is not finished.
         let max = MAX_SYSEX.get() as usize;
         let lanes = self.members.len().max(1);
-        let room = SysexAssembler::room_for(max, 1, lanes);
-        self.assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), max, lanes);
+        self.assembler = SysexAssembler::boxed(max, 1, lanes);
         changes.refused += send(out, &sends);
     }
 }
@@ -1361,20 +1359,11 @@ mod tests {
 
     use tutti_midi_ci::{CiCategories, DiscoveryData};
     use tutti_midi_device::{EndpointId, PortDirection};
-    use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
     use super::*;
     use crate::MidiSession;
     use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-
-    fn identity() -> DeviceIdentity {
-        DeviceIdentity {
-            manufacturer: ManufacturerId::new(0x41).unwrap(),
-            family: [U7::of(1), U7::of(2)],
-            model: [U7::of(3), U7::of(4)],
-            revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-        }
-    }
+    use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
     /// The output of a fake device, and the counters of what it was sent.
     fn output() -> (OpenOutput, FakeCounters) {

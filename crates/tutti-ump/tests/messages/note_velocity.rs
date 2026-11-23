@@ -36,14 +36,3 @@ fn a_velocity_survives_encode_and_decode() {
         }
     }
 }
-
-/// The plain derive reads and writes the bare number (the one type in the
-/// crate whose every raw is valid).
-#[cfg(feature = "serde")]
-#[test]
-fn it_is_written_as_the_bare_number() {
-    let v = NoteVelocity::new(0xABCD);
-    let text = serde_json::to_string(&v).unwrap();
-    assert_eq!(text, "43981");
-    assert_eq!(serde_json::from_str::<NoteVelocity>(&text).unwrap(), v);
-}

@@ -27,15 +27,10 @@
 //!    node's shape declares, a delay output and a feedback slot all their
 //!    FIFO can hold at the source's declared rate, a merge the sum of its
 //!    inputs' (so nothing past a writer can refuse or hold back an event).
-//! 7. **The lowered node tables** the executor actually reads say what the
-//!    ops say, record by record — checked against each op directly, not by
-//!    re-running the lowering — so rules 1–6 are about what runs.
-//!
-//! 9. **Params**: each node op's driven params are in strict port order,
+//! 7. **Params**: each node op's driven params are in strict port order,
 //!    each a param its unit declares, and each port's event source is a
 //!    read of the op (rules 2–4 cover it like an input). A port has one
 //!    source by construction: its value replaces the base.
-//!
 //! 8. **Fades** ([`verify_fades`], on a plan *and the delta that installs
 //!    it*): a crossfade's outgoing unit runs on the node op's own input slots
 //!    and the blend writes its own output slots, so rules 1–4 already cover
@@ -52,7 +47,7 @@
 //! run it on every proptest graph.
 
 use crate::io::PortKind;
-use crate::node::{InPlaceMask, MAX_PORTS};
+use crate::node::MAX_PORTS;
 use crate::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 
 use super::colour::Reach;
@@ -237,7 +232,7 @@ fn verify_sums(plan: &Plan) -> Result<(), VerifyError> {
     Ok(())
 }
 
-/// Rule 9: each node op's driven params.
+/// Rule 7: each node op's driven params.
 fn verify_params(plan: &Plan) -> Result<(), VerifyError> {
     let mut covered = 0usize;
     for op in &plan.ops {
@@ -486,196 +481,7 @@ pub fn verify(plan: &Plan) -> Result<(), VerifyError> {
     verify_in_place(plan)?;
     verify_tasks(plan)?;
     verify_tables(plan)?;
-    verify_lowered(plan)?;
     Ok(())
-}
-
-/// Rule 7: the executor runs node ops from `NodeTables`, not from `ops`
-/// directly, so everything above is only a proof about what runs if the
-/// tables say the same thing.
-///
-/// Checked **independently of `NodeTables::lower`**. Re-running the lowering
-/// and comparing would only catch a stale table, never a bug in the lowering
-/// itself. So each record is checked field by field against its op:
-///
-/// - the unit fields against `Plan::units`;
-/// - the port slots against the op's four lists;
-/// - each borrow run sorted, and exactly the op's requests with the right
-///   ports: the audio inputs not aliased in place and every audio output,
-///   then every event input and output;
-/// - the `Form` against the op's shape, with the slots it names. `Split`
-///   needs two different slots, and `InPlace` one slot that is both the
-///   input and the output.
-fn verify_lowered(plan: &Plan) -> Result<(), VerifyError> {
-    use crate::arena::Role;
-    use crate::plan::Form;
-
-    let t = &plan.nodes;
-    if t.recs.len() != plan.units.len() {
-        return Err(VerifyError(format!(
-            "the executor's node tables hold {} records for {} units",
-            t.recs.len(),
-            plan.units.len()
-        )));
-    }
-    for op in &plan.ops {
-        let Op::Node {
-            unit,
-            audio_in,
-            audio_out,
-            event_in,
-            event_out,
-            in_place,
-            params,
-        } = *op
-        else {
-            continue;
-        };
-        let bad = |what: &str| VerifyError(format!("the node record for unit {unit} {what}"));
-        let (Some(rec), Some(pu)) = (t.recs.get(unit as usize), plan.units.get(unit as usize))
-        else {
-            return Err(bad("is missing"));
-        };
-        if rec.unit != unit
-            || rec.store != pu.idx.0
-            || rec.generation != pu.generation
-            || rec.arrival != pu.arrival
-            || rec.park_after != pu.shape.park_after()
-            || rec.latency != pu.shape.latency.samples()
-            || rec.tail != pu.shape.tail
-            || rec.event_capacity != pu.shape.event_capacity
-            || rec.in_place != in_place
-            || rec.params != params
-            || rec.declared != pu.shape.params
-        {
-            return Err(bad("disagrees with its unit or its in-place mask"));
-        }
-
-        let ain = &plan.audio_list[audio_in.range()];
-        let aout = &plan.audio_list[audio_out.range()];
-        let ein = &plan.event_list[event_in.range()];
-        let eout = &plan.event_list[event_out.range()];
-        let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
-        if counts != [ain.len(), aout.len(), ein.len(), eout.len()] {
-            return Err(bad("counts its ports differently from its op"));
-        }
-        let start = rec.ports as usize;
-        let total = counts.iter().sum::<usize>();
-        let listed = start
-            .checked_add(total)
-            .and_then(|end| t.slots.get(start..end));
-        let op_slots = ain.iter().chain(aout).chain(ein).chain(eout);
-        if !listed.is_some_and(|l| l.iter().eq(op_slots)) {
-            return Err(bad("lists other port slots than its op"));
-        }
-
-        // The requests the op makes, sorted here and independently of the
-        // lowering: what the walk needs is exactly this list, in this order.
-        let mut audio: Vec<(u32, Role)> = ain
-            .iter()
-            .enumerate()
-            .filter(|&(c, _)| !in_place.get(c))
-            .map(|(c, &s)| (s, Role::Read(c as u8)))
-            .chain(
-                aout.iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
-            )
-            .collect();
-        audio.sort_unstable();
-        let mut event: Vec<(u32, Role)> = ein
-            .iter()
-            .enumerate()
-            .map(|(c, &s)| (s, Role::Read(c as u8)))
-            .chain(
-                eout.iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
-            )
-            .collect();
-        event.sort_unstable();
-        for (run, want, kind) in [
-            (rec.borrows, &audio, "audio"),
-            (rec.event_borrows, &event, "event"),
-        ] {
-            let got = t.borrows.get(run.range());
-            if got != Some(want.as_slice()) {
-                return Err(bad(&format!(
-                    "borrows other {kind} buffers than its op, or unsorted"
-                )));
-            }
-        }
-
-        let events = !ein.is_empty() || !eout.is_empty();
-        let form_ok = match rec.form {
-            Form::General => events,
-            Form::Source { out } => !events && ain.is_empty() && aout == [out],
-            Form::Split { input, out } => {
-                !events && ain == [input] && aout == [out] && !in_place.get(0) && input != out
-            }
-            Form::InPlace { slot } => !events && ain == [slot] && aout == [slot] && in_place.get(0),
-            Form::Direct(d) => !events && direct_ok(&d, ain, aout, in_place),
-            // The walk is correct for any event-free shape, so `Audio` is
-            // not refused for a shape a direct form could have taken.
-            Form::Audio => !events,
-        };
-        if !form_ok {
-            return Err(bad(&format!(
-                "takes the {:?} form its op does not have",
-                rec.form
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Rule 7 for a [`Form::Direct`](crate::plan::Form) record: its slot table
-/// borrows exactly the op's buffers, in the order `Arena::direct` needs.
-///
-/// - The shape is one of `Direct::SHAPES`, and the record's counts match
-///   the op's.
-/// - The used slots are strictly ascending. That makes them distinct, so no
-///   slot is both read and written.
-/// - Each output channel owns exactly one entry, and that entry is its own
-///   slot.
-/// - Each input channel is either in place (and marked so in the op) or
-///   names a read entry that holds its slot.
-/// - Every read entry is some input's, so nothing extra is borrowed.
-fn direct_ok(d: &crate::plan::Direct, ain: &[u32], aout: &[u32], in_place: InPlaceMask) -> bool {
-    use crate::plan::Direct;
-    let count = usize::from(d.count);
-    let shape = (ain.len(), aout.len());
-    if !Direct::SHAPES.contains(&shape)
-        || (usize::from(d.ins), usize::from(d.outs)) != shape
-        || count > d.slots.len()
-    {
-        return false;
-    }
-    let (slots, role) = (&d.slots[..count], &d.role[..count]);
-    if slots.windows(2).any(|w| w[0] >= w[1]) {
-        return false;
-    }
-    let outputs_ok = aout.iter().enumerate().all(|(c, &s)| {
-        let mine: Vec<usize> = (0..count)
-            .filter(|&i| usize::from(role[i]) == c && role[i] != Direct::READ)
-            .collect();
-        mine.len() == 1 && slots[mine[0]] == s
-    });
-    let roles_ok = role
-        .iter()
-        .all(|&r| r == Direct::READ || usize::from(r) < aout.len());
-    let inputs_ok = d.input.iter().enumerate().all(|(c, &r)| match ain.get(c) {
-        None => r == Direct::IN_PLACE,
-        Some(_) if in_place.get(c) => r == Direct::IN_PLACE,
-        Some(&s) => {
-            let r = usize::from(r);
-            r < count && role[r] == Direct::READ && slots[r] == s
-        }
-    });
-    let reads_used = (0..count)
-        .filter(|&i| role[i] == Direct::READ)
-        .all(|i| d.input.iter().any(|&r| usize::from(r) == i));
-    outputs_ok && roles_ok && inputs_ok && reads_used
 }
 
 /// Rule 4, second half: an in-place bit means one slot.
@@ -1007,7 +813,7 @@ pub fn verify_fades(prev: Option<&Plan>, plan: &Plan, delta: &Delta) -> Result<(
 mod tests {
     use super::*;
     use crate::compile::{Shapes, compile};
-    use crate::node::Shape;
+    use crate::node::{InPlaceMask, Shape};
     use crate::spec::GraphSpec;
     use crate::{NodeKey, Topology};
     use crate::{NodeSpec, OutputPort, PortSource};
@@ -1106,7 +912,7 @@ mod tests {
         (plan, op)
     }
 
-    /// Rule 9, and the param reads the other rules see, each reject their
+    /// Rule 7, and the param reads the other rules see, each reject their
     /// own corruption of a driven plan.
     #[test]
     fn the_verifier_rejects_each_param_corruption() {
@@ -1363,27 +1169,6 @@ mod tests {
         assert!(verify(&bad).is_err());
     }
 
-    /// A node record's declared latency and tail (the halves of `park_after`
-    /// the silence skip rebuilds a narrowed figure from) must agree with its
-    /// unit's shape: a record that lied would park a node on the wrong ring.
-    #[test]
-    fn the_verifier_rejects_a_record_whose_latency_or_tail_lies() {
-        let good = independent_pair();
-        verify(&good).expect("sound");
-
-        let mut bad = good.clone();
-        bad.nodes.recs[0].latency += tutti_units::Samples::new(1);
-        assert!(verify(&bad).unwrap_err().0.contains("disagrees"));
-
-        let mut bad = good.clone();
-        bad.nodes.recs[0].tail = match bad.nodes.recs[0].tail {
-            tutti_units::Tail::Unbounded => tutti_units::Tail::None,
-            _ => tutti_units::Tail::Unbounded,
-        };
-        assert!(verify(&bad).unwrap_err().0.contains("disagrees"));
-    }
-
-    /// Every other structural rule rejects its own corruption.
     #[test]
     fn the_verifier_rejects_each_structural_corruption() {
         let good = independent_pair();
@@ -1487,194 +1272,235 @@ mod tests {
         assert!(verify(&bad).unwrap_err().0.contains("store index"));
     }
 
-    /// The executor reads node ops from the lowered tables, so a table that
-    /// says something the ops do not is refused — the rest of the verifier
-    /// would otherwise be a proof about code that does not run. Each case is
-    /// a mistake the *lowering* could make, which re-running the lowering
-    /// would not notice.
+    /// Every node record carries what the plan says: its unit's fields, the
+    /// shape's port counts, the op's slots and sorted borrow runs, and the
+    /// form its shape and slots call for. A table row is one node: a source
+    /// with latency and a finite tail, an in-place node with an unbounded
+    /// tail, a split, an event source and sink (the general form), a stereo
+    /// node (direct) and a three-channel one (the audio walk). The expected
+    /// values are read off the shapes and the plan's ops, never off the
+    /// lowering.
     #[test]
-    fn the_verifier_rejects_node_tables_that_disagree_with_the_ops() {
+    fn every_node_record_carries_what_the_plan_says() {
         use crate::arena::Role;
-        use crate::plan::Form;
-        let good = independent_pair();
-        verify(&good).expect("sound");
-        let slot_of = |p: &Plan, u: usize| match p.nodes.recs[u].form {
-            Form::Source { out } => out,
-            f => panic!("a generator lowers to a source, not {f:?}"),
-        };
-        let other = slot_of(&good, 1);
-        assert_ne!(slot_of(&good, 0), other);
-        let refused = |bad: &Plan, what: &str| {
-            let err = verify(bad).unwrap_err();
-            assert!(
-                err.0.contains("node record for unit") && err.0.contains(what),
-                "{err}"
-            );
-        };
-
-        // A record that runs unit 0 into unit 1's slot.
-        let mut bad = good.clone();
-        bad.nodes.recs[0].form = Form::Source { out: other };
-        refused(&bad, "form");
-
-        // A borrow request naming a slot the op does not write.
-        let mut bad = good.clone();
-        bad.nodes.borrows[0].0 = other;
-        refused(&bad, "borrows");
-
-        // A dropped borrow request.
-        let mut bad = good.clone();
-        bad.nodes.recs[0].borrows.len = 0;
-        refused(&bad, "borrows");
-
-        // A write request relabelled as a read.
-        let mut bad = good.clone();
-        bad.nodes.borrows[0].1 = Role::Read(0);
-        refused(&bad, "borrows");
-
-        // Port slots that are not the op's.
-        let mut bad = good.clone();
-        bad.nodes.slots[0] = other;
-        refused(&bad, "port slots");
-
-        // A unit field that is not the unit's.
-        let mut bad = good.clone();
-        bad.nodes.recs[0].store += 7;
-        refused(&bad, "its unit");
-
-        // The one-in/one-out shape: `Split` needs the two slots its op names,
-        // and is not `InPlace`.
-        let mut t = Topology::default();
-        let (generator, thru) = (NodeKey(1), NodeKey(2));
-        let (sg, st) = (
-            Shape::source_unassigned(ChannelLayout::MONO),
-            Shape::through_unassigned(ChannelLayout::MONO),
-        );
-        t.nodes.insert(
-            generator,
-            NodeSpec::new("gen", sg.audio_in(), sg.audio_out()),
-        );
-        t.nodes
-            .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
-        t.edges.insert(
-            crate::InputPort::new(thru, 0),
-            vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
-                generator, 0,
-            )))],
-        );
-        t.set_outputs(vec![PortSource::Node(OutputPort::new(thru, 0))]);
-        let shapes: Shapes = [(generator, sg), (thru, st)].into_iter().collect();
-        let valid = GraphSpec::new(t).validate().expect("valid");
-        let prep = crate::node::Prepare::new(
-            tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
-        );
-        let split = compile(&valid, &shapes, &prep, None).expect("compiles").0;
-        let u = split.units.iter().position(|p| p.key == thru).unwrap();
-        let Form::Split { input, out } = split.nodes.recs[u].form else {
-            panic!("a one-in/one-out node that is not in place lowers to Split");
-        };
-        let mut bad = split.clone();
-        bad.nodes.recs[u].form = Form::InPlace { slot: out };
-        refused(&bad, "form");
-        let mut bad = split.clone();
-        bad.nodes.recs[u].form = Form::Split { input: out, out };
-        refused(&bad, "form");
-        let mut bad = split;
-        bad.nodes.recs[u].form = Form::Split { input, out: input };
-        refused(&bad, "form");
-    }
-
-    /// Rule 7 for the stereo direct form: each way the lowering could get the
-    /// slot table wrong is refused. The executor would otherwise hand a
-    /// channel another channel's buffer, and none of the rules about ops
-    /// would notice.
-    #[test]
-    fn the_verifier_checks_the_direct_slot_table() {
         use crate::plan::{Direct, Form};
+        use crate::spec::{EventEdge, EventInputPort, EventOutputPort};
+        use tutti_units::{Latency, Samples, Tail};
+        let mono = ChannelLayout::MONO;
+        let latent = Latency::new(Samples::new(4));
+        let wide = ChannelLayout::from_count(3);
+        // (key, shape, the audio source feeding it, if any).
+        let rows = [
+            (
+                1,
+                Shape::source_unassigned(mono)
+                    .latency(latent)
+                    .tail(Tail::Finite(Samples::new(9))),
+                None,
+            ),
+            (
+                2,
+                Shape::through_unassigned(mono)
+                    .in_place()
+                    .tail(Tail::Unbounded),
+                Some(1),
+            ),
+            (3, Shape::through_unassigned(mono), Some(2)),
+            (
+                4,
+                Shape::EMPTY
+                    .events(0, 1)
+                    .event_capacity(crate::testing::cap_of(5)),
+                None,
+            ),
+            (5, Shape::source_unassigned(mono).events(1, 0), None),
+            (6, Shape::source_unassigned(ChannelLayout::STEREO), None),
+            (7, Shape::through_unassigned(ChannelLayout::STEREO), Some(6)),
+            (8, Shape::source_unassigned(wide), None),
+            (9, Shape::through_unassigned(wide), Some(8)),
+        ];
         let mut t = Topology::default();
-        let (generator, thru) = (NodeKey(1), NodeKey(2));
-        let (sg, st) = (
-            Shape::source_unassigned(ChannelLayout::STEREO),
-            Shape::through_unassigned(ChannelLayout::STEREO),
-        );
-        t.nodes.insert(
-            generator,
-            NodeSpec::new("gen", sg.audio_in(), sg.audio_out()),
-        );
-        t.nodes
-            .insert(thru, NodeSpec::new("thru", st.audio_in(), st.audio_out()));
-        for port in 0..2 {
-            t.edges.insert(
-                crate::InputPort::new(thru, port),
-                vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
-                    generator, port,
-                )))],
-            );
+        let mut shapes = Shapes::new();
+        for &(k, shape, from) in &rows {
+            let key = NodeKey(k);
+            let mut spec = NodeSpec::new("n", shape.audio_in(), shape.audio_out());
+            spec.latency = shape.latency.samples();
+            spec.tail = shape.tail;
+            t.nodes.insert(key, spec);
+            shapes.insert(key, shape);
+            for port in 0..shape.audio_in().count() {
+                let from = NodeKey(from.expect("a node with inputs is fed"));
+                t.edges.insert(
+                    crate::InputPort::new(key, port),
+                    vec![crate::Edge::Direct(PortSource::Node(OutputPort::new(
+                        from, port,
+                    )))],
+                );
+            }
         }
-        t.set_outputs(vec![
-            PortSource::Node(OutputPort::new(thru, 0)),
-            PortSource::Node(OutputPort::new(thru, 1)),
-        ]);
-        let shapes: Shapes = [(generator, sg), (thru, st)].into_iter().collect();
-        let valid = GraphSpec::new(t).validate().expect("valid");
+        t.set_outputs(
+            [3, 5, 7, 7, 9, 9, 9]
+                .into_iter()
+                .zip([0, 0, 0, 1, 0, 1, 2])
+                .map(|(k, p)| PortSource::Node(OutputPort::new(NodeKey(k), p)))
+                .collect::<Vec<_>>(),
+        );
+        let mut g = GraphSpec::new(t);
+        g.connect_events(
+            EventInputPort::new(NodeKey(5), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(4), 0)),
+        );
         let prep = crate::node::Prepare::new(
             tutti_units::SampleRate::SR_48K,
-            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
+            tutti_buffers::MaxBlock::of(Samples::new(64)),
         );
-        let plan = compile(&valid, &shapes, &prep, None).expect("compiles").0;
-        let u = plan.units.iter().position(|p| p.key == thru).unwrap();
-        let Form::Direct(d) = plan.nodes.recs[u].form else {
-            panic!("a stereo node lowers to the direct form");
-        };
-        assert_eq!((d.ins, d.outs, d.count), (2, 2, 4), "two reads, two writes");
-        let g = plan.units.iter().position(|p| p.key == generator).unwrap();
-        assert!(matches!(plan.nodes.recs[g].form, Form::Direct(_)));
+        let plan = compile(&g.validate().expect("valid"), &shapes, &prep, None)
+            .expect("compiles")
+            .0;
 
-        let refused = |d: Direct| {
-            let mut bad = plan.clone();
-            bad.nodes.recs[u].form = Form::Direct(d);
-            let err = verify(&bad).unwrap_err();
-            assert!(err.0.contains("form"), "{err}");
-        };
-        let out0 = (0..4).find(|&i| d.role[i] == 0).unwrap();
-        let out1 = (0..4).find(|&i| d.role[i] == 1).unwrap();
-        let read0 = usize::from(d.input[0]);
+        assert_eq!(plan.nodes.recs.len(), plan.units.len(), "a record a unit");
+        assert_eq!(plan.units.len(), rows.len());
+        let mut forms = Vec::new();
+        for op in &plan.ops {
+            let Op::Node {
+                unit,
+                audio_in,
+                audio_out,
+                event_in,
+                event_out,
+                in_place,
+                params,
+            } = *op
+            else {
+                continue;
+            };
+            let rec = &plan.nodes.recs[unit as usize];
+            let pu = &plan.units[unit as usize];
+            let shape = shapes[&pu.key];
+            let at = format!("node {:?}", pu.key);
+            assert_eq!(rec.unit, unit, "{at}");
+            assert_eq!(rec.store, pu.idx.0, "{at}");
+            assert_eq!(rec.generation, pu.generation, "{at}");
+            assert_eq!(rec.arrival, pu.arrival, "{at}");
+            assert_eq!(rec.latency, shape.latency.samples(), "{at}");
+            assert_eq!(rec.tail, shape.tail, "{at}");
+            assert_eq!(
+                rec.park_after,
+                Tail::Finite(shape.latency.samples()).then(shape.tail),
+                "{at}"
+            );
+            assert_eq!(rec.event_capacity, shape.event_capacity, "{at}");
+            assert_eq!(rec.in_place, in_place, "{at}");
+            assert_eq!(rec.params, params, "{at}");
+            assert_eq!(rec.declared, shape.params, "{at}");
+            assert_eq!(
+                in_place.get(0),
+                pu.key == NodeKey(2),
+                "only the in-place node is aliased: {at}"
+            );
 
-        // The two outputs swapped.
-        let mut bad = d;
-        bad.role[out0] = 1;
-        bad.role[out1] = 0;
-        refused(bad);
-        // An input reading an output's slot.
-        let mut bad = d;
-        bad.input[0] = out0 as u8;
-        refused(bad);
-        // An input marked in place that is not.
-        let mut bad = d;
-        bad.input[1] = Direct::IN_PLACE;
-        refused(bad);
-        // Unsorted slots.
-        let mut bad = d;
-        bad.slots.swap(0, 1);
-        bad.role.swap(0, 1);
-        refused(bad);
-        // A read the node never asked for (its input moved elsewhere).
-        let mut bad = d;
-        bad.input[0] = bad.input[1];
-        refused(bad);
-        // A slot left out.
-        let mut bad = d;
-        bad.count = 3;
-        refused(bad);
-        // A read slot that is not the input's.
-        let mut bad = d;
-        bad.slots[read0] = bad.slots[read0].wrapping_add(100);
-        refused(bad);
-        // The wrong shape.
-        let mut bad = d;
-        bad.ins = 1;
-        refused(bad);
+            let ain = &plan.audio_list[audio_in.range()];
+            let aout = &plan.audio_list[audio_out.range()];
+            let ein = &plan.event_list[event_in.range()];
+            let eout = &plan.event_list[event_out.range()];
+            let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
+            assert_eq!(
+                counts,
+                [
+                    usize::from(shape.audio_in().count()),
+                    usize::from(shape.audio_out().count()),
+                    usize::from(shape.event_in),
+                    usize::from(shape.event_out)
+                ],
+                "{at}"
+            );
+            assert_eq!(
+                counts,
+                [ain.len(), aout.len(), ein.len(), eout.len()],
+                "{at}"
+            );
+            let start = usize::try_from(rec.ports).expect("a slot offset");
+            let listed = &plan.nodes.slots[start..start + counts.iter().sum::<usize>()];
+            let op_slots: Vec<u32> = ain
+                .iter()
+                .chain(aout)
+                .chain(ein)
+                .chain(eout)
+                .copied()
+                .collect();
+            assert_eq!(listed, op_slots, "{at}");
+
+            // The requests the op makes, each run sorted.
+            let sorted = |mut v: Vec<(u32, Role)>| {
+                v.sort_unstable();
+                v
+            };
+            let reads = |slots: &[u32], skip: InPlaceMask| {
+                slots
+                    .iter()
+                    .enumerate()
+                    .filter(|&(c, _)| !skip.get(c))
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .collect::<Vec<_>>()
+            };
+            let writes = |slots: &[u32]| {
+                slots
+                    .iter()
+                    .enumerate()
+                    .map(|(c, &s)| (s, Role::Write(c as u8)))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                plan.nodes.borrows[rec.borrows.range()],
+                sorted([reads(ain, in_place), writes(aout)].concat()),
+                "{at}"
+            );
+            assert_eq!(
+                plan.nodes.borrows[rec.event_borrows.range()],
+                sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
+                "{at}"
+            );
+
+            let width = (ain.len(), aout.len());
+            let want = match (ein.len() + eout.len() > 0, width) {
+                (true, _) => "General",
+                (_, (0, 1)) => "Source",
+                (_, (1, 1)) if in_place.get(0) => "InPlace",
+                (_, (1, 1)) => "Split",
+                (_, w) if Direct::SHAPES.contains(&w) => "Direct",
+                _ => "Audio",
+            };
+            let got = match rec.form {
+                Form::General => "General",
+                Form::Source { out } => {
+                    assert_eq!(aout, [out], "{at}");
+                    "Source"
+                }
+                Form::Split { input, out } => {
+                    assert_eq!((ain, aout), (&[input][..], &[out][..]), "{at}");
+                    assert_ne!(input, out, "a split never reads and writes one slot");
+                    "Split"
+                }
+                Form::InPlace { slot } => {
+                    assert_eq!((ain, aout), (&[slot][..], &[slot][..]), "{at}");
+                    "InPlace"
+                }
+                Form::Direct(d) => {
+                    assert_eq!((usize::from(d.ins), usize::from(d.outs)), width, "{at}");
+                    "Direct"
+                }
+                Form::Audio => "Audio",
+            };
+            assert_eq!(got, want, "{at}");
+            forms.push(got);
+        }
+        forms.sort_unstable();
+        forms.dedup();
+        assert_eq!(
+            forms,
+            ["Audio", "Direct", "General", "InPlace", "Source", "Split"],
+            "the table holds a node of each form"
+        );
     }
 
     /// A merge whose slot is smaller than its inputs together is refused —

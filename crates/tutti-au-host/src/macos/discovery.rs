@@ -1,9 +1,11 @@
 //! Audio Component discovery over AudioToolbox: the macOS half of
 //! [`crate::component`], which re-exports every public item here.
 
-use super::types::*;
 use crate::component::{AuComponentInfo, AuType};
 use crate::error::Result;
+use crate::fourcc_to_string;
+use coreaudio_sys as sys;
+use coreaudio_sys::AudioComponentDescription;
 pub use tutti_au_ffi::ComponentKey;
 pub use tutti_au_ffi::ComponentRef as AuComponentRef;
 use tutti_plugin_types::PluginVersion;
@@ -12,14 +14,14 @@ impl AuType {
     /// Converts a raw AudioToolbox `componentType` code to its typed variant.
     pub fn from_raw(component_type: u32) -> Self {
         match component_type {
-            K_AUDIO_UNIT_TYPE_EFFECT => AuType::Effect,
-            K_AUDIO_UNIT_TYPE_MUSIC_DEVICE => AuType::Instrument,
-            K_AUDIO_UNIT_TYPE_GENERATOR => AuType::Generator,
-            K_AUDIO_UNIT_TYPE_MUSIC_EFFECT => AuType::MusicEffect,
-            K_AUDIO_UNIT_TYPE_MIXER => AuType::Mixer,
-            K_AUDIO_UNIT_TYPE_FORMAT_CONVERTER => AuType::Converter,
-            K_AUDIO_UNIT_TYPE_OUTPUT => AuType::Output,
-            K_AUDIO_UNIT_TYPE_MIDI_PROCESSOR => AuType::MidiProcessor,
+            sys::kAudioUnitType_Effect => AuType::Effect,
+            sys::kAudioUnitType_MusicDevice => AuType::Instrument,
+            sys::kAudioUnitType_Generator => AuType::Generator,
+            sys::kAudioUnitType_MusicEffect => AuType::MusicEffect,
+            sys::kAudioUnitType_Mixer => AuType::Mixer,
+            sys::kAudioUnitType_FormatConverter => AuType::Converter,
+            sys::kAudioUnitType_Output => AuType::Output,
+            sys::kAudioUnitType_MIDIProcessor => AuType::MidiProcessor,
             other => AuType::Unknown(other),
         }
     }
@@ -27,14 +29,14 @@ impl AuType {
     /// Converts back to the raw AudioToolbox four-char code.
     pub fn to_raw(self) -> u32 {
         match self {
-            AuType::Effect => K_AUDIO_UNIT_TYPE_EFFECT,
-            AuType::Instrument => K_AUDIO_UNIT_TYPE_MUSIC_DEVICE,
-            AuType::Generator => K_AUDIO_UNIT_TYPE_GENERATOR,
-            AuType::MusicEffect => K_AUDIO_UNIT_TYPE_MUSIC_EFFECT,
-            AuType::Mixer => K_AUDIO_UNIT_TYPE_MIXER,
-            AuType::Converter => K_AUDIO_UNIT_TYPE_FORMAT_CONVERTER,
-            AuType::Output => K_AUDIO_UNIT_TYPE_OUTPUT,
-            AuType::MidiProcessor => K_AUDIO_UNIT_TYPE_MIDI_PROCESSOR,
+            AuType::Effect => sys::kAudioUnitType_Effect,
+            AuType::Instrument => sys::kAudioUnitType_MusicDevice,
+            AuType::Generator => sys::kAudioUnitType_Generator,
+            AuType::MusicEffect => sys::kAudioUnitType_MusicEffect,
+            AuType::Mixer => sys::kAudioUnitType_Mixer,
+            AuType::Converter => sys::kAudioUnitType_FormatConverter,
+            AuType::Output => sys::kAudioUnitType_Output,
+            AuType::MidiProcessor => sys::kAudioUnitType_MIDIProcessor,
             AuType::Unknown(code) => code,
         }
     }
@@ -47,7 +49,7 @@ impl AuComponentInfo {
     /// route this host does not have rather than surfacing a load failure. The
     /// system sets the flag for v3 audio units with views.
     pub fn requires_async_instantiation(&self) -> bool {
-        self.flags & K_AUDIO_COMPONENT_FLAG_REQUIRES_ASYNC_INSTANTIATION != 0
+        self.flags & sys::kAudioComponentFlag_RequiresAsyncInstantiation != 0
     }
 
     /// Whether the system registered this component as a version 3 Audio Unit.
@@ -56,7 +58,7 @@ impl AuComponentInfo {
     /// [`requires_async_instantiation`](Self::requires_async_instantiation): a
     /// v3 unit without a view is still v3 and can be created synchronously.
     pub fn is_v3(&self) -> bool {
-        self.flags & K_AUDIO_COMPONENT_FLAG_IS_V3_AUDIO_UNIT != 0
+        self.flags & sys::kAudioComponentFlag_IsV3AudioUnit != 0
     }
 }
 
@@ -195,7 +197,7 @@ mod tests {
     #[test]
     fn test_find_apple_au_delay() {
         let desc = ComponentKey::new(
-            K_AUDIO_UNIT_TYPE_EFFECT,
+            sys::kAudioUnitType_Effect,
             u32::from_be_bytes(*b"dely"),
             u32::from_be_bytes(*b"appl"),
         )

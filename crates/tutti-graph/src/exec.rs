@@ -66,7 +66,7 @@
 //! **A node op is one record.** The compiler lowers each `Op::Node` into a
 //! `NodeRec` (`plan.rs`): store index, generation, arrival, latency plus
 //! tail, the port slots, the buffer borrow requests **already sorted**, and
-//! a `Form` that picks the borrow. The verifier checks each record against its op, so a
+//! a `Form` that picks the borrow. A
 //! call does one indexed load and never sorts. The commonest shapes — at most one audio input and one
 //! audio output, or the stereo shapes 0→2, 1→2, 2→1 and 2→2, all with no
 //! event ports — borrow their slots directly, and their whole call path is
@@ -914,7 +914,7 @@ mod tests {
             Arc::clone(&plan),
             delta,
             units,
-            |_, ports, max| ParamState::new(ports, max, declick, Vec::new()),
+            |_, ports, max| ParamState::new(ports, max, declick, Vec::new(), Vec::new()),
             |key| {
                 let cell = ModeCell::new(NodeMode::Active, Mix::WET);
                 let shape = &plan.unit(key).expect("placed").shape;

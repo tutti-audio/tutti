@@ -12,6 +12,7 @@ use crate::{Delivered, HardwareMidiInputs};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_fixtures::midi;
+use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 use tutti_graph::UmpAt;
 use tutti_midi_device::{
     Capabilities, EndpointId, FunctionBlock, MAX_ATTEMPTS, MidiDeviceId, PortDirection,
@@ -20,8 +21,8 @@ use tutti_midi_device::{
 use tutti_ump::ControlValue;
 use tutti_ump::MidiChannel;
 use tutti_ump::{
-    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType,
-    SoftwareRevision, Stream, Sysex8StreamCount, SysexAssembler, SysexStep,
+    BlockDirection, FirstGroup, FunctionBlockId, GroupSpan, JrTicks, Message, MessageType, Stream,
+    Sysex8StreamCount, SysexAssembler, SysexStep,
 };
 use tutti_ump::{BlockName, EndpointName};
 
@@ -461,16 +462,6 @@ fn identity_reply(device: u8) -> Vec<Ump> {
     ])
 }
 
-fn identity() -> tutti_ump::DeviceIdentity {
-    use tutti_ump::{ManufacturerId, U7};
-    tutti_ump::DeviceIdentity {
-        manufacturer: ManufacturerId::new(0x41).unwrap(),
-        family: [U7::of(1), U7::of(2)],
-        model: [U7::of(3), U7::of(4)],
-        revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-    }
-}
-
 fn reply_at(wire: &Wire, packets: Vec<Ump>, ms: u64) {
     for ump in packets {
         assert!(wire.counters.send_input(wire.raw, ump, wire.at(ms)));
@@ -765,8 +756,7 @@ fn received(wire: &Wire) -> Vec<Ump> {
 /// The complete System Exclusive messages among `packets`, each with its Group
 /// and its payload (between `F0` and `F7`).
 fn payloads(packets: &[Ump]) -> Vec<(tutti_ump::MidiGroup, Vec<u8>)> {
-    let room = SysexAssembler::room_for(256, 1, 16);
-    let mut assembler = SysexAssembler::new(vec![0; room].into_boxed_slice(), 256, 16);
+    let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let mut found = Vec::new();
     for &ump in packets {
         assembler.begin_block();

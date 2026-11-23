@@ -367,7 +367,7 @@ fn the_overview_decodes_every_entry_the_au_reported() {
         let mut writable: u8 = 0;
         let st = unsafe {
             coreaudio_sys::AudioUnitGetPropertyInfo(
-                au.raw_unit(),
+                au.unit().as_raw(),
                 ParametersForOverview::ID,
                 Scope::GLOBAL.raw(),
                 0,
@@ -376,7 +376,7 @@ fn the_overview_decodes_every_entry_the_au_reported() {
             )
         };
         assert_eq!(st, 0, "{}: GetPropertyInfo failed", unit.label);
-        let stride = std::mem::size_of::<tutti_au_host::types::AudioUnitParameter>() as u32;
+        let stride = std::mem::size_of::<coreaudio_sys::AudioUnitParameter>() as u32;
         assert_eq!(
             overview.len() as u32,
             size / stride,

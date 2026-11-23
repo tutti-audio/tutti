@@ -79,28 +79,14 @@
 //! loom's under `--cfg loom`), with models that fail without each part.
 
 use std::fmt::Debug;
-use std::sync::atomic::Ordering;
 
-use sync::{Arc, AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence};
+use crate::sync::{Arc, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering, fence};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::{BufferError, Float, I24, Interleaved, Sample};
 use tutti_units::Samples;
 
 /// The atomics: `std`'s in a real build, `loom`'s under `--cfg loom`, so the
 /// model in `tests/pos_ring_loom.rs` checks this code rather than a replica.
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::{
-        Arc,
-        atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence},
-    };
-    #[cfg(not(loom))]
-    pub(super) use std::sync::{
-        Arc,
-        atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, fence},
-    };
-}
-
 mod sealed {
     /// Keeps [`RingSample`](super::RingSample) to the formats this crate maps
     /// to an atomic word.

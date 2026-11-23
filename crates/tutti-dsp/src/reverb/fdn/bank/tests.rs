@@ -1,6 +1,6 @@
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_units::{
-    Cents, Db, Depth, Feedback, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth,
+    Bipolar, Cents, Db, Feedback, Hz, Mix, ReadPosition, SampleRate, Samples, Seconds, StereoWidth,
     Tail,
 };
 
@@ -22,7 +22,7 @@ fn controls(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
 /// No modulation, so every line reads at its whole length.
 fn still(f: impl FnOnce(&mut FdnControls)) -> FdnControls {
     controls(|c| {
-        c.modulation = Depth::of(0.0);
+        c.modulation = Bipolar::of(0.0);
         f(c);
     })
 }
@@ -433,7 +433,7 @@ fn any_split_of_the_stream_gives_the_same_bits() {
 #[test]
 fn a_reset_bank_renders_as_a_fresh_one() {
     let l = layout(8, FreezeMode::Decaying);
-    let c = controls(|c| c.modulation = Depth::of(0.8));
+    let c = controls(|c| c.modulation = Bipolar::of(0.8));
     let (mut used, mut used_ramps) = at_rest(&l, RATE, &c);
     run(&mut used, &mut used_ramps, &noise(3, 5_001), 64);
     used.reset();

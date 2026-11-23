@@ -9,7 +9,7 @@ use super::*;
 ///   `clamped`). `Neg` stays: the other sign of an amount is in range.
 /// - `Mix + Mix`, `Mix * f64` — a blend *position* does
 ///   not compose or scale; half of a crossfade point is not a crossfade
-///   point. (`Depth` has a sign, and its own range check — that is the difference
+///   point. (`Bipolar` has a sign, and its own range check — that is the difference
 ///   between a position and a signed magnitude.)
 /// - `Pan * f64`, `Pan + Pan` — a position on a segment, so the same argument
 ///   `Mix` makes: half a pan position is not a pan position, and two of them do
@@ -80,42 +80,6 @@ fn cross_coupled_feedback_is_bounded_as_a_pair() {
 }
 
 #[test]
-fn depth_is_signed_because_inversion_is_the_point() {
-    assert_eq!(-Depth::FULL, Depth::INVERTED);
-    assert_eq!(Depth::clamped(-2.0), Depth::INVERTED);
-    assert_eq!(Depth::clamped(2.0), Depth::FULL);
-}
-
-/// A depth is within `-1..=1`: `new`, `TryFrom`, `of` and serde agree, and
-/// NaN and the infinities are refused. (Serde is a feature here; a workspace
-/// run turns it on through the crates that persist units.)
-#[cfg(feature = "serde")]
-#[test]
-fn depth_keeps_the_range_contract() {
-    let c = tutti_fixtures::RangeContract {
-        new: Depth::new,
-        get: Depth::get,
-        of: Some(Depth::of),
-        valid: &[-1.0, -0.5, 0.0, 0.25, 1.0],
-        invalid: &[-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
-    };
-    tutti_fixtures::check_range_contract(&c);
-    tutti_fixtures::check_range_serde(&c);
-}
-
-/// The one saturating constructor maps NaN to `NONE`, and `Unit::from_raw`
-/// (a parameter cell's read) is it: a cell can hold any float and a `Depth`
-/// never leaves its range.
-#[test]
-fn depth_saturates_only_by_name_and_through_a_cell() {
-    assert_eq!(Depth::clamped(f64::NAN), Depth::NONE);
-    assert_eq!(Depth::clamped(f64::INFINITY), Depth::FULL);
-    assert_eq!(Depth::clamped(f64::NEG_INFINITY), Depth::INVERTED);
-    assert_eq!(<Depth as Unit>::from_raw(9.0), Depth::FULL);
-    assert_eq!(<Depth as Unit>::from_raw(-0.5).get(), -0.5);
-}
-
-#[test]
 fn drive_is_not_a_gain() {
     // Shares `Amplitude`'s range but not its meaning: `Drive` is never
     // multiplied onto a sample, so it is deliberately not scalable.
@@ -162,23 +126,6 @@ fn stable_pair_keeps_the_ratio_and_survives_infinity() {
     let (d, c) = Feedback::stable_pair(f64::NAN, 2.0);
     assert!(d.get().is_nan());
     assert_eq!(c, Feedback::MAX_STABLE);
-}
-
-/// Without serde the same refusals hold through `new`, `TryFrom` and `of`.
-#[test]
-fn depth_refuses_what_is_outside_minus_one_to_one() {
-    for bad in [-1.001, 1.001, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        assert_eq!(Depth::new(bad), None, "{bad}");
-        assert!(Depth::try_from(bad).is_err(), "{bad}");
-        assert!(
-            std::panic::catch_unwind(|| Depth::of(bad)).is_err(),
-            "{bad}"
-        );
-    }
-    for ok in [-1.0, -0.0, 0.0, 0.5, 1.0] {
-        assert_eq!(Depth::new(ok).map(Depth::get), Some(ok));
-        assert_eq!(f64::from(Depth::try_from(ok).unwrap()), ok);
-    }
 }
 
 #[test]
@@ -314,6 +261,8 @@ fn bipolar_orders_negates_and_saturates_only_by_name() {
     assert_eq!(Bipolar::clamped(-2.0), Bipolar::MIN);
     assert_eq!(Bipolar::clamped(2.0), Bipolar::MAX);
     assert_eq!(Bipolar::clamped(f64::NAN), Bipolar::ZERO);
+    assert_eq!(Bipolar::clamped(f64::INFINITY), Bipolar::MAX);
+    assert_eq!(Bipolar::clamped(f64::NEG_INFINITY), Bipolar::MIN);
     assert_eq!(<Bipolar as Unit>::from_raw(9.0), Bipolar::MAX);
     assert_eq!(<Bipolar as Unit>::from_raw(-0.5).get(), -0.5);
     assert_eq!(<Bipolar as Unit>::to_raw(Bipolar::of(0.5)), 0.5);

@@ -18,7 +18,7 @@ use tutti_session::{
     ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
     Session,
 };
-use tutti_units::{Depth, Gain, UnitParam};
+use tutti_units::{Bipolar, Gain, UnitParam};
 
 use common::probe::Pulse;
 
@@ -92,7 +92,7 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
 
@@ -161,7 +161,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.5)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 1.5, "the base plus the route's offset");
@@ -192,7 +192,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
     let mut m = s.mods_mut();
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, edge, Depth::of(0.25)))
+    m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
 
     let _ = s.update();
@@ -222,4 +222,34 @@ fn an_edge_target_keys_apart_and_goes_with_its_node() {
     let param = ParamRef::unit(tutti_graph::NodeKey(1), UnitParam::Volume);
     assert_ne!(key, s.mods_mut().key(param));
     assert_eq!(ParamRef::from_key(key), None);
+}
+
+/// **An edge's gain reads its effective value beside its base**: the base
+/// with no route, the lane's weight (`1.0 + 0.25 * 0.5 * 4 = 1.5`) while a
+/// route drives it, the base again once the route is gone and its declick is
+/// over; the base reads unity throughout.
+#[test]
+fn a_gain_reads_its_effective_value_beside_its_base() {
+    let mut s = offline_48k();
+    let edge = mixer(&mut s);
+    settle(&mut s);
+    let _ = render(&mut s, 2, BLOCK);
+    let target = gain(&s, edge);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
+
+    let mut m = s.mods_mut();
+    m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
+    let source = m.macro_(0.5);
+    let route = m
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
+        .unwrap();
+    settle(&mut s);
+    let _ = render(&mut s, 12, BLOCK);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::new(1.5));
+    assert_eq!(s.get(target).unwrap(), Gain::UNITY, "the base stays");
+
+    s.mods_mut().remove_route(route).unwrap();
+    settle(&mut s);
+    let _ = render(&mut s, 12, BLOCK);
+    assert_eq!(s.get(target.effective()).unwrap(), Gain::UNITY);
 }

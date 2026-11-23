@@ -40,6 +40,14 @@ pub enum ValueErrorKind {
     /// value lock.
     #[error("called from inside a modify")]
     Reentrant,
+    /// A gesture's `Vec` of values is not one value per target.
+    #[error("{values} values for {targets} targets")]
+    Mismatched {
+        /// How many targets the gesture was opened over at this position.
+        targets: usize,
+        /// How many values the call gave.
+        values: usize,
+    },
     /// The target refused the value.
     #[error(transparent)]
     Refused(#[from] SetRefusal),

@@ -9,7 +9,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{NodeKey, ParamSet, PassError};
+use tutti_graph::{DeclaredUnit, EffectiveCell, NodeKey, ParamSet, PassError};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
@@ -17,9 +17,11 @@ use tutti_units::UnitAddr;
 use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
+use super::gesture::{Deferred, Ending, Gesture};
+use super::saved::SavedValues;
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
-use super::target::AnyTarget;
-use super::watcher::{Feed, IntoTargets, Watcher};
+use super::target::{AnyAssign, AnyTarget};
+use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
 use crate::AppKey;
 
 /// What one node's params are written through, and what they were declared at.
@@ -31,6 +33,9 @@ struct NodeParams {
     set: ParamSet,
     /// Each param's value when the node was addressed: the declaration's seed.
     seeds: Vec<(UnitAddr, f64)>,
+    /// What each param's lane last delivered, once the graph's editor has
+    /// the cells (`bind_lanes`).
+    lanes: Vec<(UnitAddr, EffectiveCell)>,
 }
 
 /// The key-to-cell table, behind the value lock.
@@ -42,6 +47,8 @@ pub struct Params {
     pub(super) slots: BTreeMap<SlotId, slot::Erased>,
     /// Each node's mode and mix, which its two targets share.
     controls: BTreeMap<NodeKey, Arc<NodeControl>>,
+    /// What each gain lane last delivered.
+    gain_lanes: BTreeMap<crate::ChannelEdge, EffectiveCell>,
     /// Each hosted plugin, by its node.
     #[cfg(feature = "plugin")]
     plugins: BTreeMap<NodeKey, Arc<super::PluginEntry>>,
@@ -52,6 +59,45 @@ impl Params {
     pub fn cell(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<ParamCell> {
         let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.set.cell(addr)
+    }
+
+    /// `addr`'s cell on `node` with the unit the node declares it in, when
+    /// the node is of the type `owner` names and declares one.
+    pub(super) fn unit_cell(
+        &self,
+        node: NodeKey,
+        addr: UnitAddr,
+        owner: TypeId,
+    ) -> Option<(ParamCell, DeclaredUnit)> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
+        Some((node.set.cell(addr)?, node.set.unit(addr)?))
+    }
+
+    /// Every native param a declaration gave a unit, with the value in its
+    /// cell: the node, the address, the node type and the cell's raw.
+    pub(super) fn native_params(
+        &self,
+    ) -> impl Iterator<Item = (NodeKey, UnitAddr, TypeId, f64)> + '_ {
+        self.nodes.iter().flat_map(|(node, params)| {
+            params.set.params().filter_map(move |addr| {
+                params.set.unit(addr)?;
+                let raw = params.set.get(addr)?;
+                Some((*node, addr, params.owner, raw))
+            })
+        })
+    }
+
+    /// What `addr`'s lane on `node` last delivered, as the raw of its unit:
+    /// `None` when no lane drives it, or the node is not of the type `owner`
+    /// names.
+    pub(super) fn lane(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<f64> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
+        node.lanes.iter().find(|(a, _)| *a == addr)?.1.current()
+    }
+
+    /// What `edge`'s gain lane last delivered, as the raw of its unit.
+    pub(super) fn gain_lane(&self, edge: crate::ChannelEdge) -> Option<f64> {
+        self.gain_lanes.get(&edge)?.current()
     }
 
     /// The plugin hosted at `node`.
@@ -87,6 +133,8 @@ pub struct ValueTable {
     queue: Arc<Queue>,
     /// Every change a write made, for the watchers.
     feed: Feed,
+    /// The ends of gestures dropped while this thread held the lock.
+    deferred: Deferred,
 }
 
 impl fmt::Debug for ValueTable {
@@ -132,7 +180,18 @@ impl ValueTable {
         }
         let guard = self.params.lock();
         HELD.with(|held| held.borrow_mut().push(token));
-        Some(Held { guard, token })
+        let held = Held { guard, token };
+        self.deferred.land(held.params(), &self.feed);
+        Some(held)
+    }
+
+    /// Lands what `ending` records, now under the value lock, or with the
+    /// call this thread is inside when it holds the lock already.
+    pub(crate) fn finish(&self, ending: Ending) {
+        match self.enter() {
+            Some(held) => ending(held.params(), &self.feed),
+            None => self.deferred.push(ending),
+        }
     }
 
     /// The feed of changes a write made.
@@ -156,17 +215,49 @@ impl ValueTable {
                 ))
             })
             .collect();
-        let old = self
-            .params
-            .lock()
-            .nodes
-            .insert(node, NodeParams { owner, set, seeds });
+        let old = self.params.lock().nodes.insert(
+            node,
+            NodeParams {
+                owner,
+                set,
+                seeds,
+                lanes: Vec::new(),
+            },
+        );
         drop(old);
+    }
+
+    /// Binds the delivered-value cells `cell` names to `node`'s params, as
+    /// the graph's editor has them now (a replace gives a key fresh cells).
+    /// Control thread.
+    pub(crate) fn bind_lanes(
+        &self,
+        node: NodeKey,
+        cell: impl Fn(UnitAddr) -> Option<EffectiveCell>,
+    ) {
+        let mut params = self.params.lock();
+        if let Some(entry) = params.nodes.get_mut(&node) {
+            entry.lanes = entry
+                .set
+                .params()
+                .filter_map(|addr| Some((addr, cell(addr)?)))
+                .collect();
+        }
+    }
+
+    /// Binds `edge`'s gain target to the cell its lane delivers to. Control
+    /// thread.
+    pub(crate) fn bind_gain_lane(&self, edge: crate::ChannelEdge, cell: EffectiveCell) {
+        self.params.lock().gain_lanes.insert(edge, cell);
     }
 
     /// Registers the session's own value `id`, held in `slot`. Once, as the
     /// session is built.
-    pub(crate) fn provide<V: 'static>(&self, id: SlotId, slot: SlotCell<V>) {
+    pub(crate) fn provide<V: Clone + PartialEq + Send + Sync + 'static>(
+        &self,
+        id: SlotId,
+        slot: SlotCell<V>,
+    ) {
         self.params.lock().slots.insert(id, slot::erase(slot));
     }
 
@@ -318,7 +409,13 @@ impl ValueTable {
     /// Forgets the gain target of `edge`, and what was written to it and not
     /// yet handed to the editor. Control thread.
     pub(crate) fn retire_gain(&self, edge: crate::ChannelEdge) {
-        let gone = self.params.lock().slots.remove(&SlotId::Gain(edge));
+        let gone = {
+            let mut params = self.params.lock();
+            (
+                params.slots.remove(&SlotId::Gain(edge)),
+                params.gain_lanes.remove(&edge),
+            )
+        };
         self.queue.forget_edge(edge);
         drop(gone);
     }
@@ -442,7 +539,8 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        self.table.feed().land(batch.store());
+        self.table.feed().land(batch.store(), Grouping::Batch);
+        self.table.deferred.land(held.params(), self.table.feed());
         Ok(())
     }
 
@@ -456,6 +554,11 @@ impl<K: AppKey> ValueState<K> {
     /// The feed of changes the writes make.
     pub(super) fn feed(&self) -> &Feed {
         self.table.feed()
+    }
+
+    /// Lands `ending`, as [`ValueTable::finish`] does.
+    pub(super) fn finish(&self, ending: Ending) {
+        self.table.finish(ending);
     }
 
     /// Publishes every value a write staged since the last call. Control
@@ -492,7 +595,7 @@ impl<K: AppKey> Values<K> {
         }
     }
 
-    fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
+    pub(super) fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
         self.state
             .upgrade()
             .ok_or_else(|| whole_call(ValueErrorKind::Closed))
@@ -518,6 +621,29 @@ impl<K: AppKey> Values<K> {
         self.state()?.get(read)
     }
 
+    /// [`Session::saved_values`](crate::Session::saved_values), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::saved_values`](crate::Session::saved_values), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn saved_values(&self) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?.saved_values()
+    }
+
+    /// [`Session::values_of`](crate::Session::values_of), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn values_of(
+        &self,
+        items: impl IntoIterator<Item = AnyAssign>,
+    ) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?;
+        Ok(ValueState::values_of(items))
+    }
+
     /// [`Session::watch`](crate::Session::watch), from this handle.
     ///
     /// # Errors
@@ -526,6 +652,16 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.state()?.watch(targets)
+    }
+
+    /// [`Session::gesture`](crate::Session::gesture), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::gesture`](crate::Session::gesture), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn gesture<W: IntoTargets>(&self, targets: W) -> Result<Gesture<K, W>, ValueError<K>> {
+        self.state()?.gesture(targets)
     }
 }
 

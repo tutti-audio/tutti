@@ -99,15 +99,38 @@ fn member_channel_bend_becomes_per_note_pitch_bend() {
     );
 }
 
+/// What the translator does not address to a note it sends on unchanged:
+/// the manager channel's bend (channel 0 of a lower zone), a native per-note
+/// message, and everything while MPE is disabled.
 #[test]
-fn master_channel_bend_passes_through_as_channel_bend() {
-    let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
-    // Master channel of a lower zone is channel 0.
-    let out = translator
-        .translated(&pitch_bend14(0, 12288))
-        .next()
-        .expect("passes through");
-    assert_cv2!(out, _, Voice2::PitchBend(_));
+fn what_is_not_a_members_message_passes_through() {
+    let lower = || midi::lower_zone(15);
+    let cases: [(&str, MpeMode, UmpAt, fn(&Voice2) -> bool); 3] = [
+        ("manager bend", lower(), pitch_bend14(0, 12288), |v| {
+            matches!(v, Voice2::PitchBend(_))
+        }),
+        (
+            "native per-note",
+            lower(),
+            at(
+                0,
+                midi::per_note_pitch_bend(MidiChannel::FIRST, 60, u32::MAX),
+            ),
+            |v| matches!(v, Voice2::PerNotePitchBend { .. }),
+        ),
+        ("disabled", MpeMode::Disabled, pitch_bend14(2, 16383), |v| {
+            matches!(v, Voice2::PitchBend(_))
+        }),
+    ];
+    for (name, mode, event, is_expected) in cases {
+        let mut translator = MpeTranslator::new(mode);
+        let out = translator.translated(&event).next().expect(name);
+        assert!(
+            matches!(out.1.decode(), Ok(Message::Midi2(_, ref v)) if is_expected(v)),
+            "{name}: {:?}",
+            out.1.decode()
+        );
+    }
 }
 
 /// Spec: m2-120/4.5#3
@@ -149,27 +172,6 @@ fn bend_with_no_held_note_is_dropped() {
             .next()
             .is_none()
     );
-}
-
-#[test]
-fn native_per_note_passes_through() {
-    let mut translator = MpeTranslator::new(tutti_fixtures::midi::lower_zone(15));
-    let native = at(
-        0,
-        midi::per_note_pitch_bend(MidiChannel::FIRST, 60, u32::MAX),
-    );
-    let out = translator.translated(&native).next().expect("passes");
-    assert_cv2!(out, _, Voice2::PerNotePitchBend { .. });
-}
-
-#[test]
-fn disabled_mode_passes_everything_through() {
-    let mut translator = MpeTranslator::new(MpeMode::Disabled);
-    let out = translator
-        .translated(&pitch_bend14(2, 16383))
-        .next()
-        .expect("passes");
-    assert_cv2!(out, _, Voice2::PitchBend(_));
 }
 
 #[test]

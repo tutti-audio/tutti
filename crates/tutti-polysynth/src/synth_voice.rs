@@ -20,14 +20,14 @@ use crate::Portamento;
 use crate::bank::VoiceBank;
 use crate::lane::SynthFloat;
 use crate::mpe::{MpeControl, SLIDE_CENTER};
-use crate::tuning::A4_FREQ;
 use crate::unison::MAX_UNISON_VOICES;
 use crate::{FilterModConfig, FilterType, SynthConfig};
 use crate::{MpeVoiceState, UnisonEngine, UnisonVoiceParams, UnisonVoices};
 use tutti_dsp::{Lfo, LfoWave, PanLaw, pan_gains};
+use tutti_music::Note;
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
-    Amplitude, Depth, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
+    Amplitude, Bipolar, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
     Semitones, Velocity,
 };
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
@@ -234,7 +234,7 @@ impl SynthVoice {
             snap_tone: false,
             snap_gain: false,
             start_phases: [Phase::START; MAX_UNISON_VOICES],
-            pitch: A4_FREQ,
+            pitch: Note::A4_HZ,
             base_filter_cutoff,
             base_filter_resonance,
             velocity_mod_value: Velocity::MAX,
@@ -249,13 +249,13 @@ impl SynthVoice {
             envelope_level: Amplitude::SILENT,
             active: false,
             mpe: MpeVoiceState::new(),
-            base_note_freq: A4_FREQ,
+            base_note_freq: Note::A4_HZ,
             tuned: None,
             tune: Semitones::UNISON,
             glide: Portamento::new(
                 config.portamento.clone().unwrap_or_default(),
                 sample_rate,
-                A4_FREQ,
+                Note::A4_HZ,
             ),
             sub_voices: unison_count,
         }
@@ -313,11 +313,11 @@ impl SynthVoice {
         self.cc_resonance_value = Normalized::of(0.0);
         self.lfo.reset();
         self.mpe.reset();
-        self.base_note_freq = A4_FREQ;
+        self.base_note_freq = Note::A4_HZ;
         self.tuned = None;
         self.tune = Semitones::UNISON;
-        self.pitch = A4_FREQ;
-        self.glide.reset(A4_FREQ);
+        self.pitch = Note::A4_HZ;
+        self.glide.reset(Note::A4_HZ);
     }
 
     /// Re-rates the glide.
@@ -492,7 +492,7 @@ impl SynthVoice {
         let mut cutoff = self.base_filter_cutoff;
 
         // The cutoff is a `Hz` scaled by a chain of multipliers.
-        if fm.mod_wheel_depth > Depth::of(0.0) {
+        if fm.mod_wheel_depth > Bipolar::of(0.0) {
             // The channel's wheel: its depth over the Modulation Depth Range
             // (RPN 5, CA-026) the depth is measured in, so at the default range
             // a full wheel is `mod_wheel_depth` and a range twice that opens
@@ -501,14 +501,14 @@ impl SynthVoice {
             cutoff *= 1.0 + wheel * fm.mod_wheel_depth.get();
         }
 
-        if fm.velocity_depth > Depth::of(0.0) {
+        if fm.velocity_depth > Bipolar::of(0.0) {
             let depth = fm.velocity_depth.get();
             let vel_mult = 1.0 - depth * 0.5 + self.velocity_mod_value.get() * depth * 0.5;
             cutoff *= vel_mult;
         }
 
         if let Some(lfo_rate) = fm.lfo_rate
-            && fm.lfo_depth > Depth::of(0.0)
+            && fm.lfo_depth > Bipolar::of(0.0)
         {
             self.lfo.retarget(lfo_rate, sample_rate);
             self.lfo.advance(Samples::new(frames));

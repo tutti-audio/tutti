@@ -74,7 +74,7 @@
 //! | `tutti::midi` | the common MIDI path: files, messages, keys, routes, devices, profiles | `midi` |
 //! | `tutti::codec` | audio file settings: `Spec`, `FlacLevel`, `IntDepth` and the decode errors | `codec` |
 //! | `tutti::sampler` | sample playback voices and loops | `sampler` |
-//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope | `analyze` |
+//! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo, beats, chords, key, alignment | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its config | `soundfont` |
@@ -95,7 +95,7 @@
 //!   `DeviceId`. Off by default so an offline render, a CI job or a server builds
 //!   without ALSA or CoreAudio headers.
 //! - `jack` — JACK output through `tutti-cpal` (links libjack; implies `device`).
-//! - `decode-wav`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
+//! - `decode-wav`, `decode-aiff`, `decode-flac`, `decode-mp3`, `decode-ogg` — audio file decoders (each implies `codec` and
 //!   turns on the same decoder in `tutti-codec`; a sampler decodes through it).
 //! - `encode-wav`, `encode-flac`, `encode-aiff` — the encoders
 //!   a `Format` names (each implies `codec`; none implies `export`).
@@ -157,7 +157,7 @@ pub use tutti_timeline::{
 pub use tutti_buffers::{ChannelLayout, ChannelTopology, Interleaved, InterleavedMut, MaxBlock};
 pub use tutti_music::{Meter, MeterMap, TimeSignature};
 pub use tutti_units::{
-    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Depth, Frame, Hz, Losses, Normalized,
+    Amplitude, At, BarNumber, Beat, Bipolar, Bpm, Cents, Db, Frame, Hz, Losses, Normalized,
     ParamId, Q, SampleRate, Samples, Seconds, Semitones, TextError,
 };
 
@@ -231,7 +231,8 @@ pub use tutti_session::{
 };
 #[cfg(feature = "session")]
 pub use tutti_session::{
-    Change, ChangedBy, GestureId, GestureState, IntoTargets, Watchable, Watcher,
+    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
+    Watcher,
 };
 #[cfg(all(feature = "session", feature = "midi"))]
 pub use tutti_session::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};
@@ -434,7 +435,9 @@ pub mod types {
         Stop,
     };
     pub use tutti_curve::Breakpoint;
-    pub use tutti_curve::{Curvature, CurvatureError, Exponent, ExponentError, Law, Piece};
+    pub use tutti_curve::{
+        Curvature, CurvatureError, Exponent, ExponentError, FrameProgress, Law, Piece,
+    };
     pub use tutti_music::{
         Adsr, BarPosition, BeatsPerBar, ClockPass, ClockPassEnd, FRAME_TOLERANCE, FrameClock,
         InvalidBeatsPerBar, InvalidNoteValue, LoopRange, LoopRangeError, MeterChange, Note,
@@ -453,8 +456,8 @@ pub mod types {
     pub use tutti_units::{
         ArcDegrees, Azimuth, Balance, Ballistics, BarCount, BeatDuration, BeatsPerCycle,
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
-        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, DepthOutOfRange, Direction,
-        Drive, Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
+        CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
+        Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
         FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
         ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
         ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
@@ -482,15 +485,15 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, Env, ForkByClone, HasParam, HasParams, InBus, InEvents,
-        Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
-        ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget, RtValue,
-        SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ForkByClone, HasParam, HasParams, InBus,
+        InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
+        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget,
+        RtValue, SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
-        Due, Edge, Event, EventKind, EventOrderError, EventRejected, EventWriter, ForkBuild,
-        ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
+        Due, Edge, EffectiveCell, Event, EventKind, EventOrderError, EventRejected, EventWriter,
+        ForkBuild, ForkCause, ForkFaultKind, ForkHealth, ForkSource, Forked, GraphInvalid, Harmony,
         HarmonyKind, InPlaceMask, NodeParts, Offset, ParamEvent, ParamInput, ParamKind, ParamPorts,
         ParamPortsError, ParamRamp, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
         Pass, PlayClock, PortSink, PortSource, RenderMode, Resolution, SilenceMask, SortedEvents,
@@ -533,7 +536,6 @@ pub mod session {
         BusFeed, BusFold, BusSide, EdgeFade, EdgeId, EventCapacityError, ForkError, InletCounts,
         InstrumentNode, MainOutputError, MainOutputId, MeterId, NodeBus, ParamIn, PrerollTable,
     };
-    pub use tutti_modulation::PeriodPoint;
     pub use tutti_session::Apply;
     #[cfg(feature = "device")]
     pub use tutti_session::ClockError;
@@ -550,10 +552,10 @@ pub mod session {
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
         MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
         OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Reclaimer, Reclaims,
-        Removal, RemoveError, Reopened, ReplaceRefused, Replacement, Resource, ResourceFact,
-        SessionHeardTapError, SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted,
-        Wire, main_output_width,
+        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError,
+        Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError,
+        SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted, Wire,
+        main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
@@ -595,6 +597,7 @@ pub mod session {
         feature = "sampler",
         any(
             feature = "decode-wav",
+            feature = "decode-aiff",
             feature = "decode-flac",
             feature = "decode-mp3",
             feature = "decode-ogg"
@@ -643,6 +646,7 @@ pub mod codec {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -667,6 +671,7 @@ pub mod sampler {
     };
     #[cfg(any(
         feature = "decode-wav",
+        feature = "decode-aiff",
         feature = "decode-flac",
         feature = "decode-mp3",
         feature = "decode-ogg"
@@ -677,7 +682,8 @@ pub mod sampler {
 /// Audio measurement (`tutti-measure`): the analyses `Session::analyze` runs.
 /// Each is a config (`PeakConfig`, `OnsetConfig`, `LoudnessConfig`, ...) that is
 /// a `Measure`, whose meter folds chunks into a result: loudness, peaks,
-/// silence, onsets, spectrum, chroma and the vectorscope. Feature `analyze`.
+/// silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo,
+/// beats, chords, key and take alignment. Feature `analyze`.
 #[cfg(feature = "analyze")]
 pub mod measure {
     pub use tutti_measure::{
@@ -700,6 +706,37 @@ pub mod measure {
         SpectrumMeter, SpectrumTime, SpectrumTimeError, TuningOffset, TuningOffsetError,
         TuningReference,
     };
+    // Notes and pitch.
+    pub use tutti_measure::{
+        NoteConfig, NoteError, NoteEvent, NoteMeter, NoteSpan, NoteSpanError, PitchError, PitchHop,
+        PitchHopError, PitchSplit, PitchSplitError, PyinConfig, PyinFrame, PyinMeter, PyinSwitch,
+        PyinSwitchError, PyinThresholdMean, PyinThresholdMeanError, PyinTransitionWidth,
+        PyinTransitionWidthError, VelocityRange, pyin_track, transcribe,
+    };
+    // Tempo and beats.
+    pub use tutti_measure::{
+        Alternatives, AlternativesError, BeatConfig, BeatGrid, BeatMeter, EmptyTempoRange,
+        PriorSpread, PriorSpreadError, Tempo, TempoCandidate, TempoConfig, TempoEstimateError,
+        TempoMeter, TempoRange, Tightness, TightnessError, estimate_tempo, track_beats,
+    };
+    // Chords and key.
+    pub use tutti_measure::{
+        ChordConfig, ChordError, ChordMeter, ChordQuality, ChordSpan, KeyConfig, KeyEstimate,
+        KeyEstimateError, KeyMeter, KeyProfile, SelfTransition, SelfTransitionError, Sharpness,
+        SharpnessError, detect_chords, estimate_key,
+    };
+    // A key and its mode, named apart from the session's `Key` and the dsp `Mode`.
+    pub use tutti_measure::{Key as MusicalKey, Mode as KeyMode};
+    // Alignment and cross-correlation.
+    pub use tutti_measure::{
+        AlignConfig, AlignError, AlignMeter, AlignTo, Alignment, CorrelationPeak, CrossCorrelation,
+        cross_correlate,
+    };
+    // Spectral shape and cepstrum, over the magnitudes of a short-time transform.
+    pub use tutti_measure::{
+        MfccConfig, MfccError, SpectralFeatures, StftConfig, StftMagnitude, mfcc,
+        spectral_features, stft_magnitude,
+    };
     // Loudness, waveform blocks and the vectorscope.
     pub use tutti_measure::{
         ChannelBlock, Loudness, LoudnessConfig, LoudnessMeter, PeakBlock, PeakBlocks, PeakConfig,
@@ -709,8 +746,9 @@ pub mod measure {
     // The dsp types `Error`, the spectrum and `Chroma` name.
     pub use tutti_dsp::{
         BinCount, BinIndex, ChannelWeight, ChannelWeightError, ChannelWeights, ColaGeometry,
-        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelError, StftError,
-        StftGeometry, TooManyOutputs, WindowLength, WindowLengthError,
+        CosineWindow, FrameCount, FrameIndex, Grid, HopSize, HopSizeError, MelBandCount,
+        MelBandCountError, MelError, MelNorm, MelScale, StftError, StftGeometry, TooManyOutputs,
+        WindowLength, WindowLengthError,
     };
 }
 
@@ -723,7 +761,7 @@ pub mod modulation {
         SignalKind, TargetDecl,
     };
     pub use tutti_modulation::{
-        ControlProgram, InputLayer, Layer, LfoShape, SignalSource, SourceId, Waveform,
+        ControlProgram, InputLayer, Layer, LfoShape, PeriodPoint, SignalSource, SourceId, Waveform,
     };
     pub use tutti_modulation::{
         DepthSnapshot, LayerClock, LayerId, Leg, PlayGrid, ProgramTime, RateAnchor, RouteKey,
@@ -736,9 +774,9 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AllocationStrategy, FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane,
-        MasterVolume, MasterVolumeOutOfRange, OscillatorType, PolySynth, PortamentoConfig,
-        PortamentoMode, ReferencePitch, ReferencePitchOutOfRange, SvfMode, SvfQ, SvfQOutOfRange,
+        FilterModConfig, FilterType, GlideTime, GlideTimeError, Lane, MasterVolume,
+        MasterVolumeOutOfRange, Order, OscillatorType, PolySynth, PortamentoConfig, PortamentoMode,
+        ReferencePitch, ReferencePitchOutOfRange, Steal, SvfMode, SvfQ, SvfQOutOfRange,
         SynthConfig, SynthFloat, Tuning, TuningError, UnisonConfig, UnisonVoices,
         UnisonVoicesError, VoiceMode,
     };

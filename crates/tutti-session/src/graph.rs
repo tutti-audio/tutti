@@ -48,7 +48,6 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
-use tutti_graph::NodeParts;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
@@ -64,6 +63,7 @@ use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapId,
 };
+use tutti_graph::{NodeParts, ParamSet};
 use tutti_rt::Mint;
 #[cfg(feature = "plugin")]
 use tutti_units::Latency;
@@ -219,27 +219,48 @@ pub enum Feeder {
 
 /// One node's handle. Its params by address are the value table's.
 struct Entry {
-    /// What frees the values its published cells retired
-    /// ([`SessionNode::reclaimer`]), run by [`Graph::reclaim`].
-    reclaimer: Option<crate::Reclaimer>,
-    /// The node's controls ([`IntoNode::Controls`]), kept for the node's
-    /// life: a removal or a swap moves them to the graph's retiring list,
+    /// What the node's [`NodeParts`] said of it, kept for the node's life: a
+    /// removal or a swap moves its controls to the graph's retiring list,
     /// dropped once the outgoing node has left the render, so a handle whose
     /// last drop releases something (a voice's stream) holds it while the node
     /// still renders. `None` for a node placed without [`SessionNode`]. Read
-    /// by [`Graph::controls`].
+    /// by [`Graph::controls`] and [`Graph::reclaim`].
     controls: Option<Held>,
 }
 
-/// How a node's controls are put under its key: its params, its slots and
-/// its reclaimer, as [`Graph::address`] does for the type that made them.
-type Addressing = fn(&ValueTable, NodeKey, &(dyn Any + Send)) -> Option<crate::Reclaimer>;
+/// How a node's slots are put under its key
+/// ([`SessionNode::slots`], for the type that made the controls).
+type Slots = fn(&ValueTable, NodeKey, &(dyn Any + Send));
 
-/// A node's controls with the means to address them again, which a swap that
-/// is refused when it lands needs to give the outgoing node its values back.
+/// What a node's parts said of it ([`NodeParts`]): its controls, its params
+/// by address and what frees what its cells retired, with the type that made
+/// them. A swap that is refused when it lands addresses them again to give
+/// the outgoing node its values back.
 struct Held {
     controls: Box<dyn Any + Send>,
-    addressing: Addressing,
+    /// The node's type: the owner its params are addressed under.
+    owner: std::any::TypeId,
+    params: Option<ParamSet>,
+    /// Run by [`Graph::reclaim`].
+    reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
+    slots: Slots,
+}
+
+impl Held {
+    /// Registers the params and slots under `node`.
+    fn provide(&self, values: &ValueTable, node: NodeKey) {
+        if let Some(set) = &self.params {
+            values.address(node, self.owner, set.clone());
+        }
+        (self.slots)(values, node, self.controls.as_ref());
+    }
+}
+
+/// What the session keeps of a node it split: what its parts handed back beside the unit.
+pub(crate) struct Kept<C> {
+    controls: C,
+    params: Option<ParamSet>,
+    reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
 }
 
 /// What a swap does with a fade over a node that does not fit the running
@@ -871,11 +892,11 @@ impl<F: Float> Graph<F> {
 
     /// Adds `node` to the graph, unwired, and returns its key: **the one way a
     /// node enters**. Its fork source goes to the editor, so an export forks it
-    /// as its type says; it is prepared at the graph's rate. What the node says of its controls is kept
-    /// ([`SessionNode`]): its params are addressed
-    /// ([`SessionNode::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
+    /// as its type says; it is prepared at the graph's rate. What the node's [`NodeParts`] say of it is kept: its params are addressed
+    /// ([`NodeParts::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
-    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`SessionNode::reclaimer`]), and
+    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), its slots
+    /// are the type's ([`SessionNode::slots`]), and
     /// it reads the session's tempo map ([`SessionNode::bind_timeline`]). A node
     /// that is only an [`IntoNode`] does not compile here: a host's own is
     /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
@@ -893,8 +914,8 @@ impl<F: Float> Graph<F> {
     /// }
     /// ```
     pub fn add<N: SessionNode<F>>(&mut self, node: N) -> Key<N> {
-        let (key, controls) = self.place(self.bound(node));
-        self.address::<N>(key.erase(), controls);
+        let (key, placed) = self.place(self.bound(node));
+        self.address::<N>(key.erase(), placed);
         key
     }
 
@@ -936,20 +957,35 @@ impl<F: Float> Graph<F> {
     /// Puts `node` in the editor under a fresh key, with nothing addressed and
     /// nothing to sweep: [`add`](Self::add)'s first half, for the nodes that
     /// are not a [`SessionNode`] (a bound plugin).
-    pub(crate) fn place<N: IntoNode<F>>(&mut self, node: N) -> (Key<N>, N::Controls) {
+    pub(crate) fn place<N: IntoNode<F>>(&mut self, node: N) -> (Key<N>, Kept<N::Controls>) {
         let id = NodeKey::fresh();
+        let (unit, placed) = Self::split(node);
         // A fresh key has no wiring recorded, so nothing is unwired.
-        let controls = self.editor.insert(id, N::kind(), node).controls;
-        self.nodes.insert(
-            id,
-            Entry {
-                reclaimer: None,
-                controls: None,
-            },
-        );
+        self.editor.insert(id, N::kind(), unit);
+        self.nodes.insert(id, Entry { controls: None });
         self.note_pass(id);
         self.edited = true;
-        (Key::new(id), controls)
+        (Key::new(id), placed)
+    }
+
+    /// `node` split into the unit the editor places and what the session
+    /// keeps of it.
+    fn split<N: IntoNode<F>>(node: N) -> (NodeParts<(), F>, Kept<N::Controls>) {
+        let NodeParts {
+            node,
+            controls,
+            fork,
+            params,
+            reclaimer,
+        } = node.into_parts();
+        (
+            NodeParts::new(node, (), fork, None),
+            Kept {
+                controls,
+                params,
+                reclaimer,
+            },
+        )
     }
 }
 
@@ -1036,33 +1072,37 @@ impl<F: Float> Graph<F> {
         self.values.clone()
     }
 
-    /// Keeps what a [`SessionNode`] says of its controls under `node`: its
-    /// params, its slots and its reclaimer.
-    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, controls: N::Controls) {
+    /// Keeps what the node's parts said of it under `node`: its params and
+    /// reclaimer, and its slots ([`SessionNode::slots`]).
+    fn address<N: SessionNode<F>>(&mut self, node: NodeKey, placed: Kept<N::Controls>) {
+        let Kept {
+            controls,
+            params,
+            reclaimer,
+        } = placed;
         let held = Held {
             controls: Box::new(controls),
-            addressing: Self::addressing::<N>,
+            owner: std::any::TypeId::of::<N>(),
+            params,
+            reclaimer,
+            slots: Self::slots::<N>,
         };
         if let Some(entry) = self.nodes.get_mut(&node) {
-            entry.reclaimer = (held.addressing)(&self.values, node, held.controls.as_ref());
+            held.provide(&self.values, node);
             entry.controls = Some(held);
         }
+        self.values.bind_lanes(node, |param| {
+            self.editor
+                .param_effective_cell(tutti_graph::ParamIn { node, param })
+        });
     }
 
-    /// [`address`](Self::address)'s step for the controls of an `N`.
-    fn addressing<N: SessionNode<F>>(
-        values: &ValueTable,
-        node: NodeKey,
-        controls: &(dyn Any + Send),
-    ) -> Option<crate::Reclaimer> {
+    /// [`address`](Self::address)'s step for the slots of an `N`.
+    fn slots<N: SessionNode<F>>(values: &ValueTable, node: NodeKey, controls: &(dyn Any + Send)) {
         let controls = controls
             .downcast_ref::<N::Controls>()
-            .expect("controls are held with the addressing of their own type");
-        if let Some(set) = N::params(controls) {
-            values.address(node, std::any::TypeId::of::<N>(), set);
-        }
+            .expect("controls are held with the slots of their own type");
         values.provide_node(N::slots(node, controls));
-        N::reclaimer(controls).into_reclaimer()
     }
 }
 
@@ -1106,13 +1146,7 @@ impl Graph {
         let rebinder = tutti_plugin::catalog::PluginRebinder::out_of_process(&bound);
         // A fresh key has no wiring recorded, so nothing is unwired.
         let _controls = self.editor.insert(node, PLUGIN_KIND, bound).controls;
-        self.nodes.insert(
-            node,
-            Entry {
-                reclaimer: None,
-                controls: None,
-            },
-        );
+        self.nodes.insert(node, Entry { controls: None });
         self.note_pass(node);
         self.plugins.insert(node, hosted);
         self.provide_plugin(node);
@@ -1413,7 +1447,7 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// Runs every node's reclaimer ([`SessionNode::reclaimer`], kept by
+    /// Runs every node's reclaimer ([`NodeParts::reclaimer`], kept by
     /// [`add`](Self::add) and [`replace`](Self::replace), dropped with
     /// the node), the editor's param range cells ([`Editor::reclaim`]) and
     /// (`plugin`) every hosted plugin's meter cell,
@@ -1424,8 +1458,8 @@ impl<F: Float> Graph<F> {
         let pinned: usize = self
             .nodes
             .values()
-            .filter_map(|entry| entry.reclaimer.as_ref())
-            .map(crate::Reclaimer::reclaim)
+            .filter_map(|entry| entry.controls.as_ref()?.reclaimer.as_ref())
+            .map(|reclaimer| reclaimer.reclaim())
             .sum();
         // The editor's range cells: a range a control moved or a commit
         // rewrote retires the one a block may still hold.
@@ -1509,26 +1543,22 @@ impl<F: Float> Graph<F> {
         if !self.nodes.contains_key(&node) {
             return Err(ReplaceRefused::NoSuchNode(node));
         }
-        let NodeParts {
-            node: unit,
-            controls,
-            fork,
-        } = self.bound(incoming).into_parts();
+        let (parts, placed) = Self::split(self.bound(incoming));
         let unit = Unit::<N, F> {
-            parts: NodeParts::new(unit, (), fork),
+            parts,
             node: std::marker::PhantomData,
         };
         if self.parked.iter().any(|p| p.node == node) {
-            self.park_typed::<N>(node, unit, controls, fade);
+            self.park_typed::<N>(node, unit, placed, fade);
             return Ok(Key::new(node));
         }
         match self.place_unit(node, unit, fade, OnShape::Refuse) {
             Ok(()) => {
                 self.retire_outgoing(node);
                 self.drop_plugin_record(node);
-                self.address::<N>(node, controls);
+                self.address::<N>(node, placed);
             }
-            Err(SwapRefused::Busy(unit)) => self.park_typed::<N>(node, unit, controls, fade),
+            Err(SwapRefused::Busy(unit)) => self.park_typed::<N>(node, unit, placed, fade),
             Err(SwapRefused::Failed(refused)) => return Err(refused),
         }
         Ok(Key::new(node))
@@ -1541,15 +1571,12 @@ impl<F: Float> Graph<F> {
         &mut self,
         node: NodeKey,
         unit: Unit<N, F>,
-        controls: N::Controls,
+        placed: Kept<N::Controls>,
         fade: Option<Fade>,
     ) {
         let outgoing = self.nodes.get_mut(&node).and_then(|e| e.controls.take());
-        if let Some(entry) = self.nodes.get_mut(&node) {
-            entry.reclaimer = None;
-        }
         self.values.retire(node);
-        self.address::<N>(node, controls);
+        self.address::<N>(node, placed);
         self.park(node, Box::new(Swap(unit)), fade, Some(Stash(outgoing)));
     }
 
@@ -1629,22 +1656,18 @@ impl<F: Float> Graph<F> {
             // over a swap the session made itself.
             #[cfg(feature = "plugin")]
             OnShape::Cut => {
-                let NodeParts {
-                    node: unit,
-                    controls,
-                    fork,
-                } = incoming.into_parts();
-                let fits = self.editor.fade_fits(node, &unit.shape()) == Some(true);
+                let (parts, placed) = Self::split(incoming);
+                let fits = self.editor.fade_fits(node, &parts.node.shape()) == Some(true);
                 let unit = Unit::<N, F> {
-                    parts: NodeParts::new(unit, (), fork),
+                    parts,
                     node: std::marker::PhantomData,
                 };
                 let fade = if fits { fade } else { Fade::new(Samples::ZERO) };
-                let placed = self
+                let inserted = self
                     .editor
                     .replace_or_swap(node, unit, fade)
                     .map_err(|e| SwapRefused::Failed(e.into()))?;
-                (controls, placed.unwired)
+                (placed.controls, inserted.unwired)
             }
         };
         self.note_unwired(node, &unwired);
@@ -1660,7 +1683,6 @@ impl<F: Float> Graph<F> {
     fn retire_outgoing(&mut self, node: NodeKey) {
         if let Some(entry) = self.nodes.get_mut(&node) {
             self.values.retire(node);
-            entry.reclaimer = None;
             if let Some(held) = entry.controls.take() {
                 self.retiring.push((node, held.controls));
             }
@@ -1868,10 +1890,9 @@ impl<F: Float> Graph<F> {
         };
         self.values.retire(node);
         entry.controls = stash.0;
-        entry.reclaimer = entry
-            .controls
-            .as_ref()
-            .and_then(|held| (held.addressing)(&self.values, node, held.controls.as_ref()));
+        if let Some(held) = &entry.controls {
+            held.provide(&self.values, node);
+        }
     }
 
     /// How many event inputs `node` declares.
@@ -3099,6 +3120,9 @@ impl<F: Float> Graph<F> {
         }
         let seed = self.editor.edge_gain(id).unwrap_or(Gain::UNITY);
         self.values.provide_gain(edge, seed);
+        if let Some(cell) = self.editor.edge_gain_effective_cell(id) {
+            self.values.bind_gain_lane(edge, cell);
+        }
         Ok(GainTarget::new(edge))
     }
 
@@ -4054,7 +4078,7 @@ pub trait ModKeys {
     fn depth(
         &self,
         route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
         let _ = route;
         None
     }
@@ -4145,7 +4169,7 @@ impl tutti_nodes::ModHost for ModHostOver<'_> {
     fn depth(
         &self,
         route: tutti_modulation::RouteKey,
-    ) -> Option<tutti_rt::Param<tutti_units::Depth>> {
+    ) -> Option<tutti_rt::Param<tutti_units::Bipolar>> {
         self.keys.depth(route)
     }
 }

@@ -256,12 +256,12 @@ pub fn load_preset_file(
         return Err(AuError::PresetIdentityMismatch(Box::new(
             crate::error::PresetMismatch {
                 path: path.display().to_string(),
-                file_type: crate::types::fourcc_to_string(identity.component_type),
-                file_sub_type: crate::types::fourcc_to_string(identity.sub_type),
-                file_manufacturer: crate::types::fourcc_to_string(identity.manufacturer),
-                au_type: crate::types::fourcc_to_string(desc.componentType),
-                au_sub_type: crate::types::fourcc_to_string(desc.componentSubType),
-                au_manufacturer: crate::types::fourcc_to_string(desc.componentManufacturer),
+                file_type: crate::fourcc_to_string(identity.component_type),
+                file_sub_type: crate::fourcc_to_string(identity.sub_type),
+                file_manufacturer: crate::fourcc_to_string(identity.manufacturer),
+                au_type: crate::fourcc_to_string(desc.componentType),
+                au_sub_type: crate::fourcc_to_string(desc.componentSubType),
+                au_manufacturer: crate::fourcc_to_string(desc.componentManufacturer),
             },
         )));
     }

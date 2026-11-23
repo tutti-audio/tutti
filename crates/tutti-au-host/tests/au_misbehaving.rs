@@ -149,7 +149,7 @@ fn a_refused_initialize_is_an_error() {
 ///
 /// This is the hole `src/instance.rs` documents at length: the failure arm used
 /// to return while `state` was still the `Empty` marker, turning *every* later
-/// method — `raw_unit`, `au_type`, even `is_initialized` — into an
+/// method — `unit().as_raw()`, `au_type`, even `is_initialized` — into an
 /// `unreachable!()` panic. A host that scans installed AUs and tolerates one
 /// refusing to initialize would crash on the next thing it asked, so the
 /// accessors are exercised here rather than assumed.
@@ -159,7 +159,10 @@ fn a_refused_initialize_leaves_the_instance_queryable() {
     assert!(au.initialize().is_err());
 
     // Each of these panicked in the `Empty`-state bug.
-    assert!(!au.raw_unit().is_null(), "raw_unit must stay valid");
+    assert!(
+        !au.unit().as_raw().is_null(),
+        "the raw unit must stay valid"
+    );
     let _ = au.au_type();
     let _ = au.num_inputs();
     let _ = au.num_outputs();

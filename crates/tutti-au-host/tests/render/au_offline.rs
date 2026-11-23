@@ -64,9 +64,9 @@ use crate::support::corpus::{
 };
 
 use crate::support::au::Au;
+use coreaudio_sys::kAudioUnitErr_InvalidProperty;
 use tutti_au_host::AuError;
 use tutti_au_host::offline::{self, PushScratch, RENDER_QUALITY_MAX};
-use tutti_au_host::types::K_AUDIO_UNIT_ERR_INVALID_PROPERTY;
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_plugin_types::ChannelLayout;
@@ -102,13 +102,13 @@ fn assert_property_absent<T: std::fmt::Debug>(
 ) {
     match result {
         Err(AuError::OsStatus {
-            code: K_AUDIO_UNIT_ERR_INVALID_PROPERTY,
+            code: coreaudio_sys::kAudioUnitErr_InvalidProperty,
             ..
         }) => {}
         other => panic!(
             "{label} is recorded in corpus.rs as not implementing {what}, so the \
              host must report kAudioUnitErr_InvalidProperty \
-             ({K_AUDIO_UNIT_ERR_INVALID_PROPERTY}) — got {other:?}"
+             ({kAudioUnitErr_InvalidProperty}) — got {other:?}"
         ),
     }
 }
@@ -420,7 +420,7 @@ fn an_out_of_range_render_quality_is_refused_by_the_host() {
     // through the raw property write rather than the host method, precisely
     // because the host method is what is being justified.
     let enforcing = ENFORCES_RENDER_QUALITY_RANGE.open(RATE, BLOCK);
-    let st = unsafe { raw_set_render_quality(enforcing.raw_unit(), 999) };
+    let st = unsafe { raw_set_render_quality(enforcing.unit().as_raw(), 999) };
     assert_eq!(
         st, PARAM_ERR,
         "{} is recorded as the one unit that enforces the range; it should answer \
@@ -430,7 +430,7 @@ fn an_out_of_range_render_quality_is_refused_by_the_host() {
 
     // AUMatrixReverb: the non-enforcing case, which is the majority.
     let lax = crate::support::corpus::MATRIX_REVERB.open(RATE, BLOCK);
-    let st = unsafe { raw_set_render_quality(lax.raw_unit(), 999) };
+    let st = unsafe { raw_set_render_quality(lax.unit().as_raw(), 999) };
     let read_back = lax.render_quality().unwrap();
     assert_eq!(
         (st, read_back),
@@ -651,7 +651,7 @@ fn the_push_path_is_refused_before_initialize() {
         matches!(
             err,
             AuError::OsStatus {
-                code: tutti_au_host::types::K_AUDIO_UNIT_ERR_UNINITIALIZED,
+                code: coreaudio_sys::kAudioUnitErr_Uninitialized,
                 ..
             }
         ),
@@ -665,7 +665,7 @@ fn the_push_path_is_refused_before_initialize() {
         matches!(
             err,
             AuError::OsStatus {
-                code: tutti_au_host::types::K_AUDIO_UNIT_ERR_UNINITIALIZED,
+                code: coreaudio_sys::kAudioUnitErr_Uninitialized,
                 ..
             }
         ),
@@ -892,7 +892,7 @@ fn the_one_unit_that_implements_process_multiple_renders_through_it() {
     match err {
         AuError::RenderFailed {
             function: "AudioUnitProcessMultiple",
-            code: tutti_au_host::types::K_AUDIO_UNIT_ERR_INVALID_ELEMENT,
+            code: coreaudio_sys::kAudioUnitErr_InvalidElement,
             ..
         } => {}
         other => panic!(

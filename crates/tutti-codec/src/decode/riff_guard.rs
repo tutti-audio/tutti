@@ -124,9 +124,9 @@ fn id3v2_len<R: Read + Seek + ?Sized>(source: &mut R, at: u64) -> Result<Option<
 }
 
 /// Whether `head` opens a container this build reads that is not RIFF, which
-/// the probe takes at the first byte: FLAC or Ogg. A marker of a container the
-/// build does not read (AIFF's `FORM`, an MP4 `ftyp` box) or a bare MP3 frame
-/// sync is no anchor: the probe scans past it, so a WAVE header may follow.
+/// the probe takes at the first byte: FLAC or Ogg. Any other marker (an AIFF's
+/// `FORM`, an MP4 `ftyp` box) or a bare MP3 frame sync is no anchor here: the
+/// guard scans past it, so a WAVE header may follow.
 fn is_other_container(head: &[u8]) -> bool {
     (cfg!(feature = "decode-flac") && head.starts_with(b"fLaC"))
         || (cfg!(feature = "decode-ogg") && head.starts_with(b"OggS"))

@@ -40,11 +40,13 @@ mod batch;
 mod controls;
 mod depth;
 mod error;
+mod gesture;
 mod param;
 #[cfg(feature = "plugin")]
 mod plugin;
 mod program;
 mod range;
+mod saved;
 mod slot;
 mod state;
 mod target;
@@ -59,6 +61,7 @@ pub use depth::DepthTarget;
 #[cfg(feature = "plugin")]
 pub use error::{PluginParamRefusal, UnitError};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};
+pub use gesture::Gesture;
 pub use param::{ParamTarget, TargetInfo};
 #[cfg(feature = "plugin")]
 pub(crate) use plugin::{AutomationModeSlot, CarriedParam, PluginEntry};
@@ -70,6 +73,7 @@ pub(crate) use program::{
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
 pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
+pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 #[cfg(feature = "sampler")]

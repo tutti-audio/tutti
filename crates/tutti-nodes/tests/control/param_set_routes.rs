@@ -34,7 +34,7 @@ use tutti_nodes::{
 };
 use tutti_units::UnitParam;
 use tutti_units::{
-    BeatsPerCycle, Db, Depth, Hz, PhaseIncrement, Q, Resonance, SampleRate, Samples,
+    BeatsPerCycle, Bipolar, Db, Hz, PhaseIncrement, Q, Resonance, SampleRate, Samples,
 };
 
 /// Writes `value` to `p` through `node`'s set, as a host does; `false` for
@@ -147,7 +147,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
             seed: 0,
         },
         amount: Amount {
-            depth: Depth::of(0.25),
+            depth: Bipolar::of(0.25),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },
@@ -234,7 +234,7 @@ fn render_chorus(
             },
             wave: Waveform::Const(1.0),
             amount: Amount {
-                depth: Depth::of(depth),
+                depth: Bipolar::of(depth),
                 polarity: Polarity::Bipolar,
                 curve: Law::Linear,
             },
@@ -377,7 +377,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
     let lfo = LfoNode::from(
         LfoConfig::new(LfoShape::Sine)
             .rate(Hz::new(1.0))
-            .depth(Depth::of(0.25)),
+            .depth(Bipolar::of(0.25)),
     );
     let (n, params) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
@@ -402,7 +402,7 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },
@@ -507,7 +507,7 @@ where
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },
@@ -592,7 +592,7 @@ fn a_limiter_driven_below_its_release_floor_still_releases() {
 /// depth port, ranged `-8..=8`, drives it to 8 and, separately, to −7.5. Past
 /// 1 the sweep would cross Nyquist and below 0 it would go below 0 Hz;
 /// either puts the all-pass coefficient outside `-1..=1`, where the stages
-/// diverge. Clamped (`Depth::clamped` on the depth, the sweep held
+/// diverge. Clamped (`Bipolar::clamped` on the depth, the sweep held
 /// inside `1 Hz..0.49 sr`) the output stays bounded by what the input and a
 /// 0.5 feedback can make.
 ///
@@ -708,7 +708,7 @@ fn an_lfo_reads_a_driven_depth_per_frame() {
     let lfo = LfoNode::from(
         LfoConfig::new(LfoShape::Square)
             .rate(Hz::new(1.0))
-            .depth(Depth::of(0.25)),
+            .depth(Bipolar::of(0.25)),
     );
     let (n, _) = g.add_with_controls(lfo);
     g.connect_output(n, 0, 0);
@@ -770,7 +770,7 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
         wave: Waveform::Const(1.0),
         // A quarter of the 48 dB range above the 0 dB knob: +12 dB.
         amount: Amount {
-            depth: Depth::of(0.25),
+            depth: Bipolar::of(0.25),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

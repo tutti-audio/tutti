@@ -716,10 +716,12 @@ mod time;
 mod values;
 mod wake;
 
-pub use builder::{GraphBuilder, Renderer, Standalone};
+pub use builder::{GraphBuilder, Renderer};
 pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
-pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
+pub use controls::{
+    DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
+};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
@@ -775,8 +777,8 @@ pub use node::{
 };
 pub use par::Pool;
 pub use param::{
-    MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange, ParamRangeCell,
-    ParamRangeError, ParamRangeReader, RangeView,
+    EffectiveCell, MAX_PARAM_PORTS, ParamIn, ParamInput, ParamPorts, ParamPortsError, ParamRange,
+    ParamRangeCell, ParamRangeError, ParamRangeReader, RangeView,
 };
 pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};

@@ -17,12 +17,13 @@ use crate::bank::{CONTROL_BLOCK, VoiceBank};
 use crate::lane::SynthFloat;
 use crate::mpe::MpeControl;
 use crate::synth_voice::SynthVoice;
-use crate::tuning::{A4_FREQ, key_freq};
+use crate::tuning::key_freq;
 use crate::voice::Gate;
 use crate::{SynthVoices, SynthVoicesConfig, UnisonEngine};
 use tutti_graph::{EventKind, SubBlocks};
 use tutti_midi_protocol::channel_voice;
 use tutti_midi_protocol::{PitchBendSensitivity, UniversalReader};
+use tutti_music::Note;
 use tutti_rt::Param;
 use tutti_ump::NoteId;
 use tutti_ump::{
@@ -59,7 +60,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// use std::num::NonZeroUsize;
 /// use tutti_buffers::MaxBlock;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
-/// use tutti_graph::{Prepare, Standalone};
+/// use tutti_graph::{Prepare, Renderer};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
 ///
 /// let synth = PolySynth::<f32>::new(
@@ -71,8 +72,8 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// assert_eq!(synth.active_voice_count(), 0);
 ///
 /// // Alone in a graph; a host wires a clip or keyboard to its event input.
-/// let mut standalone = Standalone::new(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
-/// let out = standalone.render(64);
+/// let (mut renderer, ..) = Renderer::alone(synth, Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
+/// let out = renderer.render(64);
 /// assert_eq!(out.len(), 2); // stereo
 /// ```
 #[derive(Debug)]
@@ -128,7 +129,7 @@ impl<F: SynthFloat> PolySynth<F> {
         let allocator_config = SynthVoicesConfig::new()
             .max_voices(config.polyphony)
             .mode(config.voice_mode)
-            .strategy(config.allocation_strategy)
+            .steal(config.steal)
             .bend_range(config.pitch_bend_range)
             .per_note_bend_range(PitchBendSensitivity::MPE_MEMBER_DEFAULT.semitones());
         let mut allocator = SynthVoices::new(allocator_config);
@@ -157,7 +158,7 @@ impl<F: SynthFloat> PolySynth<F> {
             allocator,
             voices,
             bank,
-            last_freq: A4_FREQ,
+            last_freq: Note::A4_HZ,
             unison,
             bends,
             master_volume,
@@ -328,7 +329,7 @@ impl<F: SynthFloat> PolySynth<F> {
         let id = NoteId::from_channel_note(channel, note);
         // A key struck again while it sounds replaces its voice: the note logic
         // releases the old one at once whatever holds it, and the new one takes
-        // the holds; the MIDI 1.0 spec is silent. With `NoSteal` and a full
+        // the holds; the MIDI 1.0 spec is silent. With `Steal::Never` and a full
         // pool the new note finds no slot, so the key goes silent.
         self.allocator
             .allocate(id, note, channel, vel_norm, attribute);
@@ -696,7 +697,7 @@ impl<F: SynthFloat> PolySynth<F> {
         self.universal.reset();
         self.master_applied = MasterGain::UNITY;
         self.bends = [Semitones::UNISON; 16];
-        self.last_freq = A4_FREQ;
+        self.last_freq = Note::A4_HZ;
     }
 
     /// Detach the control cells (master volume, unison detune and spread)
@@ -743,6 +744,41 @@ impl<F: SynthFloat> Clone for PolySynth<F> {
 
 #[cfg(test)]
 mod tests;
+
+// Forking for the graph's export (`Editor::fork`): the synth is a
+// `tutti_graph::ParamNode`, so a fork is the template's `fork_fresh`, which is
+// `fork_instance` with each param set to its authored value (what the host
+// last set through the `ParamSet`, not what a modulation source had added to
+// the cell). A fork carries no sounding voice and none of the by-value state
+// the live synth reached through MIDI after the template was taken (a pitch
+// bend, a CC-driven cutoff, an MPE toggle): its MIDI comes from its own event
+// input, fed by the forked clip.
+impl<F: SynthFloat> PolySynth<F> {
+    /// Returns a fresh synth for a fork of the graph this one plays in (an
+    /// offline export, for example).
+    ///
+    /// The copy has the same config and unison settings, control cells of its
+    /// own (at the values this synth's hold now, so later moves on either side
+    /// do not reach the other), and no sounding voice. State the live synth
+    /// reached through MIDI (a pitch bend, a CC-driven cutoff) is carried as
+    /// it is now. Allocates a copy of every voice, so call it off the audio
+    /// thread.
+    ///
+    /// A synth inserted into a graph registers this as its fork, so a graph
+    /// fork needs no call to it; it is for hosts building a copy by hand.
+    #[must_use]
+    pub fn fork_instance(&self) -> PolySynth<F> {
+        let mut fork = self.clone();
+        // Control cells: detached at their current values, so the fork
+        // renders the controls it was taken with rather than following live
+        // moves (and a move on the fork never reaches the live synth).
+        fork.detach_controls();
+        // A clean, inactive voice set: a clone carries the live synth's
+        // sounding notes, which a fork must not replay.
+        fork.reset_voices();
+        fork
+    }
+}
 
 impl<F: SynthFloat> PolySynth<F> {
     /// The amplitude envelope's release stage, as the node's tail.

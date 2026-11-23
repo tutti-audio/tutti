@@ -69,9 +69,10 @@ pub enum EncodeError {
     },
 }
 
-impl Clone for EncodeError {
-    /// A copy that keeps an I/O error's kind and message, not its source.
-    fn clone(&self) -> Self {
+impl EncodeError {
+    /// A copy for the encoder to keep beside the one it returns: an I/O
+    /// error keeps its kind and message, not its source.
+    pub(crate) fn duplicate(&self) -> Self {
         match self {
             Self::Io(e) => Self::Io(io::Error::new(e.kind(), e.to_string())),
             Self::Commit(e) => Self::Commit(e.clone()),

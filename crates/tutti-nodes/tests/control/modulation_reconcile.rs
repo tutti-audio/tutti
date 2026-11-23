@@ -32,7 +32,7 @@ use tutti_nodes::testing::Through;
 use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
 use tutti_ump::{Message, Voice1};
 use tutti_units::{
-    Amplitude, At, Beat, Bpm, Depth, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,
+    Amplitude, At, Beat, Bipolar, Bpm, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,
     Seconds, UnitParam,
 };
 
@@ -305,7 +305,7 @@ impl Decl {
             RouteDecl {
                 source,
                 to: RouteTarget::Param(to),
-                depth: Depth::of(depth),
+                depth: Bipolar::of(depth),
                 polarity: Polarity::Bipolar,
                 curve: Law::Linear,
             },
@@ -335,7 +335,7 @@ impl Decl {
     fn set_depth(&mut self, k: RouteKey, depth: f64) {
         for (r, d) in &mut self.routes {
             if *r == k {
-                d.depth = Depth::of(depth);
+                d.depth = Bipolar::of(depth);
             }
         }
     }
