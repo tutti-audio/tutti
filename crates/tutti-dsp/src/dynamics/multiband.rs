@@ -198,7 +198,7 @@ impl BankShape {
     #[must_use]
     pub fn new(input: BusTopology, bands: MultibandBands) -> Self {
         Self {
-            width: input.layout(),
+            width: input.width(),
             bands,
         }
     }

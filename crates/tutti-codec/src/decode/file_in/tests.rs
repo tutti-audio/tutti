@@ -601,7 +601,7 @@ fn a_caller_can_still_fold_to_stereo_itself() {
     let file = if file.is_unassigned() {
         tutti_buffers::ChannelTopology::default_for(file.width()).unwrap()
     } else {
-        file.clone()
+        *file
     };
     tutti_buffers::Fold::between(&file, &tutti_buffers::Bed::Stereo.topology())
         .expect("a 5.1 file places into stereo")

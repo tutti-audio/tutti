@@ -236,7 +236,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for DynamicEqKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(DynamicEqBank::new(self.input.layout(), rate).mode(self.mode));
+        self.bank = Some(DynamicEqBank::new(self.input.width(), rate).mode(self.mode));
         self.applied = false;
     }
 

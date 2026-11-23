@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 use tutti_buffers::Mono;
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, BusTopology, ChannelLayout, ChannelTopology};
 use tutti_buffers::{Interleaved, Wave};
 use tutti_dsp::CombDelay;
 use tutti_dsp::Wavetable;
@@ -897,7 +897,7 @@ fn mono_node<F: tutti_dsp::FftFloat + tutti_dsp::Lerp, S: tutti_buffers::Sample>
 
 /// The AmbiX bus of `order`: ACN, SN3D.
 fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }
 
 fn tube_stage() {

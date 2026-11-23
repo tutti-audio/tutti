@@ -60,11 +60,13 @@ fn speaker_of(channel: SurroundChannel) -> Speaker {
 
 /// Converts a CLAP channel map into a [`ChannelTopology`].
 ///
-/// Total, and length-preserving: the topology has exactly one position per
-/// channel the plugin reported. A named speaker the plugin reports twice is
-/// [`Speaker::Unassigned`] in each slot after its first.
-pub fn topology_of(map: &[SurroundChannel]) -> ChannelTopology {
-    ChannelTopology::Speakers(Speakers::from_format(map.iter().copied().map(speaker_of)))
+/// Length-preserving: the topology has exactly one position per channel the
+/// plugin reported. A named speaker the plugin reports twice is
+/// [`Speaker::Unassigned`] in each slot after its first. `None` is a map of more
+/// than [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) channels, which no topology
+/// holds: the port keeps its channel count and has no placement.
+pub fn topology_of(map: &[SurroundChannel]) -> Option<ChannelTopology> {
+    Speakers::from_format(map.iter().copied().map(speaker_of)).map(ChannelTopology::Speakers)
 }
 
 #[cfg(test)]
@@ -122,7 +124,7 @@ mod tests {
             .map(|&p| SurroundChannel::from_position(p))
             .collect();
         assert_eq!(
-            topology_of(&map),
+            topology_of(&map).unwrap(),
             tutti_buffers::Bed::Surround51.topology(),
             "CLAP FL FR FC LFE SL SR is the engine's 5.1 order"
         );
@@ -140,7 +142,7 @@ mod tests {
             SurroundChannel::Unknown(200),
             SurroundChannel::FrontRight,
         ];
-        let topology = topology_of(&map);
+        let topology = topology_of(&map).unwrap();
 
         assert_eq!(topology.width(), ChannelLayout::from(3u16));
         assert_eq!(topology.positions().unwrap()[1], Speaker::Unknown(200));
@@ -154,24 +156,31 @@ mod tests {
     /// An empty map is an empty topology, not a failure.
     #[test]
     fn an_empty_map_converts_to_an_empty_topology() {
-        let topology = topology_of(&[]);
+        let topology = topology_of(&[]).unwrap();
         assert_eq!(topology.width(), ChannelLayout::EMPTY);
     }
 
-    /// The conversion preserves length for every map it accepts.
+    /// The conversion preserves length for every map a topology can hold, and a
+    /// wider map has no topology rather than a truncated one.
     ///
     /// The property everything above rests on: the topology is indexed by
     /// channel, so any length change is a routing error regardless of which
     /// speakers are named.
     #[test]
-    fn conversion_preserves_the_channel_count() {
+    fn conversion_preserves_the_channel_count_and_a_wider_map_has_none() {
         for len in 0..=20u8 {
             let map: Vec<SurroundChannel> = (0..len).map(SurroundChannel::from_position).collect();
-            assert_eq!(
-                topology_of(&map).width().count(),
-                u16::from(len),
-                "a {len}-channel map must produce a {len}-channel topology"
-            );
+            match topology_of(&map) {
+                Some(topology) => {
+                    assert!(len <= 16);
+                    assert_eq!(
+                        topology.width().count(),
+                        u16::from(len),
+                        "a {len}-channel map must produce a {len}-channel topology"
+                    );
+                }
+                None => assert!(len > 16, "a {len}-channel map fits a topology"),
+            }
         }
     }
 }

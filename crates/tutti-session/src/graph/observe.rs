@@ -476,7 +476,7 @@ impl<F: Float> Graph<F> {
             id,
             Held {
                 reader,
-                topology: topology.clone(),
+                topology: *topology,
                 announced: false,
             },
         );
@@ -492,7 +492,7 @@ impl<F: Float> Graph<F> {
             .filter(|(_, held)| !held.announced)
             .map(|(&id, held)| {
                 held.announced = true;
-                (id, held.topology.clone())
+                (id, held.topology)
             })
             .collect()
     }

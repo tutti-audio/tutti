@@ -96,7 +96,7 @@ fn a_bus_that_is_not_a_bed_is_refused_by_name() {
     let unassigned =
         tutti_buffers::BusTopology::unassigned(tutti_buffers::ChannelLayout::from(6u16))
             .expect("six channels fit a bus");
-    for bus in [unassigned, tutti_buffers::BusTopology::ambisonic(foa)] {
+    for bus in [unassigned, tutti_buffers::ChannelTopology::Ambisonic(foa)] {
         let error = VbapPannerNode::<f32>::try_from(VbapPannerConfig::new(bus)).unwrap_err();
         assert!(matches!(error, VbapError::NotABed), "{bus:?}: {error:?}");
     }

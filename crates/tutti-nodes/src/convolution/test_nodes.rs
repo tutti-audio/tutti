@@ -78,7 +78,6 @@ pub(crate) fn ambisonic_node<F: FftFloat + Lerp, S: Sample>(
     irs: &[Mono<'_, S>],
     block_size: Samples,
 ) -> Result<ConvolverNode<F>, ConvolverError> {
-    let output = BusTopology::try_from(&output).expect("a test output fits a bus");
     ConvolverNode::try_from(
         ConvolverConfig::new(output, irs)
             .ambisonic(input)

@@ -374,10 +374,7 @@ fn bused(ins: usize, outs: usize, latency: usize, input: Bus, output: Bus) -> Ki
 }
 
 fn main_bus(topology: ChannelTopology) -> Bus {
-    Bus::new(
-        BusTopology::try_from(&topology).expect("fits a bus"),
-        BusRole::Main,
-    )
+    Bus::new(topology, BusRole::Main)
 }
 
 fn smpte(n: u16) -> Bus {

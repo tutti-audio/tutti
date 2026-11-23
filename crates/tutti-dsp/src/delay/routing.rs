@@ -129,7 +129,7 @@ impl FeedbackRouting {
     /// The channels it routes.
     #[must_use]
     pub const fn width(&self) -> usize {
-        self.input.layout().count() as usize
+        self.input.width().count() as usize
     }
 
     /// How much of channel `from`'s tap feeds channel `to`'s line: 0 for a channel

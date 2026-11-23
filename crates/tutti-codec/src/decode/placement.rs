@@ -61,9 +61,13 @@ pub(super) fn channels_of(channels: Option<&Channels>) -> (ChannelSet, Placement
     let stated = |topology: ChannelTopology| (ChannelSet::from(topology), Placement::Stated);
     match channels {
         Some(channels) if channels.count() == 1 => stated(Bed::Mono.topology()),
-        Some(Channels::Positioned(positions)) => stated(ChannelTopology::Speakers(
-            Speakers::from_format(positions.iter().map(speaker)),
-        )),
+        // A positioned set wider than a topology holds keeps its width and no topology.
+        Some(all @ Channels::Positioned(positions)) => {
+            match Speakers::from_format(positions.iter().map(speaker)) {
+                Some(speakers) => stated(ChannelTopology::Speakers(speakers)),
+                None => unassigned(all.count(), Placement::Stated),
+            }
+        }
         Some(all @ Channels::Ambisonic(order)) => match AmbisonicOrder::new(*order) {
             Some(order) => stated(AmbisonicFormat::ambix(order).into()),
             // Past third order no topology holds it; the width is kept for the caller to refuse.
