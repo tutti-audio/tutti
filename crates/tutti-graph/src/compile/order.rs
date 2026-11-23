@@ -5,7 +5,8 @@
 //! and `EventEdge::Direct` — because a feedback edge reads its source `MaxBlock`
 //! frames in the past and is not a predecessor this block.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::hash::Hash;
 
 /// Strongly connected components of a graph over `0..n` with successor lists
 /// `succ`. Iterative Tarjan, so a deep chain cannot overflow the stack.
@@ -24,11 +25,11 @@ pub(super) fn scc(succ: &[Vec<usize>]) -> Vec<usize> {
     // (vertex, next successor position)
     let mut call: Vec<(usize, usize)> = Vec::new();
 
-    for main_output in 0..n {
-        if index[main_output] != UNSEEN {
+    for root in 0..n {
+        if index[root] != UNSEEN {
             continue;
         }
-        call.push((main_output, 0));
+        call.push((root, 0));
         while let Some(&mut (v, ref mut pos)) = call.last_mut() {
             if *pos == 0 && index[v] == UNSEEN {
                 index[v] = next_index;
@@ -67,59 +68,74 @@ pub(super) fn scc(succ: &[Vec<usize>]) -> Vec<usize> {
     comp
 }
 
-/// Kahn's algorithm with exactly `Topology::topo_order`'s tie-breaking: the
-/// ready set is a stack seeded smallest-key-on-top, and each node's newly
-/// ready dependents are pushed so the smallest pops next.
+/// A topological sort's answer: the vertices in order, and the ones a cycle
+/// left unplaceable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Sorted<T> {
+    /// Every vertex that is not on or downstream of a cycle, dependencies first.
+    pub order: Vec<T>,
+    /// The vertices left over, in vertex order. Empty exactly when the graph is
+    /// acyclic.
+    pub cyclic: Vec<T>,
+}
+
+/// Kahn's algorithm over vertices `0..preds.len()`, where `preds[i]` lists
+/// `i`'s predecessors **with multiplicity** (one entry per edge).
 ///
-/// Reproducing it rather than calling it is deliberate: that sort sees audio
-/// edges only, and this one must also order event edges (one topological
-/// sort for both). On a graph with no event edges the two agree exactly —
-/// `compile`'s tests assert it — so a caller reading `Topology::topo_order`
-/// reads the compiler's order.
-///
-/// `preds[i]` lists `i`'s direct predecessors **with multiplicity** (one entry
-/// per edge), as `Topology::direct_preds` does. `keys` orders vertices; ties
-/// break toward the smaller key. The graph must be acyclic.
-pub(super) fn kahn<K: Ord + Copy>(keys: &[K], preds: &[Vec<usize>]) -> Vec<usize> {
-    let n = keys.len();
-    let mut in_degree = vec![0usize; n];
+/// The ready set is a stack seeded smallest-index-on-top, and each vertex's
+/// newly ready dependents are pushed so the smallest pops next: ties break
+/// toward the smaller index, so the order is a function of `preds`.
+pub(crate) fn kahn(preds: &[Vec<usize>]) -> Sorted<usize> {
+    let n = preds.len();
+    let mut in_degree: Vec<usize> = preds.iter().map(Vec::len).collect();
+    // Sinks are visited in index order, so every `dependents` list is sorted
+    // by construction, and the batch that becomes ready comes out sorted.
     let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n];
-    // Sinks are visited in index (= key) order, so every `dependents` list is
-    // key-sorted by construction, whatever order the edges were collected in,
-    // audio or event. That is what makes the `ready` batches below come out
-    // sorted without a sort; `ties_break_by_key_across_edge_kinds` pins it.
     for (node, ps) in preds.iter().enumerate() {
         for &p in ps {
             dependents[p].push(node);
-            in_degree[node] += 1;
         }
     }
-    // `keys` is sorted (vertices are dense indices in key order), so index
-    // order is key order; the BTreeMap only makes that assumption visible.
-    let by_key: BTreeMap<K, usize> = keys.iter().enumerate().map(|(i, &k)| (k, i)).collect();
-    let mut queue: Vec<usize> = by_key
-        .values()
-        .copied()
-        .filter(|&i| in_degree[i] == 0)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let mut stack: Vec<usize> = (0..n).rev().filter(|&i| in_degree[i] == 0).collect();
     let mut order = Vec::with_capacity(n);
-    while let Some(v) = queue.pop() {
+    while let Some(v) = stack.pop() {
         order.push(v);
-        let mut ready = Vec::new();
-        for &d in &dependents[v] {
+        // A dependent is ready when its last edge is released, whatever order
+        // the edges are visited in; visiting descending pushes the smallest last.
+        stack.extend(dependents[v].iter().rev().copied().filter(|&d| {
             in_degree[d] -= 1;
-            if in_degree[d] == 0 {
-                ready.push(d);
-            }
-        }
-        debug_assert!(ready.windows(2).all(|w| keys[w[0]] <= keys[w[1]]));
-        queue.extend(ready.into_iter().rev());
+            in_degree[d] == 0
+        }));
     }
-    debug_assert_eq!(order.len(), n, "kahn called on a cyclic graph");
-    order
+    // A vertex is placed exactly when its in-degree reached zero.
+    let cyclic = (0..n).filter(|&i| in_degree[i] > 0).collect();
+    Sorted { order, cyclic }
+}
+
+/// [`kahn`] over arbitrary vertices: `nodes` is the vertex order (ties break
+/// toward the earlier one) and `preds` yields a node's predecessors, with
+/// multiplicity. A predecessor that is not in `nodes` is ignored.
+pub(crate) fn sort_nodes<N, I>(nodes: &[N], preds: impl Fn(N) -> I) -> Sorted<N>
+where
+    N: Copy + Eq + Hash,
+    I: IntoIterator<Item = N>,
+{
+    let index: HashMap<N, usize> = nodes.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+    let preds: Vec<Vec<usize>> = nodes
+        .iter()
+        .map(|&n| {
+            preds(n)
+                .into_iter()
+                .filter_map(|p| index.get(&p).copied())
+                .collect()
+        })
+        .collect();
+    let Sorted { order, cyclic } = kahn(&preds);
+    let named = |v: Vec<usize>| v.into_iter().map(|i| nodes[i]).collect();
+    Sorted {
+        order: named(order),
+        cyclic: named(cyclic),
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +152,45 @@ mod tests {
         assert_ne!(c[0], c[2]);
         assert_ne!(c[0], c[3]);
         assert_ne!(c[2], c[3]);
+    }
+
+    /// The initially ready set comes out smallest first, a vertex only after all its
+    /// edges (counted with multiplicity), and a cycle's vertices, with what
+    /// hangs off it, are the leftover.
+    #[test]
+    fn kahn_orders_by_index_and_leaves_the_cycle() {
+        // 3 <- {0, 0, 2}; 1 free; 4 <-> 5; 6 <- 4.
+        let preds = vec![
+            vec![],
+            vec![],
+            vec![],
+            vec![0, 0, 2],
+            vec![5],
+            vec![4],
+            vec![4],
+        ];
+        let sorted = kahn(&preds);
+        assert_eq!(sorted.order, vec![0, 1, 2, 3]);
+        assert_eq!(sorted.cyclic, vec![4, 5, 6]);
+    }
+
+    /// A newly ready batch is taken before older ready vertices.
+    #[test]
+    fn kahn_pops_the_newest_ready_batch_first() {
+        // 0 -> 2, 1 free: 0 pops, readies 2, which pops before 1.
+        let sorted = kahn(&[vec![], vec![], vec![0]]);
+        assert_eq!(sorted.order, vec![0, 2, 1]);
+    }
+
+    /// `sort_nodes` names vertices by `nodes`' order and drops unknown
+    /// predecessors.
+    #[test]
+    fn sort_nodes_ignores_unknown_predecessors() {
+        let sorted = sort_nodes(&[10u8, 20, 30], |n| match n {
+            10 => vec![30, 99],
+            _ => vec![],
+        });
+        assert_eq!(sorted.order, vec![20, 30, 10]);
+        assert!(sorted.cyclic.is_empty());
     }
 }

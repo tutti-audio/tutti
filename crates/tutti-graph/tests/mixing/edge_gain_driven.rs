@@ -5,7 +5,7 @@
 //!
 //! Every figure is analytic: the expected render is the fold with the weight
 //! the driver's steps give at each frame, written out in the test. The
-//! parallel executor is compared against the serial one, bit for bit.
+//! parallel executor is compared against the one-participant one, bit for bit.
 
 use common::spec_of;
 use tutti_graph::testing as common;
@@ -212,7 +212,7 @@ fn plan_of(rig: &Rig) -> tutti_graph::Plan {
 
 /// A lane driving an edge's gain renders the weight the driver steps give at
 /// every frame: `((+0.0 + w[n] * 1.0) + 0.5)`, at a port and at an output
-/// channel, serial and parallel. The other edge stays plain.
+/// channel, one-participant and parallel. The other edge stays plain.
 #[test]
 fn a_driven_lane_renders_the_analytic_weight() {
     for at in [Where::Port, Where::Output] {

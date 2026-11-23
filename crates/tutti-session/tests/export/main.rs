@@ -33,7 +33,7 @@ mod f64_export;
 // What a bounce's nodes log on the audio thread, as `tracing` events.
 #[cfg(feature = "export")]
 mod rt_log;
-// A parallel export is bit-identical to the serial one.
+// A parallel export is bit-identical to the one-participant one.
 #[cfg(feature = "export")]
 mod export_parallel;
 // What a bounce keeps past its range for the sampler's nodes, and a voice pool's fork.

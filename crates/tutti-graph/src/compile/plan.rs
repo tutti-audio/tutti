@@ -1020,7 +1020,7 @@ pub struct Value {
 /// `ops` is one **serial schedule** (a topological order of the op DAG); the
 /// DAG itself is kept as CSR successor lists so a parallel executor can run
 /// any order consistent with it — and the buffer colouring is correct under
-/// every such order, not just the serial one.
+/// every such order, not just the one-participant one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub(crate) prepare: Prepare,

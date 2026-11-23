@@ -42,9 +42,9 @@
 //!
 //! [`latency`]: crate::compile::latency
 
-use crate::compile::latency::LatencyGraph;
+use crate::compile::latency::{LatencyGraph, departure};
+use crate::compile::order::{Sorted, sort_nodes};
 use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
 use tutti_units::{SampleRate, Samples, Seconds, Tail};
 
 /// The upper bound on any single node's reported tail: sixty seconds.
@@ -242,7 +242,7 @@ pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
     // `latency`'s walk deliberately approximates a cycle instead, because a
     // misaligned graph is still renderable; an unbounded one is not, and saying
     // so is the whole point of the variant.
-    let (order, had_cycle) = topological_order(g, &tails);
+    let (order, had_cycle) = topological_order(g);
     let cycle_rings = had_cycle
         && order
             .iter()
@@ -302,22 +302,6 @@ pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
     }
 }
 
-/// When a signal finishes leaving `node`: its input arrival plus its own tail.
-///
-/// The ring-out definition is what lets this be a plain add — see [`Tail`].
-/// `Samples`' saturating `Add`, for the reason its latency counterpart uses it:
-/// no node's own figure exceeds `MAX_NODE_TAIL` at the graph's rate (one past it counts as
-/// unbounded), so the bound is what makes the sum safe, not the arithmetic.
-fn departure<N: Copy + Eq + Hash>(
-    node: N,
-    arrival: &HashMap<N, Samples>,
-    own: &HashMap<N, Samples>,
-) -> Samples {
-    let at = arrival.get(&node).copied().unwrap_or_default();
-    let tail = own.get(&node).copied().unwrap_or_default();
-    at + tail
-}
-
 /// Every node that can reach an output, walking edges backwards from the taps.
 fn reaching_output<G: TailGraph>(g: &G, tails: &HashMap<G::Node, Tail>) -> HashSet<G::Node> {
     let mut live = HashSet::with_capacity(tails.len());
@@ -333,53 +317,18 @@ fn reaching_output<G: TailGraph>(g: &G, tails: &HashMap<G::Node, Tail>) -> HashS
     live
 }
 
-/// Kahn's algorithm, reporting whether a cycle stopped it.
+/// The nodes in dependency order, and whether a cycle stopped the sort.
 ///
-/// The flag is the difference from
-/// [`latency`](crate::compile::latency)'s otherwise identical walk, which swallows it:
-/// a cycle changes a tail's *answer* rather than its accuracy, so it cannot be
-/// absorbed here. Cycle nodes are still appended in iteration order, so the
-/// forward pass sees every node either way.
-fn topological_order<G: TailGraph>(g: &G, tails: &HashMap<G::Node, Tail>) -> (Vec<G::Node>, bool) {
-    let count = tails.len();
-    let known: HashSet<G::Node> = tails.keys().copied().collect();
-
-    let mut in_degree: HashMap<G::Node, usize> = known.iter().map(|&n| (n, 0)).collect();
-    let mut dependents: HashMap<G::Node, Vec<G::Node>> = HashMap::with_capacity(count);
-
-    for &node in &known {
-        for src in g.inputs(node).filter_map(|s| s.feed.node()) {
-            if known.contains(&src) {
-                dependents.entry(src).or_default().push(node);
-                *in_degree.entry(node).or_insert(0) += 1;
-            }
-        }
-    }
-
-    let mut queue: Vec<G::Node> = in_degree
-        .iter()
-        .filter(|&(_, &deg)| deg == 0)
-        .map(|(&n, _)| n)
-        .collect();
-
-    let mut order = Vec::with_capacity(count);
-    while let Some(node) = queue.pop() {
-        order.push(node);
-        for &dep in dependents.get(&node).into_iter().flatten() {
-            let deg = in_degree.entry(dep).or_insert(0);
-            *deg = deg.saturating_sub(1);
-            if *deg == 0 {
-                queue.push(dep);
-            }
-        }
-    }
-
-    let had_cycle = order.len() < count;
-    if had_cycle {
-        let placed: HashSet<G::Node> = order.iter().copied().collect();
-        order.extend(known.iter().copied().filter(|n| !placed.contains(n)));
-    }
-
+/// The flag is the difference from [`latency`](crate::compile::latency)'s walk,
+/// which swallows it: a cycle changes a tail's *answer* rather than its
+/// accuracy, so it cannot be absorbed here. Cycle nodes are still appended in
+/// node order, so the forward pass sees every node either way.
+fn topological_order<G: TailGraph>(g: &G) -> (Vec<G::Node>, bool) {
+    let nodes: Vec<G::Node> = g.nodes().collect();
+    let Sorted { mut order, cyclic } =
+        sort_nodes(&nodes, |node| g.inputs(node).filter_map(|s| s.feed.node()));
+    let had_cycle = !cyclic.is_empty();
+    order.extend(cyclic);
     (order, had_cycle)
 }
 

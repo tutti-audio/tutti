@@ -239,11 +239,11 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
     (audio, called)
 }
 
-/// **The serial and the parallel executors make the same park decision for
+/// **The one-participant and the parallel executors make the same park decision for
 /// the same raises between blocks**: each block calls the same nappers, and
 /// the render is bit for bit the same.
 #[test]
-fn serial_and_parallel_renders_with_raises_between_blocks_are_bit_identical() {
+fn one_participant_and_parallel_renders_with_raises_between_blocks_are_bit_identical() {
     let (serial_audio, serial_calls) = run(1);
     // Block 0 calls every napper; then only a raised one, on the block
     // after its notify.
