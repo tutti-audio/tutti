@@ -188,13 +188,10 @@ pub(crate) fn poll_attempt<T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_fixtures::midi::ms;
 
     const SERVER_GONE: OsStatus = OsStatus::SERVER_GONE;
     const REFUSED: OsStatus = OsStatus::NOT_PERMITTED;
-
-    fn ms(n: u64) -> Duration {
-        Duration::from_millis(n)
-    }
 
     /// The waits a rule schedules for `count` failures of `status`, each at the
     /// instant the previous one made due.
@@ -211,21 +208,26 @@ mod tests {
     }
 
     #[test]
-    fn a_gone_server_is_retried_with_doubling_waits_capped_at_one_second() {
+    fn each_rule_retries_with_doubling_waits_up_to_its_cap() {
         let start = Instant::now();
-        assert_eq!(
-            waits(Backoff::client(start), SERVER_GONE, 6, start),
-            [ms(100), ms(200), ms(400), ms(800), ms(1000), ms(1000)]
-        );
-    }
-
-    #[test]
-    fn a_refused_enable_is_retried_with_doubling_waits_capped_at_200_ms() {
-        let start = Instant::now();
-        assert_eq!(
-            waits(Backoff::endpoint(start), REFUSED, 7, start),
-            [ms(10), ms(20), ms(40), ms(80), ms(160), ms(200), ms(200)]
-        );
+        for (name, rule, status, count, expected) in [
+            (
+                "client, a gone server, capped at one second",
+                Backoff::client(start),
+                SERVER_GONE,
+                6,
+                vec![ms(100), ms(200), ms(400), ms(800), ms(1000), ms(1000)],
+            ),
+            (
+                "endpoint, a refused enable, capped at 200 ms",
+                Backoff::endpoint(start),
+                REFUSED,
+                7,
+                vec![ms(10), ms(20), ms(40), ms(80), ms(160), ms(200), ms(200)],
+            ),
+        ] {
+            assert_eq!(waits(rule, status, count, start), expected, "{name}");
+        }
     }
 
     #[test]

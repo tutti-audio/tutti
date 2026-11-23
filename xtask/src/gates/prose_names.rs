@@ -1,11 +1,33 @@
-//! `check-doc-idents`: a backticked item name in prose names an item the
-//! workspace's code uses.
+//! `check-prose-names`: prose names what exists.
 //!
 //! The gate reads the [prose](super::prose) of the repo: the comments of every
 //! `.rs` file and the text of the `.md` files, apart from the design and
-//! archive directories under `docs/`. In it, a backticked span (outside a
-//! fenced block) that is a Rust path, optionally followed by `()`, `!` or
-//! generics, is an item name when it is:
+//! archive directories under `docs/`. Two checks run on it and share one report.
+//!
+//! # Paths and citations
+//!
+//! - a path rooted at a workspace crate (`tutti_graph::Node::process`,
+//!   `tutti_rt::AudioThreadCell`) names, segment by segment, identifiers that occur in
+//!   that crate's code (`src/`, comments and literals blanked), or past the
+//!   first segment in the code of a crate it names (a re-export). A crate's
+//!   `pub use other as alias;` continues a path through `alias` in `other`,
+//!   and `PREFIX_*` names any identifier starting with `PREFIX_`;
+//! - a design-doc citation (`doc NNN`, `design NNN`, `docs/design/NNN-`) names
+//!   a file in `docs/design/` or `docs/archive/`, and a `§N.N` after it names
+//!   a numbered heading of that file.
+//!
+//! Rustdoc refuses a broken intra-doc link; this check covers what rustdoc
+//! does not read: a path in backticks, in a `//` comment or in a `.md` file.
+//!
+//! Limits: a segment resolves when its identifier occurs anywhere in the
+//! crate's code (an item, a variant, a method, a local), so a real identifier
+//! in the wrong place passes. Only the first number of a list (`docs 013,
+//! 014`) is read.
+//!
+//! # Item names
+//!
+//! A backticked span (outside a fenced block) that is a Rust path, optionally
+//! followed by `()`, `!` or generics, is an item name when it is:
 //!
 //! - one `CamelCase` word (an uppercase first letter, a lowercase letter, at
 //!   least three letters) or one `SCREAMING_SNAKE` word with an underscore;
@@ -30,17 +52,294 @@
 //! `module::item` passes when both exist anywhere in the workspace; a span
 //! that a line break splits is not read.
 
-use super::lex::{self, blank, comments, skipped, word};
+use super::lex::{self, blank, comments, line_of, skipped, word};
 use super::prose::prose;
 use super::ratchet::{self, Found, Wording};
 use super::{Report, Tree};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A workspace crate, as its code names it.
+struct Krate {
+    /// Every identifier in the crate's `src/` code.
+    idents: BTreeSet<String>,
+    /// `pub use <crate> as <alias>;`: alias to crate name.
+    aliases: BTreeMap<String, String>,
+}
+
+/// Every workspace crate under `crates/` and `testing/`, by its code name.
+fn krates(tree: &dyn Tree) -> BTreeMap<String, Krate> {
+    let mut dirs = BTreeSet::new();
+    for top in ["crates", "testing"] {
+        for path in tree.files(top, &skipped) {
+            let parts: Vec<&str> = path.split('/').collect();
+            if parts.len() == 3 && parts[2] == "Cargo.toml" {
+                dirs.insert(format!("{top}/{}", parts[1]));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for dir in dirs {
+        let name = dir.rsplit('/').next().unwrap_or(&dir).replace('-', "_");
+        let mut k = Krate {
+            idents: BTreeSet::new(),
+            aliases: BTreeMap::new(),
+        };
+        for path in tree.files(&format!("{dir}/src"), &skipped) {
+            if !path.ends_with(".rs") {
+                continue;
+            }
+            let code = blank(&tree.read(&path).unwrap_or_default());
+            let b = code.as_bytes();
+            let mut i = 0;
+            while i < b.len() {
+                if word(b[i]) {
+                    let id = lex::ident_at(&code, i).0;
+                    i += id.len();
+                    if !id.as_bytes()[0].is_ascii_digit() {
+                        k.idents.insert(id.to_owned());
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            for line in code.lines() {
+                let t = line.trim();
+                let Some(rest) = t.strip_prefix("pub use ").and_then(|r| r.strip_suffix(';'))
+                else {
+                    continue;
+                };
+                if let Some((from, alias)) = rest.split_once(" as ")
+                    && !from.contains("::")
+                {
+                    k.aliases
+                        .insert(alias.trim().to_owned(), from.trim().to_owned());
+                }
+            }
+        }
+        out.insert(name, k);
+    }
+    out
+}
+
+/// The `::`-separated identifiers after `at` (which is just past the crate
+/// name), stopping at anything that is not `::ident`.
+fn segments(text: &str, mut at: usize) -> Vec<&str> {
+    let mut out = Vec::new();
+    while text[at..].starts_with("::") {
+        let id = lex::ident_at(text, at + 2).0;
+        if id.is_empty() {
+            break;
+        }
+        at += 2 + id.len();
+        if text[at..].starts_with('*') {
+            // `CMD_*`: a prefix, kept with its star.
+            out.push(&text[at - id.len()..=at]);
+            break;
+        }
+        out.push(id);
+    }
+    out
+}
+
+/// Whether `seg` (an identifier, or a prefix ending in `*`) is one of `idents`.
+fn holds(idents: &BTreeSet<String>, seg: &str) -> bool {
+    match seg.strip_suffix('*') {
+        Some(prefix) => idents
+            .range(prefix.to_owned()..)
+            .next()
+            .is_some_and(|i| i.starts_with(prefix)),
+        None => idents.contains(seg),
+    }
+}
+
+/// The first segment of `segs` that `krate` does not define, walking aliases.
+fn unresolved_segment<'a>(
+    krates: &BTreeMap<String, Krate>,
+    krate: &str,
+    segs: &[&'a str],
+) -> Option<(String, &'a str)> {
+    let mut cur = krate.to_owned();
+    let mut aliasing = true;
+    for (n, &seg) in segs.iter().enumerate() {
+        let k = &krates[&cur];
+        if aliasing
+            && let Some(target) = k.aliases.get(seg)
+            && krates.contains_key(target)
+        {
+            cur = target.clone();
+            continue;
+        }
+        aliasing = false;
+        if holds(&k.idents, seg) {
+            continue;
+        }
+        // A re-export: past the first segment, an identifier of a crate this
+        // one names resolves too.
+        let reexported = n > 0
+            && krates
+                .iter()
+                .any(|(name, other)| k.idents.contains(name) && holds(&other.idents, seg));
+        if !reexported {
+            return Some((cur, seg));
+        }
+    }
+    None
+}
+
+/// The design and archive docs by number: each one's text.
+fn docs(tree: &dyn Tree) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for dir in ["docs/design", "docs/archive"] {
+        for path in tree.files(dir, &skipped) {
+            let name = path.rsplit('/').next().unwrap_or(&path);
+            let num = &name[..name.len().min(3)];
+            if num.len() == 3
+                && num.bytes().all(|b| b.is_ascii_digit())
+                && name[3..].starts_with('-')
+            {
+                out.insert(num.to_owned(), tree.read(&path).unwrap_or_default());
+            }
+        }
+    }
+    out
+}
+
+/// Whether `doc` has a heading numbered `sec` (`## 2.`, `### 2.7.6 Title`,
+/// `## §3`).
+fn has_section(doc: &str, sec: &str) -> bool {
+    doc.lines().any(|l| {
+        let Some(h) = l.strip_prefix('#') else {
+            return false;
+        };
+        let h = h.trim_start_matches('#').trim_start();
+        let h = h.strip_prefix('§').unwrap_or(h);
+        let Some(rest) = h.strip_prefix(sec) else {
+            return false;
+        };
+        let rb = rest.as_bytes();
+        match rb.first() {
+            None => true,
+            Some(b'.') => !rb.get(1).is_some_and(|c| c.is_ascii_alphanumeric()),
+            Some(c) => !c.is_ascii_alphanumeric(),
+        }
+    })
+}
+
+/// Every design-doc citation in `text`: (offset, number, section).
+fn citations(text: &str) -> Vec<(usize, &str, Option<&str>)> {
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if !word(b[i]) || (i > 0 && word(b[i - 1])) {
+            i += 1;
+            continue;
+        }
+        let id = lex::ident_at(text, i).0;
+        let mut after = i + id.len();
+        let lead = if text[i..].starts_with("docs/design/") {
+            after = i + "docs/design/".len();
+            Some(after)
+        } else if text[i..].starts_with("docs/archive/") {
+            after = i + "docs/archive/".len();
+            Some(after)
+        } else if matches!(id, "doc" | "docs" | "Doc" | "Docs" | "design" | "Design") {
+            let ws = text[after..].len() - text[after..].trim_start_matches(' ').len();
+            (ws > 0).then(|| after + ws)
+        } else {
+            None
+        };
+        let Some(n) = lead else {
+            i = after.max(i + 1);
+            continue;
+        };
+        let num = &text[n..(n + 3).min(text.len())];
+        let tail = b.get(n + 3).copied();
+        if num.len() != 3
+            || !num.bytes().all(|c| c.is_ascii_digit())
+            || tail.is_some_and(|c| c.is_ascii_digit())
+        {
+            i = after.max(i + 1);
+            continue;
+        }
+        let mut s = n + 3;
+        if text[s..].starts_with(',') {
+            s += 1;
+        }
+        s += text[s..].len() - text[s..].trim_start_matches(' ').len();
+        let sec = text[s..].strip_prefix('§').and_then(|r| {
+            let end = r
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '.'))
+                .unwrap_or(r.len());
+            let sec = r[..end].trim_end_matches('.');
+            (!sec.is_empty()).then_some(sec)
+        });
+        out.push((i, num, sec));
+        i = n + 3;
+    }
+    out
+}
+
+fn check_refs(tree: &dyn Tree) -> Report {
+    let krates = krates(tree);
+    let docs = docs(tree);
+    let mut bad = Vec::new();
+    for p in prose(tree) {
+        let text = &p.text;
+        let b = text.as_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if !word(b[i]) || (i > 0 && (word(b[i - 1]) || b[i - 1] == b':')) {
+                i += 1;
+                continue;
+            }
+            let id = lex::ident_at(text, i).0;
+            let end = i + id.len();
+            if krates.contains_key(id) && text[end..].starts_with("::") {
+                let segs = segments(text, end);
+                if let Some((krate, seg)) = unresolved_segment(&krates, id, &segs) {
+                    bad.push(format!(
+                        "{}:{}: `{id}::{}` names `{seg}`, which {krate}'s code does not hold",
+                        p.path,
+                        line_of(text, i),
+                        segs.join("::"),
+                    ));
+                }
+            }
+            i = end;
+        }
+        for (at, num, sec) in citations(text) {
+            let line = line_of(text, at);
+            match (docs.get(num), sec) {
+                (None, _) => bad.push(format!(
+                    "{}:{line}: cites design doc {num}, which is not in docs/design or docs/archive",
+                    p.path
+                )),
+                (Some(doc), Some(sec)) if !has_section(doc, sec) => bad.push(format!(
+                    "{}:{line}: cites doc {num} §{sec}, which has no such heading",
+                    p.path
+                )),
+                _ => {}
+            }
+        }
+    }
+    let mut r = Report::default();
+    if bad.is_empty() {
+        r.say("check-prose-names: OK");
+    } else {
+        r.fail("check-prose-names: FAIL (prose names what does not exist):");
+        for line in bad {
+            r.fail(format!("  {line}"));
+        }
+    }
+    r
+}
 
 /// `<count> <path>` lines: each file's unresolved names when the gate began.
 pub(crate) const BASELINE: &str = "xtask/doc-idents.txt";
 
 const WORDING: Wording = Wording {
-    gate: "check-doc-idents",
+    gate: "check-prose-names",
     baseline: BASELINE,
     noun: "unresolved names",
     headline: "prose names an item no code uses; name the real one",
@@ -386,7 +685,7 @@ fn spans(text: &str) -> Vec<(usize, &str)> {
 }
 
 /// The identifier at the start of `s`: it starts with a letter or `_`.
-fn ident_at(s: &str) -> Option<&str> {
+fn item_ident(s: &str) -> Option<&str> {
     let (id, _) = lex::ident_at(s, 0);
     id.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
         .then_some(id)
@@ -417,11 +716,11 @@ fn item_name(span: &str) -> Option<Vec<&str>> {
     let mut rest = span;
     let mut segs = Vec::new();
     loop {
-        let id = ident_at(rest)?;
+        let id = item_ident(rest)?;
         segs.push(id);
         rest = &rest[id.len()..];
         match rest.strip_prefix("::") {
-            Some(next) if ident_at(next).is_some() => rest = next,
+            Some(next) if item_ident(next).is_some() => rest = next,
             _ => break,
         }
     }
@@ -459,7 +758,7 @@ fn unresolved<'a>(segs: &[&'a str], known: &Known) -> Option<&'a str> {
         .find(|s| !(known.tokens.contains(*s) || screaming(s) && known.literal_tokens.contains(*s)))
 }
 
-pub(super) fn check(tree: &dyn Tree) -> Report {
+fn check_idents(tree: &dyn Tree) -> Report {
     let baseline = match ratchet::load(tree, &WORDING) {
         Ok(b) => b,
         Err(r) => return r,
@@ -490,27 +789,116 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     ratchet::settle(&WORDING, &baseline, found)
 }
 
+/// Both checks; their findings and lines are one report.
+pub(super) fn check(tree: &dyn Tree) -> Report {
+    let mut r = check_refs(tree);
+    let idents = check_idents(tree);
+    r.out.extend(idents.out);
+    r.findings.extend(idents.findings);
+    r
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::fake::Mem;
     use super::*;
 
-    fn run(files: &[(&str, &str)]) -> Report {
+    const LIB: &str =
+        "pub struct Node;\nimpl Node { pub fn process(&self) {} }\npub use tutti_b as b;\n";
+
+    fn run_refs(prose: &str) -> Vec<String> {
+        let tree = Mem::with(&[
+            ("crates/tutti-a/Cargo.toml", ""),
+            ("crates/tutti-a/src/lib.rs", LIB),
+            ("crates/tutti-b/Cargo.toml", ""),
+            ("crates/tutti-b/src/lib.rs", "pub enum Mode { Fast }\n"),
+            ("crates/tutti-c/Cargo.toml", ""),
+            ("crates/tutti-c/src/lib.rs", prose),
+            (
+                "docs/design/013-graph.md",
+                "# 013\n## 2. Design\n### 2.7.6 Sums\n## §3 Rest\n",
+            ),
+            ("docs/archive/007-old.md", "# 007\n"),
+        ]);
+        check_refs(&tree).findings
+    }
+
+    #[test]
+    fn a_path_whose_segments_the_crate_holds_resolves() {
+        assert!(run_refs("// `tutti_a::Node::process` and tutti_a::Node.\n").is_empty());
+        assert!(run_refs("/// [`Mode`](tutti_a::b::Mode::Fast), `tutti_b::Mode`\n").is_empty());
+        assert!(run_refs("// `tutti_a::*` and `tutti_a::{Node}` stop at the glob\n").is_empty());
+        assert!(run_refs("// `tutti_a::No*` is a prefix of `Node`\n").is_empty());
+        assert!(
+            run_refs("// `tutti_a::Node::Fast`: tutti_a names tutti_b, which holds it\n")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_segment_the_crate_does_not_hold_fails_naming_it() {
+        let bad = run_refs("// x\n// `tutti_a::Node::render`\n");
+        assert_eq!(
+            bad[1],
+            "  crates/tutti-c/src/lib.rs:2: `tutti_a::Node::render` names `render`, which tutti_a's code does not hold"
+        );
+        assert_eq!(run_refs("// `tutti_a::downmix`\n").len(), 2);
+        assert_eq!(
+            run_refs("// `tutti_a::Fast`: a re-export is not a root item\n").len(),
+            2
+        );
+        assert_eq!(run_refs("// `tutti_a::Zz*`\n").len(), 2);
+        assert_eq!(
+            run_refs("// `tutti_a::b::Slow`\n").len(),
+            2,
+            "{:?}",
+            run_refs("// `tutti_a::b::Slow`\n")
+        );
+    }
+
+    #[test]
+    fn code_and_strings_are_not_prose() {
+        assert!(run_refs("fn f() { let s = \"tutti_a::Gone\"; }\n").is_empty());
+    }
+
+    #[test]
+    fn a_citation_names_a_doc_and_a_section_it_has() {
+        assert!(run_refs("// doc 013, design 013 §2.7.6, doc 013 §2, doc 013 §3, docs/design/013-graph.md, doc 007\n").is_empty());
+        let bad = run_refs("// design 022 §1\n// doc 013 §2.8\n// doc 013 §2.7\n");
+        assert_eq!(
+            bad[1..],
+            [
+                "  crates/tutti-c/src/lib.rs:1: cites design doc 022, which is not in docs/design or docs/archive",
+                "  crates/tutti-c/src/lib.rs:2: cites doc 013 §2.8, which has no such heading",
+                "  crates/tutti-c/src/lib.rs:3: cites doc 013 §2.7, which has no such heading",
+            ]
+        );
+        assert_eq!(run_refs("// docs/design/026-stretch.md\n").len(), 2);
+    }
+
+    #[test]
+    fn numbers_that_are_not_citations_pass() {
+        assert!(
+            run_refs("// a doc 1234 long, doc 12, the design 2026 roadmap, mydoc 999\n").is_empty()
+        );
+    }
+
+    fn run_idents(files: &[(&str, &str)]) -> Report {
         let mut all = vec![(BASELINE, "")];
         all.extend_from_slice(files);
-        check(&Mem::with(&all))
+        check_idents(&Mem::with(&all))
     }
 
     #[test]
     fn a_name_no_code_uses_fails_with_its_file_and_line() {
-        let r = run(&[(
+        let r = run_idents(&[(
             "crates/a/src/lib.rs",
             "struct Real;\n// the `Real` type, not the `Gone` one\n/// see `Real::new` and `Real::gone()`\nfn new() {}\n",
         )]);
         assert_eq!(
             r.findings,
             [
-                "check-doc-idents: FAIL (prose names an item no code uses; name the real one):",
+                "check-prose-names: FAIL (prose names an item no code uses; name the real one):",
                 "  crates/a/src/lib.rs: 2 unresolved names, baseline 0",
                 "    crates/a/src/lib.rs:2: `Gone` names no item (`Gone` is in no code)",
                 "    crates/a/src/lib.rs:3: `Real::gone()` names no item (`gone` is in no code)",
@@ -520,7 +908,7 @@ mod tests {
 
     #[test]
     fn a_name_that_code_uses_resolves_even_when_only_a_comment_or_string_says_the_word() {
-        let r = run(&[(
+        let r = run_idents(&[(
             "crates/a/src/lib.rs",
             "// `Ghost` and `Phantom`\nconst S: &str = \"Ghost\";\nstruct Phantom;\n",
         )]);
@@ -530,7 +918,7 @@ mod tests {
 
     #[test]
     fn markdown_prose_is_read_but_fenced_blocks_and_the_records_are_not() {
-        let r = run(&[
+        let r = run_idents(&[
             ("crates/a/src/lib.rs", "struct Real;\n"),
             (
                 "crates/a/README.md",
@@ -567,7 +955,7 @@ mod tests {
 
     #[test]
     fn std_and_dependency_rooted_paths_are_not_checked_but_workspace_ones_are() {
-        let r = run(&[
+        let r = run_idents(&[
             (
                 "crates/a/Cargo.toml",
                 "[package]\nname = \"tutti-a\"\n[dependencies]\ncpal = \"1\"\n[dependencies.symphonia]\nversion = \"1\"\n",
@@ -583,7 +971,7 @@ mod tests {
 
     #[test]
     fn a_standard_library_name_and_arc_swaps_cells_are_known_anywhere() {
-        let r = run(&[(
+        let r = run_idents(&[(
             "crates/tutti-graph/src/lib.rs",
             "// `RwLock<T>: Sync`, `NonZero`, `ArcSwapOption`, `RwLocked`\n",
         )]);
@@ -598,7 +986,7 @@ mod tests {
 
     #[test]
     fn an_sdk_name_is_allowed_only_in_the_crate_that_wraps_the_sdk() {
-        let r = run(&[
+        let r = run_idents(&[
             (
                 "crates/tutti-vst3-ffi/src/lib.rs",
                 "// `IComponent` `Gone`\n",
@@ -619,11 +1007,11 @@ mod tests {
     #[test]
     fn a_file_within_its_baseline_passes_and_a_missing_baseline_fails() {
         let files = [("crates/a/src/lib.rs", "// `Gone`\n")];
-        let ok = check(&Mem::with(&[
+        let ok = check_idents(&Mem::with(&[
             (BASELINE, "1 crates/a/src/lib.rs\n"),
             files[0],
         ]));
         assert!(ok.passed());
-        assert!(!check(&Mem::with(&files)).passed());
+        assert!(!check_idents(&Mem::with(&files)).passed());
     }
 }

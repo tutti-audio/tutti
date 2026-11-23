@@ -1359,20 +1359,11 @@ mod tests {
 
     use tutti_midi_ci::{CiCategories, DiscoveryData};
     use tutti_midi_device::{EndpointId, PortDirection};
-    use tutti_ump::{ManufacturerId, SoftwareRevision, U7};
 
     use super::*;
     use crate::MidiSession;
     use crate::test_support::{FakeBackend, FakeCounters, endpoint};
-
-    fn identity() -> DeviceIdentity {
-        DeviceIdentity {
-            manufacturer: ManufacturerId::new(0x41).unwrap(),
-            family: [U7::of(1), U7::of(2)],
-            model: [U7::of(3), U7::of(4)],
-            revision: SoftwareRevision::from([U7::of(5), U7::of(6), U7::of(7), U7::of(8)]),
-        }
-    }
+    use tutti_fixtures::midi::device_identity_one_byte_manufacturer as identity;
 
     /// The output of a fake device, and the counters of what it was sent.
     fn output() -> (OpenOutput, FakeCounters) {

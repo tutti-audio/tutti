@@ -104,12 +104,9 @@ mod tests {
     use super::*;
     use crate::checks::backoff::Verdict;
     use std::time::Duration;
+    use tutti_fixtures::midi::ms;
 
     const SERVER_GONE: OsStatus = OsStatus::SERVER_GONE;
-
-    fn ms(n: u64) -> Duration {
-        Duration::from_millis(n)
-    }
 
     /// A creation that fails `failures` times with `status`, then makes 7, and
     /// the attempts it was asked for.
