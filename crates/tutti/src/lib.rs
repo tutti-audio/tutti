@@ -77,6 +77,7 @@
 //! | `tutti::measure` | the analyses `Session::analyze` runs: loudness, peaks, silence, onsets, spectrum, chroma, the vectorscope, notes, pitch, tempo, beats, chords, key, alignment | `analyze` |
 //! | `tutti::modulation` | modulation sources, curves and their errors | always |
 //! | `tutti::polysynth` | the polyphonic synth node and its configs | `synth` |
+//! | `tutti::voicing` | the note logic instruments are played by | `synth` |
 //! | `tutti::soundfont` | the SoundFont playback node and its config | `soundfont` |
 //! | `tutti::plugin` | hosting settings, the main-thread proof and the plugin catalog | `plugin` + a format |
 //!
@@ -774,14 +775,23 @@ pub mod modulation {
 #[cfg(feature = "synth")]
 pub mod polysynth {
     pub use tutti_polysynth::{
-        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, Glide, GlideTime,
-        GlideTimeError, InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice,
-        KarplusVoiceConfig, Lane, MasterVolume, MasterVolumeOutOfRange, ModalVoice,
-        ModalVoiceConfig, NoteControl, NoteInstrument, NoteStart, NoteVoice, Order, OscillatorType,
-        PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch, ReferencePitchOutOfRange,
-        Steal, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig, SynthFloat, Tuning, TuningError,
-        UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceAllocator, VoiceConfig, VoiceMode,
+        AdditiveVoice, AdditiveVoiceConfig, FilterModConfig, FilterType, GlideTime, GlideTimeError,
+        InstrumentCells, InstrumentConfig, InstrumentVoice, KarplusVoice, KarplusVoiceConfig, Lane,
+        MasterVolume, MasterVolumeOutOfRange, ModalVoice, ModalVoiceConfig, NoteInstrument,
+        OscillatorType, PolySynth, PortamentoConfig, PortamentoMode, ReferencePitch,
+        ReferencePitchOutOfRange, Strike, SvfMode, SvfQ, SvfQOutOfRange, SynthConfig, SynthFloat,
+        Tuning, TuningError, UnisonConfig, UnisonVoices, UnisonVoicesError, VoiceMode,
         WaveguideVoice, WaveguideVoiceConfig,
+    };
+}
+
+/// The note logic an instrument is played by (`tutti-voicing`): the allocator, its
+/// configuration and steal rule, and the voice a note-playing instrument implements.
+/// Feature `synth`.
+#[cfg(feature = "synth")]
+pub mod voicing {
+    pub use tutti_voicing::{
+        Glide, NoteControl, NoteStart, NoteVoice, Order, Steal, VoiceAllocator, VoiceConfig,
     };
 }
 

@@ -28,7 +28,7 @@ use tutti_buffers::{BusTopology, Float};
 use tutti_graph::{Chase, Cx, EventKind, InEvents, Io, Node, Prepare, Shape, Status};
 use tutti_midi_protocol::{SysexDeviceId, UniversalReader, channel_voice};
 use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Ump};
-use tutti_units::{Amplitude, Real, SampleRate, Tail, UnitParam};
+use tutti_units::{Amplitude, Real, SampleRate, Samples, Tail, UnitParam};
 use tutti_voicing::{NoteVoice, Patch, VoiceAllocator, VoiceConfig, VoiceSpec, VoiceTable};
 
 /// A note voice a [`NoteInstrument`] renders: made from its config at a rate, summed into a
@@ -114,13 +114,13 @@ pub struct NoteInstrument<V: InstrumentVoice> {
     /// The last finite volume the node read.
     last_gain: Amplitude,
     /// The gains the last span ended at, left and right: each span ramps from them.
-    applied: Option<[f64; 2]>,
+    applied: Option<[Amplitude; 2]>,
     float: PhantomData<fn() -> V::Float>,
 }
 
 impl<V: InstrumentVoice> NoteInstrument<V> {
     /// The rate the voices are built for until the graph prepares the node: 44.1 kHz.
-    pub const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
+    const INITIAL_RATE: SampleRate = SampleRate::SR_44K1;
 
     const PORTS: Shape = Shape::source(BusTopology::STEREO).events(1, 0);
     const EVENTS: InEvents = Self::PORTS
@@ -145,7 +145,8 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
         }
     }
 
-    /// How many voices are sounding, those in their release among them.
+    /// How many voices are sounding, those in their release among them: a meter an app reads
+    /// for a voice-count display.
     #[must_use]
     pub fn sounding(&self) -> usize {
         self.voices.iter().count()
@@ -174,8 +175,8 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
         right.copy_from_slice(left);
         let master = self.voices.allocator().master_gain();
         let to = [
-            volume.get() * master.left.get(),
-            volume.get() * master.right.get(),
+            Amplitude::new(volume.get() * master.left.get()),
+            Amplitude::new(volume.get() * master.right.get()),
         ];
         let from = self.applied.unwrap_or(to);
         ramp(left, from[0], to[0]);
@@ -185,10 +186,11 @@ impl<V: InstrumentVoice> NoteInstrument<V> {
 }
 
 /// Scales `out` by a gain that moves in a line from `from` to `to` across it.
-fn ramp<F: Float>(out: &mut [F], from: f64, to: f64) {
-    let n = out.len() as f64;
-    for (i, y) in out.iter_mut().enumerate() {
-        *y *= F::from_design(from + (to - from) * ((i + 1) as f64 / n));
+fn ramp<F: Float>(out: &mut [F], from: Amplitude, to: Amplitude) {
+    let (from, to) = (F::from_unit(from), F::from_unit(to));
+    let n = Samples::new(out.len());
+    for (k, y) in out.iter_mut().enumerate() {
+        *y *= tutti_graph::ramp_in(None, from, to, Samples::new(k), n);
     }
 }
 
@@ -211,7 +213,8 @@ impl<V: InstrumentVoice> Node<V::Float> for NoteInstrument<V> {
         }
     }
 
-    /// Always [`Status::Modified`]: a note sounds after its input's last event.
+    /// Always [`Status::Modified`]: a note sounds after its input's last event. The volume lane
+    /// is read at the span's last frame and ramped across each span.
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, V::Float>) -> Status {
         if io.frames() == 0 {
             return Status::Modified;

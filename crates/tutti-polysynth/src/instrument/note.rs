@@ -2,7 +2,7 @@
 
 use tutti_buffers::Float;
 use tutti_dsp::{Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeStages, Noise, NoiseColour};
-use tutti_ump::{MidiChannel, NoteNumber};
+use tutti_ump::{MidiChannel, NoteNumber, Pitch};
 use tutti_units::{
     Amplitude, Db, Hz, Normalized, SampleRate, Samples, Seconds, Semitones, Velocity,
 };
@@ -97,10 +97,10 @@ pub(super) struct Note<F: Float> {
     key: NoteNumber,
     tune: Semitones,
     /// The note number a per-note pitch controller set, which replaces the key's.
-    pitch: Option<f64>,
+    pitch: Option<Pitch>,
     velocity: Velocity,
     /// The largest sample of the last chunk: what the allocator's quietest steal reads.
-    peak: f64,
+    peak: Amplitude,
 }
 
 impl<F: Float> Note<F> {
@@ -117,7 +117,7 @@ impl<F: Float> Note<F> {
             tune: Semitones::UNISON,
             pitch: None,
             velocity: Velocity::SILENT,
-            peak: 0.0,
+            peak: Amplitude::SILENT,
         }
     }
 
@@ -127,7 +127,7 @@ impl<F: Float> Note<F> {
         self.tune = note.tune;
         self.pitch = None;
         self.velocity = note.velocity.velocity();
-        self.peak = self.velocity.get();
+        self.peak = self.velocity_amplitude();
         self.envelope.start(self.design);
         // A stage of no time is over at once: the envelope is at its attack's end.
         self.envelope.advance(Samples::new(0));
@@ -156,7 +156,7 @@ impl<F: Float> Note<F> {
 
     pub(super) fn control(&mut self, control: NoteControl) {
         if let NoteControl::Pitch(pitch) = control {
-            self.pitch = Some(pitch.note_number());
+            self.pitch = Some(pitch);
         }
     }
 
@@ -165,7 +165,7 @@ impl<F: Float> Note<F> {
     }
 
     pub(super) fn level(&self) -> Amplitude {
-        Amplitude::new(self.peak)
+        self.peak
     }
 
     pub(super) fn channel(&self) -> MidiChannel {
@@ -185,7 +185,7 @@ impl<F: Float> Note<F> {
     /// The pitch the note sounds at, with its channel's `bend` on it.
     pub(super) fn frequency(&self, bend: Semitones) -> Hz {
         let base = match self.pitch {
-            Some(pitch) => key_freq(pitch, Semitones::UNISON),
+            Some(pitch) => key_freq(pitch.note_number(), Semitones::UNISON),
             None => key_freq(f64::from(self.key.get()), self.tune),
         };
         base * bend.to_pitch_ratio()
@@ -203,15 +203,15 @@ impl<F: Float> Note<F> {
                 *x = self.excitation.next();
             }
             sound(&strike[..n], &mut made[..n]);
-            let from = self.envelope.level().get();
+            let from = F::from_unit(self.envelope.level());
             self.envelope.advance(Samples::new(n));
-            let to = self.envelope.level().get();
-            let mut peak = 0.0_f64;
-            for (i, (y, &m)) in span.iter_mut().zip(&made[..n]).enumerate() {
-                let gain = from + (to - from) * ((i + 1) as f64 / n as f64);
-                let heard = m * F::from_design(gain);
-                let heard_f64: f64 = heard.into();
-                peak = peak.max(heard_f64.abs());
+            let to = F::from_unit(self.envelope.level());
+            let mut peak = Amplitude::SILENT;
+            for (k, (y, &m)) in span.iter_mut().zip(&made[..n]).enumerate() {
+                let gain = tutti_graph::ramp_in(None, from, to, Samples::new(k), Samples::new(n));
+                let heard = m * gain;
+                let level: f64 = heard.into();
+                peak = peak.max(Amplitude::new(level.abs()));
                 *y += heard;
             }
             self.peak = peak;

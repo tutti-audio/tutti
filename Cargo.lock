@@ -2539,6 +2539,7 @@ dependencies = [
  "tutti-timeline",
  "tutti-ump",
  "tutti-units",
+ "tutti-voicing",
 ]
 
 [[package]]

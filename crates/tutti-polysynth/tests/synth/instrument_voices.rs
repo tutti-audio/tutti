@@ -7,12 +7,13 @@ use std::f64::consts::TAU;
 use tutti_fixtures::midi;
 use tutti_polysynth::{InstrumentVoice, NoteInstrument};
 use tutti_ump::MidiChannel;
+use tutti_units::{SampleRate, Seconds};
 use tutti_voicing::{Order, Steal, VoiceConfig};
 
 use crate::support::instruments::{each_voice, hand, poly};
 use crate::support::{BLOCK, Hand};
 
-const RATE: f64 = 48_000.0;
+const RATE: SampleRate = SampleRate::SR_48K;
 const CH: MidiChannel = MidiChannel::FIRST;
 const FULL: u16 = u16::MAX;
 
@@ -25,8 +26,14 @@ fn render<V: InstrumentVoice<Float = f32>>(hand: &mut Played<V>, blocks: usize) 
         .collect()
 }
 
+/// The frames of `s` seconds.
+fn frames(s: f64) -> usize {
+    Seconds::new(s).to_samples_ceil(RATE).get()
+}
+
+/// The blocks of `s` seconds.
 fn seconds(s: f64) -> usize {
-    (s * RATE) as usize / BLOCK
+    frames(s) / BLOCK
 }
 
 /// The frequency within 3 % of `near` whose Hann-windowed Goertzel power is greatest, found in
@@ -34,7 +41,7 @@ fn seconds(s: f64) -> usize {
 fn peak_near(signal: &[f32], near: f64) -> f64 {
     let n = signal.len() as f64;
     let power = |f: f64| {
-        let w = TAU * f / RATE;
+        let w = TAU * f / RATE.get();
         let (mut re, mut im) = (0.0, 0.0);
         for (i, &x) in signal.iter().enumerate() {
             let hann = 0.5 - 0.5 * (TAU * i as f64 / n).cos();
@@ -64,7 +71,7 @@ fn each_voice_sounds_at_its_keys_frequency_within_half_a_percent() {
             played.queue_midi(&[midi::note_on(CH, key, FULL)]);
             let heard = render(&mut played, seconds(0.4));
             // After the strike's burst, a quarter second of the ring.
-            let window = &heard[(0.1 * RATE) as usize..(0.35 * RATE) as usize];
+            let window = &heard[frames(0.1)..frames(0.35)];
             let want = 440.0 * 2.0_f64.powf((f64::from(key) - 69.0) / 12.0);
             let got = peak_near(window, want);
             assert!(
@@ -84,14 +91,14 @@ fn a_released_note_falls_off_and_is_silent_once_its_release_ends() {
         render(&mut played, seconds(0.3));
         played.queue_midi(&[midi::note_off(CH, 60, 0)]);
         let tail = render(&mut played, seconds(0.5));
-        let window = |from: f64, to: f64| peak(&tail[(from * RATE) as usize..(to * RATE) as usize]);
+        let window = |from: f64, to: f64| peak(&tail[frames(from)..frames(to)]);
         assert!(
             window(0.0, 0.05) > window(0.1, 0.15) && window(0.1, 0.15) > window(0.2, 0.25),
             "{name}: a release falls"
         );
         // The 0.25 s release has ended: the voice is free and the output exact silence.
         assert_eq!(played.sounding(), 0, "{name}: the voice ended");
-        assert_eq!(peak(&tail[(0.3 * RATE) as usize..]), 0.0, "{name}: silence");
+        assert_eq!(peak(&tail[frames(0.3)..]), 0.0, "{name}: silence");
     }
     each_voice!(check);
 }
