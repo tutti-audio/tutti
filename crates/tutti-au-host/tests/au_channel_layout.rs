@@ -742,8 +742,9 @@ fn the_element_name_copy_rule_is_observed_by_retain_count() {
         // An immortal count cannot move, so the check below would pass against a
         // leaking host: the string must be mortal for the measurement to mean
         // anything.
-        let first = tutti_fixtures::element_name_retain_count(au.raw_unit().cast(), is_output, 0)
-            .expect("the shared plugin publishes a name on element 0");
+        let first =
+            tutti_fixtures::element_name_retain_count(au.unit().as_raw().cast(), is_output, 0)
+                .expect("the shared plugin publishes a name on element 0");
         assert!(
             first < 1_000,
             "{dir:?} element 0 reports retain count {first}, the immortal range, \
@@ -752,7 +753,8 @@ fn the_element_name_copy_rule_is_observed_by_retain_count() {
 
         const READS: usize = 10;
         let before =
-            tutti_fixtures::element_name_retain_count(au.raw_unit().cast(), is_output, 0).unwrap();
+            tutti_fixtures::element_name_retain_count(au.unit().as_raw().cast(), is_output, 0)
+                .unwrap();
         for _ in 0..READS {
             let name = au.element_name(dir, 0).expect("element_name");
             assert!(
@@ -762,7 +764,8 @@ fn the_element_name_copy_rule_is_observed_by_retain_count() {
             );
         }
         let after =
-            tutti_fixtures::element_name_retain_count(au.raw_unit().cast(), is_output, 0).unwrap();
+            tutti_fixtures::element_name_retain_count(au.unit().as_raw().cast(), is_output, 0)
+                .unwrap();
         assert_eq!(
             after, before,
             "{READS} host reads of the {dir:?} element name moved its retain count \

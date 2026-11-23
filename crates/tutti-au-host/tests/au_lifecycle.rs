@@ -252,7 +252,7 @@ fn test_render_callback_installed_once() {
 ///
 /// `initialize` takes the state out with `mem::replace(.., State::Empty)`
 /// and the by-value transition consumes it, so the failure arm must put a
-/// real state back. Every later accessor — `raw_unit`, `au_type`,
+/// real state back. Every later accessor — `unit().as_raw()`, `au_type`,
 /// `num_outputs`, even `is_initialized` — routes through
 /// `handle()`/`config()`, which `unreachable!()` on `Empty`. Leaving `Empty`
 /// installed panics a host on the next thing it asks about any unit that

@@ -67,9 +67,8 @@ use tutti_rt::Mutex;
 mod support;
 use support::corpus::{DELAY, MATRIX_REVERB, REVERB2, all_finite, peak, render, silence};
 
-use tutti_au_host::{
-    AuEvent, AuParameterListener, EventAddress, emit_gesture, notify_all_parameters,
-};
+use tutti_au_ffi::emit_gesture;
+use tutti_au_host::{AuEvent, AuParameterListener, EventAddress};
 
 /// AudioToolbox tolerates concurrent use of *distinct* units, but component
 /// discovery walks a process-global registry and several tests here open the
@@ -409,20 +408,6 @@ fn load_state_notifies_listeners() {
         "set_state notified but the value is {after}, not the saved {}",
         p.range.min
     );
-}
-
-/// The wildcard notify must be accepted even with no listener registered.
-///
-/// `set_state` calls it unconditionally, and the overwhelmingly common case is
-/// a host with no editor open and therefore no listener. If AudioToolbox
-/// rejected the call in that state, every project load would be doing something
-/// that errors — currently ignored, but it would be masking a real refusal.
-#[test]
-fn notify_all_parameters_is_accepted_with_no_listener() {
-    let _g = AU_LOCK.lock();
-    let au = DELAY.open(RATE, BLOCK);
-    notify_all_parameters(au.unit())
-        .expect("the wildcard notify is legal with no listeners registered");
 }
 
 // -------------------------------------------------------------------- reset

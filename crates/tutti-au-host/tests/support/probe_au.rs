@@ -129,7 +129,7 @@ pub const PROBE_PROPERTY_RENDER_COUNT: u32 = 0x5474_746A;
 /// If the probe refuses the property, which would mean the component answering
 /// is not this file's probe.
 pub fn last_render_sample_time(au: &Au) -> f64 {
-    // SAFETY: `raw_unit` is live for `&au`, and the probe answers this id with
+    // SAFETY: `unit().as_raw()` is live for `&au`, and the probe answers this id with
     // exactly one `f64` (see `probe_get_property`).
     unsafe { read_probe_property::<f64>(au, PROBE_PROPERTY_LAST_RENDER_TIME) }
 }
@@ -259,7 +259,7 @@ impl HostPull {
 /// If the probe refuses the property, which would mean the component answering
 /// is not this file's probe.
 pub fn last_host_pull(au: &Au) -> HostPull {
-    // SAFETY: `raw_unit` is live for `&au`; the probe answers this id with
+    // SAFETY: `unit().as_raw()` is live for `&au`; the probe answers this id with
     // exactly one `HostPull`.
     unsafe { read_probe_property::<HostPull>(au, PROBE_PROPERTY_HOST_PULL) }
 }
@@ -370,11 +370,11 @@ pub const PROBE_DEPENDENT_PARAMS: &[(u32, u32)] = &[
 pub fn last_presentation_latency(au: &Au, scope: u32, element: u32) -> Option<f64> {
     let mut out = f64::NAN;
     let mut size = std::mem::size_of::<f64>() as u32;
-    // SAFETY: `raw_unit` is live for `&au`; the probe answers exactly one `f64`
+    // SAFETY: `unit().as_raw()` is live for `&au`; the probe answers exactly one `f64`
     // at this id (see `probe_get_property`).
     let status = unsafe {
         sys::AudioUnitGetProperty(
-            au.raw_unit(),
+            au.unit().as_raw(),
             PROBE_PROPERTY_LAST_PRESENTATION_LATENCY,
             scope,
             element,
@@ -406,7 +406,7 @@ pub const PROBE_INITIAL_PARAM_COUNT: u32 = 2;
 /// If the probe refuses the write, which would mean the component answering is
 /// not this file's probe.
 pub fn set_latency_seconds(au: &Au, seconds: f64) {
-    // SAFETY: `raw_unit` is live for `&au`; the probe accepts exactly one `f64`
+    // SAFETY: `unit().as_raw()` is live for `&au`; the probe accepts exactly one `f64`
     // at this id (see `probe_set_property`).
     unsafe { write_probe_property(au, PROBE_PROPERTY_SET_LATENCY, seconds) }
 }
@@ -434,7 +434,7 @@ pub fn set_param_count(au: &Au, count: u32) {
 unsafe fn write_probe_property<T>(au: &Au, id: u32, value: T) {
     let status = unsafe {
         sys::AudioUnitSetProperty(
-            au.raw_unit(),
+            au.unit().as_raw(),
             id,
             sys::kAudioUnitScope_Global,
             0,
@@ -456,7 +456,7 @@ unsafe fn read_probe_property<T>(au: &Au, id: u32) -> T {
     let mut size = std::mem::size_of::<T>() as u32;
     let status = unsafe {
         sys::AudioUnitGetProperty(
-            au.raw_unit(),
+            au.unit().as_raw(),
             id,
             sys::kAudioUnitScope_Global,
             0,

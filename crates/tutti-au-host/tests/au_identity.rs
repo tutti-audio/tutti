@@ -367,7 +367,7 @@ fn the_overview_decodes_every_entry_the_au_reported() {
         let mut writable: u8 = 0;
         let st = unsafe {
             coreaudio_sys::AudioUnitGetPropertyInfo(
-                au.raw_unit(),
+                au.unit().as_raw(),
                 ParametersForOverview::ID,
                 Scope::GLOBAL.raw(),
                 0,
