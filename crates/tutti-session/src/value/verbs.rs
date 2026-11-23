@@ -4,7 +4,9 @@
 use super::batch::{IntoAssign, IntoRead};
 use super::error::ValueError;
 use super::gesture::Gesture;
-use super::state::Values;
+use super::saved::SavedValues;
+use super::state::{ValueState, Values};
+use super::target::AnyAssign;
 use super::watcher::{IntoTargets, Watcher};
 use crate::{AppKey, Clock, Session};
 
@@ -152,6 +154,50 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// ```
     pub fn gesture<W: IntoTargets>(&self, targets: W) -> Result<Gesture<K, W>, ValueError<K>> {
         self.values.gesture(targets)
+    }
+
+    /// The base of every saved target at one instant: a [`SavedValues`] that
+    /// `set(&saved)` puts back. Every saved target is read under the value
+    /// lock, so a batch is in the map whole or not at all. A plugin's
+    /// parameters, the policies, a MIDI device's latency and a plugin's
+    /// automation mode are not saved.
+    ///
+    /// # Errors
+    ///
+    /// [`Reentrant`](crate::ValueErrorKind::Reentrant) from inside a
+    /// `modify`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tutti_buffers::ChannelLayout;
+    /// use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
+    /// use tutti_session::Session;
+    /// use tutti_units::{Hz, Q};
+    ///
+    /// let mut session = Session::builder().build().unwrap();
+    /// let filter = session
+    ///     .graph()
+    ///     .add(SvfFilterNode::<f32>::from(
+    ///         SvfFilterConfig::new(ChannelLayout::MONO, SvfType::LowPass)
+    ///             .freq(Hz::new(500.0))
+    ///             .q(Q::new(0.7)),
+    ///     ));
+    /// let saved = session.saved_values().unwrap();
+    /// session.set(filter.cutoff().to(Hz::new(800.0))).unwrap();
+    /// session.set(&saved).unwrap();
+    /// assert_eq!(session.get(filter.cutoff()).unwrap(), Hz::new(500.0));
+    /// ```
+    pub fn saved_values(&self) -> Result<SavedValues<K>, ValueError<K>> {
+        self.values.saved_values()
+    }
+
+    /// The assignments among `items` whose target is saved, as a
+    /// [`SavedValues`]: a preset built from assignments (an
+    /// [`Assign::erase`](crate::Assign::erase) each) rather than read off the
+    /// session. An item whose target is not saved is left out.
+    pub fn values_of(&self, items: impl IntoIterator<Item = AnyAssign>) -> SavedValues<K> {
+        ValueState::values_of(items)
     }
 
     /// The session's values for any control-side thread: `Clone + Send`,

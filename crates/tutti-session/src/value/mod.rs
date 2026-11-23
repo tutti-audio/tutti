@@ -47,6 +47,7 @@ mod param;
 mod plugin;
 mod program;
 mod range;
+mod saved;
 mod slot;
 mod state;
 mod target;
@@ -76,6 +77,7 @@ pub(crate) use program::{
 pub use program::{AutomationTarget, CurveTarget, MacroTarget, PolarityTarget, RateTarget};
 pub use range::RangeTarget;
 pub(crate) use range::{Bounds, RangeSlot};
+pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 #[cfg(feature = "sampler")]

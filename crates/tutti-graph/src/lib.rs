@@ -719,7 +719,9 @@ mod wake;
 pub use builder::{GraphBuilder, Renderer};
 pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
-pub use controls::{ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts};
+pub use controls::{
+    DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
+};
 pub use cost::{Cost, Schedule, Work};
 pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{

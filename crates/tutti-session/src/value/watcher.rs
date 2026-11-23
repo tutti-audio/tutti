@@ -35,6 +35,9 @@ pub enum ChangedBy {
     /// The app: a [`Session::set`](crate::Session::set) or a
     /// [`Values::set`](crate::Values::set).
     App,
+    /// A saved map put back: a [`Session::set`](crate::Session::set) of a
+    /// [`SavedValues`](crate::SavedValues).
+    Restore,
 }
 
 /// A target a [`Watcher`] can follow: every target except a plugin's
@@ -155,6 +158,12 @@ impl StoredChange {
         }
     }
 
+    /// A change in the value type a watcher names, for `base` and `value`
+    /// already erased as that type.
+    pub(super) fn erased(id: TargetId, base: Erased, value: Erased) -> Self {
+        Self { id, base, value }
+    }
+
     /// The change of a gesture's end: `value` over the base the gesture's
     /// first change started from.
     fn ended<V: Send + Sync + 'static>(id: TargetId, base: Erased, value: V) -> Self {
@@ -169,11 +178,12 @@ impl StoredChange {
 /// What a batch changed: the targets whose base moved.
 pub(crate) struct Stored {
     landings: Vec<StoredChange>,
+    by: ChangedBy,
 }
 
 impl Stored {
-    pub(super) fn new(landings: Vec<StoredChange>) -> Self {
-        Self { landings }
+    pub(super) fn new(landings: Vec<StoredChange>, by: ChangedBy) -> Self {
+        Self { landings, by }
     }
 
     /// The base each moved target had before the batch.
@@ -187,8 +197,8 @@ impl Stored {
 /// How a landing is grouped into gestures: the one rule `Feed::land` applies.
 #[derive(Clone, Copy)]
 pub(super) enum Grouping {
-    /// A batch: two or more moved targets are one new gesture, which ends with
-    /// the call; one moved target is no gesture.
+    /// A batch, or a restore of a saved map: two or more moved targets are one
+    /// new gesture, which ends with the call; one moved target is no gesture.
     Batch,
     /// A write of an open [`Gesture`](crate::Gesture): its changes, not ended.
     Open(GestureId),
@@ -310,7 +320,7 @@ impl Feed {
                         .get(&landing.id)
                         .map_or(&landing.base, |earlier| &earlier.base);
                     let record = Record {
-                        by: ChangedBy::App,
+                        by: landed.by,
                         value: Arc::clone(&landing.value),
                         base: Arc::clone(base),
                         gesture: gesture.clone(),
