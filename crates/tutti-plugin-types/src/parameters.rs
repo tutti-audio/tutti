@@ -242,15 +242,16 @@ pub struct ParameterInfo {
     flags: ParamFlags,
     /// Which bits of [`flags`](Self::flags) the format actually reported.
     known: ParamFlags,
-    /// The group this parameter belongs to, as a display label. Empty when the
+    /// The group this parameter belongs to, as a display label (a path for VST3 and CLAP). Empty when the
     /// plugin declared none.
     ///
     /// Every hosted format has a grouping mechanism and no two agree on its
     /// shape: VST3 has a real tree of units, CLAP a `/`-separated module path,
     /// VST2 a numbered category, AU an optional integer clump. What they share
     /// is that each resolves to a *name*, so that is what crosses this
-    /// boundary. A caller wanting VST3's tree reaches into `tutti-vst3-host`,
-    /// which keeps it.
+    /// boundary: for VST3 and CLAP the group's full path, as
+    /// [`ParamGroup::path`](crate::ParamGroup::path) keys it. The tree is
+    /// [`PluginWiring::param_groups`](crate::PluginWiring::param_groups).
     ///
     /// Deliberately a `String` rather than an `Option<String>`, unlike the
     /// [`known`](Self::known) mask beside it: "the format never said" and "the
@@ -277,6 +278,9 @@ pub struct ParameterInfo {
     /// `ParametersForOverview`). `false` is both "not marked" and "the format
     /// has no such list": VST3 and CLAP say nothing of it.
     overview: bool,
+    /// A short label for a narrow display, where the plugin declares one
+    /// (VST3's `shortTitle`, VST2's `shortLabel`); empty when it declares none.
+    short_name: String,
     /// How the plain value follows from the normalized position, as the format
     /// declares it. Read through [`plain_map`](Self::plain_map).
     plain_map: Option<PlainMap>,
@@ -299,6 +303,8 @@ struct ParameterInfoWire {
     pub role: Option<ControlRole>,
     #[serde(default)]
     pub overview: bool,
+    #[serde(default)]
+    pub short_name: String,
     #[serde(default)]
     pub plain_map: Option<PlainMap>,
 }
@@ -338,6 +344,7 @@ impl TryFrom<ParameterInfoWire> for ParameterInfo {
             measures: w.measures,
             role: w.role,
             overview: w.overview,
+            short_name: w.short_name,
             plain_map: w.plain_map,
         })
     }
@@ -361,6 +368,7 @@ impl ParameterInfo {
             measures: None,
             role: None,
             overview: false,
+            short_name: String::new(),
             plain_map: None,
         }
     }
@@ -423,8 +431,9 @@ impl ParameterInfo {
         &self.unit
     }
 
-    /// The group this parameter belongs to, as a display label; empty when the
-    /// plugin declared none.
+    /// The group this parameter belongs to; empty when the plugin declared none.
+    /// For VST3 and CLAP it is the [`ParamGroup::path`](crate::ParamGroup::path)
+    /// of the group.
     #[must_use]
     pub fn group(&self) -> &str {
         &self.group
@@ -453,6 +462,20 @@ impl ParameterInfo {
     #[must_use]
     pub const fn overview(&self) -> bool {
         self.overview
+    }
+
+    /// The short label the plugin declares for a narrow display; empty when it
+    /// declares none (CLAP and AU have no such field).
+    #[must_use]
+    pub fn short_name(&self) -> &str {
+        &self.short_name
+    }
+
+    /// Sets the short label.
+    #[must_use]
+    pub fn with_short_name(mut self, short_name: impl Into<String>) -> Self {
+        self.short_name = short_name.into();
+        self
     }
 
     /// Marks this parameter as one of the plugin's headline controls.
@@ -971,22 +994,31 @@ mod measures_serde_tests {
         assert_eq!((p.measures, p.role, p.overview), (None, None, false));
     }
 
-    /// A unit, a role and the overview mark survive JSON and the IPC's postcard.
+    /// A unit, a role, the overview mark and the short name survive JSON and the IPC's postcard.
     #[test]
     fn measures_role_and_overview_round_trip() {
         let p = ParameterInfo::new(ParamId::new(3), "Pan")
             .with_plain_range(-1.0, 1.0, 0.0)
             .with_measures(Some(ParamUnit::Pan))
             .with_role(Some(ControlRole::Pan(Axis::Y)))
-            .with_overview(true);
-        let want = (Some(ParamUnit::Pan), Some(ControlRole::Pan(Axis::Y)), true);
+            .with_overview(true)
+            .with_short_name("Pn");
+        let want = (
+            Some(ParamUnit::Pan),
+            Some(ControlRole::Pan(Axis::Y)),
+            true,
+            "Pn",
+        );
+        fn of(p: &ParameterInfo) -> (Option<ParamUnit>, Option<ControlRole>, bool, &str) {
+            (p.measures, p.role, p.overview, p.short_name.as_str())
+        }
 
         let json: ParameterInfo =
             serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
-        assert_eq!((json.measures, json.role, json.overview), want);
+        assert_eq!(of(&json), want);
 
         let bin: ParameterInfo = postcard::from_bytes(&postcard::to_allocvec(&p).unwrap()).unwrap();
-        assert_eq!((bin.measures, bin.role, bin.overview), want);
+        assert_eq!(of(&bin), want);
     }
 
     /// A role no `ControlRole` names is refused, not mapped to another.

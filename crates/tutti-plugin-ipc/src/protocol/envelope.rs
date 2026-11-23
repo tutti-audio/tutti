@@ -436,7 +436,7 @@ pub enum ControlReply {
         descriptor: Box<PluginDescriptor>,
         /// Engine-wiring data from instantiation (bus widths, latency, f64).
         #[serde(default)]
-        loaded: PluginWiring,
+        loaded: Box<PluginWiring>,
         /// The sample format actually agreed on, which may differ from the
         /// host's preference.
         negotiated_format: FloatWidth,

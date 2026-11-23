@@ -2,7 +2,6 @@
 //! by [`Vst3Loaded`] and, with parameter writes redirected, by
 //! [`Vst3Controller`](super::Vst3Controller).
 
-use tutti_plugin_types::MainThreadMarker;
 use tutti_plugin_types::features::probed;
 use tutti_plugin_types::{
     AutomationMode, ContentScale, Control, EditorOpened, EditorPresence, EditorWindow, Features,
@@ -11,6 +10,7 @@ use tutti_plugin_types::{
     PluginResult, PluginTail, PluginWiring, PresetId, RenderModeSupport, Request, RescanScope,
     Samples, StateUse, Vst3SubCategories, WindowHandle, bypass_parameter,
 };
+use tutti_plugin_types::{Delivered, MainThreadMarker, TrackInfo};
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 
@@ -278,11 +278,23 @@ impl Control for Vst3Loaded {
             probed: probed::VST3,
             own_bypass: bypass_parameter(&self.parameter_list(main)).map(OwnBypass::Parameter),
             assignments: self.assignments.clone(),
+            note_names: self.declared_note_names(main),
+            param_groups: super::loaded::unit_groups(&self.units(main)),
         }
     }
 
     fn parameters(&self, main: MainThreadMarker) -> Vec<ParameterInfo> {
         self.parameter_list(main)
+    }
+
+    /// The track's name and colour, told to a controller with `IInfoListener`
+    /// (`setChannelContextInfos`); VST3 has no field for the kind or the width.
+    /// A controller without the interface is told nothing.
+    fn set_track_info(&mut self, main: MainThreadMarker, info: &TrackInfo) -> Delivered {
+        let argb = info.color.map(|c| u32::from_be_bytes([c.a, c.r, c.g, c.b]));
+        self.plugin
+            .set_channel_context(main, info.name.as_deref(), argb);
+        Delivered::Yes
     }
 
     fn parameter_count(&self, main: MainThreadMarker) -> usize {
