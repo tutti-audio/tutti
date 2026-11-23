@@ -84,9 +84,7 @@ impl Plugin {
         tutti_session::Session,
         tutti_session::Key<tutti_session::AnyPlugin>,
     ) {
-        // SAFETY: nextest runs every test in its own process and this runs
-        // before the first server is spawned, on the test's own thread.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         let mut session = offline_session();
         let plugin = tutti_plugin_types::PluginRef::file(path);
         let request = match state {

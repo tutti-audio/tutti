@@ -21,9 +21,7 @@ const AUX: ParamId = ParamId::new(1);
 /// them, and a parameter's group is the path of one of them.**
 #[test]
 fn a_loaded_plugins_info_lists_its_note_names_and_param_groups() {
-    // SAFETY: nextest runs each test in its own process, and this is set from
-    // the test's own thread before the first server is spawned.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     let mut s = Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()

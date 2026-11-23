@@ -51,14 +51,6 @@ const BLOCK: usize = 512;
 /// What the probe adds to its latency while it renders offline.
 const OFFLINE_EXTRA: usize = 24;
 
-/// Sets an environment variable for the plugin servers this process spawns.
-fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-    // SAFETY: nextest runs each test in its own process, and every variable is
-    // set before the first server is spawned, from the test's own thread:
-    // nothing reads the environment concurrently.
-    unsafe { std::env::set_var(key, value) };
-}
-
 /// An offline stereo session at 48 kHz, its servers' environment set:
 /// the server's path, the offline extra, and `extra`.
 fn session(extra: &[(&str, &str)]) -> Session {
@@ -72,13 +64,13 @@ fn session_built(
 ) -> Session {
     // The probe of the plugin's file runs before any fault variable is set.
     crate::loading::prime(&PluginRef::file(clap_probe()));
-    set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-    set_env(
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+    tutti_fixtures::set_env(
         "TUTTI_CLAP_PROBE_OFFLINE_EXTRA_LATENCY",
         OFFLINE_EXTRA.to_string(),
     );
     for (key, value) in extra {
-        set_env(key, value);
+        tutti_fixtures::set_env(key, value);
     }
     build(Session::builder())
         .sample_rate(RATE)
@@ -873,9 +865,7 @@ fn a_gave_up_node_is_revived_by_a_load_composed_from_its_state() {
             })
         )
     });
-    // SAFETY: nextest runs each test in its own process, and the servers that
-    // read the variable are spawned from this thread, after this call.
-    unsafe { std::env::remove_var("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK") };
+    tutti_fixtures::remove_env("TUTTI_CLAP_PROBE_CRASH_ON_BLOCK");
 
     let state = {
         let view = s.plugin_view(node).unwrap();
