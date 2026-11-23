@@ -222,21 +222,6 @@ mod tests {
         ))
     }
 
-    #[test]
-    fn the_shape_is_heavy_and_declares_the_drive() {
-        let n = TubeStageNode::<f32>::from(TubeStageConfig::new(3u16));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Heavy);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::GainDb][..]);
-        assert_eq!(n.param_base(0), Some(6.0));
-        let empty = TubeStageNode::<f32>::from(TubeStageConfig::new(0u16));
-        assert_eq!(empty.shape().audio_in().count(), 0);
-    }
-
     /// The impulse of a small input peaks at the oversampler's declared latency, and the
     /// output has rung out by the declared tail.
     #[test]

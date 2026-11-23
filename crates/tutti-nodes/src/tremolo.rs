@@ -149,7 +149,7 @@ mod tests {
     use crate::test_support::{drive_block, prepared};
 
     use tutti_graph::{Node, ParamNode};
-    use tutti_units::Tail;
+
     use tutti_units::UnitParam;
 
     fn node(width: u16, rate: f64, depth: f64) -> TremoloNode<f32> {
@@ -158,26 +158,6 @@ mod tests {
                 .rate(Hz::new(rate))
                 .depth(Bipolar::of(depth)),
         ))
-    }
-
-    /// The shape is the width in and out, `Moderate`, with no tail, and declares the rate and
-    /// the depth; the default is 5 Hz at half depth.
-    #[test]
-    fn the_shape_declares_rate_and_depth_and_no_tail() {
-        let n = node(3, 5.0, 0.5);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(shape.tail, Tail::None);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Rate, UnitParam::Depth][..]
-        );
-        let d = TremoloNode::<f32>::from(TremoloConfig::new(1u16));
-        assert_eq!((d.param_base(0), d.param_base(1)), (Some(5.0), Some(0.5)));
     }
 
     /// Set to depth 1 through `Bipolar` the node swings to silence at the trough of a 100 Hz

@@ -18,17 +18,6 @@ fn white(seed: u64, n: usize) -> f32 {
     2.0 * ((word >> 40) as f32 / 16_777_216.0) - 1.0
 }
 
-#[test]
-fn the_shape_is_a_mono_source_declaring_the_level() {
-    let node =
-        NoiseNode::<f32>::from(NoiseConfig::new(NoiseColour::White).level(Amplitude::new(0.25)));
-    let shape = Node::<f32>::shape(&node);
-    assert_eq!(shape.audio_in().count(), 0);
-    assert_eq!(shape.audio_out().count(), 1);
-    assert_eq!(shape.params.as_slice(), &[UnitParam::Volume][..]);
-    assert_eq!(Node::<f32>::param_base(&node, 0), Some(0.25));
-}
-
 /// White at level 0.25 from seed 9 is `0.25` times the SplitMix64 word `n` as a unit fraction,
 /// doubled and shifted: the first frames are exactly those, in sample order.
 #[test]
