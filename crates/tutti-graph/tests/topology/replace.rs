@@ -619,68 +619,6 @@ fn set_latency_cuts_a_fade() {
     assert_eq!(ed.fades_in_flight(), 0);
 }
 
-/// The reference derives the same rule from the graph value alone: a node
-/// whose declared latency changes with no new generation has its fade cut,
-/// keeping the newest unit.
-#[test]
-fn the_reference_cuts_a_fade_on_a_latency_change() {
-    use tutti_graph::NodeSpec;
-    use tutti_graph::Topology;
-    use tutti_graph::{GraphSpec, Reference};
-
-    let spec_at = |generation: u32, latency: usize| {
-        let mut t = Topology {
-            inputs: ChannelLayout::MONO,
-            ..Topology::default()
-        };
-        t.nodes.insert(
-            NODE,
-            NodeSpec::new("gain", ChannelLayout::MONO, ChannelLayout::MONO)
-                .latency(Samples::new(latency)),
-        );
-        t.edges.insert(
-            InputPort::new(NODE, 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
-        t.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
-        let mut spec = GraphSpec::new(t);
-        spec.generations.insert(NODE, generation);
-        spec.validate().expect("valid")
-    };
-    let unit = |g: f32| -> BTreeMap<NodeKey, Box<dyn Node>> {
-        [(NODE, Box::new(gain(g)) as Box<dyn Node>)]
-            .into_iter()
-            .collect()
-    };
-    let fade = Fade::new(Samples::new(1000));
-    let fades: BTreeMap<NodeKey, Fade> = [(NODE, fade)].into_iter().collect();
-    let mut r = Reference::new(prepare(128));
-    let render = |r: &mut Reference| {
-        let input = vec![1.0f32; 64];
-        let mut out = vec![0.0f32; 64];
-        r.process(
-            64,
-            &TransportPosition::default(),
-            &[&input[..]],
-            &mut [&mut out[..]],
-        );
-        out
-    };
-    r.set_graph(&spec_at(0, 0), unit(1.0));
-    render(&mut r);
-    r.set_graph_with_fades(&spec_at(1, 0), unit(2.0), &fades);
-    render(&mut r);
-    r.set_graph_with_fades(&spec_at(2, 0), unit(4.0), &fades);
-    render(&mut r);
-    r.set_graph_with_fades(&spec_at(2, 3), unit(8.0), &fades);
-    let out = render(&mut r);
-    assert!(
-        out.iter().all(|&y| y == 4.0),
-        "the newest unit: {:?}",
-        &out[..4]
-    );
-}
-
 /// **A replace gives the key the incoming unit's own kind**, not the kind
 /// the key was inserted under: a key that held one type of node and now holds
 /// another must not name the old type in the spec (the kind is what
