@@ -525,41 +525,6 @@ mod tests {
         assert_eq!(output[1], 0.0);
     }
 
-    #[test]
-    fn test_click_node_plays_on_beat() {
-        let (settings, mut node) = make_click();
-        settings.mode().store(MetronomeMode::Always);
-        set_volume(&settings, Amplitude::new(1.0));
-
-        assert!(
-            sounds_within(&mut node, ROLLING, 0.0, 100),
-            "Click should produce non-zero output"
-        );
-        assert!(
-            sounds_within(&mut node, ROLLING, 1.0, 100),
-            "Click should produce non-zero output on new beat"
-        );
-    }
-
-    #[test]
-    fn test_click_plays_after_loop_wrap() {
-        let (settings, mut node) = make_click();
-        settings.mode().store(MetronomeMode::Always);
-        set_volume(&settings, Amplitude::new(1.0));
-
-        let _ = frame(&mut node, ROLLING, 7.0);
-        assert_eq!(node.metronome.onset(), Some(Beat::new(7.0)));
-
-        // Simulate loop wrap: beat jumps backward from 7 to 4
-        let found_nonzero = (0..100).any(|_| frame(&mut node, ROLLING, 4.0)[0] != 0.0);
-        assert_eq!(
-            node.metronome.onset(),
-            Some(Beat::new(4.0)),
-            "Should reset to beat 4 after loop wrap"
-        );
-        assert!(found_nonzero, "Click should play after loop wrap");
-    }
-
     /// A transport rolling from `start` so that frame `i` of the block is at
     /// beat `start + i/100` (at 44.1 kHz): 26 460 BPM.
     fn hundredths_from(start: f64) -> tutti_graph::TransportPosition {

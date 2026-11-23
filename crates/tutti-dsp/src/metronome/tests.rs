@@ -122,11 +122,15 @@ fn a_backward_jump_retriggers() {
     assert_eq!(metronome.onset(), Some(Beat::new(4.0)));
 }
 
-/// The click starts silent (`sin(0)` under a zero attack), sounds on its second frame at the
-/// level it is read at, and runs out to silence after its 30 ms.
+/// Each click is 30 ms and starts silent (`sin(0)` under a zero attack), sounds on its second
+/// frame at the level it is read at and runs out to silence; the accent peaks at the unit
+/// and the normal click at 0.7 of it.
 #[test]
-fn a_click_starts_at_zero_scales_with_volume_and_runs_out() {
+fn a_click_is_thirty_ms_from_silence_at_its_level_and_runs_out() {
     let mut metronome = prepared();
+    let peak = |click: &[f64]| click.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    assert!((peak(metronome.click(true)) - 1.0).abs() < 1e-2);
+    assert!((peak(metronome.click(false)) - 0.7).abs() < 1e-2);
     let first = metronome.tick(None, Beat::new(1.0), 0.5);
     let second = metronome.tick(None, Beat::new(1.0), 0.5);
     assert_eq!(first, 0.0);
@@ -138,14 +142,4 @@ fn a_click_starts_at_zero_scales_with_volume_and_runs_out() {
         let _ = metronome.tick(None, Beat::new(1.0), 0.5);
     }
     assert_eq!(metronome.tick(None, Beat::new(1.0), 0.5), 0.0);
-}
-
-/// The accent is 1200 Hz at full level and the normal click 1000 Hz at 0.7: the accent's
-/// peak is the unit and the normal's is 0.7 of it.
-#[test]
-fn the_accent_is_full_level_and_the_normal_click_is_seven_tenths() {
-    let metronome = prepared();
-    let peak = |click: &[f64]| click.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-    assert!((peak(metronome.click(true)) - 1.0).abs() < 1e-2);
-    assert!((peak(metronome.click(false)) - 0.7).abs() < 1e-2);
 }
