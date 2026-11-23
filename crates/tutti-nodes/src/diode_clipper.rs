@@ -6,13 +6,11 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ClipperDrive, DiodeClipper, DiodeClipperControls, Lerp,
     OversamplingFactor,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, Hz, SampleRate, Samples, Tail, UnitAddr, UnitParam};
+use tutti_graph::{Cost, Shape};
+use tutti_units::{Db, Hz, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
-use crate::params::{ControlSet, HasControl};
-use tutti_graph::DeclaredUnit;
 
 /// What a [`DiodeClipperNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -88,8 +86,7 @@ pub type DiodeClipperNode<F> = KernelNode<DiodeClipperKernel<F>>;
 
 impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
     fn from(config: DiodeClipperConfig) -> Self {
-        let input = BusTopology::unassigned(config.width)
-            .expect("a diode clipper is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a diode clipper");
         Self::with_kernel(
             DiodeClipperKernel::<F>::new(&config, input),
             DiodeClipperSet,
@@ -102,54 +99,15 @@ impl<F: Float + Lerp> From<DiodeClipperConfig> for DiodeClipperNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct DiodeClipperSet;
 
-/// The controls are the corner and the drive; the drive is a range-checked [`ClipperDrive`],
-/// which `control_set!` does not take (its rows are units), so the set is written out.
-impl ControlSet for DiodeClipperSet {
-    type Controls = DiodeClipperControls;
-
-    fn addrs(&self) -> &'static [UnitAddr] {
-        const ALL: &[UnitAddr] = &[
-            UnitAddr::first(UnitParam::Cutoff),
-            UnitAddr::first(UnitParam::GainDb),
-        ];
-        ALL
-    }
-
-    fn units(&self) -> &'static [DeclaredUnit] {
-        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Db>()];
-        ALL
-    }
+control_set! {
+    DiodeClipperSet(_s): DiodeClipperControls = DiodeClipperControls::DEFAULT;
+    live: (all);
+    Cutoff => Hz = cutoff,
+    GainDb => Db = drive via ClipperDrive;
 
     fn defaults(&self) -> DiodeClipperControls {
         DiodeClipperControls::DEFAULT
     }
-
-    fn flatten(&self, c: &DiodeClipperControls, out: &mut [f64]) {
-        let all = [c.cutoff.get(), c.drive.get().get()];
-        out.copy_from_slice(&all[..out.len()]);
-    }
-
-    fn assemble(&self, v: &[f64]) -> DiodeClipperControls {
-        let mut c = DiodeClipperControls::DEFAULT;
-        let mut cells = v.iter().copied();
-        if let Some(x) = cells.next() {
-            c.cutoff = Hz::new(x);
-        }
-        if let Some(x) = cells.next() {
-            // The one place a live drive is changed: a cell is written per frame, with no
-            // caller to refuse it to.
-            c.drive = ClipperDrive::held(Db::new(x));
-        }
-        c
-    }
-}
-
-impl HasControl<{ UnitParam::Cutoff as u16 }> for DiodeClipperSet {
-    type Unit = Hz;
-}
-
-impl HasControl<{ UnitParam::GainDb as u16 }> for DiodeClipperSet {
-    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`DiodeClipperNode`].
@@ -195,12 +153,7 @@ impl<F: Float + Lerp> Kernel for DiodeClipperKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Heavy)
+        Shape::through(self.input).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {

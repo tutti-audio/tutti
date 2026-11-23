@@ -6,21 +6,10 @@ use tutti_buffers::BusTopology;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::BlockMismatch;
 use tutti_dsp::{MAX_SECTIONS, Ramp, SimdLanes, Sos, SosBank, SosCoefficients, SosError};
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
 use tutti_units::SampleRate;
 
 /// The steps the coefficients take to a new design: one grid period.
 pub(super) const RAMP_STEPS: u32 = 16;
-
-/// The shape of a filter on the bus `input`: its output where it is, `Moderate`.
-pub(super) fn filter_shape(input: BusTopology) -> Shape {
-    let output = Bus::banded(input, BusRole::Main, 1).expect("one band is a bus");
-    Shape::buses(
-        Buses::main(input),
-        Buses::NONE.with(output).expect("one bus"),
-    )
-    .cost(Cost::Moderate)
-}
 
 /// The cascade of a [`Sos`] per channel, the design in progress and the ramp of the
 /// coefficients every channel shares.
@@ -56,11 +45,6 @@ impl<F: Float + SimdLanes> RampedSos<F> {
             .ok()
             .and_then(|()| SosCoefficients::new(&self.scratch))
             .unwrap_or_else(|| self.coefficients.target())
-    }
-
-    /// The design in progress, as the last [`design`](Self::design) left it.
-    pub(super) fn scratch(&self) -> &Sos {
-        &self.scratch
     }
 
     /// At rest on `first`, where the node is built.

@@ -1,7 +1,7 @@
 //! [`WaveguideStringNode`]: a string as two travelling waves, excited by its input.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, LowestPitch, WaveguideBank, WaveguideControls,
     WaveguidePositions,
@@ -9,7 +9,7 @@ use tutti_dsp::{
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, Normalized, SampleRate, Seconds, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`WaveguideStringNode`] is made from: its width, the lowest pitch it plays and where its
 /// controls start.
@@ -154,8 +154,7 @@ impl<F: Float> Kernel for WaveguideStringKernel<F> {
     /// `width` channels in and out, `Moderate`: two rings, an all-pass and two averages per
     /// sample and channel.
     fn shape(&self) -> Shape {
-        let bus =
-            BusTopology::unassigned(self.width).expect("a string is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a string");
         Shape::through(bus).cost(Cost::Moderate)
     }
 

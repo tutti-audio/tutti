@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::message::Message;
+use super::message::{Answered, Message, Unanswered};
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
 use crate::{BlobWire, LaneWire, SlabWire};

@@ -38,6 +38,7 @@ tutti-cpal = { version = "0.0.1", path = "../tutti-cpal", default-features = fal
 tutti-codec = { version = "0.0.1", path = "../tutti-codec", optional = true }
 tutti-sampler = { version = "0.0.1", path = "../tutti-sampler", default-features = false, optional = true }
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth", optional = true }
+tutti-voicing = { version = "0.0.1", path = "../tutti-voicing", optional = true }
 tutti-soundfont = { version = "0.0.1", path = "../tutti-soundfont", optional = true }
 tutti-midi-runtime = { version = "0.0.1", path = "../tutti-midi-runtime", default-features = false, optional = true }
 tutti-midi-file = { version = "0.0.1", path = "../tutti-midi-file", optional = true }
@@ -193,7 +194,7 @@ midi-network = ["midi", "dep:tutti-midi-network", "tutti-session?/midi-network"]
 #
 # Each also turns on the session's feature of the same name, with `?` because
 # `session` is optional.
-synth = ["midi", "dep:tutti-polysynth", "tutti-session?/synth"]
+synth = ["midi", "dep:tutti-polysynth", "dep:tutti-voicing", "tutti-session?/synth"]
 soundfont = ["midi", "dep:tutti-soundfont", "dep:tutti-sf2", "tutti-session?/soundfont"]
 sampler = ["dep:tutti-sampler", "tutti-session?/sampler"]
 # `Session::analyze` and `tutti::measure`.

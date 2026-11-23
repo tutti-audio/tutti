@@ -12,7 +12,7 @@ use std::ops::{Deref, DerefMut};
 use tutti_graph::UmpAt;
 
 use tutti_graph::contract::{Direct, HAND_EVENT_CAPACITY};
-use tutti_graph::{Event, InEvents, Offset};
+use tutti_graph::{Event, InEvents, Node, Offset};
 use tutti_polysynth::PolySynth;
 use tutti_ump::Ump;
 use tutti_units::{SampleRate, Samples};
@@ -20,26 +20,26 @@ use tutti_units::{SampleRate, Samples};
 /// The block length a [`Hand`] renders: 64 frames.
 pub const BLOCK: usize = 64;
 
-/// A [`PolySynth`] driven by hand. Derefs to the synth, so its own methods
-/// (`volume`, `active_voice_count`, …) are reachable.
-pub struct Hand {
-    direct: Direct<PolySynth<f32>>,
+/// A node (a [`PolySynth`] unless another is named) driven by hand. Derefs to the node, so its
+/// own methods (`volume`, `active_voice_count`, …) are reachable.
+pub struct Hand<N: Node = PolySynth<f32>> {
+    direct: Direct<N>,
     input: InEvents,
     queued: Vec<Event>,
 }
 
-impl Hand {
+impl<N: Node> Hand<N> {
     /// `synth`, prepared at 48 kHz (the rate every test here builds it
     /// at) for [`BLOCK`]-frame blocks.
-    pub fn new(synth: PolySynth<f32>) -> Self {
+    pub fn new(synth: N) -> Self {
         Self::at(synth, SampleRate::SR_48K)
     }
 
     /// `synth`, prepared at `rate` for [`BLOCK`]-frame blocks.
-    pub fn at(synth: PolySynth<f32>, rate: SampleRate) -> Self {
+    pub fn at(synth: N, rate: SampleRate) -> Self {
         let direct = Direct::new(synth, rate, BLOCK);
         Self {
-            input: tutti_graph::Node::shape(&*direct.node)
+            input: Node::shape(&*direct.node)
                 .event_input(0)
                 .expect("an event input"),
             direct,
@@ -98,15 +98,17 @@ impl Hand {
     }
 }
 
-impl Deref for Hand {
-    type Target = PolySynth<f32>;
-    fn deref(&self) -> &PolySynth<f32> {
+impl<N: Node> Deref for Hand<N> {
+    type Target = N;
+    fn deref(&self) -> &N {
         &self.direct.node
     }
 }
 
-impl DerefMut for Hand {
-    fn deref_mut(&mut self) -> &mut PolySynth<f32> {
+impl<N: Node> DerefMut for Hand<N> {
+    fn deref_mut(&mut self) -> &mut N {
         &mut self.direct.node
     }
 }
+
+pub mod instruments;
