@@ -454,7 +454,7 @@ impl Measurer {
         normalize: Normalize,
     ) -> std::result::Result<Self, Unmeasured> {
         let layout = topology.width();
-        let placed = LoudnessConfig::new(topology.clone())
+        let placed = LoudnessConfig::new(*topology)
             .measure(rate)
             .map(|meter| PlacedMeter { layout, meter });
         let meter = match (normalize, placed) {

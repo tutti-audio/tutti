@@ -61,7 +61,7 @@ pub fn write_wave<'a, S: Sample>(
     format: Format,
 ) -> Result<()> {
     let spec = match wave.topology() {
-        Some(topology) => Spec::new(format, topology.clone(), wave.sample_rate()),
+        Some(topology) => Spec::new(format, *topology, wave.sample_rate()),
         None => Spec::of_width(format, wave.layout(), wave.sample_rate()),
     };
     match dest.into() {

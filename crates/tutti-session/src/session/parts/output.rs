@@ -80,7 +80,7 @@ impl<F: Float> OutputPart<F> {
         if main_output == self.main_output_request && self.main_output_refusal.is_none() {
             return Ok(());
         }
-        self.main_output_request = main_output.clone();
+        self.main_output_request = main_output;
         match graph.declare_main_output(main_output, false) {
             Ok(()) => self.main_output_refusal = None,
             Err(e) => {
@@ -97,7 +97,7 @@ impl<F: Float> OutputPart<F> {
         if self.main_output_refusal.is_none() {
             return false;
         }
-        match graph.declare_main_output(self.main_output_request.clone(), true) {
+        match graph.declare_main_output(self.main_output_request, true) {
             Ok(()) => {
                 self.main_output_refusal = None;
                 true

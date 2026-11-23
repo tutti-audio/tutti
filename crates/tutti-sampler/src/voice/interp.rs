@@ -746,14 +746,12 @@ impl<F: Float> Place<F> {
         }
         // A file that names no speakers is read in the engine's order for its
         // width.
-        let fold = if topology.is_unassigned() {
-            match ChannelTopology::default_for(topology.width()) {
-                Some(named) => fold_to_width(&named, frame)?,
-                None => Fold::by_index(topology.width(), frame)?,
-            }
+        let named = if topology.is_unassigned() {
+            ChannelTopology::default_for(topology.width()).unwrap_or(*topology)
         } else {
-            fold_to_width(topology, frame)?
+            *topology
         };
+        let fold = fold_to_width(&named, frame)?;
         Self::folded(fold, frame)
     }
 
@@ -1412,52 +1410,21 @@ mod tests {
         );
     }
 
-    /// A named file wider than the cap is refused, not truncated: all twenty
-    /// speakers the vocabulary names into a frame of `MAX_CHANNELS` (which has no
-    /// order to fold to) is `Unplaced`.
+    /// A file wider than the cap is refused, not truncated: twenty channels (no
+    /// topology holds them, so they are unassigned and read by index) into a
+    /// frame of `MAX_CHANNELS` would drop four, and is `Unplaced`.
     #[test]
-    fn a_named_file_wider_than_the_cap_is_refused() {
-        use tutti_buffers::Speaker::*;
-        let twenty = ChannelTopology::new([
-            FrontLeft,
-            FrontRight,
-            FrontCenter,
-            LowFrequency,
-            BackLeft,
-            BackRight,
-            FrontLeftOfCenter,
-            FrontRightOfCenter,
-            BackCenter,
-            SideLeft,
-            SideRight,
-            TopCenter,
-            TopFrontLeft,
-            TopFrontCenter,
-            TopFrontRight,
-            TopBackLeft,
-            TopBackCenter,
-            TopBackRight,
-            TopSideLeft,
-            TopSideRight,
-        ])
-        .unwrap();
+    fn a_file_wider_than_the_cap_is_refused() {
+        let twenty = ChannelLayout::from(20u16);
+        let wave =
+            Wave::<f32>::unplaced(twenty, tutti_buffers::Placement::Stated, SampleRate::SR_48K);
         let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
         assert!(matches!(
-            Place::<f32>::for_topology(twenty.width(), Some(&twenty), frame),
+            Place::<f32>::for_wave(&wave, frame),
             Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
         ));
-    }
-
-    /// A file wider than a topology holds has no named channels to place: it is
-    /// read by index, so a frame narrower than it refuses rather than dropping
-    /// channels, and a frame as wide as it reads straight.
-    #[test]
-    fn a_wave_with_no_topology_places_by_index_or_is_refused() {
-        let wide = Wave::<f32>::new(20, SampleRate::SR_48K);
-        assert_eq!(wide.topology(), None);
-        let frame = ChannelLayout::try_from(MAX_CHANNELS).unwrap();
         assert!(matches!(
-            Place::<f32>::for_wave(&wide, frame),
+            Place::<f32>::for_topology(twenty, None, frame),
             Err(crate::PlaceError::Fold(FoldError::Unplaced { .. }))
         ));
     }

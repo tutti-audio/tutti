@@ -171,7 +171,7 @@ impl<F: Float + SimdLanes> LadderKernel<F> {
         let rate = SampleRate::SR_48K;
         Self {
             input,
-            bank: LadderBank::new(input.layout()).saturation(saturation),
+            bank: LadderBank::new(input.width()).saturation(saturation),
             blend: Ramp::new(Self::design(&LadderControls::DEFAULT, rate)),
             rate,
             applied: false,

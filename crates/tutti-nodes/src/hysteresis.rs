@@ -203,14 +203,14 @@ impl<F: Float + Lerp> Kernel for HysteresisKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         let rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.stage =
-            Hysteresis::<F>::new(self.input.layout(), rate, self.saturation, self.coercivity);
+            Hysteresis::<F>::new(self.input.width(), rate, self.saturation, self.coercivity);
         self.applied = false;
     }
 

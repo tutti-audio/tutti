@@ -219,13 +219,13 @@ impl<F: Float + Lerp> PhaserKernel<F> {
         range: SweepRange,
         stagger: Stagger,
     ) -> Result<Self, StaggerError> {
-        let width = usize::from(input.layout().count());
+        let width = usize::from(input.width().count());
         match stagger.channels() {
             Some(got) if got != width => return Err(StaggerError::Length { width, got }),
             _ => {}
         }
         let mut offsets = [PhaseIncrement::new(0.0); MAX_PHASER_CHANNELS];
-        let layout = input.layout();
+        let layout = input.width();
         for (c, o) in (0..width).filter_map(|c| layout.index(c)).zip(&mut offsets) {
             *o = stagger.offset(c);
         }

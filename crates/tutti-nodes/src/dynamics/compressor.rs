@@ -240,7 +240,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for CompressorKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.layout()));
+        self.bank = Some(CompressorBank::new(rate).key_filter(self.filter, self.input.width()));
         self.applied = false;
     }
 

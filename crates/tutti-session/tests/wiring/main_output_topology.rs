@@ -54,7 +54,7 @@ fn offline(builder: SessionBuilder, device: u16) -> Result<Session, Error> {
 }
 
 fn buses(n: u16) -> ChannelTopology {
-    ChannelTopology::new(vec![Speaker::Unassigned; usize::from(n)]).unwrap()
+    ChannelTopology::unassigned(ChannelLayout::from(n)).unwrap()
 }
 
 /// Four declared buses on a six-wide device stay at 0..4. The main output is the
@@ -153,18 +153,13 @@ fn an_unplaceable_declaration_is_refused() {
         refused(offline(Session::builder().main_output_topology(unnamed), 2)),
         FoldError::Unnamed { .. }
     ));
-    // Wider than the engine renders.
-    let wide = buses(tutti_buffers::MAX_CHANNELS as u16 + 1);
-    assert!(matches!(
-        refused(offline(Session::builder().main_output_topology(wide), 32)),
-        FoldError::Unplaced { .. }
-    ));
-    assert!(matches!(
-        Session::builder()
-            .main_output_topology(buses(40))
-            .build_detached(RATE),
-        Err(Error::Output(_))
-    ));
+    // A topology is at most `MAX_CHANNELS` wide, so a main output wider than the
+    // engine renders cannot be declared; a device that wide still builds.
+    assert!(
+        ChannelTopology::new(vec![Speaker::Unassigned; tutti_buffers::MAX_CHANNELS + 1]).is_err()
+    );
+    let wide = offline(Session::builder(), 32).unwrap();
+    assert_eq!(wide.output_device().unwrap().topology, None);
 
     // After the build.
     let mut s = offline(Session::builder(), 2).unwrap();
@@ -340,7 +335,7 @@ fn the_output_device_reads_stated_or_default() {
         Speaker::BackRight,
     ])
     .unwrap();
-    let stated = offline(Session::builder().device_topology(wired.clone()), 6).unwrap();
+    let stated = offline(Session::builder().device_topology(wired), 6).unwrap();
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
     assert_eq!(placed.topology, Some(wired));

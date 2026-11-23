@@ -284,7 +284,7 @@ impl<K: crate::AppKey, F: SessionFloat> Session<K, DeviceClock<F>> {
     ) -> std::result::Result<DeviceRestarted, RestartError> {
         let selector = request.device.clone();
         let max_block = request.max_block;
-        let topology = request.topology.clone();
+        let topology = request.topology;
         let outcome = self.check_restart(max_block).and_then(|()| {
             let previous = self.device().graph_rate();
             self.with_device(|session, device| {

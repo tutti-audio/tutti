@@ -466,7 +466,7 @@ mod tests {
         let five_one = Bed::Surround51.topology();
         let stereo = Bed::Stereo.topology();
         let routing = Routing {
-            monitor: Some(stereo.clone()),
+            monitor: Some(stereo),
             map: OutputMap::channels([2, 3]).unwrap(),
             ..Routing::default()
         };

@@ -928,7 +928,7 @@ fn a_restart_states_or_defaults_the_new_devices_placement() {
     let (driver, _new) = ManualStreamDriver::new();
     let wired = Bed::Surround51.topology();
     session
-        .restart_on(six.clone(), driver, None, Some(wired.clone()))
+        .restart_on(six.clone(), driver, None, Some(wired))
         .unwrap();
     let placed = session.output_device().unwrap();
     assert_eq!(
@@ -976,11 +976,7 @@ fn a_refused_declaration_is_retried_on_a_restart() {
         .device(tutti_cpal::DeviceSelector::Default)
         .build_device_on(spec_at(48_000.0), driver)
         .unwrap();
-    assert!(
-        session
-            .declare_main_output_topology(Some(buses.clone()))
-            .is_err()
-    );
+    assert!(session.declare_main_output_topology(Some(buses)).is_err());
     assert!(matches!(
         session.main_output_topology_status(),
         MainOutputTopologyStatus::Refused(_)
@@ -1031,15 +1027,11 @@ fn a_waiting_declaration_the_device_no_longer_places_is_refused_and_retried_on_a
         .unwrap()
         .unfaded();
     let _ = session.update();
-    session
-        .declare_main_output_topology(Some(stereo.clone()))
-        .unwrap();
+    session.declare_main_output_topology(Some(stereo)).unwrap();
     let _ = session.update();
     stream.render_block(Samples::new(64)).expect("open");
     // Four buses place on six channels, so the declaration is taken, and waits.
-    session
-        .declare_main_output_topology(Some(buses.clone()))
-        .unwrap();
+    session.declare_main_output_topology(Some(buses)).unwrap();
     assert_eq!(
         session.main_output_topology_status(),
         MainOutputTopologyStatus::Pending

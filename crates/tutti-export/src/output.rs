@@ -252,7 +252,7 @@ impl FileTarget {
     /// says which); `None` past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS).
     pub(crate) fn effective_topology(&self) -> Option<ChannelTopology> {
         match &self.width {
-            Width::Placed(topology) => Some(topology.clone()),
+            Width::Placed(topology) => Some(*topology),
             Width::Count(layout) => ChannelTopology::default_for(*layout),
         }
     }

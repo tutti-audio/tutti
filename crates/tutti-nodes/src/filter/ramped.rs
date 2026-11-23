@@ -39,7 +39,7 @@ impl<F: Float + SimdLanes> RampedSos<F> {
     /// [`start`](Self::start)ed or [`restart`](Self::restart)ed.
     pub(super) fn new(input: BusTopology) -> Self {
         Self {
-            bank: SosBank::new(input.layout()),
+            bank: SosBank::new(input.width()),
             coefficients: Ramp::new(SosCoefficients::THROUGH),
             scratch: Sos::new(Vec::with_capacity(MAX_SECTIONS), SampleRate::SR_48K),
             applied: false,

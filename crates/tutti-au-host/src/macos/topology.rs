@@ -138,9 +138,8 @@ pub fn topology_of(tag: AuLayoutTag) -> Option<ChannelTopology> {
         // grows a wide pair, which is a `tutti-buffers` decision.
         AuLayoutTag::Octagonal | AuLayoutTag::Cube => return None,
     };
-    Some(ChannelTopology::Speakers(Speakers::from_format(
-        positions.iter().copied(),
-    )))
+    // Every tag's table is at most a few channels, inside a topology's width.
+    Speakers::from_format(positions.iter().copied()).map(ChannelTopology::Speakers)
 }
 
 #[cfg(test)]

@@ -229,7 +229,7 @@ impl<S: Sample> Wave<S> {
                 .collect(),
             sample_rate: self.sample_rate,
             len: self.len,
-            topology: self.topology.clone(),
+            topology: self.topology,
             placement: self.placement,
         }
     }

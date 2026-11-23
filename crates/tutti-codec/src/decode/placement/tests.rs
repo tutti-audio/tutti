@@ -142,6 +142,20 @@ fn a_count_without_positions_takes_the_default_layout_and_says_so() {
     );
 }
 
+/// A positioned set wider than a topology holds keeps its width and has no
+/// topology, stated, and is not truncated to the speakers a topology holds.
+#[test]
+fn a_positioned_set_wider_than_a_topology_has_none() {
+    let all = Position::all();
+    assert!(
+        all.bits().count_ones() > 16,
+        "the case needs more than 16 flags"
+    );
+    let (width, topology, placement) = super::topology_of(Some(&Channels::Positioned(all)));
+    assert_eq!(u32::from(width.count()), all.bits().count_ones());
+    assert_eq!((topology, placement), (None, Placement::Stated));
+}
+
 /// An ambisonic track is the ACN, SN3D format of its order, stated, from first
 /// order to the cap (a zeroth-order track is one channel: the mono); a higher
 /// order keeps its width and has no topology.

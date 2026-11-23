@@ -47,7 +47,7 @@ pub(crate) fn output_rate(target: &FileTarget, render_rate: SampleRate) -> Sampl
 fn spec(target: &FileTarget, source_rate: SampleRate) -> Spec {
     let rate = output_rate(target, source_rate);
     match target.width.topology() {
-        Some(topology) => Spec::new(target.format(), topology.clone(), rate),
+        Some(topology) => Spec::new(target.format(), *topology, rate),
         None => Spec::of_width(target.format(), target.channels(), rate),
     }
 }

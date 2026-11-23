@@ -524,7 +524,7 @@ impl<F: Float> OutputControl<F> {
         let folds = self.cell.current();
         let entry = folds.devices.get(slot)?.as_ref()?;
         Some(OutputPlacement {
-            topology: entry.topology.clone(),
+            topology: entry.topology,
             placement: entry.placement,
         })
     }

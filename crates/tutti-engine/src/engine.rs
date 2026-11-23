@@ -2898,10 +2898,10 @@ mod tests {
         // A 2-wide device stated as a left-right swap of the front pair: the
         // main output's left lands on the device's channel 1.
         let swapped = ChannelTopology::new([FrontRight, FrontLeft]).unwrap();
-        control.state_device(stereo, Some(swapped.clone())).unwrap();
+        control.state_device(stereo, Some(swapped)).unwrap();
         let placed = control.device(stereo).unwrap();
         assert_eq!(placed.placement, Placement::Stated);
-        assert_eq!(placed.topology, Some(swapped.clone()));
+        assert_eq!(placed.topology, Some(swapped));
         assert_eq!(first_frame_after_fade(&engine, 2), [22.0, 21.0]);
         // Taken back: the width's order.
         control.state_device(stereo, None).unwrap();

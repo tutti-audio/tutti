@@ -401,7 +401,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
         let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
-            self.opts.device_topology.clone(),
+            self.opts.device_topology,
             self.dates,
         )?;
         Self::clock_midi(&parts, &engine);
@@ -450,7 +450,7 @@ impl<F: SessionFloat> SessionBuilder<Offline<F>> {
             transport.settings().tempo_reader(),
         );
         graph.set_render_workers(self.opts.render_workers);
-        graph.declare_main_output(self.opts.main_output.clone(), true)?;
+        graph.declare_main_output(self.opts.main_output, true)?;
         let (executor, background) = Self::session_executor()?;
         let bells = tutti_rt::Bells::new(&executor).map_err(crate::Error::Bells)?;
         self.session(
@@ -509,7 +509,7 @@ impl<F: SessionFloat> SessionBuilder<SystemClock<F>> {
         let mut engine = parts.graph.engine(
             &parts.transport,
             layout,
-            self.opts.device_topology.clone(),
+            self.opts.device_topology,
             BlockDates::Os,
         )?;
         Self::clock_midi(&parts, &engine);
@@ -648,7 +648,7 @@ impl<F: SessionFloat> SessionBuilder<crate::DeviceClock<F>> {
         let mut engine = parts.graph.engine(
             &parts.transport,
             spec.channels,
-            self.opts.device_topology.clone(),
+            self.opts.device_topology,
             BlockDates::Os,
         )?;
         Self::clock_midi(&parts, &engine);
@@ -1075,7 +1075,7 @@ impl<C: Clock> SessionBuilder<C> {
                 parts.click,
             ),
             output: crate::session::parts::OutputPart::new(
-                self.opts.main_output.clone(),
+                self.opts.main_output,
                 crate::policy::output_cell(table.output_facts()),
             ),
             reports: Default::default(),
@@ -1142,7 +1142,7 @@ impl<C: Clock> SessionBuilder<C> {
                 )
                 .into());
             }
-            Some(stated) => Some(stated.clone()),
+            Some(stated) => Some(*stated),
             None => ChannelTopology::default_for(device),
         };
         match &self.opts.main_output {
@@ -1177,7 +1177,7 @@ impl<C: Clock> SessionBuilder<C> {
     /// over, which publishes it to the engine.
     fn declare(&self, graph: &mut Graph<C::Float>) -> Result<()> {
         if self.opts.main_output.is_some() {
-            graph.declare_main_output(self.opts.main_output.clone(), true)?;
+            graph.declare_main_output(self.opts.main_output, true)?;
         }
         Ok(())
     }

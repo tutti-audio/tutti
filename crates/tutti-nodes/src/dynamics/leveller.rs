@@ -2,7 +2,7 @@
 //! short-term loudness.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, ChannelWeightError, ChannelWeights, KWeighting, LevellerBank,
     LevellerControls, SimdLanes, SosCoefficients, channel_weights,
@@ -108,7 +108,7 @@ impl<F: Float + SimdLanes> TryFrom<LevellerConfig> for LevellerNode<F> {
     ///
     /// [`ChannelWeightError`] for an ambisonic bus and for speakers that are not a bed's.
     fn try_from(config: LevellerConfig) -> Result<Self, ChannelWeightError> {
-        let weights = channel_weights(&ChannelTopology::from(config.input))?;
+        let weights = channel_weights(&config.input)?;
         Ok(Self::with_kernel(
             LevellerKernel::new(config.input, weights),
             LevellerSet,

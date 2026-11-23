@@ -15,8 +15,8 @@
 //! running state.
 
 use tutti_buffers::{
-    AmbisonicFormat, BusTopology, ChannelLayout, ChannelTopology, Fold, FoldError, InputOutput,
-    MAX_CHANNELS, Mono, MonoMut, Planes, PlanesMut, Sample,
+    AmbisonicFormat, BusTopology, ChannelLayout, Fold, FoldError, InputOutput, MAX_CHANNELS, Mono,
+    MonoMut, Planes, PlanesMut, Sample,
 };
 use tutti_graph::{
     Buses, Cx, Inputs, IntoNode, Io, MAX_PORTS, Node, NodeParts, Outputs, ParamNode, ParamSet,
@@ -278,7 +278,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
             }
         };
         let input = layout.input(output);
-        let (n_in, n_out) = (input.layout(), output.layout());
+        let (n_in, n_out) = (input.width(), output.width());
         if n_in.count() == 0 || n_out.count() == 0 {
             return Err(ConvolverError::NoChannels);
         }
@@ -297,14 +297,12 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
         }
         let fold = match layout {
             IrLayout::Folded => Some(
-                Fold::<F>::between(
-                    &ChannelTopology::from(input),
-                    &tutti_buffers::Bed::Mono.topology(),
-                )
-                .map_err(|source| ConvolverError::NoFold {
-                    width: n_in.count(),
-                    source,
-                })?,
+                Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
+                    |source| ConvolverError::NoFold {
+                        width: n_in.count(),
+                        source,
+                    },
+                )?,
             ),
             _ => None,
         };
@@ -551,12 +549,12 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
 
     /// The channels in.
     pub fn inputs(&self) -> ChannelLayout {
-        self.inputs.layout()
+        self.inputs.width()
     }
 
     /// The channels out.
     pub fn outputs(&self) -> ChannelLayout {
-        self.outputs.layout()
+        self.outputs.width()
     }
 
     /// A handle on the shared wet-path [`Amplitude`] cell, for every channel.
@@ -663,8 +661,8 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                 WetGain::Ramped(ramp, held)
             }
         };
-        let n_in = usize::from(self.inputs.layout().count());
-        let n = usize::from(self.outputs.layout().count());
+        let n_in = usize::from(self.inputs.width().count());
+        let n = usize::from(self.outputs.width().count());
         match &mut self.engine {
             Engine::PerChannel(convolvers) => match &self.fold {
                 None => {
@@ -818,7 +816,7 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
     /// gain runs over the block.
     fn process(&mut self, _cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {
         let size = io.frames();
-        let n_in = usize::from(self.inputs.layout().count());
+        let n_in = usize::from(self.inputs.width().count());
         let all_silent = io.silent().covers(n_in);
         // The last frame of the block whose input is not zero, on any channel.
         let last = if all_silent {
@@ -1548,7 +1546,7 @@ mod layouts {
     use super::*;
     use crate::convolution::test_nodes;
     use crate::test_support::{RATE, noise, prepared};
-    use tutti_buffers::{AmbisonicFormat, Bed};
+    use tutti_buffers::{AmbisonicFormat, Bed, ChannelTopology};
     use tutti_graph::contract::drive;
 
     const BLOCK: usize = 64;

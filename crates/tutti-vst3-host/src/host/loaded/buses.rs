@@ -132,7 +132,7 @@ impl Vst3Loaded {
             .iter()
             .zip(arrangements)
             .enumerate()
-            .map(|(i, (&width, arrangement))| {
+            .map(|(i, (&width, (_, arrangement)))| {
                 let kind = self
                     .plugin
                     .bus_info(main, MediaType::Audio, direction, i as i32)
@@ -153,24 +153,27 @@ impl Vst3Loaded {
     }
 
     /// Reads the plugin's chosen layout for each of `num_buses` buses in
-    /// `direction`. A bus whose query fails contributes an empty topology, so
-    /// the length always equals `num_buses`.
+    /// `direction`, each as its channel count and its topology. A bus whose
+    /// query fails contributes no channels and no topology, so the length always
+    /// equals `num_buses`; a bus too wide for a topology keeps its count and has
+    /// none.
     ///
-    /// Decoded into a [`ChannelTopology`] rather than straight to a count: the
-    /// mask carries *which speaker each channel is*, which a popcount discards.
+    /// Decoded into a [`ChannelTopology`] as well as a count: the mask carries
+    /// *which speaker each channel is*, which a popcount discards.
     pub(in crate::host) fn read_back_arrangements(
         &self,
         main: MainThreadMarker,
         direction: BusDirection,
         num_buses: usize,
-    ) -> Vec<ChannelTopology> {
+    ) -> Vec<(usize, Option<ChannelTopology>)> {
         (0..num_buses)
             .map(
                 |i| match self.plugin.bus_arrangement(main, direction, i as i32) {
-                    Ok(arr) => crate::host::speakers::from_arrangement(arr),
-                    Err(_) => {
-                        ChannelTopology::unassigned(tutti_buffers::ChannelLayout::EMPTY).unwrap()
-                    }
+                    Ok(arr) => (
+                        arr.count_ones() as usize,
+                        crate::host::speakers::from_arrangement(arr),
+                    ),
+                    Err(_) => (0, None),
                 },
             )
             .collect()
