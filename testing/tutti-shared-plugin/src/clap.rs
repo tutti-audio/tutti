@@ -26,6 +26,7 @@ use clap_sys::ext::audio_ports::{
     CLAP_PORT_STEREO, clap_audio_port_info, clap_plugin_audio_ports,
 };
 use clap_sys::ext::latency::{CLAP_EXT_LATENCY, clap_plugin_latency};
+use clap_sys::ext::note_name::{CLAP_EXT_NOTE_NAME, clap_note_name, clap_plugin_note_name};
 use clap_sys::ext::note_ports::{
     CLAP_EXT_NOTE_PORTS, CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, clap_note_port_info,
     clap_plugin_note_ports,
@@ -181,6 +182,39 @@ unsafe extern "C" fn ports_get(
     info.channel_count = 2;
     info.port_type = CLAP_PORT_STEREO.as_ptr();
     info.in_place_pair = CLAP_INVALID_ID;
+    true
+}
+
+static NOTE_NAME: clap_plugin_note_name = clap_plugin_note_name {
+    count: Some(note_name_count),
+    get: Some(note_name_get),
+};
+
+unsafe extern "C" fn note_name_count(_p: *const clap_plugin) -> u32 {
+    core::NOTE_NAMES.len() as u32
+}
+
+/// The names of `core::NOTE_NAMES` on every port and channel.
+unsafe extern "C" fn note_name_get(
+    _p: *const clap_plugin,
+    index: u32,
+    name: *mut clap_note_name,
+) -> bool {
+    let Some(&(key, text)) = core::NOTE_NAMES.get(index as usize) else {
+        return false;
+    };
+    if name.is_null() {
+        return false;
+    }
+    // SAFETY: `name` is an out-pointer the host owns for the call (checked non-null above).
+    let name = unsafe { &mut *name };
+    name.name = [0; CLAP_NAME_SIZE];
+    for (d, s) in name.name.iter_mut().zip(text.as_bytes()) {
+        *d = *s as c_char;
+    }
+    name.port = -1;
+    name.channel = -1;
+    name.key = i16::from(key);
     true
 }
 
@@ -697,6 +731,8 @@ unsafe extern "C" fn get_extension(_p: *const clap_plugin, id: *const c_char) ->
         &|| &AUDIO_PORTS as *const _ as *const c_void
     } else if id == CLAP_EXT_NOTE_PORTS {
         &|| &NOTE_PORTS as *const _ as *const c_void
+    } else if id == CLAP_EXT_NOTE_NAME {
+        &|| &NOTE_NAME as *const _ as *const c_void
     } else if id == CLAP_EXT_LATENCY {
         &|| &LATENCY as *const _ as *const c_void
     } else if id == CLAP_EXT_TAIL {

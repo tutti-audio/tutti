@@ -290,6 +290,13 @@ pub trait Plugin: Send {
         0
     }
 
+    /// The plugin's name for MIDI `key` of `program` (`effGetMidiKeyName`);
+    /// `None` declines.
+    fn get_midi_key_name(&self, program: i32, key: i32) -> Option<String> {
+        let _ = (program, key);
+        None
+    }
+
     /// Process an audio buffer containing `f32` values.
     ///
     /// # Example
@@ -468,6 +475,13 @@ pub trait PluginParameters: Send + Sync {
     /// Get the name of parameter at `index`.
     fn get_parameter_name(&self, index: i32) -> String {
         format!("Param {}", index)
+    }
+
+    /// The short label of parameter `index` (`effGetParameterProperties`);
+    /// `None` declines the opcode for it.
+    fn get_parameter_short_label(&self, index: i32) -> Option<String> {
+        let _ = index;
+        None
     }
 
     /// Get the value of parameter at `index`, or `None` if this implementation

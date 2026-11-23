@@ -4,7 +4,8 @@
 //! [`TrackInfo`] is the value; [`Control::set_track_info`](crate::Control::set_track_info)
 //! hands a new one to the plugin's host. A format with a place for it (CLAP's
 //! `track-info`) answers the plugin's reads from it and tells the plugin when
-//! it changes; a format without keeps the default and drops it.
+//! it changes; VST3 tells the controller's `IInfoListener` the name and colour;
+//! a format without keeps the default and drops it.
 
 use tutti_buffers::ChannelLayout;
 
