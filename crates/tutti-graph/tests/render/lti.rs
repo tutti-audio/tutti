@@ -200,6 +200,8 @@ impl Builder {
             .collect();
         let out = f(&figures);
         if !out.is_exact() {
+            // The key is never added to the topology: dropping its edges leaves
+            // no trace of the skipped node.
             self.topology.edges.retain(|at, _| at.node() != key);
             return None;
         }
