@@ -58,10 +58,10 @@ pub type TransportChanges = ArrayVec<TransportChange, MAX_TRANSPORT_CHANGES>;
 /// use tutti_units::{Beat, Bpm, SampleRate};
 ///
 /// let info = TransportInfo::new(SampleRate::of(48_000.0))
-///     .with_tempo(Bpm::of(128.0))
-///     .with_playing(true)
-///     .with_beat(Beat::new(16.0))
-///     .with_bar(Beat::new(16.0), BarNumber::default());
+///     .tempo(Bpm::of(128.0))
+///     .playing(true)
+///     .beat(Beat::new(16.0))
+///     .bar(Beat::new(16.0), BarNumber::default());
 /// assert!(info.state.playing);
 /// assert_eq!(info.position.samples, None); // the producer reports it separately
 /// ```
@@ -262,35 +262,35 @@ impl TransportInfo {
 
     /// Sets the tempo (builder).
     #[must_use]
-    pub fn with_tempo(mut self, tempo: Bpm) -> Self {
+    pub fn tempo(mut self, tempo: Bpm) -> Self {
         self.timing.tempo = tempo;
         self
     }
 
     /// Sets the tempo's slope in BPM per sample (builder): CLAP's `tempo_inc`.
     #[must_use]
-    pub fn with_tempo_inc(mut self, tempo_inc: f64) -> Self {
+    pub fn tempo_inc(mut self, tempo_inc: f64) -> Self {
         self.timing.tempo_inc = tempo_inc;
         self
     }
 
     /// Sets the playing flag (builder).
     #[must_use]
-    pub fn with_playing(mut self, playing: bool) -> Self {
+    pub fn playing(mut self, playing: bool) -> Self {
         self.state.playing = playing;
         self
     }
 
     /// Sets the recording flag (builder). Independent of the playing flag.
     #[must_use]
-    pub fn with_recording(mut self, recording: bool) -> Self {
+    pub fn recording(mut self, recording: bool) -> Self {
         self.state.recording = recording;
         self
     }
 
     /// Sets the time signature at the playhead (builder).
     #[must_use]
-    pub fn with_time_signature(mut self, signature: TimeSignature) -> Self {
+    pub fn time_signature(mut self, signature: TimeSignature) -> Self {
         self.timing.signature = signature;
         self
     }
@@ -298,17 +298,17 @@ impl TransportInfo {
     /// Sets the playhead in quarter notes (builder).
     ///
     /// Does **not** set a sample position: the producer reports that
-    /// separately via [`with_position_samples`](Self::with_position_samples),
+    /// separately via [`position_samples`](Self::position_samples),
     /// and one that has none leaves [`TransportPosition::samples`] `None`.
     #[must_use]
-    pub fn with_beat(mut self, beat: Beat) -> Self {
+    pub fn beat(mut self, beat: Beat) -> Self {
         self.position.beat = beat;
         self
     }
 
     /// Sets the playhead in seconds from song start (builder).
     #[must_use]
-    pub fn with_seconds(mut self, seconds: Seconds) -> Self {
+    pub fn seconds(mut self, seconds: Seconds) -> Self {
         self.position.seconds = seconds;
         self
     }
@@ -318,7 +318,7 @@ impl TransportInfo {
     ///
     /// See [`TransportPosition::samples`] for how the engine derives it.
     #[must_use]
-    pub fn with_position_samples(mut self, samples: i64) -> Self {
+    pub fn position_samples(mut self, samples: i64) -> Self {
         self.position.samples = Some(samples);
         self
     }
@@ -329,7 +329,7 @@ impl TransportInfo {
     ///
     /// Left at `0`, consumers fall back to the project-time `samples`.
     #[must_use]
-    pub fn with_continuous_samples(mut self, continuous_samples: i64) -> Self {
+    pub fn continuous_samples(mut self, continuous_samples: i64) -> Self {
         self.position.continuous_samples = continuous_samples;
         self
     }
@@ -337,7 +337,7 @@ impl TransportInfo {
     /// Sets the host's monotonic clock reading, in nanoseconds (builder). See
     /// [`TransportInfo::system_time_ns`].
     #[must_use]
-    pub fn with_system_time_ns(mut self, nanoseconds: i64) -> Self {
+    pub fn system_time_ns(mut self, nanoseconds: i64) -> Self {
         self.system_time_ns = Some(nanoseconds);
         self
     }
@@ -360,8 +360,8 @@ impl TransportInfo {
     ///
     /// // 120 BPM at 48 kHz: a quarter note is 24 000 frames, a clock 1 000.
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))
-    ///     .with_tempo(Bpm::of(120.0))
-    ///     .with_beat(Beat::new(2.0 + 0.25 / 24.0));
+    ///     .tempo(Bpm::of(120.0))
+    ///     .beat(Beat::new(2.0 + 0.25 / 24.0));
     /// assert_eq!(t.samples_to_nearest_clock(), Some(-250));
     /// ```
     pub fn samples_to_nearest_clock(&self) -> Option<i32> {
@@ -398,9 +398,9 @@ impl TransportInfo {
     ///
     /// // 120 BPM at 48 kHz: a beat is 24 000 frames; a quarter beat is left.
     /// let t = TransportInfo::new(SampleRate::of(48_000.0))
-    ///     .with_tempo(Bpm::of(120.0))
-    ///     .with_playing(true)
-    ///     .with_beat(Beat::new(2.75));
+    ///     .tempo(Bpm::of(120.0))
+    ///     .playing(true)
+    ///     .beat(Beat::new(2.75));
     /// assert_eq!(t.samples_to_next_beat(), Some(6_000));
     /// ```
     // A bare `u32`, not `Samples`: it is AU's `UInt32` ABI value, as
@@ -428,7 +428,7 @@ impl TransportInfo {
 
     /// Sets where the current bar starts and its number (builder).
     #[must_use]
-    pub fn with_bar(mut self, start: Beat, number: BarNumber) -> Self {
+    pub fn bar(mut self, start: Beat, number: BarNumber) -> Self {
         self.bar.start = start;
         self.bar.number = number;
         self
@@ -436,7 +436,7 @@ impl TransportInfo {
 
     /// Sets the cycle (builder): the transport is cycling.
     #[must_use]
-    pub fn with_loop(mut self, loop_region: LoopRegion) -> Self {
+    pub fn loop_region(mut self, loop_region: LoopRegion) -> Self {
         self.loop_region = Some(loop_region);
         self
     }
@@ -529,9 +529,9 @@ mod tests {
     #[test]
     fn position_samples_is_absent_until_a_host_reports_one() {
         assert_eq!(at_48k().position.samples, None);
-        assert_eq!(at_48k().with_beat(Beat::new(4.0)).position.samples, None);
+        assert_eq!(at_48k().beat(Beat::new(4.0)).position.samples, None);
         assert_eq!(
-            at_48k().with_position_samples(1_234).position.samples,
+            at_48k().position_samples(1_234).position.samples,
             Some(1_234)
         );
     }
@@ -544,8 +544,8 @@ mod tests {
     fn samples_to_nearest_clock_is_the_signed_distance_on_the_24_ppq_grid() {
         let at = |tempo: f64, rate: f64, quarters: f64| {
             TransportInfo::new(SampleRate::of(rate))
-                .with_tempo(Bpm::of(tempo))
-                .with_beat(Beat::new(quarters))
+                .tempo(Bpm::of(tempo))
+                .beat(Beat::new(quarters))
                 .samples_to_nearest_clock()
         };
         assert_eq!(at(120.0, 48_000.0, 2.0), Some(0));
@@ -566,9 +566,9 @@ mod tests {
     fn samples_to_next_beat_is_the_distance_to_the_next_whole_beat() {
         let at = |tempo: f64, rate: f64, beats: f64, playing: bool| {
             TransportInfo::new(SampleRate::of(rate))
-                .with_tempo(Bpm::of(tempo))
-                .with_playing(playing)
-                .with_beat(Beat::new(beats))
+                .tempo(Bpm::of(tempo))
+                .playing(playing)
+                .beat(Beat::new(beats))
                 .samples_to_next_beat()
         };
         assert_eq!(at(120.0, 48_000.0, 2.25, true), Some(18_000));
@@ -584,7 +584,7 @@ mod tests {
     }
 
     fn block(playing: bool, beats: f64) -> TransportInfo {
-        at_48k().with_playing(playing).with_beat(Beat::new(beats))
+        at_48k().playing(playing).beat(Beat::new(beats))
     }
 
     /// **A playhead that advances as playing predicts is not a change; the

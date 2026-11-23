@@ -199,6 +199,7 @@ impl IntoNode for ForkableSink {
             Box::new(self.sink),
             (),
             Some(Box::new(SinkFork(self.forks))),
+            None,
         )
     }
 }

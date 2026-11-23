@@ -3,7 +3,8 @@
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tutti_rt::{Counter, Tally};
+use tutti_rt::{Counter, Tally, TallyWriter, tally};
+use tutti_units::{Calls, Chunks};
 
 /// The largest chunk that crosses the process edge: the largest device
 /// callback a live plugin keeps in step with, and so the ceiling on the
@@ -19,17 +20,17 @@ use tutti_rt::{Counter, Tally};
 /// lines up with its callbacks (the batcher's module docs).
 pub const MAX_CHUNK: usize = 4096;
 
-/// What the audio path has made of the blocks it sent a plugin, ever
+/// What the audio path has made of the chunks it sent a plugin, ever
 /// (`Health::block_counts`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PipelineCounts {
-    /// Blocks it gave up waiting for.
-    pub abandoned: u64,
-    /// Of the abandoned blocks, those whose reply it collected afterwards:
+    /// Chunks it gave up waiting for.
+    pub abandoned: Chunks,
+    /// Of the abandoned chunks, those whose reply it collected afterwards:
     /// the plugin answered, late.
-    pub late: u64,
+    pub late: Chunks,
     /// Replies it took, on time or owed.
-    pub replies: u64,
+    pub replies: Chunks,
 }
 
 /// What a plugin's server lost of its own work, cumulative over the server's
@@ -42,7 +43,7 @@ pub struct ServerLosses {
     pub edits_refused: u64,
     /// Callbacks the plugin made from a thread its format forbids, which the
     /// server refused.
-    pub refused_off_thread_calls: u64,
+    pub refused_off_thread_calls: Calls,
 }
 
 /// What became of the chunks a served plugin's pipeline did not have answered
@@ -63,26 +64,26 @@ pub struct ChunkOutcomes {
     /// each played as silence (a dropout). A crashed plugin's silence is not
     /// counted. An offline fork waits for every chunk, so this stays zero
     /// unless it gave up.
-    pub missed: u64,
+    pub missed: Chunks,
     /// Of the missed chunks, those the server published after the node had
     /// played the silence: a late answer (an overloaded plugin or machine:
     /// raise the device buffer size), not a lost one. Seen in the shared ring
     /// or in the server's reply.
-    pub late: u64,
+    pub late: Chunks,
     /// Of the missed chunks, those the server refused: it did not publish the
     /// audio, and said so in its reply. Its reasons are the chunk's input slot
     /// recycled before it ran, a block that did not fit, an output channel not
     /// written, and a refused sample rate.
-    pub refused: u64,
+    pub refused: Chunks,
     /// Of the missed chunks, those neither late, refused nor skipped: the
     /// server never said what became of them within the last few chunks. Not
     /// zero is a loss no other count explains.
-    pub unanswered: u64,
+    pub unanswered: Chunks,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind (the shared ring holds one chunk behind the newest): never sent,
     /// so each played as silence and was never answered. Raise the device
     /// buffer size if it grows.
-    pub skipped: u64,
+    pub skipped: Chunks,
 }
 
 /// What the host side of a served plugin lost of its own work, cumulative
@@ -101,6 +102,7 @@ pub struct BridgeLosses {
     pub responses_lost: u64,
     /// Parameter-change buffers the audio thread leaked rather than free on
     /// its own thread: a broken sizing bound, apart from a full command queue.
+    /// Raw: a buffer is not a block, chunk or call, and no unit counts buffers.
     pub leaked_buffers: u64,
     /// Transfers between the plugin and its editor instance that were refused:
     /// a parameter write the mirror's full queue dropped (the plugin still got
@@ -117,6 +119,7 @@ pub struct BridgeLosses {
     pub editor_requests_dropped: u64,
     /// Tasks of the server on the host side (the bridge's lanes, the process's
     /// exit watch) that did not stop in time and were left running.
+    /// Raw: a task is not a block, chunk or call, and no unit counts tasks.
     pub detached_tasks: u64,
 }
 
@@ -130,33 +133,32 @@ pub struct BridgeLosses {
 /// Here, beside [`PipelineCounts`], because the batcher in `tutti-plugin-ipc`
 /// writes it and `tutti-plugin-host`'s controls read it, and neither crate may
 /// depend on the other.
-#[derive(Default)]
 pub struct ChunkCounters {
     /// The chunk submitted and not collected yet; 0 for none (sequences
     /// start at 1).
     pub in_flight: AtomicU64,
     /// Chunks the server had not answered when the node collected them
     /// (played as silence), the bridge alive.
-    pub missed: AtomicU64,
+    missed: TallyWriter<Chunks>,
     /// Of the chunks counted in [`missed`](Self::missed), those the server
     /// published after all: seen in the shared ring, or said published in the
     /// server's reply, which can come after the chunk's ring slot was reused.
-    pub late: AtomicU64,
+    late: TallyWriter<Chunks>,
     /// Of the chunks counted in [`missed`](Self::missed), those the server
     /// refused: it did not publish the audio, and said so in its reply. Its
     /// reasons are the chunk's input slot recycled before it ran, a block that
     /// did not fit, an output channel not written, and a refused rate.
-    pub refused: AtomicU64,
+    refused: TallyWriter<Chunks>,
     /// Of the chunks counted in [`missed`](Self::missed), those whose fate
     /// (published, refused or skipped) was not learned within the last few
     /// chunks: the server never said what became of them. A loss no other
     /// counter explains. Every missed chunk is late, refused, skipped (counted
     /// by the bridge) or unanswered; a chunk a reset dropped, and one whose channel the
     /// slab lacks, is none.
-    pub unanswered: AtomicU64,
+    unanswered: TallyWriter<Chunks>,
     /// Chunks the bridge dropped because the plugin fell more than one chunk
     /// behind, counted by the bridge thread (set by [`attach_skipped`](Self::attach_skipped)).
-    skipped: OnceLock<Tally<u64>>,
+    skipped: OnceLock<Tally<Chunks>>,
     /// Commands the audio side could not hand to the bridge thread (a full
     /// command queue, an empty payload pool, a parameter buffer with no room
     /// to return to), counted by the bridge (set by
@@ -203,14 +205,59 @@ impl std::fmt::Debug for ChunkCounters {
     }
 }
 
+impl Default for ChunkCounters {
+    fn default() -> Self {
+        let cell = || tally().writer();
+        Self {
+            in_flight: AtomicU64::new(0),
+            missed: cell(),
+            late: cell(),
+            refused: cell(),
+            unanswered: cell(),
+            skipped: OnceLock::new(),
+            commands_refused: OnceLock::new(),
+            responses_lost: OnceLock::new(),
+            leaked_buffers: OnceLock::new(),
+            mirror_transfers_refused: OnceLock::new(),
+            editor_requests_dropped: OnceLock::new(),
+            detached: OnceLock::new(),
+            server_refused_commands: AtomicU64::new(0),
+            server_refused_edits: AtomicU64::new(0),
+            server_refused_off_thread_calls: AtomicU64::new(0),
+            answered: OnceLock::new(),
+        }
+    }
+}
+
 impl ChunkCounters {
+    /// Counts `n` chunks the server had not answered when the node collected
+    /// them.
+    pub fn note_missed(&self, n: Chunks) {
+        self.missed.add(n);
+    }
+
+    /// Counts one missed chunk the server published after all.
+    pub fn note_late(&self) {
+        self.late.add(Chunks::new(1));
+    }
+
+    /// Counts one missed chunk the server refused.
+    pub fn note_refused(&self) {
+        self.refused.add(Chunks::new(1));
+    }
+
+    /// Counts one missed chunk whose fate was never learned.
+    pub fn note_unanswered(&self) {
+        self.unanswered.add(Chunks::new(1));
+    }
+
     /// Records how to tell that a chunk is answered (the node's bind).
     pub fn attach(&self, answered: impl Fn(u64) -> bool + Send + Sync + 'static) {
         let _ = self.answered.set(Box::new(answered));
     }
 
     /// Reads the bridge thread's count of skipped chunks (the node's bind).
-    pub fn attach_skipped(&self, skipped: Tally<u64>) {
+    pub fn attach_skipped(&self, skipped: Tally<Chunks>) {
         let _ = self.skipped.set(skipped);
     }
 
@@ -247,7 +294,7 @@ impl ChunkCounters {
     /// Takes the server's cumulative counts, as it last told them.
     pub fn note_server_losses(&self, losses: ServerLosses) {
         self.server_refused_off_thread_calls
-            .store(losses.refused_off_thread_calls, Ordering::Relaxed);
+            .store(losses.refused_off_thread_calls.get(), Ordering::Relaxed);
         self.server_refused_commands
             .store(losses.commands_refused, Ordering::Relaxed);
         self.server_refused_edits
@@ -259,11 +306,11 @@ impl ChunkCounters {
     /// one count ahead of another.
     pub fn outcomes(&self) -> ChunkOutcomes {
         ChunkOutcomes {
-            missed: self.missed.load(Ordering::Relaxed),
-            late: self.late.load(Ordering::Relaxed),
-            refused: self.refused.load(Ordering::Relaxed),
-            unanswered: self.unanswered.load(Ordering::Relaxed),
-            skipped: self.skipped.get().map_or(0, Tally::get),
+            missed: self.missed.get(),
+            late: self.late.get(),
+            refused: self.refused.get(),
+            unanswered: self.unanswered.get(),
+            skipped: self.skipped.get().map_or(Chunks::ZERO, Tally::get),
         }
     }
 
@@ -288,7 +335,9 @@ impl ChunkCounters {
         ServerLosses {
             commands_refused: self.server_refused_commands.load(Ordering::Relaxed),
             edits_refused: self.server_refused_edits.load(Ordering::Relaxed),
-            refused_off_thread_calls: self.server_refused_off_thread_calls.load(Ordering::Relaxed),
+            refused_off_thread_calls: Calls::new(
+                self.server_refused_off_thread_calls.load(Ordering::Relaxed),
+            ),
         }
     }
 

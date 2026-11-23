@@ -2,6 +2,7 @@
 //! (doc 020, stage 5), through the builder's engine. Needs the `sampler`
 //! feature (`SessionNode` for the sampler's nodes).
 
+use crate::offline::offline_48k;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 
@@ -13,13 +14,6 @@ use tutti_units::SampleRate;
 const RATE: f64 = 48_000.0;
 
 /// An offline session at `RATE`, stereo, graph blocks of up to 1 024 frames.
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
-
 /// `frames` stereo frames of `s` in `block`-frame device blocks, the
 /// transport rolling from the first block.
 fn run(s: &mut Session, frames: usize, block: usize) -> Vec<f32> {
@@ -59,7 +53,7 @@ fn a_sampler_node_added_to_the_graph_follows_the_sessions_tempo_map() {
     let mut pool = VoicePool::new();
     pool.insert(SlotId(1), source, Playback::default())
         .expect("a finite gain and a nonempty width");
-    let mut s = offline();
+    let mut s = offline_48k();
     let map =
         TempoMap::new(
             [(0.0, 120.0), (1.0, 60.0)]
@@ -107,7 +101,7 @@ fn a_sampler_pool_added_to_the_graph_carries_a_spare_under_the_transports_loop()
     }
     let source = MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
-    let mut s = offline();
+    let mut s = offline_48k();
     let pool = s.graph().add(VoicePool::new());
     let handle = s
         .graph_ref()

@@ -11,7 +11,7 @@ use futures_channel::oneshot;
 use futures_lite::future::{or, pending, yield_now};
 use std::ffi::OsStr;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_platform::{Instant, WeakExecutor, monotonic_ns, sleep_until_ns};
@@ -60,10 +60,7 @@ pub(super) async fn run(
         .args(flags)
         // The probe ends with this process: a plugin hung in its init does not
         // outlive its host.
-        .env(HOST_PID_ENV, std::process::id().to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .env(HOST_PID_ENV, std::process::id().to_string());
     // The probe loads plugin code: it gets the standard descriptors and nothing else of the host's.
     let mut child = tutti_plugin_ipc_ffi::spawn(command, Spawn::Helper).map_err(|e| match e {
         SpawnError::Start(e) | SpawnError::NotBound(e) => ProbeError::Io(e.kind()),

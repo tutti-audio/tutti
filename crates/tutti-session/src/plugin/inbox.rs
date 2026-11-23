@@ -199,7 +199,7 @@ impl Drop for ReloadPost {
 pub(crate) fn contained<R>(
     what: &str,
     node: NodeKey,
-    panics: &tutti_rt::TallyWriter<u64>,
+    panics: &tutti_rt::TallyWriter<tutti_units::Calls>,
     work: impl FnOnce() -> R,
 ) -> Option<R> {
     match catch_unwind(AssertUnwindSafe(work)) {
@@ -209,7 +209,7 @@ pub(crate) fn contained<R>(
                 "plugin {node:?}: its {what} panicked: {}",
                 tutti_platform::panic_message(payload.as_ref())
             );
-            panics.add(1);
+            panics.add(tutti_units::Calls::new(1));
             None
         }
     }

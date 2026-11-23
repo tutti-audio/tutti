@@ -4,7 +4,7 @@
 
 use crate::{
     Attribute, BendValue, ControlValue, Message, MidiGroup, NoteVelocity, U7, U14, Ump, Voice1,
-    Voice2, parse_exact,
+    Voice2, parse_exact, scale,
 };
 
 /// The release velocity a MIDI 1.0 Note On at velocity 0 becomes (M2-104
@@ -71,6 +71,29 @@ impl ExtremeValues {
                 U7::masked(avoid(u32::from(downscaled.get()), source, source_bits, 7) as u8)
             }
         }
+    }
+
+    /// The 14-bit MIDI 1.0 data of Registered Controller `index`, the inverse of
+    /// [`ControlValue::from_registered`]: rounded for an index of 0 to 31 (M2-115
+    /// section 4.4.1), otherwise [`assignable`](Self::assignable).
+    #[inline]
+    #[must_use]
+    pub fn registered(self, index: U7, value: ControlValue) -> U14 {
+        if scale::zero_extended(index) {
+            // `rounded_u14` clamps to 14 bits.
+            U14::masked(scale::rounded_u14(value.get()))
+        } else {
+            self.assignable(value)
+        }
+    }
+
+    /// The 14-bit MIDI 1.0 data of an Assignable Controller, or of a Registered
+    /// one that M2-115 scales Min-Center-Max: the top 14 bits (as
+    /// [`BendValue::to_u14`] does a bend), with this mode's extremes applied.
+    #[inline]
+    #[must_use]
+    pub fn assignable(self, value: ControlValue) -> U14 {
+        self.fourteen(BendValue::new(value.get()).to_u14(), value.get())
     }
 
     /// `downscaled`, the 14-bit downscaling of the 32-bit `source`, with this

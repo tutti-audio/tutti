@@ -1,42 +1,28 @@
 //! A disk voice's file, read on demand for an offline render.
 //!
-//! A [`DiskVoice`](super::disk_voice::DiskVoice) plays what the streamer streams
-//! into its ring. A fork of one for an export cannot: the ring has one
-//! consumer, the live audio thread, and a seek asked of the streamer moves the
-//! live stream. So a forked voice reads the file itself, through this: the
-//! file the streamer's record names ([`StreamFile`]), opened again through its
-//! asset and decoded a page at a time on the render's own thread as the render
-//! reaches it — or read in place, when the streamer's cache already holds it
-//! decoded.
+//! A fork of a [`DiskVoice`](super::disk_voice::DiskVoice) cannot read the
+//! streamer's ring (one consumer, the live audio thread; a seek asked of the
+//! streamer moves the live stream). It reads the file itself: the file the
+//! streamer's record names ([`StreamFile`]), opened again through its asset and
+//! decoded a page at a time on the render's own thread, or read in place when
+//! the streamer's cache already holds it decoded.
 //!
-//! # Why a synchronous reader, not a second streamer stream
-//!
-//! Offline there is no deadline to meet, so there is nothing to prefetch for.
-//! A second streamer stream would put the render back on the streamer's schedule
-//! (a render faster than real time outruns its refills, and an underrun is
-//! silence written into the file as a success), and would need tearing down
-//! when the export ends. Reading on demand makes the export a function of the
-//! file and the timeline alone, and its only resources — a decoder and two
-//! pages — drop with the fork, or earlier, once the voice is past its file
-//! ([`OfflineRead::close`]).
-//!
-//! # A failure is the render's, not silence
+//! Offline has no deadline, so nothing prefetches: a second streamer stream
+//! would put the render on the streamer's schedule (an underrun would be
+//! silence written as a success). The export is a function of the file and the
+//! timeline alone, and its resources (a decoder and two pages) drop with the
+//! fork, or at [`OfflineRead::close`] once the voice is past its file.
 //!
 //! A file that cannot be opened, sought or decoded renders silence from that
-//! point, and the first such failure is latched ([`FirstError`]): the fork
-//! hands the latch to the graph (its `Forked` carries it as the fork's
-//! `ForkHealth`), and the export
-//! fails naming the node and the asset rather than writing the silence as a
-//! success.
-//!
-//! # The same read as the memory tier
+//! point, and the first such failure is latched ([`FirstError`]); the fork
+//! hands the latch to the graph as its `ForkHealth`, and the export fails
+//! naming the node and the asset.
 //!
 //! A position is read exactly as `MemorySource` reads one: the four taps
 //! [`tap_indices`] names (a loop's, `LoopSpan::taps`, on a loop), through
-//! [`interpolate_taps`] (the kernel and the channel policy `read_frame` uses),
-//! silent at and past the end, mirrored the same way in reverse. A clip
-//! exported from disk is therefore the samples the same clip in memory
-//! renders, bit for bit, wherever the two are asked for the same position.
+//! [`interpolate_taps`], silent at and past the end, mirrored the same way in
+//! reverse. A clip exported from disk is the samples the same clip in memory
+//! renders, bit for bit.
 
 use std::sync::Arc;
 

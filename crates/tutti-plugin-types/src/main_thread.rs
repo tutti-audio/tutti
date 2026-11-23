@@ -67,10 +67,12 @@ impl Drop for Work {
     }
 }
 
-/// Work that found no collector and no main thread to run it.
+/// Work that found no collector and no main thread to run it. Raw: no unit
+/// counts pieces of work.
 static STRANDED: AtomicU64 = AtomicU64::new(0);
 
-/// Plugin drops handed to a collector by [`MainWorkHandle::defer_drop`].
+/// Plugin drops handed to a collector by [`MainWorkHandle::defer_drop`]. Raw:
+/// no unit counts drops.
 static DEFERRED_DROPS: AtomicU64 = AtomicU64::new(0);
 
 /// The collector of the work other threads hand to the main thread: owned by

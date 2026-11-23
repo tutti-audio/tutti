@@ -203,7 +203,7 @@ impl<F: Float> IntoNode<F> for AutomationLaneNode {
 
     fn into_parts(self) -> NodeParts<(), F> {
         let fork = LaneFork(self.clone());
-        NodeParts::new(Box::new(self), (), Some(Box::new(fork)))
+        NodeParts::new(Box::new(self), (), Some(Box::new(fork)), None)
     }
 }
 
