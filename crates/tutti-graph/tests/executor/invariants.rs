@@ -22,17 +22,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use tutti_buffers::{Float, InterleavedMut};
-use tutti_graph::testing::{self as common, Harness, Kind, Word, bits, input_signal};
+use tutti_graph::testing::{self as common, Harness, Word, bits, input_signal};
 use tutti_graph::{
-    Edge, EventEdge, EventInputPort, FeedbackFrom, GraphSpec, InputPort, NodeKey, OutputPort,
-    PortSource, ScheduleError, TapId, TapOptions, TapSpec, Topology, TransportChanges, Unforkable,
-    compile, graph_tail,
+    Edge, EventEdge, EventInputPort, NodeKey, PortSource, ScheduleError, TapId, TapOptions,
+    TapSpec, TransportChanges, Unforkable, compile, graph_tail,
 };
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Tail};
 
-use crate::generator::{
-    Desc, MAX_BLOCK, mutate, random_costs, random_graph, schedule, shape, spec_for,
-};
+use crate::generator::{Desc, MAX_BLOCK, mutate, random_costs, random_graph, schedule, shape};
 use crate::script::Script;
 
 /// What a run produced: each block's output, bit for bit (widened to 64
@@ -492,75 +489,5 @@ proptest! {
             let longest = reaching.values().copied().max().unwrap_or(0);
             prop_assert_eq!(tail.known(), Samples::new(longest));
         }
-    }
-}
-
-/// State continuity: recompiling to the same graph plus an unrelated node
-/// renders exactly what never recompiling renders. The PDC ring, the feedback
-/// slot, and the `Smooth`/`Lag` unit state all have to carry for this to hold.
-#[test]
-fn a_commit_adding_an_unconnected_node_changes_no_output() {
-    let (a, b, c, mix, orphan) = (NodeKey(1), NodeKey(2), NodeKey(3), NodeKey(4), NodeKey(9));
-    let mut kinds = BTreeMap::new();
-    kinds.insert(a, Kind::EnvProbe);
-    kinds.insert(b, Kind::Lag { latency: 37 });
-    kinds.insert(c, Kind::Smooth);
-    kinds.insert(mix, Kind::Sum { inputs: 3 });
-    let mut t = Topology::default();
-    for (&k, kind) in &kinds {
-        t.nodes.insert(k, spec_for(kind));
-    }
-    let src = |node| Edge::Direct(PortSource::Node(OutputPort::new(node, 0)));
-    t.edges.insert(InputPort::new(b, 0), vec![src(a)]);
-    t.edges.insert(InputPort::new(c, 0), vec![src(a)]);
-    t.edges.insert(InputPort::new(mix, 0), vec![src(b)]);
-    t.edges.insert(InputPort::new(mix, 1), vec![src(c)]);
-    t.edges.insert(
-        InputPort::new(mix, 2),
-        vec![Edge::Feedback(FeedbackFrom::one_block(
-            OutputPort::new(c, 0),
-            Samples::new(MAX_BLOCK),
-        ))],
-    );
-    t.set_outputs(vec![PortSource::Node(OutputPort::new(mix, 0))]);
-    let before = GraphSpec::new(t.clone());
-    let mut after_t = t;
-    let mut kinds_after = kinds.clone();
-    kinds_after.insert(
-        orphan,
-        Kind::Const {
-            value: 1.0,
-            width: 1,
-        },
-    );
-    after_t
-        .nodes
-        .insert(orphan, spec_for(&kinds_after[&orphan]));
-    let after = GraphSpec::new(after_t);
-
-    let mut steady = Harness::new(MAX_BLOCK);
-    let mut edited = Harness::new(MAX_BLOCK);
-    steady.switch(&before.validate().unwrap(), &kinds);
-    edited.switch(&before.validate().unwrap(), &kinds);
-    assert_eq!(
-        steady
-            .plan
-            .as_ref()
-            .unwrap()
-            .delay(tutti_graph::DelayKey::Audio {
-                at: InputPort::new(mix, 1),
-                from: PortSource::Node(OutputPort::new(c, 0))
-            }),
-        tutti_units::Samples::new(37),
-        "the edit must land while a PDC ring is full of signal"
-    );
-    for block in 0..20u64 {
-        let input = vec![0.0; 50];
-        if block == 7 {
-            edited.switch(&after.validate().unwrap(), &kinds_after);
-        }
-        let x = steady.block(50, &input);
-        let y = edited.block(50, &input);
-        assert_eq!(bits(&x), bits(&y), "block {block}");
     }
 }

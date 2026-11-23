@@ -20,6 +20,7 @@ mod script;
 mod borrow_forms;
 mod by_hand;
 mod chase;
+mod continuity;
 mod contract;
 mod cx_meter;
 mod executor;
