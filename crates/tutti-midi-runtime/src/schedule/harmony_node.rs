@@ -497,9 +497,8 @@ impl Published for HarmonyControls {
         Self::current(self)
     }
 
-    fn replace(&self, value: &Arc<HarmonyChanges>) -> bool {
+    fn replace(&self, value: &Arc<HarmonyChanges>) {
         self.set(Arc::clone(value));
-        true
     }
 }
 

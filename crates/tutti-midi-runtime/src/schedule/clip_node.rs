@@ -664,9 +664,8 @@ impl Published for MidiClipControls {
         Self::current(self)
     }
 
-    fn replace(&self, value: &Arc<ClipEvents>) -> bool {
+    fn replace(&self, value: &Arc<ClipEvents>) {
         self.set(Arc::clone(value));
-        true
     }
 }
 

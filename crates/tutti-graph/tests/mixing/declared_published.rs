@@ -7,8 +7,7 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    Cx, IntoNode, Io, Node, ParamNode, Prepare, Published, PublishedKind, Shape, Status,
-    declare_params,
+    Cx, IntoNode, Io, Node, ParamNode, Prepare, PublishedKind, Shape, Status, declare_params,
 };
 
 /// A list of numbers the test node publishes.
@@ -75,14 +74,13 @@ fn the_parts_carry_each_cell_under_its_kind_and_a_write_reaches_the_node() {
     let node = Holder::from(HolderConfig::new());
     let probe = node.cells.clone();
     let parts = IntoNode::<f32>::into_parts(node);
-    let kinds: Vec<_> = parts.published.iter().map(|p| p.kind).collect();
+    let kinds: Vec<_> = parts.published.iter().map(|p| p.kind()).collect();
     assert_eq!(kinds, [PublishedKind::ClipEvents, PublishedKind::Harmony]);
 
     let cell = parts.published[0]
-        .cell
-        .downcast_ref::<Arc<dyn Published<Value = Arc<Numbers>>>>()
+        .cell::<Arc<Numbers>>()
         .expect("the cell is held as the declared value");
-    assert!(cell.replace(&Arc::new(Numbers(vec![9]))));
+    cell.replace(&Arc::new(Numbers(vec![9])));
     let mut probe = probe;
     assert_eq!(*probe.events().lend(), Numbers(vec![9]));
 }
@@ -98,8 +96,7 @@ fn the_reclaimer_frees_what_a_block_held_across_a_replacement() {
         .reclaimer
         .expect("a node that publishes has a reclaimer");
     let cell = parts.published[1]
-        .cell
-        .downcast_ref::<Arc<dyn Published<Value = Arc<Numbers>>>>()
+        .cell::<Arc<Numbers>>()
         .expect("the declared value");
     {
         let _held = block.changes().lend();

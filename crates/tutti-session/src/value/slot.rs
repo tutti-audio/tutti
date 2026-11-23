@@ -812,7 +812,8 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
     }
 
     fn replace(&self, value: &V) -> bool {
-        self.0.replace(value)
+        self.0.replace(value);
+        true
     }
 }
 
@@ -822,18 +823,15 @@ impl<V: Clone + PartialEq + Send + Sync + 'static> Held for NodeCell<V> {
 /// [`slot_of`] fixes each kind's value type.
 #[cfg(any(feature = "midi", feature = "sampler"))]
 fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(entry: &ErasedPublished) -> Erased {
-    let Some(cell) = entry
-        .cell
-        .downcast_ref::<Arc<dyn tutti_graph::Published<Value = V>>>()
-    else {
+    let Some(cell) = entry.cell::<V>() else {
         panic!(
             "a node publishes {:?} as `{}`, but a session holds that kind as `{}`",
-            entry.kind,
-            entry.declared,
+            entry.kind(),
+            entry.declared(),
             std::any::type_name::<V>(),
         );
     };
-    erase_staged::<V, _>(PublishedSlot::new(NodeCell(Arc::clone(cell))))
+    erase_staged::<V, _>(PublishedSlot::new(NodeCell(cell)))
 }
 
 /// The slot a node's published cell is registered as under `node`: the table
@@ -843,7 +841,7 @@ fn node_cell<V: Clone + PartialEq + Send + Sync + 'static>(entry: &ErasedPublish
     allow(unused_variables)
 )]
 pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> (SlotId, Erased) {
-    match entry.kind {
+    match entry.kind() {
         #[cfg(feature = "midi")]
         tutti_graph::PublishedKind::ClipEvents => (
             SlotId::ClipEvents(node),

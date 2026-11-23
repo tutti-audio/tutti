@@ -597,10 +597,10 @@ impl<F: SamplerFloat> IntoNode<F> for VoiceNode<F> {
             params: handle.params.clone(),
         };
         let params = handle.params().clone();
-        let window = Copied(handle.window.clone());
+        let window = Copied::new(handle.window.clone());
         let looping = handle.looping.clone();
         let direction = handle.direction.clone();
-        let speed = Copied(handle.speed.clone());
+        let speed = Copied::new(handle.speed.clone());
         NodeParts::new(
             Box::new(node),
             handle.clone(),

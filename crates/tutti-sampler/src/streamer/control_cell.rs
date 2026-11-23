@@ -83,11 +83,10 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> tutti_graph::Published for Con
         *Self::current(self)
     }
 
-    fn replace(&self, value: &T) -> bool {
+    fn replace(&self, value: &T) {
         if *Self::current(self) != *value {
             self.publish(*value);
         }
-        true
     }
 }
 

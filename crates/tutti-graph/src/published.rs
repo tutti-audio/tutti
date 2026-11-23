@@ -65,9 +65,8 @@ pub trait Published: Send + Sync + 'static {
     /// The value now.
     fn current(&self) -> Self::Value;
 
-    /// Publishes `value`; an equal one may change nothing. Whether it was
-    /// taken: a refusal leaves the value pending for the next update.
-    fn replace(&self, value: &Self::Value) -> bool;
+    /// Publishes `value`; an equal one may change nothing.
+    fn replace(&self, value: &Self::Value);
 }
 
 /// A published `T`, shared as an `Arc`: an equal value changes nothing.
@@ -78,18 +77,25 @@ impl<T: PartialEq + Send + Sync + 'static> Published for Publisher<T> {
         Self::current(self)
     }
 
-    fn replace(&self, value: &Arc<T>) -> bool {
+    fn replace(&self, value: &Arc<T>) {
         let current = Self::current(self);
         if !Arc::ptr_eq(&current, value) && *current != **value {
             self.publish(Arc::clone(value));
         }
-        true
     }
 }
 
 /// A published `Copy` value, read and written as the value itself.
 #[derive(Clone, Debug)]
-pub struct Copied<T>(pub Publisher<T>);
+pub struct Copied<T>(Publisher<T>);
+
+impl<T> Copied<T> {
+    /// `publisher`'s value, read and written as the value itself.
+    #[must_use]
+    pub fn new(publisher: Publisher<T>) -> Self {
+        Self(publisher)
+    }
+}
 
 impl<T: Copy + PartialEq + Send + Sync + 'static> Published for Copied<T> {
     type Value = T;
@@ -98,11 +104,10 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Published for Copied<T> {
         *self.0.current()
     }
 
-    fn replace(&self, value: &T) -> bool {
+    fn replace(&self, value: &T) {
         if *self.0.current() != *value {
             self.0.publish(*value);
         }
-        true
     }
 }
 
@@ -110,15 +115,35 @@ impl<T: Copy + PartialEq + Send + Sync + 'static> Published for Copied<T> {
 /// the node declared for it, and the cell, an `Arc<dyn Published<Value = V>>`
 /// behind `Any`.
 pub struct ErasedPublished {
-    /// Which value the cell is.
-    pub kind: PublishedKind,
-    /// The name of the value type the node declared (for a refusal's text).
-    pub declared: &'static str,
-    /// The `Arc<dyn Published<Value = V>>` itself.
-    pub cell: Arc<dyn Any + Send + Sync>,
+    kind: PublishedKind,
+    declared: &'static str,
+    cell: Arc<dyn Any + Send + Sync>,
 }
 
 impl ErasedPublished {
+    /// Which value the cell is.
+    #[must_use]
+    pub const fn kind(&self) -> PublishedKind {
+        self.kind
+    }
+
+    /// The name of the value type the node declared (for a refusal's text).
+    #[must_use]
+    pub const fn declared(&self) -> &'static str {
+        self.declared
+    }
+
+    /// The cell as a publisher of `V`, or `None` when the node declared the
+    /// kind with another value type.
+    #[must_use]
+    pub fn cell<V: Clone + PartialEq + Send + Sync + 'static>(
+        &self,
+    ) -> Option<Arc<dyn Published<Value = V>>> {
+        self.cell
+            .downcast_ref::<Arc<dyn Published<Value = V>>>()
+            .cloned()
+    }
+
     pub(crate) fn new<N: HasPublished<K>, const K: u16>(
         cell: Arc<dyn Published<Value = N::Value>>,
     ) -> Self {
