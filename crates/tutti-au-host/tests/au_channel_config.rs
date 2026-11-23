@@ -342,7 +342,7 @@ fn has_input_agrees_with_the_input_element_count() {
                     !matches!(
                         e,
                         AuError::OsStatus {
-                            code: tutti_au_host::types::K_AUDIO_UNIT_ERR_INVALID_ELEMENT,
+                            code: coreaudio_sys::kAudioUnitErr_InvalidElement,
                             ..
                         }
                     ),
