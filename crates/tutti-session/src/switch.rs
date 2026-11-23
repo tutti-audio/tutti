@@ -35,7 +35,9 @@
 //!   fixed.
 
 use tutti_buffers::ChannelLayout;
-use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, Resolved, TuttiDriver};
+#[cfg(feature = "testing")]
+use tutti_cpal::Resolved;
+use tutti_cpal::{AudioEngine, DeviceHost, DeviceSelector, OutputConfig, TuttiDriver};
 use tutti_engine::{OutputQuantum, OutputSpec, StreamDriver, TimerDriver};
 use tutti_units::SampleRate;
 

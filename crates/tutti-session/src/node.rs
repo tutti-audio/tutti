@@ -2,18 +2,20 @@
 //! way in, takes, and the engine's own nodes as ones.
 
 use tutti_buffers::Float;
-use tutti_graph::{ForkByClone, IntoNode, Node, NodeKey, ParamNode, Params, Unforkable};
+use tutti_graph::{ForkByClone, IntoNode, Node, ParamNode, Params, Unforkable};
 
-use crate::{NodeSlots, TimelineView};
+use crate::TimelineView;
 
 /// A node that may enter a session's graph: it declares its own ports (event
 /// ports included), its controls and its fork ([`IntoNode`]), and, in its
 /// [`NodeParts`](tutti_graph::NodeParts), its params by address
-/// ([`NodeParts::params`](tutti_graph::NodeParts::params)) and what frees what
-/// its cells retired ([`NodeParts::reclaimer`](tutti_graph::NodeParts::reclaimer)).
-/// What the trait adds is what only the session can say of a node's type:
-/// the values its verbs reach ([`slots`](Self::slots)) and the timeline it
-/// follows ([`bind_timeline`](Self::bind_timeline)). Both default to none.
+/// ([`NodeParts::params`](tutti_graph::NodeParts::params)), its published values
+/// ([`NodeParts::published`](tutti_graph::NodeParts::published)) and what frees
+/// what its cells retired
+/// ([`NodeParts::reclaimer`](tutti_graph::NodeParts::reclaimer)).
+/// What the trait adds is what only the session can say of a node's type: the
+/// timeline it follows ([`bind_timeline`](Self::bind_timeline)), which
+/// defaults to none.
 ///
 /// Every node the engine ships is one. A host's own node is one of:
 ///
@@ -46,15 +48,6 @@ use crate::{NodeSlots, TimelineView};
 pub trait SessionNode<F: Float = f32>:
     IntoNode<F, Controls: Send + 'static> + Send + 'static
 {
-    /// The node's other values by what they are, read off its controls once
-    /// it is in: the cells a slot target (`clip.events()`) writes through.
-    /// They are kept under `node`, and forgotten when the node is removed or
-    /// replaced. Empty, the default, for a node with none.
-    fn slots(node: NodeKey, controls: &Self::Controls) -> NodeSlots {
-        let _ = (node, controls);
-        NodeSlots::default()
-    }
-
     /// The node reading the session's timeline through `timeline` (a read-only view the
     /// graph hands each node it takes in [`Graph::add`](crate::Graph::add) and
     /// [`Graph::replace`](crate::Graph::replace); the node clones the readers it
@@ -173,35 +166,21 @@ impl<F: Float> SessionNode<F> for tutti_midi_runtime::SyncOut {}
 impl<F: Float> SessionNode<F> for tutti_nodes::automation::AutomationLaneNode {}
 
 /// A MIDI clip as a graph node: its `MidiClipControls`, no params; its
-/// events are a slot (`clip.events()`), and the clips it replaced are freed
-/// by its reclaimer.
+/// events are a published value (`clip.events()`), and the clips it replaced
+/// are freed by its reclaimer.
 #[cfg(feature = "midi")]
-impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {
-    fn slots(node: NodeKey, controls: &tutti_midi_runtime::MidiClipControls) -> NodeSlots {
-        NodeSlots::of(
-            crate::value::SlotId::ClipEvents(node),
-            crate::value::PublishedSlot::new(controls.clone()),
-        )
-    }
-}
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::MidiClipNode {}
 
 /// The MPE transform: its `MpeTransformControls` read its losses, no params;
 /// its mode is the session's cell, which the session sweeps.
 #[cfg(feature = "midi")]
 impl<F: Float> SessionNode<F> for tutti_midi_runtime::MpeTransformNode {}
 
-/// The harmony node: its `HarmonyControls`, no params; its changes are a slot
-/// (`harmony.changes()`), and the lanes it replaced are freed by its
-/// reclaimer.
+/// The harmony node: its `HarmonyControls`, no params; its changes are a
+/// published value (`harmony.changes()`), and the lanes it replaced are freed
+/// by its reclaimer.
 #[cfg(feature = "midi")]
-impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {
-    fn slots(node: NodeKey, controls: &tutti_midi_runtime::HarmonyControls) -> NodeSlots {
-        NodeSlots::of(
-            crate::value::SlotId::Harmony(node),
-            crate::value::PublishedSlot::new(controls.clone()),
-        )
-    }
-}
+impl<F: Float> SessionNode<F> for tutti_midi_runtime::HarmonyNode {}
 
 /// The MIDI input node: its `MidiInputControls`, no params; the Profile zones
 /// it replaced freed by its reclaimer.
@@ -222,41 +201,12 @@ param_session_node!(floats: VbapPannerNode, HrtfBinauralNode);
 #[cfg(feature = "synth")]
 impl<F: tutti_polysynth::SynthFloat> SessionNode<F> for tutti_polysynth::PolySynth<F> {}
 
-/// The values of a voice node that the session's verbs reach: its window,
-/// loop, direction and speed, each a published cell of its handle.
-#[cfg(feature = "sampler")]
-fn voice_slots<F: tutti_sampler::SamplerFloat>(
-    node: NodeKey,
-    controls: &tutti_sampler::VoiceNodeHandle<F>,
-) -> NodeSlots {
-    use crate::value::{PublishedSlot, SlotId, SpeedCell};
-    NodeSlots::of(
-        SlotId::Window(node),
-        PublishedSlot::new(controls.window_cell().clone()),
-    )
-    .and(
-        SlotId::Looping(node),
-        PublishedSlot::new(controls.looping_cell().clone()),
-    )
-    .and(
-        SlotId::Direction(node),
-        PublishedSlot::new(controls.direction_cell().clone()),
-    )
-    .and(
-        SlotId::Speed(node),
-        PublishedSlot::new(SpeedCell(controls.speed_cell().clone())),
-    )
-}
-
 /// A voice as a graph node: its params (the gain) addressed by its set, so a
 /// param write reaches the cell the node reads and a fork starts from the
-/// gain as set; the placements it replaced freed by its reclaimer.
+/// gain as set; its window, loop, direction and speed are published values,
+/// and the placements it replaced are freed by its reclaimer.
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {
-    fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
-        voice_slots(node, controls)
-    }
-}
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::VoiceNode<F> {}
 
 /// A pool as a graph node; its controls are its `VoicePoolHandle`, whose
 /// retired voices its reclaimer frees.
@@ -276,11 +226,7 @@ impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::MemorySou
 /// a streamed clip's stream) kept by its reclaimer for as long as the node is
 /// in the graph.
 #[cfg(feature = "sampler")]
-impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {
-    fn slots(node: NodeKey, controls: &tutti_sampler::VoiceNodeHandle<F>) -> NodeSlots {
-        voice_slots(node, controls)
-    }
-}
+impl<F: tutti_sampler::SamplerFloat> SessionNode<F> for tutti_sampler::Clip<F> {}
 
 /// A streamed voice as a graph node; its controls are its
 /// `DiskVoiceControls`.

@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 //! The audio graph of the Tutti engine: a graph described as a value, a pure
 //! compiler from that value to an immutable [`Plan`], and a real-time
-//! [`Executor`] that runs the plan block by block, serially or spread over
+//! [`Executor`] that runs the plan block by block, on one thread or spread over
 //! a [`Pool`]'s threads.
 //!
 //! Use it directly to host audio processors ([`Node`]s) in a graph you build
@@ -69,7 +69,7 @@
 //!      │ compile(&ValidGraph, &Shapes, &Prepare, prev) -> (Plan, Delta)
 //!  Plan               ops, buffer slots, delay and feedback tables   immutable, Send + Sync
 //!      │ Editor::commit ──queue──▶ Executor, which sends the replaced state back
-//!  Executor           owns the units; runs the plan's ops serially, one block per call
+//!  Executor           owns the units; runs the plan's ops, one block per call
 //! ```
 //!
 //! - [`GraphSpec`] is the graph as data: a
@@ -701,6 +701,7 @@ mod plan;
 mod play;
 mod pool;
 mod preroll;
+mod published;
 mod rates;
 #[cfg(feature = "testing")]
 mod reference;
@@ -783,13 +784,13 @@ pub use param::{
 pub use param_event::{ParamEvent, ParamKind, ParamRamp, ParamSegment};
 pub use pass::{Pass, PassError};
 pub use plan::{
-    Csr, DelayKey, DelaySpec, Delta, EMPTY_SLOT, EventSlotCapacity, FeedbackKey, FeedbackSpec,
-    GainPortOp, InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
-    ZERO_SLOT,
+    Csr, DelayKey, DelaySpec, Delta, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp,
+    InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
 };
 pub use play::PlayClock;
 pub use pool::{WorkerPool, WorkerPoolBuilder};
 pub use preroll::PrerollTable;
+pub use published::{ErasedPublished, HasPublished, Published, PublishedCell, PublishedKind};
 pub use rates::SampleRates;
 #[cfg(feature = "testing")]
 pub use reference::Reference;
@@ -813,6 +814,7 @@ pub mod __private {
     pub use crate::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };
+    pub use crate::published::Sweep;
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};

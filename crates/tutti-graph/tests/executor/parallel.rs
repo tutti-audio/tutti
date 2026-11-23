@@ -1,4 +1,5 @@
-//! The parallel executor renders **bit for bit** what the serial one does: on a
+//! A render is **bit for bit** the same with one participant (no pool) and with
+//! several: on a
 //! graph with fan-out, fan-in, PDC rings, event fan-in, compiler-owned param
 //! ports (ramp and segment events, one source behind its own latency), a
 //! feedback loop and scheduled commands, for every worker count in
@@ -447,10 +448,10 @@ fn pair(workers: usize) -> (Editor, Executor) {
     (ed, exec)
 }
 
-/// Every worker count and block schedule renders what the serial executor
+/// Every worker count and block schedule renders what one participant
 /// renders, sample for sample, on every output.
 #[test]
-fn the_parallel_render_is_bit_identical_to_the_serial_one() {
+fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
     for blocks in schedules(MAX_BLOCK) {
         let (mut ed, mut exec) = pair(1);
         let serial = render(&mut ed, &mut exec, &blocks);
@@ -474,7 +475,7 @@ fn the_parallel_render_is_bit_identical_to_the_serial_one() {
 }
 
 /// More output slices than the plan has outputs are ignored the same way on
-/// every path: the serial render and each pool render the plan's channels,
+/// every path: the one-participant render and each pool render the plan's channels,
 /// bit for bit, and leave the extra slices alone.
 #[test]
 fn extra_output_slices_are_ignored_on_every_path() {
@@ -489,10 +490,10 @@ fn extra_output_slices_are_ignored_on_every_path() {
 }
 
 /// Param ranges moved between blocks, with no commit, render the same
-/// serially and on every pool, bit for bit — and no plan is sent for them.
+/// with one participant and on every pool, bit for bit — and no plan is sent for them.
 /// The live range is read in the op code both paths share (`run_params`),
-/// at the same point of the same op, so the two cannot disagree on which
-/// block a move lands on.
+/// at the same point of the same op, so no participant count can disagree on
+/// which block a move lands on.
 #[test]
 fn ranges_moved_mid_render_stay_bit_identical() {
     for blocks in schedules(MAX_BLOCK) {

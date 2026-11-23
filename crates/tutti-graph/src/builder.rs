@@ -230,6 +230,7 @@ impl<F: Float> GraphBuilder<F> {
             fork,
             params,
             reclaimer,
+            published,
         } = node.into_parts();
         let unit = NodeParts {
             node,
@@ -237,6 +238,7 @@ impl<F: Float> GraphBuilder<F> {
             fork,
             params,
             reclaimer,
+            published,
         };
         (self.insert(N::kind(), unit), controls)
     }
@@ -871,6 +873,7 @@ impl<F: Float> Renderer<F> {
             fork,
             params,
             reclaimer,
+            published,
         } = node.into_parts();
         let shape = node.shape();
         let mut g = GraphBuilder::<F>::with_format(shape.audio_in(), shape.audio_out());
@@ -880,6 +883,7 @@ impl<F: Float> Renderer<F> {
             fork,
             params,
             reclaimer,
+            published,
         };
         let key = g.insert(N::kind(), unit);
         for c in 0..usize::from(shape.audio_in().count()) {

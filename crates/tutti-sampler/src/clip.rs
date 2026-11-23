@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::SamplerFloat;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
-use tutti_graph::{HasParam, IntoNode, NodeParts};
+use tutti_graph::{HasParam, HasPublished, IntoNode, NodeParts, PublishedKind};
 use tutti_units::{Amplitude, Beat, PlaybackRate};
 
 use crate::streamer::{StreamHandle, StreamReader};
@@ -228,6 +228,12 @@ where
     VoiceNode<F>: HasParam<P>,
 {
     type Unit = <VoiceNode<F> as HasParam<P>>::Unit;
+}
+
+/// A clip publishes the values of the node it builds.
+impl<F: SamplerFloat, K: PublishedKind> HasPublished<K> for Clip<F> where
+    VoiceNode<F>: HasPublished<K>
+{
 }
 
 impl<F: SamplerFloat> IntoNode<F> for Clip<F> {

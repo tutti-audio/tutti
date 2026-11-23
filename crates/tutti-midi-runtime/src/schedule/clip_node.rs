@@ -64,8 +64,9 @@ use tutti_buffers::Float;
 use tutti_rt::Mutex;
 
 use tutti_graph::{
-    Cx, EventDensity, ForkCause, ForkSource, Forked, IntoNode, Io, MIN_EVENT_PORT_CAPACITY, Node,
-    NodeParts, Offset, OutEvents, Prepare, RenderMode, Shape, Status,
+    Cx, EventDensity, ForkCause, ForkSource, Forked, HasPublished, IntoNode, Io,
+    MIN_EVENT_PORT_CAPACITY, Node, NodeParts, Offset, OutEvents, Prepare, Published, PublishedKind,
+    RenderMode, Shape, Status,
 };
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
@@ -644,8 +645,34 @@ impl<F: Float> IntoNode<F> for MidiClipNode {
             Box::new(self),
             controls.clone(),
             Some(Box::new(fork)),
-            Some(Box::new(controls)),
+            Some(Box::new(controls.clone())),
         )
+        .published::<MidiClipNode, ClipEventsKind>(Arc::new(controls))
+    }
+}
+
+/// The kind of a clip node's events: the clip a session writes through
+/// `clip.events()`.
+#[derive(Clone, Copy, Debug)]
+pub enum ClipEventsKind {}
+
+impl PublishedKind for ClipEventsKind {
+    type Value = Arc<ClipEvents>;
+}
+
+impl HasPublished<ClipEventsKind> for MidiClipNode {}
+
+/// The clip a session writes: [`set`](MidiClipControls::set), which an equal
+/// clip leaves in force.
+impl Published for MidiClipControls {
+    type Value = Arc<ClipEvents>;
+
+    fn current(&self) -> Arc<ClipEvents> {
+        Self::current(self)
+    }
+
+    fn replace(&self, value: &Arc<ClipEvents>) {
+        self.set(Arc::clone(value));
     }
 }
 

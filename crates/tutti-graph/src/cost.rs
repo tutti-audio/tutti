@@ -15,7 +15,7 @@
 //!   place in the queue.
 //!
 //! [`schedule`] turns those totals into a [`Schedule`] for a pool of `p`
-//! participants: serial, or parallel from some block length up, waking a
+//! participants: alone, or parallel from some block length up, waking a
 //! given number of participants. It is pure arithmetic on the plan, so a
 //! test can check it from `compile` alone; the executor evaluates it when a
 //! plan meets a pool (`Executor::set_pool`, or the rebuild that applies a
@@ -56,8 +56,9 @@
 //! Work is counted in **units of about a nanosecond of one core** on the
 //! machine the constants were calibrated on. Only their
 //! ratios matter to a decision: a faster core shrinks node work and
-//! dispatch alike. They are a speed decision only — the parallel render is
-//! bit for bit the serial one, so a wrong estimate never changes a sample.
+//! dispatch alike. They are a speed decision only — a render is bit for bit
+//! the same at any participant count, so a wrong estimate never changes a
+//! sample.
 
 use crate::node::Shape;
 use crate::plan::Op;
@@ -149,12 +150,12 @@ impl Work {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Schedule {
-    /// Every block runs the serial walk on the calling thread: spreading
+    /// Every block runs on the calling thread alone: spreading
     /// would not pay for its dispatch (or there is one task, or one
     /// participant).
     Serial,
     /// Blocks of at least `from` frames spread over `wake` participants
-    /// (the caller included); shorter blocks run the serial walk.
+    /// (the caller included); shorter blocks run on the calling thread alone.
     Parallel {
         /// Participants a block wakes, the caller included: at least 2, at
         /// most the pool's: the plan's average parallelism (work over

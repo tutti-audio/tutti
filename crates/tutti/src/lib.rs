@@ -486,10 +486,11 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ForkByClone, HasParam, HasParams, InBus,
-        InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode,
-        ParamSet, ParamSetBuilder, ParamValue, Params, Prepare, RtLevel, RtRecord, RtTarget,
-        RtValue, SampleRates, Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
+        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
+        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
+        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
+        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -502,6 +503,10 @@ pub mod graph {
         TransportPosition, UmpAt, VerifyError, Wake, WiredMask,
     };
     pub use tutti_graph::{EdgeGain, FeedbackFrom, Invalid, NodeMix, RangeView};
+    pub use tutti_graph::{
+        FADE_CAPACITY, MAX_BUSES, MAX_EVENT_PORT_CAPACITY, MAX_NODE_LATENCY, MAX_NODE_TAIL,
+        MAX_PORTS, MAX_TRANSPORT_CHANGES, MIN_EVENT_PORT_CAPACITY, QUEUE_CAPACITY,
+    };
 }
 
 /// The session's host plumbing (`tutti-session`): what a host that runs the
@@ -551,12 +556,11 @@ pub mod session {
         BackgroundWork, BlockConfig, BusInputPort, BusWire, ChannelWire, Committed, Connection,
         DeclarationError, Disconnection, EventEdge, EventTapPort, EventWire, Fanin, Feeder, Graph,
         Inlet, InletError, LIVE_MAX_BLOCK, MainBusWire, MainOutputDeclaration, MainOutputReader,
-        MainOutputTopologyStatus, MainSink, Meters, NodeSlots, NotReopened, Outlet,
-        OutputPlacement, OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent,
-        PeerResourceId, Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError,
-        Reopened, ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError,
-        SessionNode, SetRateError, SetSources, Taps, TimelineView, Weighted, Wire,
-        main_output_width,
+        MainOutputTopologyStatus, MainSink, Meters, NotReopened, Outlet, OutputPlacement,
+        OutputPolicy, OutputPolicyError, PHASES, Peer, PeerError, PeerEvent, PeerResourceId,
+        Phase as UpdatePhase, PhaseCx, Policy, Presence, Removal, RemoveError, Reopened,
+        ReplaceRefused, Replacement, Resource, ResourceFact, SessionHeardTapError, SessionNode,
+        SetRateError, SetSources, Taps, TimelineView, Weighted, Wire, main_output_width,
     };
     pub use tutti_timeline::{
         AudioTaken, LoopEdit, LoopReader, OfflineTimeline, OfflineTimelineConfig, OfflineTransport,
@@ -665,6 +669,7 @@ pub mod sampler {
         StreamFailure, StreamFile, StreamHandle, StreamId, StreamPhase, StreamReader, StreamStart,
         StreamStatus, VoiceNodeHandle,
     };
+    pub use tutti_sampler::{DirectionKind, LoopingKind, SpeedKind, WindowKind};
     // A file's probe needs a decoder.
     pub use tutti_sampler::{
         ControlCell, GainError, Loop, LoopError, PlaceError, PlayError, Playback, SendError,
@@ -924,10 +929,10 @@ pub mod midi {
         SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError, HarmonyControls,
-        HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts, OffsetOutOfRange,
-        OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages, SyncOut,
-        SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError,
+        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
+        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{
         MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,

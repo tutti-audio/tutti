@@ -33,9 +33,7 @@ fn second_id() -> &'static str {
 }
 
 fn session() -> Session {
-    // SAFETY: nextest runs each test in its own process, and this is set before
-    // the first server is spawned, from the test's own thread.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
     Session::builder()
         .max_block(MaxBlock::of(Samples::new(512)))
         .build()

@@ -60,9 +60,9 @@ use crate::param::ParamIn;
 use crate::spec::{EventInputPort, EventOutputPort};
 
 /// The audio slot every unconnected or `PortSource::Zero` input reads.
-pub const ZERO_SLOT: u32 = 0;
+pub(crate) const ZERO_SLOT: u32 = 0;
 /// The event slot every unconnected event input reads.
-pub const EMPTY_SLOT: u32 = 0;
+pub(crate) const EMPTY_SLOT: u32 = 0;
 
 /// A dense index into the runtime's unit store.
 ///
@@ -1009,7 +1009,7 @@ pub struct Value {
 /// compiles and ships it.
 ///
 /// Every buffer it names is a **slot**, an index into one of two arenas
-/// (audio and event). Slot 0 of each ([`ZERO_SLOT`], [`EMPTY_SLOT`]) is
+/// (audio and event). Slot 0 of each (`ZERO_SLOT`, `EMPTY_SLOT`) is
 /// never written and is what an unconnected input reads; feedback slots
 /// come next, filled from the feedback state before the first op of each
 /// block; the rest are shared between values whose lifetimes cannot
@@ -1191,13 +1191,13 @@ impl Plan {
     }
 
     /// How this plan's blocks run on a pool of `participants` (the caller
-    /// included): serially, or spread from some block length up over some
+    /// included): on the calling thread alone, or spread from some block length up over some
     /// number of participants. Pure arithmetic on [`work`](Self::work), the
     /// costliest path through the task DAG and the task count; the executor
     /// asks it when a plan meets a pool, never per block.
     ///
-    /// A speed decision only: the parallel render is bit for bit the
-    /// serial one.
+    /// A speed decision only: a render is bit for bit the same at any
+    /// participant count.
     pub fn schedule(&self, participants: usize) -> Schedule {
         crate::cost::schedule(
             self.work,
