@@ -1,7 +1,7 @@
 //! The noise gate [`GateNode`]: closes below a threshold, keyed from a side-chain or from
 //! its own signal.
 
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, GateBank, GateControls, GateSignals, KeyFilter, KeySource, Lerp,
@@ -78,7 +78,7 @@ pub type GateNode<F> = KernelNode<GateKernel<F>>;
 /// filter on that key and the controls it starts at.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GateConfig {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     filter: KeyFilter,
     controls: GateControls,
@@ -89,9 +89,9 @@ impl GateConfig {
     /// key filter and at [`GateControls::DEFAULT`].
     ///
     /// The main bus keeps its speaker placement. A width past one bus is refused by
-    /// [`BusTopology::default_for`] before it reaches here: `new(BusTopology::default_for(n)?)`.
+    /// [`ChannelTopology::default_for`] before it reaches here: `new(ChannelTopology::default_for(n)?)`.
     #[must_use]
-    pub fn new(input: BusTopology) -> Self {
+    pub fn new(input: ChannelTopology) -> Self {
         Self {
             input,
             key: KeySource::Own,
@@ -204,7 +204,7 @@ control_set! {
 /// nothing of.
 #[derive(Clone, Debug)]
 pub struct GateKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     key: KeySource,
     filter: KeyFilter,
     /// `None` until [`prepare`](Kernel::prepare).
@@ -215,7 +215,7 @@ pub struct GateKernel<F: Float + SimdLanes> {
 
 impl<F: Float + SimdLanes + Lerp> GateKernel<F> {
     /// A gate on `input` whose detector reads `key`.
-    fn new(input: BusTopology, key: KeySource, filter: KeyFilter) -> Self {
+    fn new(input: ChannelTopology, key: KeySource, filter: KeyFilter) -> Self {
         Self {
             input,
             key,
@@ -333,7 +333,7 @@ mod tests {
 
     fn gate(threshold: f64, attack: f64, hold: f64, release: f64) -> GateNode<f32> {
         GateNode::<f32>::from(
-            GateConfig::new(BusTopology::MONO)
+            GateConfig::new(ChannelTopology::MONO)
                 .key(KeySource::Sidechain)
                 .controls(four(threshold, attack, hold, release)),
         )
@@ -379,7 +379,7 @@ mod tests {
     fn a_quiet_side_chain_closes_the_gate() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(with_range(four(-20.0, 0.001, 0.001, 0.001), -60.0)),
             ),
@@ -402,7 +402,7 @@ mod tests {
     fn a_range_over_zero_reads_as_zero() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(with_range(four(-20.0, 0.001, 0.01, 0.1), 10.0)),
             ),
@@ -426,7 +426,7 @@ mod tests {
     fn the_range_attenuates_rather_than_mutes() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(with_range(four(-20.0, 0.001, 0.001, 0.001), -12.0)),
             ),
@@ -448,7 +448,7 @@ mod tests {
     fn a_moved_ratio_moves_the_settled_gain_to_the_closed_form() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(with_range(four(-20.0, 0.0, 0.0, 0.0), -60.0)),
             ),
@@ -477,7 +477,7 @@ mod tests {
     fn a_built_ratio_makes_the_node_an_expander() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(GateControls {
                         ratio: CompressionRatio::new(2.0),
@@ -515,7 +515,7 @@ mod tests {
     fn a_stereo_gate_is_linked() {
         let mut node = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(four(-20.0, 0.0001, 0.01, 0.1)),
             ),
@@ -538,12 +538,12 @@ mod tests {
     #[test]
     fn the_width_and_the_key_choice_are_the_port_layout() {
         let c = four(-20.0, 0.001, 0.01, 0.1);
-        let wide = BusTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
+        let wide = ChannelTopology::default_for(tutti_buffers::ChannelLayout::from(4u16))
             .expect("at most one bus wide");
         for (node, inputs, outputs) in [
             (
                 GateNode::<f32>::from(
-                    GateConfig::new(BusTopology::MONO)
+                    GateConfig::new(ChannelTopology::MONO)
                         .key(KeySource::Sidechain)
                         .controls(c),
                 ),
@@ -552,7 +552,7 @@ mod tests {
             ),
             (
                 GateNode::<f32>::from(
-                    GateConfig::new(BusTopology::STEREO)
+                    GateConfig::new(ChannelTopology::STEREO)
                         .key(KeySource::Sidechain)
                         .controls(c),
                 ),
@@ -565,12 +565,12 @@ mod tests {
                 4,
             ),
             (
-                GateNode::<f32>::from(GateConfig::new(BusTopology::MONO).controls(c)),
+                GateNode::<f32>::from(GateConfig::new(ChannelTopology::MONO).controls(c)),
                 1,
                 1,
             ),
             (
-                GateNode::<f32>::from(GateConfig::new(BusTopology::STEREO).controls(c)),
+                GateNode::<f32>::from(GateConfig::new(ChannelTopology::STEREO).controls(c)),
                 2,
                 2,
             ),
@@ -580,12 +580,12 @@ mod tests {
                 4,
             ),
             (
-                GateNode::<f32>::from(GateConfig::new(BusTopology::MONO).controls(c)),
+                GateNode::<f32>::from(GateConfig::new(ChannelTopology::MONO).controls(c)),
                 1,
                 1,
             ),
             (
-                GateNode::<f32>::from(GateConfig::new(BusTopology::STEREO).controls(c)),
+                GateNode::<f32>::from(GateConfig::new(ChannelTopology::STEREO).controls(c)),
                 2,
                 2,
             ),
@@ -611,11 +611,11 @@ mod tests {
         };
         for node in [
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::STEREO)
+                GateConfig::new(ChannelTopology::STEREO)
                     .key(KeySource::Sidechain)
                     .controls(c),
             ),
-            GateNode::<f32>::from(GateConfig::new(BusTopology::MONO).controls(c)),
+            GateNode::<f32>::from(GateConfig::new(ChannelTopology::MONO).controls(c)),
         ] {
             let bases: Vec<_> = (0..6).map(|k| node.param_base(k)).collect();
             assert_eq!(
@@ -632,7 +632,7 @@ mod tests {
     fn a_gate_with_its_own_key_gates_on_its_own_signal() {
         let mk = || {
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .controls(with_range(four(-20.0, 0.0001, 0.001, 0.001), -40.0)),
             )
         };
@@ -655,7 +655,7 @@ mod tests {
     fn gate_declares_its_params() {
         let m = prepared_at(
             GateNode::<f32>::from(
-                GateConfig::new(BusTopology::MONO)
+                GateConfig::new(ChannelTopology::MONO)
                     .key(KeySource::Sidechain)
                     .controls(with_range(four(-20.0, 0.0001, 0.01, 0.1), -30.0)),
             ),

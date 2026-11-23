@@ -1,7 +1,7 @@
 //! [`TubeStageNode`]: a 12AX7 common-cathode gain stage, oversampled.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock, Mono};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock, Mono};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor, TubeDrive, TubeStage,
     TubeStageControls,
@@ -105,7 +105,7 @@ control_set! {
 /// The [`Kernel`] of a [`TubeStageNode`].
 #[derive(Clone, Debug)]
 pub struct TubeStageKernel<F: Float> {
-    input: BusTopology,
+    input: ChannelTopology,
     factor: OversamplingFactor,
     /// The rate the stage runs at: the oversampled one, or the stream's where no half-band can
     /// be designed.
@@ -116,7 +116,7 @@ pub struct TubeStageKernel<F: Float> {
 }
 
 impl<F: Float + Lerp> TubeStageKernel<F> {
-    fn new(config: &TubeStageConfig, input: BusTopology) -> Self {
+    fn new(config: &TubeStageConfig, input: ChannelTopology) -> Self {
         Self {
             input,
             factor: config.factor,

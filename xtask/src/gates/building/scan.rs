@@ -99,7 +99,7 @@ fn built(ret: &str, owner: &str) -> Option<Wrap> {
     (ty == "Self" || ty == owner).then_some(wrap)
 }
 
-/// Whether a parameter `pat: ty` names a width: a `ChannelLayout` or `BusTopology`,
+/// Whether a parameter `pat: ty` names a width: a `ChannelLayout` or `ChannelTopology`,
 /// directly, behind `impl Into<_>`, or as a generic with that `Into` bound.
 fn is_width(param: &str, bounds: &str) -> bool {
     let p = squash(strip_attrs(param));
@@ -107,7 +107,7 @@ fn is_width(param: &str, bounds: &str) -> bool {
         return false;
     };
     let ty = ty.trim();
-    let wide = |t: &str| matches!(bare(t), "ChannelLayout" | "BusTopology");
+    let wide = |t: &str| matches!(bare(t), "ChannelLayout" | "ChannelTopology");
     if wide(ty) {
         return true;
     }
@@ -121,7 +121,7 @@ fn is_width(param: &str, bounds: &str) -> bool {
     }
     // A generic `L` bounded `L: Into<ChannelLayout>` in the generics or `where`.
     let b = squash(bounds);
-    for w in ["ChannelLayout", "BusTopology"] {
+    for w in ["ChannelLayout", "ChannelTopology"] {
         let pat = format!("{ty}:Into<{w}>");
         if b.contains(&pat) || b.contains(&format!("{ty}: Into<{w}>")) {
             return true;

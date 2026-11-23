@@ -286,9 +286,9 @@ fn a_public_constructor_on_a_node_is_a_violation_and_one_on_its_config_is_not() 
 #[test]
 fn a_config_constructor_must_take_a_width_first() {
     let ok = "impl AConfig { pub fn new(l: ChannelLayout, r: u8) -> Self { todo!() } }\n\
-              impl BConfig { pub fn new(t: tutti_buffers::BusTopology) -> Self { todo!() } }\n\
+              impl BConfig { pub fn new(t: tutti_buffers::ChannelTopology) -> Self { todo!() } }\n\
               impl CConfig { pub fn new(l: impl Into<ChannelLayout>) -> Self { todo!() } }\n\
-              impl DConfig { pub fn new<L: Into<BusTopology>>(l: L) -> Self { todo!() } }\n\
+              impl DConfig { pub fn new<L: Into<ChannelTopology>>(l: L) -> Self { todo!() } }\n\
               impl EConfig { pub fn new<L>(l: L) -> Self where L: Into<ChannelLayout> { todo!() } }\n\
               impl FConfig { pub fn gain(&self) -> Self { todo!() } }\n\
               impl From<AConfig> for ANode { fn from(c: AConfig) -> Self { todo!() } }\n\

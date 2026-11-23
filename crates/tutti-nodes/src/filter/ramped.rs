@@ -2,7 +2,7 @@
 //! between designs, the machinery under [`CutFilterKernel`](crate::CutFilterKernel) and
 //! [`EqKernel`](crate::EqKernel).
 
-use tutti_buffers::BusTopology;
+use tutti_buffers::ChannelTopology;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::BlockMismatch;
 use tutti_dsp::{MAX_SECTIONS, Ramp, SimdLanes, Sos, SosBank, SosCoefficients, SosError};
@@ -26,7 +26,7 @@ pub(super) struct RampedSos<F: Float + SimdLanes> {
 impl<F: Float + SimdLanes> RampedSos<F> {
     /// A silent cascade on the bus `input`, passing the input until a design is
     /// [`start`](Self::start)ed or [`restart`](Self::restart)ed.
-    pub(super) fn new(input: BusTopology) -> Self {
+    pub(super) fn new(input: ChannelTopology) -> Self {
         Self {
             bank: SosBank::new(input.width()),
             coefficients: Ramp::new(SosCoefficients::THROUGH),

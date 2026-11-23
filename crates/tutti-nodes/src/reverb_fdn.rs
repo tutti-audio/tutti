@@ -4,7 +4,7 @@
 //! ramps); this file holds the kernel that retargets it, the cells and how the graph reaches
 //! them.
 
-use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
 };
@@ -162,8 +162,8 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
 
     fn shape(&self) -> Shape {
         Shape::buses(
-            Buses::main(BusTopology::MONO),
-            Buses::main(BusTopology::STEREO),
+            Buses::main(ChannelTopology::MONO),
+            Buses::main(ChannelTopology::STEREO),
         )
         .cost(Cost::Moderate)
     }

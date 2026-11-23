@@ -43,7 +43,7 @@
 //! `BusStripNode::render`.
 
 use crate::last_good::LastGood;
-use tutti_buffers::{BusTopology, Float, MAX_CHANNELS};
+use tutti_buffers::{ChannelTopology, Float, MAX_CHANNELS};
 use tutti_dsp::balance_gains_in;
 use tutti_graph::{Cx, Inputs, Io, Node, Outputs, Prepare, Shape, Status};
 use tutti_rt::Param;
@@ -54,7 +54,7 @@ use tutti_units::{Amplitude, Balance, Tail};
 // [`BusStripConfig`] it is made from: the bus, and the volume at the start. The balance is
 // present only on a bus with a left/right pair, which `From` decides.
 tutti_graph::declare_params!([] BusStripNode, #[derive(Copy, PartialEq)] BusStripConfig, BusStripCells {
-    required { input: BusTopology }
+    required { input: ChannelTopology }
     params {
         Volume => volume: Amplitude = Amplitude::UNITY,
         Balance => balance: Option<Balance> = None,
@@ -85,11 +85,11 @@ tutti_graph::declare_params!([] BusStripNode, #[derive(Copy, PartialEq)] BusStri
 /// Made from a [`BusStripConfig`] ([`From`]): unity volume, centred.
 ///
 /// ```
-/// use tutti_buffers::BusTopology;
+/// use tutti_buffers::ChannelTopology;
 /// use tutti_nodes::{BusStripConfig, BusStripNode};
 ///
-/// let strip = BusStripNode::from(BusStripConfig::new(BusTopology::STEREO));
-/// assert_eq!(strip.topology(), BusTopology::STEREO);
+/// let strip = BusStripNode::from(BusStripConfig::new(ChannelTopology::STEREO));
+/// assert_eq!(strip.topology(), ChannelTopology::STEREO);
 /// ```
 ///
 /// `Clone` shares the two cells: it is the template
@@ -107,7 +107,7 @@ pub struct BusStripNode {
     /// A placed bus is what lets a bus edge fold into or out of the strip: a mono
     /// source reaches both sides of a stereo strip, and a stereo strip lands on the
     /// front pair of a declared 5.1 main output.
-    topology: BusTopology,
+    topology: ChannelTopology,
     /// Each channel's side of the balance, from `topology`'s placement: built
     /// once at construction, read once per block.
     sides: [Side; MAX_CHANNELS],
@@ -145,7 +145,7 @@ enum Side {
 /// its [`mirror`](tutti_buffers::Speaker::mirror) is also on the bus, and `Mid` otherwise. A bus
 /// with no placement or an ambisonic one has no pair, so every channel is `Mid`.
 /// Control side: runs once.
-fn sides_of(topology: &BusTopology) -> [Side; MAX_CHANNELS] {
+fn sides_of(topology: &ChannelTopology) -> [Side; MAX_CHANNELS] {
     let mut sides = [Side::Mid; MAX_CHANNELS];
     let Some(positions) = topology.positions() else {
         return sides;
@@ -205,7 +205,7 @@ impl From<BusStripConfig> for BusStripNode {
 
 impl BusStripNode {
     /// The bus this strip runs on.
-    pub fn topology(&self) -> BusTopology {
+    pub fn topology(&self) -> ChannelTopology {
         self.topology
     }
 
@@ -456,24 +456,25 @@ mod tests {
     use tutti_graph::contract::drive;
 
     /// The strip on `bus`.
-    fn strip(bus: BusTopology) -> BusStripNode {
+    fn strip(bus: ChannelTopology) -> BusStripNode {
         BusStripNode::from(BusStripConfig::new(bus))
     }
 
     /// The engine's bus at `n` channels.
-    fn width(n: u16) -> BusTopology {
-        BusTopology::default_for(ChannelLayout::from(n)).expect("a test width fits a bus")
+    fn width(n: u16) -> ChannelTopology {
+        ChannelTopology::default_for(ChannelLayout::from(n)).expect("a test width fits a bus")
     }
 
     /// Left, right, centre: a placed bus of three.
-    fn lcr() -> BusTopology {
-        BusTopology::new([FrontLeft, FrontRight, FrontCenter]).expect("three speakers fit a bus")
+    fn lcr() -> ChannelTopology {
+        ChannelTopology::new([FrontLeft, FrontRight, FrontCenter])
+            .expect("three speakers fit a bus")
     }
 
     /// The strip measured as a `Light` node, at every width.
     #[test]
     fn the_strip_is_light() {
-        for topology in [BusTopology::MONO, BusTopology::STEREO] {
+        for topology in [ChannelTopology::MONO, ChannelTopology::STEREO] {
             let strip = strip(topology);
             assert_eq!(Node::<f32>::shape(&strip).cost, tutti_graph::Cost::Light);
         }
@@ -501,20 +502,20 @@ mod tests {
     /// law would attenuate a centred signal by 3 dB.
     #[test]
     fn unity_at_defaults() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         assert_eq!(tick2(&mut s, 0.5, -0.25), (0.5, -0.25));
     }
 
     #[test]
     fn volume_scales_both_channels() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         s.volume().store(Amplitude::new(0.5));
         assert_eq!(tick2(&mut s, 1.0, 1.0), (0.5, 0.5));
     }
 
     #[test]
     fn set_dispatches_each_unit_param() {
-        let s = strip(BusTopology::STEREO);
+        let s = strip(ChannelTopology::STEREO);
 
         assert!(set_param(&s, UnitParam::Volume, 0.25));
         assert_eq!(s.volume().load().get(), 0.25);
@@ -528,7 +529,7 @@ mod tests {
     /// dispatching on node type.
     #[test]
     fn ignores_params_it_does_not_own() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         assert!(!set_param(&s, UnitParam::Cutoff, 8000.0));
         assert!(!set_param(&s, UnitParam::Drive, 4.0));
         assert_eq!(tick2(&mut s, 1.0, 1.0), (1.0, 1.0));
@@ -587,7 +588,7 @@ mod tests {
     /// A fed volume overrides the atomic per sample.
     #[test]
     fn a_fed_volume_overrides_the_atomic() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         s.volume().store(Amplitude::new(1.0));
         let mut out = [0.0f32; 2];
         crate::test_support::tick_fed(&mut s, &[1.0, 1.0], &[Some(0.5)], &mut out);
@@ -599,7 +600,7 @@ mod tests {
     /// from its first frame, where the graph's declick puts it at the base.
     #[test]
     fn starting_a_feed_does_not_apply_the_gain_twice() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         s.volume().store(Amplitude::new(0.5));
         let x = [1.0f32; 16];
         let steady = drive(&mut s, RATE, Planes::new(&[&x, &x]).unwrap(), &[None, None]);
@@ -624,7 +625,7 @@ mod tests {
     /// and a fork taken later must read the cells as they are then.
     #[test]
     fn clone_shares_atomics() {
-        let original = strip(BusTopology::STEREO);
+        let original = strip(ChannelTopology::STEREO);
         let clone = original.clone();
         clone.volume().store(Amplitude::new(0.1));
         set_balance(&clone, 0.5);
@@ -650,7 +651,7 @@ mod tests {
     /// controls hold: the ramp is the only thing block length changes.
     #[test]
     fn a_block_matches_its_frames() {
-        let mut framed = strip(BusTopology::STEREO);
+        let mut framed = strip(ChannelTopology::STEREO);
         framed.volume().store(Amplitude::new(0.6));
         set_balance(&framed, 0.25);
         let mut block = ParamNode::<f32>::fork_fresh(&framed);
@@ -700,7 +701,7 @@ mod tests {
     /// `f64`.
     fn ramp_is_the_line_in<F: Float + core::fmt::Debug>(bound: f64) {
         const N: usize = 1000;
-        let mut s = strip(BusTopology::MONO);
+        let mut s = strip(ChannelTopology::MONO);
         let ones = vec![F::ONE; N];
         let steady: Vec<Vec<F>> = drive(&mut s, RATE, Planes::new(&[&ones]).unwrap(), &[]);
         assert!(steady[0].iter().all(|&v| v == F::ONE));
@@ -746,7 +747,7 @@ mod tests {
         // bound leaves room for rounding and nothing near a real step.
         const MAX_STEP: f32 = 1.5 / BLOCK as f32;
 
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         let steady = process_dc(&mut s, BLOCK, 1.0, 1.0);
         assert!(steady.iter().all(|f| *f == [1.0, 1.0]));
 
@@ -788,7 +789,7 @@ mod tests {
     #[test]
     fn volume_change_ramps_across_one_block() {
         const BLOCK: usize = 32;
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         let _ = process_dc(&mut s, BLOCK, 1.0, 1.0);
 
         s.volume().store(Amplitude::new(0.5));
@@ -813,7 +814,7 @@ mod tests {
     /// at zero must not fade in from unity for a block before going silent.
     #[test]
     fn a_fresh_or_reset_strip_starts_at_its_target() {
-        let mut s = strip(BusTopology::STEREO);
+        let mut s = strip(ChannelTopology::STEREO);
         s.volume().store(Amplitude::new(0.0));
         assert!(
             process_dc(&mut s, 16, 1.0, 1.0)
@@ -908,7 +909,11 @@ mod tests {
 
     /// One frame of ones through a strip on `topology` at `balance` and
     /// `volume`, read back by the speaker each channel feeds.
-    fn gain_by_speaker(topology: BusTopology, balance: f64, volume: f64) -> Vec<(Speaker, f32)> {
+    fn gain_by_speaker(
+        topology: ChannelTopology,
+        balance: f64,
+        volume: f64,
+    ) -> Vec<(Speaker, f32)> {
         let mut s = strip(topology);
         s.volume().store(Amplitude::new(volume));
         set_balance(&s, balance);
@@ -939,7 +944,7 @@ mod tests {
         for balance in [-1.0f64, -0.5, 0.0, 0.5, 1.0] {
             let (gl, gr) = Balance::new(balance).gains();
             let volume = 0.5f64;
-            let mut s = strip(BusTopology::STEREO);
+            let mut s = strip(ChannelTopology::STEREO);
             s.volume().store(Amplitude::new(volume));
             set_balance(&s, balance);
             let (l, r) = tick2(&mut s, 0.75, -0.25);
@@ -953,7 +958,7 @@ mod tests {
     /// unity, while the centre and the LFE take the fader alone.
     #[test]
     fn five_one_balances_front_and_side_pairs_and_spares_centre_and_lfe() {
-        let g = gain_by_speaker(BusTopology::from(Bed::Surround51), 0.5, 0.5);
+        let g = gain_by_speaker(ChannelTopology::from(Bed::Surround51), 0.5, 0.5);
         assert_eq!(of(&g, FrontLeft), 0.25);
         assert_eq!(of(&g, SideLeft), 0.25);
         assert_eq!(of(&g, FrontRight), 0.5);
@@ -966,7 +971,7 @@ mod tests {
     /// bus in another order balances the same speakers.
     #[test]
     fn pairing_is_by_speaker_not_by_channel_index() {
-        let reordered = BusTopology::new([
+        let reordered = ChannelTopology::new([
             SideRight,
             FrontCenter,
             FrontLeft,
@@ -991,7 +996,7 @@ mod tests {
     /// top back.
     #[test]
     fn seven_one_four_balances_every_pair() {
-        let g = gain_by_speaker(BusTopology::from(Bed::Surround714), -0.5, 1.0);
+        let g = gain_by_speaker(ChannelTopology::from(Bed::Surround714), -0.5, 1.0);
         for left in [FrontLeft, SideLeft, BackLeft, TopFrontLeft, TopBackLeft] {
             assert_eq!(of(&g, left), 1.0, "{left:?} is the near side");
         }
@@ -1009,12 +1014,12 @@ mod tests {
     }
 
     /// Buses with no mirrored pair: mono, unassigned, ambisonic, a lone `FL`.
-    fn pairless_buses() -> [BusTopology; 4] {
+    fn pairless_buses() -> [ChannelTopology; 4] {
         [
-            BusTopology::MONO,
-            BusTopology::unassigned(ChannelLayout::from(6u16)).expect("six fit a bus"),
+            ChannelTopology::MONO,
+            ChannelTopology::unassigned(ChannelLayout::from(6u16)).expect("six fit a bus"),
             ChannelTopology::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
-            BusTopology::new([FrontLeft, FrontCenter]).expect("two speakers fit a bus"),
+            ChannelTopology::new([FrontLeft, FrontCenter]).expect("two speakers fit a bus"),
         ]
     }
 
@@ -1045,7 +1050,7 @@ mod tests {
     #[test]
     fn a_quad_is_balanced_whichever_surround_pair_it_names() {
         for rear in [[SideLeft, SideRight], [BackLeft, BackRight]] {
-            let quad = BusTopology::new([FrontLeft, FrontRight, rear[0], rear[1]])
+            let quad = ChannelTopology::new([FrontLeft, FrontRight, rear[0], rear[1]])
                 .expect("four speakers fit a bus");
             let g = gain_by_speaker(quad, 0.5, 1.0);
             assert_eq!(of(&g, FrontLeft), 0.5, "{rear:?}");
@@ -1059,7 +1064,7 @@ mod tests {
     /// (`FL FR FC LFE BL BR FLC FRC`) and a bus with the top-side pair.
     #[test]
     fn front_of_centre_and_top_side_pairs_are_balanced() {
-        let wide = BusTopology::new([
+        let wide = ChannelTopology::new([
             FrontLeft,
             FrontRight,
             FrontCenter,
@@ -1080,7 +1085,7 @@ mod tests {
         assert_eq!(of(&g, FrontCenter), 1.0);
         assert_eq!(of(&g, LowFrequency), 1.0);
 
-        let tops = BusTopology::new([TopSideLeft, TopSideRight]).expect("two fit a bus");
+        let tops = ChannelTopology::new([TopSideLeft, TopSideRight]).expect("two fit a bus");
         let g = gain_by_speaker(tops, -0.5, 1.0);
         assert_eq!(of(&g, TopSideLeft), 1.0);
         assert_eq!(of(&g, TopSideRight), 0.5);
@@ -1092,7 +1097,7 @@ mod tests {
     #[test]
     fn a_balance_move_ramps_a_side_pair_linearly() {
         const N: usize = 67;
-        let mut s = strip(BusTopology::from(Bed::Surround51));
+        let mut s = strip(ChannelTopology::from(Bed::Surround51));
         let ones = [1.0f32; N];
         let ins: Vec<&[f32]> = vec![&ones; 6];
         let _ = drive(&mut s, RATE, Planes::new(&ins).unwrap(), &[]);

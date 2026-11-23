@@ -1,7 +1,7 @@
 //! [`EnvelopeFilterNode`]: a state-variable filter whose cutoff follows the signal's level.
 
 use tutti_buffers::Float;
-use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lerp, SimdLanes,
     SvfType,
@@ -120,7 +120,7 @@ control_set! {
 /// The filter as a [`Kernel`]: an [`EnvelopeFilterBank`] at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
-    input: BusTopology,
+    input: ChannelTopology,
     ty: SvfType,
     /// `None` until [`prepare`](Kernel::prepare).
     bank: Option<EnvelopeFilterBank<F>>,
@@ -129,7 +129,7 @@ pub struct EnvelopeFilterKernel<F: Float + SimdLanes> {
 }
 
 impl<F: Float + SimdLanes + Lerp> EnvelopeFilterKernel<F> {
-    fn new(input: BusTopology, ty: SvfType) -> Self {
+    fn new(input: ChannelTopology, ty: SvfType) -> Self {
         Self {
             input,
             ty,
