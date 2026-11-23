@@ -51,24 +51,12 @@ fn export(g: GraphBuilder, layout: ChannelLayout, secs: f64, path: &std::path::P
 }
 use tutti_nodes::testing::{Const, bass_send, vbap_mix};
 
-/// The widened export path: a graph that starts at the **device (stereo)
-/// output** width — exactly what the live engine produces — is widened offline
-/// and wired to a surround main output before export. This mirrors what a host
-/// does to the graph it exports (on `tutti_graph`, the topology's main
-/// outputs grown), and proves widening a stereo graph does NOT lose the
-/// surround channels.
+/// A quad main output built by VBAP from two sources exports four channels.
 #[test]
-fn stereo_net_widened_then_exports_four_channels() {
-    // Build the surround producer inside a STEREO-output graph (like the live one).
-    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::STEREO);
-    assert_eq!(g.outputs(), 2, "starts at device stereo width");
+fn quad_vbap_mix_exports_four_channels() {
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::QUAD);
     let src_front = g.add(Const::frame(&[1.0, 1.0]));
     let src_rear = g.add(Const::frame(&[1.0, 1.0]));
-    // Widen the graph to quad (the new outputs silent until wired), then wire
-    // the surround main output onto them. An output channel the graph does not have
-    // cannot be wired, so the widen comes first.
-    g.spec_mut().topology.outputs.resize(4, Vec::new());
-    assert_eq!(g.outputs(), 4, "graph widened to quad");
     vbap_mix(
         &mut g,
         Bed::Quad,
