@@ -22,7 +22,7 @@ use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
 use tutti_nodes::{FdnConfig, FdnNode, FreeverbConfig, FreeverbNode};
 use tutti_units::{
-    Db, Depth, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
+    Bipolar, Db, Frame, Latency, Mix, SampleRate, Samples, Seconds, Tail, UnitAddr, UnitParam,
 };
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -430,7 +430,7 @@ fn a_driven_slow_control_is_sampled_on_the_grid_whatever_the_blocks() {
 #[test]
 fn a_reset_node_renders_as_a_fresh_one() {
     let c = FdnControls {
-        modulation: Depth::of(0.8),
+        modulation: Bipolar::of(0.8),
         ..FdnControls::DEFAULT
     };
     let mut used = node(plain(), c);
@@ -526,7 +526,7 @@ fn a_size_on_the_move_is_not_parked_while_it_still_rings() {
     let c = FdnControls {
         decay: [Seconds::new(1.0); 3],
         size: Mix::new(1.0),
-        modulation: Depth::of(0.0),
+        modulation: Bipolar::of(0.0),
         ..FdnControls::DEFAULT
     };
     let mut rig = Rig::new(node(plain(), c));

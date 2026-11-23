@@ -45,7 +45,7 @@ fn tremolo(wave: OscillatorWave, rate: Hz, depth: f64) -> Tremolo {
     let mut t = Tremolo::new(wave, RATE);
     t.retarget(&TremoloControls {
         rate,
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
     });
     t
 }
@@ -158,7 +158,7 @@ fn auto_pan(law: PanLaw, depth: f64) -> AutoPan {
     let mut p = AutoPan::new(OscillatorWave::Sine, law, RATE);
     p.retarget(&AutoPanControls {
         rate: Hz::new(HZ),
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
     });
     p
 }

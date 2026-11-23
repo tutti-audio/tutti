@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, InputOutput, MaxBlock};
 use tutti_dsp::{AutoPan, AutoPanControls, BlockMismatch, COEFF_INTERVAL, OscillatorWave, PanLaw};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Depth, Hz, SampleRate, Tail};
+use tutti_units::{Bipolar, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -50,7 +50,7 @@ impl AutoPanConfig {
 
     /// The depth it starts at.
     #[must_use]
-    pub fn depth(mut self, depth: Depth) -> Self {
+    pub fn depth(mut self, depth: Bipolar) -> Self {
         self.controls.depth = depth;
         self
     }
@@ -69,7 +69,7 @@ impl Default for AutoPanConfig {
 /// Depth 1 sweeps hard left to hard right and a negative depth sweeps the other way; each
 /// channel is the law's -3 dB at the centre, and the gains' power sums to 1 at every
 /// position. The LFO starts at phase 0 and runs on across blocks. The rate
-/// (`UnitParam::Rate`, a [`Hz`]) and the depth (`UnitParam::Depth`, a [`Depth`]) are live
+/// (`UnitParam::Rate`, a [`Hz`]) and the depth (`UnitParam::Depth`, a [`Bipolar`]) are live
 /// cells, read as the [`TremoloNode`](crate::TremoloNode)'s are.
 ///
 /// No latency and no tail. A [`KernelNode`]. Made from an [`AutoPanConfig`]
@@ -94,7 +94,7 @@ control_set! {
     AutoPanSet(_s): AutoPanControls = AutoPanControls::DEFAULT;
     live: (all);
     Rate => Hz = rate { whole },
-    Depth => Depth = depth;
+    Depth => Bipolar = depth;
 
     fn defaults(&self) -> AutoPanControls {
         AutoPanControls::DEFAULT

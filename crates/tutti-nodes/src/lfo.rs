@@ -19,7 +19,9 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
 use tutti_graph::{Cx, IntoNode, Io, Node, NodeParts, ParamNode, ParamSet, Prepare, Shape, Status};
 use tutti_rt::Param;
-use tutti_units::{BeatsPerCycle, Depth, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate};
+use tutti_units::{
+    BeatsPerCycle, Bipolar, Hz, PhaseIncrement, PhaseStep, RunningPhase, SampleRate,
+};
 use tutti_units::{Latency, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
@@ -97,7 +99,7 @@ pub struct LfoNode {
     /// The free-running rate: read only by [`LfoClock::Free`], and declared as
     /// a param only then.
     rate: Param<Hz>,
-    depth: Param<Depth>,
+    depth: Param<Bipolar>,
     /// Added to the clock position before the wave reads it.
     phase_offset: PhaseIncrement,
     /// Free-running clock position within its cycle: a [`RunningPhase`], exact for as
@@ -126,7 +128,7 @@ pub struct LfoConfig {
     seed: u64,
     clock: LfoClock,
     rate: Hz,
-    depth: Depth,
+    depth: Bipolar,
     phase_offset: PhaseIncrement,
 }
 
@@ -140,7 +142,7 @@ impl LfoConfig {
             seed: 0,
             clock: LfoClock::Free,
             rate: Hz::new(1.0),
-            depth: Depth::FULL,
+            depth: Bipolar::MAX,
             phase_offset: PhaseIncrement::new(0.0),
         }
     }
@@ -174,12 +176,12 @@ impl LfoConfig {
         self
     }
 
-    /// The modulation [`Depth`] at the start.
+    /// The modulation [`Bipolar`] at the start.
     ///
     /// Bipolar: a negative depth inverts the wave, so `-1.0` is the same
     /// shape phase-flipped and `0.0` is flat.
     #[must_use]
-    pub const fn depth(mut self, depth: Depth) -> Self {
+    pub const fn depth(mut self, depth: Bipolar) -> Self {
         self.depth = depth;
         self
     }
@@ -250,7 +252,7 @@ impl LfoNode {
 // Both are read per frame. The clock is fixed once the node is live (a config option
 // only), so its shape never changes.
 tutti_graph::declare_params!([] LfoNode, n {
-    Depth => Depth = &n.depth,
+    Depth => Bipolar = &n.depth,
     Rate => Hz = matches!(n.clock, LfoClock::Free).then_some(&n.rate),
 });
 
@@ -392,7 +394,7 @@ mod tests {
         let free = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
                 .rate(Hz::new(2.0))
-                .depth(Depth::of(0.25)),
+                .depth(Bipolar::of(0.25)),
         );
         assert_eq!(
             Node::<f32>::shape(&free).params.as_slice(),
@@ -403,7 +405,7 @@ mod tests {
         let synced = LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
                 .beat_sync(BeatsPerCycle::of(4.0))
-                .depth(Depth::of(0.5)),
+                .depth(Bipolar::of(0.5)),
         );
         assert_eq!(
             Node::<f32>::shape(&synced).params.as_slice(),
@@ -563,20 +565,20 @@ mod tests {
 
     #[test]
     fn test_depth_control() {
-        let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Depth::of(0.5)));
+        let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Bipolar::of(0.5)));
         let out = render(lfo, 48_000.0, 1);
         assert!((out[0] - 0.5).abs() < 0.01);
     }
 
     /// Negative depth inverts the wave rather than silencing it.
     ///
-    /// `Depth` is bipolar: `LfoConfig::depth(-1.0)` stores `-1.0` and phase-flips the
+    /// The depth is signed: `LfoConfig::depth(-1.0)` stores `-1.0` and phase-flips the
     /// shape. Clamping to `0.0..=1.0` instead would store `0.0` and take the
     /// LFO flat, which is silent in both senses.
     #[test]
     fn negative_depth_inverts_instead_of_silencing() {
         let first = |depth: f64| {
-            let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Depth::of(depth)));
+            let lfo = LfoNode::from(LfoConfig::new(LfoShape::Square).depth(Bipolar::of(depth)));
             render(lfo, 48_000.0, 1)[0]
         };
         let (a, b) = (first(1.0), first(-1.0));
@@ -855,7 +857,7 @@ mod tests {
     }
 
     /// In an `f64` graph a free-running sine at a third of the rate is `sin(2 pi k / 3)`. The
-    /// wave and the depth are `f64` (`Waveform::raw_at`, `Depth`), so every frame holds the
+    /// wave and the depth are `f64` (`Waveform::raw_at`, `Bipolar`), so every frame holds the
     /// closed form to `F64_TOLERANCE`, and a frame is not what an `f32` narrowing leaves (a
     /// non-dyadic value, which `f32` cannot hold to 1e-9).
     #[test]

@@ -45,7 +45,7 @@ use tutti_nodes::{
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
-    Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
+    Amplitude, BeatsPerCycle, Bipolar, CompressionRatio, Db, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
 };
 
@@ -100,7 +100,7 @@ fn konst(depth: f64) -> Layer {
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

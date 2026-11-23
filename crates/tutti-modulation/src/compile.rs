@@ -28,7 +28,7 @@ use core::fmt;
 use tutti_curve::Law;
 use tutti_music::Adsr;
 use tutti_units::{
-    Ballistics, Beat, BeatsPerCycle, Depth, ParamAddr, ParamId, PhaseIncrement, PlayReading,
+    Ballistics, Beat, BeatsPerCycle, Bipolar, ParamAddr, ParamId, PhaseIncrement, PlayReading,
     SamplePosition, SampleRate, Samples, Seconds,
 };
 
@@ -193,7 +193,7 @@ pub struct RouteDecl {
     /// What it modulates.
     pub to: RouteTarget,
     /// A fraction of the target's range (of the scale, for a depth route).
-    pub depth: Depth,
+    pub depth: Bipolar,
     /// Both ways or one.
     pub polarity: Polarity,
     /// The response curve on the magnitude.

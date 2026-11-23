@@ -20,7 +20,7 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_units::{ArcDegrees, Azimuth, Beat, Bpm, Depth, SampleRate, Samples, UnitParam};
+use tutti_units::{ArcDegrees, Azimuth, Beat, Bipolar, Bpm, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
 const TEMPO: Bpm = Bpm::of(120.0);
@@ -139,7 +139,7 @@ fn constant(depth: f64) -> Layer {
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },

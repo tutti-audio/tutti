@@ -24,7 +24,7 @@
 //! a network is too large to build on an audio thread. [`FdnBank`](crate::FdnBank) runs it.
 
 use tutti_units::{
-    Cents, Db, Depth, Feedback, Gain, Hz, Mix, SampleRate, SampleSpan, Samples, Seconds,
+    Bipolar, Cents, Db, Feedback, Gain, Hz, Mix, SampleRate, SampleSpan, Samples, Seconds,
     StereoWidth,
 };
 
@@ -92,7 +92,7 @@ pub struct FdnControls {
     pub pre_delay: Seconds,
     /// The depth of the modulation of the line lengths, `0..1` (read as its
     /// absolute value).
-    pub modulation: Depth,
+    pub modulation: Bipolar,
     /// The rate of that modulation.
     pub rate: Hz,
     /// The stereo width of the wet signal: `0` is mono, `1` natural.
@@ -118,7 +118,7 @@ impl FdnControls {
         size: Mix::new(0.5),
         diffusion: Mix::new(0.8),
         pre_delay: Seconds::ZERO,
-        modulation: Depth::of(0.3),
+        modulation: Bipolar::of(0.3),
         rate: Hz::new(0.5),
         width: StereoWidth::NATURAL,
         wet: Db::UNITY,
@@ -418,7 +418,7 @@ impl FdnLayout {
             size: Mix::new(1.0),
             diffusion: Mix::new(1.0),
             pre_delay: MAX_PRE_DELAY,
-            modulation: Depth::of(1.0),
+            modulation: Bipolar::of(1.0),
             freeze: false,
             ..FdnControls::DEFAULT
         };

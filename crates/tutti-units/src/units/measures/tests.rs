@@ -20,7 +20,7 @@ use super::*;
 /// - `Velocity + Velocity` — two strikes do not sum into a harder one.
 ///
 /// And five *type* omissions, which the compiler enforces rather than a
-/// missing `impl`: `Correlation` and `StereoBalance` are not `Depth`,
+/// missing `impl`: `Correlation` and `StereoBalance` are not `Bipolar`,
 /// `Confidence` is not `Mix`, and `Velocity` is not `Amplitude`, even
 /// though the ranges coincide. A control you set and a measurement
 /// reported back are different quantities — the same split `Q` and

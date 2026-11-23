@@ -21,7 +21,7 @@ use tutti_graph::NodeKey;
 use tutti_nodes::{DistortionConfig, DistortionNode, ShapeKind};
 use tutti_rt::ParamCell;
 use tutti_session::{MainOutput, OutputPort, ParamRef, Replacement, RouteSpec, Session};
-use tutti_units::{Depth, Drive, UnitParam};
+use tutti_units::{Bipolar, Drive, UnitParam};
 
 use common::probe::ProbeUnit;
 
@@ -40,7 +40,7 @@ fn modulate_drive(s: &mut Session, node: NodeKey) {
     let mut m = s.mods_mut();
     m.range_raw(drive, 0.0, 10.0).unwrap();
     let offset = m.macro_(1.0);
-    m.route(RouteSpec::new(offset, drive, Depth::of(0.1)))
+    m.route(RouteSpec::new(offset, drive, Bipolar::of(0.1)))
         .unwrap();
     settle(s);
 }
