@@ -91,7 +91,7 @@ pub use envelope::{
     StateReady, StateStaged, Wiring, Working,
 };
 pub use frame::Framed;
-pub use message::Message;
+pub use message::{Answered, Message, Unanswered};
 pub use process::ProcessAudioData;
 pub use shm::SlabLayout;
 

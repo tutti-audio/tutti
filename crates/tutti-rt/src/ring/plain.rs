@@ -19,10 +19,7 @@
 
 use std::sync::Arc;
 
-use super::{
-    Cell, NotSync, Overflow, Padded, PushError, Returned, WriterLoss, check_free_outside,
-    take_since,
-};
+use super::{Cell, NotSync, Overflow, Padded, PushError, Returned, WriterLoss, check_free_outside};
 use crate::gauge::Counter;
 use crate::sync::{AtomicBool, AtomicU64, Ordering};
 
@@ -559,7 +556,7 @@ impl<T: Send> RingReader<T> {
     /// Values lost since this end's last `take_lost`, and resets that count;
     /// [`lost`](Self::lost) is unaffected.
     pub fn take_lost(&mut self) -> u64 {
-        take_since(&self.view, &mut self.taken)
+        self.view.take_since(&mut self.taken)
     }
 
     /// A view of the loss count that outlives the end.
