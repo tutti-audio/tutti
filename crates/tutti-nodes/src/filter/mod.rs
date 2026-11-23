@@ -29,7 +29,7 @@ pub use ladder::{LadderFilterConfig, LadderFilterNode, LadderKernel, LadderSet};
 pub use svf::{SvfFilterConfig, SvfFilterNode, SvfKernel, SvfSet};
 pub use tilt::{TiltFilterConfig, TiltFilterKernel, TiltFilterNode, TiltFilterSet};
 
-use tutti_buffers::{ChannelTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 
 /// The bus a filter built for a width runs on: the engine's order for it
 /// ([`ChannelTopology::default_for`]).
