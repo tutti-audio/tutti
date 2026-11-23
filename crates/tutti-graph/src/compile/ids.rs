@@ -51,8 +51,7 @@ macro_rules! ids {
             }
 
             fn from_index(index: usize) -> Self {
-                debug_assert!(u32::try_from(index).is_ok(), "an index past u32");
-                Self(index as u32)
+                Self(u32::try_from(index).expect("a plan table past u32"))
             }
         }
     )*};
@@ -137,6 +136,11 @@ impl<I, T> Table<I, T> {
     /// The rows, in id order.
     pub(crate) fn as_slice(&self) -> &[T] {
         &self.items
+    }
+
+    /// The rows, mutably, in id order.
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.items
     }
 
     /// The row count.
@@ -236,6 +240,18 @@ impl<'t, I, T> IntoIterator for &'t Table<I, T> {
     }
 }
 
+/// How many times a store slot has been replaced: a plan expects the unit of
+/// one generation there.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub(crate) struct Generation(u32);
+
+impl Generation {
+    /// The generation with this raw value.
+    pub(crate) const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+}
+
 impl AudioSlotId {
     /// The slot every unconnected audio input reads; never written.
     pub(crate) const ZERO: Self = Self(0);
@@ -244,6 +260,12 @@ impl AudioSlotId {
 impl EventSlotId {
     /// The slot every unconnected event input reads; never written.
     pub(crate) const EMPTY: Self = Self(0);
+
+    /// The feedback this slot is read from: the null slot is none, and the
+    /// feedback slots follow it (see [`EventFeedbackId::slot`]).
+    pub(crate) fn feedback(self) -> Option<EventFeedbackId> {
+        (self != Self::EMPTY).then(|| EventFeedbackId::from_index(self.index() - 1))
+    }
 }
 
 /// A slice of ids as the raw `u32`s they wrap: what a public accessor returns

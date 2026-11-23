@@ -6,6 +6,8 @@
 //! its own unit.
 
 use super::*;
+use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::plan::NodePorts;
 use crate::model::mode::{MixState, NodeMode};
 
 /// [`node_dispatch`] for a unit that is not plain steady Active: toggle if
@@ -24,14 +26,15 @@ pub(super) fn moded_node_op<
     st: &mut OpState<'_, A, Fl, E>,
 ) -> bool {
     let (rec, plan, frames) = (head.rec, head.plan, head.frames);
-    let [ain, aout, ein, eout] = rec.ports(&plan.nodes.slots);
+    let ports = rec.ports(&plan.nodes);
+    let NodePorts { ain, aout, .. } = ports;
 
     // The mix's lane, before anything reads the block's mix (it moves while
     // the node is parked too, as the mix's snapshot does).
     let source = plan.param_ports[rec.params.range()]
         .last()
         .filter(|p| p.is_mix())
-        .map(|p| (p.from, &st.events.pev(p.slot)[..]));
+        .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));
     u.mode.drive_step(frames, source);
 
     let want = u.mode.seen();
@@ -45,7 +48,7 @@ pub(super) fn moded_node_op<
     }
 
     if u.mode.is_parked() {
-        park(u, head, st, [ain, aout, ein, eout]);
+        park(u, head, st, ports);
         return false;
     }
 
@@ -117,7 +120,12 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u: &mut Unit<F>,
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    [ain, aout, ein, eout]: [&[u32]; 4],
+    NodePorts {
+        ain,
+        aout,
+        ein,
+        eout,
+    }: NodePorts<'_>,
 ) {
     let rec = head.rec;
     // A parked node is not processed, so a wake raised meanwhile is consumed
@@ -178,8 +186,8 @@ fn park_by_index<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlo
     u: &mut Unit<F>,
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    ain: &[u32],
-    aout: &[u32],
+    ain: &[AudioSlotId],
+    aout: &[AudioSlotId],
 ) {
     let frames = head.frames;
     let main = u.mode.inputs();
@@ -218,8 +226,8 @@ fn park_folded<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots
     u: &mut Unit<F>,
     head: &Head<'_, '_>,
     st: &mut OpState<'_, A, Fl, E>,
-    ain: &[u32],
-    aout: &[u32],
+    ain: &[AudioSlotId],
+    aout: &[AudioSlotId],
 ) {
     let frames = head.frames;
     let mut silent_in = 0u64;

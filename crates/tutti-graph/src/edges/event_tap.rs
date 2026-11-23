@@ -49,6 +49,7 @@ use tutti_rt::{ControlDrop, Overflow, RingReader, RingWriter, ring};
 use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
+use crate::compile::ids::EventSlotId;
 use crate::event::types::EventKind;
 use crate::event::writer::note_off_room;
 use crate::exec::slots::EventSlots;
@@ -140,7 +141,7 @@ impl std::fmt::Debug for EventTapWriter {
 pub(crate) fn event_tap_op<E: EventSlots + ?Sized>(
     tap: &mut EventTapWriter,
     events: &E,
-    src: u32,
+    src: EventSlotId,
     env: &Env,
 ) {
     if tap.ring.is_disconnected() {

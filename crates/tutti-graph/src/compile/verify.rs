@@ -47,8 +47,8 @@
 //! run it on every proptest graph.
 
 use crate::compile::ids::{
-    DelayId, EventFeedbackId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId,
-    PlanUnitId, Table, TaskId,
+    DelayId, EventSlotId, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
+    TaskId,
 };
 use crate::compile::plan::{Delta, EMPTY_SLOT, EventSlotCapacity, Op, Plan, ZERO_SLOT};
 use crate::node::MAX_PORTS;
@@ -647,7 +647,6 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // slot all their FIFO can hold at the source's declared rate, a merge
     // the sum of its inputs.
     let block = plan.prepare.max_block().get();
-    let fixed = 1 + plan.event_feedback.len();
     let slot_cap = |s: u32| {
         plan.event_slot_capacity
             .get(EventSlotId::new(s))
@@ -677,8 +676,11 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             if s == EMPTY_SLOT.get() {
                 return Ok(EventSlotCapacity::NONE);
             }
-            if (s as usize) < fixed {
-                let spec = &plan.event_feedback[EventFeedbackId::new(s - 1)];
+            if let Some(f) = EventSlotId::new(s)
+                .feedback()
+                .filter(|f| f.index() < plan.event_feedback.len())
+            {
+                let spec = &plan.event_feedback[f];
                 return match spec.key {
                     crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(
                         EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block),
@@ -1405,13 +1407,18 @@ mod tests {
             else {
                 continue;
             };
-            let rec = &plan.nodes.recs[unit as usize];
-            let pu = &plan.units[PlanUnitId::new(unit)];
+            let unit = PlanUnitId::new(unit);
+            let rec = &plan.nodes.recs[unit];
+            let pu = &plan.units[unit];
             let shape = shapes[&pu.key];
             let at = format!("node {:?}", pu.key);
             assert_eq!(rec.unit, unit, "{at}");
-            assert_eq!(rec.store, pu.idx.0, "{at}");
-            assert_eq!(rec.generation, pu.generation, "{at}");
+            assert_eq!(rec.store, pu.idx, "{at}");
+            assert_eq!(
+                rec.generation,
+                crate::compile::ids::Generation::new(pu.generation),
+                "{at}"
+            );
             assert_eq!(rec.arrival, pu.arrival, "{at}");
             assert_eq!(rec.latency, shape.latency.samples(), "{at}");
             assert_eq!(rec.tail, shape.tail, "{at}");
@@ -1430,10 +1437,10 @@ mod tests {
                 "only the in-place node is aliased: {at}"
             );
 
-            let ain = plan.audio_slots(audio_in);
-            let aout = plan.audio_slots(audio_out);
-            let ein = plan.event_slots(event_in);
-            let eout = plan.event_slots(event_out);
+            let ain = &plan.audio_list[audio_in.range()];
+            let aout = &plan.audio_list[audio_out.range()];
+            let ein = &plan.event_list[event_in.range()];
+            let eout = &plan.event_list[event_out.range()];
             let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
             assert_eq!(
                 counts,
@@ -1450,44 +1457,44 @@ mod tests {
                 [ain.len(), aout.len(), ein.len(), eout.len()],
                 "{at}"
             );
-            let start = usize::try_from(rec.ports).expect("a slot offset");
-            let listed = &plan.nodes.slots[start..start + counts.iter().sum::<usize>()];
-            let op_slots: Vec<u32> = ain
-                .iter()
-                .chain(aout)
-                .chain(ein)
-                .chain(eout)
-                .copied()
-                .collect();
-            assert_eq!(listed, op_slots, "{at}");
+            assert_eq!(
+                rec.ports(&plan.nodes),
+                crate::compile::plan::NodePorts {
+                    ain,
+                    aout,
+                    ein,
+                    eout
+                },
+                "{at}"
+            );
 
             // The requests the op makes, each run sorted.
-            let sorted = |mut v: Vec<(u32, Role)>| {
+            fn sorted<S: Ord>(mut v: Vec<(S, Role)>) -> Vec<(S, Role)> {
                 v.sort_unstable();
                 v
-            };
-            let reads = |slots: &[u32], skip: InPlaceMask| {
+            }
+            fn reads<S: Copy>(slots: &[S], skip: InPlaceMask) -> Vec<(S, Role)> {
                 slots
                     .iter()
                     .enumerate()
                     .filter(|&(c, _)| !skip.get(c))
                     .map(|(c, &s)| (s, Role::Read(c as u8)))
-                    .collect::<Vec<_>>()
-            };
-            let writes = |slots: &[u32]| {
+                    .collect()
+            }
+            fn writes<S: Copy>(slots: &[S]) -> Vec<(S, Role)> {
                 slots
                     .iter()
                     .enumerate()
                     .map(|(c, &s)| (s, Role::Write(c as u8)))
-                    .collect::<Vec<_>>()
-            };
+                    .collect()
+            }
             assert_eq!(
-                plan.nodes.borrows[rec.borrows.range()],
+                plan.nodes.audio_borrows[rec.borrows.range()],
                 sorted([reads(ain, in_place), writes(aout)].concat()),
                 "{at}"
             );
             assert_eq!(
-                plan.nodes.borrows[rec.event_borrows.range()],
+                plan.nodes.event_borrows[rec.event_borrows.range()],
                 sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
                 "{at}"
             );

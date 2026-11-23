@@ -584,6 +584,24 @@ impl<'v, T> RwView<'v, T> {
         &'s mut self,
         reqs: &[(u32, R)],
         is_write: impl Fn(R) -> bool,
+        read: impl FnMut(R, &'s [T]),
+        write: impl FnMut(R, &'s mut [T]),
+    ) {
+        self.split_by(reqs, |i| i, is_write, read, write);
+    }
+
+    /// [`split`](Self::split) over requests whose chunk is named by a type of
+    /// the caller's: `chunk` gives each request's chunk index.
+    ///
+    /// # Panics
+    ///
+    /// As [`split`](Self::split).
+    #[track_caller]
+    pub fn split_by<'s, I: Copy, R: Copy>(
+        &'s mut self,
+        reqs: &[(I, R)],
+        chunk: impl Fn(I) -> u32,
+        is_write: impl Fn(R) -> bool,
         mut read: impl FnMut(R, &'s [T]),
         mut write: impl FnMut(R, &'s mut [T]),
     ) {
@@ -593,6 +611,7 @@ impl<'v, T> RwView<'v, T> {
         // them all.
         let mut prev: Option<(u32, bool)> = None;
         for &(i, tag) in reqs {
+            let i = chunk(i);
             let write_it = is_write(tag);
             if let Some((pi, pw)) = prev {
                 assert!(pi <= i, "split requests are not sorted");

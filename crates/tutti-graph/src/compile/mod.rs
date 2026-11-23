@@ -1636,7 +1636,7 @@ pub fn compile(
         })
         .collect();
 
-    let nodes = NodeTables::lower(ops.as_slice(), &audio_list, &event_list, units.as_slice());
+    let nodes = NodeTables::lower(ops.as_slice(), &audio_list, &event_list, &units);
     let plan = Plan {
         prepare: *prepare,
         ops,

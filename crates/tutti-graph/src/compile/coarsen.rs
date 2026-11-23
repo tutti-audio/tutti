@@ -98,7 +98,7 @@ fn chains<I: Id>(
     preds: &Table<I, BTreeSet<I>>,
     succ: &Table<I, Vec<I>>,
 ) -> Grouping {
-    let mut group_of: Table<I, TaskId> = Table::filled(items.len(), TaskId::new(u32::MAX));
+    let mut group_of: Table<I, Option<TaskId>> = Table::filled(items.len(), None);
     let mut groups: Table<TaskId, Vec<OpId>> = Table::default();
     for (i, ops) in items.ids().zip(items) {
         let fused = (preds[i].len() == 1)
@@ -106,11 +106,11 @@ fn chains<I: Id>(
             .filter(|&p| succ[p].len() == 1);
         match fused {
             Some(p) => {
-                let g = group_of[p];
-                group_of[i] = g;
+                let g = group_of[p].expect("a predecessor is grouped before its successor");
+                group_of[i] = Some(g);
                 groups[g].extend(ops);
             }
-            None => group_of[i] = groups.push(ops),
+            None => group_of[i] = Some(groups.push(ops)),
         }
     }
     for ops in groups.iter_mut() {
@@ -122,13 +122,15 @@ fn chains<I: Id>(
 
 /// Each op's group.
 fn ops_of(groups: &Table<TaskId, Vec<OpId>>) -> Table<OpId, TaskId> {
-    let mut of = Table::filled(groups.iter().map(Vec::len).sum(), TaskId::new(u32::MAX));
+    let mut of = Table::filled(groups.iter().map(Vec::len).sum(), None);
     for (g, ops) in groups.iter_enumerated() {
         for &o in ops {
-            of[o] = g;
+            of[o] = Some(g);
         }
     }
-    of
+    of.into_iter()
+        .collect::<Option<Table<OpId, TaskId>>>()
+        .expect("every op is in a group")
 }
 
 /// The DAG between groups (`of`: each op's group), as distinct predecessor
