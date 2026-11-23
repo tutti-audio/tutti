@@ -602,12 +602,8 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
-
-    fn run(files: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files))
-    }
 
     #[derive(Default, PartialEq, Debug)]
     struct Counts {
@@ -707,14 +703,17 @@ mod tests {
 
     #[test]
     fn each_site_is_named_with_its_kind() {
-        let r = run(&[
-            (BASELINE, "1 0 crates/a/tests/t.rs\n"),
-            (
-                "crates/a/tests/t.rs",
-                "fn a() { assert!(t.elapsed() < D); }\nfn b() { if u.elapsed() > D {} }\n\
+        let r = run_gate(
+            check,
+            &[
+                (BASELINE, "1 0 crates/a/tests/t.rs\n"),
+                (
+                    "crates/a/tests/t.rs",
+                    "fn a() { assert!(t.elapsed() < D); }\nfn b() { if u.elapsed() > D {} }\n\
                  fn c() { thread::sleep(D); thread::sleep(D); }\n",
-            ),
-        ]);
+                ),
+            ],
+        );
         assert_eq!(
             r.findings,
             [
@@ -765,7 +764,7 @@ mod tests {
 
     #[test]
     fn a_clean_tree_passes() {
-        let r = run(&[(BASELINE, ""), (LIB, "fn f() {}\n")]);
+        let r = run_gate(check, &[(BASELINE, ""), (LIB, "fn f() {}\n")]);
         assert!(r.passed());
         assert_eq!(r.out[0], "check-test-time: OK");
     }
@@ -776,7 +775,7 @@ mod tests {
     fn failing(files: &[(&str, &str)]) -> Vec<String> {
         let mut all = vec![(BASELINE, "")];
         all.extend_from_slice(files);
-        run(&all).findings
+        run_gate(check, &all).findings
     }
 
     #[test]

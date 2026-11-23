@@ -3,7 +3,7 @@
 //! the `Ctx`), so `--dry-run` and the tests see exactly what a run would do.
 
 use crate::cmd::Cmd;
-use crate::gates::Gate;
+use crate::gates::{GATES, Gate};
 use crate::release::Version;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -599,33 +599,17 @@ impl Planner<'_> {
         if !RECIPES.iter().any(|r| r.0 == name) {
             return Err(format!("no recipe `{name}`; `cargo xtask help` lists them"));
         }
-        // Only these take free-form arguments or named parameters.
-        let takes_args = matches!(
-            name,
-            "test"
-                | "test-doc"
-                | "bench"
-                | "check-paths"
-                | "loom"
-                | "bench-save"
-                | "bench-cmp"
-                | "profile-bench"
-                | "verify-audio"
-                | "book"
-                | "release"
-                | "conformance-inventory"
-                | "conformance"
-                | "coverage"
-                | "public-api"
-                | "umbrella-api"
-                | "affected"
-                | "fuzz"
-        );
+        // Only a recipe with an argument column takes free-form arguments or named parameters.
+        let takes_args = RECIPES.iter().any(|r| r.0 == name && !r.1.is_empty());
         if !takes_args && !args.is_empty() {
             return Err(format!(
                 "`{name}` takes no arguments, got {}",
                 args.join(" ")
             ));
+        }
+        if let Some(gate) = Gate::of(name, args) {
+            self.out.push(Step::Gate(gate));
+            return Ok(());
         }
         match name {
             "test" => {
@@ -735,30 +719,6 @@ impl Planner<'_> {
             "plugin-server-release" => {
                 self.lines(&["cargo build --locked --release -p tutti-plugin-server --bin plugin-server"]);
             }
-            "check-session" => self.out.push(Step::Gate(Gate::Session)),
-            "check-umbrella" => self.out.push(Step::Gate(Gate::Umbrella)),
-            "check-guards" => self.out.push(Step::Gate(Gate::Guards)),
-            "check-ffi" => self.out.push(Step::Gate(Gate::Ffi)),
-            "check-errors" => self.out.push(Step::Gate(Gate::Errors)),
-            "check-layout" => self.out.push(Step::Gate(Gate::Layout)),
-            "check-alloc-binaries" => self.out.push(Step::Gate(Gate::AllocBinaries)),
-            "check-lints" => self.out.push(Step::Gate(Gate::Lints)),
-            "check-value-traits" => self.out.push(Step::Gate(Gate::ValueTraits)),
-            "check-range-types" => self.out.push(Step::Gate(Gate::RangeTypes)),
-            "check-pointers" => self.out.push(Step::Gate(Gate::Pointers)),
-            "check-prose-names" => self.out.push(Step::Gate(Gate::ProseNames)),
-            "check-passive-tests" => self.out.push(Step::Gate(Gate::PassiveTests)),
-            "check-comments" => self.out.push(Step::Gate(Gate::Comments)),
-            "check-platform-seam" => self.out.push(Step::Gate(Gate::PlatformSeam)),
-            "check-buffers" => self.out.push(Step::Gate(Gate::Buffers)),
-            "check-session-api" => self.out.push(Step::Gate(Gate::SessionApi)),
-            "check-building" => self.out.push(Step::Gate(Gate::Building)),
-            "check-values" => self.out.push(Step::Gate(Gate::Values)),
-            "check-logging" => self.out.push(Step::Gate(Gate::Logging)),
-            "check-platform" => self.out.push(Step::Gate(Gate::Platform)),
-            "check-test-time" => self.out.push(Step::Gate(Gate::TestTime)),
-            "check-width" => self.out.push(Step::Gate(Gate::Width)),
-            "check-conformance" => self.out.push(Step::Gate(Gate::Conformance)),
             "conformance" => {
                 let o = options(name, args, &["--results", "--out"])?;
                 let results = o.get("--results").map(String::as_str).ok_or("`conformance` needs `--results <dir>`")?;
@@ -796,9 +756,6 @@ impl Planner<'_> {
                 self.out.push(Step::ConformanceInventory(f));
             }
             "prune-building" => self.out.push(Step::PruneBuilding),
-            "check-submodule-pins" => self.out.push(Step::Gate(Gate::SubmodulePins)),
-            "check-hosting" => self.out.push(Step::Gate(Gate::Hosting)),
-            "check-paths" => self.out.push(Step::Gate(Gate::CanonicalPaths(args.to_vec()))),
             "fmt" => self.lines(&["cargo fmt --all --check"]),
             "lint" => {
                 self.dep("fmt")?;
@@ -889,16 +846,8 @@ impl Planner<'_> {
             "gates" => {
                 self.dep("fmt")?;
                 self.lines(&["cargo test --locked -p xtask"]);
-                for d in [
-                    "check-paths", "check-session", "check-guards", "check-ffi", "check-errors",
-                    "check-layout", "check-range-types", "check-hosting", "check-lints",
-                    "check-value-traits", "check-submodule-pins",
-                    "check-pointers", "check-comments", "check-platform-seam", "check-platform", "check-prose-names",
-                    "check-passive-tests", "check-alloc-binaries", "check-buffers",
-                    "check-building", "check-umbrella", "check-logging", "check-test-time",
-                    "check-session-api", "check-values", "check-width",
-                ] {
-                    self.dep(d)?;
+                for g in GATES.iter().filter(|g| g.local) {
+                    self.dep(g.recipe)?;
                 }
             }
             "ci" => {

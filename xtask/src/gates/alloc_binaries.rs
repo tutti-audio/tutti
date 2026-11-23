@@ -185,23 +185,22 @@ pub(super) fn check(tree: &dyn Tree, exempt: &[(&str, &str)]) -> Report {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fake::Mem;
+    use super::super::fake::run_gate;
     use super::*;
 
     const DISABLER: &str = "use assert_no_alloc::AllocDisabler;\n\n#[global_allocator]\nstatic A: AllocDisabler = AllocDisabler;\n";
     const RT_CHECK: &str = "#[global_allocator]\nstatic A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;\n";
     const COUNTING: &str = "#[global_allocator]\nstatic A: Counting = Counting;\n";
 
-    fn run(files: &[(&str, &str)], exempt: &[(&str, &str)]) -> Report {
-        check(&Mem::with(files), exempt)
-    }
-
     const PLAIN: &str = "mod a;\n";
     const AREA: &str = "crates/tutti-a/tests/area/main.rs";
 
     #[test]
     fn a_top_level_test_file_installing_alloc_disabler_fails() {
-        let r = run(&[("crates/tutti-a/tests/rt_no_alloc.rs", DISABLER)], &[]);
+        let r = run_gate(
+            |t| check(t, &[]),
+            &[("crates/tutti-a/tests/rt_no_alloc.rs", DISABLER)],
+        );
         assert_eq!(
             r.findings,
             [
@@ -214,13 +213,17 @@ mod tests {
 
     #[test]
     fn a_top_level_test_file_installing_rt_alloc_check_fails() {
-        let r = run(&[("crates/tutti-a/tests/rt_no_alloc.rs", RT_CHECK)], &[]);
+        let r = run_gate(
+            |t| check(t, &[]),
+            &[("crates/tutti-a/tests/rt_no_alloc.rs", RT_CHECK)],
+        );
         assert!(!r.passed());
     }
 
     #[test]
     fn an_area_binary_a_counting_allocator_and_a_comment_pass() {
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[]),
             &[
                 (AREA, DISABLER),
                 ("crates/tutti-a/tests/alloc_budget.rs", COUNTING),
@@ -229,7 +232,6 @@ mod tests {
                     "// #[global_allocator]\n// static A: AllocDisabler = AllocDisabler;\n",
                 ),
             ],
-            &[],
         );
         assert_eq!(r.out, ["check-alloc-binaries: ok (0 exempt)"]);
         assert!(r.passed());
@@ -238,7 +240,7 @@ mod tests {
     #[test]
     fn an_area_binary_without_an_allocator_is_a_finding() {
         for path in [AREA, "testing/tutti-b/tests/area/main.rs"] {
-            let r = run(&[(path, PLAIN)], &[]);
+            let r = run_gate(|t| check(t, &[]), &[(path, PLAIN)]);
             assert_eq!(
                 r.findings,
                 [
@@ -254,25 +256,25 @@ mod tests {
 
     #[test]
     fn an_area_binary_installing_the_check_or_another_allocator_is_not_flagged() {
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[]),
             &[
                 (AREA, RT_CHECK),
                 ("crates/tutti-a/tests/other/main.rs", COUNTING),
             ],
-            &[],
         );
         assert!(r.passed());
     }
 
     #[test]
     fn a_file_directly_under_tests_or_in_a_submodule_is_not_an_area_binary() {
-        let r = run(
+        let r = run_gate(
+            |t| check(t, &[]),
             &[
                 ("crates/tutti-a/tests/flat.rs", PLAIN),
                 ("crates/tutti-a/tests/area/other.rs", PLAIN),
                 ("crates/tutti-a/tests/area/deep/main.rs", PLAIN),
             ],
-            &[],
         );
         assert!(r.passed());
     }
@@ -280,14 +282,14 @@ mod tests {
     #[test]
     fn an_exempt_row_covers_a_binary() {
         let exempt = [(AREA, "never enters an RtScope")];
-        let r = run(&[(AREA, PLAIN)], &exempt);
+        let r = run_gate(|t| check(t, &exempt), &[(AREA, PLAIN)]);
         assert_eq!(r.out, ["check-alloc-binaries: ok (1 exempt)"]);
     }
 
     #[test]
     fn a_stale_exempt_row_fails() {
         let rows = [(AREA, "why")];
-        let r = run(&[(AREA, RT_CHECK)], &rows);
+        let r = run_gate(|t| check(t, &rows), &[(AREA, RT_CHECK)]);
         assert_eq!(
             r.findings,
             [
@@ -295,7 +297,7 @@ mod tests {
                 "  stale exempt row crates/tutti-a/tests/area/main.rs (why): the binary installs an allocator or is gone",
             ]
         );
-        let r = run(&[], &rows);
+        let r = run_gate(|t| check(t, &rows), &[]);
         assert_eq!(
             r.findings,
             [
