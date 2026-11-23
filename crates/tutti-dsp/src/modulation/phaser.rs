@@ -21,7 +21,7 @@ use crate::BlockMismatch;
 use crate::block::expect_widths;
 use tutti_buffers::{BusTopology, MAX_CHANNELS};
 use tutti_buffers::{Float, InputOutput};
-use tutti_units::{Depth, Feedback, Hz};
+use tutti_units::{Bipolar, Feedback, Hz};
 
 use crate::{Lerp, Ramp};
 
@@ -166,8 +166,8 @@ pub struct PhaserControls {
     /// How much of the [`SweepRange`] the sweep covers: **unitless**, `0..=1` (a chorus's
     /// depth is seconds of delay). 1 sweeps the whole range, 0 parks the notches at its
     /// bottom. A negative depth sweeps down from the bottom (held above 1 Hz). A
-    /// [`Depth`] is in `-1..=1` and finite by its type.
-    pub depth: Depth,
+    /// [`Bipolar`] is in `-1..=1` and finite by its type.
+    pub depth: Bipolar,
     /// How much of the chain's output recirculates into its input: deepens and sharpens the
     /// notches. Clamped into `0..=`[`Feedback::MAX_STABLE`]; one that is not finite is not
     /// taken: the node holds the last finite one (the default's before any).
@@ -179,7 +179,7 @@ impl PhaserControls {
     /// until it has been given a finite value.
     pub const DEFAULT: Self = Self {
         rate: Hz::new(0.3),
-        depth: Depth::of(0.5),
+        depth: Bipolar::of(0.5),
         feedback: Feedback::new(0.5),
     };
 }

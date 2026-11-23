@@ -27,7 +27,7 @@ use tutti_dsp::{Lfo, LfoWave, PanLaw, pan_gains};
 use tutti_music::Note;
 use tutti_ump::{MidiChannel, NoteNumber};
 use tutti_units::{
-    Amplitude, Depth, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
+    Amplitude, Bipolar, Hz, Normalized, Pan, Phase, Resonance, SampleRate, Samples, Seconds,
     Semitones, Velocity,
 };
 use tutti_voicing::{ChannelState, DEFAULT_MODULATION_RANGE};
@@ -492,7 +492,7 @@ impl SynthVoice {
         let mut cutoff = self.base_filter_cutoff;
 
         // The cutoff is a `Hz` scaled by a chain of multipliers.
-        if fm.mod_wheel_depth > Depth::of(0.0) {
+        if fm.mod_wheel_depth > Bipolar::of(0.0) {
             // The channel's wheel: its depth over the Modulation Depth Range
             // (RPN 5, CA-026) the depth is measured in, so at the default range
             // a full wheel is `mod_wheel_depth` and a range twice that opens
@@ -501,14 +501,14 @@ impl SynthVoice {
             cutoff *= 1.0 + wheel * fm.mod_wheel_depth.get();
         }
 
-        if fm.velocity_depth > Depth::of(0.0) {
+        if fm.velocity_depth > Bipolar::of(0.0) {
             let depth = fm.velocity_depth.get();
             let vel_mult = 1.0 - depth * 0.5 + self.velocity_mod_value.get() * depth * 0.5;
             cutoff *= vel_mult;
         }
 
         if let Some(lfo_rate) = fm.lfo_rate
-            && fm.lfo_depth > Depth::of(0.0)
+            && fm.lfo_depth > Bipolar::of(0.0)
         {
             self.lfo.retarget(lfo_rate, sample_rate);
             self.lfo.advance(Samples::new(frames));

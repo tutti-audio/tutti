@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, OscillatorWave, Tremolo, TremoloControls};
 use tutti_graph::{Cost, Shape};
-use tutti_units::{Depth, Hz, SampleRate, Tail};
+use tutti_units::{Bipolar, Hz, SampleRate, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -44,7 +44,7 @@ impl TremoloConfig {
 
     /// The depth it starts at.
     #[must_use]
-    pub fn depth(mut self, depth: Depth) -> Self {
+    pub fn depth(mut self, depth: Bipolar) -> Self {
         self.controls.depth = depth;
         self
     }
@@ -56,7 +56,7 @@ impl TremoloConfig {
 /// Depth 0 is unity, and depth 1 swings the gain from 1 at the wave's peak down to silence
 /// at its trough; a negative depth swings it the other way. The LFO starts at phase 0 and
 /// its phase runs on across blocks and rate changes. The rate (`UnitParam::Rate`, a [`Hz`])
-/// and the depth (`UnitParam::Depth`, a [`Depth`]) are live cells; a depth that moves is
+/// and the depth (`UnitParam::Depth`, a [`Bipolar`]) are live cells; a depth that moves is
 /// sampled at the stream grid (16 frames) and ramps over
 /// [`GAIN_RAMP`](tutti_dsp::GAIN_RAMP), a rate lands whole, and a value that is not finite
 /// reads as the last one that was.
@@ -87,7 +87,7 @@ control_set! {
     TremoloSet(_s): TremoloControls = TremoloControls::DEFAULT;
     live: (all);
     Rate => Hz = rate { whole },
-    Depth => Depth = depth;
+    Depth => Bipolar = depth;
 
     fn defaults(&self) -> TremoloControls {
         TremoloControls::DEFAULT
@@ -165,7 +165,7 @@ mod tests {
         prepared(TremoloNode::from(
             TremoloConfig::new(width)
                 .rate(Hz::new(rate))
-                .depth(Depth::of(depth)),
+                .depth(Bipolar::of(depth)),
         ))
     }
 
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!((d.param_base(0), d.param_base(1)), (Some(5.0), Some(0.5)));
     }
 
-    /// Set to depth 1 through `Depth` the node swings to silence at the trough of a 100 Hz
+    /// Set to depth 1 through `Bipolar` the node swings to silence at the trough of a 100 Hz
     /// sine (frame 360 of 480), in blocks of 64 frames.
     #[test]
     fn the_depth_is_settable_and_the_trough_is_silent() {

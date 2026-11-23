@@ -49,7 +49,7 @@
 //!     compile, LayerClock, Law, Declarations, LfoShape, Polarity, ProgramTime, RouteDecl,
 //!     RouteKey, RouteTarget, Source, SourceKey, TargetDecl, TargetKey, Waveform,
 //! };
-//! use tutti_units::{Beat, BeatsPerCycle, Depth, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
+//! use tutti_units::{Beat, BeatsPerCycle, Bipolar, Frame, ParamAddr, PhaseIncrement, PlayReading, SamplePosition, SampleRate, UnitParam};
 //!
 //! let cutoff = TargetKey::param(7, ParamAddr::Unit(UnitParam::Cutoff));
 //! let sources = [(
@@ -64,7 +64,7 @@
 //!     RouteDecl {
 //!         source: SourceKey(1),
 //!         to: RouteTarget::Param(cutoff),
-//!         depth: Depth::of(0.25),
+//!         depth: Bipolar::of(0.25),
 //!         polarity: Polarity::Bipolar,
 //!         curve: Law::Linear,
 //!     },

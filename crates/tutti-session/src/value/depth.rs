@@ -1,7 +1,7 @@
 //! [`DepthTarget`]: how deep a modulation route moves its target.
 
 use tutti_rt::Param;
-use tutti_units::Depth;
+use tutti_units::Bipolar;
 
 use super::error::SetRefusal;
 use super::slot::{Slot, SlotCell, SlotId, keyed_slot_target};
@@ -13,18 +13,18 @@ use crate::{ModSourceId, ModTarget};
 
 /// A route's depth: the [`Slot`] of its [`DepthTarget`], over the cell the
 /// route's lane reads.
-pub(crate) struct DepthSlot(pub(crate) Param<Depth>);
+pub(crate) struct DepthSlot(pub(crate) Param<Bipolar>);
 
-impl Slot<Depth> for DepthSlot {
-    fn load(&self) -> Depth {
+impl Slot<Bipolar> for DepthSlot {
+    fn load(&self) -> Bipolar {
         self.0.load()
     }
 
-    fn check(&self, _: &Depth) -> Result<(), SetRefusal> {
+    fn check(&self, _: &Bipolar) -> Result<(), SetRefusal> {
         Ok(())
     }
 
-    fn store(&self, value: &Depth) {
+    fn store(&self, value: &Bipolar) {
         self.0.store(*value);
     }
 }
@@ -39,14 +39,14 @@ keyed_slot_target!(
     /// with no route between them (never declared, or removed) fails with
     /// `NoSuchTarget`.
     DepthTarget,
-    Depth,
+    Bipolar,
     (ModSourceId, ModTarget),
     RouteDepth
 );
 
 impl Modulatable for DepthTarget {}
 impl ScalarTarget for DepthTarget {
-    type Unit = Depth;
+    type Unit = Bipolar;
 }
 
 impl DepthTarget {

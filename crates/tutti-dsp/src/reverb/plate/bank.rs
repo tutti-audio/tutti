@@ -260,7 +260,7 @@ impl<F: Float + Lerp> PlateBank<F> {
         let mut network = Box::new(Network::new(rate));
         let worst = PlateControls {
             pre_delay: crate::reverb::fdn::design::MAX_PRE_DELAY,
-            modulation: tutti_units::Depth::of(1.0),
+            modulation: tutti_units::Bipolar::of(1.0),
             ..PlateControls::DEFAULT
         };
         worst.design_into(rate, &mut network);

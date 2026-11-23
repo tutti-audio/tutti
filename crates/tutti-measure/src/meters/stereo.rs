@@ -61,7 +61,7 @@ impl StereoLevels {
 pub struct StereoReading {
     /// Inter-channel phase [`Correlation`], `-1..=1`: `+1` identical channels,
     /// `0` uncorrelated, `-1` polarity inverted. A measurement, deliberately
-    /// not `Depth` despite the coinciding range.
+    /// not `Bipolar` despite the coinciding range.
     pub correlation: Correlation,
     /// Where the energy sits on the left/right axis.
     pub balance: StereoBalance,

@@ -34,7 +34,7 @@ fn at_play(play: f64, epoch: u32) -> ProgramTime {
 
 fn amount(depth: f64) -> Amount {
     Amount {
-        depth: Depth::of(depth),
+        depth: Bipolar::of(depth),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     }
@@ -68,7 +68,7 @@ fn seconds(rate: f64) -> LayerClock {
 /// `program` with `depths` bound.
 fn bound(
     mut program: ControlProgram,
-    depths: impl IntoIterator<Item = (LayerId, Param<Depth>)>,
+    depths: impl IntoIterator<Item = (LayerId, Param<Bipolar>)>,
 ) -> ControlProgram {
     program.bind_depths(depths).expect("the cells bind");
     program
@@ -146,7 +146,7 @@ fn a_layer_offsets_by_depth_times_span() {
 /// id no layer has is ignored.
 #[test]
 fn a_layer_reads_its_depth_from_a_cell() {
-    let cell = Param::new(Depth::of(0.25));
+    let cell = Param::new(Bipolar::of(0.25));
     let p = bound(
         program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))]),
         [(LayerId(1), cell.handle()), (LayerId(9), cell.handle())],
@@ -159,7 +159,7 @@ fn a_layer_reads_its_depth_from_a_cell() {
     assert_eq!(value(&p, 3.0), 800.0);
 
     let fork = p.detached();
-    cell.store(Depth::of(-0.5));
+    cell.store(Bipolar::of(-0.5));
     assert_eq!(value(&p, 1.0), 600.0, "the next evaluation reads it");
     assert_eq!(value(&p, 3.0), 1400.0);
     assert_eq!(value(&fork, 1.0), 1200.0, "the fork's cell is its own");
@@ -182,7 +182,7 @@ fn a_layer_reads_its_depth_from_a_cell() {
 /// second 600 if each loaded the cell again.
 #[test]
 fn an_evaluation_from_a_snapshot_never_splits_its_depth() {
-    let cell = Param::new(Depth::of(0.25));
+    let cell = Param::new(Bipolar::of(0.25));
     let p = bound(
         program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.0))]),
         [(LayerId(1), cell.handle())],
@@ -193,7 +193,7 @@ fn an_evaluation_from_a_snapshot_never_splits_its_depth() {
             .unwrap()
     };
     assert_eq!(at(1.0), 1200.0);
-    cell.store(Depth::of(0.5));
+    cell.store(Bipolar::of(0.5));
     assert_eq!(at(3.0), 800.0, "the same depth after the store");
     assert_eq!(at(1.0), 1200.0);
     let next = p.depth_snapshot();
@@ -209,7 +209,10 @@ fn an_evaluation_from_a_snapshot_never_splits_its_depth() {
 /// of their bits would cancel, still differ.
 #[test]
 fn snapshots_compare_every_depth() {
-    let (a, b) = (Param::new(Depth::of(0.125)), Param::new(Depth::of(0.125)));
+    let (a, b) = (
+        Param::new(Bipolar::of(0.125)),
+        Param::new(Bipolar::of(0.125)),
+    );
     let p = bound(
         program(vec![
             layer(1, beats(4.0), LfoShape::Square, amount(0.0)),
@@ -219,8 +222,8 @@ fn snapshots_compare_every_depth() {
     );
     let before = p.depth_snapshot();
     assert_eq!(before, p.depth_snapshot());
-    a.store(Depth::of(0.125 + 2.0f64.powi(-11)));
-    b.store(Depth::of(0.1875));
+    a.store(Bipolar::of(0.125 + 2.0f64.powi(-11)));
+    b.store(Bipolar::of(0.1875));
     assert_ne!(before, p.depth_snapshot());
     assert_eq!(DepthSnapshot::EMPTY, program(vec![]).depth_snapshot());
 }
@@ -231,7 +234,7 @@ fn snapshots_compare_every_depth() {
 #[test]
 fn depth_cells_are_bounded_and_one_per_layer() {
     let mut p = program(vec![layer(1, beats(4.0), LfoShape::Square, amount(0.5))]);
-    let cell = Param::new(Depth::of(0.1));
+    let cell = Param::new(Bipolar::of(0.1));
     let many = (0..=MAX_LANE_DEPTHS).map(|_| (LayerId(1), cell.handle()));
     assert_eq!(
         p.bind_depths(many).unwrap_err(),
@@ -261,7 +264,7 @@ fn an_inputs_offset_is_depth_times_span_times_x() {
             id: LayerId(2),
             source: SourceId::new(ParamId::new(41)),
             amount: Amount {
-                depth: Depth::of(0.25),
+                depth: Bipolar::of(0.25),
                 polarity: Polarity::Unipolar,
                 curve: Law::Linear,
             },
@@ -738,7 +741,7 @@ fn a_curved_bipolar_depth_by_kinks_at_its_zero_crossings() {
         ..layer(1, beats(4.0), LfoShape::Sine, amount(1.0))
     };
     let curved = Amount {
-        depth: Depth::of(0.5),
+        depth: Bipolar::of(0.5),
         polarity: Polarity::Bipolar,
         curve: Law::PowerIn(Exponent::of(2.0)),
     };

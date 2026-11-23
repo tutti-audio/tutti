@@ -239,7 +239,7 @@
 //! let planes = StereoPlanes::new(&left, &right).expect("drained in lockstep");
 //!
 //! // `Correlation` is a MEASUREMENT type, deliberately distinct from the control
-//! // types (`Mix`, `Depth`) despite the coinciding range.
+//! // types (`Mix`, `Bipolar`) despite the coinciding range.
 //! let reading = correlate(planes);
 //! ```
 //!
