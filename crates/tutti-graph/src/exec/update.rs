@@ -9,6 +9,7 @@ use super::stage::{RingFrom, Route, Staged, sort_by_offset};
 use super::state::{Gone, Inject, Ring, State, Unit};
 use super::{Executor, MainOutputFadeRun, Suspension, place, place_all};
 use crate::NodeKey;
+use crate::compile::ids::{Id, PlanUnitId};
 use crate::compile::plan::Plan;
 use crate::event::types::Event;
 use crate::exec::held::Held;
@@ -419,7 +420,7 @@ impl<F: Float> Executor<F> {
                 RingFrom::Keep { from, rate } => {
                     let mut ring = old.rings.get_mut(from as usize).and_then(Option::take);
                     if let Some(Ring::Event(f)) = &mut ring {
-                        f.retune(plan.delays[i].len);
+                        f.retune(plan.delays.as_slice()[i].len);
                         f.resize(rate, max_block);
                     }
                     new.rings[i] = ring;
@@ -479,7 +480,7 @@ impl<F: Float> Executor<F> {
             if let Some(j) = *from {
                 let writer = old.meters.get_mut(j as usize).and_then(Option::take);
                 if let Some(w) = &writer {
-                    w.set_width(plan.meters[i].1);
+                    w.set_width(plan.meters.as_slice()[i].1);
                 }
                 new.meters[i] = writer;
             }
@@ -507,16 +508,16 @@ impl<F: Float> Executor<F> {
                     self.dropped.at_node(u, refused.saturating_add(lost));
                 }
                 None => {
-                    if let Ok(u) = plan.units.binary_search_by_key(&key, |u| u.key) {
+                    if let Some(u) = plan.unit_id(key) {
                         let lost = u32::try_from(events.len()).unwrap_or(u32::MAX);
-                        self.dropped.at_node(u as u32, lost.saturating_add(refused));
+                        self.dropped.at_node(u.get(), lost.saturating_add(refused));
                     }
                 }
             }
         }
         if let Some(op) = old_plan {
             for inj in old.inject.iter_mut().filter(|i| i.live) {
-                let at = EventInputPort::new(op.units[inj.unit as usize].key, inj.port);
+                let at = EventInputPort::new(op.units[PlanUnitId::new(inj.unit)].key, inj.port);
                 if let Some((u, shell)) = flush_target(plan, inject, has_inject, at) {
                     let mut lost = fill(&mut shell.events, &inj.events);
                     // What was owed there is still owed: the tables move.
@@ -555,7 +556,7 @@ impl<F: Float> Executor<F> {
         for (key, mut keys) in parked.drain(..) {
             let same = |a: Option<&Plan>| a.and_then(|p| p.unit(key)).map(|u| u.generation);
             let back = (same(old_plan) == same(Some(plan)))
-                .then(|| plan.units.binary_search_by_key(&key, |u| u.key).ok())
+                .then(|| plan.unit_id(key))
                 .flatten()
                 .and_then(|i| self.store[plan.units[i].idx.0 as usize].as_mut());
             match back {
@@ -585,9 +586,7 @@ impl<F: Float> Executor<F> {
                     return (tables.get(port).and_then(Option::as_ref), None);
                 }
                 let unit = plan
-                    .units
-                    .binary_search_by_key(&from.node, |u| u.key)
-                    .ok()
+                    .unit_id(from.node)
                     .and_then(|i| self.store[plan.units[i].idx.0 as usize].as_ref());
                 match unit {
                     Some(u) => (
@@ -629,8 +628,8 @@ impl<F: Float> Executor<F> {
                             debug_assert!(false, "a FIFO that owes closes has a table");
                             let mut lost = 0u32;
                             owing.for_each(|h| h.close_each(|_| lost = lost.saturating_add(1)));
-                            if let Ok(u) = plan.units.binary_search_by_key(&at.node, |u| u.key) {
-                                self.dropped.at_node(u as u32, lost);
+                            if let Some(u) = plan.unit_id(at.node) {
+                                self.dropped.at_node(u.get(), lost);
                             }
                         }
                     }
@@ -680,12 +679,12 @@ impl<F: Float> Executor<F> {
         // with the plan. What its buffer refused is counted now, and what a
         // successor with no event input cannot take is dropped, counted.
         for (key, refused) in departed.held_refused.drain(..) {
-            if let Ok(u) = plan.units.binary_search_by_key(&key, |u| u.key) {
-                self.dropped.at_node(u as u32, refused);
+            if let Some(u) = plan.unit_id(key) {
+                self.dropped.at_node(u.get(), refused);
             }
         }
         for &u in &st.queued {
-            let unit = &plan.units[u as usize];
+            let unit = &plan.units[PlanUnitId::new(u)];
             if unit.shape.event_in > 0 {
                 continue;
             }
@@ -713,11 +712,11 @@ fn flush_target<'a>(
     has_inject: &mut [bool],
     at: EventInputPort,
 ) -> Option<(u32, &'a mut Inject)> {
-    let u = plan.units.binary_search_by_key(&at.node, |u| u.key).ok()?;
-    if at.port >= plan.units[u].shape.event_in {
+    let id = plan.unit_id(at.node)?;
+    if at.port >= plan.units[id].shape.event_in {
         return None;
     }
-    let u = u as u32;
+    let u = id.get();
     let i = inject
         .binary_search_by_key(&(u, at.port), |i| (i.unit, i.port))
         .ok()?;

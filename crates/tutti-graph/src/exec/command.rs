@@ -92,6 +92,7 @@
 //! future frame holds its credit until it lands, so the limit is on
 //! *outstanding* commands, not on commands per block.
 
+use crate::compile::ids::{Id, PlanUnitId};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -545,10 +546,7 @@ impl CommandRx {
             if cmd.plan_seq > applied {
                 return true;
             }
-            let node = plan
-                .units
-                .binary_search_by_key(&cmd.to.node, |u| u.key)
-                .ok();
+            let node = plan.unit_id(cmd.to.node);
             // PDC: the sink hears timeline frame F at its own F + arrival
             // (see `Env::due_at_arrival`). The node's arrival even when its
             // port is gone (the reference does the same); none when the node
@@ -561,6 +559,7 @@ impl CommandRx {
                 cmd.to.port < shape.event_in
                     && (shape.param_events || matches!(cmd.payload, Scheduled::Event(_)))
             });
+            let target = target.map(PlanUnitId::index);
             let was_beat = matches!(cmd.at, At::Beat(_));
             let resolved = env.due_at_arrival(&mut cmd.at, arrival, crossings);
             match cmd.at {
@@ -776,7 +775,7 @@ pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize
             crate::compile::plan::Op::Node { event_in, .. } => Some(
                 plan.event_list[event_in.range()]
                     .iter()
-                    .map(|&s| plan.event_slot_capacity[s as usize].events(cap))
+                    .map(|&s| plan.event_slot_capacity[s].events(cap))
                     .sum::<usize>(),
             ),
             _ => None,
