@@ -5,6 +5,8 @@
 //! [`tutti_plugin_types`]. Host-local config lives
 //! in [`crate::config`].
 
+#[macro_use]
+mod message;
 pub(crate) mod envelope;
 pub(crate) mod frame;
 pub(crate) mod process;
@@ -13,207 +15,12 @@ pub(crate) mod wire;
 
 /// Wire protocol version, sent by the server in its [`ControlFrame::Hello`].
 ///
-/// Bump on ANY change to the host↔server wire shape (a new or reordered field on
-/// a serialized type), since the wire's codec (postcard) is not self-describing
-/// and a skew mis-parses silently. Host and subprocess refuse to handshake on a mismatch.
-///
-/// # Why an appended field is still a bump
-///
-/// Two kinds of change are easy to mistake for compatible, and neither is:
-///
-/// - A **struct** is positional: fields are written in declaration order with no
-///   tags, so a peer one version behind stops reading before the new field, and
-///   a payload from the newer side runs the decoder off the end or into the next
-///   field's bytes. `serde(default)` does not rescue this — it covers the JSON
-///   and struct-update paths, not this wire.
-/// - **Version 24** appended `ParameterInfo::measures` (an `Option<ParamUnit>`, a
-///   variant index) and `role` (an `Option<u16>`, a `UnitParam` discriminant)
-///   to every entry of a `ParameterList`: two
-///   `0x00` bytes after `group` when both are `None`. No recorded wire figure
-///   holds a `ParameterInfo`.
-/// - An **enum variant** is a varint discriminant over declaration order, so a
-///   peer receiving a tag it has no arm for fails the decode mid-stream rather
-///   than at a message boundary. Removing one renumbers every variant after it:
-///   **version 25** removed `OpenEditor`, `CloseEditor`, `EditorOpened` and
-///   `EditorClosed`, which nothing sent (the host opens an editor in its own
-///   process, through its `EditorLoader`).
-/// - A **field's type** is its bytes too: **version 26** made `PluginWiring`'s
-///   `inputs` and `outputs` lists of `PluginBus` (width, placement, a role
-///   byte) and dropped the `input_topology` and `output_topology` lists that
-///   followed `probed`, so a load reply reads differently from its first byte.
-/// - The **codec** is the whole wire: **version 27** moved it from bincode 1
-///   (unmaintained, RUSTSEC-2025-0141) to postcard, whose integers and enum
-///   tags are varints, so every message reads differently. A version-26 server
-///   is refused at the handshake (`handshake` names a server whose first frame
-///   does not decode as one from another build).
-/// - **Version 28** added `load` to `LoadPlugin`: which plugin of a file that
-///   exports several to load (a CLAP plugin id, a VST3 class id, an AU
-///   descriptor id), which the server hands its format's
-///   `OutOfProcess::load_served`. Before it a file always loaded its first
-///   plugin.
-/// - **Version 29** added `seconds` to the transport's `LoopRegion` (the loop's
-///   bounds in seconds from the project's tempo map, which CLAP's
-///   `loop_start_seconds` / `loop_end_seconds` carry), a field of every
-///   `TransportInfo` on the wire.
-/// - **Version 30** added `GetParameterPlain` and `GetParameterNormalized` (and
-///   their replies, `ParameterPlain` and `ParameterNormalized`): the conversion
-///   between a normalized value and the plugin's plain one is the format's, so
-///   it is a request to the server, whose format answers it.
-/// - **Version 31** carries parameter values as `f64`: `SetParameter`,
-///   `ParameterValue` and `ParameterChanged` held an `f32` (so 0.3 came back
-///   as 0.30000001192...), while automation points and text queries were
-///   already `f64`. It also replaces `ParameterChanged`'s `index` and `value`
-///   with the shared `ParamEdit` (the id, the value, the gesture it falls in
-///   and whether to record it), so the server forwards a plugin's edits, a
-///   gesture's begin and end among them.
-///
-/// - **Version 32** adds `status` to `AudioProcessed`: what the plugin said of
-///   itself at the end of the block (`BlockStatus`: CLAP's process status as
-///   *continue*, *tail* or *sleep*), so the node can report no tail and park
-///   when the plugin sleeps. It is a field of every block's
-///   reply, so a version-31 server's replies read differently from the first
-///   byte after the MIDI.
-/// - **Version 33** appends the editor messages: the
-///   host's `OpenEditor { parent, scale }`, `CloseEditor` and `SetEditorSize`,
-///   and the server's `EditorOpened`, `EditorSized`, `EditorWantsSize` and
-///   `EditorClosed`, so a served plugin's editor can live in the server. They
-///   follow every earlier variant, which keep their numbers.
-/// - **Version 34** splits the audio phase into two connections. No message changed: the host
-///   connects a third time after the
-///   audio connection, the server sends `Ready` on it, and the audio connection
-///   carries `ProcessAudio` and `Reset` alone (the server's render thread
-///   serves it) while the control connection carries every other request and
-///   the plugin's unsolicited news (its main thread serves it, and an editor's
-///   paint may keep it busy). A version-33 server accepts no third connection.
-/// - **Version 35** says what a state is for: `SaveState`, a state's
-///   load and the `StagedState` a load declares carry a
-///   `StateUse` (the project's own, or a duplicate's),
-///   which a format that distinguishes them (CLAP's `state-context`) acts on.
-/// - **Version 36** appends the server's `ProcessRequested`: the plugin asked
-///   to be processed again (CLAP's `request_process`), so a host that parked
-///   the node on the plugin's *sleep* wakes it. It follows every earlier
-///   variant, which keep their numbers.
-/// - **Version 37** appends the host's `SetTrackInfo` (what the host says of
-///   the plugin's track, for CLAP's `track-info`) and the server's
-///   `TransportRequested` (the plugin's request to the transport, CLAP's
-///   `transport-control`). Both follow every earlier variant, which keep their
-///   numbers.
-/// - **Version 38** writes an editor size as a `dpi::Size`, which says whether it
-///   is in physical pixels or logical points: `SetEditorSize`, `EditorOpened`,
-///   `EditorSized` and `EditorWantsSize` carried a pair of integers with no unit.
-/// - **Version 39** removed three messages nothing sent (the server's
-///   instance-destroyed notice, the host's single-parameter declaration query
-///   and its reply); the variants after them renumber.
-/// - **Version 40** added `format` to `LoadPlugin`, after `path`: the server
-///   opens the file as that format, where it chose the format by the path's
-///   extension and so could not open a link whose target has another one.
-/// - **Version 41** adds to a plugin's wiring whether it has a bypass of its own
-///   and the controller table it declares, to a parameter its role (now a
-///   `ControlRole`) and its overview mark.
-/// - **Version 42** writes a descriptor's `version` as a `PluginVersion` (absent, text,
-///   integer or dotted) where it was a string.
-/// - **Version 43** gives `PluginIoChanged` the buses the plugin has now, when they
-///   differ from the ones the host was last told: the host's picture of a
-///   served plugin's ports followed none of its changes.
-/// - **Version 44** adds `refused` to `AudioProcessed`: the server did not
-///   publish the block's audio (its input slot was recycled before it ran), so
-///   the host counts the chunk refused rather than leaving it unexplained.
-/// - **Version 45** writes a block's `TransportInfo` on its units (a `SampleRate`,
-///   a `Bpm`, a `Beat` for the playhead and the bar, a `LoopRange`), one position
-///   for each of the quarter and beat pairs, and the cycle as an optional region
-///   in place of the cycle-active flag.
-/// - **Version 46** replaces `LoadPlugin`'s `load` (a string choice of plugin)
-///   with `plugin`, an optional `PluginId`, and `PluginLoaded` names the plugin
-///   it opened (`id`); a descriptor carries no id.
-/// - **Version 47**: `PluginDescriptor` carries `widths`.
-/// - **Version 48** replaces the host's `SetParameter` (a write on the control
-///   connection) with `ApplyParameters` (the parameters no block has carried,
-///   on the audio connection in order with the blocks, answered by
-///   `ParametersApplied`): a write now rides the next block's parameter
-///   changes, and is sent as its own message only ahead of a request that
-///   observes the plugin (its state, a parameter's value). The server applies it
-///   through the format's own route for parameters outside a block.
-/// - **Version 49** adds `plain_map` to a parameter (`PlainMap`: the line between
-///   the declared ends, or the line on its integers; absent when the plugin
-///   defines the map), a field of every entry of `ParameterList`, so a
-///   version-48 server's list reads differently from the first parameter's last
-///   byte.
-/// - **Version 50** splits the host's and the server's messages by connection
-///   (`AudioRequest`/`AudioReply` on the audio connection, `ControlRequest`/
-///   `ControlReply`/`News` on the control one), so a message of the other
-///   connection has no variant to be written as.
-/// - **Version 51** gives each connection's wire types their own frame cap
-///   (`Framed::CAP`), and every chunk of a state, in either direction, carries
-///   the `total` of the whole state, so the receiver sizes its buffer once and
-///   refuses a total over the limit before it allocates.
-/// - **Version 52** numbers the requests: a control request travels as a
-///   `Request` with its `ReqId`, an `ApplyParameters` carries one, and an answer
-///   echoes it (`ControlFrame::Reply`, `ParametersApplied`), so the host matches an
-///   answer to its request by the id and not by the order of the stream. The audio
-///   connection's `Error` is gone (nothing sent it), and the restore notice becomes
-///   `ControlFrame::Working`, which the server also sends while it opens the
-///   plugin, once a second, for the host's wait to restart on; the control
-///   connection's `Ready` is a frame of its own and not a reply.
-/// - **Version 53** drops `LoadPlugin`'s `shm_name`, which the server never read:
-///   the slab is named only in `SetupSharedMemory`, as an opaque `SlabHandle`.
-/// - **Version 54** makes the slab anonymous on unix: `SetupSharedMemory` carries a
-///   `SlabWire` (nothing, on unix) and the slab itself follows the frame as one
-///   byte carrying its descriptor (as ancillary data), a sealed `memfd` on Linux and an
-///   unlinked POSIX shared memory object on macOS. The server refuses a setup whose
-///   descriptor does not arrive, and on Linux one that is not a sealed memfd of the
-///   layout's exact length. The slab's rings also start on a cache line of their
-///   own, so the layout's offsets differ from version 53's.
-/// - **Version 55** sends a plugin state as one memory object beside its frame:
-///   `LoadState`, `StageState` and `StateReady` declare its length (`len`) and
-///   carry its `BlobWire` (nothing, on unix), and the object follows the frame as
-///   a descriptor, as the slab's does, in either direction. They replace the
-///   messages that carried a state in chunks, so no answer has more than one
-///   frame. The receiver refuses an object of another length than
-///   declared, a length over `MAX_STATE_BYTES`, and on Linux one that is not a
-///   sealed memfd.
-/// - **Version 56** types two replies' payloads. `SampleRateSet` carries a
-///   `refusal` (`RateRefusalCause`: unconfigured, rolled back to a running
-///   rate, deactivated, no answer) in place of the reason text, and `Error`
-///   carries a `ServerError` (a load's stage and reason, a state's two lengths,
-///   a slab setup's failure) in place of the message.
-/// - **Version 57** types the rest of the failures the control wire carried as
-///   text. `StateLoaded` and `PluginLoaded` carry a `StateError` (a state's
-///   refusal, its two lengths, no plugin, an object the transport refused) in
-///   place of the message, and `EditorOpened` and `EditorSized` carry an
-///   `EditorError` in place of the refusal text.
-/// - **Version 58** adds the control news `PluginStateNotRestored`, after
-///   `PluginReloaded`: a rebuilt plugin that refused the state it was saved
-///   with, and the reason.
-/// - **Version 59** adds the control news `RenderModeNotApplied` (a plugin that
-///   refused the render mode it was asked for, and the mode) and
-///   `PluginWouldNotStop` (a restart the plugin would not make, and why), after
-///   `PluginStateNotRestored`, and `ServerLosses` (the server's cumulative
-///   counts of commands it could not give its render thread and of one-way
-///   edits the plugin refused), after them.
-/// - **Version 60** adds `refused_off_thread_calls` to `ServerLosses` (the
-///   callbacks the plugin made from a thread its format forbids, which the
-///   server refused).
-/// - **Version 61** makes the first connection a broker. The server's first
-///   frame on it is `ControlFrame::Hello` (the old `Ready`, renamed), and the
-///   connection stays open as the control connection. The audio lane is opened
-///   over it by `ControlRequest::OpenLane`, whose server end follows the frame
-///   as a descriptor on unix (a pipe's checked name in the frame on Windows),
-///   and the server answers `ControlReply::LaneOpened`. `AudioReply::Ready` and
-///   the other two connections' handshakes are gone, so `AudioReply`'s
-///   `ParametersApplied` moves down one tag.
-/// - **Version 62** carries a parameter point's frame offset as an unsigned
-///   `Offset` (a varint of a `u32`), where it was a signed `i32` (a zigzag
-///   varint).
-/// - **Version 63** adds to a plugin's wiring the names it gives to MIDI keys and
-///   the groups it sorts its parameters into, and to a parameter its short name.
-/// - **Version 64** appends the host's `SetAppMidiMap` and `ArmPluginMidiLearn`
-///   and the server's `AppMidiMapApplied` and `PluginMidiLearn` answers: the app's
-///   controller entries and the plugin's own MIDI learn.
-/// - **Version 65** appends the host's `GetWiring` and the server's `Wiring`
-///   answer: the plugin's wiring read now, a wiring that carries who applies its
-///   declared controller table (`assignments_applied`), and the server's
-///   `PluginMidiMapChanged` news, which makes the host read it again.
-pub const PROTOCOL_VERSION: u32 = 65;
+/// Host and subprocess refuse to handshake on a mismatch, so a skew fails at the
+/// handshake and never mis-parses a message: the codec (postcard) is not
+/// self-describing, a struct is positional and an enum is a varint over declaration
+/// order. Any change to a serialized type's shape, an appended field and an
+/// appended variant included, moves this.
+pub const PROTOCOL_VERSION: u32 = 66;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -272,10 +79,19 @@ pub(crate) fn check_protocol_version(got: u32) -> tutti_plugin_types::IpcResult<
 
 pub(crate) use envelope::default_format;
 pub use envelope::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, Lane, News, ReqId,
-    Request, StagedState, Working,
+    AppMidiMapApplied, ArmPluginMidiLearn, AudioReply, AudioRequest, CloseEditor, ControlFrame,
+    ControlReply, ControlRequest, CurrentPreset, EditorOpened, EditorSized, GetCurrentPreset,
+    GetParameter, GetParameterList, GetParameterNormalized, GetParameterPlain, GetParameterText,
+    GetParameterValueFromText, GetPresetList, GetWiring, Lane, LaneOpened, LoadPlugin, LoadPreset,
+    LoadState, News, OpenEditor, OpenLane, ParameterList, ParameterNormalized, ParameterPlain,
+    ParameterText, ParameterValue, ParameterValueFromText, PluginLoaded, PluginMidiLearn,
+    PresetList, PresetLoaded, ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap,
+    SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
+    SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState, StateLoaded,
+    StateReady, StateStaged, Wiring, Working,
 };
 pub use frame::Framed;
+pub use message::Message;
 pub use process::ProcessAudioData;
 pub use shm::SlabLayout;
 
@@ -487,7 +303,9 @@ mod tests {
         }
     }
 
-    /// **Each enum's tags are its declaration order, pinned here as literals.**
+    /// **The audio, news and frame enums' tags are their declaration order, pinned
+    /// here as literals.** The control messages' are pinned in
+    /// `every_control_message_is_pinned_to_its_row`.
     ///
     /// postcard encodes an enum as a leading varint discriminant over
     /// declaration order, so inserting a variant mid-enum silently renumbers
@@ -497,8 +315,7 @@ mod tests {
     /// change of order fails here until the version moves and the pins with it.
     #[test]
     fn the_wire_tags_are_the_declaration_order() {
-        use tutti_plugin_ipc_ffi::LaneWire;
-        use tutti_plugin_types::{AutomationMode, RenderMode, StateUse};
+        use tutti_plugin_types::RenderMode;
         let tag = |bytes: Vec<u8>| {
             assert!(bytes[0] < 0x80, "a one-byte varint tag");
             bytes[0]
@@ -527,42 +344,6 @@ mod tests {
             ),
             1
         );
-
-        let control = |m: ControlRequest| tag(postcard::to_allocvec(&m).unwrap());
-        assert_eq!(control(ControlRequest::UnloadPlugin), 1);
-        assert_eq!(
-            control(ControlRequest::SetAutomationState {
-                mode: AutomationMode::default()
-            }),
-            2
-        );
-        assert_eq!(control(ControlRequest::GetParameterList), 4);
-        assert_eq!(
-            control(ControlRequest::SaveState {
-                state_use: StateUse::Project
-            }),
-            6
-        );
-        assert_eq!(
-            control(ControlRequest::SetRenderMode {
-                mode: RenderMode::Realtime
-            }),
-            10
-        );
-        assert_eq!(control(ControlRequest::GetPresetList), 11);
-        assert_eq!(control(ControlRequest::GetCurrentPreset), 13);
-        assert_eq!(control(ControlRequest::CloseEditor), 20);
-        assert_eq!(
-            control(ControlRequest::ArmPluginMidiLearn { armed: true }),
-            25
-        );
-        assert_eq!(control(ControlRequest::GetWiring), 26);
-
-        let reply = |m: ControlReply| tag(postcard::to_allocvec(&m).unwrap());
-        assert_eq!(reply(ControlReply::ParameterValue { value: None }), 1);
-        assert_eq!(reply(ControlReply::SharedMemoryReady), 7);
-        assert_eq!(reply(ControlReply::Shutdown), 9);
-        assert_eq!(reply(ControlReply::ParameterNormalized { value: None }), 15);
 
         let news = |m: News| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(news(News::PluginParamValuesChanged), 3);
@@ -618,14 +399,333 @@ mod tests {
             }),
             3
         );
+    }
+
+    /// One request per row of the message table, named, in the table's order.
+    fn control_requests() -> Vec<(&'static str, ControlRequest)> {
+        use dpi::{LogicalSize, Size};
+        use tutti_plugin_ipc_ffi::{Blob, LaneWire};
+        use tutti_plugin_types::{
+            AutomationMode, ChannelLayout, ContentScale, RenderMode, StateUse, TrackInfo,
+        };
+
+        let layout = SlabLayout {
+            samples_per_channel: 8,
+            format: FloatWidth::F32,
+            slots: 2,
+            inputs: vec![ChannelLayout::MONO],
+            outputs: vec![ChannelLayout::MONO],
+        };
+        let (_slab, handle) = crate::AudioSlab::create(layout.clone()).unwrap();
+        let blob = || Blob::create(&[]).unwrap().wire();
+        let param_id = ParamId::new(3);
+        let value = Normalized::of(0.5);
+        vec![
+            (
+                "LoadPlugin",
+                ControlRequest::LoadPlugin {
+                    path: PathBuf::from("a"),
+                    format: PluginFormat::Vst3,
+                    plugin: None,
+                    sample_rate: SampleRate::SR_48K,
+                    block_size: 64,
+                    preferred_format: FloatWidth::F32,
+                    state: None,
+                },
+            ),
+            (
+                "SetAutomationState",
+                ControlRequest::SetAutomationState {
+                    mode: AutomationMode::default(),
+                },
+            ),
+            ("GetParameter", ControlRequest::GetParameter { param_id }),
+            ("GetParameterList", ControlRequest::GetParameterList),
+            (
+                "SetSampleRate",
+                ControlRequest::SetSampleRate {
+                    rate: SampleRate::SR_48K,
+                },
+            ),
+            (
+                "SaveState",
+                ControlRequest::SaveState {
+                    state_use: StateUse::Project,
+                },
+            ),
+            (
+                "LoadState",
+                ControlRequest::LoadState {
+                    state_use: StateUse::Project,
+                    len: 0,
+                    blob: blob(),
+                },
+            ),
+            (
+                "SetupSharedMemory",
+                ControlRequest::SetupSharedMemory {
+                    slab: handle.wire(),
+                    layout,
+                },
+            ),
+            ("Shutdown", ControlRequest::Shutdown),
+            (
+                "SetRenderMode",
+                ControlRequest::SetRenderMode {
+                    mode: RenderMode::Realtime,
+                },
+            ),
+            ("GetPresetList", ControlRequest::GetPresetList),
+            (
+                "LoadPreset",
+                ControlRequest::LoadPreset {
+                    id: PresetId::Number(1),
+                },
+            ),
+            ("GetCurrentPreset", ControlRequest::GetCurrentPreset),
+            (
+                "GetParameterText",
+                ControlRequest::GetParameterText { param_id, value },
+            ),
+            (
+                "GetParameterValueFromText",
+                ControlRequest::GetParameterValueFromText {
+                    param_id,
+                    text: String::new(),
+                },
+            ),
+            (
+                "StageState",
+                ControlRequest::StageState {
+                    len: 0,
+                    blob: blob(),
+                },
+            ),
+            (
+                "GetParameterPlain",
+                ControlRequest::GetParameterPlain { param_id, value },
+            ),
+            (
+                "GetParameterNormalized",
+                ControlRequest::GetParameterNormalized {
+                    param_id,
+                    plain: 0.0,
+                },
+            ),
+            (
+                "OpenEditor",
+                ControlRequest::OpenEditor {
+                    parent: None,
+                    scale: ContentScale::IDENTITY,
+                },
+            ),
+            ("CloseEditor", ControlRequest::CloseEditor),
+            (
+                "SetEditorSize",
+                ControlRequest::SetEditorSize {
+                    size: Size::Logical(LogicalSize::new(1.0, 1.0)),
+                },
+            ),
+            (
+                "SetTrackInfo",
+                ControlRequest::SetTrackInfo {
+                    info: TrackInfo::default(),
+                },
+            ),
+            (
+                "OpenLane",
+                ControlRequest::OpenLane {
+                    lane: Lane::Audio,
+                    wire: LaneWire::fresh().unwrap(),
+                },
+            ),
+            (
+                "SetAppMidiMap",
+                ControlRequest::SetAppMidiMap { app: vec![] },
+            ),
+            (
+                "ArmPluginMidiLearn",
+                ControlRequest::ArmPluginMidiLearn { armed: true },
+            ),
+            ("GetWiring", ControlRequest::GetWiring),
+        ]
+    }
+
+    /// One reply per row of the message table that has one, named, in the table's
+    /// order, and the failure last.
+    fn control_replies() -> Vec<(&'static str, ControlReply)> {
+        use dpi::{LogicalSize, Size};
+        use tutti_plugin_ipc_ffi::Blob;
+        use tutti_plugin_types::{
+            MidiMapApplied, PluginClass, PluginDescriptor, PluginWiring, ServerError,
+        };
+
+        let value = Some(Normalized::of(0.5));
+        vec![
+            (
+                "LoadPlugin",
+                ControlReply::PluginLoaded {
+                    id: PluginId::Vst3(Uid::new([0; 16])),
+                    descriptor: Box::new(PluginDescriptor::new("", PluginClass::Unknown)),
+                    loaded: Box::default(),
+                    negotiated_format: FloatWidth::F32,
+                    state_error: None,
+                },
+            ),
+            ("GetParameter", ControlReply::ParameterValue { value }),
+            (
+                "GetParameterList",
+                ControlReply::ParameterList { parameters: vec![] },
+            ),
+            (
+                "SetSampleRate",
+                ControlReply::SampleRateSet {
+                    rate: SampleRate::SR_48K,
+                    refusal: None,
+                },
+            ),
+            (
+                "SaveState",
+                ControlReply::StateReady {
+                    len: 0,
+                    blob: Blob::create(&[]).unwrap().wire(),
+                },
+            ),
+            ("LoadState", ControlReply::StateLoaded { error: None }),
+            ("SetupSharedMemory", ControlReply::SharedMemoryReady),
+            (
+                "GetPresetList",
+                ControlReply::PresetList { presets: vec![] },
+            ),
+            ("LoadPreset", ControlReply::PresetLoaded { ok: true }),
+            ("GetCurrentPreset", ControlReply::CurrentPreset { id: None }),
+            (
+                "GetParameterText",
+                ControlReply::ParameterText { text: None },
+            ),
+            (
+                "GetParameterValueFromText",
+                ControlReply::ParameterValueFromText { value },
+            ),
+            ("StageState", ControlReply::StateStaged { error: None }),
+            (
+                "GetParameterPlain",
+                ControlReply::ParameterPlain { plain: None },
+            ),
+            (
+                "GetParameterNormalized",
+                ControlReply::ParameterNormalized { value },
+            ),
+            (
+                "OpenEditor",
+                ControlReply::EditorOpened { result: Ok(None) },
+            ),
+            (
+                "SetEditorSize",
+                ControlReply::EditorSized {
+                    result: Ok(Size::Logical(LogicalSize::new(1.0, 1.0))),
+                },
+            ),
+            ("OpenLane", ControlReply::LaneOpened),
+            (
+                "SetAppMidiMap",
+                ControlReply::AppMidiMapApplied {
+                    applied: MidiMapApplied::Host,
+                },
+            ),
+            (
+                "ArmPluginMidiLearn",
+                ControlReply::PluginMidiLearn { result: Ok(()) },
+            ),
+            (
+                "GetWiring",
+                ControlReply::Wiring {
+                    wiring: PluginWiring::default(),
+                },
+            ),
+            (
+                "Error",
+                ControlReply::Error {
+                    error: ServerError::StateWithoutObject,
+                },
+            ),
+        ]
+    }
+
+    /// **A control request's tag is its row's place in the message table, and
+    /// every row is pinned here.** postcard writes a varint over declaration
+    /// order, so a reordered or inserted row renumbers every later request,
+    /// and a round trip cannot see it because both ends move together. The list
+    /// above is the expected order as literals; a row added to the table fails
+    /// the count until it is added to the list.
+    #[test]
+    fn every_control_request_is_pinned_to_its_row() {
+        let requests = control_requests();
+        assert_eq!(requests.len(), ControlRequest::VARIANTS, "a row has no pin");
+        for (row, (name, msg)) in requests.iter().enumerate() {
+            let bytes = postcard::to_allocvec(msg).expect("serialize");
+            assert_eq!(usize::from(bytes[0]), row, "{name}");
+            assert!(bytes[0] < 0x80, "{name}: a one-byte varint tag");
+            assert!(format!("{msg:?}").starts_with(name), "{name}: {msg:?}");
+        }
+    }
+
+    /// **A control reply's tag is its row's place among the rows that have a reply,
+    /// and the failure is the last.** The pairing is by name: the `n`th request that
+    /// is answered is answered by the `n`th reply.
+    #[test]
+    fn every_control_reply_is_pinned_to_its_row() {
+        let replies = control_replies();
+        assert_eq!(replies.len(), ControlReply::VARIANTS, "a row has no pin");
+        for (tag, (name, msg)) in replies.iter().enumerate() {
+            let bytes = postcard::to_allocvec(msg).expect("serialize");
+            assert_eq!(usize::from(bytes[0]), tag, "{name}");
+        }
+        let answered: Vec<_> = control_requests()
+            .into_iter()
+            .filter(|(_, request)| request.expects_reply())
+            .map(|(name, _)| name)
+            .collect();
+        let names: Vec<_> = replies.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names[..names.len() - 1], answered[..]);
+        assert_eq!(names.last(), Some(&"Error"));
+    }
+
+    /// **A request is its tag, then its fields as postcard writes them, in the order
+    /// the row declares them**: a varint tag, a `u32` as a varint, an `f64` as eight
+    /// little-endian bytes, a `bool` as one byte, a string as a varint length and
+    /// its bytes. Pinned from the declared layout, not from a build's output.
+    #[test]
+    fn a_request_is_its_tag_then_its_declared_fields() {
+        let bytes = |m: ControlRequest| postcard::to_allocvec(&m).expect("serialize");
+        let param_id = ParamId::new(3);
         assert_eq!(
-            control(ControlRequest::OpenLane {
-                lane: Lane::Audio,
-                wire: LaneWire::fresh().unwrap()
-            }),
-            23
+            bytes(ControlRequest::GetParameter { param_id }),
+            [2, 3],
+            "GetParameter is row 2: `param_id`"
         );
-        assert_eq!(reply(ControlReply::LaneOpened), 18);
+        assert_eq!(
+            bytes(ControlRequest::GetParameterValueFromText {
+                param_id,
+                text: "ab".into(),
+            }),
+            [14, 3, 2, b'a', b'b'],
+            "row 14: `param_id`, `text`"
+        );
+        assert_eq!(
+            bytes(ControlRequest::GetParameterNormalized {
+                param_id,
+                plain: 0.5,
+            }),
+            [17, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
+            "row 17: `param_id`, `plain`"
+        );
+        assert_eq!(
+            bytes(ControlRequest::ArmPluginMidiLearn { armed: true }),
+            [24, 1],
+            "row 24: `armed`"
+        );
+        assert_eq!(bytes(ControlRequest::GetWiring), [25], "row 25: no fields");
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {
