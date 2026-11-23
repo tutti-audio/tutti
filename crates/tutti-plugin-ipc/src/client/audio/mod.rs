@@ -30,6 +30,13 @@ use crate::ControlStream;
 use crate::ServerWatch;
 use crate::SlabHandle;
 use crate::SlabLayout;
+use crate::{
+    Answered, ArmPluginMidiLearn, CloseEditor, GetCurrentPreset, GetParameter, GetParameterList,
+    GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
+    GetPresetList, GetWiring, LoadPreset, LoadState, OpenEditor, PresetLoaded, SaveState,
+    SetAppMidiMap, SetAutomationState, SetEditorSize, SetTrackInfo, SetupSharedMemory, StateLoaded,
+    Unanswered,
+};
 use dpi::Size;
 use tutti_platform::Executor;
 use tutti_plugin_types::Answer;
@@ -102,7 +109,7 @@ pub(crate) enum WriteRefused {
     Unlisted,
 }
 
-use ask::{Ask, Reply};
+use ask::Ask;
 #[cfg(test)]
 pub(crate) use channels::COMMAND_QUEUE_SIZE;
 use channels::Channels;
@@ -110,7 +117,9 @@ pub use channels::Replies;
 pub(crate) use channels::response_ring;
 pub(crate) use channels::{BATCH_OUTCOMES, BatchOutcome};
 use lifecycle::Lifecycle;
-use messages::{AudioCommand, AudioResponse, ControlCommand, Setting};
+use messages::{
+    AudioCommand, AudioResponse, Call, ControlCommand, Deadline, Lost, Object, Outcome, Setting,
+};
 pub use payload_pool::{PARAM_BUFFERS, PayloadPool};
 use std::sync::Arc;
 use std::time::Duration;
@@ -586,27 +595,13 @@ impl AudioBridge {
         &self,
         mode: tutti_plugin_types::AutomationMode,
     ) -> Delivered {
-        if self.lifecycle.is_crashed() {
-            return Delivered::PluginDead;
-        }
-        if self
-            .channels
-            .push_control(ControlCommand::SetAutomationState { mode })
-        {
-            Delivered::Yes
-        } else {
-            Delivered::Dropped
-        }
+        self.tell(SetAutomationState { mode })
     }
 
     /// Queues what the host says of the plugin's track, saying **why** if it
-    /// did not go. Main thread: the value is boxed here, off the audio thread.
+    /// did not go. Main thread: the value is cloned here, off the audio thread.
     pub(crate) fn set_track_info(&self, info: &tutti_plugin_types::TrackInfo) -> Delivered {
-        delivery(self.lifecycle.is_crashed(), || {
-            self.channels.push_control(ControlCommand::SetTrackInfo {
-                info: Box::new(info.clone()),
-            })
-        })
+        self.tell(SetTrackInfo { info: info.clone() })
     }
 
     /// Asks for a rate change, ordered against the blocks. `false` only when the
@@ -786,24 +781,18 @@ impl AudioBridge {
     ///
     /// The plugin is dead, refused, or the transfer stalled.
     pub fn save_state(&self, state_use: StateUse) -> std::result::Result<Vec<u8>, StateError> {
-        if self.lifecycle.is_crashed() {
-            return Err(StateError::PluginCrashed);
-        }
         // What the host wrote and no block has carried is in the state.
         self.flush_host_edits();
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            ControlCommand::SaveState {
-                state_use,
-                flush: None,
-                reply,
-            }
-        }) else {
-            return Err(self.refused());
-        };
-        // As in `load_state`: a refusal to answer is not an empty state.
-        // Collapsing it to `None`/`vec![]` is what let an unsaved preset look
-        // like a plugin that had nothing to save.
-        self.await_state(ask_resp)
+        // A refusal to answer is not an empty state: collapsing it to `vec![]`
+        // is what let an unsaved preset look like a plugin that had nothing to
+        // save.
+        self.call_with(
+            SaveState { state_use },
+            Deadline::State,
+            Object::State,
+            |outcome| outcome.map(|received| received.object),
+        )
+        .map_err(state_lost)
     }
 
     /// Restores a state saved for `state_use` in the plugin. Blocks while it
@@ -817,20 +806,9 @@ impl AudioBridge {
         data: &[u8],
         state_use: StateUse,
     ) -> std::result::Result<(), StateError> {
-        let blob = self.state_object(data)?;
-        let len = data.len() as u64;
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().state_wait(), |reply| {
-            ControlCommand::LoadState {
-                state_use,
-                len,
-                blob,
-                reply,
-            }
-        }) else {
-            return Err(self.refused());
-        };
+        let (msg, blob) = self.state_message(data, state_use)?;
         // A refusal to answer is not an acceptance.
-        self.await_state(ask_resp)
+        state_loaded(self.call(msg, Deadline::State, Object::Blob(blob)))
     }
 
     /// The object a state travels as: the one copy of it the host makes, on the
@@ -844,7 +822,11 @@ impl AudioBridge {
     /// be made.
     ///
     /// [`MAX_STATE_BYTES`]: tutti_plugin_types::MAX_STATE_BYTES
-    fn state_object(&self, data: &[u8]) -> std::result::Result<Blob, StateError> {
+    fn state_message(
+        &self,
+        data: &[u8],
+        state_use: StateUse,
+    ) -> std::result::Result<(LoadState, Blob), StateError> {
         if self.lifecycle.is_crashed() {
             return Err(StateError::PluginCrashed);
         }
@@ -855,57 +837,124 @@ impl AudioBridge {
                 limit: tutti_plugin_types::MAX_STATE_BYTES,
             });
         }
-        Blob::create(data).map_err(|e| {
+        let blob = Blob::create(data).map_err(|e| {
             StateError::Rejected(format!("the state could not be made into an object: {e}"))
-        })
+        })?;
+        let msg = LoadState {
+            state_use,
+            len: data.len() as u64,
+            blob: blob.wire(),
+        };
+        Ok((msg, blob))
     }
 
-    /// The answer to a state request, waited for up to [`Timeouts::state_wait`]:
-    /// the bridge's own deadline is [`Timeouts::state`], so its report
-    /// of a stall is the one that arrives, and this one is the backstop for a
-    /// bridge that ended without answering.
-    fn await_state<T>(
+    /// Asks the server `msg` and waits for what `finish` makes of the lane's
+    /// outcome, on the lane's thread. A request made while another owes a reply
+    /// **waits for it** up to `deadline`'s wait (the caller's own timeout), in
+    /// place of queueing a second request behind it on the lane or failing at
+    /// once: [`Lost::Busy`] (counted) when the slot is still held then, or the
+    /// queue is full. The slot is the request's until the lane's thread answers
+    /// it or drops it.
+    fn call_with<R: Send + 'static>(
         &self,
-        ask: Ask<std::result::Result<T, StateError>>,
-    ) -> std::result::Result<T, StateError> {
+        msg: impl Answered,
+        deadline: Deadline,
+        object: Object,
+        finish: impl FnOnce(Outcome) -> std::result::Result<R, Lost> + Send + 'static,
+    ) -> std::result::Result<R, Lost> {
+        if self.lifecycle.is_crashed() {
+            return Err(Lost::Crashed);
+        }
         let timeouts = self.lifecycle.timeouts();
-        match ask.recv_timeout_borrowed(timeouts.state_wait()) {
+        let wait = deadline.wait(timeouts);
+        let Some((waiting, reply)) = self.channels.owing().ask(wait) else {
+            self.channels.note_command_refused();
+            return Err(Lost::Busy);
+        };
+        let call = Call {
+            flush: None,
+            deadline,
+            object,
+            done: Box::new(move |outcome| reply.send(finish(outcome))),
+        };
+        // A refused push drops the command and its reply with it: the slot is free.
+        if !self.channels.push_control(ControlCommand::ask(msg, call)) {
+            return Err(Lost::Busy);
+        }
+        // The lane answers at the request's own deadline, so this outlasts it by
+        // a margin and only ends sooner if the lane is gone.
+        match waiting.recv_timeout(wait) {
             Ok(answer) => answer,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(StateError::PluginCrashed),
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StateError::Stalled {
-                after: timeouts.state,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Lost::Crashed),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(Lost::NoAnswer {
+                after: deadline.window(timeouts).0,
             }),
         }
     }
 
-    /// Queues a control request that owes a reply, and the reply's `Ask`. A
-    /// request made while another owes one **waits for it** up to `slot_wait`
-    /// (the caller's own timeout), in place of queueing a second request behind
-    /// it on the lane or failing at once; `None` (counted) when the slot is still
-    /// held then, or the queue is full. The slot is the request's until the
-    /// lane's thread answers it or drops it.
-    fn request<T>(
+    /// Asks the server the answered request `M`: its reply, or why there is none.
+    /// As [`call_with`](Self::call_with), with the reply read as `M::Reply` and
+    /// no other kind.
+    fn call<M: Answered + 'static>(
         &self,
-        slot_wait: Duration,
-        make: impl FnOnce(Reply<T>) -> ControlCommand,
-    ) -> Option<Ask<T>> {
-        let Some((waiting, reply)) = self.channels.owing().ask(slot_wait) else {
-            self.channels.note_command_refused();
-            return None;
-        };
-        // A refused push drops the command and its reply with it: the slot is free.
-        self.channels.push_control(make(reply)).then_some(waiting)
+        msg: M,
+        deadline: Deadline,
+        object: Object,
+    ) -> std::result::Result<M::Reply, Lost>
+    where
+        M::Reply: Send + 'static,
+    {
+        self.call_with(msg, deadline, object, typed::<M>)
     }
 
-    /// Why a state request was refused: a crashed bridge (its queues are drained
-    /// with errors, and nothing reads them again), or a full queue or an owed
-    /// request that did not clear in time, which is not a crash.
-    fn refused(&self) -> StateError {
+    /// Queues `msg` and returns the [`Answer`] **the control lane's thread
+    /// fills** with what `finish` makes of the lane's outcome, at the server's
+    /// reply or at the request's deadline. A lane that ends drops the request
+    /// unanswered, which cancels the answer, as does a full queue. The request
+    /// takes no slot and queues behind one in flight, and the lane waits for
+    /// `flush` (the audio lane's answer to the host's writes) before it sends.
+    fn answer_with<T: Send + 'static>(
+        &self,
+        msg: impl Answered,
+        deadline: Deadline,
+        flush: Option<Ask<bool>>,
+        object: Object,
+        finish: impl FnOnce(Outcome) -> T + Send + 'static,
+    ) -> Answer<T> {
+        let (answer, reply) = ask::awaited();
         if self.lifecycle.is_crashed() {
-            StateError::PluginCrashed
-        } else {
-            StateError::Busy
+            reply.send(finish(Err(Lost::Crashed)));
+            return answer;
         }
+        let call = Call {
+            flush,
+            deadline,
+            object,
+            done: Box::new(move |outcome| reply.send(finish(outcome))),
+        };
+        self.queue(ControlCommand::ask(msg, call));
+        answer
+    }
+
+    /// [`answer_with`](Self::answer_with) for a reply read as `M::Reply`.
+    fn call_answer<M: Answered + 'static, T: Send + 'static>(
+        &self,
+        msg: M,
+        deadline: Deadline,
+        flush: Option<Ask<bool>>,
+        object: Object,
+        finish: impl FnOnce(std::result::Result<M::Reply, Lost>) -> T + Send + 'static,
+    ) -> Answer<T> {
+        self.answer_with(msg, deadline, flush, object, move |outcome| {
+            finish(typed::<M>(outcome))
+        })
+    }
+
+    /// Queues a request nothing answers, saying **why** if it did not go.
+    fn tell(&self, msg: impl Unanswered) -> Delivered {
+        delivery(self.lifecycle.is_crashed(), || {
+            self.channels.push_control(ControlCommand::tell(msg))
+        })
     }
 
     // --- The editor in the server ---
@@ -923,32 +972,17 @@ impl AudioBridge {
         parent: Option<u64>,
         scale: ContentScale,
     ) -> std::result::Result<Option<Size>, EditorError> {
-        if self.lifecycle.is_crashed() {
-            return Err(EditorError::PluginCrashed);
-        }
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().editor_wait(), |reply| {
-            ControlCommand::OpenEditor {
-                parent,
-                scale,
-                reply,
-            }
-        }) else {
-            return Err(EditorError::Busy);
-        };
         // The server may take as long as a plugin takes to build its window; the
-        // bridge thread answers with its own refusal at `Timeouts::editor`, so this
-        // outlasts it by a margin and only ends sooner if that thread is gone.
-        match ask_resp.recv_timeout(self.lifecycle.timeouts().editor_wait()) {
-            Ok(result) => result,
-            Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
-            Err(_) => Err(EditorError::Busy),
-        }
+        // lane answers with its own refusal at `Timeouts::editor`.
+        self.call(OpenEditor { parent, scale }, Deadline::Editor, Object::None)
+            .map_err(editor_lost)?
+            .result
     }
 
     /// Closes the server's editor. No answer: `false` when the command could
     /// not be queued.
     pub(crate) fn close_editor_in_server(&self) -> bool {
-        !self.lifecycle.is_crashed() && self.channels.push_control(ControlCommand::CloseEditor)
+        matches!(self.tell(CloseEditor), Delivered::Yes)
     }
 
     /// Asks the server's editor to take `size`, and answers with the size it
@@ -961,19 +995,9 @@ impl AudioBridge {
         &self,
         size: Size,
     ) -> std::result::Result<Size, EditorError> {
-        if self.lifecycle.is_crashed() {
-            return Err(EditorError::PluginCrashed);
-        }
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().editor_wait(), |reply| {
-            ControlCommand::SetEditorSize { size, reply }
-        }) else {
-            return Err(EditorError::Busy);
-        };
-        match ask_resp.recv_timeout(self.lifecycle.timeouts().editor_wait()) {
-            Ok(result) => result,
-            Err(_) if self.lifecycle.is_crashed() => Err(EditorError::PluginCrashed),
-            Err(_) => Err(EditorError::Busy),
-        }
+        self.call(SetEditorSize { size }, Deadline::Editor, Object::None)
+            .map_err(editor_lost)?
+            .result
     }
 
     /// The size the server's editor asked its window to take since the last
@@ -992,15 +1016,8 @@ impl AudioBridge {
     /// query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn parameters(&self) -> Option<Vec<ParameterInfo>> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameterList { reply }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let list = self.call(GetParameterList, Deadline::Query, Object::None);
+        list.ok().map(|list| list.parameters)
     }
 
     /// The plugin's preset list, or `None` when the subprocess is gone.
@@ -1008,32 +1025,16 @@ impl AudioBridge {
     /// `None` and `Some(vec![])` are different answers: the first means the
     /// question could not be asked, the second that the plugin listed nothing.
     pub fn presets(&self) -> Option<Vec<PluginPreset>> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetPresetList { reply }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let list = self.call(GetPresetList, Deadline::Query, Object::None);
+        list.ok().map(|list| list.presets)
     }
 
     /// Ask the plugin to load a preset. `false` when it refused, the format has
     /// no load path, or the subprocess is gone — all three mean the preset did
     /// not load, and a caller must leave its selection where it was.
     pub(crate) fn load_preset(&self, id: PresetId) -> bool {
-        if self.lifecycle.is_crashed() {
-            return false;
-        }
         self.reset_host_edits();
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::LoadPreset { id, reply }
-        }) else {
-            return false;
-        };
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .is_ok_and(|loaded| loaded.is_ok())
+        preset_loaded(self.call(LoadPreset { id }, Deadline::Query, Object::None)).is_ok()
     }
 
     // --- Requests answered into a future ---
@@ -1050,19 +1051,15 @@ impl AudioBridge {
         &self,
         state_use: StateUse,
     ) -> Answer<std::result::Result<Vec<u8>, StateError>> {
-        let (answer, reply) = ask::awaited();
-        if self.lifecycle.is_crashed() {
-            reply.send(Err(StateError::PluginCrashed));
-            return answer;
-        }
         // The lane waits for the flush, as a blocking save waits for it itself.
         let flush = self.request_flush();
-        self.queue(ControlCommand::SaveState {
-            state_use,
+        self.answer_with(
+            SaveState { state_use },
+            Deadline::State,
             flush,
-            reply,
-        });
-        answer
+            Object::State,
+            |outcome| outcome.map(|received| received.object).map_err(state_lost),
+        )
     }
 
     /// `load_state` as an [`Answer`], filled and bounded as
@@ -1074,31 +1071,26 @@ impl AudioBridge {
         data: &[u8],
         state_use: StateUse,
     ) -> Answer<std::result::Result<(), StateError>> {
-        let (answer, reply) = ask::awaited();
-        match self.state_object(data) {
-            Ok(blob) => self.queue(ControlCommand::LoadState {
-                state_use,
-                len: data.len() as u64,
-                blob,
-                reply,
-            }),
-            Err(error) => reply.send(Err(error)),
+        match self.state_message(data, state_use) {
+            Ok((msg, blob)) => {
+                self.call_answer(msg, Deadline::State, None, Object::Blob(blob), state_loaded)
+            }
+            Err(error) => Answer::ready(Err(error)),
         }
-        answer
     }
 
     /// `load_preset` as an [`Answer`], filled and bounded as
     /// [`save_state_answer`](Self::save_state_answer) is:
     /// [`PresetError::Stalled`] at [`Timeouts::param`].
     pub fn load_preset_answer(&self, id: PresetId) -> Answer<std::result::Result<(), PresetError>> {
-        let (answer, reply) = ask::awaited();
-        if self.lifecycle.is_crashed() {
-            reply.send(Err(PresetError::Lost));
-            return answer;
-        }
         self.reset_host_edits();
-        self.queue(ControlCommand::LoadPreset { id, reply });
-        answer
+        self.call_answer(
+            LoadPreset { id },
+            Deadline::Query,
+            None,
+            Object::None,
+            preset_loaded,
+        )
     }
 
     /// [`parameters`](Self::parameters) as an answer: queued, and **the control
@@ -1107,31 +1099,27 @@ impl AudioBridge {
     /// unanswered, which cancels the answer, as does a full queue. The request
     /// takes no slot and queues behind one in flight.
     pub fn parameters_answer(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-        let (answer, reply) = ask::awaited();
-        if self.lifecycle.is_crashed() {
-            reply.send(None);
-            return answer;
-        }
-        self.queue(ControlCommand::GetParameterList { reply });
-        answer
+        self.call_answer(
+            GetParameterList,
+            Deadline::Query,
+            None,
+            Object::None,
+            |list| list.ok().map(|list| list.parameters),
+        )
     }
 
     /// [`parameter`](Self::parameter) as an answer, filled and bounded as
     /// [`parameters_answer`](Self::parameters_answer) is. The lane applies the
     /// host's writes no block has carried before it asks.
     pub fn parameter_answer(&self, param_id: ParamId) -> Answer<Option<Normalized>> {
-        let (answer, reply) = ask::awaited();
-        if self.lifecycle.is_crashed() {
-            reply.send(None);
-            return answer;
-        }
         let flush = self.request_flush();
-        self.queue(ControlCommand::GetParameter {
-            param_id,
+        self.call_answer(
+            GetParameter { param_id },
+            Deadline::Query,
             flush,
-            reply,
-        });
-        answer
+            Object::None,
+            |read| read.ok().and_then(|read| read.value),
+        )
     }
 
     /// [`parameter_normalized`](Self::parameter_normalized) as an answer, filled
@@ -1141,17 +1129,13 @@ impl AudioBridge {
         param_id: ParamId,
         plain: f64,
     ) -> Answer<Option<Normalized>> {
-        let (answer, reply) = ask::awaited();
-        if self.lifecycle.is_crashed() {
-            reply.send(None);
-            return answer;
-        }
-        self.queue(ControlCommand::GetParameterNormalized {
-            param_id,
-            plain,
-            reply,
-        });
-        answer
+        self.call_answer(
+            GetParameterNormalized { param_id, plain },
+            Deadline::Query,
+            None,
+            Object::None,
+            |read| read.ok().and_then(|read| read.value),
+        )
     }
 
     /// Queues `command`; a full queue answers it `Busy`.
@@ -1166,19 +1150,11 @@ impl AudioBridge {
     /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
     /// Control thread; the old slab stays valid until the caller drops it.
     pub(crate) fn setup_shared_memory(&self, slab: SlabHandle, layout: SlabLayout) -> bool {
-        if self.lifecycle.is_crashed() {
-            return false;
-        }
-        let Some(ask_resp) = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::SetupSharedMemory {
-                slab,
-                layout,
-                reply,
-            }
-        }) else {
-            return false;
+        let msg = SetupSharedMemory {
+            slab: slab.wire(),
+            layout,
         };
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait()).unwrap_or(false)
+        self.call(msg, Deadline::Query, Object::Slab(slab)).is_ok()
     }
 
     /// Wait until every setting queued before this call (a rate change, a render
@@ -1213,12 +1189,8 @@ impl AudioBridge {
     /// a query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn current_preset(&self) -> Option<PresetId> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let wait = self.lifecycle.timeouts().param_wait();
-        let ask_resp = self.request(wait, |reply| ControlCommand::GetCurrentPreset { reply })?;
-        await_reply(ask_resp, wait).ok().flatten()
+        let current = self.call(GetCurrentPreset, Deadline::Query, Object::None);
+        current.ok().and_then(|current| current.id)
     }
 
     /// Hands the server's plugin the app's controller entries and returns who
@@ -1228,28 +1200,18 @@ impl AudioBridge {
         &self,
         app: &[tutti_plugin_types::MidiAssignment],
     ) -> tutti_plugin_types::MidiMapApplied {
-        let wait = self.lifecycle.timeouts().param_wait();
-        let answer = (!self.lifecycle.is_crashed())
-            .then(|| {
-                self.request(wait, |reply| ControlCommand::SetAppMidiMap {
-                    app: app.to_vec(),
-                    reply,
-                })
-            })
-            .flatten()
-            .and_then(|ask| await_reply(ask, wait).ok());
-        answer.unwrap_or(tutti_plugin_types::MidiMapApplied::Host)
+        let msg = SetAppMidiMap { app: app.to_vec() };
+        match self.call(msg, Deadline::Query, Object::None) {
+            Ok(answer) => answer.applied,
+            Err(_) => tutti_plugin_types::MidiMapApplied::Host,
+        }
     }
 
     /// The server plugin's wiring as it reads now, or `None` when it is gone or
     /// does not answer in time.
     pub(crate) fn wiring(&self) -> Option<tutti_plugin_types::PluginWiring> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let wait = self.lifecycle.timeouts().param_wait();
-        let ask = self.request(wait, |reply| ControlCommand::GetWiring { reply })?;
-        await_reply(ask, wait).ok().flatten()
+        let read = self.call(GetWiring, Deadline::Query, Object::None);
+        read.ok().map(|read| read.wiring)
     }
 
     /// Arms or disarms the server plugin's own MIDI learn; the plugin's refusal,
@@ -1259,75 +1221,36 @@ impl AudioBridge {
         &self,
         armed: bool,
     ) -> std::result::Result<(), tutti_plugin_types::PluginLearnError> {
-        use tutti_plugin_types::PluginLearnError::Lost;
-        if self.lifecycle.is_crashed() {
-            return Err(Lost);
-        }
-        let wait = self.lifecycle.timeouts().param_wait();
-        let ask = self
-            .request(wait, |reply| ControlCommand::ArmPluginMidiLearn {
-                armed,
-                reply,
-            })
-            .ok_or(Lost)?;
-        await_reply(ask, wait).map_err(|_| Lost)?
+        let msg = ArmPluginMidiLearn { armed };
+        self.call(msg, Deadline::Query, Object::None)
+            .map_err(|_| tutti_plugin_types::PluginLearnError::Lost)?
+            .result
     }
 
     /// A parameter's value, or `None` when it cannot be asked. Waits up to a
     /// query's wait for a request already owed, then up to it again for its own
     /// answer.
     pub fn parameter(&self, param_id: ParamId) -> Option<Normalized> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
         // What the host wrote and no block has carried is read back.
         self.flush_host_edits();
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameter {
-                param_id,
-                flush: None,
-                reply,
-            }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let read = self.call(GetParameter { param_id }, Deadline::Query, Object::None);
+        read.ok().and_then(|read| read.value)
     }
 
     /// The plain value the plugin's format converts `value` to, on one
     /// parameter. `None` when the subprocess is gone, the request could not be
     /// queued, or the format has no plain value for it.
     pub(crate) fn parameter_plain(&self, param_id: ParamId, value: Normalized) -> Option<f64> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameterPlain {
-                param_id,
-                value,
-                reply,
-            }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let msg = GetParameterPlain { param_id, value };
+        let read = self.call(msg, Deadline::Query, Object::None);
+        read.ok().and_then(|read| read.plain)
     }
 
     /// The inverse of [`parameter_plain`](Self::parameter_plain).
     pub(crate) fn parameter_normalized(&self, param_id: ParamId, plain: f64) -> Option<Normalized> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameterNormalized {
-                param_id,
-                plain,
-                reply,
-            }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let msg = GetParameterNormalized { param_id, plain };
+        let read = self.call(msg, Deadline::Query, Object::None);
+        read.ok().and_then(|read| read.value)
     }
 
     /// The plugin's display string for `value` on one parameter.
@@ -1336,19 +1259,9 @@ impl AudioBridge {
     /// the plugin declined — all three mean there is no text, and a caller
     /// renders the raw number.
     pub(crate) fn parameter_text(&self, param_id: ParamId, value: Normalized) -> Option<String> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameterText {
-                param_id,
-                value,
-                reply,
-            }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let msg = GetParameterText { param_id, value };
+        let read = self.call(msg, Deadline::Query, Object::None);
+        read.ok().and_then(|read| read.text)
     }
 
     /// The value the plugin parses `text` into.
@@ -1361,19 +1274,12 @@ impl AudioBridge {
         param_id: ParamId,
         text: &str,
     ) -> Option<Normalized> {
-        if self.lifecycle.is_crashed() {
-            return None;
-        }
-        let ask_resp = self.request(self.lifecycle.timeouts().param_wait(), |reply| {
-            ControlCommand::GetParameterValueFromText {
-                param_id,
-                text: text.to_string(),
-                reply,
-            }
-        })?;
-        await_reply(ask_resp, self.lifecycle.timeouts().param_wait())
-            .ok()
-            .flatten()
+        let msg = GetParameterValueFromText {
+            param_id,
+            text: text.to_string(),
+        };
+        let read = self.call(msg, Deadline::Query, Object::None);
+        read.ok().and_then(|read| read.value)
     }
 }
 
@@ -1541,7 +1447,10 @@ mod tests {
             responses_lost: channels::response_ring().2,
             host_edits: Arc::default(),
         };
-        while bridge.channels.push_control(ControlCommand::CloseEditor) {}
+        while bridge
+            .channels
+            .push_control(ControlCommand::tell(crate::CloseEditor))
+        {}
 
         assert_eq!(
             bridge.save_state(tutti_plugin_types::StateUse::Project),
@@ -1618,6 +1527,57 @@ mod tests {
 
 /// What a push of a command comes to: nothing is queued for a plugin that is
 /// gone, and a full queue refuses it. `push` runs only for a live plugin.
+/// A lane's outcome as the reply of the request `M` and no other kind: the one
+/// place a caller reads a reply's variant is `M::Reply`'s [`TryFrom`].
+fn typed<M: Answered>(outcome: Outcome) -> std::result::Result<M::Reply, Lost> {
+    M::Reply::try_from(outcome?.reply).map_err(Lost::of)
+}
+
+/// A state request's failure as the error its caller reads.
+fn state_lost(lost: Lost) -> StateError {
+    match lost {
+        Lost::Busy => StateError::Busy,
+        Lost::Crashed => StateError::PluginCrashed,
+        Lost::NoAnswer { after } => StateError::Stalled { after },
+        Lost::Object(error) => error,
+        Lost::Server(error) => StateError::Rejected(error.to_string()),
+        Lost::Wrong => StateError::UnexpectedReply,
+    }
+}
+
+/// A [`LoadState`]'s answer: the state was taken, or the plugin's refusal.
+fn state_loaded(
+    answer: std::result::Result<StateLoaded, Lost>,
+) -> std::result::Result<(), StateError> {
+    answer.map_err(state_lost)?.error.map_or(Ok(()), Err)
+}
+
+/// An editor request's failure as the error its caller reads.
+fn editor_lost(lost: Lost) -> EditorError {
+    match lost {
+        Lost::Busy => EditorError::Busy,
+        Lost::Crashed => EditorError::PluginCrashed,
+        Lost::NoAnswer { after } => EditorError::NoAnswer { after },
+        Lost::Server(error) => EditorError::Server(error),
+        Lost::Wrong | Lost::Object(_) => EditorError::UnexpectedReply,
+    }
+}
+
+/// A [`LoadPreset`]'s answer: the preset loaded, or why it did not. No answer
+/// within the window is not a refusal: the plugin was asked and may have loaded
+/// it.
+fn preset_loaded(
+    answer: std::result::Result<PresetLoaded, Lost>,
+) -> std::result::Result<(), PresetError> {
+    match answer {
+        Ok(PresetLoaded { ok: true }) => Ok(()),
+        Err(Lost::Busy) => Err(PresetError::Busy),
+        Err(Lost::Crashed) => Err(PresetError::Lost),
+        Err(Lost::NoAnswer { after }) => Err(PresetError::Stalled { after }),
+        Ok(_) | Err(_) => Err(PresetError::Refused),
+    }
+}
+
 fn delivery(crashed: bool, push: impl FnOnce() -> bool) -> Delivered {
     if crashed {
         Delivered::PluginDead
