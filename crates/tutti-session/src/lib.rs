@@ -371,8 +371,8 @@ pub use value::{
     TargetInfo, TempoTarget, ValueError, ValueErrorKind, Values,
 };
 pub use value::{
-    Change, ChangedBy, Gesture, GestureId, GestureState, IntoTargets, SavedValues, Watchable,
-    Watcher,
+    Change, ChangedBy, EditLog, EditMark, Gesture, GestureId, GestureState, IntoTargets,
+    SavedValues, Watchable, Watcher,
 };
 #[cfg(feature = "midi")]
 pub use value::{ClipEventsTarget, HarmonyTarget, MpeModeTarget, OutputLatencyTarget};

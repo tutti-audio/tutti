@@ -1,4 +1,4 @@
-//! The count units: [`Blocks`], [`Calls`], [`Chunks`] and [`Resyncs`].
+//! The count units: [`Blocks`], [`Calls`], [`Chunks`], [`Resyncs`] and [`UndoSteps`].
 //!
 //! Absent on purpose:
 //!
@@ -100,6 +100,12 @@ count! {
     Resyncs, "re-anchors"
 }
 
+count! {
+    /// A count of undo steps: how many steps of an edit log something
+    /// happened to (merged away when the log is over its cap).
+    UndoSteps, "undo steps", add
+}
+
 impl Chunks {
     /// Returns the chunks counted since `earlier`, a reading of the same
     /// running count: `self - earlier`, or zero when `earlier` is the later
@@ -121,6 +127,11 @@ mod tests {
         assert_eq!(Calls::ZERO.get(), 0);
         assert!(Chunks::new(1) < Chunks::new(2));
         assert_eq!(Resyncs::new(3).to_string(), "3");
+        assert_eq!(UndoSteps::new(2) + UndoSteps::new(1), UndoSteps::new(3));
+        assert_eq!(
+            UndoSteps::new(u64::MAX) + UndoSteps::new(1),
+            UndoSteps::new(u64::MAX)
+        );
     }
 
     #[test]

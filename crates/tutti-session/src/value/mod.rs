@@ -39,6 +39,7 @@
 mod batch;
 mod controls;
 mod depth;
+mod edit_log;
 mod error;
 mod gesture;
 mod param;
@@ -58,6 +59,7 @@ pub(crate) use controls::Write;
 pub use controls::{GainTarget, GainTargetError, MixTarget, ModeTarget};
 pub(crate) use depth::DepthSlot;
 pub use depth::DepthTarget;
+pub use edit_log::{EditLog, EditMark};
 #[cfg(feature = "plugin")]
 pub use error::{PluginParamRefusal, UnitError};
 pub use error::{SetRefusal, ValueError, ValueErrorKind};

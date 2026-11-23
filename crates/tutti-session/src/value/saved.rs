@@ -56,7 +56,19 @@ pub struct SavedValues<K> {
     key: PhantomData<fn() -> K>,
 }
 
+/// The saved targets of one instant, without the session's key type: what the
+/// feed captures for an edit log.
+pub(super) type Captured = Arc<BTreeMap<TargetId, AnyAssign>>;
+
 impl<K> SavedValues<K> {
+    /// The map of a capture, sharing it.
+    pub(super) fn of_captured(items: Captured) -> Self {
+        Self {
+            items,
+            key: PhantomData,
+        }
+    }
+
     fn new(items: BTreeMap<TargetId, AnyAssign>) -> Self {
         Self {
             items: Arc::new(items),
@@ -171,6 +183,11 @@ impl<K: AppKey> ValueState<K> {
 }
 
 impl Params {
+    /// The value now of every saved target, shareable.
+    pub(super) fn captured(&self) -> Captured {
+        Arc::new(self.capture())
+    }
+
     /// An assignment of the value now of every saved target.
     fn capture(&self) -> BTreeMap<TargetId, AnyAssign> {
         let params = self.native_params().map(|(node, addr, owner, cell)| {

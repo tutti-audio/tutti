@@ -16,6 +16,7 @@ use tutti_units::UnitAddr;
 
 use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
+use super::edit_log::EditLog;
 use super::error::{ValueError, ValueErrorKind};
 use super::gesture::{Deferred, Ending, Gesture};
 use super::saved::SavedValues;
@@ -539,7 +540,9 @@ impl<K: AppKey> ValueState<K> {
             .ok_or_else(|| whole_call(ValueErrorKind::Reentrant))?;
         let mut batch = Batch::new(held.params());
         assign.stage(&mut batch).map_err(error)?;
-        self.table.feed().land(batch.store(), Grouping::Batch);
+        self.table
+            .feed()
+            .land(held.params(), batch.store(), Grouping::Batch);
         self.table.deferred.land(held.params(), self.table.feed());
         Ok(())
     }
@@ -652,6 +655,16 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn watch<W: IntoTargets>(&self, targets: W) -> Result<Watcher<K, W>, ValueError<K>> {
         self.state()?.watch(targets)
+    }
+
+    /// [`Session::edit_log`](crate::Session::edit_log), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::edit_log`](crate::Session::edit_log), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn edit_log(&self) -> Result<EditLog<K>, ValueError<K>> {
+        self.state()?.edit_log()
     }
 
     /// [`Session::gesture`](crate::Session::gesture), from this handle.
