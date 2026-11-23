@@ -21,7 +21,7 @@
 //! [`BASELINE`] holds the count each file had when the gate began, settled by
 //! the shared [`ratchet`].
 
-use super::lex::comments;
+use super::lex::{comments, skipped, word};
 use super::ratchet::{self, Found, Wording};
 use super::{Report, Tree};
 
@@ -37,10 +37,6 @@ const ROOT_TOML: [&str; 4] = [
     "rust-toolchain.toml",
     ".cargo/config.toml",
 ];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
 
 /// The `#` comments of a TOML or YAML text at its offsets: a `#` at a line's
 /// start or after whitespace, outside a quoted string, opens a comment that
@@ -74,26 +70,22 @@ fn hash_comments(src: &str) -> String {
     out
 }
 
-fn word_byte(c: u8) -> bool {
-    c.is_ascii_alphanumeric() || c == b'_'
-}
-
 /// The citations in one line of comment text, as short labels.
 fn citations(line: &str) -> Vec<&'static str> {
     let b = line.as_bytes();
     let lower = line.to_ascii_lowercase();
     let mut found = Vec::new();
-    for word in ["doc", "design"] {
-        for (at, _) in lower.match_indices(word) {
-            if at > 0 && word_byte(b[at - 1]) {
+    for name in ["doc", "design"] {
+        for (at, _) in lower.match_indices(name) {
+            if at > 0 && word(b[at - 1]) {
                 continue;
             }
-            let mut i = at + word.len();
+            let mut i = at + name.len();
             if i < b.len() && (b[i] == b' ' || b[i] == b'-') {
                 i += 1;
             }
             let digits = b[i..].iter().take_while(|c| c.is_ascii_digit()).count();
-            let ends = b.get(i + digits).is_none_or(|&c| !word_byte(c));
+            let ends = b.get(i + digits).is_none_or(|&c| !word(c));
             if digits == 3 && b[i] == b'0' && ends {
                 found.push("a design doc");
             }
@@ -116,13 +108,13 @@ fn citations(line: &str) -> Vec<&'static str> {
     }
     let mut i = 0;
     while i < b.len() {
-        if !b[i].is_ascii_hexdigit() || (i > 0 && word_byte(b[i - 1])) {
+        if !b[i].is_ascii_hexdigit() || (i > 0 && word(b[i - 1])) {
             i += 1;
             continue;
         }
         let n = b[i..].iter().take_while(|c| c.is_ascii_hexdigit()).count();
         let token = &b[i..i + n];
-        let bounded = b.get(i + n).is_none_or(|&c| !word_byte(c));
+        let bounded = b.get(i + n).is_none_or(|&c| !word(c));
         let ticked = i > 0 && b[i - 1] == b'`' && b.get(i + n) == Some(&b'`');
         let mixed =
             token.iter().any(u8::is_ascii_digit) && token.iter().any(u8::is_ascii_alphabetic);
