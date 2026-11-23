@@ -10,30 +10,22 @@
 //! the route's whole figure; the range clamps it).
 
 use crate::common;
+use crate::common::render;
+use crate::offline::offline_48k;
 
-use tutti_buffers::ChannelLayout;
-use tutti_buffers::InterleavedMut;
 use tutti_graph::ForkByClone;
 use tutti_session::{
     ChannelEdge, GainTarget, MainOutput, ModTarget, OutputPort, ParamRef, RangeTarget, RouteSpec,
     Session,
 };
-use tutti_units::{Depth, Gain, SampleRate, UnitParam};
+use tutti_units::{Bipolar, Gain, UnitParam};
 
 use common::probe::Pulse;
 
-const RATE: f64 = 48_000.0;
 const BLOCK: usize = 128;
 /// The sources' levels.
 const A: f32 = 0.5;
 const B: f32 = 0.25;
-
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
 
 fn settle(s: &mut Session) {
     for _ in 0..6 {
@@ -51,17 +43,6 @@ fn gain(s: &Session, edge: ChannelEdge) -> GainTarget {
     s.graph_ref()
         .gain_target(edge.source(), edge.sink())
         .expect("a lane")
-}
-
-/// Output channel 0 (the left of the stereo main output) for `blocks` blocks.
-fn render(s: &mut Session, blocks: usize) -> Vec<f32> {
-    let mut all = Vec::new();
-    let mut buf = vec![0.0f32; BLOCK * 2];
-    for _ in 0..blocks {
-        s.render(&mut InterleavedMut::new(&mut buf, ChannelLayout::STEREO).unwrap());
-        all.extend(buf.as_chunks::<2>().0.iter().map(|f| f[0]));
-    }
-    all
 }
 
 /// Two always-on sources summed at output 0; the edge of the first, which has
@@ -101,23 +82,23 @@ fn mixer(s: &mut Session) -> ChannelEdge {
 /// lane's source goes (the declick).
 #[test]
 fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let edge = mixer(&mut s);
     settle(&mut s);
-    let plain = render(&mut s, 2);
+    let plain = render(&mut s, 2, BLOCK);
     assert!(plain.iter().all(|&x| x == A + B), "unity before any route");
 
     let mut m = s.mods_mut();
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.25)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
     settle(&mut s);
 
     // Past the lane's first block and the connect's declick.
     let figure = |s: &mut Session, w: f32, what: &str| {
-        let got = render(s, 12);
+        let got = render(s, 12, BLOCK);
         let want = (0.0 + w * A) + B;
         for (f, &x) in got.iter().enumerate().skip(512) {
             assert_eq!(x.to_bits(), want.to_bits(), "{what}, frame {f}");
@@ -161,14 +142,14 @@ fn a_route_onto_an_edge_modulates_the_sum_by_the_analytic_amount() {
 /// base moves to 0.25; gone, the base `0.25`.
 #[test]
 fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let edge = mixer(&mut s);
     settle(&mut s);
     s.set(gain(&s, edge).to(Gain::new(0.5))).unwrap();
     settle(&mut s);
 
     let figure = |s: &mut Session, w: f32, what: &str| {
-        let got = render(s, 12);
+        let got = render(s, 12, BLOCK);
         let want = (0.0 + w * A) + B;
         for (f, &x) in got.iter().enumerate().skip(512) {
             assert_eq!(x.to_bits(), want.to_bits(), "{what}, frame {f}");
@@ -180,7 +161,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
     let route = m
-        .route(RouteSpec::new(source, edge, Depth::of(0.5)))
+        .route(RouteSpec::new(source, edge, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     figure(&mut s, 1.5, "the base plus the route's offset");
@@ -203,7 +184,7 @@ fn the_base_is_the_lanes_knob_and_a_route_returns_to_it() {
 /// is sent and its first frame is the weighted fold at `1.0 + 0.5 = 1.5`.
 #[test]
 fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
-    let mut s = offline();
+    let mut s = offline_48k();
     settle(&mut s);
     let plans = s.graph_ref().testing().commits_sent();
 
@@ -211,7 +192,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
     let mut m = s.mods_mut();
     m.range(edge, Gain::new(-2.0)..Gain::new(2.0)).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, edge, Depth::of(0.25)))
+    m.route(RouteSpec::new(source, edge, Bipolar::of(0.25)))
         .unwrap();
 
     let _ = s.update();
@@ -221,7 +202,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
         plans + 1,
         "one plan for the wire and its lane"
     );
-    let got = render(&mut s, 1);
+    let got = render(&mut s, 1, BLOCK);
     let want = (0.0 + 1.5 * A) + B;
     assert_eq!(got[0].to_bits(), want.to_bits(), "the first frame");
     assert_eq!(got[BLOCK - 1].to_bits(), want.to_bits());
@@ -230,7 +211,7 @@ fn a_route_onto_an_edge_declared_in_the_update_sends_one_plan() {
 /// An edge target keys once per edge, apart from a param's, and is no param.
 #[test]
 fn an_edge_target_keys_apart_and_goes_with_its_node() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let edge = mixer(&mut s);
     let key = s.mods_mut().key(edge);
     assert_eq!(

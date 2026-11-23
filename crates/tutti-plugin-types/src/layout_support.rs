@@ -81,7 +81,13 @@ mod tests {
         input: Option<ChannelTopology>,
         output: Option<ChannelTopology>,
     ) -> PluginWiring {
-        let bus = |topology| PluginBus::new(ChannelLayout::STEREO, BusRole::Main).placed(topology);
+        let bus = |topology: Option<ChannelTopology>| {
+            let bus = PluginBus::new(ChannelLayout::STEREO, BusRole::Main);
+            match topology {
+                Some(topology) => bus.placed(topology),
+                None => bus,
+            }
+        };
         PluginWiring {
             inputs: vec![bus(input)],
             outputs: vec![bus(output)],

@@ -693,7 +693,7 @@ pub enum News {
         edits_refused: u64,
         /// `[main-thread]` callbacks the plugin made from another thread, which
         /// the server refused.
-        refused_off_thread_calls: u64,
+        refused_off_thread_calls: tutti_units::Calls,
     },
 }
 

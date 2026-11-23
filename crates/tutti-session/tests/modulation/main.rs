@@ -1,6 +1,9 @@
 //! Modulation through the session: lanes, routes onto params, edge gain and mix.
 
+// The offline sessions the files share.
 mod common;
+#[path = "../support/offline.rs"]
+mod offline;
 
 /// Inert outside `assert_no_alloc`, so every test here may also gate a closure on
 /// allocating nothing.

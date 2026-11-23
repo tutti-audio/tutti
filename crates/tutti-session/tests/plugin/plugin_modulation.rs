@@ -33,7 +33,7 @@ use tutti_session::{
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Depth, Hz, SampleRate, Seconds};
+use tutti_units::{Bipolar, Hz, SampleRate, Seconds};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 /// The plugin's pipeline chunk in a detached session: its `MaxBlock`
@@ -124,41 +124,43 @@ impl Drive {
             s.render_frame(InterleavedMut::one_frame(&mut out).unwrap());
             heard |= out.iter().any(|&x| x != 0.0);
         }
-        std::thread::sleep(Duration::from_millis(5));
         heard
     }
 }
 
 /// Updates until the plugin at `node` has its parameter values read.
 fn wait_for_values(drive: &mut Drive, s: &mut DetachedSession, node: impl Into<NodeKey> + Copy) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !s.plugin_view(node).is_ok_and(|p| p.params().is_ready()) {
-        assert!(
-            Instant::now() < deadline,
-            "the plugin's parameter read never landed"
-        );
-        drive.update(s);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    tutti_fixtures::wait_until(
+        "the plugin's parameter read to land",
+        tutti_fixtures::HANG_GUARD,
+        || {
+            drive.update(s);
+            s.plugin_view(node).is_ok_and(|p| p.params().is_ready())
+        },
+    );
 }
 
 /// The node of `target`'s lane, waiting for it while the declarations apply.
 fn lane_of(drive: &mut Drive, s: &mut DetachedSession, target: ParamRef) -> NodeKey {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        assert!(
-            !s.mod_state()
-                .problems()
-                .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
-            "the declarations apply"
-        );
-        if let Some((key, _)) = s.mod_state().lane(target.key()) {
-            return key;
-        }
-        assert!(Instant::now() < deadline, "no lane on {target:?}");
-        drive.update(s);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let mut lane = None;
+    tutti_fixtures::wait_until(
+        &format!("a lane on {target:?}"),
+        tutti_fixtures::HANG_GUARD,
+        || {
+            assert!(
+                !s.mod_state()
+                    .problems()
+                    .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
+                "the declarations apply"
+            );
+            lane = s.mod_state().lane(target.key()).map(|(key, _)| key);
+            if lane.is_none() {
+                drive.update(s);
+            }
+            lane.is_some()
+        },
+    );
+    lane.expect("the wait ended on a lane")
 }
 
 /// The plugin's own gain, normalized over its declared range: read from the state the
@@ -210,7 +212,7 @@ fn a_modulation_lane_on_the_plugin_survives_its_replacement() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -276,7 +278,7 @@ fn a_crossfaded_plugin_keeps_its_lane_and_a_removed_one_drops_it() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let offset = m.macro_(0.0);
-        m.route(RouteSpec::new(offset, gain, Depth::of(1.0)))
+        m.route(RouteSpec::new(offset, gain, Bipolar::of(1.0)))
             .unwrap();
     }
     let outgoing_lane = lane_of(&mut drive, &mut s, gain);
@@ -366,7 +368,7 @@ fn a_set_under_a_lane_writes_the_knob() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -417,7 +419,7 @@ fn a_set_right_after_the_lane_is_added_writes_the_knob() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -450,7 +452,7 @@ fn a_set_after_the_lane_is_removed_goes_to_the_plugin() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap()
     };
     lane_of(&mut drive, &mut s, gain);
@@ -499,7 +501,7 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let source = m.macro_(1.0);
-        m.route(RouteSpec::new(source, gain, Depth::of(-0.25)))
+        m.route(RouteSpec::new(source, gain, Bipolar::of(-0.25)))
             .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
@@ -525,12 +527,10 @@ fn a_read_landing_under_a_lane_keeps_the_knob_in_the_mirror() {
         .perform(tutti_fixtures::main_thread())
         .expect("the plugin takes the preset");
     s.apply(loaded).expect("the node hosts the plugin");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while cutoff(&s) == before {
-        assert!(Instant::now() < deadline, "the read never landed");
+    tutti_fixtures::wait_until("the read to land", tutti_fixtures::HANG_GUARD, || {
         drive.update(&mut s);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+        cutoff(&s) != before
+    });
     // The knob reported as the read landed is applied by the next update.
     drive.update(&mut s);
 
@@ -584,7 +584,8 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
         let mut m = s.mods_mut();
         m.range_raw(gain, 0.0, 1.0).unwrap();
         let lfo = m.lfo(Lfo::sine().rate(Hz::new(3.0)));
-        m.route(RouteSpec::new(lfo, gain, Depth::of(0.1))).unwrap();
+        m.route(RouteSpec::new(lfo, gain, Bipolar::of(0.1)))
+            .unwrap();
     }
     lane_of(&mut drive, &mut s, gain);
     let knob = s
@@ -638,14 +639,11 @@ fn an_export_is_the_live_render_on_a_clap_gain() {
             Beat::new(beat),
             None,
         ));
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !diagnostics_of(&s, node.into()).chunk_in_flight_answered() {
-            assert!(
-                Instant::now() < deadline,
-                "live block {b}: the chunk before it was never answered (10 s)"
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        tutti_fixtures::wait_until(
+            &format!("live block {b}: the chunk before it to be answered"),
+            tutti_fixtures::HANG_GUARD,
+            || diagnostics_of(&s, node.into()).chunk_in_flight_answered(),
+        );
         side.render(BLOCK, PlanesMut::from_vecs(&mut out).unwrap());
         assert_eq!(
             diagnostics_of(&s, node.into()).chunks().missed,

@@ -45,7 +45,7 @@ use tutti_nodes::{
 };
 use tutti_rt::ParamCell;
 use tutti_units::{
-    Amplitude, BeatsPerCycle, CompressionRatio, Db, Depth, Drive, Feedback, Hz, Mix,
+    Amplitude, BeatsPerCycle, Bipolar, CompressionRatio, Db, Drive, Feedback, Hz, Mix,
     PhaseIncrement, Q, Resonance, SampleRate, Samples, Seconds, UnitAddr, UnitParam,
 };
 
@@ -100,7 +100,7 @@ fn konst(depth: f64) -> Layer {
         },
         wave: Waveform::Const(1.0),
         amount: Amount {
-            depth: Depth::of(depth),
+            depth: Bipolar::of(depth),
             polarity: Polarity::Bipolar,
             curve: Law::Linear,
         },
@@ -245,7 +245,7 @@ fn phaser_of_width(w: usize) -> PhaserNode<f32> {
 /// A node's parts, its controls dropped.
 fn parts_of<N: IntoNode>(node: N) -> NodeParts<()> {
     let NodeParts { node, fork, .. } = node.into_parts();
-    NodeParts::new(node, (), fork)
+    NodeParts::new(node, (), fork, None)
 }
 
 /// One modulatable param of one node type: how to build the node at a

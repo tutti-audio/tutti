@@ -7,7 +7,7 @@
 //! saw edge is about 1 to 2 samples wide at sub-audio rates, and the clamp trims the
 //! polynomial overshoot of its edges.
 //!
-//! A [`Depth`] `d` in `-1..=1` is the amount. Tremolo's gain is
+//! A [`Bipolar`] `d` in `-1..=1` is the amount. Tremolo's gain is
 //! `g = 1 - (|d| - d u) / 2`: depth 0 is unity, and depth 1 swings from unity (at the wave's
 //! peak) to silence (at its trough); a negative depth swings the other way,
 //! `g = 1 - |d| (1 + u) / 2`. Auto-pan's position is `d u`, a [`Pan`](tutti_units::Pan), so
@@ -16,7 +16,7 @@
 use crate::BlockMismatch;
 use crate::block::{expect_same_width, expect_widths};
 use tutti_buffers::{Float, InputOutput};
-use tutti_units::{Depth, Hz, SampleRate};
+use tutti_units::{Bipolar, Hz, SampleRate};
 
 use crate::pan::pan_gains_in;
 use crate::{Oscillator, OscillatorStep, OscillatorWave, PanLaw};
@@ -28,14 +28,14 @@ pub struct TremoloControls {
     /// it; one that is not finite holds the phase.
     pub rate: Hz,
     /// How far the gain swings below unity: 0 none, 1 down to silence.
-    pub depth: Depth,
+    pub depth: Bipolar,
 }
 
 impl TremoloControls {
     /// 5 Hz at half depth.
     pub const DEFAULT: Self = Self {
         rate: Hz::new(5.0),
-        depth: Depth::of(0.5),
+        depth: Bipolar::of(0.5),
     };
 }
 
@@ -46,14 +46,14 @@ pub struct AutoPanControls {
     pub rate: Hz,
     /// How far the position travels either side of the centre: 0 none, 1 hard left to hard
     /// right.
-    pub depth: Depth,
+    pub depth: Bipolar,
 }
 
 impl AutoPanControls {
     /// 1 Hz across the whole field.
     pub const DEFAULT: Self = Self {
         rate: Hz::new(1.0),
-        depth: Depth::FULL,
+        depth: Bipolar::MAX,
     };
 }
 

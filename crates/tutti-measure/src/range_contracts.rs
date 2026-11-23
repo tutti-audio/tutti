@@ -2,6 +2,8 @@
 //! and never clamps, `of` panics, `TryFrom` agrees and carries the refused raw.
 //! One row per type: its test name, the range, then the raws it takes and refuses.
 
+#[cfg(feature = "serde")]
+use tutti_fixtures::check_range_serde;
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_units::{Amplitude, Cents, Confidence, Db, Samples, Seconds};
 
@@ -42,13 +44,16 @@ macro_rules! range_contracts {
         $(#[$doc])*
         #[test]
         fn $name() {
-            check_range_contract(&RangeContract {
+            let contract = RangeContract {
                 new: <$ty>::new,
                 get: <$ty>::get,
                 of: Some(<$ty>::of),
                 valid: &$valid,
                 invalid: &$invalid,
-            });
+            };
+            check_range_contract(&contract);
+            #[cfg(feature = "serde")]
+            check_range_serde(&contract);
         }
     )*};
 }

@@ -295,7 +295,7 @@ mod test_support;
 
 pub use tutti_rt::Param;
 pub use tutti_units::{
-    Amplitude, ArcDegrees, Azimuth, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db, Depth,
+    Amplitude, ArcDegrees, Azimuth, Bipolar, BitDepth, Bpm, Cents, CentsSpan, CompressionRatio, Db,
     Drive, Elevation, Feedback, HoldFactor, Hz, Mix, Q, Resonance, SampleRate, Seconds, Semitones,
     Spread, StereoWidth, Unit,
 };

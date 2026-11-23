@@ -7,6 +7,7 @@
 //! reference render. The probe nodes are `tests/common/probe.rs`'s.
 
 use crate::common;
+use crate::offline::offline_48k;
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -25,8 +26,8 @@ use tutti_session::{
     MainOutput, ModInput, ModKeys, ModRefusal, OutputPort, PHASES, ParamRef, PhaseCx, Problem,
     RouteError, RouteSpec, Session, SessionEvent, TargetName,
 };
-use tutti_units::{BeatsPerCycle, Depth, Hz, ParamAddr, UnitParam};
-use tutti_units::{SampleRate, Samples};
+use tutti_units::Samples;
+use tutti_units::{BeatsPerCycle, Bipolar, Hz, ParamAddr, UnitParam};
 
 use common::probe::{ProbeUnit, Pulse};
 
@@ -37,13 +38,6 @@ const STEP: usize = 32;
 const DECLICK: usize = 240;
 
 /// An offline session at 48 kHz, stereo.
-fn offline() -> Session {
-    Session::builder()
-        .sample_rate(SampleRate::of(RATE))
-        .build()
-        .expect("builds")
-}
-
 /// Every phase at `now`, with `mods` the host's declarations (`None`: the
 /// session's own): one update, at a time the test picks.
 fn update_at(s: &mut Session, now: Instant, mods: Option<ModInput<'_>>) -> Vec<SessionEvent> {
@@ -125,7 +119,7 @@ fn ducked(f: usize, ta: f64, tr: f64) -> f64 {
 /// 100 ms) at depth −0.6, analytically.
 #[test]
 fn the_8_1_example_renders_its_analytic_values() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let filter = s.graph().add(ProbeUnit::new(500.0));
     let pad = s.graph().add(ProbeUnit::of(UnitParam::Volume, 0.8));
     let kick_bus = s.graph().add(ForkByClone(Pulse {
@@ -148,10 +142,10 @@ fn the_8_1_example_renders_its_analytic_values() {
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     m.range_raw(gain, 0.0, 1.0).unwrap();
     let wobble = m.lfo(Lfo::sine().rate(BeatsPerCycle::of(0.5)));
-    m.route(RouteSpec::new(wobble, cutoff, Depth::of(0.3)))
+    m.route(RouteSpec::new(wobble, cutoff, Bipolar::of(0.3)))
         .unwrap();
     let kick = m.follower(Follower::default(), kick_bus);
-    m.route(RouteSpec::new(kick, gain, Depth::of(-0.6)))
+    m.route(RouteSpec::new(kick, gain, Bipolar::of(-0.6)))
         .unwrap(); // sidechain
     settle(&mut s);
 
@@ -221,7 +215,7 @@ impl HostDecl {
                 RouteDecl {
                     source: SourceKey(1),
                     to: RouteTarget::Param(HOST_TARGET),
-                    depth: Depth::of(0.3),
+                    depth: Bipolar::of(0.3),
                     polarity: tutti_modulation::Polarity::Bipolar,
                     curve: tutti_modulation::Law::Linear,
                 },
@@ -262,7 +256,7 @@ impl HostDecl {
 /// committed.
 #[test]
 fn a_target_added_later_resolves_in_that_updates_one_plan() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let keys = HostKeys {
         node: Cell::new(None),
     };
@@ -303,7 +297,7 @@ fn a_target_added_later_resolves_in_that_updates_one_plan() {
 /// the one at 4 s reports it, once, and later ones do not repeat it.
 #[test]
 fn the_unresolved_warning_fires_after_four_seconds_not_n_updates() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let keys = HostKeys {
         node: Cell::new(None),
     };
@@ -356,13 +350,13 @@ fn the_unresolved_warning_fires_after_four_seconds_not_n_updates() {
 /// returns.
 #[test]
 fn a_refusal_names_the_node_and_the_param() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     assert!(m.clear_range(cutoff));
 
@@ -411,13 +405,13 @@ fn a_refusal_names_the_node_and_the_param() {
 /// range is declared the same call succeeds, and the update applies clean.
 #[test]
 fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     assert_eq!(
-        m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5))),
+        m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5))),
         Err(RouteError::UndeclaredRange {
             target: cutoff.into()
         })
@@ -433,7 +427,10 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
 
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
-    assert!(m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5))).is_ok());
+    assert!(
+        m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
+            .is_ok()
+    );
     let _ = s.update();
     assert_eq!(s.mod_state().problems().next(), None, "applies clean");
 }
@@ -443,7 +440,7 @@ fn a_route_onto_an_unranged_target_is_refused_at_the_call() {
 /// nothing.
 #[test]
 fn a_host_and_the_session_cannot_both_declare() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     s.mods_mut().macro_(0.5);
     let keys = HostKeys {
@@ -472,13 +469,13 @@ fn a_host_and_the_session_cannot_both_declare() {
 /// every update).
 #[test]
 fn removing_a_node_through_the_graph_forgets_its_declarations() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
 
@@ -496,13 +493,13 @@ fn removing_a_node_through_the_graph_forgets_its_declarations() {
 /// warn about.
 #[test]
 fn removing_a_node_forgets_its_declarations() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
-    m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     assert!(s.mod_state().lane(cutoff.key()).is_some());
@@ -559,7 +556,7 @@ impl tutti_graph::Node for Late {
 /// figures, before the update returns. Exactly one plan is sent.
 #[test]
 fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let late = s.graph().add(ForkByClone(Late));
     let _ = s.update();
     assert_eq!(
@@ -578,7 +575,7 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let follower = m.follower(Follower::default(), late);
-    m.route(RouteSpec::new(follower, cutoff, Depth::of(0.5)))
+    m.route(RouteSpec::new(follower, cutoff, Bipolar::of(0.5)))
         .unwrap();
 
     let _ = s.update();
@@ -608,14 +605,14 @@ fn a_lane_to_a_node_added_in_the_update_sends_one_plan_with_its_latency() {
 /// through `Graph::add`, so the session sweeps them itself.
 #[test]
 fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
     m.range_raw(cutoff, 0.0, 1_000.0).unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     let (_, lane) = s.mod_state().lane(cutoff.key()).expect("the lane");
@@ -639,7 +636,7 @@ fn an_update_frees_a_program_a_block_held_across_a_route_edit() {
 /// a range edit and a new route each reach the graph on the next update.
 #[test]
 fn an_own_edit_after_a_steady_state_applies() {
-    let mut s = offline();
+    let mut s = offline_48k();
     let probe = s.graph().add(ProbeUnit::new(500.0));
     let cutoff = ParamRef::unit(probe, UnitParam::Cutoff);
     let mut m = s.mods_mut();
@@ -647,7 +644,7 @@ fn an_own_edit_after_a_steady_state_applies() {
         .unwrap();
     let lfo = m.lfo(Lfo::sine().rate(Hz::new(2.0)));
     let route = m
-        .route(RouteSpec::new(lfo, cutoff, Depth::of(0.5)))
+        .route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.5)))
         .unwrap();
     settle(&mut s);
     for _ in 0..4 {

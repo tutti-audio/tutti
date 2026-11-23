@@ -143,7 +143,11 @@ impl Vst3Loaded {
                 } else {
                     BusRole::Aux
                 };
-                PluginBus::new(bus_layout(width), role).placed(usable_topology(arrangement, width))
+                let bus = PluginBus::new(bus_layout(width), role);
+                match usable_topology(arrangement, width) {
+                    Some(topology) => bus.placed(topology),
+                    None => bus,
+                }
             })
             .collect()
     }

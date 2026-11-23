@@ -29,19 +29,14 @@
 //! `tutti-plugin-ipc-ffi` and every other layer-0 crate depend on no workspace
 //! crate because nothing sits below layer 0.
 
+use super::lex::skipped;
 use super::toml::{Kind, Toml, strings};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
 /// Directories under `crates/` or `testing/` that hold data, not a package: the
 /// spec inventories `check-conformance` reads.
 const DATA_DIRS: &[&str] = &["testing/conformance"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// Lowest first. A normal or build dependency must land in a strictly lower layer.
 pub(super) const LAYERS: &[&[&str]] = &[

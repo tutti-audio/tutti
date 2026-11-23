@@ -726,19 +726,43 @@ impl tutti_graph::IntoNode for BoundPlugin {
     fn into_parts(self) -> tutti_graph::NodeParts<Self::Controls> {
         match self.bound {
             BoundPlaced::Served(c) => {
-                let parts = tutti_graph::IntoNode::into_parts(*c);
-                tutti_graph::NodeParts::new(parts.node, Some(parts.controls), parts.fork)
+                let tutti_graph::NodeParts {
+                    node,
+                    controls,
+                    fork,
+                    params,
+                    reclaimer,
+                } = tutti_graph::IntoNode::into_parts(*c);
+                tutti_graph::NodeParts {
+                    node,
+                    controls: Some(controls),
+                    fork,
+                    params,
+                    reclaimer,
+                }
             }
             // The controls are the client's, shared with this node's cells: the
             // session keeps the ones it has.
             BoundPlaced::ServedNode(node, fork) => {
-                tutti_graph::NodeParts::new(node, None, Some(fork))
+                tutti_graph::NodeParts::new(node, None, Some(fork), None)
             }
             // An in-process node has no `PluginControls` (its meter is reached
             // through `Plugin::node_controls`, taken before binding).
             BoundPlaced::InProcess(node) => {
-                let parts = node.into_parts();
-                tutti_graph::NodeParts::new(parts.node, None, parts.fork)
+                let tutti_graph::NodeParts {
+                    node,
+                    fork,
+                    params,
+                    reclaimer,
+                    controls: _,
+                } = node.into_parts();
+                tutti_graph::NodeParts {
+                    node,
+                    controls: None,
+                    fork,
+                    params,
+                    reclaimer,
+                }
             }
         }
     }

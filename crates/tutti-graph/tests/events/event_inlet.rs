@@ -490,6 +490,7 @@ impl IntoNode for Forkable {
             Box::new(TestNode::new(self.0.clone())),
             (),
             Some(Box::new(KindFork(self.0))),
+            None,
         )
     }
 }

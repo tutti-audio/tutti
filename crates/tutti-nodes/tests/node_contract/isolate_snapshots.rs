@@ -59,7 +59,7 @@ use tutti_nodes::{
 };
 use tutti_nodes::{ModalBankConfig, ModalBankNode, Mode, Modes};
 use tutti_units::{
-    Amplitude, Cents, CompressionRatio, Db, Depth, Drive, Feedback, FrequencyRatio, Gain, Hz,
+    Amplitude, Bipolar, Cents, CompressionRatio, Db, Drive, Feedback, FrequencyRatio, Gain, Hz,
     Metres, Normalized, Q, Resonance, SampleRate, Samples, Seconds, Semitones, StereoWidth,
     UnitAddr, UnitParam,
 };
@@ -463,7 +463,7 @@ fn leveller_boosting() {
 #[test]
 fn auto_pan() {
     IsolateRow::new("AutoPanNode", || {
-        AutoPanNode::from(AutoPanConfig::new().depth(Depth::of(0.2)))
+        AutoPanNode::from(AutoPanConfig::new().depth(Bipolar::of(0.2)))
     })
     .control("rate", |p| {
         assert!(p.param_set().set(UnitParam::Rate, 40.0))
@@ -744,7 +744,7 @@ fn lfo() {
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
                 .rate(Hz::new(3.0))
-                .depth(Depth::clamped(0.8)),
+                .depth(Bipolar::clamped(0.8)),
         )
     })
     .control("rate", |l| {

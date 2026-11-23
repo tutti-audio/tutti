@@ -150,17 +150,15 @@ macro_rules! rec_control {
                 let stereo =
                     ChannelTopology::new([Speaker::FrontLeft, Speaker::FrontRight]).unwrap();
                 let mut wiring = PluginWiring {
-                    inputs: vec![
-                        PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo.clone())),
-                    ],
-                    outputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(Some(stereo))],
+                    inputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(stereo.clone())],
+                    outputs: vec![PluginBus::main(ChannelLayout::STEREO).placed(stereo)],
                     features: self.rig.features,
                     ..PluginWiring::default()
                 };
                 if self.rig.key_bus.load(Ordering::Relaxed) {
                     wiring.inputs.push(
                         PluginBus::new(ChannelLayout::MONO, BusRole::Aux)
-                            .placed(Some(ChannelTopology::new([Speaker::FrontCenter]).unwrap())),
+                            .placed(ChannelTopology::new([Speaker::FrontCenter]).unwrap()),
                     );
                 }
                 wiring
@@ -213,8 +211,8 @@ macro_rules! rec_control {
             fn dropped_reported_edits(&self) -> u64 {
                 0
             }
-            fn refused_off_thread_calls(&self) -> u64 {
-                0
+            fn refused_off_thread_calls(&self) -> tutti_units::Calls {
+                tutti_units::Calls::ZERO
             }
             /// The control side's idle flush, which a test makes panic.
             fn flush_edits(&mut self, _: MainThreadMarker) {
@@ -843,7 +841,10 @@ fn a_failed_block_is_counted_in_the_nodes_controls() {
     rig.fail.store(false, Ordering::Relaxed);
     run_block(&mut unit, 64, 64);
     let losses = controls.block_losses();
-    assert_eq!((losses.failed, losses.unlent), (1, 0));
+    assert_eq!(
+        (losses.failed, losses.unlent),
+        (tutti_units::Blocks::new(1), tutti_units::Blocks::ZERO)
+    );
     assert_eq!(controls.dropped_midi_in(), 1, "the failed block's MIDI");
 }
 
@@ -861,7 +862,11 @@ fn a_failed_blocks_cause_reaches_the_plugin_log() {
         let mut unit = unit.log(LogFilter::new(None, Some(RtLevel::Warn)));
         rig.fail.store(true, Ordering::Relaxed);
         run_block(&mut unit, 0, 128);
-        assert_eq!(controls.block_losses().failed, failed, "chunk {chunk:?}");
+        assert_eq!(
+            controls.block_losses().failed,
+            tutti_units::Blocks::new(failed),
+            "chunk {chunk:?}"
+        );
         let [record] = unit.logged() else {
             panic!("chunk {chunk:?}: one record, got {:?}", unit.logged());
         };
@@ -930,7 +935,11 @@ fn a_block_with_a_non_finite_sample_is_counted_in_the_nodes_controls() {
         rig.poison.store(true, Ordering::Relaxed);
         let (mut unit, controls) = node(&rig, 128, tempo(None));
         run_block(&mut unit, 0, 128);
-        assert_eq!(controls.block_losses().nonfinite, want, "chunk {chunk:?}");
+        assert_eq!(
+            controls.block_losses().nonfinite,
+            tutti_units::Blocks::new(want),
+            "chunk {chunk:?}"
+        );
         assert!(
             unit.output()
                 .plane(0)

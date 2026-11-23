@@ -27,7 +27,7 @@ use tutti_modulation::{Follower, Lfo};
 use tutti_nodes::{SvfFilterConfig, SvfFilterNode, SvfType};
 use tutti_session::{InputPort, Key, MainOutput, OutputPort, RouteSpec, Session};
 use tutti_units::Samples;
-use tutti_units::{BeatsPerCycle, Depth, Hz, Q};
+use tutti_units::{BeatsPerCycle, Bipolar, Hz, Q};
 
 const UPDATES: usize = 2_000;
 
@@ -62,11 +62,11 @@ fn scene(n: usize, modulated: bool) -> (Session, Vec<Key<SvfFilterNode<f32>>>) {
             let lfo = m.lfo(
                 Lfo::sine().rate(BeatsPerCycle::new(0.25 + i as f64 / 64.0).expect("above zero")),
             );
-            m.route(RouteSpec::new(lfo, cutoff, Depth::of(0.1)))
+            m.route(RouteSpec::new(lfo, cutoff, Bipolar::of(0.1)))
                 .unwrap();
         }
         let follower = m.follower(Follower::new(), filters[0]);
-        m.route(RouteSpec::new(follower, last.cutoff(), Depth::of(-0.2)))
+        m.route(RouteSpec::new(follower, last.cutoff(), Bipolar::of(-0.2)))
             .unwrap();
     }
     for _ in 0..8 {

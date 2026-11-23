@@ -6,7 +6,6 @@
 
 use crate::loading::{LoadPlugin, Spec};
 use crate::param_reads::ParamReads as _;
-use std::time::Duration;
 use tutti_buffers::PlanesMut;
 use tutti_platform::Instant;
 use tutti_session::MainOutput;
@@ -21,7 +20,7 @@ use tutti_session::{
 };
 use tutti_units::Normalized;
 use tutti_units::ParamId;
-use tutti_units::{Depth, SampleRate};
+use tutti_units::{Bipolar, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -62,22 +61,29 @@ fn update(s: &mut DetachedSession, now: Instant) -> Vec<SessionEvent> {
 
 /// Updates until `target` has a lane, and its knob.
 fn knob_of(s: &mut DetachedSession, target: ParamRef) -> f64 {
-    let deadline = Instant::now() + Duration::from_secs(10);
     let now = Instant::now();
-    loop {
-        assert!(
-            !s.mod_state()
-                .problems()
-                .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
-            "the declarations apply"
-        );
-        if let Some((_, lane)) = s.mod_state().lane(target.key()) {
-            return lane.value().expect("a plugin lane has a knob");
-        }
-        assert!(Instant::now() < deadline, "no lane on {target:?}");
-        update(s, now);
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let mut knob = None;
+    tutti_fixtures::wait_until(
+        &format!("a lane on {target:?}"),
+        tutti_fixtures::HANG_GUARD,
+        || {
+            assert!(
+                !s.mod_state()
+                    .problems()
+                    .any(|p| matches!(p, tutti_session::Problem::Refused { .. })),
+                "the declarations apply"
+            );
+            knob = s
+                .mod_state()
+                .lane(target.key())
+                .map(|(_, lane)| lane.value().expect("a plugin lane has a knob"));
+            if knob.is_none() {
+                update(s, now);
+            }
+            knob.is_some()
+        },
+    );
+    knob.expect("the wait ended on a lane")
 }
 
 /// Calls the one-argument switch `name` the probe exports, in the image the
@@ -112,8 +118,8 @@ fn a_plugin_gui_edit_becomes_the_knob() {
         m.range_raw(p0, 0.0, 1.0).unwrap();
         m.range_raw(p1, 0.0, 1.0).unwrap();
         let zero = m.macro_(0.0);
-        m.route(RouteSpec::new(zero, p0, Depth::of(1.0))).unwrap();
-        m.route(RouteSpec::new(zero, p1, Depth::of(1.0))).unwrap();
+        m.route(RouteSpec::new(zero, p0, Bipolar::of(1.0))).unwrap();
+        m.route(RouteSpec::new(zero, p1, Bipolar::of(1.0))).unwrap();
     }
     // The probe's parameter `i` starts at `i / 16`.
     assert_eq!(knob_of(&mut s, p0), 0.0);
@@ -186,7 +192,7 @@ fn a_plugins_midi_rewiring_keeps_its_lanes() {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
         let offset = m.macro_(1.0);
-        m.route(RouteSpec::new(offset, p0, Depth::of(0.25)))
+        m.route(RouteSpec::new(offset, p0, Bipolar::of(0.25)))
             .unwrap();
     }
     knob_of(&mut s, p0);
@@ -251,7 +257,7 @@ fn a_plugin_echoing_the_lane_keeps_its_knob() {
         let mut m = s.mods_mut();
         m.range_raw(p0, 0.0, 1.0).unwrap();
         let offset = m.macro_(1.0);
-        m.route(RouteSpec::new(offset, p0, Depth::of(0.25)))
+        m.route(RouteSpec::new(offset, p0, Bipolar::of(0.25)))
             .unwrap();
     }
     assert_eq!(knob_of(&mut s, p0), 0.0);

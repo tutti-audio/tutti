@@ -72,10 +72,10 @@ fn new_configs_are_the_documented_starting_synth() {
     assert_eq!(c.volume, MasterVolume::UNITY);
 
     let m = c.filter_mod;
-    assert_eq!(m.mod_wheel_depth, Depth::of(0.0));
-    assert_eq!(m.velocity_depth, Depth::of(0.0));
+    assert_eq!(m.mod_wheel_depth, Bipolar::of(0.0));
+    assert_eq!(m.velocity_depth, Bipolar::of(0.0));
     assert_eq!(m.lfo_rate, None);
-    assert_eq!(m.lfo_depth, Depth::of(0.0));
+    assert_eq!(m.lfo_depth, Bipolar::of(0.0));
 
     let p = PortamentoConfig::new();
     assert_eq!(p.mode, PortamentoMode::Off);

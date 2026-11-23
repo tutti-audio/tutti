@@ -102,6 +102,7 @@ mod held_controllers;
 mod held_keys;
 mod iso8601;
 mod jr_ticks;
+mod lanes;
 mod manufacturer;
 mod message;
 mod messages;

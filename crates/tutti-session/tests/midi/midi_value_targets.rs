@@ -198,11 +198,7 @@ impl IntoNode for HarmonyTap {
     }
 }
 
-impl SessionNode for HarmonyTap {
-    fn reclaimer(_: &()) -> tutti_session::Reclaims {
-        tutti_session::Reclaims::Nothing
-    }
-}
+impl SessionNode for HarmonyTap {}
 
 const C: Harmony = Harmony::chord(60, 60, 0b1001_0001);
 const G: Harmony = Harmony::chord(67, 67, 0b1001_0001);

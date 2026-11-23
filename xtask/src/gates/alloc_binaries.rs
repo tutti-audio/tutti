@@ -20,14 +20,8 @@
 //! `#[global_allocator]` whose `static` item names `AllocDisabler` or `RtAllocCheck` before its
 //! `;`.
 
-use super::lex::{blank, find_word_from, line_of};
+use super::lex::{blank, find_word_from, line_of, skipped};
 use super::{Report, Tree};
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// `(area binary, why it never installs `RtAllocCheck`)`: permanent.
 pub(super) const EXEMPT: &[(&str, &str)] = &[

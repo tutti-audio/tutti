@@ -2,7 +2,7 @@
 //! for a sweep position and the coefficient that tunes a stage to it.
 
 use tutti_buffers::Float;
-use tutti_units::{Bipolar, Depth, Hz, SampleRate};
+use tutti_units::{Bipolar, Hz, SampleRate};
 
 /// The all-pass centre frequency for one LFO value: the sweep range's `min`
 /// at the LFO's trough, its `max` at the peak, scaled toward `min` by `depth`.
@@ -13,7 +13,7 @@ use tutti_units::{Bipolar, Depth, Hz, SampleRate};
 /// The result is not held to any band: [`allpass_complement`] clamps it.
 #[inline]
 #[must_use]
-pub fn sweep_hz(min: Hz, max: Hz, lfo: Bipolar, depth: Depth) -> Hz {
+pub fn sweep_hz(min: Hz, max: Hz, lfo: Bipolar, depth: Bipolar) -> Hz {
     let lfo = lfo.get() * 0.5 + 0.5;
     let (min, max) = (min.get(), max.get());
     Hz::new(min + (max - min) * lfo * depth.get())
@@ -37,7 +37,7 @@ const SWEEP_CEILING: f64 = 0.98;
 ///
 /// The sweep is held inside `SWEEP_FLOOR..=0.98 ·` Nyquist first. Outside it
 /// `tan` of the normalised frequency is negative (a sweep below 0 Hz, which a
-/// negative `Depth` reaches: a depth is held in −1..=1) or past its
+/// negative `Bipolar` reaches: a depth is held in −1..=1) or past its
 /// pole (above Nyquist), `|c|` exceeds 1 and the all-pass diverges. Every
 /// sweep a depth in `0..=1` makes lies in `[min_hz, max_hz]`, inside the hold
 /// (`min_hz >= 20`, `max_hz <= 0.90` of Nyquist), so the hold changes nothing
