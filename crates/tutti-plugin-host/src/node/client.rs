@@ -19,6 +19,8 @@
 //! block. A block is allocation-free in steady state (verified by the
 //! `assert_no_alloc` test in `tests/`).
 
+use crate::MidiMapSlot;
+use crate::midi_map::MidiTranslator;
 use crate::node_losses::LossCounts;
 use crate::param_delivery::chunk_offset;
 use std::marker::PhantomData;
@@ -124,6 +126,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// and `process` size by. Moves are reported through the handle
     /// (`PluginInvalidation`), not here.
     pub(super) declared: Declared,
+    /// The controller map's reader: a mapped message of the event input becomes
+    /// a point in `params`, lent once per block or piece of one.
+    pub(super) midi_map: MidiTranslator,
     /// The event input of the node's shape: MIDI and parameter events.
     pub(super) event_in: InEvents,
     /// The event output of the node's shape, for a plugin that declared MIDI out.
@@ -582,9 +587,13 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, figures) = {
+        let (lost, figures, midi_map) = {
             let instance = inner.lock();
-            (instance.lost_latch(), instance.figure_cell())
+            (
+                instance.lost_latch(),
+                instance.figure_cell(),
+                instance.midi_map().translator(),
+            )
         };
         // The Processor's room: the one on offer, else the predecessor's, else
         // the node's own intake (a node built before its Processor reached it,
@@ -605,6 +614,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             figures,
             reporting: None,
             edits: None,
+            midi_map,
             descriptor,
             reload,
             pipeline,
@@ -673,6 +683,14 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             Some(main) => self.inner.lock().set_render_mode(main, mode, None),
             None => false,
         }
+    }
+
+    /// The control side of this node's controller map: what the plugin declares
+    /// and the app entered, shared by every node over the instance and by the
+    /// handle ([`PluginHandle::midi_map`](crate::PluginHandle::midi_map)).
+    #[must_use]
+    pub fn midi_map(&self) -> MidiMapSlot {
+        self.inner.lock().midi_map()
     }
 
     /// Seeds the parameter delivery with what a live node had delivered

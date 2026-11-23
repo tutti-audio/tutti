@@ -314,6 +314,14 @@ impl Session {
                 });
                 Ok(ControlReply::AppMidiMapApplied { applied }.into())
             }
+            M::GetWiring => {
+                let wiring = self
+                    .plugin
+                    .as_mut()
+                    .map(|p| p.plugin_mut().wiring(main))
+                    .unwrap_or_default();
+                Ok(ControlReply::Wiring { wiring }.into())
+            }
             M::ArmPluginMidiLearn { armed } => {
                 let result = match self.plugin.as_mut() {
                     Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),

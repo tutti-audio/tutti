@@ -393,6 +393,13 @@ fn mock_with(
                 ControlRequest::GetCurrentPreset => {
                     reply_control(&served, id, &ControlReply::CurrentPreset { id: None })
                 }
+                ControlRequest::GetWiring => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::Wiring {
+                        wiring: tutti_plugin_types::PluginWiring::default(),
+                    },
+                ),
                 ControlRequest::GetParameterList
                     if !listing.load(std::sync::atomic::Ordering::Relaxed) =>
                 {

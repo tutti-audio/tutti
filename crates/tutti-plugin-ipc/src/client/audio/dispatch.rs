@@ -1072,6 +1072,13 @@ pub(super) fn handle_control(
             };
             reply.send(result);
         }
+        ControlCommand::GetWiring { reply } => {
+            let wiring = match query(lane, inbox, lifecycle, ControlRequest::GetWiring)? {
+                Some(ControlReply::Wiring { wiring }) => Some(wiring),
+                _ => None,
+            };
+            reply.send(wiring);
+        }
         ControlCommand::GetCurrentPreset { reply } => {
             let value = match query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)? {
                 Some(ControlReply::CurrentPreset { id }) => id,

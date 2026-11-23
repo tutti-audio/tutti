@@ -749,6 +749,49 @@ mod off_main_tests {
         );
     }
 
+    /// **An app entry set through the handle moves its parameter at the next
+    /// block**: a Control Change on any channel lands on parameter 1 by the
+    /// word over the full 32-bit scale, and the answer is the host's.
+    #[test]
+    fn an_app_midi_entry_set_through_the_handle_moves_its_parameter() {
+        let (mut unit, handle, _pump) = loaded();
+        let word = 0x4000_0000_u32;
+        let applied = handle.set_app_midi_map(
+            main_thread(),
+            &[tutti_plugin_types::MidiAssignment {
+                channel: None,
+                source: tutti_plugin_types::MidiSource::ControlChange(tutti_ump::U7::of(1)),
+                param: ParamId::new(1),
+            }],
+        );
+        assert_eq!(applied, tutti_plugin_types::MidiMapApplied::Host);
+        let port = tutti_graph::Node::shape(&*unit.node)
+            .event_input(0)
+            .expect("an event input");
+        unit.events(
+            port,
+            &[tutti_graph::Event::midi(
+                tutti_graph::Offset::of(
+                    tutti_plugin_types::Samples::new(0),
+                    tutti_plugin_types::Samples::new(64),
+                ),
+                tutti_fixtures::midi::cc(
+                    tutti_ump::MidiChannel::of(5),
+                    tutti_ump::CCNumber::MOD_WHEEL,
+                    word,
+                ),
+            )],
+        );
+        unit.block();
+        let read =
+            futures_lite::future::block_on(handle.any_thread().parameter_value(ParamId::new(1)))
+                .flatten()
+                .map(Normalized::get)
+                .expect("a declared parameter");
+        let expected = f64::from(word) / f64::from(u32::MAX);
+        assert!((read - expected).abs() < 1e-6, "{read} against {expected}");
+    }
+
     /// **A write made while the instance is locked is not lost**: the instance
     /// is held (as a long `editor_idle` holds it), a write is made and the main
     /// thread ticks, and once the lock is released the next block applies the

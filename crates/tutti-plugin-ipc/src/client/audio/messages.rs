@@ -196,6 +196,10 @@ pub(super) enum ControlCommand {
         armed: bool,
         reply: Reply<std::result::Result<(), tutti_plugin_types::PluginLearnError>>,
     },
+    /// The plugin's wiring as the server reads it now.
+    GetWiring {
+        reply: Reply<Option<tutti_plugin_types::PluginWiring>>,
+    },
     SetEditorSize {
         size: Size,
         reply: Reply<std::result::Result<Size, EditorError>>,

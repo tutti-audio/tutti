@@ -338,8 +338,8 @@ pub trait Control: EditorWindow {
 
     /// Rebuilds the host's MIDI controller-to-parameter mapping from the plugin
     /// (VST3 `kMidiCCAssignmentChanged`); [`wiring`](Self::wiring) answers the
-    /// table it read from then on. A served plugin's wiring is the one announced
-    /// at load, so a caller of one sees no refresh.
+    /// table it read from then on. A served plugin's wiring is asked of its
+    /// server (`GetWiring`), so a caller of one sees the refresh.
     fn rebuild_midi_mapping(&mut self, main: MainThreadMarker) {
         let _ = main;
     }

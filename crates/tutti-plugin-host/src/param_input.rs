@@ -37,7 +37,9 @@ use super::segment_points::SegmentPoints;
 ///   piece. A point is a grid point when the play clock at its frame
 ///   (`cx.play_at`) is a multiple of 32: past a queue's room grid points go
 ///   first.
-/// - Any other event (MIDI, harmony) goes to `other` with its chunk frame.
+/// - Any other event (MIDI, harmony) goes to `other` with its chunk frame and
+///   the delivery, so a MIDI message the host maps lands as a point in the
+///   walk's own time order.
 ///
 /// The classification is by frame alone: a lane's corner (a breakpoint, a
 /// wrap) that lands on a grid frame is a grid point, and is dropped first
@@ -63,7 +65,7 @@ pub fn take(
     cx: &Cx<'_>,
     segments: &mut SegmentPoints,
     params: &mut ParamDelivery,
-    mut other: impl FnMut(&Event, usize),
+    mut other: impl FnMut(&Event, usize, &mut ParamDelivery),
 ) {
     let (mut ei, mut pi) = (
         events.partition_point(|e| e.offset.index() < from),
@@ -152,7 +154,7 @@ pub fn take(
                 segments.start(params, id, *seg, abs(o), frame, grid(abs(o)));
             }
             Next::Event(e) => match e.kind {
-                EventKind::Midi(_) | EventKind::Harmony(_) => other(e, frame),
+                EventKind::Midi(_) | EventKind::Harmony(_) => other(e, frame, params),
                 // A plugin is no source a lane reads: nothing to re-send.
                 EventKind::Resync => {}
             },
@@ -279,7 +281,7 @@ mod tests {
             &cx,
             &mut segments,
             &mut params,
-            |_, _| {},
+            |_, _, _| {},
         );
         let points: Vec<(u32, f64)> = params.changes().queues[0]
             .points
@@ -359,7 +361,7 @@ mod tests {
             &cx,
             &mut segments,
             &mut params,
-            |_, _| {},
+            |_, _, _| {},
         );
         let points: Vec<(u32, f64)> = params.changes().queues[0]
             .points
@@ -412,7 +414,7 @@ mod tests {
             history: TransportHistory::none(),
             meter: None,
         };
-        take(&[], events, 0, len, 0, &cx, segments, params, |_, _| {});
+        take(&[], events, 0, len, 0, &cx, segments, params, |_, _, _| {});
     }
 
     /// **A parameter the plugin's list did not name keeps its start too.**
@@ -527,7 +529,7 @@ mod tests {
             &cx,
             &mut segments,
             &mut params,
-            |_, _| {},
+            |_, _, _| {},
         );
         let stats = counters.snapshot();
         assert_eq!(stats.grid_points_dropped, 9, "the nine grid frames");
@@ -604,7 +606,7 @@ mod tests {
             &cx,
             &mut segments,
             &mut delivery,
-            |_, frame| seen.push(frame),
+            |_, frame, _| seen.push(frame),
         );
         assert_eq!(seen, [5, 10], "`other` sees the notes on their frames");
         let frames: Vec<u32> = delivery.changes().queues[0]

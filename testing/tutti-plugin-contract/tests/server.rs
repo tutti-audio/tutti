@@ -68,6 +68,15 @@ fn through_server<F: Format>(path: PathBuf) {
         .map(|v| v.get());
     assert_eq!(level, Some(0.5), "a parameter read across the boundary");
 
+    // The wiring is asked of the server, not the load copy: the declared
+    // controller table read across the boundary is the format's own.
+    assert_eq!(
+        handle.wiring(main_thread()).assignments,
+        F::SURFACE.assignments,
+        "{}: the declared table, read from the server now",
+        F::NAME
+    );
+
     // The app's controller entries and the plugin's own learn are asked of the
     // served plugin, which answers as the format does.
     let main = main_thread();

@@ -209,7 +209,10 @@ pub(crate) mod wire;
 /// - **Version 64** appends the host's `SetAppMidiMap` and `ArmPluginMidiLearn`
 ///   and the server's `AppMidiMapApplied` and `PluginMidiLearn` answers: the app's
 ///   controller entries and the plugin's own MIDI learn.
-pub const PROTOCOL_VERSION: u32 = 64;
+/// - **Version 65** appends the host's `GetWiring` and the server's `Wiring`
+///   answer: the plugin's wiring read now, so a table the plugin re-declares
+///   reaches the host.
+pub const PROTOCOL_VERSION: u32 = 65;
 
 /// Largest frame body the control connection carries, either way, in bytes.
 ///
@@ -552,6 +555,7 @@ mod tests {
             control(ControlRequest::ArmPluginMidiLearn { armed: true }),
             25
         );
+        assert_eq!(control(ControlRequest::GetWiring), 26);
 
         let reply = |m: ControlReply| tag(postcard::to_allocvec(&m).unwrap());
         assert_eq!(reply(ControlReply::ParameterValue { value: None }), 1);

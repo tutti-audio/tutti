@@ -434,6 +434,10 @@ pub enum ControlRequest {
         /// Arm (`true`) or disarm.
         armed: bool,
     },
+    /// The plugin's wiring read now
+    /// ([`Control::wiring`](tutti_plugin_types::Control::wiring)), not the
+    /// one announced at load. Answered by [`ControlReply::Wiring`].
+    GetWiring,
 }
 
 /// What the server answers a [`ControlRequest`] with.
@@ -607,6 +611,11 @@ pub enum ControlReply {
     PluginMidiLearn {
         /// Armed, or why not.
         result: Result<(), tutti_plugin_types::PluginLearnError>,
+    },
+    /// Answers a [`ControlRequest::GetWiring`].
+    Wiring {
+        /// The plugin's wiring as it reads now.
+        wiring: tutti_plugin_types::PluginWiring,
     },
 }
 

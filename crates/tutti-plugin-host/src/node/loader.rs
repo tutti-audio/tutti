@@ -193,7 +193,10 @@ where
     };
     // A pump the node's rebinder runs reports through the handle's listeners too.
     client.reporting = Some(reporting.clone());
-    let lost = inner.lock().lost_latch();
+    let (lost, midi_map) = {
+        let instance = inner.lock();
+        (instance.lost_latch(), instance.midi_map())
+    };
     let backend = Arc::new(ControlBackend {
         inner: Arc::clone(&inner),
         param_sink: param_sink.clone(),
@@ -210,7 +213,8 @@ where
     let control: Arc<dyn crate::MainThreadControl> = backend.clone();
     let handle = PluginHandle::from_backend(backend, Some(control), descriptor, loaded, param_sink)
         .invalidate_sink(invalidate_sink)
-        .transport_sink(transport_sink);
+        .transport_sink(transport_sink)
+        .midi_map(midi_map);
 
     Ok((client, handle))
 }
