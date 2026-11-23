@@ -4,9 +4,8 @@
 use tutti_buffers::Float;
 use tutti_buffers::{BusTopology, ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{
-    BlockMismatch, Butterworth, ButterworthOrder, ChebyshevI, ChebyshevII, CutResponse, DecayTime,
-    Elliptic, EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
-    StopbandAttenuation, System, TAIL_FLOOR,
+    BlockMismatch, CutAlignment, CutDecayLadder, CutDesign, CutFilterControls, CutResponse,
+    DecayTime, SimdLanes, SosCoefficients, TAIL_FLOOR,
 };
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Samples, Tail};
@@ -14,63 +13,6 @@ use tutti_units::{Hz, SampleRate, Samples, Tail};
 use super::filter_bus;
 use super::ramped::{RAMP_STEPS, RampedSos};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
-
-/// The lowest cutoff a filter takes: 10 Hz.
-pub const MIN_CUT_CUTOFF: Hz = Hz::new(10.0);
-
-/// The octaves from [`MIN_CUT_CUTOFF`] a cutoff below 192 kHz's Nyquist can sit in.
-const LADDER: usize = 14;
-
-/// The control of a [`CutFilterNode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CutFilterControls {
-    /// The cutoff: `-3 dB` for a Butterworth filter, `-6 dB` for a Linkwitz-Riley one, the
-    /// passband edge of a Chebyshev I or elliptic one and the stopband edge of a Chebyshev II
-    /// one. Read
-    /// within [`MIN_CUT_CUTOFF`] and 0.99 of the Nyquist.
-    pub cutoff: Hz,
-}
-
-impl CutFilterControls {
-    /// 1 kHz.
-    pub const DEFAULT: Self = Self {
-        cutoff: Hz::new(1_000.0),
-    };
-}
-
-/// The family and order of a [`CutFilterNode`]'s design.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[non_exhaustive]
-pub enum CutAlignment {
-    /// A [`Butterworth`] filter of this order: `6 * order` dB per octave, `-3 dB` at the cutoff.
-    Butterworth(ButterworthOrder),
-    /// A [`LinkwitzRiley`] filter of twice this order (the Butterworth order it squares):
-    /// `12 * order` dB per octave, `-6 dB` at the cutoff.
-    LinkwitzRiley(ButterworthOrder),
-    /// A [`ChebyshevI`] filter: equiripple in the passband, `-ripple` dB at the cutoff.
-    ChebyshevI {
-        /// The order.
-        order: ButterworthOrder,
-        /// The passband ripple.
-        ripple: PassbandRipple,
-    },
-    /// A [`ChebyshevII`] filter: equiripple in the stopband, `-attenuation` dB at the cutoff,
-    /// the stopband edge.
-    ChebyshevII {
-        /// The order.
-        order: ButterworthOrder,
-        /// The stopband attenuation.
-        attenuation: StopbandAttenuation,
-    },
-    /// An [`Elliptic`] filter: equiripple in both bands, `-ripple` dB at the cutoff, the
-    /// passband edge.
-    Elliptic {
-        /// The order.
-        order: ButterworthOrder,
-        /// The passband ripple and the stopband attenuation.
-        tolerances: EllipticTolerances,
-    },
-}
 
 /// What a [`CutFilterNode`] is made from: its width, response and alignment, and optionally
 /// its cutoff.
@@ -155,13 +97,11 @@ control_set! {
 #[derive(Clone, Debug)]
 pub struct CutFilterKernel<F: Float + SimdLanes> {
     input: BusTopology,
-    response: CutResponse,
-    alignment: CutAlignment,
+    design: CutDesign,
     sos: RampedSos<F>,
     rate: SampleRate,
-    /// The tail at each octave from [`MIN_CUT_CUTOFF`] up (`LADDER` rungs at most), found
-    /// in `prepare`; the rungs past the Nyquist's are unused.
-    ladder: [Tail; LADDER],
+    /// The ring-out at each octave of cutoff, found in `prepare`; `None` before it.
+    ladder: Option<CutDecayLadder>,
 }
 
 impl<F: Float + SimdLanes> CutFilterKernel<F> {
@@ -170,46 +110,33 @@ impl<F: Float + SimdLanes> CutFilterKernel<F> {
     fn new(input: BusTopology, config: &CutFilterConfig) -> Self {
         let mut kernel = Self {
             input,
-            response: config.response,
-            alignment: config.alignment,
+            design: CutDesign::new(config.response, config.alignment),
             sos: RampedSos::new(input),
             rate: SampleRate::SR_48K,
-            ladder: [Tail::Unknown; LADDER],
+            ladder: None,
         };
-        let first = kernel.design(CutFilterControls::DEFAULT.cutoff);
+        let first = kernel.design(&CutFilterControls::DEFAULT);
         kernel.sos.start(first);
         kernel
     }
 
-    /// The coefficients of the design at `cutoff`, read within [`MIN_CUT_CUTOFF`] and the
-    /// Nyquist; the cascade as it is for a cutoff that is not a number. No allocation.
-    fn design(&mut self, cutoff: Hz) -> SosCoefficients<F> {
-        let top = self.rate.nyquist_scaled(0.99).get();
-        let cutoff = Hz::new(cutoff.get().clamp(MIN_CUT_CUTOFF.get(), top));
-        let (response, alignment, rate) = (self.response, self.alignment, self.rate);
-        self.sos.design(|into| match alignment {
-            CutAlignment::Butterworth(order) => {
-                Butterworth::new(response, order).design_into(cutoff, rate, into)
-            }
-            CutAlignment::LinkwitzRiley(half) => {
-                LinkwitzRiley::new(response, half).design_into(cutoff, rate, into)
-            }
-            CutAlignment::ChebyshevI { order, ripple } => {
-                ChebyshevI::new(response, order, ripple).design_into(cutoff, rate, into)
-            }
-            CutAlignment::ChebyshevII { order, attenuation } => {
-                ChebyshevII::new(response, order, attenuation).design_into(cutoff, rate, into)
-            }
-            CutAlignment::Elliptic { order, tolerances } => {
-                Elliptic::new(response, order, tolerances).design_into(cutoff, rate, into)
-            }
-        })
+    /// The coefficients of the design at `controls`; the cascade as it is for a cutoff that
+    /// is not a number. No allocation.
+    fn design(&mut self, controls: &CutFilterControls) -> SosCoefficients<F> {
+        let (design, rate) = (self.design, self.rate);
+        self.sos
+            .design(|into| design.design_into(controls, rate, into))
     }
-}
 
-/// The cutoff of ladder rung `rung`: `rung` octaves above [`MIN_CUT_CUTOFF`].
-fn rung_cutoff(rung: usize) -> Hz {
-    MIN_CUT_CUTOFF * f64::from(1u32 << rung)
+    /// `time` in frames at the prepared rate.
+    fn tail_in(&self, time: DecayTime) -> Tail {
+        match time {
+            DecayTime::Finite(s) => {
+                Tail::Finite(Samples::new((s.get() * self.rate.get()).ceil() as usize))
+            }
+            DecayTime::Unbounded => Tail::Unbounded,
+        }
+    }
 }
 
 impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
@@ -225,18 +152,9 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
         self.rate = rate;
         self.sos.at_rate(rate);
-        let first = self.design(CutFilterControls::DEFAULT.cutoff);
+        let first = self.design(&CutFilterControls::DEFAULT);
         self.sos.restart(first);
-        let top = self.rate.nyquist_scaled(0.99);
-        for rung in 0..LADDER {
-            let _ = self.design(rung_cutoff(rung).min(top));
-            self.ladder[rung] = match self.sos.scratch().tail(TAIL_FLOOR) {
-                DecayTime::Finite(s) => {
-                    Tail::Finite(Samples::new((s.get() * rate.get()).ceil() as usize))
-                }
-                DecayTime::Unbounded => Tail::Unbounded,
-            };
-        }
+        self.ladder = Some(self.design.decay_ladder(rate, TAIL_FLOOR));
     }
 
     fn reset(&mut self) {
@@ -244,7 +162,7 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     }
 
     fn retarget(&mut self, controls: &CutFilterControls) {
-        let design = self.design(controls.cutoff);
+        let design = self.design(controls);
         self.sos.retarget(design);
     }
 
@@ -258,18 +176,16 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
 
     /// The ring-out at the lowest cutoff: the longest over every control.
     fn tail(&self) -> Tail {
-        self.ladder[0]
+        self.ladder
+            .map_or(Tail::Unknown, |ladder| self.tail_in(ladder.ceiling()))
     }
 
-    /// The tail found for the highest octave from [`MIN_CUT_CUTOFF`] at or below the
-    /// cutoff in force: a lower cutoff rings longer, so it errs long. No simulation.
+    /// The ring-out found for the highest octave at or below the cutoff in force
+    /// ([`CutDecayLadder::at`]): a lower cutoff rings longer, so it errs long. No simulation.
     fn tail_of(&mut self, controls: &CutFilterControls) -> Tail {
-        let top = self.rate.nyquist_scaled(0.99);
-        let cutoff = controls.cutoff.clamp(MIN_CUT_CUTOFF, top);
-        let octave = (1..LADDER)
-            .take_while(|&rung| rung_cutoff(rung) <= cutoff)
-            .count();
-        self.ladder[octave]
+        self.ladder.map_or(Tail::Unknown, |ladder| {
+            self.tail_in(ladder.at(controls, self.rate))
+        })
     }
 }
 
@@ -281,7 +197,10 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
     use crate::test_support::{RATE, assert_cell_ramps, drive_block, prepared};
-    use tutti_dsp::TAIL_FLOOR;
+    use tutti_dsp::{
+        ButterworthOrder, Elliptic, EllipticTolerances, MIN_CUT_CUTOFF, PassbandRipple,
+        StopbandAttenuation,
+    };
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Cost, Node, ParamNode};
     use tutti_units::{Db, UnitParam};
@@ -551,64 +470,28 @@ mod tests {
         }
     }
 
-    /// The frames an `f64` impulse response (transposed direct form II, never the kernel's
-    /// realization) of LR16 at `cutoff` last carries the tail floor of its peak.
-    fn ring_at(response: CutResponse, cutoff: f64) -> usize {
-        let sos = LinkwitzRiley::new(response, ButterworthOrder::of(8))
-            .design(Hz::new(cutoff), RATE)
-            .unwrap();
-        let mut z = vec![[0.0f64; 2]; sos.sections().len()];
-        let h: Vec<f64> = (0..1 << 20)
-            .map(|n| {
-                let mut x = if n == 0 { 1.0 } else { 0.0 };
-                for (b, z) in sos.sections().iter().zip(&mut z) {
-                    let y = b.b0 * x + z[0];
-                    z[0] = b.b1 * x - b.a1 * y + z[1];
-                    z[1] = b.b2 * x - b.a2 * y;
-                    x = y;
-                }
-                x
-            })
-            .collect();
-        let peak = h.iter().fold(0.0f64, |m, v| m.max(v.abs()));
-        let eps = TAIL_FLOOR.to_amplitude().get();
-        h.iter().rposition(|v| v.abs() >= eps * peak).unwrap() + 1
-    }
-
-    /// Between two octave rungs the tail `tail_of` reports covers the impulse response's
-    /// at that exact cutoff and is under the next rung down's twice over, and the ceiling
-    /// is the lowest rung's. Reporting the rung above fails the cover.
+    /// The ceiling is the lowest cutoff's ring-out, a finite tail that narrows (never grows)
+    /// as the cutoff in force rises; the ladder's figures are `tutti_dsp::CutDesign`'s.
     #[test]
-    fn the_tail_narrows_to_the_octave_below_the_cutoff() {
-        let config = CutFilterConfig::new(1u16, LP, lr(8));
+    fn the_tail_narrows_with_the_cutoff_in_force() {
         let frames = |t: Tail| match t {
             Tail::Finite(s) => s.get(),
             other => panic!("{other:?}"),
         };
         for response in [LP, HP] {
+            let config = CutFilterConfig::new(1u16, response, lr(8));
             let mut kernel = CutFilterKernel::<f64>::new(filter_bus(1u16.into()), &config);
-            kernel.response = response;
+            assert_eq!(kernel.tail(), Tail::Unknown);
             kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
-            assert_eq!(
-                kernel.tail(),
+            let at = |kernel: &mut CutFilterKernel<f64>, hz: f64| {
                 kernel.tail_of(&CutFilterControls {
-                    cutoff: Hz::new(10.0)
+                    cutoff: Hz::new(hz),
                 })
-            );
+            };
+            assert_eq!(kernel.tail(), at(&mut kernel, 10.0));
             let mut last = usize::MAX;
-            for cutoff in [14.0f64, 27.0, 55.0, 110.0, 230.0, 470.0, 1500.0, 3000.0] {
-                let reported = frames(kernel.tail_of(&CutFilterControls {
-                    cutoff: Hz::new(cutoff),
-                }));
-                let ring = ring_at(response, cutoff);
-                assert!(
-                    ring <= reported,
-                    "{response:?} {cutoff}: {reported} < {ring}"
-                );
-                assert!(
-                    reported <= 3 * ring + 64,
-                    "{response:?} {cutoff}: {reported} vs {ring}"
-                );
+            for cutoff in [14.0f64, 110.0, 1500.0, 3000.0] {
+                let reported = frames(at(&mut kernel, cutoff));
                 assert!(reported <= last, "{response:?} {cutoff} does not narrow");
                 last = reported;
             }

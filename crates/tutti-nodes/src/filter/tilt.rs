@@ -2,31 +2,13 @@
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Float;
-use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, Tilt};
+use tutti_dsp::{DecayTime, SimdLanes, Sos, SosError, TiltFilterControls};
 use tutti_units::{Db, Hz, SampleRate};
 
 use super::eq::sealed::Sealed;
 use super::eq::{EqControls, EqKernel};
-use super::{MAX_EQ_GAIN, MIN_EQ_CENTER, eq_center, eq_gain, filter_bus};
+use super::filter_bus;
 use crate::kernel::KernelNode;
-
-/// The controls of a [`TiltFilterNode`].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TiltFilterControls {
-    /// The pivot, where the gain is 0 dB. Read within 20 Hz and 0.99 of the Nyquist.
-    pub frequency: Hz,
-    /// The tilt: the gain at Nyquist is half of it and the gain at DC minus half. Read
-    /// within 24 dB.
-    pub gain: Db,
-}
-
-impl TiltFilterControls {
-    /// 1 kHz and 0 dB.
-    pub const DEFAULT: Self = Self {
-        frequency: Hz::new(1_000.0),
-        gain: Db::UNITY,
-    };
-}
 
 /// What a [`TiltFilterNode`] is made from: its width and its controls' start.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -46,7 +28,7 @@ impl TiltFilterConfig {
     }
 }
 
-/// A tilt equalizer of any width, a [`Tilt`] run as one state-variable section
+/// A tilt equalizer of any width, a [`Tilt`](tutti_dsp::Tilt) run as one state-variable section
 /// ([`SosBank`](tutti_dsp::SosBank)) in `f64`: the low end down by half the gain and the high
 /// end up by half, 0 dB at the pivot.
 ///
@@ -54,8 +36,8 @@ impl TiltFilterConfig {
 /// closed form on a 16-frame grid and reached along a line in the section's coefficients
 /// over the next 16 frames with the state kept, so an automated control ramps.
 ///
-/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::decay_time_over`]), the
-/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::decay_time`]). No latency. A [`KernelNode`]. Made from a
+/// The tail is the tail-sum bound over every pivot and gain ([`Tilt::decay_time_over`](tutti_dsp::Tilt::decay_time_over)), the
+/// ceiling; each block narrows it to the bound of the controls in force ([`Tilt::decay_time`](tutti_dsp::Tilt::decay_time)). No latency. A [`KernelNode`]. Made from a
 /// [`TiltFilterConfig`] (`TiltFilterNode::from`).
 ///
 /// # Panics
@@ -98,24 +80,19 @@ impl Sealed for TiltFilterControls {
     const DEFAULT: Self = Self::DEFAULT;
 
     fn held(&self, rate: SampleRate) -> Self {
-        Self {
-            frequency: eq_center(self.frequency, rate),
-            gain: eq_gain(self.gain),
-        }
+        self.held(rate)
     }
 
     fn design_into(&self, rate: SampleRate, into: &mut Sos) -> Result<(), SosError> {
-        Tilt::new(self.gain).design_into(self.frequency, rate, into)
+        self.design_into(rate, into)
     }
 
     fn decay_time(&self, rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
-        Tilt::new(self.gain).decay_time(self.frequency, rate, floor)
+        self.decay_time(rate, floor)
     }
 
-    /// [`Tilt::decay_time_over`] the pivots and gains the controls are read within.
     fn decay_ceiling(rate: SampleRate, floor: Db) -> Result<DecayTime, SosError> {
-        let top = eq_center(rate.nyquist_scaled(0.99), rate);
-        Tilt::decay_time_over(MIN_EQ_CENTER, top, MAX_EQ_GAIN, rate, floor)
+        Self::decay_ceiling(rate, floor)
     }
 }
 
@@ -129,6 +106,7 @@ mod tests {
     use crate::kernel::Kernel;
     use crate::test_support::{RATE, assert_cell_ramps, prepared};
     use tutti_buffers::MaxBlock;
+    use tutti_dsp::Tilt;
     use tutti_graph::Cost;
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
