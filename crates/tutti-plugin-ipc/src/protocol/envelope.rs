@@ -30,7 +30,7 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
-/// Wire-deserialization fallback for [`ControlRequest::LoadPlugin::block_size`]
+/// Wire-deserialization fallback for [`LoadPlugin::block_size`]
 /// when a message arrives without the field. The operative value at runtime
 /// comes from `config.max_buffer_size` (see `subprocess::launch`); this is
 /// only a safety net.
