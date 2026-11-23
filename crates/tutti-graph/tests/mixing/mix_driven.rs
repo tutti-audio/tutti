@@ -18,7 +18,7 @@ use tutti_graph::testing as common;
 use std::collections::BTreeMap;
 use std::sync::atomic::Ordering;
 
-use common::{Kind, Pair, SpecBehaviour, driver_value, input_signal, prepare};
+use common::{Harness, Kind, SpecBehaviour, driver_value, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CompileError, CycleEdge, Edge, Editor, EventOutputPort, ForkTarget, GraphInvalid, GraphSpec,
@@ -113,9 +113,9 @@ fn stepped(n: usize, shift: usize) -> Option<f32> {
 struct Rig {
     kinds: BTreeMap<NodeKey, Kind>,
     spec: GraphSpec,
-    /// The mix of the node (key 2) a pair starts at: its base.
+    /// The mix of the node (key 2) a harness starts at: its base.
     base: Option<Mix>,
-    /// The range of the node's mix a pair starts with.
+    /// The range of the node's mix a harness starts with.
     range: Option<ParamRange>,
 }
 
@@ -156,23 +156,23 @@ impl Rig {
 /// Render `blocks` blocks of `BLOCK` frames on `workers` participants,
 /// the node's output and the input.
 fn render(rig: &Rig, workers: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let mut pair = Pair::with_workers(BLOCK, workers);
+    let mut harness = Harness::with_workers(BLOCK, workers);
     if let Some(base) = rig.base {
-        pair.start_mix(key(2), base);
+        harness.start_mix(key(2), base);
     }
     if let Some(range) = rig.range {
-        pair.start_param_range(mix_of(2), range);
+        harness.start_param_range(mix_of(2), range);
     }
-    pair.switch(&rig.graph(), &rig.kinds);
-    run(&mut pair, 0, blocks)
+    harness.switch(&rig.graph(), &rig.kinds);
+    run(&mut harness, 0, blocks)
 }
 
-/// `blocks` more blocks of `pair` from frame `from`.
-fn run(pair: &mut Pair, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
+/// `blocks` more blocks of `harness` from frame `from`.
+fn run(harness: &mut Harness, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
     let (mut got, mut x) = (Vec::new(), Vec::new());
     for b in 0..blocks {
         let input = input_signal((from + b * BLOCK) as u64, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         got.extend(&a[0]);
         x.extend(&input);
     }
@@ -236,16 +236,16 @@ fn a_driven_mix_renders_the_analytic_blend() {
 /// A driven block is never taken for a static one because its ends agree: with
 /// a block of seven driver periods (112 frames) the lane's last frame is the
 /// same step every block, so the previous block's value and this block's are
-/// equal while the frames between differ (the differential suite found it).
+/// equal while the frames between differ.
 #[test]
 fn a_driven_block_whose_ends_agree_is_not_static() {
     const SEVEN: usize = 7 * PERIOD as usize;
     let rig = Rig::new(plain(), 0, None);
-    let mut pair = Pair::new(SEVEN);
-    pair.switch(&rig.graph(), &rig.kinds);
+    let mut harness = Harness::new(SEVEN);
+    harness.switch(&rig.graph(), &rig.kinds);
     for b in 0..4 {
         let input = input_signal((b * SEVEN) as u64, SEVEN);
-        let (a, _) = pair.block(SEVEN, &input);
+        let a = harness.block(SEVEN, &input);
         for n in 0..SEVEN {
             let f = b * SEVEN + n;
             let m = stepped(f, 0).expect("step").clamp(0.0, 1.0);
@@ -292,11 +292,11 @@ fn a_driven_mix_is_clamped_to_its_range_and_to_the_blend() {
 #[test]
 fn a_range_moved_between_blocks_clamps_from_the_next() {
     let rig = Rig::new(plain(), 0, None);
-    let mut pair = Pair::new(BLOCK);
-    pair.switch(&rig.graph(), &rig.kinds);
-    let (first, _) = run(&mut pair, 0, 2);
-    pair.set_mix_range(key(2), ParamRange::of(0.5, 0.5));
-    let (second, x) = run(&mut pair, 2 * BLOCK, 2);
+    let mut harness = Harness::new(BLOCK);
+    harness.switch(&rig.graph(), &rig.kinds);
+    let (first, _) = run(&mut harness, 0, 2);
+    harness.set_mix_range(key(2), ParamRange::of(0.5, 0.5));
+    let (second, x) = run(&mut harness, 2 * BLOCK, 2);
     let (_, x0) = (0, input_signal(0, 2 * BLOCK));
     for (n, &g) in first.iter().enumerate() {
         let m = stepped(n, 0).expect("step").clamp(0.0, 1.0);
@@ -337,10 +337,10 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     );
     let held = (driver_value(0, 1 << 20) * 2.0).clamp(0.0, 1.0);
 
-    let mut pair = Pair::new(BLOCK);
-    pair.start_mix(key(2), Mix::new(base));
-    pair.switch(&rig.graph(), &rig.kinds);
-    let (got, x) = run(&mut pair, 0, 2);
+    let mut harness = Harness::new(BLOCK);
+    harness.start_mix(key(2), Mix::new(base));
+    harness.switch(&rig.graph(), &rig.kinds);
+    let (got, x) = run(&mut harness, 0, 2);
     for (n, &g) in got.iter().enumerate() {
         assert_eq!(
             g.to_bits(),
@@ -349,9 +349,9 @@ fn a_source_that_goes_is_declicked_to_the_base() {
         );
     }
     rig.spec.disconnect_param(mix_of(2), lane_out(1));
-    pair.switch(&rig.graph(), &rig.kinds);
+    harness.switch(&rig.graph(), &rig.kinds);
     let d = common::declick();
-    let (got, x) = run(&mut pair, 2 * BLOCK, d / BLOCK + 2);
+    let (got, x) = run(&mut harness, 2 * BLOCK, d / BLOCK + 2);
     for (j, &g) in got.iter().enumerate() {
         let m = if j < d {
             let (out, inn) = common::smooth_gains(j, d);
@@ -378,12 +378,12 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_node() {
         },
     );
     let held = (driver_value(0, 1 << 20) * 2.0).clamp(0.0, 1.0);
-    let mut pair = Pair::new(BLOCK);
-    pair.start_mix(key(2), Mix::new(0.25));
-    pair.switch(&rig.graph(), &rig.kinds);
+    let mut harness = Harness::new(BLOCK);
+    harness.start_mix(key(2), Mix::new(0.25));
+    harness.switch(&rig.graph(), &rig.kinds);
     for round in 0..3 {
         let input = input_signal(0, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         for n in 0..BLOCK {
             let want = blend(3.0 * input[n], input[n], held as f32);
             assert_eq!(
@@ -392,7 +392,7 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_node() {
                 "round {round}, frame {n}"
             );
         }
-        pair.switch(&rig.graph(), &rig.kinds);
+        harness.switch(&rig.graph(), &rig.kinds);
     }
 }
 
@@ -402,17 +402,17 @@ fn a_driven_lane_survives_a_commit_that_keeps_its_node() {
 #[test]
 fn the_mode_wins_over_a_driven_mix() {
     let rig = Rig::new(plain(), 0, None);
-    let mut pair = Pair::new(BLOCK);
-    pair.switch(&rig.graph(), &rig.kinds);
-    pair.set_mode(key(2), NodeMode::Bypassed);
-    let (got, x) = run(&mut pair, 0, 14);
+    let mut harness = Harness::new(BLOCK);
+    harness.switch(&rig.graph(), &rig.kinds);
+    harness.set_mode(key(2), NodeMode::Bypassed);
+    let (got, x) = run(&mut harness, 0, 14);
     // After the declick the bypassed node is the input, whatever the lane.
     for n in 256..got.len() {
         assert_eq!(got[n].to_bits(), x[n].to_bits(), "bypassed, frame {n}");
     }
-    pair.set_mode(key(2), NodeMode::Active);
+    harness.set_mode(key(2), NodeMode::Active);
     let from = 14 * BLOCK;
-    let (got, x) = run(&mut pair, from, 12);
+    let (got, x) = run(&mut harness, from, 12);
     // Past the fade (and the warm-up of a node with no latency: none), the
     // blend at the lane's mix.
     for n in 256..got.len() {

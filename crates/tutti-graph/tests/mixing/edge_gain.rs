@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use common::{Kind, Pair, TestNode, bits, input_signal, prepare};
+use common::{Harness, Kind, TestNode, bits, input_signal, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
@@ -167,10 +167,10 @@ impl std::ops::Deref for Weighed {
 }
 
 impl Weighed {
-    /// Starts `pair`'s lanes at their bases.
-    fn start(&self, pair: &mut Pair) {
+    /// Starts `harness`'s lanes at their bases.
+    fn start(&self, harness: &mut Harness) {
         for &(id, base) in &self.bases {
-            pair.start_edge_gain(id, base);
+            harness.start_edge_gain(id, base);
         }
     }
 }
@@ -197,14 +197,14 @@ fn render(
     workers: usize,
     blocks: usize,
 ) -> Vec<Vec<f32>> {
-    let mut pair = Pair::with_workers(BLOCK, workers);
-    graph.start(&mut pair);
-    pair.switch(graph, kinds);
-    let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
+    let mut harness = Harness::with_workers(BLOCK, workers);
+    graph.start(&mut harness);
+    harness.switch(graph, kinds);
+    let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
     let mut frame = 0;
     for _ in 0..blocks {
         let input = input_signal(frame, BLOCK);
-        let (a, _) = pair.block(BLOCK, &input);
+        let a = harness.block(BLOCK, &input);
         for (g, a) in got.iter_mut().zip(a) {
             g.extend(a);
         }
@@ -442,36 +442,39 @@ fn a_move_ramps_across_the_block_from_the_last_weight() {
     for workers in [1usize, 4] {
         let (fan, _) = one_lane();
         let graph = fan.spec(&[a]);
-        let mut pair = Pair::with_workers(BLOCK, workers);
-        graph.start(&mut pair);
-        pair.switch(&graph, &fan.kinds);
+        let mut harness = Harness::with_workers(BLOCK, workers);
+        graph.start(&mut harness);
+        harness.switch(&graph, &fan.kinds);
         let id = fan.edge(1);
-        let run = |pair: &mut Pair, frames: usize| {
-            let (x, _) = pair.block(frames, &input_signal(0, frames));
+        let run = |harness: &mut Harness, frames: usize| {
+            let x = harness.block(frames, &input_signal(0, frames));
             x.into_iter().next().expect("one output")
         };
         // Block 1: no ramp, the weight itself.
-        assert!(run(&mut pair, BLOCK).iter().all(|&x| x == a), "first block");
+        assert!(
+            run(&mut harness, BLOCK).iter().all(|&x| x == a),
+            "first block"
+        );
         // Block 2: a move, a short block.
-        pair.set_edge_gain(id, amp(b));
-        let got = run(&mut pair, 40);
+        harness.set_edge_gain(id, amp(b));
+        let got = run(&mut harness, 40);
         for (i, (&g, w)) in got.iter().zip(ramp(a, b, 40)).enumerate() {
             assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "ramp, frame {i}");
         }
         // Block 3: nothing moved: static at the target, exactly.
         assert!(
-            run(&mut pair, BLOCK).iter().all(|&x| x == b),
+            run(&mut harness, BLOCK).iter().all(|&x| x == b),
             "static after a ramp"
         );
         // Block 4: a second move ramps from the target.
-        pair.set_edge_gain(id, amp(c));
-        let got = run(&mut pair, BLOCK);
+        harness.set_edge_gain(id, amp(c));
+        let got = run(&mut harness, BLOCK);
         for (i, (&g, w)) in got.iter().zip(ramp(b, c, BLOCK)).enumerate() {
             assert_eq!(g.to_bits(), (0.0 + w * 1.0).to_bits(), "second ramp, {i}");
         }
         // A move to the weight it already has is no move.
-        pair.set_edge_gain(id, amp(c));
-        assert!(run(&mut pair, BLOCK).iter().all(|&x| x == c));
+        harness.set_edge_gain(id, amp(c));
+        assert!(run(&mut harness, BLOCK).iter().all(|&x| x == c));
     }
 }
 
@@ -494,14 +497,14 @@ fn a_ramping_lane_is_not_fused() {
     for at_port in [false, true] {
         let fan = Fan::new(&values, at_port);
         for workers in [1usize, 4] {
-            let mut pair = Pair::with_workers(BLOCK, workers);
+            let mut harness = Harness::with_workers(BLOCK, workers);
             let graph = fan.spec(&[first, from]);
-            graph.start(&mut pair);
-            pair.switch(&graph, &fan.kinds);
+            graph.start(&mut harness);
+            harness.switch(&graph, &fan.kinds);
             let input = input_signal(0, BLOCK);
-            pair.block(BLOCK, &input);
-            pair.set_edge_gain(fan.edge(2), amp(to));
-            let (a, _) = pair.block(BLOCK, &input);
+            harness.block(BLOCK, &input);
+            harness.set_edge_gain(fan.edge(2), amp(to));
+            let a = harness.block(BLOCK, &input);
             assert_eq!(
                 bits(&a[..1]),
                 bits(std::slice::from_ref(&want)),
@@ -521,15 +524,12 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
     let values = [1.0f32, 0.5];
     let fan = Fan::new(&values, false);
     for workers in [1usize, 4] {
-        let mut pair = Pair::with_workers(BLOCK, workers);
+        let mut harness = Harness::with_workers(BLOCK, workers);
         let first = fan.spec(&[0.25, 1.0]);
-        first.start(&mut pair);
-        pair.switch(&first, &fan.kinds);
-        let step = |pair: &mut Pair| {
-            let (x, _) = pair.block(BLOCK, &input_signal(0, BLOCK));
-            x
-        };
-        let b1 = step(&mut pair);
+        first.start(&mut harness);
+        harness.switch(&first, &fan.kinds);
+        let step = |harness: &mut Harness| harness.block(BLOCK, &input_signal(0, BLOCK));
+        let b1 = step(&mut harness);
         assert!(b1[0].iter().all(|&x| x == 0.25 * 1.0 + 0.5 * 1.0));
 
         // Same wiring, a new base for each lane: a commit (a recompile, with
@@ -537,10 +537,10 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
         // weight they had.
         let second = fan.spec(&[2.0, 0.5]);
         for &(id, base) in &second.bases {
-            pair.set_edge_gain(id, base);
+            harness.set_edge_gain(id, base);
         }
-        pair.switch(&second, &fan.kinds);
-        let b2 = step(&mut pair);
+        harness.switch(&second, &fan.kinds);
+        let b2 = step(&mut harness);
         let (w1, w2) = (ramp(0.25, 2.0, BLOCK), ramp(1.0, 0.5, BLOCK));
         for (i, (&g, (&w1, &w2))) in b2[0].iter().zip(w1.iter().zip(&w2)).enumerate() {
             let want = (0.0 + w1 * 1.0) + w2 * 0.5;
@@ -553,13 +553,13 @@ fn a_lane_survives_a_commit_that_keeps_its_edge() {
             spec.set_edge_gain(fan.edge(2), EdgeGain::default());
             spec.validate().expect("valid")
         };
-        pair.switch(&third, &fan.kinds);
-        step(&mut pair);
+        harness.switch(&third, &fan.kinds);
+        step(&mut harness);
         // Add it back at a new value: a new lane, no ramp.
         let fourth = fan.spec(&[4.0, 0.5]);
-        pair.start_edge_gain(fan.edge(1), amp(4.0));
-        pair.switch(&fourth, &fan.kinds);
-        let b4 = step(&mut pair);
+        harness.start_edge_gain(fan.edge(1), amp(4.0));
+        harness.switch(&fourth, &fan.kinds);
+        let b4 = step(&mut harness);
         let want: f32 = (0.0 + 4.0 * 1.0) + 0.5 * 0.5;
         assert!(
             b4[0].iter().all(|&x| x.to_bits() == want.to_bits()),

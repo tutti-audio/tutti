@@ -186,7 +186,7 @@ pub fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
         // Audio fan-in: a port now and then
         // takes several distinct sources (direct, main input or feedback), which
         // the compiled op sums in `Edge` order, silent addends skipped, and
-        // the reference folds from `+0.0`. A hub is wider than `MAX_PORTS`
+        // a fold starts from `+0.0`. A hub is wider than `MAX_PORTS`
         // when enough earlier outputs exist (a chain of sum ops).
         let mut fan = std::mem::replace(&mut desc.fan, Rng::new(1));
         let mut set: Vec<Edge> = edge.into_iter().collect();
@@ -442,4 +442,19 @@ pub fn schedule(which: usize, seed: u64, frames: usize) -> Vec<usize> {
         total += n;
     }
     out
+}
+
+/// Declared costs for `desc`'s nodes, a pure function of the seed: about
+/// two in three declare `Cost::Light`, a few `Cost::Moderate`, the rest
+/// nothing (`Cost::Heavy`) — so cheap siblings pack beside heavy tasks that keep the plan parallel.
+pub fn random_costs(desc: &Desc, seed: u64) -> BTreeMap<NodeKey, tutti_graph::Cost> {
+    let mut rng = Rng::new(seed ^ 0xC057);
+    desc.kinds
+        .keys()
+        .filter_map(|&k| match rng.below(6) {
+            0..=3 => Some((k, tutti_graph::Cost::Light)),
+            4 => Some((k, tutti_graph::Cost::Moderate)),
+            _ => None,
+        })
+        .collect()
 }

@@ -20,7 +20,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common::{Kind, Pair, SpecBehaviour, TestNode, bits, prepare};
+use common::{Harness, Kind, SpecBehaviour, TestNode, bits, prepare};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     CommitError, Cx, Edge, Editor, EventOutputPort, FadeLaw, ForkTarget, GraphSpec, InputPort, Io,
@@ -30,7 +30,7 @@ use tutti_graph::{
 use tutti_units::{Mix, Samples, Tail};
 
 const BLOCK: usize = 64;
-/// The most a block here is: what every `Pair` is prepared for.
+/// The most a block here is: what every `Harness` is prepared for.
 const MAX_BLOCK: usize = 128;
 /// `DECLICK` at the rig's 48 kHz.
 const FADE: usize = 240;
@@ -88,10 +88,10 @@ fn ramp(from: f64, to: f64, i: usize, frames: usize) -> f32 {
     from + (to - from) * ((i + 1) as f32 / frames as f32)
 }
 
-/// A `Pair` over one node (key 1) fed by main input 0, with its mix (and
+/// A `Harness` over one node (key 1) fed by main input 0, with its mix (and
 /// mode) set before the first block: a unit starts steady in them.
 struct Rig {
-    pair: Pair,
+    harness: Harness,
     frame: u64,
 }
 
@@ -103,26 +103,26 @@ impl Rig {
         t.connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(1, 0)]);
         let spec = GraphSpec::new(t);
-        let mut pair = Pair::with_workers(MAX_BLOCK, workers);
+        let mut harness = Harness::with_workers(MAX_BLOCK, workers);
         if let Some(m) = mix {
-            pair.start_mix(key(1), m);
+            harness.start_mix(key(1), m);
         }
         if let Some(m) = mode {
-            pair.start_mode(key(1), m);
+            harness.start_mode(key(1), m);
         }
-        pair.switch(
+        harness.switch(
             &spec.validate().expect("valid"),
             &BTreeMap::from([(key(1), kind.clone())]),
         );
-        Self { pair, frame: 0 }
+        Self { harness, frame: 0 }
     }
 
     fn mix(&mut self, mix: Mix) {
-        self.pair.set_mix(key(1), mix);
+        self.harness.set_mix(key(1), mix);
     }
 
     fn mode(&mut self, mode: NodeMode) {
-        self.pair.set_mode(key(1), mode);
+        self.harness.set_mode(key(1), mode);
     }
 
     /// Render `blocks` (each a block length) of the signal `x`; the
@@ -131,7 +131,7 @@ impl Rig {
         let mut all = Vec::new();
         for &n in blocks {
             let input: Vec<f32> = (0..n as u64).map(|i| x(self.frame + i)).collect();
-            let (a, _) = self.pair.block(n, &input);
+            let a = self.harness.block(n, &input);
             all.extend(&a[0]);
             self.frame += n as u64;
         }

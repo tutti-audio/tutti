@@ -11,7 +11,7 @@ use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
 
-use common::{Kind, Pair, TestNode, bits, input_signal, prepare, shapes_of};
+use common::{Harness, Kind, TestNode, bits, input_signal, prepare, shapes_of};
 use tutti_buffers::{BufferError, Float, FoldError};
 use tutti_buffers::{BusTopology, ChannelLayout, ChannelTopology};
 use tutti_graph::Node;
@@ -169,17 +169,17 @@ impl Rig {
 
     /// `blocks` blocks on `workers` participants.
     fn render(&self, workers: usize, blocks: usize) -> Vec<Vec<f32>> {
-        let mut pair = Pair::with_workers(BLOCK, workers);
-        // A lane's weight is the fold's: the pair starts it at that base.
+        let mut harness = Harness::with_workers(BLOCK, workers);
+        // A lane's weight is the fold's: the harness starts it at that base.
         let lowering = self.lowering().expect("lowers");
         for (&id, &weight) in &lowering.lanes {
-            pair.start_edge_gain(id, weight);
+            harness.start_edge_gain(id, weight);
         }
-        pair.switch(&lowering.spec.validate().expect("valid"), &self.kinds);
-        let mut got: Vec<Vec<f32>> = vec![Vec::new(); pair.outputs];
+        harness.switch(&lowering.spec.validate().expect("valid"), &self.kinds);
+        let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
         for b in 0..blocks {
             let input = input_signal((b * BLOCK) as u64, BLOCK);
-            let (a, _) = pair.block(BLOCK, &input);
+            let a = harness.block(BLOCK, &input);
             for (g, a) in got.iter_mut().zip(a) {
                 g.extend(a);
             }
@@ -357,7 +357,7 @@ fn seven_one_into_stereo_reads_out_the_matrix() {
     }
 }
 
-/// Widening zero-fills: stereo into 5.1 passes the pair through at unity and
+/// Widening zero-fills: stereo into 5.1 passes the harness through at unity and
 /// leaves the four new channels silent; nothing invents a centre (placement
 /// is a panner's, put there on purpose). A silent destination channel has no
 /// lane at all.

@@ -27,7 +27,7 @@
 //!   interrupted, and is clamped by a range without being rewritten;
 //! - a NaN range is refused; removing a driven node leaves the graph
 //!   committable;
-//! - the executor and the reference interpreter agree bit for bit on random
+//! - a parallel render and the one-participant render agree bit for bit on random
 //!   driven graphs (steps, ramps, shaped ramps and curve segments among
 //!   their sources), across recompiles, base moves, latency changes and
 //!   regenerations.
@@ -38,7 +38,6 @@
 //! `tests/executor/contract.rs`'s `param_echo`, and the allocation gate
 //! `tests/rt_no_alloc.rs`'s `modulated_params_are_allocation_free`.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
@@ -50,7 +49,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     CommitError, Cx, Editor, EventOutputPort, Executor, ForkByClone, ForkTarget, Io, Law, Node,
     ParamEvent, ParamIn, ParamInput, ParamRamp, ParamRange, ParamRangeError, ParamSegment, Prepare,
-    Reference, Shape, Status, TransportPosition, Unforkable,
+    Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Hz, Latency, ParamKey, Q, Real, SampleRate, Samples, UnitParam};
@@ -1037,9 +1036,8 @@ impl Node for LatentHold {
 /// and `latency::plan` over the whole spec (`GraphSpec`'s `LatencyGraph`,
 /// what a latency readout folds) reports the same total.
 ///
-/// The differential's reference shares the compiler's arrival, so this test pins
-/// the spec's fold of param sources (`compile_passes.rs` pins its event
-/// sources).
+/// This test pins the spec's fold of param sources (`compile_passes.rs` pins its
+/// event sources).
 #[test]
 fn a_param_source_counts_toward_arrival_in_both_solves() {
     let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
@@ -2054,7 +2052,7 @@ fn a_shrinking_range_rewrites_neither_the_base_nor_a_ramp() {
     }
 }
 
-// ---- differential: the executor against the reference ----------------------
+// ---- random driven graphs: the parallel render is the one-participant render ----
 
 /// One generated graph: per-frame signals and ramp sources driving probes,
 /// some behind a latent sibling (so their param sources are delayed by
@@ -2254,91 +2252,65 @@ fn generator() -> impl Strategy<Value = Gen> {
 }
 
 /// Key layout: signals `100 + i`, ramp sources `200 + i`, probes `300 + i`,
-/// siblings `400 + i`.
-fn run_differential(g: &Gen) {
+/// siblings `400 + i`. Returns every step's output, channel by channel, from
+/// an executor on `workers` participants.
+fn render_generated(g: &Gen, workers: usize) -> Vec<Vec<Vec<f32>>> {
     let prep = prepare(MAX_BLOCK);
     let (mut ed, mut exec) = Editor::new(prep);
-    let mut reference = Reference::new(prep);
-    // One pair of base cells per interpreter per probe.
-    let cells: Vec<[[Cell; 2]; 2]> = g
+    if workers > 1 {
+        exec.set_pool(Some(tutti_graph::testing::test_pool(workers)));
+    }
+    let cells: Vec<[Cell; 2]> = g
         .probes
         .iter()
-        .map(|_| {
-            [
-                [Cell::new(0.5), Cell::new(-0.25)],
-                [Cell::new(0.5), Cell::new(-0.25)],
-            ]
-        })
+        .map(|_| [Cell::new(0.5), Cell::new(-0.25)])
         .collect();
-    let probe =
-        |i: usize, side: usize| Probe::new(&cells[i][side][0], &cells[i][side][1]).with_corners();
+    let probe = |i: usize| Probe::new(&cells[i][0], &cells[i][1]).with_corners();
 
-    let mut fresh: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
     let mut outputs = Vec::new();
     for (i, &seed) in g.signals.iter().enumerate() {
-        let k = NodeKey(100 + i as u64);
-        ed.insert(k, "sig", Unforkable(Signal { seed }));
-        fresh.insert(k, Box::new(Signal { seed }));
+        ed.insert(NodeKey(100 + i as u64), "sig", Unforkable(Signal { seed }));
     }
     for (i, plan) in g.ramps.iter().enumerate() {
-        let k = NodeKey(200 + i as u64);
-        let segs = g.segs[i].clone();
-        let shaped = g.shaped[i].clone();
         ed.insert(
-            k,
+            NodeKey(200 + i as u64),
             "ramps",
             Unforkable(Ramps {
                 plan: plan.clone(),
-                segs: segs.clone(),
-                shaped: shaped.clone(),
-                events: Vec::new(),
-            }),
-        );
-        fresh.insert(
-            k,
-            Box::new(Ramps {
-                plan: plan.clone(),
-                segs,
-                shaped,
+                segs: g.segs[i].clone(),
+                shaped: g.shaped[i].clone(),
                 events: Vec::new(),
             }),
         );
     }
     for (i, &lag) in g.probes.iter().enumerate() {
         let k = NodeKey(300 + i as u64);
-        ed.insert(k, "probe", Unforkable(probe(i, 0)));
-        fresh.insert(k, Box::new(probe(i, 1)));
+        ed.insert(k, "probe", Unforkable(probe(i)));
         for c in 0..4 {
             outputs.push(PortSource::Node(OutputPort::new(k, c)));
         }
         // Every probe has a sibling (of latency 0 when it adds none), so a
         // later latency change has a node to re-insert.
-        {
-            let s = NodeKey(400 + i as u64);
-            ed.insert(s, "lag", Unforkable(Lag::new(lag)));
-            fresh.insert(s, Box::new(Lag::new(lag)));
-            // Fed by the first signal, so the sibling carries something.
-            ed.spec_mut().topology.edges.insert(
-                InputPort::new(s, 0),
-                vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                    NodeKey(100),
-                    0,
-                )))],
-            );
-            ed.spec_mut().topology.edges.insert(
-                InputPort::new(k, 0),
-                vec![Edge::Direct(PortSource::Node(OutputPort::new(s, 0)))],
-            );
-        }
+        let s = NodeKey(400 + i as u64);
+        ed.insert(s, "lag", Unforkable(Lag::new(lag)));
+        // Fed by the first signal, so the sibling carries something.
+        ed.spec_mut().topology.edges.insert(
+            InputPort::new(s, 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(
+                NodeKey(100),
+                0,
+            )))],
+        );
+        ed.spec_mut().topology.edges.insert(
+            InputPort::new(k, 0),
+            vec![Edge::Direct(PortSource::Node(OutputPort::new(s, 0)))],
+        );
     }
     ed.spec_mut().topology.set_outputs(outputs.clone());
 
     let width = outputs.len();
-    // The ranges the editor holds, which the reference is handed again after
-    // each graph it switches to.
-    let mut held: BTreeMap<ParamIn, ParamRange> = BTreeMap::new();
+    let mut rendered = Vec::new();
     for (step, &n) in g.blocks.iter().enumerate() {
-        // This step's edits, to both.
         for e in &g.edges {
             let at = ParamIn {
                 node: NodeKey(300 + e.probe as u64),
@@ -2355,7 +2327,6 @@ fn run_differential(g: &Gen) {
                 if let Some((lo, hi)) = e.range {
                     ed.set_param_range(at, ParamRange::of(lo, hi))
                         .expect("a range");
-                    held.insert(at, ParamRange::of(lo, hi));
                 }
             }
             if e.until == step && e.until > e.when {
@@ -2364,37 +2335,22 @@ fn run_differential(g: &Gen) {
         }
         for &(s, p, k, v) in &g.moves {
             if s == step {
-                cells[p][0][k].set(v);
-                cells[p][1][k].set(v);
+                cells[p][k].set(v);
             }
         }
         for &(s, p, lag) in &g.lags {
             if s == step && step > 0 {
-                let k = NodeKey(400 + p as u64);
-                ed.insert(k, "lag", Unforkable(Lag::new(lag)));
-                fresh.insert(k, Box::new(Lag::new(lag)));
+                ed.insert(NodeKey(400 + p as u64), "lag", Unforkable(Lag::new(lag)));
             }
         }
         for &(s, p) in &g.regens {
             if s == step && step > 0 {
                 // `insert` at a key is a new generation.
-                let k = NodeKey(300 + p as u64);
-                ed.insert(k, "probe", Unforkable(probe(p, 0)));
-                fresh.insert(k, Box::new(probe(p, 1)));
+                ed.insert(NodeKey(300 + p as u64), "probe", Unforkable(probe(p)));
             }
         }
         ed.commit().expect("the generated graph compiles");
-        let valid = ed.spec().validate().expect("valid");
-        reference.set_graph(&valid, std::mem::take(&mut fresh));
-        for (&at, &range) in &held {
-            reference.set_param_range(at, range);
-        }
-        if let Some(plan) = ed.base() {
-            for d in plan.delays() {
-                assert_eq!(reference.delay(d.key), d.len, "PDC of {:?}", d.key);
-            }
-        }
-        // Range moves, after the commit: a control each, to both.
+        // Range moves, after the commit: a control each.
         for &(s, p, k, r) in &g.ranges {
             if s == step {
                 let at = ParamIn {
@@ -2403,53 +2359,50 @@ fn run_differential(g: &Gen) {
                 };
                 let r = r.map_or(ParamRange::UNBOUNDED, |(lo, hi)| ParamRange::of(lo, hi));
                 ed.set_param_range(at, r).expect("a range");
-                reference.set_param_range(at, r);
-                held.insert(at, r);
             }
         }
 
-        let mut a = vec![vec![0.0f32; n]; width];
-        let mut b = vec![vec![0.0f32; n]; width];
+        let mut out = vec![vec![0.0f32; n]; width];
         {
-            let mut ra: Vec<&mut [f32]> = a.iter_mut().map(|c| &mut c[..]).collect();
-            exec.process(n, &TransportPosition::default(), &[], &mut ra);
-            let mut rb: Vec<&mut [f32]> = b.iter_mut().map(|c| &mut c[..]).collect();
-            reference.process(n, &TransportPosition::default(), &[], &mut rb);
+            let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
+            exec.process(n, &TransportPosition::default(), &[], &mut outs);
         }
         ed.collect();
-        for (c, (x, y)) in a.iter().zip(&b).enumerate() {
-            for (i, (p, q)) in x.iter().zip(y).enumerate() {
-                assert_eq!(
-                    p.to_bits(),
-                    q.to_bits(),
-                    "step {step}, channel {c}, frame {i}: executor {p} vs reference {q}\n{g:?}"
-                );
-            }
-        }
+        rendered.push(out);
     }
+    rendered
 }
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// The executor's fused param step and the reference's own derivation
-    /// agree bit for bit on random driven graphs — per-frame step sources,
-    /// ramp sources, shaped ramps and curve segments (every shape, some
-    /// segments resumed part-way, interrupting each other and ramps; one
-    /// source per port, replacing
-    /// its base, and replaced by the next one connected there), ranges,
-    /// PDC-delayed sources, connections made and broken mid-stream
-    /// (declicks), base moves, latency changes (param delays appearing,
-    /// growing, shrinking), regenerated probes and ranges moved without a
-    /// commit — on every param source's PDC delay, and on every port's corners
-    /// (`ParamInput::corners`, the probes' third readout).
-    ///
-    /// A param source left out of the node's arrival does not diverge (the reference reads
-    /// the compiler's arrival); `a_param_source_counts_toward_arrival_in_both_solves` pins
-    /// it.
+    /// A parallel render of random driven graphs is the one-participant render, bit
+    /// for bit — per-frame step sources, ramp sources, shaped ramps and curve
+    /// segments (every shape, some segments resumed part-way, interrupting each
+    /// other and ramps; one source per port, replacing its base, and replaced by
+    /// the next one connected there), ranges, PDC-delayed sources, connections
+    /// made and broken mid-stream (declicks), base moves, latency changes (param
+    /// delays appearing, growing, shrinking), regenerated probes and ranges moved
+    /// without a commit — on every port's value and corners (`ParamInput::corners`,
+    /// the probes' third readout).
     #[test]
-    fn modulated_graphs_match_the_reference(g in generator()) {
-        run_differential(&g);
+    fn modulated_graphs_render_alike_on_any_participant_count(g in generator()) {
+        let serial = render_generated(&g, 1);
+        for workers in [3, 8] {
+            let parallel = render_generated(&g, workers);
+            for (step, (a, b)) in serial.iter().zip(&parallel).enumerate() {
+                for (c, (x, y)) in a.iter().zip(b).enumerate() {
+                    for (i, (p, q)) in x.iter().zip(y).enumerate() {
+                        prop_assert_eq!(
+                            p.to_bits(),
+                            q.to_bits(),
+                            "{} participants, step {}, channel {}, frame {}: {} vs {}\n{:?}",
+                            workers, step, c, i, q, p, g
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 

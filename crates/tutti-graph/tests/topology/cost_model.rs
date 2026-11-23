@@ -2,8 +2,8 @@
 //! pool's participants run every block of a plan with more than one task,
 //! and packed plans render bit for bit what one participant renders.
 //!
-//! The random-topology check is in `tests/differential.rs`
-//! (`coarsened_plans_are_bit_identical`).
+//! The random-topology check is in `tests/executor/invariants.rs`
+//! (`a_coarsened_plan_renders_as_one_participant_does`).
 
 use tutti_graph::testing as common;
 

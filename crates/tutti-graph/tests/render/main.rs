@@ -13,4 +13,3 @@ mod generator;
 
 mod compile_random;
 mod lti;
-mod rig;
