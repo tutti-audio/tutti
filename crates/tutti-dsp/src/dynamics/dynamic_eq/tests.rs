@@ -1,5 +1,4 @@
 use core::f64::consts::PI;
-use tutti_fixtures::signal::sine;
 use tutti_units::{Amplitude, Samples};
 
 use tutti_buffers::ChannelLayout;
@@ -115,16 +114,16 @@ fn run(
 /// The gain in dB a sine at the centre is given once settled, from the output over the
 /// input across the last [`MEASURE`] frames.
 fn measured_gain(mode: DynamicMode, c: &DynamicEqControls, level_db: f64) -> (f64, Db) {
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(level_db)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let x = sine(1000.0, amplitude(level_db), SETTLE);
     let mut b = bank(mode, 1, c);
     let y = run(&mut b, &[&x], &[&x], 480).remove(0);
     let tail = SETTLE - MEASURE;
     (20.0 * (rms(&y[tail..]) / rms(&x[tail..])).log10(), b.gain())
+}
+
+/// `n` samples of an `amplitude` sine at `f` hertz, from phase 0.
+fn sine(f: f64, amplitude: f64, n: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(Hz::new(f), Amplitude::new(amplitude), RATE, Samples::new(n))
 }
 
 /// The settled gain of a sine at the centre is the static curve's: threshold, knee, ratio and
@@ -191,12 +190,7 @@ fn an_upward_band_settles_on_the_mirrored_static_curve_at_its_centre() {
 fn a_downward_band_is_unity_below_the_threshold() {
     for knee in [0.0, 6.0] {
         let c = controls(-20.0, knee, 8.0, 12.0, 2.0);
-        let x = sine(
-            Hz::new(1000.0),
-            Amplitude::new(amplitude(-30.0)),
-            RATE,
-            Samples::new(SETTLE),
-        );
+        let x = sine(1000.0, amplitude(-30.0), SETTLE);
         let mut b = bank(DynamicMode::Downward, 1, &c);
         let y = run(&mut b, &[&x], &[&x], 256).remove(0);
         assert_eq!(b.gain(), Db::UNITY, "knee {knee}");
@@ -213,12 +207,7 @@ fn a_downward_band_is_unity_below_the_threshold() {
 #[test]
 fn an_upward_band_is_unity_above_the_threshold() {
     let c = controls(-30.0, 0.0, 8.0, 12.0, 2.0);
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-10.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let x = sine(1000.0, amplitude(-10.0), SETTLE);
     let mut b = bank(DynamicMode::Upward, 1, &c);
     let y = run(&mut b, &[&x], &[&x], 256).remove(0);
     assert_eq!(b.gain(), Db::UNITY);
@@ -235,14 +224,9 @@ fn a_tone_off_the_band_is_changed_by_the_bells_skirt_only() {
     let c = controls(-20.0, 0.0, 4.0, 12.0, 2.0);
     let cut = band_gain(DynamicMode::Downward, -6.0, &c);
     assert!((cut + 10.5).abs() < 1e-9);
-    let key = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let key = sine(1000.0, amplitude(-6.0), SETTLE);
     for f in [100.0, 500.0, 800.0, 1250.0, 2000.0, 4000.0, 12_000.0] {
-        let x = sine(Hz::new(f), Amplitude::new(0.1), RATE, Samples::new(SETTLE));
+        let x = sine(f, 0.1, SETTLE);
         let mut b = bank(DynamicMode::Downward, 1, &c);
         let y = run(&mut b, &[&key], &[&x], 480).remove(0);
         let tail = SETTLE - MEASURE;
@@ -260,12 +244,7 @@ fn a_tone_off_the_band_is_changed_by_the_bells_skirt_only() {
 #[test]
 fn a_loud_tone_far_from_the_band_does_not_move_it() {
     let c = controls(-20.0, 0.0, 4.0, 12.0, 4.0);
-    let x = sine(
-        Hz::new(8000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let x = sine(8000.0, amplitude(-6.0), SETTLE);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     let y = run(&mut b, &[&x], &[&x], 480).remove(0);
     assert!(
@@ -289,12 +268,7 @@ fn the_attack_reaches_one_minus_inverse_e_in_its_time_constant() {
         ..controls(-20.0, 0.0, 4.0, 12.0, 1.0)
     };
     let full = band_gain(DynamicMode::Downward, -6.0, &c);
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(tau),
-    );
+    let x = sine(1000.0, amplitude(-6.0), tau);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     run(&mut b, &[&x], &[&x], 480);
     let fraction = b.gain().get() / full;
@@ -315,12 +289,7 @@ fn the_release_falls_to_inverse_e_in_its_time_constant() {
         ..controls(-20.0, 0.0, 4.0, 12.0, 1.0)
     };
     let full = band_gain(DynamicMode::Downward, -6.0, &c);
-    let loud = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let loud = sine(1000.0, amplitude(-6.0), SETTLE);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     run(&mut b, &[&loud], &[&loud], 480);
     assert!((b.gain().get() - full).abs() < 0.1);
@@ -338,19 +307,9 @@ fn the_release_falls_to_inverse_e_in_its_time_constant() {
 #[test]
 fn the_gain_is_linked_from_the_loudest_key_channel() {
     let c = controls(-20.0, 0.0, 4.0, 12.0, 1.0);
-    let left = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let left = sine(1000.0, amplitude(-6.0), SETTLE);
     let right = vec![0.0f32; SETTLE];
-    let other = sine(
-        Hz::new(1000.0),
-        Amplitude::new(0.1),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let other = sine(1000.0, 0.1, SETTLE);
     let mut b = bank(DynamicMode::Downward, 2, &c);
     let y = run(&mut b, &[&left, &right], &[&other, &other], 480);
     let want = band_gain(DynamicMode::Downward, -6.0, &c);
@@ -370,12 +329,7 @@ fn an_upward_band_at_ratio_one_and_a_huge_threshold_lifts_nothing() {
         ratio: CompressionRatio::new(1.0),
         ..controls(-20.0, 6.0, 4.0, 12.0, 2.0)
     };
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(0.5),
-        RATE,
-        Samples::new(4096),
-    );
+    let x = sine(1000.0, 0.5, 4096);
     let mut b = bank(DynamicMode::Upward, 1, &c);
     let y = run(&mut b, &[&x], &[&x], 333).remove(0);
     assert_eq!(b.gain(), Db::UNITY);
@@ -427,12 +381,7 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
             ..base
         });
     }
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(0.5),
-        RATE,
-        Samples::new(4096),
-    );
+    let x = sine(1000.0, 0.5, 4096);
     for c in &all {
         for mode in [DynamicMode::Downward, DynamicMode::Upward] {
             let mut b = bank(mode, 1, c);
@@ -457,12 +406,7 @@ fn hostile_controls_and_keys_leave_the_output_finite() {
 #[test]
 fn a_reset_band_is_flat() {
     let c = controls(-20.0, 0.0, 4.0, 12.0, 1.0);
-    let x = sine(
-        Hz::new(1000.0),
-        Amplitude::new(amplitude(-6.0)),
-        RATE,
-        Samples::new(SETTLE),
-    );
+    let x = sine(1000.0, amplitude(-6.0), SETTLE);
     let mut b = bank(DynamicMode::Downward, 1, &c);
     run(&mut b, &[&x], &[&x], 480);
     assert!(b.gain().get() < -9.0);
@@ -494,17 +438,12 @@ fn the_upward_lift_has_its_hand_computed_anchors() {
 #[test]
 fn the_render_is_the_same_bits_in_any_blocks() {
     let n = 4_800;
-    let input: Vec<f32> = sine(Hz::new(300.0), Amplitude::new(0.4), RATE, Samples::new(n))
+    let input: Vec<f32> = sine(300.0, 0.4, n)
         .iter()
-        .zip(sine(
-            Hz::new(5_000.0),
-            Amplitude::new(0.2),
-            RATE,
-            Samples::new(n),
-        ))
+        .zip(sine(5_000.0, 0.2, n))
         .map(|(a, b)| a + b)
         .collect();
-    let mut key = sine(Hz::new(1_000.0), Amplitude::new(0.5), RATE, Samples::new(n));
+    let mut key = sine(1_000.0, 0.5, n);
     key[n / 2..].iter_mut().for_each(|x| *x *= 0.05);
     let c = DynamicEqControls {
         attack: Seconds::new(0.002),

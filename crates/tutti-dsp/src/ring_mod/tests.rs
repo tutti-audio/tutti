@@ -2,7 +2,6 @@ use super::*;
 use core::f64::consts::TAU;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 use tutti_fixtures::signal::amplitude_at;
-use tutti_fixtures::signal::sine;
 use tutti_units::Hz;
 use tutti_units::SampleRate;
 use tutti_units::{Amplitude, Samples};
@@ -35,6 +34,11 @@ fn run(m: &mut RingModulator, input: &[f32], block: usize) -> Vec<f32> {
     out
 }
 
+/// `frames` samples of a unit sine at `hz`, from phase 0.
+fn sine(hz: f64, frames: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(Hz::new(hz), Amplitude::new(1.0), RATE, Samples::new(frames))
+}
+
 /// A constant input of 1 gives the carrier itself, `sin(2 pi fc n / fs)`, whatever the blocks.
 #[test]
 fn a_constant_input_gives_the_carrier() {
@@ -55,16 +59,7 @@ fn a_constant_input_gives_the_carrier() {
 /// carrier (a second of frames is a whole number of cycles of each).
 #[test]
 fn a_sine_input_gives_the_sum_and_difference_and_no_input() {
-    let out = run(
-        &mut modulator(300.0),
-        &sine(
-            Hz::new(1_000.0),
-            Amplitude::new(1.0),
-            RATE,
-            Samples::new(48_000),
-        ),
-        512,
-    );
+    let out = run(&mut modulator(300.0), &sine(1_000.0, 48_000), 512);
     let at = |hz| amplitude_at(&out, Hz::new(hz), RATE);
     assert!((at(700.0) - 0.5).abs() < 1e-4, "{}", at(700.0));
     assert!((at(1_300.0) - 0.5).abs() < 1e-4, "{}", at(1_300.0));

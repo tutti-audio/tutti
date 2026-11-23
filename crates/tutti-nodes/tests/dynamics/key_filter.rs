@@ -111,6 +111,16 @@ fn compressor(filter: KeyFilter, cutoff: f64, q: f64) -> CompressorNode<f32> {
     )
 }
 
+/// `frames` samples of an amplitude-`a` sine at `f` hertz, from phase 0.
+fn tone(f: f64, a: f64, frames: usize) -> Vec<f32> {
+    sine(
+        Hz::new(f),
+        Amplitude::new(a),
+        SampleRate::of(FS),
+        Samples::new(frames),
+    )
+}
+
 /// A key through a high-pass is reduced by the static curve at the key's level plus the
 /// filter's analytic magnitude: a tone under the cutoff is attenuated by it, a tone well over
 /// the cutoff is not.
@@ -119,15 +129,7 @@ fn a_high_passed_key_reduces_by_the_curve_at_its_filtered_level() {
     let (fc, q, a) = (1_000.0, BUTTERWORTH, 0.5);
     for (f, attenuated) in [(250.0, true), (125.0, true), (4_000.0, false)] {
         let mut node = prepared(compressor(KeyFilter::HighPass, fc, q), SR, 1_024);
-        let out = run(
-            &mut node,
-            &sine(
-                Hz::new(f),
-                Amplitude::new(a),
-                SampleRate::of(FS),
-                Samples::new(24_000),
-            ),
-        );
+        let out = run(&mut node, &tone(f, a, 24_000));
         let got = deepest_reduction_db(&out);
         let h = response_db(KeyFilter::HighPass, f, fc, q);
         let want = curve_db(amplitude_db(a) + h, THRESHOLD, RATIO);
@@ -158,15 +160,7 @@ fn a_band_passed_key_reduces_by_the_curve_at_its_filtered_level() {
     let (fc, q, a) = (1_000.0, 2.0, 0.05);
     for f in [1_000.0, 125.0, 4_000.0] {
         let mut node = prepared(compressor(KeyFilter::BandPass, fc, q), SR, 1_024);
-        let out = run(
-            &mut node,
-            &sine(
-                Hz::new(f),
-                Amplitude::new(a),
-                SampleRate::of(FS),
-                Samples::new(24_000),
-            ),
-        );
+        let out = run(&mut node, &tone(f, a, 24_000));
         let got = deepest_reduction_db(&out);
         let h = response_db(KeyFilter::BandPass, f, fc, q);
         let want = curve_db(amplitude_db(a) + h, THRESHOLD, RATIO);
@@ -196,12 +190,7 @@ fn a_non_finite_key_sample_does_not_latch_the_key_filter() {
     );
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         let mut node = prepared(compressor(KeyFilter::HighPass, fc, q), SR, 1_024);
-        let mut key = sine(
-            Hz::new(f),
-            Amplitude::new(a),
-            SampleRate::of(FS),
-            Samples::new(24_000),
-        );
+        let mut key = tone(f, a, 24_000);
         key[6_000] = bad;
         let out = run(&mut node, &key);
         let got = deepest_reduction_db(&out);
@@ -222,12 +211,7 @@ fn the_cutoff_param_moves_the_key_filter() {
     let node = compressor(KeyFilter::HighPass, 100.0, q);
     let set = node.param_set();
     let mut node = prepared(node, SR, 1_024);
-    let key = sine(
-        Hz::new(f),
-        Amplitude::new(a),
-        SampleRate::of(FS),
-        Samples::new(48_000),
-    );
+    let key = tone(f, a, 48_000);
     let before = run(&mut node, &key[..24_000]);
     assert!(set.set(UnitParam::Cutoff, 4_000.0));
     let after = run(&mut node, &key[24_000..]);
@@ -255,12 +239,7 @@ fn the_q_param_moves_the_key_filter() {
     let node = compressor(KeyFilter::BandPass, fc, 1.0);
     let set = node.param_set();
     let mut node = prepared(node, SR, 1_024);
-    let key = sine(
-        Hz::new(fc),
-        Amplitude::new(a),
-        SampleRate::of(FS),
-        Samples::new(48_000),
-    );
+    let key = tone(fc, a, 48_000);
     let before = run(&mut node, &key[..24_000]);
     assert!(set.set(UnitParam::Q, 4.0));
     let after = run(&mut node, &key[24_000..]);
@@ -303,12 +282,7 @@ fn the_audio_is_gained_by_the_curve_and_never_filtered() {
         SR,
         1_024,
     );
-    let audio = sine(
-        Hz::new(440.0),
-        Amplitude::new(0.3),
-        SampleRate::of(FS),
-        Samples::new(4_800),
-    );
+    let audio = tone(440.0, 0.3, 4_800);
     let key: Vec<f32> = (0..audio.len())
         .map(|i| if i % 2 == 0 { a as f32 } else { -a as f32 })
         .collect();
@@ -351,12 +325,7 @@ fn gate(filter: KeyFilter, threshold: f64, cutoff: f64, q: f64) -> GateNode<f32>
 fn a_high_passed_gate_decides_on_the_filtered_key() {
     let (f, fc, q, a) = (250.0, 1_000.0, BUTTERWORTH, 0.5);
     let peak = amplitude_db(a) + response_db(KeyFilter::HighPass, f, fc, q);
-    let key = sine(
-        Hz::new(f),
-        Amplitude::new(a),
-        SampleRate::of(FS),
-        Samples::new(24_000),
-    );
+    let key = tone(f, a, 24_000);
     for (threshold, opens) in [(peak - 0.3, true), (peak + 0.3, false)] {
         let mut filtered = prepared(gate(KeyFilter::HighPass, threshold, fc, q), SR, 1_024);
         let gain = highest_gain(&run(&mut filtered, &key));
@@ -398,12 +367,7 @@ fn the_gates_cutoff_param_moves_the_key_filter() {
     let node = gate(KeyFilter::HighPass, threshold, 100.0, q);
     let set = node.param_set();
     let mut node = prepared(node, SR, 1_024);
-    let key = sine(
-        Hz::new(f),
-        Amplitude::new(a),
-        SampleRate::of(FS),
-        Samples::new(48_000),
-    );
+    let key = tone(f, a, 48_000);
     let before = run(&mut node, &key[..24_000]);
     assert!(set.set(UnitParam::Cutoff, 4_000.0));
     let after = run(&mut node, &key[24_000..]);
@@ -417,12 +381,7 @@ fn the_gates_cutoff_param_moves_the_key_filter() {
 #[test]
 fn the_gate_applies_its_gain_to_the_unfiltered_audio() {
     let a = 0.5;
-    let audio = sine(
-        Hz::new(440.0),
-        Amplitude::new(0.3),
-        SampleRate::of(FS),
-        Samples::new(4_800),
-    );
+    let audio = tone(440.0, 0.3, 4_800);
     let key: Vec<f32> = (0..audio.len())
         .map(|i| if i % 2 == 0 { a as f32 } else { -a as f32 })
         .collect();

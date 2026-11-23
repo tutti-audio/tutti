@@ -1,5 +1,4 @@
 use core::f64::consts::TAU;
-use tutti_fixtures::signal::sine;
 use tutti_units::Amplitude;
 
 use tutti_units::{Cents, Hz, SampleRate, Samples};
@@ -44,6 +43,16 @@ fn amplitude(x: &[f32], f: f64) -> f64 {
     4.0 * re.hypot(im) / x.len() as f64
 }
 
+/// `len` samples of an `amplitude` sine at `f` hertz, from phase 0.
+fn sine(f: f64, amplitude: f64, len: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        Amplitude::new(amplitude),
+        RATE,
+        Samples::new(len),
+    )
+}
+
 /// The shifter's gain over `l2` is at most 1 (the overlap-add's bound) whatever the signal and
 /// the shift: measured as the energy ratio over noise, a sine, impulses, a chirp and noise
 /// bursts, at every 400 cents of the two octaves either way. It is what keeps the shifted
@@ -63,13 +72,7 @@ fn the_shifter_gain_over_l2_is_at_most_one_at_every_shift() {
         .enumerate()
         .map(|(i, &v)| if (i / 3000) % 2 == 0 { v } else { 0.0 })
         .collect();
-    let signals = [
-        white,
-        sine(Hz::new(1100.0), Amplitude::new(1.0), RATE, Samples::new(n)),
-        impulses,
-        chirp,
-        bursts,
-    ];
+    let signals = [white, sine(1100.0, 1.0, n), impulses, chirp, bursts];
     for cents in (-2400..=2400).step_by(400) {
         for (k, x) in signals.iter().enumerate() {
             let gain = l2(&run(f64::from(cents), x)) / l2(x);
@@ -112,7 +115,7 @@ fn a_tone_climbs_an_octave_and_falls_by_the_loop_gain_each_pass() {
     const MEASURE: usize = 8192;
     let (f0, a0) = (1500.0, 0.5);
     let k = 0.99;
-    let mut x = sine(Hz::new(f0), Amplitude::new(a0), RATE, Samples::new(60_000));
+    let mut x = sine(f0, a0, 60_000);
     for pass in 1..=3 {
         x = run(1200.0, &x)
             .iter()
@@ -150,12 +153,7 @@ fn a_tone_climbs_an_octave_and_falls_by_the_loop_gain_each_pass() {
 /// the frames whose windows held it have passed.
 #[test]
 fn a_non_finite_sample_does_not_latch_in_the_shifter() {
-    let mut x = sine(
-        Hz::new(900.0),
-        Amplitude::new(0.5),
-        RATE,
-        Samples::new(30_000),
-    );
+    let mut x = sine(900.0, 0.5, 30_000);
     x[1000] = f32::NAN;
     let y = run(700.0, &x);
     let delay = Shimmer::<f32>::new(RATE).delay().get();

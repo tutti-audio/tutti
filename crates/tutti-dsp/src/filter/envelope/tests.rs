@@ -1,5 +1,4 @@
 use tutti_buffers::{Planes, PlanesMut};
-use tutti_fixtures::signal::sine;
 use tutti_units::{Amplitude, Samples};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones};
 
@@ -69,6 +68,16 @@ fn controls(base: f64, depth: f64, q: f64) -> EnvelopeFilterControls {
     }
 }
 
+/// `frames` samples of an `amplitude` sine at `hz`, from phase 0.
+fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(hz),
+        Amplitude::new(amplitude),
+        RATE,
+        Samples::new(frames),
+    )
+}
+
 /// A steady sine of amplitude `A` has the mean magnitude `2A/pi`, so the cutoff settles at
 /// `base * 2^(depth/12 * 2A/pi)` and the tone's gain is the SVF's analytic magnitude there.
 ///
@@ -89,12 +98,7 @@ fn the_settled_cutoff_is_base_times_two_to_depth_times_the_mean_level() {
         ] {
             let q = Q::new(2.0);
             let mut b = bank(ty, &controls(base, depth, q.get()));
-            let x = sine(
-                Hz::new(TONE),
-                Amplitude::new(amplitude),
-                RATE,
-                Samples::new(96_000),
-            );
+            let x = sine(TONE, amplitude, 96_000);
             let y = run(&mut b, &x, 480);
             let env = 2.0 * amplitude / core::f64::consts::PI;
             let cutoff = base * (depth / 12.0 * env).exp2();
@@ -121,12 +125,7 @@ fn zero_depth_is_a_fixed_svf_at_base() {
     let q = Q::new(2.0);
     for amplitude in [0.1, 0.9] {
         let mut b = bank(SvfType::LowPass, &controls(700.0, 0.0, q.get()));
-        let x = sine(
-            Hz::new(TONE),
-            Amplitude::new(amplitude),
-            RATE,
-            Samples::new(48_000),
-        );
+        let x = sine(TONE, amplitude, 48_000);
         let y = run(&mut b, &x, 333);
         let want = magnitude(SvfType::LowPass, 700.0, q, TONE);
         let got = measured_gain(&x, &y);
@@ -137,12 +136,7 @@ fn zero_depth_is_a_fixed_svf_at_base() {
 /// The grid is the stream's: any cut of a stream into blocks renders the same samples.
 #[test]
 fn the_render_does_not_depend_on_where_blocks_fall() {
-    let x = sine(
-        Hz::new(TONE),
-        Amplitude::new(0.7),
-        RATE,
-        Samples::new(6_000),
-    );
+    let x = sine(TONE, 0.7, 6_000);
     let reference = run(
         &mut bank(SvfType::BandPass, &controls(600.0, 24.0, 4.0)),
         &x,
@@ -166,16 +160,7 @@ fn the_controls_are_held_in_range() {
         SvfType::LowPass,
         &controls(f64::NAN, f64::INFINITY, f64::NAN),
     );
-    let y = run(
-        &mut b,
-        &sine(
-            Hz::new(TONE),
-            Amplitude::new(0.5),
-            RATE,
-            Samples::new(2_000),
-        ),
-        128,
-    );
+    let y = run(&mut b, &sine(TONE, 0.5, 2_000), 128);
     assert!(y.iter().all(|s| s.is_finite()));
     assert_eq!(b.cutoff_at(1.0), EnvelopeFilterControls::DEFAULT.base);
     // Ten octaves above 1 kHz is past the Nyquist: the cutoff stops just short of it.
@@ -199,12 +184,7 @@ fn a_level_over_full_scale_reads_as_one() {
     let env =
         (4.0 * (1.0 - sqrt3 / 2.0) + 2.0 * core::f64::consts::PI / 3.0) / core::f64::consts::PI;
     let mut b = bank(SvfType::LowPass, &controls(500.0, 24.0, q.get()));
-    let x = sine(
-        Hz::new(TONE),
-        Amplitude::new(2.0),
-        RATE,
-        Samples::new(96_000),
-    );
+    let x = sine(TONE, 2.0, 96_000);
     let y = run(&mut b, &x, 480);
     let cutoff = 500.0 * (24.0 / 12.0 * env).exp2();
     let want = magnitude(SvfType::LowPass, cutoff, q, TONE);
