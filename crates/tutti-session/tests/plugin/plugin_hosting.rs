@@ -22,8 +22,7 @@ fn session() -> Session {
 /// test does: nextest runs each test in its own process, and nothing of the
 /// test (no catalog, no session) has started a thread yet.
 fn set_server(path: impl AsRef<std::ffi::OsStr>) {
-    // SAFETY: as above, no other thread exists.
-    unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", path) };
+    tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", path);
 }
 
 /// **A blacklisted plugin is not in the catalog's answer, and is admitted once

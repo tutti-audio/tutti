@@ -53,12 +53,12 @@
 //! replaces goes back in the commit, and the editor frees it. Every type
 //! crossing the queue is `Send` (units, commits) or `Send + Sync` (the plan).
 //!
-//! # The serial executor
+//! # Running a block
 //!
-//! (The parallel one, which runs the same op code on a pool's threads, is
-//! `par.rs`; [`Executor::set_pool`] turns it on.)
-//!
-//! Walks [`Plan::ops`] in order, inside a flush-to-zero scope
+//! One op code (`par.rs`) runs every block, on the calling thread alone or,
+//! when [`Executor::set_pool`] gave it a pool and the cost model says the
+//! plan pays for it, as tasks across the pool's threads. Alone, it walks
+//! [`Plan::ops`] in order, inside a flush-to-zero scope
 //! ([`with_no_denormals`](tutti_platform::with_no_denormals)). Per block it never allocates when no commit is
 //! pending (see `tests/rt_no_alloc.rs`) and hands every node the **whole
 //! block** and its sorted events.
@@ -285,7 +285,7 @@ pub const FADE_CAPACITY: usize = 256;
 const EDGE_FADE_CAPACITY: usize = 1024;
 
 /// The audio-thread half of a graph: runs the current [`Plan`] one block at a
-/// time, serially or spread over a [`Pool`] (see [`set_pool`](Self::set_pool)).
+/// time, on the calling thread or spread over a [`Pool`] (see [`set_pool`](Self::set_pool)).
 ///
 /// Built with its [`Editor`](crate::Editor) by
 /// [`Editor::new`](crate::Editor::new): the two share one [`Prepare`] and
@@ -297,7 +297,7 @@ const EDGE_FADE_CAPACITY: usize = 1024;
 /// allocate, free, lock or block, applying a commit included: the editor
 /// built the new arena and delay state with the commit, and everything a
 /// commit replaces is sent back to the editor to be freed on the control
-/// thread. The executor walks the plan's ops (serially, or as tasks on a
+/// thread. The executor walks the plan's ops (in order, or as tasks on a
 /// pool), hands every node the
 /// **whole block** and its sorted events — it never splits a block at an
 /// event, a loop wrap or a transport change — and skips a node whose inputs
@@ -442,29 +442,23 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
     }
 }
 
-/// The parallel state for `plan` on `pool`, when it would run in
-/// parallel at all: when the cost model ([`Plan::schedule`]) says spreading
-/// pays for some block length on this pool (which needs a pool of more
-/// than one participant, and more than one task).
+/// The per-plan state for `plan` on a pool of `participants` (0: no pool):
+/// spread over the pool when the cost model ([`Plan::schedule`]) says
+/// spreading pays for some block length (which needs more than one
+/// participant and more than one task), else for the calling thread alone.
 fn par_for(
     plan: &Plan,
-    participants: Option<usize>,
+    participants: usize,
     store_len: usize,
     inject_units: impl Iterator<Item = u32>,
     overlay: usize,
-) -> Option<Par> {
-    let participants = participants?;
-    match plan.schedule(participants) {
-        Schedule::Serial => None,
-        Schedule::Parallel { wake, from } => Some(Par::new(
-            plan,
-            participants,
-            (wake, from.get()),
-            store_len,
-            inject_units,
-            overlay,
-        )),
-    }
+) -> Par {
+    let schedule = plan.schedule(participants);
+    let (participants, spread) = match schedule {
+        Schedule::Serial => (1, None),
+        Schedule::Parallel { wake, from } => (participants, Some((wake, from.get()))),
+    };
+    Par::new(plan, participants, spread, store_len, inject_units, overlay)
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
@@ -556,13 +550,13 @@ impl<F: Float> Executor<F> {
                 staged.set_participants(plan, participants);
             }
         }
-        self.state.par = self.plan.as_deref().and_then(|plan| {
+        self.state.par = self.plan.as_deref().map(|plan| {
             par_for(
                 plan,
-                participants,
+                participants.unwrap_or(0),
                 self.store.len(),
                 self.state.inject.iter().map(|i| i.unit),
-                self.state.overlay.capacity(),
+                self.state.overlay,
             )
         });
         old
@@ -596,7 +590,7 @@ impl<F: Float> Executor<F> {
     /// it (blocks shorter than its `from` still run the serial walk).
     /// Otherwise every block runs the serial walk.
     pub fn is_parallel(&self) -> bool {
-        self.state.par.is_some()
+        self.state.par.as_ref().is_some_and(Par::spreads_any)
     }
 
     /// The command ring's executor end, for the pair check.

@@ -675,7 +675,7 @@ impl SlotId {
 
 /// The controller map the app gives a plugin: which MIDI message drives which
 /// parameter, beside the table the plugin declares
-/// ([`PluginInfo::assignments`](crate::PluginInfo::assignments)).
+/// ([`Plugin::assignments`](crate::Plugin::assignments)).
 ///
 /// An entry is keyed by its channel (`None` for any) and its source; a map
 /// names each key once ([`PluginMidiMapTarget`] refuses a duplicate). The map

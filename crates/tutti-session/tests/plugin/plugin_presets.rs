@@ -23,13 +23,9 @@ mod clap {
     fn loaded() -> (Session, PluginInstance, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::loading::prime(&PluginRef::file(clap_probe()));
-        // SAFETY: nextest runs each test in its own process, and this is set
-        // before the first server is spawned, from the test's own thread.
-        unsafe {
-            std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
-            // The reference plugin answers `clap.preset-load` only when asked.
-            std::env::set_var("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
-        }
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        // The reference plugin answers `clap.preset-load` only when asked.
+        tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PRESET_LOAD", "1");
         let mut s = Session::builder()
             .max_block(MaxBlock::of(Samples::new(512)))
             .build()
@@ -234,9 +230,7 @@ mod vst3 {
     /// and bank, as soon as the load returns, and so does the info of a clone.
     #[test]
     fn a_served_list_is_read_at_the_load() {
-        // SAFETY: nextest runs each test in its own process, and this is set
-        // from the test's own thread before the first server is spawned.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         let module = tutti_fixtures::vst3_module();
         let bundle = tutti_plugin_types::bundle::bundle_dir_of(
             &module,
@@ -289,9 +283,7 @@ mod vst3 {
     /// plugin; a preset of another plugin instance is refused.
     #[test]
     fn a_node_inserted_by_the_host_loads_a_preset_its_plugin_listed() {
-        // SAFETY: nextest runs each test in its own process, and this is set
-        // from the test's own thread before the first server is spawned.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         let module = tutti_fixtures::vst3_module();
         let bundle = tutti_plugin_types::bundle::bundle_dir_of(
             &module,
@@ -335,9 +327,7 @@ mod vst3 {
     /// instance, and the listing belongs to the one that died.
     #[test]
     fn a_preset_listed_before_a_crash_recovery_is_another_plugins() {
-        // SAFETY: nextest runs each test in its own process, and this is set
-        // from the test's own thread before the first server is spawned.
-        unsafe { std::env::set_var("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server()) };
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         let module = tutti_fixtures::vst3_module();
         let bundle = tutti_plugin_types::bundle::bundle_dir_of(
             &module,

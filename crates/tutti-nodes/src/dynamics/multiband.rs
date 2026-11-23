@@ -677,6 +677,7 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
             fork,
             params,
             reclaimer,
+            published,
         } = tutti_graph::param_parts(self);
         NodeParts {
             node,
@@ -687,6 +688,7 @@ impl<F: Float + SimdLanes + Lerp> IntoNode<F> for MultibandCompressorNode<F> {
             fork,
             params,
             reclaimer,
+            published,
         }
     }
 }

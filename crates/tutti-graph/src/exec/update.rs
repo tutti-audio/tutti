@@ -701,13 +701,6 @@ impl<F: Float> Executor<F> {
                 queued.chase.clear();
             }
         }
-
-        // The parallel state was built for the pool the editor saw; a pool
-        // set since runs the serial walk until the next commit, which is
-        // bit for bit the same render.
-        if st.participants != self.pool.as_ref().map_or(0, |p| p.participants()) {
-            st.spare_par = new.par.take();
-        }
         new
     }
 }

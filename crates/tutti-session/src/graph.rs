@@ -48,6 +48,7 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
+use tutti_graph::ErasedPublished;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
@@ -228,13 +229,9 @@ struct Entry {
     controls: Option<Held>,
 }
 
-/// How a node's slots are put under its key
-/// ([`SessionNode::slots`], for the type that made the controls).
-type Slots = fn(&ValueTable, NodeKey, &(dyn Any + Send));
-
 /// What a node's parts said of it ([`NodeParts`]): its controls, its params
-/// by address and what frees what its cells retired, with the type that made
-/// them. A swap that is refused when it lands addresses them again to give
+/// by address, its published values and what frees what its cells retired,
+/// with the type that made them. A swap that is refused when it lands addresses them again to give
 /// the outgoing node its values back.
 struct Held {
     controls: Box<dyn Any + Send>,
@@ -243,7 +240,8 @@ struct Held {
     params: Option<ParamSet>,
     /// Run by [`Graph::reclaim`].
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
-    slots: Slots,
+    /// Registered as the node's slots, each under its kind.
+    published: Vec<ErasedPublished>,
 }
 
 impl Held {
@@ -255,9 +253,9 @@ impl Held {
         self.provide_slots(values, node);
     }
 
-    /// Registers the slots under `node`.
+    /// Registers the published values under `node`.
     fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
-        (self.slots)(values, node, self.controls.as_ref());
+        values.provide_node(node, &self.published);
     }
 }
 
@@ -266,6 +264,7 @@ pub(crate) struct Kept<C> {
     controls: C,
     params: Option<ParamSet>,
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
+    published: Vec<ErasedPublished>,
 }
 
 /// What a swap does with a fade over a node that does not fit the running
@@ -904,8 +903,8 @@ impl<F: Float> Graph<F> {
     /// as its type says; it is prepared at the graph's rate. What the node's [`NodeParts`] say of it is kept: its params are addressed
     /// ([`NodeParts::params`], so a [`ParamTarget`](crate::ParamTarget) write and control-rate
     /// modulation find them), its reclaimer is swept by the session's
-    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), its slots
-    /// are the type's ([`SessionNode::slots`]), and
+    /// [`Reclaim`](crate::Phase::Reclaim) phase ([`NodeParts::reclaimer`]), its published
+    /// values are its slots ([`NodeParts::published`]), and
     /// it reads the session's loop ([`SessionNode::bind_timeline`]). A node
     /// that is only an [`IntoNode`] does not compile here: a host's own is
     /// wrapped as [`ForkByClone`](tutti_graph::ForkByClone) or
@@ -986,6 +985,7 @@ impl<F: Float> Graph<F> {
             fork,
             params,
             reclaimer,
+            published,
         } = node.into_parts();
         (
             NodeParts::new(node, (), fork, None),
@@ -993,6 +993,7 @@ impl<F: Float> Graph<F> {
                 controls,
                 params,
                 reclaimer,
+                published,
             },
         )
     }
@@ -1081,8 +1082,8 @@ impl<F: Float> Graph<F> {
         self.values.clone()
     }
 
-    /// Keeps what the node's parts said of it under `node`: its params and
-    /// reclaimer, and its slots ([`SessionNode::slots`]).
+    /// Keeps what the node's parts said of it under `node`: its params,
+    /// reclaimer and published values.
     fn address<N: SessionNode<F>>(
         &mut self,
         node: NodeKey,
@@ -1093,13 +1094,14 @@ impl<F: Float> Graph<F> {
             controls,
             params,
             reclaimer,
+            published,
         } = placed;
         let held = Held {
             controls: Box::new(controls),
             owner: std::any::TypeId::of::<N>(),
             params,
             reclaimer,
-            slots: Self::slots::<N>,
+            published,
         };
         if let Some(entry) = self.nodes.get_mut(&node) {
             held.provide(&self.values, node, outgoing);
@@ -1109,14 +1111,6 @@ impl<F: Float> Graph<F> {
             self.editor
                 .param_effective_cell(tutti_graph::ParamIn { node, param })
         });
-    }
-
-    /// [`address`](Self::address)'s step for the slots of an `N`.
-    fn slots<N: SessionNode<F>>(values: &ValueTable, node: NodeKey, controls: &(dyn Any + Send)) {
-        let controls = controls
-            .downcast_ref::<N::Controls>()
-            .expect("controls are held with the slots of their own type");
-        values.provide_node(N::slots(node, controls));
     }
 }
 

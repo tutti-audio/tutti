@@ -39,18 +39,12 @@ mod clap {
     use tutti_session::ConnectError;
     use tutti_session::{AnyPlugin, Key};
 
-    fn set_env(key: &str, value: impl AsRef<std::ffi::OsStr>) {
-        // SAFETY: nextest runs each test in its own process, and every variable
-        // is set before the first server is spawned, from the test's own thread.
-        unsafe { std::env::set_var(key, value) };
-    }
-
     fn loaded(layout: Option<&str>) -> (Session, Key<AnyPlugin>) {
         // The plugin's file is probed before its variables are set.
         crate::loading::prime(&PluginRef::file(clap_probe()));
-        set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
+        tutti_fixtures::set_env("TUTTI_PLUGIN_SERVER", tutti_fixtures::plugin_server());
         if let Some(layout) = layout {
-            set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
+            tutti_fixtures::set_env("TUTTI_CLAP_PROBE_PORT_LAYOUT", layout);
         }
         let mut s = offline();
         let node = s

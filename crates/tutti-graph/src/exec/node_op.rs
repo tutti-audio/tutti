@@ -329,24 +329,20 @@ pub(crate) struct Head<'p, 'e> {
 }
 
 /// What a node op may write besides its own unit: every buffer through `A`
-/// and `E` (the arena and event slots themselves serially, a claimed view
-/// of them in parallel), and only its own unit's per-block flags.
+/// and `E` (the arena and event slots themselves on the calling thread alone,
+/// a claimed view of them on a pool), and only its own unit's per-block flags.
 pub(crate) struct OpState<'s, A: ?Sized, Fl: ?Sized, E: ?Sized> {
     pub(crate) arena: &'s mut A,
     pub(crate) flags: &'s mut Fl,
     pub(crate) events: &'s mut E,
-    /// Flushed events waiting for their sinks: every entry serially, only
-    /// this unit's in parallel. Either way, entries are matched by unit.
+    /// Flushed events waiting for their sinks: this unit's. Entries are
+    /// matched by unit.
     pub(crate) inject: &'s mut [Inject],
-    /// Per plan unit, whether flushed events wait for it: every unit's
-    /// serially, only this one's (at index `at`) in parallel. Indexed only
-    /// for a node with event inputs, so an event-free call pays nothing.
-    pub(crate) has_inject: &'s mut [bool],
-    /// Per plan unit, whether a scheduled command lands on it this block;
-    /// indexed like `has_inject`.
-    pub(crate) has_due: &'s mut [bool],
-    /// This unit's index into `has_inject` and `has_due`.
-    pub(crate) at: usize,
+    /// Whether flushed events wait for this unit. Read only for a node with
+    /// event inputs, so an event-free call pays nothing.
+    pub(crate) has_inject: &'s mut bool,
+    /// Whether a scheduled command lands on this unit this block.
+    pub(crate) has_due: &'s mut bool,
     /// Where a node's scheduled events are merged into its inputs.
     pub(crate) overlay: &'s mut Overlay,
     pub(crate) due: Deliveries<'s>,
@@ -436,11 +432,11 @@ pub(super) fn node_op_with<
     let (rec, frames) = (h.rec, h.frames);
     let unit = rec.unit;
     // Flushed events and scheduled commands only ever go to an event input.
-    let injected = !ein.is_empty() && st.has_inject[st.at];
+    let injected = !ein.is_empty() && *st.has_inject;
     // A bypassed node is sent no events but the closes of what it holds
     // (`mode.rs`): its scheduled commands are dropped.
     let discards = !ein.is_empty() && u.mode.discards_events();
-    let scheduled = !ein.is_empty() && !discards && st.has_due[st.at];
+    let scheduled = !ein.is_empty() && !discards && *st.has_due;
 
     let (in_silent, in_constant) = in_masks(ain, &*st.flags);
     // A notified `Wake` counts as input. Taken for every node every block, so a
@@ -578,7 +574,7 @@ pub(super) fn node_op_with<
             views[n_views] = (port as u16, from, st.overlay.events.len() as u32);
             n_views += 1;
         }
-        st.has_due[st.at] = false;
+        *st.has_due = false;
     } else if !u.mode.held_in().is_empty() {
         // What each event input is sent, as the node will see it: the
         // port's slot, or what flushed events and scheduled commands made
@@ -630,7 +626,7 @@ pub(super) fn node_op_with<
         .get()
         .and_then(|r| crate::node::narrow_tail(rec.tail, r));
     if scheduled {
-        st.has_due[st.at] = false;
+        *st.has_due = false;
     }
     if injected {
         let mut owing = false;
@@ -638,7 +634,7 @@ pub(super) fn node_op_with<
             inj.consumed();
             owing |= inj.live;
         }
-        st.has_inject[st.at] = owing;
+        *st.has_inject = owing;
     }
 
     u.last_idle = status == Status::Idle;

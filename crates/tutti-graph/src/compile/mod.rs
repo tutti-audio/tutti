@@ -40,9 +40,9 @@
 //!    dispatch alone (never lengthening the critical path), fuse the chains
 //!    that leaves, and total the
 //!    cost model's estimates (`Plan::work` and the critical path; see
-//!    `cost.rs`). The serial executor ignores tasks; the parallel one
-//!    (`par.rs`) dispatches them, when `Plan::schedule` says spreading
-//!    pays.
+//!    `cost.rs`). A block run on the calling thread alone ignores tasks;
+//!    one spread over a pool (`par.rs`) dispatches them, when
+//!    `Plan::schedule` says spreading pays.
 //! 8. **Verify** ([`verify`]) in debug builds.
 //! 9. **Place** units: `NodeKey` → dense [`UnitIdx`], diffed against `prev`
 //!    into a [`Delta`].
