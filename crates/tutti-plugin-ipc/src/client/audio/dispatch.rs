@@ -984,7 +984,7 @@ pub(super) fn handle_control(
             );
             // Held until the answer: where the object is read by name, it stays
             // until then.
-            let _lease = ipc::send_blob(stream, id, body, blob)?;
+            let _lease = ipc::send_attached(stream, id, body, blob)?;
             // Wait for the answer. Answering the caller straight after the write
             // would report that the request had been *sent*, never whether the
             // plugin accepted it.
@@ -1039,7 +1039,15 @@ pub(super) fn handle_control(
             // that is not coming.
             let ok = matches!(
                 query_by(lane, inbox, lifecycle, |stream, id| {
-                    ipc::send_setup(stream, id, layout, &slab)
+                    ipc::send_attached(
+                        stream,
+                        id,
+                        crate::SetupSharedMemory {
+                            slab: slab.wire(),
+                            layout,
+                        },
+                        &slab,
+                    )
                 })?,
                 Some(ControlReply::SharedMemoryReady)
             );

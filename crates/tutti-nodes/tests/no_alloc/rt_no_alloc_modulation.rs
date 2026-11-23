@@ -60,7 +60,7 @@ fn gate<N: IntoNode>(node: N, amplitude: f32, blocks: usize, mut between: impl F
 #[test]
 fn lfo_node_process_is_allocation_free() {
     gate(
-        LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0_f64))),
+        LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(2.0_f64)))),
         0.0,
         5_000,
         |_| {},
@@ -72,7 +72,7 @@ fn lfo_random_shape_process_is_allocation_free() {
     // RandomSmooth hashes its cycle index on its own path. Fast enough
     // to step inside the warm-up, so the node is audible there.
     gate(
-        LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64))),
+        LfoNode::from(LfoConfig::new(LfoShape::RandomSmooth).rate(Some(Hz::new(200.0_f64)))),
         0.0,
         5_000,
         |_| {},
@@ -87,7 +87,7 @@ fn beat_synced_lfo_process_is_allocation_free() {
     gate(
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .beat_sync(BeatsPerCycle::of(4.0))
+                .beat_sync(Some(BeatsPerCycle::of(4.0)))
                 .phase_offset(PhaseIncrement::new(0.25)),
         ),
         0.0,

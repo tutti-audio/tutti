@@ -30,7 +30,7 @@
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
-//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(440.0)))));
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
