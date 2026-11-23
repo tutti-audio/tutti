@@ -13,6 +13,10 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 use tutti_platform::{Executor, Instant};
+use tutti_plugin_ipc::{
+    CloseEditor, EditorOpened, EditorSized, GetParameterList, LoadPlugin, OpenEditor,
+    ParameterList, SetEditorSize,
+};
 
 use tutti_buffers::FloatWidth;
 use tutti_clap_test_plugin::{ClapSwitch, Site};
@@ -216,7 +220,7 @@ impl Fixture {
 const TICK: Duration = Duration::from_millis(10);
 
 fn load_message() -> ControlRequest {
-    ControlRequest::LoadPlugin {
+    ControlRequest::LoadPlugin(LoadPlugin {
         path: std::path::PathBuf::from(crate::test_utils::clap_probe_path()),
         format: tutti_plugin_types::PluginFormat::Clap,
         plugin: None,
@@ -224,7 +228,7 @@ fn load_message() -> ControlRequest {
         block_size: 512,
         preferred_format: FloatWidth::F32,
         state: None,
-    }
+    })
 }
 
 /// A session with a slab, as the handshake leaves it.
@@ -357,7 +361,7 @@ fn a_timer_is_served_at_its_deadline_not_the_tick() {
         })),
         // A message is served as it comes, and with it the callback the block
         // asked for, which registers the timer.
-        Step::Send(ControlRequest::GetParameterList),
+        Step::Send(ControlRequest::GetParameterList(GetParameterList)),
         Until::step(move |_| probe_visits(probe) >= 3),
     ]);
 
@@ -385,7 +389,7 @@ fn a_message_after_silence_is_answered() {
             let waits = waits.clone();
             move |_| waits.load(std::sync::atomic::Ordering::SeqCst) >= 3
         }),
-        Step::Send(ControlRequest::GetParameterList),
+        Step::Send(ControlRequest::GetParameterList(GetParameterList)),
     ]);
     script.waits = waits;
 
@@ -395,7 +399,7 @@ fn a_message_after_silence_is_answered() {
         matches!(
             script.heard.last(),
             Some(ControlFrame::Reply {
-                reply: ControlReply::ParameterList { parameters },
+                reply: ControlReply::ParameterList(ParameterList { parameters }),
                 ..
             }) if !parameters.is_empty()
         ),
@@ -416,7 +420,7 @@ fn a_lost_plugin_ends_the_server_abnormally() {
     let main = main_thread();
     assert!(matches!(
         fixture.session.handle(main, load_message()),
-        tutti_plugin_ipc::Reaction::Reply(ControlReply::PluginLoaded { .. })
+        tutti_plugin_ipc::Reaction::Reply(ControlReply::PluginLoaded(_))
     ));
     fixture.session.lose_plugin();
     let executor = Executor::new();
@@ -505,14 +509,14 @@ fn an_undecodable_audio_frame_ends_the_session() {
 fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
     let (mut session, _slab) = session();
     let mut script = Script::new([
-        Step::Send(ControlRequest::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor(OpenEditor {
             parent: None,
             scale: ContentScale::IDENTITY,
-        }),
-        Step::Send(ControlRequest::SetEditorSize {
+        })),
+        Step::Send(ControlRequest::SetEditorSize(SetEditorSize {
             size: dpi::PhysicalSize::new(10, 10).into(),
-        }),
-        Step::Send(ControlRequest::CloseEditor),
+        })),
+        Step::Send(ControlRequest::CloseEditor(CloseEditor)),
     ]);
 
     run(&mut session, &mut script);
@@ -521,8 +525,8 @@ fn an_editor_request_with_no_plugin_is_refused_not_ignored() {
         matches!(
             script.heard.as_slice(),
             [
-                ControlFrame::Reply { reply: ControlReply::EditorOpened { result: Err(open) }, .. },
-                ControlFrame::Reply { reply: ControlReply::EditorSized { result: Err(size) }, .. },
+                ControlFrame::Reply { reply: ControlReply::EditorOpened(EditorOpened { result: Err(open) }), .. },
+                ControlFrame::Reply { reply: ControlReply::EditorSized(EditorSized { result: Err(size) }), .. },
             ] if *open == EditorError::NoPlugin && *size == EditorError::NotOpen
         ),
         "{:?}",

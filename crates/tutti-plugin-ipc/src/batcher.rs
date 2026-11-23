@@ -841,6 +841,7 @@ mod tests {
     use super::*;
     use crate::client::audio::response_ring;
     use crate::{AudioSlab, SlabHandle};
+    use crate::{SampleRateSet, SetSampleRate};
     use tutti_plugin_types::{ChunkOutcomes, MAX_CHUNK};
 
     /// A real slab's input writer, `samples` frames per channel, stereo both
@@ -1019,12 +1020,12 @@ mod tests {
             reason: "the plugin's own message".to_owned(),
         };
         let mock = MockServer::start("batcher_refusal", move |msg| match msg {
-            crate::ControlRequest::SetSampleRate { rate } => {
-                Action::Reply(Box::new(crate::ControlReply::SampleRateSet {
+            crate::ControlRequest::SetSampleRate(SetSampleRate { rate }) => Action::Reply(
+                Box::new(crate::ControlReply::SampleRateSet(SampleRateSet {
                     rate,
                     refusal: Some(cause()),
-                }))
-            }
+                })),
+            ),
             _ => Action::Silent,
         });
         let audio = mock.bridge.audio();

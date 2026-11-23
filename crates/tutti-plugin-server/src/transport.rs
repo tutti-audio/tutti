@@ -14,6 +14,7 @@ use tutti_plugin_ipc::{
     ControlFrame, ControlReply, ControlRequest, FrameBuf, Framed, Lane, ReqId, Request, SlabHandle,
     SlabLayout, read_frame, write_frame,
 };
+use tutti_plugin_ipc::{LoadState, OpenLane, SetupSharedMemory, StageState, StateReady};
 use tutti_plugin_ipc_ffi::{Blob, Lease};
 use tutti_plugin_types::{
     Deadline, IpcError, IpcResult, MAX_STATE_BYTES, ServerError, SlabError, StateError, StateUse,
@@ -127,25 +128,25 @@ impl Inbound for Incoming {
 
     fn complete(Request { id, body }: Request, stream: &PlatformStream) -> IpcResult<Self> {
         match body {
-            ControlRequest::SetupSharedMemory { slab, layout } => {
+            ControlRequest::SetupSharedMemory(SetupSharedMemory { slab, layout }) => {
                 // The slab is the next message on the stream: an exact read
                 // right after the frame, so no read ahead can have taken it.
                 let slab = SlabHandle::receive(crate::main_loop::connection(stream), slab)?;
                 Ok(Self::SetupSlab { id, layout, slab })
             }
-            ControlRequest::OpenLane {
+            ControlRequest::OpenLane(OpenLane {
                 lane: Lane::Audio,
                 wire,
-            } => {
+            }) => {
                 // The lane's end is the next message on the stream, as the slab is.
                 let lane = crate::main_loop::receive_lane(stream, &wire)?;
                 Ok(Self::OpenAudio { id, lane })
             }
-            ControlRequest::LoadState {
+            ControlRequest::LoadState(LoadState {
                 state_use,
                 len,
                 blob,
-            } => Ok(match take_state(stream, len, blob)? {
+            }) => Ok(match take_state(stream, len, blob)? {
                 Ok(state) => Self::LoadState {
                     id,
                     state_use,
@@ -157,14 +158,16 @@ impl Inbound for Incoming {
                     error: refusal(e),
                 },
             }),
-            ControlRequest::StageState { len, blob } => Ok(match take_state(stream, len, blob)? {
-                Ok(state) => Self::StageState { id, state },
-                Err(e) => Self::StateRefused {
-                    id,
-                    staging: true,
-                    error: refusal(e),
-                },
-            }),
+            ControlRequest::StageState(StageState { len, blob }) => {
+                Ok(match take_state(stream, len, blob)? {
+                    Ok(state) => Self::StageState { id, state },
+                    Err(e) => Self::StateRefused {
+                        id,
+                        staging: true,
+                        error: refusal(e),
+                    },
+                })
+            }
             body => Ok(Self::Request(Request { id, body })),
         }
     }
@@ -213,10 +216,10 @@ pub(crate) fn send_state(
 ) -> IpcResult<()> {
     match Blob::create(state) {
         Ok(object) => {
-            let reply = ControlReply::StateReady {
+            let reply = ControlReply::StateReady(StateReady {
                 len: state.len() as u64,
                 blob: object.wire(),
-            };
+            });
             transport.send_attached(&ControlFrame::Reply { id, reply }, object)
         }
         Err(e) => transport.send(&ControlFrame::Reply {
@@ -550,6 +553,7 @@ mod lane_tests {
     use std::os::fd::{AsFd, OwnedFd};
     use std::os::unix::net::UnixStream;
     use tutti_plugin_ipc::LaneWire;
+    use tutti_plugin_ipc::{OpenLane, Shutdown};
     use tutti_plugin_types::SlabError;
 
     fn pair() -> (UnixStream, SocketTransport<Incoming, ControlFrame>) {
@@ -563,10 +567,10 @@ mod lane_tests {
     fn open_lane(id: u64) -> Request {
         Request {
             id: ReqId::new(id),
-            body: ControlRequest::OpenLane {
+            body: ControlRequest::OpenLane(OpenLane {
                 lane: Lane::Audio,
                 wire: LaneWire::fresh().expect("a lane wire"),
-            },
+            }),
         }
     }
 
@@ -580,7 +584,7 @@ mod lane_tests {
             .expect("a lane pair");
         let request = |id| Request {
             id: ReqId::new(id),
-            body: ControlRequest::Shutdown,
+            body: ControlRequest::Shutdown(Shutdown),
         };
         write_frame(&mut host, &request(1)).expect("before");
         write_frame(&mut host, &open_lane(2)).expect("the frame");
@@ -627,6 +631,7 @@ mod state_object_tests {
     use super::*;
     use std::os::fd::{AsFd, OwnedFd};
     use std::os::unix::net::UnixStream;
+    use tutti_plugin_ipc::{LoadState, StageState, StateReady};
 
     const CAP_PLUS: u64 = MAX_STATE_BYTES as u64 + 1;
 
@@ -654,10 +659,12 @@ mod state_object_tests {
     }
 
     fn load(declared: u64) -> impl FnOnce(u64, BlobWire) -> ControlRequest {
-        move |_, blob| ControlRequest::LoadState {
-            state_use: StateUse::Project,
-            len: declared,
-            blob,
+        move |_, blob| {
+            ControlRequest::LoadState(LoadState {
+                state_use: StateUse::Project,
+                len: declared,
+                blob,
+            })
         }
     }
 
@@ -688,7 +695,7 @@ mod state_object_tests {
         }
         host_sends(
             &mut host,
-            |len, blob| ControlRequest::StageState { len, blob },
+            |len, blob| ControlRequest::StageState(StageState { len, blob }),
             bytes.len() as u64,
             Blob::create(&bytes).unwrap(),
         );
@@ -708,7 +715,7 @@ mod state_object_tests {
         let frame: ControlFrame = read_frame(&mut host).expect("the frame");
         let ControlFrame::Reply {
             id,
-            reply: ControlReply::StateReady { len, blob },
+            reply: ControlReply::StateReady(StateReady { len, blob }),
         } = frame
         else {
             panic!("expected StateReady, got {frame:?}");
@@ -755,7 +762,7 @@ mod state_object_tests {
         }
         host_sends(
             &mut host,
-            |len, blob| ControlRequest::StageState { len, blob },
+            |len, blob| ControlRequest::StageState(StageState { len, blob }),
             1 << 20,
             Blob::create(&[1u8; 100]).unwrap(),
         );
@@ -862,7 +869,7 @@ mod state_object_tests {
             send_state(&mut transport, ReqId::new(1), &[i; 1000]).unwrap();
             let frame: ControlFrame = read_frame(&mut host).unwrap();
             let ControlFrame::Reply {
-                reply: ControlReply::StateReady { len, blob },
+                reply: ControlReply::StateReady(StateReady { len, blob }),
                 ..
             } = frame
             else {

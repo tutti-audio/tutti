@@ -17,7 +17,7 @@ fn take_open_lane(server: &mut ControlStream) -> (ReqId, std::os::fd::OwnedFd) {
     use std::os::fd::AsFd as _;
     let Request { id, body } =
         ipc::recv_within(server, Duration::from_secs(60)).expect("the OpenLane frame arrives");
-    let ControlRequest::OpenLane { lane, wire } = body else {
+    let ControlRequest::OpenLane(OpenLane { lane, wire }) = body else {
         panic!("expected OpenLane, got {body:?}");
     };
     assert_eq!(lane, Lane::Audio);
@@ -42,7 +42,7 @@ fn an_opened_lane_is_a_live_duplex_stream_to_the_server() {
             &mut server,
             &ControlFrame::Reply {
                 id,
-                reply: ControlReply::LaneOpened,
+                reply: ControlReply::LaneOpened(LaneOpened),
             },
         )
         .expect("LaneOpened");

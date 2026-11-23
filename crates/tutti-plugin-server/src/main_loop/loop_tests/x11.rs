@@ -7,6 +7,7 @@ use tutti_clap_test_plugin::{
     GUI_CMD_REQUEST_RESIZE, GUI_HEIGHT, GUI_REQUESTED_RESIZE_H, GUI_REQUESTED_RESIZE_W, GUI_WIDTH,
     GuiMode,
 };
+use tutti_plugin_ipc::{CloseEditor, EditorOpened, EditorSized, OpenEditor, SetEditorSize};
 use tutti_plugin_ipc::{ControlFrame, ControlReply, ControlRequest, News};
 use tutti_plugin_types::ContentScale;
 
@@ -46,18 +47,20 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
     let wanted = Size::Physical(PhysicalSize::new(801, 601));
     let mut script = Script::new([
         Step::Send(load_message()),
-        Step::Send(ControlRequest::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor(OpenEditor {
             parent: Some(0x40_0001),
             scale: ContentScale::IDENTITY,
-        }),
+        })),
         // The plugin asked for a size from `show`; only an idle tick can say so.
         Until::step(|heard| {
             heard
                 .iter()
                 .any(|m| matches!(m, ControlFrame::News(News::EditorWantsSize { .. })))
         }),
-        Step::Send(ControlRequest::SetEditorSize { size: wanted }),
-        Step::Send(ControlRequest::CloseEditor),
+        Step::Send(ControlRequest::SetEditorSize(SetEditorSize {
+            size: wanted,
+        })),
+        Step::Send(ControlRequest::CloseEditor(CloseEditor)),
         Until::step(move |_| probe.gui_capture().destroyed),
     ]);
 
@@ -68,7 +71,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .iter()
         .find_map(|m| match m {
             ControlFrame::Reply {
-                reply: ControlReply::EditorOpened { result },
+                reply: ControlReply::EditorOpened(EditorOpened { result }),
                 ..
             } => Some(result.clone()),
             _ => None,
@@ -95,7 +98,7 @@ fn the_editor_opens_resizes_and_closes_on_the_served_instance() {
         .iter()
         .find_map(|m| match m {
             ControlFrame::Reply {
-                reply: ControlReply::EditorSized { result },
+                reply: ControlReply::EditorSized(EditorSized { result }),
                 ..
             } => Some(result.clone()),
             _ => None,
@@ -128,10 +131,10 @@ fn replacing_a_plugin_closes_its_editor_and_says_so() {
     let (mut session, _slab) = session();
     let mut script = Script::new([
         Step::Send(load_message()),
-        Step::Send(ControlRequest::OpenEditor {
+        Step::Send(ControlRequest::OpenEditor(OpenEditor {
             parent: Some(0x40_0001),
             scale: ContentScale::IDENTITY,
-        }),
+        })),
         Step::Send(load_message()),
         Until::step(|heard| {
             heard

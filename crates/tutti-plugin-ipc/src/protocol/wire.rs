@@ -218,6 +218,10 @@ pub mod size_opt_result {
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        CloseEditor, EditorOpened, EditorSized, GetParameterText, OpenEditor, ParameterValue,
+        ParameterValueFromText, SampleRateSet, SetEditorSize, SetSampleRate,
+    };
     use serde::{Deserialize, Serialize};
     use tutti_plugin_types::{EditorError, MIDI_STACK_CAPACITY, MidiEventVec, WireMidi};
     use tutti_ump::Ump;
@@ -269,44 +273,44 @@ mod tests {
         use tutti_units::ParamId;
         use tutti_units::SampleRate;
 
-        let text = ControlRequest::GetParameterText {
+        let text = ControlRequest::GetParameterText(GetParameterText {
             param_id: ParamId::new(0x0102_0304),
             value: Normalized::of(0.25),
-        };
+        });
         // variant 13, id 0x0102_0304 as a varint, 0.25f64
         assert_eq!(
             postcard::to_allocvec(&text).unwrap(),
             [13, 0x84, 0x86, 0x88, 0x08, 0, 0, 0, 0, 0, 0, 208, 63]
         );
 
-        let rate = ControlRequest::SetSampleRate {
+        let rate = ControlRequest::SetSampleRate(SetSampleRate {
             rate: SampleRate::SR_48K,
-        };
+        });
         // variant 4, 48000.0f64
         assert_eq!(
             postcard::to_allocvec(&rate).unwrap(),
             [4, 0, 0, 0, 0, 0, 112, 231, 64]
         );
 
-        let set_reply = ControlReply::SampleRateSet {
+        let set_reply = ControlReply::SampleRateSet(SampleRateSet {
             rate: SampleRate::SR_48K,
             refusal: None,
-        };
+        });
         // variant 3, 48000.0f64, no error
         assert_eq!(
             postcard::to_allocvec(&set_reply).unwrap(),
             [3, 0, 0, 0, 0, 0, 112, 231, 64, 0]
         );
 
-        let some = ControlReply::ParameterValue {
+        let some = ControlReply::ParameterValue(ParameterValue {
             value: Some(Normalized::of(0.25)),
-        };
+        });
         // variant 1, Some, 0.25f64
         assert_eq!(
             postcard::to_allocvec(&some).unwrap(),
             [1, 1, 0, 0, 0, 0, 0, 0, 208, 63]
         );
-        let none = ControlReply::ParameterValue { value: None };
+        let none = ControlReply::ParameterValue(ParameterValue { value: None });
         assert_eq!(postcard::to_allocvec(&none).unwrap(), [1, 0]);
 
         let changed = News::ParameterChanged {
@@ -361,7 +365,7 @@ mod tests {
         ok.extend(48_000.0f64.to_le_bytes());
         assert!(matches!(
             postcard::from_bytes::<ControlRequest>(&ok),
-            Ok(ControlRequest::SetSampleRate { .. })
+            Ok(ControlRequest::SetSampleRate(_))
         ));
     }
 
@@ -386,53 +390,54 @@ mod tests {
             postcard::to_allocvec(&Size::Logical(LogicalSize::new(1.0, 2.0))).unwrap(),
             [1, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f, 0, 0, 0, 0, 0, 0, 0, 0x40]
         );
-        let open = ControlRequest::OpenEditor {
+        let open = ControlRequest::OpenEditor(OpenEditor {
             parent: None,
             scale: ContentScale::IDENTITY,
-        };
+        });
         assert_eq!(
             postcard::to_allocvec(&open).unwrap(),
             [18, 0, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
-        let embedded = ControlRequest::OpenEditor {
+        let embedded = ControlRequest::OpenEditor(OpenEditor {
             parent: Some(300),
             scale: ContentScale::IDENTITY,
-        };
+        });
         assert_eq!(
             postcard::to_allocvec(&embedded).unwrap(),
             [18, 1, 0xac, 0x02, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f]
         );
         assert_eq!(
-            postcard::to_allocvec(&ControlRequest::CloseEditor).unwrap(),
+            postcard::to_allocvec(&ControlRequest::CloseEditor(CloseEditor)).unwrap(),
             [19]
         );
         let mut resize = vec![20];
         resize.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap(),
+            postcard::to_allocvec(&ControlRequest::SetEditorSize(SetEditorSize { size })).unwrap(),
             resize
         );
 
         let mut opened = vec![15, 0, 1];
         opened.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&ControlReply::EditorOpened {
+            postcard::to_allocvec(&ControlReply::EditorOpened(EditorOpened {
                 result: Ok(Some(size))
-            })
+            }))
             .unwrap(),
             opened
         );
         assert_eq!(
-            postcard::to_allocvec(&ControlReply::EditorOpened {
+            postcard::to_allocvec(&ControlReply::EditorOpened(EditorOpened {
                 result: Err(EditorError::NoPlugin)
-            })
+            }))
             .unwrap(),
             [15, 1, 4]
         );
         let mut sized = vec![16, 0];
         sized.extend(size_bytes);
         assert_eq!(
-            postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap(),
+            postcard::to_allocvec(&ControlReply::EditorSized(EditorSized { result: Ok(size) }))
+                .unwrap(),
             sized
         );
         let mut wants = vec![7];
@@ -464,13 +469,16 @@ mod tests {
             logical(1.0, f64::NEG_INFINITY),
         ];
         let roundtrips = |size: Size| {
-            let host = postcard::to_allocvec(&ControlRequest::SetEditorSize { size }).unwrap();
+            let host =
+                postcard::to_allocvec(&ControlRequest::SetEditorSize(SetEditorSize { size }))
+                    .unwrap();
             let wants = postcard::to_allocvec(&News::EditorWantsSize { size }).unwrap();
             let sized =
-                postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap();
-            let opened = postcard::to_allocvec(&ControlReply::EditorOpened {
+                postcard::to_allocvec(&ControlReply::EditorSized(EditorSized { result: Ok(size) }))
+                    .unwrap();
+            let opened = postcard::to_allocvec(&ControlReply::EditorOpened(EditorOpened {
                 result: Ok(Some(size)),
-            })
+            }))
             .unwrap();
             [
                 postcard::from_bytes::<ControlRequest>(&host).is_ok(),
@@ -502,39 +510,41 @@ mod tests {
             bytes
         };
         let get_text = || {
-            postcard::to_allocvec(&ControlRequest::GetParameterText {
+            postcard::to_allocvec(&ControlRequest::GetParameterText(GetParameterText {
                 param_id: ParamId::new(1),
                 value: Normalized::of(0.5),
-            })
+            }))
             .unwrap()
         };
         let value_of = |raw: f64| {
-            let mut bytes = postcard::to_allocvec(&ControlReply::ParameterValue {
+            let mut bytes = postcard::to_allocvec(&ControlReply::ParameterValue(ParameterValue {
                 value: Some(Normalized::of(0.5)),
-            })
+            }))
             .unwrap();
             let end = bytes.len();
             bytes[end - 8..].copy_from_slice(&raw.to_le_bytes());
             postcard::from_bytes::<ControlReply>(&bytes)
         };
         let from_text = || {
-            postcard::to_allocvec(&ControlReply::ParameterValueFromText {
-                value: Some(Normalized::of(0.5)),
-            })
+            postcard::to_allocvec(&ControlReply::ParameterValueFromText(
+                ParameterValueFromText {
+                    value: Some(Normalized::of(0.5)),
+                },
+            ))
             .unwrap()
         };
 
         assert!(matches!(
             postcard::from_bytes::<ControlRequest>(&f64_tail(&get_text, 0.25)).unwrap(),
-            ControlRequest::GetParameterText { value, .. } if value == Normalized::of(0.25)
+            ControlRequest::GetParameterText(GetParameterText { value, .. }) if value == Normalized::of(0.25)
         ));
         assert!(matches!(
             postcard::from_bytes::<ControlReply>(&f64_tail(&from_text, 0.25)).unwrap(),
-            ControlReply::ParameterValueFromText { value } if value == Some(Normalized::of(0.25))
+            ControlReply::ParameterValueFromText(ParameterValueFromText { value }) if value == Some(Normalized::of(0.25))
         ));
         assert!(matches!(
             value_of(0.25).unwrap(),
-            ControlReply::ParameterValue { value } if value == Some(Normalized::of(0.25))
+            ControlReply::ParameterValue(ParameterValue { value }) if value == Some(Normalized::of(0.25))
         ));
         for raw in [7.5, -3.0, f64::NAN, f64::INFINITY] {
             assert!(value_of(raw).is_err(), "optional reply {raw}");

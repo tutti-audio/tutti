@@ -28,6 +28,11 @@ use crate::{
     AudioReply, AudioRequest, AudioSlab, ControlFrame, ControlReply, ControlRequest, Framed, News,
     ReqId, Request, SlabHandle, SlabLayout,
 };
+use crate::{
+    CurrentPreset, LoadState, ParameterValue, SampleRateSet, SetSampleRate, SetupSharedMemory,
+    SharedMemoryReady, StageState, StateLoaded, StateReady,
+};
+use crate::{OpenEditor, ParameterList};
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -101,7 +106,7 @@ fn no_editor(
 /// The answer to the request the bridge sends after a render mode: the server
 /// answers its control lane in order, so this says the mode is applied.
 fn applied_fence() -> ControlReply {
-    ControlReply::CurrentPreset { id: None }
+    ControlReply::CurrentPreset(CurrentPreset { id: None })
 }
 
 fn stereo_layout() -> SlabLayout {
@@ -160,11 +165,12 @@ impl Wire for Request {
 
     fn follow(body: &ControlRequest, stream: &Stream) {
         match body {
-            ControlRequest::SetupSharedMemory { slab, .. } => {
+            ControlRequest::SetupSharedMemory(SetupSharedMemory { slab, .. }) => {
                 SlabHandle::receive(crate::transport::connection(stream), slab.clone())
                     .expect("the slab follows its setup");
             }
-            ControlRequest::LoadState { blob, .. } | ControlRequest::StageState { blob, .. } => {
+            ControlRequest::LoadState(LoadState { blob, .. })
+            | ControlRequest::StageState(StageState { blob, .. }) => {
                 Blob::receive(crate::transport::connection(stream), blob.clone())
                     .expect("the object follows its state");
             }
@@ -279,10 +285,10 @@ fn serve_lane<Req: Wire>(
             }
             Action::State { len, bytes } => {
                 let blob = Blob::create(&bytes).expect("the mock's state object");
-                let reply = ControlReply::StateReady {
+                let reply = ControlReply::StateReady(StateReady {
                     len,
                     blob: blob.wire(),
-                };
+                });
                 if send_reply(&stream, id, &reply).is_err()
                     || blob.send(crate::transport::connection(&stream)).is_err()
                 {
@@ -291,10 +297,10 @@ fn serve_lane<Req: Wire>(
             }
             Action::StateWithoutObject => {
                 let blob = Blob::create(&[]).expect("the mock's state object");
-                let reply = ControlReply::StateReady {
+                let reply = ControlReply::StateReady(StateReady {
                     len: 0,
                     blob: blob.wire(),
-                };
+                });
                 if send_reply(&stream, id, &reply).is_err() {
                     return;
                 }
@@ -574,13 +580,13 @@ fn a_server_that_dies_mid_session_marks_the_bridge_crashed() {
     SEEN.store(0, Ordering::SeqCst);
 
     let mock = MockServer::start("mid-death", |msg| match msg {
-        ControlRequest::GetParameter { .. } => {
+        ControlRequest::GetParameter(_) => {
             // Answer the first request, die on the second. Answering once is
             // what makes this "died mid-session" rather than "never worked".
             if SEEN.fetch_add(1, Ordering::SeqCst) == 0 {
-                Action::Reply(Box::new(ControlReply::ParameterValue {
+                Action::Reply(Box::new(ControlReply::ParameterValue(ParameterValue {
                     value: Some(Normalized::of(0.5)),
-                }))
+                })))
             } else {
                 Action::Die
             }
@@ -725,10 +731,10 @@ fn a_listener_hears_the_crash_with_its_cause() {
 #[test]
 fn an_unprompted_event_reaches_the_listener_while_no_command_waits() {
     let mock = MockServer::start("unprompted", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Event(News::LatencyChanged {
+        ControlRequest::SetRenderMode(_) => Action::Event(News::LatencyChanged {
             samples: tutti_plugin_types::Samples::new(77),
         }),
-        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset(_) => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<Mutex<Vec<usize>>> = Arc::new(Mutex::new(Vec::new()));
@@ -773,7 +779,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
     };
     let sent = real.clone();
     let mock = MockServer::start("silly-layout", move |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+        ControlRequest::SetRenderMode(_) => Action::Events(vec![
             News::PluginIoChanged {
                 layout: Some(silly.clone()),
             },
@@ -781,7 +787,7 @@ fn a_layout_with_absurdly_many_buses_is_dropped_on_receipt() {
                 layout: Some(sent.clone()),
             },
         ]),
-        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset(_) => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let layouts: Arc<Mutex<Vec<Layout>>> = Arc::new(Mutex::new(Vec::new()));
@@ -816,13 +822,13 @@ fn a_plugin_that_refused_its_saved_state_is_heard_with_the_reason() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("state-not-restored", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+        ControlRequest::SetRenderMode(_) => Action::Events(vec![
             News::PluginReloaded,
             News::PluginStateNotRestored {
                 reason: "setState refused".into(),
             },
         ]),
-        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset(_) => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -853,7 +859,7 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("mode-not-applied", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![
+        ControlRequest::SetRenderMode(_) => Action::Events(vec![
             News::RenderModeNotApplied {
                 mode: tutti_plugin_types::RenderMode::Offline,
             },
@@ -861,7 +867,7 @@ fn a_refused_render_mode_and_a_restart_the_plugin_would_not_make_are_heard() {
                 reason: "inside a block".into(),
             },
         ]),
-        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset(_) => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -891,12 +897,12 @@ fn the_servers_loss_counts_are_heard() {
     use crate::client::audio::IpcEvent;
 
     let mock = MockServer::start("server-losses", |msg| match msg {
-        ControlRequest::SetRenderMode { .. } => Action::Events(vec![News::ServerLosses {
+        ControlRequest::SetRenderMode(_) => Action::Events(vec![News::ServerLosses {
             commands_refused: 3,
             edits_refused: 2,
             refused_off_thread_calls: tutti_units::Calls::new(5),
         }]),
-        ControlRequest::GetCurrentPreset => Action::Reply(Box::new(applied_fence())),
+        ControlRequest::GetCurrentPreset(_) => Action::Reply(Box::new(applied_fence())),
         _ => Action::Silent,
     });
     let heard: Arc<Mutex<Vec<(u64, u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
@@ -934,8 +940,8 @@ fn a_handle(layout: &SlabLayout) -> SlabHandle {
 fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     let layout = stereo_layout();
     let ready = MockServer::start("slab-ready", |msg| match msg {
-        ControlRequest::SetupSharedMemory { .. } => {
-            Action::Reply(Box::new(ControlReply::SharedMemoryReady))
+        ControlRequest::SetupSharedMemory(_) => {
+            Action::Reply(Box::new(ControlReply::SharedMemoryReady(SharedMemoryReady)))
         }
         _ => Action::Silent,
     });
@@ -948,7 +954,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     );
 
     let refusing = MockServer::start("slab-refused", |msg| match msg {
-        ControlRequest::SetupSharedMemory { .. } => Action::Reply(Box::new(ControlReply::Error {
+        ControlRequest::SetupSharedMemory(_) => Action::Reply(Box::new(ControlReply::Error {
             error: tutti_plugin_types::ServerError::SlabNotOpened {
                 reason: "the slab does not open".into(),
             },
@@ -977,7 +983,7 @@ fn a_slab_setup_is_answered_refused_or_given_up_on_within_the_deadline() {
     assert!(!answered, "no answer is a refusal");
 
     let dying = MockServer::start("slab-dies", |msg| match msg {
-        ControlRequest::SetupSharedMemory { .. } => Action::Die,
+        ControlRequest::SetupSharedMemory(_) => Action::Die,
         _ => Action::Silent,
     });
     let dying_bridge = Arc::clone(&dying.bridge);
@@ -1052,7 +1058,7 @@ fn calls_after_a_crash_fail_fast_instead_of_waiting_out_the_timeout() {
 #[test]
 fn a_crash_during_save_state_does_not_block_the_caller_forever() {
     let mock = MockServer::start("save-death", |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::Die,
+        ControlRequest::SaveState(_) => Action::Die,
         _ => Action::Silent,
     });
 
@@ -1099,7 +1105,7 @@ fn a_crash_during_save_state_does_not_block_the_caller_forever() {
 fn an_absurd_length_prefix_does_not_hang_or_exhaust_memory() {
     let mock =
         MockServer::start_with_timeouts("huge-len", unreachable_deadline(), |msg| match msg {
-            ControlRequest::GetParameter { .. } => Action::Raw(u32::MAX, vec![0u8; 4]),
+            ControlRequest::GetParameter(_) => Action::Raw(u32::MAX, vec![0u8; 4]),
             _ => Action::Silent,
         });
 
@@ -1135,7 +1141,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 
     let over =
         MockServer::start_with_timeouts("cap-over", unreachable_deadline(), |msg| match msg {
-            ControlRequest::GetParameter { .. } => {
+            ControlRequest::GetParameter(_) => {
                 Action::Raw(CONTROL_FRAME_BYTES as u32 + 1, Vec::new())
             }
             _ => Action::Silent,
@@ -1156,7 +1162,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
     let mut quick = Timeouts::default();
     quick.param = Duration::from_millis(300);
     let under = MockServer::start_with_timeouts("cap-under", quick, |msg| match msg {
-        ControlRequest::GetParameter { .. } => Action::Raw(CONTROL_FRAME_BYTES as u32, Vec::new()),
+        ControlRequest::GetParameter(_) => Action::Raw(CONTROL_FRAME_BYTES as u32, Vec::new()),
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&under.bridge);
@@ -1207,7 +1213,7 @@ fn the_frame_cap_is_the_boundary_it_claims_to_be() {
 #[test]
 fn a_dribbling_peer_cannot_hold_the_bridge_thread_open() {
     let mock = MockServer::start("dribble", |msg| match msg {
-        ControlRequest::GetParameter { .. } => Action::Dribble {
+        ControlRequest::GetParameter(_) => Action::Dribble {
             len: u32::MAX,
             gap: Duration::from_millis(50),
         },
@@ -1244,7 +1250,7 @@ fn a_garbage_payload_is_rejected_rather_than_decoded() {
     // framing, unlike the truncated and oversized cases.
     const GARBAGE_LEN: usize = 64;
     let mock = MockServer::start("garbage", |msg| match msg {
-        ControlRequest::GetParameter { .. } => {
+        ControlRequest::GetParameter(_) => {
             Action::Raw(GARBAGE_LEN as u32, vec![0xABu8; GARBAGE_LEN])
         }
         _ => Action::Silent,
@@ -1268,7 +1274,7 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
     let mock = MockServer::start("truncated", |msg| match msg {
         // Advertise 4 KiB, send 8 bytes, then the closure returns and the
         // server loops — the remaining bytes never come.
-        ControlRequest::GetParameter { .. } => Action::Raw(4096, vec![0u8; 8]),
+        ControlRequest::GetParameter(_) => Action::Raw(4096, vec![0u8; 8]),
         _ => Action::Silent,
     });
 
@@ -1294,8 +1300,10 @@ fn a_truncated_body_is_not_mistaken_for_a_complete_message() {
 fn a_valid_but_wrong_reply_type_does_not_satisfy_the_request() {
     let mock = MockServer::start("wrong-type", |msg| match msg {
         // Asked for a parameter value; answer with a state acknowledgement instead.
-        ControlRequest::GetParameter { .. } => {
-            Action::Reply(Box::new(ControlReply::StateLoaded { error: None }))
+        ControlRequest::GetParameter(_) => {
+            Action::Reply(Box::new(ControlReply::StateLoaded(StateLoaded {
+                error: None,
+            })))
         }
         _ => Action::Silent,
     });
@@ -1413,12 +1421,12 @@ fn a_silent_server_is_bounded_by_the_timeout() {
 fn a_refused_rate_is_reported_without_crashing_the_bridge() {
     let calls = std::sync::atomic::AtomicU32::new(0);
     let mock = MockServer::start("refused_rate", move |msg| match msg {
-        ControlRequest::SetSampleRate { rate } => {
+        ControlRequest::SetSampleRate(SetSampleRate { rate }) => {
             let first = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
-            Action::Reply(Box::new(ControlReply::SampleRateSet {
+            Action::Reply(Box::new(ControlReply::SampleRateSet(SampleRateSet {
                 rate,
                 refusal: first.then_some(RateRefusalCause::Unconfigured),
-            }))
+            })))
         }
         _ => Action::Silent,
     });
@@ -1453,17 +1461,17 @@ fn a_refused_rate_is_reported_without_crashing_the_bridge() {
 #[test]
 fn an_unanswered_rate_change_is_a_refusal_and_its_late_answer_clears_it() {
     let mock = MockServer::start_with_timeouts("late_rate", rate_timeout(300), |msg| match msg {
-        ControlRequest::SetSampleRate { rate } => Action::ReplyAfter {
-            reply: ControlReply::SampleRateSet {
+        ControlRequest::SetSampleRate(SetSampleRate { rate }) => Action::ReplyAfter {
+            reply: ControlReply::SampleRateSet(SampleRateSet {
                 rate,
                 refusal: None,
-            },
+            }),
             gap: Duration::from_millis(800),
         },
-        ControlRequest::GetParameter { .. } => {
-            Action::Reply(Box::new(ControlReply::ParameterValue {
+        ControlRequest::GetParameter(_) => {
+            Action::Reply(Box::new(ControlReply::ParameterValue(ParameterValue {
                 value: Some(Normalized::of(0.5)),
-            }))
+            })))
         }
         _ => Action::Silent,
     });
@@ -1517,27 +1525,27 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
     let mock =
         MockServer::start_with_timeouts("late_then_refused", rate_timeout(1_000), move |msg| {
             match msg {
-                ControlRequest::SetSampleRate { rate } => {
+                ControlRequest::SetSampleRate(SetSampleRate { rate }) => {
                     if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
                         // A: accepted, but only once the test has seen the bridge give up.
                         if released.recv().is_err() {
                             return Action::Silent;
                         }
-                        Action::Reply(Box::new(ControlReply::SampleRateSet {
+                        Action::Reply(Box::new(ControlReply::SampleRateSet(SampleRateSet {
                             rate,
                             refusal: None,
-                        }))
+                        })))
                     } else {
-                        Action::Reply(Box::new(ControlReply::SampleRateSet {
+                        Action::Reply(Box::new(ControlReply::SampleRateSet(SampleRateSet {
                             rate,
                             refusal: Some(RateRefusalCause::Unconfigured),
-                        }))
+                        })))
                     }
                 }
-                ControlRequest::GetParameter { .. } => {
-                    Action::Reply(Box::new(ControlReply::ParameterValue {
+                ControlRequest::GetParameter(_) => {
+                    Action::Reply(Box::new(ControlReply::ParameterValue(ParameterValue {
                         value: Some(Normalized::of(0.5)),
-                    }))
+                    })))
                 }
                 _ => Action::Silent,
             }
@@ -1578,7 +1586,7 @@ fn a_late_rate_answer_does_not_override_a_later_one() {
 fn dropping_the_bridge_ends_a_hung_rate_change() {
     let (asked, request_seen) = std::sync::mpsc::sync_channel(1);
     let mut mock = MockServer::start("hung_rate", move |msg| {
-        if matches!(msg, ControlRequest::SetSampleRate { .. }) {
+        if matches!(msg, ControlRequest::SetSampleRate(_)) {
             let _ = asked.try_send(());
         }
         Action::Silent
@@ -1609,7 +1617,7 @@ fn dropping_the_bridge_ends_a_hung_rate_change() {
 fn a_bridge_asked_to_stop_tells_the_server_to_shut_down() {
     let (heard, shutdown_seen) = std::sync::mpsc::sync_channel(1);
     let mock = MockServer::start("shutdown", move |msg| {
-        if matches!(msg, ControlRequest::Shutdown) {
+        if matches!(msg, ControlRequest::Shutdown(_)) {
             let _ = heard.try_send(());
         }
         Action::Silent
@@ -1655,7 +1663,7 @@ mod shell_server {
         let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped")));
         let tell = Arc::clone(&stdin);
         let mut mock = MockServer::start("guard_shutdown", move |msg| {
-            if matches!(msg, ControlRequest::Shutdown) {
+            if matches!(msg, ControlRequest::Shutdown(_)) {
                 let _ = writeln!(tell.lock());
             }
             Action::Silent
@@ -1697,7 +1705,7 @@ mod shell_server {
 #[test]
 fn an_under_cap_dribble_is_stopped_by_the_total_deadline() {
     let mock = MockServer::start("dribble-under", |msg| match msg {
-        ControlRequest::GetParameter { .. } => Action::Dribble {
+        ControlRequest::GetParameter(_) => Action::Dribble {
             // Comfortably under CONTROL_FRAME_BYTES: the size check must let this
             // through, or the test proves nothing about the deadline.
             len: 4096,
@@ -1732,7 +1740,7 @@ fn a_state_larger_than_one_frame_arrives_whole() {
     let expected = big.clone();
 
     let mock = MockServer::start("big-state", move |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::State {
+        ControlRequest::SaveState(_) => Action::State {
             len: big.len() as u64,
             bytes: big.clone(),
         },
@@ -1765,14 +1773,14 @@ fn a_state_larger_than_one_frame_arrives_whole() {
 fn a_state_object_of_another_length_than_declared_is_rejected() {
     for (declared, held) in [(1u64 << 20, 50usize), (2 << 20, 0)] {
         let mock = MockServer::start("state-length", move |msg| match msg {
-            ControlRequest::SaveState { .. } => Action::State {
+            ControlRequest::SaveState(_) => Action::State {
                 len: declared,
                 bytes: vec![9u8; held],
             },
-            ControlRequest::GetParameterList => {
-                Action::Reply(Box::new(ControlReply::ParameterList {
+            ControlRequest::GetParameterList(_) => {
+                Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
                     parameters: Vec::new(),
-                }))
+                })))
             }
             _ => Action::Silent,
         });
@@ -1795,13 +1803,15 @@ fn a_state_object_of_another_length_than_declared_is_rejected() {
 fn a_declared_state_past_the_limit_is_too_large() {
     use tutti_plugin_types::MAX_STATE_BYTES;
     let mock = MockServer::start("state-cap", |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::State {
+        ControlRequest::SaveState(_) => Action::State {
             len: MAX_STATE_BYTES as u64 + 1,
             bytes: vec![0u8; 16],
         },
-        ControlRequest::GetParameterList => Action::Reply(Box::new(ControlReply::ParameterList {
-            parameters: Vec::new(),
-        })),
+        ControlRequest::GetParameterList(_) => {
+            Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
+                parameters: Vec::new(),
+            })))
+        }
         _ => Action::Silent,
     });
     let err = mock
@@ -1823,7 +1833,7 @@ fn a_declared_state_past_the_limit_is_too_large() {
 #[test]
 fn a_state_frame_without_its_object_ends_the_connection() {
     let mock = MockServer::start("state-no-object", |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::StateWithoutObject,
+        ControlRequest::SaveState(_) => Action::StateWithoutObject,
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&mock.bridge);
@@ -1923,13 +1933,13 @@ fn an_oversized_load_state_is_refused_without_killing_the_bridge() {
 fn a_stalled_save_state_fails_typed_and_leaves_the_bridge_healthy() {
     let mock = MockServer::start_with_state_timeout("stalled-save", STATE_TIMEOUT, move |msg| {
         match msg {
-            ControlRequest::SaveState { .. } => Action::Silent,
+            ControlRequest::SaveState(_) => Action::Silent,
             // Answered, so the health probe below is a real round trip rather
             // than another timeout.
-            ControlRequest::GetParameterList => {
-                Action::Reply(Box::new(ControlReply::ParameterList {
+            ControlRequest::GetParameterList(_) => {
+                Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
                     parameters: Vec::new(),
-                }))
+                })))
             }
             _ => Action::Silent,
         }
@@ -1965,11 +1975,11 @@ fn a_stalled_load_state_fails_typed_and_leaves_the_bridge_healthy() {
     let mock = MockServer::start_with_state_timeout("stalled-load", STATE_TIMEOUT, move |msg| {
         match msg {
             // The object is accepted and never acknowledged.
-            ControlRequest::LoadState { .. } => Action::Silent,
-            ControlRequest::GetParameterList => {
-                Action::Reply(Box::new(ControlReply::ParameterList {
+            ControlRequest::LoadState(_) => Action::Silent,
+            ControlRequest::GetParameterList(_) => {
+                Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
                     parameters: Vec::new(),
-                }))
+                })))
             }
             _ => Action::Silent,
         }
@@ -2005,9 +2015,11 @@ fn a_load_state_refusal_the_server_typed_reaches_the_caller_typed() {
     };
     let sent = refusal.clone();
     let mock = MockServer::start("typed-state-refusal", move |msg| match msg {
-        ControlRequest::LoadState { .. } => Action::Reply(Box::new(ControlReply::StateLoaded {
-            error: Some(sent.clone()),
-        })),
+        ControlRequest::LoadState(_) => {
+            Action::Reply(Box::new(ControlReply::StateLoaded(StateLoaded {
+                error: Some(sent.clone()),
+            })))
+        }
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&mock.bridge);
@@ -2027,9 +2039,11 @@ fn a_load_state_refusal_the_server_typed_reaches_the_caller_typed() {
 #[test]
 fn a_state_load_answered_with_another_reply_is_unexpected() {
     let mock = MockServer::start("wrong-state-reply", |msg| match msg {
-        ControlRequest::LoadState { .. } => Action::Reply(Box::new(ControlReply::ParameterList {
-            parameters: Vec::new(),
-        })),
+        ControlRequest::LoadState(_) => {
+            Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
+                parameters: Vec::new(),
+            })))
+        }
         _ => Action::Silent,
     });
     let bridge = Arc::clone(&mock.bridge);
@@ -2057,16 +2071,20 @@ fn an_editor_request_that_goes_wrong_names_how() {
     };
     let mock =
         MockServer::start_with_timeouts("editor-goes-wrong", timeouts, move |msg| match msg {
-            ControlRequest::OpenEditor {
+            ControlRequest::OpenEditor(OpenEditor {
                 parent: Some(1), ..
-            } => Action::Reply(Box::new(ControlReply::Error {
+            }) => Action::Reply(Box::new(ControlReply::Error {
                 error: ServerError::NoPluginId,
             })),
-            ControlRequest::OpenEditor {
+            ControlRequest::OpenEditor(OpenEditor {
                 parent: Some(2), ..
-            } => Action::Reply(Box::new(ControlReply::StateLoaded { error: None })),
-            ControlRequest::SetEditorSize { .. } => {
-                Action::Reply(Box::new(ControlReply::StateLoaded { error: None }))
+            }) => Action::Reply(Box::new(ControlReply::StateLoaded(StateLoaded {
+                error: None,
+            }))),
+            ControlRequest::SetEditorSize(_) => {
+                Action::Reply(Box::new(ControlReply::StateLoaded(StateLoaded {
+                    error: None,
+                })))
             }
             _ => Action::Silent,
         });
@@ -2106,7 +2124,7 @@ fn an_awaited_save_state_is_filled_with_the_servers_state() {
     let bytes = vec![7u8, 8, 9];
     let sent = bytes.clone();
     let mock = MockServer::start("awaited-save", move |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::State {
+        ControlRequest::SaveState(_) => Action::State {
             len: sent.len() as u64,
             bytes: sent.clone(),
         },
@@ -2129,10 +2147,10 @@ fn an_awaited_save_state_the_server_never_answers_stalls_at_the_lanes_deadline()
             "awaited-stalled-save",
             STATE_TIMEOUT,
             |msg| match msg {
-                ControlRequest::GetParameterList => {
-                    Action::Reply(Box::new(ControlReply::ParameterList {
+                ControlRequest::GetParameterList(_) => {
+                    Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
                         parameters: Vec::new(),
-                    }))
+                    })))
                 }
                 _ => Action::Silent,
             },
@@ -2158,10 +2176,10 @@ fn an_awaited_load_state_the_server_never_acknowledges_stalls_at_the_lanes_deadl
             "awaited-stalled-load",
             STATE_TIMEOUT,
             |msg| match msg {
-                ControlRequest::GetParameterList => {
-                    Action::Reply(Box::new(ControlReply::ParameterList {
+                ControlRequest::GetParameterList(_) => {
+                    Action::Reply(Box::new(ControlReply::ParameterList(ParameterList {
                         parameters: Vec::new(),
-                    }))
+                    })))
                 }
                 _ => Action::Silent,
             },
@@ -2203,7 +2221,7 @@ fn an_awaited_preset_load_the_server_never_answers_stalls_at_the_lanes_deadline(
 #[test]
 fn an_awaited_save_state_the_server_dies_in_is_canceled() {
     let mock = MockServer::start("awaited-death", |msg| match msg {
-        ControlRequest::SaveState { .. } => Action::Die,
+        ControlRequest::SaveState(_) => Action::Die,
         _ => Action::Silent,
     });
     let answer = mock
@@ -2252,7 +2270,7 @@ fn a_live_peer_mid_frame_at_the_budget_is_not_a_crash() {
     let mut shorter = Timeouts::default();
     shorter.param = Duration::from_secs(1);
     let mock = MockServer::start_with_timeouts("split-events", shorter, |msg| match msg {
-        ControlRequest::GetParameter { .. } => Action::SplitEvents {
+        ControlRequest::GetParameter(_) => Action::SplitEvents {
             split: Duration::from_millis(200),
         },
         _ => Action::Silent,
@@ -2289,16 +2307,16 @@ fn a_second_control_call_while_a_reply_is_owed_waits_for_it() {
     let mock = {
         let log = Arc::clone(&log);
         MockServer::start_with_timeouts("queued", timeouts, move |msg| match msg {
-            ControlRequest::GetParameterList => {
+            ControlRequest::GetParameterList(_) => {
                 log.lock().push("list");
                 let _ = seen.try_send(());
                 Action::Silent
             }
-            ControlRequest::GetParameter { .. } => {
+            ControlRequest::GetParameter(_) => {
                 log.lock().push("value");
-                Action::Reply(Box::new(ControlReply::ParameterValue {
+                Action::Reply(Box::new(ControlReply::ParameterValue(ParameterValue {
                     value: Some(Normalized::of(0.25)),
-                }))
+                })))
             }
             _ => Action::Silent,
         })
@@ -2356,14 +2374,14 @@ fn hold_first_query(
 ) -> impl Fn(ControlRequest) -> Action + Send + 'static {
     let first = std::sync::atomic::AtomicBool::new(true);
     move |msg| match msg {
-        ControlRequest::GetParameter { .. } => {
+        ControlRequest::GetParameter(_) => {
             if first.swap(false, Ordering::SeqCst) {
                 seen.send(()).expect("the test is listening");
                 release.recv().expect("the test releases the request");
             }
-            Action::Reply(Box::new(ControlReply::ParameterValue {
+            Action::Reply(Box::new(ControlReply::ParameterValue(ParameterValue {
                 value: Some(Normalized::of(0.5)),
-            }))
+            })))
         }
         _ => Action::Silent,
     }
@@ -2409,14 +2427,14 @@ fn a_settle_reaches_the_server_after_the_rate_change_queued_before_it() {
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
-            ControlRequest::SetSampleRate { rate } => {
+            ControlRequest::SetSampleRate(SetSampleRate { rate }) => {
                 log.lock().push("rate");
-                Action::Reply(Box::new(ControlReply::SampleRateSet {
+                Action::Reply(Box::new(ControlReply::SampleRateSet(SampleRateSet {
                     rate,
                     refusal: None,
-                }))
+                })))
             }
-            ControlRequest::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset(_) => {
                 log.lock().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
@@ -2440,7 +2458,7 @@ fn a_crash_the_control_lane_sees_is_answered_by_the_audio_lane() {
         "control-death",
         |_| Action::Silent,
         |msg| match msg {
-            ControlRequest::GetParameter { .. } => Action::Die,
+            ControlRequest::GetParameter(_) => Action::Die,
             _ => Action::Silent,
         },
     );
@@ -2461,7 +2479,7 @@ fn a_control_call_on_a_full_queue_is_busy() {
     let (seen, seen_rx) = std::sync::mpsc::sync_channel(1);
     let (release_tx, release) = std::sync::mpsc::sync_channel::<()>(1);
     let mock = MockServer::start_lanes("full", answer_blocks, move |msg| match msg {
-        ControlRequest::GetCurrentPreset => {
+        ControlRequest::GetCurrentPreset(_) => {
             let _ = seen.try_send(());
             let _ = release.recv();
             Action::Reply(Box::new(applied_fence()))
@@ -2509,7 +2527,7 @@ fn a_shutdown_ends_when_a_control_request_is_stuck_in_the_server() {
     };
     let mut mock =
         MockServer::start_lanes_under("stuck-shutdown", timeouts, answer_blocks, move |msg| {
-            if matches!(msg, ControlRequest::GetParameter { .. }) {
+            if matches!(msg, ControlRequest::GetParameter(_)) {
                 let _ = seen.try_send(());
             }
             Action::Silent
@@ -2540,7 +2558,7 @@ fn a_setting_the_control_lane_cannot_take_in_time_is_counted() {
         t
     };
     let mock = MockServer::start_lanes_under("unapplied", timeouts, answer_blocks, move |msg| {
-        if matches!(msg, ControlRequest::OpenEditor { .. }) {
+        if matches!(msg, ControlRequest::OpenEditor(_)) {
             let _ = seen.try_send(());
         }
         Action::Silent
@@ -2582,7 +2600,7 @@ fn a_shutdown_ends_a_waiting_setting_through_its_reply() {
     };
     let mut mock =
         MockServer::start_lanes_under("setting-shutdown", timeouts, answer_blocks, move |msg| {
-            if matches!(msg, ControlRequest::GetParameter { .. }) {
+            if matches!(msg, ControlRequest::GetParameter(_)) {
                 let _ = seen.try_send(());
                 let _ = release.recv();
             }
@@ -2650,11 +2668,11 @@ fn a_render_mode_is_applied_before_the_next_block() {
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
-            ControlRequest::SetRenderMode { .. } => {
+            ControlRequest::SetRenderMode(_) => {
                 log_after_window(&log, &block_rx, "mode");
                 Action::Silent
             }
-            ControlRequest::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset(_) => {
                 log.lock().push("fence");
                 Action::Reply(Box::new(applied_fence()))
             }
@@ -2689,12 +2707,12 @@ fn a_rate_change_is_applied_before_the_next_block() {
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
-            ControlRequest::SetSampleRate { rate } => {
+            ControlRequest::SetSampleRate(SetSampleRate { rate }) => {
                 log_after_window(&log, &block_rx, "rate");
-                Action::Reply(Box::new(ControlReply::SampleRateSet {
+                Action::Reply(Box::new(ControlReply::SampleRateSet(SampleRateSet {
                     rate,
                     refusal: None,
-                }))
+                })))
             }
             _ => Action::Silent,
         }
@@ -2738,17 +2756,17 @@ fn a_control_command_pushed_after_a_block_reaches_the_server_after_it() {
     let control = {
         let log = Arc::clone(&log);
         move |msg: ControlRequest| match msg {
-            ControlRequest::SetRenderMode { .. } => {
+            ControlRequest::SetRenderMode(_) => {
                 log.lock().push("mode");
                 Action::Silent
             }
-            ControlRequest::GetCurrentPreset => {
+            ControlRequest::GetCurrentPreset(_) => {
                 log.lock().push("fence");
                 fence_seen.send(()).expect("the test listens");
                 release.recv().expect("the test releases the fence");
                 Action::Reply(Box::new(applied_fence()))
             }
-            ControlRequest::SetAutomationState { .. } => {
+            ControlRequest::SetAutomationState(_) => {
                 log.lock().push("command");
                 Action::Silent
             }

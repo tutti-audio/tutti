@@ -17,8 +17,8 @@ use crate::error::unexpected_message;
 use crate::transport::control::{self as ipc, ControlStream, PartialFrame};
 use crate::transport::shm::RING_SLOTS;
 use crate::{
-    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, News, ReqId, Request,
-    StateReady,
+    AudioReply, AudioRequest, ControlFrame, ControlReply, ControlRequest, GetCurrentPreset, News,
+    ReqId, Request, SampleRateSet, SetRenderMode, SetSampleRate, StateReady,
 };
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -517,7 +517,7 @@ impl ControlState {
                 )),
                 Heard::Abandoned(Abandoned::Discard) => Ok(None),
                 Heard::Abandoned(Abandoned::Rate) => {
-                    if let ControlReply::SampleRateSet { rate, refusal } = reply {
+                    if let ControlReply::SampleRateSet(SampleRateSet { rate, refusal }) = reply {
                         inbox.late_rate_answer(rate, refusal);
                     }
                     Ok(None)
@@ -883,7 +883,7 @@ fn fence(
     inbox: &mut Unsolicited,
     lifecycle: &Lifecycle,
 ) -> IpcResult<()> {
-    query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)?;
+    query(lane, inbox, lifecycle, GetCurrentPreset.into())?;
     Ok(())
 }
 
@@ -984,7 +984,7 @@ pub(super) fn handle_setting(
             let id = ask(
                 stream,
                 state,
-                ControlRequest::SetSampleRate { rate },
+                ControlRequest::SetSampleRate(SetSampleRate { rate }),
                 Abandoned::Rate,
                 budget,
                 budget,
@@ -1012,7 +1012,7 @@ pub(super) fn handle_setting(
                     // A refusal is not a failure of the connection: the plugin
                     // stays loaded, the server renders silence for it, and the
                     // next rate change retries it.
-                    Waited::Reply(ControlReply::SampleRateSet { rate, refusal }) => {
+                    Waited::Reply(ControlReply::SampleRateSet(SampleRateSet { rate, refusal })) => {
                         // Recorded before the blocks go on, a refusal and its
                         // clearing alike: a block that finds the old refusal
                         // would latch it (an offline fork's wait does).
@@ -1033,7 +1033,7 @@ pub(super) fn handle_setting(
             tell(
                 &mut lane.stream,
                 &mut lane.state,
-                ControlRequest::SetRenderMode { mode },
+                ControlRequest::SetRenderMode(SetRenderMode { mode }),
             )?;
             fence(lane, inbox, lifecycle)?;
             applied.send(());
@@ -1164,6 +1164,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{LaneOpened, ParameterList, ParameterValue};
     use tutti_plugin_types::Timeouts;
     use tutti_units::Chunks;
     use tutti_units::ParamId;
@@ -1181,21 +1182,21 @@ mod tests {
     fn state_ready(id: u64) -> ControlFrame {
         ControlFrame::Reply {
             id: ReqId::new(id),
-            reply: ControlReply::StateReady {
+            reply: ControlReply::StateReady(StateReady {
                 len: 0,
                 blob: tutti_plugin_ipc_ffi::Blob::create(&[])
                     .expect("an empty blob")
                     .wire(),
-            },
+            }),
         }
     }
 
     fn value(id: u64) -> ControlFrame {
         ControlFrame::Reply {
             id: ReqId::new(id),
-            reply: ControlReply::ParameterValue {
+            reply: ControlReply::ParameterValue(ParameterValue {
                 value: Some(tutti_units::Normalized::of(0.25)),
-            },
+            }),
         }
     }
 
@@ -1311,7 +1312,7 @@ mod tests {
         };
         let unrequested = ControlFrame::Reply {
             id: ReqId::new(9),
-            reply: ControlReply::LaneOpened,
+            reply: ControlReply::LaneOpened(LaneOpened),
         };
         for frame in [hello, unrequested] {
             assert!(
@@ -1357,13 +1358,13 @@ mod tests {
         ));
         let list = ControlFrame::Reply {
             id: next,
-            reply: ControlReply::ParameterList {
+            reply: ControlReply::ParameterList(ParameterList {
                 parameters: Vec::new(),
-            },
+            }),
         };
         assert!(matches!(
             state.hear(list, Some(next), Instant::now(), &mut inbox),
-            Ok(Some(ControlReply::ParameterList { .. }))
+            Ok(Some(ControlReply::ParameterList(_)))
         ));
         assert!(
             state

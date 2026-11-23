@@ -27,8 +27,8 @@ use super::dispatch::{
 use super::lifecycle::Lifecycle;
 use super::messages::{AudioCommand, AudioResponse, ControlCommand, IpcEvent, Unsolicited};
 use super::payload_pool::PayloadPool;
-use crate::ControlRequest;
 use crate::transport::control::{self as ipc, ControlStream, ControlWait};
+use crate::{ControlRequest, Shutdown};
 use futures_lite::future::yield_now;
 use std::sync::Arc;
 use std::time::Duration;
@@ -568,7 +568,11 @@ async fn control_loop(
 /// the guard kills it at the end of the grace.
 fn say_shutdown(lifecycle: &Lifecycle, lane: &mut Lane<ControlState>) {
     if !lifecycle.is_running() && lifecycle.crash_cause().is_none() {
-        let _ = tell(&mut lane.stream, &mut lane.state, ControlRequest::Shutdown);
+        let _ = tell(
+            &mut lane.stream,
+            &mut lane.state,
+            ControlRequest::Shutdown(Shutdown),
+        );
     }
 }
 

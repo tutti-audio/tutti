@@ -160,8 +160,8 @@ pub trait Unanswered: Message<Reply = ()> {}
 /// [`Stop`].
 ///
 /// It declares, for every row, a `pub struct` for the request and one for the
-/// reply (docs and field attributes carried through), a variant of the same
-/// name and fields in [`ControlRequest`] and in [`ControlReply`] (which ends in
+/// reply (docs and field attributes carried through), a newtype variant of the
+/// same name over the struct in [`ControlRequest`] and in [`ControlReply`] (which ends in
 /// `Error`, the failure any request may be answered with), `From<Request> for
 /// ControlRequest`, `From<Reply> for ControlReply`, `TryFrom<ControlReply>` for
 /// the reply (the one place a reply's variant is matched), and [`Message`] for
@@ -183,7 +183,7 @@ macro_rules! messages {
 
         impl From<$name> for ControlRequest {
             fn from(m: $name) -> Self {
-                Self::$name { $($field: m.$field),* }
+                Self::$name(m)
             }
         }
     };
@@ -193,8 +193,8 @@ macro_rules! messages {
         pub struct $name;
 
         impl From<$name> for ControlRequest {
-            fn from(_: $name) -> Self {
-                Self::$name
+            fn from(m: $name) -> Self {
+                Self::$name(m)
             }
         }
     };
@@ -207,7 +207,7 @@ macro_rules! messages {
 
         impl From<$name> for ControlReply {
             fn from(m: $name) -> Self {
-                Self::$name { $($field: m.$field),* }
+                Self::$name(m)
             }
         }
 
@@ -222,7 +222,7 @@ macro_rules! messages {
 
             fn try_from(reply: ControlReply) -> Result<Self, ControlReply> {
                 match reply {
-                    ControlReply::$name { $($field),* } => Ok(Self { $($field),* }),
+                    ControlReply::$name(m) => Ok(m),
                     other => Err(other),
                 }
             }
@@ -234,8 +234,8 @@ macro_rules! messages {
         pub struct $name;
 
         impl From<$name> for ControlReply {
-            fn from(_: $name) -> Self {
-                Self::$name
+            fn from(m: $name) -> Self {
+                Self::$name(m)
             }
         }
 
@@ -250,7 +250,7 @@ macro_rules! messages {
 
             fn try_from(reply: ControlReply) -> Result<Self, ControlReply> {
                 match reply {
-                    ControlReply::$name => Ok(Self),
+                    ControlReply::$name(m) => Ok(m),
                     other => Err(other),
                 }
             }
@@ -298,27 +298,27 @@ macro_rules! messages {
 
         /// A request on the control connection: everything but a block.
         ///
-        /// One variant per row of the message table, with the fields of the
-        /// row's request struct. Variant order is wire-significant; see the
+        /// One variant per row of the message table, a newtype over the row's
+        /// request struct. Variant order is wire-significant; see the
         /// module docs.
         #[derive(Debug, Clone, Serialize, Deserialize)]
         pub enum ControlRequest {
             $(
                 $(#[$meta])*
-                $name $({ $($(#[$fmeta])* $field : $fty),* })?,
+                $name($name),
             )*
         }
 
         /// What the server answers a [`ControlRequest`] with.
         ///
-        /// One variant per row that has a reply, with the fields of the row's
-        /// reply struct, and [`Error`](Self::Error) last. Variant order is
+        /// One variant per row that has a reply, a newtype over the row's reply
+        /// struct, and [`Error`](Self::Error) last. Variant order is
         /// wire-significant; see the module docs.
         #[derive(Debug, Clone, Serialize, Deserialize)]
         pub enum ControlReply {
             $($(
                 $(#[$rmeta])*
-                $reply $({ $($(#[$rfmeta])* $rfield : $rfty),* })?,
+                $reply($reply),
             )?)*
             /// The subprocess failed at something it was asked to do, in place of
             /// the answer a request awaits.
@@ -335,7 +335,7 @@ macro_rules! messages {
             /// Whether the server answers this request.
             pub fn expects_reply(&self) -> bool {
                 match self {
-                    $(Self::$name { .. } => <$name as Message>::REPLIES,)*
+                    $(Self::$name(_) => <$name as Message>::REPLIES,)*
                 }
             }
         }
@@ -348,9 +348,8 @@ macro_rules! messages {
         {
             match request {
                 $(
-                    ControlRequest::$name $({ $($field),* })? => {
-                        <H as Handle<$name>>::handle(handler, cx, $name $({ $($field),* })?)
-                        .into()
+                    ControlRequest::$name(msg) => {
+                        <H as Handle<$name>>::handle(handler, cx, msg).into()
                     }
                 )*
             }

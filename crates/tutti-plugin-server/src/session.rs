@@ -6,6 +6,7 @@
 //! dependency, it's unit-testable without tokio or sockets.
 
 use tutti_platform::Instant;
+use tutti_plugin_ipc::{SharedMemoryReady, StateLoaded, StateStaged};
 
 mod handlers;
 
@@ -179,7 +180,7 @@ impl Session {
             // The scratch is sized by the attach, to the most a block may carry;
             // the render thread refuses any block longer.
             Ok(opened) => match self.render.attach_slab(opened) {
-                Ok(()) => ControlReply::SharedMemoryReady,
+                Ok(()) => ControlReply::SharedMemoryReady(SharedMemoryReady),
                 Err(e) => ControlReply::Error {
                     error: ServerError::SlabNotTaken {
                         reason: e.to_string(),
@@ -461,7 +462,7 @@ impl Session {
     /// `LoadPlugin`.
     pub(crate) fn stage_state(&mut self, state: Vec<u8>) -> Reaction {
         self.staged = Some(state);
-        ControlReply::StateStaged { error: None }.into()
+        ControlReply::StateStaged(StateStaged { error: None }).into()
     }
 
     /// Answers a state whose object the transport refused (`error` says why),
@@ -471,9 +472,9 @@ impl Session {
         let error = Some(error);
         if staging {
             self.discard_staged();
-            ControlReply::StateStaged { error }.into()
+            ControlReply::StateStaged(StateStaged { error }).into()
         } else {
-            ControlReply::StateLoaded { error }.into()
+            ControlReply::StateLoaded(StateLoaded { error }).into()
         }
     }
 
@@ -499,7 +500,7 @@ impl Session {
         };
         self.forget_informs();
         self.publish();
-        ControlReply::StateLoaded { error }.into()
+        ControlReply::StateLoaded(StateLoaded { error }).into()
     }
 }
 
@@ -528,6 +529,12 @@ fn load_failure(e: &PluginError) -> ServerError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_plugin_ipc::{
+        GetParameter, GetParameterList, GetWiring, OpenLane, ParameterList, ParameterValue,
+        SampleRateSet, SaveState, SetSampleRate, SetupSharedMemory, Shutdown, StateLoaded,
+        StateStaged,
+    };
+    use tutti_plugin_ipc::{LoadPlugin, PluginLoaded};
 
     use tutti_buffers::FloatWidth;
     use tutti_plugin_ipc::StagedState;
@@ -878,16 +885,19 @@ mod tests {
         let cases: Vec<(&str, ControlRequest)> = vec![
             (
                 "GetParameter",
-                ControlRequest::GetParameter {
+                ControlRequest::GetParameter(GetParameter {
                     param_id: ParamId::new(0),
-                },
+                }),
             ),
-            ("GetParameterList", ControlRequest::GetParameterList),
+            (
+                "GetParameterList",
+                ControlRequest::GetParameterList(GetParameterList),
+            ),
             (
                 "SaveState",
-                ControlRequest::SaveState {
+                ControlRequest::SaveState(SaveState {
                     state_use: StateUse::Project,
-                },
+                }),
             ),
         ];
 
@@ -900,10 +910,10 @@ mod tests {
                 continue;
             }
             match r.into_reply() {
-                ControlReply::ParameterValue { value } => {
+                ControlReply::ParameterValue(ParameterValue { value }) => {
                     assert!(value.is_none(), "{name}: got a value with no plugin")
                 }
-                ControlReply::ParameterList { parameters } => {
+                ControlReply::ParameterList(ParameterList { parameters }) => {
                     assert!(parameters.is_empty(), "{name}: got parameters")
                 }
                 other => panic!("{name}: unexpected reply {other:?}"),
@@ -918,7 +928,7 @@ mod tests {
     fn a_wiring_ask_with_no_plugin_is_refused() {
         let mut s = Rig::new();
         let reply = s
-            .handle(main_thread(), ControlRequest::GetWiring)
+            .handle(main_thread(), ControlRequest::GetWiring(GetWiring))
             .into_reply();
         assert!(
             matches!(
@@ -960,14 +970,14 @@ mod tests {
         let r = s
             .handle(
                 main_thread(),
-                ControlRequest::SetSampleRate {
+                ControlRequest::SetSampleRate(SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
-                },
+                }),
             )
             .into_reply();
         assert!(matches!(
             r,
-            ControlReply::SampleRateSet { rate, refusal: None } if rate.get() == 96000.0
+            ControlReply::SampleRateSet(SampleRateSet { rate, refusal: None }) if rate.get() == 96000.0
         ));
     }
 
@@ -984,9 +994,9 @@ mod tests {
             .load_state(main_thread(), &[1, 2, 3], StateUse::Project)
             .into_reply();
         match reply {
-            ControlReply::StateLoaded {
+            ControlReply::StateLoaded(StateLoaded {
                 error: Some(StateError::NoPlugin),
-            } => {}
+            }) => {}
             other => panic!("expected a StateLoaded carrying a refusal, got {other:?}"),
         }
     }
@@ -1004,14 +1014,16 @@ mod tests {
     fn a_refused_state_is_answered_and_a_refused_stage_is_discarded() {
         let mut s = Rig::new();
         match s.refuse_state(false, not_sealed()).into_reply() {
-            ControlReply::StateLoaded { error } => {
+            ControlReply::StateLoaded(StateLoaded { error }) => {
                 assert_eq!(error, Some(not_sealed()));
             }
             other => panic!("expected the refusal, got {other:?}"),
         }
         assert_state_staged(s.stage_state(vec![1, 2, 3]));
         match s.refuse_state(true, not_sealed()).into_reply() {
-            ControlReply::StateStaged { error } => assert_eq!(error, Some(not_sealed())),
+            ControlReply::StateStaged(StateStaged { error }) => {
+                assert_eq!(error, Some(not_sealed()))
+            }
             other => panic!("expected the stage's refusal, got {other:?}"),
         }
         assert!(s.staged.is_none(), "a refused stage left the earlier one");
@@ -1074,7 +1086,7 @@ mod tests {
         );
         assert!(!s.side().has_slab(), "nothing was attached");
         assert!(matches!(
-            s.handle(main_thread(), ControlRequest::Shutdown),
+            s.handle(main_thread(), ControlRequest::Shutdown(Shutdown)),
             Reaction::Shutdown
         ));
     }
@@ -1084,10 +1096,10 @@ mod tests {
     #[test]
     fn a_lane_open_is_refused_without_its_end_and_when_already_open() {
         let mut s = Rig::new();
-        let bare = ControlRequest::OpenLane {
+        let bare = ControlRequest::OpenLane(OpenLane {
             lane: tutti_plugin_ipc::Lane::Audio,
             wire: tutti_plugin_ipc::LaneWire::fresh().unwrap(),
-        };
+        });
         assert!(matches!(
             s.handle(main_thread(), bare),
             Reaction::Reply(ControlReply::Error {
@@ -1117,14 +1129,14 @@ mod tests {
         let (_owner, handle) = AudioSlab::create(layout.clone()).unwrap();
         assert!(matches!(
             s.session.setup_slab(&handle, layout.clone()),
-            Reaction::Reply(ControlReply::SharedMemoryReady)
+            Reaction::Reply(ControlReply::SharedMemoryReady(SharedMemoryReady))
         ));
         assert!(s.side().has_slab(), "the render thread holds the slab");
 
-        let bare = ControlRequest::SetupSharedMemory {
+        let bare = ControlRequest::SetupSharedMemory(SetupSharedMemory {
             slab: handle.wire(),
             layout,
-        };
+        });
         assert!(matches!(
             s.handle(main_thread(), bare),
             Reaction::Reply(ControlReply::Error { .. })
@@ -1173,6 +1185,10 @@ mod tests {
     #[cfg(all(target_os = "macos", feature = "clap"))]
     mod foreign_window {
         use super::*;
+        use tutti_plugin_ipc::{
+            GetParameter, GetParameterList, LoadPlugin, ParameterList, ParameterValue,
+            PluginLoaded, SampleRateSet, SaveState, SetSampleRate, StateLoaded, StateStaged,
+        };
 
         /// **A host window this process cannot embed into is a foreign
         /// window**, named by the number the host sent.
@@ -1217,7 +1233,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                ControlRequest::LoadPlugin {
+                ControlRequest::LoadPlugin(LoadPlugin {
                     path: std::path::PathBuf::from("/nonexistent/path/plugin.vst3"),
                     format: tutti_plugin_types::PluginFormat::Vst3,
                     plugin: None,
@@ -1225,7 +1241,7 @@ mod tests {
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
                     state: None,
-                },
+                }),
             )
             .into_reply();
         match reply {
@@ -1261,7 +1277,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            ControlRequest::LoadPlugin {
+            ControlRequest::LoadPlugin(LoadPlugin {
                 path: std::path::PathBuf::from(clap_plugin()),
                 format: tutti_plugin_types::PluginFormat::Clap,
                 plugin: None,
@@ -1269,7 +1285,7 @@ mod tests {
                 block_size: 512,
                 preferred_format,
                 state: None,
-            },
+            }),
         );
 
         // The negotiated format, not the requested one, as the host's
@@ -1292,7 +1308,7 @@ mod tests {
         Rig::new()
             .handle(
                 main_thread(),
-                ControlRequest::LoadPlugin {
+                ControlRequest::LoadPlugin(LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: tutti_plugin_types::PluginFormat::Clap,
                     plugin,
@@ -1300,7 +1316,7 @@ mod tests {
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
                     state: None,
-                },
+                }),
             )
             .into_reply()
     }
@@ -1316,7 +1332,7 @@ mod tests {
     fn a_load_that_chooses_a_plugin_loads_that_one() {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
         let id_of = |reply: ControlReply| match reply {
-            ControlReply::PluginLoaded { id, .. } => id,
+            ControlReply::PluginLoaded(PluginLoaded { id, .. }) => id,
             other => panic!("expected PluginLoaded, got {other:?}"),
         };
         let first = tutti_clap_test_plugin::PLUGIN_ID.to_str().expect("utf-8");
@@ -1387,16 +1403,19 @@ mod tests {
         let set = |s: &mut Rig, rate: f64| {
             s.handle(
                 main_thread(),
-                ControlRequest::SetSampleRate {
+                ControlRequest::SetSampleRate(SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::of(rate),
-                },
+                }),
             )
             .into_reply()
         };
 
         let accepted = set(&mut s, 48000.0);
         assert!(
-            matches!(accepted, ControlReply::SampleRateSet { refusal: None, .. }),
+            matches!(
+                accepted,
+                ControlReply::SampleRateSet(SampleRateSet { refusal: None, .. })
+            ),
             "{accepted:?}"
         );
         assert!(
@@ -1412,7 +1431,7 @@ mod tests {
         assert!(
             matches!(
                 &refused,
-                ControlReply::SampleRateSet { rate, refusal: Some(e) }
+                ControlReply::SampleRateSet(SampleRateSet { rate, refusal: Some(e) })
                     if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. })
             ),
             "the host is told, with a reason: {refused:?}"
@@ -1430,10 +1449,10 @@ mod tests {
         // Refused again at the same rate: still silent.
         assert!(matches!(
             set(&mut s, 96000.0),
-            ControlReply::SampleRateSet {
+            ControlReply::SampleRateSet(SampleRateSet {
                 refusal: Some(_),
                 ..
-            }
+            })
         ));
         process_block(&mut s, &mut shm, 3, 0.5);
         assert!(!shm.has_output(3), "still silent");
@@ -1443,7 +1462,10 @@ mod tests {
         let _flagged = crate::test_utils::clap_probe_ports_64bit(both);
         let revived = set(&mut s, 88200.0);
         assert!(
-            matches!(revived, ControlReply::SampleRateSet { refusal: None, .. }),
+            matches!(
+                revived,
+                ControlReply::SampleRateSet(SampleRateSet { refusal: None, .. })
+            ),
             "{revived:?}"
         );
         assert!(s.rate_refused.is_none());
@@ -1881,9 +1903,12 @@ mod tests {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock();
         let (mut s, _shm) = load_clap(FloatWidth::F32);
         let reply = s
-            .handle(main_thread(), ControlRequest::GetParameterList)
+            .handle(
+                main_thread(),
+                ControlRequest::GetParameterList(GetParameterList),
+            )
             .into_reply();
-        let ControlReply::ParameterList { parameters } = reply else {
+        let ControlReply::ParameterList(ParameterList { parameters }) = reply else {
             panic!("expected ParameterList, got {reply:?}");
         };
         let listed: Vec<u32> = parameters.iter().map(|p| p.id().get()).collect();
@@ -1904,13 +1929,13 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                ControlRequest::GetParameter {
+                ControlRequest::GetParameter(GetParameter {
                     param_id: ParamId::new(CUTOFF),
-                },
+                }),
             )
             .into_reply();
         match reply {
-            ControlReply::ParameterValue { value } => {
+            ControlReply::ParameterValue(ParameterValue { value }) => {
                 assert_eq!(value.map(Normalized::get), Some(0.5));
             }
             other => panic!("expected ParameterValue, got {other:?}"),
@@ -1936,10 +1961,13 @@ mod tests {
             "the block renders"
         );
         let reply = s
-            .handle(main_thread(), ControlRequest::GetParameter { param_id })
+            .handle(
+                main_thread(),
+                ControlRequest::GetParameter(GetParameter { param_id }),
+            )
             .into_reply();
         match reply {
-            ControlReply::ParameterValue { value } => {
+            ControlReply::ParameterValue(ParameterValue { value }) => {
                 assert_eq!(value.map(Normalized::get), Some(0.25));
             }
             other => panic!("expected ParameterValue, got {other:?}"),
@@ -1954,7 +1982,7 @@ mod tests {
     #[cfg(feature = "clap")]
     fn assert_state_loaded(r: Reaction) {
         match r.into_reply() {
-            ControlReply::StateLoaded { error: None } => {}
+            ControlReply::StateLoaded(StateLoaded { error: None }) => {}
             other => panic!("expected an accepted StateLoaded, got {other:?}"),
         }
     }
@@ -1965,9 +1993,9 @@ mod tests {
         let data = s
             .handle(
                 main_thread(),
-                ControlRequest::SaveState {
+                ControlRequest::SaveState(SaveState {
                     state_use: StateUse::Project,
-                },
+                }),
             )
             .into_state();
         assert!(!data.is_empty(), "state should be non-empty");
@@ -1992,7 +2020,7 @@ mod tests {
         let reply = s
             .handle(
                 main_thread(),
-                ControlRequest::LoadPlugin {
+                ControlRequest::LoadPlugin(LoadPlugin {
                     path: std::path::PathBuf::from(clap_plugin()),
                     format: tutti_plugin_types::PluginFormat::Clap,
                     plugin: None,
@@ -2000,11 +2028,11 @@ mod tests {
                     block_size: 512,
                     preferred_format: FloatWidth::F32,
                     state: declared,
-                },
+                }),
             )
             .into_reply();
         match reply {
-            ControlReply::PluginLoaded { state_error, .. } => state_error,
+            ControlReply::PluginLoaded(PluginLoaded { state_error, .. }) => state_error,
             other => panic!("expected PluginLoaded, got {other:?}"),
         }
     }
@@ -2012,7 +2040,7 @@ mod tests {
     fn load_declaring(s: &mut Rig, declared: Option<StagedState>) -> ControlReply {
         s.handle(
             main_thread(),
-            ControlRequest::LoadPlugin {
+            ControlRequest::LoadPlugin(LoadPlugin {
                 path: std::path::PathBuf::from("/nonexistent/plugin.clap"),
                 format: tutti_plugin_types::PluginFormat::Clap,
                 plugin: None,
@@ -2020,7 +2048,7 @@ mod tests {
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
                 state: declared,
-            },
+            }),
         )
         .into_reply()
     }
@@ -2094,7 +2122,7 @@ mod tests {
 
     fn assert_state_staged(r: Reaction) {
         match r.into_reply() {
-            ControlReply::StateStaged { error: None } => {}
+            ControlReply::StateStaged(StateStaged { error: None }) => {}
             other => panic!("expected a staged state, got {other:?}"),
         }
     }
@@ -2166,7 +2194,7 @@ mod tests {
             let reply = s
                 .handle_with(
                     main_thread(),
-                    ControlRequest::LoadPlugin {
+                    ControlRequest::LoadPlugin(LoadPlugin {
                         path: std::path::PathBuf::from(clap_plugin()),
                         format: tutti_plugin_types::PluginFormat::Clap,
                         plugin: None,
@@ -2174,7 +2202,7 @@ mod tests {
                         block_size: 512,
                         preferred_format: FloatWidth::F32,
                         state: declared,
-                    },
+                    }),
                     &mut |m| heard.push(m),
                 )
                 .into_reply();
@@ -2193,7 +2221,7 @@ mod tests {
             matches!(heard.as_slice(), [Working::Restoring]),
             "{heard:?}"
         );
-        assert!(matches!(reply, ControlReply::PluginLoaded { .. }));
+        assert!(matches!(reply, ControlReply::PluginLoaded(_)));
 
         let mut s = Rig::new();
         let (heard, _) = load(&mut s, None);
@@ -2242,14 +2270,14 @@ mod tests {
         let r = s
             .handle(
                 main_thread(),
-                ControlRequest::SetSampleRate {
+                ControlRequest::SetSampleRate(SetSampleRate {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
-                },
+                }),
             )
             .into_reply();
         assert!(matches!(
             r,
-            ControlReply::SampleRateSet { refusal: None, .. }
+            ControlReply::SampleRateSet(SampleRateSet { refusal: None, .. })
         ));
     }
 
@@ -2292,7 +2320,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            ControlRequest::LoadPlugin {
+            ControlRequest::LoadPlugin(LoadPlugin {
                 path: bundle,
                 format: tutti_plugin_types::PluginFormat::Vst3,
                 plugin: None,
@@ -2300,7 +2328,7 @@ mod tests {
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
                 state: None,
-            },
+            }),
         );
         let loaded = s.plugin.as_ref().unwrap().plugin().loaded().clone();
         let layout = tutti_plugin_ipc::SlabLayout {
@@ -2468,7 +2496,7 @@ mod tests {
         let mut s = Rig::new();
         s.handle(
             main_thread(),
-            ControlRequest::LoadPlugin {
+            ControlRequest::LoadPlugin(LoadPlugin {
                 path: bundle,
                 format: tutti_plugin_types::PluginFormat::Vst3,
                 plugin: None,
@@ -2476,7 +2504,7 @@ mod tests {
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
                 state: None,
-            },
+            }),
         );
         let params = s
             .plugin

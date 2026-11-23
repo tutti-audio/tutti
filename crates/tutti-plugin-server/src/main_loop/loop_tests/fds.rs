@@ -3,6 +3,7 @@
 //! holds the test and its helpers.
 
 use super::*;
+use tutti_plugin_ipc::Shutdown;
 
 /// How long the loop idles between ticks here: the tick that serves the
 /// plugin's callback request, which registers the descriptor.
@@ -61,7 +62,7 @@ fn a_registered_descriptor_that_becomes_readable_is_served_once_each_time() {
             &mut host_end,
             &tutti_plugin_ipc::Request {
                 id: tutti_plugin_ipc::ReqId::new(2),
-                body: ControlRequest::Shutdown,
+                body: ControlRequest::Shutdown(Shutdown),
             },
         )
         .expect("asks it to stop");

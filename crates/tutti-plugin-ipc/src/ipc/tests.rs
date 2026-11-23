@@ -2,6 +2,11 @@
 //! plugin format or a real server. The differential test against the served
 //! node, and the real-server suites, are `tutti-plugin`'s.
 
+use crate::{
+    CurrentPreset, EditorOpened, EditorSized, LoadState, OpenEditor, ParameterList, ParameterValue,
+    PresetList, SampleRateSet, SetEditorSize, SetRenderMode, SetSampleRate, SetupSharedMemory,
+    SharedMemoryReady, StateLoaded, StateReady, Wiring,
+};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -288,14 +293,14 @@ fn mock_with(
             };
             // A setup's slab and a state's object follow their frame on the stream.
             match &message {
-                ControlRequest::SetupSharedMemory { slab, .. } => {
+                ControlRequest::SetupSharedMemory(SetupSharedMemory { slab, .. }) => {
                     let received =
                         SlabHandle::receive(crate::transport::connection(&served), slab.clone());
                     if received.is_err() {
                         break;
                     }
                 }
-                ControlRequest::LoadState { len, blob, .. } => {
+                ControlRequest::LoadState(LoadState { len, blob, .. }) => {
                     let state = tutti_plugin_ipc_ffi::Blob::receive(
                         crate::transport::connection(&served),
                         blob.clone(),
@@ -311,28 +316,28 @@ fn mock_with(
             // Recorded before it is answered: a count read after the reply sees it.
             log.push(Sent::Control(message.clone()));
             match &message {
-                ControlRequest::SetSampleRate { rate } => reply_control(
+                ControlRequest::SetSampleRate(SetSampleRate { rate }) => reply_control(
                     &served,
                     id,
-                    &ControlReply::SampleRateSet {
+                    &ControlReply::SampleRateSet(SampleRateSet {
                         rate: *rate,
                         refusal: None,
-                    },
+                    }),
                 ),
                 // The server's editor: a parent of 0 is a window it cannot embed
                 // into; any other opens at the size the test pins.
-                ControlRequest::OpenEditor { parent, .. } => reply_control(
+                ControlRequest::OpenEditor(OpenEditor { parent, .. }) => reply_control(
                     &served,
                     id,
-                    &ControlReply::EditorOpened {
+                    &ControlReply::EditorOpened(EditorOpened {
                         result: match parent {
                             Some(0) => Err(EditorError::ForeignWindow(0)),
                             Some(_) => Ok(Some(MOCK_EDITOR)),
                             None => Ok(None),
                         },
-                    },
+                    }),
                 ),
-                ControlRequest::SetupSharedMemory { .. } => {
+                ControlRequest::SetupSharedMemory(_) => {
                     if let Some(layout) = announcing.lock().take() {
                         reply(
                             &served,
@@ -351,28 +356,30 @@ fn mock_with(
                                 },
                             }
                         } else {
-                            ControlReply::SharedMemoryReady
+                            ControlReply::SharedMemoryReady(SharedMemoryReady)
                         },
                     )
                 }
-                ControlRequest::SetEditorSize { size } => reply_control(
+                ControlRequest::SetEditorSize(SetEditorSize { size }) => reply_control(
                     &served,
                     id,
-                    &ControlReply::EditorSized { result: Ok(*size) },
+                    &ControlReply::EditorSized(EditorSized { result: Ok(*size) }),
                 ),
-                ControlRequest::LoadState { .. } => {
-                    reply_control(&served, id, &ControlReply::StateLoaded { error: None })
-                }
-                ControlRequest::SaveState { .. } => match saving.lock().clone() {
+                ControlRequest::LoadState(_) => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::StateLoaded(StateLoaded { error: None }),
+                ),
+                ControlRequest::SaveState(_) => match saving.lock().clone() {
                     Some(bytes) => {
                         let object = tutti_plugin_ipc_ffi::Blob::create(&bytes).unwrap();
                         reply_control(
                             &served,
                             id,
-                            &ControlReply::StateReady {
+                            &ControlReply::StateReady(StateReady {
                                 len: bytes.len() as u64,
                                 blob: object.wire(),
-                            },
+                            }),
                         );
                         let _lease = object.send(crate::transport::connection(&served)).unwrap();
                     }
@@ -386,37 +393,41 @@ fn mock_with(
                         },
                     ),
                 },
-                ControlRequest::GetParameter { .. } => {
-                    reply_control(&served, id, &ControlReply::ParameterValue { value: None })
-                }
-                // The settle's fence (a retune of a watched fork).
-                ControlRequest::GetCurrentPreset => {
-                    reply_control(&served, id, &ControlReply::CurrentPreset { id: None })
-                }
-                ControlRequest::GetWiring => reply_control(
+                ControlRequest::GetParameter(_) => reply_control(
                     &served,
                     id,
-                    &ControlReply::Wiring {
-                        wiring: tutti_plugin_types::PluginWiring::default(),
-                    },
+                    &ControlReply::ParameterValue(ParameterValue { value: None }),
                 ),
-                ControlRequest::GetParameterList
+                // The settle's fence (a retune of a watched fork).
+                ControlRequest::GetCurrentPreset(_) => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::CurrentPreset(CurrentPreset { id: None }),
+                ),
+                ControlRequest::GetWiring(_) => reply_control(
+                    &served,
+                    id,
+                    &ControlReply::Wiring(Wiring {
+                        wiring: tutti_plugin_types::PluginWiring::default(),
+                    }),
+                ),
+                ControlRequest::GetParameterList(_)
                     if !listing.load(std::sync::atomic::Ordering::Relaxed) =>
                 {
                     reply_control(
                         &served,
                         id,
-                        &ControlReply::PresetList {
+                        &ControlReply::PresetList(PresetList {
                             presets: Vec::new(),
-                        },
+                        }),
                     )
                 }
-                ControlRequest::GetParameterList => reply_control(
+                ControlRequest::GetParameterList(_) => reply_control(
                     &served,
                     id,
-                    &ControlReply::ParameterList {
+                    &ControlReply::ParameterList(ParameterList {
                         parameters: answers.lock().clone(),
-                    },
+                    }),
                 ),
                 _ => {}
             }
@@ -523,7 +534,7 @@ fn a_processor_follows_the_graphs_rate_block_and_quantum() {
     assert_eq!(processor.chunk(), NonZeroUsize::new(30), "the block");
     assert!(
         received.wait_for(|log| log.iter().any(
-            |m| matches!(m, Sent::Control(ControlRequest::SetSampleRate { rate }) if *rate == SampleRate::SR_96K)
+            |m| matches!(m, Sent::Control(ControlRequest::SetSampleRate(SetSampleRate { rate })) if *rate == SampleRate::SR_96K)
         )),
         "the rate is sent"
     );
@@ -586,7 +597,7 @@ fn the_controller_reports_what_the_plugin_re_reports() {
     assert_eq!(asked.len(), 1, "once");
     assert!(server.wait_for(|got| {
         got.iter()
-            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
+            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList(_))))
     }));
 }
 
@@ -679,7 +690,9 @@ fn slab_setups(server: &Mock) -> Vec<SlabLayout> {
         .lock()
         .iter()
         .filter_map(|m| match m {
-            Sent::Control(ControlRequest::SetupSharedMemory { layout, .. }) => Some(layout.clone()),
+            Sent::Control(ControlRequest::SetupSharedMemory(SetupSharedMemory {
+                layout, ..
+            })) => Some(layout.clone()),
             _ => None,
         })
         .collect()
@@ -949,9 +962,9 @@ fn a_remote_editor_opens_resizes_and_closes_over_the_wire() {
     assert!(server.wait_for(|got| matches!(
         got,
         [
-            Sent::Control(ControlRequest::OpenEditor { parent: Some(0x40_0001), scale: s }),
-            Sent::Control(ControlRequest::SetEditorSize { size }),
-            Sent::Control(ControlRequest::CloseEditor),
+            Sent::Control(ControlRequest::OpenEditor(OpenEditor { parent: Some(0x40_0001), scale: s })),
+            Sent::Control(ControlRequest::SetEditorSize(SetEditorSize { size })),
+            Sent::Control(ControlRequest::CloseEditor(_)),
         ] if *s == scale && *size == wanted
     )));
 }
@@ -966,10 +979,10 @@ fn a_remote_floating_editor_sends_no_parent() {
     let _opened = ipc.open_floating_editor(main_thread()).expect("opens");
     assert!(server.wait_for(|got| matches!(
         got,
-        [Sent::Control(ControlRequest::OpenEditor {
+        [Sent::Control(ControlRequest::OpenEditor(OpenEditor {
             parent: None,
             ..
-        })]
+        }))]
     )));
 }
 
@@ -1033,7 +1046,7 @@ fn what_the_servers_editor_says_unprompted_is_heard() {
             .received
             .lock()
             .iter()
-            .any(|m| matches!(m, Sent::Control(ControlRequest::CloseEditor))),
+            .any(|m| matches!(m, Sent::Control(ControlRequest::CloseEditor(_)))),
         "no close for an editor that is not open"
     );
 }
@@ -1055,14 +1068,14 @@ fn a_client_with_a_loader_sends_no_editor_message() {
     );
     assert!(server.wait_for(|got| {
         got.iter()
-            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
+            .any(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList(_))))
     }));
     assert!(
         !server
             .received
             .lock()
             .iter()
-            .any(|m| matches!(m, Sent::Control(ControlRequest::OpenEditor { .. }))),
+            .any(|m| matches!(m, Sent::Control(ControlRequest::OpenEditor(_)))),
         "the editor is the host's"
     );
 }
@@ -1273,9 +1286,9 @@ fn telling_a_fork_offline_does_not_make_its_realtime_graph_wait() {
     assert!(
         server.wait_for(|log| log.iter().any(|m| matches!(
             m,
-            Sent::Control(ControlRequest::SetRenderMode {
+            Sent::Control(ControlRequest::SetRenderMode(SetRenderMode {
                 mode: RenderMode::Offline
-            })
+            }))
         ))),
         "the plugin was told offline all the same"
     );
@@ -1344,7 +1357,7 @@ fn list_asks(server: &Mock) -> usize {
         .received
         .lock()
         .iter()
-        .filter(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList)))
+        .filter(|m| matches!(m, Sent::Control(ControlRequest::GetParameterList(_))))
         .count()
 }
 
@@ -1781,7 +1794,7 @@ fn a_write_in_a_block_pushed_before_a_load_reaches_the_server_before_the_load() 
         .expect("the block was sent");
     let load = log
         .iter()
-        .position(|m| matches!(m, Sent::Control(ControlRequest::LoadState { .. })))
+        .position(|m| matches!(m, Sent::Control(ControlRequest::LoadState(_))))
         .expect("the load was sent");
     assert!(block < load, "the block, and its write, came first");
     let Sent::Audio(AudioRequest::ProcessAudio(data)) = &log[block] else {
@@ -1841,7 +1854,7 @@ fn a_flush_rides_the_audio_lane_behind_the_blocks_pushed_before_it() {
         .expect("the parameters sent between blocks");
     let read = log
         .iter()
-        .position(|m| matches!(m, Sent::Control(ControlRequest::GetParameter { .. })))
+        .position(|m| matches!(m, Sent::Control(ControlRequest::GetParameter(_))))
         .expect("the read");
     assert!(block < flush && flush < read, "{block} {flush} {read}");
     let Sent::Audio(AudioRequest::ApplyParameters { param_changes, .. }) = &log[flush] else {

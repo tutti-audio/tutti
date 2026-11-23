@@ -31,6 +31,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use tutti_plugin_ipc::Shutdown;
 
 use tutti_plugin_ipc::{ControlFrame, read_frame};
 
@@ -238,7 +239,7 @@ fn a_server_behind_a_wrapper_does_not_take_its_host_for_gone() {
         &mut host,
         &tutti_plugin_ipc::Request {
             id: tutti_plugin_ipc::ReqId::new(1),
-            body: tutti_plugin_ipc::ControlRequest::Shutdown,
+            body: tutti_plugin_ipc::ControlRequest::Shutdown(Shutdown),
         },
     )
     .expect("ask the server to shut down");

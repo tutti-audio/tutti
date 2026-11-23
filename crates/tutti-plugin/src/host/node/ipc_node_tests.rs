@@ -40,7 +40,7 @@ fn sent(record: &Record) -> Vec<Sent> {
         .map(|said| match said {
             Said::Audio(AudioRequest::ProcessAudio(data)) => Sent::Chunk(Box::new(data.clone())),
             Said::Audio(AudioRequest::Reset) => Sent::Reset,
-            Said::Control(ControlRequest::SetSampleRate { .. }) => Sent::Rate,
+            Said::Control(ControlRequest::SetSampleRate(_)) => Sent::Rate,
             _ => panic!("not an audio-path frame"),
         })
         .collect()

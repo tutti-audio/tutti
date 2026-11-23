@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 use tutti_platform::{Executor, Task, Unjoined, join_within};
+use tutti_plugin_ipc::LaneOpened;
 use tutti_plugin_ipc::{
     ControlFrame, ControlReply, ControlRequest, PROTOCOL_VERSION, Reaction, ReqId, Request, Working,
 };
@@ -264,7 +265,7 @@ impl PluginServer {
         // open, so the answer goes before the accept.
         control.send(&ControlFrame::Reply {
             id,
-            reply: ControlReply::LaneOpened,
+            reply: ControlReply::LaneOpened(LaneOpened),
         })?;
         let audio = SocketTransport::audio(lane.accept()?)?;
         let side = self
@@ -355,7 +356,7 @@ impl PluginServer {
                 }
                 Ok(Incoming::Request(Request {
                     id,
-                    body: body @ ControlRequest::LoadPlugin { .. },
+                    body: body @ ControlRequest::LoadPlugin(_),
                 })) => (id, self.load_working(transport, id, body)),
                 Ok(incoming) => crate::server::react(
                     &mut self.session,
@@ -465,7 +466,7 @@ pub(crate) fn react(
 ) -> (ReqId, Reaction) {
     match incoming {
         Incoming::Request(Request { id, body }) => {
-            let reaction = if matches!(body, ControlRequest::SaveState { .. }) {
+            let reaction = if matches!(body, ControlRequest::SaveState(_)) {
                 working(executor, transport, id, false, || {
                     session.handle(main, body)
                 })

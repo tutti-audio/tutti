@@ -63,7 +63,7 @@ impl Framed for ControlFrame {
     fn blob(&self) -> Option<&BlobWire> {
         match self {
             Self::Reply {
-                reply: ControlReply::StateReady { blob, .. },
+                reply: ControlReply::StateReady(crate::StateReady { blob, .. }),
                 ..
             } => Some(blob),
             _ => None,

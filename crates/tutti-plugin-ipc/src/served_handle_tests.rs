@@ -6,6 +6,7 @@
 
 #[path = "../../tutti-plugin-host/tests/support/param_reads.rs"]
 mod param_reads;
+use crate::{GetParameter, ParameterList, ParameterValue, StateReady};
 use param_reads::ParamReads as _;
 #[path = "../../tutti-plugin-host/tests/support/param_list.rs"]
 mod param_list;
@@ -283,10 +284,10 @@ fn handle_with_multi_reply_server(
                     Say::News(news) => (ControlFrame::News(news), None),
                     Say::State(bytes) => {
                         let object = tutti_plugin_ipc_ffi::Blob::create(&bytes).unwrap();
-                        let reply = ControlReply::StateReady {
+                        let reply = ControlReply::StateReady(StateReady {
                             len: bytes.len() as u64,
                             blob: object.wire(),
-                        };
+                        });
                         (ControlFrame::Reply { id: msg.id, reply }, Some(object))
                     }
                 };
@@ -340,10 +341,10 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
-            ControlRequest::GetParameterList => vec![
-                Say::from(ControlReply::ParameterList {
+            ControlRequest::GetParameterList(_) => vec![
+                Say::from(ControlReply::ParameterList(ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
-                }),
+                })),
                 Say::from(News::LatencyChanged {
                     samples: Samples::new(256),
                 }),
@@ -354,13 +355,17 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
                     ),
                 }),
             ],
-            ControlRequest::GetParameter { param_id } if param_id == ParamId::new(0) => {
-                vec![Say::from(ControlReply::ParameterValue {
+            ControlRequest::GetParameter(GetParameter { param_id })
+                if param_id == ParamId::new(0) =>
+            {
+                vec![Say::from(ControlReply::ParameterValue(ParameterValue {
                     value: Some(Normalized::of(0.5)),
-                })]
+                }))]
             }
-            ControlRequest::GetParameter { .. } => {
-                vec![Say::from(ControlReply::ParameterValue { value: None })]
+            ControlRequest::GetParameter(_) => {
+                vec![Say::from(ControlReply::ParameterValue(ParameterValue {
+                    value: None,
+                }))]
             }
             _ => {
                 // Count any other request as a test failure signal.
@@ -438,18 +443,18 @@ fn trailing_unsolicited_events_dont_poison_next_reply() {
 fn a_tail_change_reaches_the_listener() {
     let (handle, bridge, _bridge_thread, _server_thread) =
         handle_with_multi_reply_server(move |msg| match msg {
-            ControlRequest::GetParameterList => vec![
-                Say::from(ControlReply::ParameterList {
+            ControlRequest::GetParameterList(_) => vec![
+                Say::from(ControlReply::ParameterList(ParameterList {
                     parameters: vec![ParameterInfo::new(ParamId::new(0), "Vol".to_string())],
-                }),
+                })),
                 Say::from(News::TailChanged {
                     tail: PluginTail::Unbounded,
                 }),
             ],
-            ControlRequest::GetParameter { .. } => {
-                vec![Say::from(ControlReply::ParameterValue {
+            ControlRequest::GetParameter(_) => {
+                vec![Say::from(ControlReply::ParameterValue(ParameterValue {
                     value: Some(Normalized::of(0.5)),
-                })]
+                }))]
             }
             _ => vec![],
         });
@@ -486,7 +491,7 @@ fn a_tail_change_reaches_the_listener() {
 fn handle_save_state_roundtrip() {
     let (handle, _bridge, _bridge_handle, _server_thread) =
         handle_with_multi_reply_server(|msg| match msg {
-            ControlRequest::SaveState { .. } => vec![Say::State(vec![0xDE, 0xAD, 0xBE, 0xEF])],
+            ControlRequest::SaveState(_) => vec![Say::State(vec![0xDE, 0xAD, 0xBE, 0xEF])],
             _ => Vec::new(),
         });
 
@@ -497,13 +502,13 @@ fn handle_save_state_roundtrip() {
 #[test]
 fn handle_get_parameter_list() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
-        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
+        ControlRequest::GetParameterList(_) => Some(ControlReply::ParameterList(ParameterList {
             parameters: vec![
                 ParameterInfo::new(ParamId::new(0), "Volume".to_string()),
                 ParameterInfo::new(ParamId::new(1), "Pan".to_string()),
                 ParameterInfo::new(ParamId::new(2), "Cutoff".to_string()),
             ],
-        }),
+        })),
         _ => None,
     });
 
@@ -518,15 +523,17 @@ fn handle_get_parameter_list() {
 fn handle_get_parameter_value() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
         // The mirror's read lists the parameters, then asks for each value.
-        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
+        ControlRequest::GetParameterList(_) => Some(ControlReply::ParameterList(ParameterList {
             parameters: vec![ParameterInfo::new(ParamId::new(42), "Gain".to_string())],
-        }),
-        ControlRequest::GetParameter { param_id } if param_id == ParamId::new(42) => {
-            Some(ControlReply::ParameterValue {
+        })),
+        ControlRequest::GetParameter(GetParameter { param_id }) if param_id == ParamId::new(42) => {
+            Some(ControlReply::ParameterValue(ParameterValue {
                 value: Some(Normalized::of(0.75)),
-            })
+            }))
         }
-        ControlRequest::GetParameter { .. } => Some(ControlReply::ParameterValue { value: None }),
+        ControlRequest::GetParameter(_) => {
+            Some(ControlReply::ParameterValue(ParameterValue { value: None }))
+        }
         _ => None,
     });
 
@@ -542,19 +549,21 @@ fn handle_get_parameter_value() {
 #[test]
 fn a_served_read_resolves_through_the_control_lane_and_defaults_an_unanswered_value() {
     let (handle, _bridge_handle, _server_thread) = handle_with_mock_server(|msg| match msg {
-        ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
+        ControlRequest::GetParameterList(_) => Some(ControlReply::ParameterList(ParameterList {
             parameters: vec![
                 ParameterInfo::new(ParamId::new(1), "Answered".to_string()),
                 ParameterInfo::new(ParamId::new(2), "Silent".to_string())
                     .with_normalized_default(0.25),
             ],
-        }),
-        ControlRequest::GetParameter { param_id } if param_id == ParamId::new(1) => {
-            Some(ControlReply::ParameterValue {
+        })),
+        ControlRequest::GetParameter(GetParameter { param_id }) if param_id == ParamId::new(1) => {
+            Some(ControlReply::ParameterValue(ParameterValue {
                 value: Some(Normalized::of(0.75)),
-            })
+            }))
         }
-        ControlRequest::GetParameter { .. } => Some(ControlReply::ParameterValue { value: None }),
+        ControlRequest::GetParameter(_) => {
+            Some(ControlReply::ParameterValue(ParameterValue { value: None }))
+        }
         _ => None,
     });
 

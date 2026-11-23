@@ -15,6 +15,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
+use tutti_plugin_ipc::{LoadPlugin, OpenLane, PluginLoaded, Shutdown};
 
 use interprocess::local_socket::Stream;
 use tutti_buffers::FloatWidth;
@@ -56,10 +57,10 @@ fn request_audio_lane(broker: &mut Stream, id: u64) -> (Stream, ControlReply) {
         broker,
         &Request {
             id: ReqId::new(id),
-            body: ControlRequest::OpenLane {
+            body: ControlRequest::OpenLane(OpenLane {
                 lane: Lane::Audio,
                 wire: LaneWire::fresh().expect("a lane wire"),
-            },
+            }),
         },
     )
     .expect("send OpenLane");
@@ -77,7 +78,7 @@ fn request_audio_lane(broker: &mut Stream, id: u64) -> (Stream, ControlReply) {
 /// [`request_audio_lane`], which the server opens: the host's end of the lane.
 fn open_audio_lane(broker: &mut Stream) -> Stream {
     match request_audio_lane(broker, 2) {
-        (lane, ControlReply::LaneOpened) => lane,
+        (lane, ControlReply::LaneOpened(_)) => lane,
         (_, other) => panic!("expected LaneOpened, got {other:?}"),
     }
 }
@@ -96,7 +97,7 @@ fn load_choosing(
         stream,
         &Request {
             id: ReqId::new(1),
-            body: ControlRequest::LoadPlugin {
+            body: ControlRequest::LoadPlugin(LoadPlugin {
                 path: path.to_path_buf(),
                 format,
                 plugin,
@@ -104,7 +105,7 @@ fn load_choosing(
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
                 state: None,
-            },
+            }),
         },
     )
     .expect("send LoadPlugin");
@@ -165,7 +166,7 @@ fn a_load_is_announced_as_working_before_it_is_answered() {
         &mut stream,
         &Request {
             id: ReqId::new(41),
-            body: ControlRequest::LoadPlugin {
+            body: ControlRequest::LoadPlugin(LoadPlugin {
                 path: good,
                 format: PluginFormat::Clap,
                 plugin: None,
@@ -173,7 +174,7 @@ fn a_load_is_announced_as_working_before_it_is_answered() {
                 block_size: 512,
                 preferred_format: FloatWidth::F32,
                 state: None,
-            },
+            }),
         },
     )
     .expect("send LoadPlugin");
@@ -189,10 +190,7 @@ fn a_load_is_announced_as_working_before_it_is_answered() {
             ControlFrame::Working { id, .. } => assert_eq!(id, ReqId::new(41)),
             ControlFrame::Reply { id, reply } => {
                 assert_eq!(id, ReqId::new(41));
-                assert!(
-                    matches!(reply, ControlReply::PluginLoaded { .. }),
-                    "{reply:?}"
-                );
+                assert!(matches!(reply, ControlReply::PluginLoaded(_)), "{reply:?}");
                 break;
             }
             other => panic!("unexpected {other:?}"),
@@ -230,7 +228,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
     assert!(
         matches!(
             load(&mut stream, &good, PluginFormat::Clap),
-            ControlReply::PluginLoaded { .. }
+            ControlReply::PluginLoaded(_)
         ),
         "the same server loads a good plugin after a failed one"
     );
@@ -239,7 +237,7 @@ fn a_failed_load_is_answered_and_the_server_still_loads_a_good_plugin() {
         &mut stream,
         &Request {
             id: ReqId::new(2),
-            body: ControlRequest::Shutdown,
+            body: ControlRequest::Shutdown(Shutdown),
         },
     )
     .expect("send Shutdown");
@@ -255,7 +253,7 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
     let (_not_a_plugin, good) = fixtures();
     let (server, mut stream) = start_server();
     let id_of = |reply: ControlReply| match reply {
-        ControlReply::PluginLoaded { id, .. } => id,
+        ControlReply::PluginLoaded(PluginLoaded { id, .. }) => id,
         other => panic!("expected PluginLoaded, got {other:?}"),
     };
     let second = tutti_clap_test_plugin::SECOND_PLUGIN_ID
@@ -287,7 +285,7 @@ fn a_load_that_names_a_plugin_loads_that_plugin_in_the_server() {
         &mut stream,
         &Request {
             id: ReqId::new(2),
-            body: ControlRequest::Shutdown,
+            body: ControlRequest::Shutdown(Shutdown),
         },
     )
     .expect("send Shutdown");
@@ -319,14 +317,14 @@ fn a_shutdown_in_the_handshake_releases_the_plugin() {
     let (mut server, mut stream) = start_server();
     assert!(matches!(
         load(&mut stream, &good, PluginFormat::Clap),
-        ControlReply::PluginLoaded { .. }
+        ControlReply::PluginLoaded(_)
     ));
 
     write_frame(
         &mut stream,
         &Request {
             id: ReqId::new(2),
-            body: ControlRequest::Shutdown,
+            body: ControlRequest::Shutdown(Shutdown),
         },
     )
     .expect("send Shutdown");
@@ -344,7 +342,7 @@ fn a_second_lane_is_refused_by_name_and_the_session_goes_on() {
     let (mut server, mut stream) = start_server();
     assert!(matches!(
         load(&mut stream, &good, PluginFormat::Clap),
-        ControlReply::PluginLoaded { .. }
+        ControlReply::PluginLoaded(_)
     ));
     let _audio = open_audio_lane(&mut stream);
 
@@ -362,7 +360,7 @@ fn a_second_lane_is_refused_by_name_and_the_session_goes_on() {
         &mut stream,
         &Request {
             id: ReqId::new(4),
-            body: ControlRequest::Shutdown,
+            body: ControlRequest::Shutdown(Shutdown),
         },
     )
     .expect("send Shutdown");
@@ -433,7 +431,7 @@ fn a_host_that_ends_in_the_control_phase_shuts_the_server_down() {
     ));
     assert!(matches!(
         load(&mut handshake, &good, PluginFormat::Clap),
-        ControlReply::PluginLoaded { .. }
+        ControlReply::PluginLoaded(_)
     ));
     let _audio = open_audio_lane(&mut handshake);
     let mut control = handshake;

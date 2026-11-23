@@ -139,20 +139,20 @@ mod tests {
     #[test]
     fn every_preset_frame_round_trips() {
         let requests = [
-            ControlRequest::GetPresetList,
-            ControlRequest::LoadPreset {
+            ControlRequest::GetPresetList(GetPresetList),
+            ControlRequest::LoadPreset(LoadPreset {
                 id: PresetId::Number(9000),
-            },
-            ControlRequest::LoadPreset {
+            }),
+            ControlRequest::LoadPreset(LoadPreset {
                 id: PresetId::Program {
                     list_id: 3,
                     index: 7,
                 },
-            },
-            ControlRequest::LoadPreset {
+            }),
+            ControlRequest::LoadPreset(LoadPreset {
                 id: PresetId::Location(PathBuf::from("/p/lead.clap-preset")),
-            },
-            ControlRequest::GetCurrentPreset,
+            }),
+            ControlRequest::GetCurrentPreset(GetCurrentPreset),
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -165,7 +165,7 @@ mod tests {
         }
 
         let responses = [
-            ControlReply::PresetList {
+            ControlReply::PresetList(PresetList {
                 presets: vec![
                     PluginPreset::new(PresetId::Number(0), "Init"),
                     PluginPreset::in_bank(
@@ -177,13 +177,13 @@ mod tests {
                         "Bank 1",
                     ),
                 ],
-            },
-            ControlReply::PresetLoaded { ok: true },
-            ControlReply::PresetLoaded { ok: false },
-            ControlReply::CurrentPreset {
+            }),
+            ControlReply::PresetLoaded(PresetLoaded { ok: true }),
+            ControlReply::PresetLoaded(PresetLoaded { ok: false }),
+            ControlReply::CurrentPreset(CurrentPreset {
                 id: Some(PresetId::Number(4)),
-            },
-            ControlReply::CurrentPreset { id: None },
+            }),
+            ControlReply::CurrentPreset(CurrentPreset { id: None }),
         ];
         for msg in responses {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -206,23 +206,23 @@ mod tests {
     #[test]
     fn every_parameter_display_frame_round_trips() {
         let requests = [
-            ControlRequest::GetParameterText {
+            ControlRequest::GetParameterText(GetParameterText {
                 param_id: ParamId::new(0x8000_0001),
                 value: Normalized::of(0.375),
-            },
+            }),
             // The other addressing model, which VST2 uses.
-            ControlRequest::GetParameterText {
+            ControlRequest::GetParameterText(GetParameterText {
                 param_id: ParamId::new(3),
                 value: Normalized::of(1.0),
-            },
-            ControlRequest::GetParameterValueFromText {
+            }),
+            ControlRequest::GetParameterValueFromText(GetParameterValueFromText {
                 param_id: ParamId::new(7),
                 text: "800 Hz".to_string(),
-            },
-            ControlRequest::GetParameterValueFromText {
+            }),
+            ControlRequest::GetParameterValueFromText(GetParameterValueFromText {
                 param_id: ParamId::new(0),
                 text: String::new(),
-            },
+            }),
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -235,24 +235,24 @@ mod tests {
         }
 
         let responses = [
-            ControlReply::ParameterText {
+            ControlReply::ParameterText(ParameterText {
                 text: Some("Bandpass".to_string()),
-            },
-            ControlReply::ParameterText { text: None },
-            ControlReply::ParameterValueFromText {
+            }),
+            ControlReply::ParameterText(ParameterText { text: None }),
+            ControlReply::ParameterValueFromText(ParameterValueFromText {
                 value: Some(Normalized::of(0.375)),
-            },
-            ControlReply::ParameterValueFromText { value: None },
-            ControlReply::SampleRateSet {
+            }),
+            ControlReply::ParameterValueFromText(ParameterValueFromText { value: None }),
+            ControlReply::SampleRateSet(SampleRateSet {
                 rate: SampleRate::SR_96K,
                 refusal: None,
-            },
-            ControlReply::SampleRateSet {
+            }),
+            ControlReply::SampleRateSet(SampleRateSet {
                 rate: SampleRate::SR_96K,
                 refusal: Some(RateRefusalCause::Deactivated {
                     reason: "refused".to_string(),
                 }),
-            },
+            }),
         ];
         for msg in responses {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -272,14 +272,14 @@ mod tests {
     #[test]
     fn every_parameter_conversion_frame_round_trips() {
         let requests = [
-            ControlRequest::GetParameterPlain {
+            ControlRequest::GetParameterPlain(GetParameterPlain {
                 param_id: ParamId::new(3),
                 value: Normalized::of(0.375),
-            },
-            ControlRequest::GetParameterNormalized {
+            }),
+            ControlRequest::GetParameterNormalized(GetParameterNormalized {
                 param_id: ParamId::new(3),
                 plain: 632.455_532_033_675_8,
-            },
+            }),
         ];
         for msg in requests {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -287,14 +287,14 @@ mod tests {
             assert_eq!(format!("{back:?}"), format!("{msg:?}"), "{msg:?}");
         }
         let replies = [
-            ControlReply::ParameterPlain {
+            ControlReply::ParameterPlain(ParameterPlain {
                 plain: Some(632.455_532_033_675_8),
-            },
-            ControlReply::ParameterPlain { plain: None },
-            ControlReply::ParameterNormalized {
+            }),
+            ControlReply::ParameterPlain(ParameterPlain { plain: None }),
+            ControlReply::ParameterNormalized(ParameterNormalized {
                 value: Some(Normalized::of(0.5)),
-            },
-            ControlReply::ParameterNormalized { value: None },
+            }),
+            ControlReply::ParameterNormalized(ParameterNormalized { value: None }),
         ];
         for msg in replies {
             let bytes = postcard::to_allocvec(&msg).expect("serialize");
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(
             frame(ControlFrame::Reply {
                 id: ReqId::new(1),
-                reply: ControlReply::SharedMemoryReady
+                reply: ControlReply::SharedMemoryReady(SharedMemoryReady)
             }),
             0
         );
@@ -423,7 +423,7 @@ mod tests {
         vec![
             (
                 "LoadPlugin",
-                ControlRequest::LoadPlugin {
+                ControlRequest::LoadPlugin(LoadPlugin {
                     path: PathBuf::from("a"),
                     format: PluginFormat::Vst3,
                     plugin: None,
@@ -431,123 +431,135 @@ mod tests {
                     block_size: 64,
                     preferred_format: FloatWidth::F32,
                     state: None,
-                },
+                }),
             ),
             (
                 "SetAutomationState",
-                ControlRequest::SetAutomationState {
+                ControlRequest::SetAutomationState(SetAutomationState {
                     mode: AutomationMode::default(),
-                },
+                }),
             ),
-            ("GetParameter", ControlRequest::GetParameter { param_id }),
-            ("GetParameterList", ControlRequest::GetParameterList),
+            (
+                "GetParameter",
+                ControlRequest::GetParameter(GetParameter { param_id }),
+            ),
+            (
+                "GetParameterList",
+                ControlRequest::GetParameterList(GetParameterList),
+            ),
             (
                 "SetSampleRate",
-                ControlRequest::SetSampleRate {
+                ControlRequest::SetSampleRate(SetSampleRate {
                     rate: SampleRate::SR_48K,
-                },
+                }),
             ),
             (
                 "SaveState",
-                ControlRequest::SaveState {
+                ControlRequest::SaveState(SaveState {
                     state_use: StateUse::Project,
-                },
+                }),
             ),
             (
                 "LoadState",
-                ControlRequest::LoadState {
+                ControlRequest::LoadState(LoadState {
                     state_use: StateUse::Project,
                     len: 0,
                     blob: blob(),
-                },
+                }),
             ),
             (
                 "SetupSharedMemory",
-                ControlRequest::SetupSharedMemory {
+                ControlRequest::SetupSharedMemory(SetupSharedMemory {
                     slab: handle.wire(),
                     layout,
-                },
+                }),
             ),
-            ("Shutdown", ControlRequest::Shutdown),
+            ("Shutdown", ControlRequest::Shutdown(Shutdown)),
             (
                 "SetRenderMode",
-                ControlRequest::SetRenderMode {
+                ControlRequest::SetRenderMode(SetRenderMode {
                     mode: RenderMode::Realtime,
-                },
+                }),
             ),
-            ("GetPresetList", ControlRequest::GetPresetList),
+            (
+                "GetPresetList",
+                ControlRequest::GetPresetList(GetPresetList),
+            ),
             (
                 "LoadPreset",
-                ControlRequest::LoadPreset {
+                ControlRequest::LoadPreset(LoadPreset {
                     id: PresetId::Number(1),
-                },
+                }),
             ),
-            ("GetCurrentPreset", ControlRequest::GetCurrentPreset),
+            (
+                "GetCurrentPreset",
+                ControlRequest::GetCurrentPreset(GetCurrentPreset),
+            ),
             (
                 "GetParameterText",
-                ControlRequest::GetParameterText { param_id, value },
+                ControlRequest::GetParameterText(GetParameterText { param_id, value }),
             ),
             (
                 "GetParameterValueFromText",
-                ControlRequest::GetParameterValueFromText {
+                ControlRequest::GetParameterValueFromText(GetParameterValueFromText {
                     param_id,
                     text: String::new(),
-                },
+                }),
             ),
             (
                 "StageState",
-                ControlRequest::StageState {
+                ControlRequest::StageState(StageState {
                     len: 0,
                     blob: blob(),
-                },
+                }),
             ),
             (
                 "GetParameterPlain",
-                ControlRequest::GetParameterPlain { param_id, value },
+                ControlRequest::GetParameterPlain(GetParameterPlain { param_id, value }),
             ),
             (
                 "GetParameterNormalized",
-                ControlRequest::GetParameterNormalized {
+                ControlRequest::GetParameterNormalized(GetParameterNormalized {
                     param_id,
                     plain: 0.0,
-                },
+                }),
             ),
             (
                 "OpenEditor",
-                ControlRequest::OpenEditor {
+                ControlRequest::OpenEditor(OpenEditor {
                     parent: None,
                     scale: ContentScale::IDENTITY,
-                },
+                }),
             ),
-            ("CloseEditor", ControlRequest::CloseEditor),
+            ("CloseEditor", ControlRequest::CloseEditor(CloseEditor)),
             (
                 "SetEditorSize",
-                ControlRequest::SetEditorSize {
+                ControlRequest::SetEditorSize(SetEditorSize {
                     size: Size::Logical(LogicalSize::new(1.0, 1.0)),
-                },
+                }),
             ),
             (
                 "SetTrackInfo",
-                ControlRequest::SetTrackInfo {
+                ControlRequest::SetTrackInfo(SetTrackInfo {
                     info: TrackInfo::default(),
-                },
+                }),
             ),
             (
                 "OpenLane",
-                ControlRequest::OpenLane {
+                ControlRequest::OpenLane(OpenLane {
                     lane: Lane::Audio,
                     wire: LaneWire::fresh().unwrap(),
-                },
+                }),
             ),
             (
                 "SetAppMidiMap",
-                ControlRequest::SetAppMidiMap { app: vec![] },
+                ControlRequest::SetAppMidiMap(SetAppMidiMap { app: vec![] }),
             ),
             (
                 "ArmPluginMidiLearn",
-                ControlRequest::ArmPluginMidiLearn { armed: true },
+                ControlRequest::ArmPluginMidiLearn(ArmPluginMidiLearn { armed: true }),
             ),
-            ("GetWiring", ControlRequest::GetWiring),
+            ("GetWiring", ControlRequest::GetWiring(GetWiring)),
         ]
     }
 
@@ -564,84 +576,102 @@ mod tests {
         vec![
             (
                 "LoadPlugin",
-                ControlReply::PluginLoaded {
+                ControlReply::PluginLoaded(PluginLoaded {
                     id: PluginId::Vst3(Uid::new([0; 16])),
                     descriptor: Box::new(PluginDescriptor::new("", PluginClass::Unknown)),
                     loaded: Box::default(),
                     negotiated_format: FloatWidth::F32,
                     state_error: None,
-                },
+                }),
             ),
-            ("GetParameter", ControlReply::ParameterValue { value }),
+            (
+                "GetParameter",
+                ControlReply::ParameterValue(ParameterValue { value }),
+            ),
             (
                 "GetParameterList",
-                ControlReply::ParameterList { parameters: vec![] },
+                ControlReply::ParameterList(ParameterList { parameters: vec![] }),
             ),
             (
                 "SetSampleRate",
-                ControlReply::SampleRateSet {
+                ControlReply::SampleRateSet(SampleRateSet {
                     rate: SampleRate::SR_48K,
                     refusal: None,
-                },
+                }),
             ),
             (
                 "SaveState",
-                ControlReply::StateReady {
+                ControlReply::StateReady(StateReady {
                     len: 0,
                     blob: Blob::create(&[]).unwrap().wire(),
-                },
+                }),
             ),
-            ("LoadState", ControlReply::StateLoaded { error: None }),
-            ("SetupSharedMemory", ControlReply::SharedMemoryReady),
+            (
+                "LoadState",
+                ControlReply::StateLoaded(StateLoaded { error: None }),
+            ),
+            (
+                "SetupSharedMemory",
+                ControlReply::SharedMemoryReady(SharedMemoryReady),
+            ),
             (
                 "GetPresetList",
-                ControlReply::PresetList { presets: vec![] },
+                ControlReply::PresetList(PresetList { presets: vec![] }),
             ),
-            ("LoadPreset", ControlReply::PresetLoaded { ok: true }),
-            ("GetCurrentPreset", ControlReply::CurrentPreset { id: None }),
+            (
+                "LoadPreset",
+                ControlReply::PresetLoaded(PresetLoaded { ok: true }),
+            ),
+            (
+                "GetCurrentPreset",
+                ControlReply::CurrentPreset(CurrentPreset { id: None }),
+            ),
             (
                 "GetParameterText",
-                ControlReply::ParameterText { text: None },
+                ControlReply::ParameterText(ParameterText { text: None }),
             ),
             (
                 "GetParameterValueFromText",
-                ControlReply::ParameterValueFromText { value },
+                ControlReply::ParameterValueFromText(ParameterValueFromText { value }),
             ),
-            ("StageState", ControlReply::StateStaged { error: None }),
+            (
+                "StageState",
+                ControlReply::StateStaged(StateStaged { error: None }),
+            ),
             (
                 "GetParameterPlain",
-                ControlReply::ParameterPlain { plain: None },
+                ControlReply::ParameterPlain(ParameterPlain { plain: None }),
             ),
             (
                 "GetParameterNormalized",
-                ControlReply::ParameterNormalized { value },
+                ControlReply::ParameterNormalized(ParameterNormalized { value }),
             ),
             (
                 "OpenEditor",
-                ControlReply::EditorOpened { result: Ok(None) },
+                ControlReply::EditorOpened(EditorOpened { result: Ok(None) }),
             ),
             (
                 "SetEditorSize",
-                ControlReply::EditorSized {
+                ControlReply::EditorSized(EditorSized {
                     result: Ok(Size::Logical(LogicalSize::new(1.0, 1.0))),
-                },
+                }),
             ),
-            ("OpenLane", ControlReply::LaneOpened),
+            ("OpenLane", ControlReply::LaneOpened(LaneOpened)),
             (
                 "SetAppMidiMap",
-                ControlReply::AppMidiMapApplied {
+                ControlReply::AppMidiMapApplied(AppMidiMapApplied {
                     applied: MidiMapApplied::Host,
-                },
+                }),
             ),
             (
                 "ArmPluginMidiLearn",
-                ControlReply::PluginMidiLearn { result: Ok(()) },
+                ControlReply::PluginMidiLearn(PluginMidiLearn { result: Ok(()) }),
             ),
             (
                 "GetWiring",
-                ControlReply::Wiring {
+                ControlReply::Wiring(Wiring {
                     wiring: PluginWiring::default(),
-                },
+                }),
             ),
             (
                 "Error",
@@ -700,32 +730,42 @@ mod tests {
         let bytes = |m: ControlRequest| postcard::to_allocvec(&m).expect("serialize");
         let param_id = ParamId::new(3);
         assert_eq!(
-            bytes(ControlRequest::GetParameter { param_id }),
+            bytes(ControlRequest::GetParameter(GetParameter { param_id })),
             [2, 3],
             "GetParameter is row 2: `param_id`"
         );
         assert_eq!(
-            bytes(ControlRequest::GetParameterValueFromText {
-                param_id,
-                text: "ab".into(),
-            }),
+            bytes(ControlRequest::GetParameterValueFromText(
+                GetParameterValueFromText {
+                    param_id,
+                    text: "ab".into(),
+                }
+            )),
             [14, 3, 2, b'a', b'b'],
             "row 14: `param_id`, `text`"
         );
         assert_eq!(
-            bytes(ControlRequest::GetParameterNormalized {
-                param_id,
-                plain: 0.5,
-            }),
+            bytes(ControlRequest::GetParameterNormalized(
+                GetParameterNormalized {
+                    param_id,
+                    plain: 0.5,
+                }
+            )),
             [17, 3, 0, 0, 0, 0, 0, 0, 0xE0, 0x3F],
             "row 17: `param_id`, `plain`"
         );
         assert_eq!(
-            bytes(ControlRequest::ArmPluginMidiLearn { armed: true }),
+            bytes(ControlRequest::ArmPluginMidiLearn(ArmPluginMidiLearn {
+                armed: true
+            })),
             [24, 1],
             "row 24: `armed`"
         );
-        assert_eq!(bytes(ControlRequest::GetWiring), [25], "row 25: no fields");
+        assert_eq!(
+            bytes(ControlRequest::GetWiring(GetWiring)),
+            [25],
+            "row 25: no fields"
+        );
     }
 
     fn is_note_on(ev: &WireMidi) -> bool {
@@ -944,7 +984,7 @@ mod tests {
 
     #[test]
     fn test_load_plugin_f64_serialization() {
-        let msg = ControlRequest::LoadPlugin {
+        let msg = ControlRequest::LoadPlugin(LoadPlugin {
             path: PathBuf::from("/test/reverb.so"),
             format: PluginFormat::Vst3,
             plugin: Some(PluginId::Vst3(Uid::new([
@@ -955,13 +995,13 @@ mod tests {
             block_size: 1024,
             preferred_format: FloatWidth::F64,
             state: None,
-        };
+        });
 
         let encoded = postcard::to_allocvec(&msg).unwrap();
         let decoded: ControlRequest = postcard::from_bytes(&encoded).unwrap();
 
         match decoded {
-            ControlRequest::LoadPlugin {
+            ControlRequest::LoadPlugin(LoadPlugin {
                 path,
                 format,
                 plugin,
@@ -969,7 +1009,7 @@ mod tests {
                 block_size,
                 preferred_format,
                 ..
-            } => {
+            }) => {
                 assert_eq!(path, PathBuf::from("/test/reverb.so"));
                 assert_eq!(
                     format,
@@ -1071,10 +1111,10 @@ mod tests {
             .with_short_name("Pn");
         let untyped = ParameterInfo::new(ParamId::new(3), "Other");
 
-        let list = ControlReply::ParameterList {
+        let list = ControlReply::ParameterList(ParameterList {
             parameters: vec![typed.clone(), untyped],
-        };
-        let ControlReply::ParameterList { parameters } =
+        });
+        let ControlReply::ParameterList(ParameterList { parameters }) =
             postcard::from_bytes(&postcard::to_allocvec(&list).unwrap()).unwrap()
         else {
             panic!("a ParameterList decodes as one");

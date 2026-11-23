@@ -1131,12 +1131,14 @@ mod tests {
         let id = exchange.open(now, t.call, t.call);
         let reply = |of| ControlFrame::Reply {
             id: of,
-            reply: ControlReply::SharedMemoryReady,
+            reply: ControlReply::SharedMemoryReady(SharedMemoryReady),
         };
         assert!(exchange.hear(reply(ReqId::new(99)), id, now).is_err());
         assert!(matches!(
             exchange.hear(reply(id), id, now),
-            Ok(Heard::Answer(ControlReply::SharedMemoryReady))
+            Ok(Heard::Answer(ControlReply::SharedMemoryReady(
+                SharedMemoryReady
+            )))
         ));
         let other = ControlFrame::News(crate::News::EditorClosed);
         assert!(exchange.hear(other, id, now).is_err());
@@ -1155,7 +1157,7 @@ mod tests {
         };
         let unrequested = ControlFrame::Reply {
             id: ReqId::new(99),
-            reply: ControlReply::LaneOpened,
+            reply: ControlReply::LaneOpened(LaneOpened),
         };
         assert!(exchange.hear(hello, id, now).is_err());
         assert!(exchange.hear(unrequested, id, now).is_err());
@@ -1168,7 +1170,7 @@ mod tests {
         let err = handshake_against(
             postcard::to_allocvec(&ControlFrame::Reply {
                 id: ReqId::new(1),
-                reply: ControlReply::LaneOpened,
+                reply: ControlReply::LaneOpened(LaneOpened),
             })
             .unwrap(),
         );

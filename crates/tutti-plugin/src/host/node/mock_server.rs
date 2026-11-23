@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use tutti_plugin_ipc::{CurrentPreset, ParameterList, PresetList, SampleRateSet, SetSampleRate};
 use tutti_rt::Mutex;
 
 use tutti_buffers::FloatWidth;
@@ -159,34 +160,41 @@ fn serve_control(stream: &interprocess::local_socket::Stream, log: &Record, list
         let reply = match body {
             // A server that cannot list answers with another reply, which is
             // no list to the bridge.
-            ControlRequest::GetParameterList if !lists => Some(ControlReply::PresetList {
+            ControlRequest::GetParameterList(_) if !lists => {
+                Some(ControlReply::PresetList(PresetList {
+                    presets: Vec::new(),
+                }))
+            }
+            ControlRequest::GetParameterList(_) => {
+                Some(ControlReply::ParameterList(ParameterList {
+                    parameters: PARAMS
+                        .iter()
+                        .map(|&id| ParameterInfo::new(ParamId::new(id), "p"))
+                        .collect(),
+                }))
+            }
+            ControlRequest::GetPresetList(_) => Some(ControlReply::PresetList(PresetList {
                 presets: Vec::new(),
-            }),
-            ControlRequest::GetParameterList => Some(ControlReply::ParameterList {
-                parameters: PARAMS
-                    .iter()
-                    .map(|&id| ParameterInfo::new(ParamId::new(id), "p"))
-                    .collect(),
-            }),
-            ControlRequest::GetPresetList => Some(ControlReply::PresetList {
-                presets: Vec::new(),
-            }),
-            ControlRequest::GetCurrentPreset => Some(ControlReply::CurrentPreset {
-                id: Some(PresetId::Number(PRESET)),
-            }),
-            ControlRequest::SaveState { .. } => {
+            })),
+            ControlRequest::GetCurrentPreset(_) => {
+                Some(ControlReply::CurrentPreset(CurrentPreset {
+                    id: Some(PresetId::Number(PRESET)),
+                }))
+            }
+            ControlRequest::SaveState(_) => {
                 if tutti_plugin_ipc::send_state_reply(stream, id, &STATE).is_err() {
                     break;
                 }
                 None
             }
-            ControlRequest::SetSampleRate { rate } => {
-                log.lock()
-                    .push(Said::Control(ControlRequest::SetSampleRate { rate }));
-                Some(ControlReply::SampleRateSet {
+            ControlRequest::SetSampleRate(SetSampleRate { rate }) => {
+                log.lock().push(Said::Control(ControlRequest::SetSampleRate(
+                    SetSampleRate { rate },
+                )));
+                Some(ControlReply::SampleRateSet(SampleRateSet {
                     rate,
                     refusal: None,
-                })
+                }))
             }
             _ => None,
         };

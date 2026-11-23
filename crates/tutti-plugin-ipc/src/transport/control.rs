@@ -275,10 +275,10 @@ pub(crate) fn send_object<A: Attached>(
 #[cfg(feature = "testing")]
 pub fn send_state_reply(stream: &ControlStream, id: ReqId, state: &[u8]) -> IpcResult<()> {
     let object = Blob::create(state)?;
-    let reply = crate::ControlReply::StateReady {
+    let reply = crate::ControlReply::StateReady(crate::StateReady {
         len: state.len() as u64,
         blob: object.wire(),
-    };
+    });
     write_frame(&mut &*stream, &crate::ControlFrame::Reply { id, reply })?;
     let _lease = object
         .send(super::sys::connection(stream))
@@ -753,7 +753,8 @@ mod tests {
 
         let Request { id, body } = read_frame(&mut server).unwrap();
         assert_eq!(id, ReqId::new(7));
-        let ControlRequest::SetupSharedMemory { slab, layout: got } = body else {
+        let ControlRequest::SetupSharedMemory(SetupSharedMemory { slab, layout: got }) = body
+        else {
             panic!("the frame is not a setup");
         };
         assert_eq!(got, layout);
@@ -1018,6 +1019,7 @@ mod tests {
     mod unix_send_bound {
         use super::super::*;
         use crate::ControlRequest;
+        use crate::GetParameterValueFromText;
         use interprocess::local_socket::traits::Stream as _;
 
         /// **A send to a peer that reads nothing gives up at the send deadline**, as a `partial`
@@ -1033,10 +1035,10 @@ mod tests {
                 .expect("a send timeout");
             let chunk = crate::Request {
                 id: crate::ReqId::new(1),
-                body: ControlRequest::GetParameterValueFromText {
+                body: ControlRequest::GetParameterValueFromText(GetParameterValueFromText {
                     param_id: tutti_units::ParamId::new(1),
                     text: "x".repeat(1 << 20),
-                },
+                }),
             };
             // Far more than any socket buffer holds: the peer reads nothing.
             let result = (0..256).try_for_each(|_| send(&mut host, &chunk));
