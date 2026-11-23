@@ -7,72 +7,23 @@
 
 use tutti_platform::Instant;
 
+mod handlers;
+
 use crate::audio_pipeline::Clock;
 use crate::render::{RenderConfig, RenderLink, RenderSide, ToRender, link};
 use crate::served::AnyServer;
 use crate::ties::Ties;
 use dpi::Size;
-use tutti_buffers::FloatWidth;
 use tutti_plugin_ipc::{
-    AudioSlab, ControlReply, ControlRequest, News, SlabHandle, SlabLayout, StagedState, Working,
+    AudioSlab, ControlReply, ControlRequest, News, Reaction, SlabHandle, SlabLayout, Working, serve,
 };
 use tutti_plugin_ipc_ffi::Ready;
 #[cfg(all(test, feature = "clap"))]
 use tutti_plugin_types::fake::{at_frame, unit_value};
 use tutti_plugin_types::{
-    EditorError, IpcResult, MAX_STATE_BYTES, MainThreadMarker, MainWork, MainWorkHandle,
-    MidiMapApplied, ParameterQueue, PluginError, PluginFormat, PluginId, PluginLearnError,
-    PluginRef, PluginResult, RateRefusalCause, SampleRate, ServerError, StateError, StateUse,
-    Wakeups, WindowHandle,
+    EditorError, MainThreadMarker, MainWork, MainWorkHandle, PluginError, PluginResult,
+    RateRefusalCause, ServerError, StateError, StateUse, Wakeups, WindowHandle,
 };
-
-/// What [`Session::handle`] asks the transport loop to do.
-// One value per message, moved once to the transport loop; a `ControlReply`
-// carries a block's inline MIDI list.
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub(crate) enum Reaction {
-    /// Send this reply back to the host.
-    Reply(ControlReply),
-    /// Send the plugin's saved state back: a `StateReady` frame and the object
-    /// holding these bytes.
-    ///
-    /// Exists for plugin state, which does not fit a frame and so is answered as
-    /// an object. Modelled as one `Reaction` rather than letting the handler
-    /// write to the transport itself, so dispatch stays a pure function of the
-    /// request: the property the whole `Reaction` enum exists to preserve, and
-    /// what makes `handle` testable without a socket.
-    State(Vec<u8>),
-    /// No reply; keep looping.
-    None,
-    /// The host asked for shutdown; leave the loop.
-    Shutdown,
-}
-
-impl From<ControlReply> for Reaction {
-    fn from(m: ControlReply) -> Self {
-        Self::Reply(m)
-    }
-}
-
-#[cfg(test)]
-impl Reaction {
-    fn into_reply(self) -> ControlReply {
-        match self {
-            Reaction::Reply(m) => m,
-            other => panic!("expected one reply, got {other:?}"),
-        }
-    }
-
-    /// The bytes of a saved state.
-    #[cfg(feature = "clap")]
-    fn into_state(self) -> Vec<u8> {
-        match self {
-            Reaction::State(data) => data,
-            other => panic!("expected a state, got {other:?}"),
-        }
-    }
-}
 
 /// What the main thread holds of one hosted plugin, and the dispatch over the
 /// control connection's messages.
@@ -118,7 +69,7 @@ pub(crate) struct Session {
     pub(crate) editor_closed_unasked: bool,
     /// A parameter write was queued to the Processor and no block that reached
     /// the plugin has been waited for since: a state saved now could miss it
-    /// ([`Session::handle_save_state`]).
+    /// ([`Handle<SaveState>`](tutti_plugin_ipc::Handle)).
     write_pending: bool,
     /// The reader of the slots the render thread leaves each block's parameter
     /// values in: the edit controller is told of them on each tick.
@@ -191,17 +142,9 @@ impl Session {
     /// **A request that expects a frame always gets one**, including on the
     /// refusal paths: the host blocks waiting for the reply, so answering
     /// [`Reaction::None`] where it expects one hangs it until its timeout.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error only when a failure cannot be expressed as a reply the
-    /// host can act on. Plugin-level failures — a load that fails, a request
-    /// with no plugin loaded — come back as an error-carrying `Reply` instead.
-    pub(crate) fn handle(
-        &mut self,
-        main: MainThreadMarker,
-        msg: ControlRequest,
-    ) -> IpcResult<Reaction> {
+    /// Plugin-level failures — a load that fails, a request with no plugin
+    /// loaded — come back as an error-carrying `Reply`.
+    pub(crate) fn handle(&mut self, main: MainThreadMarker, msg: ControlRequest) -> Reaction {
         self.handle_with(main, msg, &mut |_| {})
     }
 
@@ -215,8 +158,8 @@ impl Session {
         main: MainThreadMarker,
         msg: ControlRequest,
         interim: &mut dyn FnMut(Working),
-    ) -> IpcResult<Reaction> {
-        let reaction = self.dispatch(main, msg, interim);
+    ) -> Reaction {
+        let reaction = serve(self, main, interim, msg);
         // What the message changed that a block reads reaches the render thread
         // before the host is answered, so every block it sends after the answer
         // runs with it.
@@ -258,223 +201,6 @@ impl Session {
             error: ServerError::LaneAlreadyOpen,
         }
         .into()
-    }
-
-    fn dispatch(
-        &mut self,
-        main: MainThreadMarker,
-        msg: ControlRequest,
-        interim: &mut dyn FnMut(Working),
-    ) -> IpcResult<Reaction> {
-        use ControlRequest as M;
-        match msg {
-            M::LoadPlugin {
-                path,
-                format,
-                plugin,
-                sample_rate,
-                block_size,
-                preferred_format,
-                state,
-            } => self.handle_load(
-                main,
-                path,
-                format,
-                plugin,
-                sample_rate,
-                block_size,
-                preferred_format,
-                state,
-                interim,
-            ),
-            M::SetAutomationState { mode } => {
-                self.write_pending = true;
-                if let Some(plugin) = self.plugin.as_mut() {
-                    plugin.plugin_mut().set_automation_state(main, mode);
-                }
-                Ok(Reaction::None)
-            }
-            M::SetTrackInfo { info } => {
-                if let Some(plugin) = self.plugin.as_mut() {
-                    plugin.plugin_mut().set_track_info(main, &info);
-                }
-                Ok(Reaction::None)
-            }
-            M::SetAppMidiMap { app } => {
-                let applied = self.plugin.as_mut().map_or(MidiMapApplied::Host, |p| {
-                    p.plugin_mut().set_app_midi_map(main, &app)
-                });
-                Ok(ControlReply::AppMidiMapApplied { applied }.into())
-            }
-            M::GetWiring => {
-                // With no plugin the answer is the refusal, which the host reads as
-                // "no wiring" and keeps the one it has.
-                Ok(match self.plugin.as_mut() {
-                    Some(p) => ControlReply::Wiring {
-                        wiring: p.plugin_mut().wiring(main),
-                    },
-                    None => ControlReply::Error {
-                        error: tutti_plugin_types::ServerError::NoPlugin,
-                    },
-                }
-                .into())
-            }
-            M::ArmPluginMidiLearn { armed } => {
-                let result = match self.plugin.as_mut() {
-                    Some(p) => p.plugin_mut().arm_plugin_midi_learn(main, armed),
-                    None => Err(PluginLearnError::Lost),
-                };
-                Ok(ControlReply::PluginMidiLearn { result }.into())
-            }
-            M::GetParameter { param_id } => {
-                let value = self
-                    .plugin
-                    .as_ref()
-                    .and_then(|p| p.plugin().parameter(main, param_id));
-                Ok(ControlReply::ParameterValue { value }.into())
-            }
-            M::GetParameterList => {
-                let parameters = self
-                    .plugin
-                    .as_ref()
-                    .map(|p| p.plugin().parameters(main))
-                    .unwrap_or_default();
-                Ok(ControlReply::ParameterList { parameters }.into())
-            }
-            M::GetPresetList => {
-                // `unwrap_or_default` — an empty list, matching
-                // `GetParameterList` above. A request arriving before a plugin
-                // is loaded is a host sequencing error, not something to report
-                // as a preset-less plugin, and the same shape already covers it
-                // for parameters.
-                let presets = self
-                    .plugin
-                    .as_mut()
-                    .map(|p| p.plugin_mut().presets(main))
-                    .unwrap_or_default();
-                Ok(ControlReply::PresetList { presets }.into())
-            }
-            M::LoadPreset { id } => {
-                self.write_pending = true;
-                self.forget_informs();
-                let ok = self
-                    .plugin
-                    .as_mut()
-                    .is_some_and(|p| p.plugin_mut().load_preset(main, &id));
-                self.forget_informs();
-                Ok(ControlReply::PresetLoaded { ok }.into())
-            }
-            M::GetCurrentPreset => {
-                let id = self
-                    .plugin
-                    .as_mut()
-                    .and_then(|p| p.plugin_mut().current_preset(main));
-                Ok(ControlReply::CurrentPreset { id }.into())
-            }
-            M::GetParameterPlain { param_id, value } => {
-                let plain = self
-                    .plugin
-                    .as_ref()
-                    .and_then(|p| p.plugin().parameter_plain(main, param_id, value));
-                Ok(ControlReply::ParameterPlain { plain }.into())
-            }
-            M::GetParameterNormalized { param_id, plain } => {
-                let value = self
-                    .plugin
-                    .as_ref()
-                    .and_then(|p| p.plugin().parameter_normalized(main, param_id, plain));
-                Ok(ControlReply::ParameterNormalized { value }.into())
-            }
-            M::GetParameterText { param_id, value } => {
-                let text = self
-                    .plugin
-                    .as_ref()
-                    .and_then(|p| p.plugin().parameter_text(main, param_id, value));
-                Ok(ControlReply::ParameterText { text }.into())
-            }
-            M::GetParameterValueFromText { param_id, text } => {
-                // Reads as a query, but is not one on every format: VST2's
-                // `effString2Parameter` writes the parsed value into the plugin
-                // as it reads it. The trait takes `&self` because the plugin
-                // handle is interior-mutable at the FFI edge, so this stays on
-                // the `as_ref` path with the other queries.
-                let value = self
-                    .plugin
-                    .as_ref()
-                    .and_then(|p| p.plugin().parameter_value_from_text(main, param_id, &text));
-                Ok(ControlReply::ParameterValueFromText { value }.into())
-            }
-
-            M::SetSampleRate { rate } => {
-                // A rate no clock can run at is refused by the wire itself: a
-                // `SampleRate` does not decode from one.
-                // A refusal leaves it silent (`handle_process` publishes nothing) and
-                // the host is told, because a rolled-back plugin would
-                // otherwise render at its old rate against the host's blocks.
-                let refusal = match self.plugin.as_mut() {
-                    Some(plugin) => match plugin.plugin_mut().set_sample_rate(main, rate) {
-                        Ok(()) => None,
-                        Err(e) => {
-                            tracing::warn!(requested = %rate, "sample rate not applied: {e}");
-                            Some(e.cause)
-                        }
-                    },
-                    None => None,
-                };
-                self.rate_refused = refusal.clone();
-                Ok(ControlReply::SampleRateSet { rate, refusal }.into())
-            }
-            M::SetRenderMode { mode } => {
-                // A plugin that has the capability (`Features::RENDER_MODE`) and
-                // refuses the mode tells the host as news
-                // (`News::RenderModeNotApplied`), through the plugin's poll; one
-                // without it is left in its mode and says nothing, since the
-                // host has the capability.
-                if let Some(plugin) = self.plugin.as_mut()
-                    && !plugin.plugin_mut().set_render_mode(main, mode)
-                {
-                    tracing::debug!(?mode, "plugin did not accept the render mode");
-                }
-                Ok(Reaction::None)
-            }
-            M::OpenEditor { parent, scale } => {
-                let result = self
-                    .open_editor(main, parent, scale)
-                    .map_err(editor_wire_error);
-                Ok(ControlReply::EditorOpened { result }.into())
-            }
-            M::CloseEditor => {
-                self.close_editor(main);
-                Ok(Reaction::None)
-            }
-            M::SetEditorSize { size } => {
-                let result = self.set_editor_size(main, size).map_err(editor_wire_error);
-                Ok(ControlReply::EditorSized { result }.into())
-            }
-
-            M::SaveState { state_use } => Ok(self.handle_save_state(main, state_use)),
-            // The transport delivers a state with its object as
-            // `Incoming::LoadState` and `Incoming::StageState`; a frame that
-            // reaches here has none.
-            M::LoadState { .. } | M::StageState { .. } => Ok(ControlReply::Error {
-                error: ServerError::StateWithoutObject,
-            }
-            .into()),
-
-            // The transport delivers a setup with its slab as `Incoming::SetupSlab`
-            // (`setup_slab`); a frame that reaches here has no slab.
-            M::SetupSharedMemory { .. } => Ok(ControlReply::Error {
-                error: ServerError::SlabSetupWithoutSlab,
-            }
-            .into()),
-            // The transport delivers a lane open with its end as
-            // `Incoming::OpenAudio`; a frame that reaches here has no end.
-            M::OpenLane { .. } => Ok(ControlReply::Error {
-                error: ServerError::LaneWithoutEnd,
-            }
-            .into()),
-            M::Shutdown => Ok(Reaction::Shutdown),
-        }
     }
 
     /// Leaves the loaded plugin as a panic in a call into it does.
@@ -729,162 +455,6 @@ impl Session {
         self.staged = None;
     }
 
-    fn handle_load(
-        &mut self,
-        main: MainThreadMarker,
-        path: std::path::PathBuf,
-        format: PluginFormat,
-        plugin: Option<PluginId>,
-        sample_rate: SampleRate,
-        block_size: usize,
-        preferred_format: FloatWidth,
-        declared: Option<StagedState>,
-        interim: &mut dyn FnMut(Working),
-    ) -> IpcResult<Reaction> {
-        // What a host staged for this load, restored before the activation: only
-        // when the load declares exactly it. Staged here or declared here and not
-        // the other, or of another length, is a host that is out of step with
-        // this server (or a stage left by another load), and restoring it would
-        // hand a plugin a state nobody meant for it.
-        let staged = self.staged.take();
-        // A load replaces what the server held, whether or not it succeeds:
-        // a refused one must not leave the old plugin answering a host that
-        // was told the load failed (and holding its instance while the next
-        // one loads).
-        self.drop_plugin(main);
-        self.rate_refused = None;
-        match (&declared, &staged) {
-            (None, None) => {}
-            (Some(d), Some(bytes)) if d.len == bytes.len() as u64 => {}
-            (declared, staged) => {
-                return Ok(ControlReply::Error {
-                    error: ServerError::StateLengthMismatch {
-                        declared: declared.map(|d| d.len),
-                        staged: staged.as_ref().map(|s| s.len() as u64),
-                    },
-                }
-                .into());
-            }
-        }
-        let mut restoring = || interim(Working::Restoring);
-        let (plugin, state_error, seat) = match AnyServer::load(
-            main,
-            &self.work_handle,
-            &PluginRef::of(path, plugin),
-            format,
-            sample_rate,
-            block_size,
-            preferred_format,
-            staged.as_deref().zip(declared.map(|d| d.state_use)),
-            &mut restoring,
-            self.render.ties().clone(),
-        ) {
-            Ok(loaded) => loaded,
-            Err(e) => return Ok(load_failure(&e).into()),
-        };
-        let Some(id) = plugin.plugin().origin().id().cloned() else {
-            return Ok(ControlReply::Error {
-                error: ServerError::NoPluginId,
-            }
-            .into());
-        };
-        let descriptor = plugin.plugin().descriptor().clone();
-        let loaded = plugin.plugin().loaded().clone();
-        let negotiated = plugin.plugin().negotiated(preferred_format);
-        self.clock = Clock { format: negotiated };
-        self.max_block = block_size;
-        // The plugin's own parameter output is held in fixed storage
-        // reserved here, before its first block: a queue per
-        // parameter, each within a block's chunk room
-        // (`ParameterChanges::reserved`).
-        self.render.set_format(negotiated);
-        self.render.reserve_params(
-            plugin.plugin().parameter_count(main),
-            ParameterQueue::chunk_room(block_size),
-        );
-        self.plugin = Some(plugin);
-        self.rate_refused = None;
-        self.publish();
-        self.declare_informs(main);
-        if let Err(e) = self.render.send(ToRender::Seat(seat)) {
-            // The load is not answered as done: the render thread has no
-            // plugin to run, and every block would be refused.
-            return Ok(ControlReply::Error {
-                error: ServerError::NotSeated {
-                    reason: e.to_string(),
-                },
-            }
-            .into());
-        }
-        Ok(ControlReply::PluginLoaded {
-            id,
-            descriptor: Box::new(descriptor),
-            loaded: Box::new(loaded),
-            negotiated_format: negotiated,
-            state_error: state_error.map(StateError::from),
-        }
-        .into())
-    }
-
-    /// Answer `SaveState` with the state as an object.
-    ///
-    /// An object because a plugin's state is the one payload whose size the
-    /// plugin picks, and a sample-embedding instrument's exceeds what a frame
-    /// carries. The empty cases are an empty object: a host waits for the
-    /// answer, so answering nothing would hang it rather than tell it there is
-    /// no state.
-    ///
-    /// **A save never silences a block that is playing.** A parameter write
-    /// waits in the Processor's ring until a block drains it, so a state saved
-    /// right after one could miss it.
-    /// - Nothing pending: the state is saved at once.
-    /// - A write pending and blocks flowing: a barrier is queued to the render
-    ///   thread and the save waits for the next block that reaches the plugin
-    ///   to run after it ([`RenderLink::barrier`]), then saves. The Processor
-    ///   never leaves the render thread.
-    /// - A write pending and no block within [`BLOCK_WAIT`]: the host is quiet,
-    ///   so the Processor is brought home for the settle, which is silent
-    ///   because nothing is playing.
-    fn handle_save_state(&mut self, main: MainThreadMarker, state_use: StateUse) -> Reaction {
-        let settle = self.write_pending && {
-            let id = self.render.barrier();
-            !self.render.wait_applied(id, BLOCK_WAIT)
-        };
-        self.write_pending = false;
-        let data = match self.plugin.as_mut() {
-            Some(p) => match if settle {
-                p.plugin_mut().save_state(main, state_use)
-            } else {
-                p.plugin_mut().save_state_live(main, state_use)
-            } {
-                Ok(data) => data,
-                // A plugin that fails to serialise is not a transport problem:
-                // one `Error` frame, and the host reports it as a rejection.
-                Err(e) => {
-                    return ControlReply::Error {
-                        error: ServerError::SaveFailed {
-                            reason: e.to_string(),
-                        },
-                    }
-                    .into();
-                }
-            },
-            None => Vec::new(),
-        };
-        // Refuse an over-limit state here rather than sending a gigabyte the
-        // host is only going to reject.
-        if data.len() > MAX_STATE_BYTES {
-            return ControlReply::Error {
-                error: ServerError::StateTooLarge {
-                    bytes: data.len() as u64,
-                    limit: MAX_STATE_BYTES as u64,
-                },
-            }
-            .into();
-        }
-        Reaction::State(data)
-    }
-
     /// Keeps `state`, which arrived as an object, for the next load. Answers as
     /// a load does, `error: None` meaning staged: nothing is applied until
     /// `LoadPlugin`.
@@ -941,16 +511,15 @@ fn editor_wire_error(e: PluginError) -> EditorError {
     }
 }
 
-/// The reply to a load that failed, with the stage the loader reached.
-fn load_failure(e: &PluginError) -> ControlReply {
-    let error = match e {
+/// The failure a load that failed answers with, with the stage the loader reached.
+fn load_failure(e: &PluginError) -> ServerError {
+    match e {
         PluginError::Load { stage, reason } => ServerError::Load {
             stage: *stage,
             reason: reason.clone(),
         },
         other => ServerError::Plugin(other.to_string()),
-    };
-    ControlReply::Error { error }
+    }
 }
 
 // Tests — pure dispatch, no tokio, no sockets.
@@ -958,6 +527,36 @@ fn load_failure(e: &PluginError) -> ControlReply {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tutti_buffers::FloatWidth;
+    use tutti_plugin_ipc::StagedState;
+    use tutti_plugin_types::{IpcResult, ParameterQueue, PluginFormat, PluginId, SampleRate};
+
+    /// What a test reads of a [`Reaction`].
+    trait ReactionExt {
+        /// The one reply it is.
+        fn into_reply(self) -> ControlReply;
+        /// The bytes of a saved state.
+        #[cfg(feature = "clap")]
+        fn into_state(self) -> Vec<u8>;
+    }
+
+    impl ReactionExt for Reaction {
+        fn into_reply(self) -> ControlReply {
+            match self {
+                Reaction::Reply(m) => m,
+                other => panic!("expected one reply, got {other:?}"),
+            }
+        }
+
+        #[cfg(feature = "clap")]
+        fn into_state(self) -> Vec<u8> {
+            match self {
+                Reaction::State(data) => data,
+                other => panic!("expected a state, got {other:?}"),
+            }
+        }
+    }
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, MutexGuard};
     use tutti_plugin_ipc::{AudioReply, AudioRequest};
@@ -1017,7 +616,7 @@ mod tests {
         }
 
         /// One message of the control connection, on the session.
-        fn handle(&mut self, main: MainThreadMarker, msg: ControlRequest) -> IpcResult<Reaction> {
+        fn handle(&mut self, main: MainThreadMarker, msg: ControlRequest) -> Reaction {
             self.session.handle(main, msg)
         }
 
@@ -1293,9 +892,7 @@ mod tests {
 
         for (name, msg) in cases {
             let mut s = Rig::new();
-            let r = s
-                .handle(main_thread(), msg)
-                .unwrap_or_else(|e| panic!("{name} errored with no plugin: {e:?}"));
+            let r = s.handle(main_thread(), msg);
 
             if let Reaction::State(bytes) = r {
                 assert!(bytes.is_empty(), "{name}: got state bytes");
@@ -1321,7 +918,6 @@ mod tests {
         let mut s = Rig::new();
         let reply = s
             .handle(main_thread(), ControlRequest::GetWiring)
-            .expect("answered")
             .into_reply();
         assert!(
             matches!(
@@ -1367,7 +963,6 @@ mod tests {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
                 },
             )
-            .unwrap()
             .into_reply();
         assert!(matches!(
             r,
@@ -1478,7 +1073,7 @@ mod tests {
         );
         assert!(!s.side().has_slab(), "nothing was attached");
         assert!(matches!(
-            s.handle(main_thread(), ControlRequest::Shutdown).unwrap(),
+            s.handle(main_thread(), ControlRequest::Shutdown),
             Reaction::Shutdown
         ));
     }
@@ -1493,7 +1088,7 @@ mod tests {
             wire: tutti_plugin_ipc::LaneWire::fresh().unwrap(),
         };
         assert!(matches!(
-            s.handle(main_thread(), bare).unwrap(),
+            s.handle(main_thread(), bare),
             Reaction::Reply(ControlReply::Error {
                 error: ServerError::LaneWithoutEnd
             })
@@ -1530,7 +1125,7 @@ mod tests {
             layout,
         };
         assert!(matches!(
-            s.handle(main_thread(), bare).unwrap(),
+            s.handle(main_thread(), bare),
             Reaction::Reply(ControlReply::Error { .. })
         ));
     }
@@ -1631,7 +1226,6 @@ mod tests {
                     state: None,
                 },
             )
-            .expect("a failed load is a reply, not a server error")
             .into_reply();
         match reply {
             ControlReply::Error {
@@ -1675,8 +1269,7 @@ mod tests {
                 preferred_format,
                 state: None,
             },
-        )
-        .unwrap();
+        );
 
         // The negotiated format, not the requested one, as the host's
         // `setup_shm` sizes the slab.
@@ -1708,7 +1301,6 @@ mod tests {
                     state: None,
                 },
             )
-            .expect("a load is a reply, not a server error")
             .into_reply()
     }
 
@@ -1798,7 +1390,6 @@ mod tests {
                     rate: tutti_plugin_types::SampleRate::of(rate),
                 },
             )
-            .unwrap()
             .into_reply()
         };
 
@@ -2290,7 +1881,6 @@ mod tests {
         let (mut s, _shm) = load_clap(FloatWidth::F32);
         let reply = s
             .handle(main_thread(), ControlRequest::GetParameterList)
-            .unwrap()
             .into_reply();
         let ControlReply::ParameterList { parameters } = reply else {
             panic!("expected ParameterList, got {reply:?}");
@@ -2317,7 +1907,6 @@ mod tests {
                     param_id: ParamId::new(CUTOFF),
                 },
             )
-            .unwrap()
             .into_reply();
         match reply {
             ControlReply::ParameterValue { value } => {
@@ -2347,7 +1936,6 @@ mod tests {
         );
         let reply = s
             .handle(main_thread(), ControlRequest::GetParameter { param_id })
-            .unwrap()
             .into_reply();
         match reply {
             ControlReply::ParameterValue { value } => {
@@ -2380,7 +1968,6 @@ mod tests {
                     state_use: StateUse::Project,
                 },
             )
-            .unwrap()
             .into_state();
         assert!(!data.is_empty(), "state should be non-empty");
         data
@@ -2414,7 +2001,6 @@ mod tests {
                     state: declared,
                 },
             )
-            .unwrap()
             .into_reply();
         match reply {
             ControlReply::PluginLoaded { state_error, .. } => state_error,
@@ -2435,7 +2021,6 @@ mod tests {
                 state: declared,
             },
         )
-        .unwrap()
         .into_reply()
     }
 
@@ -2591,7 +2176,6 @@ mod tests {
                     },
                     &mut |m| heard.push(m),
                 )
-                .unwrap()
                 .into_reply();
             (heard, reply)
         };
@@ -2661,7 +2245,6 @@ mod tests {
                     rate: tutti_plugin_types::SampleRate::SR_96K,
                 },
             )
-            .unwrap()
             .into_reply();
         assert!(matches!(
             r,
@@ -2717,8 +2300,7 @@ mod tests {
                 preferred_format: FloatWidth::F32,
                 state: None,
             },
-        )
-        .unwrap();
+        );
         let loaded = s.plugin.as_ref().unwrap().plugin().loaded().clone();
         let layout = tutti_plugin_ipc::SlabLayout {
             samples_per_channel: 8192,
@@ -2894,8 +2476,7 @@ mod tests {
                 preferred_format: FloatWidth::F32,
                 state: None,
             },
-        )
-        .unwrap();
+        );
         let params = s
             .plugin
             .as_ref()

@@ -30,6 +30,7 @@ use crate::ControlStream;
 use crate::ServerWatch;
 use crate::SlabHandle;
 use crate::SlabLayout;
+use crate::transport::control::Announced;
 use crate::{
     Answered, ArmPluginMidiLearn, CloseEditor, GetCurrentPreset, GetParameter, GetParameterList,
     GetParameterNormalized, GetParameterPlain, GetParameterText, GetParameterValueFromText,
@@ -806,9 +807,9 @@ impl AudioBridge {
         data: &[u8],
         state_use: StateUse,
     ) -> std::result::Result<(), StateError> {
-        let (msg, blob) = self.state_message(data, state_use)?;
+        let (msg, object) = Object::announced(self.state_message(data, state_use)?);
         // A refusal to answer is not an acceptance.
-        state_loaded(self.call(msg, Deadline::State, Object::Blob(blob)))
+        state_loaded(self.call(msg, Deadline::State, object))
     }
 
     /// The object a state travels as: the one copy of it the host makes, on the
@@ -826,7 +827,7 @@ impl AudioBridge {
         &self,
         data: &[u8],
         state_use: StateUse,
-    ) -> std::result::Result<(LoadState, Blob), StateError> {
+    ) -> std::result::Result<Announced<LoadState>, StateError> {
         if self.lifecycle.is_crashed() {
             return Err(StateError::PluginCrashed);
         }
@@ -840,12 +841,11 @@ impl AudioBridge {
         let blob = Blob::create(data).map_err(|e| {
             StateError::Rejected(format!("the state could not be made into an object: {e}"))
         })?;
-        let msg = LoadState {
+        Ok(Announced::new(blob, |blob| LoadState {
             state_use,
             len: data.len() as u64,
-            blob: blob.wire(),
-        };
-        Ok((msg, blob))
+            blob,
+        }))
     }
 
     /// Asks the server `msg` and waits for what `finish` makes of the lane's
@@ -1080,8 +1080,9 @@ impl AudioBridge {
         state_use: StateUse,
     ) -> Answer<std::result::Result<(), StateError>> {
         match self.state_message(data, state_use) {
-            Ok((msg, blob)) => {
-                self.call_answer(msg, Deadline::State, None, Object::Blob(blob), |a| {
+            Ok(announced) => {
+                let (msg, object) = Object::announced(announced);
+                self.call_answer(msg, Deadline::State, None, object, |a| {
                     Some(state_loaded(a))
                 })
             }
@@ -1160,11 +1161,11 @@ impl AudioBridge {
     /// it refused, did not answer within [`Timeouts::param`](tutti_plugin_types::Timeouts::param) or is gone.
     /// Control thread; the old slab stays valid until the caller drops it.
     pub(crate) fn setup_shared_memory(&self, slab: SlabHandle, layout: SlabLayout) -> bool {
-        let msg = SetupSharedMemory {
-            slab: slab.wire(),
+        let (msg, object) = Object::announced(Announced::new(slab, |slab| SetupSharedMemory {
+            slab,
             layout,
-        };
-        self.call(msg, Deadline::Query, Object::Slab(slab)).is_ok()
+        }));
+        self.call(msg, Deadline::Query, object).is_ok()
     }
 
     /// Wait until every setting queued before this call (a rate change, a render

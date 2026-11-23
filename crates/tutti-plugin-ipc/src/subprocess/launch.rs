@@ -7,11 +7,11 @@ use crate::ProcessGuard;
 use crate::config::IpcConfig;
 use crate::conversation::Conversation;
 use crate::error::unexpected_message;
-use crate::transport::control::{self as ipc, Attached, ControlStream};
+use crate::transport::control::{self as ipc, Announced, Announces, Attached, ControlStream};
 use crate::transport::shm::{AudioSlab, SlabLayout, SlabWriter};
 use crate::transport::{PendingLane, Rendezvous};
 use crate::{
-    Answered, ControlFrame, ControlReply, Lane, LaneOpened, LoadPlugin, OpenLane, ReqId,
+    Answered, ControlFrame, ControlReply, Lane, LaneOpened, LoadPlugin, OpenLane, ReqId, Request,
     SetupSharedMemory, SharedMemoryReady, StageState, StagedState, StateStaged, Working,
 };
 use std::process::Command;
@@ -453,15 +453,49 @@ impl<'t> Launch<'t> {
     /// # Errors
     ///
     /// The request cannot be written, or no answer comes within its window.
-    fn call<M: Answered, A: Attached>(
+    fn call<M: Answered>(
         &mut self,
         msg: M,
         window: Duration,
         ceiling: Duration,
-        object: A,
     ) -> IpcResult<std::result::Result<M::Reply, ControlReply>> {
         let id = self.exchange.open(Instant::now(), window, ceiling);
-        let _held = ipc::send_attached(&mut self.stream, id, msg, object)?;
+        ipc::send(
+            &mut self.stream,
+            &Request {
+                id,
+                body: msg.into(),
+            },
+        )?;
+        self.answer::<M>(id)
+    }
+
+    /// [`call`](Self::call) for a request that announces an object, which is
+    /// written right after it and returned with the answer, still held: where it
+    /// is read by name, it stays until then.
+    ///
+    /// # Errors
+    ///
+    /// As [`call`](Self::call).
+    fn call_announced<M: Answered + Announces>(
+        &mut self,
+        announced: Announced<M>,
+        window: Duration,
+        ceiling: Duration,
+    ) -> IpcResult<(
+        std::result::Result<M::Reply, ControlReply>,
+        <M::Object as Attached>::Held,
+    )> {
+        let id = self.exchange.open(Instant::now(), window, ceiling);
+        let held = ipc::send_attached(&mut self.stream, id, announced)?;
+        Ok((self.answer::<M>(id)?, held))
+    }
+
+    /// Waits for the answer to request `id`, which the exchange has open.
+    fn answer<M: Answered>(
+        &mut self,
+        id: ReqId,
+    ) -> IpcResult<std::result::Result<M::Reply, ControlReply>> {
         loop {
             let left = self.exchange.left(id, Instant::now());
             let frame = ipc::recv_within::<ControlFrame>(&mut self.stream, left)
@@ -503,7 +537,7 @@ fn load_plugin(
         preferred_format: config.preferred_format,
         state,
     };
-    match launch.call(msg, load, load.saturating_mul(LOAD_CEILING_FACTOR), ())? {
+    match launch.call(msg, load, load.saturating_mul(LOAD_CEILING_FACTOR))? {
         Ok(loaded) => Ok((
             loaded.id,
             loaded.descriptor,
@@ -546,16 +580,16 @@ fn stage_state(
         }
     };
     let call = config.timeouts.call;
-    let msg = StageState {
+    let staged = Announced::new(blob, |blob| StageState {
         len: state.len() as u64,
-        blob: blob.wire(),
-    };
+        blob,
+    });
     // The object is held until the answer: where it is read by name, it stays
     // until then.
-    match launch.call(msg, call, call, blob)? {
-        Ok(StateStaged { error: None }) => Ok(Ok(())),
-        Ok(StateStaged { error: Some(e) }) => Ok(Err(e)),
-        Err(other) => Err(unexpected_message("StateStaged", &other)),
+    match launch.call_announced(staged, call, call)? {
+        (Ok(StateStaged { error: None }), _held) => Ok(Ok(())),
+        (Ok(StateStaged { error: Some(e) }), _held) => Ok(Err(e)),
+        (Err(other), _held) => Err(unexpected_message("StateStaged", &other)),
     }
 }
 
@@ -600,13 +634,10 @@ fn setup_shm(
     let (slab, handle) = AudioSlab::create(layout.clone())?;
 
     let call = config.timeouts.call;
-    let msg = SetupSharedMemory {
-        slab: handle.wire(),
-        layout,
-    };
-    match launch.call(msg, call, call, &handle)? {
-        Ok(SharedMemoryReady) => Ok(slab),
-        Err(other) => Err(unexpected_message("SharedMemoryReady", &other)),
+    let setup = Announced::new(handle, |slab| SetupSharedMemory { slab, layout });
+    match launch.call_announced(setup, call, call)? {
+        (Ok(SharedMemoryReady), _held) => Ok(slab),
+        (Err(other), _held) => Err(unexpected_message("SharedMemoryReady", &other)),
     }
 }
 
@@ -616,13 +647,13 @@ fn setup_shm(
 fn open_audio_lane(launch: &mut Launch<'_>, config: &IpcConfig) -> IpcResult<ControlStream> {
     let lane = PendingLane::new()?;
     let call = config.timeouts.call;
-    let msg = OpenLane {
+    let open = Announced::new(lane, |wire| OpenLane {
         lane: Lane::Audio,
-        wire: lane.wire(),
-    };
-    match launch.call(msg, call, call, &lane)? {
-        Ok(LaneOpened) => lane.stream(),
-        Err(other) => Err(unexpected_message("LaneOpened", &other)),
+        wire,
+    });
+    match launch.call_announced(open, call, call)? {
+        (Ok(LaneOpened), lane) => lane.stream(),
+        (Err(other), _held) => Err(unexpected_message("LaneOpened", &other)),
     }
 }
 

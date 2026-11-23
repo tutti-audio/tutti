@@ -5,7 +5,74 @@
 //! [`ControlReply`] enums over them, and each request's [`Message`] impl. The
 //! table is `envelope.rs`'s, and its row order is the wire's.
 
-use super::envelope::{ControlReply, ControlRequest};
+use super::envelope::{ControlReply, ControlRequest, Working};
+use tutti_plugin_types::{MainThreadMarker, ServerError};
+
+/// What the server's loop does once a request is handled.
+// One value per message, moved once to the transport loop; a `ControlReply`
+// carries a block's inline MIDI list.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub enum Reaction {
+    /// Send this reply back to the host.
+    Reply(ControlReply),
+    /// Send the plugin's saved state back: a `StateReady` frame and the object
+    /// holding these bytes.
+    ///
+    /// The state does not fit a frame, so it is answered as an object. The handler
+    /// returns it rather than writing to the transport, so handling stays a pure
+    /// function of the request, testable without a socket.
+    State(Vec<u8>),
+    /// No reply; keep looping.
+    None,
+    /// The host asked for shutdown; leave the loop.
+    Shutdown,
+}
+
+impl From<ControlReply> for Reaction {
+    fn from(reply: ControlReply) -> Self {
+        Self::Reply(reply)
+    }
+}
+
+/// A tell is handled and nothing is sent.
+impl From<()> for Reaction {
+    fn from((): ()) -> Self {
+        Self::None
+    }
+}
+
+/// A handled request is its reply, or the failure that answers in its place.
+impl<R: Into<Reaction>> From<Result<R, ServerError>> for Reaction {
+    fn from(handled: Result<R, ServerError>) -> Self {
+        match handled {
+            Ok(reply) => reply.into(),
+            Err(error) => Self::Reply(ControlReply::Error { error }),
+        }
+    }
+}
+
+/// A plugin's saved state: what handling [`SaveState`](super::SaveState) returns
+/// in place of its [`StateReady`](super::StateReady), whose object the transport
+/// makes.
+#[derive(Debug)]
+pub struct SavedState(pub Vec<u8>);
+
+impl From<SavedState> for Reaction {
+    fn from(state: SavedState) -> Self {
+        Self::State(state.0)
+    }
+}
+
+/// What handling [`Shutdown`](super::Shutdown) returns: the loop ends.
+#[derive(Debug)]
+pub struct Stop;
+
+impl From<Stop> for Reaction {
+    fn from(Stop: Stop) -> Self {
+        Self::Shutdown
+    }
+}
 
 /// A request the control connection carries, and what answers it.
 ///
@@ -18,6 +85,26 @@ pub trait Message: Into<ControlRequest> {
     /// `Reply` that is built from, and only from, the [`ControlReply`] variant of
     /// the same name.
     const REPLIES: bool;
+    /// What handling the request returns: the row's reply or the failure that
+    /// answers in its place, `()` for a request nothing answers, or the row's
+    /// own outcome where the table says (`=>`).
+    type Handled: Into<Reaction>;
+}
+
+/// The server's handling of one request: it returns the row's
+/// [`Handled`](Message::Handled), so a handler that answers with another row's
+/// reply does not compile.
+///
+/// `interim` tells the host what a long handling has reached, as
+/// [`Working::Restoring`]: a handler that has nothing to tell ignores it.
+pub trait Handle<M: Message> {
+    /// Handles `msg` on the main thread.
+    fn handle(
+        &mut self,
+        main: MainThreadMarker,
+        msg: M,
+        interim: &mut dyn FnMut(Working),
+    ) -> M::Handled;
 }
 
 /// A request the server answers: its [`Reply`](Message::Reply) is built from, and
@@ -45,7 +132,11 @@ pub trait Unanswered: Message<Reply = ()> {}
 /// };
 /// ```
 ///
-/// A row with no `->` is a request nothing answers.
+/// A row with no `->` is a request nothing answers. A row may end in `=>` and
+/// the type its handler returns in place of the reply (`Result<Reply,
+/// ServerError>`, or `()` for a request nothing answers): `SaveState` returns
+/// the state's bytes, whose object the transport makes, and `Shutdown` returns
+/// [`Stop`].
 ///
 /// It declares, for every row, a `pub struct` for the request and one for the
 /// reply (docs and field attributes carried through), a variant of the same
@@ -54,6 +145,9 @@ pub trait Unanswered: Message<Reply = ()> {}
 /// ControlRequest`, `From<Reply> for ControlReply`, `TryFrom<ControlReply>` for
 /// the reply (the one place a reply's variant is matched), and [`Message`] for
 /// the request, with [`Answered`] or [`Unanswered`] by whether it has a reply.
+/// It also declares `serve`, the one match over [`ControlRequest`]: it calls the
+/// [`Handle`] of the row and returns what that handled as a [`Reaction`], and it
+/// compiles only for a handler of every row.
 ///
 /// A request's wire tag is its row's place among the rows, and a reply's is its
 /// place among the rows that have one: append a row, never reorder them, and bump
@@ -96,6 +190,12 @@ macro_rules! messages {
             }
         }
 
+        impl From<$name> for Reaction {
+            fn from(m: $name) -> Self {
+                Self::Reply(m.into())
+            }
+        }
+
         impl TryFrom<ControlReply> for $name {
             type Error = ControlReply;
 
@@ -118,6 +218,12 @@ macro_rules! messages {
             }
         }
 
+        impl From<$name> for Reaction {
+            fn from(m: $name) -> Self {
+                Self::Reply(m.into())
+            }
+        }
+
         impl TryFrom<ControlReply> for $name {
             type Error = ControlReply;
 
@@ -129,21 +235,29 @@ macro_rules! messages {
             }
         }
     };
-    (@impl $name:ident -> $reply:ident) => {
+    (@impl $name:ident -> $reply:ident => $handled:ty) => {
         impl Message for $name {
             type Reply = $reply;
             const REPLIES: bool = true;
+            type Handled = $handled;
         }
 
         impl Answered for $name {}
     };
-    (@impl $name:ident) => {
+    (@impl $name:ident -> $reply:ident) => {
+        messages! { @impl $name -> $reply => Result<$reply, ServerError> }
+    };
+    (@impl $name:ident => $handled:ty) => {
         impl Message for $name {
             type Reply = ();
             const REPLIES: bool = false;
+            type Handled = $handled;
         }
 
         impl Unanswered for $name {}
+    };
+    (@impl $name:ident) => {
+        messages! { @impl $name => () }
     };
     ($(
         $(#[$meta:meta])*
@@ -152,12 +266,13 @@ macro_rules! messages {
             $(#[$rmeta:meta])*
             $reply:ident $({ $($(#[$rfmeta:meta])* $rfield:ident : $rfty:ty),* $(,)? })?
         )?
+        $(=> $handled:ty)?
         ;
     )*) => {
         $(
             messages! { @request $(#[$meta])* $name $({ $($(#[$fmeta])* $field : $fty),* })? }
             $(messages! { @reply $(#[$rmeta])* $reply $({ $($(#[$rfmeta])* $rfield : $rfty),* })? })?
-            messages! { @impl $name $(-> $reply)? }
+            messages! { @impl $name $(-> $reply)? $(=> $handled)? }
         )*
 
         /// A request on the control connection: everything but a block.
@@ -201,6 +316,32 @@ macro_rules! messages {
                 match self {
                     $(Self::$name { .. } => <$name as Message>::REPLIES,)*
                 }
+            }
+        }
+
+        /// Handles `request` with the handler of its row and returns what the
+        /// server's loop does next.
+        pub fn serve<H>(
+            handler: &mut H,
+            main: MainThreadMarker,
+            interim: &mut dyn FnMut(Working),
+            request: ControlRequest,
+        ) -> Reaction
+        where
+            H: $(Handle<$name> +)*
+        {
+            match request {
+                $(
+                    ControlRequest::$name $({ $($field),* })? => {
+                        <H as Handle<$name>>::handle(
+                            handler,
+                            main,
+                            $name $({ $($field),* })?,
+                            interim,
+                        )
+                        .into()
+                    }
+                )*
             }
         }
 

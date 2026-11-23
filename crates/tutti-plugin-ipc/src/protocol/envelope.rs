@@ -14,15 +14,15 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use super::message::{Answered, Message, Unanswered};
+use super::message::{Answered, Handle, Message, Reaction, SavedState, Stop, Unanswered};
 use super::process::ProcessAudioData;
 use super::shm::SlabLayout;
 use crate::{BlobWire, LaneWire, SlabWire};
 use dpi::Size;
 use tutti_buffers::FloatWidth;
-use tutti_plugin_types::Samples;
 use tutti_plugin_types::{BlockStatus, ContentScale, PluginId, StateUse};
 use tutti_plugin_types::{EditorError, MidiEventVec, RateRefusalCause, ServerError, StateError};
+use tutti_plugin_types::{MainThreadMarker, Samples};
 use tutti_plugin_types::{
     ParameterInfo, PluginDescriptor, PluginFormat, PluginPreset, PluginTail, PluginWiring, PresetId,
 };
@@ -319,7 +319,7 @@ messages! {
         /// What the frame carries of the object, as for
         /// [`ControlRequest::LoadState`].
         blob: BlobWire,
-    };
+    } => Result<SavedState, ServerError>;
     /// Restore a plugin state, which follows this frame as a memory object of its
     /// own (`send_attached` writes both, and the server's transport reads both
     /// before this reaches its session), answered by
@@ -354,7 +354,7 @@ messages! {
         error: Option<StateError>,
     };
     /// Point the subprocess at the shared-memory audio slab, which follows this
-    /// frame as a descriptor of its own on unix (`send_setup` writes both, and the
+    /// frame as a descriptor of its own on unix (`send_attached` writes both, and the
     /// server's transport reads both before this reaches its session).
     SetupSharedMemory {
         /// What the frame carries of the slab: nothing on unix, where the
@@ -367,7 +367,7 @@ messages! {
     /// The subprocess mapped the shared-memory slab and is ready to process.
     SharedMemoryReady;
     /// Ask the subprocess to exit cleanly.
-    Shutdown;
+    Shutdown => Stop;
     /// Tell the plugin whether it is rendering under realtime pressure.
     ///
     /// A sibling of [`SetSampleRate`](ControlRequest::SetSampleRate) rather than a field

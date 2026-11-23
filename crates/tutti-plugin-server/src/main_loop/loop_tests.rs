@@ -415,8 +415,8 @@ fn a_lost_plugin_ends_the_server_abnormally() {
     let (mut fixture, _slab) = session();
     let main = main_thread();
     assert!(matches!(
-        fixture.session.handle(main, load_message()).expect("load"),
-        crate::session::Reaction::Reply(ControlReply::PluginLoaded { .. })
+        fixture.session.handle(main, load_message()),
+        tutti_plugin_ipc::Reaction::Reply(ControlReply::PluginLoaded { .. })
     ));
     fixture.session.lose_plugin();
     let executor = Executor::new();
