@@ -5,8 +5,7 @@ use std::sync::Arc;
 use super::audio::{AudioTaken, TransportAudio};
 use super::motion::MotionFsm;
 use super::settings::TransportSettings;
-use std::sync::atomic::Ordering;
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_tempo::TempoMap;
 use tutti_units::{Beat, SampleRate};
 
@@ -47,7 +46,7 @@ pub struct Transport {
     /// ([`set_sample_rate`](Self::set_sample_rate)) reaches each holder —
     /// a clip reader's `Arc<dyn Timeline>`, the MIDI clock master — rather
     /// than only the handle it was called on.
-    sample_rate: Arc<AtomicSampleRate>,
+    sample_rate: Arc<AtomicCell<SampleRate>>,
 }
 
 impl Transport {
@@ -57,7 +56,7 @@ impl Transport {
         Self {
             motion: MotionFsm::new(settings.clone()),
             settings,
-            sample_rate: Arc::new(AtomicSampleRate::new(sample_rate.into())),
+            sample_rate: Arc::new(AtomicCell::new(sample_rate.into())),
         }
     }
 
@@ -104,7 +103,7 @@ impl Transport {
     /// The device rate this transport converts musical time against: the
     /// one it was built at, until [`set_sample_rate`](Self::set_sample_rate).
     pub fn sample_rate(&self) -> SampleRate {
-        self.sample_rate.load(Ordering::Acquire)
+        self.sample_rate.load()
     }
 
     /// The device now runs at `sample_rate`: every clone of this transport
@@ -123,7 +122,7 @@ impl Transport {
     /// wall-clock time. Call it before scheduling against the new rate.
     pub fn set_sample_rate(&self, sample_rate: impl Into<SampleRate>) {
         let rate = sample_rate.into();
-        if self.sample_rate.swap(rate, Ordering::AcqRel) != rate {
+        if self.sample_rate.swap(rate) != rate {
             self.motion.timed().mark_rate_change();
         }
     }

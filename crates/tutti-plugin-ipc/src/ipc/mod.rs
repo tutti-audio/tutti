@@ -59,7 +59,7 @@ use tutti_plugin_types::{
     Reopen, Request, RestartRules, ResyncKind, SampleRate, Samples, StateError, StateUse, Stuck,
     WaitSwitch, Widths,
 };
-use tutti_rt::AtomicSampleRate;
+use tutti_rt::AtomicCell;
 use tutti_units::ParamId;
 
 use crate::subprocess::swap_slab;
@@ -301,7 +301,7 @@ pub(crate) struct Link {
     answering: Arc<Mutex<Arc<AudioSlab>>>,
     events: Arc<Events>,
     /// The rate the server runs at.
-    rate: AtomicSampleRate,
+    rate: AtomicCell<SampleRate>,
     /// A fork's watch: the latches it reads back, and whether the pipeline
     /// waits for each chunk (an offline fork).
     wait: Mutex<Option<Watch>>,
@@ -393,11 +393,11 @@ impl Link {
     }
 
     pub(crate) fn rate(&self) -> SampleRate {
-        self.rate.load(Ordering::Acquire)
+        self.rate.load()
     }
 
     pub(crate) fn set_rate(&self, rate: SampleRate) {
-        self.rate.store(rate, Ordering::Release);
+        self.rate.store(rate);
     }
 
     pub(crate) fn watch(&self) -> Option<Watch> {
@@ -550,7 +550,7 @@ impl Ipc {
             counters,
             answering,
             events,
-            rate: AtomicSampleRate::new(rate),
+            rate: AtomicCell::new(rate),
             wait: Mutex::new(None),
         };
         Self {

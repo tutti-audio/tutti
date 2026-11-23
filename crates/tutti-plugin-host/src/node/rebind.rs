@@ -23,10 +23,11 @@ use std::sync::Arc;
 use tutti_buffers::Float;
 
 use tutti_plugin_types::{Features, Loaded, MainThreadMarker, PluginDescriptor, Successor};
+use tutti_rt::AtomicCell;
 use tutti_rt::Mutex;
-use tutti_rt::PendingSampleRate;
 use tutti_timeline::TempoReader;
 use tutti_units::ParamId;
+use tutti_units::SampleRate;
 use tutti_units::Samples;
 
 use super::client::{Declared, InProcessClient, PluginNode, Reload};
@@ -67,7 +68,7 @@ pub struct Rebinder<L: Loaded, F: Float = f32> {
     reload: Option<Reload>,
     features: Features,
     sample_rate: tutti_units::SampleRate,
-    pending_sample_rate: Arc<PendingSampleRate>,
+    pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Where a tick delivers what its pump finds: the handle's listeners.
     /// `None` for an out-of-process plugin, whose own listener reports it.
     reporting: Option<Reporting>,

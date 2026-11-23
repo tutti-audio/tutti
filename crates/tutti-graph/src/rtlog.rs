@@ -39,8 +39,8 @@ use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use tutti_rt::{
-    ClaimTable, Counter, CounterWriter, Mutex, Overflow, PackedAtomic, RingReader, RingWriter,
-    counter, ring,
+    AtomicCell, AtomicWord, ClaimTable, Counter, CounterWriter, Mutex, Overflow, RingReader,
+    RingWriter, counter, ring,
 };
 use tutti_units::{Frame, Samples};
 
@@ -325,14 +325,29 @@ impl LogFilter {
     }
 }
 
+/// The `rt` level in the low byte of the word and the `plugin` level in the
+/// next; a word past two bytes is no filter.
+impl AtomicWord for LogFilter {
+    fn to_word(self) -> u64 {
+        u64::from(self.rt) | u64::from(self.plugin) << 8
+    }
+
+    fn from_word(word: u64) -> Option<Self> {
+        let [rt, plugin, 0, 0, 0, 0, 0, 0] = word.to_le_bytes() else {
+            return None;
+        };
+        Some(Self { rt, plugin })
+    }
+}
+
 /// Where the control side stores the [`LogFilter`] an executor loads. A
 /// clone shares the cell.
 #[derive(Clone, Debug)]
-pub(crate) struct LogGate(Arc<PackedAtomic<LogFilter>>);
+pub(crate) struct LogGate(Arc<AtomicCell<LogFilter>>);
 
 impl LogGate {
     fn off() -> Self {
-        Self(Arc::new(PackedAtomic::new(LogFilter::OFF)))
+        Self(Arc::new(AtomicCell::new(LogFilter::OFF)))
     }
 
     /// Stores `filter`: the executor reads it at the start of its next block.

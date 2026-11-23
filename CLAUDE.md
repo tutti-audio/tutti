@@ -231,7 +231,7 @@ touched.
   std's; a crate below `tutti-rt` or a test plugin allows it at its root with the reason.
 - A collection the audio thread fills is a `tutti_rt::RtVec` or `CappedVec`: capped at
   construction, refusing past it, never growing. A value of more than one field read as
-  one word is a `PackedAtomic`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
+  one word is an `AtomicCell`; an atomic float is `atomic_float::AtomicF32`/`AtomicF64`.
 - A value the audio thread reads whole is a `tutti_rt::AtomicCell<T>` over an `AtomicWord`
   (`atomic_word!`); a node declares it in `declare_params!`'s `settings` block.
 - An id type is written with `tutti_rt::id!` and minted from a `tutti_rt::Mint`.

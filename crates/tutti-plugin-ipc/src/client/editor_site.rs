@@ -19,7 +19,7 @@ use tutti_plugin_types::{
     EditorWindow, MainThreadMarker, ParamEdit, PluginError, PluginFormat, PluginRef, Request,
     StateError, WindowHandle,
 };
-use tutti_rt::{Mutex, PackedAtomic, Tally, TallyWriter, tally};
+use tutti_rt::{AtomicCell, Mutex, Tally, TallyWriter, tally};
 use tutti_units::{Normalized, ParamId};
 
 /// Where a served plugin's editor lives: an editor-only instance in this
@@ -785,10 +785,10 @@ struct GuiMirror {
     /// The writer of `refused`.
     refused_writer: TallyWriter<u64>,
     /// The latest automation mode written, as [`mode_code`]; 0 for none.
-    automation: PackedAtomic<u8>,
+    automation: AtomicCell<u8>,
     /// The code of the mode the editor was last shown, 0 for none, so an idle
     /// applies a mode once. Main thread only.
-    shown: PackedAtomic<u8>,
+    shown: AtomicCell<u8>,
     /// Whether an editor is open. Nothing is queued while it is not, and what
     /// was queued is discarded when it opens or closes: an edit made with no
     /// editor to show it is not one to replay on the first idle.
@@ -802,8 +802,8 @@ impl GuiMirror {
             params: ArrayQueue::new(MIRROR_CAPACITY),
             refused_writer: refused.writer(),
             refused,
-            automation: PackedAtomic::new(0),
-            shown: PackedAtomic::new(0),
+            automation: AtomicCell::new(0),
+            shown: AtomicCell::new(0),
             open: AtomicBool::new(false),
         }
     }
