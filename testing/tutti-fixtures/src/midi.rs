@@ -10,13 +10,15 @@
 //! 7-bit value reaches a MIDI 2.0 field through `NoteVelocity::from`,
 //! `ControlValue::from` and `BendValue::from`.
 
+use std::time::Duration;
 use tutti_midi_protocol::{
     MemberCount, MpeMode, MpeZone, MpeZoneConfig, MpeZones, PitchBendSensitivity,
 };
 use tutti_ump::{
     Address, Attribute, Bank, BendValue, BlockDirection, CCNumber, ControlValue, DeviceIdentity,
-    ManufacturerId, Message, Midi1Port, MidiChannel, NoteNumber, NoteVelocity, Protocol, Rpn,
-    SoftwareRevision, Stream, U7, Ump, Voice1, Voice2,
+    ManufacturerId, Message, Midi1Port, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Protocol,
+    Rpn, SoftwareRevision, Stream, Sysex7Packet, SysexMessage, SysexStatus, U7, Ump, Voice1,
+    Voice2,
 };
 use tutti_units::Semitones;
 
@@ -30,6 +32,46 @@ pub fn device_identity() -> DeviceIdentity {
         model: [U7::of(0x33), U7::of(0x44)],
         revision: SoftwareRevision::from([0x55, 0x66, 0x77, 0x7F].map(U7::of)),
     }
+}
+
+/// A Device Identity whose manufacturer is the one-byte id `0x41` (M1 p.40's
+/// Identity Reply), with family `01 02`, model `03 04` and revision `05 06 07 08`.
+pub fn device_identity_one_byte_manufacturer() -> DeviceIdentity {
+    DeviceIdentity {
+        manufacturer: ManufacturerId::of(0x41),
+        family: [U7::of(1), U7::of(2)],
+        model: [U7::of(3), U7::of(4)],
+        revision: SoftwareRevision::from([5, 6, 7, 8].map(U7::of)),
+    }
+}
+
+/// `n` milliseconds.
+pub fn ms(n: u64) -> Duration {
+    Duration::from_millis(n)
+}
+
+/// One System Exclusive 7 packet on the first Group.
+///
+/// # Panics
+///
+/// When `data` is more than six bytes.
+pub fn sysex7(status: SysexStatus, data: &[u8]) -> Ump {
+    Ump::from(Message::Sysex7(
+        MidiGroup::FIRST,
+        Sysex7Packet::new(status, data).unwrap(),
+    ))
+}
+
+/// The SysEx7 packets of the framed message `bytes` (`F0 .. F7`) on `group`.
+///
+/// # Panics
+///
+/// When `bytes` is not a framed message or `group` is above 15.
+pub fn sysex_packets(group: u8, bytes: &[u8]) -> Vec<Ump> {
+    SysexMessage::from_framed(bytes)
+        .expect("a framed message")
+        .packets(MidiGroup::of(group))
+        .collect()
 }
 
 /// A MIDI 2.0 Note On with no attribute.

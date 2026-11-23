@@ -7,7 +7,8 @@ use tutti_plugin_types::ChannelLayout;
 use crate::bus::BusDirection;
 use crate::error::{AuError, Result};
 use crate::handle::AuHandle;
-use crate::types::*;
+use coreaudio_sys as sys;
+use coreaudio_sys::AudioStreamBasicDescription;
 
 /// Input/output channel layouts for an AU: `tutti-au-ffi`'s [`BusLayout`](tutti_au_ffi::BusLayout), whose
 /// `has_input` carries the "has an input bus at all" distinction that
@@ -152,7 +153,7 @@ impl StreamConfig {
             // what gets returned and what `RenderScratch` is then sized from. The
             // floor was a default, never a guard; the default now lives in
             // `AuLoaded::new`, which is the one caller that has to invent a width.
-            let out_asbd = AudioStreamBasicDescription::float32(
+            let out_asbd = float32_asbd(
                 // The ASBD is the ABI edge: `mSampleRate` is a raw `f64`.
                 self.sample_rate.get(),
                 self.channels.outputs.count() as u32,
@@ -171,7 +172,7 @@ impl StreamConfig {
 
             let mut effective_inputs = self.channels.inputs;
             if self.channels.has_input {
-                let in_asbd = AudioStreamBasicDescription::float32(
+                let in_asbd = float32_asbd(
                     // The ASBD is the ABI edge: `mSampleRate` is a raw `f64`.
                     self.sample_rate.get(),
                     self.channels.inputs.count() as u32,
@@ -275,6 +276,25 @@ fn accepted_layout(scope: &'static str, channels: u32) -> Result<ChannelLayout> 
     ChannelLayout::try_from(channels).map_err(|source| AuError::BusTooWide { scope, source })
 }
 
+/// The canonical stream format: 32-bit float, non-interleaved, packed linear PCM.
+/// Non-interleaved, so `mBytesPerFrame` and `mBytesPerPacket` are one channel's
+/// worth (4), not `channels * 4`. `sample_rate` is the raw `mSampleRate`.
+fn float32_asbd(sample_rate: f64, channels: u32) -> AudioStreamBasicDescription {
+    AudioStreamBasicDescription {
+        mSampleRate: sample_rate,
+        mFormatID: sys::kAudioFormatLinearPCM,
+        mFormatFlags: sys::kAudioFormatFlagIsFloat
+            | sys::kAudioFormatFlagIsNonInterleaved
+            | sys::kAudioFormatFlagIsPacked,
+        mBytesPerPacket: 4,
+        mFramesPerPacket: 1,
+        mBytesPerFrame: 4,
+        mChannelsPerFrame: channels,
+        mBitsPerChannel: 32,
+        mReserved: 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,6 +309,23 @@ mod tests {
                 has_input: true,
             },
         )
+    }
+
+    /// Non-interleaved float32: one channel's worth per frame and packet (4
+    /// bytes), never `channels * 4`.
+    #[test]
+    fn the_float32_format_is_per_channel_sized() {
+        let asbd = float32_asbd(48_000.0, 2);
+        assert_eq!(asbd.mSampleRate, 48_000.0);
+        assert_eq!(asbd.mChannelsPerFrame, 2);
+        assert_eq!((asbd.mBytesPerFrame, asbd.mBytesPerPacket), (4, 4));
+        assert_eq!((asbd.mFramesPerPacket, asbd.mBitsPerChannel), (1, 32));
+        assert_eq!(
+            asbd.mFormatFlags,
+            sys::kAudioFormatFlagIsFloat
+                | sys::kAudioFormatFlagIsPacked
+                | sys::kAudioFormatFlagIsNonInterleaved
+        );
     }
 
     /// A rate the AU did not take must be an error, not a silent `Ok`.

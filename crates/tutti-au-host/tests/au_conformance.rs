@@ -40,9 +40,9 @@ use support::corpus::{
     impulse, peak, render, silence,
 };
 
+use coreaudio_sys::kAudioUnitErr_Uninitialized;
 use tutti_au_host::AuError;
 use tutti_au_host::component::AuType;
-use tutti_au_host::types::K_AUDIO_UNIT_ERR_UNINITIALIZED;
 use tutti_fixtures::midi;
 use tutti_ump::{CCNumber, MidiChannel};
 use tutti_units::Samples;
@@ -83,11 +83,11 @@ fn render_before_initialize_is_refused() {
         matches!(
             err,
             AuError::OsStatus {
-                code: K_AUDIO_UNIT_ERR_UNINITIALIZED,
+                code: coreaudio_sys::kAudioUnitErr_Uninitialized,
                 ..
             }
         ),
-        "expected kAudioUnitErr_Uninitialized ({K_AUDIO_UNIT_ERR_UNINITIALIZED}), \
+        "expected kAudioUnitErr_Uninitialized ({kAudioUnitErr_Uninitialized}), \
          got {err:?}"
     );
 }

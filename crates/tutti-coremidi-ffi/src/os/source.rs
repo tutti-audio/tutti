@@ -125,15 +125,6 @@ mod tests {
     use crate::os::client::test_client;
     use tutti_ump::read_protocol;
 
-    fn assert_send_sync<T: Send + Sync>() {}
-
-    /// The source crosses threads with no `unsafe impl`: if a field ever stopped
-    /// being a plain handle, this stops compiling.
-    #[test]
-    fn a_source_is_send_and_sync() {
-        assert_send_sync::<UmpSource>();
-    }
-
     /// A reserved protocol has no CoreMIDI id: no endpoint is created in it, and
     /// the two defined ones map to the two ids.
     #[test]

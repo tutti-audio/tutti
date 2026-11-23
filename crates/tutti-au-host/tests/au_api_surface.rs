@@ -34,7 +34,7 @@
 //!   every existing test in the crate.
 //!
 //! * **[`MidiOutputInfo::stream_count`]**, [`component::find_component`]'s
-//!   negative and wildcard cases, and [`types::fourcc_to_string`]'s non-UTF-8
+//!   negative and wildcard cases, and the four-char-code decode's non-UTF-8
 //!   path.
 //!
 //! ## `watch_property` CAN be driven from the host side
@@ -112,11 +112,11 @@
 
 #![cfg(target_os = "macos")]
 
+use coreaudio_sys::{AudioComponentDescription, kAudioUnitType_Effect};
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_au_ffi::Property;
 use tutti_au_ffi::property::{BypassEffect, Latency, PresentPreset};
-use tutti_au_host::types::{self, AudioComponentDescription, K_AUDIO_UNIT_TYPE_EFFECT};
 use tutti_platform::Instant;
 use tutti_rt::Mutex;
 
@@ -939,7 +939,7 @@ fn stream_count_is_the_length_of_the_name_list_including_unnamed_slots() {
 fn find_component_reports_absence_as_a_named_error() {
     let _g = AU_LOCK.lock();
     let missing = ComponentKey::new(
-        K_AUDIO_UNIT_TYPE_EFFECT,
+        kAudioUnitType_Effect,
         u32::from_be_bytes(*b"zzzz"),
         u32::from_be_bytes(*b"zzzz"),
     )
@@ -974,7 +974,7 @@ fn a_wildcard_is_no_key_and_is_listed_by_all_matching() {
         componentManufacturer: apple,
         ..Default::default()
     };
-    let exact = ComponentKey::new(K_AUDIO_UNIT_TYPE_EFFECT, delay, apple).expect("an exact key");
+    let exact = ComponentKey::new(kAudioUnitType_Effect, delay, apple).expect("an exact key");
     assert!(
         component::AuComponentRef::all_matching(&wildcard)
             .contains(&component::find_component(exact).expect("AUDelay ships with macOS")),
@@ -994,7 +994,7 @@ fn a_wildcard_is_no_key_and_is_listed_by_all_matching() {
 fn find_component_agrees_with_the_enumerator() {
     let _g = AU_LOCK.lock();
     let desc = ComponentKey::new(
-        K_AUDIO_UNIT_TYPE_EFFECT,
+        kAudioUnitType_Effect,
         u32::from_be_bytes(*b"dely"),
         u32::from_be_bytes(*b"appl"),
     )
@@ -1015,7 +1015,17 @@ fn find_component_agrees_with_the_enumerator() {
     );
 }
 
-// ------------------------------------------------------------ fourcc_to_string
+// ---------------------------------------------------------- four-char decode
+
+/// A four-char code as `AuType::Unknown`'s `Display` decodes it.
+fn fourcc_decode(code: u32) -> String {
+    let shown = AuType::Unknown(code).to_string();
+    shown
+        .strip_prefix("Unknown(")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .expect("Unknown(<code>)")
+        .to_string()
+}
 
 /// A four-char code decodes to exactly four characters, big-endian, and never
 /// panics on bytes that are not UTF-8.
@@ -1032,29 +1042,20 @@ fn find_component_agrees_with_the_enumerator() {
 /// which is **3 bytes**, so `0xFFFFFFFF` decodes to 4 chars / 12 bytes. A
 /// `len() == 4` assertion (the obvious one) would be wrong.
 #[test]
-fn fourcc_to_string_is_big_endian_and_survives_non_utf8() {
+fn a_four_char_code_decodes_big_endian_and_survives_non_utf8() {
     // Big-endian order, not little: a byte-swapped decode would render "aufx"
     // as "xfua" and every AU type string in a browser would be reversed.
-    assert_eq!(
-        types::fourcc_to_string(u32::from_be_bytes(*b"aufx")),
-        "aufx"
-    );
-    assert_eq!(
-        types::fourcc_to_string(u32::from_be_bytes(*b"dely")),
-        "dely"
-    );
+    assert_eq!(fourcc_decode(u32::from_be_bytes(*b"aufx")), "aufx");
+    assert_eq!(fourcc_decode(u32::from_be_bytes(*b"dely")), "dely");
     // Trailing space is significant — DLSMusicDevice's subtype is `dls ` and
     // trimming it would stop it matching.
-    assert_eq!(
-        types::fourcc_to_string(u32::from_be_bytes(*b"dls ")),
-        "dls "
-    );
+    assert_eq!(fourcc_decode(u32::from_be_bytes(*b"dls ")), "dls ");
 
     // Measured on macOS 15.6: an all-invalid code yields 4 replacement
     // characters, which is 12 bytes. The *character* count is 4 in every case;
     // the byte count is not, which is why the assertion is on `chars()`.
     for code in [0x0000_0000u32, 0xFFFF_FFFF, 0x8081_8283] {
-        let s = types::fourcc_to_string(code);
+        let s = fourcc_decode(code);
         assert_eq!(
             s.chars().count(),
             4,
@@ -1062,15 +1063,15 @@ fn fourcc_to_string_is_big_endian_and_survives_non_utf8() {
         );
     }
     assert_eq!(
-        types::fourcc_to_string(0xFFFF_FFFF).len(),
+        fourcc_decode(0xFFFF_FFFF).len(),
         12,
         "four U+FFFD replacement characters are 12 bytes — a `len() == 4` check \
          would be asserting the wrong quantity"
     );
     // A NUL code is four NUL *characters*, not an empty string: it must not be
     // silently trimmed into one, or two distinct manufacturers would collide.
-    assert_eq!(types::fourcc_to_string(0).chars().count(), 4);
-    assert!(!types::fourcc_to_string(0).is_empty());
+    assert_eq!(fourcc_decode(0).chars().count(), 4);
+    assert!(!fourcc_decode(0).is_empty());
 
     // Round-trip against the enumerator: every manufacturer code on the system
     // decodes to a 4-character string, so no real plugin can break the scan.
@@ -1088,7 +1089,7 @@ fn fourcc_to_string_is_big_endian_and_survives_non_utf8() {
         );
         assert_eq!(
             c.manufacturer,
-            types::fourcc_to_string(c.manufacturer_code),
+            fourcc_decode(c.manufacturer_code),
             "{}: the stored string must be the decode of the stored code",
             c.name
         );

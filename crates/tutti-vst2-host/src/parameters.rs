@@ -308,6 +308,12 @@ impl Vst2Loaded {
         .with_steps(steps)
         .with_flags(known, reported)
         .with_group(group)
+        .with_short_name(
+            props
+                .as_ref()
+                .map(|q| q.short_label.clone())
+                .unwrap_or_default(),
+        )
         .with_measures(measures);
         // The integer range's own map; a parameter with none leaves the map to
         // the plugin.
