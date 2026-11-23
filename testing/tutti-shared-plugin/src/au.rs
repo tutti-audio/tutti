@@ -737,9 +737,13 @@ unsafe extern "C" fn get_property(
                     let Some(short) = core::SHORT_NAMES.get(request.id as usize) else {
                         return ERR_INVALID_PARAMETER;
                     };
-                    // The name cut to the length asked for, which is how the property reads.
-                    let length = usize::try_from(request.length).unwrap_or(0);
-                    let name = CFString::new(&short.chars().take(length).collect::<String>());
+                    // The name cut to the length asked for; a negative length
+                    // (`kAudioUnitParameterName_Full`) asks for the whole name.
+                    let name = match usize::try_from(request.length) {
+                        Ok(length) => short.chars().take(length).collect::<String>(),
+                        Err(_) => (*short).to_string(),
+                    };
+                    let name = CFString::new(&name);
                     // Copy rule: the caller owns the reference it is given.
                     write_property(
                         data,
