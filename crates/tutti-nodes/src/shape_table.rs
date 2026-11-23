@@ -3,7 +3,7 @@
 
 use crate::test_support::{for_each_row, prepared};
 use crate::*;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_dsp::{
     Algorithm, CombDelay, FmPatch, Operator, OperatorCount, OperatorFrequency, OperatorSpec,
     Partial, Partials, Route,
@@ -467,7 +467,7 @@ fn each_node_declares_its_shape() {
         ("brickwall_limiter", || {
             check(
                 prepared(BrickwallLimiterNode::<f32>::from(
-                    BrickwallLimiterConfig::new(BusTopology::STEREO, Db::new(-1.0)),
+                    BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(-1.0)),
                 )),
                 Facts::default()
                     .io(2, 2)
