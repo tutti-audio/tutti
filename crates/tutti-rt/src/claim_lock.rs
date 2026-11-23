@@ -34,16 +34,11 @@
 //!
 //! The model in `tests/claim_loom.rs` runs this code.
 
-use sync::{AtomicU32, AtomicU64, Ordering};
+use crate::sync::{AtomicU32, AtomicU64, Ordering};
 
 use crate::backoff::Backoff;
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-}
+#[cfg(not(loom))]
+use crate::mint::Mint;
 
 const FREE: u32 = 0;
 const HELD: u32 = 1;
@@ -54,11 +49,11 @@ const DEAD: u32 = 2;
 #[cfg(not(loom))]
 fn current_thread_number() -> u64 {
     use std::cell::Cell;
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    static NEXT: Mint = Mint::new();
     thread_local! { static ID: Cell<u64> = const { Cell::new(0) }; }
     ID.with(|id| {
         if id.get() == 0 {
-            id.set(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+            id.set(NEXT.mint().get());
         }
         id.get()
     })

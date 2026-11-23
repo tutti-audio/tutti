@@ -92,7 +92,7 @@ use std::io;
 use std::sync::PoisonError;
 use std::task::{Context, Poll, Waker};
 
-use sync::{Arc, AtomicBool, Mutex, MutexGuard, Ordering, fence};
+use crate::sync::{Arc, AtomicBool, Mutex, MutexGuard, Ordering, fence};
 
 use crate::{ControlDrop, Parker, Unparker, parker};
 
@@ -110,17 +110,6 @@ mod tick_body;
     clippy::disallowed_types,
     reason = "loom's and std's locks, for the loom models of a bell"
 )]
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicBool, Ordering, fence};
-    #[cfg(loom)]
-    pub(super) use loom::sync::{Arc, Mutex, MutexGuard};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicBool, Ordering, fence};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::{Arc, Mutex, MutexGuard};
-}
-
 /// One bell's state, shared by its [`Bell`] clones and its [`Listener`].
 struct State {
     /// Rung since the listener last resolved.

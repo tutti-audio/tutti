@@ -8,14 +8,7 @@
 //! [`AtomicWord::from_word`] reads it back. The `loom` model in
 //! `tests/atomic_cell_loom.rs` runs this code.
 
-use sync::{AtomicU64, Ordering};
-
-mod sync {
-    #[cfg(loom)]
-    pub(super) use loom::sync::atomic::{AtomicU64, Ordering};
-    #[cfg(not(loom))]
-    pub(super) use std::sync::atomic::{AtomicU64, Ordering};
-}
+use crate::sync::{AtomicU64, Ordering};
 
 /// A value stored in one atomic word by its encoding.
 ///
