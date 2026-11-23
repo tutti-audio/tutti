@@ -1,99 +1,16 @@
-//! Regression gate: dynamics processors must not allocate per-buffer.
-//!
-//! Covers the `tutti-nodes` dynamics nodes: `CompressorNode` (mono +
-//! stereo), `GateNode` (mono + stereo), `LimiterNode` (lookahead),
-//! `BrickwallLimiterNode` (zero-latency clipper) and `MultibandCompressorNode`
-//! (its corners). Each runs alone
-//! in a graph through `tutti_graph::contract::BlockRig`, so the gate walks
-//! the executor's block path as well as the node's.
-//!
-//! Lookahead limiter is the most failure-prone of the group — it carries
-//! a monotonic deque + a ring buffer, both of which would historically
-//! be tempting to resize on `set_lookahead`. Its steady gates warm up
-//! outside the measurement; a burst and its release are measured from the
-//! first block, which is where the deque fills to its whole window.
-//! Lookahead changes are off-RT (`prepare`).
+//! The dynamics nodes' allocation gates beyond the table's held rows: the compressor with its
+//! control signals fed and its cells moving, the lookahead limiter through a burst and its
+//! release (measured from the first block, where the window-minimum deque fills to its whole
+//! window), the brickwall and limiter fed and cloned mid-release, and every node's corners.
 
-use tutti_buffers::{BusTopology, ChannelLayout};
-use tutti_graph::IntoNode;
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::contract::BlockRig;
 use tutti_nodes::{
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
-    CompressorNode, GateConfig, GateControls, GateNode, KeyFilter, KeySource, LimiterConfig,
-    LimiterControls, LimiterNode, Lookahead, MultibandBands, MultibandCompressorConfig,
-    MultibandCompressorNode, PeakDetection,
+    CompressorNode, GateConfig, GateControls, GateNode, KeySource, LimiterConfig, LimiterControls,
+    LimiterNode, Lookahead, MultibandBands, MultibandCompressorConfig, MultibandCompressorNode,
 };
 use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
-
-/// `node` alone in a graph through `BlockRig`: every input an alternating
-/// ±`amplitude` (to keep the envelope follower active), `warm` warm-up
-/// blocks, then `blocks` 64-frame blocks under `RtScope`.
-fn gate<N: IntoNode>(node: N, amplitude: f32, warm: usize, blocks: usize) {
-    let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut().iter_mut() {
-        let c = c.into_samples_mut();
-        for (i, x) in c.iter_mut().enumerate() {
-            *x = if i % 2 == 0 { amplitude } else { -amplitude };
-        }
-    }
-    for _ in 0..warm {
-        rig.block();
-    }
-    assert!(
-        rig.output()
-            .plane(0)
-            .samples()
-            .iter()
-            .any(|s| s.abs() > 1e-6),
-        "the node rendered silence; the gate would walk no DSP"
-    );
-    for _ in 0..blocks {
-        rig.block();
-    }
-}
-
-#[test]
-fn compressor_mono_process_is_allocation_free() {
-    // 2 inputs (audio + sidechain), 1 output.
-    gate(
-        CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::MONO)
-                .key(KeySource::Sidechain)
-                .controls(CompressorControls {
-                    threshold: Db::new(-20.0),
-                    ratio: CompressionRatio::new(4.0),
-                    attack: Seconds::new(0.005),
-                    release: Seconds::new(0.050),
-                    ..CompressorControls::DEFAULT
-                }),
-        ),
-        0.7,
-        16,
-        2_000,
-    );
-}
-
-#[test]
-fn compressor_stereo_process_is_allocation_free() {
-    // 4 inputs (L, R, SC-L, SC-R), 2 outputs, linked gain.
-    gate(
-        CompressorNode::<f32>::from(
-            CompressorConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(CompressorControls {
-                    threshold: Db::new(-18.0),
-                    knee: Db::new(6.0),
-                    ratio: CompressionRatio::new(3.0),
-                    attack: Seconds::new(0.003),
-                    release: Seconds::new(0.080),
-                    ..CompressorControls::DEFAULT
-                }),
-        ),
-        0.8,
-        16,
-        2_000,
-    );
-}
 
 /// The compressor's control signal path with every cell moving too: the threshold port fed a per-frame
 /// ramp with a NaN frame (the `ControlSignals` control signal the kernel reads per frame), and each block
@@ -108,8 +25,10 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     let mut node = Direct::new(
         CompressorNode::<f32>::from(
             CompressorConfig::new(
-                tutti_buffers::BusTopology::default_for(tutti_buffers::ChannelLayout::from(6u16))
-                    .expect("at most one bus wide"),
+                tutti_buffers::ChannelTopology::default_for(tutti_buffers::ChannelLayout::from(
+                    6u16,
+                ))
+                .expect("at most one bus wide"),
             )
             .key(KeySource::Sidechain)
             .controls(CompressorControls {
@@ -147,204 +66,6 @@ fn compressor_fed_threshold_and_moving_cells_are_allocation_free() {
     }
 }
 
-#[test]
-fn limiter_node_process_is_allocation_free() {
-    // Warm-up fills the lookahead ring and primes the deque; over ceiling.
-    gate(
-        LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
-            LimiterControls {
-                threshold: Db::new(-3.0),
-                ceiling: Db::new(-0.3),
-                ..LimiterControls::DEFAULT
-            },
-        )),
-        1.5,
-        32,
-        2_000,
-    );
-}
-
-#[test]
-fn true_peak_limiter_node_process_is_allocation_free() {
-    // The 4x up-samplers and their buffers are built at prepare; a block only fills them.
-    gate(
-        LimiterNode::<f32>::from(
-            LimiterConfig::new(BusTopology::STEREO)
-                .detection(PeakDetection::TruePeak)
-                .controls(LimiterControls {
-                    threshold: Db::new(-3.0),
-                    ceiling: Db::new(-0.3),
-                    ..LimiterControls::DEFAULT
-                }),
-        ),
-        1.5,
-        32,
-        2_000,
-    );
-}
-
-#[test]
-fn limiter_node_wide_6ch_process_is_allocation_free() {
-    // The per-channel lookahead rings + frame scratch must be built before
-    // the first block; the linked-gain wide path must not allocate per
-    // buffer.
-    gate(
-        LimiterNode::<f32>::from(
-            LimiterConfig::new(
-                BusTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide"),
-            )
-            .controls(LimiterControls {
-                threshold: Db::new(-3.0),
-                ceiling: Db::new(-0.3),
-                ..LimiterControls::DEFAULT
-            }),
-        ),
-        1.5,
-        32,
-        2_000,
-    );
-}
-
-#[test]
-fn brickwall_limiter_wide_6ch_process_is_allocation_free() {
-    gate(
-        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
-            Db::new(-0.3),
-        )),
-        1.5,
-        1,
-        5_000,
-    );
-}
-
-#[test]
-fn brickwall_limiter_process_is_allocation_free() {
-    gate(
-        BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::STEREO,
-            Db::new(-0.3),
-        )),
-        1.5,
-        1,
-        5_000,
-    );
-}
-
-#[test]
-fn gate_mono_process_is_allocation_free() {
-    // 2 inputs (audio + sidechain), 1 output.
-    gate(
-        GateNode::<f32>::from(
-            GateConfig::new(BusTopology::MONO)
-                .key(KeySource::Sidechain)
-                .controls(GateControls {
-                    threshold: Db::new(-40.0),
-                    attack: Seconds::new(0.001),
-                    hold: Seconds::new(0.010),
-                    release: Seconds::new(0.100),
-                    range: Db::new(-60.0),
-                    ..GateControls::DEFAULT
-                }),
-        ),
-        0.5,
-        16,
-        2_000,
-    );
-}
-
-#[test]
-fn gate_stereo_process_is_allocation_free() {
-    gate(
-        GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(GateControls {
-                    threshold: Db::new(-40.0),
-                    attack: Seconds::new(0.001),
-                    hold: Seconds::new(0.010),
-                    release: Seconds::new(0.100),
-                    range: Db::new(-80.0),
-                    ..GateControls::DEFAULT
-                }),
-        ),
-        0.6,
-        16,
-        2_000,
-    );
-}
-
-/// A downward expander (a finite ratio) is a gate with a level-dependent closed gain, and runs
-/// without allocating.
-#[test]
-fn expander_process_is_allocation_free() {
-    gate(
-        GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(GateControls {
-                    threshold: Db::new(-10.0),
-                    attack: Seconds::new(0.001),
-                    hold: Seconds::new(0.010),
-                    release: Seconds::new(0.100),
-                    range: Db::new(-60.0),
-                    ratio: CompressionRatio::new(3.0),
-                    ..GateControls::DEFAULT
-                }),
-        ),
-        0.1,
-        16,
-        2_000,
-    );
-}
-
-/// The key filter's stage, a high-pass on a mono compressor and a band-pass on a stereo one,
-/// runs without allocating.
-#[test]
-fn compressor_key_filter_process_is_allocation_free() {
-    for (topology, filter, amplitude) in [
-        (BusTopology::MONO, KeyFilter::HighPass, 0.7),
-        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
-    ] {
-        let node = CompressorNode::<f32>::from(
-            CompressorConfig::new(topology)
-                .key(KeySource::Sidechain)
-                .key_filter(filter)
-                .controls(CompressorControls {
-                    threshold: Db::new(-20.0),
-                    ratio: CompressionRatio::new(4.0),
-                    attack: Seconds::new(0.005),
-                    release: Seconds::new(0.050),
-                    ..CompressorControls::DEFAULT
-                }),
-        );
-        gate(node, amplitude, 16, 2_000);
-    }
-}
-
-#[test]
-fn gate_key_filter_process_is_allocation_free() {
-    for (topology, filter, amplitude) in [
-        (BusTopology::MONO, KeyFilter::HighPass, 0.5),
-        (BusTopology::STEREO, KeyFilter::BandPass, 0.6),
-    ] {
-        let node = GateNode::<f32>::from(
-            GateConfig::new(topology)
-                .key(KeySource::Sidechain)
-                .key_filter(filter)
-                .controls(GateControls {
-                    threshold: Db::new(-60.0),
-                    attack: Seconds::new(0.001),
-                    hold: Seconds::new(0.010),
-                    release: Seconds::new(0.100),
-                    range: Db::new(-20.0),
-                    ..GateControls::DEFAULT
-                }),
-        );
-        gate(node, amplitude, 16, 2_000);
-    }
-}
-
 /// A lookahead limiter through a burst and its release, every block under
 /// `RtScope` from the first. Whenever the envelope rises (from the
 /// node's initial zero onto the burst, and through the release after it)
@@ -354,7 +75,7 @@ fn gate_key_filter_process_is_allocation_free() {
 /// the deque happens before they measure.
 #[test]
 fn limiter_node_burst_and_release_are_allocation_free() {
-    let node = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+    let node = LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
         LimiterControls {
             threshold: Db::new(-3.0),
             ceiling: Db::new(-0.3),
@@ -399,7 +120,7 @@ fn brickwall_limiter_fed_ceiling_process_is_allocation_free() {
 
     let mut node = Direct::new(
         BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+            ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(-0.3),
         )),
         SampleRate::SR_48K,
@@ -437,7 +158,7 @@ fn brickwall_limiter_moving_cell_and_hostile_signal_are_allocation_free() {
 
     let mut node = Direct::new(
         BrickwallLimiterNode::<f32>::from(BrickwallLimiterConfig::new(
-            BusTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
+            ChannelTopology::unassigned(ChannelLayout::from(6u16)).unwrap(),
             Db::new(-0.3),
         )),
         SampleRate::SR_48K,
@@ -476,7 +197,8 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
     let mut node = Direct::new(
         LimiterNode::<f32>::from(
             LimiterConfig::new(
-                BusTopology::default_for(ChannelLayout::from(6u16)).expect("at most one bus wide"),
+                ChannelTopology::default_for(ChannelLayout::from(6u16))
+                    .expect("at most one bus wide"),
             )
             .controls(LimiterControls::DEFAULT),
         ),
@@ -521,7 +243,7 @@ fn limiter_node_fed_ceiling_and_threshold_process_is_allocation_free() {
 fn a_limiter_cloned_mid_release_processes_allocation_free() {
     use tutti_graph::contract::Direct;
 
-    let node = LimiterNode::<f32>::from(LimiterConfig::new(BusTopology::STEREO).controls(
+    let node = LimiterNode::<f32>::from(LimiterConfig::new(ChannelTopology::STEREO).controls(
         LimiterControls {
             threshold: Db::new(-3.0),
             ceiling: Db::new(-0.3),
@@ -753,7 +475,7 @@ fn the_compressor_corners_are_allocation_free_and_finite() {
         frames: 19_200,
     };
     for width in [2u16, 6] {
-        let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
+        let bus = ChannelTopology::default_for(ChannelLayout::from(width)).expect("one bus");
         let key = Some(usize::from(width));
         for corners in [&CORNERS, &CLAMPED, &HUGE_KNEE] {
             sweep(
@@ -802,7 +524,7 @@ fn the_gate_corners_are_allocation_free_and_finite() {
         frames: 19_200,
     };
     for width in [1u16, 2, 6] {
-        let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
+        let bus = ChannelTopology::default_for(ChannelLayout::from(width)).expect("one bus");
         sweep(
             || {
                 GateNode::<f32>::from(
@@ -888,7 +610,7 @@ fn the_limiter_corners_are_allocation_free_finite_and_under_the_ceiling() {
     };
     for lookahead in [Seconds::new(1e-9), Seconds::new(1.0)] {
         for width in [2u16, 6] {
-            let bus = BusTopology::default_for(ChannelLayout::from(width)).expect("one bus");
+            let bus = ChannelTopology::default_for(ChannelLayout::from(width)).expect("one bus");
             for corners in [&CORNERS, &HOSTILE, &HOSTILE_BASE, &INFINITE] {
                 // A 1 ns lookahead has no ring to wrap: the shorter window covers it.
                 let corners = Corners {
@@ -940,7 +662,7 @@ fn the_brickwall_corners_are_allocation_free_finite_and_under_the_ceiling() {
         frames: 19_200,
     };
     for width in [1u16, 2, 6] {
-        let bus = BusTopology::unassigned(ChannelLayout::from(width)).expect("one bus");
+        let bus = ChannelTopology::unassigned(ChannelLayout::from(width)).expect("one bus");
         for corners in [&CORNERS, &EXTREMES] {
             sweep(
                 || {
@@ -1058,7 +780,7 @@ fn the_multiband_corners_are_allocation_free_and_finite() {
                 sweep(
                     || {
                         MultibandCompressorNode::<f32>::from(MultibandCompressorConfig::new(
-                            BusTopology::default_for(ChannelLayout::from(width)).unwrap(),
+                            ChannelTopology::default_for(ChannelLayout::from(width)).unwrap(),
                             MultibandBands::new(bands).unwrap(),
                         ))
                     },

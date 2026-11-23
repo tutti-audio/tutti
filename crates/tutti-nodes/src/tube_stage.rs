@@ -152,13 +152,13 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         self.rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.stage = TubeStage::<F>::new(self.input.layout(), self.rate);
+        self.stage = TubeStage::<F>::new(self.input.width(), self.rate);
         self.applied = false;
     }
 
@@ -210,7 +210,7 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -220,28 +220,6 @@ mod tests {
         prepared(TubeStageNode::<f32>::from(
             TubeStageConfig::new(1u16).drive(TubeDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(TubeStageNode::<f32>::from(TubeStageConfig::new(
-            ChannelLayout::STEREO,
-        )));
-    }
-
-    #[test]
-    fn the_shape_is_heavy_and_declares_the_drive() {
-        let n = TubeStageNode::<f32>::from(TubeStageConfig::new(3u16));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Heavy);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::GainDb][..]);
-        assert_eq!(n.param_base(0), Some(6.0));
-        let empty = TubeStageNode::<f32>::from(TubeStageConfig::new(0u16));
-        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// The impulse of a small input peaks at the oversampler's declared latency, and the

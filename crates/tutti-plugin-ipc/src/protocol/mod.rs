@@ -88,10 +88,10 @@ pub use envelope::{
     PresetList, PresetLoaded, ReqId, Request, SampleRateSet, SaveState, SetAppMidiMap,
     SetAutomationState, SetEditorSize, SetRenderMode, SetSampleRate, SetTrackInfo,
     SetupSharedMemory, SharedMemoryReady, Shutdown, StageState, StagedState, StateLoaded,
-    StateReady, StateStaged, Wiring, Working,
+    StateReady, StateStaged, Wiring, Working, serve,
 };
 pub use frame::Framed;
-pub use message::{Answered, Message, Unanswered};
+pub use message::{Answered, Handle, Handling, Message, Reaction, SavedState, Stop, Unanswered};
 pub use process::ProcessAudioData;
 pub use shm::SlabLayout;
 

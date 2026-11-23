@@ -156,9 +156,9 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 mod tests {
     use super::*;
     use tutti_dsp::Mode;
-    use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
-    use tutti_units::{Gain, Latency, Samples, UnitParam};
+
+    use tutti_graph::contract::{assert_declared_tail, prepared};
+    use tutti_units::Gain;
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -178,32 +178,10 @@ mod tests {
         ModalBankNode::from(ModalBankConfig::new(2u16, modes()))
     }
 
-    /// A fork starts from the controls last set and shares no cell.
+    /// A bank has at least one mode.
     #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node());
-    }
-
-    /// The shape is the width in and out, with no latency, and declares the first mode's
-    /// frequency and decay with its values as their bases.
-    #[test]
-    fn the_shape_declares_the_first_modes_frequency_and_decay() {
-        let n = prepared(node(), RATE, 64);
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (2, 2)
-        );
-        assert_eq!(shape.latency, Latency::new(Samples::ZERO));
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Frequency, UnitParam::Decay][..]
-        );
-        assert_eq!((n.param_base(0), n.param_base(1)), (Some(440.0), Some(0.2)));
-        assert!(
-            Modes::try_from(&[][..]).is_err(),
-            "a bank has at least one mode"
-        );
+    fn a_bank_has_at_least_one_mode() {
+        assert!(Modes::try_from(&[][..]).is_err());
     }
 
     /// The declared tail covers the ring-out.

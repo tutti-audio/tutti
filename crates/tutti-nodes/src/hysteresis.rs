@@ -166,14 +166,14 @@ impl<F: Float + Lerp> Kernel for HysteresisKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
-        let width = usize::from(self.input.layout().count());
+        let width = usize::from(self.input.width().count());
         self.oversampled = Oversampled::new(self.factor, rate, max_block, width);
         let rate = self
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
         self.stage =
-            Hysteresis::<F>::new(self.input.layout(), rate, self.saturation, self.coercivity);
+            Hysteresis::<F>::new(self.input.width(), rate, self.saturation, self.coercivity);
         self.applied = false;
     }
 
@@ -229,7 +229,7 @@ impl<F: Float + Lerp> Kernel for HysteresisKernel<F> {
 mod tests {
     use super::*;
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
-    use tutti_graph::contract::assert_param_fork;
+
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -239,29 +239,6 @@ mod tests {
         prepared(HysteresisNode::<f32>::from(
             HysteresisConfig::new(1u16).drive(HysteresisDrive::of(Db::new(drive))),
         ))
-    }
-
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(HysteresisNode::<f32>::from(HysteresisConfig::new(
-            ChannelLayout::STEREO,
-        )));
-    }
-
-    #[test]
-    fn the_shape_is_heavy_unbounded_and_declares_the_drive() {
-        let n = prepared(HysteresisNode::<f32>::from(HysteresisConfig::new(3u16)));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Heavy);
-        assert_eq!(shape.tail, Tail::Unbounded);
-        assert_eq!(shape.params.as_slice(), &[UnitParam::GainDb][..]);
-        assert_eq!(n.param_base(0), Some(12.0));
-        let empty = HysteresisNode::<f32>::from(HysteresisConfig::new(0u16));
-        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// The oversampler's cascade is linear phase, so a small pulse (the material is nearly

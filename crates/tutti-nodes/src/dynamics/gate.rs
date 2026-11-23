@@ -247,7 +247,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for GateKernel<F> {
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {
-        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.layout()));
+        self.bank = Some(GateBank::new(rate).key_filter(self.filter, self.input.width()));
         self.applied = false;
     }
 
@@ -304,7 +304,7 @@ impl GateSet {
 mod tests {
     use super::*;
     use crate::test_support::{RATE_44K, prepared_at, tick, tick_fed};
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
     use tutti_graph::{Node, ParamNode};
     use tutti_units::UnitParam;
 
@@ -337,17 +337,6 @@ mod tests {
                 .key(KeySource::Sidechain)
                 .controls(four(threshold, attack, hold, release)),
         )
-    }
-
-    /// A fork starts from the values last set through the node's `ParamSet` and shares no
-    /// cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(GateNode::<f32>::from(
-            GateConfig::new(BusTopology::STEREO)
-                .key(KeySource::Sidechain)
-                .controls(with_range(four(-30.0, 0.001, 0.01, 0.1), -20.0)),
-        ));
     }
 
     /// A block longer than 64 frames renders whole: the gain control signal is sized from the

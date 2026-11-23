@@ -4,7 +4,7 @@
 //! The gate lives in the crate that owns the panners: `RtAllocCheck`
 //! is a global allocator, which only a test binary of that crate may do.
 
-use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, BusTopology, MaxBlock};
+use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MaxBlock};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
 use tutti_graph::{IntoNode, Node};
@@ -533,6 +533,6 @@ fn ambisonic_decoder_process_is_allocation_free() {
 }
 
 /// The AmbiX bus of `order`: ACN, SN3D.
-fn ambix(order: AmbisonicOrder) -> BusTopology {
-    BusTopology::ambisonic(AmbisonicFormat::ambix(order))
+fn ambix(order: AmbisonicOrder) -> ChannelTopology {
+    ChannelTopology::Ambisonic(AmbisonicFormat::ambix(order))
 }

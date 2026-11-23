@@ -212,7 +212,7 @@ impl BusStripNode {
     /// The audio channel count (its output count).
     #[inline]
     fn channels(&self) -> usize {
-        self.topology.layout().count() as usize
+        self.topology.width().count() as usize
     }
 
     /// A handle on the shared volume cell, the one the strip's `ParamSet`
@@ -449,9 +449,11 @@ mod tests {
     use super::*;
     use crate::test_support::{RATE, tick};
     use tutti_buffers::Planes;
-    use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, Speaker, Speaker::*};
+    use tutti_buffers::{
+        AmbisonicFormat, AmbisonicOrder, Bed, ChannelLayout, ChannelTopology, Speaker, Speaker::*,
+    };
     use tutti_graph::ParamNode;
-    use tutti_graph::contract::{assert_param_fork, drive};
+    use tutti_graph::contract::drive;
 
     /// The strip on `bus`.
     fn strip(bus: BusTopology) -> BusStripNode {
@@ -493,13 +495,6 @@ mod tests {
         let mut out = [0.0f32; 2];
         tick(strip, &[l, r], &mut out);
         (out[0], out[1])
-    }
-
-    /// A fork starts from the values last set through the strip's
-    /// `ParamSet` and shares no cell with it.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(strip(BusTopology::STEREO));
     }
 
     /// A strip must be transparent until somebody moves it. An equal-power
@@ -917,7 +912,7 @@ mod tests {
         let mut s = strip(topology);
         s.volume().store(Amplitude::new(volume));
         set_balance(&s, balance);
-        let n = topology.layout().count() as usize;
+        let n = topology.width().count() as usize;
         let mut out = vec![0.0f32; n];
         tick(&mut s, &vec![1.0f32; n], &mut out);
         topology
@@ -1018,7 +1013,7 @@ mod tests {
         [
             BusTopology::MONO,
             BusTopology::unassigned(ChannelLayout::from(6u16)).expect("six fit a bus"),
-            BusTopology::ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
+            ChannelTopology::Ambisonic(AmbisonicFormat::ambix(AmbisonicOrder::of(1))),
             BusTopology::new([FrontLeft, FrontCenter]).expect("two speakers fit a bus"),
         ]
     }
@@ -1028,7 +1023,7 @@ mod tests {
     #[test]
     fn a_bus_without_a_pair_refuses_the_balance() {
         for bus in pairless_buses() {
-            let n = bus.layout().count() as usize;
+            let n = bus.width().count() as usize;
             let mut s = strip(bus);
             s.volume().store(Amplitude::new(0.5));
             assert!(

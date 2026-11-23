@@ -34,7 +34,7 @@ use tutti_plugin_types::{
 use tutti_rt::Rt;
 
 use arrayvec::ArrayVec;
-use tutti_buffers::{BusTopology, ChannelLayout};
+use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{Bus, Buses, Cx, InEvents, Offset, OutEvents, Shape};
 use tutti_plugin_types::{Layout, PluginBus, PluginWiring};
 use tutti_rt::AtomicCell;
@@ -328,8 +328,8 @@ impl Declared {
 fn buses_of(plugin: &[PluginBus]) -> Buses {
     let mut buses = Buses::NONE;
     for bus in plugin {
-        let placed = bus.placement().and_then(|t| BusTopology::try_from(t).ok());
-        let Some(topology) = placed.or_else(|| BusTopology::unassigned(bus.channels)) else {
+        let placed = bus.placement().copied();
+        let Some(topology) = placed.or_else(|| ChannelTopology::unassigned(bus.channels)) else {
             break;
         };
         match buses.with(Bus::new(topology, bus.role)) {

@@ -134,7 +134,7 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{generate_sine, rms};
     use tutti_buffers::Planes;
-    use tutti_graph::contract::{assert_param_fork, drive, prepared};
+    use tutti_graph::contract::{drive, prepared};
     use tutti_units::SampleRate;
 
     /// `eq`, prepared at 44.1 kHz, over `input` in one block.
@@ -142,18 +142,6 @@ mod tests {
         let rate = SampleRate::SR_44K1;
         let mut eq = prepared(eq, rate, input.len());
         drive(&mut eq, rate, Planes::new(&[input]).unwrap(), &[]).remove(0)
-    }
-
-    /// **A fork reaches the inner SVF's param cells**: it starts from the
-    /// authored values and shares none of them.
-    #[test]
-    fn a_fork_severs_the_inner_filters_cells() {
-        assert_param_fork(EqBandNode::<f32>::from(
-            EqBandConfig::new(SvfType::Bell)
-                .freq(Hz::new(1000.0))
-                .q(Q::new(1.0))
-                .gain(Db::new(6.0)),
-        ));
     }
 
     /// The band declares the inner filter's tail, not the shape default.

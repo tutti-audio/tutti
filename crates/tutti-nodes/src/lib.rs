@@ -289,6 +289,10 @@ mod tail_clock;
 // Tests of every kernel node in a graph of `f64`.
 #[cfg(test)]
 mod f64_graph;
+#[cfg(test)]
+mod fork_table;
+#[cfg(test)]
+mod shape_table;
 // Rendering helpers for the width-generic nodes' unit tests.
 #[cfg(test)]
 mod test_support;

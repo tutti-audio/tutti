@@ -172,9 +172,9 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_graph::Node;
-    use tutti_graph::contract::{assert_declared_tail, assert_param_fork, prepared};
-    use tutti_units::{Samples, Seconds, UnitParam};
+
+    use tutti_graph::contract::{assert_declared_tail, prepared};
+    use tutti_units::Seconds;
 
     fn delay(secs: f64) -> CombDelay {
         CombDelay::of(Seconds::new(secs))
@@ -187,30 +187,6 @@ mod tests {
         CombFilterNode::from(
             CombFilterConfig::new(1u16, form, delay(0.004)).gain(Feedback::new(gain)),
         )
-    }
-
-    /// A fork starts from the coefficient last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(node(CombForm::Feedback, 0.5));
-    }
-
-    /// The shape is the width in and out and declares the coefficient as `Feedback`, with no
-    /// latency; the delay is the declared tail of a feedforward comb.
-    #[test]
-    fn the_shape_declares_the_coefficient_and_the_tail() {
-        let n = prepared(node(CombForm::Feedforward, 0.5), RATE, 64);
-        let shape = n.shape();
-        assert_eq!(shape.params.as_slice(), &[UnitParam::Feedback][..]);
-        assert_eq!(shape.latency, tutti_units::Latency::new(Samples::ZERO));
-        assert_eq!(shape.tail, Tail::Finite(Samples::new(4)));
-        assert_eq!(n.param_base(0), Some(0.5));
-        let empty = CombFilterNode::<f32>::from(CombFilterConfig::new(
-            ChannelLayout::EMPTY,
-            CombForm::Feedback,
-            delay(0.004),
-        ));
-        assert_eq!(empty.shape().audio_in().count(), 0);
     }
 
     /// A feedback comb's declared tail covers its ring-out.

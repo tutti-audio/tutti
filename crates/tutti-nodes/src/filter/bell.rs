@@ -108,21 +108,16 @@ mod tests {
     use super::*;
     use crate::filter::test_utils::{bin, gain, generate_sine, level, render, ring_at};
     use crate::kernel::Kernel;
-    use crate::test_support::{RATE, assert_cell_ramps, prepared};
+    use crate::test_support::{RATE, assert_cell_ramps};
     use tutti_buffers::MaxBlock;
     use tutti_dsp::MatchedBell;
-    use tutti_graph::Cost;
-    use tutti_graph::contract::assert_param_fork;
-    use tutti_graph::{Node, ParamNode};
+
+    use tutti_graph::ParamNode;
     use tutti_units::UnitParam;
     use tutti_units::{Samples, Tail};
 
     fn config(frequency: Hz, q: Q, gain: Db) -> BellFilterConfig {
         BellFilterConfig::new(1u16, frequency, q, gain)
-    }
-
-    fn node(config: BellFilterConfig) -> BellFilterNode<f32> {
-        prepared(BellFilterNode::from(config))
     }
 
     fn gain_of(config: BellFilterConfig, f: f64) -> f64 {
@@ -142,42 +137,6 @@ mod tests {
         let x = f / fc;
         let off = 1.0 - x * x;
         ((off * off + (a * x / q).powi(2)) / (off * off + (x / (a * q)).powi(2))).sqrt()
-    }
-
-    /// A fork starts from the controls last set and shares no cell.
-    #[test]
-    fn a_fork_shares_no_cell() {
-        assert_param_fork(BellFilterNode::from(BellFilterConfig::new(
-            2u16,
-            Hz::new(300.0),
-            Q::new(2.0),
-            Db::new(-6.0),
-        )));
-    }
-
-    /// The shape is the width in and out, `Moderate`, declares the center, Q and gain and an
-    /// unbounded tail ceiling; the center starts at the configured one.
-    #[test]
-    fn the_shape_declares_its_controls_and_an_unbounded_ceiling() {
-        let n = node(BellFilterConfig::new(
-            3u16,
-            Hz::new(120.0),
-            Q::new(4.0),
-            Db::new(9.0),
-        ));
-        let shape = n.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (3, 3)
-        );
-        assert_eq!(shape.cost, Cost::Moderate);
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::Q, UnitParam::GainDb][..]
-        );
-        assert_eq!(shape.tail, Tail::Unbounded);
-        assert_eq!(n.param_base(0), Some(120.0));
-        assert_eq!(n.param_base(2), Some(9.0));
     }
 
     /// A settled rendered sine has the design's magnitude (to 1e-4) at several bins, and

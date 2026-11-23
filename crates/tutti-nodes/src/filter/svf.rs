@@ -182,7 +182,7 @@ impl<F: Float + SimdLanes> SvfKernel<F> {
         let rate = SampleRate::SR_48K;
         Self {
             input,
-            bank: SvfBank::new(input.layout()),
+            bank: SvfBank::new(input.width()),
             coefficients: Ramp::new(Self::design(&SvfControls::DEFAULT, rate)),
             rate,
             applied: false,
@@ -270,8 +270,8 @@ mod tests {
     use crate::test_support::{RATE, drive_block, prepared};
     use tutti_graph::contract::{assert_param_fork, drive};
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::SampleRate;
     use tutti_units::UnitParam;
-    use tutti_units::{SampleRate, Tail};
 
     /// `node`, prepared at 44.1 kHz, over a mono `input` in one block.
     fn render(node: SvfFilterNode<f32>, input: &[f32]) -> Vec<f32> {
@@ -354,35 +354,6 @@ mod tests {
                 "R channel diverges from mono at sample {i}"
             );
         }
-    }
-
-    /// The shape is as wide as the filter was built, in and out, declares
-    /// cutoff, Q and gain as its modulatable params, and reports
-    /// `Tail::Unknown`.
-    #[test]
-    fn the_shape_is_the_width_and_declares_cutoff_q_and_gain() {
-        let f = SvfFilterNode::<f32>::from(
-            SvfFilterConfig::new(6u16, SvfType::LowPass)
-                .freq(Hz::new(1000.0))
-                .q(Q::new(0.7)),
-        );
-        let shape = f.shape();
-        assert_eq!(
-            (shape.audio_in().count(), shape.audio_out().count()),
-            (6, 6)
-        );
-        assert_eq!(
-            shape.params.as_slice(),
-            &[UnitParam::Cutoff, UnitParam::Q, UnitParam::GainDb][..]
-        );
-        assert_eq!(
-            f.param_base(0),
-            Some(1000.0),
-            "cutoff's base is its control"
-        );
-        assert_eq!(f.param_base(1), Some(0.7), "Q's base is its control");
-        assert_eq!(f.param_base(2), Some(0.0), "gain's base is its control");
-        assert_eq!(shape.tail, Tail::Unknown, "a resonant filter rings on");
     }
 
     #[test]

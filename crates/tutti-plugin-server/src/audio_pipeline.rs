@@ -1438,7 +1438,7 @@ mod tests {
             }
         };
 
-        // Reserved as `Session::handle_load` reserves the pipeline's output.
+        // Reserved as the `LoadPlugin` handler reserves the pipeline's output.
         let mut out = ProcessOutput::default();
         out.reserve_params(PARAMS, POINTS);
         // Warm up outside the gate: this is where the buffers reach their
