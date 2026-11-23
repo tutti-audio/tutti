@@ -1,7 +1,7 @@
 //! The metronome declares `Cost::Moderate`.
 //! Declaring it changes only the parallel schedule: sibling clicks pack
 //! into fewer tasks than undeclared ones, and the render on a pool is bit
-//! for bit the serial one.
+//! for bit the one-participant one.
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -150,7 +150,7 @@ fn render(exec: &mut Executor) -> Vec<Vec<f32>> {
 /// Twelve `Moderate` clicks beside two undeclared ones: the moderate ones
 /// pack into fewer tasks than the same clicks declaring nothing, the plan
 /// still spreads, and on a pool of two and of four the render is bit for
-/// bit the serial one.
+/// bit the one-participant one.
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_clicks_pack_and_render_bit_identically() {

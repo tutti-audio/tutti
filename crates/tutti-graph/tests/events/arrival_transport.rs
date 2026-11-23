@@ -445,14 +445,14 @@ fn wide(workers: usize) -> (Editor, Executor) {
     (ed, exec)
 }
 
-/// **Parallel equals serial for the arrival transport.** The same wide graph
-/// on a pool of 1 (serial), 2, 3 and 4 participants, through ragged blocks
+/// **Parallel equals one-participant for the arrival transport.** The same wide graph
+/// on a pool of 1 (one-participant), 2, 3 and 4 participants, through ragged blocks
 /// and every scene (seeks, a change inside a block, a loop that wraps, a
 /// stop, recording): every probe's output, the transport its input was
-/// rendered at, is bit-identical to the serial render's. Every participant
+/// rendered at, is bit-identical to the one-participant render's. Every participant
 /// reads the executor's one history, observed before the pool runs.
 #[test]
-fn the_parallel_render_reads_the_same_history_as_the_serial_one() {
+fn the_parallel_render_reads_the_same_history_as_the_one_participant_one() {
     let lens = [64usize, 17, 50, 1, 33, 64, 2, 40];
     let render = |workers: usize| -> Vec<Vec<u32>> {
         let (mut ed, mut exec) = wide(workers);

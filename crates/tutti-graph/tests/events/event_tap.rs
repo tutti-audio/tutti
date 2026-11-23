@@ -971,9 +971,9 @@ fn run_busy(r: &mut Rig) -> Vec<Vec<TapEvent>> {
     got
 }
 
-/// The pooled render's taps equal the serial one's, event for event, at
+/// The pooled render's taps equal the one-participant one's, event for event, at
 /// several worker counts with every participant inside `RtScope`; the
-/// serial run itself is checked against the script and the compensation.
+/// one-participant run itself is checked against the script and the compensation.
 #[test]
 fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
     let mut s = rig(1, false, 40);

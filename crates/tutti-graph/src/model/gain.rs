@@ -18,7 +18,7 @@
 //!
 //! Each block the executor **snapshots** every lane's cell
 //! ([`SumLane::snapshot`]) before the first op, on the calling thread, so a
-//! store in the middle of a block reaches no op and serial and parallel
+//! store in the middle of a block reaches no op and one-participant and parallel
 //! cannot disagree. The sum then asks the lane for its [`Weight`]
 //! ([`SumLane::weight`]):
 //!

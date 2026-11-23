@@ -409,7 +409,7 @@ fn a_width_change_without_a_new_main_output_cuts_the_fade() {
     );
 }
 
-/// The carried fade renders the serial executor's samples bit for bit on a
+/// The carried fade renders the one-participant executor's samples bit for bit on a
 /// pool, through a continuing commit, a re-declaration and its fade.
 #[test]
 fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
@@ -667,7 +667,7 @@ fn a_carried_commit_that_changes_an_old_sources_latency_keeps_the_banks_alignmen
 }
 
 /// Applying a commit that continues a fade, one that begins another, and
-/// rendering through them allocates nothing, on the serial executor and on a
+/// rendering through them allocates nothing, on the one-participant executor and on a
 /// pool.
 mod no_alloc {
     use super::*;

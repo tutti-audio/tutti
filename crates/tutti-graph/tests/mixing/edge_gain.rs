@@ -5,7 +5,7 @@
 //!
 //! Every figure is analytic: the expected value is the fold, or the ramp,
 //! written out in the test. A render is compared with another only as the
-//! parallel executor against the serial one.
+//! parallel executor against the one-participant one.
 
 use common::spec_of;
 use tutti_graph::testing as common;
@@ -213,7 +213,7 @@ fn render(
     got
 }
 
-/// Serial and parallel renders, which must be bit for bit the same.
+/// One-participant and parallel renders, which must be bit for bit the same.
 fn render_both(graph: &Weighed, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
     let serial = render(graph, kinds, 1, blocks);
     let parallel = render(graph, kinds, 4, blocks);
@@ -248,7 +248,7 @@ fn fused_fold(values: &[f32], weights: &[f32]) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// A weighted sum is `((0 + w0*a) + w1*b) + w2*c`, exactly, in source order,
-/// at a port and at an output channel, serial and parallel.
+/// at a port and at an output channel, one-participant and parallel.
 ///
 /// The figures show the two roundings: the fold is not the fused one (asserted
 /// below, so the test can see a fused kernel), and not the pairwise one.
@@ -430,7 +430,7 @@ fn one_lane() -> (Fan, Weighed) {
 /// weight to the new one across **that block's own length** (a short block
 /// here) and lands on the new one exactly at its last frame; a block with no
 /// move is static; a move after a ramp starts from the weight the ramp was
-/// given, which its last sample is. Serial and parallel.
+/// given, which its last sample is. One-participant and parallel.
 #[test]
 fn a_move_ramps_across_the_block_from_the_last_weight() {
     let (a, b, c) = (0.7f32, 0.15f32, 0.25f32);

@@ -1,4 +1,4 @@
-//! A main output crossfade on the parallel executor renders the serial executor's
+//! A main output crossfade on the parallel executor renders the one-participant executor's
 //! samples bit for bit: the old main output's channels are outputs of the plan like
 //! the main output's own, claimed and written by the same tasks.
 
@@ -101,7 +101,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
     (heard, jobs.load(Ordering::Relaxed))
 }
 
-/// The main output crossfade's samples are the serial render's, bit for bit, and
+/// The main output crossfade's samples are the one-participant render's, bit for bit, and
 /// the blocks did spread over the pool.
 #[test]
 fn a_main_output_crossfade_is_bit_identical_on_the_parallel_executor() {

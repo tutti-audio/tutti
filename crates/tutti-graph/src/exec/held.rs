@@ -49,13 +49,6 @@ impl Held {
         }
     }
 
-    /// Whether any of `events` is a held-key event.
-    pub(crate) fn any_key(events: &[Event]) -> bool {
-        events
-            .iter()
-            .any(|e| matches!(e.kind, EventKind::Midi(u) if u.note_key_event().is_some()))
-    }
-
     /// Forget everything held.
     pub(crate) fn clear(&mut self) {
         self.0.clear();
@@ -271,7 +264,10 @@ impl Keys {
         match self.held.get_mut(port) {
             Some(Some(h)) => h.observe(events),
             Some(None) => debug_assert!(
-                !Held::any_key(events),
+                !events.iter().any(|e| matches!(
+                    e.kind,
+                    EventKind::Midi(u) if u.note_key_event().is_some()
+                )),
                 "a node that declared no note events wrote one"
             ),
             None => {}
