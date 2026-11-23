@@ -128,8 +128,8 @@ impl<F: Float> InletRing<F> {
 ///
 /// It does not resample and has no clock of its own: see the
 /// module docs. Its [`shape`](Node::shape) allows only its ring's rate, so a
-/// graph re-prepared to another rate is refused naming it
-/// ([`SetRateError::RateUnsupported`](crate::SetRateError::RateUnsupported)). Real-time safe: `process` does not allocate or lock.
+/// graph re-prepared to another rate is refused naming it. Real-time safe:
+/// `process` does not allocate or lock.
 /// It reports an unbounded tail, so the executor never skips it as silent (a
 /// skipped block would leave its frames to pile up in the ring).
 ///
