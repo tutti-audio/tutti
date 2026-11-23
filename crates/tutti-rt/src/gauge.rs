@@ -4,8 +4,8 @@
 //! A node measures something (a gain reduction, a lock, a count of dropped
 //! events) and the app reads it. The two shapes share one cell: the value in
 //! one atomic word and a flag the writer raises when it is gone. The word is
-//! its own `AtomicU64` of bits rather than a `PackedAtomic`: the unit blanket
-//! reads a value through [`Reading`], not bytemuck, and the flag sits beside it.
+//! its own `AtomicU64` of bits rather than an `AtomicCell`: the unit blanket
+//! reads a value through [`Reading`], and the flag sits beside it.
 //!
 //! - A [`Gauge<U>`] is a latest value. [`GaugeWriter::set`] replaces it,
 //!   [`Gauge::get`] reads it; any number of `Clone`s read the same cell.
