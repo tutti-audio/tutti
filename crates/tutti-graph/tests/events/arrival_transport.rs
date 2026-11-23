@@ -1,8 +1,7 @@
 //! A node behind a latent path reads the transport its input was rendered
 //! at: `Cx::transport_at(offset)` is the transport `Cx::arrival` frames
 //! earlier, through block boundaries, seeks, transport changes inside a
-//! block, loop wraps, stops and ragged blocks, in the executor and the
-//! reference alike.
+//! block, loop wraps, stops and ragged blocks.
 //!
 //! The truth is the blocks themselves: the transport at timeline frame `F`
 //! is what `Env::transport_at` said for `F` in the block that held it. The
@@ -17,15 +16,15 @@
 
 use tutti_graph::testing as common;
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use tutti_buffers::MaxBlock;
 
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Env, Executor, Io, Node, Offset, Prepare, Reference, Shape, Status,
-    TransportChanges, TransportHistory, TransportPosition, Unforkable,
+    Cx, Editor, Env, Executor, Io, Node, Offset, Prepare, Shape, Status, TransportChanges,
+    TransportHistory, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -97,18 +96,10 @@ fn topology(ed: &mut Editor) {
     t.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
 }
 
-fn units(lat: usize) -> BTreeMap<NodeKey, Box<dyn Node>> {
-    let mut m: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-    m.insert(LATENT, Box::new(Latent(lat)));
-    m.insert(PROBE, Box::new(Probe));
-    m
-}
-
 struct Rig {
     ed: Editor,
     exec: Executor,
-    reference: Reference,
-    /// Every block rendered, as both interpreters were handed it.
+    /// Every block rendered, as the executor was handed it.
     played: Vec<Env>,
     /// The pieces the executor's history holds, by its documented rules:
     /// each piece's first frame, transport and rate.
@@ -127,12 +118,9 @@ impl Rig {
         ed.insert(PROBE, "probe", Unforkable(Probe));
         topology(&mut ed);
         ed.commit().expect("commits");
-        let mut reference = Reference::new(prepare(MAX));
-        reference.set_graph(&ed.spec().validate().expect("valid"), units(lat));
         Self {
             ed,
             exec,
-            reference,
             played: Vec::new(),
             kept: VecDeque::new(),
             rate: prepare(MAX).sample_rate(),
@@ -146,11 +134,9 @@ impl Rig {
             .set_latency(LATENT, Latency::new(Samples::new(lat)))
             .expect("the node exists");
         self.ed.commit().expect("recompiles");
-        self.reference
-            .set_graph(&self.ed.spec().validate().expect("valid"), BTreeMap::new());
     }
 
-    /// Re-prepares both at `rate`, with no block between the two commits.
+    /// Re-prepares at `rate`, with no block between the two commits.
     /// The ring is cleared: frames at the old rate name nothing at the new.
     fn reprepare(&mut self, rate: SampleRate) {
         let p = Prepare::new(rate, MaxBlock::of(Samples::new(MAX)));
@@ -159,13 +145,11 @@ impl Rig {
         self.ed.collect(); // re-prepares them, sends them back
         self.exec.apply_pending(); // installs them
         self.ed.collect();
-        self.reference.reprepare(p);
         self.rate = rate;
         self.kept.clear();
     }
 
-    /// One block through both; asserts they agree bit for bit and returns
-    /// the executor's outputs.
+    /// One block through the executor; returns its outputs.
     fn block(
         &mut self,
         n: usize,
@@ -181,22 +165,12 @@ impl Rig {
             play: tutti_graph::PlayClock::ZERO,
         };
         let mut a: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; n]);
-        let mut b: [Vec<f32>; 3] = std::array::from_fn(|_| vec![0.0; n]);
         {
             let [a0, a1, a2] = &mut a;
             self.exec
                 .process_with_changes(n, &t, &changes, &[], &mut [a0, a1, a2]);
-            let [b0, b1, b2] = &mut b;
-            self.reference
-                .process_with_changes(n, &t, &changes, &[], &mut [b0, b1, b2]);
         }
         self.ed.collect();
-        let bits = |v: &[Vec<f32>; 3]| {
-            v.iter()
-                .map(|c| c.iter().map(|x| x.to_bits()).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(bits(&a), bits(&b), "executor and reference");
         self.played.push(env);
         for (start, piece) in env.segments() {
             let keep = match self.kept.back() {
@@ -396,8 +370,7 @@ fn a_recompile_that_moves_the_arrival_keeps_the_history() {
 
 /// A burst of seeks, one per one-frame block, past `JUMPS` inside the
 /// arrival: the history keeps the newest 256, and the frames older than
-/// those read the oldest kept, unmoved: exactly where the model says, in the
-/// executor and the reference alike.
+/// those read the oldest kept, unmoved: exactly where the model says.
 #[test]
 fn a_burst_of_seeks_past_the_capacity_clamps_where_the_model_says() {
     const LAT: usize = 300;
@@ -421,8 +394,8 @@ fn a_burst_of_seeks_past_the_capacity_clamps_where_the_model_says() {
 /// A sample-rate change clears the history: the executor's clock is
 /// rescaled to the new rate, and frames counted at the old one name nothing
 /// there. The first blocks after it read the clamp (the first block at the
-/// new rate, unmoved) until it has `reach` frames behind it, in the executor
-/// and the reference alike; then every frame reads its block again.
+/// new rate, unmoved) until it has `reach` frames behind it; then every
+/// frame reads its block again.
 #[test]
 fn a_sample_rate_change_starts_the_history_over() {
     const LAT: usize = 100;

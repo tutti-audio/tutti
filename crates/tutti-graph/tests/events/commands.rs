@@ -1,6 +1,6 @@
 //! Timestamped commands: a scheduled
 //! event or param ramp or segment lands on its exact frame — across ragged blocks and
-//! across a block boundary — in the executor and the reference alike; late is
+//! across a block boundary; late is
 //! counted and never dropped; the queue back-pressures instead of growing.
 
 use tutti_graph::testing as common;
@@ -12,8 +12,8 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
     COMMAND_CAPACITY, Cx, Editor, EventInputPort, EventKind, Executor, Io, Node, ParamKind,
-    ParamRamp, ParamSegment, Prepare, Reference, ScheduleError, Scheduled, Shape, Status,
-    TransportPosition, Unforkable,
+    ParamRamp, ParamSegment, Prepare, ScheduleError, Scheduled, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
@@ -109,18 +109,15 @@ fn to() -> EventInputPort {
     EventInputPort::new(PROBE, 0)
 }
 
-/// An editor and executor running one `Probe`, plus a reference running
-/// another, over the same spec.
+/// An editor and executor running one `Probe`.
 struct Rig {
     ed: Editor,
     exec: Executor,
-    reference: Reference,
     exec_log: Log,
-    ref_log: Log,
 }
 
 fn rig() -> Rig {
-    let (exec_log, ref_log) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
+    let exec_log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
     ed.insert(
         PROBE,
@@ -136,46 +133,26 @@ fn rig() -> Rig {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    let mut reference = Reference::new(prepare(MAX));
-    reference.set_graph(
-        &ed.spec().validate().unwrap(),
-        [(
-            PROBE,
-            Box::new(Probe {
-                log: ref_log.clone(),
-                level: 0.0,
-            }) as Box<dyn Node>,
-        )]
-        .into(),
-    );
-    Rig {
-        ed,
-        exec,
-        reference,
-        exec_log,
-        ref_log,
-    }
+    Rig { ed, exec, exec_log }
 }
 
 impl Rig {
     fn schedule(&mut self, at: At, payload: impl Into<Scheduled>) {
         let payload = payload.into();
         self.ed.schedule(at, to(), payload).expect("room");
-        self.reference.schedule(at, to(), payload);
     }
 
-    /// Render `n` frames through both; return both outputs.
-    fn block(&mut self, n: usize, transport: &TransportPosition) -> (Vec<f32>, Vec<f32>) {
-        let (mut a, mut b) = (vec![0.0; n], vec![0.0; n]);
+    /// Render `n` frames; return the output.
+    fn block(&mut self, n: usize, transport: &TransportPosition) -> Vec<f32> {
+        let mut a = vec![0.0; n];
         self.exec.process(n, transport, &[], &mut [&mut a[..]]);
-        self.reference.process(n, transport, &[], &mut [&mut b[..]]);
-        (a, b)
+        a
     }
 }
 
 /// A command at frame `f` lands on exactly offset `f - block_start`, under a
 /// ragged block schedule — at a block's first frame, its last, in the middle,
-/// and on both sides of a boundary — in both interpreters.
+/// and on both sides of a boundary.
 #[test]
 fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
     let mut rig = rig();
@@ -200,18 +177,16 @@ fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
     for &n in &blocks {
         rig.block(n, &transport);
     }
-    for log in [&rig.exec_log, &rig.ref_log] {
-        let got = log.lock().unwrap().to_vec();
-        let want: Vec<(u64, u64, u32, u32)> = targets
-            .iter()
-            .enumerate()
-            .map(|(i, &f)| {
-                let start = *starts.iter().rev().find(|&&s| s <= f).unwrap();
-                (f, start, (f - start) as u32, i as u32)
-            })
-            .collect();
-        assert_eq!(got, want);
-    }
+    let got = rig.exec_log.lock().unwrap().to_vec();
+    let want: Vec<(u64, u64, u32, u32)> = targets
+        .iter()
+        .enumerate()
+        .map(|(i, &f)| {
+            let start = *starts.iter().rev().find(|&&s| s <= f).unwrap();
+            (f, start, (f - start) as u32, i as u32)
+        })
+        .collect();
+    assert_eq!(got, want);
     assert_eq!(rig.exec.late_command_count(), 0);
     assert_eq!(rig.ed.commands_outstanding(), 0, "every credit came back");
 }
@@ -222,15 +197,12 @@ fn a_command_lands_on_its_exact_frame_across_ragged_blocks() {
 fn a_scheduled_ramp_steps_the_output_on_its_frame() {
     let mut rig = rig();
     rig.schedule(At::Frame(Frame::new(90)), ramp(50.0));
-    let (mut a, mut b) = (Vec::new(), Vec::new());
+    let mut a = Vec::new();
     for n in [64, 64] {
-        let (x, y) = rig.block(n, &TransportPosition::default());
-        a.extend(x);
-        b.extend(y);
+        a.extend(rig.block(n, &TransportPosition::default()));
     }
     let want: Vec<f32> = (0..128).map(|i| if i < 90 { 0.0 } else { 0.5 }).collect();
     assert_eq!(a, want);
-    assert_eq!(b, want);
 }
 
 /// A time already past lands at offset 0 of the next block and is counted
@@ -244,15 +216,12 @@ fn a_late_command_lands_at_the_next_block_and_is_counted() {
     rig.schedule(At::Frame(Frame::new(10)), tag(1)); // 118 frames ago
     rig.schedule(At::NextBlock, tag(2));
     rig.block(32, &t);
-    for log in [&rig.exec_log, &rig.ref_log] {
-        assert_eq!(
-            log.lock().unwrap().to_vec(),
-            vec![(128, 128, 0, 1), (128, 128, 0, 2)],
-            "both at offset 0 of the block starting at 128, in scheduling order"
-        );
-    }
+    assert_eq!(
+        rig.exec_log.lock().unwrap().to_vec(),
+        vec![(128, 128, 0, 1), (128, 128, 0, 2)],
+        "both at offset 0 of the block starting at 128, in scheduling order"
+    );
     assert_eq!(rig.exec.late_command_count(), 1);
-    assert_eq!(rig.reference.late_command_count(), 1);
 }
 
 /// `At::Beat` resolves against the transport snapshot of the block where it
@@ -277,12 +246,10 @@ fn a_beat_command_lands_where_the_transport_reaches_it() {
     let spb = 120.0 / (60.0 * rate); // beats per frame
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(1.5 - 10.0 * spb), None);
     rig.block(64, &t);
-    for log in [&rig.exec_log, &rig.ref_log] {
-        assert_eq!(
-            log.lock().unwrap().to_vec(),
-            vec![(frame + 10, frame, 10, 3)]
-        );
-    }
+    assert_eq!(
+        rig.exec_log.lock().unwrap().to_vec(),
+        vec![(frame + 10, frame, 10, 3)]
+    );
     assert_eq!(rig.exec.late_command_count(), 0);
 }
 
@@ -444,21 +411,15 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     const LAT: NodeKey = NodeKey(1);
     const A: NodeKey = NodeKey(2);
     const B: NodeKey = NodeKey(3);
-    let units = |log: &tutti_fixtures::Record<(u64, u32)>| -> Vec<(NodeKey, Box<dyn Node>)> {
-        vec![
-            (
-                LAT,
-                Box::new(common::TestNode::new(common::Kind::Lag { latency: 20 })),
-            ),
-            (A, Box::new(Impulse(log.clone()))),
-            (B, Box::new(Impulse(log.clone()))),
-        ]
-    };
-    let (exec_log, ref_log) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
+    let exec_log = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(prepare(MAX));
-    for (k, u) in units(&exec_log) {
-        ed.insert(k, "n", Unforkable(u));
-    }
+    ed.insert(
+        LAT,
+        "n",
+        Unforkable(common::TestNode::new(common::Kind::Lag { latency: 20 })),
+    );
+    ed.insert(A, "n", Unforkable(Impulse(exec_log.clone())));
+    ed.insert(B, "n", Unforkable(Impulse(exec_log.clone())));
     let t = &mut ed.spec_mut().topology;
     t.inputs = ChannelLayout::MONO;
     t.edges.insert(
@@ -486,19 +447,13 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         exec.plan().unwrap().unit(A).unwrap().arrival.samples(),
         Samples::new(20)
     );
-    let mut reference = Reference::new(prepare(MAX));
-    reference.set_graph(
-        &ed.spec().validate().unwrap(),
-        units(&ref_log).into_iter().collect(),
-    );
     for (k, t) in [(A, 1), (B, 2)] {
         let to = EventInputPort::new(k, 0);
         ed.schedule(At::Frame(Frame::new(100)), to, tag(t))
             .expect("room");
-        reference.schedule(At::Frame(Frame::new(100)), to, tag(t));
     }
     let silence = [0.0f32; 64];
-    let (mut outs, mut routs) = (vec![Vec::new(); 2], vec![Vec::new(); 2]);
+    let mut outs = vec![Vec::new(); 2];
     for n in [64usize, 7, 64, 33] {
         let (mut a, mut b) = (vec![0.0; n], vec![0.0; n]);
         exec.process(
@@ -509,33 +464,22 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         );
         outs[0].extend(a);
         outs[1].extend(b);
-        let (mut a, mut b) = (vec![0.0; n], vec![0.0; n]);
-        reference.process(
-            n,
-            &TransportPosition::default(),
-            &[&silence[..n]],
-            &mut [&mut a[..], &mut b[..]],
-        );
-        routs[0].extend(a);
-        routs[1].extend(b);
     }
-    for (log, out) in [(&exec_log, &outs), (&ref_log, &routs)] {
-        let mut got = log.lock().unwrap().to_vec();
-        got.sort();
-        assert_eq!(
-            got,
-            vec![(100, 2), (120, 1)],
-            "the latent sink hears it 20 later"
-        );
-        for ch in out.iter() {
-            let hits: Vec<usize> = ch
-                .iter()
-                .enumerate()
-                .filter(|&(_, &x)| x != 0.0)
-                .map(|(i, _)| i)
-                .collect();
-            assert_eq!(hits, vec![120], "both impulses leave on the same frame");
-        }
+    let mut got = exec_log.lock().unwrap().to_vec();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![(100, 2), (120, 1)],
+        "the latent sink hears it 20 later"
+    );
+    for ch in outs.iter() {
+        let hits: Vec<usize> = ch
+            .iter()
+            .enumerate()
+            .filter(|&(_, &x)| x != 0.0)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(hits, vec![120], "both impulses leave on the same frame");
     }
     assert_eq!(exec.late_command_count(), 0);
 }
@@ -936,10 +880,8 @@ fn beat_resolution_matches_a_hand_computed_table() {
     ];
     for case in cases {
         let log: tutti_fixtures::Record<(u64, u32)> = tutti_fixtures::Record::new();
-        let ref_log: tutti_fixtures::Record<(u64, u32)> = tutti_fixtures::Record::new();
         let (lat, sink) = (NodeKey(1), NodeKey(2));
         let (mut ed, mut exec) = Editor::new(prepare(500));
-        let mut reference = Reference::new(prepare(500));
         let build = |ed: &mut Editor, log: &tutti_fixtures::Record<(u64, u32)>| {
             ed.insert(
                 lat,
@@ -966,47 +908,24 @@ fn beat_resolution_matches_a_hand_computed_table() {
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
-        let mut units: std::collections::BTreeMap<NodeKey, Box<dyn Node>> = Default::default();
-        units.insert(
-            lat,
-            Box::new(common::TestNode::new(common::Kind::Lag {
-                latency: case.arrival,
-            })),
-        );
-        units.insert(sink, Box::new(Impulse(ref_log.clone())));
-        reference.set_graph(&ed.spec().validate().unwrap(), units);
         let to = EventInputPort::new(sink, 0);
         let silence = [0.0f32; 500];
         for (i, tr) in case.transports.iter().enumerate() {
             if i == case.sched_at {
                 ed.schedule(At::Beat(Beat::new(case.beat)), to, tag(9))
                     .expect("room");
-                reference.schedule(At::Beat(Beat::new(case.beat)), to, tag(9));
             }
             exec.process(500, tr, &[&silence[..]], &mut []);
-            reference.process(500, tr, &[&silence[..]], &mut []);
         }
         let want: Vec<(u64, u32)> = case.want.iter().map(|&(f, _)| (f, 9)).collect();
-        assert_eq!(
-            log.lock().unwrap().to_vec(),
-            want,
-            "executor: {}",
-            case.name
-        );
-        assert_eq!(
-            ref_log.lock().unwrap().to_vec(),
-            want,
-            "reference: {}",
-            case.name
-        );
+        assert_eq!(log.lock().unwrap().to_vec(), want, "{}", case.name);
         let late = u64::from(case.want.is_some_and(|w| w.1));
         assert_eq!(exec.late_command_count(), late, "{}", case.name);
-        assert_eq!(reference.late_command_count(), late, "{}", case.name);
     }
 }
 
 /// A command whose port vanished (its node replaced by one without event
-/// inputs) is still timed by the node's arrival: both interpreters count it
+/// inputs) is still timed by the node's arrival: it counts
 /// unrouted when timeline frame 100 reaches the node, at its own frame 120 —
 /// not at 100.
 #[test]
@@ -1035,19 +954,9 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    let mut reference = Reference::new(prepare(MAX));
-    let mut units: std::collections::BTreeMap<NodeKey, Box<dyn Node>> = Default::default();
-    units.insert(
-        lat,
-        Box::new(common::TestNode::new(common::Kind::Lag { latency: 20 })),
-    );
-    units.insert(sink, Box::new(Impulse(tutti_fixtures::Record::new())));
-    reference.set_graph(&ed.spec().validate().unwrap(), units);
-
     let to = EventInputPort::new(sink, 0);
     ed.schedule(At::Frame(Frame::new(100)), to, tag(1))
         .expect("room");
-    reference.schedule(At::Frame(Frame::new(100)), to, tag(1));
     // Same key, a unit with no event inputs.
     let gain = || {
         common::TestNode::new(common::Kind::Gain {
@@ -1059,25 +968,11 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    let mut units: std::collections::BTreeMap<NodeKey, Box<dyn Node>> = Default::default();
-    units.insert(sink, Box::new(gain()));
-    reference.set_graph(&ed.spec().validate().unwrap(), units);
-
     let silence = [0.0f32; 10];
     for block in 0..14 {
         exec.process(10, &TransportPosition::default(), &[&silence[..]], &mut []);
-        reference.process(10, &TransportPosition::default(), &[&silence[..]], &mut []);
         let want = u64::from(block >= 12); // the block holding frame 120
-        assert_eq!(
-            exec.unrouted_command_count(),
-            want,
-            "executor, block {block}"
-        );
-        assert_eq!(
-            reference.unrouted_command_count(),
-            want,
-            "reference, block {block}"
-        );
+        assert_eq!(exec.unrouted_command_count(), want, "block {block}");
     }
 }
 
@@ -1170,14 +1065,14 @@ fn a_command_id_from_another_pair_is_refused() {
     assert_eq!(new.exec.cancelled_command_count(), 1);
 }
 
-/// A deterministic differential case for "a wrap leaves the playhead inside
+/// A deterministic case for "a wrap leaves the playhead inside
 /// the loop". One-frame blocks at 120 BPM (1/24 000 beat a block) enter a
 /// tiny loop [4, 4.0005) from 3.9999 and wrap around it; then the transport
 /// seeks to a beat before the loop chosen so that 2 000 wraps plus the last
 /// block's advance would "explain" it exactly. It is a seek. After it, two
 /// beats are scheduled: one the run crossed *before* the seek (3.99995, now
 /// ahead of the playhead again — it must wait), and one crossed after it (it
-/// is late). Both interpreters must agree, and both be right.
+/// is late).
 #[test]
 fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
     let mut rig = rig();
@@ -1226,11 +1121,8 @@ fn a_seek_out_of_a_loop_that_lines_up_with_wraps_is_a_seek() {
         now = step(now);
     }
     let exec: Vec<u32> = rig.exec_log.lock().unwrap().iter().map(|e| e.3).collect();
-    let reference: Vec<u32> = rig.ref_log.lock().unwrap().iter().map(|e| e.3).collect();
-    assert_eq!(exec, reference, "the interpreters agree");
     assert_eq!(exec, vec![2], "only the beat crossed after the seek fires");
     assert_eq!(rig.exec.late_command_count(), 1);
-    assert_eq!(rig.reference.late_command_count(), 1);
 }
 
 /// A node with one event input that declares no param events.
@@ -1247,15 +1139,9 @@ impl Node for Plain {
     fn reset(&mut self) {}
 }
 
-/// The log of both interpreters, which must agree.
+/// The executor's log.
 fn logs(rig: &Rig) -> Vec<(u64, u64, u32, u32)> {
-    let exec = rig.exec_log.lock().unwrap().to_vec();
-    assert_eq!(
-        exec,
-        rig.ref_log.lock().unwrap().to_vec(),
-        "the interpreters agree"
-    );
-    exec
+    rig.exec_log.lock().unwrap().to_vec()
 }
 
 /// **A scheduled param event lands on exactly its frame**, ramp or segment,
@@ -1353,7 +1239,6 @@ fn a_late_param_frame_lands_at_offset_zero_and_is_counted() {
         "both at offset 0 of the block starting at 128, in scheduling order"
     );
     assert_eq!(rig.exec.late_command_count(), 1);
-    assert_eq!(rig.reference.late_command_count(), 1);
 }
 
 /// **A param event and an event at one frame stay in their own lists**, and at

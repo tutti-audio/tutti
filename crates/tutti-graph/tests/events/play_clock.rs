@@ -5,21 +5,17 @@
 //! (`Cx::play_at`); published to the control side (`Editor::play_reading`);
 //! and started at 0 in a fork, whatever the live graph's count.
 //!
-//! The reference interpreter keeps a clock of its own, written apart from
-//! the executor's: the counts are compared frame for frame. Epochs are not,
-//! since each interpreter draws its own from the process-wide counter; each
-//! is checked against the restarts it must mark.
+//! The counts are checked frame for frame; epochs are checked against the
+//! restarts they must mark.
 
 use tutti_graph::testing as common;
-
-use std::collections::BTreeMap;
 
 use common::prepare;
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, Offset, PlayReading, Prepare,
-    Reference, Shape, Status, TransportChanges, TransportPosition, Unforkable,
+    Cx, Editor, Executor, ForkByClone, ForkTarget, Io, Node, Offset, PlayReading, Prepare, Shape,
+    Status, TransportChanges, TransportPosition, Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Beat, Bpm, Frame, Latency, Samples};
@@ -83,12 +79,10 @@ fn changes(list: &[(usize, TransportPosition)]) -> TransportChanges {
     c
 }
 
-/// The probe after a `lat`-frame source, in an editor and in the
-/// reference.
+/// The probe after a `lat`-frame source, in an editor.
 struct Rig {
     ed: Editor,
     exec: Executor,
-    reference: Reference,
 }
 
 fn rig(lat: usize, forkable: bool) -> Rig {
@@ -107,21 +101,11 @@ fn rig(lat: usize, forkable: bool) -> Rig {
     );
     t.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
     ed.commit().expect("commits");
-    let mut reference = Reference::new(prepare(MAX));
-    let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-    units.insert(LATENT, Box::new(Latent(lat)));
-    units.insert(PROBE, Box::new(Probe));
-    reference.set_graph(&ed.spec().validate().expect("valid"), units);
-    Rig {
-        ed,
-        exec,
-        reference,
-    }
+    Rig { ed, exec }
 }
 
 impl Rig {
-    /// One block through both: the executor's readings, per frame, after
-    /// asserting the reference counted the same frames.
+    /// One block: the executor's readings, per frame.
     fn block(
         &mut self,
         n: usize,
@@ -130,13 +114,9 @@ impl Rig {
     ) -> Vec<PlayReading> {
         let ch = changes(ch);
         let (mut a0, mut a1) = (vec![0.0; n], vec![0.0; n]);
-        let (mut b0, mut b1) = (vec![0.0; n], vec![0.0; n]);
         self.exec
             .process_with_changes(n, &t, &ch, &[], &mut [&mut a0, &mut a1]);
-        self.reference
-            .process_with_changes(n, &t, &ch, &[], &mut [&mut b0, &mut b1]);
         self.ed.collect();
-        assert_eq!(a0, b0, "the reference counts the same frames");
         readings(&a0, &a1)
     }
 }

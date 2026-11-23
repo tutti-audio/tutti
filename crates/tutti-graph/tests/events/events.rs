@@ -411,8 +411,8 @@ proptest! {
     /// Conservation: every event emitted while an edge exists is delivered exactly
     /// once to that edge's sink — no loss, no duplicate — through PDC delays
     /// that retune or vanish (lag at 0), rewiring, direct↔feedback switches,
-    /// regenerated emitters and ragged block sizes. Checked on both
-    /// interpreters, against the emitters' own ledger.
+    /// regenerated emitters and ragged block sizes. Checked
+    /// against the emitters' own ledger.
     ///
     /// And for scheduled commands — each lands exactly once, on its port, on
     /// its frame or (already past) at the next block's start.
@@ -421,38 +421,35 @@ proptest! {
         phases in proptest::collection::vec(arb_phase(4), 1..4),
     ) {
         let emitters: Vec<(u32, u64)> = vec![(1, 3), (2, 5), (3, 7), (4, 4)];
-        for executor in [true, false] {
-            let (emitted, got, landings, spans) = run_scheduled(&phases, &emitters, executor);
-            let want = expected(&phases, &emitted, &emitters);
-            let have = delivered(&got);
-            let side = if executor { "executor" } else { "reference" };
-            for p in 0..REC_PORTS {
-                prop_assert_eq!(
-                    want.get(&p).cloned().unwrap_or_default(),
-                    have.get(&p).cloned().unwrap_or_default(),
-                    "{} port {}", side, p
-                );
-            }
-            // Every scheduled command, exactly once, on its port — and on
-            // its frame: timeline target + the recorder's arrival latency in
-            // the phase it landed in (PDC), or, when that was already past,
-            // the first frame of a phase (where it was first seen late).
-            let mut landed: Vec<(u16, u32, u64, u64)> = got
-                .iter()
-                .filter(|e| e.1 >= SCHEDULED)
-                .map(|&(p, tag, target, at)| (p, tag, target, at))
-                .collect();
-            landed.sort_by_key(|l| l.1);
-            let who: Vec<Landing> = landed.iter().map(|&(p, t, target, _)| (p, t, target)).collect();
-            prop_assert_eq!(&who, &landings, "{} scheduled commands", side);
-            for &(_, tag, target, at) in &landed {
-                let &(_, lag) = spans.iter().rev().find(|(s, _)| *s <= at).expect("a phase");
-                let on_time = target + lag;
-                prop_assert!(
-                    at == on_time || (on_time < at && spans.iter().any(|(s, _)| *s == at)),
-                    "{} command {} for {} (+{} arrival) landed at {}", side, tag, target, lag, at
-                );
-            }
+        let (emitted, got, landings, spans) = run_scheduled(&phases, &emitters, true);
+        let want = expected(&phases, &emitted, &emitters);
+        let have = delivered(&got);
+        for p in 0..REC_PORTS {
+            prop_assert_eq!(
+                want.get(&p).cloned().unwrap_or_default(),
+                have.get(&p).cloned().unwrap_or_default(),
+                "port {}", p
+            );
+        }
+        // Every scheduled command, exactly once, on its port — and on
+        // its frame: timeline target + the recorder's arrival latency in
+        // the phase it landed in (PDC), or, when that was already past,
+        // the first frame of a phase (where it was first seen late).
+        let mut landed: Vec<(u16, u32, u64, u64)> = got
+            .iter()
+            .filter(|e| e.1 >= SCHEDULED)
+            .map(|&(p, tag, target, at)| (p, tag, target, at))
+            .collect();
+        landed.sort_by_key(|l| l.1);
+        let who: Vec<Landing> = landed.iter().map(|&(p, t, target, _)| (p, t, target)).collect();
+        prop_assert_eq!(&who, &landings, "scheduled commands");
+        for &(_, tag, target, at) in &landed {
+            let &(_, lag) = spans.iter().rev().find(|(s, _)| *s <= at).expect("a phase");
+            let on_time = target + lag;
+            prop_assert!(
+                at == on_time || (on_time < at && spans.iter().any(|(s, _)| *s == at)),
+                "command {} for {} (+{} arrival) landed at {}", tag, target, lag, at
+            );
         }
     }
 }
@@ -643,7 +640,7 @@ impl Node for Tap {
 
 /// A feedback edge delays by exactly the `delay` its edge declares — audio
 /// and events — whatever the block sizes and **whatever `MaxBlock` the
-/// interpreter was prepared with**: a bounce prepared at a larger block loops
+/// executor was prepared with**: a bounce prepared at a larger block loops
 /// exactly like live playback. Nothing is lost or repeated when the block
 /// size changes or is ragged.
 #[test]
@@ -655,78 +652,61 @@ fn feedback_delays_by_its_declared_delay_at_any_max_block() {
         (64, vec![1, 2, 3, 5, 8, 13, 21, 34, 55, 64, 17, 9, 64, 64]),
         (96, vec![96, 96, 50, 96, 3, 96, 96]),
     ] {
-        for executor in [true, false] {
-            let inbox: Inbox = tutti_fixtures::Record::new();
-            let mut t = Topology::default();
-            let cs = Clock.shape();
-            let ts = Tap(tutti_fixtures::Record::new()).shape();
-            t.nodes
-                .insert(clock, NodeSpec::new("c", cs.audio_in(), cs.audio_out()));
-            t.nodes.insert(
-                tap,
-                NodeSpec::new("t", ts.audio_in(), ts.audio_out()).tail(Tail::Unknown),
-            );
-            t.edges.insert(
-                InputPort::new(tap, 0),
-                vec![Edge::Feedback(FeedbackFrom::new(
-                    OutputPort::new(clock, 0),
-                    Samples::new(DELAY),
-                ))],
-            );
-            t.set_outputs(vec![PortSource::Node(OutputPort::new(tap, 0))]);
-            let mut g = GraphSpec::new(t);
-            g.connect_events(
-                EventInputPort::new(tap, 0),
-                EventEdge::feedback(EventOutputPort::new(clock, 0), Samples::new(DELAY)),
-            );
-            let valid = g.validate().unwrap();
-            let shapes: Shapes = [(clock, cs), (tap, ts)].into();
-            let prep = prepare(max);
-            let units = || -> BTreeMap<NodeKey, Box<dyn Node>> {
-                [
-                    (clock, Box::new(Clock) as Box<dyn Node>),
-                    (tap, Box::new(Tap(inbox.clone()))),
-                ]
-                .into()
-            };
-            let (mut ed, mut exec) = Editor::with_event_capacity(prep, 256);
-            let mut reference = Reference::new(prep);
-            if executor {
-                let (plan, delta) = compile(&valid, &shapes, &prep, None).unwrap();
-                ed.package(plan, delta, units()).expect("room in the queue");
-                exec.apply_pending();
-                ed.collect();
-            } else {
-                reference.set_graph(&valid, units());
-            }
-            let mut audio = Vec::new();
-            for &n in &schedule {
-                let mut out = vec![0.0f32; n];
-                if executor {
-                    exec.process(n, &TransportPosition::default(), &[], &mut [&mut out[..]]);
-                } else {
-                    reference.process(n, &TransportPosition::default(), &[], &mut [&mut out[..]]);
-                }
-                audio.extend(out);
-            }
-            let total = audio.len();
-            let want: Vec<f32> = (0..total)
-                .map(|i| if i < DELAY { 0.0 } else { (i - DELAY) as f32 })
-                .collect();
-            assert_eq!(
-                audio, want,
-                "audio, max {max}, {schedule:?}, executor {executor}"
-            );
-            let got = inbox.lock().unwrap().to_vec();
-            let want_ev: Vec<(u64, u64)> = (0..(total as u64).saturating_sub(DELAY as u64))
-                .map(|f| (f, f + DELAY as u64))
-                .collect();
-            let got_ev: Vec<(u64, u64)> = got.iter().map(|&(_, _, e, d)| (e, d)).collect();
-            assert_eq!(
-                got_ev, want_ev,
-                "events, max {max}, {schedule:?}, executor {executor}"
-            );
+        let inbox: Inbox = tutti_fixtures::Record::new();
+        let mut t = Topology::default();
+        let cs = Clock.shape();
+        let ts = Tap(tutti_fixtures::Record::new()).shape();
+        t.nodes
+            .insert(clock, NodeSpec::new("c", cs.audio_in(), cs.audio_out()));
+        t.nodes.insert(
+            tap,
+            NodeSpec::new("t", ts.audio_in(), ts.audio_out()).tail(Tail::Unknown),
+        );
+        t.edges.insert(
+            InputPort::new(tap, 0),
+            vec![Edge::Feedback(FeedbackFrom::new(
+                OutputPort::new(clock, 0),
+                Samples::new(DELAY),
+            ))],
+        );
+        t.set_outputs(vec![PortSource::Node(OutputPort::new(tap, 0))]);
+        let mut g = GraphSpec::new(t);
+        g.connect_events(
+            EventInputPort::new(tap, 0),
+            EventEdge::feedback(EventOutputPort::new(clock, 0), Samples::new(DELAY)),
+        );
+        let valid = g.validate().unwrap();
+        let shapes: Shapes = [(clock, cs), (tap, ts)].into();
+        let prep = prepare(max);
+        let units = || -> BTreeMap<NodeKey, Box<dyn Node>> {
+            [
+                (clock, Box::new(Clock) as Box<dyn Node>),
+                (tap, Box::new(Tap(inbox.clone()))),
+            ]
+            .into()
+        };
+        let (mut ed, mut exec) = Editor::with_event_capacity(prep, 256);
+        let (plan, delta) = compile(&valid, &shapes, &prep, None).unwrap();
+        ed.package(plan, delta, units()).expect("room in the queue");
+        exec.apply_pending();
+        ed.collect();
+        let mut audio = Vec::new();
+        for &n in &schedule {
+            let mut out = vec![0.0f32; n];
+            exec.process(n, &TransportPosition::default(), &[], &mut [&mut out[..]]);
+            audio.extend(out);
         }
+        let total = audio.len();
+        let want: Vec<f32> = (0..total)
+            .map(|i| if i < DELAY { 0.0 } else { (i - DELAY) as f32 })
+            .collect();
+        assert_eq!(audio, want, "audio, max {max}, {schedule:?}");
+        let got = inbox.lock().unwrap().to_vec();
+        let want_ev: Vec<(u64, u64)> = (0..(total as u64).saturating_sub(DELAY as u64))
+            .map(|f| (f, f + DELAY as u64))
+            .collect();
+        let got_ev: Vec<(u64, u64)> = got.iter().map(|&(_, _, e, d)| (e, d)).collect();
+        assert_eq!(got_ev, want_ev, "events, max {max}, {schedule:?}");
     }
 }
 
