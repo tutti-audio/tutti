@@ -111,12 +111,14 @@ fn a_swapping_taker_loses_no_request() {
         let cell = Arc::new(AtomicCell::new(NONE));
         let raiser = {
             let cell = Arc::clone(&cell);
-            // The raiser swaps rather than stores: loom 0.7.3 lets a plain
-            // store racing a read-modify-write produce an outcome coherence
-            // forbids (the RMW reads the old value and the store is lost
-            // even after a join), which would fail this model with no fault
-            // in the code. The taker, the side under test, is the shipped
-            // `swap` either way.
+            // The raiser swaps rather than stores: under loom 0.7.3 a raiser
+            // of `store(FIRST); store(LAST)` makes this model take
+            // `[NONE, NONE, NONE]`, which coherence forbids (each swap reads
+            // the value just before it in modification order, and both stores
+            // precede the join, so the last swap or an earlier one reads
+            // LAST). That is loom's store-vs-RMW modelling, not the cell; swap
+            // the two lines back to stores to recheck after a loom bump. The
+            // taker, the side under test, is the shipped `swap` either way.
             thread::spawn(move || {
                 let _ = cell.swap(FIRST);
                 let _ = cell.swap(LAST);

@@ -495,7 +495,7 @@ impl<L: Loaded, F: Float> std::ops::DerefMut for PluginNode<L, F> {
 }
 
 /// Park `rate` for the main thread to dispatch. Audio-thread safe: one
-/// `Relaxed` store, no lock and no allocation.
+/// `Release` store, no lock and no allocation.
 ///
 /// Last write wins. A rate superseded before anyone drained it never reached
 /// the plugin, so dropping it loses nothing — the plugin only needs to hear the

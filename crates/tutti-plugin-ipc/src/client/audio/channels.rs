@@ -401,8 +401,8 @@ impl Channels {
         taken
     }
 
-    /// The current sample rate. `Relaxed` suffices: it only sizes a timeout, so
-    /// reading a value one block stale is harmless.
+    /// The current sample rate. It only sizes a timeout, so a value one block
+    /// stale is harmless.
     pub(super) fn sample_rate(&self) -> SampleRate {
         self.sample_rate.load()
     }

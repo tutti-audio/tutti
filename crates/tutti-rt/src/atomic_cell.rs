@@ -172,6 +172,7 @@ impl AtomicWord for [u32; 2] {
     }
 
     fn from_word(word: u64) -> Option<Self> {
+        // Each `as u32` keeps its half's 32 bits: the truncation is the decode.
         Some([word as u32, (word >> 32) as u32])
     }
 }
