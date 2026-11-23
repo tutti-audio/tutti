@@ -57,7 +57,7 @@
 //! unit (review holds that one).
 
 use super::buffers::{scan_with, squash};
-use super::lex::{blank, find_word_from, line_of, matching, test_ranges};
+use super::lex::{blank, find_word_from, line_of, matching, skipped_library, test_ranges, word};
 use super::{Report, Tree};
 use std::collections::BTreeMap;
 
@@ -261,18 +261,10 @@ struct Hit {
     at: String,
 }
 
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "tests" | "benches" | "examples")
-}
-
 /// The library files of `crates/*/src`.
 fn library_files(tree: &dyn Tree) -> Vec<String> {
     let files: Vec<String> = tree
-        .files("crates", &skipped)
+        .files("crates", &skipped_library)
         .into_iter()
         .filter(|p| {
             let parts: Vec<&str> = p.split('/').collect();

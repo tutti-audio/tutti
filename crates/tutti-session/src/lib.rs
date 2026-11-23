@@ -287,7 +287,7 @@ pub use modulation::{
 };
 #[cfg(feature = "sampler")]
 pub use node::Handled;
-pub use node::{Reclaimer, Reclaims, SessionNode};
+pub use node::SessionNode;
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
 pub use peer_state::{OtherPeer, PeerState, SavedPeer};

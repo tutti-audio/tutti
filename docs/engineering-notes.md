@@ -138,7 +138,7 @@ vendor/             third-party code we never edit
 the unit newtype, never the bare float**, for any quantity one covers — in struct
 fields, function signatures, `Param<U>`, and return types alike.
 
-The roster: `Hz` · `Seconds` · `Db` · `Amplitude` · `Mix` · `Feedback` · `Depth` ·
+The roster: `Hz` · `Seconds` · `Db` · `Amplitude` · `Mix` · `Feedback` · `Bipolar` ·
 `Drive` · `Spread` · `StereoWidth` · `Bpm` · `Beat` / `BeatDuration` ·
 `Semitones` / `Cents` · `Azimuth` / `Elevation` / `ArcDegrees` · `Phase` /
 `PhaseIncrement` / `Radians` · `SamplePosition` / `Samples` / `Resyncs` · `SrcRatio` /
@@ -150,7 +150,7 @@ infinities, zero and negative numbers (no 20 to 999 policy; that is a UI limit),
 `Bpm::of` is for literals, and there is no `From<f64>` or `Unit` impl.
 
 The last three are **measurements** — values the engine reports back — as opposed
-to the controls above them. That is why `Correlation` and `Pan` are not `Depth`
+to the controls above them. That is why `Correlation` and `Pan` are not `Bipolar`
 and `Confidence` is not `Mix` despite the coinciding ranges: swapping a reading
 for a control is silent, and the compiler should refuse it. Same split `Q` and
 `Resonance` make.
@@ -249,7 +249,7 @@ Rules:
   when the only `reclaim` caller was the hardware MIDI port set's owner.
   Every publisher now reclaims on a control-side tick it already has: the
   session's `Phase::Reclaim` sweeps its graph's table (each node's
-  `Reclaimer`, which `SessionNode::reclaimer` hands the graph as the node
+  reclaimer, which the node's `NodeParts::reclaimer` hands the graph as the node
   goes in through `add` or `crossfade` and which leaves with the node:
   clips, harmony, the MIDI input, voices; and each hosted plugin's
   `PluginTimeSignature`, which a `clear_meter` leaves following no project meter)
@@ -451,7 +451,7 @@ despawn system.
 
 Params are `AudioParam<U, const P: u16>` — one generic component per scalar,
 registered with `App::add_audio_param::<U, P>()` and written in the `Params`
-phase through the node's `ParamSet` (`SessionNode::params`); a node without the
+phase through the node's `ParamSet` (`NodeParts::params`); a node without the
 param takes nothing. `P` is a packed `UnitAddr` (index in the high byte, the
 `UnitParam` discriminant in the low), so a node's only param of a kind is the
 plain `{ UnitParam::X as u16 }` and a node with several names the others with

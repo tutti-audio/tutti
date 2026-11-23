@@ -10,7 +10,7 @@ use tutti_dsp::{LadderSaturation, SvfControls};
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_music::Adsr;
 use tutti_ump::MidiGroup;
-use tutti_units::{Amplitude, Depth, Hz, Normalized, Q, Resonance, Semitones};
+use tutti_units::{Amplitude, Bipolar, Hz, Normalized, Q, Resonance, Semitones};
 
 /// The waveform every sub-voice of every voice generates.
 ///
@@ -182,10 +182,10 @@ impl fmt::Display for FilterType {
 /// thread; the filter coefficients are ramped per sample between steps.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilterModConfig {
-    pub(crate) mod_wheel_depth: Depth,
-    pub(crate) velocity_depth: Depth,
+    pub(crate) mod_wheel_depth: Bipolar,
+    pub(crate) velocity_depth: Bipolar,
     pub(crate) lfo_rate: Option<Hz>,
-    pub(crate) lfo_depth: Depth,
+    pub(crate) lfo_depth: Bipolar,
 }
 
 impl FilterModConfig {
@@ -193,28 +193,28 @@ impl FilterModConfig {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            mod_wheel_depth: Depth::of(0.0),
-            velocity_depth: Depth::of(0.0),
+            mod_wheel_depth: Bipolar::of(0.0),
+            velocity_depth: Bipolar::of(0.0),
             lfo_rate: None,
-            lfo_depth: Depth::of(0.0),
+            lfo_depth: Bipolar::of(0.0),
         }
     }
 
-    /// How far the mod wheel (CC1) opens the filter, as a [`Depth`] in 0.0..1.0.
+    /// How far the mod wheel (CC1) opens the filter, as a [`Bipolar`] in 0.0..1.0.
     /// At 1.0 a fully-open wheel doubles the cutoff frequency; at 0.0 (the
     /// default) the wheel is unrouted.
     #[must_use]
-    pub const fn mod_wheel_depth(mut self, depth: Depth) -> Self {
+    pub const fn mod_wheel_depth(mut self, depth: Bipolar) -> Self {
         self.mod_wheel_depth = depth;
         self
     }
 
-    /// How far note velocity opens the filter, as a [`Depth`] in 0.0..1.0.
+    /// How far note velocity opens the filter, as a [`Bipolar`] in 0.0..1.0.
     /// At 1.0 the softest note halves the cutoff and the hardest leaves it at
     /// the base value: velocity only ever darkens. Per-note, latched at
     /// note-on from that voice's velocity.
     #[must_use]
-    pub const fn velocity_depth(mut self, depth: Depth) -> Self {
+    pub const fn velocity_depth(mut self, depth: Bipolar) -> Self {
         self.velocity_depth = depth;
         self
     }
@@ -228,11 +228,11 @@ impl FilterModConfig {
         self
     }
 
-    /// How far the LFO sweeps the cutoff, as a [`Depth`] in 0.0..1.0. At 1.0
+    /// How far the LFO sweeps the cutoff, as a [`Bipolar`] in 0.0..1.0. At 1.0
     /// the sine sweeps cutoff ±50% around its base. Needs an
     /// [`lfo_rate`](Self::lfo_rate) to do anything.
     #[must_use]
-    pub const fn lfo_depth(mut self, depth: Depth) -> Self {
+    pub const fn lfo_depth(mut self, depth: Bipolar) -> Self {
         self.lfo_depth = depth;
         self
     }

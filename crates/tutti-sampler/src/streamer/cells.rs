@@ -165,18 +165,11 @@ impl Cells {
     /// same [`PlaybackRate::read_rate`] so neither tier can drop a factor or
     /// swap the pair.
     ///
-    /// The stretch term is folded in here, at the one composition point, for
-    /// the reason the other two are: this rate has three consumers in
-    /// `DiskSource` — the per-sample advance in `tick`, the per-sample advance in
-    /// `process`, and the `samples_needed` fetch estimate that has to agree with
-    /// them or the ring under- or over-runs. Applying stretch at the call sites
-    /// instead would need all three to remember, and the fetch estimate is the
-    /// one that fails silently.
-    ///
-    /// Drop the stretch term and it degenerates into varispeed on this tier: a
-    /// 2x-stretched disk voice consumes exactly as many source frames as an
-    /// unstretched one (512 vs 512, measured), so the vocoder is fed at full
-    /// rate and has nothing to spread.
+    /// The stretch term is folded in here, the one composition point: the
+    /// per-sample advance and the `samples_needed` fetch estimate all read this
+    /// rate and must agree with it or the ring under- or over-runs. Without
+    /// the term a stretched disk voice consumes as many source frames as an
+    /// unstretched one, and the vocoder has nothing to spread.
     #[inline]
     pub fn read_rate(&self) -> ReadRate {
         self.speed()

@@ -54,8 +54,10 @@ tutti-rt = { version = "0.0.1", path = "../tutti-rt" }
 # `check_range_contract` for the range-checked settings.
 tutti-fixtures = { path = "../../testing/tutti-fixtures" }
 tutti-ump = { path = "../tutti-ump", default-features = false }
-# `PeakBlocks`' serde round trip in the `serde` feature's tests.
-serde_json = "1"
+# The serde round trips of `PeakBlocks` and the range-checked settings in the
+# `serde` feature's tests; `float_roundtrip` parses a float back exactly, so a
+# bound one ulp inside its range reads back inside it.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # `benches/fft_analyses`.
 criterion.workspace = true
 

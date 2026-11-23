@@ -716,7 +716,7 @@ mod time;
 mod values;
 mod wake;
 
-pub use builder::{GraphBuilder, Renderer, Standalone};
+pub use builder::{GraphBuilder, Renderer};
 pub use command::{CANCEL_CAPACITY, COMMAND_CAPACITY, CommandId, ScheduleError, Scheduled};
 pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{

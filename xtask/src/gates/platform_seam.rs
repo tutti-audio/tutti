@@ -36,7 +36,7 @@
 
 use std::collections::BTreeMap;
 
-use super::lex::{blank, find_word_from, line_of, matching};
+use super::lex::{blank, find_word_from, line_of, matching, skipped, word};
 use super::{Report, Tree};
 
 const CORE: &str = "temporary: core moves it behind a module seam";
@@ -166,14 +166,6 @@ const PLATFORM: &[&str] = &[
     "target_has_atomic",
     "target_feature",
 ];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
-
-fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
 
 /// Whether `text` names a platform key as a whole word.
 fn mentions_platform(text: &str) -> bool {

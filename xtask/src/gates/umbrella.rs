@@ -27,14 +27,11 @@
 
 use super::Report;
 use super::Tree;
+use super::lex::skipped;
 use super::use_tree::placed_uses;
 use std::collections::BTreeMap;
 
 pub(super) const SRC: &str = "crates/tutti/src";
-
-pub(super) fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
 
 /// The module path of a file under the umbrella's `src`, as segments.
 pub(super) fn file_module(path: &str) -> Vec<String> {

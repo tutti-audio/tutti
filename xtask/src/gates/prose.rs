@@ -7,7 +7,7 @@
 //! text keeps its file's offsets, so a byte offset gives the file's line.
 
 use super::Tree;
-use super::lex::comments;
+use super::lex::{comments, skipped};
 
 const ROOTS: [&str; 4] = ["crates", "testing", "xtask", "docs"];
 
@@ -15,10 +15,6 @@ const ROOTS: [&str; 4] = ["crates", "testing", "xtask", "docs"];
 const ROOT_FILES: [&str; 4] = ["README.md", "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md"];
 
 /// Directories never entered, wherever they sit.
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
-
 /// Files under `docs/` that are a record rather than prose about the code.
 fn record(path: &str) -> bool {
     path.starts_with("docs/design/") || path.starts_with("docs/archive/")
@@ -59,10 +55,6 @@ pub(super) fn prose(tree: &dyn Tree) -> Vec<Prose> {
 }
 
 /// A byte that continues an identifier.
-pub(super) fn word(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::fake::Mem;

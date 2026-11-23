@@ -7,7 +7,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_graph::{ForkByClone, Params};
 use tutti_rt::Param;
 use tutti_session::{MainOutput, OutputPort, ParamRef, RouteSpec, Session};
-use tutti_units::{Amplitude, Depth, SampleRate, UnitParam};
+use tutti_units::{Amplitude, Bipolar, SampleRate, UnitParam};
 
 #[path = "../support/f64_nodes.rs"]
 mod f64_nodes;
@@ -42,7 +42,7 @@ fn a_route_onto_a_param_scales_an_f64_render_by_the_analytic_gain() {
     let mut m = s.mods_mut();
     m.range_raw(target, 0.0, 2.0).unwrap();
     let source = m.macro_(0.5);
-    m.route(RouteSpec::new(source, target, Depth::of(0.25)))
+    m.route(RouteSpec::new(source, target, Bipolar::of(0.25)))
         .unwrap();
     for _ in 0..6 {
         let _ = s.update();

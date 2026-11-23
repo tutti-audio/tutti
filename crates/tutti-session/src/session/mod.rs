@@ -368,7 +368,7 @@ impl<K: AppKey, C: Clock> Session<K, C> {
     /// retired values are still held (by a block in progress).
     ///
     /// The nodes are the graph's table: each node's reclaimer, kept by node
-    /// as it went in ([`SessionNode::reclaimer`](crate::SessionNode::reclaimer)),
+    /// as it went in ([`NodeParts::reclaimer`](tutti_graph::NodeParts::reclaimer)),
     /// and each hosted plugin's meter. Beside it, the cells the session
     /// publishes to itself: the project meter (and
     /// every slot following it), the transport's tempo map, the modulation lanes (inserted by the

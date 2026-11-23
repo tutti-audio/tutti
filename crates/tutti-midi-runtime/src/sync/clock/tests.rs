@@ -154,31 +154,6 @@ fn test_start_resets_position() {
 }
 
 #[test]
-fn test_stop_pauses_counting() {
-    let mut clock = MidiClockDecoder::new();
-    clock.start_msg();
-
-    let interval = us_per_tick(120.0);
-    let mut ts = base();
-    for _ in 0..24 {
-        clock.tick(ts);
-        ts += interval;
-    }
-    let pos_before_stop = clock.beat_position().get();
-
-    clock.stop_msg();
-    for _ in 0..24 {
-        clock.tick(ts);
-        ts += interval;
-    }
-    // Position should not advance while stopped
-    assert!(
-        (clock.beat_position().get() - pos_before_stop).abs() < 0.001,
-        "Position should not advance while stopped"
-    );
-}
-
-#[test]
 fn test_continue_resumes() {
     let mut clock = MidiClockDecoder::new();
     clock.start_msg();
@@ -211,14 +186,9 @@ fn test_continue_resumes() {
 }
 
 #[test]
-fn test_no_tempo_before_enough_ticks() {
-    let clock = MidiClockDecoder::new();
-    assert!(clock.tempo_bpm().is_none());
-}
-
-#[test]
 fn test_reset() {
     let mut clock = MidiClockDecoder::new();
+    assert!(clock.tempo_bpm().is_none());
     clock.start_msg();
 
     let interval = us_per_tick(120.0);

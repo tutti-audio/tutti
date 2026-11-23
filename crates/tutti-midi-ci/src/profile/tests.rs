@@ -438,16 +438,6 @@ fn the_details_inquiry_is_table_22_and_the_reply_table_23() {
     assert_eq!(got, data);
 }
 
-#[test]
-fn a_details_reply_whose_length_runs_past_the_message_or_holds_a_non_data_byte_is_malformed() {
-    let mut bytes = preamble(0x02, 0x29, to_dst());
-    bytes.extend([0x7E, 1, 2, 3, 4, 0x40, 0x03, 0x00, 1, 2]); // 3 declared, 2 there
-    assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
-    let mut bytes = preamble(0x02, 0x29, to_dst());
-    bytes.extend([0x7E, 1, 2, 3, 4, 0x40, 0x01, 0x00, 0x80]);
-    assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
-}
-
 /// Spec: m2-101/7.12#1
 #[test]
 fn profile_specific_data_is_table_28_with_a_four_byte_length() {
@@ -513,13 +503,39 @@ fn profile_specific_data_to_the_broadcast_muid_is_at_most_512_bytes_with_its_del
 }
 
 #[test]
-fn profile_specific_data_that_stops_short_or_declares_a_huge_length_is_malformed() {
-    let mut bytes = preamble(0x0F, 0x2F, to_dst());
-    bytes.extend([0x7E, 1, 2, 3, 4, 5, 0, 0, 0, 1, 2]); // 5 declared, 2 there
-    assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
-    let mut bytes = preamble(0x0F, 0x2F, to_dst());
-    bytes.extend([0x7E, 1, 2, 3, 4, 0x7F, 0x7F, 0x7F, 0x7F]); // 2^28 - 1 declared
-    assert_eq!(unread(&bytes).reason, UnreadReason::Malformed);
+fn a_length_that_runs_past_the_message_or_holds_a_non_data_byte_is_malformed() {
+    // (case, sub-ID#2, the body after the preamble)
+    let cases: [(&str, u8, u8, Vec<u8>); 4] = [
+        (
+            "details: 3 declared, 2 there",
+            0x02,
+            0x29,
+            vec![0x7E, 1, 2, 3, 4, 0x40, 0x03, 0x00, 1, 2],
+        ),
+        (
+            "details: a non-data byte",
+            0x02,
+            0x29,
+            vec![0x7E, 1, 2, 3, 4, 0x40, 0x01, 0x00, 0x80],
+        ),
+        (
+            "specific data: 5 declared, 2 there",
+            0x0F,
+            0x2F,
+            vec![0x7E, 1, 2, 3, 4, 5, 0, 0, 0, 1, 2],
+        ),
+        (
+            "specific data: 2^28 - 1 declared",
+            0x0F,
+            0x2F,
+            vec![0x7E, 1, 2, 3, 4, 0x7F, 0x7F, 0x7F, 0x7F],
+        ),
+    ];
+    for (name, channel, sub, body) in cases {
+        let mut bytes = preamble(channel, sub, to_dst());
+        bytes.extend(body);
+        assert_eq!(unread(&bytes).reason, UnreadReason::Malformed, "{name}");
+    }
 }
 
 #[test]
