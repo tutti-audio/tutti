@@ -150,8 +150,8 @@ fn a_wide_wave_keeps_its_width_and_has_no_topology() {
     let w = Wave::<f32>::new(20, SampleRate::SR_48K);
     assert_eq!((w.channels(), w.layout().count()), (20, 20));
     assert_eq!((w.topology(), w.placement()), (None, Placement::Default));
-    let stated = Wave::<f32>::unplaced(
-        ChannelLayout::from(40u16),
+    let stated = Wave::<f32>::with_placement(
+        ChannelSet::unassigned(ChannelLayout::from(40u16)),
         Placement::Stated,
         SampleRate::SR_48K,
     );

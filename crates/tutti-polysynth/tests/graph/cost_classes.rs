@@ -1,7 +1,7 @@
 //! The synth declares a cost class from its oscillator lanes: `Moderate` up to sixteen
 //! (`polyphony` × unison), `Heavy` past them. Declaring one changes only the parallel schedule:
 //! sibling synths pack into fewer tasks than undeclared ones, and the render on a pool is bit
-//! for bit the serial one.
+//! for bit the one-participant one.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -166,7 +166,7 @@ fn the_class_follows_the_lane_count() {
 /// Eight `Moderate` synths beside two `Heavy` ones: the moderate ones (each
 /// fused with its clip) pack into fewer tasks than the same synths
 /// declaring nothing, the plan still spreads, and on a pool of two and of
-/// four the render is bit for bit the serial one.
+/// four the render is bit for bit the one-participant one.
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
 fn moderate_synths_pack_and_render_bit_identically() {

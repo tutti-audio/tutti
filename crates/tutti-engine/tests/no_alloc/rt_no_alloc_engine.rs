@@ -24,9 +24,9 @@
 //! over arc-lend's stress test, both run by arc-lend's own CI.
 
 use std::sync::Arc;
-use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
-use tutti_engine::Engine;
+use tutti_buffers::{ChannelLayout, ChannelSet};
+use tutti_engine::{Engine, OutputPlacement};
 use tutti_fixtures::midi;
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
@@ -684,7 +684,9 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
     speakers.swap(0, 1);
     assert_eq!(speakers[0], Speaker::FrontRight);
     control
-        .state_device(twelve, Some(ChannelTopology::new(speakers).unwrap()))
+        .state_device(OutputPlacement::stated(ChannelSet::from(
+            ChannelTopology::new(speakers).unwrap(),
+        )))
         .expect("a stated device");
     let id = ed.spec().main_output_id.next();
     control

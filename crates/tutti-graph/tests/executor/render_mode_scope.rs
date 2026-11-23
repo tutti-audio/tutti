@@ -1,5 +1,5 @@
 //! A render prepared `Realtime` runs inside `RtScope`; one prepared `Offline`
-//! does not, serial or on a pool.
+//! does not, with no pool or on a pool.
 //!
 //! A node that allocates in `process` aborts the process under the area
 //! binary's `RtAllocCheck` when the executor marked the thread, so each case
@@ -39,7 +39,7 @@ impl Node for Allocating {
 }
 
 /// Eight allocating sources, one output channel each, prepared in `mode`, on a
-/// pool of `participants` (`1`: serial), rendered for a few blocks.
+/// pool of `participants` (`1`: one-participant), rendered for a few blocks.
 fn render(mode: RenderMode, participants: usize) {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(BLOCK).with_render_mode(mode));
     if participants > 1 {
@@ -66,7 +66,7 @@ fn render(mode: RenderMode, participants: usize) {
 }
 
 /// **The mode of the prepare decides the scope.** An allocating node aborts
-/// a `Realtime` render, and renders under an `Offline` one, serial and on a
+/// a `Realtime` render, and renders under an `Offline` one, with no pool and on a
 /// pool of two participants.
 #[test]
 fn an_allocating_node_aborts_a_realtime_render_and_renders_offline() {

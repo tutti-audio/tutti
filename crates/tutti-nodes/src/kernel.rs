@@ -10,7 +10,7 @@
 use core::ops::Range;
 
 use tutti_buffers::MaxBlock;
-use tutti_buffers::{Float, InputOutput, Mono, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
     BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
@@ -43,6 +43,21 @@ impl<'a, F: Float> ControlSignals<'a, F> {
     pub fn get(&self, k: usize) -> Option<Mono<'a, F>> {
         self.0.get(k).copied().flatten()
     }
+}
+
+/// The bus of `width` unnamed channels that `what` is built on.
+///
+/// # Panics
+///
+/// Past a bus's width ([`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS)): `what` is one bus.
+#[track_caller]
+pub(crate) fn unassigned_bus(width: ChannelLayout, what: &str) -> ChannelTopology {
+    ChannelTopology::unassigned(width).unwrap_or_else(|| {
+        panic!(
+            "{what} is at most {} channels wide",
+            tutti_buffers::MAX_CHANNELS
+        )
+    })
 }
 
 /// An effect's algorithm with its state, as [`KernelNode`] runs it.

@@ -6,7 +6,7 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, EnvelopeFilterBank, EnvelopeFilterControls, Lerp, SimdLanes,
     SvfType,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, Q, SampleRate, Seconds, Semitones, Tail};
 
 use super::filter_bus;
@@ -146,12 +146,7 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

@@ -6,13 +6,11 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor, TubeDrive, TubeStage,
     TubeStageControls,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
-use tutti_units::{Db, SampleRate, Samples, Tail, UnitAddr, UnitParam};
+use tutti_graph::{Cost, Shape};
+use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::oversampled::Oversampled;
-use crate::params::{ControlSet, HasControl};
-use tutti_graph::DeclaredUnit;
 
 /// What a [`TubeStageNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,8 +79,7 @@ pub type TubeStageNode<F> = KernelNode<TubeStageKernel<F>>;
 
 impl<F: Float + Lerp> From<TubeStageConfig> for TubeStageNode<F> {
     fn from(config: TubeStageConfig) -> Self {
-        let input = ChannelTopology::unassigned(config.width)
-            .expect("a tube stage is at most 16 channels wide");
+        let input = unassigned_bus(config.width, "a tube stage");
         Self::with_kernel(
             TubeStageKernel::<F>::new(&config, input),
             TubeStageSet,
@@ -95,43 +92,14 @@ impl<F: Float + Lerp> From<TubeStageConfig> for TubeStageNode<F> {
 #[derive(Clone, Copy, Debug)]
 pub struct TubeStageSet;
 
-/// The one control is the drive, a range-checked [`TubeDrive`], which `control_set!` does not
-/// take (its rows are units), so the set is written out.
-impl ControlSet for TubeStageSet {
-    type Controls = TubeStageControls;
-
-    fn addrs(&self) -> &'static [UnitAddr] {
-        const ALL: &[UnitAddr] = &[UnitAddr::first(UnitParam::GainDb)];
-        ALL
-    }
-
-    fn units(&self) -> &'static [DeclaredUnit] {
-        const ALL: &[DeclaredUnit] = &[DeclaredUnit::of::<Db>()];
-        ALL
-    }
+control_set! {
+    TubeStageSet(_s): TubeStageControls = TubeStageControls::DEFAULT;
+    live: (all);
+    GainDb => Db = drive via TubeDrive;
 
     fn defaults(&self) -> TubeStageControls {
         TubeStageControls::DEFAULT
     }
-
-    fn flatten(&self, c: &TubeStageControls, out: &mut [f64]) {
-        let all = [c.drive.get().get()];
-        out.copy_from_slice(&all[..out.len()]);
-    }
-
-    fn assemble(&self, v: &[f64]) -> TubeStageControls {
-        let mut c = TubeStageControls::DEFAULT;
-        if let Some(&x) = v.first() {
-            // The one place a live drive is changed: a cell is written per frame, with no
-            // caller to refuse it to.
-            c.drive = TubeDrive::held(Db::new(x));
-        }
-        c
-    }
-}
-
-impl HasControl<{ UnitParam::GainDb as u16 }> for TubeStageSet {
-    type Unit = Db;
 }
 
 /// The [`Kernel`] of a [`TubeStageNode`].
@@ -180,12 +148,7 @@ impl<F: Float + Lerp> Kernel for TubeStageKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Heavy)
+        Shape::through(self.input).cost(Cost::Heavy)
     }
 
     fn prepare(&mut self, rate: SampleRate, max_block: MaxBlock) {
@@ -249,6 +212,7 @@ mod tests {
     use crate::test_support::{amplitude_at, drive_block, prepared, render_chunked, sine};
     use tutti_graph::contract::assert_param_fork;
     use tutti_graph::{Node, ParamNode};
+    use tutti_units::UnitParam;
 
     const RATE: f64 = 48_000.0;
 

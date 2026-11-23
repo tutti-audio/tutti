@@ -1,4 +1,4 @@
-//! Every node runs inside `with_no_denormals`, on the serial executor and on
+//! Every node runs inside `with_no_denormals`, on the one-participant executor and on
 //! every participant of a pool, helpers included.
 //!
 //! The graph is `PROBES` independent nodes, each busy for a few tens of
@@ -130,7 +130,7 @@ fn render_probes(workers: usize, entry: Entry) {
 }
 
 #[test]
-fn nodes_run_flushing_on_the_serial_executor_and_on_every_participant() {
+fn nodes_run_flushing_with_no_pool_and_on_every_participant() {
     assert!(
         !flushed(),
         "the test thread must start with subnormals preserved, and the CPU must have them"

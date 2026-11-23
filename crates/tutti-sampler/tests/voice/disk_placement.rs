@@ -404,6 +404,7 @@ fn stream_fixture(f: &Fixture) -> (tempfile::TempDir, Rig, StreamReader<f32>) {
     assert_eq!(
         tutti_codec::FileIn::<f32>::open(dir.path().join("placed.wav"))
             .expect("opens")
+            .channel_set()
             .topology()
             .unwrap()
             .positions()

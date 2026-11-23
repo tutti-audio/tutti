@@ -1,12 +1,12 @@
 //! [`DecorrelatorNode`]: velvet-noise decorrelation of every channel.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, Decorrelator, VelvetDensity, VelvetLength};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 use crate::params::NoControls;
 
 /// What a [`DecorrelatorNode`] is made from: its width and its sequences.
@@ -99,8 +99,7 @@ impl<F: Float> Kernel for DecorrelatorKernel<F> {
     /// `width` channels in and out, `Heavy`: a multiply-add for each impulse a frame, a
     /// hundred a channel at the default density.
     fn shape(&self) -> Shape {
-        let bus = ChannelTopology::unassigned(self.config.width)
-            .expect("a decorrelator is at most 16 channels wide");
+        let bus = unassigned_bus(self.config.width, "a decorrelator");
         Shape::through(bus).cost(Cost::Heavy)
     }
 

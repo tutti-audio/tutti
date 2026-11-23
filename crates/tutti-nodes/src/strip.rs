@@ -493,7 +493,8 @@ mod tests {
 
     /// Left, right, centre: a placed bus of three.
     fn lcr() -> ChannelTopology {
-        ChannelTopology::new([FrontLeft, FrontRight, FrontCenter]).expect("three speakers fit a bus")
+        ChannelTopology::new([FrontLeft, FrontRight, FrontCenter])
+            .expect("three speakers fit a bus")
     }
 
     /// The strip measured as a `Light` node, at every width.
@@ -966,7 +967,11 @@ mod tests {
 
     /// One frame of ones through a strip on `topology` at `balance` and
     /// `volume`, read back by the speaker each channel feeds.
-    fn gain_by_speaker(topology: ChannelTopology, balance: f64, volume: f64) -> Vec<(Speaker, f32)> {
+    fn gain_by_speaker(
+        topology: ChannelTopology,
+        balance: f64,
+        volume: f64,
+    ) -> Vec<(Speaker, f32)> {
         let mut s = strip(topology);
         s.volume().store(Amplitude::new(volume));
         set_balance(&s, balance);

@@ -122,10 +122,10 @@ impl Script {
     }
 }
 
-/// The executors each case runs: serial, and parallel on a participant
+/// The executors each case runs: one-participant, and parallel on a participant
 /// count the seed picks from `common::WORKERS` — so every generated graph is
 /// held to the reference on both, and the parallel render is held to the
-/// serial one through it, sample for sample.
+/// one-participant one through it, sample for sample.
 fn modes(seed: u64) -> [usize; 2] {
     [1, common::workers_for(seed)]
 }
@@ -150,7 +150,7 @@ proptest! {
     /// tap of every output's source and an outputs tap open, the executor
     /// still renders the reference's graph bit for bit, and the lanes of each
     /// are the output channels, sample for sample, at every block schedule,
-    /// serial and parallel. The outputs tap reads **every** channel, summed
+    /// one-participant and parallel. The outputs tap reads **every** channel, summed
     /// ones included (post-sum and aligned); the ports tap names the source of
     /// a one-source channel only (a tap of ports names no sum), so it is
     /// compared on those. The reference knows no taps; this holds the tap ops
@@ -1586,14 +1586,14 @@ fn weigh(desc: &mut Desc, rng: &mut Rng) {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// Weighted lanes on the random graphs, serial and parallel, are the
+    /// Weighted lanes on the random graphs, one-participant and parallel, are the
     /// reference's bit for bit: with weights on a third of the edges (feedback
     /// ones, fan-ins, one-edge sinks, output channels, and chains behind PDC
     /// included), a fader moved between blocks (`set_edge_gain`, so ramps of
     /// every block length in the schedule), and an edit halfway that rewires,
     /// removes and regenerates nodes (lane state carried by edge, entries of
     /// vanished edges dropped, new ones added). The parallel render is held to
-    /// the serial one through the reference.
+    /// the one-participant one through the reference.
     #[test]
     fn weighted_graphs_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
         for workers in modes(seed) {
@@ -1637,7 +1637,7 @@ proptest! {
 
     /// The same at `f64`, with the control lanes moving: edge weights moved
     /// between blocks (ramps of every block length), nodes' mixes moved and
-    /// driven by lanes, serial and parallel. `Executor<f64>` renders every
+    /// driven by lanes, one-participant and parallel. `Executor<f64>` renders every
     /// ramp and lane as `Reference<f64>` does, bit for bit.
     #[test]
     fn the_f64_executor_with_moving_weights_and_mixes_is_the_f64_reference(
@@ -1782,7 +1782,7 @@ fn drive(desc: &mut Desc, rng: &mut Rng) {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// Driven lanes on the random graphs, serial and parallel, are the
+    /// Driven lanes on the random graphs, one-participant and parallel, are the
     /// reference's bit for bit: lanes of several periods and latencies drive
     /// about half the weighted edges (at ports and output channels, behind
     /// PDC, in fan-ins and one-edge sinks), with ranges that clamp, a range
@@ -1900,14 +1900,14 @@ fn pick_mode(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_graph::NodeMo
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
 
-    /// Modes on the random graphs, serial and parallel, are the reference's
+    /// Modes on the random graphs, one-participant and parallel, are the reference's
     /// bit for bit: about one block in five a node (any: latent ones, event
     /// ones, sources, sinks, in-place ones, sums of several inputs, nodes
     /// behind PDC) is set to a random mode, so toggles land mid-fade, during
     /// the warm-up, while parked and in blocks of every length in the
     /// schedule; an edit halfway rewires, removes and regenerates nodes (a
     /// kept node's mode carries, a regenerated one starts steady in the
-    /// spec's mode). The parallel render is held to the serial one through
+    /// spec's mode). The parallel render is held to the one-participant one through
     /// the reference.
     #[test]
     fn modes_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {
@@ -2002,7 +2002,7 @@ fn pick_mix(desc: &Desc, rng: &mut Rng) -> Option<(NodeKey, tutti_units::Mix)> {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
 
-    /// Mixes on the random graphs, serial and parallel, are the reference's bit
+    /// Mixes on the random graphs, one-participant and parallel, are the reference's bit
     /// for bit: about one block in four a node (any: latent ones, event ones,
     /// sources, sinks, in-place ones, sums, nodes behind PDC) gets a random mix,
     /// and one in eight of those blocks also a random mode, so a mix meets a
@@ -2113,7 +2113,7 @@ fn prune_mix_lanes(desc: &mut Desc) {
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(192), ..ProptestConfig::default() })]
 
-    /// Driven mixes on the random graphs, serial and parallel, are the
+    /// Driven mixes on the random graphs, one-participant and parallel, are the
     /// reference's bit for bit: lanes of several periods and latencies drive
     /// the mix of about a third of the nodes (latent ones, event ones, sources,
     /// sinks, in-place ones, nodes behind PDC), with ranges that clamp, a mix
@@ -2411,7 +2411,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
     /// A bus edge is nothing the interpreters know: the lowered spec renders
-    /// the same on the executor, serial and parallel, as on the reference,
+    /// the same on the executor, one-participant and parallel, as on the reference,
     /// bit for bit, at every block schedule, over random graphs of folds
     /// (weighted lanes of every width and unity copies) beside ordinary
     /// edges, with PDC rings where a latent node sits on a lane.
@@ -2500,7 +2500,7 @@ proptest! {
 
     /// A bus edge into the main output is lanes on the output channels and nothing
     /// the interpreters know: the lowered spec renders the same on the
-    /// executor, serial and parallel, as on the reference, bit for bit, with
+    /// executor, one-participant and parallel, as on the reference, bit for bit, with
     /// PDC aligning each lane to the outputs' time.
     #[test]
     fn main_output_bus_edges_are_bit_identical_to_the_reference(seed in any::<u64>(), which in 0usize..5) {

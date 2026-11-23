@@ -1,6 +1,6 @@
 //! The MIDI nodes are event-only and declare `Cost::Light`. Declaring it changes only the parallel schedule: sibling
 //! clip-to-output lanes pack into fewer tasks than undeclared ones, and on a
-//! pool every event leaves on the frame the serial walk sends it on.
+//! pool every event leaves on the frame the one-participant walk sends it on.
 
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
@@ -194,10 +194,10 @@ fn every_midi_node_is_light() {
 /// Sixteen light clip → out lanes beside two heavy ones: the light lanes
 /// pack into fewer tasks than the same lanes declaring nothing, the plan
 /// spreads from a one-frame block, and on a pool of two and of four every
-/// event is sent on the absolute frame the serial walk sends it on.
+/// event is sent on the absolute frame the one-participant walk sends it on.
 #[test]
 #[cfg_attr(miri, ignore = "spawns a worker pool")]
-fn light_lanes_pack_and_send_on_the_serial_frames() {
+fn light_lanes_pack_and_send_on_the_one_participant_frames() {
     let (declared, ..) = graph(4, true);
     let (undeclared, ..) = graph(4, false);
     let (plan, bare) = (

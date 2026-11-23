@@ -8,7 +8,7 @@ use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, MAX_NODE_TAIL, Shape};
+use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -161,11 +161,9 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
     const GRID: usize = FdnBank::<F>::CHUNK;
 
     fn shape(&self) -> Shape {
-        let output =
-            Bus::banded(ChannelTopology::STEREO, BusRole::Main, 1).expect("one band is a bus");
         Shape::buses(
             Buses::main(ChannelTopology::MONO),
-            Buses::NONE.with(output).expect("one bus"),
+            Buses::main(ChannelTopology::STEREO),
         )
         .cost(Cost::Moderate)
     }

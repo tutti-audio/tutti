@@ -11,7 +11,7 @@
 //!
 //! It is the read edge, the counterpart of [`FileOut`](crate::FileOut).
 //!
-//! **It does not downmix.** [`topology`](FileIn::topology) says which speaker
+//! **It does not downmix.** [`channel_set`](FileIn::channel_set) says which speaker
 //! each channel feeds, and a caller wanting another width builds a
 //! [`tutti_buffers::Fold`] from it, as every other engine edge does.
 //!
@@ -32,12 +32,12 @@ use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
-use tutti_buffers::{ChannelLayout, ChannelTopology, Placement};
+use tutti_buffers::{ChannelLayout, ChannelSet, Placement};
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave};
 use tutti_units::{SampleRate, Samples};
 
 use super::error::convert;
-use super::placement::topology_of;
+use super::placement::channels_of;
 use super::read::{PacketDecoder, first_audio_track, probe_asset, sample_rate_of, total_frames_of};
 use crate::DecodeError;
 use tutti_platform::Asset;
@@ -58,7 +58,7 @@ const TRUNCATED: &str = "stream ended before the container's frame count";
 /// [`read_wave`](crate::read_wave)). [`pull`](Source::pull) fills an
 /// interleaved view of `S` **at the file's own channel width** and
 /// returns the frames produced; a short count and then [`Pull::Ended`] mark the
-/// end of the file. It does not downmix: [`topology`](Self::topology) says which speaker each
+/// end of the file. It does not downmix: [`channel_set`](Self::channel_set) says which speaker each
 /// channel feeds, and a caller wanting another width builds a
 /// [`tutti_buffers::Fold`] from it.
 ///
@@ -88,11 +88,9 @@ pub struct FileIn<S: Sample = f32> {
     reader: Box<dyn FormatReader>,
     decoder: PacketDecoder<S>,
     track_id: u32,
-    /// The interleave stride: the file's width.
-    layout: ChannelLayout,
-    /// Which speaker each channel feeds, when the width has a topology.
-    topology: Option<ChannelTopology>,
-    /// Whether the container stated `topology` or only its channel count.
+    /// The file's channels; its width is the interleave stride.
+    channels: ChannelSet,
+    /// Whether the container stated `channels` or only their count.
     placement: Placement,
     sample_rate: SampleRate,
     total_frames: Option<u64>,
@@ -132,7 +130,7 @@ impl<S: Sample> std::fmt::Debug for FileIn<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FileIn")
             .field("track_id", &self.track_id)
-            .field("topology", &self.topology)
+            .field("channels", &self.channels)
             .field("sample_rate", &self.sample_rate)
             .field("total_frames", &self.total_frames)
             .field("leftover_frames", &self.leftover_frames())
@@ -159,15 +157,15 @@ impl<S: Sample> FileIn<S> {
         self.sample_rate
     }
 
-    /// Which speaker each channel of the interleaved frames feeds, in channel
-    /// order: what the container names, or [`ChannelTopology::default_for`] for
-    /// the count it states (see [`read_wave`](crate::read_wave)); `None` for a
-    /// file wider than a topology holds. Its width is [`layout`](Source::layout)'s.
-    pub fn topology(&self) -> Option<&ChannelTopology> {
-        self.topology.as_ref()
+    /// The channels of the interleaved frames, which speaker each feeds in
+    /// channel order: what the container names, or [`ChannelSet::default_for`]
+    /// the count it states (see [`read_wave`](crate::read_wave)); a file wider
+    /// than a topology holds has none. Its width is [`layout`](Source::layout)'s.
+    pub fn channel_set(&self) -> &ChannelSet {
+        &self.channels
     }
 
-    /// Whether [`topology`](Self::topology) was stated by the container or
+    /// Whether [`channel_set`](Self::channel_set) was stated by the container or
     /// the default layout for a channel count.
     pub fn placement(&self) -> Placement {
         self.placement
@@ -175,7 +173,10 @@ impl<S: Sample> FileIn<S> {
 
     /// Frames held in `leftover`, consumed or not.
     fn leftover_frames(&self) -> usize {
-        self.layout.from_interleaved_len(self.leftover.len()).get()
+        self.channels
+            .width()
+            .from_interleaved_len(self.leftover.len())
+            .get()
     }
 
     /// Returns whether [`seek`](Self::seek) can serve arbitrary positions:
@@ -213,7 +214,7 @@ impl<S: Sample> FileIn<S> {
         // no container this build reads yields a zero-channel track, and a
         // fixture cannot be built or stubbed (symphonia's `Channels` come from
         // the demuxer).
-        let (layout, topology, placement) = topology_of(params.channels.as_ref());
+        let (channels, placement) = channels_of(params.channels.as_ref());
 
         let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
 
@@ -231,8 +232,7 @@ impl<S: Sample> FileIn<S> {
             reader,
             decoder,
             track_id,
-            layout,
-            topology,
+            channels,
             placement,
             sample_rate,
             total_frames,
@@ -296,7 +296,7 @@ impl<S: Sample> FileIn<S> {
             self.origin_ts.get_or_insert(ts);
             // A packet whose channel count disagrees with `open`'s is refused:
             // the read's stride is the file's width.
-            let layout = self.layout;
+            let layout = self.channels.width();
             let packet_width = self.decoder.planes().len();
             if packet_width != usize::from(layout.count()) {
                 return Err(DecodeError::ChannelsChanged {
@@ -352,9 +352,9 @@ impl<S: Sample> FileIn<S> {
         &mut self,
         out: InterleavedMut<'_, S>,
     ) -> Result<Samples, DecodeError> {
-        if out.layout() != self.layout {
+        if out.layout() != self.channels.width() {
             return Err(DecodeError::Width {
-                file: self.layout,
+                file: self.channels.width(),
                 view: out.layout(),
             });
         }
@@ -382,7 +382,7 @@ impl<S: Sample> FileIn<S> {
     /// [`fill_sequential_interleaved`](Self::fill_sequential_interleaved),
     /// keeping the frames filled before a decode error.
     fn fill(&mut self, mut out: InterleavedMut<'_, S>) -> (usize, Option<DecodeError>) {
-        let layout = self.layout;
+        let layout = self.channels.width();
         let capacity_frames = out.frames().get();
         let mut filled = 0usize;
 
@@ -547,7 +547,7 @@ impl<S: Sample> FileIn<S> {
 ///
 /// No downmix happens here: `layout()` describes exactly what `pull`
 /// produces. A caller wanting another width builds a [`tutti_buffers::Fold`] from
-/// [`topology`](FileIn::topology).
+/// [`channel_set`](FileIn::channel_set).
 ///
 /// A file is synchronous, so it never answers [`Pull::Starved`].
 impl<S: Sample> Source for FileIn<S> {
@@ -555,7 +555,7 @@ impl<S: Sample> Source for FileIn<S> {
 
     /// The file's own width, which is what [`pull`](Self::pull) produces.
     fn layout(&self) -> ChannelLayout {
-        self.layout
+        self.channels.width()
     }
 
     /// `out` holds `out.len()` frames, and the count is that many FRAMES at

@@ -159,7 +159,7 @@ fn an_unplaceable_declaration_is_refused() {
         ChannelTopology::new(vec![Speaker::Unassigned; tutti_buffers::MAX_CHANNELS + 1]).is_err()
     );
     let wide = offline(Session::builder(), 32).unwrap();
-    assert_eq!(wide.output_device().unwrap().topology, None);
+    assert_eq!(wide.output_device().unwrap().channels.topology(), None);
 
     // After the build.
     let mut s = offline(Session::builder(), 2).unwrap();
@@ -322,8 +322,8 @@ fn the_output_device_reads_stated_or_default() {
         .expect("an engine renders it");
     assert_eq!(placed.placement, Placement::Default);
     assert_eq!(
-        placed.topology,
-        Some(tutti_buffers::Bed::Surround51.topology())
+        placed.channels,
+        tutti_buffers::ChannelSet::from(tutti_buffers::Bed::Surround51.topology())
     );
 
     let wired = ChannelTopology::new([
@@ -338,7 +338,7 @@ fn the_output_device_reads_stated_or_default() {
     let stated = offline(Session::builder().device_topology(wired), 6).unwrap();
     let placed = stated.output_device().unwrap();
     assert_eq!(placed.placement, Placement::Stated);
-    assert_eq!(placed.topology, Some(wired));
+    assert_eq!(placed.channels, tutti_buffers::ChannelSet::from(wired));
 
     let detached = Session::builder().build_detached(RATE).unwrap();
     assert_eq!(detached.output_device(), None, "no engine, no device");

@@ -1,12 +1,12 @@
 //! [`CombFilterNode`]: a delay summed with the signal, forward or back.
 
 use tutti_buffers::Float;
-use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
+use tutti_buffers::{ChannelLayout, InputOutput, MaxBlock};
 use tutti_dsp::{BlockMismatch, COEFF_INTERVAL, CombBank, CombControls, CombDelay, CombForm};
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Feedback, SampleRate, Tail};
 
-use crate::kernel::{ControlSignals, Kernel, KernelNode};
+use crate::kernel::{ControlSignals, Kernel, KernelNode, unassigned_bus};
 
 /// What a [`CombFilterNode`] is made from: its width, its form and delay, and where its
 /// coefficient starts.
@@ -117,8 +117,7 @@ impl<F: Float> Kernel for CombFilterKernel<F> {
 
     /// `width` channels in and out, `Light`: a ring read and a multiply-add per sample.
     fn shape(&self) -> Shape {
-        let bus =
-            ChannelTopology::unassigned(self.width).expect("a comb is at most 16 channels wide");
+        let bus = unassigned_bus(self.width, "a comb");
         Shape::through(bus).cost(Cost::Light)
     }
 

@@ -2,7 +2,7 @@
 //! topology, so how a main output of known or bare channels reaches a device or a
 //! file of which only the width is known lives here, once.
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, Speaker};
+use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology, Speaker};
 use tutti_buffers::{Float, Fold, FoldEnd, FoldError, FoldLevels};
 
 /// The generation of the graph's main output: each commit that changes the main output's
@@ -116,44 +116,37 @@ pub enum MainOutputError {
 /// known: a device, a file, a node's outputs.
 ///
 /// The destination is taken to be the engine's own order for its width
-/// ([`ChannelTopology::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4,
+/// ([`ChannelSet::default_for`]): mono, stereo, quad, 5.1, 7.1 and 7.1.4,
 /// and unassigned channels past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS). A
-/// destination that states its placement is [`fold_to_topology`].
+/// destination that states its placement is [`fold_to_channels`].
 ///
 /// # Errors
 ///
-/// As [`fold_to_width_with`].
+/// As [`fold_to_channels`].
 pub fn fold_to_width<F: Float>(
     src: &ChannelTopology,
     dst: ChannelLayout,
 ) -> Result<Fold<F>, FoldError> {
-    fold_to_width_with(
-        src,
-        dst,
-        ChannelTopology::default_for(dst).as_ref(),
-        FoldLevels::default(),
-    )
+    fold_to_channels(src, &ChannelSet::default_for(dst), FoldLevels::default())
 }
 
-/// [`fold_to_topology_with`] into a destination of `dst` channels whose
-/// topology is `dst_topology` when it has one: a destination wider than
-/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS) has none, and is unassigned
-/// channels, taken by index.
+/// [`fold_to_topology_with`] into the channels `dst`: by speaker where it has a
+/// topology, and by index into a destination wider than
+/// [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS), which has none.
 ///
 /// # Errors
 ///
 /// As [`fold_to_topology_with`].
-pub fn fold_to_width_with<F: Float>(
+pub fn fold_to_channels<F: Float>(
     src: &ChannelTopology,
-    dst: ChannelLayout,
-    dst_topology: Option<&ChannelTopology>,
+    dst: &ChannelSet,
     levels: FoldLevels,
 ) -> Result<Fold<F>, FoldError> {
-    match dst_topology {
-        Some(dst) => fold_to_topology_with(src, dst, levels),
+    match dst.topology() {
+        Some(topology) => fold_to_topology_with(src, topology, levels),
         None => {
             refuse_unnamed(src)?;
-            Fold::by_index(src.width(), dst)
+            Fold::by_index(src.width(), dst.width())
         }
     }
 }

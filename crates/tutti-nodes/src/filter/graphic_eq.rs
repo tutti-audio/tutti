@@ -6,7 +6,7 @@ use tutti_dsp::{BlockMismatch, DecayTime, GraphicBands, SimdLanes, SosCoefficien
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Tail};
 
-use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use super::ramped::{RAMP_STEPS, RampedSos};
 use super::{MAX_EQ_GAIN, eq_gain};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
@@ -174,7 +174,7 @@ impl<F: Float + SimdLanes> Kernel for GraphicEqKernel<F> {
             GraphicBands::Octave => Cost::Moderate,
             _ => Cost::Heavy,
         };
-        filter_shape(self.input).cost(cost)
+        Shape::through(self.input).cost(cost)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

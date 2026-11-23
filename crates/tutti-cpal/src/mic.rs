@@ -46,7 +46,7 @@ use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 
-use tutti_buffers::{ChannelLayout, ChannelTopology, SampleFormat};
+use tutti_buffers::{ChannelLayout, ChannelSet, SampleFormat};
 use tutti_buffers::{Float, Fold, Interleaved, InterleavedMut, Pull, Source};
 use tutti_codec::{FileOut, Format, Spec};
 use tutti_graph::{InletRing, TapReader, TapWriter};
@@ -105,7 +105,7 @@ struct StreamHandle(
 /// the rule in `Sample`, so an `i32` device keeps its bits in an `f64` graph.
 ///
 /// Its [`layout`](Source::layout) is the number of inputs selected, and its
-/// [`topology`](Self::topology) says they feed no speaker.
+/// [`channel_set`](Self::channel_set) says they feed no speaker.
 ///
 /// [`open_with_monitor`](Self::open_with_monitor) also returns the reader of a
 /// second, shallow (about 10 ms) ring fed from the same callback, for an inlet
@@ -453,13 +453,13 @@ impl<F: Float> MicIn<F> {
         self.device_inputs
     }
 
-    /// Which speaker each delivered channel feeds: none, they are numbered
-    /// device inputs ([`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned)).
-    /// [`Fold::between`] this to the topology a mic should be placed in. `None`
-    /// for a mic wider than a topology holds.
+    /// The delivered channels: numbered device inputs that feed no speaker
+    /// ([`Speaker::Unassigned`](tutti_buffers::Speaker::Unassigned)), with no
+    /// topology past [`MAX_CHANNELS`](tutti_buffers::MAX_CHANNELS). [`Fold::between`]
+    /// its topology to the one a mic should be placed in.
     #[must_use]
-    pub fn topology(&self) -> Option<ChannelTopology> {
-        ChannelTopology::unassigned(self.tap.layout())
+    pub fn channel_set(&self) -> ChannelSet {
+        ChannelSet::unassigned(self.tap.layout())
     }
 
     /// Creates a file sink that matches this mic: its sample rate, its

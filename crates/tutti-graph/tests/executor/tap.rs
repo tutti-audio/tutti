@@ -280,9 +280,9 @@ fn a_tap_is_aligned_by_the_compiler_and_any_width() {
     assert!(lane(&read.edges, 2, 1).iter().all(|&x| x == 0.0));
 }
 
-/// The parallel render, outputs and every tap, is bit-identical to the serial
+/// The parallel render, outputs and every tap, is bit-identical to the one-participant
 /// one at several worker counts, with every participant inside
-/// `assert_no_alloc`, and the serial render itself is the analytic one.
+/// `assert_no_alloc`, and the one-participant render itself is the analytic one.
 #[test]
 fn the_parallel_taps_are_bit_identical_and_allocation_free() {
     let mut s = rig(1, false);
@@ -1017,7 +1017,7 @@ fn port(node: u64, port: u16) -> PortSource {
 /// new width on silence, and the commit succeeds: a recording or a display
 /// must not wedge the graph. The silence is zeros in the stream, not a loss
 /// (`take_lost` stays 0) and not a gap (the stream keeps its length), and the
-/// other lanes play on, on the serial and the pooled executor alike.
+/// other lanes play on, on the one-participant and the pooled executor alike.
 #[test]
 fn a_narrowed_node_silences_the_tap_lanes_past_its_width_and_commits() {
     for (workers, gated) in [(1, false), (3, true)] {

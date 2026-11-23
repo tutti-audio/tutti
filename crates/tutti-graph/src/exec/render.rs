@@ -342,7 +342,7 @@ impl<F: Float> Executor<F> {
                 let fifo = f.as_mut().expect("built by apply");
                 let out = &mut events[spec.slot as usize];
                 out.clear();
-                fifo.pop_due_slot(out, frames);
+                fifo.pop_due(out, frames);
             }
 
             let due = commands.deliveries();

@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 #[cfg(codec)]
 use tutti_buffers::Source;
-use tutti_buffers::{ChannelLayout, ChannelTopology};
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Float, Wave};
 use tutti_measure::{Measure, StreamMeter};
 #[cfg(codec)]
@@ -177,7 +177,7 @@ where
         let layout = reader.layout();
         let context = A::Context::from_audio(reader.sample_rate(), layout);
         let mut meter = self.analysis.measure(context)?;
-        let mut chunk = Chunk::new(layout, reader.topology().as_ref());
+        let mut chunk = Chunk::new(&reader.channel_set());
         loop {
             reader.next(&mut chunk)?;
             if chunk.is_empty() {
@@ -336,11 +336,11 @@ impl<'w, S: Float> Reader<'w, S> {
         }
     }
 
-    fn topology(&self) -> Option<ChannelTopology> {
+    fn channel_set(&self) -> ChannelSet {
         match self {
-            Self::Wave { wave, .. } => wave.topology().cloned(),
+            Self::Wave { wave, .. } => wave.channel_set(),
             #[cfg(codec)]
-            Self::File(file) => file.topology().cloned(),
+            Self::File(file) => *file.channel_set(),
         }
     }
 

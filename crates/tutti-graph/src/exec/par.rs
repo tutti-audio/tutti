@@ -832,7 +832,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 let mut fifo = self.event_fb.one(feedback as usize);
                 let fifo = fifo.as_mut().expect("built by apply");
                 let e = self.events.slots();
-                let lost = fifo.push_slot(e.slot(src));
+                let lost = fifo.push(e.slot(src));
                 self.dropped
                     .charge_feedback(fx.plan, feedback, u64::from(lost));
             }
