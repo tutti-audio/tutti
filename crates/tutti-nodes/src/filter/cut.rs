@@ -8,11 +8,11 @@ use tutti_dsp::{
     Elliptic, EllipticTolerances, LinkwitzRiley, PassbandRipple, SimdLanes, SosCoefficients,
     StopbandAttenuation, System, TAIL_FLOOR,
 };
-use tutti_graph::Shape;
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Hz, SampleRate, Samples, Tail};
 
 use super::filter_bus;
-use super::ramped::{RAMP_STEPS, RampedSos, filter_shape};
+use super::ramped::{RAMP_STEPS, RampedSos};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// The lowest cutoff a filter takes: 10 Hz.
@@ -219,7 +219,7 @@ impl<F: Float + SimdLanes> Kernel for CutFilterKernel<F> {
     const GRID: usize = RAMP_STEPS as usize;
 
     fn shape(&self) -> Shape {
-        filter_shape(self.input)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     fn prepare(&mut self, rate: SampleRate, _: MaxBlock) {

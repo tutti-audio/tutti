@@ -12,7 +12,7 @@
 //! `tutti-midi-runtime`) to the event input; each event is applied on its own
 //! frame. The rest of the crate is configuration: `SynthConfig` with its
 //! `OscillatorType`, `FilterType`, `Adsr` and `FilterModConfig`; voice
-//! allocation (`VoiceMode`, `Steal`); `UnisonConfig`;
+//! allocation (`VoiceMode`, and `tutti_voicing`'s `Steal`); `UnisonConfig`;
 //! `PortamentoConfig`; and `Tuning`.
 //!
 //! Inserted into a graph, the synth hands back a `tutti_graph::ParamSet` over its
@@ -126,7 +126,7 @@
 //! - [`SynthConfig`]: everything a synth is built from, with
 //!   [`OscillatorType`], [`FilterType`] and [`SvfMode`], [`Adsr`]
 //!   and [`FilterModConfig`].
-//! - Voice allocation: [`VoiceMode`] and [`Steal`] (by [`Order`]).
+//! - Voice allocation: [`VoiceMode`] and `tutti_voicing`'s `Steal` (by `Order`).
 //! - [`UnisonConfig`] (with [`UnisonVoices`]), [`PortamentoConfig`] (with [`PortamentoMode`] and
 //!   the `tutti_curve::Law` of its `curve`) and [`Tuning`].
 
@@ -138,8 +138,6 @@ mod mpe;
 pub(crate) use mpe::MpeVoiceState;
 // Public: these appear in `SynthConfig`'s fields.
 pub use voice::VoiceMode;
-// The steal rule `SynthConfig::steal` takes: voicing's own `Steal` and `Order`.
-pub use tutti_voicing::{Order, Steal};
 
 mod unison;
 pub(crate) use unison::UnisonEngine;
@@ -167,6 +165,14 @@ pub use tutti_music::Adsr;
 
 mod polysynth;
 pub use polysynth::PolySynth;
+
+mod instrument;
+// A voice that sounds a `tutti-dsp` resonator, and the node that plays them by MIDI.
+pub use instrument::{
+    AdditiveVoice, AdditiveVoiceConfig, InstrumentCells, InstrumentConfig, InstrumentVoice,
+    KarplusVoice, KarplusVoiceConfig, ModalVoice, ModalVoiceConfig, NoteInstrument, Strike,
+    WaveguideVoice, WaveguideVoiceConfig,
+};
 
 mod synth_voice;
 

@@ -10,7 +10,7 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, LimiterBank, LimiterControls, LimiterSignals, Lookahead,
     PeakDetection,
 };
-use tutti_graph::{Bus, BusRole, Buses, Cost, Shape};
+use tutti_graph::{Cost, Shape};
 use tutti_units::{Db, SampleRate, Samples, Seconds, Tail};
 
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -199,12 +199,7 @@ impl<F: Float> Kernel for LimiterKernel<F> {
     const GRID: usize = COEFF_INTERVAL;
 
     fn shape(&self) -> Shape {
-        let output = Bus::banded(self.input, BusRole::Main, 1).expect("one band is a bus");
-        Shape::buses(
-            Buses::main(self.input),
-            Buses::NONE.with(output).expect("one bus"),
-        )
-        .cost(Cost::Moderate)
+        Shape::through(self.input).cost(Cost::Moderate)
     }
 
     /// Sizes the delay from the lookahead at `rate`: a re-prepare empties it.

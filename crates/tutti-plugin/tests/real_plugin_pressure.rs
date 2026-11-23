@@ -3,8 +3,8 @@
 //!
 //! # What this exists to catch
 //!
-//! Per-plugin waits on the audio thread would *sum*: the graph's serial
-//! executor runs nodes one after another in one callback, so N stalled plugins
+//! Per-plugin waits on the audio thread would *sum*: the graph's executor with no pool
+//! runs nodes one after another in one callback, so N stalled plugins
 //! would cost N x budget, and 3 is enough to overrun 64 frames at 48 kHz. This
 //! proves nothing waits with **real plugin subprocesses**,
 //! which a mock server cannot model: real scheduling, real dlopen'd DSP, real
@@ -329,7 +329,7 @@ fn drive_series(units: &mut [GraphUnit], blocks: usize) -> Run {
         fill_sine(&mut input, max_ch, block);
 
         // Every unit gets the SAME input and is processed one after another —
-        // the arrangement the serial executor produces for parallel plugins on
+        // the arrangement an executor with no pool produces for parallel plugins on
         // separate tracks, and precisely the one whose per-node waits would
         // sum inside a single callback.
         //

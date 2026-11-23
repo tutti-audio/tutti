@@ -747,7 +747,7 @@ impl Env {
             At::Frame(f) => {
                 let d = f.get() - self.frame.get();
                 if d < self.block_len.get() as u64 {
-                    Due::In(Offset(d as u32))
+                    Due::In(Offset::raw(d as u32))
                 } else {
                     Due::NotYet
                 }
@@ -758,7 +758,7 @@ impl Env {
             At::Beat(b) => self
                 .segments()
                 .find_map(|(start, segment)| match segment.beat_due(b.get()) {
-                    Due::In(k) => Some(Due::In(Offset(start.0 + k.0))),
+                    Due::In(k) => Some(Due::In(Offset::raw(start.0 + k.0))),
                     _ => None,
                 })
                 .unwrap_or(Due::NotYet),
@@ -787,7 +787,7 @@ impl Env {
             };
             (end > start).then(|| {
                 (
-                    Offset(start as u32),
+                    Offset::raw(start as u32),
                     Env {
                         frame: self.frame + Samples::new(start),
                         sample_rate: self.sample_rate,
@@ -797,7 +797,7 @@ impl Env {
                         // A piece holds no change, so no start of its own:
                         // its clock is the block's at its first frame.
                         play: crate::node::play::PlayClock {
-                            start: self.play_at(Offset(start as u32)),
+                            start: self.play_at(Offset::raw(start as u32)),
                             next_epoch: self.play.next_epoch,
                         },
                     },
@@ -1045,7 +1045,7 @@ impl Env {
         // clip and MIDI reader in the engine places beats by the same rule.
         let k = first_frame_at_or_after(frames_per_beat.frames_in(BeatDuration::new(ahead))).max(0);
         match u32::try_from(k) {
-            Ok(k) if (k as usize) < self.block_len.get() => Due::In(Offset(k)),
+            Ok(k) if (k as usize) < self.block_len.get() => Due::In(Offset::raw(k)),
             _ => Due::NotYet,
         }
     }
@@ -1079,14 +1079,14 @@ mod tests {
         let mut e = env(5_000, 64, t);
         e.changes
             .push(
-                Offset(50),
+                Offset::raw(50),
                 TransportPosition::new(true, Bpm::of(133.0), Beat::new(9.3), looping),
             )
             .expect("in order");
         let mut walked = Vec::new();
         e.for_each_beat(|i, b| walked.push((i, b)));
         for (i, b) in walked {
-            let at = e.transport_at(Offset(i as u32)).beat();
+            let at = e.transport_at(Offset::raw(i as u32)).beat();
             assert_eq!(at.get().to_bits(), b.get().to_bits(), "frame {i}");
         }
     }
@@ -1116,7 +1116,7 @@ mod tests {
         let stopped = TransportPosition::new(false, Bpm::of(120.0), Beat::new(3.0), None);
         let mut e = env(1_000, 64, stopped);
         let rolling = TransportPosition::new(true, Bpm::of(120.0), Beat::new(3.0), None);
-        e.changes.push(Offset(10), rolling).expect("in order");
+        e.changes.push(Offset::raw(10), rolling).expect("in order");
         let mut seen = Vec::new();
         e.for_each_beat(|i, b| seen.push((i, b.get())));
         assert_eq!(seen.len(), 64, "one call per frame");
@@ -1128,7 +1128,7 @@ mod tests {
                 3.0 + (i - 10) as f64 * per_frame
             };
             assert!((b - want).abs() < 1e-12, "frame {i}: {b} vs {want}");
-            let at = e.transport_at(Offset(i as u32)).beat().get();
+            let at = e.transport_at(Offset::raw(i as u32)).beat().get();
             assert!(
                 (b - at).abs() < 1e-12,
                 "frame {i}: {b} vs transport_at {at}"

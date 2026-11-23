@@ -3,7 +3,7 @@
 //! invariants of the render (never another reference render).
 //!
 //! The 200-lane
-//! serial == parallel and no-allocation gates are in
+//! one-participant == parallel and no-allocation gates are in
 //! `rt_no_alloc_modulation.rs`, beside the gated pool they share.
 
 use std::sync::Arc;
