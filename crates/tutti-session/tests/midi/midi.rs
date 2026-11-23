@@ -132,6 +132,24 @@ fn a_clip_plays_its_note_on_its_frame() {
     assert_eq!(note_ons(&seen), vec![(8_000, 60)]);
 }
 
+/// **Playing a clip makes no edit mark**: the session writes the clip itself, which is
+/// no app edit.
+#[test]
+fn playing_a_clip_leaves_the_edit_log_empty() {
+    let mut s = offline();
+    let (synth, _seen) = tap(&mut s);
+    let mut log = s.edit_log().expect("a log");
+    s.midi()
+        .play_clip(
+            synth,
+            Beat::new(0.0),
+            note(60, MF, Beat::new(1.0 / 3.0), BeatDuration::new(1.0)),
+        )
+        .expect("the tap takes MIDI");
+    let _ = s.update();
+    assert_eq!(log.drain().count(), 0);
+}
+
 /// **A clip edit updates in place**: a second `play_clip` on one target
 /// replaces its clip's events, and the graph's node count stays the same.
 /// `stop_clip` empties it and keeps it.
