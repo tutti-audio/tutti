@@ -11,7 +11,10 @@ use std::any::Any;
 
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
-use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
+use super::target::{
+    AnyAssign, Assign, Effective, Info, Modify, Modulatable, Staged, TargetId,
+    sealed::{Lane, Store},
+};
 use super::watcher::{Stored, StoredChange};
 
 /// An item that failed: its position, and what failed there.
@@ -210,7 +213,8 @@ pub use seal::stage::Sealed as Stageable;
 /// but keeps its position). Sealed.
 pub trait IntoAssign<K>: Stageable {}
 
-/// What [`Session::get`](crate::Session::get) takes: a target (its base), or
+/// What [`Session::get`](crate::Session::get) takes: a target (its base), its
+/// [`effective`](crate::ParamTarget::effective) value, or
 /// tuples of up to 12 of them (nested too), arrays, `Vec`s and `Option`s. It
 /// answers in the argument's shape. Sealed.
 pub trait IntoRead: Readable {}
@@ -288,6 +292,16 @@ where
     }
 }
 impl<T: Store> IntoRead for Info<T> where Info<T>: Describe {}
+
+impl<T: Store + Lane + Modulatable> Readable for Effective<T> {
+    type Output = T::Value;
+
+    fn read(self, batch: &mut Batch<'_>) -> Result<T::Value, Failure> {
+        let base = batch.read_base(self.target)?;
+        Ok(self.target.delivered(batch.params()).unwrap_or(base))
+    }
+}
+impl<T: Store + Lane + Modulatable> IntoRead for Effective<T> {}
 
 /// What a target's [`Info`] answers.
 pub trait Describe {

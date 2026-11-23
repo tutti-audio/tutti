@@ -313,6 +313,12 @@ impl ScalarTarget for GainTarget {
     type Unit = Gain;
 }
 
+impl sealed::Lane for GainTarget {
+    fn delivered(self, params: &Params) -> Option<Gain> {
+        params.gain_lane(self.0).map(Gain::new)
+    }
+}
+
 impl GainTarget {
     /// The value the audio thread uses, which a route onto the edge may have
     /// moved from the base.
