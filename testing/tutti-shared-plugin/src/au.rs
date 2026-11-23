@@ -480,7 +480,7 @@ unsafe fn write_table(
 /// The entries of a mapping write: whole records, at least one.
 unsafe fn read_table(data: *const c_void, size: u32) -> Option<Vec<MidiMapping>> {
     let each = std::mem::size_of::<MidiMapping>();
-    if data.is_null() || size == 0 || size as usize % each != 0 {
+    if data.is_null() || size == 0 || !(size as usize).is_multiple_of(each) {
         return None;
     }
     Some(
