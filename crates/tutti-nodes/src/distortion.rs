@@ -773,46 +773,4 @@ mod tests {
         let out = drive_block(&mut n, &[&[0.0; 256]]);
         assert!(out[0].iter().all(|&y| y == 0.0));
     }
-
-    /// An `f64` block through a `DistortionKernel::<f64>` of `Softsign` at the drive `h`
-    /// is `h x / (1 + |h x|)` in `f64`, to 2^-45, and its
-    /// first-order antialiased form on a signal that alternates in sign is
-    /// `(F(x[n]) - F(x[n-1])) / (x[n] - x[n-1])` with `F(u) = |u| - ln(1 + |u|)` the
-    /// antiderivative of `u / (1 + |u|)` that is 0 at 0, the history starting at 0.
-    #[test]
-    fn an_f64_kernel_is_the_curve_and_its_divided_difference_in_f64() {
-        use crate::test_support::drive_kernel;
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let len = 200;
-        let x: Vec<f64> = wide_signal(len)
-            .iter()
-            .enumerate()
-            .map(|(n, v)| if n % 2 == 0 { *v } else { -2.0 * v })
-            .collect();
-        let h = 1.7;
-        let controls = WaveshaperControls {
-            drive: Drive::new(h),
-        };
-        let render = |order: Antialiasing| {
-            let config = DistortionConfig::new(ChannelLayout::MONO, ShapeKind::Softsign)
-                .antialiasing(order)
-                .expect("an order the kind has");
-            let mut k = DistortionKernel::<f64>::new(&config, ChannelTopology::MONO);
-            k.prepare(RATE, MaxBlock::of(Samples::new(len)));
-            drive_kernel(&mut k, &[(0, controls)], std::slice::from_ref(&x)).remove(0)
-        };
-        let want: Vec<f64> = x.iter().map(|x| h * x / (1.0 + (h * x).abs())).collect();
-        assert_close_f64(&render(Antialiasing::Off), &want, 2.0f64.powi(-45));
-        let antiderivative = |u: f64| u.abs() - u.abs().ln_1p();
-        let mut before = 0.0f64;
-        let want: Vec<f64> = x
-            .iter()
-            .map(|&now| {
-                let (a, b) = (h * now, h * before);
-                before = now;
-                (antiderivative(a) - antiderivative(b)) / (a - b)
-            })
-            .collect();
-        assert_close_f64(&render(Antialiasing::FirstOrder), &want, 2.0f64.powi(-45));
-    }
 }

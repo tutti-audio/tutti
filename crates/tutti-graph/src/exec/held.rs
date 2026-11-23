@@ -62,7 +62,7 @@ impl Held {
     /// Write the close of what is held ahead of `events` (at offset 0, so the
     /// block stays sorted), as many as `events`' capacity takes, and forget
     /// those: the rest stays held for the next call. Allocates nothing.
-    pub(crate) fn close_ahead(&mut self, events: &mut Vec<Event>) {
+    pub(crate) fn close_ahead(&mut self, events: &mut CappedVec<Event>) {
         let start = events.len();
         let added = self.drain_into(events);
         debug_assert_eq!(events.len() - start, added);
@@ -72,14 +72,14 @@ impl Held {
     /// Append the close of what is held to `events`, controllers returned then
     /// note offs, as many as its capacity takes, and forget those. Returns how
     /// many. Allocates nothing.
-    pub(crate) fn drain_into(&mut self, events: &mut Vec<Event>) -> usize {
+    pub(crate) fn drain_into(&mut self, events: &mut CappedVec<Event>) -> usize {
         self.drain_upto(events, usize::MAX)
     }
 
     /// [`drain_into`](Self::drain_into) writing at most `max` events.
-    pub(crate) fn drain_upto(&mut self, events: &mut Vec<Event>, max: usize) -> usize {
+    pub(crate) fn drain_upto(&mut self, events: &mut CappedVec<Event>, max: usize) -> usize {
         let start = events.len();
-        let room = |e: &Vec<Event>| e.len() < e.capacity() && e.len() - start < max;
+        let room = |e: &CappedVec<Event>| !e.is_full() && e.len() - start < max;
         let released = self.0.controllers_mut().release_while(None, |ump| {
             if !room(events) {
                 return false;
@@ -284,7 +284,7 @@ impl Keys {
     }
 
     /// Write what `port` owes ahead of `events`, as far as they take.
-    pub(crate) fn close_port(&mut self, port: usize, events: &mut Vec<Event>) {
+    pub(crate) fn close_port(&mut self, port: usize, events: &mut CappedVec<Event>) {
         if let Some(Some(h)) = self.owed.get_mut(port) {
             h.close_ahead(events);
         }

@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn test_click_node_silent_when_paused() {
+    fn an_always_click_is_silent_on_a_stopped_transport() {
         let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::Always);
 
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn test_preroll_only_mode() {
+    fn a_preroll_only_click_sounds_only_in_the_count_in() {
         let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::PrerollOnly);
         set_volume(&settings, Amplitude::new(1.0));
@@ -814,7 +814,7 @@ mod tests {
     }
 
     #[test]
-    fn test_recording_only_mode() {
+    fn a_recording_only_click_sounds_only_while_recording() {
         let (settings, mut node) = make_click();
         settings.mode().store(MetronomeMode::RecordingOnly);
         set_volume(&settings, Amplitude::new(1.0));

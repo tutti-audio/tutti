@@ -27,10 +27,9 @@
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
 use crate::compile::ids::{DelayId, EventFeedbackId, Id, PlanUnitId};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::NodeKey;
-use tutti_rt::RingWriter;
+use tutti_rt::{CappedVec, CounterWriter, RingWriter};
 
 use crate::compile::plan::{FeedbackKey, Plan};
 use crate::model::spec::EventOutputPort;
@@ -82,7 +81,7 @@ pub(crate) struct Dropped {
     recovered: u64,
     /// This block's refusals the log could not name.
     unreported: u64,
-    log: Vec<Entry>,
+    log: CappedVec<Entry>,
 }
 
 impl Dropped {
@@ -92,7 +91,7 @@ impl Dropped {
             total: 0,
             recovered: 0,
             unreported: 0,
-            log: Vec::with_capacity(LOG_CAPACITY),
+            log: CappedVec::with_capacity(LOG_CAPACITY),
         }
     }
 
@@ -199,14 +198,13 @@ impl Dropped {
         if count == 0 && recovered == 0 {
             return;
         }
-        if self.log.len() < self.log.capacity() {
-            self.log.push(Entry {
-                owner,
-                port,
-                count,
-                recovered,
-            });
-        } else {
+        let entry = Entry {
+            owner,
+            port,
+            count,
+            recovered,
+        };
+        if !self.log.push(entry) {
             self.unreported += u64::from(count.saturating_sub(recovered));
         }
     }
@@ -217,9 +215,7 @@ impl Dropped {
         self.recovered += other.recovered;
         self.unreported += other.unreported;
         for e in other.log.drain(..) {
-            if self.log.len() < self.log.capacity() {
-                self.log.push(e);
-            } else {
+            if !self.log.push(e) {
                 self.unreported += u64::from(e.count.saturating_sub(e.recovered));
             }
         }
@@ -233,7 +229,7 @@ impl Dropped {
         &mut self,
         plan: &Plan,
         tx: &mut RingWriter<EventLoss>,
-        unreported: &AtomicU64,
+        unreported: &mut CounterWriter<u64>,
     ) {
         for e in self.log.drain(..) {
             let node = match e.owner {
@@ -257,7 +253,7 @@ impl Dropped {
             }
         }
         if self.unreported != 0 {
-            unreported.fetch_add(self.unreported, Ordering::Relaxed);
+            unreported.add(self.unreported);
             self.unreported = 0;
         }
     }

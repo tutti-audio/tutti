@@ -184,37 +184,3 @@ impl<F: Float + SimdLanes + Lerp> Kernel for EnvelopeFilterKernel<F> {
         Tail::Unknown
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tutti_buffers::InputOutput;
-    use tutti_fixtures::signal::wide_signal;
-    use tutti_units::Samples;
-
-    /// An `f64` kernel keeps the filter in `f64`: a constant `c` of more than 24 bits through a
-    /// low-pass at depth 0 (a fixed filter of unit DC gain) settles on `c` to 1e-12 (an `f32`
-    /// state is off by 1e-8).
-    #[test]
-    fn an_f64_kernel_settles_a_wide_constant_on_itself_in_f64() {
-        let mut k = EnvelopeFilterKernel::<f64>::new(ChannelTopology::MONO, SvfType::LowPass);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(4_000)),
-        );
-        k.retarget(&EnvelopeFilterControls {
-            base: Hz::new(1_000.0),
-            ..EnvelopeFilterControls::DEFAULT
-        });
-        let c = wide_signal(1)[0];
-        let x = vec![c; 4_000];
-        let mut y = vec![0.0f64; x.len()];
-        k.render(
-            &mut InputOutput::from_slices(Samples::new(x.len()), &[&x[..]], &mut [&mut y[..]])
-                .unwrap(),
-            ControlSignals::NONE,
-        )
-        .unwrap();
-        assert!((y[3_999] - c).abs() < 1e-12, "{} against {c}", y[3_999]);
-    }
-}

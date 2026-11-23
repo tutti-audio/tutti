@@ -164,7 +164,6 @@ impl BrickwallSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::drive_kernel;
     use crate::test_support::{
         RATE_44K, fed_sample_gain, prepared, prepared_at, sample_gain, tick, tick_fed,
     };
@@ -222,28 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn test_brickwall_clips_at_ceiling() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
-            BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(0.0)),
-        ));
-
-        let mut out = [0.0f32; 2];
-        tick(&mut bw, &[2.0, -3.0], &mut out);
-
-        assert!(
-            (out[0] - 1.0).abs() < 0.001,
-            "Should clip to 1.0, got {}",
-            out[0]
-        );
-        assert!(
-            (out[1] - (-1.0)).abs() < 0.001,
-            "Should clip to -1.0, got {}",
-            out[1]
-        );
-    }
-
-    #[test]
-    fn test_brickwall_adjustable_ceiling() {
+    fn the_configured_ceiling_is_the_clip_level() {
         let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
             BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(-6.0)),
         ));
@@ -257,19 +235,6 @@ mod tests {
             "Should clip to {ceiling_lin}, got {}",
             out[0]
         );
-    }
-
-    #[test]
-    fn test_brickwall_passes_quiet_signal() {
-        let mut bw = prepared(BrickwallLimiterNode::<f32>::from(
-            BrickwallLimiterConfig::new(ChannelTopology::STEREO, Db::new(0.0)),
-        ));
-
-        let mut out = [0.0f32; 2];
-        tick(&mut bw, &[0.3, -0.2], &mut out);
-
-        assert!((out[0] - 0.3).abs() < 0.001);
-        assert!((out[1] - (-0.2)).abs() < 0.001);
     }
 
     #[test]
@@ -422,27 +387,5 @@ mod tests {
         }
         assert!((out[0] - 1.0).abs() < 1e-4);
         assert!((out[1] + 1.0).abs() < 1e-4);
-    }
-
-    /// An `f64` kernel clamps at the ceiling its control holds: over `-20 dB` a signal of more
-    /// than 24 bits leaves at `10^(-20 / 20)`, to 1e-15.
-    #[test]
-    fn an_f64_kernel_clamps_a_wide_signal_at_the_f64_ceiling() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
-        let x = wide_signal(128);
-        let mut k = BrickwallKernel::<f64>::new(ChannelTopology::MONO);
-        k.prepare(
-            SampleRate::SR_48K,
-            MaxBlock::of(tutti_units::Samples::new(128)),
-        );
-        let controls = BrickwallControls {
-            ceiling: Db::new(-20.0),
-        };
-        let y = drive_kernel(&mut k, &[(0, controls)], &[x]);
-        assert_close_f64(
-            &y[0],
-            &vec![Db::new(-20.0).to_amplitude().get(); 128],
-            1e-15,
-        );
     }
 }

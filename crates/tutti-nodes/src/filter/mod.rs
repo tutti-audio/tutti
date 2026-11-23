@@ -100,21 +100,6 @@ pub(super) mod test_utils {
         level(&out[8_192..])
     }
 
-    /// `signal::impulse` of `len` frames.
-    pub fn impulse(len: usize) -> Vec<f32> {
-        signal::impulse(Samples::new(len))
-    }
-
-    /// A mono node over `input`, one frame per call (a block of one). The
-    /// node must be prepared.
-    pub fn process_mono(node: &mut dyn Node, input: &[f32]) -> Vec<f32> {
-        let mut output = vec![0.0f32; input.len()];
-        for (i, &sample) in input.iter().enumerate() {
-            crate::test_support::tick(node, &[sample], &mut output[i..i + 1]);
-        }
-        output
-    }
-
     /// `signal::sine` at unit amplitude, for a test that holds bare numbers.
     pub fn generate_sine(freq: f64, sample_rate: f32, num_samples: usize) -> Vec<f32> {
         signal::sine(
