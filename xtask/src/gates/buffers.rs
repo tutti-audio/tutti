@@ -53,6 +53,7 @@
 use super::lex::{
     blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges, word,
 };
+use super::ratchet;
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -515,16 +516,10 @@ pub(super) fn reason_error(reason: &str, allowed: &[&str]) -> Option<String> {
 /// The reasons `LIST` accepts.
 const KINDS: [&str; 3] = ["pending", "ffi", "not-audio"];
 
-/// The list's rows, key to reason; the errors name the line.
-fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
+/// The list's rows, key to reason, read through the ratchet's row list.
+fn read(tree: &dyn Tree) -> Result<BTreeMap<String, String>, Report> {
     let mut rows = BTreeMap::new();
-    let mut errors = Vec::new();
-    for (n, line) in text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let at = n + 1;
+    ratchet::read_rows(tree, "check-buffers", LIST, |at, line, errors| {
         let (key, reason) = match line.split_once(char::is_whitespace) {
             Some((k, r)) => (k, r.trim()),
             None => (line, ""),
@@ -535,27 +530,16 @@ fn parse(text: &str) -> Result<BTreeMap<String, String>, Vec<String>> {
         if rows.insert(key.to_owned(), reason.to_owned()).is_some() {
             errors.push(format!("  {LIST}:{at}: `{key}` is listed twice"));
         }
-    }
-    if errors.is_empty() {
-        Ok(rows)
-    } else {
-        Err(errors)
-    }
+        Some(())
+    })?;
+    Ok(rows)
 }
 
 pub(super) fn check(tree: &dyn Tree, min_files: usize) -> Report {
     let mut r = Report::default();
-    let Some(text) = tree.read(LIST) else {
-        r.fail(format!("check-buffers: FAIL: {LIST} is missing"));
-        return r;
-    };
-    let rows = match parse(&text) {
+    let rows = match read(tree) {
         Ok(rows) => rows,
-        Err(errors) => {
-            r.fail(format!("check-buffers: FAIL ({LIST} is malformed):"));
-            errors.into_iter().for_each(|e| r.fail(e));
-            return r;
-        }
+        Err(r) => return r,
     };
     let files = source_files(tree);
     if files.len() < min_files {
