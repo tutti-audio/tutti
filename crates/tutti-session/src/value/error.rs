@@ -109,6 +109,14 @@ pub enum PluginParamRefusal {
     /// The parameter's declaration no longer reads as the target's unit.
     #[error(transparent)]
     Unit(#[from] UnitError),
+    /// A MIDI map names one channel and source twice.
+    #[error("the MIDI map names channel {channel:?} and {message:?} twice")]
+    DuplicateMidiEntry {
+        /// The channel both entries name; `None` is any channel.
+        channel: Option<tutti_ump::MidiChannel>,
+        /// The message both entries name.
+        message: tutti_plugin_types::MidiSource,
+    },
 }
 
 /// Why a plugin parameter is not a target in a tutti unit

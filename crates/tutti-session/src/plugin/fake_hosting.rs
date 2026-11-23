@@ -18,6 +18,7 @@ use tutti_plugin_types::PluginRef;
 mod editor;
 mod losses;
 mod plugin_health;
+mod plugin_midi_map;
 mod plugin_params;
 mod plugin_state;
 mod plugin_track_info;

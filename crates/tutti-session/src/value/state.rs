@@ -474,7 +474,8 @@ impl ValueTable {
 
     /// Registers the plugin hosted at `node`, replacing the entry it had: its
     /// parameter targets, its automation mode where the plugin takes one
-    /// (`mode`) and its track info (`track`). Control thread.
+    /// (`mode`), its track info (`track`) and the app's MIDI map (`midi_map`).
+    /// Control thread.
     #[cfg(feature = "plugin")]
     pub(crate) fn provide_plugin(
         &self,
@@ -482,6 +483,7 @@ impl ValueTable {
         entry: super::PluginEntry,
         mode: Option<SlotCell<tutti_plugin_types::AutomationMode>>,
         track: SlotCell<tutti_plugin_types::TrackInfo>,
+        midi_map: SlotCell<super::MidiMap>,
     ) {
         let mut params = self.params.lock();
         let slot = SlotId::automation_mode(node);
@@ -494,6 +496,9 @@ impl ValueTable {
             params
                 .slots
                 .insert(SlotId::track_info(node), slot::erase(track)),
+            params
+                .slots
+                .insert(SlotId::midi_map(node), slot::erase(midi_map)),
         );
         drop(params);
         drop(old);

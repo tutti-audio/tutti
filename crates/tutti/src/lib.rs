@@ -248,17 +248,17 @@ pub use tutti_session::{
 pub use tutti_session::{
     LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords,
 };
+#[cfg(all(feature = "session", feature = "plugin"))]
+pub use tutti_session::{
+    MidiMap, PluginAutomationModeTarget, PluginMidiMapTarget, PluginParamRefusal,
+    PluginParamTarget, PluginTrackInfoTarget, PluginUnit, UnitError,
+};
 #[cfg(all(feature = "session", feature = "sampler"))]
 pub use tutti_session::{OpenStream, OpenStreamError, OpenedStream, OpeningStream};
 #[cfg(all(feature = "session", feature = "plugin"))]
 pub use tutti_session::{OtherPeer, PeerState, SavedPeer};
 #[cfg(feature = "session")]
 pub use tutti_session::{ParamRef, RouteSpec};
-#[cfg(all(feature = "session", feature = "plugin"))]
-pub use tutti_session::{
-    PluginAutomationModeTarget, PluginParamRefusal, PluginParamTarget, PluginTrackInfoTarget,
-    PluginUnit, UnitError,
-};
 
 // --- the modules ------------------------------------------------------------
 
@@ -829,8 +829,8 @@ pub mod plugin {
         UnknownExtension, Verdict, VersionText, Vst2Category, Vst3PlugType, Vst3SubCategories,
     };
     pub use tutti_plugin_types::{
-        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, NoteName, ParamGroup,
-        PluginPreset, TrackInfo, TrackKind,
+        AutomationMode, MainThreadMarker, MainWork, MainWorkHandle, MidiAssignment, MidiSource,
+        NoteName, ParamGroup, PluginPreset, TrackInfo, TrackKind,
     };
     pub use tutti_plugin_types::{
         EditorError, EditorMirrorError, EditorOpened, LoadStage, NoEditorHost, RateRefusal,

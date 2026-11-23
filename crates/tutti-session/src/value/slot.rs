@@ -90,6 +90,9 @@ pub enum SlotId {
     /// The track info the host tells a plugin.
     #[cfg(feature = "plugin")]
     PluginTrackInfo(NodeKey),
+    /// The app's MIDI map of a plugin.
+    #[cfg(feature = "plugin")]
+    PluginMidiMap(NodeKey),
     /// The depth of the route from a source into a target.
     RouteDepth((ModSourceId, ModTarget)),
 }
@@ -109,6 +112,8 @@ impl SlotId {
             Self::OutputLatency => false,
             #[cfg(feature = "plugin")]
             Self::PluginAutomationMode(_) | Self::PluginTrackInfo(_) => false,
+            #[cfg(feature = "plugin")]
+            Self::PluginMidiMap(_) => true,
             Self::Tempo
             | Self::Meter
             | Self::Loop
@@ -142,7 +147,9 @@ impl SlotId {
             | Self::Direction(node)
             | Self::Speed(node) => Some(node),
             #[cfg(feature = "plugin")]
-            Self::PluginAutomationMode(node) | Self::PluginTrackInfo(node) => Some(node),
+            Self::PluginAutomationMode(node)
+            | Self::PluginTrackInfo(node)
+            | Self::PluginMidiMap(node) => Some(node),
             Self::Automation(TargetKey::Param { node, .. }) => Some(NodeKey(node)),
             _ => None,
         }
