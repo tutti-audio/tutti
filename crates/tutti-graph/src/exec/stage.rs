@@ -30,7 +30,7 @@ use tutti_rt::{CappedVec, Gauge};
 use tutti_curve::declick_frames;
 
 use super::commit::{Commit, Participants, Rendered};
-use super::node_op::{CONSTANT, SILENT};
+use super::node_op::Flags;
 use super::par_for;
 use super::state::{Gone, Inject, Ring, State, Unit};
 use crate::EventTapPort;
@@ -372,8 +372,8 @@ impl Stager {
         let state = State {
             arena: Arena::new(plan.audio_slots as usize, cx.max_block),
             flags: {
-                let mut v = vec![0u8; plan.audio_slots as usize];
-                v[0] = SILENT | CONSTANT;
+                let mut v = vec![Flags::NONE; plan.audio_slots as usize];
+                v[0] = Flags::SILENCE;
                 v
             },
             events: plan

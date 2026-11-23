@@ -175,7 +175,7 @@ impl<F: Float> Mode<F> for Exclusive {
 /// The executor's own audio slots and flags.
 pub(super) struct ExclusiveAudio<'c, F: Float> {
     pub(super) arena: &'c mut Arena<F>,
-    pub(super) flags: &'c mut [u8],
+    pub(super) flags: &'c mut [crate::exec::Flags],
 }
 
 impl<F: Float> Audio<F> for ExclusiveAudio<'_, F> {
@@ -183,10 +183,10 @@ impl<F: Float> Audio<F> for ExclusiveAudio<'_, F> {
         = &'g mut Arena<F>
     where
         Self: 'g;
-    type Flags = [u8];
+    type Flags = [crate::exec::Flags];
 
     #[inline(always)]
-    fn parts(&mut self) -> (&mut Arena<F>, &mut [u8]) {
+    fn parts(&mut self) -> (&mut Arena<F>, &mut [crate::exec::Flags]) {
         (&mut *self.arena, &mut *self.flags)
     }
 }
