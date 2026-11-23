@@ -83,8 +83,8 @@ impl<F: RingFloat> Handles<F> {
 /// which the control side sends after storing the rate here. A stream built
 /// between the store and the command reads the new rate either way, and the
 /// command re-derives it to the same ratio, so no lock orders the two.
-#[derive(Clone)]
 // The `SessionRate` command sent after a store orders the streamer's read of it.
+#[derive(Clone)]
 pub(crate) struct SessionRate(Arc<AtomicCell<SampleRate>>);
 
 impl SessionRate {
