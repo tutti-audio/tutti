@@ -417,6 +417,10 @@ impl crate::ControlSet for AmbisonicDecoderSet {
         &[]
     }
 
+    fn units(&self) -> Vec<tutti_graph::DeclaredUnit> {
+        Vec::new()
+    }
+
     fn defaults(&self) {}
 
     fn flatten(&self, _: &(), _: &mut [f64]) {}

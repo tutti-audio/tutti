@@ -31,6 +31,7 @@
 //! port instead), so the cell holds what the user set, and a fork of the
 //! node starts from it ([`ParamFork`]) without a second, "authored" copy.
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -43,12 +44,46 @@ use crate::RenderMode;
 use crate::fork::{ForkBuild, ForkCause, ForkSource, Forked};
 use tutti_buffers::Float;
 
+use crate::declare::ParamValue;
 use crate::node::{IntoNode, Node, NodeParts};
 
-/// One param: its address and the cell the node reads.
+/// One param: its address, the cell the node reads, and the unit the node
+/// declares it in when it declares one.
 struct Slot {
     param: UnitAddr,
     live: ParamCell,
+    unit: Option<DeclaredUnit>,
+}
+
+/// The unit a param's value is in, erased: how a host that reaches a param by
+/// address names a cell's `f64` as the value of the unit the node declares it
+/// in. Made by a declaration ([`declare_params!`](crate::declare_params));
+/// a [`ParamSet`] built by hand has none.
+#[derive(Clone, Copy)]
+pub struct DeclaredUnit {
+    value: fn(f64) -> Arc<dyn Any + Send + Sync>,
+}
+
+impl DeclaredUnit {
+    /// The unit `U`.
+    #[must_use]
+    pub fn of<U: ParamValue>() -> Self {
+        Self {
+            value: |cell| Arc::new(U::from_cell(cell)),
+        }
+    }
+
+    /// The unit's value for a cell's `f64`: a `U` behind the pointer.
+    #[must_use]
+    pub fn value(self, cell: f64) -> Arc<dyn Any + Send + Sync> {
+        (self.value)(cell)
+    }
+}
+
+impl std::fmt::Debug for DeclaredUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeclaredUnit").finish_non_exhaustive()
+    }
 }
 
 /// A node's params by [`UnitAddr`]: the cells the running node reads, once
@@ -104,6 +139,11 @@ impl ParamSet {
         self.slot(param.into()).map(|s| s.live.clone())
     }
 
+    /// The unit `param` is declared in, for a set a declaration built.
+    pub fn unit(&self, param: impl Into<UnitAddr>) -> Option<DeclaredUnit> {
+        self.slot(param.into()).and_then(|s| s.unit)
+    }
+
     /// The params, in the order they were added.
     pub fn params(&self) -> impl Iterator<Item = UnitAddr> + '_ {
         self.slots.iter().map(|s| s.param)
@@ -150,7 +190,30 @@ impl ParamSetBuilder {
             self.slots.iter().all(|s| s.param != param),
             "{param:?} added to a ParamSet twice"
         );
-        self.slots.push(Slot { param, live: cell });
+        self.slots.push(Slot {
+            param,
+            live: cell,
+            unit: None,
+        });
+        self
+    }
+
+    /// As [`param`](Self::param), for a param declared in `unit`.
+    ///
+    /// # Panics
+    ///
+    /// As [`param`](Self::param).
+    #[must_use]
+    pub fn param_in(
+        mut self,
+        unit: DeclaredUnit,
+        param: impl Into<UnitAddr>,
+        cell: impl Into<ParamCell>,
+    ) -> Self {
+        self = self.param(param, cell);
+        if let Some(slot) = self.slots.last_mut() {
+            slot.unit = Some(unit);
+        }
         self
     }
 

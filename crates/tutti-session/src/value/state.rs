@@ -9,7 +9,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{NodeKey, ParamSet, PassError};
+use tutti_graph::{DeclaredUnit, NodeKey, ParamSet, PassError};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
@@ -18,8 +18,9 @@ use super::batch::{Batch, Failure, IntoAssign, IntoRead, Readable, Stageable};
 use super::controls::{GainSlot, MixSlot, ModeSlot, NodeControl, Queue, Write};
 use super::error::{ValueError, ValueErrorKind};
 use super::gesture::{Deferred, Ending, Gesture};
+use super::saved::SavedValues;
 use super::slot::{self, NodeSlots, SlotCell, SlotId};
-use super::target::AnyTarget;
+use super::target::{AnyAssign, AnyTarget};
 use super::watcher::{Feed, Grouping, IntoTargets, Watcher};
 use crate::AppKey;
 
@@ -53,6 +54,32 @@ impl Params {
     pub fn cell(&self, node: NodeKey, addr: UnitAddr, owner: TypeId) -> Option<ParamCell> {
         let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
         node.set.cell(addr)
+    }
+
+    /// `addr`'s cell on `node` with the unit the node declares it in, when
+    /// the node is of the type `owner` names and declares one.
+    pub(super) fn unit_cell(
+        &self,
+        node: NodeKey,
+        addr: UnitAddr,
+        owner: TypeId,
+    ) -> Option<(ParamCell, DeclaredUnit)> {
+        let node = self.nodes.get(&node).filter(|n| n.owner == owner)?;
+        Some((node.set.cell(addr)?, node.set.unit(addr)?))
+    }
+
+    /// Every native param a declaration gave a unit, with the value in its
+    /// cell: the node, the address, the node type and the cell's raw.
+    pub(super) fn native_params(
+        &self,
+    ) -> impl Iterator<Item = (NodeKey, UnitAddr, TypeId, f64)> + '_ {
+        self.nodes.iter().flat_map(|(node, params)| {
+            params.set.params().filter_map(move |addr| {
+                params.set.unit(addr)?;
+                let raw = params.set.get(addr)?;
+                Some((*node, addr, params.owner, raw))
+            })
+        })
     }
 
     /// The plugin hosted at `node`.
@@ -180,7 +207,11 @@ impl ValueTable {
 
     /// Registers the session's own value `id`, held in `slot`. Once, as the
     /// session is built.
-    pub(crate) fn provide<V: 'static>(&self, id: SlotId, slot: SlotCell<V>) {
+    pub(crate) fn provide<V: Clone + PartialEq + Send + Sync + 'static>(
+        &self,
+        id: SlotId,
+        slot: SlotCell<V>,
+    ) {
         self.params.lock().slots.insert(id, slot::erase(slot));
     }
 
@@ -512,7 +543,7 @@ impl<K: AppKey> Values<K> {
         }
     }
 
-    fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
+    pub(super) fn state(&self) -> Result<Arc<ValueState<K>>, ValueError<K>> {
         self.state
             .upgrade()
             .ok_or_else(|| whole_call(ValueErrorKind::Closed))
@@ -536,6 +567,29 @@ impl<K: AppKey> Values<K> {
     /// [`ValueErrorKind::Closed`] once the session is gone.
     pub fn get<R: IntoRead>(&self, read: R) -> Result<R::Output, ValueError<K>> {
         self.state()?.get(read)
+    }
+
+    /// [`Session::saved_values`](crate::Session::saved_values), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::saved_values`](crate::Session::saved_values), and
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn saved_values(&self) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?.saved_values()
+    }
+
+    /// [`Session::values_of`](crate::Session::values_of), from this handle.
+    ///
+    /// # Errors
+    ///
+    /// [`ValueErrorKind::Closed`] once the session is gone.
+    pub fn values_of(
+        &self,
+        items: impl IntoIterator<Item = AnyAssign>,
+    ) -> Result<SavedValues<K>, ValueError<K>> {
+        self.state()?;
+        Ok(ValueState::values_of(items))
     }
 
     /// [`Session::watch`](crate::Session::watch), from this handle.

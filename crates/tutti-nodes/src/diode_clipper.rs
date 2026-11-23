@@ -12,6 +12,7 @@ use tutti_units::{Db, Hz, SampleRate, Samples, Tail, UnitAddr, UnitParam};
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 use crate::oversampled::Oversampled;
 use crate::params::{ControlSet, HasControl};
+use tutti_graph::DeclaredUnit;
 
 /// What a [`DiodeClipperNode`] is made from: its width, its controls and its oversampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,6 +113,10 @@ impl ControlSet for DiodeClipperSet {
             UnitAddr::first(UnitParam::GainDb),
         ];
         ALL
+    }
+
+    fn units(&self) -> Vec<DeclaredUnit> {
+        vec![DeclaredUnit::of::<Hz>(), DeclaredUnit::of::<Db>()]
     }
 
     fn defaults(&self) -> DiodeClipperControls {

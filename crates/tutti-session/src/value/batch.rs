@@ -12,7 +12,7 @@ use std::any::Any;
 use super::error::{SetRefusal, ValueErrorKind};
 use super::state::Params;
 use super::target::{AnyAssign, Assign, Info, Modify, Staged, TargetId, sealed::Store};
-use super::watcher::{Stored, StoredChange};
+use super::watcher::{ChangedBy, Stored, StoredChange};
 
 /// An item that failed: its position, and what failed there.
 #[derive(Debug)]
@@ -56,7 +56,7 @@ impl<T: Store> Staged for Slot<T> {
     fn store(self: Box<Self>) -> Option<StoredChange> {
         T::store(&self.cell, &self.value);
         // A value equal to the base is no change.
-        (self.value != self.base).then(|| StoredChange::new(self.id, self.base, self.value))
+        (self.value != self.base).then(|| T::landing(self.id, &self.cell, self.base, self.value))
     }
 }
 
@@ -67,6 +67,8 @@ pub struct Batch<'a> {
     slots: Vec<Box<dyn Staged>>,
     /// The position of the item being staged.
     index: usize,
+    /// Who the landing is by: the app, or a restore of a saved map.
+    by: ChangedBy,
 }
 
 impl<'a> Batch<'a> {
@@ -75,14 +77,21 @@ impl<'a> Batch<'a> {
             params,
             slots: Vec::new(),
             index: 0,
+            by: ChangedBy::App,
         }
+    }
+
+    /// Makes the landing a restore: every change it makes is
+    /// [`ChangedBy::Restore`].
+    pub(super) fn restoring(&mut self) {
+        self.by = ChangedBy::Restore;
     }
 
     /// Stores every target's final value, in the order each was first named,
     /// and answers the targets whose value is not the base they had.
     pub(crate) fn store(self) -> Stored {
         let landings = self.slots.into_iter().filter_map(Staged::store).collect();
-        Stored::new(landings)
+        Stored::new(landings, self.by)
     }
 
     /// The failure of the item being staged as a whole, naming no target.
