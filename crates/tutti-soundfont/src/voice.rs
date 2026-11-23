@@ -8,12 +8,12 @@ use tutti_dsp::{
     Lfo, LfoWave, PanLaw, SOLVE_CEILING, SimdLanes, SvfCoefficients, SvfControls, SvfModel,
     SvfType, pan_gains, svf_step,
 };
-use tutti_sf2::{SamplePool, Side};
-use tutti_ump::{MidiChannel, NoteNumber, RegisteredPerNoteController};
+use tutti_sf2::{SamplePool, Side, SoundFont};
+use tutti_ump::{MidiChannel, NoteNumber, NoteVelocity, RegisteredPerNoteController};
 use tutti_units::{
     Amplitude, Cents, Db, Hz, Pan, Q, SampleRate, SampleSpan, Samples, Seconds, Semitones,
 };
-use tutti_voicing::{ChannelState, Glide, NoteControl};
+use tutti_voicing::{ChannelState, Glide, NoteControl, NoteStart, NoteVoice};
 
 /// The longest an exclusive class's quick release takes, to fall
 /// 100 dB as every release time does (section 8.1.2, generator 38): the floor
@@ -25,6 +25,7 @@ pub(crate) const QUICK_RELEASE: Seconds = Seconds::new(0.01);
 use crate::channel::Channel;
 use crate::envelope::SoundFontEnvelope;
 use crate::oscillator::Oscillator;
+use crate::patch::PresetPatch;
 use crate::region_ex::RegionEx;
 use crate::region_pair::RegionPair;
 use crate::render::Render;
@@ -255,7 +256,7 @@ impl<F: Float + SimdLanes> Voice<F> {
         }
     }
 
-    pub(crate) fn start(&mut self, region: &RegionPair, channel: i32, key: i32, velocity: i32) {
+    pub(crate) fn begin(&mut self, region: &RegionPair, channel: i32, key: i32, velocity: i32) {
         self.played = key;
         self.transpose = Semitones::new(0.0);
         self.glide = None;
@@ -337,29 +338,6 @@ impl<F: Float + SimdLanes> Voice<F> {
         self.voice_length = 0;
     }
 
-    /// Starts the glide a note begins with, if it has one: the voice sounds at
-    /// the pitch of the glide's key and arrives at its own.
-    pub(crate) fn glide(&mut self, glide: Option<Glide>) {
-        self.glide = glide.and_then(|g| self.glide_run(g));
-    }
-
-    /// Sets how far the voice's key sounds from equal temperament, with no new
-    /// attack. A glide in progress keeps the offset it left with.
-    pub(crate) fn tune(&mut self, tune: Semitones) {
-        self.tune = tune;
-    }
-
-    /// Moves the voice to `key` with no new attack (a legato move, or the voice
-    /// a Portamento Control names). With a glide it jumps to the glide's key and
-    /// glides to the new one; without, it is at the new key at once.
-    pub(crate) fn retarget(&mut self, key: NoteNumber, tune: Semitones, glide: Option<Glide>) {
-        self.tune = tune;
-        let key = i32::from(key.get());
-        self.transpose += Semitones::new(f64::from(key - self.played));
-        self.played = key;
-        self.glide = glide.and_then(|g| self.glide_run(g));
-    }
-
     /// The run of a glide, or none for a glide of no time (a jump).
     fn glide_run(&self, glide: Glide) -> Option<GlideRun> {
         let frames = glide.time.to_samples(self.rate);
@@ -382,67 +360,6 @@ impl<F: Float + SimdLanes> Voice<F> {
             self.glide = None;
         }
         offset
-    }
-
-    /// Takes a per-note controller's value (M2-104 section 7.4). What a
-    /// SoundFont voice can carry: the note's sounding pitch (its told Pitch
-    /// 7.25 or Attribute Pitch 7.9 and its per-note bend, summed by
-    /// `tutti-voicing`; it replaces its key's, and the key still
-    /// chooses the sample, envelope scaling and zone, as the voice was
-    /// started), Registered Volume (the GM law, as CC 7)
-    /// and Registered Pan (as CC 10, replacing the channel's pan for this
-    /// note). Everything else (pressure, modulation, breath, balance, the
-    /// sound controllers, the effects depths, the assignable controllers) has
-    /// no generator in a SoundFont voice to drive and is dropped.
-    pub(crate) fn control(&mut self, control: NoteControl) {
-        match control {
-            NoteControl::Pitch(pitch) => {
-                self.note.pitch = Some(Semitones::new(pitch.note_number()))
-            }
-            NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
-                self.note.volume = Amplitude::new(value.normalized().get());
-            }
-            NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
-                self.note.pan = Some(Pan::new(2.0 * value.normalized().get() - 1.0));
-            }
-            NoteControl::Pressure(_)
-            | NoteControl::Registered(..)
-            | NoteControl::Assignable(..) => {}
-        }
-    }
-
-    /// Per-Note Management Reset (M2-104 section 7.4.5): the note's per-note
-    /// controllers return to their defaults.
-    pub(crate) fn reset_controls(&mut self) {
-        self.note = NoteControls::DEFAULT;
-    }
-
-    /// Lets the voice go into its release at once (SF2 2.04 section 9.1.7: the
-    /// envelope enters its release phase from its current value, so a voice
-    /// released in its delay stage, where that value is 0, never sounds). The
-    /// volume and modulation envelopes' release stages start, and a loop that
-    /// runs until the key is up ends. A voice already released is left alone.
-    pub(crate) fn release(&mut self) {
-        if self.voice_state == VoiceState::Playing {
-            self.vol_env.release();
-            self.mod_env.release();
-            self.oscillator.release();
-            self.voice_state = VoiceState::Released;
-        }
-    }
-
-    /// Lets the voice go into the quick release of an exclusive class (SF2
-    /// 2.04 section 8.1.2, generator 57): its volume
-    /// envelope falls over [`QUICK_RELEASE`] at the longest, whatever its
-    /// own release is. A voice already releasing is sped up, never slowed.
-    pub(crate) fn damp(&mut self) {
-        self.vol_env.release_within(QUICK_RELEASE);
-        self.release();
-    }
-
-    /// The volume envelope's level now: what the core steals by.
-    pub(crate) fn level(&self) -> Amplitude {
-        self.vol_env.level()
     }
 
     pub(crate) fn process(
@@ -567,6 +484,109 @@ impl<F: Float + SimdLanes> Voice<F> {
 
     pub(crate) fn block(&self) -> &[F] {
         &self.block
+    }
+}
+
+impl<F: Float + SimdLanes> NoteVoice for Voice<F> {
+    type Context = SoundFont;
+
+    /// Starts the note's region of the font, at the note's tuning and glide.
+    fn start(&mut self, note: &NoteStart, font: &SoundFont) {
+        let (p, i) = PresetPatch::zones(note.spec.tag);
+        let preset_zone = &font.presets()[note.spec.scope as usize].regions()[p];
+        let instrument_zone = &font.instruments()[preset_zone.instrument_id()].regions()[i];
+        self.begin(
+            &RegionPair::new(preset_zone, instrument_zone),
+            i32::from(note.channel.get()),
+            i32::from(note.key.get()),
+            i32::from(note.velocity.to_note_on_u7().get()),
+        );
+        self.tune = note.tune;
+        self.glide = note.glide.and_then(|g| self.glide_run(g));
+    }
+
+    /// Sets how far the voice's key sounds from equal temperament, with no new
+    /// attack. A glide in progress keeps the offset it left with.
+    fn tune(&mut self, tune: Semitones) {
+        self.tune = tune;
+    }
+
+    /// Moves the voice to `key` with no new attack (a legato move, or the voice
+    /// a Portamento Control names). With a glide it jumps to the glide's key and
+    /// glides to the new one; without, it is at the new key at once.
+    fn retarget(
+        &mut self,
+        key: NoteNumber,
+        tune: Semitones,
+        _velocity: NoteVelocity,
+        glide: Option<Glide>,
+    ) {
+        self.tune = tune;
+        let key = i32::from(key.get());
+        self.transpose += Semitones::new(f64::from(key - self.played));
+        self.played = key;
+        self.glide = glide.and_then(|g| self.glide_run(g));
+    }
+
+    /// Takes a per-note controller's value (M2-104 section 7.4). What a
+    /// SoundFont voice can carry: the note's sounding pitch (its told Pitch
+    /// 7.25 or Attribute Pitch 7.9 and its per-note bend, summed by
+    /// `tutti-voicing`; it replaces its key's, and the key still
+    /// chooses the sample, envelope scaling and zone, as the voice was
+    /// started), Registered Volume (the GM law, as CC 7)
+    /// and Registered Pan (as CC 10, replacing the channel's pan for this
+    /// note). Everything else (pressure, modulation, breath, balance, the
+    /// sound controllers, the effects depths, the assignable controllers) has
+    /// no generator in a SoundFont voice to drive and is dropped.
+    fn control(&mut self, control: NoteControl) {
+        match control {
+            NoteControl::Pitch(pitch) => {
+                self.note.pitch = Some(Semitones::new(pitch.note_number()))
+            }
+            NoteControl::Registered(RegisteredPerNoteController::Volume, value) => {
+                self.note.volume = Amplitude::new(value.normalized().get());
+            }
+            NoteControl::Registered(RegisteredPerNoteController::Pan, value) => {
+                self.note.pan = Some(Pan::new(2.0 * value.normalized().get() - 1.0));
+            }
+            NoteControl::Pressure(_)
+            | NoteControl::Registered(..)
+            | NoteControl::Assignable(..) => {}
+        }
+    }
+
+    /// Per-Note Management Reset (M2-104 section 7.4.5): the note's per-note
+    /// controllers return to their defaults.
+    fn reset_controls(&mut self) {
+        self.note = NoteControls::DEFAULT;
+    }
+
+    /// Lets the voice go into its release at once (SF2 2.04 section 9.1.7: the
+    /// envelope enters its release phase from its current value, so a voice
+    /// released in its delay stage, where that value is 0, never sounds). The
+    /// volume and modulation envelopes' release stages start, and a loop that
+    /// runs until the key is up ends. A voice already released is left alone.
+    fn release(&mut self, _velocity: NoteVelocity) {
+        if self.voice_state == VoiceState::Playing {
+            self.vol_env.release();
+            self.mod_env.release();
+            self.oscillator.release();
+            self.voice_state = VoiceState::Released;
+        }
+    }
+
+    /// Lets the voice go into the quick release of an exclusive class (SF2
+    /// 2.04 section 8.1.2, generator 57): its volume
+    /// envelope falls over [`QUICK_RELEASE`] at the longest, whatever its
+    /// own release is. A voice already releasing is sped up, never slowed.
+    fn damp(&mut self) {
+        self.vol_env.release_within(QUICK_RELEASE);
+        self.release(NoteVelocity::CENTER);
+    }
+
+    /// The volume envelope's level now: what the core steals by.
+    fn level(&self) -> Amplitude {
+        self.vol_env.level()
     }
 }
 
@@ -908,7 +928,7 @@ mod tests {
         let preset = &font.presets()[0].regions()[0];
         let instrument = &font.instruments()[preset.instrument_id()].regions()[0];
         let mut voice = Voice::<F>::new(&Render::new(rate));
-        voice.start(&RegionPair::new(preset, instrument), 0, 60, 127);
+        voice.begin(&RegionPair::new(preset, instrument), 0, 60, 127);
         let data = font.sample_pool();
         let chunks = |voice: &mut Voice<F>, n: usize| {
             for _ in 0..n {
@@ -918,7 +938,7 @@ mod tests {
         // The delay, attack, hold and decay at their default millisecond each are 96 chunks at
         // 192 kHz.
         chunks(&mut voice, 200);
-        voice.release();
+        voice.release(NoteVelocity::CENTER);
         chunks(&mut voice, first);
         let g1: f64 = voice.current_mix_gain_left.into();
         chunks(&mut voice, last - first);

@@ -48,7 +48,8 @@
 //! umbrella exports; the rows of [`TESTING`], items a crate keeps behind its
 //! `testing` feature, which the all-features text still shows.
 
-use super::use_tree::{is_word, uses};
+use super::lex::word;
+use super::use_tree::uses;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Why the sans-IO surface of a network `Client` and `Host` is internal.
@@ -217,12 +218,12 @@ impl Ty {
 /// crate or a path cut short after `::` names nothing.
 fn named_at(s: &str, at: usize) -> Option<(Ty, usize)> {
     let b = s.as_bytes();
-    let word = |from: usize| from + b[from..].iter().take_while(|&&c| is_word(c)).count();
-    let mut i = word(at);
+    let word_end = |from: usize| from + b[from..].iter().take_while(|&&c| word(c)).count();
+    let mut i = word_end(at);
     let krate = s[at..i].to_owned();
     let mut mods = Vec::new();
     while s[i..].starts_with("::") {
-        let e = word(i + 2);
+        let e = word_end(i + 2);
         if e == i + 2 {
             break;
         }
@@ -248,7 +249,7 @@ fn named_at(s: &str, at: usize) -> Option<(Ty, usize)> {
 fn types<'a>(s: &'a str, consts: &'a Consts) -> impl Iterator<Item = Ty> + 'a {
     let b = s.as_bytes();
     s.match_indices("tutti_")
-        .filter(|(i, _)| *i == 0 || !is_word(b[i - 1]))
+        .filter(|(i, _)| *i == 0 || !word(b[i - 1]))
         .filter_map(|(i, _)| named_at(s, i))
         .map(|(t, _)| t)
         .filter(|t| !t.is_value() && !consts.contains(t))
@@ -316,7 +317,7 @@ impl<'a> Item<'a> {
             return None;
         }
         let words: Vec<&str> = before.split_whitespace().collect();
-        if !words.iter().all(|w| w.bytes().all(is_word)) {
+        if !words.iter().all(|w| w.bytes().all(word)) {
             return None;
         }
         Some(Item {

@@ -19,14 +19,8 @@
 
 use std::collections::BTreeSet;
 
-use super::lex::{blank, find_word, find_word_from, line_of, matching};
+use super::lex::{blank, find_word, find_word_from, is_test_file, line_of, matching, skipped};
 use super::{Report, Tree};
-
-const SKIPPED_DIRS: &[&str] = &["target", ".git"];
-
-fn skipped(dir: &str) -> bool {
-    SKIPPED_DIRS.contains(&dir)
-}
 
 /// `(crate directory, type, reason)`. The reason starts with `permanent:` or
 /// `temporary:`.
@@ -187,11 +181,6 @@ pub(super) fn check(tree: &dyn Tree, allow: &[(&str, &str, &str)]) -> Report {
         }
     }
     r
-}
-
-/// Whether a path under `src/` is a test module by name.
-fn is_test_file(rel: &str) -> bool {
-    rel.split('/').any(|c| c == "tests" || c == "tests.rs")
 }
 
 fn scan_file(scan: &mut Scan, krate: &str, path: &str, text: &str) {

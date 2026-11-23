@@ -11,7 +11,7 @@
 //! line's content. Header and other extensions (`.h:N`, `.cpp:N`) cite SDKs
 //! outside the repo and are not read.
 
-use super::lex::line_of;
+use super::lex::{line_of, skipped};
 use super::prose::prose;
 use super::{Report, Tree};
 
@@ -22,10 +22,6 @@ const FOREIGN: &[(&str, &str)] = &[(
 )];
 
 const ROOTS: [&str; 5] = ["crates", "testing", "xtask", "docs", "vendor"];
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git")
-}
 
 fn path_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'/')

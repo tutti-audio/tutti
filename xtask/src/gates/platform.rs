@@ -23,7 +23,7 @@
 
 use std::collections::BTreeSet;
 
-use super::lex::{blank, find_word_from, line_of};
+use super::lex::{blank, find_word_from, line_of, skipped};
 use super::use_tree::item_uses;
 use super::{Report, Tree};
 
@@ -33,10 +33,6 @@ const EXEMPT_PREFIX: &str = "crates/tutti-platform/";
 
 /// The fewest source files a real run reads; fewer means the walk is broken.
 pub(super) const MIN_FILES: usize = 500;
-
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "target" | ".git" | "node_modules")
-}
 
 /// Whether `path` names `std::time` (a leading `::` already stripped by the use tree).
 fn is_std_time(path: &[String]) -> bool {

@@ -27,8 +27,10 @@
 //! today's violations that a later change removes; the gate fails on a violation with no
 //! row and on a row with no violation, so the list only shrinks.
 
-use super::buffers::{blocks, ident_at, item_end, split_top, squash, strip_attrs};
-use super::lex::{blank, find_word_from, matching, test_ranges};
+use super::buffers::{blocks, item_end, split_top, squash};
+use super::lex::{
+    blank, find_word_from, ident_at, matching, skipped_library, strip_attrs, test_ranges,
+};
 use super::{Report, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -86,10 +88,6 @@ struct Site {
     short: String,
 }
 
-fn skipped(dir: &str) -> bool {
-    matches!(dir, "tests" | "benches" | "examples" | "target")
-}
-
 fn is_receiver(param: &str) -> bool {
     let p = squash(strip_attrs(param));
     let p = p.trim();
@@ -99,7 +97,7 @@ fn is_receiver(param: &str) -> bool {
 /// The units of `tutti-units`: `struct Name(f32)` and `struct Name(f64)`.
 fn units(tree: &dyn Tree) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for file in tree.files(UNITS, &skipped) {
+    for file in tree.files(UNITS, &skipped_library) {
         if !file.ends_with(".rs") || file.ends_with("/tests.rs") {
             continue;
         }
@@ -294,7 +292,7 @@ pub(super) fn check(tree: &dyn Tree, min_files: usize, min_units: usize) -> Repo
     };
     let units = units(tree);
     let files: Vec<String> = tree
-        .files(ROOT, &skipped)
+        .files(ROOT, &skipped_library)
         .into_iter()
         .filter(|f| f.ends_with(".rs") && !f.ends_with("/tests.rs"))
         .collect();

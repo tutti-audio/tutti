@@ -7,5 +7,6 @@ static A: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 mod step_no_alloc;
 mod support;
+mod table;
 mod tuning;
 mod universal;
