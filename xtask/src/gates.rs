@@ -38,6 +38,7 @@ mod prose;
 mod prose_names;
 mod range_types;
 mod ratchet;
+mod recipe_lists;
 mod session;
 mod session_api;
 mod sf2_spec;
@@ -57,6 +58,7 @@ mod values;
 mod vst3_sdk;
 mod width;
 
+pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
 
 use std::fs;
@@ -159,16 +161,20 @@ pub(crate) const GATES: &[GateDef] = &[
     gate("check-errors", true, |r| {
         errors::check(&r.tree, errors::ALLOW)
     }),
-    gate("check-layout", true, |r| layout::check(&r.tree)),
+    gate("check-layout", true, |r| {
+        let mut report = layout::check(&r.tree);
+        let lists = recipe_lists::check(&r.tree, &crate::recipes::listed());
+        report.out.extend(lists.out);
+        report.findings.extend(lists.findings);
+        report
+    }),
     gate("check-range-types", true, |r| {
         range_types::check(&r.tree, range_types::EXCEPTIONS)
     }),
     gate("check-hosting", true, |r| hosting::check(&r.tree)),
-    gate("check-lints", true, |r| {
-        lints::check(&r.tree, lints::UNLINTED)
-    }),
+    gate("check-lints", true, |r| lints::check(&r.tree)),
     gate("check-value-traits", true, |r| {
-        value_traits::check(&r.tree, value_traits::ALLOW, value_traits::MIN_FILES)
+        value_traits::check(&r.tree, value_traits::MIN_FILES)
     }),
     gate("check-submodule-pins", true, |r| {
         submodule_pins::check(&RealGit(r.root.to_path_buf()), submodule_pins::PINS)
@@ -729,6 +735,77 @@ pub(crate) mod fake {
     impl Git for Mem {
         fn submodule_status(&self, path: &str) -> Option<String> {
             self.status.get(path).cloned()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fake::run_gate;
+    use super::*;
+
+    type Check = fn(&dyn Tree) -> Report;
+
+    /// A baseline or row-list gate, with the file it reads.
+    fn lists() -> Vec<(&'static str, Check, &'static str)> {
+        vec![
+            ("check-comments", |t| comments::check(t), comments::BASELINE),
+            (
+                "check-passive-tests",
+                |t| passive_tests::check(t),
+                passive_tests::BASELINE,
+            ),
+            (
+                "check-prose-names",
+                |t| prose_names::check(t),
+                prose_names::BASELINE,
+            ),
+            (
+                "check-test-time",
+                |t| test_time::check(t),
+                test_time::BASELINE,
+            ),
+            ("check-buffers", |t| buffers::check(t, 0), buffers::LIST),
+            (
+                "check-buffers",
+                |t| buffers_loops::check(t, 0),
+                buffers_loops::LIST,
+            ),
+            (
+                "check-session-api",
+                |t| session_api::check(t, 0),
+                session_api::ALLOW,
+            ),
+            ("check-width", |t| width::check(t, &[], 0), width::BASELINE),
+            (
+                "check-building",
+                |t| building::check(t, &[], 0),
+                building::LIST,
+            ),
+            ("check-values", |t| values::check(t, 0, 0), values::LIST),
+            (
+                "umbrella-collisions",
+                |t| umbrella_collisions::check(t),
+                umbrella_collisions::BASELINE,
+            ),
+            (
+                "umbrella-collisions",
+                |t| umbrella_collisions::check(t),
+                umbrella_collisions::ALLOW,
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_gate_with_its_sources_and_no_baseline_file_fails_naming_it() {
+        let src = [
+            ("crates/a/src/lib.rs", "pub fn f() {}\n"),
+            ("crates/tutti/src/lib.rs", "pub use tutti_a::Hz;\n"),
+        ];
+        for (gate, check, path) in lists() {
+            let r = run_gate(check, &src);
+            let want = format!("{gate}: FAIL: {path} is missing");
+            assert!(r.findings.contains(&want), "{path}: {:?}", r.findings);
         }
     }
 }

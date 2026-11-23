@@ -24,6 +24,7 @@
 //! Comments and string literals are not code.
 
 use super::lex::{blank, find_word, line_of, skipped};
+use super::toml::Toml;
 use super::{Report, Tree};
 
 /// `(crate directory, why it may hold unsafe, the lint it must carry instead)`.
@@ -168,17 +169,15 @@ pub(super) fn check(tree: &dyn Tree) -> Report {
     match tree.read(&format!("{MIDI}/Cargo.toml")) {
         None => bad.push(format!("{MIDI}/Cargo.toml: missing; was the crate moved?")),
         Some(manifest) => {
-            for dep in RAW_DEPS {
-                let named = manifest.lines().any(|l| {
-                    l.trim_start()
-                        .strip_prefix(dep)
-                        .is_some_and(|r| r.trim_start().starts_with(['=', '.']))
-                });
-                if named {
-                    bad.push(format!(
-                        "{MIDI}/Cargo.toml: depends on `{dep}` (raw FFI belongs to the -ffi crates)"
-                    ));
-                }
+            let named: Vec<String> = Toml::parse(&manifest)
+                .dependencies()
+                .into_iter()
+                .map(|(n, _)| n)
+                .collect();
+            for dep in RAW_DEPS.iter().filter(|d| named.iter().any(|n| n == *d)) {
+                bad.push(format!(
+                    "{MIDI}/Cargo.toml: depends on `{dep}` (raw FFI belongs to the -ffi crates)"
+                ));
             }
         }
     }
@@ -381,6 +380,26 @@ mod tests {
             "[target.'cfg(windows)'.dependencies]\nwindows-sys = \"0.61\"\n",
         );
         assert!(r.findings[1].contains("`windows-sys`"));
+    }
+
+    #[test]
+    fn a_renamed_raw_dependency_is_flagged_and_an_alias_named_like_one_is_not() {
+        let r = with(
+            clean(),
+            "crates/tutti-midi-hardware/Cargo.toml",
+            "[dependencies]\nsys = { package = \"libc\", version = \"0.2\" }\n",
+        );
+        assert!(
+            r.findings.iter().any(|l| l.contains("`libc`")),
+            "{:?}",
+            r.findings
+        );
+        let r = with(
+            clean(),
+            "crates/tutti-midi-hardware/Cargo.toml",
+            "[dependencies]\nlibc = { package = \"tutti-other\", version = \"0.2\" }\n",
+        );
+        assert!(r.passed(), "{:?}", r.findings);
     }
 
     #[test]
