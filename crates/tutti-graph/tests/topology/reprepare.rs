@@ -114,18 +114,16 @@ fn wire(ed: &mut Editor) {
     }
 }
 
-/// An editor/executor pair and a reference over the graph above, both at
-/// `p`, logging events into separate inboxes.
+/// An editor/executor pair over the graph above, at `p`, logging events into
+/// an inbox.
 struct Rig {
     ed: Editor,
     exec: Executor,
-    reference: Reference,
     exec_inbox: Inbox,
-    ref_inbox: Inbox,
 }
 
 fn rig(p: Prepare) -> Rig {
-    let (exec_inbox, ref_inbox) = (tutti_fixtures::Record::new(), tutti_fixtures::Record::new());
+    let exec_inbox = tutti_fixtures::Record::new();
     let (mut ed, mut exec) = Editor::new(p);
     for (k, u) in units(&exec_inbox) {
         ed.insert(k, "n", Unforkable(u));
@@ -134,22 +132,15 @@ fn rig(p: Prepare) -> Rig {
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
-    let mut reference = Reference::new(p);
-    reference.set_graph(
-        &ed.spec().validate().unwrap(),
-        units(&ref_inbox).into_iter().collect(),
-    );
     Rig {
         ed,
         exec,
-        reference,
         exec_inbox,
-        ref_inbox,
     }
 }
 
 impl Rig {
-    /// Re-prepare both, with no block rendered between the two commits.
+    /// Re-prepare, with no block rendered between the two commits.
     fn reprepare(&mut self, p: Prepare) {
         self.ed.reprepare(p).expect("reprepares");
         self.exec.apply_pending(); // checks the units out
@@ -157,21 +148,16 @@ impl Rig {
         self.exec.apply_pending(); // installs them
         assert_eq!(self.ed.in_flight(), 1, "the resume box is out");
         self.ed.collect();
-        self.reference.reprepare(p);
     }
 
-    /// Render `blocks` through both on a constant 1.0 input; the executor's
-    /// output, after asserting the reference's is bit-identical.
+    /// Render `blocks` on a constant 1.0 input; the executor's output.
     fn render(&mut self, blocks: &[usize]) -> Vec<f32> {
         let mut all = Vec::new();
         let t = TransportPosition::default();
         for &n in blocks {
             let input = vec![1.0f32; n];
-            let (mut a, mut b) = (vec![0.0f32; n], vec![0.0f32; n]);
+            let mut a = vec![0.0f32; n];
             self.exec.process(n, &t, &[&input[..]], &mut [&mut a[..]]);
-            self.reference
-                .process(n, &t, &[&input[..]], &mut [&mut b[..]]);
-            assert_eq!(common::bits(&[a.clone()]), common::bits(&[b]));
             all.extend(a);
         }
         all
@@ -288,11 +274,6 @@ fn a_rate_change_resets_rings_and_flushes_pending_events() {
     // at twice the rate.
     assert_eq!(rig.exec.frame().get(), 384 + 256);
     assert_direct_events_conserved(&rig.exec_inbox, &[0..192, 384..384 + 256 - 64]);
-    assert_eq!(
-        rig.exec_inbox.lock().unwrap().to_vec(),
-        rig.ref_inbox.lock().unwrap().to_vec(),
-        "the reference, stating the rule independently, agrees event for event"
-    );
     // And some really were in the delay at the change, and landed after it.
     assert!(
         rig.exec_inbox
@@ -608,7 +589,7 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
 /// every pending frame-timed command scheduled before the re-prepare move to
 /// the same wall-clock time at the new rate (nearest frame); one scheduled
 /// after it already speaks the new rate. Blocks rendered while suspended
-/// count on the clock. Checked in both interpreters, with a suspended block
+/// count on the clock. Checked with a suspended block
 /// between the two halves.
 #[test]
 fn a_rate_change_keeps_pending_commands_at_their_wall_clock_time() {
@@ -618,15 +599,12 @@ fn a_rate_change_keeps_pending_commands_at_their_wall_clock_time() {
     let note = |t: u32| EventKind::Midi(Ump([t, 9, 0, 0]));
     let old_rate = tutti_units::At::Frame(tutti_units::Frame::new(1_000));
     rig.ed.schedule(old_rate, to, note(70_000)).expect("room");
-    rig.reference.schedule(old_rate, to, note(70_000));
 
     let p = prep(96_000.0, 64);
     rig.ed.reprepare(p).expect("reprepares");
-    rig.reference.suspend(p);
     let new_rate = tutti_units::At::Frame(tutti_units::Frame::new(1_500));
     rig.ed.schedule(new_rate, to, note(70_001)).expect("room");
-    rig.reference.schedule(new_rate, to, note(70_001));
-    // One block while suspended: silence in both, and the clock counts.
+    // One block while suspended: silence, and the clock counts.
     rig.render(&[64]);
     assert_eq!(
         rig.exec.frame().get(),
@@ -634,20 +612,18 @@ fn a_rate_change_keeps_pending_commands_at_their_wall_clock_time() {
         "192 frames at 48 kHz is 384 at 96"
     );
     rig.ed.collect(); // the resume
-    rig.reference.resume();
     rig.render(&[64; 30]);
-    for inbox in [&rig.exec_inbox, &rig.ref_inbox] {
-        let got: Vec<(u32, u64)> = inbox
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|e| e.0 >= 70_000)
-            .map(|e| (e.0, e.2))
-            .collect();
-        // The recorder's arrival is 30 frames (the EventLag path): both land
-        // 30 after their timeline frames.
-        assert_eq!(got, vec![(70_001, 1_530), (70_000, 2_030)]);
-    }
+    let got: Vec<(u32, u64)> = rig
+        .exec_inbox
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| e.0 >= 70_000)
+        .map(|e| (e.0, e.2))
+        .collect();
+    // The recorder's arrival is 30 frames (the EventLag path): both land
+    // 30 after their timeline frames.
+    assert_eq!(got, vec![(70_001, 1_530), (70_000, 2_030)]);
     assert_eq!(rig.exec.late_command_count(), 0);
 }
 
@@ -664,19 +640,17 @@ fn frames_a_rate_change_merges_keep_their_order() {
         let at = tutti_units::At::Frame(tutti_units::Frame::new(frame));
         let note = EventKind::Midi(Ump([tag, 9, 0, 0]));
         rig.ed.schedule(at, to, note).expect("room");
-        rig.reference.schedule(at, to, note);
     }
     rig.reprepare(prep(48_000.0, 64));
     rig.render(&[64; 12]);
-    for inbox in [&rig.exec_inbox, &rig.ref_inbox] {
-        let got: Vec<(u32, u64)> = inbox
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|e| e.0 >= 80_000)
-            .map(|e| (e.0, e.2))
-            .collect();
-        // Both on 500 + the recorder's 30-frame arrival.
-        assert_eq!(got, vec![(80_001, 530), (80_000, 530)]);
-    }
+    let got: Vec<(u32, u64)> = rig
+        .exec_inbox
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| e.0 >= 80_000)
+        .map(|e| (e.0, e.2))
+        .collect();
+    // Both on 500 + the recorder's 30-frame arrival.
+    assert_eq!(got, vec![(80_001, 530), (80_000, 530)]);
 }

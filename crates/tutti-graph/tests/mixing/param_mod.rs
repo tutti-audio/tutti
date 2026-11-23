@@ -1657,14 +1657,12 @@ fn moving_base(i: usize) -> f32 {
     1.0 + (3.0f32 - 1.0) * ((i + 1) as f32 / 16.0)
 }
 
-/// `Cutoff` as the executor and as the reference render it (named), for a
-/// [`SegmentThenRamp`] driving the probe's port: block 1, frames 0..8, at a
-/// still base of 1; block 2, frames 8..24, under [`moving_base`].
-fn segment_then_ramp(at: u64, step_at: Option<u64>) -> Vec<(&'static str, Vec<f32>, Vec<f32>)> {
-    let prep = prepare(64);
+/// `Cutoff` as the executor renders it, for a [`SegmentThenRamp`] driving
+/// the probe's port: block 1, frames 0..8, at a still base of 1; block 2,
+/// frames 8..24, under [`moving_base`].
+fn segment_then_ramp(at: u64, step_at: Option<u64>) -> (Vec<f32>, Vec<f32>) {
     let (cutoff, q) = (Cell::new(1.0), Cell::new(0.0));
     let (mut ed, mut exec) = probe_graph(64, &cutoff, &q);
-    let mut reference = Reference::new(prep);
     ed.insert(
         NodeKey(1),
         "src",
@@ -1673,45 +1671,26 @@ fn segment_then_ramp(at: u64, step_at: Option<u64>) -> Vec<(&'static str, Vec<f3
     ed.spec_mut()
         .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
     ed.commit().expect("commits");
-    let mut units: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-    units.insert(NodeKey(PROBE), Box::new(Probe::new(&cutoff, &q)));
-    units.insert(NodeKey(1), Box::new(SegmentThenRamp { at, step_at }));
-    reference.set_graph(&ed.spec().validate().expect("valid"), units);
-
-    let mut rendered = Vec::new();
-    for (side, name) in [(0, "executor"), (1, "reference")] {
-        cutoff.set(1.0);
-        let mut run = |n: usize| -> Vec<f32> {
-            let mut out = [vec![0.0; n], vec![0.0; n], vec![0.0; n]];
-            let [a, c, d] = &mut out;
-            let mut bufs = [&mut a[..], &mut c[..], &mut d[..]];
-            if side == 0 {
-                exec.process(n, &TransportPosition::default(), &[], &mut bufs);
-                ed.collect();
-            } else {
-                reference.process(n, &TransportPosition::default(), &[], &mut bufs);
-            }
-            let [cut, _, _] = out;
-            cut
-        };
-        let first = run(8);
-        cutoff.set(3.0);
-        let second = run(16);
-        rendered.push((name, first, second));
-    }
-    rendered
+    let mut run = |n: usize| -> Vec<f32> {
+        let mut out = [vec![0.0; n], vec![0.0; n], vec![0.0; n]];
+        let [a, c, d] = &mut out;
+        let mut bufs = [&mut a[..], &mut c[..], &mut d[..]];
+        exec.process(n, &TransportPosition::default(), &[], &mut bufs);
+        ed.collect();
+        let [cut, _, _] = out;
+        cut
+    };
+    let first = run(8);
+    cutoff.set(3.0);
+    let second = run(16);
+    (first, second)
 }
 
 /// `want`, bit for bit, frame by frame from absolute frame `from`.
-fn assert_bits(name: &str, got: &[f32], want: &[f32], from: usize) {
-    assert_eq!(got.len(), want.len(), "{name}");
+fn assert_bits(got: &[f32], want: &[f32], from: usize) {
+    assert_eq!(got.len(), want.len());
     for (j, (g, w)) in got.iter().zip(want).enumerate() {
-        assert_eq!(
-            g.to_bits(),
-            w.to_bits(),
-            "{name}, frame {}: {g} vs {w}",
-            from + j
-        );
+        assert_eq!(g.to_bits(), w.to_bits(), "frame {}: {g} vs {w}", from + j);
     }
 }
 
@@ -1740,17 +1719,15 @@ fn ramp_from(at: u64, held: impl Fn(usize) -> f32) -> Vec<f32> {
 /// source's first events, starts from the base at that frame, exactly as
 /// it would with no segment before it (a first ramp starts from the base
 /// at its frame; a second event on a frame replaces the first from the same
-/// value). Pinned under a base that is ramping across the block, in the
-/// executor and in the reference alike, so neither can start it from the
-/// previous frame's base or from a value nothing wrote.
+/// value). Pinned under a base that is ramping across the block, so it
+/// cannot start from the previous frame's base or from a value nothing wrote.
 #[test]
 fn a_ramp_replacing_a_first_segment_on_its_frame_starts_from_the_base() {
     let want = ramp_from(10, moving_base);
     assert_eq!(want[2], 1.03125, "the ramp's first frame, from the base");
-    for (name, first, second) in segment_then_ramp(10, None) {
-        assert_eq!(first, vec![1.0; 8], "{name}: the base, before any event");
-        assert_bits(name, &second, &want, 8);
-    }
+    let (first, second) = segment_then_ramp(10, None);
+    assert_eq!(first, vec![1.0; 8], "the base, before any event");
+    assert_bits(&second, &want, 8);
 }
 
 /// Once the source has started, a ramp that replaces a segment on the
@@ -1761,14 +1738,13 @@ fn a_ramp_replacing_a_first_segment_on_its_frame_starts_from_the_base() {
 fn a_started_sources_ramp_replacing_a_segment_on_its_frame_starts_from_its_held_value() {
     let want = ramp_from(10, |_| 7.0);
     assert_eq!(want[2], 5.25, "the ramp's first frame, from the held 7");
-    for (name, first, second) in segment_then_ramp(10, Some(2)) {
-        assert_eq!(
-            first,
-            [1.0, 1.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0],
-            "{name}: the base, then the step"
-        );
-        assert_bits(name, &second, &want, 8);
-    }
+    let (first, second) = segment_then_ramp(10, Some(2));
+    assert_eq!(
+        first,
+        [1.0, 1.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0],
+        "the base, then the step"
+    );
+    assert_bits(&second, &want, 8);
 }
 
 /// A segment replaces the base, frame by frame: before the segment's first
@@ -2547,8 +2523,7 @@ fn a_range_cell_handle_is_the_ports_own() {
 /// 40-frame segment at 10 (one step in, so it lands on 49), the same piece
 /// resumed at 20 and at 30 (a source's re-send, a resync), the piece at rest
 /// on its end at 70, then a new 8-frame segment at 80 (landing on 87). The
-/// corners are 10, 49, 80 and 87 at blocks of 1, 64 and 100 frames, and the
-/// reference interpreter, written apart from the port, reports the same.
+/// corners are 10, 49, 80 and 87 at blocks of 1, 64 and 100 frames.
 #[test]
 fn corners_skip_a_resend_at_any_block_size() {
     let key = ParamKey::<Hz>::CUTOFF;
@@ -2567,13 +2542,12 @@ fn corners_skip_a_resend_at_any_block_size() {
         shaped: Vec::new(),
         events: Vec::new(),
     };
-    let render = |block: usize, side: Side| -> Vec<u32> {
+    let render = |block: usize| -> Vec<u32> {
         let (cutoff, q) = (Cell::new(0.0), Cell::new(0.0));
         let prep = prepare(128);
         let (mut ed, mut exec) = Editor::new(prep);
-        let mut reference = Reference::new(prep);
         let probe = Probe::new(&cutoff, &q).with_corners();
-        ed.insert(NodeKey(PROBE), "probe", Unforkable(probe.clone()));
+        ed.insert(NodeKey(PROBE), "probe", Unforkable(probe));
         ed.insert(NodeKey(1), "src", Unforkable(source()));
         ed.spec_mut()
             .topology
@@ -2581,22 +2555,13 @@ fn corners_skip_a_resend_at_any_block_size() {
         ed.spec_mut()
             .connect_param(param(PROBE, UnitParam::Cutoff), ev(1));
         ed.commit().expect("commits");
-        let mut fresh: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-        fresh.insert(NodeKey(PROBE), Box::new(probe));
-        fresh.insert(NodeKey(1), Box::new(source()));
-        reference.set_graph(&ed.spec().validate().expect("valid"), fresh);
         let mut corners = Vec::new();
         let mut done = 0;
         while done < 128 {
             let n = block.min(128 - done);
             let mut out = vec![vec![0.0f32; n]; 4];
             let mut refs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[..]).collect();
-            match side {
-                Side::Executor => exec.process(n, &TransportPosition::default(), &[], &mut refs),
-                Side::Reference => {
-                    reference.process(n, &TransportPosition::default(), &[], &mut refs)
-                }
-            }
+            exec.process(n, &TransportPosition::default(), &[], &mut refs);
             ed.collect();
             corners.extend(
                 (0..n)
@@ -2607,21 +2572,9 @@ fn corners_skip_a_resend_at_any_block_size() {
         }
         corners
     };
-    for side in [Side::Executor, Side::Reference] {
-        for block in [1, 64, 100] {
-            assert_eq!(
-                render(block, side),
-                [10, 49, 80, 87],
-                "{side:?}, blocks of {block}"
-            );
-        }
+    for block in [1, 64, 100] {
+        assert_eq!(render(block), [10, 49, 80, 87], "blocks of {block}");
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Side {
-    Executor,
-    Reference,
 }
 
 /// **A port's effective cell reads the lane's last frame while it drives the

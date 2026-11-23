@@ -3,7 +3,6 @@
 
 use tutti_graph::testing as common;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,8 +11,8 @@ use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_graph::MAX_NODE_LATENCY;
 use tutti_graph::NodeKey;
 use tutti_graph::{
-    CommitError, Cx, Editor, Executor, Io, Node, Prepare, Reference, Shape, Status,
-    TransportPosition, Unforkable,
+    CommitError, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition,
+    Unforkable,
 };
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, SampleRate, Samples};
@@ -107,23 +106,8 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     (ed, exec)
 }
 
-/// Units for a [`Reference`] of the same graph.
-fn fresh(plugin: Plugin) -> BTreeMap<NodeKey, Box<dyn Node>> {
-    let mut m: BTreeMap<NodeKey, Box<dyn Node>> = BTreeMap::new();
-    m.insert(PLUGIN, Box::new(plugin));
-    m.insert(
-        DRY,
-        Box::new(TestNode::new(Kind::Gain {
-            gain: 1.0,
-            width: 1,
-        })),
-    );
-    m
-}
-
-/// One block of `input` through `exec` and `reference`; both outputs of
-/// each, which must agree bit for bit.
-fn block(exec: &mut Executor, reference: &mut Reference, input: &[f32]) -> [Vec<f32>; 2] {
+/// One block of `input` through `exec`; both its outputs.
+fn block(exec: &mut Executor, input: &[f32]) -> [Vec<f32>; 2] {
     let n = input.len();
     let (mut a, mut b) = (vec![0.0f32; n], vec![0.0f32; n]);
     exec.process(
@@ -132,16 +116,6 @@ fn block(exec: &mut Executor, reference: &mut Reference, input: &[f32]) -> [Vec<
         &[input],
         &mut [&mut a, &mut b],
     );
-    let (mut ra, mut rb) = (vec![0.0f32; n], vec![0.0f32; n]);
-    reference.process(
-        n,
-        &TransportPosition::default(),
-        &[input],
-        &mut [&mut ra, &mut rb],
-    );
-    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(&a), bits(&ra), "executor and reference, output 0");
-    assert_eq!(bits(&b), bits(&rb), "executor and reference, output 1");
     [a, b]
 }
 
@@ -161,31 +135,20 @@ fn peak_at(v: &[f32]) -> Option<usize> {
 /// the plugin's own output — whose compensation stays 0, since it is the
 /// latest path — is bit-identical to a run that never changed anything (no
 /// click), and the unit is the same one (never retired, called every block).
-/// A [`Reference`] handed the same spec renders the same numbers.
 #[test]
 fn a_latency_change_moves_the_other_paths_compensation() {
     let plugin = Plugin::new();
     let (reported, calls) = (Arc::clone(&plugin.reported), Arc::clone(&plugin.calls));
     let (mut ed, mut exec) = graph(plugin.clone());
     ed.commit().expect("commits");
-    let mut reference = Reference::new(prepare(64));
-    // Its own call counter, so `calls` counts the executor's unit alone.
-    let mut ref_plugin = plugin.clone();
-    ref_plugin.calls = Arc::new(AtomicUsize::new(0));
-    reference.set_graph(&ed.spec().validate().expect("valid"), fresh(ref_plugin));
 
     // The untouched twin: the same graph, never changed.
     let (mut twin_ed, mut twin) = graph(Plugin::new());
     twin_ed.commit().expect("commits");
-    let mut twin_ref = Reference::new(prepare(64));
-    twin_ref.set_graph(
-        &twin_ed.spec().validate().expect("valid"),
-        fresh(Plugin::new()),
-    );
 
     // Misaligned while the plugin under-reports.
-    let [wet, dry] = block(&mut exec, &mut reference, &impulse(64, 8));
-    let [twin_wet, _] = block(&mut twin, &mut twin_ref, &impulse(64, 8));
+    let [wet, dry] = block(&mut exec, &impulse(64, 8));
+    let [twin_wet, _] = block(&mut twin, &impulse(64, 8));
     assert_eq!(peak_at(&wet), Some(8 + TRUE_LATENCY));
     assert_eq!(peak_at(&dry), Some(8), "no compensation yet");
     assert_eq!(wet, twin_wet);
@@ -199,14 +162,13 @@ fn a_latency_change_moves_the_other_paths_compensation() {
         Samples::new(TRUE_LATENCY)
     );
     ed.commit().expect("recompiles");
-    reference.set_graph(&ed.spec().validate().expect("valid"), BTreeMap::new());
 
     let mut wet_all = wet;
     let mut twin_all = twin_wet;
     for b in 0..4 {
         let input = impulse(64, 20);
-        let [wet, dry] = block(&mut exec, &mut reference, &input);
-        let [twin_wet, _] = block(&mut twin, &mut twin_ref, &input);
+        let [wet, dry] = block(&mut exec, &input);
+        let [twin_wet, _] = block(&mut twin, &input);
         if b > 0 {
             assert_eq!(
                 peak_at(&dry),

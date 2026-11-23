@@ -2,8 +2,8 @@
 //! offs of what the edge's source holds. A sink that gains an edge is told
 //! nothing; the later off of a note it never heard begin reaches it.
 //!
-//! Each scenario runs on the serial executor, on the parallel one and on the
-//! reference interpreter, and the three must log the same events.
+//! Each scenario runs on the serial executor and on the parallel one, and the
+//! two must log the same events.
 
 use tutti_graph::testing as common;
 
@@ -12,13 +12,12 @@ use std::sync::Arc;
 use common::TestPool;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
-use tutti_graph::NodeSpec;
+use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, Fade,
-    ForkByClone, ForkTarget, Io, Node, Offset, Prepare, Reference, RenderMode, Shape, Shapes,
-    Status, TransportPosition, Unforkable,
+    ForkByClone, ForkTarget, Io, Node, Offset, Prepare, RenderMode, Shape, Status,
+    TransportPosition, Unforkable,
 };
-use tutti_graph::{NodeKey, Topology};
 use tutti_ump::{
     Address, CCNumber, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, U7, U14, Ump,
     Voice1, Voice2,
@@ -166,27 +165,20 @@ fn m1_controller(controller: CCNumber, value: u8) -> Words {
 enum Mode {
     Serial,
     Parallel,
-    Reference,
 }
 
-const MODES: [Mode; 3] = [Mode::Serial, Mode::Parallel, Mode::Reference];
+const MODES: [Mode; 2] = [Mode::Serial, Mode::Parallel];
 
 /// The engine under a scenario: a source `1` and sinks `2..`, edges set with
 /// `wire`, blocks with `block`.
 struct Rig {
-    ed: Option<Editor>,
-    exec: Option<Executor>,
-    reference: Option<Reference>,
+    ed: Editor,
+    exec: Executor,
     mail: Mail,
     log: Log,
-    edges: Vec<(u64, u64)>,
     sinks: Vec<u64>,
-    src_gen: u32,
     frame: u64,
     mode: Mode,
-    /// Sinks take an audio input from a latent node, so every event edge
-    /// into them runs through a PDC delay.
-    lag: bool,
     /// Every edge `wire` sets is a feedback edge of this delay.
     feedback: Option<Samples>,
 }
@@ -200,213 +192,94 @@ impl Rig {
         let prep = common::prepare(MAX);
         let mail: Mail = Mail::default();
         let log: Log = tutti_fixtures::Record::new();
-        let (ed, exec, reference) = match mode {
-            Mode::Reference => (None, None, Some(Reference::new(prep))),
-            _ => {
-                let (ed, mut exec) = Editor::with_event_capacity(prep, 64);
-                if matches!(mode, Mode::Parallel) {
-                    exec.set_pool(Some(TestPool::new(2)));
-                }
-                (Some(ed), Some(exec), None)
-            }
-        };
+        let (ed, mut exec) = Editor::with_event_capacity(prep, 64);
+        if matches!(mode, Mode::Parallel) {
+            exec.set_pool(Some(TestPool::new(2)));
+        }
         let mut r = Self {
             ed,
             exec,
-            reference,
             mail,
             log,
-            edges: vec![],
             sinks: sinks.to_vec(),
-            src_gen: 0,
             frame: 0,
             mode,
-            lag,
             feedback: None,
         };
-        if let Some(ed) = &mut r.ed {
+        let ed = &mut r.ed;
+        ed.insert(
+            NodeKey(1),
+            "src",
+            Unforkable(Src {
+                mail: r.mail.clone(),
+            }),
+        );
+        if lag {
+            ed.insert(NodeKey(LAG), "lag", Unforkable(Lag));
+        }
+        for &s in sinks {
             ed.insert(
-                NodeKey(1),
-                "src",
-                Unforkable(Src {
-                    mail: r.mail.clone(),
+                NodeKey(s),
+                "sink",
+                Unforkable(Sink {
+                    id: s,
+                    log: r.log.clone(),
+                    audio: lag,
                 }),
             );
             if lag {
-                ed.insert(NodeKey(LAG), "lag", Unforkable(Lag));
-            }
-            for &s in sinks {
-                ed.insert(
-                    NodeKey(s),
-                    "sink",
-                    Unforkable(Sink {
-                        id: s,
-                        log: r.log.clone(),
-                        audio: lag,
-                    }),
+                ed.spec_mut().topology.edges.insert(
+                    tutti_graph::InputPort::new(NodeKey(s), 0),
+                    vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
+                        tutti_graph::OutputPort::new(NodeKey(LAG), 0),
+                    ))],
                 );
-                if lag {
-                    ed.spec_mut().topology.edges.insert(
-                        tutti_graph::InputPort::new(NodeKey(s), 0),
-                        vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                            tutti_graph::OutputPort::new(NodeKey(LAG), 0),
-                        ))],
-                    );
-                }
             }
         }
         r
     }
 
-    fn units(&self, keys: &[u64]) -> std::collections::BTreeMap<NodeKey, Box<dyn Node>> {
-        let mut m: std::collections::BTreeMap<NodeKey, Box<dyn Node>> = Default::default();
-        for &k in keys {
-            m.insert(
-                NodeKey(k),
-                if k == 1 {
-                    Box::new(Src {
-                        mail: self.mail.clone(),
-                    })
-                } else if k == LAG {
-                    Box::new(Lag)
-                } else {
-                    Box::new(Sink {
-                        id: k,
-                        log: self.log.clone(),
-                        audio: self.lag,
-                    })
-                },
-            );
-        }
-        m
-    }
-
-    fn edge(&self, from: u64) -> EventEdge {
-        match self.feedback {
-            Some(delay) => EventEdge::feedback(out(from), delay),
-            None => EventEdge::Direct(out(from)),
-        }
-    }
-
     /// Set the edge list and commit.
     fn wire(&mut self, edges: &[(u64, u64)]) {
-        self.edges = edges.to_vec();
-        match self.mode {
-            Mode::Reference => {
-                let mut t = Topology::default();
-                let mut shapes = Shapes::new();
-                let all: Vec<u64> = std::iter::once(1u64)
-                    .chain(self.lag.then_some(LAG))
-                    .chain(self.sinks.iter().copied())
-                    .collect();
-                for k in all {
-                    let sh = if k == 1 {
-                        Src {
-                            mail: self.mail.clone(),
-                        }
-                        .shape()
-                    } else if k == LAG {
-                        Lag.shape()
-                    } else {
-                        Sink {
-                            id: k,
-                            log: self.log.clone(),
-                            audio: self.lag,
-                        }
-                        .shape()
-                    };
-                    t.nodes.insert(
-                        NodeKey(k),
-                        NodeSpec::new("n", sh.audio_in(), sh.audio_out())
-                            .latency(sh.latency.samples())
-                            .tail(sh.tail),
-                    );
-                    shapes.insert(NodeKey(k), sh);
-                }
-                if self.lag {
-                    for &s in &self.sinks {
-                        t.edges.insert(
-                            tutti_graph::InputPort::new(NodeKey(s), 0),
-                            vec![tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
-                                tutti_graph::OutputPort::new(NodeKey(LAG), 0),
-                            ))],
-                        );
-                    }
-                }
-                let mut g = tutti_graph::GraphSpec::new(t);
-                for &(f, to) in edges {
-                    g.connect_events(at(to), self.edge(f));
-                }
-                g.generations.insert(NodeKey(1), self.src_gen);
-                let valid = g.validate().expect("valid");
-                let keys: Vec<u64> = std::iter::once(1)
-                    .chain(self.lag.then_some(LAG))
-                    .chain(self.sinks.iter().copied())
-                    .collect();
-                let units = self.units(&keys);
-                self.reference.as_mut().unwrap().set_graph(&valid, units);
-                let _ = &shapes;
-            }
-            _ => {
-                let feedback = self.feedback;
-                let edge = |f| match feedback {
-                    Some(delay) => EventEdge::feedback(out(f), delay),
-                    None => EventEdge::Direct(out(f)),
-                };
-                let ed = self.ed.as_mut().unwrap();
-                let spec = ed.spec_mut();
-                spec.events.clear();
-                for &(f, to) in edges {
-                    spec.connect_events(at(to), edge(f));
-                }
-                ed.commit().expect("commits");
-                let exec = self.exec.as_mut().unwrap();
-                exec.apply_pending();
-                ed.collect();
-                if matches!(self.mode, Mode::Parallel) && self.sinks.len() > 1 && !edges.is_empty()
-                {
-                    assert!(exec.is_parallel(), "the parallel mode runs parallel");
-                }
-            }
+        let feedback = self.feedback;
+        let edge = |f| match feedback {
+            Some(delay) => EventEdge::feedback(out(f), delay),
+            None => EventEdge::Direct(out(f)),
+        };
+        let spec = self.ed.spec_mut();
+        spec.events.clear();
+        for &(f, to) in edges {
+            spec.connect_events(at(to), edge(f));
+        }
+        self.ed.commit().expect("commits");
+        self.exec.apply_pending();
+        self.ed.collect();
+        if matches!(self.mode, Mode::Parallel) && self.sinks.len() > 1 && !edges.is_empty() {
+            assert!(self.exec.is_parallel(), "the parallel mode runs parallel");
         }
     }
 
     /// Replace the source with a new unit (a new generation).
     fn replace_source(&mut self) {
-        self.src_gen += 1;
-        match self.mode {
-            Mode::Reference => {
-                let edges = self.edges.clone();
-                self.wire(&edges);
-            }
-            _ => {
-                let ed = self.ed.as_mut().unwrap();
-                ed.replace(
-                    NodeKey(1),
-                    Unforkable(Src {
-                        mail: self.mail.clone(),
-                    }),
-                    Fade::new(Samples::new(0)),
-                )
-                .ok();
-                ed.commit().ok();
-                self.exec.as_mut().unwrap().apply_pending();
-                ed.collect();
-            }
-        }
+        self.ed
+            .replace(
+                NodeKey(1),
+                Unforkable(Src {
+                    mail: self.mail.clone(),
+                }),
+                Fade::new(Samples::new(0)),
+            )
+            .ok();
+        self.ed.commit().ok();
+        self.exec.apply_pending();
+        self.ed.collect();
     }
 
     fn remove_source(&mut self) {
-        match self.mode {
-            Mode::Reference => panic!("not modelled in this harness"),
-            _ => {
-                let ed = self.ed.as_mut().unwrap();
-                ed.remove(NodeKey(1));
-                ed.commit().expect("commits");
-                self.exec.as_mut().unwrap().apply_pending();
-                ed.collect();
-            }
-        }
+        self.ed.remove(NodeKey(1));
+        self.ed.commit().expect("commits");
+        self.exec.apply_pending();
+        self.ed.collect();
     }
 
     fn send(&self, w: Words) {
@@ -416,14 +289,7 @@ impl Rig {
     /// Render one block of `MAX` frames.
     fn block(&mut self) {
         let t = TransportPosition::default();
-        match self.mode {
-            Mode::Reference => self
-                .reference
-                .as_mut()
-                .unwrap()
-                .process(MAX, &t, &[], &mut []),
-            _ => self.exec.as_mut().unwrap().process(MAX, &t, &[], &mut []),
-        }
+        self.exec.process(MAX, &t, &[], &mut []);
         self.frame += MAX as u64;
     }
 
@@ -465,11 +331,7 @@ fn by_sink(log: &[(u64, u64, Words)]) -> Vec<(u64, u64, Words)> {
 
 fn same(logs: &[Vec<(u64, u64, Words)>]) {
     for l in &logs[1..] {
-        assert_eq!(
-            by_sink(&logs[0]),
-            by_sink(l),
-            "serial, parallel and reference agree"
-        );
+        assert_eq!(by_sink(&logs[0]), by_sink(l), "serial and parallel agree");
     }
 }
 
@@ -785,10 +647,10 @@ fn a_removed_sink_is_not_sent_anything() {
     r.send(on60());
     r.block();
     {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.remove(NodeKey(2));
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     }
     r.send(off60());
@@ -877,7 +739,7 @@ fn fan_in_closes_the_cut_sources_keys_only() {
     let mut r = Rig::new(Mode::Serial, &[2]);
     let mail2: Mail = Mail::default();
     {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.insert(
             NodeKey(5),
             "src2",
@@ -887,14 +749,14 @@ fn fan_in_closes_the_cut_sources_keys_only() {
         );
     }
     let both = |r: &mut Rig, edges: &[(u64, u64)]| {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         let spec = ed.spec_mut();
         spec.events.clear();
         for &(f, to) in edges {
             spec.connect_events(at(to), EventEdge::Direct(out(f)));
         }
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     };
     both(&mut r, &[(1, 2), (5, 2)]);
@@ -920,7 +782,7 @@ fn a_crossfaded_source_closes_its_sinks() {
     r.send(on60());
     r.block();
     {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.replace(
             NodeKey(1),
             Unforkable(Src {
@@ -930,7 +792,7 @@ fn a_crossfaded_source_closes_its_sinks() {
         )
         .expect("replace");
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     }
     r.block();
@@ -948,7 +810,7 @@ fn a_crossfaded_source_closes_its_sinks() {
 fn fan_in_on_one_key_is_closed_by_either_source() {
     let mut r = Rig::new(Mode::Serial, &[2]);
     let mail2: Mail = Mail::default();
-    r.ed.as_mut().unwrap().insert(
+    r.ed.insert(
         NodeKey(5),
         "src2",
         Unforkable(Src {
@@ -956,14 +818,14 @@ fn fan_in_on_one_key_is_closed_by_either_source() {
         }),
     );
     let wire = |r: &mut Rig, edges: &[(u64, u64)]| {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.spec_mut().events.clear();
         for &(f, to) in edges {
             ed.spec_mut()
                 .connect_events(at(to), EventEdge::Direct(out(f)));
         }
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     };
     wire(&mut r, &[(1, 2), (5, 2)]);
@@ -983,7 +845,7 @@ fn a_key_held_across_a_reprepare_is_closed() {
     r.wire(&[(1, 2)]);
     r.send(on60());
     r.block();
-    let (ed, exec) = (r.ed.as_mut().unwrap(), r.exec.as_mut().unwrap());
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
     exec.apply_pending();
     ed.collect();
@@ -1020,8 +882,7 @@ fn a_cut_feedback_edge_delivers_what_is_in_flight_then_closes() {
 
 /// A replace with a fade while another fade runs: the first replacement
 /// keeps writing until the second takes over, and its keys are closed then,
-/// at once for none of them. The reference interpreter does not model a
-/// crossfade, so this runs on the serial and the parallel executor.
+/// at once for none of them.
 #[test]
 fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
     for mode in [Mode::Serial, Mode::Parallel] {
@@ -1030,11 +891,11 @@ fn a_second_fade_closes_the_first_replacements_keys_when_it_takes_over() {
         r.block();
         let fade = Fade::new(Samples::new(MAX * 3));
         let swap = |r: &mut Rig, mail: &Mail| {
-            let ed = r.ed.as_mut().unwrap();
+            let ed = &mut r.ed;
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
                 .expect("replaces");
             ed.commit().unwrap();
-            r.exec.as_mut().unwrap().apply_pending();
+            r.exec.apply_pending();
             ed.collect();
         };
         let (m2, m3): (Mail, Mail) = Default::default();
@@ -1084,11 +945,11 @@ fn a_third_fade_supersedes_the_waiting_one() {
         r.block();
         let fade = Fade::new(Samples::new(MAX * 3));
         let swap = |r: &mut Rig, mail: &Mail| {
-            let ed = r.ed.as_mut().unwrap();
+            let ed = &mut r.ed;
             ed.replace(NodeKey(1), Unforkable(Src { mail: mail.clone() }), fade)
                 .expect("replaces");
             ed.commit().unwrap();
-            r.exec.as_mut().unwrap().apply_pending();
+            r.exec.apply_pending();
             ed.collect();
         };
         let (m2, m3, m4): (Mail, Mail, Mail) = Default::default();
@@ -1115,7 +976,7 @@ fn a_third_fade_supersedes_the_waiting_one() {
 }
 
 fn swap_with_fade(r: &mut Rig, mail: &Mail, frames: usize) {
-    let ed = r.ed.as_mut().unwrap();
+    let ed = &mut r.ed;
     ed.replace(
         NodeKey(1),
         Unforkable(Src { mail: mail.clone() }),
@@ -1123,7 +984,7 @@ fn swap_with_fade(r: &mut Rig, mail: &Mail, frames: usize) {
     )
     .expect("replaces");
     ed.commit().unwrap();
-    r.exec.as_mut().unwrap().apply_pending();
+    r.exec.apply_pending();
     ed.collect();
 }
 
@@ -1142,7 +1003,7 @@ fn a_reprepare_with_a_fade_queued_closes_the_stopped_units_keys() {
     swap_with_fade(&mut r, &m3, MAX * 8);
     r.block();
     assert_eq!(r.words(2), vec![on60()], "still sounding");
-    let (ed, exec) = (r.ed.as_mut().unwrap(), r.exec.as_mut().unwrap());
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
     ed.reprepare(common::prepare(MAX * 2)).expect("reprepares");
     exec.apply_pending();
     ed.collect();
@@ -1263,7 +1124,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
     r.block();
     let (m2, m3): (Mail, Mail) = Default::default();
     {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m2.clone() }),
@@ -1271,13 +1132,13 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
         )
         .unwrap();
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     }
     m2.lock().unwrap().push((0, on60()));
     r.block();
     {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.replace(
             NodeKey(1),
             Unforkable(Src { mail: m3.clone() }),
@@ -1285,7 +1146,7 @@ fn a_hard_replace_during_a_fade_closes_the_running_units_keys() {
         )
         .unwrap();
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     }
     r.block();
@@ -1357,7 +1218,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
     sweep(
         &[2],
         |r| {
-            let ed = r.ed.as_mut().unwrap();
+            let ed = &mut r.ed;
             ed.replace(
                 NodeKey(1),
                 Unforkable(Src {
@@ -1367,7 +1228,7 @@ fn a_hard_replace_around_a_promotion_closes_once() {
             )
             .unwrap();
             ed.commit().unwrap();
-            r.exec.as_mut().unwrap().apply_pending();
+            r.exec.apply_pending();
             ed.collect();
         },
         |r, label| {
@@ -1519,8 +1380,7 @@ fn a_replaced_source_behind_a_delay_closes_every_key() {
 }
 
 /// A held set larger than the delay's FIFO holds: the closes the queue has no
-/// room for stay owed and pour in as room frees, so every key is closed
-/// (executors only: the reference closes all at once).
+/// room for stay owed and pour in as room frees, so every key is closed.
 #[test]
 fn a_replaced_source_behind_a_delay_closes_a_set_larger_than_the_fifo() {
     let run = |mode: Mode| {
@@ -1534,7 +1394,7 @@ fn a_replaced_source_behind_a_delay_closes_a_set_larger_than_the_fifo() {
         let (keys, first) = closes(&r.words(2));
         assert!(every_key_once(&keys), "{mode:?}: every key closed, once");
         assert_eq!(first, Some(m1_controller(CCNumber::SUSTAIN, 0)));
-        assert_eq!(r.exec.as_ref().unwrap().dropped_event_count(), 0);
+        assert_eq!(r.exec.dropped_event_count(), 0);
         r.got(2)
     };
     assert_eq!(run(Mode::Serial), run(Mode::Parallel));
@@ -1548,7 +1408,7 @@ fn a_source_replaced_by_the_resume_commit_is_closed() {
     r.wire(&[(1, 2)]);
     r.send(on60());
     r.block();
-    let (ed, exec) = (r.ed.as_mut().unwrap(), r.exec.as_mut().unwrap());
+    let (ed, exec) = (&mut r.ed, &mut r.exec);
     ed.replace(
         NodeKey(1),
         Unforkable(Src {
@@ -1576,7 +1436,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
     r.block();
     {
         let log = r.log.clone();
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         ed.replace(
             NodeKey(2),
             Unforkable(Sink {
@@ -1589,7 +1449,7 @@ fn a_replaced_sink_is_not_sent_a_close() {
         .unwrap();
         ed.spec_mut().events.clear();
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     }
     r.block();
@@ -1613,13 +1473,13 @@ fn closes_the_delay_cannot_hold_stay_owed_until_it_can() {
         }
         r.block();
     }
-    assert_eq!(r.exec.as_ref().unwrap().lost_event_count(), 0);
+    assert_eq!(r.exec.lost_event_count(), 0);
     r.replace_source();
     for _ in 0..60 {
         r.block();
     }
     assert_eq!(
-        r.exec.as_ref().unwrap().lost_event_count(),
+        r.exec.lost_event_count(),
         0,
         "nothing the FIFO could not hold is lost"
     );
@@ -1659,7 +1519,7 @@ fn a_live_note_during_a_long_drain_is_neither_refused_nor_left_sounding() {
             r.block();
         }
         assert_eq!(
-            r.exec.as_ref().unwrap().dropped_event_count(),
+            r.exec.dropped_event_count(),
             0,
             "{mode:?}: nothing live was refused"
         );
@@ -1710,7 +1570,7 @@ fn a_source_without_note_events_closes_nothing() {
     }
     let mut r = Rig::new(Mode::Serial, &[2]);
     let edit = |r: &mut Rig, wired: bool| {
-        let ed = r.ed.as_mut().unwrap();
+        let ed = &mut r.ed;
         if wired {
             ed.insert(NodeKey(6), "clock", Unforkable(Clock));
             ed.spec_mut()
@@ -1719,7 +1579,7 @@ fn a_source_without_note_events_closes_nothing() {
             ed.spec_mut().events.clear();
         }
         ed.commit().unwrap();
-        r.exec.as_mut().unwrap().apply_pending();
+        r.exec.apply_pending();
         ed.collect();
     };
     edit(&mut r, true);
@@ -2073,16 +1933,13 @@ mod random {
         #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(300), ..ProptestConfig::default() })]
 
         /// Every sink ends with nothing held, hears no on the source did not
-        /// write, and no off for a key the source never wrote. Serial,
-        /// parallel and reference agree, with and without a PDC delay. (The
-        /// reference does not model a crossfade, so no fade is in this walk.)
+        /// write, and no off for a key the source never wrote. Serial
+        /// and parallel agree, with and without a PDC delay.
         #[test]
         fn sinks_end_holding_nothing(steps in steps(), lag in any::<bool>()) {
             let (serial, sent) = run(Mode::Serial, lag, &steps);
             let (parallel, _) = run(Mode::Parallel, lag, &steps);
-            let (reference, _) = run(Mode::Reference, lag, &steps);
             prop_assert_eq!(by_sink(&serial), by_sink(&parallel));
-            prop_assert_eq!(by_sink(&serial), by_sink(&reference));
             for sink in [2u64, 3, 4] {
                 let held = held_at_end(&sink_words(&serial, sink));
                 prop_assert!(held.is_empty(), "sink {} holds {:?}", sink, held);

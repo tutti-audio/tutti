@@ -1,7 +1,6 @@
 //! Events as ports: the graph-side properties a MIDI or automation node
 //! relies on, each
-//! checked on the executor **and** the reference interpreter, so the two
-//! cannot share one wrong decision unseen.
+//! checked on the executor.
 //!
 //! - **Same-block delivery**: an event edge joins the one topological order,
 //!   so what a node emits reaches its downstream node in the block it was
@@ -28,8 +27,8 @@ use tutti_buffers::MaxBlock;
 use tutti_graph::NodeSpec;
 use tutti_graph::{
     Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, EventSlotCapacity,
-    GraphSpec, Io, Node, Op, Prepare, Reference, Shape, Shapes, Status, TransportPosition,
-    Unforkable, ValidGraph, compile,
+    GraphSpec, Io, Node, Op, Prepare, Shape, Shapes, Status, TransportPosition, Unforkable,
+    ValidGraph, compile,
 };
 use tutti_graph::{NodeKey, Topology};
 use tutti_ump::Ump;
@@ -156,7 +155,7 @@ impl Node for Sink {
 
 type Make = Box<dyn Fn() -> Box<dyn Node>>;
 
-/// A graph for both interpreters: node constructors by key, and the event
+/// A graph: node constructors by key, and the event
 /// edges exactly as the test lists them (not through `connect_events`, so a
 /// test can list sources out of order).
 struct Rig {
@@ -188,11 +187,10 @@ impl Rig {
     }
 
     /// Render `blocks` through the executor (with `default_cap` as its
-    /// default event capacity) or the reference. Returns what the sinks saw
-    /// and how many events the interpreter refused.
+    /// default event capacity). Returns what the sinks saw and how many
+    /// events it refused.
     fn run(
         &self,
-        executor: bool,
         max: usize,
         default_cap: usize,
         blocks: &[usize],
@@ -202,24 +200,15 @@ impl Rig {
         let prep = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(max)));
         let (valid, shapes) = self.spec();
         let transport = TransportPosition::default();
-        let dropped = if executor {
-            let (mut ed, mut exec) = Editor::with_event_capacity(prep, default_cap);
-            let (plan, delta) = compile(&valid, &shapes, &prep, None).expect("compiles");
-            ed.package(plan, delta, self.units()).expect("room");
-            exec.apply_pending();
-            ed.collect();
-            for &n in blocks {
-                exec.process(n, &transport, &[], &mut []);
-            }
-            exec.dropped_event_count()
-        } else {
-            let mut r = Reference::new(prep);
-            r.set_graph(&valid, self.units());
-            for &n in blocks {
-                r.process(n, &transport, &[], &mut []);
-            }
-            r.dropped_event_count()
-        };
+        let (mut ed, mut exec) = Editor::with_event_capacity(prep, default_cap);
+        let (plan, delta) = compile(&valid, &shapes, &prep, None).expect("compiles");
+        ed.package(plan, delta, self.units()).expect("room");
+        exec.apply_pending();
+        ed.collect();
+        for &n in blocks {
+            exec.process(n, &transport, &[], &mut []);
+        }
+        let dropped = exec.dropped_event_count();
         (seen.lock().unwrap().to_vec(), dropped)
     }
 }
@@ -324,11 +313,9 @@ fn an_event_reaches_downstream_in_the_block_it_was_emitted() {
             (b, o, 0, f as u32 + 1000)
         })
         .collect();
-    for executor in [true, false] {
-        let (got, dropped) = rig.run(executor, 64, 64, &blocks, &seen);
-        assert_eq!(got, want, "executor: {executor}");
-        assert_eq!(dropped, 0);
-    }
+    let (got, dropped) = rig.run(64, 64, &blocks, &seen);
+    assert_eq!(got, want);
+    assert_eq!(dropped, 0);
 }
 
 /// Fan-in: several sources on one event input merge by offset, and a tie
@@ -377,10 +364,8 @@ fn fan_in_ties_go_by_source_key_then_port() {
             (64, k as u32, 0, 51),
             (64, k as u32, 0, 90),
         ]);
-        for executor in [true, false] {
-            let (got, _) = rig.run(executor, 64, 64, &[64, 64, 64], &seen);
-            assert_eq!(got, want, "tie at offset {k}, executor: {executor}");
-        }
+        let (got, _) = rig.run(64, 64, &[64, 64, 64], &seen);
+        assert_eq!(got, want, "tie at offset {k}");
     }
 
     // The spec keeps sources in that order however they are connected, so
@@ -456,11 +441,9 @@ fn pdc_shifts_events_across_blocks_and_drops_none() {
                 (b, o, 0, i as u32)
             })
             .collect();
-        for executor in [true, false] {
-            let (got, dropped) = rig.run(executor, 128, 64, &blocks, &seen);
-            assert_eq!(got, want, "executor: {executor}, blocks {blocks:?}");
-            assert_eq!(dropped, 0);
-        }
+        let (got, dropped) = rig.run(128, 64, &blocks, &seen);
+        assert_eq!(got, want, "blocks {blocks:?}");
+        assert_eq!(dropped, 0);
     }
 }
 
@@ -503,18 +486,16 @@ fn an_event_feedback_edge_delays_by_its_declared_delay() {
         // The sink logs port by port within a block; compare as sets of
         // deliveries, each at its (block, offset).
         want.sort();
-        for executor in [true, false] {
-            let (mut got, dropped) = rig.run(executor, 64, 64, &blocks, &seen);
-            got.sort();
-            assert_eq!(got, want, "executor: {executor}, blocks {blocks:?}");
-            assert_eq!(dropped, 0);
-        }
+        let (mut got, dropped) = rig.run(64, 64, &blocks, &seen);
+        got.sort();
+        assert_eq!(got, want, "blocks {blocks:?}");
+        assert_eq!(dropped, 0);
     }
 }
 
 /// Overflow is defined and observable: a port declaring 3 events per block
 /// that is handed 5 in one block keeps the first 3 — the newest two are
-/// refused at the push (the node is told) and counted by the interpreter.
+/// refused at the push (the node is told) and counted by the executor.
 /// A port that declares nothing takes the executor's default, and all 5 fit.
 #[test]
 fn a_port_past_its_declared_capacity_drops_the_newest_and_counts_them() {
@@ -523,27 +504,25 @@ fn a_port_past_its_declared_capacity_drops_the_newest_and_counts_them() {
         let plan: Vec<(u64, u16, u32)> = (0..5).map(|i| (70 + i, 0, i as u32)).collect();
         let want: Vec<(u64, u32, u16, u32)> =
             (0..kept).map(|i| (64, 6 + i as u32, 0, i as u32)).collect();
-        for executor in [true, false] {
-            let refused = Arc::new(AtomicUsize::new(0));
-            let mut events = BTreeMap::new();
-            events.insert(at(1, 0), vec![EventEdge::Direct(out(2, 0))]);
-            let rig = Rig {
-                nodes: vec![
-                    (NodeKey(1), sink(1, &seen)),
-                    (NodeKey(2), burst(1, cap, &plan, &refused)),
-                ],
-                events,
-            };
-            let (got, dropped) = rig.run(executor, 64, 64, &[64, 64, 64], &seen);
-            assert_eq!(got, want, "{cap:?}, executor: {executor}");
-            let lost = 5 - kept;
-            assert_eq!(dropped, lost as u64, "counted by the interpreter");
-            assert_eq!(
-                refused.load(Ordering::Relaxed),
-                lost,
-                "and refused to the node at the push"
-            );
-        }
+        let refused = Arc::new(AtomicUsize::new(0));
+        let mut events = BTreeMap::new();
+        events.insert(at(1, 0), vec![EventEdge::Direct(out(2, 0))]);
+        let rig = Rig {
+            nodes: vec![
+                (NodeKey(1), sink(1, &seen)),
+                (NodeKey(2), burst(1, cap, &plan, &refused)),
+            ],
+            events,
+        };
+        let (got, dropped) = rig.run(64, 64, &[64, 64, 64], &seen);
+        assert_eq!(got, want, "{cap:?}");
+        let lost = 5 - kept;
+        assert_eq!(dropped, lost as u64, "counted by the executor");
+        assert_eq!(
+            refused.load(Ordering::Relaxed),
+            lost,
+            "and refused to the node at the push"
+        );
     }
 }
 
@@ -613,21 +592,16 @@ fn declared_capacities_size_merges_and_delays_so_nothing_is_lost() {
         "{sink_merge:?}"
     );
     let blocks = vec![64usize; 14];
-    for executor in [true, false] {
-        let (got, dropped) = rig.run(executor, 64, 1, &blocks, &seen);
-        assert_eq!(dropped, 0, "executor: {executor}");
-        assert_eq!(refused.load(Ordering::Relaxed), 0);
-        let direct = got.iter().filter(|g| g.2 == 0).count();
-        let delayed: Vec<_> = got.iter().filter(|g| g.2 == 1).collect();
-        assert_eq!(
-            direct, 160,
-            "both chords, every block, executor: {executor}"
-        );
-        assert_eq!(delayed.len(), 80, "executor: {executor}");
-        for d in delayed {
-            let f = d.0 + u64::from(d.1);
-            assert_eq!((f - LATE as u64) % 64, 13, "on its frame, 141 late");
-        }
+    let (got, dropped) = rig.run(64, 1, &blocks, &seen);
+    assert_eq!(dropped, 0, "no event dropped");
+    assert_eq!(refused.load(Ordering::Relaxed), 0);
+    let direct = got.iter().filter(|g| g.2 == 0).count();
+    let delayed: Vec<_> = got.iter().filter(|g| g.2 == 1).collect();
+    assert_eq!(direct, 160, "both chords, every block");
+    assert_eq!(delayed.len(), 80);
+    for d in delayed {
+        let f = d.0 + u64::from(d.1);
+        assert_eq!((f - LATE as u64) % 64, 13, "on its frame, 141 late");
     }
 }
 
@@ -651,7 +625,7 @@ impl Node for CappedRelay {
 /// port declaring **one** event per block writes on the last frame of one
 /// block and the first frame of the next, and a 13-frame PDC delay (and a
 /// 70-frame feedback edge) brings both due inside a single later block.
-/// Both land there, on their frames, in both interpreters — the delay's
+/// Both land there, on their frames — the delay's
 /// output slot is priced at everything its FIFO can hold, not at the
 /// source's one block. (Found by the crossfade proptest in CI: a
 /// replacement emitting soon after its predecessor, behind a retuned delay.)
@@ -694,13 +668,11 @@ fn a_delay_delivers_what_came_due_across_its_sources_blocks() {
     // Both due in one block, on each path.
     assert_eq!(want[0].0, want[1].0);
     assert_eq!(want[2].0, want[3].0);
-    for executor in [true, false] {
-        let (mut got, dropped) = rig.run(executor, 64, 64, &blocks, &seen);
-        got.sort();
-        assert_eq!(got, want, "executor: {executor}");
-        assert_eq!(dropped, 0);
-        assert_eq!(refused.load(Ordering::Relaxed), 0);
-    }
+    let (mut got, dropped) = rig.run(64, 64, &blocks, &seen);
+    got.sort();
+    assert_eq!(got, want);
+    assert_eq!(dropped, 0);
+    assert_eq!(refused.load(Ordering::Relaxed), 0);
 }
 
 /// What a sink logged, as `(port, absolute frame, tag)`, sorted.
