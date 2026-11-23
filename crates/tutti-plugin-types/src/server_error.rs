@@ -86,4 +86,7 @@ pub enum ServerError {
     /// A lane was opened that is already open.
     #[error("the audio lane is already open")]
     LaneAlreadyOpen,
+    /// A request that needs a plugin arrived with none loaded.
+    #[error("no plugin is loaded")]
+    NoPlugin,
 }

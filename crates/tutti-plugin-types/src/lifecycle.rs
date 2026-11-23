@@ -33,7 +33,7 @@ use crate::{
 ///
 /// A bound, so a step never allocates its output and never grows with its
 /// input.
-pub const EFFECT_CAPACITY: usize = 14;
+pub const EFFECT_CAPACITY: usize = 15;
 
 /// The effects of one [`step`], in the order to perform them.
 pub(crate) type Effects = ArrayVec<Effect, EFFECT_CAPACITY>;
@@ -48,10 +48,10 @@ pub const FDS_PER_TICK: usize = 3;
 
 /// The most effects one [`step`] emits: a tick that runs a full set of timers
 /// and descriptors, reads the latency, tail and layout, notifies a values
-/// rescan, reads and notifies an info rescan, rebuilds the MIDI mapping and
-/// notifies a note-expression change. No other step comes near it;
+/// rescan, reads and notifies an info rescan, rebuilds the MIDI mapping and tells it,
+/// and notifies a note-expression change. No other step comes near it;
 /// the assertion below keeps [`EFFECT_CAPACITY`] at or above it.
-pub const MAX_STEP_EFFECTS: usize = TIMERS_PER_TICK + FDS_PER_TICK + 8;
+pub const MAX_STEP_EFFECTS: usize = TIMERS_PER_TICK + FDS_PER_TICK + 9;
 
 const _: () = assert!(MAX_STEP_EFFECTS <= EFFECT_CAPACITY);
 
@@ -376,6 +376,10 @@ pub enum Notice {
     NoteExpressionChanged,
     /// Parameters were added, removed or described differently.
     ParamTitlesChanged,
+    /// The plugin's declared controller table changed and was re-read
+    /// ([`Control::rebuild_midi_mapping`](crate::Control::rebuild_midi_mapping)):
+    /// [`Control::wiring`](crate::Control::wiring) answers the new one.
+    MidiMapChanged,
     /// The instance was rebuilt.
     Reloaded,
     /// The rebuilt instance did not take the state the old one was saved with:
@@ -810,7 +814,10 @@ impl State {
                     self.plan.wait = Wait::Activate;
                     return;
                 }
-                Task::RebuildMidiMapping => emit(out, Effect::RebuildMidiMapping),
+                Task::RebuildMidiMapping => {
+                    emit(out, Effect::RebuildMidiMapping);
+                    emit(out, Effect::Notify(Notice::MidiMapChanged));
+                }
                 Task::Lend => emit(out, Effect::Lend),
                 Task::ReadParams(scope) => {
                     emit(out, Effect::ReadParams(scope));
@@ -1051,6 +1058,7 @@ impl State {
         if p.midi_cc {
             p.midi_cc = false;
             emit(out, Effect::RebuildMidiMapping);
+            emit(out, Effect::Notify(Notice::MidiMapChanged));
         }
         if p.note_expr {
             p.note_expr = false;

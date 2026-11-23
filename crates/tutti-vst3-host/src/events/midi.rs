@@ -168,9 +168,10 @@ impl MidiEncoder {
     /// **Every other message with a MIDI 1.0 form** (controllers, channel pitch
     /// bend and pressure, program change, an RPN or NRPN, a System message) has
     /// no VST3 event: `DataEvent` has the one type `kMidiSysEx` (ivstevents.h),
-    /// and a plugin reads it as SysEx. A controller reaches a plugin as a
-    /// parameter change through `IMidiMapping` (`CcRoute`), before it gets here;
-    /// one that no mapping takes is dropped and counted
+    /// and a plugin reads it as SysEx. A controller the plugin node's
+    /// controller map takes reaches a plugin as a parameter change, before it
+    /// gets here, and is not in the MIDI this encodes; the rest, which nothing
+    /// maps, is dropped and counted
     /// ([`unsendable_dropped`](Self::unsendable_dropped)). A single-packet SysEx
     /// is a `Data` event.
     ///
@@ -270,10 +271,11 @@ impl MidiEncoder {
                     self.out.push(on_bus(off, bus));
                 }
             }
-            // CC, channel pressure, channel pitch bend and program change ride
-            // the plugin's parameter funnel (`CcRoute`) when `IMidiMapping`
-            // maps them; VST3 has no event for them otherwise (the per-note
-            // bend sensitivity is consumed by `per_note`). Dropped, counted.
+            // CC, channel pressure and channel pitch bend are a parameter change
+            // when the node's controller map names them, and the node takes
+            // them out of this MIDI; VST3 has no event for one nothing maps,
+            // nor for a program change (the per-note bend sensitivity is
+            // consumed by `per_note`). Dropped, counted.
             Voice2::ControlChange { .. }
             | Voice2::ChannelPressure(_)
             | Voice2::PitchBend(_)

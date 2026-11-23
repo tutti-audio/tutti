@@ -1072,6 +1072,13 @@ pub(super) fn handle_control(
             };
             reply.send(result);
         }
+        ControlCommand::GetWiring { reply } => {
+            let wiring = match query(lane, inbox, lifecycle, ControlRequest::GetWiring)? {
+                Some(ControlReply::Wiring { wiring }) => Some(wiring),
+                _ => None,
+            };
+            reply.send(wiring);
+        }
         ControlCommand::GetCurrentPreset { reply } => {
             let value = match query(lane, inbox, lifecycle, ControlRequest::GetCurrentPreset)? {
                 Some(ControlReply::CurrentPreset { id }) => id,
@@ -1401,6 +1408,7 @@ fn file_news(inbox: &mut Unsolicited, news: News) {
         News::ParameterChanged { edit } => inbox.param(edit),
         News::PluginParamValuesChanged => inbox.resync(ResyncKind::ParamValues),
         News::PluginParamTitlesChanged => inbox.resync(ResyncKind::ParamTitles),
+        News::PluginMidiMapChanged => inbox.midi_map_changed(),
         News::PluginIoChanged { layout } => {
             if let Some(layout) = layout {
                 inbox.io_layout(layout);

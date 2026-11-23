@@ -305,6 +305,7 @@ impl Control for ClapLoaded {
             probed: probed::CLAP,
             own_bypass: bypass_parameter(&params).map(OwnBypass::Parameter),
             assignments: Vec::new(),
+            assignments_applied: tutti_plugin_types::MidiMapApplied::Host,
             note_names: self.declared_note_names(main),
             param_groups: super::params::module_groups(&params),
         }

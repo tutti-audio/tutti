@@ -231,6 +231,8 @@ where
                 let intake = &mut this.intake;
                 let (chords, scales) = (&mut this.chords, &mut this.scales);
                 let mut midi_dropped = 0u64;
+                // The controller map, lent for this piece's walk.
+                let table = this.midi_map.lend();
                 param_input::take(
                     events.as_slice(),
                     events.params(),
@@ -240,8 +242,12 @@ where
                     cx,
                     &mut this.segments,
                     &mut this.params,
-                    |e, frame| match e.kind {
+                    |e, frame, params| match e.kind {
                         EventKind::Midi(ump) => {
+                            // A mapped controller is a parameter point, not MIDI.
+                            if table.take(params, frame, ump) {
+                                return;
+                            }
                             // On the piece's frames; `frame` is the chunk's.
                             let event = WireMidi {
                                 offset: (frame - phase) as u32,
@@ -256,6 +262,7 @@ where
                         EventKind::Resync => {}
                     },
                 );
+                drop(table);
                 this.params.count_midi_dropped(midi_dropped);
                 lost += midi_dropped;
 
@@ -435,6 +442,8 @@ where
         intake.new_chunk();
         let mut midi_dropped = 0u64;
         let mut harmony_dropped = 0u64;
+        // The controller map, lent for this block's walk.
+        let table = this.midi_map.lend();
         param_input::take(
             events.as_slice(),
             events.params(),
@@ -444,8 +453,12 @@ where
             cx,
             &mut this.segments,
             &mut this.params,
-            |e, frame| match e.kind {
+            |e, frame, params| match e.kind {
                 EventKind::Midi(ump) => {
+                    // A mapped controller is a parameter point, not MIDI.
+                    if table.take(params, frame, ump) {
+                        return;
+                    }
                     let event = WireMidi::at(e.offset, ump);
                     midi_dropped += intake.push_displacing(midi, event);
                 }
@@ -459,6 +472,7 @@ where
                 EventKind::Resync => {}
             },
         );
+        drop(table);
         this.params.count_midi_dropped(midi_dropped);
         this.params.losses().harmony.add(harmony_dropped);
         io.count_lost(midi_dropped);

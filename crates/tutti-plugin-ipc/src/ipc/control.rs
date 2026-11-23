@@ -210,7 +210,14 @@ macro_rules! served_control {
             }
 
             fn wiring(&self, _main: MainThreadMarker) -> PluginWiring {
-                self.wiring_now()
+                // The buses are the activation's; the declared controller table is
+                // the server's, read now.
+                let mut wiring = self.wiring_now();
+                if let Some(live) = self.link.bridge.audio().wiring() {
+                    wiring.assignments = live.assignments;
+                    wiring.assignments_applied = live.assignments_applied;
+                }
+                wiring
             }
 
             fn parameters(&self, _main: MainThreadMarker) -> Vec<ParameterInfo> {
