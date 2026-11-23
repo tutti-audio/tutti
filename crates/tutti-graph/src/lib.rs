@@ -723,7 +723,7 @@ pub use compile::{CompileError, CycleEdge, Shapes, VerifyError, compile};
 pub use controls::{
     DeclaredUnit, ParamFork, ParamNode, ParamSet, ParamSetBuilder, Params, param_parts,
 };
-pub use cost::{Cost, Schedule, Work};
+pub use cost::{Cost, Work};
 pub use declare::{HasParam, HasParams, ParamValue, Scalar};
 pub use editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,

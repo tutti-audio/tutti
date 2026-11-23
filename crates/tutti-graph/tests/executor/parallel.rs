@@ -523,16 +523,14 @@ fn ranges_moved_mid_render_stay_bit_identical() {
     }
 }
 
-/// The plan really is parallel: several tasks, and the cost model spreads
-/// every block of it over all four participants (its nodes declare no
-/// cost, so each is assumed worth a thread).
+/// The plan really is parallel: several tasks (its nodes declare no cost,
+/// so none is packed), spread over the pool.
 #[test]
 fn the_graph_spreads() {
     let (_ed, exec) = pair(4);
     let plan = exec.plan().expect("a plan");
     assert!(plan.tasks().len() > 8, "{} tasks", plan.tasks().len());
-    let schedule = plan.schedule(4);
-    assert_eq!((schedule.wake, schedule.from), (4, Samples::new(1)));
+    assert!(exec.is_parallel());
 }
 
 /// An offline fork (what export renders) renders the same on a pool as
@@ -747,12 +745,7 @@ fn the_executor_waits_by_its_pools_budget() {
     ]);
     ed.commit().expect("commits");
     exec.apply_pending();
-    assert!(exec.is_parallel());
-    assert_eq!(
-        exec.plan().expect("a plan").schedule(2).wake,
-        2,
-        "the block spreads"
-    );
+    assert!(exec.is_parallel(), "the block spreads");
 
     let input = vec![0.5f32; MAX_BLOCK];
     let mut chans = vec![vec![0.0f32; MAX_BLOCK]; 2];

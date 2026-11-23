@@ -1,5 +1,4 @@
-//! The parallel executor against the serial one, on this
-//! crate's filters, at 1, 2, 4 and 8 participants.
+//! The executor on this crate's filters at 1, 2, 4 and 8 participants.
 //!
 //! Shapes, each one block of `FRAMES` at 48 kHz, driven through the
 //! `Executor` directly (no engine fold, no transport):
@@ -9,14 +8,14 @@
 //!   fan-in on the output (the graph's `Op::Sum`): the shape that parallelises (every chain is one
 //!   fused task, and `lanes` of them are ready at once).
 //! - `deep/<depth>` — one chain of `depth` filters: nothing to spread (one
-//!   task), so a pool must cost nothing here. The executor falls back to the
-//!   serial walk for a one-task plan.
+//!   task), so a pool must cost nothing here. A one-task plan runs on the
+//!   calling thread alone.
 //! - `tiny/<lanes>` — `lanes` single cheap gains off one input, summed:
 //!   tasks too small to be worth dispatching. The gains declare
-//!   `Cost::Light`, so the cost model packs them and keeps
-//!   the block serial. `tiny/<lanes>-undeclared` is the same graph with
-//!   gains that declare nothing: every gain its own task, spread over the
-//!   pool — where a pool loses.
+//!   `Cost::Light`, so the cost model packs them into a few tasks, which
+//!   still spread over the pool. `tiny/<lanes>-undeclared` is the same graph
+//!   with gains that declare nothing: every gain its own task — where a pool
+//!   loses most.
 //! - `mixed/<lanes>x<depth>x<fan>` — `lanes` chains of `depth` filters,
 //!   each fanned out to `fan` light gains, every gain a source of the one
 //!   output's fan-in (the graph sums `lanes * fan` addends): heavy work with
@@ -24,7 +23,7 @@
 //!   matters. `-undeclared` again for the gains declaring nothing.
 //!
 //! `workers` is the participant count, the calling thread included; `1` is
-//! the serial executor with no pool. The pool is `tutti_graph::WorkerPool`
+//! no pool. The pool is `tutti_graph::WorkerPool`
 //! with its default waits, so a block's helpers are usually still spinning
 //! from the last block (criterion runs blocks back to back); the wake cost
 //! of a parked helper is not in these numbers.

@@ -671,14 +671,11 @@ fn the_fan_in_generator_covers_the_sum_op() {
 
 /// `coarsened_plans_are_bit_identical` exercises what it claims: over 512
 /// seeds, declared costs pack plans further than the same graphs
-/// undeclared, and many of those packed plans still spread on a pool of
-/// four (so packed tasks run in parallel), while others go serial.
+/// undeclared, and many of those packed plans keep several tasks (so
+/// packed tasks run in parallel on a pool).
 #[test]
 fn the_cost_generator_packs_and_spreads() {
-    let (mut packed, mut packed_parallel, mut serial) = (0, 0, 0);
-    // Undeclared graphs, for the record:
-    // multi-task plans the model keeps serial at four participants.
-    let (mut plain_multi, mut plain_serial) = (0, 0);
+    let (mut packed, mut packed_parallel) = (0, 0);
     for seed in 0..512u64 {
         let desc = random_graph(seed);
         let valid = desc.spec.validate().expect("valid");
@@ -693,31 +690,20 @@ fn the_cost_generator_packs_and_spreads() {
             .0
         };
         let plain = compile(&BTreeMap::new());
-        if plain.tasks().len() > 1 {
-            plain_multi += 1;
-            if plain.schedule(4).wake == 1 {
-                plain_serial += 1;
-            }
-        }
         let costed = compile(&random_costs(&desc, seed));
         if costed.tasks().len() < plain.tasks().len() {
             packed += 1;
-            if costed.schedule(4).wake > 1 {
+            if costed.tasks().len() > 1 {
                 packed_parallel += 1;
             }
         }
-        if plain.tasks().len() > 1 && costed.schedule(4).wake == 1 {
-            serial += 1;
-        }
     }
-    eprintln!("packed further: {packed}, of them parallel: {packed_parallel}, serial: {serial}");
-    eprintln!("undeclared multi-task plans: {plain_multi}, serial at 4: {plain_serial}");
+    eprintln!("packed further: {packed}, of them several tasks: {packed_parallel}");
     assert!(packed > 50, "only {packed} plans packed further");
     assert!(
         packed_parallel > 25,
-        "only {packed_parallel} packed plans spread"
+        "only {packed_parallel} packed plans keep several tasks"
     );
-    assert!(serial > 25, "only {serial} multi-task plans went serial");
 }
 
 /// Add a direct back edge — audio or event — from a node to one created no

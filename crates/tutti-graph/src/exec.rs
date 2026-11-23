@@ -441,9 +441,7 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
     }
 }
 
-/// The per-plan state for `plan` on a pool of `participants` (0: no pool),
-/// with the cost model's [`Plan::schedule`]: how many participants a block
-/// wakes, from which block length up.
+/// The per-plan state for `plan` on a pool of `participants` (0: no pool).
 fn par_for(
     plan: &Plan,
     participants: usize,
@@ -451,14 +449,7 @@ fn par_for(
     inject_units: impl Iterator<Item = u32>,
     overlay: usize,
 ) -> Par {
-    Par::new(
-        plan,
-        participants,
-        plan.schedule(participants),
-        store_len,
-        inject_units,
-        overlay,
-    )
+    Par::new(plan, participants, store_len, inject_units, overlay)
 }
 
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
@@ -524,15 +515,15 @@ impl<F: Float> Executor<F> {
     /// or before an export renders). The editor builds the parallel state of
     /// each plan it sends for the pool the executor has when it sends it. A
     /// commit sent on another thread while this runs may still be staged for
-    /// the pool before it: it runs the serial walk, which renders the same
-    /// samples, and its unused parallel state goes back in the commit.
+    /// the pool before it: it runs on the calling thread alone, which renders
+    /// the same samples, and its unused parallel state goes back in the
+    /// commit.
     ///
-    /// Whether a block spreads is the cost model's call
-    /// ([`Plan::schedule`]), made for each plan when it meets the pool: a
-    /// plan too cheap to pay for dispatch, a block shorter than the length
-    /// it pays from, a plan of one task and a pool of one participant all
-    /// run the serial walk. The serial executor is the parallel one's
-    /// one-worker case, and both render the same samples.
+    /// The pool's participants are the threads a block runs on: with more
+    /// than one, every block of a plan with more than one task spreads over
+    /// all of them. A pool of one participant and a plan of one task run on
+    /// the calling thread alone. A render is the same at any participant
+    /// count.
     pub fn set_pool(&mut self, pool: Option<Arc<dyn Pool>>) -> Option<Arc<dyn Pool>> {
         let old = std::mem::replace(&mut self.pool, pool);
         let participants = self.pool.as_ref().map(|p| p.participants());
@@ -586,11 +577,10 @@ impl<F: Float> Executor<F> {
     }
 
     /// Whether the running plan's blocks are spread across the pool: a pool
-    /// is set and [`Plan::schedule`] says spreading pays for the plan on
-    /// it (blocks shorter than its `from` still run the serial walk).
-    /// Otherwise every block runs the serial walk.
+    /// of more than one participant is set and the plan has more than one
+    /// task. Otherwise every block runs on the calling thread alone.
     pub fn is_parallel(&self) -> bool {
-        self.state.par.as_ref().is_some_and(Par::spreads_any)
+        self.state.par.as_ref().is_some_and(Par::spreads)
     }
 
     /// The command ring's executor end, for the pair check.

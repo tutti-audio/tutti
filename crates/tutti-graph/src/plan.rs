@@ -52,7 +52,7 @@ use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::arena::Role;
 use crate::compile::VerifyError;
-use crate::cost::{Schedule, Work};
+use crate::cost::Work;
 use crate::fade::Fade;
 use crate::io::PortKind;
 use crate::node::{InPlaceMask, Prepare, Shape, Wired};
@@ -1038,8 +1038,6 @@ pub struct Plan {
     pub(crate) task_succ: Csr,
     pub(crate) task_activation: Vec<u32>,
     pub(crate) work: Work,
-    pub(crate) critical: Work,
-    pub(crate) task_width: u32,
     pub(crate) audio_slots: u32,
     pub(crate) event_slots: u32,
     pub(crate) event_slot_capacity: Vec<EventSlotCapacity>,
@@ -1177,36 +1175,6 @@ impl Plan {
     /// (see [`Work`] and [`Shape::cost`](crate::Shape::cost)).
     pub fn work(&self) -> Work {
         self.work
-    }
-
-    /// The most tasks on one level of the task DAG (a task's level is its
-    /// longest path from a task with no predecessor), after coarsening.
-    /// One of the two estimates [`schedule`](Self::schedule) wakes
-    /// participants by, with the average parallelism: tasks on different
-    /// levels can be ready at once (in A → {C, D}, B → {E, F}, D → {E, F}
-    /// the widest level holds two, yet C, E and F can run together), so
-    /// neither bounds how many a block could use.
-    pub fn task_width(&self) -> usize {
-        self.task_width as usize
-    }
-
-    /// How this plan's blocks run on a pool of `participants` (the caller
-    /// included): how many participants a block wakes, from which block
-    /// length up (one, for every block, when spreading never pays). Pure arithmetic on [`work`](Self::work), the
-    /// costliest path through the task DAG and the task count; the executor
-    /// asks it when a plan meets a pool, never per block.
-    ///
-    /// A speed decision only: a render is bit for bit the same at any
-    /// participant count.
-    pub fn schedule(&self, participants: usize) -> Schedule {
-        crate::cost::schedule(
-            self.work,
-            self.critical,
-            self.tasks.len(),
-            self.task_width as usize,
-            self.prepare.max_block().samples(),
-            participants,
-        )
     }
 
     /// Arena size in slots for `kind`, including the null slot (0) and the

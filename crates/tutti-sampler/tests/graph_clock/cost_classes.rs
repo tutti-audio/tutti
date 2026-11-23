@@ -212,13 +212,9 @@ fn moderate_reads_pack_and_render_bit_identically() {
             });
             assert!(heavy.count() <= 1, "two stretched voices share a task");
         }
-        // From a one-frame block: every ragged block below is spread, so
-        // the comparison is never a serial walk against itself.
-        assert!(
-            plan.schedule(4).from == Samples::new(1),
-            "{:?}",
-            plan.schedule(4)
-        );
+        // Several tasks: every block below spreads on a pool, so the
+        // comparison is never one participant against itself.
+        assert!(plan.tasks().len() > 1, "{:?}", plan.tasks());
 
         let channels = if bus {
             2

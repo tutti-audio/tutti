@@ -348,9 +348,8 @@ impl<F: Float> Executor<F> {
             let due = commands.deliveries();
             // The level gate, once for the block: every lane's slots take it.
             logs.begin_block();
-            // The pool's participants take the plan's tasks when the cost model
-            // says this plan spreads at this block length (`Plan::schedule`);
-            // otherwise the calling thread is the one participant, inline.
+            // The pool's participants take the plan's tasks when the plan
+            // spreads; otherwise the calling thread is the one participant.
             fade_ended |= crate::par::run_block(
                 par.as_mut().expect("a staged plan carries its par"),
                 pool.as_ref(),
