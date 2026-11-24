@@ -32,7 +32,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_codec::{Format, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, RenderGraph,
-    Rendered, Resample, Setup, Written, render_one,
+    Rendered, Resample, Setup, TailPolicy, Written, render_one,
 };
 use tutti_graph::GraphBuilder;
 use tutti_nodes::testing::{Const, Osc};
@@ -118,7 +118,7 @@ fn config(seconds: f64, rate: f64, channels: ChannelLayout, format: Format) -> C
             rate,
             Seconds::new(seconds).to_samples(rate),
             Samples::new(0),
-            Samples::new(0),
+            TailPolicy::Frames(Samples::ZERO),
         )
         .expect("a render"),
         format,

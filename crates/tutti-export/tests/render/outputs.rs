@@ -19,7 +19,7 @@ use tutti_buffers::{Bed, ChannelTopology};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Placement, Produced,
-    RenderError, RenderGraph, Setup, TargetError, render,
+    RenderError, RenderGraph, Setup, TailPolicy, TargetError, render,
 };
 use tutti_graph::{
     Cx, Editor, Executor, ForkByClone, GraphBuilder, Io, Node, NodeKey, OutputPort, PortSource,
@@ -98,7 +98,13 @@ fn stereo_placement() -> Placement {
 }
 
 fn job(frames: usize) -> Job {
-    Job::new(RATE, Samples::new(frames), Samples::new(0), Samples::new(0)).expect("a render")
+    Job::new(
+        RATE,
+        Samples::new(frames),
+        Samples::new(0),
+        TailPolicy::Frames(Samples::ZERO),
+    )
+    .expect("a render")
 }
 
 fn wav(path: &std::path::Path, pcm: Pcm) -> FileTarget {
@@ -362,7 +368,7 @@ fn a_tap_is_drained_and_gated_like_the_main_output() {
         RATE,
         Samples::new(2_000),
         Samples::new(1_500),
-        Samples::new(0),
+        TailPolicy::Frames(Samples::ZERO),
     )
     .expect("a render");
     let produced = render(
