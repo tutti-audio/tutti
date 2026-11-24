@@ -218,7 +218,7 @@ impl<T: NoUninit + AnyBitPattern> SeqReader<T> {
     /// [`Contended`], as above.
     pub fn read(&self, retries: usize) -> Result<Option<T>, Contended> {
         for _ in 0..=retries {
-            match self.attempt() {
+            match self.try_read() {
                 Attempt::Never => return Ok(None),
                 Attempt::Stable(_, copy) => return Ok(Some(copy)),
                 Attempt::Torn => crate::sync::spin_loop(),
@@ -227,28 +227,18 @@ impl<T: NoUninit + AnyBitPattern> SeqReader<T> {
         Err(Contended)
     }
 
-    /// One copy of the value of the last completed write, with that write's
-    /// sequence: `None` if nothing has been written yet, or if a write
-    /// overlapped the copy. Never spins and never retries, so a caller with a
-    /// block to finish loses nothing by a `None`: it tries again next block.
+    /// One copy attempt at the value of the last completed write, with that
+    /// write's sequence. Never spins and never retries, so a caller with a
+    /// block to finish loses nothing by [`Attempt::Torn`]: it tries again next
+    /// block.
     ///
     /// The sequence is even and nonzero, and unique to the write: it grows by
     /// two with every write. A caller that keeps the sequence of the last
     /// value it applied tells "already seen" by comparing, and applies a value
     /// only when the sequence differs.
     ///
-    /// Before the first write it returns `None`, as [`read`](Self::read)
-    /// returns `Ok(None)`; the two are not told apart here.
-    pub fn try_read(&self) -> Option<(u64, T)> {
-        match self.attempt() {
-            Attempt::Stable(seq, copy) => Some((seq, copy)),
-            Attempt::Never | Attempt::Torn => None,
-        }
-    }
-
-    /// The protocol's one copy attempt, shared by [`read`](Self::read) and
-    /// [`try_read`](Self::try_read).
-    fn attempt(&self) -> Attempt<T> {
+    /// [`read`](Self::read) is this attempt repeated.
+    pub fn try_read(&self) -> Attempt<T> {
         let (seq, words) = split(&self.cell);
         let before = seq.load(Ordering::Acquire);
         if before == 0 {
@@ -276,8 +266,9 @@ impl<T: NoUninit + AnyBitPattern> SeqReader<T> {
     }
 }
 
-/// What one copy attempt found.
-enum Attempt<T> {
+/// What one [`SeqReader::try_read`] found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Attempt<T> {
     /// The sequence was zero: nothing written.
     Never,
     /// A write was in progress or overlapped the copy.

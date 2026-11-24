@@ -154,6 +154,31 @@ until it is un-parked. `vendor/` is third-party and never restyled.
 - **T18. No global state** (`M-AVOID-STATICS`): a `static` holding mutable
   state is a finding unless it is one of the process-wide facts `CLAUDE.md`
   names (the play clock's epoch counter, the stranded-work count `MainWork::stranded`).
+- **T19. A kind is a type; a setting is a value.** T1 for kinds: two things
+  that differ in what they own, in what they need to be built, or in what they
+  can do are two types sharing their common part, never one type with a tag
+  and fields beside it that must agree with the tag. Each kind's facts live
+  inside the kind.
+  - **The shape follows who holds them:** two structs, or one constructor per
+    kind taking what its kind requires, where the caller knows the kind; an
+    enum whose variants hold each kind's own fields, where one holder stores
+    either; a generic over a sealed trait where the kinds share code
+    (`ControlLaneNode` over a `LaneKind`: `PortLane` and `ForeignLane` each
+    hold their own range and clamp their own way).
+  - **The tells**, each a finding when it marks a kind: a method documented as
+    answering `None`, `false` or "ignored" for one kind; an `unreachable!` or
+    `expect` whose message says two tags agree; a field that is `Some` exactly
+    when a flag is set; a reserved value that stands for "the other kind"; the
+    same variants in two enums.
+  - **An enum stays right** when its variants hold their own data, for a spec
+    or wire vocabulary, and for a state machine whose states hold their data.
+  - **Two questions before a split.** Does a user of the real thing change it
+    while it runs? Then it is a setting on one type, however the code fixes it
+    today: a delay's sync is flipped on a running delay, so it is a setting and
+    not a second node. Can one owner write every transition? A fact another
+    thread writes stays its own fact and is not folded into a state enum.
+  - **Split along the ownership that exists.** A shape that makes two kinds
+    share an owner they do not share is the same mistake from the other side.
 
 ## E. Errors and panics
 
@@ -222,9 +247,9 @@ until it is un-parked. `vendor/` is third-party and never restyled.
   "doc 013", "design 0NN §5", "as built (T2)", plan item numbers or lane
   names, which rustdoc cannot render and a reader cannot follow. A design
   decision a user must know (why a type refuses something, what a guarantee
-  costs) is written where the item is, in a sentence. `docs/design/` is being
-  retired: its current-state content moves into the crates' rustdoc and the
-  files are deleted (git history keeps them).
+  costs) is written where the item is, in a sentence. The design docs are
+  retired: their current-state content is in the crates' rustdoc and the
+  files are in `docs/archive/`, kept as written.
 - **D10. Rust's own doc style** (the standard library's and RFC 1574's): the
   summary line is a third-person present-tense sentence ending in a period
   ("Returns the number of frames in the wave."), followed by a blank line and

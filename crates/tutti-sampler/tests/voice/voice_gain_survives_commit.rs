@@ -41,7 +41,7 @@ use tutti_graph::{
 };
 use tutti_modulation::{Amount, ControlProgramBuilder, Law, Layer, LayerClock, LayerId, Polarity};
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
-use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceNodeHandle, VoiceSource};
+use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceNodeHandle};
 use tutti_units::{
     Amplitude, Beat, BeatsPerCycle, Bipolar, Bpm, Frame, PhaseIncrement, SampleRate, Samples,
     UnitParam,
@@ -80,15 +80,10 @@ fn rolling(frame: Frame) -> TransportPosition {
 /// compare 0.0 against 0.0. A setup without a rolling clock fails on the
 /// guard below, which is what it is for.
 fn solo_voice() -> (Renderer, NodeKey, VoiceNodeHandle<f32>) {
-    let voice = Voice {
-        source: VoiceSource::Memory(
-            MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
-        ),
-        play: Playback::default(),
-    };
+    let source = MemorySource::placed(flat_wave(48_000), VoiceWindow::from(Beat::new(0.0)))
+        .expect("a placeable wave");
     let (mut solo, key, handle) = Renderer::alone(
-        VoiceNode::with_channels(voice, ChannelLayout::MONO)
+        VoiceNode::with_channels(source, Playback::default(), ChannelLayout::MONO)
             .expect("a finite gain and a nonempty width"),
         Prepare::new(RATE, MaxBlock::of(Samples::new(BLOCK))),
     );
@@ -327,17 +322,13 @@ fn a_lane_drives_a_memory_sources_gain_around_its_cell() {
 fn a_voices_gain_port_reads_its_cell_as_its_base() {
     use tutti_graph::Node;
 
-    let voice = Voice {
-        source: VoiceSource::Memory(
-            MemorySource::placed(flat_wave(64), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
-        ),
-        play: Playback {
-            gain: Amplitude::new(0.25),
-            ..Playback::default()
-        },
+    let source = MemorySource::placed(flat_wave(64), VoiceWindow::from(Beat::new(0.0)))
+        .expect("a placeable wave");
+    let play = Playback {
+        gain: Amplitude::new(0.25),
+        ..Playback::default()
     };
-    let node = VoiceNode::with_channels(voice, ChannelLayout::MONO)
+    let node = VoiceNode::with_channels(source, play, ChannelLayout::MONO)
         .expect("a finite gain and a nonempty width");
     assert_eq!(
         node.shape().params.as_slice(),
