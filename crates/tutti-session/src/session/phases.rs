@@ -302,6 +302,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         let committed = self.graph.commit();
         if committed == Committed::Sent {
             self.graph.publish_sent();
+            // After the send: the nodes that gained a receiver in this
+            // commit are told, and send it their setup from the next block.
+            let gained = self.graph.take_gained_receivers();
+            self.midi.receivers_gained(&self.graph, &gained);
         }
         committed
     }

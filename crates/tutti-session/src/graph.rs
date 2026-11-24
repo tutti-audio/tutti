@@ -483,6 +483,10 @@ pub struct Graph<F: Float = f32> {
     /// The nodes the graph's removal took out since the session last
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
+    /// The nodes whose event output gained a receiver (an edge to a sink it
+    /// did not feed, or its sink swapped at the key) since the commit that
+    /// sent the edit ([`Graph::take_gained_receivers`]).
+    gained: Vec<NodeKey>,
     /// What the main output's channels are, when a host declared it
     /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology));
     /// `None` is the engine's order for the main output's width.
@@ -683,6 +687,7 @@ impl<F: Float> Graph<F> {
             reopened: BTreeMap::new(),
             parked: VecDeque::new(),
             dropped: Vec::new(),
+            gained: Vec::new(),
             unwired: Vec::new(),
             rewired: Vec::new(),
             removed: Vec::new(),
@@ -1703,6 +1708,19 @@ impl<F: Float> Graph<F> {
             }
         };
         self.note_unwired(node, &unwired);
+        // The unit at `node` is new: whatever feeds it feeds a receiver that
+        // has not heard it before.
+        let feeding: Vec<NodeKey> = self
+            .editor
+            .spec()
+            .events
+            .iter()
+            .filter(|(at, _)| at.node() == node)
+            .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()))
+            .collect();
+        for from in feeding {
+            self.note_gained(from);
+        }
         self.note_pass(node);
         self.sweep_gain_targets();
         self.edited = true;
@@ -2006,11 +2024,31 @@ impl<F: Float> Graph<F> {
         if held {
             return Ok(false);
         }
-        self.editor
-            .connect_events(to, EventEdge::Direct(from))
-            .expect("checked: both ends exist");
+        self.connect_event(to, from);
         self.edited = true;
         Ok(true)
+    }
+
+    /// Writes the event edge `from -> at` into the editor, the one place an
+    /// event edge is added, and notes that `from`'s node gained a receiver.
+    fn connect_event(&mut self, at: EventInputPort, from: EventOutputPort) {
+        self.editor
+            .connect_events(at, EventEdge::Direct(from))
+            .expect("checked: both ends exist");
+        self.note_gained(from.node());
+    }
+
+    fn note_gained(&mut self, node: NodeKey) {
+        if !self.gained.contains(&node) {
+            self.gained.push(node);
+        }
+    }
+
+    /// The nodes whose event output gained a receiver since the last call: the
+    /// session tells a node that cannot see its own edges, once the commit
+    /// holding them is sent.
+    pub(crate) fn take_gained_receivers(&mut self) -> Vec<NodeKey> {
+        std::mem::take(&mut self.gained)
     }
 
     /// Takes the event edge `from -> to` out: whether it was there.
@@ -2088,9 +2126,7 @@ impl<F: Float> Graph<F> {
         for from in want {
             let edge = EventEdge::Direct(from);
             if !have.contains(&edge) {
-                self.editor
-                    .connect_events(at, edge)
-                    .expect("checked: both ends exist");
+                self.connect_event(at, from);
             }
         }
         self.edited = true;
