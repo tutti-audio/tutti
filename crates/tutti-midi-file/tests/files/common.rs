@@ -1,24 +1,23 @@
 //! What the file tests share: a track of events and a note.
 
 use tutti_midi_file::{
-    ClipFile, ClipReadError, FileEvent, Layout, LeadTrack, Meta, MetricalSequences, MetricalView,
-    Pattern, ReadRepair, SmfDivision, SmfReadError, StandardMidiFile, SysEx, Tick, Timebase, Track,
-    TracksError,
+    ClipFile, ClipReadError, Layout, LeadTrack, Meta, MetricalSequences, MetricalView, Pattern,
+    ReadRepair, SmfDivision, SmfEvent, SmfReadError, StandardMidiFile, SysEx, Tick, Timebase,
+    Track, TracksError,
 };
-use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
+use tutti_ump::{MidiChannel, NoteNumber, U7, Voice1};
 
 /// A track of `events`, in tick order, ending at the last of them.
-pub fn track(events: Vec<(u64, FileEvent)>) -> Track {
+pub fn track(events: Vec<(u64, SmfEvent)>) -> Track {
     events.into_iter().map(|(t, e)| (Tick(t), e)).collect()
 }
 
-/// A Note On of `key` at velocity 100 on `channel`, in the first Group.
-pub fn note(channel: u8, key: u8) -> FileEvent {
-    Message::midi1(
-        MidiChannel::of(channel),
-        Voice1::note_on(NoteNumber::of(key), U7::of(100)),
-    )
-    .into()
+/// A Note On of `key` at velocity 100 on `channel`.
+pub fn note(channel: u8, key: u8) -> SmfEvent {
+    SmfEvent::Channel {
+        channel: MidiChannel::of(channel),
+        message: Voice1::note_on(NoteNumber::of(key), U7::of(100)),
+    }
 }
 
 /// The metrical view of `file`; a test of a metrical file reads its beats, tempo map and clip
@@ -178,14 +177,14 @@ pub fn placed(file: &StandardMidiFile) -> Vec<ReadRepair> {
 /// The events of track `track` of `file`, a read file, without the Set Tempo and
 /// Time Signature the read inserted there ([`ReadRepair::DefaultTempo`],
 /// [`ReadRepair::DefaultTimeSignature`]): the first of each kind at tick 0.
-pub fn unspecified(file: &StandardMidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
+pub fn unspecified(file: &StandardMidiFile, track: usize) -> Vec<(Tick, SmfEvent)> {
     let inserted = |wanted: ReadRepair| file.repairs().contains(&wanted);
     let mut tempo = inserted(ReadRepair::DefaultTempo { track });
     let mut meter = inserted(ReadRepair::DefaultTimeSignature { track });
     let events = file.tracks()[track].events();
     let opening = events
         .iter()
-        .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, FileEvent::Meta(_)))
+        .take_while(|(tick, e)| *tick == Tick(0) && matches!(e, SmfEvent::Meta(_)))
         .count();
     events
         .iter()
@@ -193,8 +192,8 @@ pub fn unspecified(file: &StandardMidiFile, track: usize) -> Vec<(Tick, FileEven
         .filter(|&(at, (_, event))| {
             let drop = at < opening
                 && match event {
-                    FileEvent::Meta(Meta::Tempo { .. }) => std::mem::take(&mut tempo),
-                    FileEvent::Meta(Meta::TimeSignature { .. }) => std::mem::take(&mut meter),
+                    SmfEvent::Meta(Meta::Tempo { .. }) => std::mem::take(&mut tempo),
+                    SmfEvent::Meta(Meta::TimeSignature { .. }) => std::mem::take(&mut meter),
                     _ => false,
                 };
             !drop

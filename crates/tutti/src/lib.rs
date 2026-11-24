@@ -931,10 +931,10 @@ pub mod midi {
     };
     pub use tutti_midi_file::{
         ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipRefusal,
-        ClipSequence, ClipTimeline, ReadError, Refusal, SmfParseError, SmfReadError,
-        StandardMidiFile, ToClipError, TracksError, WriteError,
+        ClipSequence, ClipTimeline, ReadError, SmfParseError, SmfReadError, StandardMidiFile,
+        ToClipError, TracksError, WriteError,
     };
-    pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
+    pub use tutti_midi_file::{Meta, MidiFile, SmfEvent, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
