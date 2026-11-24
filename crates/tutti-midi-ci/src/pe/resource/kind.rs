@@ -131,7 +131,7 @@ pub enum StandardResource {
 }
 
 impl StandardResource {
-    const ALL: [Self; 17] = [
+    pub(super) const ALL: [Self; 17] = [
         Self::ResourceList,
         Self::DeviceInfo,
         Self::ChannelList,
@@ -186,7 +186,7 @@ impl StandardResource {
     /// (M2-103 §8.6).
     #[must_use]
     pub fn is_list(self) -> bool {
-        self.as_str().as_bytes().ends_with(b"List")
+        names_a_list(self.as_str())
     }
 
     /// How an inquiry for the Resource names an entry. `ProgramList`,
@@ -261,6 +261,11 @@ impl StandardResource {
     }
 }
 
+/// Whether a Resource name is a List Resource's: it ends `List` (M2-103 §8.6).
+fn names_a_list(name: &str) -> bool {
+    name.ends_with("List")
+}
+
 impl fmt::Display for StandardResource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
@@ -313,17 +318,24 @@ impl UntypedResource {
         }
     }
 
-    /// What a ResourceList entry says when it names nothing (M2-103 §14.3).
+    /// The name as a header carries it.
     #[must_use]
-    pub const fn defaults() -> ResourceDefaults {
-        ResourceDefaults {
-            can_get: true,
-            can_set: CanSet::None,
-            can_subscribe: false,
-            can_paginate: false,
-            require_res_id: false,
+    pub fn name(&self) -> ResourceName {
+        match self {
+            Self::Custom(custom) => custom.0.clone(),
+            Self::Unmodelled(name) => name.0.clone(),
         }
     }
+
+    /// What a ResourceList entry says when it names nothing (M2-103 §14.3):
+    /// the same for every Resource of this kind.
+    pub const DEFAULTS: ResourceDefaults = ResourceDefaults {
+        can_get: true,
+        can_set: CanSet::None,
+        can_subscribe: false,
+        can_paginate: false,
+        require_res_id: false,
+    };
 }
 
 impl From<CustomResource> for UntypedResource {
@@ -426,8 +438,7 @@ impl PeResource {
     #[must_use]
     pub fn name(&self) -> ResourceName {
         match self {
-            Self::Untyped(UntypedResource::Custom(custom)) => custom.0.clone(),
-            Self::Untyped(UntypedResource::Unmodelled(name)) => name.0.clone(),
+            Self::Untyped(untyped) => untyped.name(),
             Self::Standard(standard) => standard.name(),
         }
     }
@@ -436,7 +447,10 @@ impl PeResource {
     /// (M2-103 §8.6).
     #[must_use]
     pub fn is_list(&self) -> bool {
-        self.as_str().ends_with("List")
+        match self {
+            Self::Standard(standard) => standard.is_list(),
+            Self::Untyped(untyped) => names_a_list(untyped.as_str()),
+        }
     }
 
     /// How an inquiry for the Resource names an entry: the standard Resource's
@@ -455,7 +469,7 @@ impl PeResource {
     pub fn defaults(&self) -> ResourceDefaults {
         match self {
             Self::Standard(standard) => standard.defaults(),
-            Self::Untyped(_) => UntypedResource::defaults(),
+            Self::Untyped(_) => UntypedResource::DEFAULTS,
         }
     }
 }

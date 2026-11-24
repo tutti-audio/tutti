@@ -77,7 +77,7 @@ impl ResourceEntry {
     /// `canGet`, `canSet`, `requireResId`, `canPaginate` and `schema`
     /// (M2-103 §14.3), so the builder has no setter for them:
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0599
     /// use tutti_midi_ci::{CanSet, ResourceEntry, StandardResource};
     ///
     /// let _ = ResourceEntry::standard(StandardResource::DeviceInfo).can_set(CanSet::Full);
@@ -410,7 +410,7 @@ impl ResourceEntryBuilder<StandardResource> {
         if entry.resource == StandardResource::ResourceList {
             return Err(EntryError::ListsItself);
         }
-        entry.checked()?;
+        entry.checked().map_err(|(error, _)| error)?;
         Ok(entry)
     }
 }
@@ -470,7 +470,7 @@ impl ResourceEntryBuilder<UntypedResource> {
     /// [`EntryError::Duplicate`] for one twice.
     pub fn build(self) -> Result<ResourceEntry, EntryError> {
         let entry = self.0;
-        entry.checked()?;
+        entry.checked().map_err(|(error, _)| error)?;
         entry.schema_authored()?;
         Ok(entry)
     }
@@ -498,36 +498,7 @@ impl ResourceEntry {
                 return Err((error, property));
             }
         }
-        self.checked().map_err(|error| {
-            let field = self.field_of(&error);
-            (error, field)
-        })
-    }
-
-    /// The property of the entry that `error` refuses.
-    fn field_of(&self, error: &EntryError) -> &'static str {
-        match error {
-            EntryError::ListsItself => "resource",
-            EntryError::NotOverridable { property, .. } => property,
-            EntryError::NotAList(_) if self.can_paginate => "canPaginate",
-            EntryError::NotAList(_) => "columns",
-            EntryError::SchemaIncomplete(_) | EntryError::SchemaTypedNonJson(_) => "schema",
-            EntryError::FlowControlWithoutTransaction(_) if self.fc_on_get && !self.can_get => {
-                "fcOnGet"
-            }
-            EntryError::FlowControlWithoutTransaction(_) => "fcOnSet",
-            EntryError::Empty("encodings") => "encodings",
-            EntryError::Empty(_) => "mediaTypes",
-            EntryError::Duplicate(twice)
-                if self
-                    .encodings
-                    .as_ref()
-                    .is_some_and(|e| e.iter().any(|e| e.as_str() == twice)) =>
-            {
-                "encodings"
-            }
-            EntryError::Duplicate(_) => "mediaTypes",
-        }
+        self.checked()
     }
 
     /// What an author of an entry owes its schema (M2-103 §14.3, §14.4): a
@@ -565,37 +536,48 @@ impl ResourceEntry {
         }
     }
 
-    fn checked(&self) -> Result<(), EntryError> {
+    /// Checks the properties against each other; a refusal names the property
+    /// it is of.
+    fn checked(&self) -> Result<(), (EntryError, &'static str)> {
+        let name = || self.resource.as_str().to_owned();
         if (self.can_paginate || !self.columns.is_empty()) && !self.resource.is_list() {
-            return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
+            let field = if self.can_paginate {
+                "canPaginate"
+            } else {
+                "columns"
+            };
+            return Err((EntryError::NotAList(name()), field));
         }
-        if (self.fc_on_get && !self.can_get) || (self.fc_on_set && self.can_set == CanSet::None) {
-            return Err(EntryError::FlowControlWithoutTransaction(
-                self.resource.as_str().to_owned(),
-            ));
+        if self.fc_on_get && !self.can_get {
+            return Err((EntryError::FlowControlWithoutTransaction(name()), "fcOnGet"));
+        }
+        if self.fc_on_set && self.can_set == CanSet::None {
+            return Err((EntryError::FlowControlWithoutTransaction(name()), "fcOnSet"));
         }
         if let Some(encodings) = &self.encodings {
             if encodings.is_empty() {
-                return Err(EntryError::Empty("encodings"));
+                return Err((EntryError::Empty("encodings"), "encodings"));
             }
             if let Some(twice) = encodings
                 .iter()
                 .enumerate()
                 .find(|(at, e)| encodings[..*at].contains(e))
             {
-                return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
+                let twice = twice.1.as_str().to_owned();
+                return Err((EntryError::Duplicate(twice), "encodings"));
             }
         }
         if let Some(media_types) = &self.media_types {
             if media_types.is_empty() {
-                return Err(EntryError::Empty("media types"));
+                return Err((EntryError::Empty("media types"), "mediaTypes"));
             }
             if let Some(twice) = media_types
                 .iter()
                 .enumerate()
                 .find(|(at, m)| media_types[..*at].contains(m))
             {
-                return Err(EntryError::Duplicate(twice.1.as_str().to_owned()));
+                let twice = twice.1.as_str().to_owned();
+                return Err((EntryError::Duplicate(twice), "mediaTypes"));
             }
         }
         Ok(())

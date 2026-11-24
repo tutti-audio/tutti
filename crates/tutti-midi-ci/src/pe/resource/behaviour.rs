@@ -856,7 +856,13 @@ fn only_an_untyped_resource_holds_binary_data() {
     assert!(PeBinary::new(shouted.clone(), vec![]).is_none());
     assert!(PeState::binary(shouted, vec![]).is_none());
     assert!(PeBinary::new(octets(), vec![1, 255]).is_some());
-    assert!(PeData::decode_bytes(StandardResource::LocalOn, Some(&octets()), b"x").is_err());
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&octets()), b"x"),
+        Err(PeDataError::new(
+            "LocalOn",
+            PeDataFault::NotValid(InvalidValue::ResourceIsTyped)
+        ))
+    );
     let json_bytes = PeData::decode_bytes(StandardResource::LocalOn, None, b"true").unwrap();
     assert_eq!(json_bytes, PeData::LocalOn(PeLocalOn(true)));
 }

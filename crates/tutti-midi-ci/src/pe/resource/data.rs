@@ -108,7 +108,7 @@ impl PeOpaque {
     /// The Property Data `json` of `resource`. A standard Resource has a type, so
     /// its data is a [`PeData`] variant and not opaque:
     ///
-    /// ```compile_fail
+    /// ```compile_fail,E0277
     /// use tutti_midi_ci::{PeJson, PeOpaque, StandardResource};
     ///
     /// let _ = PeOpaque::new(StandardResource::LocalOn, PeJson::Bool(true));

@@ -883,6 +883,58 @@ fn a_standard_resource_keeps_its_defaults() {
     }
     // The default itself is no override.
     assert!(received(r#"{"resource":"LocalOn","canSet":"full"}"#).is_ok());
+    // Every standard Resource: each of the four flags stated as other than its
+    // default is refused naming the property, and stated as its default is taken.
+    for resource in StandardResource::ALL {
+        let d = resource.defaults();
+        let can_set = |c: CanSet| format!(r#""canSet":"{}""#, c.as_str());
+        let other_set = if d.can_set == CanSet::None {
+            CanSet::Full
+        } else {
+            CanSet::None
+        };
+        let flags = [
+            (
+                "canGet",
+                format!(r#""canGet":{}"#, d.can_get),
+                format!(r#""canGet":{}"#, !d.can_get),
+            ),
+            ("canSet", can_set(d.can_set), can_set(other_set)),
+            (
+                "requireResId",
+                format!(r#""requireResId":{}"#, d.require_res_id),
+                format!(r#""requireResId":{}"#, !d.require_res_id),
+            ),
+            (
+                "canPaginate",
+                format!(r#""canPaginate":{}"#, d.can_paginate),
+                format!(r#""canPaginate":{}"#, !d.can_paginate),
+            ),
+        ];
+        for (property, restated, flipped) in flags {
+            let entry = |flag: &str| {
+                ResourceEntry::from_json(&json(&format!(
+                    r#"{{"resource":"{}",{flag}}}"#,
+                    resource.as_str()
+                )))
+            };
+            let refused = entry(&flipped);
+            let Err(PeDataError {
+                fault:
+                    PeDataFault::NotValid(InvalidValue::Entry(EntryError::NotOverridable {
+                        property: named,
+                        ..
+                    })),
+                ..
+            }) = &refused
+            else {
+                panic!("{resource} {flipped}: {refused:?}");
+            };
+            assert_eq!(*named, property, "{resource}");
+            let taken = entry(&restated);
+            assert!(taken.is_ok(), "{resource} {restated}: {taken:?}");
+        }
+    }
     // What the spec lets an entry declare is open.
     assert!(
         entry(StandardResource::ChannelList)
