@@ -312,7 +312,7 @@ struct Job<L: InProcess, R> {
 /// turns out to be running (it holds the slots) is waited for again.
 ///
 /// An [`Unhanded`](Verdict::Unhanded) wait runs `work` at once too, counted
-/// ([`EditPost::unhanded`](super::host_edits::EditPost::unhanded)).
+/// ([`EditPost::count_unhanded`](super::host_edits::EditPost::count_unhanded)).
 ///
 /// **The one case that does not settle**: with no collector to queue on (it was
 /// never pumped, or it is gone), `work` runs at once and the writes are not
