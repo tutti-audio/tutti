@@ -213,6 +213,7 @@ impl ClapLoaded {
             .reserve_exact(INPUT_NOTE_EXPRESSIONS);
 
         let declared: Vec<_> = table.ranges.iter().map(|b| b.id).collect();
+        let carried = Vec::with_capacity(declared.len());
         let ranges = Publisher::new(table);
         let pools = Publisher::new(PoolCell(self.pool_snapshot()));
         let channels = |ports: &tutti_plugin_types::BusChannels| -> Vec<u32> {
@@ -238,6 +239,7 @@ impl ClapLoaded {
             scratch: Box::new(scratch),
             ranges: ranges.reader(),
             drain,
+            carried,
             reports,
             reports_dropped: Arc::clone(&reports_dropped),
         });

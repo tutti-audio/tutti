@@ -3196,6 +3196,7 @@ dependencies = [
  "tutti-plugin-types",
  "tutti-rt",
  "tutti-shared-plugin",
+ "tutti-timeline",
  "tutti-ump",
  "tutti-units",
  "tutti-vst2-author",

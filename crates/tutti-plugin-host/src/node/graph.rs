@@ -139,9 +139,27 @@ where
 
     /// A parked node (bypassed) answers its Processor's handoff: a recall the
     /// control side raised (a restart, a commit's relend, a rate change) is
-    /// returned, and a Processor on offer is taken. Wait-free; renders nothing.
+    /// returned, and a Processor on offer is taken. While it holds the
+    /// Processor it also delivers the host's parameter writes between blocks
+    /// ([`Processor::flush_parameters`]), so a write made to a parked node
+    /// reaches the plugin without a block. A write the flush could not deliver
+    /// is owed to the next chunk, as a refused block's is. Wait-free; renders
+    /// nothing.
     fn poll_parked(&mut self) {
-        let _ = self.client.rt.poll(Processor::stop);
+        let this = &mut self.client;
+        let Some(processor) = this.rt.poll(Processor::stop) else {
+            return;
+        };
+        if this.edits.is_none() {
+            return;
+        }
+        this.params.begin();
+        take_edits(this.edits.as_ref(), &mut this.params, 0);
+        void_stale_edits(this.edits.as_ref(), &mut this.params);
+        if !this.params.chunk().is_empty() {
+            let flushed = processor.flush_parameters(this.params.chunk()).is_ok();
+            this.params.handed_off(flushed);
+        }
     }
 
     fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_, F>) -> Status {

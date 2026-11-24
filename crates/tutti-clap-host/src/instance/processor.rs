@@ -31,6 +31,8 @@ pub(crate) struct ProcessorParts {
     pub scratch: Box<AudioScratch>,
     pub ranges: Reader<RangeTable>,
     pub drain: EditReader,
+    /// Room for one carried edit per declared parameter.
+    pub carried: Vec<(ParamId, Normalized)>,
     pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
@@ -53,6 +55,9 @@ pub struct ClapProcessor {
     pub(crate) scratch: Box<AudioScratch>,
     pub(crate) ranges: Reader<RangeTable>,
     pub(crate) drain: EditReader,
+    /// The Controller's edits to parameters that require `process`, which a
+    /// flush drained and left for the next block.
+    pub(crate) carried: Vec<(ParamId, Normalized)>,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,
@@ -87,6 +92,7 @@ impl ClapProcessor {
             scratch,
             ranges,
             drain,
+            carried,
             reports,
             reports_dropped,
         } = parts;
@@ -94,6 +100,7 @@ impl ClapProcessor {
             scratch,
             ranges,
             drain,
+            carried,
             reports,
             reports_dropped,
             audio_side,

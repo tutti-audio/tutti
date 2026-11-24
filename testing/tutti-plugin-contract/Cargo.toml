@@ -52,7 +52,14 @@ required-features = ["server"]
 name = "automation_state"
 required-features = ["server"]
 
+# `tests/requires_process_writes.rs`: a host write to a REQUIRES_PROCESS parameter before a block.
+[[test]]
+name = "requires_process_writes"
+required-features = ["server"]
+
 [dev-dependencies]
+# `tests/requires_process_writes.rs` binds a plugin's node to a constant tempo.
+tutti-timeline = { path = "../../crates/tutti-timeline" }
 # `tests/server.rs` drives an in-process node by hand (`contract::Direct`).
 tutti-graph = { path = "../../crates/tutti-graph", features = ["contract"] }
 # Test reads block on a `ParamRead` (a test may block).

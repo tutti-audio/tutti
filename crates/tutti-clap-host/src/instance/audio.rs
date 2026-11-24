@@ -3,7 +3,7 @@
 use super::ClapProcessor;
 use super::config::AudioScratch;
 use crate::error::{ClapError, Result};
-use crate::events::{ClapEvent, EventList};
+use crate::events::{ClapEvent, EventList, ParamBounds};
 use crate::types::{ClapNoteExpression, ParameterChanges, TransportInfo};
 use clap_sys::events::{
     CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_TRANSPORT, CLAP_TRANSPORT_HAS_BEATS_TIMELINE,
@@ -20,6 +20,7 @@ use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
+use tutti_units::{Normalized, ParamId};
 
 /// Owned snapshot of the plugin's per-block output. Returned for
 /// non-RT consumers (tests, offline render) via
@@ -342,6 +343,10 @@ impl ClapProcessor {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
+            // What a flush left for a block goes first.
+            for (id, value) in self.carried.drain(..) {
+                input_events.add_param_edit(id, value.get(), &table.ranges, table.claims);
+            }
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(each);
             });
@@ -379,7 +384,10 @@ impl ClapProcessor {
     }
 
     /// Delivers `changes` between blocks with `clap.params.flush`, the
-    /// Controller's writes first, as at the head of a block. `false` when the
+    /// Controller's writes first, as at the head of a block. A parameter that
+    /// requires `process` takes no value from a flush of an active plugin: its
+    /// Controller edit and its point in `changes` are kept, and the next block
+    /// delivers each parameter's last value at its head. `false` when the
     /// plugin has no flush entry or is busy.
     pub fn flush_parameters(&mut self, changes: &tutti_plugin_types::ParameterChanges) -> bool {
         self.scratch.input_events.clear();
@@ -388,11 +396,23 @@ impl ClapProcessor {
             let table = self.ranges.lend();
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
+            let carried = &mut self.carried;
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
-                drain.drain(each);
+                drain.drain(|id, value| {
+                    if ParamBounds::find(&table.ranges, id).is_some_and(|b| b.requires_process) {
+                        carry(carried, id, value);
+                    } else {
+                        each(id, value);
+                    }
+                });
             });
             if !changes.is_empty() {
-                input_events.add_param_changes(changes, &table.ranges, table.claims);
+                input_events.add_flushable_changes(
+                    changes,
+                    &table.ranges,
+                    table.claims,
+                    |id, value| carry(carried, id, value),
+                );
             }
         }
         self.scratch.input_events.sort_by_time();
@@ -595,6 +615,16 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
         // construction, so the conversion is total and lossless.
         tsig_num: transport.timing.signature.beats_per_bar().into(),
         tsig_denom: transport.timing.signature.note_value().into(),
+    }
+}
+
+/// Keeps an edit a flush could not deliver for the next block: the newest of a
+/// parameter. The room is one entry per declared parameter, reserved at
+/// activation, so this never allocates.
+fn carry(carried: &mut Vec<(ParamId, Normalized)>, id: ParamId, value: Normalized) {
+    match carried.iter_mut().find(|(known, _)| *known == id) {
+        Some(entry) => entry.1 = value,
+        None => carried.push((id, value)),
     }
 }
 

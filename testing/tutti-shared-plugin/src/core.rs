@@ -948,7 +948,7 @@ impl Core {
     /// forgets the points. No block is counted and nothing is rendered. Never
     /// allocates.
     pub fn flush(&self, dsp: &mut Dsp) {
-        self.log(7, 0, 0, 0.0);
+        self.log_flush();
         dsp.events.retain(|ev| match *ev {
             Ev::Param { id, value, .. } => {
                 self.apply(id, value);
@@ -956,6 +956,13 @@ impl Core {
             }
             _ => true,
         });
+    }
+
+    /// Records a parameter flush: the values the host sends next, until the
+    /// next block, arrived outside a block. CLAP `params.flush` logs it before
+    /// the first value it carries.
+    pub fn log_flush(&self) {
+        self.log(7, 0, 0, 0.0);
     }
 
     /// Records a parameter value the host set outside a block's event list, at

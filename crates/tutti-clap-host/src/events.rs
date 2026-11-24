@@ -72,6 +72,10 @@ pub struct ParamBounds {
     /// `CLAP_PARAM_IS_READONLY`: "the parameter can't be changed by the host",
     /// so no value is ever written to it.
     pub read_only: bool,
+    /// `CLAP_PARAM_REQUIRES_PROCESS`: the parameter takes a value in a
+    /// `process` call, in event order, never from a flush while the plugin is
+    /// active.
+    pub requires_process: bool,
 }
 
 impl ParamBounds {
@@ -84,6 +88,7 @@ impl ParamBounds {
             max,
             stepped: false,
             read_only: false,
+            requires_process: false,
         }
     }
 
@@ -96,6 +101,7 @@ impl ParamBounds {
             max,
             stepped: true,
             read_only: false,
+            requires_process: false,
         }
     }
 
@@ -1538,10 +1544,48 @@ impl InputEventList {
         ranges: &[ParamBounds],
         plugin_claims_params: bool,
     ) -> &mut Self {
+        self.add_changes(
+            changes,
+            ranges,
+            plugin_claims_params,
+            None::<fn(ParamId, Normalized)>,
+        );
+        self
+    }
+
+    /// [`add_param_changes`](Self::add_param_changes) for a `params.flush`:
+    /// the points of a [`requires_process`](ParamBounds::requires_process)
+    /// parameter are left out, and `held` is handed each such parameter with
+    /// its last value, for a block to deliver.
+    pub(crate) fn add_flushable_changes(
+        &mut self,
+        changes: &ParameterChanges,
+        ranges: &[ParamBounds],
+        plugin_claims_params: bool,
+        held: impl FnMut(ParamId, Normalized),
+    ) {
+        self.add_changes(changes, ranges, plugin_claims_params, Some(held));
+    }
+
+    fn add_changes(
+        &mut self,
+        changes: &ParameterChanges,
+        ranges: &[ParamBounds],
+        plugin_claims_params: bool,
+        mut holding: Option<impl FnMut(ParamId, Normalized)>,
+    ) {
         let mut pushed = 0usize;
         for queue in &changes.queues {
             let param_id = queue.param_id;
             let range = ParamBounds::find(ranges, param_id);
+            if let Some(hold) = holding.as_mut()
+                && range.is_some_and(|b| b.requires_process)
+            {
+                if let Some(last) = queue.points.last() {
+                    hold(param_id, last.value);
+                }
+                continue;
+            }
             if range.is_none() && plugin_claims_params {
                 continue;
             }
@@ -1583,7 +1627,6 @@ impl InputEventList {
                 }
             }
         }
-        self
     }
 
     /// Adds the block's edits. `drain` hands each parameter written since the
@@ -2493,6 +2536,37 @@ mod tests {
             })
             .collect();
         assert_eq!(got, vec![(9, 600.0), (5, 2.5)]);
+    }
+
+    /// **A flush leaves out a parameter that requires `process`, and hands over
+    /// its last value**; every other parameter is delivered as a block would.
+    #[test]
+    fn a_flush_holds_back_a_requires_process_parameter() {
+        let mut held_back = ParamBounds::continuous(ParamId::new(2), 0.0, 10.0);
+        held_back.requires_process = true;
+        let ranges = [
+            ParamBounds::continuous(ParamId::new(1), 0.0, 1.0),
+            held_back,
+        ];
+        let mut changes = ParameterChanges::reserved(2, 2);
+        changes.add_change(ParamId::new(1u32), at_frame(0), unit_value(0.5));
+        changes.add_change(ParamId::new(2u32), at_frame(0), unit_value(0.25));
+        changes.add_change(ParamId::new(2u32), at_frame(1), unit_value(0.75));
+        let mut list = InputEventList::new(InputRooms::new(0).param_points(4));
+        let mut held = Vec::new();
+        list.add_flushable_changes(&changes, &ranges, true, |id, value| {
+            held.push((id, value.get()));
+        });
+        let sent: Vec<(u32, f64)> = list
+            .events()
+            .iter()
+            .filter_map(|e| match e {
+                ClapEvent::ParamValue(v) => Some((v.param_id, v.value)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, vec![(1, 0.5)]);
+        assert_eq!(held, vec![(ParamId::new(2), 0.75)]);
     }
 
     /// A banked Program Change reaches the plugin as CC 0, CC 32 and PC, at one

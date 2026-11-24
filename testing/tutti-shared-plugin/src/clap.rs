@@ -31,7 +31,7 @@ use clap_sys::ext::param_indication::{
 };
 use clap_sys::ext::params::{
     CLAP_EXT_PARAMS, CLAP_PARAM_IS_AUTOMATABLE, CLAP_PARAM_IS_BYPASS, CLAP_PARAM_IS_READONLY,
-    CLAP_PARAM_IS_STEPPED, clap_param_info, clap_plugin_params,
+    CLAP_PARAM_IS_STEPPED, CLAP_PARAM_REQUIRES_PROCESS, clap_param_info, clap_plugin_params,
 };
 use clap_sys::ext::state::{CLAP_EXT_STATE, clap_plugin_state};
 use clap_sys::ext::tail::{CLAP_EXT_TAIL, clap_plugin_tail};
@@ -315,6 +315,9 @@ unsafe extern "C" fn params_info(
         core::METER => CLAP_PARAM_IS_READONLY,
         core::MODE => CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED,
         core::BYPASS => CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_BYPASS,
+        // Takes its value in a `process` call only: the host never flushes it
+        // into an active plugin.
+        core::AUX => CLAP_PARAM_IS_AUTOMATABLE | CLAP_PARAM_REQUIRES_PROCESS,
         _ => CLAP_PARAM_IS_AUTOMATABLE,
     };
     info.cookie = ptr::null_mut();
@@ -533,10 +536,14 @@ unsafe extern "C" fn params_flush(
     let (Some(size), Some(get)) = (input.size, input.get) else {
         return;
     };
+    let mut flushed = false;
     for i in 0..unsafe { size(input) } {
         if let Some(Ev::Param { id, value, .. }) = unsafe { decode(get(input, i)) } {
             // Recorded as a block's is: what the host sent, before anything is
-            // done with it.
+            // done with it, after a mark that it arrived by flush.
+            if !std::mem::replace(&mut flushed, true) {
+                me.core.log_flush();
+            }
             me.core.log_set_param(id, value);
             me.core.set_param(id, value);
         }
