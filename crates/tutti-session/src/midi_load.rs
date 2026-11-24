@@ -11,7 +11,7 @@
 //! published when [`Midi::load_midi`] was called ([`LoadMidi`]).
 //!
 //! What the read repaired ([`ReadRepair`]) and what the conversion left out
-//! (a [`Unplayed`]) is the loaded value's [`report`](LoadedMidi::report),
+//! (an [`Unplayed`]) is the loaded value's [`report`](LoadedMidi::report),
 //! never a log line.
 
 use std::future::IntoFuture;
