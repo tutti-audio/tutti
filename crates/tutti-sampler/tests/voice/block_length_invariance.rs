@@ -56,7 +56,7 @@ use tutti_graph::contract::{self, Direct};
 use tutti_graph::{Env, Node, TransportChanges, TransportPosition};
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, Manual, MemorySource, PlayDirection, Playback, SlotId,
-    StepOutcome, StreamHandle, Voice, VoiceNode, VoicePool, VoiceSource,
+    StepOutcome, StreamHandle, VoiceNode, VoicePool,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, PlaybackRate, SampleRate, Samples, StretchFactor};
 
@@ -228,15 +228,6 @@ fn memory_parts(wave: &Arc<Wave>, play: Playback) -> (MemorySource<f32>, Playbac
     (source, play)
 }
 
-/// [`memory_parts`] as a voice.
-fn memory_voice(wave: &Arc<Wave>, play: Playback) -> Voice<f32> {
-    let (source, play) = memory_parts(wave, play);
-    Voice {
-        source: VoiceSource::Memory(source),
-        play,
-    }
-}
-
 /// The memory-tier playbacks every pool case renders.
 fn playbacks() -> Vec<(&'static str, Playback)> {
     vec![
@@ -295,7 +286,8 @@ fn memory_voices_render_the_same_frames_at_any_block_length() {
             pool
         });
         assert_block_invariant(&format!("voice node, {name}"), || {
-            VoiceNode::new(memory_voice(&wave, play)).expect("a finite gain and a nonempty width")
+            let (source, play) = memory_parts(&wave, play);
+            VoiceNode::new(source, play).expect("a finite gain and a nonempty width")
         });
     }
 }

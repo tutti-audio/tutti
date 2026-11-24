@@ -116,12 +116,10 @@ fn resetting_a_fork_leaves_the_live_voice_playing() {
     let sampler =
         MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
     let node = VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Memory(sampler),
-            play: Playback {
-                stretch: StretchFactor::new(2.0),
-                ..Playback::default()
-            },
+        sampler,
+        Playback {
+            stretch: StretchFactor::new(2.0),
+            ..Playback::default()
         },
         1u16,
     )
@@ -189,12 +187,10 @@ fn a_standalone_voices_fork_shares_no_stretch_state() {
         let sampler = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave");
         VoiceNode::with_channels(
-            Voice {
-                source: VoiceSource::Memory(sampler),
-                play: Playback {
-                    stretch: StretchFactor::new(2.0),
-                    ..Playback::default()
-                },
+            sampler,
+            Playback {
+                stretch: StretchFactor::new(2.0),
+                ..Playback::default()
             },
             1u16,
         )
@@ -456,12 +452,10 @@ fn a_transport_seek_flushes_a_standalone_voice_node() {
     let sampler =
         MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
     let mut node = VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Memory(sampler),
-            play: Playback {
-                stretch: StretchFactor::new(2.0),
-                ..Playback::default()
-            },
+        sampler,
+        Playback {
+            stretch: StretchFactor::new(2.0),
+            ..Playback::default()
         },
         1u16,
     )
@@ -522,12 +516,10 @@ fn continuous_playback_does_not_flush_a_standalone_voice_node() {
     let sampler =
         MemorySource::placed(wave, VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave");
     let mut node = VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Memory(sampler),
-            play: Playback {
-                stretch: StretchFactor::new(2.0),
-                ..Playback::default()
-            },
+        sampler,
+        Playback {
+            stretch: StretchFactor::new(2.0),
+            ..Playback::default()
         },
         1u16,
     )
@@ -651,12 +643,10 @@ fn a_voice_node_reads_a_wave_at_another_rate_at_any_block_length() {
                 MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
                     .expect("a placeable wave");
             let mut node = VoiceNode::with_channels(
-                Voice {
-                    source: VoiceSource::Memory(sampler),
-                    play: Playback {
-                        direction,
-                        ..Playback::default()
-                    },
+                sampler,
+                Playback {
+                    direction,
+                    ..Playback::default()
                 },
                 1u16,
             )
@@ -1269,12 +1259,9 @@ fn voice_node_is_a_standalone_graph_node() {
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     let sampler = MemorySource::placed(make_wave(100), VoiceWindow::from(Beat::new(0.0)))
         .expect("a placeable wave");
-    let voice = Voice {
-        source: VoiceSource::Memory(sampler),
-        play: Playback::default(),
-    };
 
-    let mut node = VoiceNode::new(voice).expect("a finite gain and a nonempty width");
+    let mut node =
+        VoiceNode::new(sampler, Playback::default()).expect("a finite gain and a nonempty width");
     assert_eq!(node.shape().audio_in().count(), 0);
     assert_eq!(node.shape().audio_out().count(), 2);
 
@@ -1305,12 +1292,16 @@ fn a_voices_fork_keeps_its_window_and_reads_the_renders_transport() {
     let fork = voice
         .fork_copy(tutti_graph::RenderMode::Realtime)
         .expect("a memory voice forks");
-    match &fork.source {
-        VoiceSource::Memory(s) => assert_eq!(s.window().map(|w| w.start), Some(Beat::new(2.0))),
-        other => panic!("expected a Memory source, got {other:?}"),
-    }
+    let Voice {
+        source: VoiceSource::Memory(forked),
+        play,
+    } = fork
+    else {
+        panic!("expected a Memory source");
+    };
+    assert_eq!(forked.window().map(|w| w.start), Some(Beat::new(2.0)));
     let mut node =
-        VoiceNode::with_channels(fork, 1u16).expect("a finite gain and a nonempty width");
+        VoiceNode::with_channels(forked, play, 1u16).expect("a finite gain and a nonempty width");
     node.prepare(&Prepare::new(
         SampleRate::of(SR),
         MaxBlock::of(Samples::new(64)),
@@ -1902,36 +1893,40 @@ fn a_pool_wider_than_the_sampler_reads_is_refused() {
 /// wired to.
 #[test]
 fn a_voice_node_refuses_a_width_or_gain_the_sampler_cannot_run() {
-    let voice = |gain: f64| Voice {
-        source: VoiceSource::Memory(
+    let voice = |gain: f64| {
+        (
             MemorySource::placed(make_wave(4096), VoiceWindow::from(Beat::new(0.0)))
                 .expect("a placeable wave"),
-        ),
-        play: Playback {
-            gain: Amplitude::new(gain),
-            ..Playback::default()
-        },
+            Playback {
+                gain: Amplitude::new(gain),
+                ..Playback::default()
+            },
+        )
+    };
+    let node = |gain: f64, channels: ChannelLayout| {
+        let (source, play) = voice(gain);
+        VoiceNode::with_channels(source, play, channels)
     };
     let max = tutti_buffers::MAX_CHANNELS as u16;
     assert_eq!(
-        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(max)).err(),
+        node(1.0, ChannelLayout::from(max)).err(),
         None,
         "the ceiling itself is carried"
     );
     assert_eq!(
-        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(max + 2)).err(),
+        node(1.0, ChannelLayout::from(max + 2)).err(),
         Some(VoiceNodeError::Width(PlaceError::WidthTooWide {
             channels: max + 2,
             max
         }))
     );
     assert_eq!(
-        VoiceNode::with_channels(voice(1.0), ChannelLayout::from(0u16)).err(),
+        node(1.0, ChannelLayout::from(0u16)).err(),
         Some(VoiceNodeError::Width(PlaceError::EmptyWidth))
     );
     for gain in [f64::NAN, f64::INFINITY] {
         assert_eq!(
-            VoiceNode::new(voice(gain)).err(),
+            node(gain, ChannelLayout::STEREO).err(),
             Some(VoiceNodeError::Gain(GainError::NotFinite))
         );
     }
@@ -1955,12 +1950,9 @@ fn both_nodes_declare_their_width() {
             },
         )
         .expect("a placeable wave");
-        let voice = Voice {
-            source: VoiceSource::Memory(sampler),
-            play: Playback::default(),
-        };
         let vn = VoiceNode::with_channels(
-            voice,
+            sampler,
+            Playback::default(),
             ChannelLayout::try_from(w).expect("a test width is small"),
         )
         .expect("a finite gain and a nonempty width");

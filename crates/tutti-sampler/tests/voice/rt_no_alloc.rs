@@ -31,8 +31,8 @@ use tutti_graph::Node;
 use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    MemorySource, MemorySourceConfig, PlayDirection, Playback, SendError, SlotId, Voice, VoiceNode,
-    VoicePool, VoicePoolHandle, VoiceSource, VoiceWindow,
+    MemorySource, MemorySourceConfig, PlayDirection, Playback, SendError, SlotId, VoiceNode,
+    VoicePool, VoicePoolHandle, VoiceWindow,
 };
 use tutti_units::{
     Amplitude, Beat, BeatDuration, Bpm, Cents, PlaybackRate, SampleRate, Seconds, StretchFactor,
@@ -564,13 +564,10 @@ fn placed_parts(wave: &Arc<Wave>, stretch: f64) -> (MemorySource<f32>, Playback)
     (sampler, play)
 }
 
-/// [`placed_parts`] as a voice.
-fn placed_voice(wave: &Arc<Wave>, stretch: f64) -> Voice<f32> {
+/// [`placed_parts`] as a standalone voice node.
+fn placed_node(wave: &Arc<Wave>, stretch: f64) -> VoiceNode<f32> {
     let (sampler, play) = placed_parts(wave, stretch);
-    Voice {
-        source: VoiceSource::Memory(sampler),
-        play,
-    }
+    VoiceNode::new(sampler, play).expect("a finite gain and a nonempty width")
 }
 
 /// Inserts `parts` in `pool` at `id`.
@@ -614,9 +611,7 @@ fn voice_nodes_at_max_block_512_in_ragged_blocks_are_allocation_free() {
     insert(&mut pool, 2, (late, silent));
     ragged_at_512(pool);
 
-    ragged_at_512(
-        VoiceNode::new(placed_voice(&wave, 0.5)).expect("a finite gain and a nonempty width"),
-    );
+    ragged_at_512(placed_node(&wave, 0.5));
 
     ragged_at_512(
         MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
@@ -686,18 +681,12 @@ fn a_loop_wrap_crossfade_is_allocation_free() {
     let mut pool = VoicePool::new();
     insert(&mut pool, 0, placed_parts(&wave, 1.0));
     wraps_without_allocating(pool, true);
-    wraps_without_allocating(
-        VoiceNode::new(placed_voice(&wave, 1.0)).expect("a finite gain and a nonempty width"),
-        true,
-    );
+    wraps_without_allocating(placed_node(&wave, 1.0), true);
     // Stretched: every wrap is a reseat, which primes in `process`.
     let mut stretched = VoicePool::new();
     insert(&mut stretched, 0, placed_parts(&wave, 1.5));
     wraps_without_allocating(stretched, false);
-    wraps_without_allocating(
-        VoiceNode::new(placed_voice(&wave, 1.5)).expect("a finite gain and a nonempty width"),
-        false,
-    );
+    wraps_without_allocating(placed_node(&wave, 1.5), false);
     wraps_without_allocating(
         MemorySource::placed(wave.clone(), VoiceWindow::from(Beat::new(0.0)))
             .expect("a placeable wave"),
@@ -1392,15 +1381,10 @@ fn voice_node_command_drain_does_not_allocate() {
         });
     source.play();
 
-    let (node, handle) = tutti_sampler::VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Memory(source),
-            play: Playback::default(),
-        },
-        ChannelLayout::STEREO,
-    )
-    .expect("a finite gain and a nonempty width")
-    .with_handle();
+    let (node, handle) =
+        tutti_sampler::VoiceNode::with_channels(source, Playback::default(), ChannelLayout::STEREO)
+            .expect("a finite gain and a nonempty width")
+            .with_handle();
     let mut rig = Rig::new(node, 64);
 
     // Warm-up outside the gate: the first blocks touch lazily-sized state, and
