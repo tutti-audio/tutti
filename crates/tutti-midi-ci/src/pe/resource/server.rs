@@ -22,7 +22,7 @@ use super::super::request_ids::RequestIds;
 use super::super::tree::PeJson;
 use super::data::PeData;
 use super::fields::PeDataError;
-use super::kind::{CanSet, PeResource};
+use super::kind::{CanSet, PeResource, StandardResource};
 use super::request::ResourceTarget;
 use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, StateVerdict};
 use super::store::{ResourceStore, StoreError};
@@ -713,7 +713,7 @@ impl ResourceResponder {
         let PeHeader::Request(request) = held.header else {
             return false;
         };
-        if PeResource::from_name(&request.resource) != PeResource::State {
+        if PeResource::from_name(&request.resource) != StandardResource::State {
             return false;
         }
         let Some(id) = request
@@ -903,7 +903,7 @@ impl ResourceResponder {
             }
             .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))
         };
-        if resource == PeResource::ResourceList {
+        if resource == StandardResource::ResourceList {
             if request.res_id.is_some() || request.page.is_some() {
                 return Err(refusal(
                     PeStatus::BadRequest,
@@ -940,7 +940,7 @@ impl ResourceResponder {
 
     /// The data a target names.
     fn data_of(&self, store: &ResourceStore, target: &ResourceTarget) -> Result<PeData, Refusal> {
-        if *target.resource() == PeResource::ResourceList {
+        if *target.resource() == StandardResource::ResourceList {
             return Ok(PeData::ResourceList(store.resource_list()));
         }
         store

@@ -161,9 +161,9 @@ pub struct PeLink {
 impl PeLink {
     /// A Link to `resource` with no other property.
     #[must_use]
-    pub fn new(resource: PeResource) -> Self {
+    pub fn new(resource: impl Into<PeResource>) -> Self {
         Self {
-            resource,
+            resource: resource.into(),
             res_id: None,
             title: None,
             role: None,
@@ -173,7 +173,7 @@ impl PeLink {
 
     /// The Link to the entry `res_id` of `resource`.
     #[must_use]
-    pub fn entry(resource: PeResource, res_id: ResourceId) -> Self {
+    pub fn entry(resource: impl Into<PeResource>, res_id: ResourceId) -> Self {
         Self {
             res_id: Some(res_id),
             ..Self::new(resource)
