@@ -177,3 +177,76 @@ fn a_write_to_a_parked_node_is_read_after_a_parked_block_out_of_process() {
         "a read after one parked block returns the written value"
     );
 }
+
+/// The probe's `Cutoff`: a table parameter, which its state holds (an extra
+/// parameter is not in the state).
+const CUTOFF: tutti_units::ParamId = tutti_units::ParamId::new(101);
+
+/// **A state saved right after a write, with no block, holds the write**:
+/// restored into a fresh instance, the fresh one reads it.
+fn a_saved_state_holds_the_write(
+    live: &tutti_plugin_host::PluginHandle,
+    fresh: &tutti_plugin_host::PluginHandle,
+) {
+    live.send_parameter(CUTOFF, Normalized::of(WRITTEN))
+        .expect("the plugin lists the parameter");
+    let state = live
+        .save_state(tutti_plugin_types::StateUse::Project)
+        .expect("the probe saves");
+    fresh
+        .load_state(main_thread(), &state)
+        .expect("the fresh instance loads the state");
+    assert_eq!(
+        fresh.parameter_value(CUTOFF),
+        Some(Normalized::of(WRITTEN)),
+        "the fresh instance reads the written value"
+    );
+}
+
+/// **In process, a state saved after a write holds it.**
+#[test]
+fn a_state_saved_after_a_write_holds_it_in_process() {
+    let _lock = machine_lock();
+    let load = || {
+        tutti_plugin_host::load_client::<ClapLoaded, f32>(
+            main_thread(),
+            &tutti_fixtures::pumped_work(),
+            &tutti_plugin_types::PluginRef::file(tutti_fixtures::clap_probe()),
+            SampleRate::of(SAMPLE_RATE),
+        )
+        .expect("the reference plugin loads in process")
+    };
+    let (live_client, live) = load();
+    let (_fresh_client, fresh) = load();
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::from_count(2));
+    let (key, _controls) = g.add_with_controls(live_client.bind(tempo()));
+    g.pipe_output(key);
+    let _renderer = g
+        .renderer(Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples::new(BLOCK)),
+        ))
+        .expect("a one-plugin graph compiles");
+    a_saved_state_holds_the_write(&live, &fresh);
+}
+
+/// **Served, a state saved after a write holds it.**
+#[test]
+fn a_state_saved_after_a_write_holds_it_out_of_process() {
+    let _lock = machine_lock();
+    let live = load_probe(SAMPLE_RATE);
+    let fresh = load_probe(SAMPLE_RATE);
+    let mut g = GraphBuilder::new(
+        ChannelLayout::EMPTY,
+        ChannelLayout::from_count(u16::try_from(live.client.outputs()).expect("a few ports")),
+    );
+    let (key, _controls) = g.add_with_controls(live.client.bind(tempo()));
+    g.pipe_output(key);
+    let _renderer = g
+        .renderer(Prepare::new(
+            SampleRate::of(SAMPLE_RATE),
+            MaxBlock::of(Samples::new(BLOCK)),
+        ))
+        .expect("a one-plugin graph compiles");
+    a_saved_state_holds_the_write(&live.handle, &fresh.handle);
+}
