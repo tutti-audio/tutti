@@ -87,10 +87,6 @@ pub enum MidiEvent {
         /// The bar line it takes effect on.
         beat: tutti_units::Beat,
     },
-    /// The session stopped following ([`Midi::unfollow_tempo`](crate::Midi::unfollow_tempo)):
-    /// the project's own tempo and meter are published again, from the next
-    /// block, at the beat the transport is then at.
-    TempoUnfollowed,
     /// The session locked to the MIDI clock it follows
     /// ([`Midi::follow_clock`](crate::Midi::follow_clock)): Beat Clock after a
     /// quarter note of steady ticks, MTC after three consistent cycles of
@@ -126,11 +122,6 @@ pub enum MidiEvent {
         /// The clock followed.
         kind: crate::ClockKind,
     },
-    /// The session stopped following its MIDI clock
-    /// ([`Midi::unfollow_clock`](crate::Midi::unfollow_clock)); the transport
-    /// keeps the motion it had, and the project's tempo and meter are published
-    /// again if the follower had changed them.
-    ClockUnfollowed,
     /// The transport [refused](Losses::refused) commands a
     /// followed MIDI clock or Machine Control asked of it, this many in one
     /// update: its list of timed commands was full. Nothing was
@@ -147,9 +138,21 @@ pub enum MidiEvent {
     /// in progress was dropped and nothing of it was applied. No COMMAND ERROR
     /// is sent.
     MachineControlSegmentation(tutti_midi_runtime::SegmentFault),
-    /// The session stopped following MIDI Machine Control
-    /// ([`Midi::unfollow_machine_control`](crate::Midi::unfollow_machine_control)).
-    MachineControlUnfollowed,
+    /// A follower the session follows with stopped: an `unfollow_*` call
+    /// ([`UnfollowCause::Requested`](crate::UnfollowCause::Requested)) or the
+    /// removal of the input node it read, whose tap can never speak again
+    /// ([`UnfollowCause::InputGone`](crate::UnfollowCause::InputGone)). The
+    /// follower is dropped, the project's own tempo and meter are published
+    /// again for the maps it stepped (from the next block, at the beat the
+    /// transport is then at, so the playhead does not jump), the transport keeps
+    /// the motion it had, and the next `follow_tempo`, `follow_clock` or
+    /// `follow_machine_control` is accepted.
+    Unfollowed {
+        /// The follower that ended.
+        follower: crate::FollowKind,
+        /// Why it ended.
+        cause: crate::UnfollowCause,
+    },
     /// A network endpoint's peer was invited, joined, left or failed to
     /// authenticate ([`Midi::open_network_client`](crate::Midi::open_network_client) and
     /// [`open_network_host`](crate::Midi::open_network_host)). There is none
