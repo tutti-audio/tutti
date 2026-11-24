@@ -91,7 +91,10 @@ The reviewer checks:
    something, `#[non_exhaustive]` on what will grow, `Send` and `Sync` stated. By
    tutti's own rules, an error type derives `thiserror::Error` and a standalone one
    ends in `Error`, and a call never hands out a lower crate's object that skips the
-   checks the call makes, so there is one way in.
+   checks the call makes, so there is one way in. A method documented as answering
+   `None`, `false` or "ignored" for one kind of its receiver, or an `unreachable!` that
+   says two tags agree, is a finding: the reviewer asks the two questions of the style
+   guide's T19 before accepting either the tag or a split.
 5. **Breaking changes.** Marked `!` in the title, the migration in "Breaking changes and
    migration", and the old shape deleted in the same pull request, with no
    compatibility shim.

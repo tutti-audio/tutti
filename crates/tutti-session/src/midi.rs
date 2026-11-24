@@ -38,8 +38,8 @@ use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
     MACHINE_TAP_CAPACITY, MachineFollow, Placed,
 };
+use crate::{ClockKind, ClockOffset, FollowClock, FollowMachineControl, FollowTempo};
 use crate::{EventOutputPort, Key, MidiError, MidiEvent, MidiNodes};
-use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
 type Result<T> = std::result::Result<T, MidiError>;
@@ -1949,21 +1949,21 @@ impl<F: Float> Midi<'_, F> {
     /// [`Poll`](crate::Phase::Poll) phase. **Off by default**: until this is
     /// called, a Timing Clock or a Quarter Frame changes nothing.
     ///
-    /// **[`ClockKind::BeatClock`](tutti_midi_runtime::ClockKind::BeatClock)**:
+    /// **[`ClockKind::BeatClock`]**:
     /// the tempo fit from the Timing Clocks' spacing is published into the
     /// tempo map as [`follow_tempo`](Self::follow_tempo)'s is (and reported as
     /// [`MidiEvent::TempoFollowed`]), Start plays from beat 0, Continue plays
     /// from where the source counted to, Stop stops, and a Song Position
     /// Pointer locates to its sixteenth notes (M1 pp.27 to 31).
     ///
-    /// **[`ClockKind::Mtc`](tutti_midi_runtime::ClockKind::Mtc)**: the position
+    /// **[`ClockKind::Mtc`]**: the position
     /// Quarter Frames spell drives the playhead, `00:00:00:00` being beat 0 on
     /// the tempo map in force. The transport plays once the follower locks,
     /// locates when the source jumps, and a Full Message locates.
     ///
     /// **Lock** is reported as [`MidiEvent::ClockLocked`] and
     /// [`MidiEvent::ClockUnlocked`]; the rules and constants are those of
-    /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
+    /// `tutti_midi_runtime::BeatClockFollower` and `MtcFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
     /// A command is placed on the frame its message arrived on, 20 ms on, and
@@ -1978,14 +1978,14 @@ impl<F: Float> Midi<'_, F> {
     /// **Drift is corrected.** In each poll while the transport rolls, the
     /// beat the source counts is compared with the beat the transport reaches
     /// at the next block ([`clock_error`](Self::clock_error)), and the tempo
-    /// published is the fit trimmed to close the error in `ClockFollower::CATCH_UP`
+    /// published is the fit trimmed to close the error in `BeatClockFollower::CATCH_UP`
     /// (4 seconds), by at most 2% of the fit. A trim goes into the map as any
-    /// tempo does, a step of at least `ClockFollower::TEMPO_STEP` and one point
+    /// tempo does, a step of at least `BeatClockFollower::TEMPO_STEP` and one point
     /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
-    /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
+    /// (0.0067 beat) and the fit's noise. An error past `BeatClockFollower::SLIP` (a
     /// quarter of a beat) locates to the source's beat once and is reported as
     /// [`MidiEvent::ClockSlipped`]. MTC has no tempo to trim, and the same slip rule
-    /// reads its time against the transport's at `ClockFollower::MTC_SLIP_FRAMES` (2
+    /// reads its time against the transport's at `MtcFollower::SLIP_FRAMES` (2
     /// frames). A source off nominal speed is followed by those locates alone; MTC
     /// running backward stops the transport ([`MidiEvent::ClockReversed`]).
     ///
@@ -1999,12 +1999,10 @@ impl<F: Float> Midi<'_, F> {
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
-        if follow.kind() == tutti_midi_runtime::ClockKind::BeatClock && self.state.follow.is_some()
-        {
+        if follow.kind() == ClockKind::BeatClock && self.state.follow.is_some() {
             return Err(MidiError::TempoSourceTaken);
         }
         let tap = self.follow_tap(follow.input(), follow.group(), CLOCK_TAP_CAPACITY)?;
-        let core = tutti_midi_runtime::ClockFollower::new(follow.kind());
         // A second follow replaces the first; the base is published again
         // before the second steps it.
         if let Some(first) = self.state.clock.take()
@@ -2012,7 +2010,7 @@ impl<F: Float> Midi<'_, F> {
         {
             self.release_maps();
         }
-        self.state.clock = Some(ClockFollow::new(core, tap));
+        self.state.clock = Some(ClockFollow::new(follow.kind(), tap));
         Ok(())
     }
 
@@ -2023,7 +2021,7 @@ impl<F: Float> Midi<'_, F> {
     /// not read one: not locked, not rolling, or a locate that has not landed
     /// yet.
     #[must_use]
-    pub fn clock_error(&self) -> Option<tutti_midi_runtime::ClockOffset> {
+    pub fn clock_error(&self) -> Option<ClockOffset> {
         self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 
