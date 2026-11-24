@@ -101,10 +101,6 @@ impl<F: RingFloat> std::fmt::Debug for Ring<F> {
 }
 
 impl<F: RingFloat> Ring<F> {
-    pub(crate) fn region_id(&self) -> StreamId {
-        self.region_id
-    }
-
     /// Declared width — the file's own layout.
     pub(crate) fn channels(&self) -> ChannelLayout {
         nonempty(self.channels.width())

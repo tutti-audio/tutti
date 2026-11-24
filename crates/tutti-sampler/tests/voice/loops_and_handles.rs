@@ -561,7 +561,7 @@ fn a_command_for_an_id_with_no_voice_is_refused_and_changes_nothing() {
 }
 
 /// **A wave cannot replace a disk voice's**: the call names the slot and
-/// queues nothing (the pool's count of ignored swaps stays zero), and the
+/// queues nothing (nothing is retired), and the
 /// voice renders the file's ramp across it.
 #[test]
 fn replace_wave_on_a_disk_voice_is_refused_and_queues_nothing() {
@@ -583,7 +583,11 @@ fn replace_wave_on_a_disk_voice_is_refused_and_queues_nothing() {
         );
     });
     assert_frames("disk voice", &got, |n| n);
-    assert_eq!(handle.drops().wave_swaps_ignored, 0);
+    assert_eq!(
+        handle.collect_retired(),
+        0,
+        "nothing was queued, so nothing retired"
+    );
 }
 
 /// **A gain that is not finite is refused at the handles, and the voice keeps
