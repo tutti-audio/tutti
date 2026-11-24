@@ -8,14 +8,20 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// A public item: its key, and where it is declared.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct Item {
-    pub(super) key: String,
-    pub(super) file: String,
-    pub(super) line: usize,
+pub(in crate::gates) struct Item {
+    pub(in crate::gates) key: String,
+    pub(in crate::gates) file: String,
+    pub(in crate::gates) line: usize,
+    /// The keyword that declares it (`fn`, `struct`, ..).
+    pub(in crate::gates) kind: &'static str,
+    /// The `impl` target an associated item sits in.
+    pub(in crate::gates) owner: Option<String>,
+    /// The item's own name.
+    pub(in crate::gates) name: String,
 }
 
 /// The public items of each crate under `crates/`, sorted by key.
-pub(super) fn items(tree: &dyn Tree) -> BTreeMap<String, Vec<Item>> {
+pub(in crate::gates) fn items(tree: &dyn Tree) -> BTreeMap<String, Vec<Item>> {
     let files = source_files(tree);
     let skipped = test_modules(tree, &files);
     let mut out: BTreeMap<String, Vec<Item>> = BTreeMap::new();
@@ -138,23 +144,25 @@ pub(super) fn scan(path: &str, src: &str) -> Vec<Item> {
     let blocks = blocks(&code);
     let inline = inline_mods(&code);
     let base = module_path(path);
-    let item = |p: usize, kind: &str, name: &str| {
+    let item = |p: usize, kind: &'static str, name: &str| {
         let mut parts = base.clone();
         let mut around: Vec<_> = inline.iter().filter(|m| m.0 < p && p < m.1).collect();
         around.sort_by_key(|m| m.0);
         parts.extend(around.iter().map(|m| m.2.clone()));
-        if let Some(b) = blocks
+        let owner = blocks
             .iter()
             .filter(|b| b.open < p && p < b.close)
             .max_by_key(|b| b.open)
-        {
-            parts.push(b.owner.clone());
-        }
+            .map(|b| b.owner.clone());
+        parts.extend(owner.clone());
         parts.push(name.to_owned());
         Item {
             key: format!("{kind} {}", parts.join("::")),
             file: path.to_owned(),
             line: line_of(&code, p),
+            kind,
+            owner,
+            name: name.to_owned(),
         }
     };
     let mut out = Vec::new();

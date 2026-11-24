@@ -29,7 +29,8 @@
 //! behind a `cfg` of another platform is not indexed (the index has every cargo feature on); visibility is read from the
 //! declaration's text (`pub ` and no restriction).
 
-use super::lex::{blank, find_word_from, ident_at, is_test_file, strip_attrs, test_ranges};
+use super::lex::{blank, find_word_from, ident_at, is_test_file, test_ranges};
+use super::public_items::scan;
 use super::scip::{self, Document};
 use super::{Tree, lex};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -48,6 +49,20 @@ pub(super) enum Kind {
 }
 
 impl Kind {
+    /// The kind a scanned item's keyword names, when it is one this report lists.
+    fn of(keyword: &str) -> Option<Kind> {
+        Some(match keyword {
+            "fn" => Kind::Fn,
+            "struct" => Kind::Struct,
+            "enum" => Kind::Enum,
+            "trait" => Kind::Trait,
+            "type" => Kind::Type,
+            "const" => Kind::Const,
+            "static" => Kind::Static,
+            _ => return None,
+        })
+    }
+
     fn word(self) -> &'static str {
         match self {
             Kind::Fn => "fn",
@@ -107,10 +122,6 @@ pub(super) struct Row {
 /// What each rule removed, per crate.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(super) struct Removed {
-    /// Declared in a `trait` block.
-    pub(super) trait_items: usize,
-    /// Held by an `impl <Trait> for <Type>` block.
-    pub(super) trait_impl_items: usize,
     /// A trait some non-test `impl` implements.
     pub(super) implemented_traits: usize,
     /// Named by the umbrella.
@@ -164,17 +175,7 @@ pub(super) fn classify(
     (rows, removed)
 }
 
-// ---- reading a declaration from source ----
-
-/// What a definition's enclosing block makes of it.
-#[derive(Debug, PartialEq, Eq)]
-enum Context {
-    Module,
-    Inherent(String),
-    TraitBody,
-    TraitImpl,
-    Other,
-}
+// ---- reading where a definition sits ----
 
 /// The `{`, `(` or `[` blocks around `at`, innermost first, each with the text
 /// before it back to the previous `;`, `{` or `}`.
@@ -205,158 +206,14 @@ fn is_macro(header: &str) -> bool {
         .any(|(i, w)| lex::word(w[0]) && w[1] == b'!' && b.get(i + 2) != Some(&b'='))
 }
 
-fn strip_head(mut s: &str) -> &str {
-    loop {
-        s = strip_attrs(s.trim_start());
-        if let Some(r) = s.strip_prefix("pub(") {
-            s = r.split_once(')').map_or("", |x| x.1);
-        } else if let Some(r) = ["pub ", "unsafe ", "default ", "auto "]
-            .iter()
-            .find_map(|p| s.strip_prefix(p))
-        {
-            s = r;
-        } else {
-            return s.trim_start();
-        }
-    }
-}
-
-fn context(header: &str) -> Context {
-    let h = strip_head(header);
-    let word = |w: &str| {
-        h.strip_prefix(w)
-            .is_some_and(|r| !r.bytes().next().is_some_and(lex::word))
+/// Whether the item whose line is 1-based `line` of `code` (blanked) sits inside a
+/// macro invocation or a `macro_rules!` body.
+fn in_macro(code: &str, starts: &[usize], line: usize) -> bool {
+    let Some(&at) = starts.get(line - 1) else {
+        return false;
     };
-    if word("trait") {
-        Context::TraitBody
-    } else if word("mod") {
-        Context::Module
-    } else if word("impl") {
-        let mut rest = h["impl".len()..].trim_start();
-        if rest.starts_with('<') {
-            let end = lex::matching(rest, 0, b'<', b'>').map_or(0, |e| e + 1);
-            rest = rest[end..].trim_start();
-        }
-        let mut from = 0;
-        while let Some(p) = find_word_from(rest, "for", from) {
-            if !rest[p + 3..].trim_start().starts_with('<') {
-                return Context::TraitImpl;
-            }
-            from = p + 3;
-        }
-        let path: String = rest
-            .trim_start_matches(['&', '*'])
-            .trim_start_matches("dyn ")
-            .chars()
-            .take_while(|&c| lex::word_char(c) || c == ':')
-            .collect();
-        Context::Inherent(path.rsplit("::").next().unwrap_or("_").to_owned())
-    } else {
-        Context::Other
-    }
-}
-
-/// The `(is public, kind, name)` a declaration line opens.
-fn head(line: &str) -> Option<(bool, Kind, String)> {
-    let mut s = strip_attrs(line.trim());
-    let mut public = false;
-    if let Some(r) = s.strip_prefix("pub ") {
-        public = true;
-        s = r;
-    } else if let Some(r) = s.strip_prefix("pub(") {
-        s = r.split_once(')')?.1;
-    }
-    loop {
-        s = s.trim_start();
-        if let Some(r) = ["unsafe ", "async ", "default "]
-            .iter()
-            .find_map(|q| s.strip_prefix(q))
-        {
-            s = r;
-        } else if let Some(r) = s.strip_prefix("extern ") {
-            s = r.trim_start();
-            if s.starts_with('"') {
-                s = s[1..].split_once('"')?.1;
-            }
-        } else if let Some(r) = s.strip_prefix("const ") {
-            let next = r.trim_start();
-            if ["fn ", "unsafe ", "async ", "extern "]
-                .iter()
-                .any(|q| next.starts_with(q))
-            {
-                s = next;
-            } else {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-    let (kind, rest) = [
-        ("fn ", Kind::Fn),
-        ("struct ", Kind::Struct),
-        ("enum ", Kind::Enum),
-        ("trait ", Kind::Trait),
-        ("type ", Kind::Type),
-        ("const ", Kind::Const),
-        ("static ", Kind::Static),
-    ]
-    .iter()
-    .find_map(|(w, k)| s.strip_prefix(w).map(|r| (*k, r)))?;
-    let rest = rest.strip_prefix("mut ").unwrap_or(rest);
-    let (name, _) = ident_at(rest, 0);
-    (!name.is_empty()).then(|| (public, kind, name.to_owned()))
-}
-
-/// What the definition at `line` (0-based) of `code` (blanked) is.
-#[derive(Debug, PartialEq, Eq)]
-enum Declared {
-    /// Not a public function, struct, enum, trait, type, const or static.
-    Not,
-    /// A member of a `trait` block.
-    TraitItem,
-    /// A member of an `impl <Trait> for <Type>` block.
-    TraitImplItem,
-    Public {
-        kind: Kind,
-        owner: Option<String>,
-        name: String,
-        in_macro: bool,
-    },
-}
-
-fn declared(code: &str, starts: &[usize], line: usize) -> Declared {
-    let Some(&at) = starts.get(line) else {
-        return Declared::Not;
-    };
-    let end = starts.get(line + 1).copied().unwrap_or(code.len());
-    let text = &code[at..end];
-    let Some((public, kind, name)) = head(text) else {
-        return Declared::Not;
-    };
-    let at = at + (text.len() - text.trim_start().len());
-    let chain = enclosing(code, at);
-    let in_macro = chain.iter().any(|(_, h)| is_macro(h));
-    let ctx = chain
-        .iter()
-        .find(|(o, h)| *o == b'{' && !is_macro(h))
-        .map_or(Context::Module, |(_, h)| context(h));
-    match ctx {
-        Context::TraitBody => Declared::TraitItem,
-        Context::TraitImpl => Declared::TraitImplItem,
-        Context::Other if !in_macro => Declared::Not,
-        _ if !public => Declared::Not,
-        ctx => Declared::Public {
-            kind,
-            // A macro body's own braces are no impl: its items are taken as the module's.
-            owner: match ctx {
-                Context::Inherent(t) => Some(t),
-                _ => None,
-            },
-            name,
-            in_macro,
-        },
-    }
+    let at = at + (code[at..].len() - code[at..].trim_start().len());
+    enclosing(code, at).iter().any(|(_, h)| is_macro(h))
 }
 
 /// The names of the traits an `impl .. Trait for ..` header in `code` (blanked)
@@ -650,7 +507,13 @@ pub(crate) fn report(
     };
     // Pass 1: the definitions in the named crates' production files.
     let mut items: HashMap<String, Item> = HashMap::new();
-    let mut counts: BTreeMap<String, Removed> = BTreeMap::new();
+    // The public items of the source, by where they are declared.
+    let scanned = scan::items(tree);
+    let listed: HashMap<(&str, usize), &scan::Item> = scanned
+        .values()
+        .flatten()
+        .map(|i| ((i.file.as_str(), i.line), i))
+        .collect();
     for doc in scip::documents(index)? {
         let doc: Document = doc?;
         let Some(krate) = crate_of(&doc.path).filter(|k| crates.iter().any(|c| c == k)) else {
@@ -670,37 +533,26 @@ pub(crate) fn report(
             if o.symbol.starts_with("local ") || items.contains_key(&o.symbol) {
                 continue;
             }
-            let line = o.line as usize;
-            if src.tests.iter().any(|&(a, b)| a <= line + 1 && line < b) {
+            let line = o.line as usize + 1;
+            let Some(it) = listed.get(&(doc.path.as_str(), line)) else {
                 continue;
-            }
-            match declared(&src.code, &src.starts, line) {
-                Declared::Not => {}
-                Declared::TraitItem => counts.entry(krate.to_owned()).or_default().trait_items += 1,
-                Declared::TraitImplItem => {
-                    counts.entry(krate.to_owned()).or_default().trait_impl_items += 1;
-                }
-                Declared::Public {
+            };
+            let Some(kind) = Kind::of(it.kind) else {
+                continue;
+            };
+            items.insert(
+                o.symbol.clone(),
+                Item {
+                    krate: krate.to_owned(),
+                    file: doc.path.clone(),
+                    line,
                     kind,
-                    owner,
-                    name,
-                    in_macro,
-                } => {
-                    items.insert(
-                        o.symbol.clone(),
-                        Item {
-                            krate: krate.to_owned(),
-                            file: doc.path.clone(),
-                            line: line + 1,
-                            kind,
-                            owner,
-                            name,
-                            in_macro,
-                            refs: Vec::new(),
-                        },
-                    );
-                }
-            }
+                    owner: it.owner.clone(),
+                    name: it.name.clone(),
+                    in_macro: in_macro(&src.code, &src.starts, line),
+                    refs: Vec::new(),
+                },
+            );
         }
     }
     // Pass 2: the references to them, anywhere.
@@ -767,11 +619,7 @@ pub(crate) fn report(
             .cloned()
             .collect();
         let (rows, removed) = classify(&mine, &is_test, names.as_ref(), &implemented_by);
-        let mut removed = Removed {
-            trait_items: counts.get(krate).map_or(0, |c| c.trait_items),
-            trait_impl_items: counts.get(krate).map_or(0, |c| c.trait_impl_items),
-            ..removed
-        };
+        let mut removed = removed;
         removed.in_macro = rows.iter().filter(|r| r.in_macro).count();
         let _ = writeln!(out, "{krate}: {} items", rows.len());
         for r in &rows {
@@ -797,11 +645,9 @@ pub(crate) fn report(
         let none = rows.iter().filter(|r| r.refs == Refs::None).count();
         let _ = writeln!(
             out,
-            "{krate}: {} listed ({none} with no reference, {} test-only); left out: {} trait-block, {} trait-impl, {} implemented-trait, {} umbrella-named; labelled in macro: {}\n",
+            "{krate}: {} listed ({none} with no reference, {} test-only); left out: {} implemented-trait, {} umbrella-named; labelled in macro: {}\n",
             rows.len(),
             rows.len() - none,
-            removed.trait_items,
-            removed.trait_impl_items,
             removed.implemented_traits,
             removed.umbrella,
             removed.in_macro
@@ -950,63 +796,16 @@ mod tests {
         assert_eq!(removed.implemented_traits, 1);
     }
 
-    fn decl(src: &str, line: usize) -> Declared {
-        let code = blank(src);
+    fn macro_at(src: &str, line: usize) -> bool {
         let src = Src::new(src);
-        declared(&code, &src.starts, line)
-    }
-
-    #[test]
-    fn only_an_unrestricted_pub_item_is_declared_public() {
-        let src = "pub fn a() {}\npub(crate) fn b() {}\nfn c() {}\npub struct S { pub x: u8 }\n";
-        assert!(matches!(
-            decl(src, 0),
-            Declared::Public { kind: Kind::Fn, .. }
-        ));
-        assert_eq!(decl(src, 1), Declared::Not);
-        assert_eq!(decl(src, 2), Declared::Not);
-        assert!(matches!(
-            decl(src, 3),
-            Declared::Public {
-                kind: Kind::Struct,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn methods_know_their_type_and_trait_members_are_set_apart() {
-        let src = "impl<T> Foo<T> {\n    pub const fn m() {}\n}\ntrait Tr {\n    fn t();\n}\n\
-                   impl Tr for Foo<u8> {\n    fn t() {}\n}\n";
-        assert_eq!(
-            decl(src, 1),
-            Declared::Public {
-                kind: Kind::Fn,
-                owner: Some("Foo".to_owned()),
-                name: "m".to_owned(),
-                in_macro: false
-            }
-        );
-        assert_eq!(decl(src, 4), Declared::TraitItem);
-        assert_eq!(decl(src, 7), Declared::TraitImplItem);
+        in_macro(&src.code, &src.starts, line)
     }
 
     #[test]
     fn an_item_in_a_macro_invocation_is_labelled() {
-        let src = "declare! {\n    pub fn a() {}\n}\nmacro_rules! m {\n    () => {\n        pub fn b() {}\n    };\n}\n";
-        assert!(matches!(
-            decl(src, 1),
-            Declared::Public { in_macro: true, .. }
-        ));
-        assert!(matches!(
-            decl(src, 5),
-            Declared::Public { in_macro: true, .. }
-        ));
-    }
-
-    #[test]
-    fn an_item_inside_a_function_body_is_not_declared() {
-        assert_eq!(decl("fn f() {\n    pub struct L;\n}\n", 1), Declared::Not);
+        let src = "declare! {\n    pub fn a() {}\n}\npub fn b() {}\n";
+        assert!(macro_at(src, 2));
+        assert!(!macro_at(src, 4));
     }
 
     #[test]
