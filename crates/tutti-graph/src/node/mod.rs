@@ -39,7 +39,7 @@ use tutti_buffers::MaxBlock;
 
 use tutti_music::MeterMap;
 use tutti_tempo::TempoMap;
-use tutti_units::{Latency, SampleRate, Tail};
+use tutti_units::{Latency, SampleRate, Samples, Tail};
 
 use crate::exec::history::TransportHistory;
 use crate::node::controls::ParamSet;
@@ -221,6 +221,13 @@ impl Prepare {
     /// The rate every block will run at.
     pub const fn sample_rate(&self) -> SampleRate {
         self.sample_rate
+    }
+
+    /// The length of every declick fade at this rate: [`DECLICK`](crate::DECLICK)
+    /// in frames. The one owner of the length of an edge's weight fade, a
+    /// unit's mode fade and a param port's source fade.
+    pub(crate) fn declick(&self) -> Samples {
+        tutti_curve::declick_frames(self.sample_rate)
     }
 
     /// The longest block [`Node::process`] will be handed. Blocks may be any

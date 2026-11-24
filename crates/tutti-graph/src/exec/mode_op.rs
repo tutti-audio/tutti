@@ -35,10 +35,11 @@ pub(super) fn moded_node_op<
         .last()
         .filter(|p| p.is_mix())
         .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));
-    u.mode.mix.drive_step(frames, source);
+    let declick = plan.prepare.declick();
+    u.mode.mix.drive_step(frames, declick, source);
 
     let want = u.mode.seen();
-    if want != u.mode.heading() && u.mode.toggle(want) {
+    if want != u.mode.heading() && u.mode.toggle(want, declick) {
         // Un-bypass: its state is stale. Reset before the first call.
         u.node.reset();
         u.quiet = Samples::ZERO;
@@ -69,7 +70,7 @@ pub(super) fn moded_node_op<
 
     let ended = run_node_op(u, head, st);
 
-    let seg = u.mode.step(frames);
+    let seg = u.mode.step(frames, declick);
     if seg.is_steady() && seg.steady == NodeMode::Active && seg.mix.is_wet() {
         return ended;
     }

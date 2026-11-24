@@ -439,6 +439,7 @@ pub(super) fn run_params<
     let ports = &plan.param_ports[rec.params.range()];
     let mut next = ports.iter().peekable();
     let declared = rec.declared;
+    let declick = plan.prepare.declick();
     // The state was sized from the unit's shape; a fade's two units declare
     // the same params (checked where it is asked for), so the two agree.
     let n = declared.len().min(params.port_count());
@@ -447,9 +448,9 @@ pub(super) fn run_params<
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
                 let events = st.events.pev(EventSlotId::new(p.slot));
-                params.port(k, param, frames, Some((p.from, events)), base);
+                params.port(k, param, frames, declick, Some((p.from, events)), base);
             }
-            None => params.port(k, param, frames, None, base),
+            None => params.port(k, param, frames, declick, None, base),
         }
     }
 }
