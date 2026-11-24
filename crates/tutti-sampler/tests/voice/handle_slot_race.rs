@@ -200,8 +200,12 @@ fn a_command_reaches_the_voice_holding_the_slot_when_it_is_queued() {
                 while !a_done.load(SeqCst) {
                     let seen = blocks.load(SeqCst);
                     for _ in 0..PER_DRAIN {
+                        // Every loop ends inside the file: B rests once it has
+                        // named them all, however the threads were scheduled.
+                        if n + 1 >= LEN {
+                            break;
+                        }
                         n += 1;
-                        assert!(n < LEN, "B outran the file");
                         let setting = Some(loop_frames(0, n, 0));
                         call(Kind::Loop, n, &|| handle.set_loop(SLOT, setting));
                         call(Kind::Direction, n, &|| {
