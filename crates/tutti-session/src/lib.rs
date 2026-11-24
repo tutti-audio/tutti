@@ -75,6 +75,8 @@ mod bounce;
 mod builder;
 #[cfg(feature = "plugin")]
 mod bypass;
+#[cfg(feature = "device")]
+mod callback_size;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
