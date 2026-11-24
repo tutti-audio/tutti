@@ -758,6 +758,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
+            None,
         );
 
         let play = Playback {
@@ -1364,6 +1365,7 @@ fn streaming_voice_of(region: u64) -> Voice<f32> {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
+            None,
         )),
         play: Playback::default(),
     }

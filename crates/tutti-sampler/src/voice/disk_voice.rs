@@ -233,7 +233,7 @@ enum Reader<F: SamplerFloat> {
 /// when the fork is taken (a loop set later on the stream is not a copy this
 /// would have missed).
 #[derive(Clone)]
-struct Origin<F: SamplerFloat> {
+pub(crate) struct Origin<F: SamplerFloat> {
     file: Arc<StreamFile<F>>,
     status: Arc<StatusCell>,
 }
@@ -346,19 +346,10 @@ impl<F: SamplerFloat> DiskVoice<F> {
     ///
     /// Construction (streamer stream registration, ring allocation) happens on
     /// the ECS/streamer side; this only binds the already-built unit to a
-    /// timeline window. `shared_state` is the stream's `Cells`. A voice over a
-    /// bare ring (a test's) has no file, so its fork plays silence.
-    #[cfg(test)]
+    /// timeline window. `shared_state` is the stream's `Cells`, and `origin` the
+    /// stream's file, which a fork reads. A voice over a bare ring (a test's)
+    /// has none, so its fork plays silence.
     pub(crate) fn new(
-        inner: DiskSource<F>,
-        shared_state: Arc<Cells>,
-        config: DiskVoiceConfig,
-    ) -> Self {
-        Self::over(inner, shared_state, config, None)
-    }
-
-    /// `new` over a stream whose file a fork reads (`origin`).
-    fn over(
         inner: DiskSource<F>,
         shared_state: Arc<Cells>,
         config: DiskVoiceConfig,
@@ -412,7 +403,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         } = reader;
         let file_rate = file.file_rate();
         let inner = DiskSource::with_reader(ring, Some(reader), width, place);
-        Self::over(
+        Self::new(
             inner,
             cells,
             DiskVoiceConfig {
@@ -681,7 +672,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         match &mut self.reader {
             Reader::File(offline) => {
                 lanes.clear(n, frames);
-                let cx = FileCx::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
                 offline.render(
                     clock,
                     range,
@@ -758,7 +749,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         let rate = self.input_step();
         match &mut self.reader {
             Reader::File(offline) => {
-                let cx = FileCx::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
                 offline.read(positions, cx, |i, f| lanes.put(i, &f[..w]));
             }
             Reader::Ring { read, declick, .. } => {
@@ -828,7 +819,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         let positions = &mut positions[..range.len()];
         match &mut self.reader {
             Reader::File(offline) => {
-                let cx = FileCx::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
                 offline.render(clock, range, positions, (gate, rate), cx, emit);
             }
             Reader::Ring { read, declick, .. } => {
@@ -894,7 +885,7 @@ fn ring_runs<E: FnMut(usize, &[F]), F: SamplerFloat>(
 }
 
 /// What a fork's file read takes from the voice around it.
-struct FileCx<F: SamplerFloat> {
+struct FileContext<F: SamplerFloat> {
     /// Output width, at most [`MAX_CHANNELS`].
     width: usize,
     /// The voice's output gain, as a sample factor.
@@ -903,7 +894,7 @@ struct FileCx<F: SamplerFloat> {
     told_rate: bool,
 }
 
-impl<F: SamplerFloat> FileCx<F> {
+impl<F: SamplerFloat> FileContext<F> {
     fn new(shared_state: &Cells, sample_rate: Option<SampleRate>, width: usize) -> Self {
         Self {
             width: width.min(MAX_CHANNELS),
@@ -924,7 +915,7 @@ impl<F: SamplerFloat> Offline<F> {
         range: Range<usize>,
         positions: &mut [Option<SamplePosition>],
         step: (Gate, ReadRate),
-        cx: FileCx<F>,
+        cx: FileContext<F>,
         emit: impl FnMut(usize, &[F]),
     ) {
         self.place(clock, range, step, positions);
@@ -953,11 +944,11 @@ impl<F: SamplerFloat> Offline<F> {
     fn read(
         &mut self,
         positions: &[Option<SamplePosition>],
-        FileCx {
+        FileContext {
             width: w,
             gain,
             told_rate,
-        }: FileCx<F>,
+        }: FileContext<F>,
         mut emit: impl FnMut(usize, &[F]),
     ) {
         let silent = [F::ZERO; MAX_CHANNELS];

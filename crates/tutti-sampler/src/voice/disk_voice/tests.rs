@@ -128,6 +128,7 @@ fn make_clip_reader_at(
             },
             file_sample_rate: SampleRate::SR_44K1,
         },
+        None,
     )
 }
 
@@ -179,6 +180,7 @@ fn placement_gate_applies_src_ratio_exactly_once() {
             // The file's rate, as `ports.rs` hands it over: session × src.
             file_sample_rate: SampleRate::of(44_100.0 * src),
         },
+        None,
     );
 
     // Two seconds in at 120 BPM = beat 4.0.
@@ -406,6 +408,7 @@ fn a_clone_holds_no_live_reader() {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     );
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     run_block(&mut live, &t, 64);
@@ -722,6 +725,7 @@ fn wide_clip_at(width: usize, at: u64) -> DiskVoice<f32> {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     )
 }
 
@@ -872,6 +876,7 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     )
 }
 
@@ -1228,6 +1233,7 @@ fn outside_the_window_silences_every_channel() {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
+            None,
         );
 
         // Pre-dirty the node's outputs so a missing write shows, in a
@@ -1301,6 +1307,7 @@ fn cached_stride_reads_every_channel_at_width_six() {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     );
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
@@ -1599,6 +1606,7 @@ fn a_skipped_block_forgets_the_fade_and_the_last_position() {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     );
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();
@@ -1651,6 +1659,7 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
+        None,
     );
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();
