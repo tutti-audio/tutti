@@ -1135,6 +1135,57 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
     ));
 }
 
+// M2-103 §14: ResourceList has no entry of its own, so it declares no pagination, no
+// Flow Control, no Set and no Subscription, and an Initiator that does not know the
+// peer's ResourceList yet refuses what the Responder refuses with 400, 406 and 405.
+#[test]
+fn an_inquiry_for_resource_list_is_refused_what_it_does_not_declare() {
+    let now = Instant::now();
+    let (mut init, _) =
+        ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
+    let target = || ResourceTarget::try_from(StandardResource::ResourceList).unwrap();
+    let page = PePage {
+        offset: 0,
+        limit: NonZeroU32::new(5).unwrap(),
+    };
+    assert!(matches!(
+        init.get(&ResourceGet::new(target()).paged(page), now),
+        Err(CallError::Refused(RequestRefused::NotDeclaredPaginable(_)))
+    ));
+    assert!(matches!(
+        init.get(&ResourceGet::new(target()).flow_controlled(), now),
+        Err(CallError::Refused(RequestRefused::FlowControlNotDeclared(_)))
+    ));
+    assert!(matches!(
+        init.subscribe(&ResourceGet::new(target()), now),
+        Err(CallError::Refused(RequestRefused::CannotSubscribe(_)))
+    ));
+    let set = ResourceSet::full(target(), PeData::ResourceList(PeResourceList::new())).unwrap();
+    assert!(matches!(
+        init.set(&set, now),
+        Err(CallError::Refused(RequestRefused::CannotSet { .. }))
+    ));
+}
+
+// M2-103 §10: the changes of a Partial Set are JSON, so an entry that lists no
+// `application/json` is not partially set.
+#[test]
+fn a_partial_set_needs_json_among_the_media_types_of_the_entry() {
+    let entry = custom_entry("X-Part", r#"{"title":"Part"}"#)
+        .can_set(CanSet::Partial)
+        .media_types(vec![MediaType::OCTET_STREAM])
+        .build()
+        .unwrap();
+    let set = ResourceSet::partial(
+        ResourceTarget::try_from(custom("X-Part")).unwrap(),
+        PartialUpdate::new(),
+    );
+    assert!(matches!(
+        set.check(&entry),
+        Err(RequestRefused::MediaTypeNotDeclared { .. })
+    ));
+}
+
 // M2-103 §10: a Set carries the data of the Resource it is for.
 #[test]
 fn a_set_carries_data_of_its_resource() {
