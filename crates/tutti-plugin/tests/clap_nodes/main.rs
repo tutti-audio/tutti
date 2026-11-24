@@ -30,6 +30,7 @@ mod clap_node_no_alloc;
 mod clap_pdc_alignment;
 mod clap_ragged;
 mod clap_rate_refused;
+mod clap_read_after_write;
 mod clap_transport;
 mod clap_wake;
 mod plugin_param_delivery;
