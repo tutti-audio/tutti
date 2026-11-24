@@ -837,7 +837,7 @@ mod tests {
     }
 
     /// `node` over one block of `x` on every channel, and the tail it reports.
-    fn reported(node: &mut DelayNode<f32>, x: &[f32]) -> Option<Tail> {
+    fn reported(node: &mut DelayNode<f32>, x: &[f32], params: &[Option<&[f32]>]) -> Option<Tail> {
         use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
         use tutti_units::Frame;
 
@@ -849,7 +849,7 @@ mod tests {
             changes: TransportChanges::NONE,
             play: PlayClock::ZERO,
         };
-        tutti_graph::contract::drive_input(node, &env, Planes::new(&[x, x]).unwrap(), &[], &[])
+        tutti_graph::contract::drive_input(node, &env, Planes::new(&[x, x]).unwrap(), params, &[])
             .reported_tail
     }
 
@@ -870,11 +870,40 @@ mod tests {
         assert_eq!(node.shape().tail, Tail::Unbounded);
         let trips = (1e-3f64.ln() / 0.8f64.ln()).ceil() as usize;
         let want = (1 + trips) * (10 + 2);
-        let Some(Tail::Finite(got)) = reported(&mut node, &click(64)) else {
+        let Some(Tail::Finite(got)) = reported(&mut node, &click(64), &[]) else {
             panic!("a finite reported tail")
         };
         assert!(got.get().abs_diff(want) <= 1, "{got:?}, wanted {want}");
         assert_declared_tail(&mut node, RATE);
+    }
+
+    /// A feedback a signal drives high for a block, over a cell at none, is reported at the
+    /// driven value: 0.9 on a stereo pair of 10 frames is `ceil(ln 1e-3 / ln 0.9) = 66` trips,
+    /// 67 periods of 12 frames, where the cell alone is the one echo (12 frames).
+    #[test]
+    fn a_driven_feedback_is_reported_at_the_driven_value() {
+        let build = || {
+            prepared(
+                DelayNode::<f32>::from(
+                    DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
+                        .controls(controls(frames(10.0), 0.0, 0.0)),
+                ),
+                RATE,
+                64,
+            )
+        };
+        let driven = vec![0.9f32; 64];
+        let Some(Tail::Finite(got)) = reported(&mut build(), &click(64), &[None, Some(&driven)])
+        else {
+            panic!("a finite reported tail")
+        };
+        let trips = (1e-3f64.ln() / 0.9f64.ln()).ceil() as usize;
+        let want = (1 + trips) * 12;
+        assert!(got.get() >= want - 1, "{got:?}, wanted {want}");
+        let Some(Tail::Finite(cell)) = reported(&mut build(), &click(64), &[]) else {
+            panic!("a finite reported tail")
+        };
+        assert!(cell.get() < got.get(), "the cell alone: {cell:?}");
     }
 
     /// A feedback at the stable bound on half a second of delay rings past what a graph takes
@@ -889,7 +918,7 @@ mod tests {
             RATE,
             64,
         );
-        assert_eq!(reported(&mut node, &click(64)), Some(Tail::Unbounded));
+        assert_eq!(reported(&mut node, &click(64), &[]), Some(Tail::Unbounded));
     }
 
     /// `node` over one block of `x` under a playing transport at `bpm`.
