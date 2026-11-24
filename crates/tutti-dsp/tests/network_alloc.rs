@@ -106,8 +106,8 @@ fn the_fdn_retargets_and_renders_without_allocating() {
     }
 }
 
-/// The FDN's `design_into` runs on a 140 KiB stack: a network is 109 KiB (`MAX_STAGES` of the
-/// largest stage), with 31 KiB spare for the frames, and building one on an
+/// The FDN's `design_into` runs on a 140 KiB stack: a network is 113 KiB (`MAX_STAGES` of the
+/// largest stage), with 27 KiB spare for the frames, and building one on an
 /// audio thread's callback must not copy it. An unoptimised build copies a network about
 /// three times, so building one needs well over that.
 #[test]

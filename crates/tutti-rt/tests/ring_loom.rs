@@ -27,8 +27,8 @@
 //! - **a reader dropped mid-push**: every value is freed exactly once (queued
 //!   at the drop, or handed back by a refused push), and a push after
 //!   `Disconnected` never succeeds (the `reader_gone` ordering);
-//! - **the loss count under a race**: the reader's `take_lost` calls sum to
-//!   the writer's cumulative `lost`, none counting a loss not yet made;
+//! - **the loss count under a race**: the reader's cumulative `lost` never
+//!   goes down, counts no loss not yet made, and ends at the writer's;
 //! - **disconnection loses nothing**: a reader that saw "writer gone" before
 //!   its pop has seen every value pushed;
 //! - **no torn slot, no overlapping access**: the slots are loom
@@ -216,13 +216,13 @@ fn the_loss_count_survives_a_race() {
             }
             writer.lost()
         });
-        let mut taken = reader.take_lost();
+        let first = reader.lost();
         let _ = reader.pop();
-        taken += reader.take_lost();
+        let second = reader.lost();
         let total = producer.join().unwrap();
-        assert!(taken <= total, "a take counted a loss not yet made");
-        taken += reader.take_lost();
-        assert_eq!(taken, total, "take_lost dropped or repeated a loss");
+        assert!(first <= second, "the cumulative count went down");
+        assert!(second <= total, "a read counted a loss not yet made");
+        assert_eq!(reader.lost(), total, "a loss was dropped or repeated");
         assert_eq!(view.get(), total);
         assert_eq!(reader.lost(), total);
     });

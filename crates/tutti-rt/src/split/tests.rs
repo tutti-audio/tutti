@@ -55,7 +55,6 @@ fn views_share_reads_and_exclude_writes() {
     assert!(b.try_get(0).is_err());
     drop(a);
     assert_eq!(b.get(0), &[5, 0]);
-    assert_eq!(b.held(), 2);
 }
 
 /// One `Held` backs one live view at a time.

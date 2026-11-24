@@ -7,7 +7,7 @@ use tutti_graph::{Editor, Prepare};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
-fn manual_spec() -> OutputSpec {
+pub(crate) fn manual_spec() -> OutputSpec {
     OutputSpec::new(
         SampleRate::SR_48K,
         tutti_buffers::ChannelLayout::STEREO,
@@ -25,7 +25,7 @@ fn empty_state(rate: SampleRate) -> Arc<AudioCallbackState> {
 
 /// An engine on a device of the default host recorded as `opened`: the host is
 /// opened (it lists nothing) and no device is resolved.
-fn on_device(opened: Opened) -> AudioEngine {
+pub(crate) fn on_device(opened: Opened) -> AudioEngine {
     let target = (
         crate::DeviceHost::open(crate::AudioHost::Default).expect("the default host opens"),
         OutputConfig::from(DeviceSelector::Default),
@@ -37,7 +37,7 @@ fn on_device(opened: Opened) -> AudioEngine {
     }
 }
 
-fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
+pub(crate) fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
     crate::TuttiDriver::new(engine, empty_state(SampleRate::SR_48K))
 }
 
@@ -134,39 +134,4 @@ fn selecting_another_device_keeps_the_chosen_sample_format() {
         config,
         OutputConfig::from(DeviceSelector::named("B")).sample_format(SampleFormat::I16)
     );
-}
-
-/// **Selecting a device on a spec-built engine is refused at the call.** The
-/// engine has no device to select, so the call names the same refusal `start`
-/// would, on the engine and on the driver wrapping one.
-#[test]
-fn selecting_a_device_on_a_spec_built_engine_is_refused() {
-    let mut engine = AudioEngine::from_spec(manual_spec());
-    assert!(matches!(
-        engine.select_device(DeviceSelector::Default),
-        Err(DeviceError::InvalidDevice(_))
-    ));
-    let mut driver = driver_over(engine);
-    assert!(matches!(
-        driver.select_device(DeviceSelector::Default),
-        Err(DeviceError::InvalidDevice(_))
-    ));
-}
-
-/// **A switch onto a supplied driver keeps the device on record**: the driver
-/// can still select a device for the restart that opens it again, and names none
-/// meanwhile.
-#[test]
-fn a_switch_to_a_supplied_driver_keeps_the_device_to_restart_onto() {
-    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
-    let (manual, _stream) = ManualStreamDriver::new();
-    driver
-        .switch(manual_spec(), manual, |_, _| {
-            Ok::<(), crate::DeviceError>(())
-        })
-        .unwrap();
-    assert_eq!(driver.opened_name().unwrap(), None);
-    driver
-        .select_device(DeviceSelector::Default)
-        .expect("the device is still on record");
 }
