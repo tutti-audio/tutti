@@ -10,7 +10,7 @@ use tutti_rt::Mutex;
 
 use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
 use tutti_cpal::{DeviceDirection, DeviceId, DeviceSelector, Snapshot, SnapshotSource};
-use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputSpec};
+use tutti_engine::{BackendErrorKind, ManualStreamDriver, OutputQuantum, OutputSpec};
 use tutti_graph::{Cx, ForkByClone, Io, Node, Prepare, Shape, Status};
 use tutti_nodes::testing::Osc;
 use tutti_nodes::{LimiterConfig, LimiterControls, LimiterNode};
@@ -1280,4 +1280,167 @@ fn a_restart_onto_a_device_the_map_does_not_fit_is_refused_and_keeps_the_map() {
         .restart_on(spec(4), driver, None, None)
         .expect("outputs 3 and 4 are there");
     assert_eq!(session.output_device().unwrap().channels.width().count(), 4);
+}
+
+/// A session asked for 512-frame callbacks on a device whose stream runs at
+/// `rate`: the spec says 512.
+fn spec_with_quantum(rate: f64, frames: usize) -> OutputSpec {
+    spec_at(rate).with_quantum(OutputQuantum::of(frames))
+}
+
+/// The restart requests with a callback size in `events`.
+fn quantum_requests(events: &[SessionEvent]) -> Vec<OutputQuantum> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            SessionEvent::Device(DeviceEvent::RestartWanted(r)) => r.quantum,
+            _ => None,
+        })
+        .collect()
+}
+
+/// **Callbacks that settle at another size than the one asked for move the
+/// graph and the stream to it, once.** The device was opened asking for 512
+/// frames and the backend delivers 480: the session asks for a restart onto
+/// 480 after the delivered size holds, the host runs it, the graph is
+/// prepared for 480 and the stream's spec says 480, and callbacks of 480
+/// change nothing more.
+#[test]
+fn callbacks_that_settle_at_another_size_move_the_graph_and_the_stream_to_it() {
+    let (driver, stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_with_quantum(48_000.0, 512), driver)
+        .unwrap();
+    let base = Instant::now();
+    let mut asked = Vec::new();
+    let mut ms = 0;
+    while asked.is_empty() && ms < 100 {
+        stream.render_block(Samples::new(480)).expect("open");
+        ms += 1;
+        asked.extend(quantum_requests(&poll(&mut session, base, ms)));
+    }
+    assert_eq!(
+        asked,
+        [OutputQuantum::of(480)],
+        "asked for what it settled at"
+    );
+    assert_eq!(
+        session.graph_ref().testing().prepared().quantum(),
+        Some(MaxBlock::of(Samples::new(512))),
+        "nothing moved until the host runs the restart"
+    );
+
+    // The host runs it, on a device-free driver delivering what the request
+    // names.
+    let (driver, new) = ManualStreamDriver::new();
+    session
+        .restart_on(spec_with_quantum(48_000.0, 480), driver, None, None)
+        .unwrap();
+    assert_eq!(
+        session.graph_ref().testing().prepared().quantum(),
+        Some(MaxBlock::of(Samples::new(480)))
+    );
+    assert_eq!(
+        session.device().spec().quantum,
+        Some(OutputQuantum::of(480))
+    );
+
+    let mut later = poll(&mut session, base, 200);
+    for step in 0..50 {
+        new.render_block(Samples::new(480)).expect("open");
+        later.extend(poll(&mut session, base, 201 + step));
+    }
+    assert!(
+        quantum_requests(&later).is_empty(),
+        "callbacks of the prepared size change nothing: {later:?}"
+    );
+    assert!(
+        later
+            .iter()
+            .all(|e| !matches!(e, SessionEvent::Device(DeviceEvent::CallbackSizeVaries))),
+        "{later:?}"
+    );
+}
+
+/// **Callbacks of the size the graph is prepared for never ask for a
+/// restart.**
+#[test]
+fn callbacks_of_the_prepared_size_never_ask_for_a_restart() {
+    let (driver, stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_with_quantum(48_000.0, 512), driver)
+        .unwrap();
+    let base = Instant::now();
+    let mut events = Vec::new();
+    for ms in 0..100 {
+        stream.render_block(Samples::new(512)).expect("open");
+        events.extend(poll(&mut session, base, ms));
+    }
+    assert!(events.is_empty(), "{events:?}");
+}
+
+/// **Callbacks that keep changing size are reported once and restart
+/// nothing.**
+#[test]
+fn callbacks_that_never_settle_are_reported_varying_once() {
+    let (driver, stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_with_quantum(48_000.0, 512), driver)
+        .unwrap();
+    let base = Instant::now();
+    let mut events = Vec::new();
+    for ms in 0..200u64 {
+        let frames = if ms % 2 == 0 { 400 } else { 480 };
+        stream.render_block(Samples::new(frames)).expect("open");
+        events.extend(poll(&mut session, base, ms));
+    }
+    let varying = events
+        .iter()
+        .filter(|e| matches!(e, SessionEvent::Device(DeviceEvent::CallbackSizeVaries)))
+        .count();
+    assert_eq!(varying, 1, "{events:?}");
+    assert!(quantum_requests(&events).is_empty(), "{events:?}");
+}
+
+/// **A device that keeps delivering another size after each restart is asked
+/// twice, then reported varying once, then left alone.** The host restarts
+/// onto each asked size and the device then delivers a third size: two
+/// requests in total, `CallbackSizeVaries` once, then silence.
+#[test]
+fn a_device_that_keeps_changing_size_after_restarts_is_asked_twice_then_reported() {
+    let (driver, mut stream) = ManualStreamDriver::new();
+    let mut session = Session::builder()
+        .device(tutti_cpal::DeviceSelector::Default)
+        .build_device_on(spec_with_quantum(48_000.0, 512), driver)
+        .unwrap();
+    let base = Instant::now();
+    let mut ms = 0;
+    let mut asked = Vec::new();
+    let mut varying = 0;
+    // The device delivers 480, then 441 once restarted onto 480, then 400
+    // once restarted onto 441, for as long as it is polled.
+    for (delivered, asked_size) in [(480, Some(480)), (441, Some(441)), (400, None)] {
+        for _ in 0..40 {
+            stream.render_block(Samples::new(delivered)).expect("open");
+            ms += 1;
+            let events = poll(&mut session, base, ms);
+            asked.extend(quantum_requests(&events));
+            varying += events
+                .iter()
+                .filter(|e| matches!(e, SessionEvent::Device(DeviceEvent::CallbackSizeVaries)))
+                .count();
+        }
+        if let Some(size) = asked_size {
+            let (driver, next) = ManualStreamDriver::new();
+            session
+                .restart_on(spec_with_quantum(48_000.0, size), driver, None, None)
+                .unwrap();
+            stream = next;
+        }
+    }
+    assert_eq!(asked, [OutputQuantum::of(480), OutputQuantum::of(441)]);
+    assert_eq!(varying, 1, "reported once, and no third request");
 }

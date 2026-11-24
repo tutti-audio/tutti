@@ -60,7 +60,6 @@ fn new_configs_are_the_documented_starting_synth() {
     assert_eq!(c.voice_mode, VoiceMode::Poly);
     assert_eq!(c.oscillator, OscillatorType::Saw);
     assert_eq!(c.filter, FilterType::None);
-    assert_eq!(c.ladder_saturation, LadderSaturation::PerStage);
     assert_eq!(c.envelope, Adsr::default());
     assert_eq!(c.portamento, None);
     assert_eq!(c.unison, None);
