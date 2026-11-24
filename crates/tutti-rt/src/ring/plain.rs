@@ -531,7 +531,6 @@ impl<T: Send> RingReader<T> {
     pub fn lost(&self) -> u64 {
         self.view.get()
     }
-
 }
 
 /// The values a [`RingReader::drain`] takes.
