@@ -371,6 +371,9 @@ fn enclosing_open(code: &str, at: usize) -> Option<usize> {
 /// skipping balanced `()` and `[]` groups.
 fn item_end(code: &str, from: usize) -> usize {
     let b = code.as_bytes();
+    if !starts_item(code, from) {
+        return member_end(code, from);
+    }
     let mut i = from;
     while i < b.len() {
         match b[i] {
@@ -378,6 +381,89 @@ fn item_end(code: &str, from: usize) -> usize {
             b'[' => i = matching(code, i, b'[', b']').unwrap_or(b.len()),
             b'{' => return matching(code, i, b'{', b'}').map_or(b.len(), |c| c + 1),
             b';' => return i + 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
+}
+
+/// Whether what follows an attribute (at `from`) opens an item or a statement, and not a
+/// field, a variant or a match arm: an item's or a block statement's keyword, an opening
+/// bracket, or a macro invocation (a path followed by `!`), none of which a member starts
+/// with.
+fn starts_item(code: &str, from: usize) -> bool {
+    let mut rest = strip_attrs(code[from..].trim_start());
+    if let Some(r) = rest.strip_prefix("pub") {
+        rest = r.trim_start();
+        if rest.starts_with('(') {
+            rest = rest.split_once(')').map_or("", |x| x.1).trim_start();
+        }
+    }
+    let word: String = rest
+        .chars()
+        .take_while(|&c| c.is_alphanumeric() || c == '_')
+        .collect();
+    matches!(
+        word.as_str(),
+        "fn" | "struct"
+            | "enum"
+            | "union"
+            | "trait"
+            | "impl"
+            | "mod"
+            | "use"
+            | "const"
+            | "static"
+            | "type"
+            | "extern"
+            | "unsafe"
+            | "async"
+            | "macro_rules"
+            | "let"
+            | "default"
+            | "auto"
+            | "if"
+            | "match"
+            | "for"
+            | "while"
+            | "loop"
+    ) || rest.starts_with(['{', '(', '[', '#', '<', '&', '*'])
+        || invokes_macro(rest)
+}
+
+/// Whether `rest` starts with a path followed by `!` (and not `!=`): `name! { .. }`,
+/// `a::b!(..)`.
+fn invokes_macro(rest: &str) -> bool {
+    let path = rest
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+        .unwrap_or(rest.len());
+    let after = rest[path..].trim_start();
+    path > 0 && after.starts_with('!') && !after.starts_with("!=")
+}
+
+/// The end of a field, a variant or a match arm: the `,` outside `()`, `[]`, `{}` and `<>`
+/// that ends it, the `;` of a statement, or the unmatched `}` that closes its block.
+///
+/// It can read too far, never past the member's enclosing block: a `<` that is a comparison
+/// in an arm's expression leaves the angle count up, so that arm ends at the next `;` or at
+/// the block's `}` and not at its comma. A bracket with no match (source that does not
+/// parse) ends the member at the end of the text.
+fn member_end(code: &str, from: usize) -> usize {
+    let b = code.as_bytes();
+    let (mut i, mut angle) = (from, 0usize);
+    while i < b.len() {
+        match b[i] {
+            b'(' => i = matching(code, i, b'(', b')').unwrap_or(b.len()),
+            b'[' => i = matching(code, i, b'[', b']').unwrap_or(b.len()),
+            b'{' => i = matching(code, i, b'{', b'}').unwrap_or(b.len()),
+            b'<' => angle += 1,
+            b'>' if i > 0 && b[i - 1] != b'-' && b[i - 1] != b'=' => {
+                angle = angle.saturating_sub(1);
+            }
+            b',' if angle == 0 => return i + 1,
+            b';' => return i + 1,
+            b'}' => return i,
             _ => {}
         }
         i += 1;
@@ -487,5 +573,40 @@ mod tests {
         let nested = "mod m { #![cfg(test)] fn t() {} }\nfn live() {}\n";
         let r = test_ranges(nested);
         assert_eq!(&nested[r[0].0..r[0].1], "{ #![cfg(test)] fn t() {} }");
+    }
+
+    #[test]
+    fn a_cfg_test_field_or_variant_ends_at_its_comma_not_at_the_next_block() {
+        let src = "struct S {\n    a: u8,\n    #[cfg(test)]\n    hook: Option<A<B, C>>,\n}\n\nimpl S {\n    fn live() {}\n}\n";
+        let r = test_ranges(src);
+        assert_eq!(r.len(), 1);
+        assert!(src[r[0].0..r[0].1].ends_with("Option<A<B, C>>,"));
+        let last = "enum E { A, #[cfg(test)] B(u8) }\nfn live() {}\n";
+        let r = test_ranges(last);
+        assert!(last[r[0].0..r[0].1].ends_with("B(u8) "));
+    }
+
+    #[test]
+    fn a_cfg_test_macro_or_block_statement_ends_at_its_own_brace() {
+        let src = "#[cfg(test)]\nthread_local! { static X: u8 = 0; }\n\nfn live(a: u8, b: u8) {}\n";
+        let r = test_ranges(src);
+        assert_eq!(r.len(), 1);
+        assert!(src[r[0].0..r[0].1].ends_with("static X: u8 = 0; }"));
+        let path = "#[cfg(test)]\nstd::thread_local! { static X: u8 = 0; }\nfn live() {}\n";
+        let r = test_ranges(path);
+        assert!(path[r[0].0..r[0].1].ends_with("= 0; }"));
+        for word in [
+            "if hook",
+            "match hook",
+            "for _ in hook",
+            "while hook",
+            "loop",
+        ] {
+            let src =
+                format!("fn f() {{\n    #[cfg(test)]\n    {word} {{ g() }}\n    live(a, b);\n}}\n");
+            let r = test_ranges(&src);
+            assert_eq!(r.len(), 1, "{word}");
+            assert!(src[r[0].0..r[0].1].ends_with("{ g() }"), "{word}");
+        }
     }
 }
