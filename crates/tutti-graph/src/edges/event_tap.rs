@@ -8,7 +8,7 @@
 //! is handed them, after the delays that align them. The compiler emits one
 //! [`Op::EventTap`](crate::Op::EventTap) per tap whose port exists, and, for
 //! an aligned tap, the same delay an event edge into an output-time sink would
-//! get ([`DelayKey::EventTap`](crate::DelayKey::EventTap)). A tap that is not
+//! get ([`EventDelayKey::EventTap`](crate::EventDelayKey::EventTap)). A tap that is not
 //! in the topology compiles to nothing. Opening one refuses a port that does
 //! not exist then ([`MissingSource::EventPort`](crate::MissingSource)); a port
 //! that goes missing later (a node replaced by one with fewer event outputs, a

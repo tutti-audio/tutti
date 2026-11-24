@@ -163,7 +163,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
     ed.collect();
     let plan = exec.plan().expect("applied");
     assert!(
-        plan.delays().len() >= 2,
+        plan.audio_delays().len() + plan.event_delays().len() >= 2,
         "the gate must run through PDC rings"
     );
 
@@ -699,7 +699,7 @@ fn declared_event_capacities_are_allocation_free_on(workers: usize) {
     ed.collect();
     let plan = exec.plan().expect("applied");
     assert!(
-        plan.delays().len() >= 2,
+        plan.audio_delays().len() + plan.event_delays().len() >= 2,
         "both sprays reach the tally through a PDC delay"
     );
 
@@ -966,9 +966,9 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
     assert_eq!(ed.in_flight(), 0, "a range move sends nothing");
     let plan = exec.plan().expect("a plan");
     assert!(
-        plan.delays()
+        plan.event_delays()
             .iter()
-            .any(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. })),
+            .any(|d| matches!(d.key, tutti_graph::EventDelayKey::ParamEvent { .. })),
         "a param source was delayed by PDC inside the gate"
     );
 }
@@ -1067,9 +1067,9 @@ fn param_events_are_allocation_free_on(workers: usize) {
     }
     let plan = exec.plan().expect("a plan");
     let event_delays = plan
-        .delays()
+        .event_delays()
         .iter()
-        .filter(|d| matches!(d.key, tutti_graph::DelayKey::Event { .. }))
+        .filter(|d| matches!(d.key, tutti_graph::EventDelayKey::Edge { .. }))
         .count();
     assert_eq!(event_delays, 2, "both fan-in sources are delayed by PDC");
     assert!(
@@ -2563,9 +2563,13 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         )
         .expect("the port exists");
     ed.commit().expect("commits");
-    let delays = exec.plan().expect("applied").delays().len();
+    let delay_count = |exec: &tutti_graph::Executor| {
+        let plan = exec.plan().expect("applied");
+        plan.audio_delays().len() + plan.event_delays().len()
+    };
+    let delays = delay_count(&exec);
     apply(&mut exec);
-    assert!(exec.plan().expect("applied").delays().len() > delays);
+    assert!(delay_count(&exec) > delays);
     blocks(&mut exec, 16, 64);
     ed.collect();
 
