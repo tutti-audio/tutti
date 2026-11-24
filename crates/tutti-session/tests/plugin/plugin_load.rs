@@ -14,12 +14,13 @@ use tutti_plugin::catalog::ResolvedHosting;
 use tutti_plugin_db::Catalog;
 use tutti_plugin_types::{PluginId, PluginRef};
 use tutti_session::{
-    AddPluginError, LoadError, MainOutput, Peer, Presence, Session, SwapPluginError,
+    AddPluginError, LoadError, MainOutput, Peer, PluginCause, Presence, Session, SwapPluginError,
 };
 use tutti_units::Samples;
 
 use crate::loading::{Block as _, Hosted as _};
 use crate::support::clap_probe;
+use std::future::IntoFuture as _;
 
 const BLOCK: usize = 512;
 

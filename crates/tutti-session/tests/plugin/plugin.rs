@@ -22,6 +22,8 @@ use tutti_session::InputPort;
 use tutti_session::MainOutput;
 use tutti_session::{AnyPlugin, Key, PluginChange, PluginEvent};
 
+use std::sync::atomic::Ordering;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tutti_buffers::MaxBlock;
