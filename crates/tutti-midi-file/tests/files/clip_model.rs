@@ -1604,3 +1604,42 @@ fn a_clip_files_timeline_is_its_packets_as_stored_without_the_header() {
     let file = ClipFile::new(DIVISION, header, sequence).unwrap();
     assert_eq!(file.timeline().packets, [(Beat::new(0.5), note)]);
 }
+
+/// A header message is used when the tempo map or the meter is built from it: a
+/// Set Tempo with a tempo, and a Set Time Signature (held, or refused and listed
+/// by the clip). Any other message, and a Set Tempo of 0 (M2-104 section 7.5.3:
+/// no tempo), is unused.
+#[test]
+fn a_header_messages_unused_by_the_timeline_are_all_but_the_tempo_and_the_meter() {
+    let zero_tempo: Ump = Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(0))).into();
+    let metronome: Ump = Message::Flex(
+        MidiGroup::FIRST,
+        Flex::SetMetronome(tutti_ump::Metronome {
+            clocks_per_click: 24,
+            accents: tutti_ump::BarAccents::Undivided(std::num::NonZeroU8::new(3).unwrap()),
+            subdivision_1: 0,
+            subdivision_2: 0,
+        }),
+    )
+    .into();
+    let messages = [
+        set_tempo(100.0),
+        zero_tempo,
+        time_signature(),
+        // A denominator field of 0 is refused by the meter.
+        signature(3, 0),
+        program_change(),
+        metronome,
+    ];
+    let header = messages
+        .into_iter()
+        .fold(ClipHeader::new(), |h, m| h.push(Tick(0), m).unwrap());
+    assert_eq!(
+        header.unused_messages().collect::<Vec<_>>(),
+        [
+            (Tick(0), zero_tempo),
+            (Tick(0), program_change()),
+            (Tick(0), metronome)
+        ]
+    );
+}

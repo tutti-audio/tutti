@@ -14,7 +14,7 @@ use tutti_ump::{
     Address, Flex, FlexAddress, FlexTextKind, Form, Message, MidiGroup, NoteNumber, Stream, System,
     TicksPerQuarterNote, U7, Ump, Unknown, Voice1,
 };
-use tutti_units::{Beat, Seconds};
+use tutti_units::{Beat, Bpm, Seconds};
 
 use crate::file::{Stated, meter_of, pair_notes, tempo_map_of};
 use crate::midi_file::write_bytes;
@@ -121,6 +121,19 @@ impl ClipHeader {
     #[must_use]
     pub fn messages(&self) -> &[(Tick, Ump)] {
         self.run.events()
+    }
+
+    /// The messages nothing of the file's timeline is built from, in order: all
+    /// but a Set Tempo with a tempo, which is a step of
+    /// [`ClipFile::tempo_map`], and a Set Time Signature, which is a change of
+    /// [`ClipFile::meter_map`] or is listed in
+    /// [`ClipFile::refused_time_signatures`]. A Set Tempo of 0 names no tempo
+    /// and is one of them, as a Program Change and a Set Metronome are.
+    pub fn unused_messages(&self) -> impl Iterator<Item = (Tick, Ump)> + '_ {
+        self.messages()
+            .iter()
+            .copied()
+            .filter(|&(_, ump)| matches!(Statement::of(ump), Statement::Unused))
     }
 
     /// Where the header ends, on its own clock: the tick of Start of Clip,
@@ -507,10 +520,8 @@ impl ClipFile {
             .map(move |&(tick, ump)| (tick.beats(tpq), ump));
         header
             .chain(sequence)
-            .filter_map(|(beat, ump)| match ump.decode() {
-                Ok(Message::Flex(_, Flex::SetTimeSignature(field))) => {
-                    Some((beat, Stated::flex(&field)))
-                }
+            .filter_map(|(beat, ump)| match Statement::of(ump) {
+                Statement::Meter(stated) => Some((beat, stated)),
                 _ => None,
             })
     }
@@ -563,6 +574,33 @@ pub struct ClipTimeline {
     pub unknown: Vec<(Beat, Unknown)>,
 }
 
+/// What a Clip File's message says of its timeline: the one place that decides
+/// which messages the tempo map and the meter are built from.
+pub(crate) enum Statement {
+    /// A Set Tempo with a tempo: a step of the tempo map. A Set Tempo of 0
+    /// (M2-104 section 7.5.3) names no tempo and makes no step.
+    Tempo(Bpm),
+    /// A Set Time Signature: a change of the meter, or a time signature it
+    /// refuses.
+    Meter(Stated),
+    /// A message the tempo map and the meter do not read.
+    Unused,
+}
+
+impl Statement {
+    pub(crate) fn of(ump: Ump) -> Self {
+        match ump.decode() {
+            Ok(Message::Flex(_, Flex::SetTempo(field))) => {
+                field.bpm().map_or(Self::Unused, Self::Tempo)
+            }
+            Ok(Message::Flex(_, Flex::SetTimeSignature(field))) => {
+                Self::Meter(Stated::flex(&field))
+            }
+            _ => Self::Unused,
+        }
+    }
+}
+
 /// The packets of `part` the format does not hold: a Utility message, the
 /// file's own structure, a MIDI-CI Property Exchange message.
 fn check_part(part: ClipPart, messages: &[(Tick, Ump)]) -> Result<(), ClipBuildError> {
@@ -586,8 +624,8 @@ fn tempo_map(
     header: &ClipHeader,
     sequence: &ClipSequence,
 ) -> Result<Arc<TempoMap>, tutti_tempo::TempoError> {
-    let set_tempo = |ump: &Ump| match ump.decode() {
-        Ok(Message::Flex(_, Flex::SetTempo(field))) => field.bpm(),
+    let set_tempo = |ump: &Ump| match Statement::of(*ump) {
+        Statement::Tempo(bpm) => Some(bpm),
         _ => None,
     };
     // The header runs before the sequence, so its tempo is the one at tick 0

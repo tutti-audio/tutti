@@ -13,8 +13,7 @@ use tutti_midi_file::{
 };
 use tutti_music::TimeSignature;
 use tutti_session::{
-    DetachedSession, DroppedEvent, LoadError, LoadedMidi, NoCommonTimelineError, Session,
-    TrackError,
+    DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError, Unplayed,
 };
 use tutti_tempo::TempoMap;
 use tutti_ump::{
@@ -214,7 +213,7 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     // The Program Change is the one header message nothing uses.
     assert_eq!(
         loaded.report().dropped,
-        [DroppedEvent::Header {
+        [Unplayed::Header {
             tick: Tick(0),
             packet: program_change
         }]
@@ -354,7 +353,7 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
     let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
-    let DroppedEvent::Smf {
+    let Unplayed::Smf {
         track, beat, why, ..
     } = &dropped[0]
     else {
@@ -398,7 +397,7 @@ fn smpte_smf(division: u16, events: &[&[u8]]) -> Vec<u8> {
 fn escape_beat(loaded: &LoadedMidi) -> Beat {
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
-    let DroppedEvent::Smf { beat, .. } = &dropped[0] else {
+    let Unplayed::Smf { beat, .. } = &dropped[0] else {
         panic!("a Standard MIDI File's event: {:?}", dropped[0]);
     };
     *beat

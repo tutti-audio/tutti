@@ -1010,10 +1010,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
-        FollowMachineControl, FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi,
-        LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink,
-        NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause,
+        AnyNode, ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl,
+        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
+        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
+        NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause, Unplayed,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{

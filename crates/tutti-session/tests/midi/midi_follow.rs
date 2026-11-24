@@ -12,8 +12,7 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_session::{
-    DroppedEvent, FollowKind, FollowTempo, MidiError, MidiEvent, Session, SessionEvent,
-    UnfollowCause,
+    FollowKind, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, UnfollowCause, Unplayed,
 };
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
@@ -634,7 +633,7 @@ fn an_smpte_load_while_following_places_notes_by_the_base() {
     let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x09".to_vec();
     bytes.extend([0x87, 0x68, 0xF7, 1, 0x55, 0x00, 0xFF, 0x2F, 0x00]);
     let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
-    let DroppedEvent::Smf { beat, .. } = &loaded.report().dropped[0] else {
+    let Unplayed::Smf { beat, .. } = &loaded.report().dropped[0] else {
         panic!("a Standard MIDI File's event");
     };
     assert_eq!(*beat, Beat::new(2.0));
