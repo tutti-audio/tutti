@@ -1095,14 +1095,6 @@ impl OutLink {
         }
     }
 
-    /// The stream an away link carries on.
-    const fn parked(&self) -> Option<JrStream> {
-        match self {
-            Self::Open(_) => None,
-            Self::Away { stream, .. } => Some(*stream),
-        }
-    }
-
     /// The open device's output with its stamp stream.
     fn open_mut(&mut self) -> Option<&mut UmpOut<OpenOutput>> {
         match self {
@@ -1601,7 +1593,7 @@ impl Ports {
             edits.graph = true;
         }
         for port in &mut self.outputs {
-            let Some(stream) = port.link.parked() else {
+            let OutLink::Away { stream, .. } = port.link else {
                 continue;
             };
             if !arrived.direction.is_output() || !is_arrived(io, &port.saved) {

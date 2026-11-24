@@ -3,7 +3,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::{FakeBackend, persistent_endpoint};
-use tutti_units::Frame;
+use tutti_units::{Frame, SampleRate};
 
 /// What `wait` resolved to on its first poll: a fake backend has nothing to start.
 fn ready<T, E: std::fmt::Debug>(wait: impl Future<Output = Result<T, E>>) -> T {
@@ -142,6 +142,54 @@ fn a_never_opened_output_stamps_from_zero() {
         .filter(|word| word >> 20 == 0x002)
         .collect();
     assert_eq!(stamps, vec![0x0020_0000, 0x0020_0271]);
+}
+
+/// **A never-opened output re-rated before its first open stamps as a fresh
+/// stream at the new rate**: JR Timestamps count ticks of 1/31 250 s
+/// (M2-104-UM §7.2.3.1), so at 31 250 Hz a gap of 1 000 frames is 1 000 ticks
+/// (1 000 / 31 250 s x 31 250 = 1 000 = 0x3E8); at the opened rate of 48 000 Hz
+/// the same gap would be 651 ticks.
+#[test]
+fn a_never_opened_output_re_rated_before_its_open_stamps_at_the_new_rate() {
+    let (backend, fake) =
+        FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], usize::MAX);
+    let mut s = Session::builder()
+        .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+        .sample_rate(SampleRate::of(48_000.0))
+        .build()
+        .expect("builds");
+    let _ = s.update();
+    let synth = s.midi().devices().remove(0);
+    fake.unplug(EndpointId::from_raw(10));
+    let _ = s.update();
+    let opened = ready(s.open_midi_output(synth).expect("begins"));
+    let _out = s.apply(opened).expect("opens with no device");
+    let _ = s.update();
+    s.graph().set_sample_rate(SampleRate::of(31_250.0)).unwrap();
+    let _ = s.update();
+    render(&mut s, 8);
+    let _ = s.update();
+    render(&mut s, 4);
+    let _ = s.update();
+    fake.plug(persistent_endpoint(10, "Synth"), PortDirection::Output);
+    let _ = s.update();
+    assert_eq!(s.midi.state.ports.stream_origin(), Frame::ZERO);
+    let out = s.midi.state.ports.open_output();
+    out.destination_mut().set_config(tutti_ump::StreamConfig {
+        protocol: tutti_ump::Protocol::Midi2,
+        rx_jr: true,
+        tx_jr: false,
+    });
+    let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0x8000);
+    let _ = fake.take_sent(EndpointId::from_raw(10));
+    out.send_frames(&[(Frame::new(0), note), (Frame::new(1_000), note)], None);
+    let stamps: Vec<u32> = fake
+        .take_sent(EndpointId::from_raw(10))
+        .iter()
+        .map(|ump| ump.0[0])
+        .filter(|word| word >> 20 == 0x002)
+        .collect();
+    assert_eq!(stamps, vec![0x0020_0000, 0x0020_03E8]);
 }
 
 /// **A replugged device's losses count from zero, and the port's are the sum**:
