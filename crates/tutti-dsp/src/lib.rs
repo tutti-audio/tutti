@@ -376,7 +376,7 @@ pub use resample::{
     VariableResampler, WindowedSinc, needs_resampling, resampled_frames,
 };
 pub use reverb::fdn::bank::{FdnBank, FdnRamps};
-pub use reverb::fdn::design::{FdnControls, FdnLayout, FreezeMode, MAX_PRE_DELAY, MIN_DECAY};
+pub use reverb::fdn::design::{FdnControls, FdnLayout, MAX_PRE_DELAY, MIN_DECAY};
 pub use reverb::freeverb::bank::{FreeverbBank, FreeverbRamps};
 pub use reverb::freeverb::design::FreeverbControls;
 pub(crate) use reverb::network::loop_gain;

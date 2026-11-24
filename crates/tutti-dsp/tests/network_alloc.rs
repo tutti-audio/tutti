@@ -62,11 +62,11 @@ fn freeverb_retargets_and_renders_without_allocating() {
 #[test]
 fn the_fdn_retargets_and_renders_without_allocating() {
     use tutti_buffers::{InputOutput, Planes, PlanesMut};
-    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay};
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay};
     use tutti_units::{Bipolar, Db, Hz, StereoWidth};
 
     let rate = SampleRate::SR_48K;
-    let layout = FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap();
+    let layout = FdnLayout::new(8, MaxDecay::DEFAULT).unwrap();
     let mut bank = FdnBank::<f32>::new(&layout, rate);
     let mut ramps = bank.ramps();
     let input = vec![0.25f32; 64];

@@ -6,7 +6,7 @@
 //! that time), mixed by an orthogonal reflection `A = I - 2 v v^T`, with an
 //! input pre-delay, a slow modulation of the line lengths, a stereo output
 //! (even lines left, odd right) with a width and a wet gain, and, if the design
-//! is [`Freezable`](FreezeMode::Freezable), a freeze: every gain exactly one and
+//! is not a [shimmer](FdnLayout::shimmering), a freeze: every gain exactly one and
 //! the input gated off, so the network is lossless and its tail never ends.
 //!
 //! **Diffusion** is the vector `v`: from one axis (no line feeds another,
@@ -98,7 +98,8 @@ pub struct FdnControls {
     pub width: StereoWidth,
     /// The wet gain.
     pub wet: Db,
-    /// Holds the tail; ignored by a layout that is [`FreezeMode::Decaying`].
+    /// Holds the tail; ignored by a [shimmering](FdnLayout::shimmering) layout, whose tail always
+    /// decays.
     pub freeze: bool,
     /// How far the shimmer shifts the feedback, read only by a
     /// [shimmering](FdnLayout::shimmering) layout.
@@ -133,21 +134,9 @@ impl Default for FdnControls {
     }
 }
 
-/// Whether a feedback delay network can hold its tail: the [`FdnControls::freeze`] control is
-/// live only on a [`Freezable`](Self::Freezable) layout.
-///
-/// A freezable layout has an unbounded tail reach, so a node of it never has a finite tail to
-/// declare to an export (which spends the whole cap): freeze is opt-in for that reason.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum FreezeMode {
-    /// The tail always decays: the freeze control is ignored and the tail is finite.
-    Decaying,
-    /// The freeze control holds the tail: every gain is exactly one and the input is gated off.
-    Freezable,
-}
-
-/// What a feedback delay network is built to: its lines, its longest decay and its
-/// [`FreezeMode`]. Mono in, stereo out.
+/// What a feedback delay network is built to: its lines and its longest decay.
+/// Mono in, stereo out. Every layout but a [shimmer](Self::shimmering) can freeze (see
+/// [`FdnControls::freeze`]), so its tail is unbounded over every control.
 ///
 /// A control outside its range is clamped and a non-finite one takes the
 /// [`FdnControls::DEFAULT`] value, so every control gives a stable network.
@@ -155,7 +144,6 @@ pub enum FreezeMode {
 pub struct FdnLayout {
     lines: usize,
     max_decay: Seconds,
-    freeze_mode: FreezeMode,
     shimmer: bool,
 }
 
@@ -164,20 +152,14 @@ impl FdnLayout {
     const LINES: usize = 8;
 
     /// A design of `lines` lines (2 to 16, even: half feed each ear), RT60s up
-    /// to `max_decay`, which holds its tail on a freeze if `freeze_mode` is
-    /// [`Freezable`](FreezeMode::Freezable). `None`
-    /// when `lines` is out of range (`max_decay` is range-checked by its type).
-    ///
-    /// **A design that can freeze has an unbounded tail reach**, so a node
-    /// of it never has a finite tail to declare to an export (which spends the
-    /// whole cap): freeze is opt-in for that reason.
+    /// to `max_decay`, which holds its tail on a freeze. `None` when `lines` is out of range
+    /// (`max_decay` is range-checked by its type).
     #[must_use]
-    pub fn new(lines: usize, max_decay: MaxDecay, freeze_mode: FreezeMode) -> Option<Self> {
+    pub fn new(lines: usize, max_decay: MaxDecay) -> Option<Self> {
         let ok = (2..=LENGTHS.len()).contains(&lines) && lines.is_multiple_of(2);
         ok.then_some(Self {
             lines,
             max_decay: max_decay.get(),
-            freeze_mode,
             shimmer: false,
         })
     }
@@ -193,7 +175,7 @@ impl FdnLayout {
     /// not a processing latency.
     #[must_use]
     pub fn shimmering(lines: usize, max_decay: MaxDecay) -> Option<Self> {
-        Self::new(lines, max_decay, FreezeMode::Decaying).map(|l| Self { shimmer: true, ..l })
+        Self::new(lines, max_decay).map(|l| Self { shimmer: true, ..l })
     }
 
     /// Whether the feedback is shifted ([`shimmering`](Self::shimmering)).
@@ -206,12 +188,6 @@ impl FdnLayout {
     #[must_use]
     pub fn lines(&self) -> usize {
         self.lines
-    }
-
-    /// Whether the freeze control does anything.
-    #[must_use]
-    pub fn freeze_mode(&self) -> FreezeMode {
-        self.freeze_mode
     }
 }
 
@@ -232,12 +208,11 @@ impl FdnLayout {
 }
 
 impl Default for FdnLayout {
-    /// Eight lines, RT60s up to 8 s, [`FreezeMode::Decaying`].
+    /// Eight lines, RT60s up to 8 s.
     fn default() -> Self {
         Self {
             lines: Self::LINES,
             max_decay: MaxDecay::DEFAULT.get(),
-            freeze_mode: FreezeMode::Decaying,
             shimmer: false,
         }
     }
@@ -250,7 +225,7 @@ impl FdnLayout {
     /// allocation.
     pub fn design_into(&self, c: &FdnControls, rate: SampleRate, out: &mut Network) {
         let d = FdnControls::DEFAULT;
-        let freeze = self.freeze_mode == FreezeMode::Freezable && c.freeze;
+        let freeze = !self.shimmer && c.freeze;
         let rt60 = [
             c.decay[1], // low
             c.decay[0], // mid
@@ -387,8 +362,8 @@ pub(crate) fn set_loop_delay(network: &mut Network, delay: Samples) {
 
 impl FdnLayout {
     /// The worst case over every control: size 1, the longest decay in every band, the
-    /// longest pre-delay, the deepest modulation. The tail is unbounded if the layout can
-    /// freeze, and the network's own at the longest decay if not. Control side.
+    /// longest pre-delay, the deepest modulation. The tail is unbounded unless the layout is a
+    /// shimmer, which cannot freeze: the network's own at the longest decay. Control side.
     pub(crate) fn capacity(&self, rate: SampleRate, loop_delay: Samples) -> NetworkCapacity {
         let worst = FdnControls {
             decay: [self.max_decay; 3],
@@ -406,7 +381,7 @@ impl FdnLayout {
         }
         let mut b = NetworkCapacity::need(&network, TAIL_FLOOR);
         b.tail = match b.tail {
-            _ if self.freeze_mode == FreezeMode::Freezable => DecayTime::Unbounded,
+            _ if !self.shimmer => DecayTime::Unbounded,
             DecayTime::Finite(t) => {
                 DecayTime::Finite(Seconds::new(t.get() * self.rounding_margin(rate)))
             }

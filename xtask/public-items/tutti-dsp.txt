@@ -217,7 +217,6 @@ enum oversample::OversamplingFactor
 enum pan::PanLaw
 enum ramp::Steps
 enum resample::ResampleError
-enum reverb::fdn::design::FreezeMode
 enum reverb::network::Absorption
 enum reverb::network::AllPassForm
 enum reverb::network::Band
@@ -807,7 +806,6 @@ fn reverb::fdn::bank::FdnBank::tail
 fn reverb::fdn::bank::FdnBank::tail_of
 fn reverb::fdn::bank::FdnRamps::jump_to_target
 fn reverb::fdn::design::FdnLayout::design_into
-fn reverb::fdn::design::FdnLayout::freeze_mode
 fn reverb::fdn::design::FdnLayout::lines
 fn reverb::fdn::design::FdnLayout::new
 fn reverb::fdn::design::FdnLayout::shimmering
