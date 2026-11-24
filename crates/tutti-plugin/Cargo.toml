@@ -161,6 +161,13 @@ path = "tests/vst2_fork/main.rs"
 harness = false
 required-features = ["vst2"]
 
+# The in-process CLAP node forked, on the main thread as the VST2 one is.
+[[test]]
+name = "clap_fork"
+path = "tests/clap_fork/main.rs"
+harness = false
+required-features = ["clap"]
+
 # The percentile harness for what a working plugin step costs; it owns `main()`.
 [[bench]]
 name = "pressure"

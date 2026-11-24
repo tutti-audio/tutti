@@ -223,14 +223,18 @@ where
             post: self.edits.clone(),
             work: self.work.clone(),
         };
-        let (work, done) = (Box::new(work), Box::new(done));
+        let job = Job {
+            host,
+            wait,
+            work: Box::new(work),
+            done: Box::new(done),
+        };
         if let Some(main) = MainThreadMarker::new() {
-            step(main, host, wait, work, done);
+            step(main, job);
         } else if self.work.is_pumped() {
-            self.work
-                .defer(move |main| step(main, host, wait, work, done));
+            requeue(None, job);
         } else {
-            done(None);
+            (job.done)(None);
         }
     }
 
@@ -293,49 +297,80 @@ struct Host<L: InProcess> {
     work: MainWorkHandle,
 }
 
+/// A call waiting for the host's writes, as the main thread's tick holds it.
+struct Job<L: InProcess, R> {
+    host: Host<L>,
+    wait: Option<Settle>,
+    work: Box<dyn FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send>,
+    done: Box<dyn FnOnce(Option<R>) + Send>,
+}
+
 /// One poll of a job that waits for the host's writes, on the main thread. A
 /// covered wait, or none, runs `work` and hands its result to `done`. A wait
 /// still open queues the job again for the next tick. A node idle for a whole
 /// window has its writes applied out of band, then `work` runs; a node that
-/// turns out to be running (it holds the slots) is waited for again. With no
-/// collector to queue on, `work` runs at once, and the writes are not waited
-/// for.
-fn step<L: InProcess + 'static, R>(
-    main: MainThreadMarker,
-    host: Host<L>,
-    mut wait: Option<Settle>,
-    work: Box<dyn FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send>,
-    done: Box<dyn FnOnce(Option<R>) + Send>,
-) where
+/// turns out to be running (it holds the slots) is waited for again.
+///
+/// **The one case that does not settle**: with no collector to queue on (it was
+/// never pumped, or it is gone), `work` runs at once and the writes are not
+/// waited for. A call made on the main thread with no pumped collector is that
+/// case. A gone collector hands the job back
+/// ([`MainWorkHandle::queue`]) rather than running it inline, so the job cannot
+/// nest in itself.
+fn step<L: InProcess + 'static, R>(main: MainThreadMarker, mut job: Job<L, R>)
+where
     L::Processor: 'static,
     R: Send + 'static,
 {
-    let verdict = wait.as_mut().map_or(Verdict::Covered, |wait| {
-        host.post.poll(wait, Instant::now())
+    let verdict = job.wait.as_mut().map_or(Verdict::Covered, |wait| {
+        job.host.post.poll(wait, Instant::now())
     });
-    let queue = host.work.is_pumped();
-    if verdict == Verdict::Waiting && queue {
-        host.work
-            .clone()
-            .defer(move |main| step(main, host, wait, work, done));
-        return;
+    if verdict == Verdict::Waiting && job.host.work.is_pumped() {
+        return requeue(Some(main), job);
     }
-    let mut instance = host.inner.lock();
+    let mut instance = job.host.inner.lock();
     if verdict == Verdict::Idle {
         let applied = instance
             .control()
-            .is_none_or(|control| host.post.apply_idle(main, control));
-        if !applied && queue {
+            .is_none_or(|control| job.host.post.apply_idle(main, control));
+        if !applied && job.host.work.is_pumped() {
             drop(instance);
-            host.work
-                .clone()
-                .defer(move |main| step(main, host, wait, work, done));
-            return;
+            return requeue(Some(main), job);
         }
     }
-    let ran = work(main, &mut instance);
+    let ran = (job.work)(main, &mut instance);
     drop(instance);
-    done(Some(ran));
+    (job.done)(Some(ran));
+}
+
+/// Queues `job` for the next tick. A collector that is gone hands it back: on
+/// the main thread (`main`) it runs at once without waiting, and off it nothing
+/// can, so the call is unanswered.
+fn requeue<L: InProcess + 'static, R>(main: Option<MainThreadMarker>, job: Job<L, R>)
+where
+    L::Processor: 'static,
+    R: Send + 'static,
+{
+    let handle = job.host.work.clone();
+    let cell = Arc::new(Mutex::new(Some(job)));
+    let queued = Arc::clone(&cell);
+    let sent = handle.queue(move |main| {
+        if let Some(job) = queued.lock().take() {
+            step(main, job);
+        }
+    });
+    if sent.is_err()
+        && let Some(mut job) = cell.lock().take()
+    {
+        match main {
+            Some(main) => {
+                job.wait = None;
+                step(main, job);
+            }
+            // Off the main thread nothing can run it.
+            None => (job.done)(None),
+        }
+    }
 }
 
 /// Tells the plugin's edit controller of the host's writes on the main thread's
@@ -349,7 +384,9 @@ pub(super) fn queue_inform(
     tell: Arc<dyn Fn(MainThreadMarker, &[(ParamId, Normalized)]) -> bool + Send + Sync>,
 ) {
     let again = work.clone();
-    work.defer(move |main| {
+    let (released, job_post) = (post.clone(), post);
+    let queued = work.queue(move |main| {
+        let post = job_post;
         let told = post.take_inform();
         if told.is_empty() {
             return;
@@ -362,6 +399,11 @@ pub(super) fn queue_inform(
             queue_inform(again, post, tell);
         }
     });
+    // A collector that is gone runs nothing: the claim on the job is given back,
+    // and the writes wait for a read, a save or the next write's job.
+    if queued.is_err() {
+        released.release_job();
+    }
 }
 
 impl<L> AnyThread for ControlBackend<L>
@@ -371,6 +413,12 @@ where
 {
     /// `None` for a lost plugin, for a plugin that exposes no value to read,
     /// for an id it does not have, and when the main thread does not answer.
+    ///
+    /// The answer holds every write made before the call, handed to the plugin
+    /// by the node's blocks or parked polls (or applied out of band to a node
+    /// idle for a window): the main thread's ticks poll for it. The one case
+    /// that does not wait: a call made on the main thread with no pumped
+    /// collector runs at once.
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
         self.on_main_answer(true, move |main, instance| {
             instance.control()?.parameter(main, id)
@@ -762,6 +810,54 @@ mod off_main_tests {
             .expect("a declared parameter");
         unit.block();
         (unit, handle)
+    }
+
+    /// **A settled call on a gone collector runs once, at once, and does not
+    /// nest**: the write is pending and no block drains it, so the wait is open,
+    /// but the collector that would queue the retry is gone and hands it back.
+    #[test]
+    fn a_settled_call_on_a_gone_collector_runs_once_without_recursing() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let main = main_thread();
+        let (collector, work) = MainWork::new();
+        let (unit, _handle) = load(&work);
+        collector.run(main);
+        drop(collector);
+        assert!(
+            work.is_pumped(),
+            "the collector ran, so the call would queue"
+        );
+        let client = &unit.node.client;
+        let post = client
+            .edits
+            .as_ref()
+            .expect("an in-process node has slots")
+            .post();
+        post.write(ParamId::new(1), Normalized::of(0.25))
+            .expect("a declared parameter");
+        let ran = std::sync::Arc::new(AtomicU32::new(0));
+        let answered = std::sync::Arc::new(AtomicU32::new(0));
+        let (counted, told) = (
+            std::sync::Arc::clone(&ran),
+            std::sync::Arc::clone(&answered),
+        );
+        let job = super::Job {
+            wait: Some(post.settle(tutti_platform::Instant::now())),
+            host: super::Host {
+                inner: std::sync::Arc::clone(&client.inner),
+                post,
+                work,
+            },
+            work: Box::new(move |_, _| {
+                counted.fetch_add(1, Ordering::Relaxed);
+            }),
+            done: Box::new(move |ran| {
+                told.fetch_add(u32::from(ran.is_some()), Ordering::Relaxed);
+            }),
+        };
+        super::step(main, job);
+        assert_eq!(ran.load(Ordering::Relaxed), 1, "the work ran once");
+        assert_eq!(answered.load(Ordering::Relaxed), 1, "and was answered");
     }
 
     /// **A pool thread's call on the handle is answered by the main thread's

@@ -98,7 +98,11 @@ struct PostState {
     through: Generation,
     /// The newest write of each parameter, with its generation, until a state
     /// or a preset load makes it stale: what a fork starts from when no block
-    /// has handed the write to the plugin.
+    /// has handed the write to the plugin. A copy of what the slots hold, with
+    /// one writer: [`EditPost::write`] stores here in the critical section that
+    /// writes the slot, and [`EditPost::reset`] clears it in the one that bumps
+    /// the epoch. At most one entry per declared parameter (the ids are fixed for
+    /// the activation), so it never grows past the slot count.
     latest: Vec<(ParamId, Normalized, Generation)>,
 }
 

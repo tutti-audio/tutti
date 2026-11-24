@@ -92,6 +92,8 @@ static DEFERRED_DROPS: AtomicU64 = AtomicU64::new(0);
 pub struct MainWork {
     queue: Receiver<Work>,
     pumped: Arc<AtomicBool>,
+    /// Set when the collector is dropped: no later send is ever run by it.
+    gone: Arc<AtomicBool>,
 }
 
 /// The send side of a [`MainWork`]: a plugin's way to hand a close to the main
@@ -101,6 +103,7 @@ pub struct MainWork {
 pub struct MainWorkHandle {
     queue: Sender<Work>,
     pumped: Arc<AtomicBool>,
+    gone: Arc<AtomicBool>,
 }
 
 impl MainWork {
@@ -109,12 +112,18 @@ impl MainWork {
     pub fn new() -> (MainWork, MainWorkHandle) {
         let (queue, inbox) = channel();
         let pumped = Arc::new(AtomicBool::new(false));
+        let gone = Arc::new(AtomicBool::new(false));
         (
             MainWork {
                 queue: inbox,
                 pumped: Arc::clone(&pumped),
+                gone: Arc::clone(&gone),
             },
-            MainWorkHandle { queue, pumped },
+            MainWorkHandle {
+                queue,
+                pumped,
+                gone,
+            },
         )
     }
 
@@ -156,6 +165,7 @@ impl Drop for MainWork {
     /// Work still queued when the collector goes runs now on the main thread; off
     /// it nothing can run it, and each piece is counted in [`MainWork::stranded`].
     fn drop(&mut self) {
+        self.gone.store(true, Ordering::Release);
         let pending: Vec<Work> = self.queue.try_iter().collect();
         if pending.is_empty() {
             return;
@@ -187,7 +197,9 @@ impl MainWorkHandle {
     /// [`MainWork::run`]. Never waits and never loses the work to a full queue.
     ///
     /// If the collector is gone, the work runs now when the caller is on the
-    /// main thread, and otherwise is counted in [`MainWork::stranded`].
+    /// main thread, and otherwise is counted in [`MainWork::stranded`]. Work
+    /// that queues itself again with this must use [`queue`](Self::queue): with
+    /// the collector gone, this runs it inline, and it would nest without end.
     ///
     /// # Never from an audio thread
     ///
@@ -208,19 +220,54 @@ impl MainWorkHandle {
     /// deferral here never runs there. The in-process VST2 suite pins it:
     /// `tutti-plugin-host/tests/node/vst2_in_process_retire.rs`.
     pub fn defer(&self, work: impl FnOnce(MainThreadMarker) + Send + 'static) {
-        let Err(gone) = self.queue.send(Work::new(work)) else {
+        let Err(work) = self.queue(work) else {
             return;
         };
         match MainThreadMarker::new() {
-            Some(main) => gone.0.run(main),
+            Some(main) => work(main),
             None => {
                 STRANDED.fetch_add(1, Ordering::Relaxed);
                 // Dropping the work would drop what it holds on this thread, and a
                 // plugin dropped off the main thread defers its close again: here, to
                 // the same gone collector. The plugin leaks instead.
-                std::mem::forget(gone.0);
+                std::mem::forget(work);
             }
         }
+    }
+
+    /// Hands `work` to the collector's main thread, to run at its next
+    /// [`MainWork::run`], or hands it back when the collector is gone: it never
+    /// runs here and is never counted stranded, so the caller decides what a
+    /// gone collector means to it. Never waits. The one queueing path:
+    /// [`defer`](Self::defer) is this plus its fallback.
+    ///
+    /// A send that loses a race with the collector's drop is not handed back
+    /// (the closure is already boxed in the queue); it is dealt with as `defer`
+    /// always dealt with a gone collector, and the next call sees the flag.
+    ///
+    /// Same rules as `defer`: never from an audio thread.
+    ///
+    /// # Errors
+    ///
+    /// `Err(work)` when the collector is gone.
+    pub fn queue<W>(&self, work: W) -> Result<(), W>
+    where
+        W: FnOnce(MainThreadMarker) + Send + 'static,
+    {
+        if self.gone.load(Ordering::Acquire) {
+            return Err(work);
+        }
+        let Err(lost) = self.queue.send(Work::new(work)) else {
+            return Ok(());
+        };
+        match MainThreadMarker::new() {
+            Some(main) => lost.0.run(main),
+            None => {
+                STRANDED.fetch_add(1, Ordering::Relaxed);
+                std::mem::forget(lost.0);
+            }
+        }
+        Ok(())
     }
 
     /// [`defer`](Self::defer) for the close of a plugin dropped off its own
@@ -235,6 +282,35 @@ impl MainWorkHandle {
 #[cfg(test)]
 mod tests {
     use super::{MainWork, Work};
+
+    /// **A gone collector hands the work back and runs nothing**; a live one
+    /// takes it, and the collector runs it.
+    #[test]
+    fn a_gone_collector_hands_the_work_back() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let main = tutti_fixtures::main_thread();
+        let ran = std::sync::Arc::new(AtomicU32::new(0));
+        let job = |ran: &std::sync::Arc<AtomicU32>| {
+            let ran = std::sync::Arc::clone(ran);
+            move |_main| {
+                ran.fetch_add(1, Ordering::Relaxed);
+            }
+        };
+        let (work, handle) = MainWork::new();
+        assert!(handle.queue(job(&ran)).is_ok(), "a live collector takes it");
+        assert_eq!(work.run(main), 1);
+        drop(work);
+        let Err(back) = handle.queue(job(&ran)) else {
+            panic!("a gone collector took work");
+        };
+        assert_eq!(ran.load(Ordering::Relaxed), 1, "it ran nothing");
+        back(main);
+        assert_eq!(
+            ran.load(Ordering::Relaxed),
+            2,
+            "and the work came back whole"
+        );
+    }
 
     /// **Only a plugin drop counts as a deferred drop**: `defer_drop` adds one
     /// each, plain `defer` adds none, and the collector runs both.
