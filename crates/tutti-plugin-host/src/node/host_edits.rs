@@ -17,8 +17,8 @@
 //!   the next block, losing nothing;
 //! - the control side, before a read, a save or a fork: [`EditPost::flush`]
 //!   claims the cell, waiting, and applies what no block has taken through the
-//!   plugin's own `Control`, out of band where the format allows it, so what it
-//!   observes holds every write made before it. A format's Processor applies what its own slots hold ahead of a
+//!   plugin's own `Control`, so what it observes holds every write made before
+//!   it. A format's Processor applies what its own slots hold ahead of a
 //!   block's parameter changes, so a write made after a flush wins over it.
 //!
 //! **An epoch is stamped on what a drain keeps.** A state or preset load makes
@@ -159,14 +159,14 @@ impl EditPost {
     }
 
     /// Applies the writes no block has taken through the plugin's own
-    /// `Control`, out of band ([`Control::set_parameter_out_of_band`]), so a
-    /// read or a save made now sees them. Each is consumed here or by a block, never both. Control thread,
+    /// `Control` ([`Control::set_parameter`]), so a read or a save made now sees
+    /// them. Each is consumed here or by a block, never both. Control thread,
     /// main thread.
     pub(super) fn flush(&self, main: MainThreadMarker, control: &mut dyn Control) {
         for (id, value) in self.take_undrained() {
             // A write the plugin refuses (read-only) is refused here as a block
             // would refuse it.
-            let _ = control.set_parameter_out_of_band(main, id, value);
+            let _ = control.set_parameter(main, id, value);
         }
     }
 }
