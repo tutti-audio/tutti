@@ -71,14 +71,29 @@ pub(super) struct Leaf {
     /// The path the item comes from, crate first, and its own name before an `as`.
     pub(super) path: Vec<String>,
     pub(super) source: String,
-    /// The leaf is a glob, a bare crate or `self`: a crate or module whole.
-    pub(super) whole: bool,
-    /// The leaf is `self` of a group (`m::{self}`): `source` is then the group's
-    /// own name and `path` what precedes it.
-    pub(super) is_self: bool,
+    pub(super) kind: Kind,
+}
+
+/// What a leaf of a `pub use` tree names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Kind {
+    /// An item or a module by name.
+    Item,
+    /// A glob (`m::*`); `source` and `name` are the `*` token.
+    Glob,
+    /// A bare `tutti_` crate (`tutti_x`, `tutti_x as y`).
+    Crate,
+    /// `self` of a group under a `tutti_` crate (`tutti_x::m::{self}`):
+    /// `source` is then the group's own name and `path` what precedes it.
+    SelfOf,
 }
 
 impl Leaf {
+    /// Whether the leaf re-exports a crate or module whole: anything but an item.
+    pub(super) fn is_whole(&self) -> bool {
+        self.kind != Kind::Item
+    }
+
     /// The crate the item comes from; empty for a bare name.
     pub(super) fn krate(&self) -> &str {
         self.path.first().map_or("", String::as_str)
@@ -134,14 +149,21 @@ fn leaves(t: &[&str], k: &mut usize, pre: &[String], out: &mut Vec<Leaf>) {
             _ => (tok.to_owned(), path),
         };
         let tutti = path.first().is_some_and(|p| p.starts_with("tutti_"));
+        let crate_whole = tutti || (path.is_empty() && source.starts_with("tutti_"));
+        let kind = if glob {
+            Kind::Glob
+        } else if self_leaf && crate_whole {
+            Kind::SelfOf
+        } else if path.is_empty() && source.starts_with("tutti_") {
+            Kind::Crate
+        } else {
+            Kind::Item
+        };
         out.push(Leaf {
             name: alias.unwrap_or(&source).to_owned(),
-            whole: glob
-                || (self_leaf && tutti)
-                || (path.is_empty() && source.starts_with("tutti_")),
             path,
             source,
-            is_self: self_leaf,
+            kind,
         });
         return;
     }
@@ -269,10 +291,10 @@ pub(super) fn inline_mods(code: &str) -> Vec<(String, usize, usize)> {
 mod tests {
     use super::*;
 
-    fn items(src: &str) -> Vec<(Vec<String>, String, String, bool)> {
+    fn items(src: &str) -> Vec<(Vec<String>, String, String, Kind)> {
         uses(src)
             .into_iter()
-            .map(|l| (l.path, l.source, l.name, l.whole))
+            .map(|l| (l.path, l.source, l.name, l.kind))
             .collect()
     }
 
@@ -280,13 +302,13 @@ mod tests {
         path: &[&str],
         source: &str,
         name: &str,
-        whole: bool,
-    ) -> (Vec<String>, String, String, bool) {
+        kind: Kind,
+    ) -> (Vec<String>, String, String, Kind) {
         (
             path.iter().map(|p| (*p).to_owned()).collect(),
             source.to_owned(),
             name.to_owned(),
-            whole,
+            kind,
         )
     }
 
@@ -297,26 +319,26 @@ mod tests {
         assert_eq!(
             got,
             [
-                leaf(&["tutti_x"], "A", "A", false),
-                leaf(&["tutti_x"], "B", "C", false),
-                leaf(&["tutti_x", "m"], "D", "D", false),
-                leaf(&["tutti_x"], "m", "E", true),
+                leaf(&["tutti_x"], "A", "A", Kind::Item),
+                leaf(&["tutti_x"], "B", "C", Kind::Item),
+                leaf(&["tutti_x", "m"], "D", "D", Kind::Item),
+                leaf(&["tutti_x"], "m", "E", Kind::SelfOf),
             ]
         );
     }
 
     #[test]
     fn a_crate_a_self_and_a_glob_are_whole() {
-        for src in [
-            "pub use tutti_x;",
-            "pub use ::tutti_x as y;",
-            "pub use tutti_x::{self};",
-            "pub use tutti_x::m::*;",
-            "pub use local::*;",
+        for (src, kind) in [
+            ("pub use tutti_x;", Kind::Crate),
+            ("pub use ::tutti_x as y;", Kind::Crate),
+            ("pub use tutti_x::{self};", Kind::SelfOf),
+            ("pub use tutti_x::m::*;", Kind::Glob),
+            ("pub use local::*;", Kind::Glob),
         ] {
-            assert!(items(src).iter().all(|i| i.3), "{src}");
+            assert!(items(src).iter().all(|i| i.3 == kind), "{src}");
         }
-        assert!(!items("pub use tutti_x::m;")[0].3);
+        assert_eq!(items("pub use tutti_x::m;")[0].3, Kind::Item);
     }
 
     #[test]

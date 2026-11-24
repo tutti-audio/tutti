@@ -72,7 +72,7 @@ fn capability_is_read_from_the_endpoint_not_assumed() {
 /// The `Midi2` direction is covered by the real-device enumeration above
 /// (every endpoint on this machine reports MIDI 2.0), so a hardcoded
 /// `midi1()` would fail *there*. Pinning it here too would need a
-/// MIDI-2.0-protocol endpoint to hand `endpoint_capability` as a
+/// MIDI-2.0-protocol endpoint to hand `endpoint_capability` as an
 /// `Endpoint` — `UmpVirtualEndpoint` keeps its `MIDIEndpointRef`
 /// private, and widening that API purely for a test is the wrong trade.
 /// Between the two, neither constant survives.

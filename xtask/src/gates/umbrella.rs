@@ -112,7 +112,7 @@ fn items(tree: &dyn Tree) -> Report {
         leaf,
     } in uses
     {
-        if leaf.whole {
+        if leaf.is_whole() {
             bad.push(format!(
                 "{place}: re-exports a crate or module whole (`{}`); list each item by name",
                 leaf.name

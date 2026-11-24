@@ -29,8 +29,9 @@
 //!   Clock, MTC, Machine Control and Flex Data, JR timestamps).
 //! - [`MidiClockDecoder`] and [`MtcDecoder`]: the inbound half of
 //!   sync (Beat Clock and MTC decoders), beside the master that sends them.
-//! - [`ClockFollower`]: what a transport that follows an outside Beat Clock or MTC does
-//!   (tempo, play, stop, locate, lock), as a pure state machine; the session places it.
+//! - [`BeatClockFollower`] and [`MtcFollower`]: what a transport that follows an outside
+//!   Beat Clock or MTC does (tempo, play, stop, locate, lock), as pure state machines; the
+//!   session places them.
 //! - [`MpeTranslator`]: the inbound state (`live`) that rewrites classic-MPE channel
 //!   spread into native MIDI 2.0 per-note messages, and [`MpeTransformNode`], the same
 //!   as a node of one event stream.
@@ -228,9 +229,9 @@ pub use schedule::{
     MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
-    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,
-    MachineControlEvent, MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder,
-    MtcDirection, SegmentFault,
+    BeatClockEvent, BeatClockFollower, ClockEvent, ClockTransportState, MachineControlEvent,
+    MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder, MtcDirection, MtcEvent,
+    MtcFollower, SegmentFault,
 };
 pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower};

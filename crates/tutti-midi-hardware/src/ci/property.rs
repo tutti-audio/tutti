@@ -59,6 +59,7 @@ impl Member {
     fn declares_property_exchange(&self, muid: Muid) -> bool {
         self.device.peer(muid).is_some_and(|peer| {
             peer.discovery()
+                .body
                 .categories
                 .contains(CiCategories::PROPERTY_EXCHANGE)
         })
@@ -80,7 +81,7 @@ impl Member {
         let Some(max_sysex) = self
             .device
             .peer(muid)
-            .map(|peer| peer.discovery().max_sysex_size)
+            .map(|peer| peer.discovery().body.max_sysex_size)
         else {
             return;
         };

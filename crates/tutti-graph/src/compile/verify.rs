@@ -50,7 +50,8 @@
 //! every random graph.
 
 use crate::compile::ids::{
-    AudioSlotId, DelayId, EventSlotId, OpId, PlanUnitId, Table, TableSlice, TaskId,
+    AudioDelayId, AudioSlotId, EventDelayId, EventSlotId, OpId, PlanUnitId, Table, TableSlice,
+    TaskId,
 };
 use crate::compile::plan::{
     Delta, EMPTY_SLOT, EventSlotCapacity, Op, ParamPortOp, Plan, Span, ZERO_SLOT,
@@ -572,24 +573,31 @@ fn verify_tasks(plan: &Plan) -> Result<(), VerifyError> {
 
 /// Rule 6: the index tables.
 fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
-    let mut delay_uses: Table<DelayId, usize> = Table::filled(plan.program.delays.len(), 0);
+    let mut audio_delay_uses: Table<AudioDelayId, usize> =
+        Table::filled(plan.program.audio_delays.len(), 0);
+    let mut event_delay_uses: Table<EventDelayId, usize> =
+        Table::filled(plan.program.event_delays.len(), 0);
     let mut unit_uses: Table<PlanUnitId, usize> = Table::filled(plan.units.len(), 0);
     for op in &plan.program.ops {
-        let d = match *op {
-            Op::Delay { delay, .. } | Op::EventDelay { delay, .. } => Some(delay),
-            Op::Output { delay, .. } => delay,
-            Op::Node { unit, .. } => {
-                unit_uses[unit] += 1;
-                None
-            }
-            _ => None,
-        };
-        if let Some(d) = d {
-            delay_uses[d] += 1;
+        match *op {
+            Op::Delay { delay, .. } => audio_delay_uses[delay] += 1,
+            Op::Output {
+                delay: Some(delay), ..
+            } => audio_delay_uses[delay] += 1,
+            Op::EventDelay { delay, .. } => event_delay_uses[delay] += 1,
+            Op::Node { unit, .. } => unit_uses[unit] += 1,
+            _ => {}
         }
     }
-    if let Some((d, uses)) = delay_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
-        return Err(VerifyError(format!("delay {d} is used by {uses} ops")));
+    if let Some((d, uses)) = audio_delay_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
+        return Err(VerifyError(format!(
+            "audio delay {d} is used by {uses} ops"
+        )));
+    }
+    if let Some((d, uses)) = event_delay_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
+        return Err(VerifyError(format!(
+            "event delay {d} is used by {uses} ops"
+        )));
     }
     if let Some((u, uses)) = unit_uses.iter_enumerated().find(|&(_, &c)| c != 1) {
         return Err(VerifyError(format!("unit {u} is run by {uses} ops")));
@@ -603,13 +611,12 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
     // the sum of its inputs.
     let block = plan.prepare.max_block().get();
     let slot_cap = |s: EventSlotId| plan.program.sizing.events[s];
-    for (f, spec) in plan.program.event_feedback.iter_enumerated() {
-        let crate::compile::plan::FeedbackKey::Event { from, delay, .. } = spec.key else {
-            return Err(VerifyError(format!(
-                "event feedback {f} is not keyed as events"
-            )));
-        };
-        let need = EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block);
+    for spec in plan.program.event_feedback.iter() {
+        let need = EventSlotCapacity::fifo(
+            plan.event_port_capacity(spec.key.from),
+            spec.key.delay,
+            block,
+        );
         if !slot_cap(spec.slot).holds(need) {
             return Err(VerifyError(format!(
                 "event feedback slot {} holds {:?}, its FIFO {need:?}",
@@ -627,12 +634,11 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 return Ok(EventSlotCapacity::NONE);
             }
             if let Some(spec) = plan.program.event_feedback.iter().find(|f| f.slot == s) {
-                return match spec.key {
-                    crate::compile::plan::FeedbackKey::Event { from, delay, .. } => Ok(
-                        EventSlotCapacity::fifo(plan.event_port_capacity(from), delay, block),
-                    ),
-                    _ => Err(VerifyError(format!("event slot {s} is not event feedback"))),
-                };
+                return Ok(EventSlotCapacity::fifo(
+                    plan.event_port_capacity(spec.key.from),
+                    spec.key.delay,
+                    block,
+                ));
             }
             plan.program
                 .event_values
@@ -644,13 +650,8 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
         op_need[m] = match *op {
             Op::Node { unit, .. } => EventSlotCapacity::port(plan.units[unit].shape.event_capacity),
             Op::EventDelay { delay, .. } => {
-                let d = &plan.program.delays[delay];
-                let Some(from) = d.key.event_origin() else {
-                    return Err(VerifyError(format!(
-                        "event delay {delay} is not keyed as events"
-                    )));
-                };
-                plan.event_tap_fifo(from, d.len, block)
+                let d = &plan.program.event_delays[delay];
+                plan.event_tap_fifo(d.key.origin(), d.len, block)
             }
             Op::EventMerge { srcs, bound, .. } => {
                 let mut need = EventSlotCapacity::NONE;
@@ -1220,13 +1221,15 @@ mod tests {
 
         // A delay no op uses.
         let mut bad = good.clone();
-        bad.program.delays.push(crate::compile::plan::DelaySpec {
-            key: crate::compile::plan::DelayKey::Output {
-                channel: 0,
-                from: PortSource::Zero,
-            },
-            len: tutti_units::Samples::new(1),
-        });
+        bad.program
+            .audio_delays
+            .push(crate::compile::plan::AudioDelay {
+                key: crate::compile::plan::AudioDelayKey::Output {
+                    channel: 0,
+                    from: PortSource::Zero,
+                },
+                len: tutti_units::Samples::new(1),
+            });
         assert!(verify(&bad).unwrap_err().0.contains("delay 0 is used by 0"));
 
         // Rule 6: a unit run by two ops (the second node op takes the first's

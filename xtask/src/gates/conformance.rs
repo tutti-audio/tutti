@@ -71,7 +71,7 @@
 //! CI, so with it absent the comparison is skipped and said so, and only
 //! `TUTTI_CONFORMANCE=require-all` makes the absence a finding.
 
-use super::carry::{self, CHANGED_SIDE, Fate, is_orphan};
+use super::carry::{self, Fate};
 use super::clap_sys::{self, Item};
 use super::lex::{blank_keeping_docs, skipped};
 use super::midi_spec;
@@ -88,18 +88,76 @@ const TAG: &str = "/// Spec:";
 /// The ids of the VST3 inventory.
 const VST3_PREFIX: &str = "vst3.";
 
+/// A row's side column: the spec side the row is about, or where the row
+/// stands while its sentence is being reread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum Side {
+    /// The side of the spec the row is about (`plugin`, `host`, `todo`, ..).
+    Spec(String),
+    /// The sentence changed under the row's hand columns, which are blanked.
+    Changed,
+    /// The row keeps the hand columns of a sentence no row claims any more;
+    /// holds the side it had.
+    Orphan(String),
+}
+
+/// The text of [`Side::Changed`].
+const CHANGED: &str = "changed";
+/// The text before the old side of [`Side::Orphan`].
+const ORPHAN_PREFIX: &str = "orphan:";
+
+impl Side {
+    /// The side a column's text writes.
+    fn parse(text: &str) -> Self {
+        if text == CHANGED {
+            Self::Changed
+        } else if let Some(old) = text.strip_prefix(ORPHAN_PREFIX) {
+            Self::Orphan(old.to_owned())
+        } else {
+            Self::Spec(text.to_owned())
+        }
+    }
+
+    /// This side as a row that keeps its hand columns without a sentence.
+    pub(super) fn orphaned(self) -> Self {
+        match self {
+            Self::Spec(side) => Self::Orphan(side),
+            Self::Changed => Self::Orphan(CHANGED.to_owned()),
+            orphan @ Self::Orphan(_) => orphan,
+        }
+    }
+}
+
+impl std::fmt::Display for Side {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spec(side) => f.write_str(side),
+            Self::Changed => f.write_str(CHANGED),
+            Self::Orphan(side) => write!(f, "{ORPHAN_PREFIX}{side}"),
+        }
+    }
+}
+
+/// Why a row is not a requirement on its side, and where the spec says so.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct NotApplicable {
+    /// One of [`NA_KINDS`].
+    pub(super) kind: String,
+    /// The spec location.
+    pub(super) cite: String,
+}
+
 /// One inventory row, every column as written (trimmed).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Row {
     pub(super) id: String,
-    pub(super) side: String,
+    pub(super) side: Side,
     pub(super) maturity: String,
     pub(super) kind: String,
     pub(super) section: String,
     pub(super) paraphrase: String,
     pub(super) facts: String,
-    pub(super) na_kind: String,
-    pub(super) cite: String,
+    pub(super) na: Option<NotApplicable>,
     /// [`super::carry::digest`] of the requirement sentence a text-extracted row
     /// stands for; empty for a row with no sentence.
     pub(super) digest: String,
@@ -107,26 +165,26 @@ pub(super) struct Row {
 
 impl Row {
     fn render(&self) -> String {
+        let (na_kind, cite) = self
+            .na
+            .as_ref()
+            .map_or(("", ""), |na| (na.kind.as_str(), na.cite.as_str()));
+        let side = self.side.to_string();
         let mut cols = vec![
-            &self.id,
-            &self.side,
+            self.id.as_str(),
+            &side,
             &self.maturity,
             &self.kind,
             &self.section,
             &self.paraphrase,
             &self.facts,
-            &self.na_kind,
-            &self.cite,
+            na_kind,
+            cite,
         ];
         if !self.digest.is_empty() {
             cols.push(&self.digest);
         }
-        cols.iter()
-            .map(|c| c.as_str())
-            .collect::<Vec<_>>()
-            .join(" | ")
-            .trim_end()
-            .to_owned()
+        cols.join(" | ").trim_end().to_owned()
     }
 }
 
@@ -227,24 +285,28 @@ pub(super) fn parse_row(line: &str) -> Result<Row, String> {
         ));
     }
     check_facts(facts)?;
-    if na_kind.is_empty() != cite.is_empty() {
-        return Err("na-kind and cite must be both set or both empty".to_owned());
-    }
-    if !na_kind.is_empty() && !NA_KINDS.contains(&na_kind) {
-        return Err(format!(
-            "na-kind `{na_kind}` is not deprecated, forbidden-for-side or other-side"
-        ));
-    }
+    let na = match (na_kind.is_empty(), cite.is_empty()) {
+        (true, true) => None,
+        (false, false) if NA_KINDS.contains(&na_kind) => Some(NotApplicable {
+            kind: na_kind.to_owned(),
+            cite: cite.to_owned(),
+        }),
+        (false, false) => {
+            return Err(format!(
+                "na-kind `{na_kind}` is not deprecated, forbidden-for-side or other-side"
+            ));
+        }
+        _ => return Err("na-kind and cite must be both set or both empty".to_owned()),
+    };
     Ok(Row {
         id: id.to_owned(),
-        side: side.to_owned(),
+        side: Side::parse(side),
         maturity: maturity.to_owned(),
         kind: kind.to_owned(),
         section: section.to_owned(),
         paraphrase: paraphrase.to_owned(),
         facts: facts.to_owned(),
-        na_kind: na_kind.to_owned(),
-        cite: cite.to_owned(),
+        na,
         digest: digest.to_owned(),
     })
 }
@@ -291,14 +353,14 @@ pub(super) fn load(tree: &dyn Tree) -> (Vec<(String, Row)>, Vec<String>) {
         let (file_rows, file_errs) = parse_file(&path, &text);
         errs.extend(file_errs);
         for r in file_rows {
-            if is_orphan(&r.side) {
+            if matches!(r.side, Side::Orphan(_)) {
                 errs.push(format!(
                     "{path}: orphan row `{}`: its sentence is gone; move its hand text to the row it belongs to and delete this row",
                     r.id
                 ));
                 continue;
             }
-            if r.side == CHANGED_SIDE {
+            if r.side == Side::Changed {
                 errs.push(format!(
                     "{path}: requirement text changed under hand columns: row `{}`; reread its sentence and rewrite its side, paraphrase and other hand columns",
                     r.id
@@ -519,7 +581,7 @@ pub(super) fn check(
     let committed: BTreeSet<(String, String, String)> = rows
         .iter()
         .filter(|(_, row)| row.id.starts_with("clap."))
-        .map(|(_, row)| (row.id.clone(), row.side.clone(), row.maturity.clone()))
+        .map(|(_, row)| (row.id.clone(), row.side.to_string(), row.maturity.clone()))
         .collect();
     let spec = tree
         .read("Cargo.lock")
@@ -548,7 +610,7 @@ pub(super) fn check(
     let committed_vst3: BTreeSet<(String, String, String)> = rows
         .iter()
         .filter(|(_, row)| row.id.starts_with(VST3_PREFIX))
-        .map(|(_, row)| (row.id.clone(), row.side.clone(), row.maturity.clone()))
+        .map(|(_, row)| (row.id.clone(), row.side.to_string(), row.maturity.clone()))
         .collect();
     match vst3_sdk::extract(tree) {
         Ok(items) => {
@@ -719,20 +781,19 @@ pub(super) fn regenerate(existing: Option<&str>, items: &[Item]) -> Result<Strin
     for it in items {
         let row = match old.remove(&it.id) {
             Some(mut r) => {
-                r.side = it.side.to_owned();
+                r.side = Side::Spec(it.side.to_owned());
                 r.maturity = it.maturity.to_owned();
                 r
             }
             None => Row {
                 id: it.id.clone(),
-                side: it.side.to_owned(),
+                side: Side::Spec(it.side.to_owned()),
                 maturity: it.maturity.to_owned(),
                 kind: String::new(),
                 section: String::new(),
                 paraphrase: String::new(),
                 facts: String::new(),
-                na_kind: String::new(),
-                cite: String::new(),
+                na: None,
                 digest: String::new(),
             },
         };
@@ -781,18 +842,17 @@ pub(super) fn regenerate_vst3(
             added.push(it.id.clone());
             Row {
                 id: it.id.clone(),
-                side: String::new(),
+                side: Side::Spec(String::new()),
                 maturity: String::new(),
                 kind: String::new(),
                 section: String::new(),
                 paraphrase: String::new(),
                 facts: String::new(),
-                na_kind: String::new(),
-                cite: String::new(),
+                na: None,
                 digest: String::new(),
             }
         });
-        row.side = it.side.to_owned();
+        row.side = Side::Spec(it.side.to_owned());
         row.maturity = it.maturity.to_owned();
         row.section = it.section.clone();
         out.push_str(&row.render());
@@ -952,16 +1012,15 @@ struct Extracted<'a> {
 
 /// The row an item becomes: its generated columns over what `fate` keeps.
 fn apply(fate: Fate, it: &Extracted) -> (Row, Option<Row>) {
-    let blank = |side: &str| Row {
+    let blank = |side: Side| Row {
         id: it.id.to_owned(),
-        side: side.to_owned(),
+        side,
         maturity: String::new(),
         kind: String::new(),
         section: String::new(),
         paraphrase: String::new(),
         facts: String::new(),
-        na_kind: String::new(),
-        cite: String::new(),
+        na: None,
         digest: String::new(),
     };
     let (mut row, lost) = match fate {
@@ -969,8 +1028,8 @@ fn apply(fate: Fate, it: &Extracted) -> (Row, Option<Row>) {
             r.id = it.id.to_owned();
             (r, None)
         }
-        Fate::Changed(old) => (blank(CHANGED_SIDE), Some(old)),
-        Fate::New => (blank("todo"), None),
+        Fate::Changed(old) => (blank(Side::Changed), Some(old)),
+        Fate::New => (blank(Side::Spec("todo".to_owned())), None),
     };
     row.kind = it.kind.to_owned();
     row.section = it.section.to_owned();
@@ -1085,7 +1144,10 @@ pub(super) fn regenerate_sf2(existing: &str, items: &[sf2_spec::Item]) -> Result
     for line in existing.lines() {
         let t = line.trim();
         let id = t.split('|').next().unwrap_or("").trim();
-        let is_orphan = t.split('|').nth(1).is_some_and(|c| is_orphan(c.trim()));
+        let is_orphan = t
+            .split('|')
+            .nth(1)
+            .is_some_and(|c| matches!(Side::parse(c.trim()), Side::Orphan(_)));
         if is_orphan {
             continue;
         }
@@ -1805,15 +1867,24 @@ mod tests {
         let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         let rows = rows_of(&r.text);
         assert_eq!(
-            (rows[0].side.as_str(), rows[0].paraphrase.as_str()),
+            (
+                rows[0].side.to_string().as_str(),
+                rows[0].paraphrase.as_str()
+            ),
             ("host", "ay")
         );
         assert_eq!(
-            (rows[1].side.as_str(), rows[1].paraphrase.as_str()),
+            (
+                rows[1].side.to_string().as_str(),
+                rows[1].paraphrase.as_str()
+            ),
             ("todo", "")
         );
         assert_eq!(
-            (rows[2].side.as_str(), rows[2].paraphrase.as_str()),
+            (
+                rows[2].side.to_string().as_str(),
+                rows[2].paraphrase.as_str()
+            ),
             ("client", "bee")
         );
         assert_eq!(r.added, ["m2-104/1#2"]);
@@ -1837,7 +1908,10 @@ mod tests {
         assert!(r.orphans.is_empty());
         let rows = rows_of(&r.text);
         assert_eq!(
-            (rows[1].side.as_str(), rows[1].paraphrase.as_str()),
+            (
+                rows[1].side.to_string().as_str(),
+                rows[1].paraphrase.as_str()
+            ),
             ("changed", "")
         );
         assert_eq!(rows[0].paraphrase, "ay");
@@ -1879,7 +1953,7 @@ mod tests {
             .collect();
         let r = regenerate_midi(&midi_spec::M2_104, Some(&old), &new).unwrap();
         let rows = rows_of(&r.text);
-        assert_eq!(rows[0].side, "todo");
+        assert_eq!(rows[0].side, Side::Spec("todo".to_owned()));
         assert_eq!(rows[1].paraphrase, "first");
         assert_eq!(rows[2].paraphrase, "second");
         assert_eq!(rows[1].digest, rows[2].digest);
@@ -1960,7 +2034,11 @@ mod tests {
             assert_eq!(r.orphans.len(), 1);
             let row = rows_of(&r.text).pop().unwrap();
             assert_eq!(
-                (row.id.as_str(), row.side.as_str(), row.paraphrase.as_str()),
+                (
+                    row.id.as_str(),
+                    row.side.to_string().as_str(),
+                    row.paraphrase.as_str()
+                ),
                 ("m2-104/1#2", "orphan:client", "bee")
             );
             assert_eq!(row.digest, carry::digest("B shall y."));
@@ -1985,16 +2063,16 @@ mod tests {
         assert_eq!(r.orphans[0].paraphrase, "bee");
         assert_eq!(r.added, ["m2-104/2#1"]);
         let rows = rows_of(&r.text);
-        let ids: Vec<(&str, &str)> = rows
+        let ids: Vec<(&str, String)> = rows
             .iter()
-            .map(|r| (r.id.as_str(), r.side.as_str()))
+            .map(|r| (r.id.as_str(), r.side.to_string()))
             .collect();
         assert_eq!(
             ids,
             [
-                ("m2-104/1#1", "host"),
-                ("m2-104/1#2", "orphan:client"),
-                ("m2-104/2#1", "todo")
+                ("m2-104/1#1", "host".to_owned()),
+                ("m2-104/1#2", "orphan:client".to_owned()),
+                ("m2-104/2#1", "todo".to_owned())
             ]
         );
         assert!(!run(&[("testing/conformance/midi-m2-104.txt", &r.text)]).passed());
@@ -2017,7 +2095,7 @@ mod tests {
             .lines()
             .map(|l| match parse_row(l) {
                 Ok(mut r) if r.id == "m2-104/mt/0" => {
-                    r.side = "util".to_owned();
+                    r.side = Side::Spec("util".to_owned());
                     r.paraphrase = "my table".to_owned();
                     assert!(r.digest.is_empty());
                     r.render() + "\n"
@@ -2028,7 +2106,7 @@ mod tests {
         let new = [sentence(1, "Z shall z."), sentence(2, "A shall x."), table];
         let r = regenerate_midi(&midi_spec::M2_104, Some(&file), &new).unwrap();
         let rows = rows_of(&r.text);
-        assert_eq!(rows[2].side, "util");
+        assert_eq!(rows[2].side, Side::Spec("util".to_owned()));
         assert_eq!(rows[2].paraphrase, "my table");
         assert!(rows[2].digest.is_empty() && !rows[1].digest.is_empty());
         assert!(r.orphans.is_empty() && r.changed.is_empty());
@@ -2063,7 +2141,7 @@ mod tests {
             .find(|w| w.id == "sf2.gen.alpha")
             .unwrap();
         assert_eq!(
-            (row.side.as_str(), row.paraphrase.as_str()),
+            (row.side.to_string().as_str(), row.paraphrase.as_str()),
             ("changed", "")
         );
         let report = sf2_run(&r.text, Err("absent".to_owned()), Require::default());

@@ -1108,6 +1108,7 @@ impl Member {
     ) {
         let declares = self.device.peer(muid).is_some_and(|peer| {
             peer.discovery()
+                .body
                 .categories
                 .contains(CiCategories::PROFILE_CONFIGURATION)
         });
@@ -1137,6 +1138,7 @@ impl Member {
     ) {
         let declares = self.device.peer(muid).is_some_and(|peer| {
             peer.discovery()
+                .body
                 .categories
                 .contains(CiCategories::PROCESS_INQUIRY)
         });
@@ -1357,7 +1359,7 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 mod tests {
     use std::time::Duration;
 
-    use tutti_midi_ci::{CiCategories, DiscoveryData};
+    use tutti_midi_ci::{CiCategories, DeviceBody, DiscoveryData};
     use tutti_midi_device::{EndpointId, PortDirection};
 
     use super::*;
@@ -1400,7 +1402,11 @@ mod tests {
     fn a_ci_message_the_device_has_no_room_for_whole_is_not_sent_in_part() {
         let message = CiMessage::Discovery {
             header: CiHeader::new(Muid::of(0x0012_3456)),
-            data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
+            data: DiscoveryData::new(DeviceBody::new(
+                identity(),
+                CiCategories::empty(),
+                MaxSysexSize::of(256),
+            )),
         };
         let packets = message.packets(G0).unwrap().count();
         assert!(packets >= 2, "a message of several packets");
@@ -1463,7 +1469,11 @@ mod tests {
         // again in both and is not reported again.
         let message = CiMessage::Discovery {
             header: CiHeader::new(Muid::of(0x0012_3456)),
-            data: DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(256)),
+            data: DiscoveryData::new(DeviceBody::new(
+                identity(),
+                CiCategories::empty(),
+                MaxSysexSize::of(256),
+            )),
         };
         let packets: Vec<Ump> = message.packets(G0).unwrap().collect();
         assert!(packets.len() >= 2);

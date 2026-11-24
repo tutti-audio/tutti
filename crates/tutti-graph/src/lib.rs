@@ -702,8 +702,8 @@ pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
 pub use compile::ids::{
-    AudioFeedbackId, AudioSlotId, DelayId, EventFeedbackId, EventSlotId, OpId, PlanEventTapId,
-    PlanMeterId, PlanTapId, PlanUnitId, TaskId,
+    AudioDelayId, AudioFeedbackId, AudioSlotId, EventDelayId, EventFeedbackId, EventSlotId, OpId,
+    PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, TaskId,
 };
 pub use compile::latency::{
     ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
@@ -714,8 +714,9 @@ pub use compile::main_output::{
     fold_to_topology_with, fold_to_width,
 };
 pub use compile::plan::{
-    Csr, DelayKey, DelaySpec, Delta, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp,
-    InputBound, Op, ParamPortOp, Placement, Plan, PlanUnit, Span, UnitIdx, Value,
+    AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, Delta, EventDelay, EventDelayKey,
+    EventFeedbackKey, EventSlotCapacity, FeedbackSpec, GainPortOp, InputBound, Op, ParamPortOp,
+    Placement, Plan, PlanUnit, Span, UnitIdx, Value,
 };
 pub use compile::preroll::PrerollTable;
 pub use compile::tail::{GraphTail, MAX_NODE_TAIL, TailGraph, graph_tail};

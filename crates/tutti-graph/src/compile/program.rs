@@ -16,12 +16,12 @@ use std::fmt::Debug;
 
 use crate::EdgeId;
 use crate::compile::ids::{
-    AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
-    EventValueId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, Table,
+    AudioDelayId, AudioFeedbackId, AudioSlotId, AudioValueId, EventDelayId, EventFeedbackId,
+    EventSlotId, EventValueId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, Table,
 };
 use crate::compile::plan::{
-    Csr, DelaySpec, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, Op, ParamPortOp,
-    Value,
+    AudioDelay, AudioFeedbackKey, Csr, EventDelay, EventFeedbackKey, EventSlotCapacity,
+    FeedbackSpec, GainPortOp, Op, ParamPortOp, Value,
 };
 
 /// Where an audio operand reads from, before colouring.
@@ -131,8 +131,8 @@ impl Refs for ByValue {
     type Event = ERef;
     type AudioSlot = ();
     type EventSlot = ();
-    type AudioFeedback = FeedbackKey;
-    type EventFeedback = FeedbackKey;
+    type AudioFeedback = AudioFeedbackKey;
+    type EventFeedback = EventFeedbackKey;
     type Sizing = Capacities;
 }
 
@@ -141,8 +141,8 @@ impl Refs for BySlot {
     type Event = EventSlotId;
     type AudioSlot = AudioSlotId;
     type EventSlot = EventSlotId;
-    type AudioFeedback = FeedbackSpec<AudioSlotId>;
-    type EventFeedback = FeedbackSpec<EventSlotId>;
+    type AudioFeedback = FeedbackSpec<AudioFeedbackKey, AudioSlotId>;
+    type EventFeedback = FeedbackSpec<EventFeedbackKey, EventSlotId>;
     type Sizing = Sizes;
 }
 
@@ -173,8 +173,10 @@ pub(crate) struct Program<S: Refs> {
     pub(crate) value_readers: Vec<OpId>,
     /// The ops each op waits for: sorted, without duplicates.
     pub(crate) deps: Csr<OpId>,
-    /// The PDC delays.
-    pub(crate) delays: Table<DelayId, DelaySpec>,
+    /// The PDC delays of audio.
+    pub(crate) audio_delays: Table<AudioDelayId, AudioDelay>,
+    /// The PDC delays of events.
+    pub(crate) event_delays: Table<EventDelayId, EventDelay>,
     /// The audio feedback edges, ascending: slots after the null slot.
     pub(crate) audio_feedback: Table<AudioFeedbackId, S::AudioFeedback>,
     /// The event feedback edges, ascending.

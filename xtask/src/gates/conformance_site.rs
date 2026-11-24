@@ -240,7 +240,7 @@ pub(super) fn report(tree: &dyn Tree, results: &[(Os, String)]) -> Result<Vec<Ar
                 let tests = seen.get(row.id.as_str()).cloned().unwrap_or_default();
                 let status = PerOs::from_fn(|os| {
                     let ran = &tests[os];
-                    if !row.na_kind.is_empty() {
+                    if row.na.is_some() {
                         Status::Na
                     } else if ran.iter().any(|(_, o)| *o == Outcome::Failed) {
                         Status::Failing
@@ -363,8 +363,8 @@ fn cell(r: &RowReport, os: Os) -> String {
         Status::NoResults => ("noresults", "no results"),
         Status::Na => ("na", "n/a"),
     };
-    let title = if r.status[os] == Status::Na {
-        format!("{}: {}", r.row.na_kind, r.row.cite)
+    let title = if let (Status::Na, Some(na)) = (r.status[os], &r.row.na) {
+        format!("{}: {}", na.kind, na.cite)
     } else {
         r.tests[os]
             .iter()
@@ -448,7 +448,7 @@ and <b>n/a</b> when the spec itself excludes the row (hover for the citation). \
             h.push_str(&format!(
                 "<tr><td class=\"id\">{}</td><td>{}</td><td>{}</td><td>{}</td>",
                 esc(&r.row.id),
-                esc(&r.row.side),
+                esc(&r.row.side.to_string()),
                 esc(&r.row.kind),
                 esc(&r.row.paraphrase),
             ));
