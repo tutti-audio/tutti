@@ -133,7 +133,9 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<OpenedOutput<TimerRunning>, TimerError> {
-        let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get();
+        // The size every tick renders: the spec's, or the default.
+        let quantum = spec.quantum.unwrap_or(DEFAULT_BLOCK);
+        let frames = quantum.get();
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];
@@ -166,7 +168,7 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
                 stop,
                 task: Some(task),
             },
-            quantum: spec.quantum,
+            quantum: Some(quantum),
         })
     }
 }

@@ -416,13 +416,14 @@ impl CpalDriver {
     ) -> Result<(cpal::Stream, Option<OutputQuantum>)> {
         let back = Arc::new(Mutex::new(None));
         let kept = Arc::new(AtomicBool::new(false));
+        let channels = block.channels();
         let attempt = |config: &cpal::StreamConfig, block| {
             let hold = Hold {
                 block: Some(block),
                 back: Arc::clone(&back),
                 kept: Arc::clone(&kept),
             };
-            self.build_once(config, hold, Arc::clone(&faults), render)
+            self.build_once(config, channels, hold, Arc::clone(&faults), render)
         };
         let stream = match attempt(config, block) {
             Err(DeviceError::BuildStream(refused))
@@ -451,11 +452,11 @@ impl CpalDriver {
     fn build_once<T: cpal::SizedSample + 'static, F: Float>(
         &self,
         config: &cpal::StreamConfig,
+        channels: usize,
         mut hold: Hold<F>,
         faults: Arc<StreamFaults>,
         render: Render<F, T>,
     ) -> Result<cpal::Stream> {
-        let channels = hold.block.as_ref().map_or(1, OutputBlock::channels);
         let delivering = Arc::clone(&faults);
         self.device
             .build_output_stream(

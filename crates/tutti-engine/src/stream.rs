@@ -190,10 +190,15 @@ pub struct OutputStream {
     faults: Arc<StreamFaults>,
     /// The output callback's reported delay, shared with each run's block.
     latency: Arc<StreamLatency>,
-    running: Option<Box<dyn RunningStream>>,
-    /// The spec's quantum as it was asked, held while a stream is open (the
-    /// spec then carries the opened one) and restored by [`stop`](Self::stop).
-    requested: Option<Option<OutputQuantum>>,
+    running: Option<Running>,
+}
+
+/// An open stream, with the quantum its spec asked for: the spec carries the
+/// opened one while the stream is held, and [`OutputStream::stop`] puts the
+/// request back.
+struct Running {
+    stream: Box<dyn RunningStream>,
+    requested: Option<OutputQuantum>,
 }
 
 // Hand-rolled: the running stream is not `Debug`. Reports the configuration a
@@ -217,7 +222,6 @@ impl OutputStream {
             faults: Arc::new(StreamFaults::new()),
             latency: Arc::new(StreamLatency::new()),
             running: None,
-            requested: None,
         }
     }
 
@@ -277,9 +281,11 @@ impl OutputStream {
         let opened = driver
             .open(&self.spec, block, Arc::clone(&self.faults))
             .map_err(StartError::Driver)?;
-        self.requested = Some(self.spec.quantum);
+        self.running = Some(Running {
+            stream: Box::new(opened.stream),
+            requested: self.spec.quantum,
+        });
         self.spec.quantum = opened.quantum;
-        self.running = Some(Box::new(opened.stream));
         Ok(())
     }
 
@@ -305,10 +311,8 @@ impl OutputStream {
     ///
     /// When this returns, the callback no longer runs.
     pub fn stop(&mut self) {
-        if let Some(running) = self.running.take() {
-            running.stop();
-        }
-        if let Some(requested) = self.requested.take() {
+        if let Some(Running { stream, requested }) = self.running.take() {
+            stream.stop();
             self.spec.quantum = requested;
         }
     }
