@@ -56,9 +56,8 @@ fn engine(spin: Duration, max_block: usize) -> (Engine, Transport, Editor) {
         MaxBlock::of(Samples::new(max_block)),
     ));
     ed.insert(NodeKey(1), "spin", Unforkable(Spin { spin }));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     (engine, transport, ed)
@@ -169,9 +168,8 @@ fn events_past_a_ports_capacity_reach_the_block_counts() {
     ));
     let per_block = tutti_graph::DEFAULT_EVENT_CAPACITY + 100;
     ed.insert(NodeKey(1), "burst", Unforkable(Burst { per_block }));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let blocks = engine.blocks();

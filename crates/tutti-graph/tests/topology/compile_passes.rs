@@ -1190,9 +1190,9 @@ fn removing_a_node_removes_its_resolution_marks() {
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
     let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
-    ed.spec_mut().connect_events(at, EventEdge::Direct(from));
-    ed.spec_mut()
-        .require_resolution(at, from, tutti_graph::Resolution::Sample);
+    ed.connect_events(at, EventEdge::Direct(from)).unwrap();
+    ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
+        .unwrap();
     ed.commit().expect("the consumer honours samples");
     ed.remove(A);
     ed.commit().expect("commits");
@@ -1219,12 +1219,15 @@ fn disconnecting_an_edge_drops_its_resolution_mark() {
         Unforkable(common::TestNode::new(Kind::Consumer { inputs: 1 })),
     );
     let (from, at) = (EventOutputPort::new(A, 0), EventInputPort::new(B, 0));
-    ed.spec_mut().connect_events(at, EventEdge::Direct(from));
-    ed.spec_mut()
-        .require_resolution(at, from, tutti_graph::Resolution::Sample);
+    ed.connect_events(at, EventEdge::Direct(from)).unwrap();
+    ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
+        .unwrap();
     ed.commit().expect("commits");
-    assert!(ed.spec_mut().disconnect_events(at, from));
-    assert!(!ed.spec_mut().disconnect_events(at, from), "already gone");
+    assert!(ed.disconnect_events(at, tutti_graph::EventEdge::Direct(from)));
+    assert!(
+        !ed.disconnect_events(at, tutti_graph::EventEdge::Direct(from)),
+        "already gone"
+    );
     ed.commit().expect("commits");
     assert!(ed.spec().required_resolution.is_empty());
 

@@ -81,8 +81,8 @@ fn render(sends: Vec<(u64, ParamSegment)>, block: usize) -> Vec<f32> {
         param: UnitParam::Ratio.into(),
     };
     r.editor_mut()
-        .spec_mut()
-        .connect_param(at, EventOutputPort::new(s, 0));
+        .connect_param(at, EventOutputPort::new(s, 0))
+        .unwrap();
     r.editor_mut().commit().expect("commits");
     let input = vec![1.0f32; FRAMES];
     r.render_input(Planes::new(&[&input]).unwrap()).remove(0)

@@ -27,10 +27,11 @@ pub(crate) fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackS
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level.to_f64())));
-    ed.spec_mut().topology.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
-    ]);
+    ])
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     // The editor outlives nothing here: a test process is the whole lifetime,

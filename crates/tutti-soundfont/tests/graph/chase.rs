@@ -68,13 +68,13 @@ impl Rig {
         let (inlet, tx) = EventInletNode::pair(EventCapacity::of(256));
         ed.insert(NodeKey(1), "inlet", Unforkable(inlet));
         ed.insert(NodeKey(2), "instrument", instrument);
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(2), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
-        ed.spec_mut()
-            .topology
-            .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))));
+        )
+        .unwrap();
+        ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
+            .unwrap();
         ed.commit().expect("commits");
         Self { ed, exec, tx }
     }

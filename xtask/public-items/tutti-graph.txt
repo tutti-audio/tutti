@@ -71,6 +71,7 @@ enum edges::rtlog::RtValue
 enum edit::editor::errors::CloseError
 enum edit::editor::errors::CommitError
 enum edit::editor::errors::MissingSource
+enum edit::editor::errors::WireError
 enum event::sorted::EventOrderError
 enum event::types::EventKind
 enum event::types::HarmonyKind
@@ -389,7 +390,6 @@ fn edit::editor::Editor::set_limits
 fn edit::editor::Editor::set_main_output_gate
 fn edit::editor::Editor::shapes
 fn edit::editor::Editor::spec
-fn edit::editor::Editor::spec_mut
 fn edit::editor::Editor::take_event_losses
 fn edit::editor::Editor::take_unreported_event_losses
 fn edit::editor::Editor::with_event_capacity
@@ -447,6 +447,21 @@ fn edit::editor::taps::Editor::prune_meters
 fn edit::editor::taps::Editor::prune_taps
 fn edit::editor::taps::Editor::reopen_heard_tap
 fn edit::editor::unwired::Unwired::is_empty
+fn edit::editor::wiring::Editor::clear_edge_gain
+fn edit::editor::wiring::Editor::clear_resolution
+fn edit::editor::wiring::Editor::connect_edge
+fn edit::editor::wiring::Editor::connect_edge_gain
+fn edit::editor::wiring::Editor::connect_events
+fn edit::editor::wiring::Editor::connect_param
+fn edit::editor::wiring::Editor::declare_main_output
+fn edit::editor::wiring::Editor::disconnect_edge
+fn edit::editor::wiring::Editor::disconnect_edge_gain
+fn edit::editor::wiring::Editor::disconnect_events
+fn edit::editor::wiring::Editor::disconnect_param
+fn edit::editor::wiring::Editor::require_resolution
+fn edit::editor::wiring::Editor::resize_inputs
+fn edit::editor::wiring::Editor::resize_outputs
+fn edit::editor::wiring::Editor::wire_outputs
 fn event::sorted::SortedEvents::as_slice
 fn event::sorted::SortedEvents::is_empty
 fn event::sorted::SortedEvents::iter
@@ -541,6 +556,8 @@ fn model::bus_edge::NodeBus::with_band
 fn model::fade::Fade::law
 fn model::fade::Fade::new
 fn model::fade::Fade::seconds
+fn model::graph::EdgeId::into_output
+fn model::graph::EdgeId::into_port
 fn model::graph::EventTapPort::node
 fn model::graph::FeedbackFrom::new
 fn model::graph::FeedbackFrom::one_block
@@ -914,6 +931,8 @@ fn testing::block_in
 fn testing::cap_of
 fn testing::declick
 fn testing::driver_value
+fn testing::feed_input
+fn testing::feed_output
 fn testing::input_signal
 fn testing::pooled
 fn testing::pooled_fresh
@@ -924,6 +943,7 @@ fn testing::smooth_gains
 fn testing::spec_of
 fn testing::test_pool
 fn testing::units_costed
+fn testing::wire_like
 fn testing::with_buses
 macro contract::suite::contract_tests
 macro node::declare::declare_params

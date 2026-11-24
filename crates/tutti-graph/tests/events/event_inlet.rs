@@ -9,6 +9,7 @@
 //! Every figure is analytic (a frame, an offset, a capacity), none read from
 //! another render.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode};
@@ -532,10 +533,11 @@ fn graph(
         Forkable(Kind::Consumer { inputs: n }),
     );
     for k in 1..=n {
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(10), k - 1),
             EventEdge::Direct(EventOutputPort::new(NodeKey(u64::from(k)), 0)),
-        );
+        )
+        .unwrap();
     }
     // Heavy audio chains beside the inlets, so the cost model has work worth
     // a thread: the plan is spread on a pool only when that pays.
@@ -558,23 +560,28 @@ fn graph(
                     width: 1,
                 }),
             );
-            ed.spec_mut().topology.connect(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(NodeKey(base + g), 0),
                 Edge::Direct(out(base + g - 1)),
-            );
+            ))
+            .unwrap();
         }
     }
     let sum = if heavy { 5 } else { 1 };
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
-    let topology = &mut ed.spec_mut().topology;
-    topology.connect(InputPort::new(NodeKey(30), 0), Edge::Direct(out(10)));
+    ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(30), 0),
+        Edge::Direct(out(10)),
+    ))
+    .unwrap();
     for c in (0..4u16).filter(|_| heavy) {
-        topology.connect(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(30), c + 1),
             Edge::Direct(out(103 + u64::from(c) * 10)),
-        );
+        ))
+        .unwrap();
     }
-    ed.spec_mut().topology.set_outputs([out(30)]);
+    ed.wire_outputs([out(30)]).unwrap();
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),

@@ -173,7 +173,7 @@ impl<F: Float> Editor<F> {
     /// Refuses a source that is not in the spec now, uncommitted edits
     /// included: a typo'd key or a port past a node's width would otherwise
     /// record silence for good.
-    fn check_sources(&self, sources: &[PortSource]) -> Result<(), MissingSource> {
+    pub(super) fn check_sources(&self, sources: &[PortSource]) -> Result<(), MissingSource> {
         let t = &self.spec.topology;
         for &source in sources {
             match source {

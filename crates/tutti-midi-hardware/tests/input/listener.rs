@@ -74,10 +74,13 @@ impl Listener {
     pub(crate) fn attach(&mut self, inlet: EventInletNode) {
         let key = NodeKey(100);
         self.rig.editor.insert(key, "inlet", inlet);
-        self.rig.editor.spec_mut().connect_events(
-            EventInputPort::new(self.entry, 0),
-            EventEdge::Direct(EventOutputPort::new(key, 0)),
-        );
+        self.rig
+            .editor
+            .connect_events(
+                EventInputPort::new(self.entry, 0),
+                EventEdge::Direct(EventOutputPort::new(key, 0)),
+            )
+            .unwrap();
         self.rig.commit();
     }
 

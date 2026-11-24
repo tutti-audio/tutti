@@ -9,11 +9,12 @@
 //! in `f64`, to within `f32` rounding.
 
 use tutti_graph::testing as common;
+use tutti_graph::testing::feed_output;
 
 use common::{Kind, TestNode, prepare};
 use tutti_graph::{
-    Edge, EdgeFade, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSink, PortSource,
-    TransportPosition, Unforkable,
+    EdgeFade, EdgeId, Editor, Executor, NodeKey, OutputPort, PortSource, TransportPosition,
+    Unforkable,
 };
 use tutti_units::Gain;
 
@@ -35,10 +36,7 @@ fn out(node: u64) -> PortSource {
 }
 
 fn output_edge(from: u64) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Output(0),
-        from: Edge::Direct(out(from)),
-    }
+    EdgeId::into_output(0, out(from))
 }
 
 /// Constants `values` (keys `1..`) summed at output 0.
@@ -55,7 +53,7 @@ impl Rig {
             let k = Kind::Const { value, width: 1 };
             ed.insert(key(n), "const", Unforkable(TestNode::new(k)));
         }
-        ed.spec_mut().topology.outputs = vec![(1..=values.len() as u64).map(out).collect()];
+        feed_output(&mut ed, 0, (1..=values.len() as u64).map(out));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -234,7 +232,7 @@ fn parallel_equals_one_participant_for_a_graph_mid_fade() {
             let k = Kind::Const { value, width: 1 };
             ed.insert(key(i as u64 + 1), "const", Unforkable(TestNode::new(k)));
         }
-        ed.spec_mut().topology.outputs = vec![(1..=8).map(out).collect()];
+        feed_output(&mut ed, 0, (1..=8).map(out));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

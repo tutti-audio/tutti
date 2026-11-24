@@ -7,6 +7,7 @@ use crate::harness::bus;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_fixtures::{cycle_blocks, midi};
+use tutti_graph::EdgeId;
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, ParamSet, TransportPosition};
 use tutti_music::{NoteDuration, NoteValue};
@@ -110,16 +111,17 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         let (l, p) = (NodeKey(10 + k as u64), NodeKey(20 + k as u64));
         ed.insert(l, "lane", lane);
         ed.insert(p, "probe", Unforkable(ParamProbe));
-        ed.spec_mut().connect_param(
+        ed.connect_param(
             ParamIn {
                 node: p,
                 param: UnitParam::Cutoff.into(),
             },
             EventOutputPort::new(l, 0),
-        );
+        )
+        .unwrap();
         outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -409,13 +411,15 @@ fn lanes_200(
     for j in 0..25u64 {
         ed.insert(NodeKey(1000 + j), "probe", Unforkable(Probe8));
         for p in 0..8 {
-            ed.spec_mut()
-                .topology
-                .outputs
-                .push(vec![PortSource::Node(OutputPort::new(
-                    NodeKey(1000 + j),
-                    p,
-                ))]);
+            {
+                let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+                ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+                ed.connect_edge(EdgeId::into_output(
+                    channel,
+                    PortSource::Node(OutputPort::new(NodeKey(1000 + j), p)),
+                ))
+                .unwrap()
+            };
         }
     }
     for k in 0..200 {
@@ -428,8 +432,8 @@ fn lanes_200(
         let (lane, knob) = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
         let key = NodeKey(2000 + k as u64);
         controls.push((ed.insert(key, "lane", lane).controls, knob));
-        ed.spec_mut()
-            .connect_param(at(k), EventOutputPort::new(key, 0));
+        ed.connect_param(at(k), EventOutputPort::new(key, 0))
+            .unwrap();
     }
     ed.commit().expect("commits");
     (ed, exec, controls)
@@ -702,10 +706,15 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
     };
     for k in 0..2 * CHAINS {
         ed.insert(probe(k), "probe", ForkByClone(ParamProbe));
-        ed.spec_mut()
-            .topology
-            .outputs
-            .push(vec![PortSource::Node(OutputPort::new(probe(k), 0))]);
+        {
+            let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+            ed.connect_edge(EdgeId::into_output(
+                channel,
+                PortSource::Node(OutputPort::new(probe(k), 0)),
+            ))
+            .unwrap()
+        };
         ed.set_param_range(cutoff(k), ParamRange::of(0.0, 1.0))
             .expect("a probe");
     }
@@ -730,10 +739,11 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
             ));
             ed.insert(node, "follower", ForkByClone(follower));
             for port in 0..2 {
-                ed.spec_mut().topology.edges.insert(
+                ed.connect_edge(EdgeId::into_port(
                     InputPort::new(node, port),
-                    vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
-                );
+                    Edge::Direct(PortSource::Node(OutputPort::new(src, port))),
+                ))
+                .unwrap();
             }
         } else {
             ed.insert(
@@ -754,10 +764,11 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
                 "envelope",
                 ForkByClone(NoteEnvelopeNode::from(NoteEnvelopeConfig::new(id, adsr))),
             );
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 EventInputPort::new(node, 0),
                 EventEdge::Direct(EventOutputPort::new(src, 0)),
-            );
+            )
+            .unwrap();
         }
         let input = InputLayer {
             id: LayerId(1),
@@ -781,12 +792,13 @@ fn signal_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         );
         let lane_key = NodeKey(6000 + k as u64);
         ed.insert(lane_key, "lane", lane);
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(lane_key, 0),
             EventEdge::Direct(EventOutputPort::new(node, 0)),
-        );
-        ed.spec_mut()
-            .connect_param(cutoff(k), EventOutputPort::new(lane_key, 0));
+        )
+        .unwrap();
+        ed.connect_param(cutoff(k), EventOutputPort::new(lane_key, 0))
+            .unwrap();
     }
     ed.commit().expect("commits");
     (ed, exec)
@@ -1004,12 +1016,13 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
             ),
         )
         .controls;
-    let topology = &mut ed.spec_mut().topology;
-    topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(filter, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(saw, 0)))],
-    );
-    topology.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))]);
+        Edge::Direct(PortSource::Node(OutputPort::new(saw, 0))),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
+        .unwrap();
     ed.commit().expect("commits");
     let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
     let mut out = vec![0.0f32; 128];

@@ -2049,9 +2049,8 @@ mod tests {
         use tutti_graph::NodeKey;
         use tutti_graph::{OutputPort, PortSource};
         ed.insert(NodeKey(1), "ramp", tutti_graph::Unforkable(Ramp(width)));
-        ed.spec_mut().topology.set_outputs(
-            (0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))),
-        );
+        ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+            .unwrap();
         ed.commit().expect("commits");
     }
 
@@ -2066,7 +2065,7 @@ mod tests {
     ) -> Result<MainOutputId, tutti_graph::MainOutputError> {
         let id = ed.spec().main_output_id.next();
         control.publish_main_output(id, main_output, device)?;
-        ed.spec_mut().main_output_id = id;
+        ed.declare_main_output(ed.spec().main_output, id);
         ed.commit().expect("commits");
         Ok(id)
     }
@@ -2363,7 +2362,7 @@ mod tests {
                 eight,
             )
             .unwrap();
-        ed.spec_mut().main_output_id = id;
+        ed.declare_main_output(ed.spec().main_output, id);
         ed.commit().unwrap();
         assert_eq!(
             first_frame(&engine, 8),
@@ -2470,7 +2469,7 @@ mod tests {
                 let id = ed.spec().main_output_id.next();
                 match control.publish_main_output(id, main_output, six) {
                     Ok(()) => {
-                        ed.spec_mut().main_output_id = id;
+                        ed.declare_main_output(ed.spec().main_output, id);
                         // The queue can be full while the callback lags.
                         while ed.commit().is_err() {
                             std::thread::yield_now();
@@ -2551,7 +2550,7 @@ mod tests {
         );
         // The newest pending main output is committed and rendered: the older ones
         // are retired and the room is back.
-        ed.spec_mut().main_output_id = id;
+        ed.declare_main_output(ed.spec().main_output, id);
         ed.commit().unwrap();
         let _ = first_frame(&engine, 2);
         let _ = control.reclaim();
@@ -2592,7 +2591,7 @@ mod tests {
         rewire(&mut ed, 2);
         let _ = first_frame(&engine, 2);
         let unheard = MainOutputId::GENESIS.next();
-        ed.spec_mut().main_output_id = unheard;
+        ed.declare_main_output(ed.spec().main_output, unheard);
         assert_eq!(
             ed.commit(),
             Err(CommitError::MainOutputNotPublished {
@@ -3021,9 +3020,8 @@ mod tests {
             MaxBlock::of(Samples::new(8)),
         ));
         ed.insert(NodeKey(1), "probe", tutti_graph::Unforkable(TempoProbe));
-        ed.spec_mut()
-            .topology
-            .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))));
+        ed.wire_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c))))
+            .unwrap();
         ed.commit().expect("commits");
         let engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
         transport.settings().set_tempo(tutti_units::Bpm::of(120.0));
@@ -3041,9 +3039,8 @@ mod tests {
     fn feed(ed: &mut Editor, width: usize, channel: usize) {
         use tutti_graph::{NodeKey, OutputPort, PortSource};
         let dc = PortSource::Node(OutputPort::new(NodeKey(1), 0));
-        ed.spec_mut()
-            .topology
-            .set_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }));
+        ed.wire_outputs((0..width).map(|c| if c == channel { dc } else { PortSource::Zero }))
+            .unwrap();
     }
 
     /// The smootherstep `s(x) = x³ (6x² − 15x + 10)` the equal-amplitude
@@ -3085,7 +3082,7 @@ mod tests {
         control
             .publish_main_output(id, main_output, ChannelLayout::STEREO)
             .expect("places");
-        ed.spec_mut().main_output_id = id;
+        ed.declare_main_output(ed.spec().main_output, id);
         feed(ed, width, channel);
         ed.commit().expect("commits");
     }
@@ -3486,7 +3483,7 @@ mod tests {
         let mut heard: Vec<f32> = block_with(&engine, 2, || {});
         let dc =
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(tutti_graph::NodeKey(1), 0));
-        ed.spec_mut().topology.set_outputs([dc, dc]);
+        ed.wire_outputs([dc, dc]).unwrap();
         ed.commit().expect("commits");
         heard.extend((0..3).flat_map(|_| block_with(&engine, 2, || {})));
         for (k, frame) in frames_of(&heard, 2).enumerate() {
@@ -3567,7 +3564,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.spec_mut().topology.set_outputs([count, late]);
+        ed.wire_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3581,8 +3578,8 @@ mod tests {
         control
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
-        ed.spec_mut().main_output_id = id;
-        ed.spec_mut().topology.set_outputs([late, count]);
+        ed.declare_main_output(ed.spec().main_output, id);
+        ed.wire_outputs([late, count]).unwrap();
         ed.commit().expect("commits");
         let heard: Vec<f32> = (0..3).flat_map(|_| block_with(&engine, 2, || {})).collect();
         // The counter's value at absolute frame `t` is `t + 1`; delayed by 16
@@ -3623,7 +3620,7 @@ mod tests {
         ed.insert(NodeKey(2), "late", tutti_graph::Unforkable(Late));
         let count = PortSource::Node(OutputPort::new(NodeKey(1), 0));
         let late = PortSource::Node(OutputPort::new(NodeKey(2), 0));
-        ed.spec_mut().topology.set_outputs([count, late]);
+        ed.wire_outputs([count, late]).unwrap();
         ed.commit().expect("commits");
         let engine =
             Engine::new(&Transport::new(SampleRate::SR_48K), &mut ed, exec).expect("within limits");
@@ -3640,10 +3637,8 @@ mod tests {
         control
             .publish_main_output(id, None, ChannelLayout::STEREO)
             .unwrap();
-        ed.spec_mut().main_output_id = id;
-        ed.spec_mut()
-            .topology
-            .set_outputs([count, PortSource::Zero]);
+        ed.declare_main_output(ed.spec().main_output, id);
+        ed.wire_outputs([count, PortSource::Zero]).unwrap();
         ed.commit().expect("commits");
         assert_eq!(
             ed.base().map(|p| p.total_latency().samples()),

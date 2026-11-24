@@ -51,10 +51,7 @@ fn amp(v: f32) -> Gain {
 
 /// Edge `node → (sink, 0)` of a pass-through sink.
 fn port_edge(sink: u64, from: u64) -> EdgeId {
-    EdgeId {
-        sink: PortSink::Port(at(sink, 0)),
-        from: direct(from),
-    }
+    EdgeId::into_port(at(sink, 0), direct(from))
 }
 
 /// Edge `node → output 0`.
@@ -561,7 +558,8 @@ impl Rig {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
         ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
-        ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
+        ed.wire_outputs([out(1)]).unwrap();
+        ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
         ed.set_edge_gain(output_edge(1), amp(base))
             .expect("the edge exists");
         ed.commit().expect("commits");
@@ -629,7 +627,7 @@ fn set_edge_gain_leaves_the_plan_untouched_and_lands_next_block() {
     rig.exec.apply_pending();
     let got = rig.block();
     assert_eq!(got[0], (0.0 + 0.25 * 1.0) + 3.0 * 2.0, "its first block");
-    rig.ed.spec_mut().clear_edge_gain(output_edge(2));
+    rig.ed.clear_edge_gain(output_edge(2));
     rig.ed.commit().expect("commits");
     assert!(!Arc::ptr_eq(&with_both, &rig.plan()), "a removed one too");
 }
@@ -650,7 +648,7 @@ fn a_gain_set_before_a_recompile_keeps_its_base() {
 
     rig.ed
         .insert(key(3), "three", Unforkable(TestNode::new(dc(4.0))));
-    rig.ed.spec_mut().topology.outputs[0].push(out(3));
+    rig.ed.connect_edge(output_edge(3)).unwrap();
     rig.ed.commit().expect("commits");
     rig.exec.apply_pending();
     assert!(!Arc::ptr_eq(&plan, &rig.plan()), "a recompile");
@@ -764,8 +762,8 @@ fn removing_an_edge_removes_its_entry() {
         .set_edge_gain(output_edge(2), amp(1.0))
         .expect("an edge");
     rig.ed.remove(key(1));
-    assert!(rig.ed.spec_mut().gains.contains_key(&output_edge(2)));
-    assert!(!rig.ed.spec_mut().gains.contains_key(&output_edge(1)));
+    assert!(rig.ed.spec().gains.contains_key(&output_edge(2)));
+    assert!(!rig.ed.spec().gains.contains_key(&output_edge(1)));
     rig.ed.commit().expect("commits without the stale entry");
 }
 
@@ -784,7 +782,7 @@ fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
     let old = rig.ed.edge_gain_range_cell(id).expect("a cell");
     assert_eq!(old.current(), held);
 
-    rig.ed.spec_mut().clear_edge_gain(id);
+    rig.ed.clear_edge_gain(id);
     assert!(rig.ed.edge_gain_range_cell(id).is_none(), "dropped");
     rig.ed.set_edge_gain(id, amp(0.25)).expect("an edge");
     let new = rig.ed.edge_gain_range_cell(id).expect("a cell");
@@ -800,26 +798,6 @@ fn a_redeclared_entry_is_read_by_the_audio_at_its_new_base() {
         got.iter().all(|&x| x == (0.0 + 0.25 * 1.0) + 2.0),
         "the audio reads the new base"
     );
-}
-
-/// An entry written raw through `spec_mut` on a connected edge is a lane at
-/// the editor's values, unity and the default range: a commit makes its cell
-/// and renders the plain sum, never a panic.
-#[test]
-fn a_raw_entry_commits_as_a_unity_lane() {
-    let mut rig = Rig::new(0.5);
-    let id = output_edge(2);
-    rig.ed.spec_mut().set_edge_gain(id, EdgeGain::default());
-    rig.ed.commit().expect("commits");
-    rig.exec.apply_pending();
-    rig.block();
-    let got = rig.block();
-    assert!(
-        got.iter().all(|&x| x == (0.0 + 0.5 * 1.0) + 2.0 * 1.0),
-        "the raw lane weighs unity"
-    );
-    assert_eq!(rig.ed.edge_gain(id), Some(amp(1.0)));
-    assert_eq!(rig.ed.edge_gain_range(id), Some(EdgeGain::DEFAULT_RANGE));
 }
 
 // ---------------------------------------------------------------------------
@@ -898,11 +876,12 @@ impl Mixer {
             }),
         );
         for k in 1..=n {
-            ed.spec_mut().topology.connect(at(n + 1, 0), direct(k));
+            ed.connect_edge(EdgeId::into_port(at(n + 1, 0), direct(k)))
+                .unwrap();
             ed.set_edge_gain(port_edge(n + 1, k), amp(weights[k as usize - 1]))
                 .expect("the edge exists");
         }
-        ed.spec_mut().topology.set_outputs(vec![out(n + 1)]);
+        ed.wire_outputs(vec![out(n + 1)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1072,7 +1051,8 @@ fn a_fork_carries_the_edge_gains() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.insert(key(2), "b", ForkByClone(Level(2.0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1), out(2)]];
+    ed.wire_outputs([out(1)]).unwrap();
+    ed.connect_edge(EdgeId::into_output(0, out(2))).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.set_edge_gain(output_edge(2), amp(-2.0))
         .expect("an edge");
@@ -1110,7 +1090,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
-    ed.spec_mut().topology.outputs = vec![vec![out(1)]];
+    ed.wire_outputs([out(1)]).unwrap();
     ed.set_edge_gain(output_edge(1), amp(0.5)).expect("an edge");
     ed.commit().expect("commits");
     let knob = ed.edge_gain_cell(output_edge(1)).expect("a cell once sent");
