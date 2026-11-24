@@ -300,7 +300,6 @@ impl<F: Float> Executor<F> {
                 inject,
                 has_inject,
                 has_due,
-                overlay: _,
                 par,
             } = state;
             // Slices, not `&mut Vec`s: a slice's pointer and length are locals

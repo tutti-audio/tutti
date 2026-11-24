@@ -433,8 +433,10 @@ tutti_rt::id! {
 pub enum EventTapPort {
     /// An event output: what the port wrote.
     Out(EventOutputPort),
-    /// An event input: what the node reads there, every source merged in the
-    /// order the node is handed them.
+    /// An event input: what the node is handed there this block, every source
+    /// merged in the order the node is handed them, the flushed events, the
+    /// closes of cut edges and the scheduled commands with them (a bypassed
+    /// node is handed only the closes it owes).
     In(EventInputPort),
 }
 
