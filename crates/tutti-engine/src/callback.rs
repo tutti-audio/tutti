@@ -30,9 +30,10 @@ use tutti_buffers::{Float, Interleaved, InterleavedMut, Sample, convert};
 use tutti_platform::with_no_denormals;
 use tutti_units::Samples;
 
-use crate::Engine;
+use crate::callback_frames::CallbackFrames;
 use crate::faults::StreamFaults;
 use crate::latency::StreamLatency;
+use crate::{Engine, OutputQuantum};
 
 /// Maximum frames per driver callback buffer.
 ///
@@ -41,7 +42,7 @@ use crate::latency::StreamLatency;
 /// callback is written silent, and counted in
 /// [`BlockCounts::truncated`](crate::BlockCounts::truncated), rather than
 /// reallocating on the audio thread. A stream is opened at an
-/// [`OutputQuantum`](crate::OutputQuantum), which is never longer.
+/// [`OutputQuantum`], which is never longer.
 pub const MAX_FRAMES: usize = 8192;
 
 /// Everything the output callback reads: the [`Engine`].
@@ -121,7 +122,10 @@ pub struct OutputBlock<F: Float = f32> {
     /// derived ONCE here — never inside the per-frame loops.
     channels: usize,
     buffer: Vec<F>,
-    last_rendered_frames: usize,
+    /// The frames the last render produced ([`callback_frames`](Self::callback_frames)).
+    last_rendered_frames: Option<Samples>,
+    /// Where each callback's size goes for the control side to read.
+    frames: Arc<CallbackFrames>,
     /// Where each callback's reported delay goes ([`render_delayed_with`](Self::render_delayed_with)).
     latency: Arc<StreamLatency>,
     /// Where a panic of the render is recorded.
@@ -168,7 +172,8 @@ impl<F: Float> OutputBlock<F> {
             layout,
             channels,
             buffer: vec![F::ZERO; layout.interleaved_len(Samples::new(MAX_FRAMES))],
-            last_rendered_frames: 0,
+            last_rendered_frames: None,
+            frames: Arc::new(CallbackFrames::new()),
             latency: Arc::new(StreamLatency::new()),
             faults: Arc::new(StreamFaults::new()),
             failed: false,
@@ -191,6 +196,14 @@ impl<F: Float> OutputBlock<F> {
         self
     }
 
+    /// This block recording each callback's frame count into `frames` instead
+    /// of a cell of its own: the stream's, which outlives the block.
+    #[must_use]
+    pub(crate) fn with_callback_frames(mut self, frames: Arc<CallbackFrames>) -> Self {
+        self.frames = frames;
+        self
+    }
+
     /// The device width this block was sized for.
     pub fn layout(&self) -> ChannelLayout {
         self.layout
@@ -202,8 +215,8 @@ impl<F: Float> OutputBlock<F> {
     }
 
     /// Frames the last render actually produced: the callback's, at most
-    /// [`MAX_FRAMES`].
-    pub fn last_rendered_frames(&self) -> usize {
+    /// [`MAX_FRAMES`]; `None` before the first callback.
+    pub fn callback_frames(&self) -> Option<Samples> {
         self.last_rendered_frames
     }
 
@@ -341,7 +354,11 @@ impl<F: Float> OutputBlock<F> {
         if frames < offered {
             self.state.engine.count_truncated();
         }
-        self.last_rendered_frames = frames.get();
+        self.last_rendered_frames = Some(frames);
+        // A callback of no frames is not a size.
+        if let Some(size) = OutputQuantum::new(frames.get()) {
+            self.frames.record(size);
+        }
 
         let mix = &mut self.buffer[..self.layout.interleaved_len(frames)];
         // Zero before rendering: the previous callback's contents are not

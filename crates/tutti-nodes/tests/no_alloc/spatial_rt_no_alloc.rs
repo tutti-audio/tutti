@@ -4,6 +4,7 @@
 //! The gate lives in the crate that owns the panners: `RtAllocCheck`
 //! is a global allocator, which only a test binary of that crate may do.
 
+use crate::harness::Gate;
 use tutti_buffers::{AmbisonicFormat, AmbisonicOrder, Bed, ChannelTopology, MaxBlock};
 use tutti_graph::ParamNode;
 use tutti_graph::contract::{BlockRig, Direct};
@@ -23,26 +24,11 @@ use tutti_units::{Azimuth, UnitParam};
 /// The inputs carry signal, and the gate checks it came out, so a gate over a node that renders nothing cannot pass
 /// having walked no DSP.
 fn gate<N: IntoNode>(node: N, warm: usize) {
-    let (mut rig, _controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for c in rig.inputs_mut().iter_mut() {
-        let c = c.into_samples_mut();
-        c.fill(0.5);
-    }
-    for _ in 0..warm {
-        rig.block();
-    }
-    assert!(
-        rig.output()
-            .plane(0)
-            .samples()
-            .iter()
-            .chain(rig.output().plane(1).samples())
-            .any(|s| s.abs() > 1e-6),
-        "the node rendered silence; the gate would walk no DSP"
-    );
-    for _ in 0..256 {
-        rig.block();
-    }
+    Gate::new(|_, _| 0.5)
+        .warm(warm)
+        .blocks(256)
+        .any_of(2)
+        .run("panner", node, |_, _| {});
 }
 
 #[test]
@@ -450,39 +436,21 @@ fn hrtf<F: tutti_dsp::FftFloat>(
 /// block: 16 warm-up blocks, then 256 under `RtScope`. The inputs carry a
 /// non-trivial signal and the output is checked to sound.
 fn gate_moving<N: IntoNode<Controls = tutti_graph::ParamSet>>(node: N) {
-    let (mut rig, controls) = BlockRig::new(node, SampleRate::SR_48K, 64);
-    for (c, plane) in rig.inputs_mut().iter_mut().enumerate() {
-        for (i, x) in plane.into_samples_mut().iter_mut().enumerate() {
-            *x = 0.1 * (c as f32 + 1.0) * (((i * 7 + c) % 13) as f32 - 6.0);
-        }
-    }
-    let aim = |i: usize| {
-        controls.set(
-            UnitParam::Azimuth,
-            if i.is_multiple_of(2) { -150.0 } else { 120.0 },
-        );
-        controls.set(
-            UnitParam::Elevation,
-            if i.is_multiple_of(3) { 60.0 } else { -20.0 },
-        );
-    };
-    for i in 0..16 {
-        aim(i);
-        rig.block();
-    }
-    assert!(
-        (0..rig.output().channels()).any(|c| rig
-            .output()
-            .plane(c)
-            .samples()
-            .iter()
-            .any(|s| s.abs() > 1e-6)),
-        "the node rendered silence; the gate would walk no DSP"
-    );
-    for i in 0..256 {
-        aim(i);
-        rig.block();
-    }
+    Gate::new(|c, i| 0.1 * (c as f32 + 1.0) * (((i * 7 + c) % 13) as f32 - 6.0))
+        .warm(16)
+        .blocks(256)
+        .any_of(usize::MAX)
+        .warm_moves()
+        .run("moving panner", node, |controls, i| {
+            controls.set(
+                UnitParam::Azimuth,
+                if i.is_multiple_of(2) { -150.0 } else { 120.0 },
+            );
+            controls.set(
+                UnitParam::Elevation,
+                if i.is_multiple_of(3) { 60.0 } else { -20.0 },
+            );
+        });
 }
 
 #[test]

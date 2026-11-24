@@ -23,15 +23,7 @@ fn flat() -> Adsr {
 }
 
 fn bank<F: SynthFloat>(osc: OscillatorType, filter: FilterType, env: Adsr) -> VoiceBank<F> {
-    VoiceBank::new(
-        osc,
-        &filter,
-        LadderSaturation::PerStage,
-        &env,
-        sr(),
-        16,
-        UnisonVoices::ONE,
-    )
+    VoiceBank::new(osc, &filter, &env, sr(), 16, UnisonVoices::ONE)
 }
 
 /// Start `lane` sounding at `freq` with unity gains, as a note-on would.
@@ -212,6 +204,7 @@ fn a_voice_renders_the_same_in_any_lane_and_lanes_sum() {
     let filter = FilterType::Moog {
         cutoff: Hz::new(1_500.0),
         resonance: Resonance::new(0.6),
+        saturation: LadderSaturation::PerStage,
     };
     let solo = |lane: usize, freq: Hz| {
         let mut b = bank::<f32>(OscillatorType::Saw, filter, flat());
@@ -387,6 +380,7 @@ fn ladder_gain_matches_the_closed_form<F: SynthFloat>() {
     let filter = FilterType::Moog {
         cutoff: Hz::new(fc),
         resonance: Resonance::new(res),
+        saturation: LadderSaturation::PerStage,
     };
     let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
     b.set_filter(0, 1, Hz::new(fc), Resonance::new(res));
@@ -432,6 +426,7 @@ fn lane_per_stage_ladder_is_the_scalar_solve<F: SynthFloat + SimdLanes>() {
     let filter = FilterType::Moog {
         cutoff: Hz::new(1_200.0),
         resonance: Resonance::new(0.8),
+        saturation: LadderSaturation::PerStage,
     };
     let mut b = bank::<F>(OscillatorType::Sine, filter, flat());
     b.set_filter(0, 1, Hz::new(1_200.0), Resonance::new(0.8));
@@ -472,18 +467,18 @@ fn lane_per_stage_ladder_is_the_scalar_solve<F: SynthFloat + SimdLanes>() {
 /// of the unit peak applied once by the input model and four times by the per-stage model.
 #[test]
 fn a_bank_peaks_at_the_saturation_of_its_model() {
-    let filter = FilterType::Moog {
-        cutoff: Hz::new(18_000.0),
-        resonance: Resonance::NONE,
-    };
     for (saturation, times) in [
         (LadderSaturation::Input, 1),
         (LadderSaturation::PerStage, 4),
     ] {
+        let filter = FilterType::Moog {
+            cutoff: Hz::new(18_000.0),
+            resonance: Resonance::NONE,
+            saturation,
+        };
         let mut b = VoiceBank::<f64>::new(
             OscillatorType::Sine,
             &filter,
-            saturation,
             &flat(),
             sr(),
             16,
@@ -685,7 +680,6 @@ fn every_lane_starts_on_its_own_noise_seed() {
     let bank = VoiceBank::<f32>::new(
         OscillatorType::Noise,
         &FilterType::None,
-        LadderSaturation::PerStage,
         &flat(),
         sr(),
         16,
@@ -704,7 +698,6 @@ fn extreme_bank<F: SynthFloat>(rate: SampleRate, env: Adsr) -> VoiceBank<F> {
     VoiceBank::new(
         OscillatorType::Sine,
         &FilterType::None,
-        LadderSaturation::PerStage,
         &env,
         rate,
         1,
@@ -898,6 +891,7 @@ fn lanes_sum_and_do_not_touch_each_other_at_f64() {
     let filter = FilterType::Moog {
         cutoff: Hz::new(1_500.0),
         resonance: Resonance::new(0.6),
+        saturation: LadderSaturation::PerStage,
     };
     let solo = |lane: usize, freq: Hz| {
         let mut b = bank::<f64>(OscillatorType::Saw, filter, flat());
@@ -936,7 +930,6 @@ fn every_lane_of_an_f64_bank_starts_on_its_own_noise_seed() {
     let bank = VoiceBank::<f64>::new(
         OscillatorType::Noise,
         &FilterType::None,
-        LadderSaturation::PerStage,
         &flat(),
         sr(),
         16,

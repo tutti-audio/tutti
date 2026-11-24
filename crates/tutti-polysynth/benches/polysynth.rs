@@ -152,12 +152,13 @@ fn bench_oscillator(c: &mut Criterion) {
 fn bench_filter(c: &mut Criterion) {
     let mut group = c.benchmark_group("voices/filter");
     group.throughput(Throughput::Elements(BLOCK as u64));
-    let moog = FilterType::Moog {
+    let moog = |saturation| FilterType::Moog {
         cutoff: Hz::new(2_000.0),
         resonance: Resonance::new(0.3),
+        saturation,
     };
-    for (name, filter, ladder_saturation) in [
-        ("none", FilterType::None, LadderSaturation::PerStage),
+    for (name, filter) in [
+        ("none", FilterType::None),
         (
             "svf-lowpass",
             FilterType::Svf {
@@ -165,15 +166,11 @@ fn bench_filter(c: &mut Criterion) {
                 q: tutti_polysynth::SvfQ::BUTTERWORTH,
                 mode: SvfMode::Lowpass,
             },
-            LadderSaturation::PerStage,
         ),
-        ("moog-ladder", moog, LadderSaturation::PerStage),
-        ("moog-ladder-input", moog, LadderSaturation::Input),
+        ("moog-ladder", moog(LadderSaturation::PerStage)),
+        ("moog-ladder-input", moog(LadderSaturation::Input)),
     ] {
-        let mut synth = held(
-            config().filter(filter).ladder_saturation(ladder_saturation),
-            16,
-        );
+        let mut synth = held(config().filter(filter), 16);
         group.bench_function(name, |b| b.iter(|| drive(&mut synth)));
     }
     group.finish();

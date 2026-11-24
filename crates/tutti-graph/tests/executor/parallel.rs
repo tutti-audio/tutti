@@ -19,6 +19,7 @@ use tutti_buffers::MaxBlock;
 
 use common::{Kind, TestNode, WORKERS, bits, test_pool};
 use tutti_buffers::ChannelLayout;
+use tutti_fixtures::{cycle_blocks, fixed_blocks};
 use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor, ForkCause,
@@ -322,21 +323,14 @@ fn prepare(max: usize) -> Prepare {
 /// one that changes every block.
 fn schedules(max: usize) -> Vec<Vec<usize>> {
     let total = 3_000;
-    let fixed = |n: usize| {
-        let mut v = vec![n; total / n];
-        v.push(total % n.max(1));
-        v.retain(|&n| n > 0);
-        v
-    };
-    let mut ragged = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, max, 7, 64, max - 1, 33, 2][i % 7].min(total - sum);
-        ragged.push(n);
-        sum += n;
-        i += 1;
-    }
-    vec![fixed(1), fixed(7), fixed(64), fixed(max), ragged]
+    let ragged = cycle_blocks(&[1, max, 7, 64, max - 1, 33, 2], total);
+    vec![
+        fixed_blocks(1, total),
+        fixed_blocks(7, total),
+        fixed_blocks(64, total),
+        fixed_blocks(max, total),
+        ragged,
+    ]
 }
 
 /// Render `blocks` through `exec` (drained back into `ed`), with commands

@@ -9,6 +9,7 @@ fn voice(lfo_rate: Option<Hz>) -> SynthVoice {
         .filter(FilterType::Moog {
             cutoff: BASE,
             resonance: Resonance::NONE,
+            saturation: tutti_dsp::LadderSaturation::PerStage,
         })
         .filter_mod(match lfo_rate {
             Some(rate) => filter_mod.lfo_rate(rate),

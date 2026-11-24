@@ -116,6 +116,12 @@ pub enum FilterType {
         /// Ladder feedback. Musically 0.0 (no emphasis) to ~1.0, where the
         /// ladder self-oscillates; CC71 sweeps this up to a ceiling of 0.95.
         resonance: Resonance,
+        /// Where the ladder's `tanh` saturators sit: the cheap
+        /// [`Input`](LadderSaturation::Input) model or the
+        /// [`PerStage`](LadderSaturation::PerStage) one, which costs several times more per
+        /// sample and saturates the way `LadderFilterNode` does. Both run the lanes'
+        /// approximate `tanh` (see [`LadderSaturation`]). Fixed for the life of the synth.
+        saturation: LadderSaturation,
     },
     /// A state-variable filter, 12 dB/octave, tapped per [`SvfMode`].
     Svf {
@@ -267,7 +273,6 @@ pub struct SynthConfig {
     pub(crate) voice_mode: VoiceMode,
     pub(crate) oscillator: OscillatorType,
     pub(crate) filter: FilterType,
-    pub(crate) ladder_saturation: LadderSaturation,
     pub(crate) envelope: Adsr,
     pub(crate) portamento: Option<PortamentoConfig>,
     pub(crate) unison: Option<UnisonConfig>,
@@ -295,7 +300,6 @@ impl SynthConfig {
             voice_mode: VoiceMode::Poly,
             oscillator: OscillatorType::default(),
             filter: FilterType::default(),
-            ladder_saturation: LadderSaturation::PerStage,
             envelope: Adsr::default(),
             portamento: None,
             unison: None,
@@ -340,17 +344,6 @@ impl SynthConfig {
     #[must_use]
     pub fn filter(mut self, filter: FilterType) -> Self {
         self.filter = filter;
-        self
-    }
-
-    /// Where the [`Moog`](FilterType::Moog) ladder's `tanh` saturators sit: the cheap
-    /// [`Input`](LadderSaturation::Input) model or the [`PerStage`](LadderSaturation::PerStage)
-    /// one, which costs several times more per sample and saturates the way
-    /// `LadderFilterNode` does. Default `PerStage`. Construction-only; no other filter reads it.
-    /// Both run the lanes' approximate `tanh` (see [`LadderSaturation`]).
-    #[must_use]
-    pub fn ladder_saturation(mut self, ladder_saturation: LadderSaturation) -> Self {
-        self.ladder_saturation = ladder_saturation;
         self
     }
 
