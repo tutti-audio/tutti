@@ -207,7 +207,7 @@ mod tests {
     /// The damping is the one control the tail does not read.
     #[test]
     fn only_the_damping_is_flagged_no_ring() {
-        let set = FreeverbSet { cells: true };
+        let set = FreeverbSet;
         assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::Damping)]);
     }
 }
