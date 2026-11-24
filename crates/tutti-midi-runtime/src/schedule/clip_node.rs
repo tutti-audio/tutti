@@ -41,10 +41,15 @@
 //! goes before the chase and the chase before the events, so a receiver ends
 //! on the clip's own state. A loop wrap or a seek does not send it: the
 //! receiver was configured when the run started. A header message the port
-//! has no room for is refused and counted with every other refused event
-//! (`Editor::take_event_losses`), the way a chase is cut: the messages that
-//! fit land, in order, and each one past them is lost whole; a message of
-//! several packets can lose its tail. Nothing waits for room.
+//! has no room for is lost, counted with every other refused event
+//! (`Editor::take_event_losses`), and never waited on. A header message goes
+//! out whole or not at all: a System Exclusive run (a Start, its Continues and
+//! its End, or a run that never ends, which is one message to its last
+//! packet) is sent only if the port has room for every packet. The header stops
+//! at the first message that does not fit, and each packet from it on is
+//! counted lost, so the receiver holds a prefix of the header in file order,
+//! never a message without its end nor a later message that leans on a lost
+//! earlier one.
 //!
 //! A key (group, channel, note number) is held or not (the MIDI convention),
 //! by one note at a time, as a DAW plays notes of one key that overlap (M2-104
@@ -88,7 +93,7 @@ use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{AtomicRequestFlags, Publisher, Reader, RequestFlag};
 use tutti_ump::{
     Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, NoteNumber, NoteVelocity, U7, Ump,
-    Voice1, Voice2,
+    Voice1, Voice2, spans,
 };
 use tutti_units::{Beat, BeatDuration, FramesPerBeat};
 
@@ -151,9 +156,11 @@ pub struct ClipEvents {
     /// [`notes`](Self::notes) reads it.
     ends: Box<[Option<u32>]>,
     /// The header: the messages the node sends where the clip starts, in file
-    /// order, each at its own beat on the header's clock (the beats before the
-    /// clip's own beat 0; the node ignores them and sends all at once).
-    header: Box<[TimedMidiEvent]>,
+    /// order, each message the packets of one packet or of one System
+    /// Exclusive run. Each packet is at its own time on the header's clock,
+    /// counted from 0 at the header's start; the node ignores the times and
+    /// sends all at once.
+    header: Box<[Box<[TimedMidiEvent]>]>,
 }
 
 /// A note of a clip: a note-on and the note-off that ends it, if one does
@@ -190,14 +197,23 @@ impl ClipEvents {
         }
     }
 
-    /// The clip with `messages` as its header: sent where the clip starts (see
+    /// The clip with `packets` as its header: sent where the clip starts (see
     /// the module docs), not events of the clip, so [`len`](Self::len),
-    /// [`notes`](Self::notes) and the chase do not read them. The messages
-    /// keep the order given, each at its own beat on the header's clock, and
-    /// are translated to MIDI 2.0 as the clip's events are. Control thread.
+    /// [`notes`](Self::notes) and the chase do not read them. The packets
+    /// keep the order given and are translated to MIDI 2.0 as the clip's
+    /// events are. Each is at its time on the header's own clock: the message's
+    /// tick counted from the header's start, in quarter notes (a caller with
+    /// no such clock gives 0). The node does not read the times; they are
+    /// kept for a player that spaces the header out. The packets of one System
+    /// Exclusive run are grouped here (a run that never ends is one group to
+    /// its last packet), so the node sends each group whole or not at all.
+    /// Control thread.
     #[must_use]
-    pub fn header(mut self, messages: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
-        self.header = translated(messages).into();
+    pub fn header(mut self, packets: impl IntoIterator<Item = TimedMidiEvent>) -> Self {
+        let packets = translated(packets);
+        self.header = spans(&packets, TimedMidiEvent::event)
+            .map(|message| message.packets().into())
+            .collect();
         self
     }
 
@@ -684,14 +700,25 @@ impl Beated for ClipEvent {
 struct Playing<'a, 'w, 'c> {
     sending: Sending<'a, 'w, NoteId>,
     chase: &'c [Box<[Setter]>],
-    header: &'c [TimedMidiEvent],
+    header: &'c [Box<[TimedMidiEvent]>],
+    /// The port's declared capacity: what a header message's room is read from.
+    capacity: usize,
 }
 
 impl Playing<'_, '_, '_> {
-    /// Sends the header, in order, at `at`.
+    /// Sends the header at `at`, message by message, each whole or not at all.
+    /// At the first message the port has no room for, every packet from it on
+    /// is counted lost and nothing more is sent.
     fn send_header(&mut self, at: Offset) {
-        for message in self.header {
-            self.sending.send(at, message.event(), None);
+        for (i, message) in self.header.iter().enumerate() {
+            if message.len() > self.capacity.saturating_sub(self.sending.written()) {
+                let lost = self.header[i..].iter().map(|m| m.len()).sum();
+                self.sending.count_lost(lost);
+                return;
+            }
+            for packet in message {
+                self.sending.send(at, packet.event(), None);
+            }
         }
     }
 
@@ -733,12 +760,13 @@ impl Visit<ClipEvent> for Playing<'_, '_, '_> {
         self.send_chase(o, beat);
     }
 
-    /// The header, then what [`jump`](Self::jump) sends.
-    fn start(&mut self, at: Option<Offset>, beat: Beat, fpb: FramesPerBeat, events: &[ClipEvent]) {
-        if let Some(o) = at {
-            self.send_header(o);
-        }
-        self.jump(at, beat, fpb, events);
+    /// Ends what is held, then the header, then the chase: the order a
+    /// replacement sends them in.
+    fn start(&mut self, at: Option<Offset>, beat: Beat, _: FramesPerBeat, _: &[ClipEvent]) {
+        let Some(o) = at else { return };
+        self.sending.release_all(o);
+        self.send_header(o);
+        self.send_chase(o, beat);
     }
 
     /// The header, then the chase, with what is held left sounding: the notes
@@ -778,6 +806,7 @@ impl<F: Float> Node<F> for MidiClipNode {
             sending: held.block(io.event_out(Self::OUT), first),
             chase: &clip.chase,
             header: &clip.header,
+            capacity: self.capacity.get() as usize,
         };
         if replaced {
             playing.sending.release_all(first);

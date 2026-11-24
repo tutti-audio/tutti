@@ -242,3 +242,43 @@ fn overlapping_notes_of_one_key_pair_first_on_first_off() {
         [Some(BeatDuration::new(2.0)), Some(BeatDuration::new(3.0))]
     );
 }
+
+/// **A reset makes the next start send the header again, once**: the node
+/// forgets where playback was, so it reads the next block as a start.
+#[test]
+fn a_reset_then_the_next_start_sends_the_header_once() {
+    use tutti_graph::TransportPosition;
+    use tutti_graph::contract::Direct;
+    use tutti_units::SampleRate;
+
+    let hello = midi::program_change(
+        tutti_ump::Address::new(MidiGroup::FIRST, MidiChannel::FIRST),
+        7,
+        None,
+    );
+    let clip = ClipEvents::default().header([TimedMidiEvent::new(Beat::new(0.0), hello).unwrap()]);
+    let node = MidiClipNode::over(Publisher::new(clip));
+    let out = Node::<f32>::shape(&node)
+        .event_output(0)
+        .expect("an event output");
+    let mut d = Direct::new(node, SampleRate::SR_48K, 64);
+    let block = |d: &mut Direct<MidiClipNode>, frame: f64| {
+        d.set_transport(TransportPosition::new(
+            true,
+            tutti_units::Bpm::of(120.0),
+            Beat::new(frame / 24_000.0),
+            None,
+        ));
+        d.block();
+        d.event_output(out).len()
+    };
+    assert_eq!(block(&mut d, 0.0), 1, "the first block starts the run");
+    assert_eq!(block(&mut d, 64.0), 0, "the run goes on");
+    Node::<f32>::reset(&mut *d.node);
+    assert_eq!(
+        block(&mut d, 128.0),
+        1,
+        "the block after a reset starts again"
+    );
+    assert_eq!(block(&mut d, 192.0), 0);
+}

@@ -208,7 +208,7 @@ pub struct LoadReport {
 
 impl LoadReport {
     /// Whether the file was read as it is, every event is in a clip, and no
-    /// header message of a Clip File went unused.
+    /// Set Profile On message of a Clip File's header went unplayed.
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.repairs.is_empty()

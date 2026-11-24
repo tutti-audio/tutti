@@ -1063,8 +1063,8 @@ fn volume(value: u32) -> Ump {
     )
 }
 
-/// `events` as a clip carrying `header`, which sits at beats before the
-/// clip's beat 0 on the header's own clock (the node ignores them).
+/// `events` as a clip carrying `header`, each message at its own time on the
+/// header's clock, a quarter note apart from 0 (the node ignores the times).
 fn headed(events: impl IntoIterator<Item = TimedMidiEvent>, header: &[Ump]) -> ClipEvents {
     let events: ClipEvents = events.into_iter().collect();
     events.header(
@@ -1338,4 +1338,73 @@ fn a_header_sysex_run_without_an_end_is_one_message() {
     assert_eq!(heard(&seen).len(), 255);
     let refused: u32 = ed.take_event_losses().map(|l| l.count).sum();
     assert_eq!(refused, 2);
+}
+
+/// **A changed receiver does not end the notes the clip holds**: the resend is
+/// the header and the chase, with no note-off at the port.
+#[test]
+fn a_changed_receiver_leaves_the_held_notes_sounding() {
+    let clip = headed([at(10, on(60)), at(10_000, off(60))], &[program(1)]);
+    let (_ed, mut exec, controls, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.receiver_changed();
+    exec.process(64, &rolling(64), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![(0, program(1)), (10, on(60)), (64, program(1))]
+    );
+}
+
+/// **A seek on the block a receiver changed sends the header once**: the jump
+/// is the start of the resend, not a second send after it.
+#[test]
+fn a_seek_in_the_block_a_receiver_changed_sends_the_header_once() {
+    let clip = headed([at(10, program(5)), at(48_010, on(60))], &[program(1)]);
+    let (_ed, mut exec, controls, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.receiver_changed();
+    exec.process(64, &rolling(48_000), &[], &mut []);
+    assert_eq!(
+        heard(&seen),
+        vec![
+            (0, program(1)),
+            (10, program(5)),
+            (64, program(1)),
+            (64, program(5)),
+            (74, on(60)),
+        ]
+    );
+}
+
+/// **A start in the middle of a block sends the header on the start's frame**:
+/// stopped for 20 frames, rolling from there.
+#[test]
+fn a_start_inside_a_block_sends_the_header_on_its_frame() {
+    let clip = headed([at(30, on(60))], &[program(1)]);
+    let (_ed, mut exec, _c, seen) = rig_headed(clip, 64);
+    let mut changes = TransportChanges::NONE;
+    changes
+        .push(Offset::of(Samples::new(20), Samples::new(64)), rolling(0))
+        .unwrap();
+    exec.process_with_changes(64, &stopped(0), &changes, &[], &mut []);
+    assert_eq!(heard(&seen), vec![(20, program(1)), (50, on(60))]);
+}
+
+/// **A start that finds notes held ends them before it sends the header and
+/// the chase** (a seek on the block a receiver changed is a start with notes
+/// sounding): the order at the port is note-off, header, chase.
+#[test]
+fn a_start_releases_before_the_header_and_the_chase() {
+    let clip = headed(
+        [at(10, on(60)), at(20, program(5)), at(10_000, off(60))],
+        &[program(1)],
+    );
+    let (_ed, mut exec, controls, seen) = rig_headed(clip, 64);
+    exec.process(64, &rolling(0), &[], &mut []);
+    controls.receiver_changed();
+    exec.process(64, &rolling(48_000), &[], &mut []);
+    assert_eq!(
+        heard(&seen)[3..],
+        [(64, off(60)), (64, program(1)), (64, program(5))]
+    );
 }

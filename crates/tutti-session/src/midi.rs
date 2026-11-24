@@ -1329,6 +1329,9 @@ impl<F: Float> Midi<'_, F> {
     /// wraps, and **a bounce contains it**: an export forks the clip with its
     /// target, where the keys of a live input are not in one.
     ///
+    /// A clip built here has no header: a loaded Clip File's configuration
+    /// header plays only with [`play_track`](Self::play_track), which keeps it.
+    ///
     /// **A clip does not loop itself**: it plays on the transport's timeline,
     /// so a repeat is the transport's loop
     /// (`session.transport_handle().looping()`) over the beats it
@@ -1421,7 +1424,9 @@ impl<F: Float> Midi<'_, F> {
     /// caller who wants an offset rebuilds the events and uses `play_clip`. The track is the one
     /// [`load_midi`](Self::load_midi) returned
     /// ([`LoadedMidi::track`](crate::LoadedMidi::track)); its events are built
-    /// already, so this publishes a shared value and converts nothing.
+    /// already, so this publishes a shared value and converts nothing. A Clip
+    /// File's configuration header is part of that value, sent where the clip
+    /// starts.
     ///
     /// # Errors
     ///
