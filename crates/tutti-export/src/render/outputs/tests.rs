@@ -1,7 +1,7 @@
 use super::*;
 use crate::Setup;
 use crate::spill::SPILL_MEMORY_BYTES;
-use crate::{BufferTarget, Normalize, NormalizeSpec, Progress};
+use crate::{BufferTarget, Normalize, NormalizeSpec, Progress, TailPolicy};
 use tutti_codec::Pcm;
 use tutti_graph::GraphBuilder;
 use tutti_timeline::FrozenClock;
@@ -34,7 +34,13 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 /// at any reading of the render.
 fn run(budget: usize, dir: &std::path::Path) -> (crate::Written, Vec<Vec<f32>>, bool) {
     let path = dir.join("n.wav");
-    let job = Job::new(RATE, Samples::new(FRAMES), Samples::new(0), Samples::new(0)).unwrap();
+    let job = Job::new(
+        RATE,
+        Samples::new(FRAMES),
+        Samples::new(0),
+        TailPolicy::Frames(Samples::ZERO),
+    )
+    .unwrap();
     let mut seen_spill = false;
     let mut watch = |_: &Progress| {
         seen_spill |= names(dir).iter().any(|n| n.ends_with(".spill"));
@@ -125,7 +131,13 @@ fn a_normalized_output_spills_past_the_budget_and_writes_what_it_would_in_memory
 fn a_cancelled_or_failed_render_removes_its_spill() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("n.wav");
-    let job = Job::new(RATE, Samples::new(FRAMES), Samples::new(0), Samples::new(0)).unwrap();
+    let job = Job::new(
+        RATE,
+        Samples::new(FRAMES),
+        Samples::new(0),
+        TailPolicy::Frames(Samples::ZERO),
+    )
+    .unwrap();
     let target = || {
         Output::main_output(
             crate::FileTarget::new(
@@ -187,11 +199,7 @@ fn a_cancelled_or_failed_render_removes_its_spill() {
 /// once locally: the test process aborts.
 #[test]
 fn planes_no_allocator_can_give_are_render_too_large() {
-    let plan = RenderPlan {
-        total: Samples::new(usize::MAX / 2),
-        output_length: Samples::new(usize::MAX / 2),
-        latency: Samples::new(0),
-    };
+    let plan = RenderPlan::of_frames(Samples::new(usize::MAX / 2));
     let err = reserve_planes::<f32>(&plan, ChannelLayout::STEREO).unwrap_err();
     assert!(
         matches!(err, RenderError::RenderTooLarge { channels, .. } if channels == ChannelLayout::STEREO),

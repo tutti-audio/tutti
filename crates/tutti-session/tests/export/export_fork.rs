@@ -190,7 +190,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
                 rate,
                 Seconds::new(seconds).to_samples(rate),
                 Samples::new(0),
-                Samples::new(0),
+                tutti_export::TailPolicy::Frames(Samples::ZERO),
             )
             .expect("a render"),
             &FrozenClock,
@@ -331,6 +331,57 @@ fn latency_and_tail_come_from_the_graph() {
         planes[0].len(),
         frames,
         "an unknown tail renders none, not the cap"
+    );
+}
+
+/// **A bounce of a reverb with live cells spends the tail the reverb reports
+/// for the room it is set to** (the node declares the largest room's, about
+/// nine seconds): a constant fed through a room of 0, the General MIDI room
+/// and a room of 0.9 ends at the programme's frames and the bank's own
+/// `tail_of` for those controls, long by under a block (the executor counts
+/// whole quiet blocks). Whether that report covers the ring-out is the
+/// bank's own test. The constant owes nothing itself and is not at rest at
+/// the programme's end, so the reverb owes its report in full (a source that
+/// still owed would make it owe its ceiling after it).
+#[test]
+fn a_bounce_ends_at_the_tail_the_reverb_reports_for_its_room() {
+    let seconds = 0.2;
+    let frames = (seconds * RATE) as usize;
+    let block = 1024;
+    let bank = tutti_dsp::FreeverbBank::<f32>::new(SampleRate::of(RATE));
+    let mut lengths = Vec::new();
+    for room in [0.0, 0.5, 0.9] {
+        let mut session = session();
+        let src = session.graph().add(ForkByClone(Const::mono(0.5)));
+        let verb = session.graph().add(tutti_nodes::FreeverbNode::<f32>::from(
+            tutti_nodes::FreeverbConfig::new(),
+        ));
+        session.graph().connect(src, verb).unwrap().unfaded();
+        session.graph().connect(verb, MainOutput).unwrap().unfaded();
+        session
+            .set(verb.room_size().to(tutti_units::Mix::new(room)))
+            .unwrap();
+        let controls = tutti_nodes::FreeverbControls {
+            room: tutti_units::Mix::new(room),
+            ..tutti_nodes::FreeverbControls::GENERAL_MIDI
+        };
+        let Tail::Finite(report) = bank.tail_of(&controls) else {
+            panic!("room {room}: a finite report")
+        };
+        let planes = render(
+            &mut session,
+            buffers(seconds).tail(tutti_session::BounceTail::default()),
+        );
+        let got = planes[0].len() - frames;
+        assert!(
+            (report.get()..report.get() + block).contains(&got),
+            "room {room}: rang {got} frames, the reverb reports {report:?}"
+        );
+        lengths.push(got);
+    }
+    assert!(
+        lengths.is_sorted_by(|a, b| a < b),
+        "a shorter room ends before a longer one: {lengths:?}"
     );
 }
 

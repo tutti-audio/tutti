@@ -32,7 +32,7 @@ use crate::support::{render_normalized_to_file, render_to_buffers, render_to_fil
 use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
-    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup,
+    GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup, TailPolicy,
 };
 use tutti_fixtures::signal::amplitude_at;
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
@@ -482,7 +482,7 @@ fn the_latency_trim_drops_the_lookahead() {
     // Untrimmed, and 240 frames longer (as a tail), so it covers the same
     // span shifted.
     let mut whole = config(Pcm::Float32, ChannelLayout::STEREO);
-    whole.render.tail = latency;
+    whole.render.tail = TailPolicy::Frames(latency);
     let b = buffers(built(limited()), &whole).into_planes();
     let shifted: Vec<Vec<f32>> = b.iter().map(|p| p[240..].to_vec()).collect();
     assert_same("trimmed against untrimmed from 240", &a, &shifted);
@@ -502,11 +502,11 @@ fn the_latency_trim_drops_the_lookahead() {
 #[test]
 fn a_limiter_adds_no_tail_to_the_render() {
     let graph = built(limited());
-    assert_eq!(graph.reported_tail().samples(), Some(Samples::ZERO));
+    assert_eq!(graph.declared_tail().samples(), Some(Samples::ZERO));
     let latency = graph.reported_latency();
     let mut cfg = config(Pcm::Float32, ChannelLayout::STEREO);
     cfg.render.latency = latency;
-    cfg.render.tail = graph.reported_tail().samples().unwrap();
+    cfg.render.tail = TailPolicy::Frames(graph.declared_tail().samples().unwrap());
     let planes = buffers(built(limited()), &cfg).into_planes();
     assert_eq!(
         planes[0].len(),
@@ -515,7 +515,7 @@ fn a_limiter_adds_no_tail_to_the_render() {
     );
 
     let mut whole = config(Pcm::Float32, ChannelLayout::STEREO);
-    whole.render.tail = latency + graph.reported_tail().samples().unwrap();
+    whole.render.tail = TailPolicy::Frames(latency + graph.declared_tail().samples().unwrap());
     let planes = buffers(built(limited()), &whole).into_planes();
     let n = latency.get();
     assert_eq!(planes[0].len(), FRAMES + n, "the duration plus the latency");
@@ -535,12 +535,12 @@ fn a_limiter_adds_no_tail_to_the_render() {
 fn the_tail_extends_the_render_by_the_ring_out() {
     let graph = built(convolved());
     assert_eq!(
-        graph.reported_tail().samples(),
+        graph.declared_tail().samples(),
         Some(Samples::new(2999)),
         "the IR's ring-out"
     );
     let mut cfg = config(Pcm::Float32, ChannelLayout::MONO);
-    cfg.render.tail = graph.reported_tail().samples().unwrap();
+    cfg.render.tail = TailPolicy::Frames(graph.declared_tail().samples().unwrap());
     // The latency trim too, so both halves of the gate run together.
     cfg.render.latency = graph.reported_latency();
     let planes = buffers(built(convolved()), &cfg).into_planes();

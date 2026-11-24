@@ -206,6 +206,7 @@ use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
 use crate::compile::plan::Plan;
+use crate::compile::tail::{GraphTail, Owed, TailGraph, graph_tail_of};
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
 use crate::exec::command::CommandRx;
@@ -217,6 +218,7 @@ use crate::exec::slots::{AudioSlots, EventSlots, SlotFlags};
 use crate::node::Prepare;
 use crate::node::play::PlayState;
 use crate::{EdgeFade, EdgeId};
+use std::collections::HashMap;
 
 /// Puts `item` into `to`, which has room for it by construction (the editor
 /// sized `to` with the commit that is applying). A refusal is a miscount on
@@ -697,6 +699,39 @@ impl<F: Float> Executor<F> {
             width: plan.rendered_outputs() - bank.base,
             done: Samples::new(run.done),
             fade: bank.fade,
+        })
+    }
+
+    /// The graph's tail over what its units owe now: [`graph_tail`]'s fold
+    /// (a cascade adds, a merge takes the largest) with each unit's two
+    /// figures. A node owes what is left of its last
+    /// [`report_tail`](crate::Io::report_tail) (else its declared ceiling) when
+    /// nothing upstream still owes, and nothing when the executor skips it as
+    /// at rest; after an upstream that still owes it owes its declared
+    /// ceiling, since a report is about the input already heard. A node the
+    /// plan does not run keeps its declared figure.
+    ///
+    /// `topology` is the graph the running plan was compiled from (the
+    /// editor's spec). Call it between blocks, on the thread that renders:
+    /// an offline render owns its executor, and a live one has no such
+    /// moment.
+    ///
+    /// [`graph_tail`]: crate::graph_tail
+    pub fn reported_tail<G: TailGraph<Node = NodeKey>>(&self, topology: &G) -> GraphTail {
+        let owed: HashMap<NodeKey, Owed> = self.plan.as_ref().map_or_else(HashMap::new, |plan| {
+            plan.nodes
+                .recs
+                .iter()
+                .filter_map(|rec| {
+                    let u = self.store[rec.store.0 as usize].as_ref()?;
+                    Some((plan.units[rec.unit].key, u.owed(rec)))
+                })
+                .collect()
+        });
+        graph_tail_of(topology, self.prepare.sample_rate(), |node| {
+            owed.get(&node)
+                .copied()
+                .unwrap_or_else(|| Owed::declared(topology.tail(node)))
         })
     }
 
