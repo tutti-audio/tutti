@@ -95,6 +95,9 @@ The reviewer checks:
    `None`, `false` or "ignored" for one kind of its receiver, or an `unreachable!` that
    says two tags agree, is a finding: the reviewer asks the two questions of the style
    guide's T19 before accepting either the tag or a split.
+   An added row in `xtask/public-items/` is argued in the pull request's description (what
+   calls the item from outside its crate, and which existing item was considered first), and a
+   row for an item only tests call is a finding.
 5. **Breaking changes.** Marked `!` in the title, the migration in "Breaking changes and
    migration", and the old shape deleted in the same pull request, with no
    compatibility shim.
