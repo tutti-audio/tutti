@@ -407,7 +407,7 @@ fn a_flac_decodes_to_exactly_the_rendered_frames_with_a_valid_md5() {
                     render: RenderConfig {
                         sample_rate: tutti_units::SampleRate::of(SR),
                         duration_seconds: Seconds::new(0.0),
-                        tail: tutti_units::Samples::new(frames),
+                        tail: tutti_export::TailPolicy::Frames(tutti_units::Samples::new(frames)),
                         ..Default::default()
                     },
                     encode: EncodeConfig {

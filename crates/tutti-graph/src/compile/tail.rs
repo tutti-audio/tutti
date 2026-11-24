@@ -42,7 +42,7 @@
 //!
 //! [`latency`]: crate::compile::latency
 
-use crate::compile::latency::{LatencyGraph, departure};
+use crate::compile::latency::LatencyGraph;
 use crate::compile::order::{Sorted, sort_nodes};
 use std::collections::{HashMap, HashSet};
 use tutti_units::{SampleRate, Samples, Seconds, Tail};
@@ -228,31 +228,98 @@ impl GraphTail {
 /// nodes all report [`Tail::None`], which is the common case. Allocates; run it
 /// on the control thread.
 pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
-    let limit = MAX_NODE_TAIL.to_samples_ceil(rate);
-    let tails: HashMap<G::Node, Tail> = g.nodes().map(|node| (node, g.tail(node))).collect();
+    graph_tail_of(g, rate, |node| Owed::declared(g.tail(node)))
+}
 
-    if tails.is_empty() {
+/// What a node adds to the graph's tail: what it owes if nothing more arrives
+/// at it, and what it adds once input from upstream does.
+///
+/// A declared tail is both. An executor between blocks knows more of the first
+/// (a node at rest owes nothing, one that reported owes its report) and no more
+/// of the second than the ceiling, because a report is about the input already
+/// heard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Owed {
+    /// Owed when no upstream node still owes: it arrives to nothing.
+    pub(crate) alone: Tail,
+    /// Added after an upstream node that still owes.
+    pub(crate) fed: Tail,
+}
+
+impl Owed {
+    /// A node that owes `tail` whether or not anything reaches it.
+    pub(crate) const fn declared(tail: Tail) -> Self {
+        Self {
+            alone: tail,
+            fed: tail,
+        }
+    }
+}
+
+/// [`graph_tail`]'s fold with each node's figures given by `figure` instead of
+/// [`TailGraph::tail`]: the walk, the bound and the cycle rule are the same
+/// whatever the figures are (declared ceilings, or what the executor holds
+/// between blocks). A node departs `alone` when nothing upstream owes (its
+/// arrival is zero), and `fed` after one that does; the unbounded and unknown
+/// judgements are made on the figure applied to each node.
+pub(crate) fn graph_tail_of<G: TailGraph>(
+    g: &G,
+    rate: SampleRate,
+    figure: impl Fn(G::Node) -> Owed,
+) -> GraphTail {
+    let limit = MAX_NODE_TAIL.to_samples_ceil(rate);
+    let figures: HashMap<G::Node, Owed> = g.nodes().map(|node| (node, figure(node))).collect();
+
+    if figures.is_empty() {
         return GraphTail::default();
     }
 
-    let live = reaching_output(g, &tails);
+    let live = reaching_output(g, &figures);
+    let (order, had_cycle) = topological_order(g);
+
+    // Arrival is the longest departure upstream; a node's own figure is
+    // `alone` at an arrival of zero and `fed` otherwise. A figure with no
+    // finite value, or one past the bound, adds nothing to the sum:
+    // `unbounded` and `unknown_nodes` carry it instead, so the total stays the
+    // answer for the part of the graph that spoke.
+    let mut applied: HashMap<G::Node, Tail> = HashMap::with_capacity(order.len());
+    let mut departure: HashMap<G::Node, Samples> = HashMap::with_capacity(order.len());
+    for &node in &order {
+        let at = g
+            .inputs(node)
+            .filter_map(|s| s.feed.node())
+            .map(|src| departure.get(&src).copied().unwrap_or_default())
+            .max()
+            .unwrap_or_default();
+        let owed = figures[&node];
+        let tail = if at == Samples::ZERO {
+            owed.alone
+        } else {
+            owed.fed
+        };
+        let own = tail
+            .samples()
+            .filter(|&s| s <= limit)
+            .unwrap_or(Samples::ZERO);
+        applied.insert(node, tail);
+        departure.insert(node, at + own);
+    }
 
     // A cycle carrying any tail never decays: each pass round the loop re-enters
     // a node that rings, so there is no pass on which the graph falls silent.
     // `latency`'s walk deliberately approximates a cycle instead, because a
     // misaligned graph is still renderable; an unbounded one is not, and saying
     // so is the whole point of the variant.
-    let (order, had_cycle) = topological_order(g);
     let cycle_rings = had_cycle
         && order
             .iter()
             .filter(|n| live.contains(n))
-            .any(|n| !matches!(tails.get(n), Some(Tail::None) | None));
+            .any(|n| !matches!(applied.get(n), Some(Tail::None) | None));
 
     // A finite figure past `MAX_NODE_TAIL` is not trusted as a figure: it
     // counts as never decaying, so nothing cuts a ring-out to the bound.
     let unbounded = cycle_rings
-        || live.iter().any(|n| match tails.get(n) {
+        || live.iter().any(|n| match applied.get(n) {
             Some(Tail::Unbounded) => true,
             Some(Tail::Finite(frames)) => *frames > limit,
             _ => false,
@@ -260,38 +327,13 @@ pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
 
     let unknown_nodes = live
         .iter()
-        .filter(|n| matches!(tails.get(n), Some(Tail::Unknown)))
+        .filter(|n| matches!(applied.get(n), Some(Tail::Unknown)))
         .count();
-
-    // Nodes with no finite figure, or one past the bound, contribute nothing
-    // to the sum; `unbounded` and `unknown_nodes` carry them instead, so the
-    // total stays the answer for the part of the graph that spoke.
-    let own: HashMap<G::Node, Samples> = tails
-        .iter()
-        .map(|(&node, &tail)| {
-            let s = tail
-                .samples()
-                .filter(|&s| s <= limit)
-                .unwrap_or(Samples::ZERO);
-            (node, s)
-        })
-        .collect();
-
-    let mut arrival: HashMap<G::Node, Samples> = HashMap::with_capacity(order.len());
-    for &node in &order {
-        let at = g
-            .inputs(node)
-            .filter_map(|s| s.feed.node())
-            .map(|src| departure(src, &arrival, &own))
-            .max()
-            .unwrap_or_default();
-        arrival.insert(node, at);
-    }
 
     let known = g
         .outputs()
         .filter_map(|s| s.feed.node())
-        .map(|src| departure(src, &arrival, &own))
+        .map(|src| departure.get(&src).copied().unwrap_or_default())
         .max()
         .unwrap_or_default();
 
@@ -303,12 +345,12 @@ pub fn graph_tail<G: TailGraph>(g: &G, rate: SampleRate) -> GraphTail {
 }
 
 /// Every node that can reach an output, walking edges backwards from the taps.
-fn reaching_output<G: TailGraph>(g: &G, tails: &HashMap<G::Node, Tail>) -> HashSet<G::Node> {
-    let mut live = HashSet::with_capacity(tails.len());
+fn reaching_output<G: TailGraph>(g: &G, figures: &HashMap<G::Node, Owed>) -> HashSet<G::Node> {
+    let mut live = HashSet::with_capacity(figures.len());
     let mut stack: Vec<G::Node> = g.outputs().filter_map(|s| s.feed.node()).collect();
 
     while let Some(node) = stack.pop() {
-        if !tails.contains_key(&node) || !live.insert(node) {
+        if !figures.contains_key(&node) || !live.insert(node) {
             continue;
         }
         stack.extend(g.inputs(node).filter_map(|s| s.feed.node()));
@@ -649,6 +691,53 @@ mod tests {
         let t = graph_tail(&g, R);
         assert_eq!(t.samples(), Some(Samples::new(3000)));
         assert_eq!(t.resolve(Samples::new(384_000)), Samples::new(3000));
+    }
+
+    /// A node adds its `alone` figure when nothing upstream owes and its `fed`
+    /// figure after a branch that does: the mixer after an owing branch and a
+    /// resting one owes `fed` after the owing one's 300, and the same mixer
+    /// after the resting branch alone owes its `alone` figure, nothing.
+    #[test]
+    fn a_node_adds_its_fed_figure_only_after_an_upstream_that_owes() {
+        let g = Toy {
+            nodes: vec![
+                (Tail::None, vec![]),
+                (Tail::None, vec![Some(0)]),
+                (Tail::None, vec![Some(0)]),
+                (Tail::None, vec![Some(1), Some(2)]),
+            ],
+            outputs: vec![Some(3)],
+        };
+        let owed = |n: usize| match n {
+            1 => Owed {
+                alone: finite(300),
+                fed: finite(5000),
+            },
+            2 => Owed {
+                alone: Tail::None,
+                fed: finite(4000),
+            },
+            3 => Owed {
+                alone: Tail::None,
+                fed: finite(700),
+            },
+            _ => Owed::declared(Tail::None),
+        };
+        // Node 1 owes 300 alone; the mixer after it adds its fed 700.
+        assert_eq!(
+            graph_tail_of(&g, R, owed).samples(),
+            Some(Samples::new(1000))
+        );
+
+        // With the owing branch resting too, nothing arrives and nothing is owed.
+        let resting = |n: usize| match n {
+            1 => Owed {
+                alone: Tail::None,
+                fed: finite(5000),
+            },
+            n => owed(n),
+        };
+        assert_eq!(graph_tail_of(&g, R, resting).samples(), Some(Samples::ZERO));
     }
 
     /// An empty graph has no tail rather than an unknown one.

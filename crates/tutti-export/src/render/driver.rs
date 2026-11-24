@@ -21,7 +21,7 @@
 
 use crate::control::{Control, Outcome, Stage};
 use crate::render::BlockCursor;
-use crate::{ConfigError, RenderGraph, RtLogSink};
+use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
@@ -297,6 +297,12 @@ impl<F: Float> GraphSource<'_, F> {
         block_size
     }
 
+    /// The tail the graph's units owe now ([`tutti_graph::Executor::reported_tail`]),
+    /// between blocks.
+    pub(crate) fn reported_tail(&self) -> tutti_graph::GraphTail {
+        self.executor.reported_tail(&self.editor.spec().topology)
+    }
+
     /// Events the graph lost since the render began (`Executor::lost_event_count`):
     /// not a note-off it refused and sent again.
     pub(crate) fn lost_events(&self) -> u64 {
@@ -485,6 +491,12 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 /// frame range of it the gate keeps: empty for a block before the latency or
 /// past the length, which a tap still has to drain.
 ///
+/// A fixed tail ([`TailPolicy::Frames`]) is pulled with the programme. A
+/// reported one ([`TailPolicy::Reported`]) is asked of the graph once, between
+/// blocks, when the programme's last frame has rendered, and the render
+/// pulls that many frames more; progress counts the plan's most until then
+/// and the true total after.
+///
 /// The token is checked before every block and after the progress a block
 /// delivered (a callback may cancel; the last block's too), and a cancelled
 /// render ends there as [`Outcome::Cancelled`]. `stage` is the stage the
@@ -510,40 +522,63 @@ where
     let max_block = src.max_block().max(1);
     let mut kept = Samples::new(0);
 
+    // The frames to pull before the next look at the tail: all of them for a
+    // fixed tail, the programme alone for one the graph reports. Progress
+    // counts the most the render can be until the tail is known.
+    let mut total = match plan.tail {
+        TailPolicy::Frames(_) => plan.total,
+        TailPolicy::Reported { .. } => plan.programme,
+    };
+    let mut resolved = matches!(plan.tail, TailPolicy::Frames(_));
     control.begin(stage, Some(plan.total));
-    while src.produced() < plan.total {
-        if control.is_cancelled() {
-            return Ok(Outcome::Cancelled);
-        }
-        // `Samples` has no `Sub` on purpose — an unsigned count that wraps is a
-        // buffer size that reads off the end of the world. `remaining_after` is
-        // the named, saturating form.
-        let want = plan
-            .total
-            .remaining_after(src.produced())
-            .min(Samples::new(max_block));
-        let block_start = src.produced();
-        let n = src.render_block(want.get());
-        if n == 0 {
-            break;
-        }
+    loop {
+        while src.produced() < total {
+            if control.is_cancelled() {
+                return Ok(Outcome::Cancelled);
+            }
+            // `Samples` has no `Sub` on purpose — an unsigned count that wraps is a
+            // buffer size that reads off the end of the world. `remaining_after` is
+            // the named, saturating form.
+            let want = total
+                .remaining_after(src.produced())
+                .min(Samples::new(max_block));
+            let block_start = src.produced();
+            let n = src.render_block(want.get());
+            if n == 0 {
+                return Ok(Outcome::Finished(()));
+            }
 
-        let cursor = BlockCursor {
-            block_start,
-            latency: plan.latency,
-            kept_so_far: kept,
-            output_length: plan.output_length,
-        };
-        let window = cursor.window(Samples::new(n));
-        let kept_now = window.len();
-        consume(src, n, window)?;
-        kept += Samples::new(kept_now);
-        control.advance(stage, src.produced(), plan.total);
-        if control.is_cancelled() {
-            return Ok(Outcome::Cancelled);
+            let cursor = BlockCursor {
+                block_start,
+                latency: plan.latency,
+                kept_so_far: kept,
+                output_length: plan.output_length,
+            };
+            let window = cursor.window(Samples::new(n));
+            let kept_now = window.len();
+            consume(src, n, window)?;
+            kept += Samples::new(kept_now);
+            control.advance(
+                stage,
+                src.produced(),
+                if resolved { total } else { plan.total },
+            );
+            if control.is_cancelled() {
+                return Ok(Outcome::Cancelled);
+            }
+            // After the check, so a render the caller cancelled is not judged.
+            check_loss(on_loss, src.lost_events())?;
         }
-        // After the check, so a render the caller cancelled is not judged.
-        check_loss(on_loss, src.lost_events())?;
+        // The programme has rendered: a reported tail is read once, between
+        // blocks, and spent under its ceiling.
+        match plan.tail {
+            TailPolicy::Reported { ceiling } if !resolved => {
+                resolved = true;
+                total = plan.programme + src.reported_tail().resolve(ceiling);
+                control.advance(stage, src.produced(), total);
+            }
+            _ => break,
+        }
     }
 
     Ok(Outcome::Finished(()))

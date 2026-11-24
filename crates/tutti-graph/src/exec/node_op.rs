@@ -9,7 +9,6 @@ use tutti_buffers::MaxBlock;
 use tutti_units::{Samples, Tail};
 
 use super::state::{Inject, Unit};
-use super::tail_elapsed;
 use crate::compile::plan::{Direct, Form, NodePorts, NodeRec, NodeTables, Plan};
 use crate::edges::rtlog::{LogSink, LogSlots};
 use crate::event::merge::merge_into;
@@ -500,20 +499,7 @@ pub(super) fn node_op_with<
     // See the module docs: a node with event inputs parks only on its own
     // say-so (`Status::Idle`); one without parks when its inputs, its last
     // output and its latency plus tail agree.
-    let skip = quiet_inputs
-        && if ein.is_empty() {
-            !ain.is_empty()
-                && u.last_quiet
-                && tail_elapsed(
-                    match u.reported {
-                        None => rec.park_after,
-                        Some(t) => Tail::Finite(rec.latency).then(t),
-                    },
-                    u.quiet,
-                )
-        } else {
-            u.last_idle
-        };
+    let skip = quiet_inputs && u.at_rest(rec);
     // A bypassed node is called until it has been sent the close of what
     // it holds, whatever it says of itself.
     let skip = skip && !(discards && u.mode.holds_input());

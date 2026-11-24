@@ -190,7 +190,7 @@ fn chain_fresh(seconds: f64) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
                 rate,
                 Seconds::new(seconds).to_samples(rate),
                 Samples::new(0),
-                Samples::new(0),
+                tutti_export::TailPolicy::Frames(Samples::ZERO),
             )
             .expect("a render"),
             &FrozenClock,
@@ -331,6 +331,63 @@ fn latency_and_tail_come_from_the_graph() {
         planes[0].len(),
         frames,
         "an unknown tail renders none, not the cap"
+    );
+}
+
+/// The frames a Freeverb room rings for at `rate`, from its definition: the
+/// longest comb (1640 frames at 44.1 kHz, scaled to the rate) rings the
+/// Schroeder trips `ln(1e-3) / ln g` of its loop gain `g = room * 0.28 + 0.7`,
+/// each a period and the interpolation's two frames, and the four all-passes
+/// add their own echoes, eleven periods each at `a = 0.5`.
+fn schroeder_tail(room: f64) -> i64 {
+    let scale = |t: usize| (RATE / 44_100.0 * t as f64).round();
+    let trips = |q: f64| (1e-3f64.ln() / q.ln()).ceil();
+    let chain: f64 = [556usize, 441, 341, 225]
+        .iter()
+        .map(|&d| (1.0 + trips(0.5)) * (scale(d + 23) + 2.0))
+        .sum();
+    let comb = (1.0 + trips(room * 0.28 + 0.7)) * (scale(1617 + 23) + 2.0);
+    (comb + chain).ceil() as i64
+}
+
+/// **A bounce of a reverb with live cells spends the tail of the room it is
+/// set to** (the node declares the largest room's, about nine seconds):
+/// a constant fed through a room of 0 and through a room of 0.9 ends at the
+/// programme's frames and the room's own ring-out, to the frame the
+/// definition rounds to. The constant owes nothing itself and is not at rest
+/// at the programme's end, so the reverb owes its report in full (a source
+/// that still owed would make it owe its ceiling after it).
+#[test]
+fn a_bounce_ends_at_the_tail_of_the_reverbs_room() {
+    let seconds = 0.2;
+    let frames = (seconds * RATE) as i64;
+    let mut lengths = Vec::new();
+    for room in [0.0, 0.9] {
+        let mut session = session();
+        let src = session.graph().add(ForkByClone(Const::mono(0.5)));
+        let verb = session.graph().add(tutti_nodes::FreeverbNode::<f32>::from(
+            tutti_nodes::FreeverbConfig::new(),
+        ));
+        session.graph().connect(src, verb).unwrap().unfaded();
+        session.graph().connect(verb, MainOutput).unwrap().unfaded();
+        session
+            .set(verb.room_size().to(tutti_units::Mix::new(room)))
+            .unwrap();
+        let planes = render(
+            &mut session,
+            buffers(seconds).tail(tutti_session::BounceTail::default()),
+        );
+        let got = planes[0].len() as i64 - frames;
+        let want = schroeder_tail(room);
+        assert!(
+            (got - want).abs() <= 2,
+            "room {room}: rang {got} frames, the definition says {want}"
+        );
+        lengths.push(got);
+    }
+    assert!(
+        lengths[0] < lengths[1],
+        "a short room ends before a long one"
     );
 }
 
