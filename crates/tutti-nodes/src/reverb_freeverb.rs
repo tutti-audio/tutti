@@ -85,7 +85,7 @@ pub struct FreeverbSet;
 control_set! {
     FreeverbSet(_s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
     live: (all);
-    RoomSize => Mix = room { whole },
+    RoomSize => Mix = room { whole, longest = 1.0 },
     Damping => Mix = damp { whole, no_ring };
 
     fn defaults(&self) -> FreeverbControls {
@@ -209,5 +209,21 @@ mod tests {
     fn only_the_damping_is_flagged_no_ring() {
         let set = FreeverbSet;
         assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::Damping)]);
+    }
+
+    /// The room never rings shorter as it moves to its stated largest, whatever the damping.
+    #[test]
+    fn the_tail_is_longest_at_the_largest_room() {
+        use tutti_buffers::MaxBlock;
+        let mut kernel = FreeverbKernel::<f64>::new();
+        kernel.prepare(
+            tutti_units::SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(64)),
+        );
+        crate::test_support::assert_tail_longest_at_stated(
+            &mut kernel,
+            &FreeverbSet,
+            &[(0.0, 1.0), (0.0, 0.0)],
+        );
     }
 }
