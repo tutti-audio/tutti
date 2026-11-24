@@ -1,5 +1,7 @@
 use super::*;
 use crate::AudioEngine;
+use crate::output::Opened;
+use crate::output::tests::{driver_over, manual_spec, on_device};
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
@@ -110,4 +112,23 @@ fn a_restart_that_resolves_no_device_leaves_the_stream_running() {
         "restart_with stopped the stream"
     );
     drop(ed);
+}
+
+/// **A switch onto a supplied driver keeps the device on record**: the driver
+/// still holds the device for the restart that opens it again, and names none
+/// meanwhile.
+#[test]
+fn a_switch_to_a_supplied_driver_keeps_the_device_to_restart_onto() {
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
+    let (manual, _stream) = ManualStreamDriver::new();
+    driver
+        .switch(manual_spec(), manual, |_, _| {
+            Ok::<(), crate::DeviceError>(())
+        })
+        .unwrap();
+    assert_eq!(driver.opened_name().unwrap(), None);
+    driver
+        .origin
+        .target_mut()
+        .expect("the driver still holds the device");
 }

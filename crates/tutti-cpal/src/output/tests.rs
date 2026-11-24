@@ -7,7 +7,7 @@ use tutti_graph::{Editor, Prepare};
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
-fn manual_spec() -> OutputSpec {
+pub(crate) fn manual_spec() -> OutputSpec {
     OutputSpec::new(
         SampleRate::SR_48K,
         tutti_buffers::ChannelLayout::STEREO,
@@ -25,7 +25,7 @@ fn empty_state(rate: SampleRate) -> Arc<AudioCallbackState> {
 
 /// An engine on a device of the default host recorded as `opened`: the host is
 /// opened (it lists nothing) and no device is resolved.
-fn on_device(opened: Opened) -> AudioEngine {
+pub(crate) fn on_device(opened: Opened) -> AudioEngine {
     let target = (
         crate::DeviceHost::open(crate::AudioHost::Default).expect("the default host opens"),
         OutputConfig::from(DeviceSelector::Default),
@@ -37,7 +37,7 @@ fn on_device(opened: Opened) -> AudioEngine {
     }
 }
 
-fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
+pub(crate) fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
     crate::TuttiDriver::new(engine, empty_state(SampleRate::SR_48K))
 }
 
@@ -134,30 +134,4 @@ fn selecting_another_device_keeps_the_chosen_sample_format() {
         config,
         OutputConfig::from(DeviceSelector::named("B")).sample_format(SampleFormat::I16)
     );
-}
-
-/// **A switch onto a supplied driver names no device** while it runs there.
-#[test]
-fn a_switch_to_a_supplied_driver_names_no_device() {
-    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
-    let (manual, _stream) = ManualStreamDriver::new();
-    driver
-        .switch(manual_spec(), manual, |_, _| {
-            Ok::<(), crate::DeviceError>(())
-        })
-        .unwrap();
-    assert_eq!(driver.opened_name().unwrap(), None);
-}
-
-/// **Supplying a driver keeps the device on record**, so a restart can open it
-/// again, and names none meanwhile (`switch` supplies through this).
-#[test]
-fn supplying_a_driver_keeps_the_device_to_restart_onto() {
-    let mut engine = on_device(Opened::Named("Card".into()));
-    engine.origin.supply();
-    assert_eq!(engine.opened_name().unwrap(), None);
-    engine
-        .origin
-        .target_mut()
-        .expect("the device is still on record");
 }
