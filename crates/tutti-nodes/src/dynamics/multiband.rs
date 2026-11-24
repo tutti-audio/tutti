@@ -430,6 +430,9 @@ impl<F: Float + SimdLanes + Lerp> Tuned<F> {
     /// Aims the bank at `settings`.
     fn apply(&mut self, settings: MultibandSettings) {
         self.bank.retarget(&settings);
+        if self.applied.is_none() {
+            self.bank.jump_to_target();
+        }
         self.applied = Some(settings);
     }
 
@@ -1941,5 +1944,41 @@ mod tests {
                 .all(|(a, b)| a.to_bits() == b.to_bits()),
             "a reset node differs from a fresh one"
         );
+    }
+
+    /// A fresh node, a reset one and a re-prepared one land their settings whole: a 6 dB
+    /// makeup under a 10 kHz split is at its full gain on frames 100 to 200 of the first block
+    /// (a ramp from 0 dB over the 5 ms gain ramp would still be climbing there), even when the
+    /// run before the reset moved the makeup elsewhere.
+    #[test]
+    fn the_first_block_after_a_reset_or_a_prepare_lands_whole() {
+        let want = 0.5 * 10f32.powf(6.0 / 20.0);
+        let (n, c) = node(2);
+        unity(&c);
+        c.set_crossover(0, Hz::new(10_000.0));
+        c.band(0).set_makeup(6.0);
+        let mut n = prepared(n);
+        let dc = [vec![0.5f32; 400]];
+        let landed = |out: &[Vec<f32>], what: &str| {
+            assert!(
+                out[0][100..200].iter().all(|v| (v - want).abs() < 1e-3),
+                "{what}: {:?}",
+                &out[0][100..104]
+            );
+        };
+        landed(&render_chunked(&mut n, &dc, 400), "fresh");
+        c.band(0).set_makeup(-12.0);
+        render_chunked(&mut n, &[vec![0.5f32; 2_000]], 512);
+        c.band(0).set_makeup(6.0);
+        n.reset();
+        landed(&render_chunked(&mut n, &dc, 400), "reset");
+        c.band(0).set_makeup(-12.0);
+        render_chunked(&mut n, &[vec![0.5f32; 2_000]], 512);
+        c.band(0).set_makeup(6.0);
+        n.prepare(&Prepare::new(
+            RATE,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(1024)),
+        ));
+        landed(&render_chunked(&mut n, &dc, 400), "re-prepare");
     }
 }

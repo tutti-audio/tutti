@@ -112,20 +112,6 @@ impl<F: Float + SimdLanes + Lerp> KeyStage<F> {
         self.coefficients.jump_to_target();
     }
 
-    /// The stage [`new`](Self::new) makes, in place: the default response, cutoff and Q, and
-    /// silence. No allocation.
-    fn clear(&mut self) {
-        self.ty = SvfType::HighPass;
-        self.bank.reset();
-        self.coefficients = Ramp::new(Self::design(
-            self.ty,
-            KeyFilter::DEFAULT_CUTOFF,
-            KeyFilter::DEFAULT_Q,
-            self.rate,
-        ))
-        .steps(COEFF_INTERVAL as u32);
-    }
-
     /// Takes the response `ty`: the next [`retarget`](Self::retarget) designs it. The
     /// integrators are untouched, both responses of a key filter reading the same two.
     fn respond(&mut self, ty: SvfType) {
@@ -217,13 +203,6 @@ impl<F: Float + SimdLanes + Lerp> KeyPath<F> {
     /// Lands the stage's coefficients on their design now.
     pub(super) fn jump_to_target(&mut self) {
         self.stage.jump_to_target();
-    }
-
-    /// The path [`new`](Self::new) makes, in place: off, the stage at its defaults and
-    /// silent. No allocation.
-    pub(super) fn clear(&mut self) {
-        self.stage.clear();
-        self.on = None;
     }
 
     /// Takes `filter` at `cutoff` and `q`. Off, the stage is left as it is and the cutoff
