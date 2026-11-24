@@ -984,8 +984,7 @@ impl<F: Float> Editor<F> {
                     // Every path that places a unit (insert, replace) sets
                     // or clears its source with the generation it assigns,
                     // so this is a generation moved some other way (a
-                    // caller writing `spec_mut().generations`, a `package`
-                    // placing units the editor never saw). Forking the old
+                    // `package` placing units the editor never saw). Forking the old
                     // unit would be a copy of something no longer there.
                     debug_assert!(
                         false,

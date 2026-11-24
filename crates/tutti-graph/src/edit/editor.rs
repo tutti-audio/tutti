@@ -77,6 +77,8 @@ use tutti_buffers::Float;
 mod cells;
 mod commit;
 mod controls;
+#[cfg(test)]
+mod corrupted;
 mod errors;
 mod lifecycle;
 mod link;
@@ -600,19 +602,13 @@ impl<F: Float> Editor<F> {
         &self.spec
     }
 
-    /// The graph value, for wiring. Nodes are added with
-    /// [`insert`](Self::insert), not here, so every node has a unit.
-    /// Moves the [`revision`](Self::revision), whether or not the borrow
-    /// writes.
-    ///
-    /// A gain entry is declared by the editor, which makes its cell
-    /// ([`set_edge_gain`](Self::set_edge_gain),
-    /// [`set_edge_gain_range`](Self::set_edge_gain_range),
-    /// [`set_edge_fade`](Self::set_edge_fade)): wire a source
-    /// ([`GraphSpec::connect_edge_gain`]) only to an edge declared that way,
-    /// and never write [`GraphSpec::gains`] through this borrow. A commit
-    /// that finds an entry without its cell makes one from the values.
-    pub fn spec_mut(&mut self) -> &mut GraphSpec {
+    /// The graph value, for the editor's own edits and the tests inside the
+    /// crate. Every edit an outside caller makes goes through a typed call
+    /// ([`connect_edge`](Self::connect_edge), [`insert`](Self::insert) and
+    /// the rest), which checks it and marks the [`revision`](Self::revision)
+    /// only when it changes something. Moves the revision, whether or not the
+    /// borrow writes.
+    pub(crate) fn spec_mut(&mut self) -> &mut GraphSpec {
         self.touch();
         &mut self.spec
     }
@@ -632,7 +628,7 @@ impl<F: Float> Editor<F> {
     }
 
     /// A count that moves whenever anything the editor shows a reader may
-    /// have changed: the spec ([`spec_mut`](Self::spec_mut) included), the
+    /// have changed: the spec (any wiring call), the
     /// shapes and generations, the plan sent last ([`base`](Self::base)),
     /// a param range or its cells, the [`Prepare`]. Equal revisions mean
     /// none of those changed in between, so a control-side pass that is a
