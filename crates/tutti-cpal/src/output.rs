@@ -426,8 +426,8 @@ impl AudioEngine {
     /// Builds a stream on the selected device and starts it. A stream that is
     /// already running is an error: the state handed in is not adopted.
     ///
-    /// Re-reads the device's config first (at the chosen format, if any), so after a
-    /// [`select_device`](Self::select_device) the [`spec`](OutputStream::spec),
+    /// Re-reads the device's config first (at the chosen format, if any), so the
+    /// [`spec`](OutputStream::spec),
     /// [`sample_rate`](OutputStream::sample_rate) and [`channels`](OutputStream::channels)
     /// describe the device that is actually playing. The stream is opened with
     /// a fixed buffer of the [`quantum`](OutputConfig::quantum) asked for, which
