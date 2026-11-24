@@ -35,7 +35,8 @@ pub(crate) struct Challenged {
 pub(crate) enum HostOpening {
     /// The Host waits for its application to accept or decline.
     Confirming { since: Instant },
-    /// The Host waits for the answer to its challenge.
+    /// The Host waits for the answer to its challenge. Boxed: `Challenged` is
+    /// 232 bytes against 16 for the other state (clippy `large_enum_variant`).
     Challenged(Box<Challenged>),
 }
 
@@ -110,6 +111,39 @@ impl HostRole {
     fn admit(&self, core: &mut Core<Self>, now: Instant) {
         core.out.push(Command::Accepted(core.local));
         core.establish(now);
+    }
+
+    /// Answers an Invitation with the challenge its Client must meet.
+    fn challenge(
+        &self,
+        core: &mut Core<Self>,
+        now: Instant,
+        invitation: &Invitation,
+        challenge: Challenge,
+    ) {
+        let local = core.local;
+        if !invitation.methods.contains(challenge.required()) {
+            return core.refuse(now, ByeReason::NoMatchingAuthentication);
+        }
+        let nonce = match (self.nonce_source)() {
+            Ok(nonce) => nonce,
+            Err(error) => {
+                core.events.push(Event::NonceUnavailable {
+                    peer: core.peer,
+                    error,
+                });
+                return core.refuse(now, ByeReason::Unknown);
+            }
+        };
+        core.out
+            .push(challenge.command(nonce, Because::Invited, local));
+        core.phase = Phase::Opening(HostOpening::Challenged(Box::new(Challenged {
+            challenge,
+            nonce,
+            since: now,
+            failures: 0,
+            delayed: None,
+        })));
     }
 
     /// Checks an authenticated Invitation against the challenge in hand.
@@ -228,38 +262,24 @@ impl Role for HostRole {
             return core.refuse(now, ByeReason::TooManySessions);
         }
         core.remote = Some(invitation.identity);
-        if let Some(challenge) = self.admission.challenge() {
-            if !invitation.methods.contains(challenge.required()) {
-                return core.refuse(now, ByeReason::NoMatchingAuthentication);
+        match &*self.admission {
+            Admission::Open => self.admit(core, now),
+            Admission::Confirm => {
+                core.out.push(Command::Pending(local));
+                core.phase = Phase::Opening(HostOpening::Confirming { since: now });
+                core.events.push(Event::Confirm {
+                    peer: core.peer,
+                    remote: invitation.identity,
+                });
             }
-            let nonce = match (self.nonce_source)() {
-                Ok(nonce) => nonce,
-                Err(error) => {
-                    core.events.push(Event::NonceUnavailable {
-                        peer: core.peer,
-                        error,
-                    });
-                    return core.refuse(now, ByeReason::Unknown);
-                }
-            };
-            core.out
-                .push(challenge.command(nonce, Because::Invited, local));
-            core.phase = Phase::Opening(HostOpening::Challenged(Box::new(Challenged {
-                challenge,
-                nonce,
-                since: now,
-                failures: 0,
-                delayed: None,
-            })));
-        } else if *self.admission == Admission::Confirm {
-            core.out.push(Command::Pending(local));
-            core.phase = Phase::Opening(HostOpening::Confirming { since: now });
-            core.events.push(Event::Confirm {
-                peer: core.peer,
-                remote: invitation.identity,
-            });
-        } else {
-            self.admit(core, now);
+            Admission::SharedSecret(secret) => {
+                let challenge = Challenge::SharedSecret(Arc::clone(secret));
+                self.challenge(core, now, &invitation, challenge);
+            }
+            Admission::Users(users) => {
+                let challenge = Challenge::Users(Arc::clone(users));
+                self.challenge(core, now, &invitation, challenge);
+            }
         }
     }
 
