@@ -29,7 +29,7 @@ use super::ids::{
     AudioFeedbackId, AudioSlotId, AudioValueId, EventFeedbackId, EventSlotId, Id, OpId, Table,
     TableSlice,
 };
-use super::plan::{Csr, EventSlotCapacity, GainPortOp, Op, ParamPortOp, Value};
+use super::plan::{Csr, EventSlotCapacity, FeedbackSpec, GainPortOp, Op, ParamPortOp, Value};
 use super::program::{ARef, BySlot, ByValue, ERef, Program, Sizes};
 use super::shapes::Units;
 use crate::node::InPlaceMask;
@@ -49,7 +49,7 @@ impl Reach {
         let words = n.div_ceil(64);
         let mut bits = vec![0u64; n * words];
         for b in 0..n {
-            for a in deps.row_at(b).iter().map(|a| a.index()) {
+            for a in deps.row(b).iter().map(|a| a.index()) {
                 debug_assert!(a < b, "op DAG edges point forward");
                 bits[b * words + a / 64] |= 1 << (a % 64);
                 for w in 0..words {
@@ -140,49 +140,35 @@ pub(crate) fn assign<V: Id>(
     }
 }
 
-/// The lives of `values`, writers named by their ops and readers by their
-/// spans of `readers`.
-fn lives_of<'a, V: Id, A: Copy, E: Copy>(
-    values: &TableSlice<V, Value<()>>,
-    ops: &TableSlice<OpId, Op<A, E>>,
+/// The lives of `values`, readers named by their spans of `readers`.
+fn lives_of<'a, V: Id, S>(
+    values: &TableSlice<V, Value<S>>,
     readers: &'a [OpId],
 ) -> Table<V, Life<'a>> {
     values
         .iter()
         .map(|v| Life {
-            writer: ops
-                .id(v.writer as usize)
-                .expect("a value is written by an op of the program"),
+            writer: v.writer,
             readers: &readers[v.readers.range()],
         })
         .collect()
 }
 
-/// The slots of `colouring`'s values, past the `fixed` slots in front of them,
-/// among the `slots` of the arena.
-fn slots_of<V: Id, S: Id>(
+/// `values` with the slot each was given: the coloured value's slot is the
+/// `fixed` slots in front of the arena, then its colour.
+fn slotted<V: Id, S: Id, R>(
+    values: Table<V, Value<()>>,
     colouring: &Colouring<V>,
     fixed: usize,
-    slots: &TableSlice<S, impl Sized>,
-) -> Table<V, S> {
-    colouring
-        .slot
-        .iter()
-        .map(|&s| {
-            slots
-                .id(fixed + s)
-                .expect("the arena holds every coloured slot")
-        })
-        .collect()
-}
-
-/// `values` with the slot each was given.
-fn slotted<V: Id, S: Id>(values: Table<V, Value<()>>, at: &TableSlice<V, S>) -> Table<V, Value> {
+    arena: &TableSlice<S, R>,
+) -> Table<V, Value<S>> {
     values
         .into_iter()
-        .zip(at)
-        .map(|(v, s)| Value {
-            slot: s.get(),
+        .zip(&colouring.slot)
+        .map(|(v, &colour)| Value {
+            slot: arena
+                .id(fixed + colour)
+                .expect("the arena holds every coloured slot"),
             writer: v.writer,
             readers: v.readers,
         })
@@ -241,7 +227,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
                 audio_in,
                 audio_out,
                 ..
-            } if units.shapes.as_slice()[unit as usize].in_place => {
+            } if units.shapes[unit].in_place => {
                 let ain = &audio_list[audio_in.range()];
                 let aout = &audio_list[audio_out.range()];
                 for (&r, &out) in ain.iter().zip(aout) {
@@ -260,13 +246,9 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         }
     }
 
-    let audio_colour = assign(
-        &lives_of(&audio_values, &ops, &value_readers),
-        &reach,
-        &in_place,
-    );
+    let audio_colour = assign(&lives_of(&audio_values, &value_readers), &reach, &in_place);
     let event_colour = assign(
-        &lives_of(&event_values, &ops, &value_readers),
+        &lives_of(&event_values, &value_readers),
         &reach,
         &Table::filled(event_values.len(), None),
     );
@@ -277,16 +259,18 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
     let audio_arena: Table<AudioSlotId, ()> = Table::filled(audio_fixed + audio_colour.count, ());
     let mut event_arena: Table<EventSlotId, EventSlotCapacity> =
         Table::filled(event_fixed + event_colour.count, EventSlotCapacity::NONE);
-    let audio_at = slots_of(&audio_colour, audio_fixed, &audio_arena);
-    let event_at = slots_of(&event_colour, event_fixed, &event_arena);
     let audio_feedback_at: Table<AudioFeedbackId, AudioSlotId> = audio_feedback
-        .iter_enumerated()
-        .map(|(f, _)| audio_arena.id(1 + f.index()).expect("a feedback slot"))
+        .iter()
+        .zip(audio_arena.ids().skip(1))
+        .map(|(_, slot)| slot)
         .collect();
     let event_feedback_at: Table<EventFeedbackId, EventSlotId> = event_feedback
-        .iter_enumerated()
-        .map(|(f, _)| event_arena.id(1 + f.index()).expect("a feedback slot"))
+        .iter()
+        .zip(event_arena.ids().skip(1))
+        .map(|(_, slot)| slot)
         .collect();
+    let audio_values = slotted(audio_values, &audio_colour, audio_fixed, &audio_arena);
+    let event_values = slotted(event_values, &event_colour, event_fixed, &event_arena);
 
     // Event slot capacities: a feedback slot holds its FIFO, and a slot
     // shared by several values the most of each currency any of them needs.
@@ -294,58 +278,61 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         event_arena[event_feedback_at[f]] = cap;
     }
     for (v, &cap) in sizing.values.iter_enumerated() {
-        let s = event_at[v];
+        let s = event_values[v].slot;
         event_arena[s] = event_arena[s].covering(cap);
     }
 
     let aref_slot = |r: ARef| match r {
-        ARef::Val(v) => audio_at[v],
+        ARef::Val(v) => audio_values[v].slot,
         ARef::Zero => AudioSlotId::ZERO,
         ARef::Fb(f) => audio_feedback_at[f],
     };
     let eref_slot = |r: ERef| match r {
-        ERef::Val(v) => event_at[v],
+        ERef::Val(v) => event_values[v].slot,
         ERef::Empty => EventSlotId::EMPTY,
         ERef::Fb(f) => event_feedback_at[f],
     };
     let audio_list: Vec<AudioSlotId> = audio_list.iter().map(|&r| aref_slot(r)).collect();
     let event_list: Vec<EventSlotId> = event_list.iter().map(|&r| eref_slot(r)).collect();
 
-    let ops: Table<OpId, Op> = ops
+    let ops: Table<OpId, Op<AudioSlotId, EventSlotId>> = ops
         .into_iter()
-        .map(
-            |op| match op.map(|r| aref_slot(r).get(), |r| eref_slot(r).get()) {
-                // A channel is in place when its output came out in its input's
-                // slot.
+        .map(|op| match op.map(aref_slot, eref_slot) {
+            // A channel is in place when its output came out in its input's
+            // slot.
+            Op::Node {
+                unit,
+                audio_in,
+                audio_out,
+                event_in,
+                event_out,
+                params,
+                ..
+            } => {
+                let in_place = audio_list[audio_in.range()]
+                    .iter()
+                    .zip(&audio_list[audio_out.range()])
+                    .enumerate()
+                    .filter(|&(_, (input, output))| input == output)
+                    .fold(InPlaceMask::NONE, |mask, (c, _)| mask.with(c));
+                // Only a node that accepts in-place aliasing was offered it.
+                debug_assert!(
+                    in_place == InPlaceMask::NONE || units.shapes[unit].in_place,
+                    "a node that does not alias in place shares an input and an output slot"
+                );
                 Op::Node {
                     unit,
                     audio_in,
                     audio_out,
                     event_in,
                     event_out,
+                    in_place,
                     params,
-                    ..
-                } => Op::Node {
-                    unit,
-                    audio_in,
-                    audio_out,
-                    event_in,
-                    event_out,
-                    in_place: audio_list[audio_in.range()]
-                        .iter()
-                        .zip(&audio_list[audio_out.range()])
-                        .enumerate()
-                        .filter(|&(_, (input, output))| input == output)
-                        .fold(InPlaceMask::NONE, |mask, (c, _)| mask.with(c)),
-                    params,
-                },
-                op => op,
-            },
-        )
+                }
+            }
+            op => op,
+        })
         .collect();
-    let audio_values = slotted(audio_values, &audio_at);
-    let event_values = slotted(event_values, &event_at);
-
     Program {
         ops,
         audio_list,
@@ -356,7 +343,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
                 port: p.port,
                 param: p.param,
                 from: p.from,
-                slot: eref_slot(p.slot).get(),
+                slot: eref_slot(p.slot),
             })
             .collect(),
         gain_ports: gain_ports
@@ -364,7 +351,7 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
             .map(|g| GainPortOp {
                 lane: g.lane,
                 from: g.from,
-                slot: eref_slot(g.slot).get(),
+                slot: eref_slot(g.slot),
             })
             .collect(),
         sum_lanes,
@@ -373,8 +360,16 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
         value_readers,
         deps,
         delays,
-        audio_feedback,
-        event_feedback,
+        audio_feedback: audio_feedback
+            .into_iter()
+            .zip(&audio_feedback_at)
+            .map(|(key, &slot)| FeedbackSpec { key, slot })
+            .collect(),
+        event_feedback: event_feedback
+            .into_iter()
+            .zip(&event_feedback_at)
+            .map(|(key, &slot)| FeedbackSpec { key, slot })
+            .collect(),
         taps,
         event_taps,
         meters,

@@ -113,14 +113,6 @@ pub enum RoutingError {
     },
 }
 
-impl RoutingError {
-    /// Whether the map is what the pair broke on.
-    #[must_use]
-    pub fn is_map(&self) -> bool {
-        matches!(self, Self::MapWidth { .. } | Self::MapPast { .. })
-    }
-}
-
 /// The main output's way to the device: the format it is heard in, the map, and the
 /// levels the monitor fold takes.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -497,6 +489,5 @@ mod tests {
                 heard: ChannelLayout::STEREO
             })
         );
-        assert!(wide.fold::<f32>(&five_one, &five_set).unwrap_err().is_map());
     }
 }

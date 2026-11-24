@@ -57,12 +57,6 @@ impl<F: Float> Stopped<'_, F> {
 pub struct StreamHost<F: Float = f32> {
     stream: OutputStream,
     callback_state: Arc<AudioCallbackState<F>>,
-    /// The rate the graph runs at: the stream's at build, then only what a
-    /// restart hook returned `Ok` for. Kept apart from the spec, which a
-    /// restart resolves to the new device's config before its hook runs;
-    /// comparing against that would let a second plain restart onto the
-    /// same new-rate device find "no change" and start over the old graph.
-    graph_rate: SampleRate,
 }
 
 // Hand-rolled: `AudioCallbackState` holds the RT-side graph handles and is not
@@ -87,7 +81,6 @@ impl<F: Float> StreamHost<F> {
     /// renderer.
     pub fn new(stream: OutputStream, callback_state: Arc<AudioCallbackState<F>>) -> Self {
         Self {
-            graph_rate: stream.sample_rate(),
             stream,
             callback_state,
         }
@@ -96,9 +89,10 @@ impl<F: Float> StreamHost<F> {
     /// Returns the rate the graph runs at, as far as this host knows.
     ///
     /// This is the stream's rate at [`new`](Self::new), then the rate of the
-    /// last restart whose hook returned `Ok`.
+    /// last restart whose hook returned `Ok`: a failed restart restores the
+    /// spec it started from.
     pub fn graph_rate(&self) -> SampleRate {
-        self.graph_rate
+        self.stream.spec().sample_rate
     }
 
     /// Says the graph is prepared as `prepared` says: the stream's rate and
@@ -119,7 +113,6 @@ impl<F: Float> StreamHost<F> {
             .quantum()
             .map(OutputQuantum::try_from)
             .transpose()?;
-        self.graph_rate = prepared.sample_rate();
         let mut spec = self.stream.spec().clone();
         spec.sample_rate = prepared.sample_rate();
         spec.quantum = quantum;
@@ -186,12 +179,9 @@ impl<F: Float> StreamHost<F> {
         let stopped = Stopped {
             state: &self.callback_state,
         };
-        match rerate(self.stream.spec(), &stopped) {
-            Ok(()) => self.graph_rate = self.stream.spec().sample_rate,
-            Err(e) => {
-                self.stream.set_spec(old);
-                return Err(e);
-            }
+        if let Err(e) = rerate(self.stream.spec(), &stopped) {
+            self.stream.set_spec(old);
+            return Err(e);
         }
         self.stream
             .start_with(Arc::clone(&self.callback_state), driver)?;

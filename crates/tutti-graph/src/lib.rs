@@ -701,6 +701,10 @@ pub use node::fork::{
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
+pub use compile::ids::{
+    AudioFeedbackId, AudioSlotId, DelayId, EventFeedbackId, EventSlotId, OpId, PlanEventTapId,
+    PlanMeterId, PlanTapId, PlanUnitId, TaskId,
+};
 pub use compile::latency::{
     ChannelFeed, Compensation, Delays, Feed, InputDelay, LatencyGraph, MAX_NODE_LATENCY,
     OutputDelay, PortFeed, delays, plan as latency_plan,

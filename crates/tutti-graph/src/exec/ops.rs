@@ -3,7 +3,7 @@
 
 use super::node_op::Flags;
 use super::state::Ring;
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::{AudioSlotId, EventSlotId};
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
 use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
@@ -100,7 +100,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     events: &E,
     list: &[AudioSlotId],
     lanes: &mut [SumLane<F>],
-    gains: &[GainPortOp],
+    gains: &[GainPortOp<EventSlotId>],
     dst: AudioSlotId,
     frames: usize,
     declick: Samples,
@@ -114,7 +114,7 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
         let source = gains
             .iter()
             .find(|g| usize::from(g.lane) == k)
-            .map(|g| (g.from, &events.pev(EventSlotId::new(g.slot))[..]));
+            .map(|g| (g.from, &events.pev(g.slot)[..]));
         *w = SumLane::weight(lane, frames, declick, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`
