@@ -573,13 +573,18 @@ where
         // The programme has rendered: a reported tail is read once, between
         // blocks, and spent under its ceiling.
         match plan.tail {
-            TailPolicy::Reported { ceiling, flush } if !resolved => {
+            TailPolicy::Reported {
+                ceiling,
+                kept_latency,
+            } if !resolved => {
                 resolved = true;
                 // The programme's end is asked at the graph's input side; the
                 // graph's latency is then pulled once for every node, as for a
                 // fixed tail.
-                total =
-                    plan.latency + plan.programme + flush + src.reported_tail().resolve(ceiling);
+                total = plan.latency
+                    + plan.programme
+                    + kept_latency
+                    + src.reported_tail().resolve(ceiling);
                 control.advance(stage, src.produced(), total);
             }
             _ => break,

@@ -1477,11 +1477,11 @@ impl Figures {
             // most this. `resolve`, not `samples().unwrap_or(cap)`: a node
             // that never said (`Tail::Unknown`) is bounded by what the others
             // declared, not by the cap, which would append silence. The
-            // untrimmed latency is `flush`: pulled once, after the programme
+            // untrimmed latency is `kept_latency`: pulled once, after the programme
             // and before the tail.
             BounceTail::Graph { cap } => TailPolicy::Reported {
                 ceiling: graph.declared_tail().resolve(cap.to_samples(self.rate)),
-                flush: kept,
+                kept_latency: kept,
             },
         };
         self.provisional(latency, tail)

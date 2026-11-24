@@ -1475,7 +1475,7 @@ const PROGRAMME: usize = 8_820;
 fn reported(ceiling: usize) -> TailPolicy {
     TailPolicy::Reported {
         ceiling: Samples::new(ceiling),
-        flush: Samples::ZERO,
+        kept_latency: Samples::ZERO,
     }
 }
 

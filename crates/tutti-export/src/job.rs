@@ -59,7 +59,7 @@ pub enum TailPolicy {
         /// Frames of the graph's latency the job does not trim: the programme
         /// leaves the graph that much late, so they are pulled and kept
         /// between the programme's end and the tail.
-        flush: Samples,
+        kept_latency: Samples,
     },
 }
 
@@ -69,7 +69,10 @@ impl TailPolicy {
     pub fn bound(self) -> Samples {
         match self {
             Self::Frames(frames) => frames,
-            Self::Reported { ceiling, flush } => ceiling + flush,
+            Self::Reported {
+                ceiling,
+                kept_latency,
+            } => ceiling + kept_latency,
         }
     }
 }
