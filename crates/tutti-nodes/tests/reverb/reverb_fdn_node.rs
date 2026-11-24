@@ -172,6 +172,33 @@ fn the_reported_tail_is_the_networks_and_honest() {
     }
 }
 
+/// A node of a freezable layout built with the freeze on reports `Tail::Unbounded` to the graph
+/// on every block from its first, with and without input (a lossless loop with a shut input
+/// never falls to the floor); the same controls on a layout that cannot freeze ignore the
+/// freeze and report a finite tail, held under the declared ceiling.
+#[test]
+fn a_frozen_node_reports_an_unbounded_tail_to_the_graph() {
+    let frozen = FdnControls {
+        freeze: true,
+        ..FdnControls::DEFAULT
+    };
+    let mut rig = Rig::new(node(freezable(), frozen));
+    for block in [
+        impulse(),
+        vec![0.0; BLOCK],
+        noise(3, BLOCK),
+        vec![0.0; BLOCK],
+    ] {
+        assert_eq!(rig.block(&block, &[]).reported_tail, Some(Tail::Unbounded));
+    }
+    let mut decaying = Rig::new(node(plain(), frozen));
+    let Tail::Finite(ceiling) = decaying.node.shape().tail else {
+        panic!("a layout that cannot freeze declares a finite ceiling")
+    };
+    let reported = finite(&decaying.block(&impulse(), &[]));
+    assert!(reported <= ceiling.get(), "{reported} under {ceiling:?}");
+}
+
 /// A freeze reports an unbounded tail and holds: with the input silent the level a second
 /// after the freeze and four seconds later differ by under half a dB, and the node is never
 /// parked. Thawed, it reports a finite tail again, decays and is eventually idle.

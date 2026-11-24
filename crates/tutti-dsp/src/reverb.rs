@@ -16,6 +16,8 @@ pub(crate) mod freeverb;
 pub(crate) mod network;
 pub(crate) mod plate;
 pub(crate) mod spring;
+#[cfg(test)]
+mod tail_probe;
 
 use tutti_units::{SampleRate, Seconds, Tail};
 
