@@ -50,13 +50,13 @@ fn graph(frame: u64) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(1), "clip", MidiClipNode::new([note_on_at(frame)]));
     ed.insert(NodeKey(2), "synth", saw());
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))));
+    )
+    .unwrap();
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
+        .unwrap();
     ed.commit().expect("commits");
     (ed, exec)
 }

@@ -28,6 +28,7 @@ use tutti_buffers::InterleavedMut;
 use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_engine::{Engine, OutputPlacement};
 use tutti_fixtures::midi;
+use tutti_graph::EdgeId;
 use tutti_music::LoopRange;
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{LoopEdit, Transport};
@@ -94,9 +95,8 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
@@ -175,9 +175,8 @@ fn a_published_tempo_map_is_taken_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let mut output = vec![0.0f32; 1024 * 2];
@@ -237,9 +236,8 @@ fn a_step_map_is_followed_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(dense(90.0));
@@ -297,9 +295,8 @@ fn a_step_map_is_followed_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(4_096)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport
@@ -363,9 +360,8 @@ fn the_heard_tap_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let mut engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let _ = transport.motion().send(MotionCommand::Play);
@@ -456,12 +452,12 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let (clock, sink) = (NodeKey(1), NodeKey(2));
     ed.insert(clock, "clock", Unforkable(BeatWalk));
     let _ = ed.insert(sink, "click", click);
-    let topology = &mut ed.spec_mut().topology;
-    topology.set_outputs(
+    ed.wire_outputs(
         [(sink, 0), (sink, 1), (clock, 0), (clock, 1)]
             .into_iter()
             .map(|(node, port)| PortSource::Node(OutputPort::new(node, port))),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
@@ -543,19 +539,18 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
             "gain",
             ForkByClone(crate::support::Gain(0.1 * (k + 1) as f32)),
         );
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(k + 11), 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                NodeKey(k + 1),
-                0,
-            )))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(k + 1), 0))),
+        ))
+        .unwrap();
     }
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_outputs(
         [11, 12]
             .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -611,9 +606,8 @@ fn a_714_main_output_block_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
     engine
@@ -673,9 +667,8 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
     let control = engine.output_control();
@@ -692,7 +685,7 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
     control
         .publish_main_output(id, Some(Bed::Surround714.topology()), twelve)
         .expect("places");
-    ed.spec_mut().main_output_id = id;
+    ed.declare_main_output(ed.spec().main_output, id);
     ed.commit().expect("commits");
 
     let mut out = vec![0.0f32; 512 * 12];
@@ -729,9 +722,8 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
     let twelve = ChannelLayout::from(12u16);
@@ -806,9 +798,8 @@ fn a_routing_crossfade_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
     let twelve = ChannelLayout::from(12u16);
@@ -900,7 +891,7 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.insert(NodeKey(2), "latent", Unforkable(Latent));
     let wire = |ed: &mut Editor, width: u16| {
-        ed.spec_mut().topology.set_outputs((0..width).map(|port| {
+        ed.wire_outputs((0..width).map(|port| {
             // The old main output's last channel is the latent source's, so every
             // other channel of it is aligned by a ring; the new main output has none.
             let node = if width == 12 && port == 11 { 2 } else { 1 };
@@ -908,7 +899,8 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
                 NodeKey(node),
                 if node == 2 { 0 } else { port },
             ))
-        }));
+        }))
+        .unwrap();
     };
     wire(&mut ed, 12);
     ed.commit().expect("commits");
@@ -926,7 +918,7 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     control
         .publish_main_output(id, Some(Bed::Surround51.topology()), ChannelLayout::STEREO)
         .expect("places");
-    ed.spec_mut().main_output_id = id;
+    ed.declare_main_output(ed.spec().main_output, id);
     wire(&mut ed, 6);
     ed.commit().expect("commits");
     for _ in 0..8 {

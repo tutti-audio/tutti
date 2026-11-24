@@ -151,9 +151,8 @@ fn render(
             ed.insert(NodeKey(1), "voice", source);
         }
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(map));
@@ -291,9 +290,8 @@ fn a_block_lent_no_map_places_a_clip_by_the_transports_tempo() {
     pool.insert(SlotId(1), source, Playback::default())
         .expect("a finite gain and a nonempty width");
     ed.insert(NodeKey(1), "voice", pool);
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     const BLOCK: usize = 64;
     let mut out = Vec::new();
@@ -394,9 +392,8 @@ fn a_clip_placed_ahead_of_a_tempo_change_lands_its_first_frame_on_its_start() {
     handle
         .set_stretch(SlotId(1), StretchFactor::UNITY, Cents::new(0.0))
         .expect("room");
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .unwrap();
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     transport.settings().set_tempo_map(Arc::clone(&m));

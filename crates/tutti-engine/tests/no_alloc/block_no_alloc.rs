@@ -27,6 +27,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_buffers::MaxBlock;
 use tutti_engine::{AudioCallbackState, Engine, MAX_FRAMES, OutputBlock, process_audio};
+use tutti_graph::EdgeId;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, MeterReader, Prepare, TapReader};
 use tutti_graph::{MeterId, MeterSpec, NodeKey, TapId, TapOptions};
@@ -73,13 +74,13 @@ fn rolling_state_with(
                 .q(Q::new(0.7)),
         ),
     );
-    ed.spec_mut().topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(filter, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2]);
+        Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+        .unwrap();
     let reader = tap.then(|| {
         let sources: Vec<_> = ed
             .spec()

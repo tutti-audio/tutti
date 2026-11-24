@@ -519,6 +519,7 @@ mod logged {
 
     use super::{BLOCK, POISONED, SR};
     use tutti_buffers::{ChannelLayout, ChannelTopology, MaxBlock};
+    use tutti_graph::EdgeId;
     use tutti_graph::{
         Cx, Edge, Editor, Executor, InputPort, IntoNode, Io, LogFilter, Node, NodeKey, OutputPort,
         PortSource, Prepare, RtLevel, RtLogReaders, RtRecord, RtValue, Shape, Status,
@@ -582,14 +583,15 @@ mod logged {
             }),
         );
         ed.insert(fx, "fx", node);
-        let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
-            topology.edges.insert(
+            ed.connect_edge(EdgeId::into_port(
                 InputPort::new(fx, port),
-                vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
-            );
+                Edge::Direct(PortSource::Node(OutputPort::new(src, port))),
+            ))
+            .unwrap();
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))));
+        ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
+            .unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

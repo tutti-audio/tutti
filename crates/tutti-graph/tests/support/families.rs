@@ -201,18 +201,10 @@ pub fn weigh(desc: &mut Desc, rng: &mut Rng) {
     let mut ids: Vec<EdgeId> = t
         .edges
         .iter()
-        .flat_map(|(&at, es)| {
-            es.iter().map(move |&from| EdgeId {
-                sink: PortSink::Port(at),
-                from,
-            })
-        })
+        .flat_map(|(&at, es)| es.iter().map(move |&from| EdgeId::into_port(at, from)))
         .collect();
     for (ch, sources) in t.outputs.iter().enumerate() {
-        ids.extend(sources.iter().map(|&s| EdgeId {
-            sink: PortSink::Output(ch as u16),
-            from: Edge::Direct(s),
-        }));
+        ids.extend(sources.iter().map(|&s| EdgeId::into_output(ch as u16, s)));
     }
     for id in ids {
         if rng.chance(33) && !desc.spec.gains.contains_key(&id) {

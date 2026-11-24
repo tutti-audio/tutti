@@ -16,6 +16,7 @@ mod bus_no_alloc;
 mod buses;
 mod compile_passes;
 mod cost_model;
+mod editor_wiring;
 mod fork;
 mod graph_value;
 mod limits;

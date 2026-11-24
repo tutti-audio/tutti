@@ -11,8 +11,8 @@ use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, declick, prepare};
 use tutti_graph::{
-    Edge, EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort, PortSink,
-    PortSource, Renderer, TransportPosition, Unforkable,
+    EdgeId, Editor, Executor, Fade, FadeLaw, MainOutputFade, NodeKey, OutputPort, PortSource,
+    Renderer, TransportPosition, Unforkable,
 };
 use tutti_units::{Amplitude, Gain, Latency, Samples};
 
@@ -80,9 +80,8 @@ fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
     for (k, kind) in nodes {
         ed.insert(key(*k), "node", Unforkable(TestNode::new(kind.clone())));
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>());
+    ed.wire_outputs(outputs.iter().map(|&n| source(n)).collect::<Vec<_>>())
+        .unwrap();
     ed.commit().expect("commits");
     let mut r = Renderer::new(ed, exec);
     r.set_block(Samples::new(BLOCK));
@@ -94,8 +93,8 @@ fn rig_with(nodes: &[(u64, Kind)], outputs: &[u64]) -> Renderer {
 fn declare(r: &mut Renderer, node: u64, fade: Fade) {
     let ed = r.editor_mut();
     ed.set_main_output_fade(Some(fade));
-    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
-    ed.spec_mut().topology.set_outputs(vec![source(node)]);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(node)]).unwrap();
     ed.commit()
         .expect("commits with the old main output's channels");
 }
@@ -373,8 +372,8 @@ fn a_hard_redeclare_mid_fade_cuts_at_its_block() {
     step(&mut r, BLOCK);
     r.editor_mut().set_main_output_fade(None);
     let ed = r.editor_mut();
-    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
-    ed.spec_mut().topology.set_outputs(vec![source(3)]);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(3)]).unwrap();
     ed.commit().expect("commits");
     let newest = r.editor().spec().main_output_id;
     let block = step(&mut r, BLOCK);
@@ -396,9 +395,8 @@ fn a_width_change_without_a_new_main_output_cuts_the_fade() {
     declare(&mut r, 2, fade(FadeLaw::EqualAmplitude));
     step(&mut r, BLOCK);
     r.editor_mut()
-        .spec_mut()
-        .topology
-        .set_outputs(vec![source(2), source(2)]);
+        .wire_outputs(vec![source(2), source(2)])
+        .unwrap();
     r.editor_mut().commit().expect("commits");
     let block = step(&mut r, BLOCK);
     assert_eq!(block.fade, None);
@@ -439,10 +437,8 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
         record(&mut r);
         let ed = r.editor_mut();
         ed.set_main_output_fade(Some(fade(law)));
-        ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
-        ed.spec_mut()
-            .topology
-            .set_outputs(vec![source(3), source(4)]);
+        ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+        ed.wire_outputs(vec![source(3), source(4)]).unwrap();
         ed.commit().expect("commits");
         record(&mut r);
         r.editor_mut().remove(key(7));
@@ -465,10 +461,8 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
 fn declare_pair(r: &mut Renderer, a: u64, b: u64, fade: Fade) {
     let ed = r.editor_mut();
     ed.set_main_output_fade(Some(fade));
-    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![source(a), source(b)]);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(a), source(b)]).unwrap();
     ed.commit().expect("commits");
 }
 
@@ -534,16 +528,13 @@ fn a_carried_commit_that_removes_an_old_source_drops_it_from_the_bank_and_keeps_
         ],
         &[1, 2],
     );
-    let weighted = EdgeId {
-        sink: PortSink::Output(1),
-        from: Edge::Direct(source(2)),
-    };
+    let weighted = EdgeId::into_output(1, source(2));
     r.editor_mut()
         .set_edge_gain(weighted, Gain::new(0.5))
         .expect("the edge exists");
     r.editor_mut().commit().expect("commits");
     step(&mut r, BLOCK);
-    r.editor_mut().spec_mut().gains.remove(&weighted);
+    r.editor_mut().clear_edge_gain(weighted);
     declare_pair(&mut r, 3, 3, fade(FadeLaw::EqualAmplitude));
     let block = step(&mut r, BLOCK);
     assert!(block.all[2].iter().all(|&x| x == OLD));
@@ -580,7 +571,7 @@ fn a_carried_commit_that_removes_every_old_source_cuts() {
             width: 1,
         })),
     );
-    ed.spec_mut().topology.set_outputs(vec![source(9)]);
+    ed.wire_outputs(vec![source(9)]).unwrap();
     ed.commit().expect("commits");
     let block = step(&mut r, BLOCK);
     assert_eq!(block.fade, None);
@@ -747,8 +738,8 @@ fn main_output_fade_running_is_true_while_the_bank_runs_and_false_after_settling
     step(&mut r, BLOCK);
     r.editor_mut().set_main_output_fade(None);
     let ed = r.editor_mut();
-    ed.spec_mut().main_output_id = ed.spec().main_output_id.next();
-    ed.spec_mut().topology.set_outputs(vec![source(3)]);
+    ed.declare_main_output(ed.spec().main_output, ed.spec().main_output_id.next());
+    ed.wire_outputs(vec![source(3)]).unwrap();
     ed.commit().expect("commits");
     assert!(
         !r.editor().main_output_fade_running(),

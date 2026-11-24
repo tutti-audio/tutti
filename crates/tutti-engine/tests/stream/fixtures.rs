@@ -11,6 +11,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::SampleFormat;
 use tutti_engine::{AudioCallbackState, Engine, OutputSpec};
+use tutti_graph::EdgeId;
 use tutti_graph::NodeKey;
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
 use tutti_graph::{Editor, Prepare};
@@ -39,9 +40,8 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
 pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs]);
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
+        .unwrap();
 }
 
 /// A rolling transport driving a sine through a filter, at `outputs` width.
@@ -62,10 +62,11 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
                     .q(Q::new(0.7)),
             ),
         );
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(filter, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+        ))
+        .unwrap();
         fan(ed, filter, outputs);
     });
     let state = AudioCallbackState::new(engine);

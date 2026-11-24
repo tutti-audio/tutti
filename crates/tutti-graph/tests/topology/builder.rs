@@ -5,6 +5,7 @@
 
 use tutti_buffers::{Planes, PlanesMut};
 use tutti_fixtures::signal::bits;
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use common::{Kind, TestNode, prepare};
@@ -257,7 +258,7 @@ mod net_rule {
 }
 
 /// The same graph written twice — through the builder, and by hand through
-/// `Editor::insert` and `spec_mut` — gives equal specs, equal plans and a
+/// `Editor::insert` and the wiring calls — gives equal specs, equal plans and a
 /// bit-identical render. It covers every kind of wiring the builder writes:
 /// a main input, a node-to-node edge, a feedback edge, a main output
 /// fed by `set_output` and one by `connect_output`, and an event edge.
@@ -312,28 +313,34 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         test_node,
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let at = |node: u64, port: u16| InputPort::new(NodeKey(node), port);
     let from = |node: u64, port: u16| OutputPort::new(NodeKey(node), port);
-    spec.topology
-        .edges
-        .insert(at(0, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
-    spec.topology.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
+        at(0, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
         at(0, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay))],
-    );
-    spec.topology
-        .edges
-        .insert(at(1, 0), vec![Edge::Direct(PortSource::Node(from(0, 0)))]);
-    spec.topology.set_outputs(vec![
+        Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay)),
+    ))
+    .unwrap();
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::Node(from(0, 0))),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
-    ]);
-    spec.connect_events(
+    ])
+    .unwrap();
+    ed.connect_events(
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
-    );
+    )
+    .unwrap();
     ed.commit().expect("commits");
     let mut by_hand = Renderer::new(ed, exec);
     by_hand.render(1); // installs the plan the builder installed eagerly
@@ -644,9 +651,8 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .unwrap();
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);
 }

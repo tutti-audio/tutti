@@ -334,6 +334,18 @@ fn a_driven_decay_reports_the_finite_figure_at_its_longest_decay() {
         "{:?}",
         after.reported_tail
     );
+    let none: Option<&[f32]> = None;
+    let small = vec![0.0f32; BLOCK];
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
+    let d = rig.block(
+        &impulse(),
+        &[none, none, none, Some(&small), none, Some(&small)],
+    );
+    assert_eq!(
+        d.reported_tail,
+        Some(Tail::Unbounded),
+        "a driven size and pre-delay"
+    );
 }
 
 /// A signal on the freeze, even at off, may switch it on after the block, and a frozen room
@@ -391,8 +403,8 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
         let editor = r.editor_mut();
         editor.insert(key, "lane", lane);
         editor
-            .spec_mut()
-            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0));
+            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0))
+            .unwrap();
         editor.commit().expect("the lane commits");
         let frames = 96_000;
         let mut x = noise(8, 4_800);

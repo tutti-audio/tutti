@@ -15,7 +15,9 @@ use crate::rendezvous::Rendezvous;
 use common::spec_of;
 use tutti_buffers::Float;
 use tutti_fixtures::{Record, Shared};
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::wire_like;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -902,7 +904,7 @@ struct Solo {
 impl Solo {
     fn new(inputs: u16) -> Self {
         let (mut ed, exec) = Editor::new(prepare(MAX_BLOCK));
-        ed.spec_mut().topology.inputs = ChannelLayout::from_count(inputs);
+        ed.resize_inputs(ChannelLayout::from_count(inputs));
         Self { ed, exec, frame: 0 }
     }
 
@@ -911,7 +913,9 @@ impl Solo {
     }
 
     fn wire(&mut self, f: impl FnOnce(&mut Topology)) {
-        f(&mut self.ed.spec_mut().topology);
+        let mut topology = self.ed.spec().topology.clone();
+        f(&mut topology);
+        wire_like(&mut self.ed, &tutti_graph::GraphSpec::new(topology));
     }
 
     fn commit(&mut self) {
@@ -1153,9 +1157,8 @@ fn a_held_input_note_is_closed_on_bypass() {
         t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(2), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1196,9 +1199,8 @@ fn a_held_input_note_is_closed_on_an_idle_node() {
         t.connect(at(3, 0), direct(2));
         t.set_outputs(vec![out(3, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(3), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(3), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(5, BLOCK, &|_| 0.0);
@@ -1235,9 +1237,8 @@ fn a_bypassed_source_closes_its_notes() {
         t.connect(at(2, 0), Edge::Direct(PortSource::MainInput(0)));
         t.set_outputs(vec![out(2, 0)]);
     });
-    s.ed.spec_mut()
-        .events
-        .insert(ev_in(2), vec![EventEdge::Direct(ev_out(1))]);
+    s.ed.connect_events(ev_in(2), EventEdge::Direct(ev_out(1)))
+        .unwrap();
     s.commit();
     mail.lock().unwrap().push(ON60);
     s.run(2, BLOCK, &|_| 0.5);
@@ -1286,8 +1287,9 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
                 width: 1,
             })),
         );
-        ed.spec_mut().topology.connect(at(2, 0), direct(1));
-        ed.spec_mut().topology.set_outputs(vec![out(2, 0)]);
+        ed.connect_edge(EdgeId::into_port(at(2, 0), direct(1)))
+            .unwrap();
+        ed.wire_outputs(vec![out(2, 0)]).unwrap();
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1372,12 +1374,14 @@ fn modes_name_nodes() {
 #[test]
 fn a_fork_copies_the_mode_and_starts_steady() {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "probe", ForkByClone(Probe::new(3.0)));
-    ed.spec_mut()
-        .topology
-        .connect(at(1, 0), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1, 0)]);
+    ed.connect_edge(EdgeId::into_port(
+        at(1, 0),
+        Edge::Direct(PortSource::MainInput(0)),
+    ))
+    .unwrap();
+    ed.wire_outputs(vec![out(1, 0)]).unwrap();
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

@@ -10,6 +10,8 @@ use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
 use tutti_fixtures::cycle_blocks;
+use tutti_graph::EdgeId;
+use tutti_graph::testing::feed_output;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
@@ -169,7 +171,12 @@ fn probes(max: usize, probes: &[u64], range: (f64, f64)) -> (Editor, Executor) {
     ));
     for &p in probes {
         ed.insert(NodeKey(p), "probe", ForkByClone(Probe));
-        ed.spec_mut().topology.outputs.push(vec![out(p, 0)]);
+        {
+            let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+            ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+            ed.connect_edge(EdgeId::into_output(channel, out(p, 0)))
+                .unwrap()
+        };
     }
     for &p in probes {
         ed.set_param_range(cutoff(p), ParamRange::of(range.0, range.1))
@@ -213,8 +220,8 @@ fn native_on(
 /// Inserts `lane` at `key`, wired to `probe`'s cutoff; returns its controls.
 fn wire(ed: &mut Editor, key: u64, lane: ControlLaneNode<PortLane>, probe: u64) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
-    ed.spec_mut()
-        .connect_param(cutoff(probe), EventOutputPort::new(NodeKey(key), 0));
+    ed.connect_param(cutoff(probe), EventOutputPort::new(NodeKey(key), 0))
+        .unwrap();
     controls
 }
 
@@ -228,14 +235,15 @@ fn wire_sink<K: LaneKind>(
 ) -> LaneControls {
     let controls = ed.insert(NodeKey(key), "lane", lane).controls;
     ed.insert(NodeKey(sink), "sink", ForkByClone(SegSink::default()));
-    let s = ed.spec_mut();
-    s.connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(sink), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(key), 0)),
-    );
-    s.topology
-        .outputs
-        .extend([vec![out(sink, 0)], vec![out(sink, 1)]]);
+    )
+    .unwrap();
+    for port in 0..2 {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        feed_output(ed, channel, [out(sink, port)]);
+    }
     controls
 }
 
@@ -1158,10 +1166,11 @@ fn an_input_offset_is_exact_from_its_frame() {
 
 /// Connects the `Feed` at `feed` to the lane at `lane`'s event input.
 fn feed_into(ed: &mut Editor, feed: u64, lane: u64) {
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(lane), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(feed), 0)),
-    );
+    )
+    .unwrap();
 }
 
 /// **A republish that reads a new source frees a slot for it.** A program
@@ -1323,8 +1332,8 @@ fn a_resync_sends_a_steady_lane_to_its_new_target() {
     let got = run(&mut ed, &mut exec);
     assert!(got[0].iter().all(|&v| v == 250.0), "probe 2 has it");
     let from = EventOutputPort::new(NodeKey(1), 0);
-    assert!(ed.spec_mut().disconnect_param(cutoff(2), from));
-    ed.spec_mut().connect_param(cutoff(3), from);
+    assert!(ed.disconnect_param(cutoff(2), from));
+    ed.connect_param(cutoff(3), from).unwrap();
     ed.commit().expect("commits");
     for _ in 0..3 {
         let got = run(&mut ed, &mut exec);

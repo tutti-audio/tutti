@@ -571,8 +571,8 @@ fn a_lane_driving_the_room_changes_how_long_it_rings() {
         let editor = r.editor_mut();
         editor.insert(key, "lane", lane);
         editor
-            .spec_mut()
-            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0));
+            .connect_param(at, tutti_graph::EventOutputPort::new(key, 0))
+            .unwrap();
         editor.commit().expect("the lane commits");
         let frames = 60_000;
         let mut x = noise(8, 4_800);

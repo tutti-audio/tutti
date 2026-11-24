@@ -6,7 +6,9 @@
 //! A meter reads the signal and changes nothing: the properties here are
 //! analytic figures and the one-participant render against the parallel one.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
+use tutti_graph::testing::feed_output;
 
 use common::{Kind, TestNode, prepare};
 use tutti_buffers::ChannelLayout;
@@ -83,7 +85,7 @@ fn constants(r: &mut Rig, values: &[f32]) {
         );
         outputs.push(out(key));
     }
-    r.ed.spec_mut().topology.set_outputs(outputs);
+    r.ed.wire_outputs(outputs).unwrap();
 }
 
 fn commit(r: &mut Rig) {
@@ -208,7 +210,7 @@ fn a_spike_is_held_until_read_and_read_once() {
             done: false,
         }),
     );
-    r.ed.spec_mut().topology.set_outputs(vec![out(1)]);
+    r.ed.wire_outputs(vec![out(1)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -276,8 +278,13 @@ fn the_main_output_follows_the_outputs() {
     block(&mut r, 32);
     assert_eq!(level(&mut m), vec![(0.5, 0.5, 32), (0.25, 0.25, 32)]);
 
-    r.ed.spec_mut().topology.outputs[0] = Vec::new();
-    r.ed.spec_mut().topology.outputs.push(vec![out(1)]);
+    feed_output(&mut r.ed, 0, []);
+    {
+        let channel = u16::try_from(r.ed.spec().topology.outputs.len()).expect("a width");
+        r.ed.resize_outputs(ChannelLayout::from_count(channel + 1));
+        r.ed.connect_edge(EdgeId::into_output(channel, out(1)))
+            .unwrap()
+    };
     commit(&mut r);
     assert_eq!(m.channels(), 3);
     block(&mut r, 32);
@@ -438,7 +445,7 @@ fn a_reused_key_is_not_read_by_the_old_meter() {
 /// slowest), ragged block sizes, stopped blocks and a seek.
 fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
     let mut r = rig(workers, workers > 1);
-    r.ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    r.ed.resize_inputs(ChannelLayout::MONO);
     let mut outputs = Vec::new();
     for (k, latency) in [30usize, 11, 0].into_iter().enumerate() {
         let (lag, gain) = (10 + k as u64, 20 + k as u64);
@@ -451,18 +458,19 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
                 width: 1,
             }),
         );
-        let t = &mut r.ed.spec_mut().topology;
-        t.edges.insert(
+        r.ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(lag), 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
-        t.edges.insert(
+            Edge::Direct(PortSource::MainInput(0)),
+        ))
+        .unwrap();
+        r.ed.connect_edge(EdgeId::into_port(
             InputPort::new(NodeKey(gain), 0),
-            vec![Edge::Direct(out(lag))],
-        );
+            Edge::Direct(out(lag)),
+        ))
+        .unwrap();
         outputs.push(out(gain));
     }
-    r.ed.spec_mut().topology.set_outputs(outputs.clone());
+    r.ed.wire_outputs(outputs.clone()).unwrap();
     let mut readers = Vec::new();
     if main_output {
         readers.push(
@@ -543,7 +551,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| PortSource::Node(OutputPort::new(NodeKey(1), p));
-    r.ed.spec_mut().topology.set_outputs(vec![port(0)]);
+    r.ed.wire_outputs(vec![port(0)]).unwrap();
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
             .expect("the sources exist");
@@ -604,12 +612,13 @@ fn the_main_output_reads_at_the_outputs_time() {
     r.ed.insert(NodeKey(1), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(2), "pulse", Unforkable(Burst { len: 50, done: 0 }));
     r.ed.insert(NodeKey(3), "lag", Forkable(Kind::Lag { latency: 30 }));
-    r.ed.spec_mut()
-        .topology
-        .edges
-        .insert(InputPort::new(NodeKey(3), 0), vec![Edge::Direct(out(2))]);
+    r.ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(3), 0),
+        Edge::Direct(out(2)),
+    ))
+    .unwrap();
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
-    r.ed.spec_mut().topology.set_outputs(vec![out(3), out(1)]);
+    r.ed.wire_outputs(vec![out(3), out(1)]).unwrap();
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -692,39 +701,17 @@ fn a_meter_can_be_redeclared() {
     assert_eq!(level(&mut second), vec![(0.0, 0.0, 0)]);
 }
 
-/// A meter's lanes are fixed by how it was opened: editing a `Ports` list to
-/// another length, or growing the outputs a main output follows past the cells, is
-/// refused at the commit.
+/// A meter's lanes are fixed by how it was opened: growing the outputs a main
+/// output meter follows past the cells is refused at the commit.
 #[test]
-fn a_meter_cannot_change_its_width_under_its_cells() {
+fn a_main_output_meter_cannot_outgrow_its_cells() {
     let mut r = rig(1, false);
     constants(&mut r, &[0.5, 0.25]);
-    let _ports =
-        r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![out(1), out(2)]))
-            .expect("the sources exist");
-    commit(&mut r);
-    let Some(MeterSpec::Ports { sources, .. }) =
-        r.ed.spec_mut().topology.meters.get_mut(&MeterId::of(1))
-    else {
-        panic!("open");
-    };
-    sources.push(PortSource::Zero);
-    assert_eq!(
-        r.ed.commit(),
-        Err(CommitError::MeterWidth {
-            meter: MeterId::of(1),
-            sources: 3,
-            capacity: 2
-        })
-    );
-    r.ed.close_meter(MeterId::of(1)).unwrap();
-
     let _main_output =
         r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
-    r.ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1]);
+    r.ed.wire_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
+        .unwrap();
     assert!(matches!(
         r.ed.commit(),
         Err(CommitError::MeterWidth { meter, .. }) if meter == MeterId::of(2)
@@ -787,11 +774,12 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
     constants(r, &values);
     // A chain with latency so the compiler aligns the outputs.
     r.ed.insert(NodeKey(20), "lag", Forkable(Kind::Lag { latency: 7 }));
-    r.ed.spec_mut()
-        .topology
-        .edges
-        .insert(InputPort::new(NodeKey(20), 0), vec![Edge::Direct(out(1))]);
-    r.ed.spec_mut().topology.outputs[5] = vec![out(20)];
+    r.ed.connect_edge(EdgeId::into_port(
+        InputPort::new(NodeKey(20), 0),
+        Edge::Direct(out(1)),
+    ))
+    .unwrap();
+    feed_output(&mut r.ed, 5, [out(20)]);
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");

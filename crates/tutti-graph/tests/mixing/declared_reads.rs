@@ -140,19 +140,21 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.spec_mut().topology.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
-    );
+    )
+    .unwrap();
     for &(addr, _) in to {
-        ed.spec_mut().connect_param(
+        ed.connect_param(
             ParamIn {
                 node: NODE,
                 param: addr,
             },
             EventOutputPort::new(SRC, 0),
-        );
+        )
+        .unwrap();
     }
     ed.commit().expect("commits");
     exec.apply_pending();

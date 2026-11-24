@@ -14,6 +14,7 @@
 //! behind a block start), at most `JUMPS` are kept, the newest, and a rate
 //! change clears them. The roll is the public `Env::transport_at`'s.
 
+use tutti_graph::EdgeId;
 use tutti_graph::testing as common;
 
 use std::collections::VecDeque;
@@ -88,12 +89,13 @@ fn encode(t: &TransportPosition) -> [f32; 2] {
 }
 
 fn topology(ed: &mut Editor) {
-    let t = &mut ed.spec_mut().topology;
-    t.edges.insert(
+    ed.connect_edge(EdgeId::into_port(
         InputPort::new(PROBE, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0)))],
-    );
-    t.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
+        Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
+    ))
+    .unwrap();
+    ed.wire_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+        .unwrap();
 }
 
 struct Rig {
@@ -431,13 +433,14 @@ fn wide(workers: usize) -> (Editor, Executor) {
         let (latent, probe) = (NodeKey(10 + i as u64), NodeKey(20 + i as u64));
         ed.insert(latent, "latent", Unforkable(Latent(lat)));
         ed.insert(probe, "probe", Unforkable(Probe));
-        ed.spec_mut().topology.edges.insert(
+        ed.connect_edge(EdgeId::into_port(
             InputPort::new(probe, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(latent, 0)))],
-        );
+            Edge::Direct(PortSource::Node(OutputPort::new(latent, 0))),
+        ))
+        .unwrap();
         outputs.extend((0..3).map(|port| PortSource::Node(OutputPort::new(probe, port))));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.wire_outputs(outputs).unwrap();
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, workers);
     (ed, exec)

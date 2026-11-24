@@ -228,8 +228,8 @@ impl GainCells {
                     return (id, cell);
                 }
                 let range = values.gain_range(id);
-                // An entry has its cell from its declaration; one written
-                // through `spec_mut` has none yet, and a lane without an
+                // An entry has its cell from its declaration; one a fork
+                // or a builder wrote whole has none yet, and a lane without an
                 // entry is derived by this commit (the main output
                 // crossfade's): the cell is made here from the values.
                 let fade = if spec.gains.contains_key(&id) {

@@ -444,6 +444,7 @@ fn dynamics::multiband::BankShape::bands
 fn dynamics::multiband::BankShape::new
 fn dynamics::multiband::BankShape::width
 fn dynamics::multiband::MultibandBank::bands
+fn dynamics::multiband::MultibandBank::jump_to_target
 fn dynamics::multiband::MultibandBank::new
 fn dynamics::multiband::MultibandBank::process
 fn dynamics::multiband::MultibandBank::reset
