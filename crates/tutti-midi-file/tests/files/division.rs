@@ -6,20 +6,21 @@ use crate::common::{metrical, sequences};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Meta, MicrosPerQuarter, MidiFile, OtherSmfFormat, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, SmfTicksPerFrame, SmfTicksPerQuarter, SmpteView, Tick, Timebase,
+    Meta, MicrosPerQuarter, OtherSmfFormat, SmfDivision, SmfEvent, SmfFormat, SmfParseError,
+    SmfReadError, SmfTicksPerFrame, SmfTicksPerQuarter, SmpteView, StandardMidiFile, Tick,
+    Timebase,
 };
 use tutti_midi_protocol::MtcRate;
 use tutti_tempo::TempoMap;
 use tutti_units::Seconds;
 use tutti_units::{Beat, Bpm};
 
-fn read(bytes: &[u8]) -> MidiFile {
+fn read(bytes: &[u8]) -> StandardMidiFile {
     read_bytes(bytes).expect("reads")
 }
 
 /// The SMPTE view of one timeline of `file`.
-fn smpte(file: &MidiFile) -> SmpteView<'_> {
+fn smpte(file: &StandardMidiFile) -> SmpteView<'_> {
     let Timebase::Smpte(view) = file.timebase() else {
         panic!("an SMPTE file of one timeline");
     };
@@ -60,7 +61,7 @@ fn a_division_word_with_its_top_bit_set_is_a_frame_rate_and_ticks_per_frame() {
             fps,
             ticks_per_frame: SmfTicksPerFrame::of(ticks_per_frame),
         };
-        assert_eq!(file.division(), Some(division), "{word:02X?}");
+        assert_eq!(file.division(), division, "{word:02X?}");
         assert_eq!(division.word(), u16::from_be_bytes(word));
         // A write gives the division word back.
         assert_eq!(division_bytes(&encoded(&file)), word);
@@ -74,7 +75,7 @@ fn a_division_word_with_its_top_bit_set_is_a_frame_rate_and_ticks_per_frame() {
 fn a_division_word_with_its_top_bit_clear_is_ticks_per_quarter() {
     for tpq in [1u16, 96, 480, 0x7FFF] {
         let file = read(&one_note(Division::Metrical(tpq)));
-        assert_eq!(file.division(), Some(SmfDivision::per_quarter(tpq)));
+        assert_eq!(file.division(), SmfDivision::per_quarter(tpq));
         assert_eq!(division_bytes(&encoded(&file)), tpq.to_be_bytes());
     }
 }
@@ -99,7 +100,7 @@ fn a_division_with_a_foreign_frame_rate_or_no_resolution_is_refused() {
         assert!(
             matches!(
                 read_bytes(&bytes),
-                Err(ReadError::Smf { track: None, offset: 0, cause: c }) if c == cause
+                Err(SmfReadError::Parse { track: None, offset: 0, cause: c }) if c == cause
             ),
             "{fps} x {ticks_per_frame}"
         );
@@ -202,7 +203,7 @@ fn an_smpte_files_events_are_at_seconds_and_no_tempo_applies() {
     // The Set Tempo is still an event and is written back.
     assert!(matches!(
         file.tracks()[0].events()[0].1,
-        FileEvent::Meta(Meta::Tempo {
+        SmfEvent::Meta(Meta::Tempo {
             micros_per_quarter,
             ..
         }) if micros_per_quarter == MicrosPerQuarter::of(1_000_000)
@@ -271,7 +272,7 @@ fn a_format_3_file_reads_as_its_tracks_and_writes_back_exactly() {
     );
     assert_eq!(&bytes[8..10], [0x00, 0x03]);
     let file = read(&bytes);
-    assert_eq!(file.format(), Some(SmfFormat::Other(OtherSmfFormat::of(3))));
+    assert_eq!(file.format(), SmfFormat::Other(OtherSmfFormat::of(3)));
     assert_eq!(file.tracks().len(), 2);
     assert_eq!(file.tracks()[1].events()[2].0, Tick(48));
     assert_eq!(encoded(&file), bytes);
@@ -289,7 +290,7 @@ fn a_format_word_is_kept_whatever_it_is() {
         let file = read(&bytes);
         assert_eq!(encoded(&file)[8..10], word.to_be_bytes());
         assert_eq!(
-            matches!(file.format(), Some(SmfFormat::Other(_))),
+            matches!(file.format(), SmfFormat::Other(_)),
             word > 2,
             "{word}"
         );

@@ -21,7 +21,7 @@
 
 use crate::control::{Control, Outcome, Stage};
 use crate::render::BlockCursor;
-use crate::{ConfigError, RenderGraph, RtLogSink};
+use crate::{ConfigError, RenderGraph, RtLogSink, TailPolicy};
 use std::ops::Range;
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, ChannelSet, ChannelTopology};
@@ -297,6 +297,12 @@ impl<F: Float> GraphSource<'_, F> {
         block_size
     }
 
+    /// The tail the graph's units owe now ([`tutti_graph::Executor::reported_tail`]),
+    /// between blocks.
+    pub(crate) fn reported_tail(&self) -> tutti_graph::GraphTail {
+        self.executor.reported_tail(&self.editor.spec().topology)
+    }
+
     /// Events the graph lost since the render began (`Executor::lost_event_count`):
     /// not a note-off it refused and sent again.
     pub(crate) fn lost_events(&self) -> u64 {
@@ -485,6 +491,16 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 /// frame range of it the gate keeps: empty for a block before the latency or
 /// past the length, which a tap still has to drain.
 ///
+/// A fixed tail ([`TailPolicy::Frames`]) is pulled with the programme. A
+/// reported one ([`TailPolicy::Reported`]) is asked of the graph at the
+/// programme's last frame and again after every block pulled for it: each ask
+/// bounds the tail (what is spent plus what is owed), the tail is the
+/// smallest bound seen, so it is never longer than the first ask's and ends
+/// early when a node comes to rest. The graph's latency is then pulled once, so a
+/// ring-out inside a latency after the node that rang still reaches the
+/// output; progress counts the plan's most until then and the true total
+/// after.
+///
 /// The token is checked before every block and after the progress a block
 /// delivered (a callback may cancel; the last block's too), and a cancelled
 /// render ends there as [`Outcome::Cancelled`]. `stage` is the stage the
@@ -510,22 +526,76 @@ where
     let max_block = src.max_block().max(1);
     let mut kept = Samples::new(0);
 
+    // Where the render is, and what progress counts: the plan's most until
+    // the flush fixes the true total.
+    let mut phase = Phase::Programme;
+    let mut total = plan.total;
     control.begin(stage, Some(plan.total));
-    while src.produced() < plan.total {
+    loop {
+        // The frames the phase pulls next, and the phase after it: none left
+        // moves the render on.
+        let pulled = src.produced();
+        let (next, want) = match phase {
+            Phase::Programme => match plan.tail {
+                TailPolicy::Frames(_) => (Phase::Done, plan.total.remaining_after(pulled)),
+                TailPolicy::Reported {
+                    ceiling,
+                    kept_latency,
+                } => (
+                    Phase::Tail {
+                        ceiling,
+                        kept_latency,
+                        spent: Samples::ZERO,
+                        bound: ceiling,
+                    },
+                    plan.programme.remaining_after(pulled),
+                ),
+            },
+            Phase::Tail {
+                ceiling,
+                kept_latency,
+                spent,
+                bound,
+            } => {
+                // Every ask bounds the tail from the programme's end: what
+                // is spent plus what is owed now (which also counts what
+                // sounded after the end, so it is never too short). The tail
+                // is the smallest bound seen, and never passes `ceiling`.
+                let owed = src.reported_tail().resolve(ceiling.remaining_after(spent));
+                let bound = bound.min(spent + owed);
+                let left = bound.remaining_after(spent);
+                phase = Phase::Tail {
+                    ceiling,
+                    kept_latency,
+                    spent,
+                    bound,
+                };
+                // The graph's latency is pulled once, after the last ask, for
+                // every node; the true total is known from here.
+                let end = pulled + plan.latency + kept_latency;
+                if left == Samples::ZERO {
+                    total = end;
+                    control.advance(stage, pulled, total);
+                }
+                (Phase::Flush { end }, left)
+            }
+            Phase::Flush { end } => (Phase::Done, end.remaining_after(pulled)),
+            Phase::Done => break,
+        };
+        if want == Samples::ZERO {
+            phase = next;
+            continue;
+        }
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
-        // `Samples` has no `Sub` on purpose — an unsigned count that wraps is a
-        // buffer size that reads off the end of the world. `remaining_after` is
-        // the named, saturating form.
-        let want = plan
-            .total
-            .remaining_after(src.produced())
-            .min(Samples::new(max_block));
-        let block_start = src.produced();
-        let n = src.render_block(want.get());
+        let block_start = pulled;
+        let n = src.render_block(want.get().min(max_block));
         if n == 0 {
-            break;
+            return Ok(Outcome::Finished(()));
+        }
+        if let Phase::Tail { spent, .. } = &mut phase {
+            *spent += Samples::new(n);
         }
 
         let cursor = BlockCursor {
@@ -538,7 +608,7 @@ where
         let kept_now = window.len();
         consume(src, n, window)?;
         kept += Samples::new(kept_now);
-        control.advance(stage, src.produced(), plan.total);
+        control.advance(stage, src.produced(), total);
         if control.is_cancelled() {
             return Ok(Outcome::Cancelled);
         }
@@ -547,6 +617,29 @@ where
     }
 
     Ok(Outcome::Finished(()))
+}
+
+/// Where [`drive`] is in a render. A render is a programme, then (for a
+/// reported tail) a tail asked of the graph after every block, then the
+/// graph's latency flushed once.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// Pulling the programme, or all of a fixed tail's frames.
+    Programme,
+    /// Pulling a reported tail: `spent` frames so far, up to `bound`, the
+    /// smallest bound any ask has given (never past `ceiling`).
+    Tail {
+        ceiling: Samples,
+        kept_latency: Samples,
+        spent: Samples,
+        bound: Samples,
+    },
+    /// Pulling the graph's latency (and the kept part of it), up to the
+    /// frame `end`.
+    Flush {
+        end: Samples,
+    },
+    Done,
 }
 
 #[cfg(test)]

@@ -229,3 +229,49 @@ fn a_swap_remove_at_len_panics() {
     v.extend([1, 2]);
     let _ = v.swap_remove(2);
 }
+
+/// A slice that fits is copied whole, after what is there.
+#[test]
+fn a_slice_that_fits_is_copied_whole() {
+    let mut v = CappedVec::with_capacity(5);
+    assert!(v.push(9));
+    assert_eq!(v.extend_from_slice(&[1, 2, 3, 4]), 4);
+    assert_eq!(v.as_slice(), &[9, 1, 2, 3, 4]);
+    assert_eq!(v.refused(), 0);
+    assert!(!v.is_overflowed());
+}
+
+/// A slice that fits in part is copied up to the cap, and the rest counted.
+#[test]
+fn a_slice_that_fits_in_part_is_cut_and_counted() {
+    let mut v = CappedVec::with_capacity(3);
+    assert_eq!(v.extend_from_slice(&[1, 2, 3, 4, 5]), 3);
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+    assert_eq!(v.refused(), 2);
+    assert!(v.is_overflowed());
+    assert_eq!(v.extend_from_slice(&[6]), 0);
+    assert_eq!(v.refused(), 3);
+}
+
+/// An empty slice changes nothing.
+#[test]
+fn an_empty_slice_changes_nothing() {
+    let mut v: CappedVec<u32> = CappedVec::with_capacity(2);
+    assert_eq!(v.extend_from_slice(&[]), 0);
+    assert!(v.is_empty() && !v.is_overflowed());
+}
+
+/// Copying slices block after block keeps the one allocation made at
+/// construction.
+#[test]
+fn copying_slices_never_reallocates() {
+    let mut v = CappedVec::with_capacity(64);
+    let storage = v.as_slice().as_ptr();
+    let src: Vec<u32> = (0..100).collect();
+    for block in 0..10 {
+        assert_eq!(v.extend_from_slice(&src), 64);
+        assert_eq!(v.as_slice().as_ptr(), storage, "block {block}");
+        assert_eq!(v.capacity(), 64);
+        v.clear();
+    }
+}

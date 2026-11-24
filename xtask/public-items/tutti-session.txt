@@ -53,9 +53,12 @@ enum midi_ci::subscription::SubscriptionCause
 enum midi_event::MidiEvent
 enum midi_follow::ClockKind
 enum midi_follow::ClockOffset
+enum midi_follow::FollowKind
+enum midi_follow::UnfollowCause
 enum midi_hardware::MidiPolicyError
 enum midi_load::NoCommonTimelineError
 enum midi_load::TrackError
+enum midi_load::Unplayed
 enum midi_network::NetworkError
 enum midi_network::NetworkEvent
 enum midi_network_none::NetworkEvent
@@ -934,7 +937,6 @@ struct midi_follow::FollowClock
 struct midi_follow::FollowMachineControl
 struct midi_follow::FollowTempo
 struct midi_hardware::MidiPolicy
-struct midi_load::DroppedEvent
 struct midi_load::LoadMidi
 struct midi_load::LoadReport
 struct midi_load::LoadedMidi
@@ -1041,6 +1043,7 @@ struct value::range::RangeTarget
 struct value::saved::SavedValues
 struct value::slot::ClickTargets
 struct value::slot::SettingTarget
+struct value::slot::SettingWord
 struct value::state::Held
 struct value::state::Params
 struct value::state::ValueState

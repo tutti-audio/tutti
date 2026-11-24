@@ -32,7 +32,7 @@ use symphonia::core::codecs::audio::well_known::CODEC_ID_FLAC;
 use symphonia::core::errors::{Error, SeekErrorKind};
 use symphonia::core::formats::{FormatReader, SeekMode, SeekTo};
 use symphonia::core::units::Timestamp;
-use tutti_buffers::{ChannelLayout, ChannelSet, Placement};
+use tutti_buffers::{ChannelLayout, ChannelSet};
 use tutti_buffers::{Interleaved, InterleavedMut, Planes, Pull, Sample, Source, interleave};
 use tutti_units::{SampleRate, Samples};
 
@@ -90,8 +90,6 @@ pub struct FileIn<S: Sample = f32> {
     track_id: u32,
     /// The file's channels; its width is the interleave stride.
     channels: ChannelSet,
-    /// Whether the container stated `channels` or only their count.
-    placement: Placement,
     sample_rate: SampleRate,
     total_frames: Option<u64>,
     /// Decoded-but-unconsumed frames from the last packet, interleaved at the
@@ -165,12 +163,6 @@ impl<S: Sample> FileIn<S> {
         &self.channels
     }
 
-    /// Whether [`channel_set`](Self::channel_set) was stated by the container or
-    /// the default layout for a channel count.
-    pub fn placement(&self) -> Placement {
-        self.placement
-    }
-
     /// Frames held in `leftover`, consumed or not.
     fn leftover_frames(&self) -> usize {
         self.channels
@@ -214,7 +206,7 @@ impl<S: Sample> FileIn<S> {
         // no container this build reads yields a zero-channel track, and a
         // fixture cannot be built or stubbed (symphonia's `Channels` come from
         // the demuxer).
-        let (channels, placement) = channels_of(params.channels.as_ref());
+        let (channels, _) = channels_of(params.channels.as_ref());
 
         let decoder = PacketDecoder::<S>::new(params).map_err(convert)?;
 
@@ -233,7 +225,6 @@ impl<S: Sample> FileIn<S> {
             decoder,
             track_id,
             channels,
-            placement,
             sample_rate,
             total_frames,
             leftover,

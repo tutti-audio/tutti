@@ -54,7 +54,9 @@
 use alloc::vec::Vec;
 use core::num::{NonZeroU16, NonZeroUsize};
 
-use tutti_midi_protocol::{GeneralMidiMode, Heard, KeyTable, Timing, TuningMessage, Universal};
+use tutti_midi_protocol::{
+    GeneralMidiMode, Heard, KeyChanges, KeyTable, Timing, TuningMessage, Universal,
+};
 use tutti_ump::{
     Address, Attribute, CCNumber, Message, MidiChannel, MidiGroup, NoteId, NoteNumber,
     NoteVelocity, RegisteredData, Rpn, U7, Ump, Voice2,
@@ -922,22 +924,20 @@ impl VoiceAllocator {
                 }
             }
             TuningMessage::NoteChange {
-                timing,
                 bank,
                 program,
                 changes,
-            } => {
-                let bank = bank.unwrap_or(U7::of(0));
-                let Some(stored) = self.tuning.table_mut(bank, program) else {
-                    return;
-                };
-                for change in changes.as_slice() {
-                    stored.set(change.key, change.frequency);
-                }
-                if timing == Timing::RealTime {
-                    self.retune_notes(|_, c| c.tuning_bank == bank && c.tuning_program == program);
-                }
-            }
+            } => self.change_notes(bank, program, &changes, Timing::NonRealTime),
+            TuningMessage::RealTimeNoteChange {
+                bank,
+                program,
+                changes,
+            } => self.change_notes(
+                bank.unwrap_or(U7::of(0)),
+                program,
+                &changes,
+                Timing::RealTime,
+            ),
             TuningMessage::OctaveTuning {
                 timing,
                 channels,
@@ -950,6 +950,20 @@ impl VoiceAllocator {
                     self.retune_notes(|n, _| channels.contains(n.channel));
                 }
             }
+        }
+    }
+
+    /// A Single Note Tuning Change: the table's keys take their words, and a
+    /// real-time change re-tunes the notes sounding on the program.
+    fn change_notes(&mut self, bank: U7, program: U7, changes: &KeyChanges, timing: Timing) {
+        let Some(stored) = self.tuning.table_mut(bank, program) else {
+            return;
+        };
+        for change in changes.as_slice() {
+            stored.set(change.key, change.frequency);
+        }
+        if timing == Timing::RealTime {
+            self.retune_notes(|_, c| c.tuning_bank == bank && c.tuning_program == program);
         }
     }
 

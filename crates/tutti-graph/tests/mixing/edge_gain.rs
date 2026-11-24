@@ -19,8 +19,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
     GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
-    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::Gain;
 
@@ -200,29 +199,16 @@ fn render(
     let mut harness = Harness::with_workers(BLOCK, workers);
     graph.start(&mut harness);
     harness.switch(graph, kinds);
-    let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
-    let mut frame = 0;
-    for _ in 0..blocks {
-        let input = input_signal(frame, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        for (g, a) in got.iter_mut().zip(a) {
-            g.extend(a);
-        }
-        frame += BLOCK as u64;
-    }
-    got
+    harness.run(&vec![BLOCK; blocks], 0)
 }
 
 /// One-participant and parallel renders, which must be bit for bit the same.
 fn render_both(graph: &Weighed, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
-    let serial = render(graph, kinds, 1, blocks);
-    let parallel = render(graph, kinds, 4, blocks);
-    assert_eq!(
-        bits(&serial),
-        bits(&parallel),
-        "parallel differs from serial"
-    );
-    serial
+    common::agree_across_workers(
+        [4],
+        |workers| render(graph, kinds, workers, blocks),
+        |r| bits(r),
+    )
 }
 
 /// `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..`: a multiply and an add per lane,
@@ -594,13 +580,7 @@ impl Rig {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }
@@ -944,13 +924,7 @@ impl Mixer {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }

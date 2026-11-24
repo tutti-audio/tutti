@@ -2,7 +2,7 @@ use super::*;
 
 fn drained(reader: &mut SeqSlotsReader<f64>) -> Vec<(usize, f64)> {
     let mut out = Vec::new();
-    reader.drain(|slot, value| out.push((slot, value)));
+    reader.drain_in_epoch(|slot, value, _| out.push((slot, value)));
     out
 }
 
@@ -80,7 +80,7 @@ fn a_wide_value_round_trips() {
     let (mut writer, mut reader) = seq_slots::<[u32; 3]>(1);
     writer.write(0, [1, 2, 3]);
     let mut got = Vec::new();
-    reader.drain(|slot, value| got.push((slot, value)));
+    reader.drain_in_epoch(|slot, value, _| got.push((slot, value)));
     assert_eq!(got, [(0, [1, 2, 3])]);
 }
 

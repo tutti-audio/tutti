@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_RAMP, Ramp};
-use tutti_graph::{DeclaredUnit, Io, MAX_PARAM_PORTS, ParamSetBuilder};
+use tutti_graph::{DeclaredUnit, ErasedSetting, Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
@@ -68,6 +68,14 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// designed from, to design again: the dead-band. Exact inequality by default.
     fn moved(&self, applied: &Self::Controls, target: &Self::Controls) -> bool {
         applied != target
+    }
+
+    /// The cells of the settings the set holds, each under its kind: what a session's key
+    /// sets and reads. Allocates; called on the control side when the node's parts are built.
+    /// None by default; a set that holds one also implements
+    /// [`HasSetting`](tutti_graph::HasSetting) for its kind.
+    fn settings(&self) -> Vec<ErasedSetting> {
+        Vec::new()
     }
 
     /// Stops sharing what the set shares besides the cells (a setting's word), keeping its

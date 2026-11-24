@@ -7,8 +7,11 @@ use tutti_units::{Samples, Tail};
 
 use super::commit::{Crossfade, NodeBox};
 use super::node_op::Flags;
+use super::tail_elapsed;
 use crate::NodeKey;
 use crate::compile::ids::{Generation, PlanUnitId, Table};
+use crate::compile::plan::NodeRec;
+use crate::compile::tail::Owed;
 use crate::edges::event_tap::EventTapWriter;
 use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
@@ -74,6 +77,68 @@ impl<F: Float> Unit<F> {
     }
 }
 
+impl<F: Float> Unit<F> {
+    /// Whether the executor skips this unit on a block whose inputs are
+    /// silent: a node without event inputs when its last call left every
+    /// output silent and its latency plus its tail (the last report, else the
+    /// declared tail) has elapsed in quiet input; one with event inputs when
+    /// its last call said [`Status::Idle`](crate::Status::Idle). A node
+    /// with no audio inputs is never parked on its tail.
+    pub(super) fn at_rest(&self, rec: &NodeRec) -> bool {
+        if rec.ein == 0 {
+            rec.ain != 0
+                && self.last_quiet
+                && tail_elapsed(
+                    match self.reported {
+                        None => rec.park_after,
+                        Some(t) => Tail::Finite(rec.latency).then(t),
+                    },
+                    self.quiet,
+                )
+        } else {
+            self.last_idle
+        }
+    }
+
+    /// What this unit adds to the graph's tail between blocks.
+    ///
+    /// `fed` is its declared ceiling: a report is about the input already
+    /// heard, so it says nothing of what an upstream node's remaining output
+    /// will excite. `alone` is what it owes if nothing more arrives:
+    ///
+    /// - a node with event inputs: nothing once its last call said
+    ///   [`Status::Idle`](crate::Status::Idle), else its ceiling;
+    /// - a node with no audio inputs: its last report, else its ceiling;
+    /// - otherwise nothing when [at rest](Self::at_rest), else the part of its
+    ///   latency and report (else ceiling) that quiet input has not covered,
+    ///   never more than the tail itself. `quiet` counts whole blocks of quiet
+    ///   input, so the figure errs long by less than a block. A unit not at
+    ///   rest whose figure is covered (its last output was not silent) owes the
+    ///   whole tail.
+    pub(super) fn owed(&self, rec: &NodeRec) -> Owed {
+        let full = self.reported.unwrap_or(rec.tail);
+        let alone = if rec.ein != 0 {
+            if self.last_idle { Tail::None } else { rec.tail }
+        } else if rec.ain == 0 {
+            full
+        } else if self.at_rest(rec) {
+            Tail::None
+        } else {
+            match full {
+                Tail::Finite(t) => {
+                    let left = (rec.latency + t).remaining_after(self.quiet).min(t);
+                    Tail::Finite(if left == Samples::ZERO { t } else { left })
+                }
+                other => other,
+            }
+        };
+        Owed {
+            alone,
+            fed: rec.tail,
+        }
+    }
+}
+
 /// What a commit takes away from the keys held at a node: the tables of the
 /// keys retired or replaced, and the keys replaced.
 #[derive(Default)]
@@ -115,9 +180,6 @@ pub(crate) struct Inject {
     pub(crate) unit: PlanUnitId,
     pub(super) port: u16,
     pub(super) events: CappedVec<Event>,
-    /// Where `events` and the sink's own slot events are merged, sized when
-    /// applying so the merge never grows.
-    pub(super) merged: CappedVec<Event>,
     pub(super) live: bool,
     /// While a commit's flush is written: how many of `events` came before
     /// the closes of the edges it cut.
@@ -190,7 +252,6 @@ impl Inject {
     /// sink stays live while closes are owed.
     pub(super) fn consumed(&mut self) {
         self.events.clear();
-        self.merged.clear();
         self.live = self.draining();
     }
 
@@ -224,16 +285,13 @@ pub(super) struct State<F: Float = f32> {
     pub(super) event_taps: Vec<Option<EventTapWriter>>,
     /// One set of cells per planned meter (`None`: nobody opened it).
     pub(super) meters: Vec<Option<MeterWriter>>,
-    /// One state per entry of `Plan::sum_lanes`: a weighted lane's weight
+    /// One state per entry of the plan's sum lanes: a weighted lane's weight
     /// across blocks, or a plain addend's none.
     pub(super) lanes: Vec<SumLane<F>>,
     pub(super) inject: Vec<Inject>,
     pub(super) has_inject: Table<PlanUnitId, bool>,
     /// Plan units with a scheduled command landing this block.
     pub(super) has_due: Table<PlanUnitId, bool>,
-    /// The room of the buffer where a node's scheduled events are merged into
-    /// its inputs, one per participant (`command::overlay_capacity`).
-    pub(super) overlay: usize,
     /// The executor's per-plan state for running a block's tasks on its
     /// participants (`par.rs`); `None` while there is no plan.
     pub(super) par: Option<Par>,
@@ -256,7 +314,6 @@ impl<F: Float> State<F> {
             inject: Vec::new(),
             has_inject: Table::default(),
             has_due: Table::default(),
-            overlay: 0,
             par: None,
         }
     }
@@ -284,7 +341,6 @@ mod tests {
             unit: id_at(0),
             port: 0,
             events: CappedVec::default(),
-            merged: CappedVec::default(),
             live: false,
             closed_from: 0,
             owed: CappedVec::with_capacity(room),

@@ -144,9 +144,7 @@ impl Rig {
 
     /// Render `n` frames; return the output.
     fn block(&mut self, n: usize, transport: &TransportPosition) -> Vec<f32> {
-        let mut a = vec![0.0; n];
-        self.exec.process(n, transport, &[], &mut [&mut a[..]]);
-        a
+        common::block_in(&mut self.exec, n, &[], 1, transport).swap_remove(0)
     }
 }
 

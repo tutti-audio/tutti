@@ -1,14 +1,14 @@
-//! Standard MIDI File bytes: the wire half under [`MidiFile`](crate::MidiFile).
+//! Standard MIDI File bytes: the wire half under [`StandardMidiFile`](crate::StandardMidiFile).
 //!
 //! [`read()`] is a `winnow` parser (private to `read.rs`, in no signature) and
 //! [`write()`] a fold of pure functions, the reader's inverse. Both parse onto
-//! and write from this crate's own types ([`FileEvent`](crate::FileEvent),
+//! and write from this crate's own types ([`SmfEvent`](crate::SmfEvent),
 //! [`Meta`](crate::Meta)).
 //!
 //! # Everything here is 7-bit
 //!
 //! An SMF cannot express MIDI 2.0 resolution: a channel message is a
-//! [`Voice1`](tutti_ump::Voice1) on the first Group, and the MIDI 2.0 side of the
+//! [`Voice1`](tutti_ump::Voice1) on a channel, with no Group, and the MIDI 2.0 side of the
 //! crate (the Clip File) is a *different format*, not a wider encoding of
 //! this one.
 //!
@@ -16,7 +16,7 @@
 //!
 //! A chunk that runs past the end of the file, fewer track chunks than the
 //! header declares, or a track that ends mid-event is a
-//! [`ReadError::Smf`](crate::ReadError::Smf) whose cause is one of the
+//! [`SmfReadError::Parse`](crate::SmfReadError::Parse) whose cause is one of the
 //! [`SmfParseError`] cut-off variants, with the track
 //! and byte offset it was found at. A write the fields cannot hold is
 //! [`TracksError::TooLarge`](crate::TracksError::TooLarge), refused when the

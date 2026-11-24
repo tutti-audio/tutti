@@ -198,7 +198,7 @@ fn folded_six_channel_convolver_process_is_allocation_free() {
 #[test]
 fn distortion_process_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
-    use tutti_nodes::{DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind};
+    use tutti_nodes::{DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind, Waveshape};
     use tutti_units::SampleRate;
 
     let kinds = [
@@ -223,10 +223,10 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
         for fed in [false, true] {
             let node = match factor {
                 None => DistortionNode::<f32>::from(
-                    DistortionConfig::new(3u16, kind).drive(Drive::new(2.0)),
+                    DistortionConfig::new(3u16, Waveshape::new(kind)).drive(Drive::new(2.0)),
                 ),
                 Some(f) => DistortionNode::<f32>::from(
-                    DistortionConfig::new(3u16, kind)
+                    DistortionConfig::new(3u16, Waveshape::new(kind))
                         .drive(Drive::new(2.0))
                         .oversampling(f),
                 ),
@@ -284,7 +284,8 @@ fn distortion_process_is_allocation_free_fed_and_unfed() {
 fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     use tutti_graph::contract::Direct;
     use tutti_nodes::{
-        Antialiasing, DistortionConfig, DistortionNode, OversamplingFactor, ShapeKind,
+        DistortionConfig, DistortionNode, OversamplingFactor, SecondOrderShape, ShapeKind,
+        Waveshape,
     };
     use tutti_units::SampleRate;
 
@@ -299,16 +300,19 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
     ];
     let drive: Vec<f32> = (0..64).map(|i| 1.0 + 0.0625 * i as f32).collect();
     for kind in kinds {
-        for order in [Antialiasing::FirstOrder, Antialiasing::SecondOrder]
+        let first = Waveshape::new(kind).first_order();
+        let second = match kind {
+            ShapeKind::HardClip => Some(SecondOrderShape::HardClip),
+            ShapeKind::Softsign => Some(SecondOrderShape::Softsign),
+            _ => None,
+        };
+        for shape in [Some(first), second.map(Waveshape::second_order)]
             .into_iter()
-            .filter(|&order| order <= kind.max_antialiasing())
+            .flatten()
         {
             for oversampled in [false, true] {
                 for fed in [false, true] {
-                    let config = DistortionConfig::new(3u16, kind)
-                        .drive(Drive::new(2.0))
-                        .antialiasing(order)
-                        .expect("an order the kind has");
+                    let config = DistortionConfig::new(3u16, shape).drive(Drive::new(2.0));
                     let config = if oversampled {
                         config.oversampling(OversamplingFactor::X4)
                     } else {
@@ -333,7 +337,7 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
                             .samples()
                             .iter()
                             .any(|s| s.abs() > 1e-6)),
-                        "{kind:?} {order:?} fed={fed} rendered a silent channel"
+                        "{shape:?} fed={fed} rendered a silent channel"
                     );
                     for _ in 0..256 {
                         node.block();

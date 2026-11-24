@@ -271,8 +271,8 @@ impl<R: FnMut() -> u32> CiDevice<R> {
 
     fn on_decoded(&mut self, message: &CiMessage, now: Instant, actions: &mut Vec<CiAction>) {
         match message {
-            CiMessage::Discovery { header, data } => {
-                if header.source == self.muid {
+            CiMessage::Discovery { source, data, .. } => {
+                if *source == self.muid {
                     // Appendix A.1.1: our own Discovery, looped back by a Thru or a
                     // merge, is the message we sent; anything else under our MUID is
                     // another device that drew it.
@@ -281,14 +281,17 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                     }
                 } else {
                     actions.push(CiAction::Send(CiMessage::DiscoveryReply {
-                        header: self.header(),
-                        to: header.source,
+                        device_id: CiDeviceId::FunctionBlock,
+                        source: self.muid,
+                        to: *source,
                         data: ReplyData::answering(data, self.own),
                     }));
                 }
             }
-            CiMessage::DiscoveryReply { header, to, data } => {
-                if header.source == self.muid {
+            CiMessage::DiscoveryReply {
+                source, to, data, ..
+            } => {
+                if *source == self.muid {
                     // A Reply from our MUID to our MUID answers our Discovery from a
                     // device that drew our MUID (we never answer ourselves); one to
                     // another MUID is our own Reply looped back.
@@ -296,7 +299,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                         self.collide(now, actions);
                     }
                 } else if *to == self.muid {
-                    self.on_reply(header.source, *data, actions);
+                    self.on_reply(*source, *data, actions);
                 }
             }
             CiMessage::InvalidateMuid { target, .. } => {
@@ -538,7 +541,8 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             replied: BTreeSet::new(),
         };
         actions.push(CiAction::Send(CiMessage::Discovery {
-            header: self.header(),
+            device_id: CiDeviceId::FunctionBlock,
+            source: self.muid,
             data: self.sent_discovery(),
         }));
     }

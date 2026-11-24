@@ -7,11 +7,11 @@ use tutti_platform::Instant;
 
 use tutti_ump::{ControlValue, ManufacturerBytesError, ManufacturerId, MidiChannel, U7};
 
-use super::super::header::{PeEncoding, PePage};
+use super::super::header::{PeEncoding, PePage, PeSetScope};
 use super::super::limits::{MediaType, PeTextError, PropertyNameError, ResourceId};
 use super::super::partial::PartialUpdate;
 use super::super::tree::PeJson;
-use super::exchange::initiator_settings;
+use super::exchange::{custom, custom_entry, custom_name, initiator_settings};
 use super::*;
 use crate::Muid;
 use crate::testing::{OURS, PEER};
@@ -20,27 +20,28 @@ fn json(text: &str) -> PeJson {
     PeJson::try_from(text.as_bytes()).unwrap()
 }
 
-fn decode(resource: &PeResource, text: &str) -> Result<PeData, PeDataError> {
+fn decode(resource: impl Into<PeResource>, text: &str) -> Result<PeData, PeDataError> {
     PeData::decode(resource, &json(text))
 }
 
-fn ok(resource: PeResource, text: &str) -> PeData {
-    decode(&resource, text).unwrap_or_else(|e| panic!("{text}: {e}"))
+fn ok(resource: impl Into<PeResource>, text: &str) -> PeData {
+    decode(resource, text).unwrap_or_else(|e| panic!("{text}: {e}"))
 }
 
-fn fails(resource: PeResource, text: &str) -> PeDataError {
-    match decode(&resource, text) {
+fn fails(resource: impl Into<PeResource>, text: &str) -> PeDataError {
+    match decode(resource, text) {
         Err(error) => error,
         Ok(data) => panic!("{text} was read as {data:?}"),
     }
 }
 
 /// The data written and read again is the data, and its JSON is `text`'s.
-fn round_trips(resource: PeResource, text: &str) -> PeData {
+fn round_trips(resource: impl Into<PeResource>, text: &str) -> PeData {
+    let resource = resource.into();
     let data = ok(resource.clone(), text);
     assert_eq!(data.to_json(), Some(json(text)), "{text}");
     assert_eq!(
-        PeData::decode(&resource, &data.to_json().unwrap()),
+        PeData::decode(resource, &data.to_json().unwrap()),
         Ok(data.clone())
     );
     data
@@ -50,17 +51,13 @@ fn id(text: &str) -> ResourceId {
     ResourceId::new(text).unwrap()
 }
 
-fn custom(name: &str) -> PeResource {
-    PeResource::Custom(CustomResource::new(name).unwrap())
-}
-
 // M2-105 §3.2 Table 6: DeviceInfo, with ids that are the bytes of Discovery.
 #[test]
 fn device_info_reads_the_ids_of_table_6() {
     let text = r#"{"version":"1.0","manufacturerId":[125,0,0],"manufacturer":"Educational Use",
         "familyId":[0,0],"family":"Test Range","modelId":[48,0],"model":"MIDI-CI Test Workbench",
         "versionId":[0,0,1,0],"links":[{"resource":"X-SystemSettings"},{"resource":"X-LocalOn"}]}"#;
-    let PeData::DeviceInfo(info) = ok(PeResource::DeviceInfo, text) else {
+    let PeData::DeviceInfo(info) = ok(StandardResource::DeviceInfo, text) else {
         panic!("not DeviceInfo");
     };
     assert_eq!(info.identity.manufacturer, ManufacturerId::NON_COMMERCIAL);
@@ -80,7 +77,7 @@ fn device_info_is_written_with_its_ids_in_bytes() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
         "family":"Example Range","modelId":[48,0],"model":"Example Pedal","versionId":[0,0,1,0],
         "version":"1.0","serialNumber":"A1"}"#;
-    round_trips(PeResource::DeviceInfo, text);
+    round_trips(StandardResource::DeviceInfo, text);
 }
 
 // M2-105 Table 5 marks the ids and the four names required, and M2-103 §8.3 has a
@@ -90,7 +87,7 @@ fn device_info_is_written_with_its_ids_in_bytes() {
 fn device_info_requires_its_properties() {
     let full = r#"{"manufacturerId":[125,0,0],"manufacturer":"M","familyId":[0,0],"family":"F",
         "modelId":[0,0],"model":"X","versionId":[0,0,0,0],"version":"1"}"#;
-    assert!(decode(&PeResource::DeviceInfo, full).is_ok());
+    assert!(decode(StandardResource::DeviceInfo, full).is_ok());
     for key in [
         "manufacturerId",
         "manufacturer",
@@ -105,7 +102,7 @@ fn device_info_requires_its_properties() {
         if let PeJson::Object(o) = &mut object {
             o.remove(key);
         }
-        let error = PeData::decode(&PeResource::DeviceInfo, &object).unwrap_err();
+        let error = PeData::decode(StandardResource::DeviceInfo, &object).unwrap_err();
         assert_eq!(error.fault, PeDataFault::Missing, "{key}");
     }
     // A required string is never empty.
@@ -118,13 +115,17 @@ fn device_info_requires_its_properties() {
         let empty = full.replace(&format!(r#""{key}":"{value}""#), &format!(r#""{key}":"""#));
         assert_ne!(empty, full, "{key}");
         assert_eq!(
-            fails(PeResource::DeviceInfo, &empty).fault,
+            fails(StandardResource::DeviceInfo, &empty).fault,
             PeDataFault::Missing,
             "{key}"
         );
     }
     assert_eq!(
-        fails(PeResource::ChannelList, r#"[{"title":"","channel":1}]"#).fault,
+        fails(
+            StandardResource::ChannelList,
+            r#"[{"title":"","channel":1}]"#
+        )
+        .fault,
         PeDataFault::Missing
     );
 }
@@ -139,14 +140,14 @@ fn device_info_ids_are_7_bit_arrays_of_the_right_length() {
             "modelId":[0,0],"model":"X","versionId":[0,0,0,0],"version":"1"{field}}}"#
         )
     };
-    assert!(decode(&PeResource::DeviceInfo, &with("")).is_ok());
+    assert!(decode(StandardResource::DeviceInfo, &with("")).is_ok());
     for bad in [
         with("").replace("[125,0,0]", "[128,0,0]"),
         with("").replace("[125,0,0]", "[125,0]"),
         with("").replace(r#""familyId":[0,0]"#, r#""familyId":[0,0,0]"#),
         with("").replace("[0,0,0,0]", "[0,0,0,-1]"),
     ] {
-        assert!(decode(&PeResource::DeviceInfo, &bad).is_err(), "{bad}");
+        assert!(decode(StandardResource::DeviceInfo, &bad).is_err(), "{bad}");
     }
 }
 
@@ -158,7 +159,7 @@ fn a_manufacturer_property_is_kept_and_written_back() {
     let text = r#"{"manufacturerId":[125,0,0],"manufacturer":"Educational Use","familyId":[0,0],
         "family":"Example Range","modelId":[48,0],"model":"Example Pedal",
         "versionId":[0,0,1,0],"version":"1.0","x-uniqueKey":"myuniquevalue"}"#;
-    let PeData::DeviceInfo(info) = round_trips(PeResource::DeviceInfo, text) else {
+    let PeData::DeviceInfo(info) = round_trips(StandardResource::DeviceInfo, text) else {
         panic!("not DeviceInfo");
     };
     assert_eq!(
@@ -166,11 +167,11 @@ fn a_manufacturer_property_is_kept_and_written_back() {
         Some(&PeJson::String("myuniquevalue".to_owned()))
     );
     let later = text.replace(r#""x-uniqueKey":"myuniquevalue""#, r#""futureProp":1"#);
-    assert!(decode(&PeResource::DeviceInfo, &later).is_ok());
+    assert!(decode(StandardResource::DeviceInfo, &later).is_ok());
     // M2-103 §6.1: a name is alphanumeric and not only digits.
     let bad = text.replace(r#""x-uniqueKey""#, r#""not_a_name""#);
     assert!(matches!(
-        fails(PeResource::DeviceInfo, &bad).fault,
+        fails(StandardResource::DeviceInfo, &bad).fault,
         PeDataFault::NotValid(InvalidValue::PropertyName(PropertyNameError::Text(
             PeTextError::Character { .. }
         )))
@@ -194,7 +195,7 @@ fn only_a_vendor_name_is_an_extension() {
 fn channel_list_reads_table_11() {
     let text = r#"[{"title":"Lead","channel":1,"programTitle":"Piano + Strings","bankPC":[1,0,76]},
         {"title":"Drums","channel":10,"programTitle":"GM2 Jazz Drum Set","bankPC":[0,0,33]}]"#;
-    let PeData::ChannelList(list) = round_trips(PeResource::ChannelList, text) else {
+    let PeData::ChannelList(list) = round_trips(StandardResource::ChannelList, text) else {
         panic!("not ChannelList");
     };
     let first = &list.entries()[0];
@@ -215,12 +216,12 @@ fn channel_list_reads_table_11() {
 #[test]
 fn a_channel_number_is_1_to_256() {
     let entry = |n: i64| format!(r#"[{{"title":"T","channel":{n}}}]"#);
-    assert!(decode(&PeResource::ChannelList, &entry(1)).is_ok());
-    assert!(decode(&PeResource::ChannelList, &entry(256)).is_ok());
-    assert!(decode(&PeResource::ChannelList, &entry(0)).is_err());
-    assert!(decode(&PeResource::ChannelList, &entry(257)).is_err());
+    assert!(decode(StandardResource::ChannelList, &entry(1)).is_ok());
+    assert!(decode(StandardResource::ChannelList, &entry(256)).is_ok());
+    assert!(decode(StandardResource::ChannelList, &entry(0)).is_err());
+    assert!(decode(StandardResource::ChannelList, &entry(257)).is_err());
     assert_eq!(
-        fails(PeResource::ChannelList, r#"[{"channel":1}]"#).fault,
+        fails(StandardResource::ChannelList, r#"[{"channel":1}]"#).fault,
         PeDataFault::Missing
     );
 }
@@ -231,7 +232,7 @@ fn a_channel_number_is_1_to_256() {
 fn a_cluster_reads_its_start_length_and_mode() {
     let text = r#"[{"title":"Mode 4 Device Option A","channel":3,"clusterChannelStart":3,
         "clusterLength":6,"clusterMidiMode":4,"programTitle":"Church Organ 1","bankPC":[2,0,1]}]"#;
-    let PeData::ChannelList(list) = round_trips(PeResource::ChannelList, text) else {
+    let PeData::ChannelList(list) = round_trips(StandardResource::ChannelList, text) else {
         panic!("not ChannelList");
     };
     let cluster = list.entries()[0].cluster.unwrap();
@@ -247,7 +248,7 @@ fn a_cluster_reads_its_start_length_and_mode() {
 fn a_cluster_has_the_defaults_of_table_10() {
     let text = r#"[{"title":"MPE Lower Zone Mode 3","channel":1,"programTitle":"MPE Synth",
         "bankPC":[2,0,1],"clusterChannelStart":2,"clusterLength":6,"clusterType":"mpe1"}]"#;
-    let PeData::ChannelList(list) = round_trips(PeResource::ChannelList, text) else {
+    let PeData::ChannelList(list) = round_trips(StandardResource::ChannelList, text) else {
         panic!("not ChannelList");
     };
     let cluster = list.entries()[0].cluster.unwrap();
@@ -267,7 +268,7 @@ fn a_half_cluster_is_refused() {
         r#"[{"title":"T","channel":1,"clusterChannelStart":2,"clusterLength":2,"clusterMidiMode":5}]"#,
         r#"[{"title":"T","channel":1,"clusterChannelStart":2,"clusterLength":2,"clusterType":"mpe2"}]"#,
     ] {
-        assert!(decode(&PeResource::ChannelList, bad).is_err(), "{bad}");
+        assert!(decode(StandardResource::ChannelList, bad).is_err(), "{bad}");
     }
 }
 
@@ -278,11 +279,11 @@ fn channel_links_name_program_collections() {
     let text = r#"[{"title":"Lead","channel":1,"programTitle":"Piano + Strings","bankPC":[1,0,76],
         "links":[{"resource":"ProgramList","resId":"presets","title":"Factory Presets"},
         {"resource":"ProgramList","resId":"user1","title":"User Programs"}]}]"#;
-    let PeData::ChannelList(list) = round_trips(PeResource::ChannelList, text) else {
+    let PeData::ChannelList(list) = round_trips(StandardResource::ChannelList, text) else {
         panic!("not ChannelList");
     };
     let links = &list.entries()[0].links;
-    assert_eq!(links[0].resource, PeResource::ProgramList);
+    assert_eq!(links[0].resource, StandardResource::ProgramList);
     assert_eq!(links[0].res_id, Some(id("presets")));
     assert_eq!(links[1].title.as_deref(), Some("User Programs"));
 }
@@ -296,9 +297,9 @@ fn a_link_role_is_at_most_32_characters() {
             r#"[{{"title":"T","channel":1,"links":[{{"resource":"ChCtrlList","resId":"m","role":"{role}"}}]}}]"#
         )
     };
-    assert!(decode(&PeResource::ChannelList, &link("cluster")).is_ok());
-    assert!(decode(&PeResource::ChannelList, &link(&"r".repeat(32))).is_ok());
-    assert!(decode(&PeResource::ChannelList, &link(&"r".repeat(33))).is_err());
+    assert!(decode(StandardResource::ChannelList, &link("cluster")).is_ok());
+    assert!(decode(StandardResource::ChannelList, &link(&"r".repeat(32))).is_ok());
+    assert!(decode(StandardResource::ChannelList, &link(&"r".repeat(33))).is_err());
 }
 
 // M2-107 §2.2: ProgramList entries have a title, the Bank Select and Program Change
@@ -308,7 +309,7 @@ fn a_link_role_is_at_most_32_characters() {
 fn program_list_reads_its_entries() {
     let text = r#"[{"title":"Acoustic Grand Piano","bankPC":[121,0,1],"category":["Piano","Keys"],
         "tags":["grand","acoustic"]},{"title":"60s Strings","bankPC":[121,2,49]}]"#;
-    let PeData::ProgramList(list) = round_trips(PeResource::ProgramList, text) else {
+    let PeData::ProgramList(list) = round_trips(StandardResource::ProgramList, text) else {
         panic!("not ProgramList");
     };
     assert_eq!(list.entries()[0].categories, ["Piano", "Keys"]);
@@ -319,7 +320,7 @@ fn program_list_reads_its_entries() {
 #[test]
 fn a_program_has_a_3_item_7_bit_bank_pc() {
     assert_eq!(
-        fails(PeResource::ProgramList, r#"[{"title":"A"}]"#).fault,
+        fails(StandardResource::ProgramList, r#"[{"title":"A"}]"#).fault,
         PeDataFault::Missing
     );
     for bad in [
@@ -330,7 +331,10 @@ fn a_program_has_a_3_item_7_bit_bank_pc() {
         r#"["a",0,0]"#,
     ] {
         let text = format!(r#"[{{"title":"A","bankPC":{bad}}}]"#);
-        assert!(decode(&PeResource::ProgramList, &text).is_err(), "{text}");
+        assert!(
+            decode(StandardResource::ProgramList, &text).is_err(),
+            "{text}"
+        );
     }
 }
 
@@ -341,25 +345,26 @@ fn mode_list_reads_its_entries() {
     let text = r#"[{"modeId":"singleChannelMode","title":"Single MIDI Channel Mode",
         "description":"This describes a single Program that plays one source."},
         {"modeId":"multiChannelMode","title":"Multiple MIDI Channel Mode"}]"#;
-    let PeData::ModeList(list) = round_trips(PeResource::ModeList, text) else {
+    let PeData::ModeList(list) = round_trips(StandardResource::ModeList, text) else {
         panic!("not ModeList");
     };
     assert_eq!(list.entries()[0].mode_id.as_str(), "singleChannelMode");
     assert!(list.entries()[1].description.is_none());
     let long = format!(r#"[{{"modeId":"{}","title":"T"}}]"#, "m".repeat(37));
-    assert!(decode(&PeResource::ModeList, &long).is_err());
+    assert!(decode(StandardResource::ModeList, &long).is_err());
 }
 
 // M2-106 §3.2: CurrentMode is the `modeId` as a string.
 #[test]
 fn current_mode_is_a_mode_id_string() {
-    let PeData::CurrentMode(mode) = round_trips(PeResource::CurrentMode, r#""multiChannelMode""#)
+    let PeData::CurrentMode(mode) =
+        round_trips(StandardResource::CurrentMode, r#""multiChannelMode""#)
     else {
         panic!("not CurrentMode");
     };
     assert_eq!(mode.0.as_str(), "multiChannelMode");
-    assert!(decode(&PeResource::CurrentMode, "3").is_err());
-    assert!(decode(&PeResource::CurrentMode, r#""""#).is_err());
+    assert!(decode(StandardResource::CurrentMode, "3").is_err());
+    assert!(decode(StandardResource::CurrentMode, r#""""#).is_err());
 }
 
 // M2-108 §2.2: ChannelMode is 1 to 4: Omni On Poly, Omni On Mono, Omni Off Poly,
@@ -372,30 +377,34 @@ fn channel_mode_is_the_number_of_the_mode() {
         (3, PeMidiMode::OmniOffPoly),
         (4, PeMidiMode::OmniOffMono),
     ] {
-        let PeData::ChannelMode(got) = round_trips(PeResource::ChannelMode, &n.to_string()) else {
+        let PeData::ChannelMode(got) = round_trips(StandardResource::ChannelMode, &n.to_string())
+        else {
             panic!("not ChannelMode");
         };
         assert_eq!(got.0, mode);
     }
-    assert!(decode(&PeResource::ChannelMode, "0").is_err());
-    assert!(decode(&PeResource::ChannelMode, "5").is_err());
+    assert!(decode(StandardResource::ChannelMode, "0").is_err());
+    assert!(decode(StandardResource::ChannelMode, "5").is_err());
 }
 
 // M2-108 §3.2 and §4.2: the Basic Channels are written 1 to 16, which the 0-based
 // MidiChannel holds.
 #[test]
 fn a_basic_channel_is_written_1_to_16() {
-    let PeData::BasicChannelRx(rx) = round_trips(PeResource::BasicChannelRx, "1") else {
+    let PeData::BasicChannelRx(rx) = round_trips(StandardResource::BasicChannelRx, "1") else {
         panic!("not BasicChannelRx");
     };
     assert_eq!(rx.0, MidiChannel::of(0));
-    let PeData::BasicChannelTx(tx) = round_trips(PeResource::BasicChannelTx, "16") else {
+    let PeData::BasicChannelTx(tx) = round_trips(StandardResource::BasicChannelTx, "16") else {
         panic!("not BasicChannelTx");
     };
     assert_eq!(tx.0, MidiChannel::of(15));
-    for resource in [PeResource::BasicChannelRx, PeResource::BasicChannelTx] {
+    for resource in [
+        StandardResource::BasicChannelRx,
+        StandardResource::BasicChannelTx,
+    ] {
         for bad in ["0", "17", "-1", "1.5", "true"] {
-            assert!(decode(&resource, bad).is_err(), "{bad}");
+            assert!(decode(resource, bad).is_err(), "{bad}");
         }
     }
 }
@@ -404,15 +413,15 @@ fn a_basic_channel_is_written_1_to_16() {
 #[test]
 fn local_on_and_external_sync_are_booleans() {
     assert_eq!(
-        round_trips(PeResource::LocalOn, "false"),
+        round_trips(StandardResource::LocalOn, "false"),
         PeData::LocalOn(PeLocalOn(false))
     );
     assert_eq!(
-        round_trips(PeResource::ExternalSync, "true"),
+        round_trips(StandardResource::ExternalSync, "true"),
         PeData::ExternalSync(PeExternalSync(true))
     );
-    assert!(decode(&PeResource::LocalOn, "1").is_err());
-    assert!(decode(&PeResource::ExternalSync, r#""true""#).is_err());
+    assert!(decode(StandardResource::LocalOn, "1").is_err());
+    assert!(decode(StandardResource::ExternalSync, r#""true""#).is_err());
 }
 
 const ALL_CTRL: &str = r#"[
@@ -428,7 +437,7 @@ const ALL_CTRL: &str = r#"[
 // M2-117 §2.1.2 Table 6: AllCtrlList.
 #[test]
 fn all_ctrl_list_reads_table_6() {
-    let PeData::AllCtrlList(list) = round_trips(PeResource::AllCtrlList, ALL_CTRL) else {
+    let PeData::AllCtrlList(list) = round_trips(StandardResource::AllCtrlList, ALL_CTRL) else {
         panic!("not AllCtrlList");
     };
     let [volume, cutoff, hold, wave] = list.entries() else {
@@ -472,18 +481,24 @@ fn value_select_needs_a_map() {
         format!(r#"[{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[1],{extra}}}]"#)
     };
     let error = fails(
-        PeResource::AllCtrlList,
+        StandardResource::AllCtrlList,
         &entry(r#""typeHint":"valueSelect""#),
     );
     assert_eq!(error.fault, PeDataFault::Missing);
     assert!(
         decode(
-            &PeResource::AllCtrlList,
+            StandardResource::AllCtrlList,
             &entry(r#""typeHint":"valueSelect","ctrlMapId":"m""#)
         )
         .is_ok()
     );
-    assert!(decode(&PeResource::AllCtrlList, &entry(r#""typeHint":"slider""#)).is_err());
+    assert!(
+        decode(
+            StandardResource::AllCtrlList,
+            &entry(r#""typeHint":"slider""#)
+        )
+        .is_err()
+    );
 }
 
 // M2-117 §2.1.1.3: `minMax` and `stepCount` shall not be on the same entry.
@@ -493,24 +508,36 @@ fn step_count_and_min_max_exclude_each_other() {
     let entry = |extra: &str| {
         format!(r#"[{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[1],{extra}}}]"#)
     };
-    assert!(decode(&PeResource::AllCtrlList, &entry(r#""stepCount":5"#)).is_ok());
-    assert!(decode(&PeResource::AllCtrlList, &entry(r#""minMax":[10,200]"#)).is_ok());
+    assert!(decode(StandardResource::AllCtrlList, &entry(r#""stepCount":5"#)).is_ok());
     assert!(
         decode(
-            &PeResource::AllCtrlList,
+            StandardResource::AllCtrlList,
+            &entry(r#""minMax":[10,200]"#)
+        )
+        .is_ok()
+    );
+    assert!(
+        decode(
+            StandardResource::AllCtrlList,
             &entry(r#""stepCount":5,"minMax":[10,200]"#)
         )
         .is_err()
     );
-    assert!(decode(&PeResource::AllCtrlList, &entry(r#""minMax":[200,10]"#)).is_err());
     assert!(
         decode(
-            &PeResource::AllCtrlList,
+            StandardResource::AllCtrlList,
+            &entry(r#""minMax":[200,10]"#)
+        )
+        .is_err()
+    );
+    assert!(
+        decode(
+            StandardResource::AllCtrlList,
             &entry(r#""minMax":[1,4294967296]"#)
         )
         .is_err()
     );
-    assert!(decode(&PeResource::AllCtrlList, &entry(r#""stepCount":0"#)).is_err());
+    assert!(decode(StandardResource::AllCtrlList, &entry(r#""stepCount":0"#)).is_err());
 }
 
 // M2-117 Table 5: `priority` is 1 to 5, `default` is an unsigned 32-bit value, and
@@ -523,7 +550,7 @@ fn controller_numbers_have_the_ranges_of_table_5() {
     };
     assert!(
         decode(
-            &PeResource::AllCtrlList,
+            StandardResource::AllCtrlList,
             &entry(r#""priority":1,"default":4294967295,"numSigBits":32"#)
         )
         .is_ok()
@@ -538,7 +565,7 @@ fn controller_numbers_have_the_ranges_of_table_5() {
         r#""transmit":"sometimes""#,
     ] {
         assert!(
-            decode(&PeResource::AllCtrlList, &entry(bad)).is_err(),
+            decode(StandardResource::AllCtrlList, &entry(bad)).is_err(),
             "{bad}"
         );
     }
@@ -553,7 +580,7 @@ fn a_controller_has_the_index_its_type_needs() {
     };
     for kind in ["chPress", "pPress", "pBend", "pnp"] {
         assert!(
-            decode(&PeResource::AllCtrlList, &entry(kind, "")).is_ok(),
+            decode(StandardResource::AllCtrlList, &entry(kind, "")).is_ok(),
             "{kind}"
         );
     }
@@ -566,15 +593,15 @@ fn a_controller_has_the_index_its_type_needs() {
         ("pnac", r#","ctrlIndex":[200]"#, r#","ctrlIndex":[1,2]"#),
     ] {
         assert!(
-            decode(&PeResource::AllCtrlList, &entry(kind, good)).is_ok(),
+            decode(StandardResource::AllCtrlList, &entry(kind, good)).is_ok(),
             "{kind}{good}"
         );
         assert!(
-            decode(&PeResource::AllCtrlList, &entry(kind, bad)).is_err(),
+            decode(StandardResource::AllCtrlList, &entry(kind, bad)).is_err(),
             "{kind}{bad}"
         );
     }
-    assert!(decode(&PeResource::AllCtrlList, &entry("sysex", "")).is_err());
+    assert!(decode(StandardResource::AllCtrlList, &entry("sysex", "")).is_err());
 }
 
 // M2-117 §2.1.3 Table 7: one controller may be listed twice, once for what it
@@ -584,15 +611,15 @@ fn a_controller_has_the_index_its_type_needs() {
 fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
     let pair = r#"[{"title":"Vibrato","ctrlType":"cc","channel":1,"default":0,"ctrlIndex":[2],"transmit":"none"},
         {"title":"Modulation Wheel","ctrlType":"cc","channel":1,"default":0,"ctrlIndex":[2],"recognize":"none"}]"#;
-    assert!(decode(&PeResource::AllCtrlList, pair).is_ok());
+    assert!(decode(StandardResource::AllCtrlList, pair).is_ok());
     let twice = r#"[{"title":"A","ctrlType":"cc","channel":1,"ctrlIndex":[2]},
         {"title":"B","ctrlType":"cc","channel":1,"ctrlIndex":[2]}]"#;
-    assert!(decode(&PeResource::AllCtrlList, twice).is_err());
+    assert!(decode(StandardResource::AllCtrlList, twice).is_err());
     // The fault is the list's, and the repeat names its controller and Channel.
-    let error = fails(PeResource::AllCtrlList, twice);
+    let error = fails(StandardResource::AllCtrlList, twice);
     assert_eq!(error.place, Place::of("AllCtrlList"));
     assert_eq!(error.place.at_property(), None);
-    let PeData::AllCtrlList(pair_list) = round_trips(PeResource::AllCtrlList, pair) else {
+    let PeData::AllCtrlList(pair_list) = round_trips(StandardResource::AllCtrlList, pair) else {
         panic!("not AllCtrlList");
     };
     let first = pair_list.entries()[0].clone();
@@ -618,7 +645,10 @@ fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
         (r#""recognize":"none""#, r#""recognize":"none""#),
     ] {
         let both = format!("[{},{}]", entry(a), entry(b));
-        assert!(decode(&PeResource::AllCtrlList, &both).is_err(), "{both}");
+        assert!(
+            decode(StandardResource::AllCtrlList, &both).is_err(),
+            "{both}"
+        );
     }
     // A third entry of the pair's controller is a repeat.
     let third = format!(
@@ -627,13 +657,16 @@ fn a_controller_is_listed_twice_only_for_transmit_and_recognize() {
         entry(r#""recognize":"none""#),
         entry(r#""transmit":"none""#)
     );
-    assert!(decode(&PeResource::AllCtrlList, &third).is_err(), "{third}");
+    assert!(
+        decode(StandardResource::AllCtrlList, &third).is_err(),
+        "{third}"
+    );
     // The same controller on another Channel is another entry.
     let other = twice.replace(
         r#""title":"B","ctrlType":"cc","channel":1"#,
         r#""title":"B","ctrlType":"cc","channel":2"#,
     );
-    assert!(decode(&PeResource::AllCtrlList, &other).is_ok());
+    assert!(decode(StandardResource::AllCtrlList, &other).is_ok());
 }
 
 // M2-117 §3.1.2 Table 12: ChCtrlList has no `channel`, and `defaultCCMap` is for a
@@ -644,14 +677,14 @@ fn ch_ctrl_list_reads_table_12() {
         "ctrlIndex":[7,39],"ctrlMapId":"volumeDb","defaultCCMap":true},
         {"title":"Aftertouch","ctrlType":"chPress","default":0,"transmit":"none"},
         {"title":"Vibrato","ctrlType":"pnac","default":2147483648,"ctrlIndex":[74]}]"#;
-    let PeData::ChCtrlList(list) = round_trips(PeResource::ChCtrlList, text) else {
+    let PeData::ChCtrlList(list) = round_trips(StandardResource::ChCtrlList, text) else {
         panic!("not ChCtrlList");
     };
     assert!(list.entries()[0].default_cc_map());
     assert!(!list.entries()[1].default_cc_map());
     assert_eq!(list.entries()[1].ctrl().transmit, CtrlValueKind::None);
     let bad = r#"[{"title":"A","ctrlType":"chPress","defaultCCMap":true}]"#;
-    assert!(decode(&PeResource::ChCtrlList, bad).is_err());
+    assert!(decode(StandardResource::ChCtrlList, bad).is_err());
 }
 
 // M2-117 §4.1.1 Table 20: CtrlMapList entries are an unsigned 32-bit value and the
@@ -660,18 +693,18 @@ fn ch_ctrl_list_reads_table_12() {
 fn ctrl_map_list_reads_table_20() {
     let text = r#"[{"value":0,"title":"-infinity dB"},{"value":167772160,"title":"-100dB"},
         {"value":4294967295,"title":"+10dB"}]"#;
-    let PeData::CtrlMapList(list) = round_trips(PeResource::CtrlMapList, text) else {
+    let PeData::CtrlMapList(list) = round_trips(StandardResource::CtrlMapList, text) else {
         panic!("not CtrlMapList");
     };
     assert_eq!(list.entries()[2].value, ControlValue::MAX);
     assert!(
         decode(
-            &PeResource::CtrlMapList,
+            StandardResource::CtrlMapList,
             r#"[{"value":4294967296,"title":"x"}]"#
         )
         .is_err()
     );
-    assert!(decode(&PeResource::CtrlMapList, r#"[{"value":1}]"#).is_err());
+    assert!(decode(StandardResource::CtrlMapList, r#"[{"value":1}]"#).is_err());
 }
 
 // M2-105 §5.1 Table 24: JSONSchema is a JSON Schema, an object.
@@ -679,11 +712,11 @@ fn ctrl_map_list_reads_table_20() {
 fn json_schema_is_an_object() {
     let text = r#"{"$schema":"http://json-schema.org/draft-04/schema#","type":"object",
         "properties":{"audioOut":{"type":"string","enum":["USB","line"]}}}"#;
-    let PeData::JsonSchema(schema) = round_trips(PeResource::JsonSchema, text) else {
+    let PeData::JsonSchema(schema) = round_trips(StandardResource::JsonSchema, text) else {
         panic!("not JSONSchema");
     };
     assert!(schema.as_object().get("properties").is_some());
-    assert!(decode(&PeResource::JsonSchema, "[]").is_err());
+    assert!(decode(StandardResource::JsonSchema, "[]").is_err());
 }
 
 // M2-103 §14: Property Data of a Resource this crate has no type for is kept as
@@ -700,9 +733,27 @@ fn a_resource_without_a_type_is_opaque_json() {
     assert!(opaque.body().json().unwrap().as_object().is_some());
     let state =
         PeResource::from_name(&super::super::limits::ResourceName::new("TuningList").unwrap());
-    assert!(matches!(state, PeResource::Unmodelled(_)));
+    assert!(matches!(
+        state,
+        PeResource::Untyped(UntypedResource::Unmodelled(_))
+    ));
     assert!(matches!(ok(state, "[]"), PeData::Opaque(_)));
-    assert!(PeOpaque::new(PeResource::LocalOn, PeJson::Bool(true)).is_none());
+}
+
+// M2-103 §14.3: a standard Resource's name is the standard Resource, so no entry
+// that may override flags is made for it, and a manufacturer's name is custom.
+/// Spec: m2-103/14.3#3
+#[test]
+fn a_standard_or_manufacturer_name_is_not_unmodelled() {
+    for name in ["DeviceInfo", "JSONSchema", "State", "X-Anything"] {
+        assert_eq!(UnmodelledResource::new(name), None, "{name}");
+    }
+    assert!(UnmodelledResource::new("TuningList").is_some());
+    let name = super::super::limits::ResourceName::new("DeviceInfo").unwrap();
+    assert_eq!(
+        PeResource::from_name(&name),
+        PeResource::Standard(StandardResource::DeviceInfo)
+    );
 }
 
 // M2-103 §8.4: a manufacturer Resource is named `X-` and 1 to 33 alphanumerics;
@@ -717,11 +768,11 @@ fn resource_names_follow_8_4_and_8_6() {
     assert!(custom("X-SongList").is_list());
     assert!(!custom("X-Song").is_list());
     for (resource, list) in [
-        (PeResource::ProgramList, true),
-        (PeResource::ResourceList, true),
-        (PeResource::LocalOn, false),
-        (PeResource::DeviceInfo, false),
-        (PeResource::JsonSchema, false),
+        (StandardResource::ProgramList, true),
+        (StandardResource::ResourceList, true),
+        (StandardResource::LocalOn, false),
+        (StandardResource::DeviceInfo, false),
+        (StandardResource::JsonSchema, false),
     ] {
         assert_eq!(resource.is_list(), list, "{}", resource.as_str());
     }
@@ -735,16 +786,16 @@ fn resource_list_reads_table_82() {
         {"resource":"ProgramList"},
         {"resource":"X-Buffer","canSet":"full","mediaTypes":["application/octet-stream"],
          "encodings":["MCoded7"],"schema":{"title":"Buffer"}}]"#;
-    let PeData::ResourceList(list) = ok(PeResource::ResourceList, text) else {
+    let PeData::ResourceList(list) = ok(StandardResource::ResourceList, text) else {
         panic!("not ResourceList");
     };
-    let device = list.entry(&PeResource::DeviceInfo).unwrap();
+    let device = list.entry(&StandardResource::DeviceInfo).unwrap();
     assert!(device.can_get());
     assert_eq!(device.can_set(), CanSet::None);
     assert!(!device.can_subscribe());
     assert_eq!(device.encodings(), [PeEncoding::Ascii]);
     assert!(
-        list.entry(&PeResource::ChannelList)
+        list.entry(&StandardResource::ChannelList)
             .unwrap()
             .can_subscribe()
     );
@@ -762,35 +813,35 @@ fn resource_list_reads_table_82() {
 /// Spec: m2-103/14.3#2
 #[test]
 fn a_default_entry_is_minimal() {
-    let minimal = |resource: PeResource| {
-        ResourceEntry::builder(resource)
+    let minimal = |resource: StandardResource| {
+        ResourceEntry::standard(resource)
             .build()
             .unwrap()
             .to_json()
             .encode()
     };
     assert_eq!(
-        minimal(PeResource::ChannelList),
+        minimal(StandardResource::ChannelList),
         br#"{"resource":"ChannelList"}"#
     );
     // ProgramList paginates and needs a resId by default; CurrentMode can be set.
     assert_eq!(
-        minimal(PeResource::ProgramList),
+        minimal(StandardResource::ProgramList),
         br#"{"resource":"ProgramList"}"#
     );
     assert_eq!(
-        minimal(PeResource::CurrentMode),
+        minimal(StandardResource::CurrentMode),
         br#"{"resource":"CurrentMode"}"#
     );
-    let programs = ResourceEntry::builder(PeResource::ProgramList)
+    let programs = ResourceEntry::standard(StandardResource::ProgramList)
         .build()
         .unwrap();
     assert!(programs.can_paginate() && programs.require_res_id());
-    let mode = ResourceEntry::builder(PeResource::CurrentMode)
+    let mode = ResourceEntry::standard(StandardResource::CurrentMode)
         .build()
         .unwrap();
     assert_eq!(mode.can_set(), CanSet::Full);
-    let subscribable = ResourceEntry::builder(PeResource::ChannelList)
+    let subscribable = ResourceEntry::standard(StandardResource::ChannelList)
         .can_subscribe(true)
         .build()
         .unwrap();
@@ -800,47 +851,107 @@ fn a_default_entry_is_minimal() {
     );
 }
 
-// M2-103 §14.3: canGet, canSet, requireResId, canPaginate and schema keep their
-// defaults on a Resource an AMEI/MMA specification defines.
+// M2-103 §14.3: canGet, canSet, requireResId and canPaginate keep their defaults on a
+// Resource an AMEI/MMA specification defines: the entry builder of one has no setter
+// for them, and an entry a peer sent that declares another value is refused.
 /// Spec: m2-103/14.3#3, m2-103/14.4#1
 #[test]
 fn a_standard_resource_keeps_its_defaults() {
-    let entry = ResourceEntry::builder;
-    let refused = |e: ResourceEntryBuilder| {
-        let e = e.build();
-        assert!(matches!(e, Err(EntryError::NotOverridable { .. })), "{e:?}");
-    };
-    refused(entry(PeResource::ChannelList).can_set(CanSet::Full));
-    refused(entry(PeResource::LocalOn).can_set(CanSet::None));
-    refused(entry(PeResource::ChannelList).can_get(false));
-    refused(entry(PeResource::ChannelList).require_res_id(true));
-    refused(entry(PeResource::ProgramList).can_paginate(false));
-    refused(entry(PeResource::ChannelList).can_paginate(true));
-    refused(entry(PeResource::ChannelList).schema(json(r#"{"title":"x"}"#)));
+    let entry = ResourceEntry::standard;
+    let received = |text: &str| ResourceEntry::from_json(&json(text));
+    for text in [
+        r#"{"resource":"ChannelList","canSet":"full"}"#,
+        r#"{"resource":"LocalOn","canSet":"none"}"#,
+        r#"{"resource":"ChannelList","canGet":false}"#,
+        r#"{"resource":"ChannelList","requireResId":true}"#,
+        r#"{"resource":"ProgramList","canPaginate":false}"#,
+        r#"{"resource":"ChannelList","canPaginate":true}"#,
+    ] {
+        let refused = received(text);
+        assert!(
+            matches!(
+                &refused,
+                Err(PeDataError {
+                    fault: PeDataFault::NotValid(InvalidValue::Entry(
+                        EntryError::NotOverridable { .. }
+                    )),
+                    ..
+                })
+            ),
+            "{text}: {refused:?}"
+        );
+    }
     // The default itself is no override.
-    assert!(
-        entry(PeResource::LocalOn)
-            .can_set(CanSet::Full)
-            .build()
-            .is_ok()
-    );
+    assert!(received(r#"{"resource":"LocalOn","canSet":"full"}"#).is_ok());
+    // Every standard Resource: each of the four flags stated as other than its
+    // default is refused naming the property, and stated as its default is taken.
+    for resource in StandardResource::ALL {
+        let d = resource.defaults();
+        let can_set = |c: CanSet| format!(r#""canSet":"{}""#, c.as_str());
+        let other_set = if d.can_set == CanSet::None {
+            CanSet::Full
+        } else {
+            CanSet::None
+        };
+        let flags = [
+            (
+                "canGet",
+                format!(r#""canGet":{}"#, d.can_get),
+                format!(r#""canGet":{}"#, !d.can_get),
+            ),
+            ("canSet", can_set(d.can_set), can_set(other_set)),
+            (
+                "requireResId",
+                format!(r#""requireResId":{}"#, d.require_res_id),
+                format!(r#""requireResId":{}"#, !d.require_res_id),
+            ),
+            (
+                "canPaginate",
+                format!(r#""canPaginate":{}"#, d.can_paginate),
+                format!(r#""canPaginate":{}"#, !d.can_paginate),
+            ),
+        ];
+        for (property, restated, flipped) in flags {
+            let entry = |flag: &str| {
+                ResourceEntry::from_json(&json(&format!(
+                    r#"{{"resource":"{}",{flag}}}"#,
+                    resource.as_str()
+                )))
+            };
+            let refused = entry(&flipped);
+            let Err(PeDataError {
+                fault:
+                    PeDataFault::NotValid(InvalidValue::Entry(EntryError::NotOverridable {
+                        property: named,
+                        ..
+                    })),
+                ..
+            }) = &refused
+            else {
+                panic!("{resource} {flipped}: {refused:?}");
+            };
+            assert_eq!(*named, property, "{resource}");
+            let taken = entry(&restated);
+            assert!(taken.is_ok(), "{resource} {restated}: {taken:?}");
+        }
+    }
     // What the spec lets an entry declare is open.
     assert!(
-        entry(PeResource::ChannelList)
+        entry(StandardResource::ChannelList)
             .fc_on_get(true)
             .build()
             .is_ok()
     );
     assert!(
-        entry(PeResource::ChannelList)
+        entry(StandardResource::ChannelList)
             .encodings(vec![PeEncoding::Ascii, PeEncoding::ZlibMcoded7])
             .build()
             .is_ok()
     );
-    // On the wire the same rule holds.
+    // In a ResourceList the same rule holds.
     assert!(
         decode(
-            &PeResource::ResourceList,
+            StandardResource::ResourceList,
             r#"[{"resource":"ChannelList","canSet":"full"}]"#
         )
         .is_err()
@@ -852,27 +963,26 @@ fn a_standard_resource_keeps_its_defaults() {
 #[test]
 fn resource_list_does_not_list_itself_or_repeat() {
     assert_eq!(
-        ResourceEntry::builder(PeResource::ResourceList).build(),
+        ResourceEntry::standard(StandardResource::ResourceList).build(),
         Err(EntryError::ListsItself)
     );
     assert!(
         decode(
-            &PeResource::ResourceList,
+            StandardResource::ResourceList,
             r#"[{"resource":"ResourceList"}]"#
         )
         .is_err()
     );
     let twice = r#"[{"resource":"DeviceInfo"},{"resource":"DeviceInfo"}]"#;
-    assert!(decode(&PeResource::ResourceList, twice).is_err());
+    assert!(decode(StandardResource::ResourceList, twice).is_err());
 }
 
 // M2-103 §14.2.1: `canPaginate` and `columns` are List Resource properties.
 /// Spec: m2-103/14.2.1#1
 #[test]
 fn only_a_list_resource_paginates_and_has_columns() {
-    let x_song = custom("X-Song");
-    let schema = json(r#"{"title":"Song","type":"object"}"#);
-    let entry = || ResourceEntry::builder(x_song.clone()).schema(schema.clone());
+    let schema = r#"{"title":"Song","type":"object"}"#;
+    let entry = || custom_entry("X-Song", schema);
     assert!(matches!(
         entry().can_paginate(true).build(),
         Err(EntryError::NotAList(_))
@@ -885,7 +995,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
         entry().columns(columns.clone()).build(),
         Err(EntryError::NotAList(_))
     ));
-    let list = || ResourceEntry::builder(custom("X-SongList")).schema(schema.clone());
+    let list = || custom_entry("X-SongList", schema);
     assert!(list().can_paginate(true).build().is_ok());
     assert!(list().columns(columns).build().is_ok());
 }
@@ -895,11 +1005,7 @@ fn only_a_list_resource_paginates_and_has_columns() {
 /// Spec: m2-103/14.4#2, m2-103/14.4#3, m2-103/14.6#3
 #[test]
 fn a_custom_entry_needs_a_schema_with_a_title() {
-    let wifi = custom("X-WIFIOn");
-    assert!(matches!(
-        ResourceEntry::builder(wifi.clone()).build(),
-        Err(EntryError::SchemaIncomplete(_))
-    ));
+    let wifi = || custom_name("X-WIFIOn");
     for incomplete in [
         r#"{"type":"boolean"}"#,
         r#"{"title":"WIFI Enabled"}"#,
@@ -908,9 +1014,7 @@ fn a_custom_entry_needs_a_schema_with_a_title() {
     ] {
         assert!(
             matches!(
-                ResourceEntry::builder(wifi.clone())
-                    .schema(json(incomplete))
-                    .build(),
+                ResourceEntry::custom(wifi(), json(incomplete)).build(),
                 Err(EntryError::SchemaIncomplete(_))
             ),
             "{incomplete}"
@@ -918,8 +1022,7 @@ fn a_custom_entry_needs_a_schema_with_a_title() {
     }
     let schema =
         json(r#"{"title":"WIFI Enabled","description":"Turn WIFI on or Off","type":"boolean"}"#);
-    let entry = ResourceEntry::builder(wifi)
-        .schema(schema.clone())
+    let entry = ResourceEntry::custom(wifi(), schema.clone())
         .can_set(CanSet::Full)
         .build()
         .unwrap();
@@ -939,14 +1042,14 @@ fn columns_name_a_property_or_a_link() {
     let text = r#"[{"resource":"ChannelList","canSubscribe":true,"columns":[
         {"property":"channel","title":"MIDI Channel"},{"property":"programTitle","title":"Program Name"},
         {"link":"ProgramList","title":"Program List"}]}]"#;
-    let PeData::ResourceList(list) = round_trips(PeResource::ResourceList, text) else {
+    let PeData::ResourceList(list) = round_trips(StandardResource::ResourceList, text) else {
         panic!("not ResourceList");
     };
     let columns = list.entries()[0].columns();
     assert_eq!(columns.len(), 3);
     assert_eq!(
         columns[2].source,
-        ColumnSource::Link(PeResource::ProgramList)
+        ColumnSource::Link(StandardResource::ProgramList.into())
     );
     for bad in [
         r#"{"title":"x"}"#,
@@ -954,7 +1057,10 @@ fn columns_name_a_property_or_a_link() {
         r#"{"property":"not a name"}"#,
     ] {
         let text = format!(r#"[{{"resource":"ChannelList","columns":[{bad}]}}]"#);
-        assert!(decode(&PeResource::ResourceList, &text).is_err(), "{text}");
+        assert!(
+            decode(StandardResource::ResourceList, &text).is_err(),
+            "{text}"
+        );
     }
 }
 
@@ -964,15 +1070,19 @@ fn columns_name_a_property_or_a_link() {
 #[test]
 fn a_target_has_a_res_id_when_the_resource_has_entries() {
     assert!(matches!(
-        ResourceTarget::try_from(PeResource::ProgramList),
-        Err(RequestRefused::ResIdRequired(PeResource::ProgramList))
+        ResourceTarget::try_from(StandardResource::ProgramList),
+        Err(RequestRefused::ResIdRequired(PeResource::Standard(
+            StandardResource::ProgramList
+        )))
     ));
-    assert!(ResourceTarget::entry(PeResource::ProgramList, id("general")).is_ok());
+    assert!(ResourceTarget::entry(StandardResource::ProgramList, id("general")).is_ok());
     assert!(matches!(
-        ResourceTarget::entry(PeResource::LocalOn, id("x")),
-        Err(RequestRefused::ResIdUnused(PeResource::LocalOn))
+        ResourceTarget::entry(StandardResource::LocalOn, id("x")),
+        Err(RequestRefused::ResIdUnused(PeResource::Standard(
+            StandardResource::LocalOn
+        )))
     ));
-    assert!(ResourceTarget::try_from(PeResource::LocalOn).is_ok());
+    assert!(ResourceTarget::try_from(StandardResource::LocalOn).is_ok());
     // A manufacturer Resource is either, as its entry says.
     assert!(ResourceTarget::try_from(custom("X-A")).is_ok());
     assert!(ResourceTarget::entry(custom("X-A"), id("one")).is_ok());
@@ -986,18 +1096,18 @@ fn only_a_list_resource_is_asked_for_a_page() {
         offset: 0,
         limit: NonZeroU32::new(5).unwrap(),
     };
-    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
     assert!(matches!(
         ResourceGet::new(target)
             .paged(page)
-            .check_get(&entry_of(PeResource::LocalOn)),
+            .check_get(&entry_of(StandardResource::LocalOn)),
         Err(RequestRefused::NotPaginable(_))
     ));
-    let list = ResourceTarget::entry(PeResource::ProgramList, id("g")).unwrap();
+    let list = ResourceTarget::entry(StandardResource::ProgramList, id("g")).unwrap();
     assert_eq!(
         ResourceGet::new(list)
             .paged(page)
-            .check_get(&entry_of(PeResource::ProgramList)),
+            .check_get(&entry_of(StandardResource::ProgramList)),
         Ok(())
     );
 }
@@ -1010,8 +1120,8 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
     let now = Instant::now();
     let (mut init, _) =
         ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
-    let paged =
-        ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap()).paged(PePage {
+    let paged = ResourceGet::new(ResourceTarget::try_from(StandardResource::LocalOn).unwrap())
+        .paged(PePage {
             offset: 0,
             limit: NonZeroU32::new(5).unwrap(),
         });
@@ -1025,22 +1135,75 @@ fn a_page_of_a_non_list_resource_is_refused_before_the_resource_list_is_known() 
     ));
 }
 
+// M2-103 §14: ResourceList has no entry of its own, so it declares no pagination, no
+// Flow Control, no Set and no Subscription, and an Initiator that does not know the
+// peer's ResourceList yet refuses what the Responder refuses with 400, 406 and 405.
+#[test]
+fn the_initiator_refuses_resource_list_what_it_does_not_declare() {
+    let now = Instant::now();
+    let (mut init, _) =
+        ResourceInitiator::new(Muid::of(OURS), Muid::of(PEER), initiator_settings(512), now);
+    let target = || ResourceTarget::try_from(StandardResource::ResourceList).unwrap();
+    let page = PePage {
+        offset: 0,
+        limit: NonZeroU32::new(5).unwrap(),
+    };
+    assert!(matches!(
+        init.get(&ResourceGet::new(target()).paged(page), now),
+        Err(CallError::Refused(RequestRefused::NotDeclaredPaginable(_)))
+    ));
+    assert!(matches!(
+        init.get(&ResourceGet::new(target()).flow_controlled(), now),
+        Err(CallError::Refused(RequestRefused::FlowControlNotDeclared(
+            _
+        )))
+    ));
+    assert!(matches!(
+        init.subscribe(&ResourceGet::new(target()), now),
+        Err(CallError::Refused(RequestRefused::CannotSubscribe(_)))
+    ));
+    let set = ResourceSet::full(target(), PeData::ResourceList(PeResourceList::new())).unwrap();
+    assert!(matches!(
+        init.set(&set, now),
+        Err(CallError::Refused(RequestRefused::CannotSet { .. }))
+    ));
+}
+
+// M2-103 §10: the changes of a Partial Set are JSON, so an entry that lists no
+// `application/json` is not partially set.
+#[test]
+fn a_partial_set_needs_json_among_the_media_types_of_the_entry() {
+    let entry = custom_entry("X-Part", r#"{"title":"Part"}"#)
+        .can_set(CanSet::Partial)
+        .media_types(vec![MediaType::OCTET_STREAM])
+        .build()
+        .unwrap();
+    let set = ResourceSet::partial(
+        ResourceTarget::try_from(custom("X-Part")).unwrap(),
+        PartialUpdate::new(),
+    );
+    assert!(matches!(
+        set.check(&entry),
+        Err(RequestRefused::MediaTypeNotDeclared { .. })
+    ));
+}
+
 // M2-103 §10: a Set carries the data of the Resource it is for.
 #[test]
 fn a_set_carries_data_of_its_resource() {
-    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
     assert!(ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(true))).is_ok());
     assert_eq!(
         ResourceSet::full(target, PeData::ExternalSync(PeExternalSync(true))).unwrap_err(),
         RequestRefused::DataOfAnotherResource {
-            data: PeResource::ExternalSync,
-            target: PeResource::LocalOn,
+            data: StandardResource::ExternalSync.into(),
+            target: StandardResource::LocalOn.into(),
         }
     );
 }
 
-fn entry_of(resource: PeResource) -> ResourceEntry {
-    ResourceEntry::builder(resource).build().unwrap()
+fn entry_of(resource: StandardResource) -> ResourceEntry {
+    ResourceEntry::standard(resource).build().unwrap()
 }
 
 // M2-103 §14.2, Table 79: a Get needs `canGet`, a `resId` where `requireResId` says,
@@ -1052,8 +1215,9 @@ fn a_get_is_checked_against_its_entry() {
         offset: 0,
         limit: NonZeroU32::new(2).unwrap(),
     };
-    let channels = ResourceGet::new(ResourceTarget::try_from(PeResource::ChannelList).unwrap());
-    let entry = entry_of(PeResource::ChannelList);
+    let channels =
+        ResourceGet::new(ResourceTarget::try_from(StandardResource::ChannelList).unwrap());
+    let entry = entry_of(StandardResource::ChannelList);
     assert_eq!(channels.check_get(&entry), Ok(()));
     assert!(matches!(
         channels.clone().paged(page).check_get(&entry),
@@ -1070,7 +1234,7 @@ fn a_get_is_checked_against_its_entry() {
         channels.clone().flow_controlled().check_get(&entry),
         Err(RequestRefused::FlowControlNotDeclared(_))
     ));
-    let rich = ResourceEntry::builder(PeResource::ChannelList)
+    let rich = ResourceEntry::standard(StandardResource::ChannelList)
         .encodings(vec![PeEncoding::Ascii, PeEncoding::Mcoded7])
         .fc_on_get(true)
         .build()
@@ -1085,16 +1249,15 @@ fn a_get_is_checked_against_its_entry() {
     assert_eq!(channels.flow_controlled().check_get(&rich), Ok(()));
     // ProgramList paginates by default, and wants its resId.
     let programs =
-        ResourceGet::new(ResourceTarget::entry(PeResource::ProgramList, id("g")).unwrap())
+        ResourceGet::new(ResourceTarget::entry(StandardResource::ProgramList, id("g")).unwrap())
             .paged(page);
     assert_eq!(
-        programs.check_get(&entry_of(PeResource::ProgramList)),
+        programs.check_get(&entry_of(StandardResource::ProgramList)),
         Ok(())
     );
     assert!(matches!(
         ResourceGet::new(ResourceTarget::try_from(custom("X-A")).unwrap()).check_get(
-            &ResourceEntry::builder(custom("X-A"))
-                .schema(json(r#"{"title":"A","type":"string"}"#))
+            &custom_entry("X-A", r#"{"title":"A","type":"string"}"#)
                 .require_res_id(true)
                 .build()
                 .unwrap()
@@ -1108,33 +1271,32 @@ fn a_get_is_checked_against_its_entry() {
 /// Spec: m2-103/10#3, m2-103/10#9
 #[test]
 fn a_set_is_checked_against_its_entry() {
-    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
     let full = ResourceSet::full(target.clone(), PeData::LocalOn(PeLocalOn(true))).unwrap();
     let partial = ResourceSet::partial(target, PartialUpdate::new());
-    let local_on = entry_of(PeResource::LocalOn);
+    let local_on = entry_of(StandardResource::LocalOn);
     assert_eq!(full.check(&local_on), Ok(()));
     assert!(matches!(
         partial.check(&local_on),
         Err(RequestRefused::CannotSet {
-            scope: "in part",
+            scope: PeSetScope::Partial,
             ..
         })
     ));
     let read_only = ResourceSet::full(
-        ResourceTarget::try_from(PeResource::ChannelMode).unwrap(),
+        ResourceTarget::try_from(StandardResource::ChannelMode).unwrap(),
         PeData::ChannelMode(PeChannelMode(PeMidiMode::OmniOffPoly)),
     )
     .unwrap();
     assert!(matches!(
-        read_only.check(&entry_of(PeResource::ChannelMode)),
+        read_only.check(&entry_of(StandardResource::ChannelMode)),
         Err(RequestRefused::CannotSet {
-            scope: "in whole",
+            scope: PeSetScope::Whole,
             ..
         })
     ));
     let x = custom("X-Edit");
-    let editable = ResourceEntry::builder(x.clone())
-        .schema(json(r#"{"title":"Edit","type":"string"}"#))
+    let editable = custom_entry("X-Edit", r#"{"title":"Edit","type":"string"}"#)
         .can_set(CanSet::Partial)
         .build()
         .unwrap();
@@ -1148,13 +1310,13 @@ fn a_set_is_checked_against_its_entry() {
 // M2-103 §11, §14.2: a Subscription needs `canSubscribe`.
 #[test]
 fn a_subscription_needs_can_subscribe() {
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::ChannelList).unwrap());
-    let entry = entry_of(PeResource::ChannelList);
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::ChannelList).unwrap());
+    let entry = entry_of(StandardResource::ChannelList);
     assert!(matches!(
         get.check_subscribe(&entry),
         Err(RequestRefused::CannotSubscribe(_))
     ));
-    let subscribable = ResourceEntry::builder(PeResource::ChannelList)
+    let subscribable = ResourceEntry::standard(StandardResource::ChannelList)
         .can_subscribe(true)
         .build()
         .unwrap();
@@ -1167,23 +1329,23 @@ fn a_subscription_needs_can_subscribe() {
 #[test]
 fn the_wire_names_of_the_resources_are_the_specs_and_pascal_case() {
     for (resource, name) in [
-        (PeResource::ResourceList, "ResourceList"),
-        (PeResource::DeviceInfo, "DeviceInfo"),
-        (PeResource::ChannelList, "ChannelList"),
-        (PeResource::JsonSchema, "JSONSchema"),
-        (PeResource::ModeList, "ModeList"),
-        (PeResource::CurrentMode, "CurrentMode"),
-        (PeResource::ChannelMode, "ChannelMode"),
-        (PeResource::BasicChannelRx, "BasicChannelRx"),
-        (PeResource::BasicChannelTx, "BasicChannelTx"),
-        (PeResource::ProgramList, "ProgramList"),
-        (PeResource::LocalOn, "LocalOn"),
-        (PeResource::ExternalSync, "ExternalSync"),
-        (PeResource::AllCtrlList, "AllCtrlList"),
-        (PeResource::ChCtrlList, "ChCtrlList"),
-        (PeResource::CtrlMapList, "CtrlMapList"),
-        (PeResource::StateList, "StateList"),
-        (PeResource::State, "State"),
+        (StandardResource::ResourceList, "ResourceList"),
+        (StandardResource::DeviceInfo, "DeviceInfo"),
+        (StandardResource::ChannelList, "ChannelList"),
+        (StandardResource::JsonSchema, "JSONSchema"),
+        (StandardResource::ModeList, "ModeList"),
+        (StandardResource::CurrentMode, "CurrentMode"),
+        (StandardResource::ChannelMode, "ChannelMode"),
+        (StandardResource::BasicChannelRx, "BasicChannelRx"),
+        (StandardResource::BasicChannelTx, "BasicChannelTx"),
+        (StandardResource::ProgramList, "ProgramList"),
+        (StandardResource::LocalOn, "LocalOn"),
+        (StandardResource::ExternalSync, "ExternalSync"),
+        (StandardResource::AllCtrlList, "AllCtrlList"),
+        (StandardResource::ChCtrlList, "ChCtrlList"),
+        (StandardResource::CtrlMapList, "CtrlMapList"),
+        (StandardResource::StateList, "StateList"),
+        (StandardResource::State, "State"),
     ] {
         assert_eq!(resource.as_str(), name);
         assert_eq!(PeResource::from_name(&resource.name()), resource);
@@ -1210,10 +1372,6 @@ fn the_wire_names_of_the_resources_are_the_specs_and_pascal_case() {
 fn a_received_entry_is_taken_where_a_built_one_is_refused() {
     let from_json = |text: &str| ResourceEntry::from_json(&json(text));
     assert!(from_json(r#"{"resource":"X-NoSchema"}"#).is_ok());
-    assert!(matches!(
-        ResourceEntry::builder(custom("X-NoSchema")).build(),
-        Err(EntryError::SchemaIncomplete(_))
-    ));
     // A schema is the sender's to complete, and a standard Resource's entry in
     // M2-107's example carries one.
     assert!(from_json(r#"{"resource":"X-A","schema":{"title":"A"}}"#).is_ok());
@@ -1222,26 +1380,18 @@ fn a_received_entry_is_taken_where_a_built_one_is_refused() {
             .is_ok()
     );
     assert!(matches!(
-        ResourceEntry::builder(custom("X-A"))
-            .schema(json(r#"{"title":"A"}"#))
-            .build(),
+        custom_entry("X-A", r#"{"title":"A"}"#).build(),
         Err(EntryError::SchemaIncomplete(_))
-    ));
-    assert!(matches!(
-        ResourceEntry::builder(PeResource::ProgramList)
-            .schema(json(r#"{"type":"array","title":"Program List"}"#))
-            .build(),
-        Err(EntryError::NotOverridable { .. })
     ));
     assert!(from_json(r#"{"resource":"ResourceList"}"#).is_ok());
     assert_eq!(
-        ResourceEntry::builder(PeResource::ResourceList).build(),
+        ResourceEntry::standard(StandardResource::ResourceList).build(),
         Err(EntryError::ListsItself)
     );
     // The list that holds it refuses it.
     assert!(
         decode(
-            &PeResource::ResourceList,
+            StandardResource::ResourceList,
             r#"[{"resource":"ResourceList"}]"#
         )
         .is_err()
@@ -1253,7 +1403,7 @@ fn a_received_entry_is_taken_where_a_built_one_is_refused() {
 #[test]
 fn a_resource_name_fault_carries_the_text_error() {
     let error = fails(
-        PeResource::ResourceList,
+        StandardResource::ResourceList,
         r#"[{"resource":"has space","canGet":true}]"#,
     );
     assert_eq!(error.place.to_string(), "resource entry.resource");
@@ -1269,12 +1419,12 @@ fn a_priority_fault_carries_the_range_error() {
     let entry = |extra: &str| {
         format!(r#"[{{"title":"T","ctrlType":"cc","channel":1,"ctrlIndex":[1],{extra}}}]"#)
     };
-    let error = fails(PeResource::AllCtrlList, &entry(r#""priority":9"#));
+    let error = fails(StandardResource::AllCtrlList, &entry(r#""priority":9"#));
     assert_eq!(
         error.fault,
         PeDataFault::NotValid(InvalidValue::Priority(NotAPriority(9)))
     );
-    let error = fails(PeResource::AllCtrlList, &entry(r#""priority":300"#));
+    let error = fails(StandardResource::AllCtrlList, &entry(r#""priority":300"#));
     assert!(matches!(
         error.fault,
         PeDataFault::NotValid(InvalidValue::Width {
@@ -1288,7 +1438,11 @@ fn a_priority_fault_carries_the_range_error() {
         "not valid: 300 does not fit an unsigned 8-bit value"
     );
     assert_eq!(
-        fails(PeResource::AllCtrlList, &entry(r#""minMax":[200,10]"#)).fault,
+        fails(
+            StandardResource::AllCtrlList,
+            &entry(r#""minMax":[200,10]"#)
+        )
+        .fault,
         PeDataFault::NotValid(InvalidValue::MinAboveMax)
     );
 }
@@ -1297,7 +1451,7 @@ fn a_priority_fault_carries_the_range_error() {
 #[test]
 fn a_controller_entry_fault_names_the_index_and_the_path_that_failed() {
     let entry = |extra: &str| format!(r#"[{{"title":"T","channel":1,{extra}}}]"#);
-    let fault = |extra: &str| fails(PeResource::AllCtrlList, &entry(extra)).fault;
+    let fault = |extra: &str| fails(StandardResource::AllCtrlList, &entry(extra)).fault;
     // `rpn` takes a bank and an index: one integer is the wrong shape.
     assert_eq!(
         fault(r#""ctrlType":"rpn","ctrlIndex":[0]"#),
@@ -1367,13 +1521,13 @@ fn a_device_info_fault_carries_the_manufacturer_bytes_error() {
         )
     };
     assert_eq!(
-        fails(PeResource::DeviceInfo, &text("[0,0,0]")).fault,
+        fails(StandardResource::DeviceInfo, &text("[0,0,0]")).fault,
         PeDataFault::NotValid(InvalidValue::ManufacturerId(
             ManufacturerBytesError::AllZero
         ))
     );
     assert_eq!(
-        fails(PeResource::DeviceInfo, &text("[65,1,0]")).fault,
+        fails(StandardResource::DeviceInfo, &text("[65,1,0]")).fault,
         PeDataFault::NotValid(InvalidValue::ManufacturerId(
             ManufacturerBytesError::TrailingBytes { first: 65 }
         ))
@@ -1385,7 +1539,7 @@ fn a_device_info_fault_carries_the_manufacturer_bytes_error() {
 fn a_list_entry_fault_carries_the_error_of_the_entry_type() {
     let entry = |extra: &str| format!(r#"[{{"resource":"X-Buffer",{extra}}}]"#);
     let error = fails(
-        PeResource::ResourceList,
+        StandardResource::ResourceList,
         &entry(r#""mediaTypes":["text/plain","bell\u0007"]"#),
     );
     assert_eq!(error.place.to_string(), "resource entry.mediaTypes");
@@ -1394,7 +1548,7 @@ fn a_list_entry_fault_carries_the_error_of_the_entry_type() {
         PeDataFault::NotValid(InvalidValue::Text(PeTextError::Character { .. }))
     ));
     let error = fails(
-        PeResource::ResourceList,
+        StandardResource::ResourceList,
         &entry(r#""encodings":["ASCII","gzip"]"#),
     );
     assert!(matches!(
@@ -1407,7 +1561,10 @@ fn a_list_entry_fault_carries_the_error_of_the_entry_type() {
 /// Spec: m2-105/4.3#2
 #[test]
 fn a_channel_fault_carries_the_function_block_channel_error() {
-    let error = fails(PeResource::ChannelList, r#"[{"title":"A","channel":257}]"#);
+    let error = fails(
+        StandardResource::ChannelList,
+        r#"[{"title":"A","channel":257}]"#,
+    );
     assert_eq!(
         error.fault,
         PeDataFault::NotValid(InvalidValue::FunctionBlockChannel(NotAPeChannel(257)))
@@ -1420,11 +1577,10 @@ fn a_channel_fault_carries_the_function_block_channel_error() {
 #[test]
 fn a_non_json_entry_leaves_the_schema_type_empty() {
     let sample = |schema: &str| {
-        ResourceEntry::builder(custom("X-Sample"))
+        ResourceEntry::custom(custom_name("X-Sample"), json(schema))
             .can_set(CanSet::Full)
             .media_types(vec![MediaType::new("audio/wav").unwrap()])
             .encodings(vec![PeEncoding::Mcoded7])
-            .schema(json(schema))
             .build()
     };
     assert!(sample(r#"{"title":"Sample Upload","description":"Upload the sample here"}"#).is_ok());
@@ -1445,7 +1601,7 @@ fn a_non_json_entry_leaves_the_schema_type_empty() {
 #[test]
 fn a_list_object_extension_holds_no_nested_object() {
     let entry = |extra: &str| format!(r#"[{{"title":"T","channel":1,{extra}}}]"#);
-    let decode = |extra: &str| PeData::decode(&PeResource::ChannelList, &json(&entry(extra)));
+    let decode = |extra: &str| PeData::decode(StandardResource::ChannelList, &json(&entry(extra)));
     for plain in [
         r#""x-s":"a""#,
         r#""x-n":null"#,
@@ -1493,7 +1649,8 @@ fn a_selector_link_needs_a_list_resource_for_its_options() {
             "actionResource":"X-Set","selectedProperty":"value"}}]}}]"#
         )
     };
-    let decode = |resource: &str| PeData::decode(&PeResource::ChannelList, &json(&entry(resource)));
+    let decode =
+        |resource: &str| PeData::decode(StandardResource::ChannelList, &json(&entry(resource)));
     assert!(decode("X-OptionList").is_ok());
     assert!(matches!(
         decode("X-Options"),
@@ -1514,10 +1671,10 @@ fn a_store_refuses_a_link_to_an_undeclared_action_resource() {
             r#"[{{"title":"Piano","channel":1,"links":[
             {{"resource":"{resource}","propData":1,"role":"simpleAction"}}]}}]"#
         );
-        PeData::decode(&PeResource::ChannelList, &json(&text)).unwrap()
+        PeData::decode(StandardResource::ChannelList, &json(&text)).unwrap()
     };
     let selector = PeData::decode(
-        &PeResource::ChannelList,
+        StandardResource::ChannelList,
         &json(
             r#"[{"title":"Piano","channel":1,"links":[{"resource":"X-OptionList",
             "role":"selectorAction","actionResource":"X-Nowhere","selectedProperty":"v"}]}]"#,
@@ -1526,13 +1683,12 @@ fn a_store_refuses_a_link_to_an_undeclared_action_resource() {
     .unwrap();
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::ChannelList)
+        ResourceEntry::standard(StandardResource::ChannelList)
             .build()
             .unwrap(),
     );
     store.declare(
-        ResourceEntry::builder(custom("X-Copy"))
-            .schema(json(r#"{"title":"Copy","type":"integer"}"#))
+        custom_entry("X-Copy", r#"{"title":"Copy","type":"integer"}"#)
             .build()
             .unwrap(),
     );
@@ -1567,8 +1723,9 @@ fn programs(n: u8) -> PeData {
 #[test]
 fn a_store_keeps_one_entry_for_each_res_id() {
     let mut store = ResourceStore::new();
-    store.declare(entry_of(PeResource::ProgramList));
-    let target = |name: &str| ResourceTarget::entry(PeResource::ProgramList, id(name)).unwrap();
+    store.declare(entry_of(StandardResource::ProgramList));
+    let target =
+        |name: &str| ResourceTarget::entry(StandardResource::ProgramList, id(name)).unwrap();
     store.put(Some(id("a")), programs(1)).unwrap();
     store.put(Some(id("b")), programs(2)).unwrap();
     store.put(Some(id("a")), programs(3)).unwrap();
@@ -1583,21 +1740,20 @@ fn a_store_keeps_one_entry_for_each_res_id() {
 #[test]
 fn a_resource_with_entries_says_require_res_id_true_in_the_resource_list() {
     let mut store = ResourceStore::new();
-    store.declare(entry_of(PeResource::ProgramList));
-    let edit = ResourceEntry::builder(custom("X-Edit"))
-        .schema(json(r#"{"title":"Edit","type":"object"}"#))
+    store.declare(entry_of(StandardResource::ProgramList));
+    let edit = custom_entry("X-Edit", r#"{"title":"Edit","type":"object"}"#)
         .require_res_id(true)
         .build()
         .unwrap();
     store.declare(edit);
-    store.declare(entry_of(PeResource::LocalOn));
-    let edit_data = || PeData::decode(&custom("X-Edit"), &json(r#"{"a":1}"#)).unwrap();
+    store.declare(entry_of(StandardResource::LocalOn));
+    let edit_data = || PeData::decode(custom("X-Edit"), &json(r#"{"a":1}"#)).unwrap();
     assert!(store.put(Some(id("a")), programs(1)).is_ok());
     assert!(store.put(Some(id("a")), edit_data()).is_ok());
     assert_eq!(
         store.put(None, programs(1)),
         Err(StoreError::ResIdDisagrees {
-            resource: PeResource::ProgramList,
+            resource: StandardResource::ProgramList.into(),
             required: true
         })
     );
@@ -1611,15 +1767,15 @@ fn a_resource_with_entries_says_require_res_id_true_in_the_resource_list() {
     assert_eq!(
         store.put(Some(id("a")), PeData::LocalOn(PeLocalOn(true))),
         Err(StoreError::ResIdDisagrees {
-            resource: PeResource::LocalOn,
+            resource: StandardResource::LocalOn.into(),
             required: false
         })
     );
     let list = store.resource_list();
-    let requires = |resource: &PeResource| list.entry(resource).unwrap().require_res_id();
-    assert!(requires(&PeResource::ProgramList));
-    assert!(requires(&custom("X-Edit")));
-    assert!(!requires(&PeResource::LocalOn));
+    let requires = |resource: PeResource| list.entry(&resource).unwrap().require_res_id();
+    assert!(requires(StandardResource::ProgramList.into()));
+    assert!(requires(custom("X-Edit")));
+    assert!(!requires(StandardResource::LocalOn.into()));
     // On the wire a manufacturer's entry says so.
     let written = list.entry(&custom("X-Edit")).unwrap().to_json().encode();
     assert!(
@@ -1635,7 +1791,7 @@ fn a_resource_with_entries_says_require_res_id_true_in_the_resource_list() {
 #[test]
 fn a_property_data_number_is_written_and_read_in_decimal() {
     let data = ok(
-        PeResource::ChannelList,
+        StandardResource::ChannelList,
         r#"[{"title":"T","channel":10,"bankPC":[125,0,127]}]"#,
     );
     let written = String::from_utf8(data.to_json().unwrap().encode()).unwrap();

@@ -89,14 +89,7 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
 
 fn block(exec: &mut Executor, input: f32) -> Vec<f32> {
     let inp = vec![input; BLOCK];
-    let mut out = vec![0.0f32; BLOCK];
-    exec.process(
-        BLOCK,
-        &TransportPosition::default(),
-        &[&inp[..]],
-        &mut [&mut out[..]],
-    );
-    out
+    common::block_in(exec, BLOCK, &[&inp[..]], 1, &TransportPosition::default()).remove(0)
 }
 
 /// Calls the node takes over `blocks` blocks of silence.

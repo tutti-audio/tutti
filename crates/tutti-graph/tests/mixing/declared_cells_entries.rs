@@ -13,8 +13,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::contract::assert_param_fork;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, Executor, HasParam, Io, Node, OutputPort, ParamEvent, ParamIn,
-    ParamInput, ParamNode, ParamSegment, PortSource, Prepare, Shape, Status, TransportPosition,
-    declare_params,
+    ParamInput, ParamNode, ParamSegment, PortSource, Prepare, Shape, Status, declare_params,
 };
 use tutti_rt::{AtomicWord, atomic_word};
 use tutti_units::{Amplitude, Db, Hz, Mix, Q, Samples, UnitAddr, UnitParam};
@@ -107,15 +106,6 @@ impl Node for Steps {
 const NODE: tutti_graph::NodeKey = tutti_graph::NodeKey(1);
 const SRC: tutti_graph::NodeKey = tutti_graph::NodeKey(2);
 
-fn render_block(exec: &mut Executor, outputs: usize) -> Vec<Vec<f32>> {
-    let mut outs = vec![vec![0.0; 64]; outputs];
-    {
-        let mut refs: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
-        exec.process(64, &TransportPosition::default(), &[], &mut refs);
-    }
-    outs
-}
-
 /// `Sparse` bare, a source stepping `to` at it, and its three outputs.
 fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
@@ -141,7 +131,7 @@ fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
     }
     ed.commit().expect("commits");
     exec.apply_pending();
-    let outs = render_block(&mut exec, 3);
+    let outs = common::block(&mut exec, 64, 3);
     ed.collect();
     outs.try_into().expect("three outputs")
 }
@@ -298,9 +288,7 @@ impl Rig {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0; 64];
-        self.exec
-            .process(64, &TransportPosition::default(), &[], &mut [&mut out[..]]);
+        let out = common::block(&mut self.exec, 64, 1).remove(0);
         self.ed.collect();
         out
     }

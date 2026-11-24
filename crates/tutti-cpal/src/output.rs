@@ -80,12 +80,27 @@ impl OutputConfig {
 }
 
 impl OutputConfig {
-    /// Opens the device with callbacks of exactly `quantum` frames. A size
-    /// outside the range the device reports is
-    /// [`DeviceError::QuantumUnavailable`] when the stream is opened, never
-    /// clamped into it. Without this the stream asks for
-    /// [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames, clamped into the
-    /// range, and a device that reports no range opens with its own buffer.
+    /// Asks the device for callbacks of `quantum` frames. A size outside the
+    /// range the device reports is [`DeviceError::QuantumUnavailable`] when the
+    /// stream is opened, never clamped into it. Without this the stream asks
+    /// for [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames, clamped into
+    /// the range, and a device that reports no range opens with its own buffer.
+    ///
+    /// The size is a request. A backend that refuses it
+    /// (`cpal::ErrorKind::UnsupportedConfig`) is asked again for its default
+    /// buffer, and the stream's [`OutputSpec::quantum`](tutti_engine::OutputSpec::quantum)
+    /// then reports what the open stream's `buffer_size` says, or `None` when
+    /// it cannot say. cpal 0.18 reports it as:
+    ///
+    /// | Backend | `buffer_size` |
+    /// |---|---|
+    /// | ALSA | the negotiated period |
+    /// | CoreAudio | the device's buffer frame size, which can change while the stream runs |
+    /// | JACK | the server's buffer size, which can change |
+    /// | WASAPI | the device period, which a shared-mode callback need not match |
+    /// | PulseAudio | the minimum request length, not the callback size |
+    ///
+    /// cpal documents it as an estimate that is not enforced per callback.
     #[must_use]
     pub fn quantum(mut self, quantum: OutputQuantum) -> Self {
         self.quantum = Some(quantum);
@@ -411,8 +426,8 @@ impl AudioEngine {
     /// Builds a stream on the selected device and starts it. A stream that is
     /// already running is an error: the state handed in is not adopted.
     ///
-    /// Re-reads the device's config first (at the chosen format, if any), so after a
-    /// [`select_device`](Self::select_device) the [`spec`](OutputStream::spec),
+    /// Re-reads the device's config first (at the chosen format, if any), so the
+    /// [`spec`](OutputStream::spec),
     /// [`sample_rate`](OutputStream::sample_rate) and [`channels`](OutputStream::channels)
     /// describe the device that is actually playing. The stream is opened with
     /// a fixed buffer of the [`quantum`](OutputConfig::quantum) asked for, which
@@ -551,17 +566,6 @@ impl AudioEngine {
         self.stream.stop();
     }
 
-    /// Selects the device the next [`start`](Self::start) opens, by name or
-    /// index. Does not disturb a running stream.
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidDevice`] on an engine built with
-    /// [`from_spec`](Self::from_spec), which has no device to select.
-    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<()> {
-        self.origin.target_mut()?.1.select(sel);
-        Ok(())
-    }
-
     /// The name of the device the running (or last started) stream opened,
     /// as it was then. It asks the host nothing, so it never enumerates
     /// (which can block for good in a sound server's ALSA plugin) and is
@@ -580,4 +584,4 @@ impl AudioEngine {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

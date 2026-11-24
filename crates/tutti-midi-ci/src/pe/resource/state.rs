@@ -16,12 +16,12 @@ use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
 use super::data::{OpaqueBody, PeBinary, PeData};
-use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
+use super::entry::ResourceEntry;
 use super::fields::{
     Fields, PeDataError, PeDataFault, PeExtensions, PeText, Place, integer, narrowed,
     required_text, text,
 };
-use super::kind::PeResource;
+use super::kind::{PeResource, StandardResource};
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget};
 use super::store::{ResourceStore, StoreError};
 
@@ -545,32 +545,6 @@ impl ResourceStore {
     }
 }
 
-impl ResourceEntry {
-    /// The entry of State with the defaults M2-111 §3.4 gives: Get and a Full Set,
-    /// one state to each `resId`, Mcoded7 and `application/octet-stream`.
-    #[must_use]
-    pub fn device_state() -> Self {
-        Self::device_state_builder()
-            .build()
-            .unwrap_or_else(|_: EntryError| unreachable!("State takes its own defaults"))
-    }
-
-    /// The builder of the entry of State, with those defaults.
-    pub(super) fn device_state_builder() -> ResourceEntryBuilder {
-        Self::builder(PeResource::State)
-            .encodings(vec![PeEncoding::Mcoded7])
-            .media_types(vec![MediaType::OCTET_STREAM])
-    }
-
-    /// The entry of StateList.
-    #[must_use]
-    pub fn state_list() -> Self {
-        Self::builder(PeResource::StateList)
-            .build()
-            .unwrap_or_else(|_: EntryError| unreachable!("StateList has no custom name"))
-    }
-}
-
 impl ResourceStore {
     /// Declares StateList and State, so that the store serves states.
     pub fn declare_states(&mut self) {
@@ -717,7 +691,7 @@ impl SavedState {
             }
             .into());
         }
-        let target = ResourceTarget::entry(PeResource::State, self.state_id.resource_id())?;
+        let target = ResourceTarget::entry(StandardResource::State, self.state_id.resource_id())?;
         Ok(ResourceSet::full(
             target,
             PeData::State(self.state.clone()),
@@ -798,7 +772,10 @@ mod wire {
 impl ResourceInitiator {
     /// The `encoding` a call for `resource` is made in: ASCII where the entry
     /// takes it, and the first it lists otherwise.
-    fn state_encoding(&self, resource: &PeResource) -> PeEncoding {
+    fn state_encoding<R>(&self, resource: &R) -> PeEncoding
+    where
+        PeResource: PartialEq<R>,
+    {
         match self.resource_list().and_then(|l| l.entry(resource)) {
             Some(entry) if !entry.encodings().contains(&PeEncoding::Ascii) => entry
                 .encodings()
@@ -858,7 +835,7 @@ impl ResourceInitiator {
         {
             return Err(GetStateError::TooLarge { size, limit });
         }
-        let target = ResourceTarget::entry(PeResource::State, entry.state_id.resource_id())
+        let target = ResourceTarget::entry(StandardResource::State, entry.state_id.resource_id())
             .map_err(CallError::from)?;
         let get = self.state_get(target).limited(limit);
         Ok(self.get(&get, now)?)
@@ -880,7 +857,7 @@ impl ResourceInitiator {
     ) -> Result<(CallId, Vec<super::ResourceAction>), RestoreError> {
         let set = saved
             .restore(peer)?
-            .encoded(self.state_encoding(&PeResource::State));
+            .encoded(self.state_encoding(&StandardResource::State));
         Ok(self.set(&set, now)?)
     }
 }

@@ -2,9 +2,11 @@
 //! Get, Set and Start Subscription for one Resource, with the entry of it, its
 //! page and its encoding (M2-103 §7.2, §8.5, §8.6.2, §10, §11).
 
+use std::borrow::Cow;
+
 use super::super::body::BodyLimit;
-use super::super::header::PeEncoding;
 use super::super::header::PePage;
+use super::super::header::{PeEncoding, PeSetScope};
 use super::super::limits::{MediaType, ResourceId};
 use super::super::partial::PartialUpdate;
 use super::super::reassemble::PeFlowControl;
@@ -12,7 +14,7 @@ use super::super::tree::PeObject;
 use super::data::PeData;
 use super::entry::ResourceEntry;
 use super::fields::PeDataError;
-use super::kind::{CanSet, PeResource, ResIdUse};
+use super::kind::{CanSet, PeResource, ResIdUse, StandardResource};
 use super::link::{LinkRole, PeLink};
 
 /// An inquiry that the rules of Property Exchange refuse.
@@ -44,12 +46,12 @@ pub enum RequestRefused {
     #[error("{0} cannot be got")]
     CannotGet(PeResource),
     /// The entry does not let the Resource be set, or set in part.
-    #[error("{resource} cannot be set {scope}")]
+    #[error("{resource} cannot be set {}", in_scope(*.scope))]
     CannotSet {
         /// The Resource.
         resource: PeResource,
-        /// What was asked: `in whole` or `in part`.
-        scope: &'static str,
+        /// What was asked: the whole Property Data or a part of it.
+        scope: PeSetScope,
     },
     /// The entry does not let the Resource be subscribed to.
     #[error("{0} cannot be subscribed to")]
@@ -86,6 +88,13 @@ pub enum RequestRefused {
     },
 }
 
+fn in_scope(scope: PeSetScope) -> &'static str {
+    match scope {
+        PeSetScope::Whole => "in whole",
+        PeSetScope::Partial => "in part",
+    }
+}
+
 /// A Resource, and the entry of it an inquiry names, as the rules of the
 /// Resource have them (M2-103 §8.5): a Resource that has entries is named with
 /// one, and one that has none is named without.
@@ -114,11 +123,24 @@ impl TryFrom<PeResource> for ResourceTarget {
     }
 }
 
+impl TryFrom<StandardResource> for ResourceTarget {
+    type Error = RequestRefused;
+
+    /// The Resource without an entry.
+    ///
+    /// # Errors
+    ///
+    /// [`RequestRefused::ResIdRequired`] for a Resource that has entries.
+    fn try_from(resource: StandardResource) -> Result<Self, RequestRefused> {
+        Self::try_from(PeResource::from(resource))
+    }
+}
+
 impl ResourceTarget {
     /// The State list, a Resource with no entry.
     pub(super) fn state_list() -> Self {
         Self {
-            resource: PeResource::StateList,
+            resource: StandardResource::StateList.into(),
             res_id: None,
         }
     }
@@ -128,7 +150,11 @@ impl ResourceTarget {
     /// # Errors
     ///
     /// [`RequestRefused::ResIdUnused`] for a Resource that has no entries.
-    pub fn entry(resource: PeResource, res_id: ResourceId) -> Result<Self, RequestRefused> {
+    pub fn entry(
+        resource: impl Into<PeResource>,
+        res_id: ResourceId,
+    ) -> Result<Self, RequestRefused> {
+        let resource = resource.into();
         if resource.res_id_use() == ResIdUse::Unused {
             return Err(RequestRefused::ResIdUnused(resource));
         }
@@ -405,43 +431,17 @@ impl ResourceSet {
     ///
     /// The [`RequestRefused`] that names what the entry does not allow.
     pub fn check(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
-        let name = self.target.resource().clone();
-        let (needed, scope) = match self.body {
-            SetBody::Full(_) => (CanSet::Full, "in whole"),
-            SetBody::Partial(_) => (CanSet::Partial, "in part"),
+        let (scope, media_type) = match &self.body {
+            SetBody::Full(data) => (PeSetScope::Whole, data.media_type()),
+            SetBody::Partial(_) => (PeSetScope::Partial, None),
         };
-        // `partial` includes `full` (M2-103 §14.2).
-        let allowed = match entry.can_set() {
-            CanSet::None => false,
-            CanSet::Full => needed == CanSet::Full,
-            CanSet::Partial => true,
-        };
-        if !allowed {
-            return Err(RequestRefused::CannotSet {
-                resource: name,
-                scope,
-            });
+        SetHeader {
+            target: &self.target,
+            scope,
+            encoding: self.encoding,
+            media_type,
         }
-        self.target.agrees_with(entry)?;
-        if !entry.encodings().contains(&self.encoding) {
-            return Err(RequestRefused::EncodingNotDeclared {
-                resource: name,
-                encoding: self.encoding.as_str(),
-            });
-        }
-        if let SetBody::Full(data) = &self.body {
-            let json = MediaType::new("application/json");
-            let media_type = data.media_type().or(json.as_ref());
-            if let Some(media_type) = media_type
-                && !entry.media_types().contains(media_type)
-            {
-                return Err(RequestRefused::MediaTypeNotDeclared {
-                    resource: name,
-                    media_type: media_type.clone(),
-                });
-            }
-        }
-        Ok(())
+        .check(entry)
     }
 
     /// The Set a `selectorAction` Link asks for once the user chose `chosen`, an
@@ -465,7 +465,68 @@ impl ResourceSet {
     }
 }
 
-fn link_target(
+/// What a Set says of itself before its body is read: the Resource, whether it
+/// replaces the whole Property Data, the encoding and the media type of the data
+/// (JSON when none). A Responder that has only this checks with it what
+/// [`ResourceSet::check`] checks of a Set it holds.
+pub(super) struct SetHeader<'a> {
+    pub(super) target: &'a ResourceTarget,
+    pub(super) scope: PeSetScope,
+    pub(super) encoding: PeEncoding,
+    pub(super) media_type: Option<&'a MediaType>,
+}
+
+impl SetHeader<'_> {
+    /// Checks the Set against the entry of the ResourceList.
+    pub(super) fn check(&self, entry: &ResourceEntry) -> Result<(), RequestRefused> {
+        let name = || self.target.resource().clone();
+        // `partial` includes `full` (M2-103 §14.2).
+        let allowed = matches!(
+            (entry.can_set(), self.scope),
+            (CanSet::Partial, _) | (CanSet::Full, PeSetScope::Whole)
+        );
+        if !allowed {
+            return Err(RequestRefused::CannotSet {
+                resource: name(),
+                scope: self.scope,
+            });
+        }
+        self.target.agrees_with(entry)?;
+        if !entry.encodings().contains(&self.encoding) {
+            return Err(RequestRefused::EncodingNotDeclared {
+                resource: name(),
+                encoding: self.encoding.as_str(),
+            });
+        }
+        let media_type = self.media_type.unwrap_or(&MediaType::JSON);
+        if !entry.media_types().iter().any(|t| t.same_type(media_type)) {
+            return Err(RequestRefused::MediaTypeNotDeclared {
+                resource: name(),
+                media_type: media_type.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The entry that judges an inquiry for `resource`: `held`, the one a ResourceList
+/// gives for it, or ResourceList's own, which no list holds.
+///
+/// # Errors
+///
+/// [`RequestRefused::NotListed`] when `held` is none for another Resource.
+pub(super) fn judging_entry<'a>(
+    held: Option<&'a ResourceEntry>,
+    resource: &PeResource,
+) -> Result<Cow<'a, ResourceEntry>, RequestRefused> {
+    if *resource == StandardResource::ResourceList {
+        return Ok(Cow::Owned(ResourceEntry::resource_list()));
+    }
+    held.map(Cow::Borrowed)
+        .ok_or_else(|| RequestRefused::NotListed(resource.clone()))
+}
+
+pub(super) fn link_target(
     resource: &PeResource,
     res_id: Option<&ResourceId>,
 ) -> Result<ResourceTarget, RequestRefused> {

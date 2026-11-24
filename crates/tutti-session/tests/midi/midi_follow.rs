@@ -11,7 +11,9 @@ use tutti_platform::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
-use tutti_session::{FollowTempo, MidiError, MidiEvent, Session, SessionEvent};
+use tutti_session::{
+    FollowKind, FollowTempo, MidiError, MidiEvent, Session, SessionEvent, UnfollowCause, Unplayed,
+};
 use tutti_tempo::{TempoMap, TempoPoint, Transition};
 use tutti_ump::{Flex, FlexTempo, Message, MidiGroup, Ump};
 use tutti_units::{Beat, Bpm, SampleRate};
@@ -195,9 +197,13 @@ fn a_set_tempo_is_a_step_at_the_next_block_start_and_unfollowing_restores() {
     );
     let events = s.update();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::TempoUnfollowed))),
+        events.iter().any(|e| matches!(
+            e,
+            SessionEvent::Midi(MidiEvent::Unfollowed {
+                follower: FollowKind::Tempo,
+                cause: UnfollowCause::Requested
+            })
+        )),
         "the update reports it"
     );
     let restored = crate::tempo::effective(&s);
@@ -627,5 +633,8 @@ fn an_smpte_load_while_following_places_notes_by_the_base() {
     let mut bytes = b"MThd\0\0\0\x06\0\0\0\x01\xE7\x28MTrk\0\0\0\x09".to_vec();
     bytes.extend([0x87, 0x68, 0xF7, 1, 0x55, 0x00, 0xFF, 0x2F, 0x00]);
     let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
-    assert_eq!(loaded.report().dropped[0].beat, Beat::new(2.0));
+    let Unplayed::Smf { beat, .. } = &loaded.report().unplayed[0] else {
+        panic!("a Standard MIDI File's event");
+    };
+    assert_eq!(*beat, Beat::new(2.0));
 }

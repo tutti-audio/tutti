@@ -124,10 +124,11 @@ impl<F: SessionFloat> DeviceHandle<F> {
         &mut self,
         now: tutti_platform::Instant,
         lost: bool,
+        prepared: Option<OutputQuantum>,
         out: &mut Vec<SessionEvent>,
     ) {
         out.append(&mut self.events);
-        self.poll_callback_size(out);
+        self.poll_callback_size(prepared, out);
         if let Some(watch) = &mut self.watch {
             // The loss is taken in first and decided on with the devices this
             // poll finds: a stream lost as its device left must not be sent
@@ -141,16 +142,17 @@ impl<F: SessionFloat> DeviceHandle<F> {
 }
 
 impl<F: SessionFloat> DeviceHandle<F> {
-    /// Reads the sizes of the callbacks since the last update against the one
-    /// the graph is prepared for ([`CallbackSizeRule`]): a size the callbacks
+    /// Reads the sizes of the callbacks since the last update against the size
+    /// the graph is `prepared` for (`Prepare::quantum`), not the stream's spec:
+    /// the spec says what the stream opened at ([`CallbackSizeRule`]): a size the callbacks
     /// settled at is asked for as a restart onto it, and callbacks that never
-    /// settle are reported. A stream opened with no fixed callback size has
+    /// settle are reported. A graph prepared with no callback size has
     /// none to compare. A callback longer than `MAX_FRAMES` is no size here:
     /// the engine renders its head, silences its tail and counts it
     /// (`BlockCounts::truncated`).
-    fn poll_callback_size(&mut self, out: &mut Vec<SessionEvent>) {
+    fn poll_callback_size(&mut self, prepared: Option<OutputQuantum>, out: &mut Vec<SessionEvent>) {
         let device = self.device();
-        let Some(prepared) = device.spec().quantum else {
+        let Some(prepared) = prepared else {
             self.callback_size = CallbackSizeRule::default();
             return;
         };

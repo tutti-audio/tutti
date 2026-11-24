@@ -281,3 +281,50 @@ fn a_density_sizes_a_port_by_the_block() {
         MIN_EVENT_PORT_CAPACITY
     );
 }
+
+/// One source holding anything merges as itself, in order: whole at exactly
+/// the room, with the empty sources around it changing nothing.
+#[test]
+fn a_lone_source_at_the_exact_room_is_copied_whole() {
+    let a: Vec<Event> = (0..8).map(|i| ev(i, 100 + i)).collect();
+    let mut out = CappedVec::with_capacity(8);
+    assert_eq!(merge_into(&[&[], &a, &[]], &mut out), 0);
+    assert_eq!(out.as_slice(), &a[..]);
+}
+
+/// One event past the room: the walk's rule, not a cut slice. A lone source
+/// of two note-ons and a note-off into a room of two keeps the note-off and
+/// the first note-on, in order, and counts the one it cut.
+#[test]
+fn a_lone_source_one_over_the_room_keeps_its_note_off() {
+    let off = Event::midi(Offset::raw(5), midi_off());
+    let a = [ev(1, 1), ev(2, 2), off];
+    let mut out = CappedVec::with_capacity(2);
+    assert_eq!(merge_into(&[&a, &[]], &mut out), 1);
+    assert_eq!(out.as_slice(), &[a[0], a[2]]);
+}
+
+fn midi_off() -> Ump {
+    tutti_fixtures::midi::m1_note_off(MidiChannel::FIRST, 60, U7::of(0))
+}
+
+/// One source of param events keeps the first of what the room takes and
+/// counts the rest, as the walk does.
+#[test]
+fn a_lone_param_source_keeps_the_first_the_room_takes() {
+    use crate::event::merge::merge_params;
+    use crate::node::param_event::ParamEvent;
+    let p = |at: u32| {
+        ParamEvent::segment(
+            Offset::raw(at),
+            crate::ParamSegment::by_id(tutti_units::ParamId::new(1), 0.0, 1.0, Samples::new(8)),
+        )
+    };
+    let a: Vec<ParamEvent> = (0..5).map(p).collect();
+    let mut out = CappedVec::with_capacity(3);
+    assert_eq!(merge_params(&[&[], &a], &mut out), 2);
+    assert_eq!(out.as_slice(), &a[..3]);
+    let mut out = CappedVec::with_capacity(5);
+    assert_eq!(merge_params(&[&a, &[]], &mut out), 0);
+    assert_eq!(out.as_slice(), &a[..]);
+}

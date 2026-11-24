@@ -35,6 +35,7 @@ fn clip::Clip::new
 fn clip::Clip::speed
 fn clip::Clip::streaming
 fn probe::probe
+fn streamer::DiskStreamer::adopt
 fn streamer::DiskStreamer::manual
 fn streamer::DiskStreamer::open_stream
 fn streamer::DiskStreamer::open_stream_into
@@ -84,6 +85,7 @@ fn streamer::open::StreamReader::file_rate
 fn streamer::open::StreamReader::id
 fn streamer::open::StreamStart::get
 fn streamer::open::StreamStart::new
+fn streamer::prefetch::RegionOut::push_interleaved
 fn streamer::stream::StreamHandle::direction
 fn streamer::stream::StreamHandle::direction_cell
 fn streamer::stream::StreamHandle::file

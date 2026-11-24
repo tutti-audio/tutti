@@ -47,7 +47,7 @@
 //!   functions, [`amplitude_to_db`]); the compressor ([`CompressorBank`], its threshold a
 //!   control signal, its makeup a [`Ramp`] over [`GAIN_RAMP`]) and the noise gate ([`GateBank`], its
 //!   range ramping likewise), both reading a [`KeySource`] (a side-chain bus or the signal
-//!   itself) through a [`KeyFilter`] if built with one; the lookahead limiter ([`LimiterBank`],
+//!   itself) through a [`KeyFilter`] that a control switches; the lookahead limiter ([`LimiterBank`],
 //!   its threshold and ceiling [`LimiterSignals`], its lookahead its latency); the brickwall
 //!   clipper ([`BrickwallBank`], its ceiling a per-frame control signal); the transient shaper
 //!   ([`TransientBank`]: one gain from a fast and a slow one-pole envelope; [`TransientDetector`]:
@@ -255,6 +255,8 @@ mod spatial;
 mod spectral;
 mod stft;
 #[cfg(test)]
+mod tail_probe;
+#[cfg(test)]
 mod testing;
 mod viterbi;
 
@@ -379,9 +381,9 @@ pub use reverb::freeverb::bank::{FreeverbBank, FreeverbRamps};
 pub use reverb::freeverb::design::FreeverbControls;
 pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
-    LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
-    NetworkOutputMap, NetworkStage, Tap, TapSet, rt60_from_gain,
+    Absorption, AllPass, AllPassForm, Band, BandAbsorption, Fdn, FirSummary, Full, Gains, Inline,
+    Line, LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix,
+    Network, NetworkOutputMap, NetworkStage, Tap, TapSet, rt60_from_gain,
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
@@ -425,7 +427,7 @@ pub use tube_stage::{TubeDrive, TubeDriveError, TubeStage, TubeStageControls};
 pub use viterbi::{BandedTransition, StickyTransition, Transition, sticky_viterbi, viterbi};
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{
-    Antialiasing, AntialiasingError, ShapeKind, WaveshaperBank, WaveshaperControls,
+    Antialiasing, SecondOrderShape, ShapeKind, Waveshape, WaveshaperBank, WaveshaperControls,
 };
 pub use wavetable::{
     TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,

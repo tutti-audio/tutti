@@ -52,15 +52,15 @@ use winnow::combinator::{alt, dispatch, eof, fail, peek, repeat};
 use winnow::error::ContextError;
 use winnow::token::{literal, take};
 
-use tutti_ump::{ManufacturerId, MidiChannel, MidiGroup, U7, Voice1, parse_exact};
+use tutti_ump::{ManufacturerId, Message, MidiChannel, MidiGroup, U7, Voice1, parse_exact};
 
 use super::{SmfDivision, SmfParts};
 use crate::file::split_extra;
 use crate::file::{
-    FileEvent, Lead, LeadRepair, MalformedMeta, Meta, MicrosPerQuarter, Opening, OtherMetaKind,
-    ReadRepair, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
+    Lead, LeadRepair, MalformedMeta, Meta, MicrosPerQuarter, Opening, OtherMetaKind, ReadRepair,
+    SmfEvent, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
 };
-use crate::{ReadError, SmfParseError};
+use crate::{SmfParseError, SmfReadError};
 
 type Res<T> = std::result::Result<T, ContextError<SmfParseError>>;
 
@@ -162,7 +162,7 @@ fn chunk<'a>(input: &mut &'a [u8]) -> Res<Chunk<'a>> {
 
 /// The whole file, framed: the header and the offset and body of each `MTrk`
 /// chunk.
-fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), ReadError> {
+fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), SmfReadError> {
     let mut input = bytes;
     let header = header
         .parse_next(&mut input)
@@ -182,8 +182,8 @@ fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), ReadError> {
 // ---- events ----------------------------------------------------------------
 
 /// The data bytes of a channel status (how many is `Voice1::data_len`'s) as a
-/// message on the first Group. `parse_exact` owns the status bit layout.
-fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<SmfParseError>> {
+/// channel message. `parse_exact` owns the status bit layout.
+fn channel<'a>(status: u8) -> impl Parser<&'a [u8], SmfEvent, ContextError<SmfParseError>> {
     let count = Voice1::data_len(status).map_or(0, usize::from);
     take(count)
         .verify_map(move |data: &[u8]| {
@@ -192,7 +192,13 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<SmfP
                 [a, b] => [status, a, b],
                 _ => return None,
             };
-            parse_exact(MidiGroup::FIRST, &bytes).map(FileEvent::Message)
+            match parse_exact(MidiGroup::FIRST, &bytes)? {
+                Message::Midi1(address, message) => Some(SmfEvent::Channel {
+                    channel: address.channel,
+                    message,
+                }),
+                _ => None,
+            }
         })
         .context(SmfParseError::ChannelData)
 }
@@ -203,7 +209,7 @@ fn channel<'a>(status: u8) -> impl Parser<&'a [u8], FileEvent, ContextError<SmfP
 /// the End of Track that ends the track.
 #[derive(Clone)]
 enum Item {
-    Event(FileEvent),
+    Event(SmfEvent),
     Lead(Lead, Box<[u8]>),
     EightBitSysEx(Box<[u8]>),
     EndOfTrack,
@@ -274,7 +280,7 @@ fn meta_of(kind: u8, data: &[u8]) -> Item {
                 .unwrap_or(Meta::Malformed(MalformedMeta::new(kind, data))),
         },
     };
-    Item::Event(FileEvent::Meta(meta))
+    Item::Event(SmfEvent::Meta(meta))
 }
 
 /// The MIDI Channel Prefix or Sequencer-Specific event of `kind` and `data`:
@@ -339,11 +345,11 @@ fn event<'a>(
             0xF0 => counted(vlq).map(|d| {
                 let item = sysex(d).map_or_else(
                     || Item::EightBitSysEx(d.into()),
-                    |sysex| Item::Event(FileEvent::SysEx(sysex)),
+                    |sysex| Item::Event(SmfEvent::SysEx(sysex)),
                 );
                 (item, None)
             }),
-            0xF7 => counted(vlq).map(|d| (Item::Event(FileEvent::Escape(d.into())), None)),
+            0xF7 => counted(vlq).map(|d| (Item::Event(SmfEvent::Escape(d.into())), None)),
             0x80..=0xEF => channel(status).map(move |e| (Item::Event(e), Some(status))),
             _ => refuse(SmfParseError::SystemStatus),
         }
@@ -443,34 +449,34 @@ fn settle(track: &mut Leads, lead: Lead, tick: Tick, leading: bool) -> Option<(L
 /// `raw` are the events that are an `F0` event read as an escape.
 fn close_sysex(
     track: usize,
-    events: &mut [(Tick, FileEvent)],
+    events: &mut [(Tick, SmfEvent)],
     raw: &[usize],
     changes: &mut Vec<ReadRepair>,
 ) {
-    let mut close = |events: &mut [(Tick, FileEvent)], index: usize| {
+    let mut close = |events: &mut [(Tick, SmfEvent)], index: usize| {
         let (at, event) = &mut events[index];
-        if let FileEvent::SysEx(SysEx::Start(data)) = event {
-            *event = FileEvent::SysEx(SysEx::Complete(std::mem::take(data)));
+        if let SmfEvent::SysEx(SysEx::Start(data)) = event {
+            *event = SmfEvent::SysEx(SysEx::Complete(std::mem::take(data)));
             changes.push(ReadRepair::SysExClosed { track, at: *at });
         }
     };
     let mut open: Option<usize> = None;
     for index in 0..events.len() {
         match &events[index].1 {
-            FileEvent::SysEx(_) | FileEvent::Message(_) => {
+            SmfEvent::SysEx(_) | SmfEvent::Channel { .. } => {
                 if let Some(first) = open.take() {
                     close(events, first);
                 }
-                if matches!(events[index].1, FileEvent::SysEx(SysEx::Start(_))) {
+                if matches!(events[index].1, SmfEvent::SysEx(SysEx::Start(_))) {
                     open = Some(index);
                 }
             }
-            FileEvent::Escape(_) if raw.contains(&index) => {
+            SmfEvent::Escape(_) if raw.contains(&index) => {
                 if let Some(first) = open.take() {
                     close(events, first);
                 }
             }
-            FileEvent::Escape(data) if data.last() == Some(&0xF7) => open = None,
+            SmfEvent::Escape(data) if data.last() == Some(&0xF7) => open = None,
             _ => {}
         }
     }
@@ -511,14 +517,14 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<ReadRepair>), F
         }
         match item {
             Item::Event(event) => {
-                leading &= tick == Tick(0) && matches!(event, FileEvent::Meta(_));
+                leading &= tick == Tick(0) && matches!(event, SmfEvent::Meta(_));
                 events.push((tick, event));
             }
             Item::EightBitSysEx(data) => {
                 leading = false;
                 raw.push(events.len());
                 let bytes = std::iter::once(0xF0).chain(data.iter().copied()).collect();
-                events.push((tick, FileEvent::Escape(bytes)));
+                events.push((tick, SmfEvent::Escape(bytes)));
                 changes.push(ReadRepair::SysExEscaped {
                     track: index,
                     at: tick,
@@ -556,7 +562,7 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<ReadRepair>), F
     }
     close_sysex(index, &mut events, &raw, &mut changes);
     let end = end.unwrap_or(last);
-    let mut track = Track::from_read(Vec::new(), Tick(0), events, end);
+    let mut track = Track::from_read(events, end);
     track.name = leads.name.take();
     Ok((track, leads, changes))
 }
@@ -571,8 +577,8 @@ fn faults(e: &ContextError<SmfParseError>) -> Vec<SmfParseError> {
 /// The one place winnow's error becomes ours: the error of the refusal
 /// `faults` at byte `offset`. A refusal that names no rule ran out of bytes
 /// inside an event.
-fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> ReadError {
-    ReadError::Smf {
+fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> SmfReadError {
+    SmfReadError::Parse {
         track,
         offset,
         cause: faults
@@ -586,13 +592,13 @@ fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> Rea
 ///
 /// # Errors
 ///
-/// - [`ReadError::Smf`] for anything malformed or cut off, with where.
-pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
+/// - [`SmfReadError::Parse`] for anything malformed or cut off, with where.
+pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, SmfReadError> {
     let (header, chunks) = smf(bytes)?;
     let declared = usize::from(header.tracks);
     // Fewer than declared is a cut file; more, or a format 0 with other
     // than one, disagrees with its own header.
-    let smf_error = |offset, cause| ReadError::Smf {
+    let smf_error = |offset, cause| SmfReadError::Parse {
         track: None,
         offset,
         cause,

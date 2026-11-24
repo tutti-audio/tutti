@@ -88,7 +88,8 @@ pub use saved::SavedValues;
 #[cfg(feature = "midi-hardware")]
 pub use slot::MidiPolicyTarget;
 pub(crate) use slot::{
-    Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotCell, SlotId, TempoCell,
+    Cell, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SettingWord, SlotCell, SlotId,
+    TempoCell, WordSlot,
 };
 pub use slot::{
     ClickTargets, ClickVolumeTarget, LoopTarget, MeterTarget, OutputPolicyTarget, SettingTarget,

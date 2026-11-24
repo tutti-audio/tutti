@@ -1,6 +1,7 @@
 //! [`ResourceInitiator`]: the Initiator of Property Exchange speaking in
 //! Resources (M2-103 §3.2, §8 to §11, §14), over [`PeInitiator`].
 
+use std::borrow::Cow;
 use std::num::NonZeroU32;
 use tutti_platform::Instant;
 
@@ -9,8 +10,8 @@ use super::super::chunk::PeRequestId;
 use super::super::header::PeSetScope;
 use super::super::header::{PeEncoding, PePage, PeReply, PeStatus};
 use super::super::initiator::{
-    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeKind,
-    PeNotification, PeOutcome, PeResponse, PeSet, PeSettings,
+    PeAction, PeCall, PeCapabilitiesFailure, PeChange, PeError, PeGet, PeInitiator, PeNotification,
+    PeOutcome, PeResponse, PeSet, PeSettings,
 };
 use super::super::limits::{MediaType, SubscribeId};
 use super::super::partial::PartialUpdate;
@@ -20,8 +21,10 @@ use super::cache::{Cached, GetCache, PeCacheScope};
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
-use super::kind::PeResource;
-use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody};
+use super::kind::{PeResource, StandardResource};
+use super::request::{
+    RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody, judging_entry,
+};
 use super::state::StateStamp;
 use crate::{CiMessage, Decoded, Initiator, Muid};
 
@@ -332,6 +335,8 @@ pub struct ResourceInitiator {
     pe: PeInitiator,
     list: Option<PeResourceList>,
     ops: Vec<(PeRequestId, Op)>,
+    /// The typed target and the data of each Subscription the transaction layer
+    /// answers for: opened and ended at the same events as its table of Ids.
     subs: Vec<Sub>,
     cache: GetCache,
     next_call: u32,
@@ -402,15 +407,17 @@ impl ResourceInitiator {
         id
     }
 
-    /// The entry of the ResourceList for `resource`, when the list is known.
-    fn entry(&self, resource: &PeResource) -> Result<Option<&ResourceEntry>, RequestRefused> {
+    /// The entry that judges an inquiry for `resource`: the list's, when the list
+    /// is known, and ResourceList's own always.
+    fn entry(
+        &self,
+        resource: &PeResource,
+    ) -> Result<Option<Cow<'_, ResourceEntry>>, RequestRefused> {
         match &self.list {
-            None => Ok(None),
-            Some(_) if *resource == PeResource::ResourceList => Ok(None),
-            Some(list) => list
-                .entry(resource)
-                .map(Some)
-                .ok_or_else(|| RequestRefused::NotListed(resource.clone())),
+            None if *resource != StandardResource::ResourceList => Ok(None),
+            list => {
+                judging_entry(list.as_ref().and_then(|l| l.entry(resource)), resource).map(Some)
+            }
         }
     }
 
@@ -446,7 +453,7 @@ impl ResourceInitiator {
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
         get.check_page_target()?;
         if let Some(entry) = self.entry(get.target().resource())? {
-            get.check_get(entry)?;
+            get.check_get(&entry)?;
         }
         let call = self.call_id();
         self.cache.prune(now);
@@ -492,7 +499,7 @@ impl ResourceInitiator {
         }
         let paginates = self
             .entry(get.target().resource())?
-            .is_some_and(ResourceEntry::can_paginate);
+            .is_some_and(|entry| entry.can_paginate());
         if !paginates {
             return self.get(get, now);
         }
@@ -501,7 +508,7 @@ impl ResourceInitiator {
             limit: page_size,
         };
         if let Some(entry) = self.entry(get.target().resource())? {
-            get.clone().paged(page).check_get(entry)?;
+            get.clone().paged(page).check_get(&entry)?;
         }
         let call = self.call_id();
         let walk = Walk {
@@ -532,7 +539,7 @@ impl ResourceInitiator {
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
         let flow = match self.entry(set.target().resource())? {
             Some(entry) => {
-                set.check(entry)?;
+                set.check(&entry)?;
                 if entry.fc_on_set() {
                     PeFlowControl::On
                 } else {
@@ -580,7 +587,7 @@ impl ResourceInitiator {
     ) -> Result<(CallId, Vec<ResourceAction>), CallError> {
         get.check_page_target()?;
         if let Some(entry) = self.entry(get.target().resource())? {
-            get.check_subscribe(entry)?;
+            get.check_subscribe(&entry)?;
         }
         let call = self.call_id();
         let op = Op::Subscribe {
@@ -630,9 +637,8 @@ impl ResourceInitiator {
                 }
                 PeAction::Finished {
                     request_id,
-                    kind,
                     outcome,
-                } => self.finished(request_id, kind, outcome, now, &mut out),
+                } => self.finished(request_id, outcome, now, &mut out),
                 PeAction::Notification(notification) => self.notified(notification, now, &mut out),
             }
         }
@@ -640,7 +646,7 @@ impl ResourceInitiator {
     }
 
     fn fetch_list(&mut self, now: Instant, out: &mut Vec<ResourceAction>) {
-        let get = PeGet::new(PeResource::ResourceList.name());
+        let get = PeGet::new(StandardResource::ResourceList.name());
         match self.pe.start(PeCall::Get(get), now) {
             Ok((id, actions)) => {
                 self.ops.push((id, Op::List));
@@ -654,7 +660,6 @@ impl ResourceInitiator {
     fn finished(
         &mut self,
         id: PeRequestId,
-        _kind: PeKind,
         outcome: PeOutcome,
         now: Instant,
         out: &mut Vec<ResourceAction>,
@@ -668,7 +673,7 @@ impl ResourceInitiator {
             other => Err(ResourceFailure::Peer(Box::new(other))),
         };
         match op {
-            Op::List => match reply.and_then(|r| decode(&PeResource::ResourceList, &r)) {
+            Op::List => match reply.and_then(|r| decode(StandardResource::ResourceList, &r)) {
                 Ok(PeData::ResourceList(list)) => {
                     self.list = Some(list.clone());
                     self.cache.clear();
@@ -703,7 +708,7 @@ impl ResourceInitiator {
             Op::Set { call, target } => {
                 let resource = target.resource().clone();
                 let (result, stamp) = match reply {
-                    Ok(r) if resource == PeResource::State => {
+                    Ok(r) if resource == StandardResource::State => {
                         match StateStamp::read(&r.header.extra) {
                             Ok(stamp) => (Ok(r.status()), Some(stamp)),
                             Err(error) => (Err(error.into()), None),
@@ -1000,7 +1005,10 @@ fn parse(response: &PeResponse) -> Result<PeJson, ResourceFailure> {
 }
 
 /// The data of a reply: JSON, or the bytes of its media type.
-fn decode(resource: &PeResource, response: &PeResponse) -> Result<PeData, ResourceFailure> {
+fn decode(
+    resource: impl Into<PeResource>,
+    response: &PeResponse,
+) -> Result<PeData, ResourceFailure> {
     let data = match response.header.media_type.as_ref() {
         Some(media_type) => PeData::decode_bytes(resource, Some(media_type), &response.body)?,
         None => PeData::decode(resource, &parse(response)?)?,
@@ -1020,7 +1028,7 @@ fn read_full(
 fn apply_partial(held: &PeData, bytes: &[u8]) -> Option<PeData> {
     let update = PartialUpdate::try_from(&PeJson::try_from(bytes).ok()?).ok()?;
     let changed = update.apply(&held.to_json()?).ok()?;
-    PeData::decode(&held.resource(), &changed).ok()
+    PeData::decode(held.resource(), &changed).ok()
 }
 
 impl Initiator for ResourceInitiator {

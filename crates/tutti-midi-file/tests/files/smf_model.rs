@@ -1,4 +1,4 @@
-//! The Standard MIDI File half of [`MidiFile`], against bytes built from the
+//! The Standard MIDI File half of [`StandardMidiFile`], against bytes built from the
 //! SMF 1.0 spec (`support`: an encoder and a decoder written from it, sharing
 //! no code with the crate, so they are the second opinion on the bytes).
 //!
@@ -13,17 +13,14 @@ use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 
 use tutti_midi_file::{
-    FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
-    ReadError, SmfDivision, SmfParseError, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind,
-    Tick, Timebase, TracksError,
+    Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote, ReadError,
+    SmfDivision, SmfEvent, SmfParseError, SmfReadError, SmpteFractionalFrames, SmpteOffset,
+    StandardMidiFile, SysEx, TextKind, Tick, Timebase, TracksError,
 };
 use tutti_midi_protocol::{
     SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
 };
-use tutti_ump::{
-    Address, ControlValue, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
-    U14, Voice1,
-};
+use tutti_ump::{MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7, U14, Voice1};
 use tutti_units::{Beat, Bpm, Seconds};
 
 const TPQ: u16 = 480;
@@ -35,30 +32,22 @@ fn smf(format: u16, tracks: &[Vec<RawEvent>]) -> Vec<u8> {
     build_smf(format, Division::Metrical(TPQ), tracks)
 }
 
-fn voice(channel: u8, voice: Voice1) -> FileEvent {
-    FileEvent::Message(Message::Midi1(
-        Address::first(MidiChannel::new(channel).unwrap()),
-        voice,
-    ))
+fn voice(channel: u8, voice: Voice1) -> SmfEvent {
+    SmfEvent::Channel {
+        channel: MidiChannel::new(channel).unwrap(),
+        message: voice,
+    }
 }
 
-fn on(channel: u8, key: u8, vel: u8) -> FileEvent {
-    Message::midi1(
-        MidiChannel::of(channel),
-        Voice1::note_on(NoteNumber::of(key), U7::of(vel)),
-    )
-    .into()
+fn on(channel: u8, key: u8, vel: u8) -> SmfEvent {
+    voice(channel, Voice1::note_on(NoteNumber::of(key), U7::of(vel)))
 }
 
-fn off(channel: u8, key: u8, vel: u8) -> FileEvent {
-    Message::midi1(
-        MidiChannel::of(channel),
-        Voice1::note_off(NoteNumber::of(key), U7::of(vel)),
-    )
-    .into()
+fn off(channel: u8, key: u8, vel: u8) -> SmfEvent {
+    voice(channel, Voice1::note_off(NoteNumber::of(key), U7::of(vel)))
 }
 
-fn read(bytes: &[u8]) -> MidiFile {
+fn read(bytes: &[u8]) -> StandardMidiFile {
     read_bytes(bytes).expect("reads")
 }
 
@@ -168,22 +157,22 @@ fn every_event_kind_survives_a_read_and_a_write() {
             )
         );
         assert_eq!(file.repairs(), []);
-        assert_eq!(at(0).1, FileEvent::Meta(Meta::text(TextKind::Text, "text")));
-        assert_eq!(at(2).1, FileEvent::Meta(Meta::text(TextKind::Lyric, "la")));
+        assert_eq!(at(0).1, SmfEvent::Meta(Meta::text(TextKind::Text, "text")));
+        assert_eq!(at(2).1, SmfEvent::Meta(Meta::text(TextKind::Lyric, "la")));
         assert_eq!(
             at(3).1,
-            FileEvent::Meta(Meta::text(TextKind::Marker, "Verse"))
+            SmfEvent::Meta(Meta::text(TextKind::Marker, "Verse"))
         );
         assert_eq!(
             at(9).1,
-            FileEvent::Meta(Meta::Tempo {
+            SmfEvent::Meta(Meta::Tempo {
                 micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             })
         );
         assert_eq!(
             at(10).1,
-            FileEvent::Meta(Meta::TimeSignature {
+            SmfEvent::Meta(Meta::TimeSignature {
                 numerator: 6,
                 denominator_power: 3,
                 clocks_per_click: 24,
@@ -193,7 +182,7 @@ fn every_event_kind_survives_a_read_and_a_write() {
         );
         assert_eq!(
             at(11).1,
-            FileEvent::Meta(Meta::KeySignature {
+            SmfEvent::Meta(Meta::KeySignature {
                 sharps: -3,
                 minor: true,
                 extra: Box::default(),
@@ -221,14 +210,14 @@ fn every_event_kind_survives_a_read_and_a_write() {
         );
         assert_eq!(
             at(21).1,
-            FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
+            SmfEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
         );
         // The `F7` ends it and the writer adds it, so the model holds 300 bytes.
-        let FileEvent::SysEx(SysEx::Complete(long)) = &at(22).1 else {
+        let SmfEvent::SysEx(SysEx::Complete(long)) = &at(22).1 else {
             panic!("a whole SysEx message");
         };
         assert_eq!(long.len(), 300);
-        assert_eq!(at(23).1, FileEvent::Escape(vec![1, 2, 3].into()));
+        assert_eq!(at(23).1, SmfEvent::Escape(vec![1, 2, 3].into()));
         assert_eq!(at(24).0, Tick(20 + u64::from(BEAT)));
 
         let written = encoded(&file);
@@ -331,7 +320,7 @@ fn format_2_keeps_its_sequences_apart() {
     for sequence in &sequences {
         let beats: Vec<Beat> = sequence
             .events()
-            .filter(|(_, e)| matches!(e, FileEvent::Message(_)))
+            .filter(|(_, e)| matches!(e, SmfEvent::Channel { .. }))
             .map(|(beat, _)| beat)
             .collect();
         assert_eq!(beats, [Beat::new(1.0)]);
@@ -420,11 +409,11 @@ fn merged_events_are_in_time_order_ties_in_track_order() {
     ));
     assert_eq!(file.tracks()[0].name(), Some("Conductor"));
     assert_eq!(file.tracks()[1].name(), Some("Bass"));
-    let merged: Vec<(Beat, &FileEvent)> = metrical(&file).events().collect();
+    let merged: Vec<(Beat, &SmfEvent)> = metrical(&file).events().collect();
     let beats: Vec<f64> = merged.iter().map(|(b, _)| b.get()).collect();
     assert!(beats.windows(2).all(|w| w[0] <= w[1]), "{beats:?}");
     // The two events at beat 4: track 0's off, then track 1's on.
-    let at4: Vec<&FileEvent> = merged
+    let at4: Vec<&SmfEvent> = merged
         .iter()
         .filter(|(b, _)| *b == Beat::new(4.0))
         .map(|(_, e)| *e)
@@ -560,7 +549,7 @@ fn a_zero_tempo_is_not_a_tempo_and_an_absurd_one_is_read_as_written() {
     ));
     assert_eq!(
         file.tracks()[0].events()[0].1,
-        FileEvent::Meta(Meta::Tempo {
+        SmfEvent::Meta(Meta::Tempo {
             micros_per_quarter: MicrosPerQuarter::of(0),
             extra: Box::default(),
         })
@@ -639,7 +628,7 @@ fn a_zero_division_is_refused() {
     let bytes = build_smf(0, Division::Metrical(0), &[vec![]]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::ZeroTicksPerBeat
@@ -682,7 +671,7 @@ fn a_chunk_cut_short_is_truncated() {
     let cut = &bytes[..bytes.len() - 5];
     assert!(matches!(
         read_bytes(cut),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::ChunkCutOff
@@ -691,7 +680,7 @@ fn a_chunk_cut_short_is_truncated() {
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
         read_bytes(&bytes[..14 + 5]),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::ChunkCutOff
@@ -715,7 +704,7 @@ fn a_file_missing_a_track_is_truncated() {
     let cut = &two[..one.len()];
     assert!(matches!(
         read_bytes(cut),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset,
             cause: SmfParseError::TracksCutOff
@@ -737,7 +726,7 @@ fn a_track_that_ends_mid_event_is_a_parse_error() {
     // The header chunk is 14 bytes and the track chunk's own header 8.
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::ChannelData
@@ -759,7 +748,7 @@ fn a_meta_event_longer_than_its_chunk_is_an_event_cut_off() {
     assert!(
         matches!(
             err,
-            ReadError::Smf {
+            SmfReadError::Parse {
                 track: Some(0),
                 offset: 22,
                 cause: SmfParseError::EventCutOff
@@ -783,7 +772,7 @@ fn a_chunk_past_the_declared_tracks_is_named_where_it_starts() {
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset,
             cause: SmfParseError::ExtraTracks
@@ -877,7 +866,7 @@ fn the_writer_frames_a_file_as_the_spec_bytes() {
         vec![
             track(vec![(
                 0,
-                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap()),
+                SmfEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap()),
             )]),
             track(vec![
                 (0, on(0, 60, 100)),
@@ -950,13 +939,13 @@ fn an_other_meta_kind_is_a_type_byte_with_no_variant() {
 /// Spec: smf/track-chunks#26
 #[test]
 fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
-    let events: Vec<(Tick, FileEvent)> = (0..0x80u8)
+    let events: Vec<(Tick, SmfEvent)> = (0..0x80u8)
         .filter_map(OtherMetaKind::new)
         .map(|kind| {
             let data = vec![0x7F; usize::from(kind.get() % 5)];
             (
                 Tick(0),
-                FileEvent::Meta(Meta::Other {
+                SmfEvent::Meta(Meta::Other {
                     kind,
                     data: data.into(),
                 }),
@@ -967,24 +956,10 @@ fn an_other_meta_event_of_every_allowed_kind_writes_and_reads_back_equal() {
     assert_eq!(read(&encoded(&file)), file);
 }
 
-/// What an SMF cannot hold is refused rather than dropped on write: a packet,
-/// another group, a tempo over 24 bits, a gap over 28 bits.
+/// A gap of more than 28 bits between events is refused when the file is built
+/// (SMF 1.0 section 1.1: a delta-time is a variable-length quantity).
 #[test]
-fn what_an_smf_cannot_hold_is_refused() {
-    let one = |event| crate::common::format0(SMF_DIVISION, track(vec![(0, event)]));
-    let group_1 = FileEvent::Message(Message::Midi1(
-        Address {
-            group: MidiGroup::new(1).unwrap(),
-            channel: MidiChannel::FIRST,
-        },
-        Voice1::ProgramChange(U7::of(1)),
-    ));
-    assert!(matches!(one(group_1), Err(TracksError::Refused { .. })));
-    let midi2 = FileEvent::Message(Message::Midi2(
-        Address::first(MidiChannel::FIRST),
-        tutti_ump::Voice2::ChannelPressure(ControlValue::MIN),
-    ));
-    assert!(matches!(one(midi2), Err(TracksError::Refused { .. })));
+fn a_gap_over_28_bits_is_refused() {
     let gap = crate::common::format0(SMF_DIVISION, track(vec![(0x1000_0000, on(0, 60, 1))]));
     assert!(matches!(gap, Err(TracksError::Gap { .. })));
 }
@@ -1000,7 +975,7 @@ fn an_event_longer_than_28_bits_is_too_large() {
         let data = vec![0; len - 1];
         crate::common::format0(
             SMF_DIVISION,
-            track(vec![(0, FileEvent::SysEx(common::complete(&data)))]),
+            track(vec![(0, SmfEvent::SysEx(common::complete(&data)))]),
         )
         .map(drop)
     };
@@ -1025,7 +1000,7 @@ fn a_file_reads_and_writes_a_path() {
     let path = dir.path().join("x.mid");
     let file = crate::common::format0(SMF_DIVISION, track(vec![(0, on(0, 60, 1))])).unwrap();
     file.write(&path).unwrap();
-    assert_eq!(MidiFile::read(&path).unwrap(), file);
+    assert_eq!(MidiFile::read(&path).unwrap(), MidiFile::Standard(file));
     assert!(matches!(
         MidiFile::read(dir.path().join("absent.mid")),
         Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound
@@ -1036,8 +1011,11 @@ fn a_file_reads_and_writes_a_path() {
 #[test]
 fn bytes_of_neither_container_are_named_as_such() {
     assert!(matches!(
-        read_bytes(b"RIFF....WAVE"),
+        MidiFile::from_bytes(b"RIFF....WAVE"),
         Err(ReadError::UnknownFormat)
     ));
-    assert!(matches!(read_bytes(b""), Err(ReadError::UnknownFormat)));
+    assert!(matches!(
+        MidiFile::from_bytes(b""),
+        Err(ReadError::UnknownFormat)
+    ));
 }

@@ -8,14 +8,16 @@ use tutti_midi_ci::{
 use std::sync::Arc;
 
 use tutti_midi_ci::Muid;
-use tutti_midi_ci::{PeData, PeJson, PeResource, PeResourceList, ResourceGet, ResourceTarget};
+use tutti_midi_ci::{
+    PeData, PeJson, PeResourceList, ResourceGet, ResourceTarget, StandardResource,
+};
 use tutti_midi_device::MidiDeviceId;
 use tutti_midi_hardware::test_support::property_peer;
 use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
 use super::{
-    Ended, PeFailure, PeerError, PeerReply, Pending, PortLink, PropertySlot, Slot, SwitchProfile,
+    PeFailure, PeerError, PeerReply, Pending, PortLink, PropertySlot, Shut, Slot, SwitchProfile,
 };
 use crate::peer::ResourceIds;
 
@@ -113,7 +115,7 @@ fn a_body_that_is_not_json_or_not_the_resources_lands_as_unreadable() {
         panic!("not JSON");
     };
     let number = PeJson::try_from(b"5".as_slice()).expect("JSON");
-    let Err(data) = PeData::decode(&PeResource::LocalOn, &number) else {
+    let Err(data) = PeData::decode(StandardResource::LocalOn, &number) else {
         panic!("not LocalOn's data");
     };
     for failure in [ResourceFailure::Json(json), ResourceFailure::Data(data)] {
@@ -171,7 +173,7 @@ fn a_pending_that_ends_as_disconnected_resolves_its_property_calls_disconnected(
         PeResourceList::new(),
     );
     let ask = peer.ask(PropertyCall::Get(ResourceGet::new(
-        ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
+        ResourceTarget::try_from(StandardResource::LocalOn).unwrap(),
     )));
     let id = PeerId {
         group: MidiGroup::FIRST,
@@ -189,7 +191,7 @@ fn a_pending_that_ends_as_disconnected_resolves_its_property_calls_disconnected(
             replies: vec![sender],
         }));
     }
-    pending.end(Ended::Disconnected);
+    pending.end(Shut::Away);
     for reply in replies {
         assert_eq!(polled(reply), Some(Err(PeerError::Disconnected)));
     }

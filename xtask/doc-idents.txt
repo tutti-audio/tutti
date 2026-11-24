@@ -51,7 +51,7 @@
 1 crates/tutti-graph/tests/topology/bus_edges.rs
 1 crates/tutti-measure/src/analyses/yin.rs
 3 crates/tutti-midi-device/src/table/tests.rs
-2 crates/tutti-midi-file/src/file.rs
+1 crates/tutti-midi-file/src/file.rs
 1 crates/tutti-midi-file/src/kind.rs
 3 crates/tutti-midi-file/src/smf/read.rs
 1 crates/tutti-midi-hardware/src/backend/alsa/tests.rs
