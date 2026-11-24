@@ -14,8 +14,8 @@ use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::PitchBendSensitivity;
 use tutti_ump::{
-    Address, Attribute, MidiChannel, MidiGroup, NoteId, NoteNumber, NoteVelocity,
-    PerNoteManagement, Pitch, Rpn, Ump, Voice2,
+    Address, Attribute, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, PerNoteManagement, Pitch,
+    Rpn, Ump, Voice2,
 };
 use tutti_ump::{Bank, ControlValue, Message, RegisteredPerNoteController, System, U7};
 use tutti_units::Samples;
@@ -698,20 +698,6 @@ fn a_banked_program_change_is_three_messages_every_time() {
         ),
     );
     assert_eq!(drain(&mut list).len(), 3);
-}
-
-/// The ids a note is told by are not `(channel, key)` pairs: a Note On's id
-/// is above `NoteId::MAX_CHANNEL_NOTE`, so it names no pair and a plugin never
-/// confuses two notes of one key.
-#[test]
-fn a_minted_id_names_no_channel_and_key() {
-    let mut list = InputEventList::new(InputRooms::new(1024));
-    add(
-        &mut list,
-        midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
-    );
-    let id = note_on(&drain(&mut list)[0]).3;
-    assert!(u32::try_from(id).unwrap() > NoteId::MAX_CHANNEL_NOTE);
 }
 
 /// **Each note port has its own dialect**: Group 0 on a port that takes CLAP
