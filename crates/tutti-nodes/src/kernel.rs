@@ -405,21 +405,22 @@ impl<K: Kernel> KernelNode<K> {
         let Some(clock) = &mut t.clock else {
             return size;
         };
-        if moved {
-            t.current = tail_frames(self.kernel.tail_of(target));
-        }
         // A driven control the tail reads may take any value later, and its block's values
         // do not cover that: the block reports the most the kernel rings with each driven
         // control at its longest value ([`Ring::LongestAt`]), or the ceiling when one has none.
-        // The figure follows which ports are driven, never the values they carry.
-        let current = if self.params.ring_driven(io) {
-            match self.params.longest(io) {
-                Some(longest) => tail_frames(self.kernel.tail_of(&longest)),
-                None => tail_frames(self.kernel.tail()),
-            }
-        } else {
-            t.current
-        };
+        // The figure follows which ports are driven, never the values they carry. It is asked
+        // before the target's, so a kernel that keeps its last design holds the target's for
+        // the retarget that follows.
+        let driven = self.params.ring_driven(io).then(|| {
+            tail_frames(match self.params.longest(io) {
+                Some(longest) => self.kernel.tail_of(&longest),
+                None => self.kernel.tail(),
+            })
+        });
+        if moved {
+            t.current = tail_frames(self.kernel.tail_of(target));
+        }
+        let current = driven.unwrap_or(t.current);
         let last_input = (0..inputs)
             .filter_map(|c| {
                 io.input(c)[..size]
