@@ -339,7 +339,7 @@ impl<F: SamplerFloat> std::fmt::Debug for DiskVoice<F> {
 
 impl<F: SamplerFloat> Clone for DiskVoice<F> {
     /// A copy sharing the stream and the control cell: a template when this
-    /// is a live voice (see [`Reader`]), allocating nothing but the placement's
+    /// is a live voice (see `Reader`), allocating nothing but the placement's
     /// own clone. Not a fork: see `fork_copy`.
     fn clone(&self) -> Self {
         Self {
