@@ -30,7 +30,7 @@
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
-//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(440.0)))));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -317,7 +317,7 @@ pub mod nodes {
         GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode, HysteresisConfig,
         HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig, KarplusStrongNode,
         KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
-        LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterNode, MetronomeMode,
+        LevellerNode, LfoConfig, LfoNode, LfoSync, LimiterConfig, LimiterNode, MetronomeMode,
         MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands, MultibandCompressorConfig,
         MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode, NoteEnvelopeConfig,

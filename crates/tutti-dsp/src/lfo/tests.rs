@@ -4,7 +4,6 @@
 //! `2^-64` quantum of the step.
 
 use super::*;
-use tutti_units::Phase;
 
 const RATE: f64 = 48_000.0;
 
@@ -143,4 +142,31 @@ fn a_rate_past_the_nyquist_is_held_under_half_a_cycle_a_frame() {
     let mut lfo = Lfo::new(LfoWave::Sine, Hz::new(90.0), SampleRate::of(100.0));
     lfo.advance(Samples::new(10));
     assert!(lfo.cycles() > 4.9 && lfo.cycles() < 5.0, "{}", lfo.cycles());
+}
+
+/// A located clock reads the cycles it was put at, forward and backward, and advances from
+/// there as a clock that ran to it would: 2.75 and -0.25 are dyadic, so the phase holds them
+/// exactly, and 25 frames at 0.01 of a cycle a frame later it is a quarter cycle on.
+#[test]
+fn a_located_clock_reads_its_cycles_and_advances_from_them() {
+    for at in [2.75, -0.25, 0.0, -3.5] {
+        let mut clock = lfo(LfoWave::Sine);
+        clock.advance(frames(37));
+        clock.locate(at);
+        assert_eq!(clock.cycles(), at);
+        clock.advance(frames(25));
+        assert!((clock.cycles() - (at + 0.25)).abs() < 1e-15, "{at}");
+    }
+}
+
+/// A position that is not finite leaves the clock where it is.
+#[test]
+fn a_located_clock_ignores_a_position_that_is_not_finite() {
+    let mut clock = lfo(LfoWave::Sine);
+    clock.advance(frames(10));
+    let before = clock.cycles();
+    for at in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        clock.locate(at);
+        assert_eq!(clock.cycles(), before);
+    }
 }
