@@ -40,6 +40,8 @@ mod routes;
 mod problems;
 // A node's automation outlives a replace of the node.
 mod automation_replace;
+// A source's feed follows its kind.
+mod source_kinds;
 // A route's polarity and curve, an LFO's rate and a macro's value are values:
 // staged at `set`, republished at the update.
 mod program_targets;

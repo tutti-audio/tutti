@@ -69,6 +69,7 @@ enum modulation::ModRefusal
 enum modulation::ModTarget
 enum modulation::Problem
 enum modulation::RouteError
+enum modulation::SourceError
 enum modulation::SourceName
 enum modulation::TargetName
 enum peer::PeerError

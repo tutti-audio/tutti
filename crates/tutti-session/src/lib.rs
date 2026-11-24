@@ -288,7 +288,7 @@ pub use midi_sink::{MidiSink, OpenMidiSink};
 pub use modulation::{
     AutomationTake, MixRef, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget, Mods,
     ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, ParamRef, Problem, Ranged, RouteError,
-    RouteInfo, RouteSpec, SourceInfo, SourceName, TargetName, declare_targets,
+    RouteInfo, RouteSpec, SourceError, SourceInfo, SourceName, TargetName, declare_targets,
 };
 pub use peer::{Peer, PeerError, PeerEvent, PeerResourceId, Presence, Resource, ResourceFact};
 #[cfg(any(feature = "plugin", feature = "midi-hardware"))]
