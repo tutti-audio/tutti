@@ -617,8 +617,8 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     assert_eq!(a.tracks()[0].notes(), b.sequence().notes());
     // The file's Set Tempo and Time Signature come first.
     assert_eq!(
-        a.tracks()[0].events()[2].1.message(),
-        Some(b.sequence().events()[0].1.decode().unwrap())
+        a.tracks()[0].events()[2].1.packet(),
+        Some(b.sequence().events()[0].1)
     );
 }
 

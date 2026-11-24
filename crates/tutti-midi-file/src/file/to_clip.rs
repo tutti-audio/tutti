@@ -366,7 +366,7 @@ fn convert(ev: &SmfEvent) -> std::result::Result<(Rank, Vec<Ump>), DropReason> {
     match ev {
         // A MIDI 1.0 channel message on the first Group.
         SmfEvent::Channel { channel, message } => {
-            other(vec![Ump::from(Message::midi1(*channel, *message))])
+            other(vec![super::channel_packet(*channel, *message)])
         }
         // A divided message's first packet is not one complete message.
         SmfEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),

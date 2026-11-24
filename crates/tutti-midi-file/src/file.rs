@@ -502,15 +502,20 @@ impl From<Meta> for SmfEvent {
 }
 
 impl SmfEvent {
-    /// The channel message as the packet a clip plays (MIDI 1.0 on the first
-    /// Group), for an event that is one.
+    /// The packet a channel message plays as (MIDI 1.0 on the first Group),
+    /// for an event that is one.
     #[must_use]
-    pub fn message(&self) -> Option<Message> {
+    pub fn packet(&self) -> Option<Ump> {
         match self {
-            Self::Channel { channel, message } => Some(Message::midi1(*channel, *message)),
+            Self::Channel { channel, message } => Some(channel_packet(*channel, *message)),
             _ => None,
         }
     }
+}
+
+/// The MIDI 1.0 packet of `message` on `channel` of the first Group.
+pub(crate) fn channel_packet(channel: MidiChannel, message: Voice1) -> Ump {
+    Message::midi1(channel, message).into()
 }
 
 /// One of the four meta events that open an SMF track (SMF 1.0 section 3.3),
@@ -1076,9 +1081,9 @@ impl Track {
     #[must_use]
     pub fn notes(&self) -> Vec<PairedNote> {
         pair_notes(
-            self.events().iter().filter_map(|(tick, event)| {
-                event.message().map(|message| (*tick, Ump::from(message)))
-            }),
+            self.events()
+                .iter()
+                .filter_map(|(tick, event)| Some((*tick, event.packet()?))),
         )
     }
 }
@@ -2182,7 +2187,7 @@ impl SmfTimeline {
                     timeline.abandon(&mut open);
                     timeline
                         .packets
-                        .push((beat, Ump::from(Message::midi1(*channel, *message))));
+                        .push((beat, channel_packet(*channel, *message)));
                 }
                 SmfEvent::Meta(_) => {}
             }
