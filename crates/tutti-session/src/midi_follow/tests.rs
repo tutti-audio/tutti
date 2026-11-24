@@ -1,6 +1,5 @@
 use super::*;
 use crate::{MidiEvent, SessionEvent};
-use tutti_midi_runtime::ClockOffset;
 use tutti_music::MeterMap;
 use tutti_units::{SampleRate, Samples};
 
@@ -61,26 +60,19 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
     let stand = rolling();
     let mut out = Vec::new();
     let events = vec![
-        ClockEvent::Locate {
-            position: ClockPosition::Beat(Beat::new(0.0)),
+        Heard::Locate {
+            position: Beat::new(0.0),
             at: at(96_000),
         },
-        ClockEvent::Play,
-        ClockEvent::Tempo {
+        Heard::Play,
+        Heard::Tempo {
             tempo: Bpm::of(90.0),
             at: at(96_000),
         },
-        ClockEvent::Stop { at: at(96_480) },
+        Heard::Stop { at: at(96_480) },
     ];
-    let (actions, tempos) = lay(
-        events,
-        ClockKind::BeatClock,
-        false,
-        &stand,
-        Bpm::of(120.0),
-        &map(120.0),
-        &mut out,
-    );
+    let (actions, tempos) =
+        lay::<BeatClockFollower>(events, false, &stand, Bpm::of(120.0), &map(120.0), &mut out);
     // The source ends stopped, so the locate is not advanced.
     assert_eq!(
         actions,
@@ -105,22 +97,7 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
 #[test]
 fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
     let stand = rolling();
-    for (position, expected) in [
-        (ClockPosition::Beat(Beat::new(8.0)), 8.04),
-        (ClockPosition::Time(Seconds::new(10.0)), 20.04),
-    ] {
-        let (actions, _) = lay(
-            vec![ClockEvent::Locate {
-                position,
-                at: at(96_000),
-            }],
-            ClockKind::BeatClock,
-            true,
-            &stand,
-            Bpm::of(120.0),
-            &map(120.0),
-            &mut Vec::new(),
-        );
+    let placed = |actions: Vec<Placed>| {
         let [
             Placed {
                 action: ClockAction::Locate(beat),
@@ -131,11 +108,34 @@ fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
             panic!("one placed locate: {actions:?}");
         };
         assert_eq!(frame, Frame::new(96_960));
-        assert!(
-            (beat.get() - expected).abs() < 1e-9,
-            "{position:?}: {beat:?}"
-        );
-    }
+        beat
+    };
+    let (actions, _) = lay::<BeatClockFollower>(
+        vec![Heard::Locate {
+            position: Beat::new(8.0),
+            at: at(96_000),
+        }],
+        true,
+        &stand,
+        Bpm::of(120.0),
+        &map(120.0),
+        &mut Vec::new(),
+    );
+    let beat = placed(actions);
+    assert!((beat.get() - 8.04).abs() < 1e-9, "{beat:?}");
+    let (actions, _) = lay::<MtcFollower>(
+        vec![Heard::Locate {
+            position: Seconds::new(10.0),
+            at: at(96_000),
+        }],
+        true,
+        &stand,
+        Bpm::of(120.0),
+        &map(120.0),
+        &mut Vec::new(),
+    );
+    let beat = placed(actions);
+    assert!((beat.get() - 20.04).abs() < 1e-9, "{beat:?}");
 }
 
 /// **A tempo step lands on the beat the transport reaches at its placed
@@ -184,15 +184,12 @@ fn a_stopped_transport_stands_where_it_is() {
 #[test]
 fn a_reversed_source_is_reported_and_stopped() {
     let mut out = Vec::new();
-    let (actions, _) = lay(
+    let (actions, _) = lay::<MtcFollower>(
         vec![
-            ClockEvent::Reversed,
-            ClockEvent::Stop { at: at(96_000) },
-            ClockEvent::Slipped {
-                error: ClockOffset::Time(Seconds::new(0.1)),
-            },
+            Heard::Reversed,
+            Heard::Stop { at: at(96_000) },
+            Heard::Slipped(ClockOffset::Time(Seconds::new(0.1))),
         ],
-        ClockKind::Mtc,
         false,
         &rolling(),
         Bpm::of(120.0),
