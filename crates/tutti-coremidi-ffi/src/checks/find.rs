@@ -16,7 +16,7 @@ pub(crate) const OBJECT_TYPE_DESTINATION: i32 = 3;
 /// An endpoint was not taken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub(crate) enum FindError {
+pub enum FindError {
     /// No endpoint has this unique id: it was removed, or never existed.
     #[error("no CoreMIDI endpoint has unique id {0}")]
     Missing(UniqueId),

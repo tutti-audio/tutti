@@ -52,7 +52,8 @@
 
 // The OS-free checks and decisions: one seam, since only `os` uses them off tests.
 #[cfg(any(target_os = "macos", test))]
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// Off macOS only the tests reach them: the `os` half that uses and exports them is absent.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code, unreachable_pub))]
 mod checks;
 
 // The one platform seam: the macOS half, or nothing.

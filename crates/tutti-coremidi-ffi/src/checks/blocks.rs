@@ -32,7 +32,7 @@ const MAX_UINTEGER7: u8 = 0x7F;
 
 /// A field of a Function Block that holds a reserved value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum BlockField {
+pub enum BlockField {
     /// The block number.
     Id,
     /// The direction.
@@ -59,7 +59,7 @@ impl core::fmt::Display for BlockField {
 
 /// Why a Function Block cannot be created on a CoreMIDI endpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum BlockRefusal {
+pub enum BlockRefusal {
     /// A field holds a value the spec reserves, which has no CoreMIDI value.
     #[error("a Function Block's {0} is a reserved value")]
     Reserved(BlockField),

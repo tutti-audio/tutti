@@ -24,7 +24,7 @@ use crate::status::{CANNOT_DO_IN_CURRENT_CONTEXT, NO_ERR};
 /// Spelled out rather than reusing `bool`: the AU writes through these pointers
 /// expecting a 1-byte C boolean, and while the widths coincide today, naming
 /// Apple's type keeps the ABI contract visible at the call site.
-pub type Boolean = u8;
+pub(crate) type Boolean = u8;
 
 /// Apple's `HostCallbackInfo`, laid out exactly as
 /// `AudioUnitProperties.h` declares it (line 1264 of the macOS 15.6 SDK).
@@ -50,15 +50,16 @@ pub(crate) struct HostCallbackInfo {
 }
 
 /// `HostCallback_GetBeatAndTempo`.
-pub type BeatAndTempoProc = unsafe extern "C" fn(*mut c_void, *mut f64, *mut f64) -> OSStatus;
+pub(crate) type BeatAndTempoProc =
+    unsafe extern "C" fn(*mut c_void, *mut f64, *mut f64) -> OSStatus;
 
 /// `HostCallback_GetMusicalTimeLocation`. Note the mixed widths — the time
 /// signature numerator is `Float32` while the denominator is `UInt32`.
-pub type MusicalTimeLocationProc =
+pub(crate) type MusicalTimeLocationProc =
     unsafe extern "C" fn(*mut c_void, *mut u32, *mut f32, *mut u32, *mut f64) -> OSStatus;
 
 /// `HostCallback_GetTransportState` (v1) — no `outIsRecording`.
-pub type TransportStateProc = unsafe extern "C" fn(
+pub(crate) type TransportStateProc = unsafe extern "C" fn(
     *mut c_void,
     *mut Boolean,
     *mut Boolean,
@@ -70,7 +71,7 @@ pub type TransportStateProc = unsafe extern "C" fn(
 
 /// `HostCallback_GetTransportState2` (v2) — v1 plus `outIsRecording` in second
 /// position, which is why the two cannot share an implementation.
-pub type TransportStateProc2 = unsafe extern "C" fn(
+pub(crate) type TransportStateProc2 = unsafe extern "C" fn(
     *mut c_void,
     *mut Boolean,
     *mut Boolean,

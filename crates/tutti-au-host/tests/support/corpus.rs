@@ -31,7 +31,7 @@ use tutti_au_host::{AuLayoutTag, BusDirection};
 
 /// One Apple Audio Unit, addressed by the codes AudioToolbox registers it under.
 #[derive(Debug, Clone, Copy)]
-pub struct AuRef {
+pub(crate) struct AuRef {
     /// Display name, for assertion messages only — never used for lookup.
     pub label: &'static str,
     /// Four-char `componentSubType`.
@@ -66,7 +66,7 @@ impl AuRef {
     }
 
     /// Locate this unit, or `None` if it is not registered on this machine.
-    pub fn find(&self) -> Option<AuComponentInfo> {
+    pub(crate) fn find(&self) -> Option<AuComponentInfo> {
         let wanted = u32::from_be_bytes(*self.sub_type);
         enumerate_components_of_type(self.au_type)
             .into_iter()
@@ -74,7 +74,7 @@ impl AuRef {
     }
 
     /// Locate this unit or panic. See the module docs for why absence is fatal.
-    pub fn require(&self) -> AuComponentInfo {
+    pub(crate) fn require(&self) -> AuComponentInfo {
         self.find().unwrap_or_else(|| {
             panic!(
                 "{} ({}) is not registered with AudioToolbox. It ships with \
@@ -87,7 +87,7 @@ impl AuRef {
     }
 
     /// Instantiate this unit at `rate`/`block`, already initialized.
-    pub fn open(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
+    pub(crate) fn open(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
         let info = self.require();
         let mut au = Au::new(info.component, rate, block)
             .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", self.label));
@@ -97,7 +97,7 @@ impl AuRef {
     }
 
     /// Instantiate without initializing, for tests that drive the transition.
-    pub fn open_uninitialized(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
+    pub(crate) fn open_uninitialized(&self, rate: tutti_units::SampleRate, block: u32) -> Au {
         let info = self.require();
         Au::new(info.component, rate, block)
             .unwrap_or_else(|e| panic!("{}: instantiate failed: {e:?}", self.label))
@@ -110,7 +110,7 @@ const APPLE: u32 = u32::from_be_bytes(*b"appl");
 
 /// Apple's voice isolation effect, the one unit a corpus sweep never initializes
 /// (see [`may_initialize_in_a_sweep`]).
-pub const SOUND_ISOLATION: AuRef = AuRef::effect("AUSoundIsolation", b"vois");
+pub(crate) const SOUND_ISOLATION: AuRef = AuRef::effect("AUSoundIsolation", b"vois");
 
 /// Whether a corpus sweep may `initialize` this unit: every unit but
 /// [`SOUND_ISOLATION`].
@@ -126,57 +126,57 @@ pub const SOUND_ISOLATION: AuRef = AuRef::effect("AUSoundIsolation", b"vois");
 /// follows the runner's failure, not a refused init as such, and cannot be
 /// reproduced here. The unit is still instantiated and probed loaded; only its
 /// initialized phase is left out.
-pub fn may_initialize_in_a_sweep(info: &AuComponentInfo) -> bool {
+pub(crate) fn may_initialize_in_a_sweep(info: &AuComponentInfo) -> bool {
     !(info.sub_type == u32::from_be_bytes(*SOUND_ISOLATION.sub_type)
         && info.manufacturer_code == APPLE)
 }
 
 /// A delay: many parameters, several units, no reported latency.
-pub const DELAY: AuRef = AuRef::effect("AUDelay", b"dely");
+pub(crate) const DELAY: AuRef = AuRef::effect("AUDelay", b"dely");
 /// A 41-parameter EQ — the widest parameter surface in the corpus.
-pub const N_BAND_EQ: AuRef = AuRef::effect("AUNBandEQ", b"nbeq");
+pub(crate) const N_BAND_EQ: AuRef = AuRef::effect("AUNBandEQ", b"nbeq");
 /// Two parameters only; the minimal effect shape.
-pub const LOWPASS: AuRef = AuRef::effect("AULowpass", b"lpas");
+pub(crate) const LOWPASS: AuRef = AuRef::effect("AULowpass", b"lpas");
 /// Reports a real non-zero latency (256 samples of lookahead), so PDC has
 /// something to assert against.
-pub const DYNAMICS: AuRef = AuRef::effect("AUDynamicsProcessor", b"dcmp");
+pub(crate) const DYNAMICS: AuRef = AuRef::effect("AUDynamicsProcessor", b"dcmp");
 /// The widest factory-preset surface among Apple's effects (22 presets, named
 /// and numbered `0..=21`), and a strongly non-linear processor — so it is the
 /// unit that can tell a bypassed render from a processed one at a glance.
-pub const DISTORTION: AuRef = AuRef::effect("AUDistortion", b"dist");
+pub(crate) const DISTORTION: AuRef = AuRef::effect("AUDistortion", b"dist");
 /// 13 factory presets, sharing its preset names with [`REVERB2`]. The pair
 /// exists so preset assertions are not resting on a single AU's table.
-pub const MATRIX_REVERB: AuRef = AuRef::effect("AUMatrixReverb", b"mrev");
+pub(crate) const MATRIX_REVERB: AuRef = AuRef::effect("AUMatrixReverb", b"mrev");
 /// 13 factory presets. Unlike [`MATRIX_REVERB`] it reports no preset selected
 /// (`-1`) on a fresh instance, which is what makes it useful: the two units
 /// disagree about the initial state, so nothing may assume one.
-pub const REVERB2: AuRef = AuRef::effect("AUReverb2", b"rvb2");
+pub(crate) const REVERB2: AuRef = AuRef::effect("AUReverb2", b"rvb2");
 /// A sampler with no input bus, driven by MIDI.
-pub const SAMPLER: AuRef = AuRef::instrument("AUSampler", b"samp");
+pub(crate) const SAMPLER: AuRef = AuRef::instrument("AUSampler", b"samp");
 /// The built-in DLS synth: no input bus, driven by MIDI.
-pub const DLS_SYNTH: AuRef = AuRef::instrument("DLSMusicDevice", b"dls ");
+pub(crate) const DLS_SYNTH: AuRef = AuRef::instrument("DLSMusicDevice", b"dls ");
 
 /// 64 input elements and 4 output elements — the widest bus topology on the
 /// system, and the only corpus member with more than one bus on *both* sides.
 /// Publishes `{-1,-2}`: any input width, any output width, independently.
-pub const MATRIX_MIXER: AuRef = AuRef::mixer("AUMatrixMixer", b"mxmx");
+pub(crate) const MATRIX_MIXER: AuRef = AuRef::mixer("AUMatrixMixer", b"mxmx");
 /// 8 input elements, each carrying its own 7-parameter strip. The subject for
 /// per-element parameter addressing: the same parameter id on two different
 /// input elements holds two independent values.
-pub const MULTI_CHANNEL_MIXER: AuRef = AuRef::mixer("AUMultiChannelMixer", b"mcmx");
+pub(crate) const MULTI_CHANNEL_MIXER: AuRef = AuRef::mixer("AUMultiChannelMixer", b"mcmx");
 /// One input, two outputs. The mirror image of DLSMusicDevice — multi-bus on the
 /// side the instruments are single-bus on — and it declares `{-1,-1}`, the
 /// "any width, but matched" spelling.
-pub const MULTI_SPLITTER: AuRef = AuRef::mixer("AUMultiSplitter", b"mspl");
+pub(crate) const MULTI_SPLITTER: AuRef = AuRef::mixer("AUMultiSplitter", b"mspl");
 /// A second view-less unit, so the no-editor assertions are not resting on one
 /// AU's behaviour. Measured on macOS 15.6, as for [`MATRIX_REVERB`]:
 /// `AuEditor::has_editor` is false and `open` fails with
 /// `kAudioUnitErr_InvalidProperty` (-10879).
-pub const NO_VIEW_SAMPLE_DELAY: AuRef = AuRef::effect("AUSampleDelay", b"sdly");
+pub(crate) const NO_VIEW_SAMPLE_DELAY: AuRef = AuRef::effect("AUSampleDelay", b"sdly");
 
 /// Every effect in the corpus, for tests that assert a property across all of
 /// them rather than picking one representative.
-pub const EFFECTS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS];
+pub(crate) const EFFECTS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS];
 
 /// Effects that ship factory presets, paired with the count each advertises.
 ///
@@ -185,7 +185,7 @@ pub const EFFECTS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS];
 /// the `CFArray` walk, or elements silently dropped by the `filter_map` — and
 /// "more than zero presets" would pass all of those. Measured on macOS 15.6;
 /// see `au_presets_bypass.rs` for what a mismatch here means.
-pub const PRESET_EFFECTS: &[(AuRef, usize)] = &[
+pub(crate) const PRESET_EFFECTS: &[(AuRef, usize)] = &[
     (DISTORTION, 22),
     (MATRIX_REVERB, 13),
     (REVERB2, 13),
@@ -196,13 +196,13 @@ pub const PRESET_EFFECTS: &[(AuRef, usize)] = &[
 /// host reports as "no presets" rather than as an error. Keeping them named
 /// here is what stops that absorption from also hiding a real regression: if
 /// one of these ever grew presets the count assertion would catch it.
-pub const PRESETLESS_EFFECTS: &[AuRef] = &[DELAY, LOWPASS, N_BAND_EQ];
+pub(crate) const PRESETLESS_EFFECTS: &[AuRef] = &[DELAY, LOWPASS, N_BAND_EQ];
 
 /// Units measured to advertise a Cocoa view on macOS 15.6, with the frame size
 /// each one reported. Sizes are recorded so a host that starts inventing
 /// geometry (returning its requested 800x600 rather than the view's own frame)
 /// is caught, not merely a host that returns something non-zero.
-pub const WITH_COCOA_VIEW: &[(AuRef, u32, u32)] = &[
+pub(crate) const WITH_COCOA_VIEW: &[(AuRef, u32, u32)] = &[
     (DELAY, 484, 255),
     (LOWPASS, 500, 200),
     (DYNAMICS, 388, 324),
@@ -212,15 +212,15 @@ pub const WITH_COCOA_VIEW: &[(AuRef, u32, u32)] = &[
 ];
 
 /// Units measured to advertise no Cocoa view at all.
-pub const WITHOUT_COCOA_VIEW: &[AuRef] = &[MATRIX_REVERB, NO_VIEW_SAMPLE_DELAY];
+pub(crate) const WITHOUT_COCOA_VIEW: &[AuRef] = &[MATRIX_REVERB, NO_VIEW_SAMPLE_DELAY];
 
 /// Every instrument in the corpus.
-pub const INSTRUMENTS: &[AuRef] = &[SAMPLER, DLS_SYNTH];
+pub(crate) const INSTRUMENTS: &[AuRef] = &[SAMPLER, DLS_SYNTH];
 
 /// Every mixer in the corpus. Mixers are where AUv2's multi-bus and per-element
 /// parameter features are actually exercised; no effect or instrument on the
 /// system uses either.
-pub const MIXERS: &[AuRef] = &[MATRIX_MIXER, MULTI_CHANNEL_MIXER, MULTI_SPLITTER];
+pub(crate) const MIXERS: &[AuRef] = &[MATRIX_MIXER, MULTI_CHANNEL_MIXER, MULTI_SPLITTER];
 
 /// Effects paired with the tail time each reports, in seconds.
 ///
@@ -231,7 +231,7 @@ pub const MIXERS: &[AuRef] = &[MATRIX_MIXER, MULTI_CHANNEL_MIXER, MULTI_SPLITTER
 /// tail, 0 latency; AUDynamicsProcessor: 0.2s tail, 256-sample latency), so
 /// only the correct property satisfies both. [`NO_TAIL_EFFECTS`] is the
 /// zero-tail counterpart.
-pub const TAIL_EFFECTS: &[(AuRef, f32)] = &[
+pub(crate) const TAIL_EFFECTS: &[(AuRef, f32)] = &[
     (MATRIX_REVERB, 10.0),
     (REVERB2, 3.0),
     (DYNAMICS, 0.2),
@@ -246,7 +246,7 @@ pub const TAIL_EFFECTS: &[(AuRef, f32)] = &[
 /// fact from an instrument's refusal to answer at all, and naming one is what
 /// stops a host from conflating them — a bounce would otherwise truncate the
 /// tail of every unit whose tail it could not read.
-pub const NO_TAIL_EFFECTS: &[AuRef] = &[NO_VIEW_SAMPLE_DELAY];
+pub(crate) const NO_TAIL_EFFECTS: &[AuRef] = &[NO_VIEW_SAMPLE_DELAY];
 
 /// Units measured to reject `kAudioUnitProperty_TailTime` outright with
 /// `kAudioUnitErr_InvalidProperty` (-10879).
@@ -254,18 +254,18 @@ pub const NO_TAIL_EFFECTS: &[AuRef] = &[NO_VIEW_SAMPLE_DELAY];
 /// Every Apple instrument, mixer and generator does. Named here so the host's
 /// decision to propagate that as an error rather than flatten it to `Seconds::new(0)`
 /// is pinned by a test — see `au_transport.rs`.
-pub const TAILLESS_UNITS: &[AuRef] = &[SAMPLER, DLS_SYNTH, MULTI_CHANNEL_MIXER];
+pub(crate) const TAILLESS_UNITS: &[AuRef] = &[SAMPLER, DLS_SYNTH, MULTI_CHANNEL_MIXER];
 
 /// The AU tail-time refusal status: `kAudioUnitErr_InvalidProperty`.
-pub const TAIL_UNSUPPORTED: i32 = -10879;
+pub(crate) const TAIL_UNSUPPORTED: i32 = -10879;
 
 /// Planar silence: `channels` buffers of `frames` zeroes.
-pub fn silence(channels: usize, frames: usize) -> Vec<Vec<f32>> {
+pub(crate) fn silence(channels: usize, frames: usize) -> Vec<Vec<f32>> {
     vec![vec![0.0f32; frames]; channels]
 }
 
 /// A unit impulse in channel 0, silence elsewhere.
-pub fn impulse(channels: usize, frames: usize) -> Vec<Vec<f32>> {
+pub(crate) fn impulse(channels: usize, frames: usize) -> Vec<Vec<f32>> {
     let mut b = silence(channels, frames);
     if let Some(first) = b.first_mut() {
         first[0] = 1.0;
@@ -275,7 +275,7 @@ pub fn impulse(channels: usize, frames: usize) -> Vec<Vec<f32>> {
 
 /// Render one block, borrowing `input` and `output` in the shapes `process`
 /// wants. Returns whatever `process` returned so callers can assert on it.
-pub fn render(
+pub(crate) fn render(
     au: &mut Au,
     input: &[Vec<f32>],
     output: &mut [Vec<f32>],
@@ -287,7 +287,7 @@ pub fn render(
 }
 
 /// Largest absolute sample across every channel.
-pub fn peak(buffers: &[Vec<f32>]) -> f32 {
+pub(crate) fn peak(buffers: &[Vec<f32>]) -> f32 {
     buffers
         .iter()
         .flat_map(|c| c.iter())
@@ -295,7 +295,7 @@ pub fn peak(buffers: &[Vec<f32>]) -> f32 {
 }
 
 /// True when every sample in every channel is finite (no NaN, no infinity).
-pub fn all_finite(buffers: &[Vec<f32>]) -> bool {
+pub(crate) fn all_finite(buffers: &[Vec<f32>]) -> bool {
     buffers.iter().flat_map(|c| c.iter()).all(|s| s.is_finite())
 }
 
@@ -311,7 +311,7 @@ pub fn all_finite(buffers: &[Vec<f32>]) -> bool {
 ///
 /// Every member also accepts a 4-channel format, which
 /// `a_quad_request_is_honoured_where_the_au_takes_it` relies on.
-pub const ACCEPTS_MONO: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS, SAMPLER];
+pub(crate) const ACCEPTS_MONO: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS, SAMPLER];
 
 /// Units measured to **refuse** a 1-channel output format and keep their own
 /// width.
@@ -324,7 +324,7 @@ pub const ACCEPTS_MONO: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, DYNAMICS, SAMPLE
 ///
 /// AUMatrixReverb refuses mono but *accepts* quad on its output while keeping 2
 /// on its input, so it is also the corpus's asymmetric-layout case.
-pub const REFUSES_MONO: &[AuRef] = &[MATRIX_REVERB, DLS_SYNTH];
+pub(crate) const REFUSES_MONO: &[AuRef] = &[MATRIX_REVERB, DLS_SYNTH];
 
 /// Parameters measured to publish `kAudioUnitProperty_ParameterValueStrings`,
 /// as `(unit, parameter id, count, first label, last label)`.
@@ -336,7 +336,7 @@ pub const REFUSES_MONO: &[AuRef] = &[MATRIX_REVERB, DLS_SYNTH];
 /// `Type` parameters (ids 2000..=2007; id 2000 is the representative), with
 /// `kAudioUnitParameterFlag_ValuesHaveStrings` **clear** — see
 /// `au_param_display.rs::value_strings_are_not_gated_on_the_flag_that_under_reports`.
-pub const VALUE_STRING_PARAMS: &[(AuRef, u32, usize, &str, &str)] =
+pub(crate) const VALUE_STRING_PARAMS: &[(AuRef, u32, usize, &str, &str)] =
     &[(N_BAND_EQ, 2000, 11, "Parametric", "Resonant High Shelf")];
 
 /// Effects measured to group their parameters, paired with the number of distinct
@@ -354,7 +354,7 @@ pub const VALUE_STRING_PARAMS: &[(AuRef, u32, usize, &str, &str)] =
 /// the parameter list renders 6 sections while the AU can label 7. This
 /// constant is the *claimed* count, since that is what a section list builds
 /// from.
-pub const CLUMPED_EFFECTS: &[(AuRef, usize)] = &[(DISTORTION, 6), (MATRIX_REVERB, 4)];
+pub(crate) const CLUMPED_EFFECTS: &[(AuRef, usize)] = &[(DISTORTION, 6), (MATRIX_REVERB, 4)];
 
 /// Units measured to publish `kAudioUnitParameterFlag_MeterReadOnly` parameters,
 /// with the count each advertises.
@@ -366,11 +366,11 @@ pub const CLUMPED_EFFECTS: &[(AuRef, usize)] = &[(DISTORTION, 6), (MATRIX_REVERB
 ///
 /// AUMultibandCompressor is not in [`EFFECTS`]; it is referenced only here and by
 /// the meter test, since it is the widest meter surface on the system.
-pub const METER_PARAM_UNITS: &[(AuRef, usize)] = &[(MULTIBAND_COMPRESSOR, 12), (SAMPLER, 2)];
+pub(crate) const METER_PARAM_UNITS: &[(AuRef, usize)] = &[(MULTIBAND_COMPRESSOR, 12), (SAMPLER, 2)];
 
 /// 12 meter pseudo-parameters across 4 bands — the widest `MeterReadOnly` surface
 /// among Apple's effects, and 6 parameter clumps.
-pub const MULTIBAND_COMPRESSOR: AuRef = AuRef::effect("AUMultibandCompressor", b"mcmp");
+pub(crate) const MULTIBAND_COMPRESSOR: AuRef = AuRef::effect("AUMultibandCompressor", b"mcmp");
 
 /// AUSpatialMixer — in the corpus for two independent reasons, both measured.
 ///
@@ -391,7 +391,7 @@ pub const MULTIBAND_COMPRESSOR: AuRef = AuRef::effect("AUMultibandCompressor", b
 /// runs, while the readback lands on the ramp's end value — the endpoint is
 /// applied and the interpolation discarded. See
 /// `au_render_notify.rs::the_can_ramp_flag_is_a_claim_not_a_guarantee`.
-pub const SPATIAL_MIXER: AuRef = AuRef::mixer("AUSpatialMixer", b"3dem");
+pub(crate) const SPATIAL_MIXER: AuRef = AuRef::mixer("AUSpatialMixer", b"3dem");
 
 /// Directories macOS ships Apple-authored `.aupreset` files in.
 ///
@@ -407,7 +407,7 @@ pub const SPATIAL_MIXER: AuRef = AuRef::mixer("AUSpatialMixer", b"3dem");
 /// `.aupreset` anywhere under `/Library/Audio` or `~/Library/Audio`), because
 /// Apple's units ship presets as in-bundle factory presets, not loose files.
 /// The Tunings tree is where the loose Apple `.aupreset` files actually are.
-pub const APPLE_PRESET_DIRS: &[&str] = &[
+pub(crate) const APPLE_PRESET_DIRS: &[&str] = &[
     "/System/Library/Audio/Tunings/Generic/AU",
     "/System/Library/Audio/Tunings",
 ];
@@ -426,7 +426,7 @@ pub const APPLE_PRESET_DIRS: &[&str] = &[
 /// implementation detail of Apple's spatial-audio tuning system, not a
 /// documented part of macOS — so a caller reports the absence rather than
 /// asserting against it.
-pub fn find_apple_preset_for(unit: &AuRef) -> Option<std::path::PathBuf> {
+pub(crate) fn find_apple_preset_for(unit: &AuRef) -> Option<std::path::PathBuf> {
     let wanted_sub = u32::from_be_bytes(*unit.sub_type);
     for root in APPLE_PRESET_DIRS {
         let found = walk_aupresets(std::path::Path::new(root))
@@ -466,7 +466,7 @@ fn walk_aupresets(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// `AUSpatialMixer`'s `global reverb gain` — the rampable-but-not-ramped subject.
 ///
 /// `(parameter id, range min, range max)`, measured on macOS 15.6.
-pub const SPATIAL_MIXER_RAMP_PARAM: (u32, f32, f32) = (9, -40.0, 40.0);
+pub(crate) const SPATIAL_MIXER_RAMP_PARAM: (u32, f32, f32) = (9, -40.0, 40.0);
 
 /// Per-segment peak envelope: splits each channel-0 block into `segments` equal
 /// spans and reports the peak absolute sample in each.
@@ -475,7 +475,7 @@ pub const SPATIAL_MIXER_RAMP_PARAM: (u32, f32, f32) = (9, -40.0, 40.0);
 /// boundary: a ramp's envelope rises across the segments, a step's is flat. A
 /// single [`peak`] over the whole block cannot tell them apart — both report the
 /// same maximum.
-pub fn envelope(buffer: &[f32], segments: usize) -> Vec<f32> {
+pub(crate) fn envelope(buffer: &[f32], segments: usize) -> Vec<f32> {
     let seg = buffer.len() / segments;
     (0..segments)
         .map(|i| {
@@ -503,10 +503,10 @@ pub fn envelope(buffer: &[f32], segments: usize) -> Vec<f32> {
 /// unimplemented by the units that would most obviously use it. The
 /// counterweight, [`WITHOUT_OFFLINE_RENDER`], is what pins the host's decision
 /// to propagate that refusal as an error rather than flatten it to `false`.
-pub const WITH_OFFLINE_RENDER: &[AuRef] = &[SAMPLER, DLS_SYNTH];
+pub(crate) const WITH_OFFLINE_RENDER: &[AuRef] = &[SAMPLER, DLS_SYNTH];
 
 /// Units measured to refuse `kAudioUnitProperty_OfflineRender` outright.
-pub const WITHOUT_OFFLINE_RENDER: &[AuRef] = &[
+pub(crate) const WITHOUT_OFFLINE_RENDER: &[AuRef] = &[
     DELAY,
     DYNAMICS,
     DISTORTION,
@@ -525,7 +525,7 @@ pub const WITHOUT_OFFLINE_RENDER: &[AuRef] = &[
 /// which is why the host must not flatten a refusal into `false` — doing so would
 /// report that AUMatrixReverb *forbids* in-place operation when it has merely
 /// never mentioned it. [`WITHOUT_IN_PLACE`] carries the refusing side.
-pub const WITH_IN_PLACE: &[(AuRef, bool)] = &[
+pub(crate) const WITH_IN_PLACE: &[(AuRef, bool)] = &[
     (DELAY, true),
     (DYNAMICS, true),
     (DISTORTION, true),
@@ -539,7 +539,7 @@ pub const WITH_IN_PLACE: &[(AuRef, bool)] = &[
 /// Note AUNBandEQ and both reverbs are here while every other effect is in
 /// [`WITH_IN_PLACE`]: the split does not follow unit type, so a host cannot infer
 /// the capability and must ask.
-pub const WITHOUT_IN_PLACE: &[AuRef] = &[
+pub(crate) const WITHOUT_IN_PLACE: &[AuRef] = &[
     MATRIX_REVERB,
     REVERB2,
     N_BAND_EQ,
@@ -555,7 +555,7 @@ pub const WITHOUT_IN_PLACE: &[AuRef] = &[
 /// AUMultiChannelMixer start at 64, AUMatrixReverb and DLSMusicDevice at 127 —
 /// so a host that returned a fabricated constant would satisfy a "non-zero"
 /// check but not this.
-pub const WITH_RENDER_QUALITY: &[(AuRef, u32)] = &[
+pub(crate) const WITH_RENDER_QUALITY: &[(AuRef, u32)] = &[
     (DISTORTION, 64),
     (MATRIX_REVERB, 127),
     (DLS_SYNTH, 127),
@@ -563,7 +563,7 @@ pub const WITH_RENDER_QUALITY: &[(AuRef, u32)] = &[
 ];
 
 /// Units measured to refuse `kAudioUnitProperty_RenderQuality` (-10879).
-pub const WITHOUT_RENDER_QUALITY: &[AuRef] = &[
+pub(crate) const WITHOUT_RENDER_QUALITY: &[AuRef] = &[
     DELAY,
     DYNAMICS,
     REVERB2,
@@ -583,18 +583,18 @@ pub const WITHOUT_RENDER_QUALITY: &[AuRef] = &[
 /// round-trips `u32::MAX`). That is what makes the host-side range check
 /// load-bearing rather than belt-and-braces, and it is why a write-then-read-back
 /// verifier would not substitute for it.
-pub const ENFORCES_RENDER_QUALITY_RANGE: AuRef = DISTORTION;
+pub(crate) const ENFORCES_RENDER_QUALITY_RANGE: AuRef = DISTORTION;
 
 /// `paramErr`, the status [`ENFORCES_RENDER_QUALITY_RANGE`] returns for a
 /// render-quality value above 127.
-pub const PARAM_ERR: i32 = -50;
+pub(crate) const PARAM_ERR: i32 = -50;
 
 /// Units measured to implement the `AudioUnitProcess` push-render selector
 /// (`noErr`, and audio comes out).
 ///
 /// 6 of the 9 corpus effects. AUMatrixReverb and AUReverb2 do not, nor does any
 /// instrument or mixer — see [`WITHOUT_PUSH_RENDER`].
-pub const WITH_PUSH_RENDER: &[AuRef] = &[
+pub(crate) const WITH_PUSH_RENDER: &[AuRef] = &[
     DELAY,
     DYNAMICS,
     DISTORTION,
@@ -610,7 +610,7 @@ pub const WITH_PUSH_RENDER: &[AuRef] = &[
 /// Named so the host's refusal path is exercised against a real refusal rather
 /// than a fabricated one — the same discipline [`REFUSES_MONO`] applies to stream
 /// formats.
-pub const WITHOUT_PUSH_RENDER: &[AuRef] = &[
+pub(crate) const WITHOUT_PUSH_RENDER: &[AuRef] = &[
     MATRIX_REVERB,
     REVERB2,
     SAMPLER,
@@ -630,11 +630,11 @@ pub const WITHOUT_PUSH_RENDER: &[AuRef] = &[
 /// this machine.** `AudioUnitProcessMultiple` is the only AUv2 call that can
 /// carry a second input bus, and nothing implements it in a form that accepts
 /// one.
-pub const IMPLEMENTS_PROCESS_MULTIPLE: AuRef = REVERB2;
+pub(crate) const IMPLEMENTS_PROCESS_MULTIPLE: AuRef = REVERB2;
 
 /// `unimpErr` — the classic Mac OS status an AU returns for a dispatch selector
 /// it does not implement. It is a CarbonCore value, not in `coreaudio-sys`.
-pub const UNIMP_ERR: i32 = -4;
+pub(crate) const UNIMP_ERR: i32 = -4;
 
 /// `kAudioUnitErr_TooManyFramesToProcess`, the AU's own answer to a render wider
 /// than the `MaximumFramesPerSlice` it was initialized at.
@@ -643,7 +643,7 @@ pub const UNIMP_ERR: i32 = -4;
 /// this, not merely *alongside* it: the host must refuse an oversized render
 /// before handing the AU a buffer list whose `mDataByteSize` overstates
 /// storage it actually allocated.
-pub const TOO_MANY_FRAMES: i32 = -10874;
+pub(crate) const TOO_MANY_FRAMES: i32 = -10874;
 
 /// A 440 Hz sine at `amplitude`, `channels` wide, starting at sample `offset`.
 ///
@@ -651,7 +651,7 @@ pub const TOO_MANY_FRAMES: i32 = -10874;
 /// silence cannot reveal — reading its own output as input, or emitting the
 /// previous block — and every such failure still produces zeroes when fed
 /// zeroes.
-pub fn sine(
+pub(crate) fn sine(
     channels: usize,
     frames: usize,
     offset: usize,
@@ -674,13 +674,13 @@ pub fn sine(
 
 /// The widest `SupportedChannelLayoutTags` surface among Apple's effects — 12
 /// entries on each scope, including a duplicate. See [`DUPLICATE_TAG_UNIT`].
-pub const NEW_PITCH: AuRef = AuRef::effect("AUNewPitch", b"nutp");
+pub(crate) const NEW_PITCH: AuRef = AuRef::effect("AUNewPitch", b"nutp");
 /// 8 layout tags on both scopes, all literal widths with no wildcards, and the
 /// only Apple effect that publishes a full `Mono`→`Octagonal` ladder.
-pub const ROUND_TRIP_AAC: AuRef = AuRef::effect("AURoundTripAAC", b"raac");
+pub(crate) const ROUND_TRIP_AAC: AuRef = AuRef::effect("AURoundTripAAC", b"raac");
 /// A second instrument publishing `[Mono, Stereo]`, so the layout-tag assertions
 /// on [`SAMPLER`] are not resting on one AU's table.
-pub const MIDI_SYNTH: AuRef = AuRef::instrument("AUMIDISynth", b"msyn");
+pub(crate) const MIDI_SYNTH: AuRef = AuRef::instrument("AUMIDISynth", b"msyn");
 
 /// Units measured to publish `kAudioUnitProperty_SupportedChannelLayoutTags`, as
 /// `(unit, direction-is-output, expected tags)`.
@@ -694,7 +694,7 @@ pub const MIDI_SYNTH: AuRef = AuRef::instrument("AUMIDISynth", b"msyn");
 /// AUDelay, AUNBandEQ, AUMatrixMixer and the rest, all `-10879` — are in
 /// [`NO_LAYOUT_TAG_UNITS`]. See [`DUPLICATE_TAG_UNIT`] for AUNewPitch's row,
 /// split out on its own.
-pub const LAYOUT_TAG_UNITS: &[(AuRef, bool, &[AuLayoutTag])] = &[
+pub(crate) const LAYOUT_TAG_UNITS: &[(AuRef, bool, &[AuLayoutTag])] = &[
     // AUMatrixReverb: output only; its input scope refuses the property. This is
     // the unit the set/refuse assertions use, because it is the only Apple effect
     // publishing surround tags.
@@ -760,7 +760,7 @@ pub const LAYOUT_TAG_UNITS: &[(AuRef, bool, &[AuLayoutTag])] = &[
 /// Split out from [`LAYOUT_TAG_UNITS`] because AUNewPitch's 12-entry list is the
 /// one row whose point is the *duplicate*, and burying it among the others would
 /// let a reader take it for a typo.
-pub const DUPLICATE_TAG_UNIT: (AuRef, &[AuLayoutTag]) = (
+pub(crate) const DUPLICATE_TAG_UNIT: (AuRef, &[AuLayoutTag]) = (
     NEW_PITCH,
     &[
         AuLayoutTag::Mono,
@@ -786,7 +786,7 @@ pub const DUPLICATE_TAG_UNIT: (AuRef, &[AuLayoutTag]) = (
 /// empty vec, and naming the refusers is what stops that absorption from also
 /// hiding a real regression. If one of these ever grew tags, the emptiness
 /// assertion catches it.
-pub const NO_LAYOUT_TAG_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MIXER];
+pub(crate) const NO_LAYOUT_TAG_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MIXER];
 
 /// `(unit, is_output, configured width, tag)` triples measured to be **accepted**
 /// by `AudioUnitSetProperty(AudioChannelLayout)`.
@@ -795,7 +795,7 @@ pub const NO_LAYOUT_TAG_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MI
 /// tag's channel count against the width already configured on that bus. Every
 /// row here was verified to return `noErr` *and* to read back the tag that was
 /// written. See [`REFUSED_LAYOUT_SETS`] for the mismatches.
-pub const ACCEPTED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
+pub(crate) const ACCEPTED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
     (MATRIX_REVERB, true, 2, AuLayoutTag::Stereo),
     (MATRIX_REVERB, true, 4, AuLayoutTag::Quadraphonic),
     (MATRIX_REVERB, true, 5, AuLayoutTag::AudioUnit5_0),
@@ -814,7 +814,7 @@ pub const ACCEPTED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
 ///   meaningful: without them the acceptance could be luck.
 /// * a tag the AU does **not** publish at all — `AudioUnit_5_1` on
 ///   AUMatrixReverb, `Quadraphonic` on AUSampler.
-pub const REFUSED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
+pub(crate) const REFUSED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
     // Published, wrong width.
     (MATRIX_REVERB, true, 4, AuLayoutTag::AudioUnit5_0),
     (MATRIX_REVERB, true, 5, AuLayoutTag::Quadraphonic),
@@ -832,7 +832,7 @@ pub const REFUSED_LAYOUT_SETS: &[(AuRef, bool, u16, AuLayoutTag)] = &[
 /// host configured. A host that returned `ChannelLayout::from(count)` dressed up as
 /// a tag would also pass this — which is why [`ACCEPTED_LAYOUT_SETS`] then
 /// *changes* the tag and re-reads it.
-pub const CURRENT_LAYOUT_UNITS: &[(AuRef, bool, AuLayoutTag)] = &[
+pub(crate) const CURRENT_LAYOUT_UNITS: &[(AuRef, bool, AuLayoutTag)] = &[
     (MATRIX_REVERB, true, AuLayoutTag::Stereo),
     (MULTI_CHANNEL_MIXER, false, AuLayoutTag::Stereo),
     (MULTI_CHANNEL_MIXER, true, AuLayoutTag::Stereo),
@@ -849,11 +849,11 @@ pub const CURRENT_LAYOUT_UNITS: &[(AuRef, bool, AuLayoutTag)] = &[
 /// this unit *does* publish `[Mono, Stereo]` as supported, so "no tags" cannot be
 /// used to predict it, and a fabricated `Stereo` would be a claim about speaker
 /// order the host cannot back up.
-pub const LAYOUT_NOT_IN_USE_UNITS: &[(AuRef, bool)] = &[(SAMPLER, true)];
+pub(crate) const LAYOUT_NOT_IN_USE_UNITS: &[(AuRef, bool)] = &[(SAMPLER, true)];
 
 /// Units measured to have **no** channel-layout property on either scope
 /// (`kAudioUnitErr_InvalidProperty`, -10879).
-pub const NO_LAYOUT_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MIXER];
+pub(crate) const NO_LAYOUT_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MIXER];
 
 /// `(unit, is_output, element, name)` quadruples measured to publish an element
 /// name.
@@ -863,7 +863,7 @@ pub const NO_LAYOUT_UNITS: &[AuRef] = &[DELAY, N_BAND_EQ, LOWPASS, MATRIX_MIXER]
 /// one of their real input elements — 0..=7 and 0..=63 respectively — so on
 /// macOS 15.6 Apple's mixers publish no element names at all. DLSMusicDevice is
 /// the one Apple unit that does, which is this constant's own weight.
-pub const NAMED_ELEMENTS_APPLE_ONLY: &[(AuRef, bool, u32, &str)] = &[
+pub(crate) const NAMED_ELEMENTS_APPLE_ONLY: &[(AuRef, bool, u32, &str)] = &[
     // Its second output is literally called "unused" — the kind of thing a host
     // should show the user rather than rendering as "Bus 2".
     (DLS_SYNTH, true, 0, "stereo mix"),
@@ -877,7 +877,7 @@ pub const NAMED_ELEMENTS_APPLE_ONLY: &[(AuRef, bool, u32, &str)] = &[
 /// whole reason `element_name` returns the AU's status instead of an empty string:
 /// a nameless bus and a nonexistent bus are different facts, and a host sizing
 /// buffers cannot confuse them.
-pub const UNNAMED_ELEMENTS: &[(AuRef, bool, u32)] = &[
+pub(crate) const UNNAMED_ELEMENTS: &[(AuRef, bool, u32)] = &[
     // Every real input of both Apple mixers.
     (MULTI_CHANNEL_MIXER, false, 0),
     (MULTI_CHANNEL_MIXER, false, 7),
@@ -895,7 +895,7 @@ pub const UNNAMED_ELEMENTS: &[(AuRef, bool, u32)] = &[
 /// AUMatrixMixer has 64 so input 64 is. A host that clamped an out-of-range index
 /// to the last valid bus would return "the name of input 7" for input 8 and pass
 /// any test that only tried 999.
-pub const OUT_OF_RANGE_ELEMENTS: &[(AuRef, bool, u32)] = &[
+pub(crate) const OUT_OF_RANGE_ELEMENTS: &[(AuRef, bool, u32)] = &[
     (MULTI_CHANNEL_MIXER, false, 8),
     (MATRIX_MIXER, false, 64),
     (DLS_SYNTH, true, 2),
@@ -903,15 +903,15 @@ pub const OUT_OF_RANGE_ELEMENTS: &[(AuRef, bool, u32)] = &[
 
 /// The AU status for "the property exists here but holds no value":
 /// `kAudioUnitErr_PropertyNotInUse`.
-pub const PROPERTY_NOT_IN_USE: i32 = -10850;
+pub(crate) const PROPERTY_NOT_IN_USE: i32 = -10850;
 /// The AU status for "no such element": `kAudioUnitErr_InvalidElement`.
-pub const INVALID_ELEMENT: i32 = -10877;
+pub(crate) const INVALID_ELEMENT: i32 = -10877;
 /// The AU status for "no such property on this unit":
 /// `kAudioUnitErr_InvalidProperty`.
-pub const INVALID_PROPERTY: i32 = -10879;
+pub(crate) const INVALID_PROPERTY: i32 = -10879;
 /// The AU status for a value the property will not take:
 /// `kAudioUnitErr_InvalidPropertyValue`.
-pub const INVALID_PROPERTY_VALUE: i32 = -10851;
+pub(crate) const INVALID_PROPERTY_VALUE: i32 = -10851;
 
 /// Every AU installed on this machine, for the exhaustive MIDI-output sweep.
 ///
@@ -938,7 +938,7 @@ pub const INVALID_PROPERTY_VALUE: i32 = -10851;
 /// Reads `PROBE_MANUFACTURER` from `probe_au` rather than re-spelling the
 /// four-char code, so the filter and the registration cannot drift apart.
 /// Pinned by `the_corpus_sweep_never_sees_a_harness_probe`.
-pub fn every_component() -> Vec<AuComponentInfo> {
+pub(crate) fn every_component() -> Vec<AuComponentInfo> {
     tutti_au_host::component::enumerate_components()
         .into_iter()
         .filter(|c| c.manufacturer_code != super::probe_au::PROBE_MANUFACTURER)
@@ -951,7 +951,7 @@ pub fn every_component() -> Vec<AuComponentInfo> {
 /// `(AuRef, BusDirection, …)` cannot be written in one literal without naming the
 /// enum path at every row; this keeps the tables readable and puts the conversion
 /// in one place.
-pub fn direction(is_output: bool) -> BusDirection {
+pub(crate) fn direction(is_output: bool) -> BusDirection {
     if is_output {
         BusDirection::Output
     } else {
@@ -972,7 +972,7 @@ pub fn direction(is_output: bool) -> BusDirection {
 /// several units refuse a narrowing and keep their own, and a caller asserting on
 /// a layout needs to know which it got. `has_input` is taken from the AU's own
 /// probe by way of `Au`, so an instrument is not handed a phantom input.
-pub fn open_at_output_width(
+pub(crate) fn open_at_output_width(
     unit: &AuRef,
     rate: tutti_units::SampleRate,
     block: u32,

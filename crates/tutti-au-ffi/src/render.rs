@@ -60,7 +60,7 @@ pub(crate) struct RenderBufferList {
 }
 
 impl RenderBufferList {
-    pub fn new(channels: ChannelLayout) -> Self {
+    pub(crate) fn new(channels: ChannelLayout) -> Self {
         let bytes = buffer_list_bytes(channels.count() as usize);
         let words = bytes.div_ceil(std::mem::size_of::<AblWord>());
         Self {
@@ -71,7 +71,7 @@ impl RenderBufferList {
 
     /// Point the list at `buffers` (one `Vec<f32>` per channel) and return a
     /// pointer suitable for `AudioUnitRender` or the input render callback.
-    pub fn bind(&mut self, buffers: &mut [Vec<f32>], frames: u32) -> *mut AudioBufferList {
+    pub(crate) fn bind(&mut self, buffers: &mut [Vec<f32>], frames: u32) -> *mut AudioBufferList {
         // `storage` is 8-aligned (see `AblWord`) and `buffer_list_bytes` long,
         // so this cast and every trailing `mBuffers[ch]` write below stay in
         // bounds for `ch < channels.count()`.
@@ -136,7 +136,7 @@ pub(crate) struct RenderScratch {
 }
 
 impl RenderScratch {
-    pub fn new(layout: BusLayout, block_size: u32) -> Self {
+    pub(crate) fn new(layout: BusLayout, block_size: u32) -> Self {
         let out_ch = layout.outputs.count() as usize;
         let in_ch = if layout.has_input {
             layout.inputs.count() as usize
@@ -158,7 +158,7 @@ impl RenderScratch {
         }
     }
 
-    pub fn bind_output(&mut self, frames: u32) -> *mut AudioBufferList {
+    pub(crate) fn bind_output(&mut self, frames: u32) -> *mut AudioBufferList {
         self.list.bind(&mut self.outputs, frames)
     }
 
@@ -169,7 +169,7 @@ impl RenderScratch {
     /// `AudioBufferList` of `Float32`). A plane past the scratch's channels is
     /// not staged, and a scratch channel the caller has no plane for keeps
     /// what it held.
-    pub fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {
+    pub(crate) fn stage_input<S: Sample>(&mut self, input: Planes<'_, S>) {
         for (ch, plane) in input.iter().enumerate() {
             if let Some(dst) = self.inputs.get_mut(ch) {
                 for (d, &s) in dst.iter_mut().zip(plane.samples()) {
@@ -182,7 +182,7 @@ impl RenderScratch {
     /// Converts the rendered block out, up to `output.frames()` frames per
     /// plane, widening for a 64-bit caller. A plane past the scratch's
     /// channels keeps what it held.
-    pub fn emit_output<S: Sample>(&self, output: &mut PlanesMut<'_, '_, S>) {
+    pub(crate) fn emit_output<S: Sample>(&self, output: &mut PlanesMut<'_, '_, S>) {
         for (ch, plane) in output.iter_mut().enumerate() {
             if let Some(src) = self.outputs.get(ch) {
                 for (d, &s) in plane.into_samples_mut().iter_mut().zip(src) {
@@ -195,7 +195,7 @@ impl RenderScratch {
     /// Returns the pre-advance sample position and move the cursor forward by
     /// `frames`. The pre-advance value is what AudioToolbox expects for the
     /// current block's timestamp.
-    pub fn advance(&mut self, frames: u32) -> f64 {
+    pub(crate) fn advance(&mut self, frames: u32) -> f64 {
         let prev = self.sample_position;
         self.sample_position += frames as f64;
         prev
@@ -213,13 +213,13 @@ impl RenderScratch {
     /// `TransportState::set_transport`
     /// publishes. Writing a playhead here would answer that question twice, in
     /// two places, with no way for an AU to tell which clock it received.
-    pub fn reset_position(&mut self) {
+    pub(crate) fn reset_position(&mut self) {
         self.sample_position = 0.0;
     }
 
     /// The position the next block will be stamped with.
     #[cfg(test)]
-    pub fn position(&self) -> f64 {
+    pub(crate) fn position(&self) -> f64 {
         self.sample_position
     }
 }
