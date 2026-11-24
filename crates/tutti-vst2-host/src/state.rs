@@ -11,8 +11,6 @@
 //!   program, serialized in index order and replayed on restore. Loses any
 //!   non-parameter state the plugin holds, but works for a plugin with no chunk
 //!   mechanism.
-//! - `b"CHK\0"` and `b"PRM\0"` are the same shapes written before the program
-//!   index was carried, still read, with no program set.
 //!
 //! **Program chunk, not bank chunk, and why.** `aeffect.h` (authority 3) says
 //! `effFlagsProgramChunks` means "program data is handled in formatless chunks", and that
@@ -35,31 +33,18 @@ use crate::loaded::Vst2Loaded;
 /// State format tags:
 /// - `b"CHK\x01"` = chunk-based state of the current program, with its index
 /// - `b"PRM\x01"` = parameter-based state, with the program index
-/// - `b"CHK\0"`, `b"PRM\0"` = the same with no program index (older states)
 const STATE_HEADER_CHUNK: [u8; 4] = *b"CHK\x01";
 const STATE_HEADER_PARAMS: [u8; 4] = *b"PRM\x01";
-const STATE_HEADER_CHUNK_NO_PROGRAM: [u8; 4] = *b"CHK\0";
-const STATE_HEADER_PARAMS_NO_PROGRAM: [u8; 4] = *b"PRM\0";
 
 const TAG_CHUNK: usize = 0;
-const TAG_PARAMS: usize = 1;
-const TAG_CHUNK_NO_PROGRAM: usize = 2;
 
-/// How a VST2 state blob opens: by one of the four tags, and nothing else.
+/// How a VST2 state blob opens: by one of the two tags, and nothing else.
 ///
 /// The VST2 spec has no state container beyond `effGetChunk`/`effSetChunk`'s opaque bytes
 /// (`aeffect.h`), and a plugin without chunks has no stream at all, so every state this host
 /// writes is tagged and an untagged blob is no state of this host's: it is refused rather
 /// than handed to `effSetChunk`.
-const FRAME: StateFrame = StateFrame::new(
-    "VST2",
-    &[
-        &STATE_HEADER_CHUNK,
-        &STATE_HEADER_PARAMS,
-        &STATE_HEADER_CHUNK_NO_PROGRAM,
-        &STATE_HEADER_PARAMS_NO_PROGRAM,
-    ],
-);
+const FRAME: StateFrame = StateFrame::new("VST2", &[&STATE_HEADER_CHUNK, &STATE_HEADER_PARAMS]);
 
 /// The program index a state records when the plugin has no programs to select.
 const NO_PROGRAM: i32 = -1;
@@ -71,15 +56,15 @@ const NO_PROGRAM: i32 = -1;
 pub(crate) enum StateHeader<'a> {
     /// A chunk payload — hand straight to `load_preset_data`, after the program is set.
     Chunk {
-        /// The program to select first; `None` for a state that predates the index.
-        program: Option<i32>,
+        /// The program to select first.
+        program: i32,
         payload: &'a [u8],
     },
     /// A parameter snapshot: `count` normalized f32 values follow,
     /// carried in `values` (already length-validated against `count`).
     Params {
-        /// The program to select first; `None` for a state that predates the index.
-        program: Option<i32>,
+        /// The program to select first.
+        program: i32,
         count: i32,
         values: &'a [u8],
     },
@@ -92,16 +77,10 @@ pub(crate) enum StateHeader<'a> {
 /// Errors mirror the `write_state` early-returns exactly.
 pub(crate) fn parse_state_header(data: &[u8]) -> Result<StateHeader<'_>> {
     let (tag, body) = FRAME.open(data)?;
-    let chunk = tag == TAG_CHUNK || tag == TAG_CHUNK_NO_PROGRAM;
-    let with_program = tag == TAG_CHUNK || tag == TAG_PARAMS;
     let mut reader = FRAME.reader(body);
-    let program = if with_program {
-        Some(reader.i32_le("program index")?)
-    } else {
-        None
-    };
+    let program = reader.i32_le("program index")?;
 
-    if chunk {
+    if tag == TAG_CHUNK {
         let payload = reader.take_rest();
         if payload.is_empty() {
             return Err(reader.invalid("chunk", "empty").into());
@@ -258,9 +237,8 @@ impl Vst2Loaded {
         // snapshot is its values. A recorded index the plugin does not have (or `-1`, for a
         // plugin that had no programs) selects nothing.
         let (StateHeader::Chunk { program, .. } | StateHeader::Params { program, .. }) = &state;
-        if let Some(program) = *program
-            && (0..self.instance.read_num_programs()).contains(&program)
-        {
+        let program = *program;
+        if (0..self.instance.read_num_programs()).contains(&program) {
             self.instance
                 .with_preset_bracket(main, |instance| instance.change_preset(main, program));
         }
@@ -339,20 +317,7 @@ mod tests {
         assert_eq!(
             parse_state_header(&data).unwrap(),
             StateHeader::Chunk {
-                program: Some(3),
-                payload: &[1, 2, 3, 4]
-            }
-        );
-    }
-
-    #[test]
-    fn a_state_without_a_program_index_is_still_read() {
-        let mut data = STATE_HEADER_CHUNK_NO_PROGRAM.to_vec();
-        data.extend_from_slice(&[1, 2, 3, 4]);
-        assert_eq!(
-            parse_state_header(&data).unwrap(),
-            StateHeader::Chunk {
-                program: None,
+                program: 3,
                 payload: &[1, 2, 3, 4]
             }
         );
@@ -375,7 +340,8 @@ mod tests {
     #[test]
     fn params_missing_count() {
         // Header present but fewer than 4 count bytes follow.
-        let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
+        let mut data = STATE_HEADER_PARAMS.to_vec();
+        data.extend_from_slice(&0i32.to_le_bytes());
         data.extend_from_slice(&[0, 0]);
         let err = parse_state_header(&data).unwrap_err();
         assert!(matches!(
@@ -389,7 +355,8 @@ mod tests {
 
     #[test]
     fn params_negative_count() {
-        let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
+        let mut data = STATE_HEADER_PARAMS.to_vec();
+        data.extend_from_slice(&0i32.to_le_bytes());
         data.extend_from_slice(&(-1i32).to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
         assert!(
@@ -402,7 +369,8 @@ mod tests {
     fn params_size_mismatch() {
         // count says 2 params (needs 4 + 2*4 = 12 bytes payload) but only 1
         // value's worth of bytes follow.
-        let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
+        let mut data = STATE_HEADER_PARAMS.to_vec();
+        data.extend_from_slice(&0i32.to_le_bytes());
         data.extend_from_slice(&2i32.to_le_bytes());
         data.extend_from_slice(&1.0f32.to_le_bytes());
         let err = parse_state_header(&data).unwrap_err();
@@ -417,7 +385,8 @@ mod tests {
 
     #[test]
     fn params_valid_roundtrip() {
-        let mut data = STATE_HEADER_PARAMS_NO_PROGRAM.to_vec();
+        let mut data = STATE_HEADER_PARAMS.to_vec();
+        data.extend_from_slice(&0i32.to_le_bytes());
         data.extend_from_slice(&2i32.to_le_bytes());
         data.extend_from_slice(&0.25f32.to_le_bytes());
         data.extend_from_slice(&0.75f32.to_le_bytes());
@@ -428,7 +397,7 @@ mod tests {
                 count,
                 values,
             } => {
-                assert_eq!(program, None);
+                assert_eq!(program, 0);
                 assert_eq!(count, 2);
                 assert_eq!(values.len(), 8);
                 assert_eq!(f32::from_le_bytes(values[0..4].try_into().unwrap()), 0.25);
@@ -450,7 +419,7 @@ mod tests {
                 count,
                 values,
             } => {
-                assert_eq!((program, count, values.len()), (Some(5), 1, 4));
+                assert_eq!((program, count, values.len()), (5, 1, 4));
             }
             other => panic!("expected Params, got {other:?}"),
         }

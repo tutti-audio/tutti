@@ -589,7 +589,8 @@ fn chunk_state_round_trips() {
     // Give the plugin a chunk to save by restoring one first — the probe's
     // chunk starts empty, and an empty chunk legitimately falls back to a
     // parameter snapshot.
-    let mut seeded = b"CHK\0".to_vec();
+    let mut seeded = b"CHK\x01".to_vec();
+    seeded.extend_from_slice(&(-1i32).to_le_bytes()); // no program to select
     seeded.extend_from_slice(b"probe-state-v1");
     instance
         .load_state(
@@ -624,7 +625,7 @@ fn chunk_state_round_trips() {
 /// `tutti-vst2-ffi`'s `failed_chunk_save_is_distinguishable_from_an_empty_one`.)
 ///
 /// Reached via `NO_CHUNKS` rather than an emptied chunk: the probe seeds its
-/// chunk non-empty and `set_state` rejects an empty `CHK\0` payload as
+/// chunk non-empty and `set_state` rejects an empty `CHK\x01` payload as
 /// malformed, so there is no route to an empty chunk on a chunk-capable
 /// plugin. Both land on the same host branch.
 #[test]
@@ -654,7 +655,8 @@ fn restoring_a_chunk_into_a_chunkless_plugin_goes_to_the_plugin() {
     let _guard = lock_probe();
     let mut instance = load_probe_with(&[("TUTTI_VST2_PROBE_NO_CHUNKS", "1")]);
 
-    let mut chunk = b"CHK\0".to_vec();
+    let mut chunk = b"CHK\x01".to_vec();
+    chunk.extend_from_slice(&(-1i32).to_le_bytes()); // no program to select
     chunk.extend_from_slice(b"state-for-a-plugin-that-cannot-take-it");
 
     // The probe answers `effSetChunk` with 0, as a JUCE plugin does after a successful load:
@@ -757,14 +759,15 @@ fn state_restore_rejects_malformed_blobs() {
         instance
             .load_state(
                 main_thread(),
-                b"CHK\0",
+                b"CHK\x01\xff\xff\xff\xff",
                 tutti_plugin_types::StateUse::Project
             )
             .is_err(),
         "empty chunk payload"
     );
 
-    let mut bad = b"PRM\0".to_vec();
+    let mut bad = b"PRM\x01".to_vec();
+    bad.extend_from_slice(&(-1i32).to_le_bytes()); // no program to select
     bad.extend_from_slice(&2i32.to_le_bytes()); // claims 2 params
     bad.extend_from_slice(&0.5f32.to_le_bytes()); // only 1 value follows
     assert!(
