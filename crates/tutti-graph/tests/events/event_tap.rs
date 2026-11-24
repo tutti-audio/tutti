@@ -1813,3 +1813,179 @@ fn a_lone_source_is_copied_whole_and_a_command_is_merged_beside_it() {
     assert_eq!(drain(&mut raw), want, "what the tap carried");
     assert_eq!(r.exec.dropped_event_count(), 0);
 }
+
+/// A node with two event inputs and a declared input bound, which records
+/// what it is handed at each input.
+#[derive(Clone)]
+struct TwoIn {
+    heard: [tutti_fixtures::Record<TapEvent>; 2],
+    bound: u32,
+}
+
+impl TwoIn {
+    const SHAPE: Shape = Shape::EMPTY.events(2, 0);
+    const IN: [tutti_graph::InEvents; 2] = [
+        Self::SHAPE.event_input(0).expect("declared"),
+        Self::SHAPE.event_input(1).expect("declared"),
+    ];
+}
+
+impl Node for TwoIn {
+    fn shape(&self) -> Shape {
+        Self::SHAPE.event_input_capacity(std::num::NonZeroU32::new(self.bound).expect("a bound"))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, cx: &Cx<'_>, io: Io<'_>) -> Status {
+        for (p, heard) in self.heard.iter().enumerate() {
+            let mut heard = heard.lock().unwrap();
+            for e in io.events(Self::IN[p]) {
+                if let EventKind::Midi(ump) = e.kind {
+                    heard.push(TapEvent {
+                        frame: cx.env.frame_at(e.offset),
+                        ump,
+                    });
+                }
+            }
+        }
+        Status::Silent
+    }
+    fn reset(&mut self) {}
+}
+
+/// What one block brings a node with two inputs and a bound: per port a source
+/// of 64 events (one a frame, a note-off on the last frame) and 128 scheduled
+/// commands, two a frame; 384 in all against a bound of 360 that is larger
+/// than a view holds of one port (a source priced 64 and 256 of command room).
+/// Returns what the node was handed and what each input's tap carried, per
+/// port, and the executor's dropped count.
+fn two_bounded(workers: usize) -> (Vec<Vec<TapEvent>>, Vec<Vec<TapEvent>>, u64) {
+    const BOUND: u32 = 360;
+    let mut r = rig(workers, workers > 1, 40);
+    for p in 0..2u64 {
+        let base = 64 * p as u32;
+        let mut events: Vec<(u64, Ump)> =
+            (0..63u32).map(|f| (u64::from(f), on(base + f))).collect();
+        events.push((63, off(base)));
+        let mut s = Script::new(events);
+        s.cap = 64;
+        r.ed.insert(NodeKey(10 + p), "script", Unforkable(s));
+    }
+    // An unrelated pair, so the graph has tasks to spread.
+    script(&mut r, 30, Script::new(vec![(1, on(1))]));
+    r.ed.insert(
+        NodeKey(31),
+        "probe",
+        ForkByClone(Probe {
+            heard: tutti_fixtures::Record::new(),
+            ports: 1,
+            capacity: 0,
+            audible: false,
+        }),
+    );
+    r.ed.spec_mut().connect_events(
+        EventInputPort::new(NodeKey(31), 0),
+        EventEdge::Direct(port(30, 0)),
+    );
+    let heard = [tutti_fixtures::Record::new(), tutti_fixtures::Record::new()];
+    r.ed.insert(
+        NodeKey(20),
+        "two",
+        Unforkable(TwoIn {
+            heard: heard.clone(),
+            bound: BOUND,
+        }),
+    );
+    let mut taps = Vec::new();
+    for p in 0..2u16 {
+        let input = EventInputPort::new(NodeKey(20), p);
+        r.ed.spec_mut()
+            .connect_events(input, EventEdge::Direct(port(10 + u64::from(p), 0)));
+        taps.push(
+            r.ed.open_event_tap(
+                EventTapId::of(u64::from(p) + 1),
+                input,
+                EventTapOptions::new(EventCapacity::of(512)).align(TapAlign::Raw),
+            )
+            .expect("the input exists"),
+        );
+    }
+    commit(&mut r);
+    for p in 0..2u16 {
+        for i in 0..128u32 {
+            r.ed.schedule(
+                At::Frame(Frame::new(u64::from(i % 64))),
+                EventInputPort::new(NodeKey(20), p),
+                Scheduled::Event(EventKind::Midi(on(10 + (i % 50)))),
+            )
+            .expect("room");
+        }
+    }
+    assert_eq!(r.exec.is_parallel(), workers > 1);
+    render(&mut r, &[64], 64);
+
+    // The merge the node is owed, from the rule alone: the sources of a port
+    // are its edge (index 1) and its commands (index 2) below the other
+    // port's; ordered by frame, ties to the lower source; of `BOUND` events,
+    // every note-off lands and the others take what is left.
+    let mut all: Vec<(u64, usize, Ump)> = Vec::new();
+    for p in 0..2usize {
+        let base = 64 * p as u32;
+        for f in 0..63u32 {
+            all.push((u64::from(f), 3 * p + 1, on_port(on(base + f), 0)));
+        }
+        all.push((63, 3 * p + 1, on_port(off(base), 0)));
+        for i in 0..128u32 {
+            all.push((u64::from(i % 64), 3 * p + 2, on(10 + (i % 50))));
+        }
+    }
+    all.sort_by_key(|&(f, src, _)| (f, src));
+    assert_eq!(all.len(), 384);
+    let offs = all.iter().filter(|e| e.2.is_note_off()).count();
+    let mut others = BOUND as usize - offs;
+    let mut owed: Vec<Vec<TapEvent>> = vec![Vec::new(); 2];
+    let mut kept = 0;
+    for &(f, src, ump) in &all {
+        let lands = kept < BOUND as usize
+            && (ump.is_note_off() || {
+                let fits = others > 0;
+                others = others.saturating_sub(1);
+                fits
+            });
+        if lands {
+            kept += 1;
+            owed[src / 3].push(at(f, ump));
+        }
+    }
+    assert_eq!(kept, BOUND as usize);
+    let handed: Vec<Vec<TapEvent>> = heard.iter().map(|h| h.lock().unwrap().to_vec()).collect();
+    assert_eq!(
+        handed.iter().map(Vec::len).sum::<usize>(),
+        BOUND as usize,
+        "events handed in all, {workers} workers"
+    );
+    assert_eq!(handed, owed, "what the node was handed, {workers} workers");
+    assert_eq!(
+        r.exec.dropped_event_count(),
+        384 - u64::from(BOUND),
+        "the cut is counted once"
+    );
+    let carried: Vec<Vec<TapEvent>> = taps.iter_mut().map(drain).collect();
+    (handed, carried, r.exec.dropped_event_count())
+}
+
+/// **A node's input bound is over all its inputs together**, whatever one
+/// view holds: a block that brings 384 events to two inputs bounded at 360
+/// hands the node 360 in all, the first in frame order with the note-offs
+/// kept, and counts 24; the taps carry what it was handed, on the pool too.
+#[test]
+fn an_input_bound_cuts_over_all_inputs_together() {
+    let (handed, carried, _) = two_bounded(1);
+    assert_eq!(handed, carried, "what each input's tap carried");
+    let total: usize = handed.iter().map(Vec::len).sum();
+    assert_eq!(total, 360);
+    for workers in [2, 3] {
+        let pooled = two_bounded(workers);
+        assert_eq!(pooled.0, handed, "{workers} workers");
+        assert_eq!(pooled.1, carried, "{workers} workers");
+    }
+}

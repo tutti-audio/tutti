@@ -709,6 +709,10 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
         },
         |port, v| views[usize::from(port)] = Some(v),
     );
+    debug_assert!(
+        views[..ports].iter().all(Option::is_some),
+        "every input has a view: the loops below pair views with ports by position"
+    );
     let arrived = (0..ports).any(|p| !sourced[p].is_empty() || !sourced_params[p].is_empty());
     for view in views[..ports].iter_mut().flatten() {
         view.clear();
@@ -757,26 +761,33 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
     let total: usize = (0..ports)
         .map(|p| sources(p).iter().map(|s| s.len()).sum::<usize>())
         .sum();
-    debug_assert!(
-        views[..ports].iter().all(Option::is_some),
-        "every input has a view"
-    );
     let mut lost = 0u32;
     match bound.filter(|b| total > b.get() as usize) {
         Some(bound) => {
-            // The same walk for every port: each pass keeps its own.
+            // The bound is over all the node's inputs together, so every
+            // pass walks the same sources with the same room, `bound`, and
+            // keeps its own port's share: the walk's loss is one fact, the
+            // same from each pass (the first is taken, the others checked).
+            // A share fits its view: its sources are the flushed events, the
+            // port's slot and its commands, which the view's room holds
+            // whole (`stage.rs`), so a refused push is a bug; it is counted
+            // as lost all the same.
             let mut all: [&[Event]; 3 * MAX_PORTS] = [&[]; 3 * MAX_PORTS];
             for port in 0..ports {
                 all[3 * port..3 * port + 3].copy_from_slice(&sources(port));
             }
+            let mut cut = None;
+            let mut refused = 0u32;
             for (port, view) in views.iter_mut().flatten().enumerate() {
-                let room = (bound.get() as usize).min(view.events.capacity());
-                lost = merge_walk(&all[..3 * ports], room, |i, e| {
-                    if i / 3 == port {
-                        view.events.push(e);
+                let dropped = merge_walk(&all[..3 * ports], bound.get() as usize, |i, e| {
+                    if i / 3 == port && !view.events.push(e) {
+                        refused += 1;
                     }
                 });
+                debug_assert_eq!(*cut.get_or_insert(dropped), dropped, "one walk, one loss");
             }
+            debug_assert_eq!(refused, 0, "a port's share fits its view");
+            lost += cut.unwrap_or(0) + refused;
         }
         None => {
             for (port, view) in views.iter_mut().flatten().enumerate() {
