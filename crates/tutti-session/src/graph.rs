@@ -2047,19 +2047,39 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The nodes whose event output gained a receiver, once the executor has
-    /// applied the commit that carried it: the session tells a node that
-    /// cannot see its own edges, and a block that reads the telling runs the
-    /// new plan. The editor hands a commit back only after the executor
-    /// applied it and in the order sent, so nothing in flight means every
-    /// commit sent, this edit's included, is applied. Until then the nodes
-    /// wait (a stopped engine never applies; the list holds each node once
-    /// and forgets a removed one).
+    /// The nodes whose event output gained a receiver, and every node that feeds
+    /// them through event edges (a clip behind the transform it feeds), once
+    /// the executor has applied the commit that carried it: the session tells a
+    /// node that cannot see its own edges, and a block that reads the telling
+    /// runs the new plan. The editor hands a commit back only after the
+    /// executor applied it and in the order sent, so nothing in flight means
+    /// every commit sent, this edit's included, is applied; a session that
+    /// keeps a commit in flight on every update delays the telling until an
+    /// update finds none. Until then the nodes wait (a stopped engine never
+    /// applies; the list holds each node once and forgets a removed one).
     pub(crate) fn take_applied_receivers(&mut self) -> Vec<NodeKey> {
-        if self.editor.in_flight() == 0 {
-            return std::mem::take(&mut self.unapplied);
+        if self.editor.in_flight() != 0 {
+            return Vec::new();
         }
-        Vec::new()
+        let mut seen: std::collections::BTreeSet<NodeKey> =
+            std::mem::take(&mut self.unapplied).into_iter().collect();
+        let mut stack: Vec<NodeKey> = seen.iter().copied().collect();
+        // Over the spec as applied: a source wired upstream in the same edit is
+        // found, and a feedback edge is walked once.
+        while let Some(node) = stack.pop() {
+            let feeding = self
+                .editor
+                .spec()
+                .events
+                .range(EventInputPort::new(node, 0)..=EventInputPort::new(node, u16::MAX))
+                .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()));
+            for from in feeding {
+                if seen.insert(from) {
+                    stack.push(from);
+                }
+            }
+        }
+        seen.into_iter().collect()
     }
 
     /// Takes the event edge `from -> to` out: whether it was there.

@@ -3,11 +3,15 @@
 //! commit that holds the new edge is sent, and for a sink replaced at its key.
 
 use crate::common::{MF, Seen, blocks, note, offline, play, tap};
+use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, InterleavedMut};
 use tutti_fixtures::midi;
 use tutti_graph::{EventInputPort, Fade, NodeKey, TransportPosition};
 use tutti_midi_runtime::{ClipEvents, MidiClipNode, TimedMidiEvent};
-use tutti_session::{Feeder, Key, Replacement, Session};
+use tutti_music::MeterMap;
+use tutti_session::{Feeder, Key, LoadedTrack, Replacement, Session};
+use tutti_tempo::TempoMap;
+use tutti_timeline::ProjectMeter;
 use tutti_ump::{Address, CCNumber, MidiChannel, MidiGroup, Ump};
 use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Samples};
 
@@ -232,4 +236,79 @@ fn the_setup_is_sent_after_the_executor_applied_the_wiring() {
     tick(&mut side, 3);
     let got: Vec<Ump> = heard(&heard_b).into_iter().map(|e| e.1).collect();
     assert_eq!(got, vec![program(1), volume(), program(5)]);
+}
+
+/// A track of `headed_clip` on a 120 BPM map, as `play_track` takes it.
+fn track() -> LoadedTrack {
+    LoadedTrack {
+        events: Arc::new(headed_clip()),
+        tempo: Arc::new(TempoMap::constant(Bpm::of(120.0)).expect("a tempo")),
+        meter: Arc::new(ProjectMeter::new(MeterMap::default())),
+    }
+}
+
+/// **The session's own clip path tells the clip too**: `play_track` puts the
+/// clip's transform between the clip and its target, so a target swapped at its
+/// key (a new unit at the key) is the transform's new receiver, and the clip
+/// upstream sends the new unit the setup, header then chase.
+#[test]
+fn a_played_tracks_target_replaced_at_its_key_gets_the_setup() {
+    let mut s = offline();
+    let (target, seen) = tap(&mut s);
+    s.midi().play_track(target, &track()).expect("plays");
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let _ = s.update();
+    play(&s);
+    blocks(&mut s, 2);
+    let heard_before = heard(&seen).len();
+    assert_eq!(heard_before, 3, "header, header, chase at the start");
+    s.graph()
+        .replace(
+            target,
+            Replacement::new(crate::common::Tap(seen.clone())).fade(Fade::new(Samples::new(0))),
+        )
+        .expect("the target is there");
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let at = START + 3 * BLOCK;
+    assert_eq!(
+        heard(&seen)[heard_before..],
+        [(at, program(1)), (at, volume()), (at, program(5))]
+    );
+}
+
+/// **A playing clip moved to another target sends it the setup**:
+/// `retarget` re-feeds the clip's transform into the new target, which has
+/// not heard the clip.
+#[test]
+fn a_played_clip_retargeted_while_playing_sends_the_new_target_the_setup() {
+    let mut s = offline();
+    let (first, first_seen) = tap(&mut s);
+    let (second, second_seen) = tap(&mut s);
+    s.midi().play_track(first, &track()).expect("plays");
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let _ = s.update();
+    play(&s);
+    blocks(&mut s, 2);
+    let clip = s.midi().clip(first).expect("the track's clip").erase();
+    s.midi().retarget(clip, second).expect("a target");
+    let _ = s.update();
+    blocks(&mut s, 1);
+    assert_eq!(
+        heard(&second_seen),
+        vec![],
+        "applied, the clip not yet told"
+    );
+    let _ = s.update();
+    blocks(&mut s, 1);
+    let at = START + 3 * BLOCK;
+    assert_eq!(
+        heard(&second_seen),
+        [(at, program(1)), (at, volume()), (at, program(5))]
+    );
+    assert_eq!(heard(&first_seen).len(), 3, "the old target hears no more");
 }
