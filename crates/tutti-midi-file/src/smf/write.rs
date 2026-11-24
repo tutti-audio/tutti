@@ -140,7 +140,7 @@ fn encode(event: &FileEvent) -> Option<Encoded> {
             let (kind, data) = meta_parts(meta);
             Some(Encoded::Other(counted(&[0xFF, kind], &data)))
         }
-        FileEvent::Message(_) | FileEvent::Unknown(_) => None,
+        FileEvent::Message(_) => None,
     }
 }
 
@@ -183,9 +183,9 @@ fn body(track: &Track, leads: &[Lead]) -> Vec<u8> {
             std::iter::once(0).chain(counted(&[0xFF, kind], &data))
         })
         .collect();
-    let (out, _, at) = track.events.iter().fold((opening, None, Tick(0)), append);
+    let (out, _, at) = track.events().iter().fold((opening, None, Tick(0)), append);
     out.into_iter()
-        .chain(delta(at, track.end))
+        .chain(delta(at, track.end()))
         .chain([0xFF, 0x2F, 0x00])
         .collect()
 }
@@ -208,7 +208,7 @@ fn chunk(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
 /// # Errors
 ///
 /// [`TracksError::TooLarge`] for an event or a chunk past its length field. A
-/// caller has checked the rest ([`MidiFile`](crate::MidiFile)'s constructor):
+/// caller has checked the rest ([`StandardMidiFile`](crate::StandardMidiFile)'s constructor):
 /// events in order, a delta that fits the wire's 28 bits, only group-0 MIDI
 /// 1.0 messages, at most 65535 tracks.
 pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), TracksError> {
@@ -219,7 +219,7 @@ pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), Track
             // The delta of 0, `FF`, the type, the length, the data.
             total += 1 + counted_len(2, lead.wire().1.len())? as u64;
         }
-        for (tick, event) in &track.events {
+        for (tick, event) in track.events() {
             total += vlq_len(tick.0.saturating_sub(at.0)) as u64;
             at = *tick;
             let bytes = match event {
@@ -247,12 +247,12 @@ pub(crate) fn measure(tracks: &[Track], leads: &[Vec<Lead>]) -> Result<(), Track
                     running = None;
                     counted_len(2, meta_parts(meta).1.len())?
                 }
-                FileEvent::Message(_) | FileEvent::Unknown(_) => 0,
+                FileEvent::Message(_) => 0,
             };
             total += bytes as u64;
         }
         // The End of Track: its delta, `FF 2F 00`.
-        total += (vlq_len(track.end.0.saturating_sub(at.0)) + 3) as u64;
+        total += (vlq_len(track.end().0.saturating_sub(at.0)) + 3) as u64;
         if total > u64::from(u32::MAX) {
             return Err(TracksError::TooLarge);
         }

@@ -4,7 +4,8 @@ use tutti_ump::{MidiChannel, U7};
 
 use super::{
     Ack, AckStatus, CiAction, CiDeviceId, CiHeader, CiMessage, Decoded, Muid, Nak, NakStatus,
-    ProcessAction, ProfileAction, ProfileChannels, ProfileTarget, TimeoutWait, Unread,
+    ProcessAction, ProfileAction, ProfileChannels, ProfileFormat, ProfileTarget, TimeoutWait,
+    Unread,
 };
 
 /// The source of the messages a test decodes.
@@ -172,15 +173,13 @@ pub(super) fn profile_table(
         &Decoded::Message(if enabled {
             CiMessage::ProfileEnabled {
                 source: header.source,
-                ci_version: header.ci_version,
-                target,
+                format: ProfileFormat::current(target),
                 profile,
             }
         } else {
             CiMessage::ProfileDisabled {
                 source: header.source,
-                ci_version: header.ci_version,
-                target,
+                format: ProfileFormat::current(target),
                 profile,
             }
         }),

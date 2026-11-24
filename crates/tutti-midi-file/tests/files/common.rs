@@ -1,8 +1,9 @@
 //! What the file tests share: a track of events and a note.
 
 use tutti_midi_file::{
-    FileEvent, Layout, LeadTrack, Meta, MetricalSequences, MetricalView, MidiFile, Pattern,
-    ReadRepair, SmfDivision, SysEx, Tick, Timebase, Track, TracksError,
+    ClipFile, ClipReadError, FileEvent, Layout, LeadTrack, Meta, MetricalSequences, MetricalView,
+    Pattern, ReadRepair, SmfDivision, SmfReadError, StandardMidiFile, SysEx, Tick, Timebase, Track,
+    TracksError,
 };
 use tutti_ump::{Message, MidiChannel, NoteNumber, U7, Voice1};
 
@@ -22,12 +23,12 @@ pub fn note(channel: u8, key: u8) -> FileEvent {
 
 /// The metrical view of `file`; a test of a metrical file reads its beats, tempo map and clip
 /// through it.
-pub fn metrical(file: &MidiFile) -> MetricalView<'_> {
+pub fn metrical(file: &StandardMidiFile) -> MetricalView<'_> {
     file.timebase().metrical().expect("a metrical file")
 }
 
 /// The independent sequences of `file`, a metrical file of format 2 or above.
-pub fn sequences(file: &MidiFile) -> MetricalSequences<'_> {
+pub fn sequences(file: &StandardMidiFile) -> MetricalSequences<'_> {
     let Timebase::MetricalSequences(view) = file.timebase() else {
         panic!("a metrical file of independent sequences");
     };
@@ -45,8 +46,8 @@ pub fn start(bytes: &[u8]) -> SysEx {
 }
 
 /// A format 0 file of `track`.
-pub fn format0(division: SmfDivision, track: Track) -> Result<MidiFile, TracksError> {
-    MidiFile::smf(division, Layout::Format0(LeadTrack::new(track)))
+pub fn format0(division: SmfDivision, track: Track) -> Result<StandardMidiFile, TracksError> {
+    StandardMidiFile::new(division, Layout::Format0(LeadTrack::new(track)))
 }
 
 /// A format 1 file of `tracks`, the first of which is its lead.
@@ -54,14 +55,17 @@ pub fn format0(division: SmfDivision, track: Track) -> Result<MidiFile, TracksEr
 /// # Panics
 ///
 /// If `tracks` is empty.
-pub fn format1(division: SmfDivision, mut tracks: Vec<Track>) -> Result<MidiFile, TracksError> {
+pub fn format1(
+    division: SmfDivision,
+    mut tracks: Vec<Track>,
+) -> Result<StandardMidiFile, TracksError> {
     let lead = LeadTrack::new(tracks.remove(0));
-    MidiFile::smf(division, Layout::Format1 { lead, tracks })
+    StandardMidiFile::new(division, Layout::Format1 { lead, tracks })
 }
 
 /// A format 2 file of `tracks`, each a pattern numbered by its place.
-pub fn format2(division: SmfDivision, tracks: Vec<Track>) -> Result<MidiFile, TracksError> {
-    MidiFile::smf(
+pub fn format2(division: SmfDivision, tracks: Vec<Track>) -> Result<StandardMidiFile, TracksError> {
+    StandardMidiFile::new(
         division,
         Layout::Format2 {
             copyright: None,
@@ -158,7 +162,7 @@ pub fn without_defaults(bytes: &[u8]) -> Vec<u8> {
 
 /// `file`'s changes a read made other than giving it the default tempo and
 /// time signature.
-pub fn placed(file: &MidiFile) -> Vec<ReadRepair> {
+pub fn placed(file: &StandardMidiFile) -> Vec<ReadRepair> {
     file.repairs()
         .iter()
         .filter(|n| {
@@ -174,7 +178,7 @@ pub fn placed(file: &MidiFile) -> Vec<ReadRepair> {
 /// The events of track `track` of `file`, a read file, without the Set Tempo and
 /// Time Signature the read inserted there ([`ReadRepair::DefaultTempo`],
 /// [`ReadRepair::DefaultTimeSignature`]): the first of each kind at tick 0.
-pub fn unspecified(file: &MidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
+pub fn unspecified(file: &StandardMidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
     let inserted = |wanted: ReadRepair| file.repairs().contains(&wanted);
     let mut tempo = inserted(ReadRepair::DefaultTempo { track });
     let mut meter = inserted(ReadRepair::DefaultTimeSignature { track });
@@ -199,13 +203,25 @@ pub fn unspecified(file: &MidiFile, track: usize) -> Vec<(Tick, FileEvent)> {
         .collect()
 }
 
-/// Reads `bytes` as a MIDI file: the one `MidiFile::read`, from an owned copy.
-pub fn read_bytes(bytes: impl AsRef<[u8]>) -> Result<MidiFile, tutti_midi_file::ReadError> {
-    MidiFile::read(bytes.as_ref().to_vec())
+/// Reads `bytes` as a Standard MIDI File.
+pub fn read_bytes(bytes: impl AsRef<[u8]>) -> Result<StandardMidiFile, SmfReadError> {
+    StandardMidiFile::from_bytes(bytes.as_ref())
+}
+
+/// Reads `bytes` as a Clip File.
+pub fn read_clip(bytes: impl AsRef<[u8]>) -> Result<ClipFile, ClipReadError> {
+    ClipFile::from_bytes(bytes.as_ref())
 }
 
 /// `file` written to a `Vec`.
-pub fn encoded(file: &MidiFile) -> Vec<u8> {
+pub fn encoded(file: &StandardMidiFile) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    file.write(&mut bytes).expect("a Vec takes the write");
+    bytes
+}
+
+/// `file` written to a `Vec`.
+pub fn encoded_clip(file: &ClipFile) -> Vec<u8> {
     let mut bytes = Vec::new();
     file.write(&mut bytes).expect("a Vec takes the write");
     bytes

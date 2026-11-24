@@ -9,19 +9,19 @@
 //! packets the conversion makes survive them.
 
 use crate::common::{self, metrical, note, track};
-use crate::common::{encoded, read_bytes};
+use crate::common::{encoded_clip, read_bytes, read_clip};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    DropReason, FileEvent, Layout, Lead, LeadTrack, LyricChange, Meta, MicrosPerQuarter, MidiFile,
-    OtherMetaKind, SmfDivision, SmfPart, SmpteFractionalFrames, SmpteOffset, TextKind, Tick,
-    ToClipError, Track,
+    ClipFile, DropReason, FileEvent, Layout, Lead, LeadTrack, LyricChange, Meta, MicrosPerQuarter,
+    OtherMetaKind, SmfDivision, SmfPart, SmpteFractionalFrames, SmpteOffset, StandardMidiFile,
+    TextKind, Tick, Track,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_ump::{
     BarAccents, Flex, FlexAddress, FlexTempo, FlexTextError, FlexTextKind, FlexTimeSignature, Form,
     KeySignature, Letter, ManufacturerId, Message, Metronome, MidiChannel, MidiGroup, SharpsFlats,
-    Stream, SysexStatus, Utility, split_stream,
+    Stream, SysexStatus, Ump, Utility, split_stream,
 };
 use tutti_units::{Beat, Seconds};
 
@@ -36,29 +36,42 @@ fn text(kind: TextKind, s: &str) -> FileEvent {
     meta(Meta::text(kind, s))
 }
 
-fn flex(f: Flex) -> FileEvent {
-    FileEvent::Message(Message::Flex(MidiGroup::FIRST, f))
+fn flex(f: Flex) -> Ump {
+    Message::Flex(MidiGroup::FIRST, f).into()
 }
 
-fn format0(events: Vec<(u64, FileEvent)>) -> MidiFile {
+fn format0(events: Vec<(u64, FileEvent)>) -> StandardMidiFile {
     crate::common::format0(SMF_DIVISION, track(events)).unwrap()
 }
 
-fn format0_track(track: Track) -> MidiFile {
+fn format0_track(track: Track) -> StandardMidiFile {
     crate::common::format0(SMF_DIVISION, track).unwrap()
 }
 
-fn format0_lead(lead: LeadTrack) -> MidiFile {
-    MidiFile::smf(SMF_DIVISION, Layout::Format0(lead)).unwrap()
+fn format0_lead(lead: LeadTrack) -> StandardMidiFile {
+    StandardMidiFile::new(SMF_DIVISION, Layout::Format0(lead)).unwrap()
 }
 
-fn events_of(file: &MidiFile) -> &[(Tick, FileEvent)] {
-    file.tracks()[0].events()
+/// The packet of an SMF event that is a message.
+fn packet(event: FileEvent) -> Ump {
+    match event {
+        FileEvent::Message(message) => Ump::from(message),
+        _ => unreachable!("the event is a message"),
+    }
+}
+
+/// The message of a clip packet, `None` for one no definition covers.
+fn message(ump: &Ump) -> Option<Message> {
+    ump.decode().ok()
+}
+
+fn events_of(file: &ClipFile) -> &[(Tick, Ump)] {
+    file.sequence().events()
 }
 
 const DEFAULT_TEMPO: FlexTempo = FlexTempo::new(50_000_000);
 
-fn signature_events(n: u8, d: u8, bb: u8, cc: u8) -> [FileEvent; 2] {
+fn signature_events(n: u8, d: u8, bb: u8, cc: u8) -> [Ump; 2] {
     [
         flex(Flex::SetTimeSignature(FlexTimeSignature {
             numerator: n,
@@ -146,9 +159,9 @@ fn a_time_signature_is_a_signature_and_a_metronome() {
     assert_eq!((&a.1, &b.1), (&sig, &metronome));
     // The Metronome's accent parts add up to the Time Signature's beats.
     let (
-        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(time))),
-        FileEvent::Message(Message::Flex(_, Flex::SetMetronome(click))),
-    ) = (&a.1, &b.1)
+        Some(Message::Flex(_, Flex::SetTimeSignature(time))),
+        Some(Message::Flex(_, Flex::SetMetronome(click))),
+    ) = (message(&a.1), message(&b.1))
     else {
         panic!("{a:?} {b:?}")
     };
@@ -181,8 +194,8 @@ fn a_key_signature_is_the_sharps_and_the_tonic() {
         let clip = metrical(&smf).to_clip().unwrap().clip;
         let key = events_of(&clip)
             .iter()
-            .find_map(|(_, e)| match e {
-                FileEvent::Message(Message::Flex(_, Flex::SetKeySignature(a, k))) => Some((*a, *k)),
+            .find_map(|(_, e)| match message(e) {
+                Some(Message::Flex(_, Flex::SetKeySignature(a, k))) => Some((a, k)),
                 _ => None,
             })
             .unwrap();
@@ -201,16 +214,16 @@ fn a_key_signature_is_the_sharps_and_the_tonic() {
 }
 
 /// The Flex text of each packet, with its place in the message.
-fn flex_texts(file: &MidiFile) -> Vec<(FlexTextKind, Form, Vec<u8>)> {
+fn flex_texts(file: &ClipFile) -> Vec<(FlexTextKind, Form, Vec<u8>)> {
     events_of(file)
         .iter()
-        .filter_map(|(_, e)| match e {
-            FileEvent::Message(Message::Flex(
+        .filter_map(|(_, e)| match message(e) {
+            Some(Message::Flex(
                 _,
                 Flex::Text {
                     kind, form, bytes, ..
                 },
-            )) => Some((*kind, *form, bytes.to_vec())),
+            )) => Some((kind, form, bytes.to_vec())),
             _ => None,
         })
         .collect()
@@ -250,7 +263,7 @@ fn copyright_and_lyrics_are_flex_text_over_several_packets() {
     );
     let ticks: Vec<u64> = events_of(&clip)
         .iter()
-        .filter(|(_, e)| matches!(e, FileEvent::Message(Message::Flex(_, Flex::Text { .. }))))
+        .filter(|(_, e)| matches!(message(e), Some(Message::Flex(_, Flex::Text { .. }))))
         .map(|(t, _)| t.0)
         .collect();
     assert_eq!(ticks, [0, 0, 10]);
@@ -273,7 +286,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
         ),
         (480, note(0, 60)),
     ]);
-    let bytes = encoded(&metrical(&smf).to_clip().unwrap().clip);
+    let bytes = encoded_clip(&metrical(&smf).to_clip().unwrap().clip);
     let words: Vec<u32> = bytes[8..]
         .as_chunks::<4>()
         .0
@@ -309,8 +322,8 @@ fn a_complete_sysex_is_sysex7_packets() {
     assert!(converted.dropped.is_empty());
     let packets: Vec<_> = events_of(&converted.clip)
         .iter()
-        .filter_map(|(t, e)| match e {
-            FileEvent::Message(Message::Sysex7(_, p)) => Some((t.0, p.status(), p.data().to_vec())),
+        .filter_map(|(t, e)| match message(e) {
+            Some(Message::Sysex7(_, p)) => Some((t.0, p.status(), p.data().to_vec())),
             _ => None,
         })
         .collect();
@@ -371,26 +384,22 @@ fn format_1_merges_by_tick_ties_in_track_order() {
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let notes: Vec<(u64, FileEvent)> = events_of(&clip)
+    let notes: Vec<(u64, Ump)> = events_of(&clip)
         .iter()
-        .filter(|(_, e)| matches!(e, FileEvent::Message(Message::Midi1(..))))
-        .map(|(t, e)| (t.0, e.clone()))
+        .filter(|(_, e)| matches!(message(e), Some(Message::Midi1(..))))
+        .map(|(t, e)| (t.0, *e))
         .collect();
-    assert_eq!(notes, [(50, c), (100, a.0), (100, a.1), (100, b)]);
+    assert_eq!(
+        notes,
+        [
+            (50, packet(c)),
+            (100, packet(a.0)),
+            (100, packet(a.1)),
+            (100, packet(b))
+        ]
+    );
     // The end is the longest track's.
-    assert_eq!(clip.tracks()[0].end(), Tick(100));
-}
-
-#[test]
-fn a_clip_is_not_converted_again() {
-    let clip = metrical(&format0(vec![(0, note(0, 60))]))
-        .to_clip()
-        .unwrap()
-        .clip;
-    assert!(matches!(
-        metrical(&clip).to_clip(),
-        Err(ToClipError::AlreadyClip)
-    ));
+    assert_eq!(clip.end(), Tick(100));
 }
 
 /// M2-116 sections 7.1.1 and 7.1.2: the first Set Tempo, then the first Set
@@ -430,9 +439,9 @@ fn the_first_tempo_and_signature_lead_the_clip() {
         flex(Flex::SetTempo(FlexTempo::new(100_000_000))),
         sig,
         metronome,
-        note(0, 60),
+        packet(note(0, 60)),
     ];
-    let got: Vec<_> = events_of(&clip).iter().map(|(_, e)| e.clone()).collect();
+    let got: Vec<_> = events_of(&clip).iter().map(|(_, e)| *e).collect();
     assert_eq!(got, want);
 }
 
@@ -453,26 +462,20 @@ fn a_file_with_no_tempo_or_signature_gets_the_smf_defaults() {
     ]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
     let [sig, metronome] = signature_events(4, 2, 8, 24);
-    let got: Vec<_> = events_of(&clip)
-        .iter()
-        .map(|(t, e)| (t.0, e.clone()))
-        .collect();
+    let got: Vec<_> = events_of(&clip).iter().map(|(t, e)| (t.0, *e)).collect();
     assert_eq!(
         got,
         [
             (0, flex(Flex::SetTempo(DEFAULT_TEMPO))),
             (0, sig),
             (0, metronome),
-            (0, note(0, 60)),
+            (0, packet(note(0, 60))),
             // The later tempo is on a 1/24-quarter position (960 is a multiple of 20), so it stays.
             (960, flex(Flex::SetTempo(FlexTempo::new(25_000_000)))),
         ]
     );
     // Two beats at the default 120 bpm (1 s), then two at 240 bpm (0.5 s).
-    assert_eq!(
-        metrical(&clip).seconds_at(Tick(4 * u64::from(TPQ))),
-        Seconds::new(1.5)
-    );
+    assert_eq!(clip.seconds_at(Tick(4 * u64::from(TPQ))), Seconds::new(1.5));
 }
 
 #[test]
@@ -487,8 +490,8 @@ fn a_tempo_at_tick_zero_is_not_defaulted() {
     let clip = metrical(&smf).to_clip().unwrap().clip;
     let tempos: Vec<_> = events_of(&clip)
         .iter()
-        .filter_map(|(_, e)| match e {
-            FileEvent::Message(Message::Flex(_, Flex::SetTempo(t))) => Some(*t),
+        .filter_map(|(_, e)| match message(e) {
+            Some(Message::Flex(_, Flex::SetTempo(t))) => Some(t),
             _ => None,
         })
         .collect();
@@ -512,9 +515,9 @@ fn the_division_and_the_end_carry_over() {
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    assert_eq!(metrical(&clip).ticks_per_quarter().get(), 96);
-    assert_eq!(clip.tracks()[0].end(), Tick(400));
-    assert!(clip.tracks()[0].header().is_empty());
+    assert_eq!(clip.ticks_per_quarter().get(), 96);
+    assert_eq!(clip.end(), Tick(400));
+    assert!(clip.header().messages().is_empty());
 }
 
 /// Each event with no UMP form, with its tick and reason, in clip order.
@@ -629,8 +632,8 @@ fn what_has_no_successor_is_reported_with_its_tick() {
         .iter()
         .filter(|(_, e)| {
             matches!(
-                e,
-                FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(_)))
+                message(e),
+                Some(Message::Flex(_, Flex::SetTimeSignature(_)))
             )
         })
         .map(|(t, _)| t.0)
@@ -791,7 +794,7 @@ fn property_exchange_and_empty_text_are_reported() {
     );
     let sysex_ticks: Vec<u64> = events_of(&converted.clip)
         .iter()
-        .filter(|(_, e)| matches!(e, FileEvent::Message(Message::Sysex7(..))))
+        .filter(|(_, e)| matches!(message(e), Some(Message::Sysex7(..))))
         .map(|(t, _)| t.0)
         .collect();
     assert_eq!(sysex_ticks, [2], "Discovery is carried");
@@ -800,7 +803,7 @@ fn property_exchange_and_empty_text_are_reported() {
 /// The clip written and read back is the same clip.
 #[test]
 fn the_clip_round_trips_through_its_bytes() {
-    let smf = MidiFile::smf(
+    let smf = StandardMidiFile::new(
         SMF_DIVISION,
         Layout::Format1 {
             lead: LeadTrack::new(track(vec![
@@ -834,7 +837,7 @@ fn the_clip_round_trips_through_its_bytes() {
     )
     .unwrap();
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(encoded(&clip)).unwrap();
+    let again = read_clip(encoded_clip(&clip)).unwrap();
     assert_eq!(again, clip);
 }
 
@@ -855,7 +858,7 @@ fn signature_meta(numerator: u8, power: u8) -> FileEvent {
     })
 }
 
-fn at_ticks(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<u64> {
+fn at_ticks(clip: &ClipFile, wanted: fn(&Ump) -> bool) -> Vec<u64> {
     events_of(clip)
         .iter()
         .filter(|(_, e)| wanted(e))
@@ -863,14 +866,14 @@ fn at_ticks(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<u64> {
         .collect()
 }
 
-fn is_tempo(e: &FileEvent) -> bool {
-    matches!(e, FileEvent::Message(Message::Flex(_, Flex::SetTempo(_))))
+fn is_tempo(e: &Ump) -> bool {
+    matches!(message(e), Some(Message::Flex(_, Flex::SetTempo(_))))
 }
 
-fn is_signature(e: &FileEvent) -> bool {
+fn is_signature(e: &Ump) -> bool {
     matches!(
-        e,
-        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(_)))
+        message(e),
+        Some(Message::Flex(_, Flex::SetTimeSignature(_)))
     )
 }
 
@@ -966,15 +969,15 @@ fn events_on_their_grids_are_not_moved() {
     assert_eq!(at_ticks(&done.clip, is_tempo), [0, 960, 3360]);
 }
 
-fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> MidiFile {
+fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> StandardMidiFile {
     crate::common::format0(SmfDivision::per_quarter(tpq), track(events)).unwrap()
 }
 
-fn flex_events(clip: &MidiFile, wanted: fn(&FileEvent) -> bool) -> Vec<(u64, FileEvent)> {
+fn flex_events(clip: &ClipFile, wanted: fn(&Ump) -> bool) -> Vec<(u64, Ump)> {
     events_of(clip)
         .iter()
         .filter(|(_, e)| wanted(e))
-        .map(|(t, e)| (t.0, e.clone()))
+        .map(|(t, e)| (t.0, *e))
         .collect()
 }
 
@@ -998,11 +1001,7 @@ fn two_time_signatures_that_snap_to_one_bar_line_leave_the_later() {
     let [sig, metronome] = signature_events(2, 2, 8, 24);
     // The default 4/4 at tick 0, then the later signature at 384.
     let got = flex_events(&done.clip, |e| {
-        is_signature(e)
-            || matches!(
-                e,
-                FileEvent::Message(Message::Flex(_, Flex::SetMetronome(_)))
-            )
+        is_signature(e) || matches!(message(e), Some(Message::Flex(_, Flex::SetMetronome(_))))
     });
     let [default_sig, default_metronome] = signature_events(4, 2, 8, 24);
     assert_eq!(
@@ -1080,7 +1079,7 @@ fn a_zero_tempo_is_dropped_and_is_not_the_first_tempo() {
 fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, tempo_event(1_000_000)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(encoded(&clip)).unwrap();
+    let again = read_clip(encoded_clip(&clip)).unwrap();
     assert_eq!(again, clip);
     assert_eq!(
         flex_events(&again, is_tempo),
@@ -1094,7 +1093,7 @@ fn a_tempo_that_snaps_to_tick_zero_is_the_only_one_there() {
 fn a_signature_that_snaps_to_tick_zero_is_the_only_one_there() {
     let smf = format0(vec![(5, signature_meta(3, 2)), (50, note(0, 60))]);
     let clip = metrical(&smf).to_clip().unwrap().clip;
-    let again = read_bytes(encoded(&clip)).unwrap();
+    let again = read_clip(encoded_clip(&clip)).unwrap();
     assert_eq!(again, clip);
     let [sig, _] = signature_events(3, 2, 8, 24);
     assert_eq!(flex_events(&again, is_signature), [(0, sig)]);
@@ -1153,11 +1152,11 @@ fn a_replacing_signature_counts_its_bars_from_the_one_before_the_replaced() {
 /// The Lyric Data texts of a clip, one string a message: M2-104 section
 /// 7.5.10 puts a syllable in one message, so the short ones here are one
 /// Complete packet each.
-fn lyrics_of(file: &MidiFile) -> Vec<(u64, String)> {
+fn lyrics_of(file: &ClipFile) -> Vec<(u64, String)> {
     events_of(file)
         .iter()
-        .filter_map(|(tick, e)| match e {
-            FileEvent::Message(Message::Flex(
+        .filter_map(|(tick, e)| match message(e) {
+            Some(Message::Flex(
                 _,
                 Flex::Text {
                     kind: FlexTextKind::Lyrics,
@@ -1363,7 +1362,10 @@ fn a_pickup_bar_has_its_own_signature_and_the_next_bar_a_new_one() {
         .collect();
     assert_eq!(signatures, [pickup, bar]);
     // The pickup is one beat: the second bar begins a quarter note in.
-    assert_eq!(metrical(&done.clip).beat_at(Tick(480)), Beat::new(1.0));
+    assert_eq!(
+        Tick(480).beats(done.clip.ticks_per_quarter()),
+        Beat::new(1.0)
+    );
 }
 
 /// Without a signature for the pickup, a 4/4 bar is counted from the start of
