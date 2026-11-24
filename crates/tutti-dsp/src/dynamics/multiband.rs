@@ -343,7 +343,9 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
     /// Aims at `controls`: the crossover is designed in place (total: a set out of order is
     /// solved with its splits no lower than the one before) and ramps to the design over a
     /// grid period, each band's compressor is set as [`CompressorBank::retarget`] does, and the
-    /// bypass and solo weights ramp over [`GAIN_RAMP`]. No allocation.
+    /// bypass and solo weights ramp over [`GAIN_RAMP`]. A fresh bank ramps from its defaults; call
+    /// [`jump_to_target`](Self::jump_to_target) after the first to start on the controls. No
+    /// allocation.
     pub fn retarget(&mut self, controls: &MultibandSettings) {
         self.model.design_into(&controls.crossover, self.rate);
         self.blend.retarget(self.model.blend());

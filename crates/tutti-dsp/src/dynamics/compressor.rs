@@ -229,7 +229,7 @@ impl<F: Float + SimdLanes + Lerp> CompressorBank<F> {
         self.key.reset();
     }
 
-    /// Lands the makeup on its target now.
+    /// Lands the makeup and the key filter's coefficients on their targets now.
     pub fn jump_to_target(&mut self) {
         self.makeup.jump_to_target();
         self.key.jump_to_target();

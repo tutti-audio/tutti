@@ -1946,12 +1946,12 @@ mod tests {
         );
     }
 
-    /// A fresh node, a reset one and a re-prepared one land their settings whole: a 6 dB
+    /// A fresh node, a reset one, a re-prepared one and a fork land their settings whole: a 6 dB
     /// makeup under a 10 kHz split is at its full gain on frames 100 to 200 of the first block
     /// (a ramp from 0 dB over the 5 ms gain ramp would still be climbing there), even when the
     /// run before the reset moved the makeup elsewhere.
     #[test]
-    fn the_first_block_after_a_reset_or_a_prepare_lands_whole() {
+    fn the_first_block_after_a_reset_a_prepare_or_a_fork_lands_whole() {
         let want = 0.5 * 10f32.powf(6.0 / 20.0);
         let (n, c) = node(2);
         unity(&c);
@@ -1980,5 +1980,12 @@ mod tests {
             tutti_buffers::MaxBlock::of(tutti_units::Samples::new(1024)),
         ));
         landed(&render_chunked(&mut n, &dc, 400), "re-prepare");
+        // A fork taken while the live node's makeup is mid-ramp is a clone, not a reset.
+        c.band(0).set_makeup(-12.0);
+        render_chunked(&mut n, &[vec![0.5f32; 2_000]], 512);
+        c.band(0).set_makeup(6.0);
+        render_chunked(&mut n, &[vec![0.5f32; 50]], 50);
+        let mut fork = n.fork_fresh();
+        landed(&render_chunked(&mut fork, &dc, 400), "fork");
     }
 }
