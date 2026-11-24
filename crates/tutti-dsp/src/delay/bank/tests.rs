@@ -578,7 +578,7 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
 /// is off by 1e-8.
 #[test]
 fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (16usize, 200usize);
     let x = wide_signal(len);
     let mono = mono(InterpolationMode::Linear);
@@ -589,7 +589,7 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
             .collect()
     };
     let y = run_wide(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
-    assert_close_f64(&y[0], &delayed(&x), 0.0);
+    assert_close(&y[0], &delayed(&x), 0.0);
 
     let g = 0.6;
     let mut v = vec![0.0f64; len];
@@ -597,14 +597,14 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
     }
     let y = run_wide(&mono, &controls(time, 0.6, 0.0), &[x]);
-    assert_close_f64(&y[0], &delayed(&v), 2.0f64.powi(-45));
+    assert_close(&y[0], &delayed(&v), 2.0f64.powi(-45));
 }
 
 /// The cross-fed loop of an `f64` bank is the two-channel recursion `v0[n] = x[n] + g v0[n -
 /// d] + c v1[n - d]`, `v1[n] = g v1[n - d] + c v0[n - d]` of the swap routing, to 2^-45.
 #[test]
 fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (8usize, 120usize);
     let x = wide_signal(len);
     let (g, c) = (0.3, 0.4);
@@ -625,8 +625,8 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
         &controls(d as f64 / 1024.0, 0.3, 0.4),
         &[x, vec![0.0; len]],
     );
-    assert_close_f64(&y[0], &delayed(&v0), 2.0f64.powi(-45));
-    assert_close_f64(&y[1], &delayed(&v1), 2.0f64.powi(-45));
+    assert_close(&y[0], &delayed(&v0), 2.0f64.powi(-45));
+    assert_close(&y[1], &delayed(&v1), 2.0f64.powi(-45));
 }
 
 /// A mono synced delay of `note` that holds up to four seconds.

@@ -580,7 +580,7 @@ fn stage_state(
         }
     };
     let call = config.timeouts.call;
-    let staged = Announced::<StageState>::new(blob, state.len() as u64);
+    let staged = Announced::<StageState>::new(blob, ());
     // The object is held until the answer: where it is read by name, it stays
     // until then.
     match launch.call_announced(staged, call, call)? {

@@ -56,3 +56,73 @@ impl PlayReading {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PLAY_SPAN: u64 = 1 << 40;
+
+    /// The word is 24 bits of epoch high and 40 of play low.
+    #[test]
+    fn the_epoch_packs_into_the_high_24_bits_and_play_into_the_low_40() {
+        let epoch_only = PlayReading {
+            epoch: 1,
+            play: Frame::ZERO,
+        };
+        assert_eq!(epoch_only.pack(), PLAY_SPAN);
+        let play_only = PlayReading {
+            epoch: 0,
+            play: Frame::new(1),
+        };
+        assert_eq!(play_only.pack(), 1);
+        let top = PlayReading {
+            epoch: PlayReading::EPOCHS - 1,
+            play: Frame::new(PLAY_SPAN - 1),
+        };
+        assert_eq!(top.pack(), u64::MAX);
+    }
+
+    /// A reading whose epoch is below `EPOCHS` and whose play is below `2^40`
+    /// comes back from its word unchanged, at every corner.
+    #[test]
+    fn a_reading_in_range_round_trips_through_its_word() {
+        for epoch in [0, 1, PlayReading::EPOCHS / 2, PlayReading::EPOCHS - 1] {
+            for play in [0, 1, PLAY_SPAN / 2, PLAY_SPAN - 1] {
+                let r = PlayReading {
+                    epoch,
+                    play: Frame::new(play),
+                };
+                assert_eq!(PlayReading::unpack(r.pack()), r, "{r:?}");
+            }
+        }
+    }
+
+    /// Play wraps past `2^40` frames and the epoch past `EPOCHS`, each within
+    /// its own field: neither carries into the other.
+    #[test]
+    fn play_and_epoch_wrap_within_their_own_fields() {
+        let past_play = PlayReading {
+            epoch: 5,
+            play: Frame::new(PLAY_SPAN + 3),
+        };
+        assert_eq!(
+            PlayReading::unpack(past_play.pack()),
+            PlayReading {
+                epoch: 5,
+                play: Frame::new(3),
+            }
+        );
+        let past_epoch = PlayReading {
+            epoch: PlayReading::EPOCHS + 2,
+            play: Frame::new(7),
+        };
+        assert_eq!(
+            PlayReading::unpack(past_epoch.pack()),
+            PlayReading {
+                epoch: 2,
+                play: Frame::new(7),
+            }
+        );
+    }
+}

@@ -447,7 +447,7 @@ fn the_bands_stay_within_the_models_bound() {
 #[test]
 fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
     use crate::testing::butterworth_all_pass;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let n = 4_800;
     let x = wide_signal(n);
     for splits in [&[1_000.0f64][..], &[500.0, 4_000.0]] {
@@ -461,7 +461,7 @@ fn an_f64_crossover_sums_to_the_all_pass_recursion_of_its_splits() {
         let want = splits
             .iter()
             .fold(x.clone(), |y, &fc| butterworth_all_pass(&y, fc, RATE.get()));
-        assert_close_f64(&got, &want, 1e-12);
+        assert_close(&got, &want, 1e-12);
     }
 }
 

@@ -34,3 +34,4 @@ mod clap_transport;
 mod clap_wake;
 mod plugin_param_delivery;
 mod plugin_param_delivery_no_alloc;
+mod ramp_source;

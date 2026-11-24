@@ -90,7 +90,7 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
     for (ni, no) in [(2u16, 2u16), (3, 2), (1, 4), (4, 3)] {
         let irs: Vec<Vec<f32>> = (0..ni * no)
             .map(|p| {
-                noise(100 + u32::from(p), 40 + 37 * usize::from(p))
+                noise::<f32>(100 + u32::from(p), 40 + 37 * usize::from(p))
                     .iter()
                     .map(|v| v * 0.2)
                     .collect()
@@ -226,7 +226,7 @@ fn a_bad_shape_is_refused_by_name() {
 /// so an `f32` engine misses by 1e-8.
 #[test]
 fn an_f64_matrix_of_unit_impulses_is_the_identity_at_its_latency() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (frames, unit, zero) = (400, [1.0f64], [0.0f64; 1]);
     let irs = [
         Mono::new(&unit),
@@ -250,7 +250,7 @@ fn an_f64_matrix_of_unit_impulses_is_the_identity_at_its_latency() {
     for (got, x) in out.iter().zip([&left, &right]) {
         let mut want = vec![0.0f64; frames];
         want[lat..].copy_from_slice(&x[..frames - lat]);
-        assert_close_f64(got, &want, 1e-12);
+        assert_close(got, &want, 1e-12);
     }
 }
 
@@ -260,7 +260,7 @@ fn an_f64_matrix_of_unit_impulses_is_the_identity_at_its_latency() {
 /// 1e-12.
 #[test]
 fn an_f64_matrix_of_delayed_scaled_impulses_delays_and_scales() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     fn tap64(delay: usize, gain: f64) -> Vec<f64> {
         let mut ir = vec![0.0; delay + 1];
         ir[delay] = gain;
@@ -289,6 +289,6 @@ fn an_f64_matrix_of_delayed_scaled_impulses_delays_and_scales() {
     let want_r: Vec<f64> = (0..frames)
         .map(|n| 0.5 * at(&left, n, 5) + at(&right, n, 0))
         .collect();
-    assert_close_f64(&out[0], &want_l, 1e-12);
-    assert_close_f64(&out[1], &want_r, 1e-12);
+    assert_close(&out[0], &want_l, 1e-12);
+    assert_close(&out[1], &want_r, 1e-12);
 }

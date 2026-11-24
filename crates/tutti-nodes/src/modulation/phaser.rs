@@ -1040,7 +1040,7 @@ mod tests {
     /// `u[n] = x[n] + g y[n - 1]`, computed in `f64`, to 2^-45.
     #[test]
     fn an_f64_kernel_at_no_depth_is_the_all_pass_difference_equation_in_f64() {
-        use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+        use tutti_fixtures::signal::{assert_close, wide_signal};
         let (stages, len, g) = (2usize, 300usize, 0.5f64);
         let a: f64 = allpass_complement(SweepRange::DEFAULT.min(), RATE);
         let c = a - 1.0;
@@ -1077,6 +1077,6 @@ mod tests {
         .unwrap();
         k.prepare(RATE, MaxBlock::of(Samples::new(len)));
         let y = drive_kernel(&mut k, &[(0, controls)], &[x]).remove(0);
-        assert_close_f64(&y, &want, 2.0f64.powi(-45));
+        assert_close(&y, &want, 2.0f64.powi(-45));
     }
 }

@@ -29,9 +29,6 @@ fn tone(len: usize, freq: f64, sample_rate: f64) -> Vec<f64> {
         tutti_units::SampleRate::of(sample_rate),
         tutti_units::Samples::new(len),
     )
-    .into_iter()
-    .map(f64::from)
-    .collect()
 }
 
 #[test]

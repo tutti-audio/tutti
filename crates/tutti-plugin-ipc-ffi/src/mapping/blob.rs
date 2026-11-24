@@ -24,6 +24,7 @@ pub type BlobWire = super::SlabWire;
 pub struct Blob {
     slab: platform::Slab,
     backing: platform::Backing,
+    len: u64,
 }
 
 /// What keeps a sent blob readable where it is read by name (Windows), and
@@ -54,7 +55,18 @@ impl Blob {
             op: "write",
             source,
         })?;
-        Ok(Self { slab, backing })
+        Ok(Self {
+            slab,
+            backing,
+            len: bytes.len() as u64,
+        })
+    }
+
+    /// How many bytes the blob holds: the length the frame that announces it
+    /// declares.
+    #[must_use]
+    pub fn byte_len(&self) -> u64 {
+        self.len
     }
 
     /// What goes in the frame that announces this blob.

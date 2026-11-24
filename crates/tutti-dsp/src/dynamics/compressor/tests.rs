@@ -161,9 +161,9 @@ fn run<F: Float + SimdLanes + Lerp>(
     run_in(bank, audio, key, signal, CHUNK)
 }
 
-/// A level of `db` as an amplitude, from the definition.
+/// A level of `db` as an amplitude.
 fn amplitude(db: f64) -> f32 {
-    10f64.powf(db / 20.0) as f32
+    Db::new(db).to_amplitude().get() as f32
 }
 
 /// The static curve of the compressor from its definition (Giannoulis, Massberg and
@@ -779,24 +779,9 @@ fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
     }
 }
 
-/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
-/// `key`.
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, keyed by `key`.
 fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
-    let mut bank = CompressorBank::<f64>::new(RATE);
-    bank.retarget(c);
-    bank.jump_to_target();
-    let mut out = vec![0.0f64; audio.len()];
-    bank.process(
-        CompressorSignals::default(),
-        Planes::new(&[key]).unwrap(),
-        &mut InputOutput::paired(
-            Planes::new(&[audio]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    out
+    run(&mut bank_at::<f64>(c, RATE), &[audio], &[key], None).remove(0)
 }
 
 /// A key level `-12.04 dB` or so that no `f32` holds: the value `wide_signal` starts at,
@@ -810,10 +795,10 @@ fn wide_constant(len: usize) -> Vec<f64> {
 /// path narrows it.
 #[test]
 fn an_f64_compressor_under_its_threshold_is_the_identity_at_0_db_makeup() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(300);
     let c = controls(0.0, 6.0, 4.0, 0.002, 0.05, 0.0);
-    assert_close_f64(&run_f64(&c, &x, &x), &x, 0.0);
+    assert_close(&run_f64(&c, &x, &x), &x, 0.0);
 }
 
 /// At a constant key the reduction is the one-pole `y[n] = y[n-1] + c (target - y[n-1])`
@@ -821,7 +806,7 @@ fn an_f64_compressor_under_its_threshold_is_the_identity_at_0_db_makeup() {
 /// `10^(-y[n] / 20)`: the closed form in `f64`, to 1e-12.
 #[test]
 fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
-    use tutti_fixtures::signal::assert_close_f64;
+    use tutti_fixtures::signal::assert_close;
     let (threshold, ratio, tau) = (-30.0, 4.0, 0.002);
     let key = wide_constant(2_000);
     let k = key[0];
@@ -836,7 +821,7 @@ fn an_f64_compressor_follows_the_one_pole_closed_form_in_f64() {
             x * 10f64.powf(-reduction / 20.0)
         })
         .collect();
-    assert_close_f64(&run_f64(&c, &key, &key), &want, 1e-12);
+    assert_close(&run_f64(&c, &key, &key), &want, 1e-12);
 }
 
 /// With instant times the reduction is the curve's at once, so a constant key `L` dB over
