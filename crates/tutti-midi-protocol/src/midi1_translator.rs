@@ -1,7 +1,7 @@
 //! The stateful MIDI 2.0 to MIDI 1.0 translation of M2-104 Appendix D.2: the
 //! [`Midi1Translator`] an output edge runs.
 
-use crate::{PerNoteTranslation, TranslationMode, midi1};
+use crate::{MpeLayout, PerNoteTranslation, TranslationMode, midi1};
 use members::Members;
 use tutti_ump::{
     Address, CCNumber, ExtremeValues, Message, Midi1Bytes, U7, U14, Ump, Voice1, Voice2,
@@ -71,9 +71,17 @@ mod members;
 /// ```
 #[derive(Clone, Debug)]
 pub struct Midi1Translator {
-    mode: TranslationMode,
-    /// The note allocation of the MPE mode; none in any other.
-    members: Option<Members>,
+    extremes: ExtremeValues,
+    per_note: PerNote,
+}
+
+/// What the translator does with the per-note messages, and what that takes.
+#[derive(Clone, Debug)]
+enum PerNote {
+    /// The Default Translation: they have no MIDI 1.0 message and send nothing.
+    Dropped,
+    /// MPE: the zone's layout and the note allocation on its member channels.
+    Mpe { layout: MpeLayout, members: Members },
 }
 
 impl Default for Midi1Translator {
@@ -100,11 +108,8 @@ impl Midi1Translator {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            mode: TranslationMode {
-                extremes: ExtremeValues::Scaled,
-                per_note: PerNoteTranslation::Dropped,
-            },
-            members: None,
+            extremes: ExtremeValues::Scaled,
+            per_note: PerNote::Dropped,
         }
     }
 
@@ -114,20 +119,34 @@ impl Midi1Translator {
     /// held without sending their Note Offs.
     #[must_use]
     pub fn with_mode(mode: TranslationMode) -> Self {
-        let members = matches!(mode.per_note, PerNoteTranslation::Mpe(_)).then(Members::new);
-        Self { mode, members }
+        Self {
+            extremes: mode.extremes,
+            per_note: match mode.per_note {
+                PerNoteTranslation::Dropped => PerNote::Dropped,
+                PerNoteTranslation::Mpe(layout) => PerNote::Mpe {
+                    layout,
+                    members: Members::new(),
+                },
+            },
+        }
     }
 
     /// The mode this translator translates by.
     #[must_use]
-    pub const fn mode(&self) -> TranslationMode {
-        self.mode
+    pub fn mode(&self) -> TranslationMode {
+        TranslationMode {
+            extremes: self.extremes,
+            per_note: match self.per_note {
+                PerNote::Dropped => PerNoteTranslation::Dropped,
+                PerNote::Mpe { layout, .. } => PerNoteTranslation::Mpe(layout),
+            },
+        }
     }
 
     /// Forgets the notes the MPE mode holds, without a Note Off, as at
     /// [`new`](Self::new). The Default Translation holds nothing to forget.
     pub fn reset(&mut self) {
-        if let Some(members) = self.members.as_mut() {
+        if let PerNote::Mpe { members, .. } = &mut self.per_note {
             members.clear();
         }
     }
@@ -148,7 +167,7 @@ impl Midi1Translator {
             // In the MPE mode a MIDI 1.0 voice message is the MIDI 2.0 one it
             // means (M2-104 D.3) and takes the same rules; otherwise it passes
             // unchanged.
-            Message::Midi1(address, voice) if self.members.is_some() => {
+            Message::Midi1(address, voice) if matches!(self.per_note, PerNote::Mpe { .. }) => {
                 (address, Voice2::from(voice))
             }
             Message::Midi1(..) => {
@@ -160,10 +179,9 @@ impl Midi1Translator {
                 return;
             }
         };
-        let extremes = self.mode.extremes;
-        if let (PerNoteTranslation::Mpe(zone), Some(members)) =
-            (self.mode.per_note, self.members.as_mut())
-            && members.route(&zone, extremes, address, voice, &mut out)
+        let extremes = self.extremes;
+        if let PerNote::Mpe { layout, members } = &mut self.per_note
+            && members.route(layout, extremes, address, voice, &mut out)
         {
             return;
         }
@@ -171,12 +189,12 @@ impl Midi1Translator {
         // 4.1 to 4.6: zone-wide messages, Program Change and Bank Select are
         // the Manager Channel's), so the source channel names no MIDI 1.0
         // channel.
-        let address = match self.mode.per_note {
-            PerNoteTranslation::Mpe(zone) => Address {
-                channel: zone.master_channel(),
+        let address = match &self.per_note {
+            PerNote::Mpe { layout, .. } => Address {
+                channel: layout.master_channel(),
                 ..address
             },
-            PerNoteTranslation::Dropped => address,
+            PerNote::Dropped => address,
         };
         let plain = |out: &mut dyn FnMut(Midi1Bytes)| {
             if let Ok(voice) = Voice1::from_voice2(voice, extremes) {
@@ -215,7 +233,7 @@ impl Midi1Translator {
             // Omni Off, Omni On, Mono Mode On and Poly Mode On are sent on no
             // MPE Channel (M2-120 section 4.7).
             Voice2::ControlChange { controller, .. }
-                if matches!(self.mode.per_note, PerNoteTranslation::Mpe(_))
+                if matches!(self.per_note, PerNote::Mpe { .. })
                     && (124..=127).contains(&controller.get()) => {}
             _ => plain(&mut out),
         }
