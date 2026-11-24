@@ -1568,6 +1568,40 @@ fn a_steady_apply_is_skipped_and_renders_the_same() {
     }
 }
 
+/// **A depth write to a route that a depth route scales lands from the cell.**
+/// A macro of 1 at depth 0.2 on probe 1's cutoff (`0..=1000`, knob 500),
+/// scaled by a macro of 0.5 through a depth route of depth 1: the offset is
+/// `1000 * 0.2 * 1 * 0.5` = 100, so 600. Writing the scaled route's depth to
+/// 0.6 after a steady state commits and republishes nothing, and the next
+/// block reads `1000 * 0.6 * 0.5` = 300, so 800.
+#[test]
+fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
+    let mut r = rig(128);
+    r.decl.routes.clear();
+    r.decl.sources.clear();
+    let full = r.decl.source(5, ModSource::Macro { value: 1.0 });
+    let half = r.decl.source(6, ModSource::Macro { value: 0.5 });
+    let scaled = r.decl.route(7, full, cutoff_of(1), 0.2);
+    let by = r.decl.route(8, half, cutoff_of(1), 1.0);
+    for (k, route) in &mut r.decl.routes {
+        if *k == by {
+            route.to = RouteTarget::Depth(scaled);
+        }
+    }
+    render(&mut r.ed, &mut r.exec, 128, 128);
+    reapply(&mut r);
+    r.m.commit(&mut r.ed).expect("commits");
+    let at = |r: &mut Rig| render(&mut r.ed, &mut r.exec, 128, 1_024)[0][1_023];
+    let near = |got: f32, want: f32| assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+    near(at(&mut r), 600.0);
+    steady(&mut r);
+
+    r.decl.set_depth(scaled, 0.6);
+    let applied = reapply(&mut r);
+    assert!(!applied.commit && applied.republished.is_empty());
+    near(at(&mut r), 800.0);
+}
+
 /// A source edit (an LFO's rate) is republished.
 #[test]
 fn a_source_edit_after_a_steady_state_is_republished() {
