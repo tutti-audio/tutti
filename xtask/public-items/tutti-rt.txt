@@ -48,6 +48,7 @@ fn capped_vec::CappedVec::capacity
 fn capped_vec::CappedVec::clear
 fn capped_vec::CappedVec::drain
 fn capped_vec::CappedVec::extend
+fn capped_vec::CappedVec::extend_from_slice
 fn capped_vec::CappedVec::insert_within_capacity
 fn capped_vec::CappedVec::is_empty
 fn capped_vec::CappedVec::is_full

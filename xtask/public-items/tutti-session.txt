@@ -53,6 +53,8 @@ enum midi_ci::subscription::SubscriptionCause
 enum midi_event::MidiEvent
 enum midi_follow::ClockKind
 enum midi_follow::ClockOffset
+enum midi_follow::FollowKind
+enum midi_follow::UnfollowCause
 enum midi_hardware::MidiPolicyError
 enum midi_load::NoCommonTimelineError
 enum midi_load::TrackError

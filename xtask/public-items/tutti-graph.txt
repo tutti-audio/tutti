@@ -404,10 +404,8 @@ fn edit::editor::Editor::with_event_capacity
 fn edit::editor::Editor::with_format
 fn edit::editor::commit::Editor::collect
 fn edit::editor::commit::Editor::commit
-fn edit::editor::commit::Editor::main_output_fade
 fn edit::editor::commit::Editor::package
 fn edit::editor::commit::Editor::set_main_output_fade
-fn edit::editor::commit::Editor::validate
 fn edit::editor::controls::Editor::bus_edge_is_live
 fn edit::editor::controls::Editor::bypasses_itself
 fn edit::editor::controls::Editor::check_gain_edge
@@ -886,6 +884,8 @@ fn testing::Harness::block_at
 fn testing::Harness::block_with_changes
 fn testing::Harness::channels
 fn testing::Harness::new
+fn testing::Harness::run
+fn testing::Harness::run_with
 fn testing::Harness::set_edge_gain
 fn testing::Harness::set_edge_gain_range
 fn testing::Harness::set_mix
@@ -911,11 +911,15 @@ fn testing::TestNode::in_format
 fn testing::TestNode::new
 fn testing::TestPool::new
 fn testing::TestPool::with_waits
+fn testing::agree_across_workers
 fn testing::bits
+fn testing::bits_of
 fn testing::cap_of
 fn testing::declick
 fn testing::driver_value
 fn testing::input_signal
+fn testing::pooled
+fn testing::pooled_fresh
 fn testing::prepare
 fn testing::shapes_costed
 fn testing::shapes_of

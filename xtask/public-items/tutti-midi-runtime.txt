@@ -33,7 +33,6 @@ const sync::follow::MtcFollower::SLIP_FRAMES
 const sync::mtc::MtcDecoder::DIRECTION_STEPS
 const taken::Taken::NONE
 enum clock_map::Observed
-enum live::keys::SendUniversalError
 enum mpe_features::MpeFeaturesError
 enum output_plan::Placement
 enum output_plan::SendAt

@@ -1062,14 +1062,16 @@ fn waveguide::WaveguideString::tuning
 fn waveshape::Antialiasing::delay
 fn waveshape::Antialiasing::ring_out
 fn waveshape::ShapeKind::apply
-fn waveshape::WaveshaperBank::antialiasing
-fn waveshape::WaveshaperBank::antialiasing_order
+fn waveshape::Waveshape::antialiasing
+fn waveshape::Waveshape::antialiasing_order
+fn waveshape::Waveshape::kind
+fn waveshape::Waveshape::new
 fn waveshape::WaveshaperBank::jump_to_target
 fn waveshape::WaveshaperBank::new
 fn waveshape::WaveshaperBank::process
 fn waveshape::WaveshaperBank::reset
 fn waveshape::WaveshaperBank::retarget
-fn waveshape::adaa::ShapeKind::antialiasing
+fn waveshape::WaveshaperBank::shape
 fn waveshape::adaa::ShapeKind::max_antialiasing
 fn wavetable::Wavetable::frames
 fn wavetable::Wavetable::harmonics
@@ -1320,6 +1322,7 @@ struct waveguide::WaveguideControls
 struct waveguide::WaveguidePositions
 struct waveguide::WaveguideString
 struct waveshape::AntialiasingError
+struct waveshape::Waveshape
 struct waveshape::WaveshaperBank
 struct waveshape::WaveshaperControls
 struct wavetable::Wavetable
