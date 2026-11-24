@@ -164,6 +164,7 @@ fn delay(layout: ChannelLayout) -> DelayNode<f32> {
             .interpolation(InterpolationMode::CubicHermite),
         )
         .controls(DelayControls {
+            sync: tutti_nodes::DelaySync::Free,
             time: Seconds::new(0.0123),
             feedback: Feedback::new(0.55),
             cross_feedback: Feedback::NONE,

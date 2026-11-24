@@ -306,7 +306,7 @@ pub mod nodes {
         ConvolverNode, CrossoverConfig, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterNode, DcBlockerConfig, DcBlockerNode, Decoding,
         DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DelayTiming, DiodeClipperConfig, DiodeClipperNode,
+        DelayLayoutError, DelayNode, DelaySync, DiodeClipperConfig, DiodeClipperNode,
         DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
         DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
         EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
