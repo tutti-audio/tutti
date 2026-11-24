@@ -164,8 +164,6 @@ testing = ["tutti-cpal?/testing"]
 
 [dev-dependencies]
 tutti-polysynth = { version = "0.0.1", path = "../tutti-polysynth" }
-# The `LadderSaturation` a bench's polysynth ladder states (`benches/render_load.rs`).
-tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false }
 # Test reads block on a `ParamRead` (a test may block).
 futures-lite.workspace = true
 # Turns `testing` on for this crate's own tests, benches and doctests.

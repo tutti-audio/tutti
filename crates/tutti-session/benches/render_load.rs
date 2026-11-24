@@ -127,10 +127,9 @@ impl Variant {
     }
 }
 
-use tutti_dsp::LadderSaturation;
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_platform::Instant;
-use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
+use tutti_polysynth::{Adsr, FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig};
 use tutti_rt::SplitMix64;
 use tutti_sampler::{MemorySource, Playback, SlotId, VoicePool, VoiceWindow};
 use tutti_session::{InputPort, MainOutput, OutputPort, Session, Workers};

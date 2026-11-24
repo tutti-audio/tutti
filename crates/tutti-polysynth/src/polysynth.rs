@@ -59,10 +59,9 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// ```
 /// use std::num::NonZeroUsize;
 /// use tutti_buffers::MaxBlock;
-/// use tutti_dsp::LadderSaturation;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Renderer};
-/// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
+/// use tutti_polysynth::{FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig};
 ///
 /// let synth = PolySynth::<f32>::new(
 ///     SynthConfig::new()
