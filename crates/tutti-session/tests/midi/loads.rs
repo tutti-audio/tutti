@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use crate::common::{offline, tap};
 use crate::midi::{note_ons, roll};
 
-use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     ClipFile, ClipHeader, ClipSequence, MidiFile, ReadRepair, StandardMidiFile, Tick, TimelineDrop,
 };
@@ -202,22 +201,26 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     .expect("loads");
     assert!(clean.report().is_clean(), "{:?}", clean.report());
 
-    // A Set Profile On is not played (the MIDI-CI transaction it asks for is
-    // not run): each of its packets is listed.
-    let on = ProfileOnRequest {
-        target: ProfileTarget::Group,
-        profile: ProfileId::MPE,
-    };
-    let profiled = ClipHeader::new().profile_on(on);
-    let listed: Vec<_> = profiled
-        .profile_messages()
-        .iter()
-        .map(|&(tick, packet)| Unplayed::Header { tick, packet })
-        .collect();
-    assert!(!listed.is_empty());
-    let profiled =
-        tutti_fixtures::block_on(session().midi().load_midi(bytes_of(profiled))).expect("loads");
-    assert_eq!(profiled.report().unplayed, listed);
+    #[cfg(feature = "midi-hardware")]
+    {
+        // A Set Profile On is not played (the MIDI-CI transaction it asks for is
+        // not run): each of its packets is listed.
+        use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
+        let on = ProfileOnRequest {
+            target: ProfileTarget::Group,
+            profile: ProfileId::MPE,
+        };
+        let profiled = ClipHeader::new().profile_on(on);
+        let listed: Vec<_> = profiled
+            .profile_messages()
+            .iter()
+            .map(|&(tick, packet)| Unplayed::Header { tick, packet })
+            .collect();
+        assert!(!listed.is_empty());
+        let profiled = tutti_fixtures::block_on(session().midi().load_midi(bytes_of(profiled)))
+            .expect("loads");
+        assert_eq!(profiled.report().unplayed, listed);
+    }
 
     let header = tempo_and_meter
         .push(Tick(0), program_change)
