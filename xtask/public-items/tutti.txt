@@ -1,0 +1,26 @@
+# The public items of tutti: one row per `pub` item its source declares, `<kind> <path>`,
+# sorted (`cargo xtask write-public-items` rewrites this file from the tree).
+# A new public item needs its row in the change that adds it, argued in the pull request;
+# a row with no item is deleted, so the list only shrinks on its own.
+mod codec
+mod dsp
+mod graph
+mod measure
+mod midi
+mod midi::network
+mod midi::profile
+mod midi::property
+mod midi::tuning
+mod midi::universal
+mod modulation
+mod nodes
+mod nodes::kernel
+mod plugin
+mod plugin::catalog
+mod polysynth
+mod sampler
+mod session
+mod soundfont
+mod tempo
+mod types
+mod voicing
