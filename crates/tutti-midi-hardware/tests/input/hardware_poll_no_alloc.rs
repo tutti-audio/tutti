@@ -67,10 +67,12 @@ impl Rig {
             editor.insert(input_node, "in", MidiInputNode::new());
             let key = NodeKey(100 + input as u64);
             editor.insert(key, "inlet", node);
-            editor.spec_mut().connect_events(
-                EventInputPort::new(input_node, 0),
-                EventEdge::Direct(EventOutputPort::new(key, 0)),
-            );
+            editor
+                .connect_events(
+                    EventInputPort::new(input_node, 0),
+                    EventEdge::Direct(EventOutputPort::new(key, 0)),
+                )
+                .expect("the edge wires");
         }
         let out = editor
             .open_event_tap(
