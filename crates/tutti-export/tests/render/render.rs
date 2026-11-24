@@ -1482,6 +1482,8 @@ fn reported(ceiling: usize) -> TailPolicy {
 
 /// **An export spends the tail its nodes report at the programme's end**, not
 /// the ceiling they declare: the node declares 4,000 frames and reports 100.
+/// The source is a constant that keeps sounding past the programme, which
+/// does not lengthen the tail: every later ask bounds it by more than the first.
 #[test]
 fn export_spends_the_tail_its_nodes_report_at_the_programmes_end() {
     let graph = narrowing_chain(0.5, &[(frames_tail(4_000), Some(frames_tail(100)))]);
@@ -1655,6 +1657,97 @@ fn a_node_that_never_reports_spends_its_ceiling() {
 
     let graph = narrowing_chain(0.5, &[(frames_tail(4_000), None)]);
     assert_eq!(tailed_frames(graph, reported(1_500)), PROGRAMME + 1_500);
+}
+
+/// An instrument with an event input: it sounds (0.5) through the programme
+/// up to frame `sounding`, then is silent and says [`Status::Idle`] (the block
+/// after its last sound), under a declared tail of 20,000 frames.
+#[derive(Clone)]
+struct Release {
+    sounding: usize,
+    at: usize,
+}
+
+impl Node for Release {
+    fn shape(&self) -> Shape {
+        Shape::source_unassigned(ChannelLayout::MONO)
+            .events(1, 0)
+            .tail(frames_tail(20_000))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let out = io.output(0);
+        let idle = self.at >= self.sounding;
+        for (i, x) in out.iter_mut().enumerate() {
+            *x = if self.at + i < self.sounding {
+                0.5
+            } else {
+                0.0
+            };
+        }
+        self.at += out.len();
+        if idle { Status::Idle } else { Status::Modified }
+    }
+    fn reset(&mut self) {
+        self.at = 0;
+    }
+}
+
+/// **The export asks again as the tail renders.** An instrument (declared
+/// tail 20,000) sounds 1,024 frames past the programme and is idle from the
+/// block after; a node after it rings 300 frames and reports so (declared
+/// tail 5,300). One ask at the programme's end charges 20,000 + 5,300 (the
+/// instrument's ceiling, then the node's, fed by one that owes): the render
+/// would be 8,820 + 25,300. The tail is the smallest bound seen, each ask
+/// bounding it by what is spent plus what is owed: the first gives 25,300; one
+/// block (1,024) later the instrument has just sounded its last, so the bound
+/// is 1,024 + 25,300 and the first stands; after a second block (2,048 spent)
+/// the instrument has said idle and the node after it, no longer fed, owes
+/// its report of 300 (its input has been quiet 1,024 frames, past its report,
+/// but its last block was not flagged silent, so it owes the whole report):
+/// the bound is 2,048 + 300 = 2,348. The render is 8,820 + 2,348.
+#[test]
+fn a_bounce_after_an_instrument_in_release_ends_at_the_release_and_the_reported_tail() {
+    const RELEASE: usize = 1_024;
+    const RING: usize = 300;
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let instrument = g.add(ForkByClone(Release {
+        sounding: PROGRAMME + RELEASE,
+        at: 0,
+    }));
+    let rings = g.add(ForkByClone(Rings {
+        ring: RING,
+        left: 0,
+    }));
+    g.connect(instrument, 0, rings, 0);
+    g.pipe_output(rings);
+    let graph = built(g, RATE);
+    assert_eq!(
+        graph.declared_tail().samples(),
+        Some(Samples::new(20_000 + RING + 5_000))
+    );
+    assert_eq!(
+        tailed_frames(graph, reported(40_000)),
+        PROGRAMME + 2 * RELEASE + RING
+    );
+}
+
+/// A node that never says idle spends the ceiling and no more: the ceiling
+/// (2,500 frames, two blocks and 452) is not a multiple of the block, and the
+/// node declares 20,000. (The unbounded report below is the same rule for a
+/// node whose figure is the cap; this one is a finite figure that never falls.)
+#[test]
+fn a_node_that_never_rests_spends_the_ceiling_and_no_more() {
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let instrument = g.add(ForkByClone(Release {
+        sounding: usize::MAX,
+        at: 0,
+    }));
+    g.pipe_output(instrument);
+    assert_eq!(
+        tailed_frames(built(g, RATE), reported(2_500)),
+        PROGRAMME + 2_500
+    );
 }
 
 /// A normalized export renders once and measures and writes what it spilled:

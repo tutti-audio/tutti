@@ -1,4 +1,4 @@
-//! Standard MIDI File bytes: the wire half under [`MidiFile`](crate::MidiFile).
+//! Standard MIDI File bytes: the wire half under [`StandardMidiFile`](crate::StandardMidiFile).
 //!
 //! [`read()`] is a `winnow` parser (private to `read.rs`, in no signature) and
 //! [`write()`] a fold of pure functions, the reader's inverse. Both parse onto
@@ -16,7 +16,7 @@
 //!
 //! A chunk that runs past the end of the file, fewer track chunks than the
 //! header declares, or a track that ends mid-event is a
-//! [`ReadError::Smf`](crate::ReadError::Smf) whose cause is one of the
+//! [`SmfReadError::Parse`](crate::SmfReadError::Parse) whose cause is one of the
 //! [`SmfParseError`] cut-off variants, with the track
 //! and byte offset it was found at. A write the fields cannot hold is
 //! [`TracksError::TooLarge`](crate::TracksError::TooLarge), refused when the

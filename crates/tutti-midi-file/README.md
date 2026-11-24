@@ -2,7 +2,7 @@
 
 This crate reads and writes MIDI files: Standard MIDI Files (.mid) and MIDI 2.0 Clip Files (.midi2).
 
-A file is read into one model and written back without losing data, including SysEx and meta events.
+Each kind of file is its own type, read and written back without losing data, including SysEx and meta events.
 
 This crate is part of [tutti](https://github.com/tutti-audio/tutti), a real-time audio engine for Rust.
 

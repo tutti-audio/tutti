@@ -10,7 +10,7 @@ use crate::endpoint::{Capabilities, FunctionBlock, Supports};
 use tutti_fixtures::midi;
 use tutti_midi_ci::Initiator;
 use tutti_midi_ci::{
-    CI_VERSION, CiMessage, Decoded, Muid, ProfileChannels, ProfileInitiator, ProfileTarget,
+    CiMessage, Decoded, Muid, ProfileChannels, ProfileFormat, ProfileInitiator, ProfileTarget,
 };
 
 const OURS: u32 = 0x0100_0001;
@@ -146,8 +146,10 @@ fn table(reports: &[(CiDeviceId, Option<u16>)]) -> ProfileTable {
         peer.on_message(
             &Decoded::Message(CiMessage::ProfileEnabled {
                 source: Muid::of(PEER),
-                ci_version: tutti_ump::CiVersion::of(if channels.is_some() { 2 } else { 1 }),
-                target: target(address, channels.unwrap_or(0)),
+                format: match channels {
+                    Some(channels) => ProfileFormat::current(target(address, channels)),
+                    None => ProfileFormat::Version1 { address },
+                },
                 profile: ProfileId::MPE,
             }),
             Instant::now(),
@@ -307,8 +309,7 @@ fn a_disabled_mpe_profile_is_no_zone() {
     peer.on_message(
         &Decoded::Message(CiMessage::ProfileDisabled {
             source: Muid::of(PEER),
-            ci_version: CI_VERSION,
-            target: target(channel(0), 8),
+            format: ProfileFormat::current(target(channel(0), 8)),
             profile: ProfileId::MPE,
         }),
         Instant::now(),

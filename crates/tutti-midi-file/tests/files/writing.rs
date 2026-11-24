@@ -4,12 +4,12 @@
 
 use std::path::Path;
 
-use tutti_midi_file::{MidiFile, SmfDivision, WriteError};
+use tutti_midi_file::{MidiFile, SmfDivision, StandardMidiFile, WriteError};
 use tutti_platform::Destination;
 
-use crate::common::{encoded, track};
+use crate::common::{encoded, read_bytes, track};
 
-fn file(tpq: u16) -> MidiFile {
+fn file(tpq: u16) -> StandardMidiFile {
     crate::common::format0(SmfDivision::per_quarter(tpq), track(vec![])).unwrap()
 }
 
@@ -30,7 +30,7 @@ fn a_write_to_a_new_path_creates_exactly_the_files_bytes_and_no_temp() {
     f.write(&path).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), encoded(&f));
     assert_eq!(entries(dir.path()), ["a.mid"]);
-    assert_eq!(MidiFile::read(&path).unwrap(), f);
+    assert_eq!(MidiFile::read(&path).unwrap(), MidiFile::Standard(f));
 }
 
 /// A refused `create_new` is `Exists`, not the generic commit failure, and its
@@ -63,7 +63,7 @@ fn the_default_write_replaces_the_old_file_with_the_new_bytes_and_leaves_no_temp
     let f = file(96);
     f.write(&path).unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), encoded(&f));
-    assert_eq!(MidiFile::read(&path).unwrap(), f);
+    assert_eq!(MidiFile::read(&path).unwrap(), MidiFile::Standard(f));
     assert_eq!(entries(dir.path()), ["a.mid"]);
 }
 
@@ -99,7 +99,7 @@ fn a_write_to_a_vec_reads_back_as_the_file() {
     let mut bytes = Vec::new();
     f.write(&mut bytes).unwrap();
     assert!(!bytes.is_empty());
-    assert_eq!(MidiFile::read(bytes).unwrap(), f);
+    assert_eq!(read_bytes(bytes).unwrap(), f);
 }
 
 /// A writer is appended to, in one piece, whatever `create_new` says.
@@ -111,7 +111,7 @@ fn a_write_to_a_writer_appends_the_whole_file_and_ignores_create_new() {
     assert_eq!(&bytes[..4], b"head");
     // The SMF header chunk (SMF 1.0 section 2.1) follows what was there, whole.
     assert_eq!(&bytes[4..8], b"MThd");
-    assert_eq!(MidiFile::read(bytes[4..].to_vec()).unwrap(), f);
+    assert_eq!(read_bytes(&bytes[4..]).unwrap(), f);
 }
 
 #[test]

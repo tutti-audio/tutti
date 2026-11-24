@@ -426,8 +426,8 @@ impl AudioEngine {
     /// Builds a stream on the selected device and starts it. A stream that is
     /// already running is an error: the state handed in is not adopted.
     ///
-    /// Re-reads the device's config first (at the chosen format, if any), so after a
-    /// [`select_device`](Self::select_device) the [`spec`](OutputStream::spec),
+    /// Re-reads the device's config first (at the chosen format, if any), so the
+    /// [`spec`](OutputStream::spec),
     /// [`sample_rate`](OutputStream::sample_rate) and [`channels`](OutputStream::channels)
     /// describe the device that is actually playing. The stream is opened with
     /// a fixed buffer of the [`quantum`](OutputConfig::quantum) asked for, which
@@ -566,17 +566,6 @@ impl AudioEngine {
         self.stream.stop();
     }
 
-    /// Selects the device the next [`start`](Self::start) opens, by name or
-    /// index. Does not disturb a running stream.
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidDevice`] on an engine built with
-    /// [`from_spec`](Self::from_spec), which has no device to select.
-    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<()> {
-        self.origin.target_mut()?.1.select(sel);
-        Ok(())
-    }
-
     /// The name of the device the running (or last started) stream opened,
     /// as it was then. It asks the host nothing, so it never enumerates
     /// (which can block for good in a sound server's ALSA plugin) and is
@@ -595,4 +584,4 @@ impl AudioEngine {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

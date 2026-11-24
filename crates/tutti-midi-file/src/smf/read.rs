@@ -60,7 +60,7 @@ use crate::file::{
     FileEvent, Lead, LeadRepair, MalformedMeta, Meta, MicrosPerQuarter, Opening, OtherMetaKind,
     ReadRepair, SmfFormat, SmpteOffset, SysEx, TextKind, Tick, Track,
 };
-use crate::{ReadError, SmfParseError};
+use crate::{SmfParseError, SmfReadError};
 
 type Res<T> = std::result::Result<T, ContextError<SmfParseError>>;
 
@@ -162,7 +162,7 @@ fn chunk<'a>(input: &mut &'a [u8]) -> Res<Chunk<'a>> {
 
 /// The whole file, framed: the header and the offset and body of each `MTrk`
 /// chunk.
-fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), ReadError> {
+fn smf(bytes: &[u8]) -> Result<(Header, Vec<(usize, &[u8])>), SmfReadError> {
     let mut input = bytes;
     let header = header
         .parse_next(&mut input)
@@ -556,7 +556,7 @@ fn track(index: usize, body: &[u8]) -> Result<(Track, Leads, Vec<ReadRepair>), F
     }
     close_sysex(index, &mut events, &raw, &mut changes);
     let end = end.unwrap_or(last);
-    let mut track = Track::from_read(Vec::new(), Tick(0), events, end);
+    let mut track = Track::from_read(events, end);
     track.name = leads.name.take();
     Ok((track, leads, changes))
 }
@@ -571,8 +571,8 @@ fn faults(e: &ContextError<SmfParseError>) -> Vec<SmfParseError> {
 /// The one place winnow's error becomes ours: the error of the refusal
 /// `faults` at byte `offset`. A refusal that names no rule ran out of bytes
 /// inside an event.
-fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> ReadError {
-    ReadError::Smf {
+fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> SmfReadError {
+    SmfReadError::Parse {
         track,
         offset,
         cause: faults
@@ -586,13 +586,13 @@ fn refused(track: Option<usize>, offset: usize, faults: &[SmfParseError]) -> Rea
 ///
 /// # Errors
 ///
-/// - [`ReadError::Smf`] for anything malformed or cut off, with where.
-pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, ReadError> {
+/// - [`SmfReadError::Parse`] for anything malformed or cut off, with where.
+pub(crate) fn read(bytes: &[u8]) -> Result<SmfParts, SmfReadError> {
     let (header, chunks) = smf(bytes)?;
     let declared = usize::from(header.tracks);
     // Fewer than declared is a cut file; more, or a format 0 with other
     // than one, disagrees with its own header.
-    let smf_error = |offset, cause| ReadError::Smf {
+    let smf_error = |offset, cause| SmfReadError::Parse {
         track: None,
         offset,
         cause,

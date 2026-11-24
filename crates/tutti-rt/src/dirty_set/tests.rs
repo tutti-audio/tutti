@@ -45,8 +45,6 @@ fn word_boundaries_hold() {
 fn an_index_past_the_end_is_refused() {
     for len in [0, 1, 63, 64, 65] {
         let set = DirtySet::new(len);
-        assert_eq!(set.len(), len);
-        assert_eq!(set.is_empty(), len == 0);
         assert!(set.index(len).is_none(), "len {len}");
         assert!(set.index(usize::MAX).is_none());
         if len > 0 {

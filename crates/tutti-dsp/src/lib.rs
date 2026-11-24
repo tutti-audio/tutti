@@ -255,6 +255,8 @@ mod spatial;
 mod spectral;
 mod stft;
 #[cfg(test)]
+mod tail_probe;
+#[cfg(test)]
 mod testing;
 mod viterbi;
 
@@ -379,9 +381,9 @@ pub use reverb::freeverb::bank::{FreeverbBank, FreeverbRamps};
 pub use reverb::freeverb::design::FreeverbControls;
 pub(crate) use reverb::network::loop_gain;
 pub use reverb::network::{
-    Absorption, AllPass, AllPassForm, Band, Fdn, FirSummary, Full, Gains, Inline, Line,
-    LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix, Network,
-    NetworkOutputMap, NetworkStage, Tap, TapSet, rt60_from_gain,
+    Absorption, AllPass, AllPassForm, Band, BandAbsorption, Fdn, FirSummary, Full, Gains, Inline,
+    Line, LineModulation, MAX_CHANNELS, MAX_DENSE, MAX_LINES, MAX_STAGES, MAX_TAPS, Matrix,
+    Network, NetworkOutputMap, NetworkStage, Tap, TapSet, rt60_from_gain,
 };
 pub use reverb::plate::bank::{PlateBank, PlateRamps};
 pub use reverb::plate::design::{MAX_PLATE_DECAY, PlateControls};
