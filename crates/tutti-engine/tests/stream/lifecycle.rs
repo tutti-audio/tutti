@@ -503,3 +503,25 @@ fn a_start_after_a_lost_device_releases_the_dead_stream_before_opening() {
     assert!(!first.is_open());
     assert!(second.is_open() && engine.is_running());
 }
+
+/// **A fault after stop is not recorded.**
+///
+/// The stream is gone; an error a test delivers through its handle reaches
+/// nobody, so the fault record stays as the stop left it.
+#[test]
+fn a_fault_after_stop_is_not_recorded() {
+    let (mut engine, state) = engine_and_state();
+    let faults = engine.faults();
+    let (driver, stream) = ManualStreamDriver::new();
+    engine.start_with(state, driver).unwrap();
+    engine.stop();
+
+    stream.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
+
+    assert_eq!(faults.count(), 0);
+    assert!(!faults.is_disconnected());
+}
