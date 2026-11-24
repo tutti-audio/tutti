@@ -477,15 +477,12 @@ impl SendError {
 /// vocoder) to drop on the audio thread.
 ///
 /// ```compile_fail
-/// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource};
+/// # use tutti_sampler::{MemorySource, Playback, VoiceNode};
 /// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
 /// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let voice = Voice {
-/// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
-/// #     play: Playback::default(),
-/// # };
-/// let (_node, handle) = VoiceNode::new(voice).expect("a finite gain and a nonempty width").with_handle();
+/// # let source = MemorySource::new(wave.clone()).expect("a placeable wave");
+/// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
 /// // A standalone voice node has no door for a pool's wave swap.
 /// let _ = handle.replace_wave(tutti_sampler::SlotId(0), wave);
 /// ```
@@ -493,15 +490,12 @@ impl SendError {
 /// The same setup with a control it does take compiles:
 ///
 /// ```
-/// # use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoiceSource, VoiceWindow};
+/// # use tutti_sampler::{MemorySource, Playback, VoiceNode, VoiceWindow};
 /// # use tutti_buffers::{Mono, Wave};
 /// # use std::sync::Arc;
 /// # let wave = Arc::new(Wave::from_mono(tutti_units::SampleRate::SR_48K, Mono::new(&[0.0; 64])));
-/// # let voice = Voice {
-/// #     source: VoiceSource::Memory(MemorySource::new(wave.clone()).expect("a placeable wave")),
-/// #     play: Playback::default(),
-/// # };
-/// let (_node, handle) = VoiceNode::new(voice).expect("a finite gain and a nonempty width").with_handle();
+/// # let source = MemorySource::new(wave.clone()).expect("a placeable wave");
+/// let (_node, handle) = VoiceNode::new(source, Playback::default()).expect("a finite gain and a nonempty width").with_handle();
 /// handle.window_cell().publish(Some(VoiceWindow::from(tutti_units::Beat::new(1.0))));
 /// ```
 #[derive(Clone, Debug)]

@@ -17,7 +17,7 @@ use crate::{
 
 /// A sample placed on the timeline: where it starts, how loud, and whether it
 /// loops. It is a graph node as it stands, so a user never assembles a
-/// [`Voice`], a [`VoiceSource`] or a
+/// [`Voice`](crate::Voice), a [`VoiceSource`](crate::VoiceSource) or a
 /// [`VoiceWindow`]:
 ///
 /// ```ignore

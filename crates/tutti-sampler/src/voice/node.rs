@@ -669,7 +669,7 @@ impl<F: SamplerFloat> HasPublished<SpeedKind> for VoiceNode<F> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemorySource, Playback, VoiceSource, VoiceWindow};
+    use crate::{MemorySource, Playback, VoiceWindow};
     use tutti_buffers::Mono;
     use tutti_units::{Beat, SampleRate};
 
@@ -681,13 +681,12 @@ mod tests {
             SampleRate::SR_48K,
             Mono::new(&[0.0; 64]),
         ));
-        let voice = Voice {
-            source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
-            play: Playback::default(),
-        };
-        let (mut node, handle) = VoiceNode::new(voice)
-            .expect("a finite gain and a nonempty width")
-            .with_handle();
+        let (mut node, handle) = VoiceNode::new(
+            MemorySource::new(wave).expect("a placeable wave"),
+            Playback::default(),
+        )
+        .expect("a finite gain and a nonempty width")
+        .with_handle();
         {
             // A block in progress across the move.
             let _held = node.window.lend();
@@ -708,13 +707,12 @@ mod tests {
             SampleRate::SR_48K,
             Mono::new(&[0.0; 64]),
         ));
-        let voice = Voice {
-            source: VoiceSource::Memory(MemorySource::new(wave).expect("a placeable wave")),
-            play: Playback::default(),
-        };
-        let (mut node, handle) = VoiceNode::new(voice)
-            .expect("a finite gain and a nonempty width")
-            .with_handle();
+        let (mut node, handle) = VoiceNode::new(
+            MemorySource::new(wave).expect("a placeable wave"),
+            Playback::default(),
+        )
+        .expect("a finite gain and a nonempty width")
+        .with_handle();
         {
             // A block in progress across the move.
             let _held = node.speed.lend();
@@ -741,19 +739,16 @@ mod tests {
             tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
         );
         let free = |play: Playback| {
-            let voice = Voice {
-                source: VoiceSource::Memory(
-                    MemorySource::new(Arc::clone(&wave)).expect("a placeable wave"),
-                ),
-                play,
-            };
             let NodeParts {
                 node: mut live,
                 fork,
                 ..
-            } = VoiceNode::new(voice)
-                .expect("a finite gain and a nonempty width")
-                .into_parts();
+            } = VoiceNode::new(
+                MemorySource::new(Arc::clone(&wave)).expect("a placeable wave"),
+                play,
+            )
+            .expect("a finite gain and a nonempty width")
+            .into_parts();
             live.prepare(&prepare);
             let mut fork = fork
                 .expect("forks")
@@ -777,15 +772,10 @@ mod tests {
             "a stretch of two plays twice as long"
         );
 
-        let placed = Voice {
-            source: VoiceSource::Memory(
-                MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                    .expect("a placeable wave"),
-            ),
-            play: Playback::default(),
-        };
+        let placed = MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave");
         assert_eq!(
-            VoiceNode::new(placed)
+            VoiceNode::new(placed, Playback::default())
                 .expect("a finite gain and a nonempty width")
                 .shape()
                 .tail,
