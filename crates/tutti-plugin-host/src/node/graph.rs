@@ -158,7 +158,27 @@ where
             // The plugin was not told this node's rate (`set_rate`), or runs at
             // the rate it kept after refusing it: silence, not audio at another
             // rate. A Processor the control side recalls is still handed back.
+            // The node returns `Silent`, never `Idle`, and has an event input,
+            // so the executor keeps calling it. A note sounding when the mute
+            // begins is cut: the refused change deactivated the plugin and
+            // activated it anew (`HostOp::Reconfigure`), and `Processor::reset`
+            // is called only by this node's `reset`, so nothing resumes it;
+            // the activation that ends the mute starts clear again.
             let _ = this.rt.poll(Processor::stop);
+            // The MIDI the block carries is not delivered: counted, and the
+            // rest of a SysEx open in it is skipped, as for a block the
+            // plugin did not process.
+            let midi = io
+                .events(this.event_in)
+                .as_slice()
+                .iter()
+                .filter(|e| matches!(e.kind, EventKind::Midi(_)))
+                .count() as u64;
+            if midi > 0 {
+                this.params.count_midi_dropped(midi);
+                io.count_lost(midi);
+                this.intake.lost();
+            }
             return Status::Silent;
         }
         let ports = this.declared.ports;
@@ -596,6 +616,7 @@ where
     /// Control thread.
     fn bind_wake(&mut self, wake: tutti_graph::Wake) {
         let mut instance = self.client.inner.lock();
+        instance.bind_wake(wake.clone());
         if let Some(control) = instance.control() {
             control.bind_wake(tutti_plugin_types::ProcessWake::new(move || wake.notify()));
         }

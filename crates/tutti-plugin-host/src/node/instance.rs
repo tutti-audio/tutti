@@ -238,6 +238,9 @@ pub(super) struct Instance<L: Loaded> {
     silence: Option<Silence>,
     /// The nodes over this instance render silence while a refusal stands.
     silenced: Arc<Silenced>,
+    /// Wakes the node the executor parked: raised after a recall, which only
+    /// the node's next call answers.
+    wake: Option<tutti_graph::Wake>,
     /// A successor was committed ([`commit`](Self::commit)).
     committed: bool,
     /// Whether the plugin is lost, and why, readable with no lock.
@@ -324,6 +327,7 @@ impl<L: Loaded> Instance<L> {
             reports: Vec::new(),
             silence: None,
             silenced: Arc::default(),
+            wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
@@ -366,6 +370,7 @@ impl<L: Loaded> Instance<L> {
             reports: Vec::new(),
             silence: None,
             silenced: Arc::default(),
+            wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
@@ -449,6 +454,14 @@ impl<L: Loaded> Instance<L> {
                     | Notice::ParamTitlesChanged => {}
                 });
         self.publish_figures();
+        // A plan parked for the Processor has raised its recall; the realtime
+        // end hands it back at the node's next call, which a parked node does
+        // not get unless woken. Raised after the recall, never before.
+        if self.state.is_parked()
+            && let Some(wake) = &self.wake
+        {
+            wake.notify();
+        }
         if std::mem::take(&mut self.midi_map_stale) {
             self.declare_midi_map(main);
             self.reports.push(PluginInvalidation::MidiMap);
@@ -525,7 +538,9 @@ impl<L: Loaded> Instance<L> {
     /// [`RebindError::NotRunning`] for a plugin that is not active (loaded,
     /// refused or lost), or that runs at the rate it accepted after refusing
     /// the graph's: a successor would render at the wrong rate, so there is no
-    /// Processor to move until a rate is taken.
+    /// Processor to move until a rate is taken. Once one is
+    /// ([`restored`](Self::restored)) the session's next update that retries
+    /// the rebind succeeds, with no action by the app.
     /// [`RebindError::Restarting`] while the plugin's own restart or a request
     /// still to be read is under way: the layout the lifecycle holds is not the
     /// one the plugin will run with, so the caller pumps and tries again.
@@ -587,6 +602,12 @@ impl<L: Loaded> Instance<L> {
     /// this instance and the handle's health.
     pub(super) fn lost_latch(&self) -> Arc<Lost> {
         Arc::clone(&self.lost)
+    }
+
+    /// The wake of the node placed over this instance, raised whenever a
+    /// recall waits for it.
+    pub(super) fn bind_wake(&mut self, wake: tutti_graph::Wake) {
+        self.wake = Some(wake);
     }
 
     /// The flag the nodes over this instance read to render silence while a
@@ -810,6 +831,15 @@ impl<L: Loaded> Instance<L> {
     /// host is told once when it was told of a refused rate (a stuck restart
     /// or an unprepared fork was announced as no refusal). The one place the
     /// reason is cleared and published.
+    ///
+    /// The order is fixed: the recall of the Processor activated at the old
+    /// rate is answered by the node's `rt.poll` (the node is woken for it),
+    /// and the tick that follows deactivates, activates at the new rate and
+    /// lends the new Processor; [`settle`](Self::settle) runs after that tick,
+    /// with nothing planned, so the mute is cleared only when the old
+    /// Processor has been returned and the one at the new rate is lent. A
+    /// node therefore never renders with the Processor rolled back to the old
+    /// rate once the mute is down.
     fn restored(&mut self) {
         if let Some(Silence::Refused { .. }) = self.silence.take() {
             self.reports.push(PluginInvalidation::RateRestored);
