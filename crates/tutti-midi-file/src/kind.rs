@@ -20,9 +20,9 @@ const SMF_MAGIC: [u8; 4] = *b"MThd";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MidiFileKind {
-    /// A Standard MIDI File — leading `MThd`. Read with [`MidiFile::read`](crate::MidiFile::read).
+    /// A Standard MIDI File — leading `MThd`. Read with [`StandardMidiFile::from_bytes`](crate::StandardMidiFile::from_bytes).
     StandardMidiFile,
-    /// A MIDI 2.0 Clip File — leading `SMF2CLIP`. Read with [`MidiFile::read`](crate::MidiFile::read).
+    /// A MIDI 2.0 Clip File — leading `SMF2CLIP`. Read with [`ClipFile::from_bytes`](crate::ClipFile::from_bytes).
     ClipFile,
 }
 

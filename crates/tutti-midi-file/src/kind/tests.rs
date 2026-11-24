@@ -1,22 +1,29 @@
 use super::*;
-use crate::MidiFile;
+use crate::{ClipFile, ClipHeader, ClipSequence, MidiFile, StandardMidiFile};
+
+fn empty_clip() -> ClipFile {
+    ClipFile::new(
+        tutti_ump::TicksPerQuarterNote::of(96),
+        ClipHeader::new(),
+        ClipSequence::new(),
+    )
+    .unwrap()
+}
 
 #[test]
 fn detect_tells_the_two_midi_formats_apart() {
-    let clip = MidiFile::clip(
-        tutti_ump::TicksPerQuarterNote::of(96),
-        crate::Track::default(),
-    )
-    .unwrap()
-    .encode();
+    let mut clip = Vec::new();
+    empty_clip().write(&mut clip).unwrap();
     assert_eq!(MidiFileKind::of_header(&clip), Some(MidiFileKind::ClipFile));
 
-    let smf = MidiFile::smf(
+    let mut smf = Vec::new();
+    StandardMidiFile::new(
         crate::SmfDivision::per_quarter(480),
         crate::Layout::Format0(crate::LeadTrack::new(crate::Track::default())),
     )
     .unwrap()
-    .encode();
+    .write(&mut smf)
+    .unwrap();
     assert_eq!(
         MidiFileKind::of_header(&smf),
         Some(MidiFileKind::StandardMidiFile)
@@ -41,20 +48,14 @@ fn detect_reads_the_magic_not_the_extension() {
     // A clip file under an SMF extension still detects as a clip file, and
     // the SMF reader rejects it rather than mis-parsing it.
     let misnamed = dir.path().join("misnamed.mid");
-    MidiFile::clip(
-        tutti_ump::TicksPerQuarterNote::of(96),
-        crate::Track::default(),
-    )
-    .unwrap()
-    .write(&misnamed)
-    .unwrap();
+    empty_clip().write(&misnamed).unwrap();
     assert_eq!(
         MidiFileKind::detect(&misnamed).unwrap(),
         Some(MidiFileKind::ClipFile)
     );
     assert_eq!(
-        MidiFile::read(&misnamed).unwrap().encode()[..8],
-        crate::clip_file::CLIP_FILE_MAGIC
+        MidiFile::read(&misnamed).unwrap(),
+        MidiFile::Clip(empty_clip())
     );
 
     // Readable but unrecognised — `Ok(None)`, not an error.

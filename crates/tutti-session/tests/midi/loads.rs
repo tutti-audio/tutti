@@ -8,17 +8,36 @@
 
 use std::path::{Path, PathBuf};
 
-use tutti_midi_file::{MidiFile, ReadRepair, Tick, TimelineDrop, Track};
+use tutti_midi_file::{
+    ClipFile, ClipHeader, ClipSequence, MidiFile, ReadRepair, StandardMidiFile, Tick, TimelineDrop,
+};
 use tutti_music::TimeSignature;
 use tutti_session::{
-    DetachedSession, LoadError, LoadedMidi, NoCommonTimelineError, Session, TrackError,
+    DetachedSession, DroppedEvent, LoadError, LoadedMidi, NoCommonTimelineError, Session,
+    TrackError,
 };
 use tutti_tempo::TempoMap;
 use tutti_ump::{
-    Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
-    TicksPerQuarterNote, U7,
+    Address, Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
+    TicksPerQuarterNote, U7, Ump, Voice1,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Seconds};
+
+/// The Standard MIDI File a load read.
+fn standard(loaded: &LoadedMidi) -> &StandardMidiFile {
+    let MidiFile::Standard(file) = loaded.file() else {
+        panic!("a Standard MIDI File, got {:?}", loaded.file());
+    };
+    file
+}
+
+/// The Clip File a load read.
+fn clip(loaded: &LoadedMidi) -> &ClipFile {
+    let MidiFile::Clip(file) = loaded.file() else {
+        panic!("a Clip File, got {:?}", loaded.file());
+    };
+    file
+}
 
 fn session() -> DetachedSession {
     Session::builder()
@@ -101,52 +120,31 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
     );
     let mut s = session();
     let loaded = tutti_fixtures::block_on(s.midi().load_midi(bytes)).expect("loads");
-    assert_eq!(loaded.file().tracks().len(), 2);
+    assert_eq!(standard(&loaded).tracks().len(), 2);
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
     let tempo = loaded.tempo().expect("one timeline");
     assert_eq!(tempo.seconds_at(Beat::new(2.0)), Seconds::new(1.0));
 }
 
-/// A Clip File's configuration header (M2-116 section 6) is not on the sequence's
-/// timeline, so a load does not play it.
-#[test]
-fn a_clip_files_header_is_not_reported_by_a_load() {
-    use tutti_midi_ci::{ProfileId, ProfileOnRequest, ProfileTarget};
-
-    let on = ProfileOnRequest {
-        target: ProfileTarget::Group,
-        profile: ProfileId::MPE,
-    };
-    let track = Track::new()
-        .profile_on(on)
-        .note(
-            Tick(0),
-            Tick(96),
-            MidiChannel::FIRST,
-            NoteNumber::of(60),
-            U7::of(100),
-        )
-        .ending_at(Tick(96));
-    let mut bytes = Vec::new();
-    MidiFile::clip(TicksPerQuarterNote::of(96), track)
-        .expect("a clip")
-        .write(&mut bytes)
-        .expect("a Vec takes the write");
-
-    let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
-
-    assert_eq!(loaded.track(0).unwrap().events.len(), 2);
-    assert!(loaded.report().is_clean());
-}
-
 /// A MIDI 2.0 Clip File (M2-116) loads as its notes over its Flex Data tempo: at
 /// 96 ticks a quarter, a note from tick 0 to 96 is beat 0 to 1, one from tick 192
 /// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a
-/// second. Its Set Time Signature of 3/4 is the loaded meter.
+/// second. Its Set Time Signature of 3/4 is the loaded meter. Its configuration
+/// header (M2-116 section 6) is the file's own configuration, not an event of the
+/// sequence: the load lists each header message as not played.
 #[test]
 fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
     let division = TicksPerQuarterNote::of(96);
-    let track = Track::new()
+    let program_change: Ump = Message::Midi1(
+        Address::first(MidiChannel::FIRST),
+        Voice1::ProgramChange(U7::of(5)),
+    )
+    .into();
+    let header = ClipHeader::new()
+        .push(Tick(0), program_change)
+        .unwrap()
+        .ending_at(Tick(12));
+    let sequence = ClipSequence::new()
         .push(
             Tick(0),
             Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
@@ -180,7 +178,7 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
         )
         .ending_at(Tick(288));
     let mut bytes = Vec::new();
-    MidiFile::clip(division, track)
+    ClipFile::new(division, header, sequence)
         .expect("a clip")
         .write(&mut bytes)
         .expect("a Vec takes the write");
@@ -191,15 +189,22 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
     // The Set Tempo and Set Time Signature messages and two notes, a note-on and a
     // note-off each.
     assert_eq!(loaded.track(0).unwrap().events.len(), 6);
-    let view = loaded
-        .file()
-        .timebase()
-        .metrical()
-        .expect("a metrical clip");
-    let notes = loaded.file().tracks()[0].notes();
-    let beats: Vec<_> = notes
+    assert_eq!(
+        loaded.report().dropped,
+        [DroppedEvent::Header {
+            tick: Tick(0),
+            packet: program_change
+        }]
+    );
+    let file = clip(&loaded);
+    let beats: Vec<_> = file
+        .sequence()
+        .notes()
         .iter()
-        .map(|n| (view.beat_at(n.start), view.beat_at(n.end)))
+        .map(|n| {
+            let beat = |tick: Tick| tick.beats(file.ticks_per_quarter());
+            (beat(n.start), beat(n.end))
+        })
         .collect();
     assert_eq!(
         beats,
@@ -229,7 +234,7 @@ fn a_format_1_file_lands_each_track_with_its_clip_and_the_shared_timeline() {
     );
     let loaded = load(&mut session(), write(dir.path(), "f1.mid", &bytes)).expect("loads");
 
-    assert_eq!(loaded.file().tracks().len(), 2);
+    assert_eq!(standard(&loaded).tracks().len(), 2);
     // A note is its note-on and its note-off.
     assert_eq!(loaded.track(0).unwrap().events.len(), 2);
     assert_eq!(loaded.track(1).unwrap().events.len(), 4);
@@ -326,8 +331,14 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
     let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
-    assert_eq!((dropped[0].track, dropped[0].beat), (0, Beat::new(0.5)));
-    assert_eq!(dropped[0].why, TimelineDrop::BareEscape);
+    let DroppedEvent::Smf {
+        track, beat, why, ..
+    } = &dropped[0]
+    else {
+        panic!("a Standard MIDI File's event: {:?}", dropped[0]);
+    };
+    assert_eq!((*track, *beat), (0, Beat::new(0.5)));
+    assert_eq!(*why, TimelineDrop::BareEscape);
     assert_eq!(loaded.track(0).unwrap().events.len(), 2);
 }
 
@@ -364,7 +375,10 @@ fn smpte_smf(division: u16, events: &[&[u8]]) -> Vec<u8> {
 fn escape_beat(loaded: &LoadedMidi) -> Beat {
     let dropped = &loaded.report().dropped;
     assert_eq!(dropped.len(), 1);
-    dropped[0].beat
+    let DroppedEvent::Smf { beat, .. } = &dropped[0] else {
+        panic!("a Standard MIDI File's event: {:?}", dropped[0]);
+    };
+    *beat
 }
 
 /// Delta 1000 (`87 68`), then the F7 escape of the one byte 0x55.
