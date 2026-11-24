@@ -123,21 +123,18 @@ proptest! {
 fn brute_force_interference(plan: &tutti_graph::Plan) {
     use tutti_graph::PortKind;
     let n = plan.ops().len();
-    let succ = plan.op_successors();
-    // reach[a] = every op reachable from a (strictly).
-    let reach: Vec<BTreeSet<u32>> = (0..n)
-        .map(|a| {
-            let mut seen = BTreeSet::new();
-            let mut stack: Vec<u32> = succ.row(a).to_vec();
-            while let Some(x) = stack.pop() {
-                if seen.insert(x) {
-                    stack.extend_from_slice(succ.row(x as usize));
-                }
-            }
-            seen
-        })
-        .collect();
-    let before = |a: u32, b: u32| reach[a as usize].contains(&b);
+    // before[b] = every op that happens before b: its dependencies, and
+    // theirs. Ops are in topological order, so one forward pass is enough.
+    let mut before: Vec<BTreeSet<u32>> = Vec::with_capacity(n);
+    for b in 0..n {
+        let mut set = BTreeSet::new();
+        for &a in plan.op_dependencies(b) {
+            set.insert(a);
+            set.extend(before[a as usize].iter().copied());
+        }
+        before.push(set);
+    }
+    let before = |a: u32, b: u32| before[b as usize].contains(&a);
     let readers = |v: &tutti_graph::Value| {
         let r = v.readers;
         &plan.value_readers()[r.start as usize..(r.start + r.len) as usize]

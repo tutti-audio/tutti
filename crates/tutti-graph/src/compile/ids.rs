@@ -90,21 +90,6 @@ ids! {
     PlanMeterId;
 }
 
-impl AudioFeedbackId {
-    /// The audio slot this feedback is read from: slot 0 is the null slot,
-    /// the feedback slots follow.
-    pub(crate) fn slot(self) -> AudioSlotId {
-        AudioSlotId::from_index(1 + self.index())
-    }
-}
-
-impl EventFeedbackId {
-    /// The event slot this feedback is read from.
-    pub(crate) fn slot(self) -> EventSlotId {
-        EventSlotId::from_index(1 + self.index())
-    }
-}
-
 /// A `Vec<T>` that only an `I` indexes; its rows are read and written through
 /// the [`TableSlice`] it derefs to.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -217,6 +202,20 @@ impl<I: Id, T> TableSlice<I, T> {
         self.items.get_mut(id.index())
     }
 
+    /// The id of row `index`, if there is one: the one way an arithmetic
+    /// position becomes an id.
+    pub(crate) fn id(&self, index: usize) -> Option<I> {
+        (index < self.items.len()).then(|| I::from_index(index))
+    }
+
+    /// The id of the row whose key is `key`, in a table sorted by `by`.
+    pub(crate) fn search_by_key<K: Ord>(&self, key: &K, by: impl FnMut(&T) -> K) -> Option<I> {
+        self.items
+            .binary_search_by_key(key, by)
+            .ok()
+            .map(I::from_index)
+    }
+
     /// Every id, in order.
     pub(crate) fn ids(&self) -> impl DoubleEndedIterator<Item = I> + use<I, T> {
         (0..self.items.len()).map(I::from_index)
@@ -312,8 +311,8 @@ impl EventSlotId {
     pub(crate) const EMPTY: Self = Self(0);
 
     /// The feedback this slot is read from, among `feedbacks` of them: the
-    /// null slot and a slot past the feedback slots have none (see
-    /// [`EventFeedbackId::slot`]).
+    /// null slot and a slot past the feedback slots have none (feedback
+    /// `k` is read from slot `1 + k`).
     pub(crate) fn feedback(self, feedbacks: usize) -> Option<EventFeedbackId> {
         let id = EventFeedbackId::from_index(self.index().checked_sub(1)?);
         (id.index() < feedbacks).then_some(id)

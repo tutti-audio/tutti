@@ -16,7 +16,7 @@ use tutti_engine::{MAX_FRAMES, OutputBlock};
 #[test]
 fn the_conversion_to_every_device_format_is_allocation_free() {
     fn gate<S: Sample>(label: &str) {
-        let mut block = OutputBlock::new(dc_state(0.5, 2), ChannelLayout::STEREO);
+        let mut block = OutputBlock::new(dc_state(0.5f32, 2), ChannelLayout::STEREO);
         let mut out = vec![S::SILENCE; MAX_FRAMES * 2];
         block.render_delayed(&mut out, None);
         assert_no_alloc::assert_no_alloc(|| {

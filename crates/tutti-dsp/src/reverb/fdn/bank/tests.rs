@@ -57,14 +57,9 @@ fn fdn_of(n: &Network) -> &Fdn {
 
 /// `frames` of a deterministic noise in `-0.5..0.5`.
 fn noise(seed: u32, frames: usize) -> Vec<f32> {
-    let mut s = seed | 1;
-    (0..frames)
-        .map(|_| {
-            s ^= s << 13;
-            s ^= s >> 17;
-            s ^= s << 5;
-            (s >> 8) as f32 / (1u32 << 24) as f32 - 0.5
-        })
+    tutti_fixtures::noise::<f32>(seed, frames)
+        .iter()
+        .map(|v| 0.5 * v)
         .collect()
 }
 

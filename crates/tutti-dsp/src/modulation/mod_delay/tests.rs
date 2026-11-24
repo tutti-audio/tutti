@@ -407,7 +407,7 @@ fn the_slew_is_frames_of_delay_per_frame() {
 /// `v[n] = x[n] + g v[n - d]` heard at `y[n] = v[n - d]`, to 2^-45.
 #[test]
 fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (16usize, 200usize);
     let rate = SampleRate::of(1_024.0);
     let sweep = Sweep::of(
@@ -446,14 +446,14 @@ fn an_f64_bank_with_no_depth_is_a_fixed_delay_in_f64() {
             .map(|n| n.checked_sub(d).map_or(0.0, |k| v[k]))
             .collect()
     };
-    assert_close_f64(&run_with(0.0), &delayed(&x), 0.0);
+    assert_close(&run_with(0.0), &delayed(&x), 0.0);
 
     let g = 0.6;
     let mut v = vec![0.0f64; len];
     for n in 0..len {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
     }
-    assert_close_f64(&run_with(g), &delayed(&v), 2.0f64.powi(-45));
+    assert_close(&run_with(g), &delayed(&v), 2.0f64.powi(-45));
 }
 
 /// **A sweep rate is finite and at least `MIN_RATE`**: a slower rate, or one that is not

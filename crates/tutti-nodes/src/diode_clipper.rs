@@ -280,7 +280,10 @@ mod tests {
         let mut n = node(4_000.0, 0.0);
         assert!(n.param_set().set(UnitParam::Cutoff, 500.0));
         let f = 2_000.0;
-        let x: Vec<f32> = sine(f, RATE, 9_600).iter().map(|v| v * 1e-4).collect();
+        let x: Vec<f32> = sine::<f32>(f, RATE, 9_600)
+            .iter()
+            .map(|v| v * 1e-4)
+            .collect();
         let y = render_chunked(&mut n, &[x], 256).remove(0);
         let gain = amplitude_at(&y[4_800..], Hz::new(f), SampleRate::of(RATE)) / 1e-4;
         let analog = 1.0 / (1.0 + (f / 500.0f64).powi(2)).sqrt();
@@ -293,7 +296,10 @@ mod tests {
     #[test]
     fn the_drive_is_settable_by_unit_param_and_the_pair_clips() {
         let mut n = node(5_000.0, 0.0);
-        let x: Vec<f32> = sine(1_000.0, RATE, 4_800).iter().map(|v| v * 0.5).collect();
+        let x: Vec<f32> = sine::<f32>(1_000.0, RATE, 4_800)
+            .iter()
+            .map(|v| v * 0.5)
+            .collect();
         let before = render_chunked(&mut n, std::slice::from_ref(&x), 256).remove(0);
         assert!(n.param_set().set(UnitParam::GainDb, 20.0));
         let _ = drive_block(&mut n, &[&x[..64]]);

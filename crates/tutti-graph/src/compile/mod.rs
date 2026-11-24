@@ -31,33 +31,33 @@
 //!    the spec lists them in. One wider than [`MAX_PORTS`] becomes a tree
 //!    of merges over contiguous source ranges, which keeps that rule
 //!    exactly.
-//! 5. **Emit ops** (`emit`) in the serial order, recording every value's writer and
-//!    readers, and the op DAG.
-//! 6. **Colour** ([`colour`], then `lower`) — slot sharing that is correct under any
-//!    parallel schedule, with in-place aliasing where legal.
-//! 7. **Coarsen and price** ([`coarsen`]) — fuse single-successor /
-//!    single-predecessor chains into tasks, pack sibling tasks too cheap to
-//!    dispatch alone (never lengthening the critical path), fuse the chains
-//!    that leaves (estimates from `cost.rs`). A block run on
-//!    the calling thread alone ignores tasks; one spread over a pool
-//!    (`par.rs`) dispatches them.
-//! 8. **Assemble** (`assemble`) the plan once, then **verify** ([`verify`]) in
-//!    debug builds.
-//! 9. **Place** (`place`) units: `NodeKey` → dense [`UnitIdx`](plan::UnitIdx), diffed against `prev`
-//!    into a [`Delta`].
+//! 5. **Emit ops** (`emit`) in the serial order into a `Program` that names
+//!    values, not slots, recording every value's writer, readers and event
+//!    capacity, and each op's dependencies.
+//! 6. **Group** (`coarsen`) the ops into tasks, reading no slot: fuse
+//!    single-successor / single-predecessor chains, pack sibling tasks too
+//!    cheap to dispatch alone (never lengthening the critical path), fuse the
+//!    chains that leaves (estimates from `cost.rs`). A block run on the calling
+//!    thread alone ignores tasks; one spread over a pool (`par.rs`) dispatches
+//!    them.
+//! 7. **Colour** (`colour`) — slot sharing that is correct under any parallel
+//!    schedule, with in-place aliasing where legal, and the lowering of the
+//!    program from values to slots.
+//! 8. **Place** (`place`) units: `NodeKey` → dense [`UnitIdx`](plan::UnitIdx), diffed against `prev`
+//!    into a [`Delta`]; the plan is then built once from the program, and
+//!    **verified** ([`verify`]) in debug builds.
 
-mod assemble;
 mod coarsen;
 mod colour;
 mod emit;
 pub(crate) mod ids;
 pub(crate) mod latency;
-mod lower;
 pub(crate) mod main_output;
 pub(crate) mod order;
 mod place;
 pub(crate) mod plan;
 pub(crate) mod preroll;
+pub(crate) mod program;
 mod schedule;
 mod shapes;
 pub(crate) mod tail;
@@ -71,7 +71,6 @@ use crate::{InputPort, PortSink};
 use tutti_buffers::ChannelLayout;
 use tutti_units::{Latency, Samples, Tail};
 
-use crate::compile::assemble::Passes;
 use crate::compile::place::Placed;
 use crate::compile::plan::{Delta, Plan};
 use crate::model::spec::{EventInputPort, EventOutputPort, ValidGraph};
@@ -299,30 +298,19 @@ pub fn compile(
     let checked = shapes::check(graph, shapes, prepare)?;
     let order = schedule::order(&schedule::acyclic(graph, &checked)?);
     let timing = timing::solve(graph, &checked, prepare, prev);
-    let emitted = emit::emit(graph, &checked, &order, &timing);
-    let coloured = colour::assign(graph, &checked, prepare, &emitted);
-    let lowered = lower::lower(&emitted, &coloured);
-    let tasks = coarsen::price_and_group(
-        &lowered,
-        &emitted.preds,
-        &coloured.succ,
-        &checked.shapes,
-        prepare,
-    );
+    let program = emit::emit(graph, &checked, &order, &timing, prepare);
+    let tasks = coarsen::group(&program, &checked, prepare.max_block().samples());
+    let program = colour::colour(program, &checked);
     let Placed { delta, units } = place::place(graph, &checked, &timing, prev);
-    let plan = assemble::assemble(Passes {
-        graph,
+    let plan = Plan::new(
         prepare,
-        checked: &checked,
-        order: &order,
-        timing,
-        emitted,
-        coloured,
-        lowered,
+        program,
         tasks,
         units,
-        store_len: delta.store_len,
-    });
+        delta.store_len,
+        graph,
+        timing,
+    );
 
     #[cfg(debug_assertions)]
     if let Err(e) = verify::verify(&plan) {

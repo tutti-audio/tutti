@@ -31,7 +31,7 @@ pub(super) fn moded_node_op<
 
     // The mix's lane, before anything reads the block's mix (it moves while
     // the node is parked too, as the mix's snapshot does).
-    let source = plan.param_ports[rec.params.range()]
+    let source = plan.program.param_ports[rec.params.range()]
         .last()
         .filter(|p| p.is_mix())
         .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));

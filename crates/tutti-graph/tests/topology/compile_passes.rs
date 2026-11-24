@@ -230,6 +230,17 @@ fn shapes_of_spec(t: &Topology) -> Shapes {
         .collect()
 }
 
+/// The nodes in the order the plan runs them: its node ops, in op order.
+fn order(plan: &tutti_graph::Plan) -> Vec<NodeKey> {
+    plan.ops()
+        .iter()
+        .filter_map(|op| match *op {
+            Op::Node { unit, .. } => Some(plan.units()[unit as usize].key),
+            _ => None,
+        })
+        .collect()
+}
+
 fn compiled(t: &Topology) -> tutti_graph::Plan {
     let valid = GraphSpec::new(t.clone()).validate().expect("valid");
     compile(&valid, &shapes_of_spec(t), &common::prepare(PREP), None)
@@ -296,8 +307,8 @@ fn the_order_is_topology_topo_order() {
     assert_eq!(shapes().len(), 13, "the shape list is the coverage");
     for (name, t) in shapes() {
         assert_eq!(
-            compiled(&t).order(),
-            t.topo_order().expect("acyclic").as_slice(),
+            order(&compiled(&t)),
+            t.topo_order().expect("acyclic"),
             "{name}"
         );
     }
@@ -337,7 +348,7 @@ fn ties_break_by_key_across_edge_kinds() {
     )
     .unwrap()
     .0;
-    assert_eq!(plan.order(), &[x, a, b]);
+    assert_eq!(order(&plan), [x, a, b]);
 }
 
 // ---------------------------------------------------------------------------
@@ -696,11 +707,7 @@ fn colouring_respects_the_partial_order_not_the_serial_one() {
         PortSource::Node(out(C, 0)),
     ]);
     let plan = compiled(&t);
-    assert_eq!(
-        plan.order(),
-        &[A, B, C],
-        "the serial order the test assumes"
-    );
+    assert_eq!(order(&plan), [A, B, C], "the serial order the test assumes");
     let slot_of = |key: NodeKey| {
         let unit = plan.units().iter().position(|u| u.key == key).unwrap() as u32;
         plan.ops()

@@ -332,7 +332,7 @@ impl<F: Float> Executor<F> {
 
             // Feedback reads happen before any op: the delay is a whole
             // `MaxBlock`, so nothing this block's captures queue is due yet.
-            for (f, spec) in audio_fb.iter().zip(&plan.audio_feedback) {
+            for (f, spec) in audio_fb.iter().zip(&plan.program.audio_feedback) {
                 let ring = f.as_ref().expect("built by apply");
                 let is_silent =
                     ring.peek_oldest(arena.slot_mut(AudioSlotId::new(spec.slot), frames));
@@ -341,7 +341,7 @@ impl<F: Float> Executor<F> {
                     Flags::new(is_silent, is_silent),
                 );
             }
-            for (f, spec) in event_fb.iter_mut().zip(&plan.event_feedback) {
+            for (f, spec) in event_fb.iter_mut().zip(&plan.program.event_feedback) {
                 let fifo = f.as_mut().expect("built by apply");
                 let out = &mut events[spec.slot as usize];
                 out.clear();
@@ -397,7 +397,7 @@ impl<F: Float> Executor<F> {
             // An edge whose declick fade ended this block tells the editor,
             // which drops it (or its entry) at its next collect. A full
             // ring keeps the report in the lane for the next block.
-            for (lane, id) in lanes.iter_mut().zip(&plan.sum_lanes) {
+            for (lane, id) in lanes.iter_mut().zip(&plan.program.sum_lanes) {
                 if let (Some(kind), Some(id)) = (lane.finished(), id)
                     && edge_fades.push((*id, kind)).is_ok()
                 {

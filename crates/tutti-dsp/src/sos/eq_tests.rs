@@ -2,7 +2,7 @@ use core::f64::consts::PI;
 
 use super::*;
 use crate::{Complex64, DecayTime};
-use tutti_units::Q;
+use tutti_units::{Amplitude, Q};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -42,10 +42,6 @@ fn bell(fc: f64, q: f64, db: f64) -> Biquad {
         .sections()[0]
 }
 
-fn to_db(m: f64) -> f64 {
-    20.0 * m.log10()
-}
-
 const CENTERS: [f64; 7] = [60.0, 250.0, 1000.0, 5000.0, 12000.0, 19200.0, 22000.0];
 const QS: [f64; 5] = [0.3, 0.707, 2.0, 8.0, 25.0];
 const GAINS: [f64; 6] = [-24.0, -12.0, -3.0, 3.0, 12.0, 24.0];
@@ -79,7 +75,9 @@ fn the_matched_bell_equals_the_analog_magnitude_at_dc_the_center_and_nyquist() {
             for db in GAINS {
                 let b = bell(fc, q, db);
                 let (fc, q, db) = (fc, q, db);
-                let at = |f: f64| to_db(magnitude(&b, f)) - analog_bell_db(fc, q, db, f);
+                let at = |f: f64| {
+                    Amplitude::new(magnitude(&b, f)).to_db().get() - analog_bell_db(fc, q, db, f)
+                };
                 let tag = format!("fc {fc} q {q} gain {db}");
                 assert!(at(0.0).abs() < 1e-9, "{tag} DC: {}", at(0.0));
                 assert!(at(fc).abs() < 1e-5, "{tag} center: {}", at(fc));
@@ -99,7 +97,9 @@ fn worst_deviation(b: &Biquad, fc: f64, q: f64, db: f64) -> f64 {
     (1..)
         .map(|i| f64::from(i) * 100.0)
         .take_while(|f| *f <= 0.9 * RATE.get() / 2.0)
-        .map(|f| (to_db(magnitude(b, f)) - analog_bell_db(fc, q, db, f)).abs())
+        .map(|f| {
+            (Amplitude::new(magnitude(b, f)).to_db().get() - analog_bell_db(fc, q, db, f)).abs()
+        })
         .fold(0.0, f64::max)
 }
 

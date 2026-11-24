@@ -31,9 +31,6 @@ fn sine(hz: f64, len: usize) -> Vec<f64> {
         tutti_units::SampleRate::of(RATE),
         tutti_units::Samples::new(len),
     )
-    .into_iter()
-    .map(f64::from)
-    .collect()
 }
 
 /// A pure sine's centroid is its frequency, to within a bin.
