@@ -13,7 +13,7 @@ mod times;
 
 pub use bank::{DelayBank, DelayRamps, DelaySignals};
 pub use layout::{
-    DELAY_SLEW, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayTiming,
+    DELAY_SLEW, DelayControls, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelaySync,
     MAX_DELAY_CHANNELS,
 };
 pub(crate) use max_delay::MAX_FRAMES;

@@ -5,13 +5,16 @@
 //! taps of the others (the cross-feedback, a stereo ping-pong's). The output is the delayed
 //! signal alone, the **wet** signal: the blend with the dry input is the graph's mix.
 //!
-//! The longest delay, the interpolation, the routing and the channel times are
+//! The longest delay, the interpolation, the routing, the channel times and the notes are
 //! **construction constants**, not controls: the longest delay sizes the lines, and the
-//! others are a build-time choice, not something to automate. A stereo delay is routed by
+//! others are a build-time choice, not something to automate. Whether the delay is timed
+//! in seconds or in notes is a control ([`DelaySync`]): a running delay switches. A stereo delay is routed by
 //! [`FeedbackRouting::swap`] (a ping-pong) and any other width by [`FeedbackRouting::none`], until
 //! [`DelayLayoutBuilder::routing`] says otherwise.
 
 use tutti_buffers::ChannelTopology;
+use tutti_music::NoteDuration;
+use tutti_rt::atomic_word;
 use tutti_units::{Feedback, Seconds};
 
 use super::max_delay::MaxDelay;
@@ -36,12 +39,31 @@ pub const DELAY_SLEW: f64 = 0.125;
 /// The most channels a delay has: a bus's.
 pub const MAX_DELAY_CHANNELS: usize = MAX_WIDTH;
 
+/// Where a running delay's times come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum DelaySync {
+    /// Seconds: channel 0's time is [`DelayControls::time`], and the channels past the first
+    /// follow it or hold [`ChannelTimes`] of their own.
+    #[default]
+    Free,
+    /// Notes: each channel is delayed by its note ([`NoteTimes`]) at the tempo.
+    Synced,
+}
+
+atomic_word!(DelaySync { Free, Synced });
+
 /// The controls of a delay.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DelayControls {
+    /// Whether the times are the seconds below or the layout's notes at the tempo. A switch
+    /// moves each channel's time to the other source's at no more than [`DELAY_SLEW`], and
+    /// the lines keep what they hold.
+    pub sync: DelaySync,
     /// The delay of channel 0, and of every channel that follows it
     /// ([`ChannelTimes::linked`]): clamped into `0..=max_delay`. A time that is not finite is not taken: the node holds the
-    /// last finite one. Inert on a [synced](DelayTiming::Synced) delay, whose times are its notes'.
+    /// last finite one. Not in use while [`Synced`](DelaySync::Synced), and kept: a switch
+    /// back to [`Free`](DelaySync::Free) aims at it.
     pub time: Seconds,
     /// How much of a channel's own delayed tap recirculates into its line. Bounded, with
     /// the cross-feedback, as a pair
@@ -56,6 +78,7 @@ pub struct DelayControls {
 impl DelayControls {
     /// No delay, no recirculation: what a non-finite control falls back to.
     pub const DEFAULT: Self = Self {
+        sync: DelaySync::Free,
         time: Seconds::ZERO,
         feedback: Feedback::NONE,
         cross_feedback: Feedback::NONE,
@@ -68,34 +91,25 @@ impl Default for DelayControls {
     }
 }
 
-/// Where a delay's times come from: seconds, or note durations at the session's tempo. One or
-/// the other for the whole delay, chosen where the layout is built.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DelayTiming {
-    /// The time control is channel 0's, in seconds, and the channels past the first follow it
-    /// or hold [`ChannelTimes`] of their own.
-    Free(ChannelTimes),
-    /// Each channel is delayed by a note ([`NoteTimes`]) at the tempo, and the time control is
-    /// inert.
-    Synced(NoteTimes),
-}
-
 /// What a delay is built to: `input` wide, each channel a line of up to a [`MaxDelay`],
 /// read with an [`InterpolationMode`], recirculating through its own tap and, with a
-/// [`FeedbackRouting`], the others', timed by its [`DelayTiming`].
+/// [`FeedbackRouting`], the others', with the times its channels hold in seconds
+/// ([`ChannelTimes`]) and the notes they hold at a tempo ([`NoteTimes`]); [`DelaySync`] says
+/// which a running delay reads.
 #[derive(Clone, Copy, Debug)]
 pub struct DelayLayout {
     input: ChannelTopology,
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: FeedbackRouting,
-    timing: DelayTiming,
+    times: ChannelTimes,
+    notes: NoteTimes,
 }
 
 impl DelayLayout {
     /// A delay on the bus `input`, holding up to `max_delay`, reading with the default
-    /// [`InterpolationMode`], its channels linked in seconds and routed by the default for
-    /// its width.
+    /// [`InterpolationMode`], its channels linked in seconds, a quarter note each when
+    /// synced, and routed by the default for its width.
     #[must_use]
     pub fn new(input: ChannelTopology, max_delay: MaxDelay) -> Self {
         let routing = if input == ChannelTopology::STEREO {
@@ -108,7 +122,8 @@ impl DelayLayout {
             max_delay,
             interpolation: InterpolationMode::default(),
             routing,
-            timing: DelayTiming::Free(ChannelTimes::linked()),
+            times: ChannelTimes::linked(),
+            notes: NoteTimes::all(NoteDuration::QUARTER),
         }
     }
 
@@ -120,7 +135,7 @@ impl DelayLayout {
     }
 
     /// A [`DelayLayoutBuilder`] for the same delay, to give it a routing, channel times of
-    /// its own or times in notes.
+    /// its own or notes of its own.
     #[must_use]
     pub const fn builder(input: ChannelTopology, max_delay: MaxDelay) -> DelayLayoutBuilder {
         DelayLayoutBuilder {
@@ -128,7 +143,8 @@ impl DelayLayout {
             max_delay,
             interpolation: InterpolationMode::Linear,
             routing: None,
-            timing: DelayTiming::Free(ChannelTimes::linked()),
+            times: ChannelTimes::linked(),
+            notes: NoteTimes::all(NoteDuration::QUARTER),
         }
     }
 
@@ -162,14 +178,21 @@ impl DelayLayout {
         &self.routing
     }
 
-    /// Where the channels' times come from.
+    /// The times of the channels past the first, in seconds: what a delay reads while
+    /// [`Free`](DelaySync::Free).
     #[must_use]
-    pub const fn timing(&self) -> &DelayTiming {
-        &self.timing
+    pub const fn times(&self) -> &ChannelTimes {
+        &self.times
+    }
+
+    /// The channels' notes: what a delay reads while [`Synced`](DelaySync::Synced).
+    #[must_use]
+    pub const fn notes(&self) -> &NoteTimes {
+        &self.notes
     }
 }
 
-/// The terminal step of a [`DelayLayout`] with a routing, channel times or note times of its own:
+/// The terminal step of a [`DelayLayout`] with a routing, channel times or notes of its own:
 /// [`build`](Self::build) checks them against the bus and the longest delay, which the
 /// options cannot see.
 #[derive(Clone, Copy, Debug)]
@@ -178,7 +201,8 @@ pub struct DelayLayoutBuilder {
     max_delay: MaxDelay,
     interpolation: InterpolationMode,
     routing: Option<FeedbackRouting>,
-    timing: DelayTiming,
+    times: ChannelTimes,
+    notes: NoteTimes,
 }
 
 /// A refused [`DelayLayout`].
@@ -211,19 +235,19 @@ impl DelayLayoutBuilder {
         self
     }
 
-    /// Delays the channels past the first by `times`, in seconds. Replaces
-    /// [`synced`](Self::synced): a delay's times are in seconds or in notes, never both.
+    /// Delays the channels past the first by `times`, in seconds, while the delay is
+    /// [`Free`](DelaySync::Free).
     #[must_use]
     pub const fn times(mut self, times: ChannelTimes) -> Self {
-        self.timing = DelayTiming::Free(times);
+        self.times = times;
         self
     }
 
-    /// Delays every channel by a note at the session's tempo, and the time control does
-    /// nothing. Replaces [`times`](Self::times).
+    /// Delays each channel by its note of `notes` at the session's tempo, while the delay is
+    /// [`Synced`](DelaySync::Synced).
     #[must_use]
-    pub const fn synced(mut self, notes: NoteTimes) -> Self {
-        self.timing = DelayTiming::Synced(notes);
+    pub const fn notes(mut self, notes: NoteTimes) -> Self {
+        self.notes = notes;
         self
     }
 
@@ -250,37 +274,34 @@ impl DelayLayoutBuilder {
             }
             layout.routing = routing;
         }
-        match self.timing {
-            DelayTiming::Free(times) => {
-                if !times.is_linked() && times.fixed().len() != layout.width() - 1 {
-                    return Err(ChannelTimesError::Length {
-                        width: layout.width(),
-                        expected: layout.width() - 1,
-                        got: times.fixed().len(),
-                    }
-                    .into());
-                }
-                let max = self.max_delay.get();
-                if let Some(i) = times.fixed().iter().position(|t| t.get() > max.get()) {
-                    return Err(ChannelTimesError::Past {
-                        channel: i + 1,
-                        time: times.fixed()[i],
-                        max,
-                    }
-                    .into());
-                }
+        let times = self.times;
+        if !times.is_linked() && times.fixed().len() != layout.width() - 1 {
+            return Err(ChannelTimesError::Length {
+                width: layout.width(),
+                expected: layout.width() - 1,
+                got: times.fixed().len(),
             }
-            DelayTiming::Synced(notes) => {
-                if !notes.is_linked() && notes.notes().len() != layout.width() {
-                    return Err(NoteTimesError::Length {
-                        width: layout.width(),
-                        got: notes.notes().len(),
-                    }
-                    .into());
-                }
-            }
+            .into());
         }
-        layout.timing = self.timing;
+        let max = self.max_delay.get();
+        if let Some(i) = times.fixed().iter().position(|t| t.get() > max.get()) {
+            return Err(ChannelTimesError::Past {
+                channel: i + 1,
+                time: times.fixed()[i],
+                max,
+            }
+            .into());
+        }
+        let notes = self.notes;
+        if !notes.is_linked() && notes.notes().len() != layout.width() {
+            return Err(NoteTimesError::Length {
+                width: layout.width(),
+                got: notes.notes().len(),
+            }
+            .into());
+        }
+        layout.times = times;
+        layout.notes = notes;
         Ok(layout)
     }
 }

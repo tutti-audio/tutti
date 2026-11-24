@@ -254,6 +254,7 @@ fn sweep() {
                     MaxDelay::of(s(0.5)),
                 ))
                 .controls(DelayControls {
+                    sync: tutti_nodes::DelaySync::Free,
                     time: s(b),
                     feedback: Feedback::new(0.3),
                     cross_feedback: Feedback::NONE,
@@ -272,6 +273,7 @@ fn sweep() {
             .unwrap();
             Box::new(DelayNode::<f32>::from(DelayConfig::new(layout).controls(
                 DelayControls {
+                    sync: tutti_nodes::DelaySync::Free,
                     time: s(b),
                     feedback: Feedback::new(0.3),
                     cross_feedback: Feedback::new(0.3),

@@ -176,6 +176,7 @@ fn delay_line() {
             .build()
             .unwrap();
         DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+            sync: tutti_nodes::DelaySync::Free,
             time: Seconds::new(0.05),
             feedback: Feedback::new(0.5_f64),
             cross_feedback: Feedback::new(0.3_f64),
