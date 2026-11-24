@@ -57,6 +57,15 @@ mod export_fork_sampler;
 ))]
 mod export_fork_synth;
 
+// A General MIDI setup's bounce ends at the tail its nodes report, not their ceiling.
+#[cfg(all(
+    feature = "export",
+    feature = "midi",
+    feature = "synth",
+    feature = "soundfont"
+))]
+mod bounce_general_midi;
+
 // Starts a bounce, awaits its render and applies it.
 #[cfg(feature = "export")]
 #[path = "../support/bounced.rs"]
