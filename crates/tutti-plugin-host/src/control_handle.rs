@@ -495,13 +495,15 @@ impl PluginHandle {
         }
     }
 
-    /// Returns `true` if this plugin has an editor this handle can open.
+    /// Returns `true` if the plugin was asked and reported an editor
+    /// ([`PluginDescriptor::has_editor`]) and this handle has a main-thread
+    /// route to open it.
     ///
     /// Cheap enough to call per frame when deciding whether to offer a
     /// window.
     #[must_use]
     pub fn has_editor(&self) -> bool {
-        self.control.is_some()
+        self.control.is_some() && self.descriptor.has_editor()
     }
 
     /// Returns the plugin's catalog identity (id, name, vendor, version, class,

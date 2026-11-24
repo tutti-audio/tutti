@@ -68,7 +68,8 @@ mod clap {
         assert!(plugin.handle().server_pid().is_some());
     }
 
-    /// **`OutOfProcess` serves it too**, from any thread (no main-thread proof).
+    /// **`OutOfProcess` serves it too**, from any thread (no main-thread proof),
+    /// and its handle answers the plugin's own editor presence.
     #[test]
     fn out_of_process_serves_a_clap_plugin() {
         let _env = with_server();
@@ -82,10 +83,15 @@ mod clap {
         .expect("the reference plugin loads through a server");
         assert_eq!(plugin.hosting(), ResolvedHosting::OutOfProcess);
         assert!(plugin.handle().server_pid().is_some());
+        assert!(
+            !plugin.handle().has_editor(),
+            "the reference plugin presents no `clap.gui`"
+        );
     }
 
     /// **`InProcess` loads the same plugin in the host's process**: no server
-    /// is looked for (none can be found here) and the plugin is the one asked for.
+    /// is looked for (none can be found here), the plugin is the one asked for, and
+    /// its handle answers the plugin's own editor presence.
     #[test]
     fn in_process_hosts_a_clap_plugin_here() {
         let mut env = tutti_fixtures::ScopedEnv::new();
@@ -103,6 +109,10 @@ mod clap {
         .expect("the reference plugin loads in this process");
         assert_eq!(plugin.hosting(), ResolvedHosting::InProcess);
         assert_eq!(plugin.handle().server_pid(), None);
+        assert!(
+            !plugin.handle().has_editor(),
+            "the reference plugin presents no `clap.gui`"
+        );
         assert_eq!(
             plugin.plugin().id(),
             Some(&tutti_plugin_types::PluginId::Clap(

@@ -41,7 +41,14 @@ fn hosting_as(backend: Inert, served: bool) -> (DetachedSession, NodeKey, FakePl
     let handle = PluginHandle::from_backend(
         Arc::new(backend),
         Some(control),
-        tutti_plugin_types::PluginDescriptor::new("", tutti_plugin_types::PluginClass::Unknown),
+        // What a loader reads of a plugin with an editor, as the fake has.
+        tutti_plugin_types::PluginDescriptor {
+            editor: tutti_plugin_types::EditorPresence::Present,
+            ..tutti_plugin_types::PluginDescriptor::new(
+                "",
+                tutti_plugin_types::PluginClass::Unknown,
+            )
+        },
         Default::default(),
         Default::default(),
     );
