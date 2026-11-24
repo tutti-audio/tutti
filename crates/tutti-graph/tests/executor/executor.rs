@@ -1137,7 +1137,7 @@ fn too_few_input_slices_render_silence_in_release() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(SRC, "a", Unforkable(const_node(0.5)));
     ed.resize_inputs(tutti_buffers::ChannelLayout::MONO);
-    ed.set_outputs(vec![PortSource::MainInput(0)])
+    ed.wire_outputs(vec![PortSource::MainInput(0)])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let out = render(&mut exec, 16, 1);
