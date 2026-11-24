@@ -647,7 +647,7 @@ fn undeclared_params_and_missing_sources_are_refused() {
         ed.connect_param(param(PROBE, UnitParam::Drive), ev(1)),
         Err(tutti_graph::WireError::Missing(
             tutti_graph::MissingSource::Param {
-                node: PROBE,
+                node: NodeKey(PROBE),
                 param: UnitParam::Drive.into(),
             }
         )),

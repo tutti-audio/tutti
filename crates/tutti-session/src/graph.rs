@@ -3500,10 +3500,13 @@ impl<F: Float> Graph<F> {
             None
         };
         self.widen_refusal = refused;
-        if refused.is_none() && self.editor.spec().topology.outputs.len() < channels {
-            // `channels` is within MAX_CHANNELS: the refusal above takes the rest.
-            self.editor
-                .resize_outputs(ChannelLayout::try_from(channels).expect("within MAX_CHANNELS"));
+        // `channels` is within MAX_CHANNELS here (the refusal above takes the
+        // rest), so it is always a width.
+        if refused.is_none()
+            && self.editor.spec().topology.outputs.len() < channels
+            && let Ok(width) = ChannelLayout::try_from(channels)
+        {
+            self.editor.resize_outputs(width);
             self.edited = true;
         }
         self.publish_output_facts();
