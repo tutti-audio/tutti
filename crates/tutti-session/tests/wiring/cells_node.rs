@@ -174,8 +174,9 @@ fn a_published_value_lands_at_the_update_and_the_next_block_reads_it() {
 }
 
 /// **The update's reclaim sweep frees the value a block held across a
-/// replacement**, through the reclaimer the node's parts carry: a reader of
-/// the cell stands in for a block in progress across the publish.
+/// replacement**: the node's parts carry the cell as a published entry and no
+/// reclaimer, and the session sweeps the entry. A reader of the cell stands in
+/// for a block in progress across the publish.
 #[test]
 fn an_update_frees_a_published_value_a_block_held_across_a_replacement() {
     let (mut s, count, probe) = session_with_count();
@@ -275,4 +276,30 @@ fn a_node_publishing_an_unknown_kind_is_added_and_renders() {
         .unfaded();
     let _ = s.update();
     assert_eq!(frame(&mut s), 0.0, "the value starts at its default");
+}
+
+/// **An entry of a kind the session does not address is swept all the same**:
+/// the update frees the value a block held across a replacement.
+#[test]
+fn an_update_frees_the_value_of_an_unaddressed_entry_a_block_held() {
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build_detached(SampleRate::SR_48K)
+        .expect("builds");
+    let node = Silent::from(SilentConfig::new());
+    let mut block = node.cells.clone();
+    let publisher = block.level().publisher().clone();
+    let silent = s.graph().add(node);
+    s.graph()
+        .set_sources(MainOutput::channel(0), [silent.output(0)])
+        .unwrap()
+        .unfaded();
+    let _ = s.update();
+    {
+        let _held = block.level().lend();
+        publisher.publish(7);
+        assert_eq!(publisher.retired_len(), 1, "the first value is held");
+    }
+    let _ = s.update();
+    assert_eq!(publisher.retired_len(), 0, "the sweep freed it");
 }

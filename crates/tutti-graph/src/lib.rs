@@ -773,7 +773,6 @@ pub use tutti_units::PlayReading;
 /// What [`declare_params!`] expands to, and nothing a caller names.
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::exec::published::Sweep;
     pub use crate::node::declare::{
         Cells, OwnedCell, ParamEntry, Row, Visit, base, input, ports, row, set,
     };

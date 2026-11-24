@@ -106,7 +106,7 @@ impl Cells {
     /// conversion ratio, stretch rate) at their current values, and nothing
     /// else: no counters.
     ///
-    /// What a disk voice severed for an offline render keeps
+    /// What a disk voice forked for an offline render keeps
     /// (`DiskVoice::fork_copy`): its controls as a snapshot, like every other
     /// forked unit's, in cells no streamer and no live voice shares.
     pub(crate) fn detached(&self) -> Self {
