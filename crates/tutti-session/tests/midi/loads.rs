@@ -8,6 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::common::{offline, tap};
+use crate::midi::{note_ons, roll};
+
 use tutti_midi_file::{
     ClipFile, ClipHeader, ClipSequence, MidiFile, ReadRepair, StandardMidiFile, Tick, TimelineDrop,
 };
@@ -18,9 +21,9 @@ use tutti_session::{
 use tutti_tempo::TempoMap;
 use tutti_ump::{
     Address, Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
-    TicksPerQuarterNote, U7, Ump, Voice1,
+    NoteVelocity, TicksPerQuarterNote, U7, Ump, Voice1,
 };
-use tutti_units::{Beat, Bpm, SampleRate, Seconds};
+use tutti_units::{Beat, BeatDuration, Bpm, SampleRate, Seconds};
 
 /// The Standard MIDI File a load read.
 fn standard(loaded: &LoadedMidi) -> &StandardMidiFile {
@@ -30,19 +33,16 @@ fn standard(loaded: &LoadedMidi) -> &StandardMidiFile {
     file
 }
 
-/// The Clip File a load read.
-fn clip(loaded: &LoadedMidi) -> &ClipFile {
-    let MidiFile::Clip(file) = loaded.file() else {
-        panic!("a Clip File, got {:?}", loaded.file());
-    };
-    file
-}
-
 fn session() -> DetachedSession {
     Session::builder()
         .build_detached(SampleRate::SR_48K)
         .expect("builds")
 }
+
+/// MIDI 1.0 velocity 100 at MIDI 2.0 width, by M2-115's min-centre-max
+/// scaling: `100 << 9`, and the six bits below the centre bit (36) repeated
+/// beneath.
+const VELOCITY_100: NoteVelocity = NoteVelocity::new(100 << 9 | 36 << 3 | 36 >> 3);
 
 /// **A MIDI load of a dropped session is `ShutDown`**: the file did not fail.
 #[test]
@@ -204,8 +204,10 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
         .push(Tick(0), program_change)
         .unwrap()
         .ending_at(Tick(12));
+    let mut played = offline();
+    let (target, seen) = tap(&mut played);
     let loaded =
-        tutti_fixtures::block_on(session().midi().load_midi(bytes_of(header))).expect("loads");
+        tutti_fixtures::block_on(played.midi().load_midi(bytes_of(header))).expect("loads");
 
     // The Set Tempo packet and two notes, a note-on and a note-off each: the
     // header is not in the clip.
@@ -218,23 +220,39 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
             packet: program_change
         }]
     );
-    let file = clip(&loaded);
-    let beats: Vec<_> = file
-        .sequence()
+    let notes: Vec<_> = loaded
+        .track(0)
+        .unwrap()
+        .events
         .notes()
-        .iter()
-        .map(|n| {
-            let beat = |tick: Tick| tick.beats(file.ticks_per_quarter());
-            (beat(n.start), beat(n.end))
-        })
+        .map(|n| (n.start, n.length, n.note.get(), n.velocity))
         .collect();
     assert_eq!(
-        beats,
+        notes,
         [
-            (Beat::new(0.0), Beat::new(1.0)),
-            (Beat::new(2.0), Beat::new(3.0))
+            (
+                Beat::new(0.0),
+                Some(BeatDuration::new(1.0)),
+                60,
+                VELOCITY_100
+            ),
+            (
+                Beat::new(2.0),
+                Some(BeatDuration::new(1.0)),
+                64,
+                VELOCITY_100
+            ),
         ]
     );
+    // Played on the session's own tempo (120 a minute: two beats a second), the
+    // note-ons land on the frames of beats 0 and 2.
+    played
+        .midi()
+        .play_track(target, loaded.track(0).unwrap())
+        .unwrap();
+    let _ = played.update();
+    roll(&mut played, 49_000);
+    assert_eq!(note_ons(&seen), [(0, 60), (48_000, 64)]);
     let seconds = loaded.tempo().unwrap().seconds_at(Beat::new(2.0));
     assert!((seconds.get() - 1.0).abs() < 1e-9, "{seconds:?}");
     let meter = loaded.meter().expect("one timeline").current();
