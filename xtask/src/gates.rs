@@ -52,6 +52,9 @@ mod toml;
 mod umbrella;
 // Backs the local `umbrella-api` recipe (it needs the docs nightly): not a gate.
 mod umbrella_api;
+// Backs the local `unused-public` recipe (it needs rust-analyzer): not a gate.
+mod scip;
+mod unused_public;
 // Read by `check-umbrella`.
 mod umbrella_collisions;
 mod use_tree;
@@ -65,6 +68,7 @@ pub(crate) use public_api_counts::{
 };
 pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
+pub(crate) use unused_public::report as unused_public;
 
 use std::fs;
 use std::path::{Path, PathBuf};

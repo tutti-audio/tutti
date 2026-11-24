@@ -43,6 +43,43 @@ fn the_ports_are_the_fdns_without_the_freeze_and_with_the_shift_and_the_send() {
     );
 }
 
+/// The tail reads the send and no shift or wet gain: moving either alone leaves the reported
+/// tail, which is what their `no_ring` flags promise.
+#[test]
+fn the_shift_and_the_wet_gain_do_not_change_the_reported_tail() {
+    let figure = |pitch: f64, wet: f64| {
+        let c = FdnControls {
+            shimmer_pitch: Cents::new(pitch),
+            shimmer_send: Feedback::new_clamped(0.5),
+            wet: Db::new(wet),
+            ..FdnControls::DEFAULT
+        };
+        let mut n = node(ShimmerConfig::new().controls(c));
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: SR,
+            block_len: Samples::new(BLOCK),
+            transport: TransportPosition::default(),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        let impulse = tutti_fixtures::signal::impulse::<f32>(Samples::new(BLOCK));
+        drive_input(
+            &mut n,
+            &env,
+            Planes::new(&[&impulse[..]]).unwrap(),
+            &[],
+            &[],
+        )
+        .reported_tail
+    };
+    let base = figure(1200.0, 0.0);
+    assert!(matches!(base, Some(Tail::Finite(_))), "{base:?}");
+    for (pitch, wet) in [(-1200.0, 0.0), (700.0, 0.0), (1200.0, -12.0), (0.0, 6.0)] {
+        assert_eq!(figure(pitch, wet), base, "{pitch} cents, {wet} dB");
+    }
+}
+
 /// The reported tail is the network's own `tail(-60 dB)` with the shifter's delay (the bank's
 /// `shimmer_delay`) in the loop: the model with `loop_delay` set, which
 /// the node reports at the controls in force, and past it the output is exactly silent (the
