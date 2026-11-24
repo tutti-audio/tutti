@@ -54,7 +54,7 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
     s.midi.state.ports.outputs[0]
         .out
         .as_mut()
-        .and_then(UmpOut::device_mut)
+        .map(UmpOut::destination_mut)
         .expect("the device's output")
         .set_config(tutti_ump::StreamConfig {
             protocol: tutti_ump::Protocol::Midi2,
@@ -89,6 +89,51 @@ fn the_stamp_stream_is_carried_across_a_closed_output() {
         before,
         "carried on by the reopened output, not started over"
     );
+}
+
+/// **A device's output stamps iff its configuration receives JR Timestamps**
+/// (M2-104-UM §7.2.2.2), through the same `UmpOut`: two notes 20 ms apart go
+/// out with a JR Timestamp of 625 ticks of 1/31 250 s (§7.2.3.1) between them
+/// when it does, and bare when it does not.
+#[test]
+fn an_output_stamps_iff_its_configuration_receives_jr_timestamps() {
+    let sent = |rx_jr: bool| {
+        let (backend, fake) =
+            FakeBackend::build_with(vec![], vec![persistent_endpoint(10, "Synth")], usize::MAX);
+        let mut s = Session::builder()
+            .midi_hardware_over(backend, tutti_midi_hardware::MidiHardwareConfig::new())
+            .build()
+            .expect("builds");
+        let _ = s.update();
+        let synth = s.midi().devices().remove(0);
+        let opened = ready(s.open_midi_output(synth).expect("begins"));
+        let _out = s.apply(opened).expect("opens");
+        let _ = s.update();
+        let out = s.midi.state.ports.outputs[0].out.as_mut().expect("open");
+        out.destination_mut().set_config(tutti_ump::StreamConfig {
+            protocol: tutti_ump::Protocol::Midi2,
+            rx_jr,
+            tx_jr: false,
+        });
+        let note = tutti_fixtures::midi::note_on(tutti_ump::MidiChannel::FIRST, 60, 0x8000);
+        let _ = fake.take_sent(EndpointId::from_raw(10));
+        out.send_frames(&[(Frame::new(0), note), (Frame::new(960), note)], None);
+        let sent = fake.take_sent(EndpointId::from_raw(10));
+        // The JR Timestamp messages: utility status 0x2, a 20-bit time.
+        let stamps: Vec<u32> = sent
+            .iter()
+            .map(|ump| ump.0[0])
+            .filter(|word| word >> 20 == 0x002)
+            .collect();
+        let notes = sent.iter().filter(|ump| **ump == note).count();
+        (stamps, notes)
+    };
+    assert_eq!(
+        sent(true),
+        (vec![0x0020_0000, 0x0020_0271], 2),
+        "a stamp before each note: 0 ticks, then 625 (20 ms)"
+    );
+    assert_eq!(sent(false), (vec![], 2), "the notes go out bare");
 }
 
 /// **A port whose reader died reads the fault it died of; one whose input was

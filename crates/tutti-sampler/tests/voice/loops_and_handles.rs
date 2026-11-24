@@ -16,7 +16,7 @@ use tutti_sampler::testing::{MockTransport, loop_frames, play, wait_for_open};
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, LoopError, Manual, MemorySource,
     PlayDirection, Playback, SlotId, StreamHandle, StreamStart, VoiceNode, VoiceNodeHandle,
-    VoicePool, VoiceSource, VoiceWindow,
+    VoicePool, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, PlaybackRate, SampleRate, Samples};
 
@@ -88,10 +88,8 @@ fn window() -> VoiceWindow {
 fn memory_node() -> (VoiceNode<f32>, VoiceNodeHandle<f32>) {
     let source = MemorySource::placed(ramp(), window()).expect("a placeable wave");
     VoiceNode::with_channels(
-        tutti_sampler::Voice {
-            source: VoiceSource::Memory(source),
-            play: Playback::default(),
-        },
+        source,
+        Playback::default(),
         tutti_buffers::ChannelLayout::MONO,
     )
     .expect("a finite gain and a nonempty width")
@@ -275,10 +273,8 @@ fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
 
     let source = MemorySource::new(ramp()).expect("a placeable wave");
     let (mut node, handle) = VoiceNode::with_channels(
-        tutti_sampler::Voice {
-            source: VoiceSource::Memory(source),
-            play: Playback::default(),
-        },
+        source,
+        Playback::default(),
         tutti_buffers::ChannelLayout::MONO,
     )
     .expect("a finite gain and a nonempty width")
@@ -312,14 +308,8 @@ fn a_node_handle_sets_speed_and_stops_and_resumes_a_free_running_voice() {
 fn free_node(play: Playback) -> VoiceNode<f32> {
     let mut source = MemorySource::new(ramp()).expect("a placeable wave");
     source.set_loop(play.loop_);
-    VoiceNode::with_channels(
-        tutti_sampler::Voice {
-            source: VoiceSource::Memory(source),
-            play,
-        },
-        tutti_buffers::ChannelLayout::MONO,
-    )
-    .expect("a finite gain and a nonempty width")
+    VoiceNode::with_channels(source, play, tutti_buffers::ChannelLayout::MONO)
+        .expect("a finite gain and a nonempty width")
 }
 
 /// **A reversed free-running voice plays the ramp backwards from its last
@@ -670,11 +660,7 @@ fn every_gain_entry_refuses_a_gain_that_is_not_finite() {
 
         let again = MemorySource::placed(ramp(), window()).expect("a placeable wave");
         assert_eq!(
-            VoiceNode::new(tutti_sampler::Voice {
-                source: VoiceSource::Memory(again),
-                play,
-            })
-            .err(),
+            VoiceNode::new(again, play).err(),
             Some(VoiceNodeError::Gain(GainError::NotFinite))
         );
         assert_eq!(
@@ -697,14 +683,7 @@ fn a_pool_or_node_of_no_channels_is_refused() {
     );
     let source = MemorySource::placed(ramp(), window()).expect("a placeable wave");
     assert_eq!(
-        VoiceNode::with_channels(
-            tutti_sampler::Voice {
-                source: VoiceSource::Memory(source),
-                play: Playback::default(),
-            },
-            0u16
-        )
-        .err(),
+        VoiceNode::with_channels(source, Playback::default(), 0u16).err(),
         Some(VoiceNodeError::Width(PlaceError::EmptyWidth))
     );
 }
