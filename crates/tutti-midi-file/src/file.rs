@@ -2117,24 +2117,26 @@ struct Stated {
 /// same power in its denominator field, but reads 0 as non-standard, so it names
 /// no denominator there (as `to_clip` refuses a whole-note denominator).
 fn stated_time_signature(event: &FileEvent) -> Option<Stated> {
-    let (numerator, denominator_power, whole_note) = match event {
+    let power_of_two = |power: u8| 1u32.checked_shl(u32::from(power));
+    match event {
         FileEvent::Meta(Meta::TimeSignature {
             numerator,
             denominator_power,
             ..
-        }) => (*numerator, *denominator_power, true),
-        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(field))) => {
-            (field.numerator, field.denominator, false)
-        }
-        _ => return None,
-    };
-    Some(Stated {
-        numerator,
-        denominator_power,
-        denominator: (whole_note || denominator_power != 0)
-            .then(|| 1u32.checked_shl(u32::from(denominator_power)))
-            .flatten(),
-    })
+        }) => Some(Stated {
+            numerator: *numerator,
+            denominator_power: *denominator_power,
+            denominator: power_of_two(*denominator_power),
+        }),
+        FileEvent::Message(Message::Flex(_, Flex::SetTimeSignature(field))) => Some(Stated {
+            numerator: field.numerator,
+            denominator_power: field.denominator,
+            denominator: (field.denominator != 0)
+                .then(|| power_of_two(field.denominator))
+                .flatten(),
+        }),
+        _ => None,
+    }
 }
 
 /// The meter change a time signature stated at `beat` makes, or the refusal
