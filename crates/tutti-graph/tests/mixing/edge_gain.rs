@@ -19,8 +19,7 @@ use tutti_buffers::ChannelLayout;
 use tutti_graph::{
     Cx, Edge, EdgeGain, EdgeGainError, EdgeId, Editor, Executor, ForkByClone, ForkTarget,
     GraphInvalid, GraphSpec, InputPort, Io, Node, NodeKey, Op, OutputPort, Plan, PortSink,
-    PortSource, Prepare, Renderer, Shape, Status, Topology, TransportPosition, Unforkable,
-    ValidGraph, compile,
+    PortSource, Prepare, Renderer, Shape, Status, Topology, Unforkable, ValidGraph, compile,
 };
 use tutti_units::Gain;
 
@@ -581,13 +580,7 @@ impl Rig {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }
@@ -931,13 +924,7 @@ impl Mixer {
     }
 
     fn block(&mut self) -> Vec<f32> {
-        let mut out = vec![0.0f32; BLOCK];
-        self.exec.process(
-            BLOCK,
-            &TransportPosition::default(),
-            &[],
-            &mut [out.as_mut_slice()],
-        );
+        let out = common::block(&mut self.exec, BLOCK, 1).remove(0);
         self.ed.collect();
         out
     }

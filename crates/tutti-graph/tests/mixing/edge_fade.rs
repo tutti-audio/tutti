@@ -229,9 +229,7 @@ fn parallel_equals_one_participant_for_a_graph_mid_fade() {
     fn run(workers: usize) -> Vec<u32> {
         let values: Vec<f32> = (1..=8).map(|i| i as f32 * 0.37 - 1.1).collect();
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(common::TestPool::new(workers)));
-        }
+        common::pooled_fresh(&mut exec, workers);
         for (i, &value) in values.iter().enumerate() {
             let k = Kind::Const { value, width: 1 };
             ed.insert(key(i as u64 + 1), "const", Unforkable(TestNode::new(k)));
@@ -271,6 +269,5 @@ fn parallel_equals_one_participant_for_a_graph_mid_fade() {
         run_blocks(&mut exec, &mut ed, &[37, 64, 5, 64, 64, 11, 64, 64, 64]);
         got
     }
-    let serial = run(1);
-    assert_eq!(run(4), serial, "four participants against one");
+    common::agree_across_workers([4], run, Vec::clone);
 }
