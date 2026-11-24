@@ -666,10 +666,20 @@ proptest! {
         let planned = shell.trace.iter()
             .filter(|r| matches!(r.kind, Kind::Tick | Kind::Reply) && r.fx.contains(&Fx::Recall))
             .count();
-        let rollbacks = shell.trace.iter()
-            .filter(|r| r.kind == Kind::Refused
-                && r.fx.iter().any(|f| matches!(f, Fx::Activate(_))))
-            .count();
+        // A rollback is the activation a refusal answers with, before it tells
+        // the host (a replayed op follows the notice). One is allowed for a
+        // refused activation that is not itself a rollback.
+        let mut rollbacks = 0;
+        let mut in_flight_is_rollback = false;
+        for r in &shell.trace {
+            if !r.fx.iter().any(|f| matches!(f, Fx::Activate(_))) {
+                continue;
+            }
+            let rollback = r.kind == Kind::Refused && !r.fx.contains(&Fx::RefusedNotice);
+            prop_assert!(!(rollback && in_flight_is_rollback), "a refused rollback rolls back again");
+            rollbacks += usize::from(rollback);
+            in_flight_is_rollback = rollback;
+        }
         prop_assert!(activations <= ops + planned + rollbacks);
     }
 
@@ -863,8 +873,19 @@ fn rule_2_a_change_raised_before_the_deactivation_is_answered_by_the_reads() {
 fn rule_3_a_refusal_reads_nothing_and_a_later_activation_retries() {
     let p = prep(3);
     let (s, _) = go(State::new(REST), Event::Op(HostOp::Activate(p)));
-    let (s, fx) = reply(s, Reply::Refused(err()));
-    assert_eq!(fx, [Fx::RefusedNotice]);
+    let (s, out) = step(s, Event::Replied(Reply::Refused(err())));
+    assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::RefusedNotice]);
+    assert!(
+        matches!(
+            out.last(),
+            Some(Effect::Notify(Notice::Refused {
+                recovery: Recovery::Inactive,
+                ..
+            }))
+        ),
+        "a first activation has nothing to go back to"
+    );
+    assert_eq!(s.applied(), None);
     assert_eq!(s.stage(), Stage::Refused { rate: p.rate() });
     assert!(!s.renders());
     let (s, fx) = go(s, Event::Op(HostOp::Reconfigure(prep(4))));
@@ -942,12 +963,15 @@ fn rule_3_a_refused_rollback_leaves_the_plugin_inactive_and_says_so() {
     assert_eq!(s.applied(), Some(p));
 }
 
-/// **A refused first activation has nothing to go back to: it is told as
-/// inactive and nothing else is activated.**
+/// **A restart refused at the setting the plugin already runs at has nothing
+/// to go back to: it is told as inactive and nothing is activated again.**
 #[test]
-fn rule_3_a_refused_first_activation_rolls_back_to_nothing() {
-    let p = prep(3);
-    let (s, _) = go(State::new(REST), Event::Op(HostOp::Activate(p)));
+fn rule_3_a_restart_refused_at_the_running_setting_is_inactive_and_does_not_loop() {
+    let s = req(active(RESTARTS, prep(1)), Request::Restart);
+    let (s, _) = go(s, Event::Tick);
+    let (s, _) = reply(s, Reply::Returned);
+    let (s, fx) = reply(s, Reply::Deactivated);
+    assert_eq!(fx, [Fx::Activate(prep(1))]);
     let (s, out) = step(s, Event::Replied(Reply::Refused(err())));
     assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::RefusedNotice]);
     assert!(matches!(
@@ -957,7 +981,29 @@ fn rule_3_a_refused_first_activation_rolls_back_to_nothing() {
             ..
         }))
     ));
-    assert_eq!(s.applied(), None);
+    assert_eq!(
+        s.stage(),
+        Stage::Refused {
+            rate: prep(1).rate()
+        }
+    );
+}
+
+/// **A plugin lost while its refusal is being rolled back still tells the
+/// refusal, as inactive, and is poisoned.**
+#[test]
+fn rule_3_a_plugin_lost_during_a_rollback_tells_the_refusal_as_inactive() {
+    let (s, _) = refused_reconfigure(REST, prep(1), prep(2));
+    let (s, out) = step(s, Event::Died);
+    assert_eq!(out.iter().map(tag).collect::<Vec<_>>(), [Fx::RefusedNotice]);
+    assert!(matches!(
+        out.last(),
+        Some(Effect::Notify(Notice::Refused {
+            recovery: Recovery::Inactive,
+            ..
+        }))
+    ));
+    assert_eq!(s.stage(), Stage::Poisoned);
 }
 
 /// **A plugin's own restart after a refused rate activates with the rate it

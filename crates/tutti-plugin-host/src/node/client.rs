@@ -734,6 +734,14 @@ pub(super) fn void_stale_edits(edits: Option<&EditPort>, params: &mut ParamDeliv
 }
 
 impl<L: Loaded, F: Float> InProcessClient<L, F> {
+    /// `n` MIDI events were not delivered: counted dropped, and the rest of
+    /// every SysEx open in the intake is skipped. The caller reports the
+    /// loss to the graph (`Io::count_lost`).
+    pub(super) fn lose_midi(&mut self, n: u64) {
+        self.params.count_midi_dropped(n);
+        self.intake.lost();
+    }
+
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next

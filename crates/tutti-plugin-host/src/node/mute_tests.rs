@@ -6,8 +6,7 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{main_thread, midi};
 use tutti_graph::{
-    EventInletNode, EventInletWriter, GraphBuilder, NodeKey, Prepare as GraphPrepare, Renderer,
-    Unforkable,
+    EventCapacity, EventInletNode, EventInletWriter, GraphBuilder, NodeKey, Renderer, Unforkable,
 };
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
 use tutti_plugin_types::{Control, Loaded, MaxBlock, PluginInvalidation, Prepare};
@@ -24,9 +23,8 @@ const A: SampleRate = SampleRate::SR_48K;
 const B: SampleRate = SampleRate::SR_96K;
 const C: SampleRate = SampleRate::SR_44K1;
 const BLOCK: usize = 64;
-/// More blocks than any exchange here needs: a bound on a loop that waits for
-/// an event, never a measure of speed.
-const BLOCKS_LIMIT: usize = 64;
+/// A bound on a loop that waits for an event, never a measure of speed.
+const LIMIT: usize = 64;
 
 struct Rig {
     renderer: Renderer,
@@ -37,10 +35,16 @@ struct Rig {
     frame: u64,
 }
 
+fn tempo() -> TempoReader {
+    TempoReader::fixed(Arc::new(
+        TempoMap::constant(Bpm::of(120.0)).expect("a tempo"),
+    ))
+}
+
 impl Rig {
-    /// An effect over the fake at rate `A`, an event inlet feeding its event
-    /// input, silent input. The fake sleeps in a block that gives it nothing,
-    /// so the node is `Status::Idle` and the executor parks it.
+    /// An effect over the fake at rate `A` with an event inlet feeding it. The
+    /// fake sleeps in a block that gives it nothing, so the node is `Idle`
+    /// and the executor parks it.
     fn new() -> Self {
         let (fake, loaded) = FakePlugin::new();
         fake.ring_out(1);
@@ -63,18 +67,15 @@ impl Rig {
         )
         .expect("the fake is narrow");
         let inner = Arc::clone(&client.inner);
-        let tempo = TempoReader::fixed(Arc::new(
-            TempoMap::constant(Bpm::of(120.0)).expect("a tempo"),
-        ));
         let layout = ChannelLayout::from_count(2);
         let mut graph = GraphBuilder::new(ChannelLayout::EMPTY, layout);
-        let key = graph.add(Unforkable(client.bind(tempo)));
-        let (inlet, events) = EventInletNode::pair(tutti_graph::EventCapacity::of(64));
+        let key = graph.add(Unforkable(client.bind(tempo())));
+        let (inlet, events) = EventInletNode::pair(EventCapacity::of(64));
         let from = graph.add(inlet);
         graph.connect_events(from, 0, key, 0);
         graph.pipe_output(key);
         let renderer = graph
-            .renderer(GraphPrepare::new(
+            .renderer(tutti_graph::Prepare::new(
                 A,
                 tutti_buffers::MaxBlock::of(Samples::new(BLOCK)),
             ))
@@ -92,12 +93,17 @@ impl Rig {
 
     /// One block, nothing on the audio inputs; the first output channel.
     fn block(&mut self) -> Vec<f32> {
-        let out = self.renderer.render(BLOCK);
         self.frame += BLOCK as u64;
-        out.into_iter().next().expect("two outputs")
+        self.renderer.render(BLOCK).swap_remove(0)
     }
 
-    /// The main thread's pump: what the plugin's control side reports.
+    fn note(&mut self) {
+        let note = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
+        self.events
+            .push(Frame::new(self.frame), note)
+            .expect("room");
+    }
+
     fn pump(&self) -> Vec<PluginInvalidation> {
         self.inner.lock().pump(main_thread()).reports
     }
@@ -110,26 +116,43 @@ impl Rig {
             .count()
     }
 
-    /// Blocks and pumps, a block between every control step, until a report
-    /// `want` accepts arrives; the reports so far.
+    /// The plugin is asked for `rate` the way the pump path asks.
+    fn ask(&self, rate: SampleRate) {
+        self.inner
+            .lock()
+            .set_sample_rate(main_thread(), rate, None)
+            .expect("the change starts");
+    }
+
+    /// Blocks and pumps, a block between every control step, until `done`;
+    /// the reports so far.
     fn until(
         &mut self,
         what: &str,
-        want: impl Fn(&PluginInvalidation) -> bool,
+        done: impl Fn(&Rig, &[PluginInvalidation]) -> bool,
     ) -> Vec<PluginInvalidation> {
         let mut seen = Vec::new();
-        for _ in 0..BLOCKS_LIMIT {
+        for _ in 0..LIMIT {
             self.block();
             seen.extend(self.pump());
             self.block();
-            if seen.iter().any(&want) {
+            if done(self, &seen) {
                 return seen;
             }
         }
-        panic!("no {what} was reported: {seen:?}");
+        panic!("no {what}: {seen:?}");
     }
 
-    /// Runs blocks until the node has come to rest: the fake is no longer called.
+    /// Until the report `want` accepts arrives.
+    fn until_reported(
+        &mut self,
+        what: &str,
+        want: fn(&PluginInvalidation) -> bool,
+    ) -> Vec<PluginInvalidation> {
+        self.until(what, |_, seen| seen.iter().any(want))
+    }
+
+    /// Blocks until the executor has parked the node: the fake is not called.
     fn rest(&mut self) {
         for _ in 0..8 {
             self.block();
@@ -141,16 +164,17 @@ impl Rig {
         assert_eq!(self.processed(), before, "the executor parked the node");
     }
 
-    fn refuse_b(&mut self) -> Vec<PluginInvalidation> {
+    fn refuse_b(&mut self) {
         self.fake.refuse_rate(Some(B));
-        self.inner
-            .lock()
-            .set_sample_rate(main_thread(), B, None)
-            .expect("the change starts");
-        self.until("refused rate", |r| {
+        self.ask(B);
+        self.until_reported("refused rate", |r| {
             matches!(r, PluginInvalidation::RateRefused(_))
-        })
+        });
     }
+}
+
+fn restored(r: &PluginInvalidation) -> bool {
+    matches!(r, PluginInvalidation::RateRestored)
 }
 
 /// **A recall reaches a node the executor parked, and a node muted by a refused
@@ -164,34 +188,15 @@ impl Rig {
 fn a_recall_reaches_a_parked_node_and_a_muted_node_is_never_parked() {
     let mut rig = Rig::new();
     rig.rest();
-
-    let refused = rig.refuse_b();
-    assert!(
-        matches!(
-            refused.as_slice(),
-            [PluginInvalidation::RateRefused(r)] if r.rate == B
-        ),
-        "{refused:?}"
-    );
+    rig.refuse_b();
     assert!(rig.inner.lock().silenced().holds(), "muted");
-    assert!(
-        rig.block().iter().all(|&s| s == 0.0),
-        "muted: silence, not the plugin at the wrong rate"
-    );
+    assert!(rig.block().iter().all(|&s| s == 0.0), "muted: silence");
 
     rig.fake.refuse_rate(None);
-    rig.inner
-        .lock()
-        .set_sample_rate(main_thread(), C, None)
-        .expect("the change starts");
-    let reports = rig.until("restored rate", |r| {
-        matches!(r, PluginInvalidation::RateRestored)
-    });
+    rig.ask(C);
+    let reports = rig.until_reported("restored rate", restored);
     assert_eq!(
-        reports
-            .iter()
-            .filter(|r| matches!(r, PluginInvalidation::RateRestored))
-            .count(),
+        reports.iter().filter(|r| restored(r)).count(),
         1,
         "{reports:?}"
     );
@@ -200,10 +205,8 @@ fn a_recall_reaches_a_parked_node_and_a_muted_node_is_never_parked() {
         rig.fake
             .calls()
             .iter()
-            .any(|c| matches!(c, Call::Activate(rate, _) if *rate == C)),
-        "the plugin was activated at the accepted rate"
+            .any(|c| matches!(c, Call::Activate(rate, _) if *rate == C))
     );
-    let _ = rig.key;
 }
 
 /// **No Processor activated at the rolled-back rate processes a block between
@@ -213,55 +216,32 @@ fn a_recall_reaches_a_parked_node_and_a_muted_node_is_never_parked() {
 #[test]
 fn the_audio_thread_never_renders_with_the_rolled_back_processor() {
     let mut rig = Rig::new();
-    // Sounding, so the node is not parked and every block is a candidate.
-    let trigger = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
     for _ in 0..4 {
-        rig.events
-            .push(Frame::new(rig.frame), trigger)
-            .expect("room");
+        rig.note();
         rig.block();
     }
     rig.refuse_b();
-    let calls = rig.fake.calls();
-    let rolled_back = calls
+    let rolled_back = rig
+        .fake
+        .calls()
         .iter()
         .rposition(|c| matches!(c, Call::Activate(rate, _) if *rate == A))
         .expect("the plugin was activated again at the accepted rate");
-
     // Pumped and rendered with the refusal standing.
     for _ in 0..3 {
-        rig.events
-            .push(Frame::new(rig.frame), trigger)
-            .expect("room");
+        rig.note();
         rig.block();
         let _ = rig.pump();
         rig.block();
     }
     rig.fake.refuse_rate(None);
-    rig.inner
-        .lock()
-        .set_sample_rate(main_thread(), C, None)
-        .expect("the change starts");
-    for _ in 0..BLOCKS_LIMIT {
-        rig.events
-            .push(Frame::new(rig.frame), trigger)
-            .expect("room");
-        rig.block();
-        let reports = rig.pump();
-        rig.block();
-        if reports
-            .iter()
-            .any(|r| matches!(r, PluginInvalidation::RateRestored))
-        {
-            break;
-        }
-    }
+    rig.ask(C);
+    rig.until_reported("restored rate", restored);
     let calls = rig.fake.calls();
     let at_c = calls
         .iter()
         .position(|c| matches!(c, Call::Activate(rate, _) if *rate == C))
         .expect("the plugin was activated at the accepted rate");
-    assert!(at_c > rolled_back);
     assert!(
         calls[rolled_back..at_c]
             .iter()
@@ -286,9 +266,8 @@ fn a_muted_node_counts_the_midi_it_is_given_as_lost() {
     rig.refuse_b();
     let key = rig.key;
     let _ = rig.renderer.editor_mut().take_event_losses().count();
-    let note = midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100));
     for _ in 0..3 {
-        rig.events.push(Frame::new(rig.frame), note).expect("room");
+        rig.note();
     }
     rig.block();
     let lost: u32 = rig

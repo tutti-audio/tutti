@@ -175,9 +175,8 @@ where
                 .filter(|e| matches!(e.kind, EventKind::Midi(_)))
                 .count() as u64;
             if midi > 0 {
-                this.params.count_midi_dropped(midi);
+                this.lose_midi(midi);
                 io.count_lost(midi);
-                this.intake.lost();
             }
             return Status::Silent;
         }
@@ -557,8 +556,7 @@ where
             // What a Processor says it lost (none that is not chunked does).
             let reported = this.out.midi_lost() as u64;
             if reported > 0 {
-                this.params.count_midi_dropped(reported);
-                this.intake.lost();
+                this.lose_midi(reported);
                 io.count_lost(reported);
             }
         }
@@ -568,9 +566,8 @@ where
         if !processed {
             // The block's MIDI was dropped with it (`render_with`): counted,
             // and the rest of every SysEx open in it is skipped.
-            this.params.count_midi_dropped(block_midi as u64);
+            this.lose_midi(block_midi as u64);
             io.count_lost(block_midi as u64);
-            this.intake.lost();
         }
         if let (Some(out), true) = (out, processed) {
             let out_events = &mut this.out.midi_events;

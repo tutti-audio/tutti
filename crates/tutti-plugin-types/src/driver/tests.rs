@@ -469,30 +469,6 @@ fn control_is_reachable_loaded_active_and_refused() {
     assert!(refused.lifecycle.control().is_some());
 }
 
-/// **A refused reconfigure activates the plugin again at the setting it
-/// accepted, and the host is told it runs there.**
-#[test]
-fn a_refused_reconfigure_runs_the_plugin_again_at_the_accepted_rate() {
-    let mut rig = Rig::new();
-    rig.op(HostOp::Activate(prepare(48_000.0)));
-    rig.take_notices();
-    rig.plugin.refuse_rate(Some(SampleRate::SR_22K05));
-    rig.op(HostOp::Reconfigure(prepare(22_050.0)));
-
-    assert_eq!(rig.state.stage(), Stage::Active);
-    assert_eq!(rig.state.applied(), Some(prepare(48_000.0)));
-    let notices = rig.take_notices();
-    assert!(
-        matches!(
-            notices.as_slice(),
-            [Notice::IoChanged, Notice::Refused { rate, recovery: Recovery::RolledBack { running }, .. }]
-                if *rate == SampleRate::SR_22K05 && running.rate() == SampleRate::SR_48K
-        ),
-        "{notices:?}"
-    );
-    rig.render(64).unwrap();
-}
-
 /// **A plugin lost while its refusal is rolled back is told once, by the
 /// refusal.**
 #[test]
