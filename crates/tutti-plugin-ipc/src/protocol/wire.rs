@@ -307,8 +307,6 @@ mod tests {
         ));
     }
 
-    /// A wire value in `0..=1` decodes; one outside it, or NaN, fails the
-    /// message, in each width and in the optional forms.
     /// **The editor messages are written in the widths the spec's rules give.** A
     /// variant tag is a varint over declaration order (`OpenEditor` is 18 of the
     /// control requests, `EditorOpened` 15 of the replies); a size is a unit tag then two varints (physical) or two `f64`
@@ -445,6 +443,8 @@ mod tests {
         }
     }
 
+    /// A wire value in `0..=1` decodes; one outside it, or NaN, fails the
+    /// message, in each width and in the optional forms.
     #[test]
     fn a_normalized_outside_the_unit_range_is_refused() {
         use crate::{ControlReply, ControlRequest};

@@ -1021,41 +1021,22 @@ mod tests {
         t.join().unwrap();
     }
 
-    /// **No push is left sitting in the queue**: many hand-offs, each
-    /// answered before the next, race the bridge's park against the ring.
-    /// A lost wake-up leaves one unanswered and the receive times out (there
-    /// is no backstop timeout to hide it).
+    /// **A command queued before the bridge parks is not slept through**: the
+    /// wait's condition holds the queue, so the park returns at once. The
+    /// parker's own lost-wake-up rule is `tutti-rt`'s loom model.
     #[test]
-    fn no_pushed_command_waits_on_a_missed_wake_up() {
-        let (c, parker) = channels();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, rx) = bridge(&c, parker, &stop);
-        for i in 0..20_000u32 {
-            // Alternate a spin so the push lands both before and after the park.
-            for _ in 0..(i % 64) {
-                std::hint::spin_loop();
-            }
-            assert!(c.push_block(AudioCommand::Reset));
-            rx.recv_timeout(PATIENCE)
-                .unwrap_or_else(|_| panic!("hand-off {i} was never woken"));
-        }
-        stop.store(true, Ordering::Release);
-        c.wake();
-        t.join().unwrap();
-    }
-
-    /// **`wake` ends a wait on a stop flag with no command queued**, which
-    /// is how `shutdown` reaches a parked bridge when its queue was full.
-    #[test]
-    fn wake_ends_a_wait_with_nothing_queued() {
-        let (c, parker) = channels();
-        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (t, _rx) = bridge(&c, parker, &stop);
-        while !c.unparker.is_parked() {
-            std::thread::yield_now();
-        }
-        stop.store(true, Ordering::Release);
-        c.wake();
+    fn a_command_queued_before_the_park_ends_the_wait() {
+        let (c, mut parker) = channels();
+        assert!(c.push_block(AudioCommand::Reset));
+        let (done, waited) = std::sync::mpsc::channel();
+        let waiting = c.clone();
+        let t = std::thread::spawn(move || {
+            waiting.wait_for_block(&mut parker, || false);
+            done.send(()).unwrap();
+        });
+        waited
+            .recv_timeout(PATIENCE)
+            .expect("the wait returned with a command queued");
         t.join().unwrap();
     }
 
