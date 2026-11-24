@@ -5,6 +5,7 @@
 use std::fmt::{self, Debug, Formatter};
 use tutti_platform::Instant;
 
+use tutti_engine::OutputQuantum;
 use tutti_modulation::Declarations;
 use tutti_platform::MainThreadMarker;
 
@@ -267,7 +268,14 @@ impl<K: AppKey, C: Clock> Session<K, C> {
                 self.reports.drain_carried(out);
                 let lost = self.fault_poll(out);
                 self.devices.poll(cx.now, out);
-                Running::poll(&mut self.running, cx.now, lost, out);
+                // A prepared quantum past `OutputQuantum`'s range cannot have
+                // come from a stream: it counts as no callback size.
+                let prepared = self
+                    .graph
+                    .prepared()
+                    .quantum()
+                    .and_then(|block| OutputQuantum::try_from(block).ok());
+                Running::poll(&mut self.running, cx.now, lost, prepared, out);
             }
             Phase::Reclaim => {
                 // Any thread that owns the session: what it frees is
