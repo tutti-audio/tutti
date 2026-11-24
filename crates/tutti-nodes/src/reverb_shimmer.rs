@@ -129,9 +129,9 @@ pub struct ShimmerSet;
 control_set! {
     ShimmerSet(_s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
     live: (all);
-    Decay[0] => Seconds = decay[0] { whole },
-    Decay[1] => Seconds = decay[1] { whole },
-    Decay[2] => Seconds = decay[2] { whole },
+    Decay[0] => Seconds = decay[0] { whole, longest = MaxDecay::CAP.get() },
+    Decay[1] => Seconds = decay[1] { whole, longest = MaxDecay::CAP.get() },
+    Decay[2] => Seconds = decay[2] { whole, longest = MaxDecay::CAP.get() },
     RoomSize => Mix = size { whole },
     Diffusion => Mix = diffusion { whole },
     DelayTime => Seconds = pre_delay { whole },
@@ -140,7 +140,7 @@ control_set! {
     StereoSpread => StereoWidth = width { whole },
     GainDb => Db = wet { whole, no_ring },
     Pitch => Cents = shimmer_pitch { whole, no_ring },
-    Feedback => Feedback = shimmer_send { whole };
+    Feedback => Feedback = shimmer_send { whole, longest = Feedback::MAX_STABLE.get() };
 
     fn defaults(&self) -> FdnControls {
         FdnControls::DEFAULT
@@ -213,6 +213,41 @@ mod tests {
                 UnitAddr::first(UnitParam::GainDb),
                 UnitAddr::first(UnitParam::Pitch)
             ]
+        );
+    }
+
+    /// The rows that state a longest value (the three decays and the send) never ring shorter
+    /// as they move to it, whatever the other controls are.
+    #[test]
+    fn the_tail_is_longest_at_the_stated_decays_and_send() {
+        use tutti_buffers::MaxBlock;
+        let mut kernel = ShimmerKernel::<f64> {
+            fdn: FdnKernel::new(FdnLayout::shimmering(8, MaxDecay::DEFAULT).unwrap()),
+        };
+        kernel.prepare(
+            SampleRate::SR_48K,
+            MaxBlock::of(tutti_units::Samples::new(64)),
+        );
+        // The layout clamps a decay at its longest (the default 8 s), so the sweep spans the
+        // decays that differ; the stated value past it reads as that longest.
+        let decay = (0.05, MaxDecay::DEFAULT.get().get());
+        crate::test_support::assert_tail_longest_at_stated(
+            &mut kernel,
+            &ShimmerSet,
+            &[
+                decay,
+                decay,
+                decay,
+                (0.0, 1.0),
+                (0.0, 1.0),
+                (0.0, 0.5),
+                (-1.0, 1.0),
+                (0.05, 5.0),
+                (0.0, 2.0),
+                (0.0, 0.0),
+                (0.0, 0.0),
+                (0.0, 0.99),
+            ],
         );
     }
 }
