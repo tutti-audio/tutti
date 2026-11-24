@@ -20,7 +20,7 @@ use super::command::{GainError, Steering, SteeringCell, VoiceNodeHandle, ask};
 use super::disk_voice::DiskVoice;
 use super::disk_voice::VoiceHealth;
 use super::loop_span::Loop;
-use super::memory_source::VoiceWindow;
+use super::memory_source::{MemorySource, VoiceWindow};
 use super::slot::{PlaybackSlot, stretch_wanted};
 use super::stretched;
 use super::types::{PlayDirection, Playback, Reach, SlotId, Voice, VoiceSource};
@@ -134,17 +134,45 @@ pub struct VoiceNode<F: SamplerFloat> {
 }
 
 impl<F: SamplerFloat> VoiceNode<F> {
-    /// Wraps a single [`Voice`] as a standalone stereo graph node. Builds the
-    /// resident stretch processor once (like a mixer slot), off any hot path.
+    /// A standalone stereo graph node over an in-memory voice, `source` played
+    /// as `play` says. Builds the resident stretch processor once (like a
+    /// mixer slot), off any hot path.
+    ///
+    /// A streaming voice is built with [`streaming`](Self::streaming), which
+    /// takes the stream that steers its loop and direction.
     ///
     /// # Errors
     ///
-    /// [`VoiceNodeError::Gain`] for a `voice.play` gain that is not finite.
-    pub fn new(voice: Voice<F>) -> Result<Self, VoiceNodeError> {
-        Self::with_channels(voice, ChannelLayout::STEREO)
+    /// [`VoiceNodeError::Gain`] for a `play` gain that is not finite.
+    pub fn new(source: MemorySource<F>, play: Playback) -> Result<Self, VoiceNodeError> {
+        Self::with_channels(source, play, ChannelLayout::STEREO)
     }
 
-    /// Wraps a single [`Voice`] as a `channels`-wide graph node.
+    /// [`new`](Self::new) for a `channels`-wide node.
+    ///
+    /// # Errors
+    ///
+    /// [`VoiceNodeError::Gain`] for a `play` gain that is not finite, and
+    /// [`VoiceNodeError::Width`] for a width of no channels or past the
+    /// sampler's ceiling ([`voice_width`](crate::voice_width)).
+    pub fn with_channels(
+        source: MemorySource<F>,
+        play: Playback,
+        channels: impl Into<ChannelLayout>,
+    ) -> Result<Self, VoiceNodeError> {
+        Self::of_voice(
+            Voice {
+                source: VoiceSource::Memory(source),
+                play,
+            },
+            channels,
+        )
+    }
+
+    /// A `channels`-wide node over `voice`, of either tier, with no stream: what
+    /// the two public constructors and a fork build on. A disk voice here is
+    /// one nothing steers (a fork's, or [`streaming`](Self::streaming)'s before
+    /// it takes its stream).
     ///
     /// Builds the vocoder here when `voice.play` asks for one. This
     /// is a control-thread constructor, so the allocation is free; the
@@ -155,13 +183,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
     /// — no stretch, no pitch shift, and no error — because
     /// `PlaybackSlot::with_channels` always leaves the field `None` and nothing
     /// else on this path fills it in.
-    ///
-    /// # Errors
-    ///
-    /// [`VoiceNodeError::Gain`] for a `voice.play` gain that is not finite, and
-    /// [`VoiceNodeError::Width`] for a width of no channels or past the
-    /// sampler's ceiling ([`voice_width`](crate::voice_width)).
-    pub fn with_channels(
+    fn of_voice(
         voice: Voice<F>,
         channels: impl Into<ChannelLayout>,
     ) -> Result<Self, VoiceNodeError> {
@@ -220,7 +242,7 @@ impl<F: SamplerFloat> VoiceNode<F> {
         voice.store_gain(play.gain);
         voice.set_speed(play.speed);
         let width = ChannelLayout::from_count(voice.width() as u16);
-        let mut node = Self::with_channels(
+        let mut node = Self::of_voice(
             Voice {
                 source: VoiceSource::Disk(voice),
                 play,
@@ -410,14 +432,6 @@ impl<F: SamplerFloat> std::fmt::Debug for VoiceNode<F> {
     }
 }
 
-impl<F: SamplerFloat> TryFrom<Voice<F>> for VoiceNode<F> {
-    type Error = VoiceNodeError;
-
-    fn try_from(voice: Voice<F>) -> Result<Self, VoiceNodeError> {
-        Self::new(voice)
-    }
-}
-
 // The param a `VoiceNode` lets the graph modulate: its gain, as
 // `UnitParam::Volume`. Block-rate in the voice (read once per block, as its
 // cell is), so a driven port is read the same way: its value on the block's
@@ -571,7 +585,7 @@ impl<F: SamplerFloat> ForkSource<F> for VoiceNodeFork<F> {
         let health = voice.fault().map(VoiceHealth);
         // A driven gain that is not finite refuses the fork, as the node's own
         // constructor does.
-        let mut node = VoiceNode::with_channels(voice, self.channels).map_err(ForkCause::new)?;
+        let mut node = VoiceNode::of_voice(voice, self.channels).map_err(ForkCause::new)?;
         node.reach = Reach::Frozen;
         let forked = Forked::new(Box::new(node));
         Ok(match health {
