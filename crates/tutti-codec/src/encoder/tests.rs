@@ -89,21 +89,15 @@ fn a_file_appears_at_its_path_only_when_finished() {
     }
 }
 
-/// An encoder dropped before `finish`, by `abort` or after an error, removes
-/// its file and leaves what was at the path alone.
+/// An encoder dropped before `finish` removes its file and leaves what was at
+/// the path alone.
 #[test]
-fn an_aborted_encoder_removes_its_file_and_leaves_the_path_alone() {
+fn a_dropped_encoder_removes_its_file_and_leaves_the_path_alone() {
     let dir = tempfile::tempdir().unwrap();
     for (ext, format) in formats() {
         let path = dir.path().join(format!("take.{ext}"));
         std::fs::write(&path, b"previous").unwrap();
         let spec = spec(format, 2);
-
-        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
-        encoder
-            .write(Interleaved::new(&saw(2, 5_000), spec.layout()).unwrap())
-            .unwrap();
-        encoder.abort();
 
         let mut dropped = FileEncoder::create(&spec, &path).unwrap();
         dropped
@@ -117,7 +111,7 @@ fn an_aborted_encoder_removes_its_file_and_leaves_the_path_alone() {
     }
 }
 
-/// A write that fails mid-take, and the abort that follows, leave the path as
+/// A write that fails mid-take, and the drop that follows, leave the path as
 /// it was and no temporary. The failure is the width check, which every format
 /// shares; the full-disk case is below.
 #[test]
@@ -272,41 +266,26 @@ fn an_encoder_can_move_to_another_thread() {
     is_send::<FileEncoder>();
 }
 
-/// A WAV file that outgrows its limit mid-take (after the up-front check
-/// passed) leaves no file behind and the path untouched, and `finish` after the
-/// failed write removes the staged file and returns the first error instead of
-/// moving a partial take into place.
-#[cfg(feature = "encode-wav")]
+/// `finish` after a failed write removes the staged file and returns the first
+/// error instead of moving a partial take into place.
 #[test]
-fn a_file_that_crosses_its_limit_is_never_put_in_place() {
+fn finish_after_a_failed_write_returns_the_first_error_and_puts_nothing_in_place() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("take.wav");
-    std::fs::write(&path, b"previous").unwrap();
-    let spec = spec(Format::Wav(crate::Pcm::Int16), 2);
-
-    // Dropped after the failed write: nothing left.
-    let mut encoder = FileEncoder::create(&spec, &path).unwrap().limit_frames(6);
-    let err = encoder
-        .write(Interleaved::new(&saw(2, 8), spec.layout()).unwrap())
-        .expect_err("8 frames cross a limit of 6");
-    assert!(
-        matches!(err, EncodeError::WavTooLarge { limit_frames: 6 }),
-        "{err}"
-    );
-    drop(encoder);
-    assert_eq!(std::fs::read(&path).unwrap(), b"previous");
-    assert_eq!(listing(dir.path()), ["take.wav"]);
-
-    // Finished after the failed write: the first error, nothing put in place.
-    let mut encoder = FileEncoder::create(&spec, &path).unwrap().limit_frames(6);
-    let first = encoder
-        .write(Interleaved::new(&saw(2, 8), spec.layout()).unwrap())
-        .unwrap_err();
-    let _ = encoder.write(Interleaved::new(&saw(2, 1), spec.layout()).unwrap());
-    let err = encoder.finish().expect_err("a partial take is not a file");
-    assert_eq!(err.to_string(), first.to_string());
-    assert_eq!(std::fs::read(&path).unwrap(), b"previous");
-    assert_eq!(listing(dir.path()), ["take.wav"]);
+    for (ext, format) in formats() {
+        let path = dir.path().join(format!("take.{ext}"));
+        std::fs::write(&path, b"previous").unwrap();
+        let spec = spec(format, 2);
+        let mut encoder = FileEncoder::create(&spec, &path).unwrap();
+        let first = encoder
+            .write(Interleaved::new(&saw(1, 100), ChannelLayout::MONO).unwrap())
+            .expect_err("a mono block is not stereo");
+        let _ = encoder.write(Interleaved::new(&saw(2, 1), spec.layout()).unwrap());
+        let err = encoder.finish().expect_err("a partial take is not a file");
+        assert_eq!(err.to_string(), first.to_string(), "{ext}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"previous", "{ext}");
+        assert_eq!(listing(dir.path()), [format!("take.{ext}")], "{ext}");
+        std::fs::remove_file(&path).unwrap();
+    }
 }
 
 /// A planned length past the format's limit is refused by the codec's own

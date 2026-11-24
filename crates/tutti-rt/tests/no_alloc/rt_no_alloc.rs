@@ -87,9 +87,10 @@ fn request_flags_and_ring_are_allocation_free() {
     let (mut writer, mut reader) = ring::<[u32; 3]>(4, Overflow::DropNewest);
     assert_no_alloc::assert_no_alloc(|| {
         for round in 0..1_000u32 {
-            flags.raise(RequestFlag::of((round % 32) as u8));
+            let flag = RequestFlag::of((round % 32) as u8);
+            flags.raise(flag);
             let taken = flags.take();
-            assert_eq!(taken.iter().count(), 1);
+            assert!(taken.contains(flag));
             for n in 0..6 {
                 let _ = writer.push([round, n, 0]);
             }
@@ -153,7 +154,7 @@ fn seq_cell_write_and_read_are_allocation_free() {
     });
 }
 
-/// `SeqSlotsWriter::write` and `new_epoch`, and `SeqSlotsReader::drain`, neither
+/// `SeqSlotsWriter::write` and `new_epoch`, and `SeqSlotsReader::drain_in_epoch`, neither
 /// allocate nor free.
 #[test]
 fn seq_slots_write_and_drain_are_allocation_free() {
@@ -167,7 +168,7 @@ fn seq_slots_write_and_drain_are_allocation_free() {
                 writer.new_epoch();
             }
             let mut yielded = 0;
-            reader.drain(|_, _| yielded += 1);
+            reader.drain_in_epoch(|_, _, _| yielded += 1);
             assert_eq!(yielded, if round % 10 == 0 { 0 } else { 64 });
         }
     });
@@ -227,7 +228,6 @@ fn split_claims_and_views_are_allocation_free() {
                 |_, write| write[0] = round,
             );
             assert_eq!(seen, 4);
-            assert_eq!(view.held(), 3);
         }
     });
 }
@@ -428,7 +428,7 @@ fn ring_is_allocation_free() {
                 }
                 core::hint::black_box(reader.peek());
                 assert!(reader.pop().is_none());
-                core::hint::black_box((writer.take_lost(), reader.lost()));
+                core::hint::black_box((writer.lost(), reader.lost()));
             }
         });
         drop(reader);

@@ -215,7 +215,7 @@ fn a_sleep_with_a_past_deadline_resolves_within_one_drive() {
 #[test]
 fn a_sleep_with_a_far_deadline_stays_pending_across_drives() {
     let executor = Executor::new();
-    let task = executor.spawn(executor.sleep(Duration::from_secs(3600 * 24)));
+    let task = executor.spawn(executor.timer().sleep(Duration::from_secs(3600 * 24)));
     for _ in 0..3 {
         executor.run_until_stalled();
     }
@@ -290,7 +290,7 @@ fn a_detached_task_runs_on_a_thread() {
 #[test]
 fn a_sleep_wakes_a_parked_thread_at_its_deadline() {
     let (executor, _threads) = with_threads(1);
-    let sleep = executor.sleep(Duration::from_millis(5));
+    let sleep = executor.timer().sleep(Duration::from_millis(5));
     let (tx, rx) = mpsc::channel();
     executor
         .spawn(async move {
@@ -304,7 +304,7 @@ fn a_sleep_wakes_a_parked_thread_at_its_deadline() {
 #[test]
 fn a_near_sleep_spawned_after_a_far_one_wakes_a_parked_thread() {
     let (executor, _threads) = with_threads(1);
-    let mut far = executor.sleep(Duration::from_secs(3600 * 24));
+    let mut far = executor.timer().sleep(Duration::from_secs(3600 * 24));
     let (armed_tx, armed_rx) = mpsc::channel();
     executor
         .spawn(std::future::poll_fn(move |cx| {
@@ -314,7 +314,7 @@ fn a_near_sleep_spawned_after_a_far_one_wakes_a_parked_thread() {
         }))
         .detach();
     armed_rx.recv_timeout(HANG_GUARD).unwrap();
-    let near = executor.sleep(Duration::from_millis(5));
+    let near = executor.timer().sleep(Duration::from_millis(5));
     let (tx, rx) = mpsc::channel();
     executor
         .spawn(async move {
@@ -422,7 +422,7 @@ fn threads_dropped_on_one_of_their_own_do_not_join_themselves() {
     }
 
     let (executor, threads) = with_threads(1);
-    let mut sleep = executor.sleep(Duration::from_millis(5));
+    let mut sleep = executor.timer().sleep(Duration::from_millis(5));
     let (tx, rx) = mpsc::channel();
     let holder = Arc::new(Holder {
         threads: Mutex::new(Some(threads)),
@@ -440,7 +440,7 @@ fn threads_dropped_on_one_of_their_own_do_not_join_themselves() {
 #[test]
 fn a_pending_sleep_resolves_once_its_executor_drops() {
     let executor = Executor::new();
-    let mut sleep = executor.sleep(Duration::from_secs(3600 * 24));
+    let mut sleep = executor.timer().sleep(Duration::from_secs(3600 * 24));
     let mut cx = Context::from_waker(Waker::noop());
     assert!(Pin::new(&mut sleep).poll(&mut cx).is_pending());
     drop(executor);
@@ -667,7 +667,7 @@ fn a_dedicated_future_runs_with_no_threads_and_no_drive() {
 #[test]
 fn a_dedicated_future_fires_the_executors_sleeps() {
     let executor = Executor::new();
-    let sleep = executor.sleep(Duration::from_millis(5));
+    let sleep = executor.timer().sleep(Duration::from_millis(5));
     let task = executor
         .spawn_dedicated("tutti-test-sleeper", None, async move {
             assert_eq!(sleep.await, Ok(()));
