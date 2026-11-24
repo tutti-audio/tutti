@@ -4,6 +4,7 @@
 #[global_allocator]
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
+mod hrir_sphere;
 mod hrtf_panner;
 mod hrtf_render;
 mod spatial_contract;

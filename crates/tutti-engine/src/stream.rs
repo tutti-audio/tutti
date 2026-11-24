@@ -226,7 +226,8 @@ impl OutputStream {
     /// # Errors
     /// [`StartError::AlreadyRunning`] if a stream is running (it is left
     /// running and the driver is not opened); otherwise whatever the driver's
-    /// [`open`](StreamDriver::open) reports.
+    /// [`open`](StreamDriver::open) reports. A stream whose device was lost is
+    /// released before the driver opens.
     pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
         state: Arc<AudioCallbackState<F>>,
@@ -235,6 +236,9 @@ impl OutputStream {
         if self.is_running() {
             return Err(StartError::AlreadyRunning);
         }
+        // A stream still held here is one whose device was lost: it is released
+        // before the next opens, so two are never held.
+        self.stop();
         self.faults.clear();
         self.latency.reset();
         let block = OutputBlock::new(state, self.spec.channels)

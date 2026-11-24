@@ -1260,36 +1260,51 @@ struct Fader<F: Float> {
     run: Option<Run<F>>,
 }
 
-/// One fade of the gain: `n` frames from `from` to silence (a fade-out that
-/// ends on `aim`) or to unity, `k` of them done.
+/// One fade of the gain, `k` of its `n` frames done: a fade-out from `from` to
+/// silence that ends on `aim`, or a fade-in from `from` to unity.
 #[derive(Clone, Copy, Debug)]
-struct Run<F: Float> {
-    from: F,
-    k: usize,
-    n: usize,
-    /// The frame a fade-out ends on; `None`: a fade-in.
-    aim: Option<Frame>,
+enum Run<F: Float> {
+    Out {
+        from: F,
+        k: usize,
+        n: usize,
+        /// The frame the fade-out ends on.
+        aim: Frame,
+    },
+    In {
+        from: F,
+        k: usize,
+        n: usize,
+    },
 }
 
 impl<F: Float> Run<F> {
     /// The gain of the fade's next frame, and the run moved past it; `None`
     /// once it has reached its end.
     fn step(self) -> (F, Option<Self>) {
-        let to = if self.aim.is_some() { F::ZERO } else { F::ONE };
+        let (from, to, k, n) = match self {
+            Self::Out { from, k, n, .. } => (from, F::ZERO, k, n),
+            Self::In { from, k, n } => (from, F::ONE, k, n),
+        };
         let gain = fade_in(
             FadeLaw::EqualAmplitude,
-            self.from,
+            from,
             to,
-            Samples::new(self.k),
-            Samples::new(self.n),
+            Samples::new(k),
+            Samples::new(n),
         );
         // A fade-in lasts one frame past its last law step, which is the
         // gain's exact end; a fade-out ends on its aim, which is zero.
-        let next = Self {
-            k: self.k + 1,
-            ..self
+        let next = match self {
+            Self::Out { from, n, aim, .. } => Self::Out {
+                from,
+                k: k + 1,
+                n,
+                aim,
+            },
+            Self::In { from, n, .. } => Self::In { from, k: k + 1, n },
         };
-        (gain, (next.k <= self.n).then_some(next))
+        (gain, (k < n).then_some(next))
     }
 }
 
@@ -1305,11 +1320,10 @@ impl<F: Float> Fader<F> {
 
     /// A fade-in from silence, starting on the next frame.
     fn rise(fade: usize) -> Option<Run<F>> {
-        Some(Run {
+        Some(Run::In {
             from: F::ZERO,
             k: 0,
             n: fade,
-            aim: None,
         })
     }
 
@@ -1365,24 +1379,23 @@ impl<F: Float> Fader<F> {
                         // A fade-out over the frames left, from the gain the
                         // frame has (a fade-in cut short continues from there).
                         let run = match self.run {
-                            Some(r) if r.aim == Some(to) => r,
-                            _ => Run {
+                            Some(r @ Run::Out { aim, .. }) if aim == to => r,
+                            _ => Run::Out {
                                 from: self.gain,
                                 k: 0,
                                 n: (to.get() - x) as usize,
-                                aim: Some(to),
+                                aim: to,
                             },
                         };
                         (self.gain, self.run) = run.step();
                     }
                     _ => {
                         let run = match self.run {
-                            Some(r) if r.aim.is_none() => Some(r),
-                            _ if self.gain < F::ONE => Some(Run {
+                            Some(r @ Run::In { .. }) => Some(r),
+                            _ if self.gain < F::ONE => Some(Run::In {
                                 from: self.gain,
                                 k: 0,
                                 n: fade,
-                                aim: None,
                             }),
                             _ => None,
                         };
