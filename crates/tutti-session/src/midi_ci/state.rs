@@ -10,8 +10,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tutti_midi_ci::{
-    MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeResource, PeState, Place,
-    RequestRefused, ResourceFailure, StateId,
+    MediaType, PeData, PeDataError, PeDataFault, PeResource, PeState, Place, RequestRefused,
+    ResourceFailure, StateId,
 };
 use tutti_midi_device::SavedDevice;
 
@@ -55,10 +55,8 @@ impl Future for SavePeerState {
                     fault: PeDataFault::OfResource(other.resource()),
                 })))
             })?;
-            let (media_type, bytes) = match state.body() {
-                OpaqueBody::Binary { media_type, bytes } => (media_type.clone(), bytes.clone()),
-                OpaqueBody::Json(json) => (MediaType::JSON, json.encode()),
-            };
+            let (media_type, bytes) = state.body().to_wire();
+            let media_type = media_type.unwrap_or(MediaType::JSON);
             Ok(PeerState::new(SavedPeer::Device(device), media_type, bytes))
         }))
     }

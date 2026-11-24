@@ -15,7 +15,7 @@ use super::super::limits::{MediaType, PeTextError, PropertyName, ResourceId, alp
 use super::super::tree::{PeJson, PeObject};
 use super::super::value::PeExtra;
 use super::client::{CallError, CallId, ResourceInitiator};
-use super::data::{OpaqueBody, PeData};
+use super::data::{OpaqueBody, PeBinary, PeData};
 use super::entry::{EntryError, ResourceEntry, ResourceEntryBuilder};
 use super::fields::{
     Fields, PeDataError, PeDataFault, PeExtensions, PeText, Place, integer, narrowed,
@@ -294,10 +294,7 @@ impl PeState {
     #[must_use]
     pub fn octets(bytes: Vec<u8>) -> Self {
         Self {
-            body: OpaqueBody::Binary {
-                media_type: MediaType::OCTET_STREAM,
-                bytes,
-            },
+            body: OpaqueBody::Binary(PeBinary::octets(bytes)),
             rev: None,
             timestamp: None,
         }
@@ -307,8 +304,8 @@ impl PeState {
     /// which [`json`](Self::json) holds.
     #[must_use]
     pub fn binary(media_type: MediaType, bytes: Vec<u8>) -> Option<Self> {
-        (!media_type.as_str().eq_ignore_ascii_case("application/json")).then_some(Self {
-            body: OpaqueBody::Binary { media_type, bytes },
+        PeBinary::new(media_type, bytes).map(|binary| Self {
+            body: OpaqueBody::Binary(binary),
             rev: None,
             timestamp: None,
         })
@@ -360,10 +357,7 @@ impl PeState {
     /// and the bytes.
     #[must_use]
     pub fn to_wire(&self) -> (Option<MediaType>, Vec<u8>) {
-        match &self.body {
-            OpaqueBody::Json(json) => (None, json.encode()),
-            OpaqueBody::Binary { media_type, bytes } => (Some(media_type.clone()), bytes.clone()),
-        }
+        self.body.to_wire()
     }
 
     /// The state in `bytes` of `media_type`, none for JSON.

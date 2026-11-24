@@ -1282,6 +1282,7 @@ fn a_set_is_announced_to_the_subscribers() {
     };
     assert_eq!(
         opaque
+            .body()
             .json()
             .unwrap()
             .as_object()

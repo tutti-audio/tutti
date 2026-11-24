@@ -16,8 +16,8 @@ use tutti_graph::{Env, Node, PlayClock, TransportChanges, TransportPosition, con
 use tutti_music::{FrameClock, LoopRange};
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
-    MemorySource, MemorySourceConfig, Playback, SlotId, Voice, VoiceNode, VoicePool,
-    VoicePoolHandle, VoiceSource, VoiceWindow,
+    MemorySource, MemorySourceConfig, Playback, SlotId, VoiceNode, VoicePool, VoicePoolHandle,
+    VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, Cents, Frame, SampleRate, Samples, StretchFactor};
 
@@ -330,14 +330,14 @@ fn a_stretching_memory_voice_declares_no_latency() {
         (1.0, 700.0),
         (1.5, -1200.0),
     ] {
-        let node = VoiceNode::new(Voice {
-            source: VoiceSource::Memory(source(&clip)),
-            play: Playback {
+        let node = VoiceNode::new(
+            source(&clip),
+            Playback {
                 stretch: StretchFactor::new(stretch),
                 pitch: Cents::new(cents),
                 ..Default::default()
             },
-        })
+        )
         .expect("a finite gain and a nonempty width");
         assert_eq!(
             node.shape().latency.samples(),
@@ -398,13 +398,13 @@ fn an_onset_lands_at_its_timeline_frame_through_a_node() {
         }
     };
     let clip = wave(30_000, &[&tone_from, &tone_from]);
-    let node = VoiceNode::new(Voice {
-        source: VoiceSource::Memory(source(&clip)),
-        play: Playback {
+    let node = VoiceNode::new(
+        source(&clip),
+        Playback {
             stretch: StretchFactor::new(1.5),
             ..Default::default()
         },
-    })
+    )
     .expect("a finite gain and a nonempty width");
     let mut node = contract::prepared(node, SampleRate::of(SR), BLOCK);
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));

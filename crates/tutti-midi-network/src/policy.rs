@@ -2,6 +2,7 @@
 //! ([`Admission`]).
 
 use std::fmt;
+use std::sync::Arc;
 
 use crate::{AuthMethods, Username};
 
@@ -70,21 +71,10 @@ pub enum Admission {
     /// and reports an [`Event::Confirm`](crate::Event::Confirm).
     Confirm,
     /// A Client must answer a challenge with this shared secret.
-    SharedSecret(String),
+    SharedSecret(Arc<str>),
     /// A Client must answer a challenge with the password of one of these
     /// users.
-    Users(Vec<(Username, String)>),
-}
-
-impl Admission {
-    /// The method a Client needs to be admitted, if one is.
-    pub(crate) fn required(&self) -> AuthMethods {
-        match self {
-            Self::Open | Self::Confirm => AuthMethods::NONE,
-            Self::SharedSecret(_) => AuthMethods::SHARED_SECRET,
-            Self::Users(_) => AuthMethods::USER,
-        }
-    }
+    Users(Arc<[(Username, String)]>),
 }
 
 impl fmt::Debug for Admission {

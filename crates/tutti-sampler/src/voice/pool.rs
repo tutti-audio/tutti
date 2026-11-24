@@ -123,8 +123,9 @@ pub struct PoolDrops {
     /// aimed at a slot whose stream the handle had not passed them to. Not
     /// recorded in the voice's `Playback`.
     pub directions_dropped: u64,
-    /// [`replace_wave`](VoicePoolHandle::replace_wave) calls aimed at a
-    /// streaming voice, which changes source by a fresh
+    /// [`replace_wave`](VoicePoolHandle::replace_wave) calls the drain found
+    /// aimed at a streaming voice: one that took the slot after the handle
+    /// read its tier. A streaming voice changes source by a fresh
     /// [`add_streaming`](VoicePoolHandle::add_streaming) instead.
     pub wave_swaps_ignored: u64,
     /// Adds for a new slot refused because the pool already held

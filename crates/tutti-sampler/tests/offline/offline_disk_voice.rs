@@ -30,7 +30,7 @@ use tutti_platform::Asset;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Loop, Manual, Playback, StreamHandle, StreamReader, StreamStart,
-    Voice, VoiceNode, VoiceSource,
+    VoiceNode,
 };
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Samples};
 
@@ -235,16 +235,14 @@ fn a_fork_plays_the_file_from_the_frame_its_beat_falls_on() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, SR as u32, 60_000);
-    let (_streamer, reader) = streamer_on(&path);
+    let (rig, reader) = streamer_on(&path);
+    let Rig {
+        streamer: _streamer,
+        stream,
+    } = rig;
     let voice = live_voice(reader, 2.0);
-    let node = VoiceNode::with_channels(
-        Voice {
-            source: VoiceSource::Disk(voice.clone()),
-            play: Playback::default(),
-        },
-        2u16,
-    )
-    .expect("a finite gain and a nonempty width");
+    let node = VoiceNode::streaming(voice.clone(), stream, Playback::default())
+        .expect("a finite gain and a nonempty width");
 
     let mut node_fork = fork_unprepared(node);
     node_fork.node.prepare(&offline_prepare(SampleRate::of(SR)));
@@ -805,12 +803,10 @@ fn a_fork_matches_the_memory_tier_bit_for_bit() {
         let mut memory: Box<dyn Node> = if case.reverse {
             Box::new(
                 VoiceNode::with_channels(
-                    Voice {
-                        source: VoiceSource::Memory(source),
-                        play: Playback {
-                            direction: tutti_sampler::PlayDirection::Reverse,
-                            ..Playback::default()
-                        },
+                    source,
+                    Playback {
+                        direction: tutti_sampler::PlayDirection::Reverse,
+                        ..Playback::default()
                     },
                     2u16,
                 )
@@ -874,18 +870,20 @@ fn a_stretched_fork_sounds_from_the_frame_its_beat_falls_on() {
         .collect();
     tutti_fixtures::signal::write_wav_f32(&path, SampleRate::of(SR), 2, &tone);
     for speed in [0.5, 1.0, 2.0] {
-        let (_streamer, reader) = streamer_on(&path);
+        let (rig, reader) = streamer_on(&path);
+        let Rig {
+            streamer: _streamer,
+            stream,
+        } = rig;
         let voice = live_voice(reader, 1.0);
-        let node = VoiceNode::with_channels(
-            Voice {
-                source: VoiceSource::Disk(voice),
-                play: Playback {
-                    speed: tutti_units::PlaybackRate::of(speed),
-                    stretch: tutti_units::StretchFactor::new(1.5),
-                    ..Playback::default()
-                },
+        let node = VoiceNode::streaming(
+            voice,
+            stream,
+            Playback {
+                speed: tutti_units::PlaybackRate::of(speed),
+                stretch: tutti_units::StretchFactor::new(1.5),
+                ..Playback::default()
             },
-            2u16,
         )
         .expect("a finite gain and a nonempty width");
         let mut copy = fork_unprepared(node);
