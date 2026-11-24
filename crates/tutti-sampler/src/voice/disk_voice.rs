@@ -149,7 +149,7 @@ enum Reader<F: SamplerFloat> {
         declick: usize,
     },
     /// A clone of a live voice: what [`DiskVoice::fork_copy`] reads of the
-    /// stream, and nothing that reads the ring. It renders silence, and is
+    /// stream, and no ring reader. It renders silence, and is
     /// what a node's fork template holds.
     Template(Template<F>),
     /// A fork's own file read ([`DiskVoice::fork_copy`]): it never touches the
