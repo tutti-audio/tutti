@@ -102,7 +102,7 @@ use crate::graph::Graph;
 use crate::value::{Bases, Steps};
 
 /// Which of the session's followers an event is about.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FollowKind {
     /// The Flex tempo follower ([`Midi::follow_tempo`](crate::Midi::follow_tempo)).
@@ -115,7 +115,7 @@ pub enum FollowKind {
 }
 
 /// Why a follower ended without an `unfollow_*` call.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum UnfollowCause {
     /// The input node it read was removed from the graph.
