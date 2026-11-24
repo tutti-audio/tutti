@@ -1085,15 +1085,14 @@ fn cut_edges(workers: usize, pairs: u64) -> Vec<Cut> {
         .collect()
 }
 
-/// **An input tap carries what the node is handed, the closes of a cut edge
-/// included.** A script holds key 60, the sustain pedal and an off-centre
-/// bend on an edge that is then cut: the node is sent, at the first frame of
-/// the next block, the pedal up, the bend centred (0x2000) and the key's note
-/// off, and the raw tap carries exactly those at those frames. The aligned
-/// one is later by the gap to the output time (40).
+/// **The closes of a cut edge reach every input tap, on any number of
+/// workers.** Four scripts each hold key 60, the sustain pedal and an
+/// off-centre bend on an edge that is then cut: each probe is sent, at the
+/// first frame of the next block, the pedal up, the bend centred (0x2000) and
+/// the key's note off, and its raw tap carries exactly those at those frames.
+/// The aligned one is later by the gap to the output time (40).
 #[test]
-fn an_input_tap_carries_the_closes_of_a_cut_edge() {
-    let cut = &cut_edges(1, 1)[0];
+fn the_closes_of_a_cut_edge_reach_every_input_tap_on_any_number_of_workers() {
     let expect = vec![
         at(3, on(60)),
         at(5, pedal(127)),
@@ -1102,32 +1101,20 @@ fn an_input_tap_carries_the_closes_of_a_cut_edge() {
         at(64, bend(0x2000)),
         at(64, off(60)),
     ];
-    assert_eq!(cut.heard, expect, "what the node was handed");
-    assert_eq!(cut.raw, expect);
     let later: Vec<TapEvent> = expect
         .iter()
         .map(|e| at(e.frame.get() + 40, e.ump))
         .collect();
-    assert_eq!(cut.aligned, later);
-}
-
-/// The taps of several probes on the pool carry what the one-participant
-/// render's do, event for event.
-#[test]
-fn the_closes_of_cut_edges_reach_input_taps_on_the_pool() {
-    let serial = cut_edges(1, 4);
-    for workers in [2, 3] {
-        let pooled = cut_edges(workers, 4);
-        for (s, p) in serial.iter().zip(&pooled) {
-            assert_eq!(s.raw, p.raw, "{workers} workers");
-            assert_eq!(s.aligned, p.aligned, "{workers} workers");
+    for workers in [1, 2, 3] {
+        for cut in cut_edges(workers, 4) {
+            assert_eq!(
+                cut.heard, expect,
+                "what the node was handed, {workers} workers"
+            );
+            assert_eq!(cut.raw, expect, "{workers} workers");
+            assert_eq!(cut.aligned, later, "{workers} workers");
         }
     }
-    assert!(
-        serial
-            .iter()
-            .all(|c| c.raw.len() == 6 && c.aligned.len() == 6)
-    );
 }
 
 /// **A scheduled event command to an input is in the input tap**, at the
@@ -1312,40 +1299,32 @@ fn bounded(workers: usize, pairs: u64) -> Vec<Cut> {
         .collect()
 }
 
-/// **An input tap carries what the node's declared bound leaves.** The
-/// scheduled `on(9)` makes four events for a bound of 3: the earliest by frame
-/// land, the note-off before any other, so `on(2)` at 4 is the one cut.
+/// **An input tap carries what the node's declared bound leaves, on any
+/// number of workers.** The scheduled `on(9)` makes four events for a bound of
+/// 3: the earliest by frame land, the note-off before any other, so `on(2)` at
+/// 4 is the one cut. Each of four probes is handed those three and its raw tap
+/// carries them; its aligned tap is later by the gap to the output time (40).
 #[test]
-fn an_input_tap_carries_the_events_the_input_bound_leaves() {
-    let cut = &bounded(1, 1)[0];
+fn an_input_tap_carries_the_events_the_input_bound_leaves_on_any_number_of_workers() {
     let expect = vec![
         at(2, on_port(on(1), 0)),
         at(3, on(9)),
         at(8, on_port(off(1), 0)),
     ];
-    assert_eq!(cut.heard, expect, "what the node was handed");
-    assert_eq!(cut.raw, expect);
     let later: Vec<TapEvent> = expect
         .iter()
         .map(|e| at(e.frame.get() + 40, e.ump))
         .collect();
-    assert_eq!(cut.aligned, later);
-}
-
-/// The cut taps of several probes on the pool equal the serial render's, event
-/// for event.
-#[test]
-fn the_bounded_input_taps_are_bit_identical_on_the_pool() {
-    let serial = bounded(1, 4);
-    for workers in [2, 3] {
-        let pooled = bounded(workers, 4);
-        for (s, p) in serial.iter().zip(&pooled) {
-            assert_eq!(s.heard, p.heard, "{workers} workers");
-            assert_eq!(s.raw, p.raw, "{workers} workers");
-            assert_eq!(s.aligned, p.aligned, "{workers} workers");
+    for workers in [1, 2, 3] {
+        for cut in bounded(workers, 4) {
+            assert_eq!(
+                cut.heard, expect,
+                "what the node was handed, {workers} workers"
+            );
+            assert_eq!(cut.raw, expect, "{workers} workers");
+            assert_eq!(cut.aligned, later, "{workers} workers");
         }
     }
-    assert!(serial.iter().all(|c| c.raw.len() == 3));
 }
 
 /// **A command to an input nothing feeds is in its taps**: the view exists
