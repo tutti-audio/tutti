@@ -68,7 +68,7 @@
 //! Per block neither path allocates, takes a lock or makes a system call on
 //! the audio thread, except a spread block's pool wake of its sleeping
 //! helpers: the claim tables, the ready list and each worker's scratch (its
-//! claim lists, its overlay buffer) are sized when a plan is applied. The
+//! claim lists) are sized when a plan is applied. The
 //! caller never waits for a helper that has not started; it waits only for
 //! work a started helper is finishing. See `tests/rt_no_alloc.rs`.
 //!
@@ -106,7 +106,7 @@ use crate::compile::plan::{Op, Plan};
 use crate::edges::rtlog::LogLane;
 use crate::exec::Flags;
 use crate::exec::arena::{Arena, Line};
-use crate::exec::command::{Deliveries, Overlay};
+use crate::exec::command::Deliveries;
 use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
 use crate::exec::slots::{EventSlot, EventSlots, SharedFlags};
@@ -183,8 +183,6 @@ pub(crate) struct Worker {
     held_audio: Held,
     /// The event slots an op's view holds.
     held_events: Held,
-    /// Where a node's scheduled events are merged into its inputs.
-    overlay: Overlay,
     /// Events refused this block, and where.
     dropped: Dropped,
     /// Whether a crossfade ended this block.
@@ -276,14 +274,12 @@ impl Claims {
 
 impl Par {
     /// For `plan`, with `inject` the executor's (unit-sorted) flushed-event
-    /// list, `store_len` its unit store's length and `overlay` the overlay
-    /// capacity one node call may need. Allocates.
+    /// list and `store_len` its unit store's length. Allocates.
     pub(crate) fn new(
         plan: &Plan,
         participants: usize,
         store_len: usize,
         inject_units: impl Iterator<Item = PlanUnitId>,
-        overlay: usize,
     ) -> Self {
         let successors: Vec<u32> = plan.task_succ.targets.iter().map(|t| t.get()).collect();
         let graph = TaskGraph::new(
@@ -311,6 +307,9 @@ impl Par {
         // event source of each param it declares, or an event merge's
         // inputs and output.
         let held = 2 * MAX_PORTS + crate::node::param::MAX_PARAM_PORTS + 1;
+        // A node's event slots also include the source of each input beside
+        // its view.
+        let held_events = held + MAX_PORTS;
         Self {
             participants,
             spreads,
@@ -323,8 +322,7 @@ impl Par {
             workers: (0..workers)
                 .map(|_| Worker {
                     held_audio: Held::new(held),
-                    held_events: Held::new(held),
-                    overlay: Overlay::with_capacity(overlay),
+                    held_events: Held::new(held_events),
                     dropped: Dropped::new(),
                     fade_ended: false,
                     panic: None,
@@ -492,7 +490,6 @@ fn run_alone<F: Float>(par: &mut Par, b: Block<'_, '_, F>) -> bool {
             flags: b.flags,
         },
         events: b.events,
-        overlay: &mut par.workers[0].overlay,
         dropped: b.dropped,
         fade_ended: &mut ended,
         log: &mut b.logs[0],
@@ -632,7 +629,6 @@ impl<F: Float> Shared<'_, '_, F> {
             let Worker {
                 held_audio,
                 held_events,
-                overlay,
                 dropped,
                 fade_ended,
                 panic,
@@ -660,7 +656,6 @@ impl<F: Float> Shared<'_, '_, F> {
                     split: &self.events,
                     held: held_events,
                 },
-                overlay,
                 dropped,
                 fade_ended,
                 log: &mut lane,
@@ -701,8 +696,6 @@ where
     outputs: M::Table<'c, &'o mut [F]>,
     audio: M::Audio<'c>,
     events: M::Events<'c>,
-    /// Where a node's scheduled events are merged into its inputs.
-    overlay: &'c mut Overlay,
     /// Events refused, and where.
     dropped: &'c mut Dropped,
     /// Whether a crossfade ended.
@@ -811,7 +804,6 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     inject: &mut inject,
                     has_inject: &mut has_inject,
                     has_due: &mut has_due,
-                    overlay: self.overlay,
                     due: fx.due,
                     dropped: self.dropped,
                     log: &self.log.slots,

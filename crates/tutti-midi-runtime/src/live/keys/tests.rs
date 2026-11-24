@@ -253,7 +253,7 @@ fn a_full_refusal_writes_no_packet() {
     }
     assert_eq!(
         keys.send_universal(Stamp::NextBlock, message),
-        Err(SendUniversalError::Push(PushError::Full))
+        Err(PushError::Full)
     );
     assert_eq!(keys.vacant(), 1);
     assert_eq!(keys.losses().lost, 0);
@@ -317,8 +317,7 @@ fn a_message_longer_than_the_room_is_refused_whole() {
     }
     let message = addressed(
         Recipient::AllCall,
-        Universal::Tuning(tutti_midi_protocol::TuningMessage::NoteChange {
-            timing: tutti_midi_protocol::Timing::RealTime,
+        Universal::Tuning(tutti_midi_protocol::TuningMessage::RealTimeNoteChange {
             bank: Some(U7::of(1)),
             program: U7::of(2),
             changes,
@@ -336,34 +335,9 @@ fn a_message_longer_than_the_room_is_refused_whole() {
     let before = keys.vacant();
     assert_eq!(
         keys.send_universal(Stamp::NextBlock, message),
-        Err(SendUniversalError::Push(PushError::Full))
+        Err(PushError::Full)
     );
     assert_eq!(keys.vacant(), before);
-}
-
-/// The variants only a reader makes are refused naming what they are, and
-/// nothing is written.
-#[test]
-fn a_read_only_message_is_unwritable_and_writes_nothing() {
-    let (mut d, mut keys) = rig();
-    for (message, refusal) in [
-        (
-            Universal::MachineControlTruncated(MmcCommands::stop()),
-            NotWritable::MachineControlTruncated,
-        ),
-        (
-            Universal::MachineControlResponse(tutti_midi_protocol::MmcFields::new()),
-            NotWritable::MachineControlResponse,
-        ),
-    ] {
-        assert_eq!(
-            keys.send_universal(Stamp::NextBlock, addressed(Recipient::AllCall, message)),
-            Err(SendUniversalError::Unwritable(refusal))
-        );
-    }
-    assert_eq!(keys.vacant(), LIVE_INLET_CAPACITY.slots());
-    d.block();
-    assert!(sent(&d).is_empty());
 }
 
 /// Every packet of a message lands on the frame it was stamped for, in order.

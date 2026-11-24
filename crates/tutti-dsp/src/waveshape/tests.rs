@@ -112,7 +112,7 @@ const RATE: SampleRate = SampleRate::SR_48K;
 
 /// A bank of `kind` at rest on `drive`.
 fn at_rest(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
-    let mut bank = WaveshaperBank::<f32>::new(kind, RATE);
+    let mut bank = WaveshaperBank::<f32>::new(Waveshape::new(kind), RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
@@ -321,9 +321,10 @@ fn orders_of(kind: ShapeKind) -> impl Iterator<Item = Antialiasing> {
 
 /// A bank of `kind` at rest on `drive`, antialiased to `order`.
 fn antialiased(kind: ShapeKind, drive: f64, order: Antialiasing) -> WaveshaperBank<f32> {
-    let mut bank = WaveshaperBank::<f32>::new(kind, RATE)
+    let shape = Waveshape::new(kind)
         .antialiasing(order)
         .expect("an order the kind has");
+    let mut bank = WaveshaperBank::<f32>::new(shape, RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });
@@ -959,7 +960,7 @@ fn the_delay_is_the_centroid_of_the_impulse_response() {
 
 /// The kinds with a second antiderivative are `Softsign` and `HardClip`; an order past a kind's
 /// highest is refused with the kind, the order and the highest named, `Off` and the highest are
-/// taken, and a refusal leaves the bank as it was.
+/// taken, and a bank shapes with the shape it is built from.
 #[test]
 fn an_order_past_the_kinds_highest_is_refused() {
     for kind in KINDS {
@@ -968,13 +969,16 @@ fn an_order_past_the_kinds_highest_is_refused() {
             _ => Antialiasing::FirstOrder,
         };
         assert_eq!(kind.max_antialiasing(), highest, "{kind:?}");
-        let bank = |order| WaveshaperBank::<f32>::new(kind, RATE).antialiasing(order);
+        let shape = |order| Waveshape::new(kind).antialiasing(order);
         for order in [Antialiasing::Off, Antialiasing::FirstOrder, highest] {
-            assert_eq!(bank(order).unwrap().antialiasing_order(), order, "{kind:?}");
+            let shape = shape(order).unwrap();
+            assert_eq!(shape.antialiasing_order(), order, "{kind:?}");
+            let bank = WaveshaperBank::<f32>::new(shape, RATE);
+            assert_eq!(bank.shape(), shape, "{kind:?}");
         }
         if highest == Antialiasing::FirstOrder {
             assert_eq!(
-                bank(Antialiasing::SecondOrder).unwrap_err(),
+                shape(Antialiasing::SecondOrder).unwrap_err(),
                 AntialiasingError {
                     kind,
                     order: Antialiasing::SecondOrder,
@@ -982,7 +986,7 @@ fn an_order_past_the_kinds_highest_is_refused() {
                 }
             );
         } else {
-            assert!(bank(Antialiasing::SecondOrder).is_ok());
+            assert!(shape(Antialiasing::SecondOrder).is_ok());
         }
     }
 }
@@ -1024,9 +1028,10 @@ fn a_non_finite_input_is_heard_at_its_own_frame_only() {
 
 /// One block of `x` through an `f64` bank of `kind` at rest on `drive`, at `order`.
 fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> Vec<f64> {
-    let mut bank = WaveshaperBank::<f64>::new(kind, RATE)
+    let shape = Waveshape::new(kind)
         .antialiasing(order)
         .expect("an order the kind has");
+    let mut bank = WaveshaperBank::<f64>::new(shape, RATE);
     bank.retarget(&WaveshaperControls {
         drive: Drive::new(drive),
     });

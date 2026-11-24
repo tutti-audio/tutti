@@ -427,11 +427,31 @@ pub enum TuningMessage {
         /// The twelve offsets.
         offsets: OctaveOffsets,
     },
-    /// Single Note Tuning Change: real time (`08 02`, `08 07`) or non-real
-    /// time (`08 07`).
+    /// Single Note Tuning Change, non-real time (`08 07`): the tuning changes
+    /// and sounding notes keep their pitch. It names its bank; the bankless
+    /// form is real time ([`RealTimeNoteChange`](Self::RealTimeNoteChange)).
+    ///
+    /// ```compile_fail,E0308
+    /// use tutti_midi_protocol::{KeyChanges, TuningMessage};
+    /// use tutti_ump::U7;
+    ///
+    /// let _ = TuningMessage::NoteChange {
+    ///     bank: None,
+    ///     program: U7::of(0),
+    ///     changes: KeyChanges::new(),
+    /// };
+    /// ```
     NoteChange {
-        /// Whether sounding notes follow.
-        timing: Timing,
+        /// The bank.
+        bank: U7,
+        /// The tuning program.
+        program: U7,
+        /// The keys and their words.
+        changes: KeyChanges,
+    },
+    /// Single Note Tuning Change, real time (`08 02`, or `08 07` with a bank):
+    /// sounding notes follow.
+    RealTimeNoteChange {
         /// The bank, if the message names one (`08 07`).
         bank: Option<U7>,
         /// The tuning program.

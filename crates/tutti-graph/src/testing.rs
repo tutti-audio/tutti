@@ -732,9 +732,7 @@ impl Harness {
     /// [`TestPool`] of `workers` participants (`1`: no pool).
     pub fn with_workers(max_block: usize, workers: usize) -> Self {
         let mut harness = Self::new(max_block);
-        if workers > 1 {
-            harness.exec.set_pool(Some(test_pool(workers)));
-        }
+        pooled(&mut harness.exec, workers);
         harness
     }
 }
@@ -993,6 +991,72 @@ impl<F: Float> Harness<F> {
             .process_with_changes(frames, transport, changes, &ins, &mut outs);
         out
     }
+
+    /// Render `blocks` (each a block length) from frame `from` on the
+    /// harness's own input, [`input_signal`], and return every output channel
+    /// concatenated over the blocks. Each block is [`block`](Self::block).
+    pub fn run(&mut self, blocks: &[usize], from: u64) -> Vec<Vec<F>> {
+        self.run_with(blocks, from, input_signal)
+    }
+
+    /// [`run`](Self::run) over the input `signal(start, frames)` gives for
+    /// each block, where `start` is the frame the block begins at (`from`
+    /// plus the lengths of the blocks before it).
+    pub fn run_with(
+        &mut self,
+        blocks: &[usize],
+        from: u64,
+        mut signal: impl FnMut(u64, usize) -> Vec<F>,
+    ) -> Vec<Vec<F>> {
+        let mut all: Vec<Vec<F>> = vec![Vec::new(); self.outputs];
+        let mut frame = from;
+        for &n in blocks {
+            let input = signal(frame, n);
+            for (all, out) in all.iter_mut().zip(self.block(n, &input)) {
+                all.extend(out);
+            }
+            frame += n as u64;
+        }
+        all
+    }
+}
+
+/// Run `exec`'s blocks on the shared [`test_pool`] of `workers`
+/// participants; `1` leaves it serial (no pool).
+pub fn pooled<F: Float>(exec: &mut Executor<F>, workers: usize) {
+    if workers > 1 {
+        exec.set_pool(Some(test_pool(workers)));
+    }
+}
+
+/// As [`pooled`], on a fresh [`TestPool`] that no other executor of the
+/// process shares.
+pub fn pooled_fresh<F: Float>(exec: &mut Executor<F>, workers: usize) {
+    if workers > 1 {
+        exec.set_pool(Some(TestPool::new(workers)));
+    }
+}
+
+/// Call `render(1)`, the serial render, then `render(w)` for each `w` of
+/// `workers`, and assert `same` of each equals `same` of the serial one (the
+/// panic names the worker count). `same` says what must be equal: the
+/// [`bits`] of a render, one channel's [`bits_of`], a count. Returns the
+/// serial value itself, for the caller's own assertions.
+pub fn agree_across_workers<T, K: PartialEq + std::fmt::Debug>(
+    workers: impl IntoIterator<Item = usize>,
+    mut render: impl FnMut(usize) -> T,
+    same: impl Fn(&T) -> K,
+) -> T {
+    let serial = render(1);
+    let want = same(&serial);
+    for w in workers {
+        assert_eq!(
+            same(&render(w)),
+            want,
+            "{w} workers differ from the serial render"
+        );
+    }
+    serial
 }
 
 /// A deterministic main input signal.
@@ -1015,6 +1079,11 @@ pub fn bits<F: Word>(v: &[Vec<F>]) -> Vec<Vec<F::Bits>> {
     v.iter()
         .map(|c| c.iter().map(|&x| x.to_word()).collect())
         .collect()
+}
+
+/// [`bits`] of one channel.
+pub fn bits_of<F: Word>(v: &[F]) -> Vec<F::Bits> {
+    v.iter().map(|&x| x.to_word()).collect()
 }
 
 /// A float and the integer holding its bits.
