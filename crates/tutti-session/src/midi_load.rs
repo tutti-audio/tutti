@@ -259,8 +259,8 @@ impl LoadedMidi {
     /// use tutti_session::Session;
     /// use tutti_units::{Beat, Bpm, SampleRate};
     ///
-    /// // A file whose tempo track says 90 beats a minute.
-    /// let track = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(90.0)).unwrap());
+    /// // A file whose tempo track says 100 beats a minute.
+    /// let track = Track::new().meta(Tick(0), Meta::tempo(Bpm::of(100.0)).unwrap());
     /// let file = StandardMidiFile::new(
     ///     SmfDivision::per_quarter(480),
     ///     Layout::Format0(LeadTrack::new(track)),
@@ -271,14 +271,14 @@ impl LoadedMidi {
     /// let mut session = Session::builder().build_detached(SampleRate::SR_48K)?;
     /// let loaded = tutti_fixtures::block_on(session.midi().load_midi(bytes))?;
     /// let map = loaded.tempo()?.clone();
-    /// assert_eq!(map.tempo_at(Beat::new(0.0)), Bpm::of(90.0));
+    /// assert_eq!(map.tempo_at(Beat::new(0.0)), Bpm::of(100.0));
     ///
     /// // The load left the session's tempo as it was ...
     /// let tempo = session.transport_handle().tempo();
-    /// assert_ne!(session.get(tempo)?.tempo_at(Beat::new(0.0)), Bpm::of(90.0));
+    /// assert_ne!(session.get(tempo)?.tempo_at(Beat::new(0.0)), Bpm::of(100.0));
     /// // ... and the project takes the file's by setting it.
     /// session.set(tempo.to(map))?;
-    /// assert_eq!(session.get(tempo)?.tempo_at(Beat::new(0.0)), Bpm::of(90.0));
+    /// assert_eq!(session.get(tempo)?.tempo_at(Beat::new(0.0)), Bpm::of(100.0));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///

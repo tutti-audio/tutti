@@ -1,7 +1,7 @@
 //! [`StandardMidiFile`]: a Standard MIDI File, lossless, with a tempo map.
 //!
 //! `.mid` is worn by a Standard MIDI File and a MIDI 2.0 Clip File alike, so
-//! which decoder runs is decided by the leading bytes ([`MidiFileKind::detect`]),
+//! which decoder runs is decided by the leading bytes ([`MidiFileKind::detect`](crate::MidiFileKind::detect)),
 //! never by the name ([`MidiFile::read`](crate::MidiFile::read)). A Standard
 //! MIDI File is [`Track`]s of `(Tick, FileEvent)`, the file's division, and the
 //! [`TempoMap`] its tempo events declare. Ticks are integers, so a file read
