@@ -256,6 +256,12 @@ impl MediaType {
     /// `application/octet-stream`, the media type of Property Data no format
     /// names.
     pub const OCTET_STREAM: Self = Self::of("application/octet-stream");
+
+    /// Whether this is `application/json`, however its case is spelt.
+    #[must_use]
+    pub fn is_json(&self) -> bool {
+        self.as_str().eq_ignore_ascii_case("application/json")
+    }
 }
 
 /// The explanatory text of a Reply (§7.3, Table 14), held as the text it says:

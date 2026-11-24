@@ -1254,7 +1254,7 @@ mod state {
         let target = ResourceTarget::entry(PeResource::State, full_state().resource_id()).unwrap();
         match wire.peer.store.get(&target) {
             Some(PeData::State(state)) => match state.body() {
-                OpaqueBody::Binary { bytes, .. } => bytes.clone(),
+                OpaqueBody::Binary(binary) => binary.bytes().to_vec(),
                 OpaqueBody::Json(_) => panic!("binary expected"),
             },
             other => panic!("the device holds no state: {other:?}"),
@@ -1662,7 +1662,7 @@ fn a_fetched_custom_resource_is_opaque_json() {
         panic!("opaque data");
     };
     assert_eq!(
-        opaque.json(),
+        opaque.body().json(),
         Some(&json(r#"{"name":"PIANO 4","lfoSpeed":30}"#))
     );
 }
