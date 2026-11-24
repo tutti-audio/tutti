@@ -8,9 +8,10 @@
 //! **What the model leaves out, on purpose.** Modulation moves a line around its
 //! centre length, and the model reads the centre. A [`NetworkStage::Fir`] holds a
 //! summary and not the response, so it has no frequency response (NaN), no
-//! finite `l1_norm` and radius 0. [`FdnBank`](crate::FdnBank) rescales a set
-//! of band gains that would exceed 1 anywhere to peak at 0.9999; the model does not,
-//! and [`Absorption::peak`] is what shows a design never asks for it.
+//! finite `l1_norm` and radius 0. The design of an [`FdnLayout`](crate::FdnLayout)
+//! scales a set of band gains whose response peaks above the largest of them down to that
+//! largest, and the network carries the scaled gains; a network built by hand is not
+//! scaled, and [`Absorption::peak`] is what shows where it peaks.
 
 use tutti_units::{Amplitude, Db, Gain, Hz, SampleRate};
 
@@ -47,13 +48,9 @@ impl Absorption {
                 }
                 gain.get() * (1.0 - d) / (ONE - delay(w, 1.0) * d)
             }
-            Absorption::Bands {
-                low,
-                mid,
-                high,
-                crossover,
-            } => {
-                let (low, mid, high) = (low.get(), mid.get(), high.get());
+            Absorption::Bands(b) => {
+                let (low, mid, high) = (b.low().get(), b.mid().get(), b.high().get());
+                let crossover = b.crossover();
                 // `L = ((1 - p) / (1 - p z^-1))^2`, as the kernel's two cascaded
                 // one-poles; `L1` at the lower crossover, `L2` at the upper.
                 let l = |fc: Hz| {
@@ -67,9 +64,8 @@ impl Absorption {
     }
 
     /// The largest `|G|` of the absorption over a grid of frequencies from DC to
-    /// Nyquist (dense toward DC, where the bands change): what
-    /// [`FdnBank`](crate::FdnBank) rescales when it exceeds 1. A design whose
-    /// absorptions peak at 1 or under is one the kernel runs as the model says.
+    /// Nyquist (dense toward DC, where the bands change): what a design of an
+    /// [`FdnLayout`](crate::FdnLayout) holds to the largest of its band gains.
     #[must_use]
     pub fn peak(&self, rate: SampleRate) -> f64 {
         (0..=PEAK_POINTS)
@@ -80,43 +76,17 @@ impl Absorption {
             .fold(0.0, f64::max)
     }
 
-    /// A bound on the largest `|G(e^jw)|`: the gain of a [`Gain`](Self::Gain), the
-    /// exact peak of a one-pole (at DC or at Nyquist), and for bands the largest
-    /// of a grid of 4096 frequencies plus what the response can move between two
-    /// of them (its slope is at most `2 p / (1 - p)` times each term's weight, for
-    /// each pole `p`). Tighter than the `majorant` at `r = 1` when the bands
-    /// rise with frequency, where the sum of the magnitudes of the three weights
-    /// exceeds the peak.
-    fn sup(&self, rate: SampleRate) -> f64 {
-        let Absorption::Bands {
-            low,
-            mid,
-            high,
-            crossover,
-        } = *self
-        else {
-            return self.majorant(1.0, rate);
-        };
-        const POINTS: usize = 4096;
-        let (low, mid, high) = (low.get(), mid.get(), high.get());
-        let pole = |fc: Hz| cutoff_pole(fc, rate);
-        let (p1, p2) = (pole(crossover[0]), pole(crossover[1]));
-        if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
-            || ![p1, p2]
-                .iter()
-                .all(|p| p.is_finite() && *p > 0.0 && *p < 1.0)
-        {
-            return f64::INFINITY;
+    /// A bound on the largest `|G(e^jw)|` over every frequency, which never undercuts it: the
+    /// gain of a [`Gain`](Self::Gain), the exact peak of a one-pole (at DC or at Nyquist), and
+    /// for bands the bound stored with them (`BandAbsorption::peak`: exact where the
+    /// gains do not rise with frequency, the design's scaled peak otherwise). Infinity for gains
+    /// that are not loop gains. Tighter than the `majorant` at `r = 1` when the bands rise with
+    /// frequency, where the sum of the magnitudes of the three weights exceeds the peak.
+    pub(super) fn sup(&self, rate: SampleRate) -> f64 {
+        match *self {
+            Absorption::Bands(b) => b.peak().get(),
+            _ => self.majorant(1.0, rate),
         }
-        let slope =
-            (mid - high).abs() * 2.0 * p2 / (1.0 - p2) + (low - mid).abs() * 2.0 * p1 / (1.0 - p1);
-        let peak = (0..=POINTS)
-            .map(|k| {
-                self.response(std::f64::consts::PI * k as f64 / POINTS as f64, rate)
-                    .norm()
-            })
-            .fold(0.0, f64::max);
-        peak + slope * std::f64::consts::PI / POINTS as f64 / 2.0
     }
 
     /// `sum |g_k| r^-k` over the impulse response of one trip, for `r` in
@@ -135,13 +105,9 @@ impl Absorption {
                 // The impulse response is `g (1 - d) d^k`.
                 g * (1.0 - d).abs() / (1.0 - d.abs() / r)
             }
-            Absorption::Bands {
-                low,
-                mid,
-                high,
-                crossover,
-            } => {
-                let (low, mid, high) = (low.get(), mid.get(), high.get());
+            Absorption::Bands(b) => {
+                let (low, mid, high) = (b.low().get(), b.mid().get(), b.high().get());
+                let crossover = b.crossover();
                 if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0) {
                     return f64::INFINITY;
                 }
