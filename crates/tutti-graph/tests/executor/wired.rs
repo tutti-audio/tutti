@@ -9,12 +9,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_graph::testing as common;
 
-use common::{Kind, TestNode, WORKERS, prepare, test_pool};
+use common::{Kind, TestNode, WORKERS, prepare};
 use tutti_buffers::{ChannelLayout, ChannelTopology};
 use tutti_graph::{
     Bus, BusOutputPort, BusRole, Buses, Cx, Edge, EdgeFade, EdgeId, Editor, Executor, FeedbackFrom,
     InputPort, Io, Node, NodeBus, NodeKey, OutputPort, PortSink, PortSource, Prepare, Rewired,
-    Shape, Status, TapAlign, TapId, TapOptions, TransportPosition, Unforkable, Wired, WiredMask,
+    Shape, Status, TapAlign, TapId, TapOptions, Unforkable, Wired, WiredMask,
 };
 use tutti_units::{Samples, Tail};
 
@@ -111,9 +111,7 @@ fn wired(inputs: u64, outputs: u64) -> Wired {
 }
 
 fn render(exec: &mut Executor, outs: usize) {
-    let mut bufs = vec![vec![0.0f32; 16]; outs];
-    let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(16, &TransportPosition::default(), &[], &mut refs);
+    common::block(exec, 16, outs);
 }
 
 /// Commits, applies and renders one block, returning what the commit
@@ -130,9 +128,7 @@ fn step(ed: &mut Editor, exec: &mut Executor, seen: &Seen, outs: usize) -> (Vec<
 /// steps' reports and reads.
 fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     let (mut ed, mut exec) = Editor::new(prepare(16));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     let seen = Arc::new(Seen::default());
     ed.insert(
         SRC,
@@ -269,10 +265,7 @@ fn a_commit_reports_the_nodes_whose_wiring_moved_and_no_others() {
 
 #[test]
 fn the_parallel_executor_reads_the_one_participant_masks() {
-    let serial = scenario(1);
-    for workers in WORKERS {
-        assert_eq!(scenario(workers), serial, "{workers} workers");
-    }
+    common::agree_across_workers(WORKERS, scenario, Clone::clone);
 }
 
 /// A hand-built `Io` has no plan: every port reads wired, so a node that

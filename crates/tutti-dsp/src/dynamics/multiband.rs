@@ -298,7 +298,7 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
             crossover: CrossoverBank::new(width),
             blend: Ramp::new(model.blend()).steps(COEFF_INTERVAL as u32),
             model,
-            compressors: core::array::from_fn(|_| CompressorBank::new(rate)),
+            compressors: core::array::from_fn(|_| CompressorBank::new(width, rate)),
             bypass: [Ramp::new(F::ZERO); MAX_BANDS],
             audible: [Ramp::new(F::ONE); MAX_BANDS],
             steps,
@@ -322,7 +322,9 @@ impl<F: Float + SimdLanes + Lerp> MultibandBank<F> {
         self.model
             .design_into(&CrossoverControls::octaves(self.rate), self.rate);
         self.blend = Ramp::new(self.model.blend()).steps(COEFF_INTERVAL as u32);
-        self.compressors = core::array::from_fn(|_| CompressorBank::new(self.rate));
+        for compressor in &mut self.compressors {
+            compressor.clear();
+        }
         self.bypass = [Ramp::new(F::ZERO); MAX_BANDS];
         self.audible = [Ramp::new(F::ONE); MAX_BANDS];
         self.deepest = [Db::UNITY; MAX_BANDS];

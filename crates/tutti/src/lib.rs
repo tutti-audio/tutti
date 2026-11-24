@@ -30,7 +30,7 @@
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
-//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(440.0)))));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -317,7 +317,7 @@ pub mod nodes {
         GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode, HysteresisConfig,
         HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig, KarplusStrongNode,
         KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
-        LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterNode, MetronomeMode,
+        LevellerNode, LfoConfig, LfoNode, LfoSync, LimiterConfig, LimiterNode, MetronomeMode,
         MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout, ModDelayLayoutBuilder,
         ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands, MultibandCompressorConfig,
         MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode, NoteEnvelopeConfig,
@@ -531,9 +531,9 @@ pub mod session {
     };
     pub use tutti_engine::{
         BackendErrorKind, CallbackFrames, CallbackSpan, GraphEngineError, LOAD_MEAN_TIME_CONSTANT,
-        Lagging, OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum,
-        OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
-        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        Lagging, OpenedOutput, OutputLevelError, OutputLevels, OutputMap, OutputMapError,
+        OutputQuantum, OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError,
+        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -1138,14 +1138,14 @@ pub mod midi {
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_ci::{
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
-            CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
-            Confirmation, ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
-            CustomResource, EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole,
-            ListedTwice, ModeId, NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel,
-            NotAPeMidiMode, NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize,
-            NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds,
-            OpaqueBody, PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate,
-            PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
+            CcIndex, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
+            ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+            EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId,
+            NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode,
+            NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
+            NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds, OpaqueBody,
+            PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate, PartialValue,
+            PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
             PeBasicChannelTx, PeBinary, PeBodyError, PeCacheTime, PeCapabilities,
             PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
             PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
@@ -1155,12 +1155,12 @@ pub mod midi {
             PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
             PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
             PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
-            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place, Priority,
-            PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
-            ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
-            ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            PeSetScope, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass,
+            PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place,
+            Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse,
+            ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
+            ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent,
+            RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
             StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
             SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
             UntypedResource, UpdateKind,

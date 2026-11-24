@@ -1,12 +1,12 @@
 use crate::testing::uniform;
 use tutti_buffers::{Float, Mono, Planes, PlanesMut};
 use tutti_rt::SplitMix64;
-use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds};
 
 use super::*;
 use crate::compute_compressor_gain_reduction;
 use crate::testing::noise;
-use tutti_buffers::InputOutput;
+use tutti_buffers::{ChannelLayout, InputOutput};
 
 // The banks under test are `f32` (the session's audio format), so their tolerances are `f32`'s;
 // the `f64` banks have their own tests below.
@@ -103,7 +103,7 @@ fn bank_at<F: Float + SimdLanes + Lerp>(
     c: &CompressorControls,
     rate: SampleRate,
 ) -> CompressorBank<F> {
-    let mut bank = CompressorBank::new(rate);
+    let mut bank = CompressorBank::new(ChannelLayout::MONO, rate);
     bank.retarget(c);
     bank.jump_to_target();
     bank
@@ -951,4 +951,113 @@ fn an_f32_hundred_and_three_hundred_second_release_still_falls_along_the_closed_
             assert!(target - got > 0.1, "{tau} s: the reduction never released");
         }
     }
+}
+
+/// The 2nd-order high-pass's magnitude at `f` for a cutoff `fc` and `q`, in dB, from the
+/// closed form under the bilinear map: `w^2 / sqrt((1 - w^2)^2 + (w / q)^2)` at the prewarped
+/// `w = tan(pi f / fs) / tan(pi fc / fs)`.
+fn high_pass_db(f: f64, fc: f64, q: f64) -> f64 {
+    let rate = RATE.get();
+    let w = (std::f64::consts::PI * f / rate).tan() / (std::f64::consts::PI * fc / rate).tan();
+    20.0 * (w * w / (1.0 - w * w).hypot(w / q)).log10()
+}
+
+/// The deepest reduction, in dB, over the last 4800 frames (whole cycles of 250 Hz at 48 kHz)
+/// of `bank` run over `key` as audio of ones.
+fn deepest_reduction(bank: &mut CompressorBank<f32>, key: &[f32]) -> f64 {
+    let ones = vec![1.0f32; key.len()];
+    let out = run(bank, &[&ones], &[key], None).remove(0);
+    let lowest = out[out.len() - 4800..]
+        .iter()
+        .fold(f32::MAX, |m, &g| m.min(g));
+    -20.0 * f64::from(lowest).log10()
+}
+
+/// How far under a tone's true peak, in dB, the largest of its samples can fall, `f32`'s
+/// 0.02 dB included: `cos(pi f / fs)` of its height.
+fn sampled_peak_tolerance_db(f: f64) -> f64 {
+    0.02 - 20.0 * (std::f64::consts::PI * f / RATE.get()).cos().log10()
+}
+
+/// A running bank follows its key filter control. A 250 Hz key at -6 dB reduces by the static
+/// curve at its full level while off; once the control is high-pass at 1 kHz, by the curve at
+/// the level the filter's closed-form magnitude leaves it; and off again, at the full level.
+#[test]
+fn a_running_bank_switches_its_key_filter_and_back() {
+    let (f, fc, q, a) = (250.0, 1_000.0, std::f64::consts::FRAC_1_SQRT_2, 0.5);
+    let c = CompressorControls {
+        key_cutoff: Hz::new(fc),
+        key_q: Q::new(q),
+        ..controls(-40.0, 0.0, 4.0, 0.0, 0.0, 0.0)
+    };
+    let key = fixtures_sine(f, a, 24_000);
+    let level = 20.0 * a.log10();
+    let off = curve(level, -40.0, 0.0, 4.0);
+    let on = curve(level + high_pass_db(f, fc, q), -40.0, 0.0, 4.0);
+    assert!(on < off - 5.0, "the high-pass attenuates the key");
+    let tolerance = sampled_peak_tolerance_db(f);
+    let mut bank = runner(&c);
+    for (filter, want) in [
+        (KeyFilter::Off, off),
+        (KeyFilter::HighPass, on),
+        (KeyFilter::Off, off),
+    ] {
+        bank.retarget(&CompressorControls {
+            key_filter: filter,
+            ..c
+        });
+        let got = deepest_reduction(&mut bank, &key);
+        assert!(
+            (got - want).abs() < tolerance,
+            "{filter:?}: {got} dB, curve says {want} dB"
+        );
+    }
+}
+
+/// A cutoff and Q moved while the filter is off change nothing heard and are kept: switching
+/// on reduces by the curve at the key through the high-pass at the moved cutoff and Q, not at
+/// the ones the bank started with.
+#[test]
+fn a_cutoff_and_q_moved_while_off_are_where_a_switch_in_lands() {
+    let (f, a) = (250.0, 0.5);
+    let started = (100.0, std::f64::consts::FRAC_1_SQRT_2);
+    let moved = (1_000.0, 1.0);
+    let c = |(fc, q): (f64, f64), key_filter| CompressorControls {
+        key_filter,
+        key_cutoff: Hz::new(fc),
+        key_q: Q::new(q),
+        ..controls(-40.0, 0.0, 4.0, 0.0, 0.0, 0.0)
+    };
+    let key = fixtures_sine(f, a, 24_000);
+    let level = 20.0 * a.log10();
+    let full = curve(level, -40.0, 0.0, 4.0);
+    let at = |(fc, q): (f64, f64)| curve(level + high_pass_db(f, fc, q), -40.0, 0.0, 4.0);
+    assert!(
+        at(moved) < at(started) - 5.0,
+        "the two cutoffs are told apart"
+    );
+    let tolerance = sampled_peak_tolerance_db(f);
+    let mut bank = runner(&c(started, KeyFilter::Off));
+    for (controls, want) in [
+        (c(started, KeyFilter::Off), full),
+        (c(moved, KeyFilter::Off), full),
+        (c(moved, KeyFilter::HighPass), at(moved)),
+    ] {
+        bank.retarget(&controls);
+        let got = deepest_reduction(&mut bank, &key);
+        assert!(
+            (got - want).abs() < tolerance,
+            "{controls:?}: {got} dB, curve says {want} dB"
+        );
+    }
+}
+
+/// `frames` samples of an amplitude-`a` sine at `f` hertz at the tests' rate, from phase 0.
+fn fixtures_sine(f: f64, a: f64, frames: usize) -> Vec<f32> {
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        tutti_units::Amplitude::new(a),
+        RATE,
+        tutti_units::Samples::new(frames),
+    )
 }

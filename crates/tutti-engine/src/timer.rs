@@ -18,7 +18,7 @@ use tutti_units::Samples;
 
 use crate::callback::OutputBlock;
 use crate::faults::StreamFaults;
-use crate::stream::{OutputQuantum, OutputSpec, RunningStream, StreamDriver};
+use crate::stream::{OpenedOutput, OutputQuantum, OutputSpec, RunningStream, StreamDriver};
 
 use pacer::{Due, Pacer};
 
@@ -132,8 +132,10 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
         spec: &OutputSpec,
         mut block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<TimerRunning, TimerError> {
-        let frames = spec.quantum.unwrap_or(DEFAULT_BLOCK).get();
+    ) -> Result<OpenedOutput<TimerRunning>, TimerError> {
+        // The size every tick renders: the spec's, or the default.
+        let quantum = spec.quantum.unwrap_or(DEFAULT_BLOCK);
+        let frames = quantum.get();
         let rate = spec.sample_rate;
         // Sized here, on the control thread; the loop only fills it.
         let mut scratch = vec![F::ZERO; block.layout().interleaved_len(Samples::new(frames))];
@@ -161,9 +163,12 @@ impl<F: Float> StreamDriver<F> for TimerDriver {
                 }
             },
         )?;
-        Ok(TimerRunning {
-            stop,
-            task: Some(task),
+        Ok(OpenedOutput {
+            stream: TimerRunning {
+                stop,
+                task: Some(task),
+            },
+            quantum: Some(quantum),
         })
     }
 }

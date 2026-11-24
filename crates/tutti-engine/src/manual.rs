@@ -17,7 +17,7 @@ use tutti_units::Samples;
 
 use crate::callback::OutputBlock;
 use crate::faults::{BackendErrorKind, StreamFaults};
-use crate::stream::{OutputSpec, RunningStream, StreamDriver};
+use crate::stream::{OpenedOutput, OutputSpec, RunningStream, StreamDriver};
 
 /// A driver that runs no callbacks of its own: the caller runs them through
 /// the paired [`ManualStream`].
@@ -216,15 +216,18 @@ impl<F: Float> StreamDriver<F> for ManualStreamDriver<F> {
 
     fn open(
         self,
-        _spec: &OutputSpec,
+        spec: &OutputSpec,
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<ManualRunning<F>, Infallible> {
+    ) -> Result<OpenedOutput<ManualRunning<F>>, Infallible> {
         // The block and its fault sink reach the handle here rather than
         // through a separate wiring call: `open` is the one place both the
         // driver and the sink are in scope, and a generic `start_with` cannot
         // know it is holding a manual driver.
         *self.slot.lock() = Some(Open { block, faults });
-        Ok(ManualRunning { slot: self.slot })
+        Ok(OpenedOutput {
+            stream: ManualRunning { slot: self.slot },
+            quantum: spec.quantum,
+        })
     }
 }
