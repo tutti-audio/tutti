@@ -7,6 +7,7 @@
 //! polls itself (`Rig::threaded`).
 
 use super::*;
+use crate::Recovery;
 use crate::fake::{Call, FakeLoaded, FakePlugin};
 use crate::{
     AtomicRequestFlags, HostOp, MaxBlock, PluginError, PluginIo, PluginResult, PluginTail,
@@ -461,10 +462,36 @@ fn control_is_reachable_loaded_active_and_refused() {
             .map(|c| c.wiring(main()))
             .is_some()
     );
-    rig.plugin.refuse_rate(Some(SampleRate::of(1_000.0)));
-    rig.op(HostOp::Reconfigure(prepare(1_000.0)));
-    assert!(matches!(rig.lifecycle, Lifecycle::Refused { .. }));
-    assert!(rig.lifecycle.control().is_some());
+    let mut refused = Rig::new();
+    refused.plugin.refuse_rate(Some(SampleRate::of(1_000.0)));
+    refused.op(HostOp::Activate(prepare(1_000.0)));
+    assert!(matches!(refused.lifecycle, Lifecycle::Refused { .. }));
+    assert!(refused.lifecycle.control().is_some());
+}
+
+/// **A plugin lost while its refusal is rolled back is told once, by the
+/// refusal.**
+#[test]
+fn a_plugin_lost_in_a_refused_reconfigure_is_told_by_the_refusal_alone() {
+    let mut rig = Rig::new();
+    rig.op(HostOp::Activate(prepare(48_000.0)));
+    rig.take_notices();
+    rig.plugin.refuse_rate(Some(SampleRate::SR_22K05));
+    rig.plugin.lose_plugin_on_refusal(true);
+    rig.op(HostOp::Reconfigure(prepare(22_050.0)));
+
+    assert!(rig.lifecycle.is_poisoned());
+    let notices = rig.take_notices();
+    assert!(
+        matches!(
+            notices.as_slice(),
+            [Notice::Refused {
+                recovery: Recovery::Inactive,
+                ..
+            }]
+        ),
+        "{notices:?}"
+    );
 }
 
 /// **State round-trips through the control surface, loaded and active.**
@@ -595,13 +622,13 @@ fn stuck_then_reconfigure_settles_at_the_new_rate() {
     rig.op(HostOp::Reconfigure(prepare(96_000.0)));
     assert_eq!(rig.state.stage(), Stage::Active);
     assert_eq!(
-        rig.state.prepare().map(|p| p.rate()),
+        rig.state.applied().map(|p| p.rate()),
         Some(SampleRate::SR_48K)
     );
     rig.op(HostOp::Reconfigure(prepare(96_000.0)));
     assert_eq!(rig.state.stage(), Stage::Active);
     assert_eq!(
-        rig.state.prepare().map(|p| p.rate()),
+        rig.state.applied().map(|p| p.rate()),
         Some(SampleRate::SR_96K)
     );
     rig.render(64).unwrap();
@@ -963,7 +990,7 @@ fn an_adopted_plugin_is_in_the_state_a_driven_activation_leaves() {
     );
 
     assert_eq!(state.stage(), driven.state.stage());
-    assert_eq!(state.prepare(), driven.state.prepare());
+    assert_eq!(state.applied(), driven.state.applied());
     assert_eq!(state.latency(), Some(Samples::new(32)));
     assert_eq!(state.latency(), driven.state.latency());
     assert_eq!(state.tail(), driven.state.tail());

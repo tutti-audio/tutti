@@ -45,7 +45,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost};
+use super::instance::{Figures, Instance, Lost, Silence, Silenced, WakeSlot};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -85,6 +85,13 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) rt: Rt<L::Processor>,
     /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
     lost: Arc<Lost>,
+    /// Whether the plugin runs at the rate it kept after refusing the graph's:
+    /// the node renders silence ([`Instance::silenced`]). The instance holds
+    /// the other clone and outlives the node, so the node's drop never frees it.
+    pub(super) silenced: Arc<Silenced>,
+    /// Where this node binds its wake: the instance's, for the node that
+    /// holds the Processor, or the slot of a successor until it does.
+    pub(super) wake: Arc<WakeSlot>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
     /// locked or not.
@@ -163,10 +170,6 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     pub(super) pending_sample_rate: Arc<AtomicCell<Option<SampleRate>>>,
     /// Who tells the plugin the rate the node is prepared at.
     pub(super) rate_delivery: RateDelivery,
-    /// A fork's rate could not be told to the plugin (its `prepare` ran off the
-    /// main thread), so it is at a rate other than the node's: the node renders
-    /// silence until a `prepare` on the main thread tells it.
-    pub(super) rate_refused: bool,
     /// The render mode the last `prepare` carried (realtime before one): a
     /// `prepare` tells the plugin its mode only when the one it carries
     /// changed, so a re-prepare at the same mode leaves what the session
@@ -587,10 +590,12 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, figures, midi_map) = {
+        let (lost, silenced, wake, figures, midi_map) = {
             let instance = inner.lock();
             (
                 instance.lost_latch(),
+                instance.silenced(),
+                instance.wake_slot(),
                 instance.figure_cell(),
                 instance.midi_map().translator(),
             )
@@ -611,6 +616,8 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             inner,
             rt,
             lost,
+            silenced,
+            wake,
             figures,
             reporting: None,
             edits: None,
@@ -633,7 +640,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             sample_rate,
             pending_sample_rate,
             rate_delivery: RateDelivery::Pending,
-            rate_refused: false,
             prepared_mode: tutti_graph::RenderMode::Realtime,
             event_input,
             event_room,
@@ -733,6 +739,14 @@ pub(super) fn void_stale_edits(edits: Option<&EditPort>, params: &mut ParamDeliv
 }
 
 impl<L: Loaded, F: Float> InProcessClient<L, F> {
+    /// `n` MIDI events were not delivered: counted dropped, and the rest of
+    /// every SysEx open in the intake is skipped. The caller reports the
+    /// loss to the graph (`Io::count_lost`).
+    pub(super) fn lose_midi(&mut self, n: u64) {
+        self.params.count_midi_dropped(n);
+        self.intake.lost();
+    }
+
     /// The chunk in flight is dropped (a reset, a re-prepare): the walk of its
     /// transport ends, and the MIDI the Processor held for it is lost, counted
     /// now in the delivery's dropped MIDI and in the executor's at the next
@@ -771,7 +785,6 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             controls.restamp(rate);
         }
         self.sample_rate = rate;
-        self.rate_refused = false;
         self.inner.lock().retuned(rate);
         true
     }
@@ -856,7 +869,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         self.sample_rate = rate;
         // Only on a change: a redundant bracket makes a plugin reallocate its
         // buffers.
-        if !changed && !self.rate_refused {
+        if !changed && !self.silenced.holds() {
             return;
         }
         // `prepare` has no token to be handed and cannot fail, so it asks for
@@ -869,9 +882,8 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
                 .inner
                 .lock()
                 .set_sample_rate(main, rate, Some(&mut self.rt));
-            // A refusal renders silence (no Processor is lent) and is reported
-            // through the handle (`PluginInvalidation::RateRefused`).
-            self.rate_refused = outcome.is_err();
+            // A refusal renders silence (the instance publishes it) and is
+            // reported through the handle (`PluginInvalidation::RateRefused`).
             if let Err(reason) = outcome {
                 tracing::error!("a plugin refused its rate: {reason}");
             }
@@ -881,11 +893,11 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             // Off the main thread the bracket cannot run: pending for the main
             // thread's pump.
             RateDelivery::Pending => queue_sample_rate(&self.pending_sample_rate, rate),
-            // A fork has no pump: the refusal is recorded (`rate_refused`), the
-            // node renders silence rather than audio at the wrong rate, and the
-            // next `prepare` on the main thread clears it.
+            // A fork has no pump: the instance records that the rate was not
+            // told, the node renders silence rather than audio at the wrong
+            // rate, and the next `prepare` on the main thread clears it.
             RateDelivery::InPrepare => {
-                self.rate_refused = true;
+                self.inner.lock().silence(Silence::Unprepared);
                 tracing::error!(
                     "a forked plugin was prepared off the main thread; \
                      it renders silence until it is prepared on it"

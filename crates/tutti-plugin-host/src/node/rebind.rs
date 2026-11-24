@@ -186,6 +186,9 @@ where
             Some(pipeline),
             Some(self.event_room),
         );
+        // Its wake is the instance's once the Processor moves to this node.
+        let wake = Arc::<super::instance::WakeSlot>::default();
+        client.wake = Arc::clone(&wake);
         client.reporting = self.reporting.clone();
         client.edits = self.edits.clone();
         // What the node it replaces delivered: the plugin holds those values.
@@ -201,6 +204,7 @@ where
             Pending {
                 inner: Arc::clone(&self.inner),
                 successor,
+                wake,
                 delivery: Arc::clone(&self.delivery),
                 counters,
             },
@@ -247,6 +251,8 @@ where
 pub struct Pending<L: Loaded> {
     inner: Arc<Mutex<Instance<L>>>,
     successor: Successor<L::Processor>,
+    /// Where the node binds its wake.
+    wake: Arc<super::instance::WakeSlot>,
     /// The rebinder's record of the newest committed node's counters.
     delivery: Arc<Mutex<Arc<DeliveryCounters>>>,
     /// The node's own, which `delivery` holds once it is committed.
@@ -277,7 +283,7 @@ impl<L: Loaded> Pending<L> {
     /// replaces the first: its node never receives a Processor.
     pub fn commit(self, main: MainThreadMarker) {
         *self.delivery.lock() = self.counters;
-        self.inner.lock().commit(main, self.successor);
+        self.inner.lock().commit(main, self.successor, self.wake);
     }
 }
 
@@ -829,8 +835,10 @@ mod tests {
         }
     }
 
-    /// **A plugin that refused its rate is not running: a rebind is refused
-    /// by name and nothing is rehanded,** so no node waits for a Processor.
+    /// **A plugin that refused its rate is not rebound, though it runs at the
+    /// rate it accepted: a successor would render at the wrong rate, so a
+    /// rebind is refused by name and nothing is rehanded,** and no node waits
+    /// for a Processor.
     #[test]
     fn a_refused_plugin_is_not_rebound() {
         let (fake, rebinder, mut old, inner) = rig();
@@ -841,12 +849,13 @@ mod tests {
             .lock()
             .set_sample_rate(main, SampleRate::SR_44K1, None);
         let mut frame = BLOCK as u64;
-        while inner.lock().renders() {
+        while inner.lock().ready_to_rehand() == Err(RebindError::Restarting) {
             block(&mut old, frame);
             inner.lock().pump(main);
             frame += BLOCK as u64;
-            assert!(frame < 16 * BLOCK as u64, "the plugin never refused");
+            assert!(frame < 16 * BLOCK as u64, "the change never finished");
         }
+        assert!(inner.lock().renders(), "it runs at the rate it accepted");
         assert_eq!(
             rebind(&rebinder).expect_err("refused"),
             RebindError::NotRunning
