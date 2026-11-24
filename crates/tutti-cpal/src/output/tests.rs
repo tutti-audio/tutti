@@ -136,37 +136,15 @@ fn selecting_another_device_keeps_the_chosen_sample_format() {
     );
 }
 
-/// **Selecting a device on a spec-built engine is refused at the call.** The
-/// engine has no device to select, so the call names the same refusal `start`
-/// would, on the engine and on the driver wrapping one.
+/// **Supplying a driver keeps the device on record**, so a restart can open it
+/// again, and names none meanwhile.
 #[test]
-fn selecting_a_device_on_a_spec_built_engine_is_refused() {
-    let mut engine = AudioEngine::from_spec(manual_spec());
-    assert!(matches!(
-        engine.select_device(DeviceSelector::Default),
-        Err(DeviceError::InvalidDevice(_))
-    ));
-    let mut driver = driver_over(engine);
-    assert!(matches!(
-        driver.select_device(DeviceSelector::Default),
-        Err(DeviceError::InvalidDevice(_))
-    ));
-}
-
-/// **A switch onto a supplied driver keeps the device on record**: the driver
-/// can still select a device for the restart that opens it again, and names none
-/// meanwhile.
-#[test]
-fn a_switch_to_a_supplied_driver_keeps_the_device_to_restart_onto() {
-    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
-    let (manual, _stream) = ManualStreamDriver::new();
-    driver
-        .switch(manual_spec(), manual, |_, _| {
-            Ok::<(), crate::DeviceError>(())
-        })
-        .unwrap();
-    assert_eq!(driver.opened_name().unwrap(), None);
-    driver
-        .select_device(DeviceSelector::Default)
+fn supplying_a_driver_keeps_the_device_to_restart_onto() {
+    let mut engine = on_device(Opened::Named("Card".into()));
+    engine.origin.supply();
+    assert_eq!(engine.opened_name().unwrap(), None);
+    engine
+        .origin
+        .target_mut()
         .expect("the device is still on record");
 }

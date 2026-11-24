@@ -566,17 +566,6 @@ impl AudioEngine {
         self.stream.stop();
     }
 
-    /// Selects the device the next [`start`](Self::start) opens, by name or
-    /// index. Does not disturb a running stream.
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidDevice`] on an engine built with
-    /// [`from_spec`](Self::from_spec), which has no device to select.
-    pub fn select_device(&mut self, sel: DeviceSelector) -> Result<()> {
-        self.origin.target_mut()?.1.select(sel);
-        Ok(())
-    }
-
     /// The name of the device the running (or last started) stream opened,
     /// as it was then. It asks the host nothing, so it never enumerates
     /// (which can block for good in a sound server's ALSA plugin) and is
