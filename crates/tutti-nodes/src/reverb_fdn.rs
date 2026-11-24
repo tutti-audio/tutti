@@ -243,7 +243,9 @@ mod tests {
         use tutti_units::Samples;
         let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
         kernel.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
-        let decay = (0.05, MaxDecay::CAP.get());
+        // The layout clamps a decay at its longest (the default 8 s), so the sweep spans the
+        // decays that differ; the stated value past it reads as that longest.
+        let decay = (0.05, MaxDecay::DEFAULT.get().get());
         crate::test_support::assert_tail_longest_at_stated(
             &mut kernel,
             &FdnSet,
