@@ -31,7 +31,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use loom::thread;
-use tutti_rt::{Rt, handoff};
+use tutti_rt::{Handback, Rt, handoff};
 
 /// Executions loom ran, to report.
 static RUNS: AtomicUsize = AtomicUsize::new(0);
@@ -82,7 +82,7 @@ fn a_lent_value_is_in_one_place_and_a_recall_is_never_lost() {
         let withdrawn = hand.recall();
         let mut rt: Rt<Tracked> = audio.join().unwrap();
 
-        let returned = hand.take();
+        let returned = hand.take().map(Handback::into_inner);
         let held = rt.held().is_some();
         let places =
             usize::from(withdrawn.is_some()) + usize::from(returned.is_some()) + usize::from(held);
@@ -97,7 +97,9 @@ fn a_lent_value_is_in_one_place_and_a_recall_is_never_lost() {
             // Recalled while the audio end held it and after its last poll:
             // the bit is still raised, so the next poll returns it.
             assert!(rt.poll(stop).is_none(), "a recall is never lost");
-            let back = hand.take().expect("returned");
+            let Some(Handback::Recalled(back)) = hand.take() else {
+                panic!("returned by the poll");
+            };
             assert!(back.stopped);
         }
         drop((withdrawn, returned, hand, rt));
@@ -132,7 +134,7 @@ fn a_lend_racing_a_return_loses_and_duplicates_nothing() {
             ids.push(v.id);
         }
         // The slot: either the returned first value, or the second on offer.
-        let returned = hand.take();
+        let returned = hand.take().map(Handback::into_inner);
         if let Some(v) = &returned {
             ids.push(v.id);
         }
@@ -215,7 +217,9 @@ fn a_lend_never_erases_a_recall_for_a_held_value() {
         // A was returned by the poll, or is returned by the next one: the
         // recall is still raised.
         let _ = rt.poll(stop);
-        let back = hand.take().expect("A comes back");
+        let Some(Handback::Recalled(back)) = hand.take() else {
+            panic!("A comes back, by the recall");
+        };
         assert_eq!(back.id, 1);
         assert!(back.stopped);
         assert!(rt.held().is_none());
@@ -245,9 +249,21 @@ fn the_audio_end_goes_after(polls: usize) {
         assert!(hand.borrower_gone());
         // What the audio end returned at a poll or left as it went, and what
         // is still on offer to nobody.
-        mine.extend(hand.take());
+        for home in [hand.take(), hand.take()].into_iter().flatten() {
+            // How it came home is what was done to it: `last` ran on a
+            // recalled value and on no other.
+            match home {
+                Handback::Recalled(v) => {
+                    assert!(v.stopped, "recalled: `last` ran");
+                    mine.push(v);
+                }
+                Handback::Dropped(v) => {
+                    assert!(!v.stopped, "dropped: as it was");
+                    mine.push(v);
+                }
+            }
+        }
         mine.extend(hand.recall());
-        mine.extend(hand.take());
         assert_eq!(
             drops.load(Ordering::SeqCst),
             0,

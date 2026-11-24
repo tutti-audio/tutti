@@ -48,7 +48,11 @@ fn a_lent_value_comes_back_after_a_recall() {
         "returned"
     );
     assert_eq!(stops, 1);
-    assert_eq!(hand.take(), Some(8), "back, after `last`");
+    assert_eq!(
+        hand.take(),
+        Some(Handback::Recalled(8)),
+        "back, after `last`"
+    );
     assert_eq!(hand.take(), None, "once");
 }
 
@@ -74,7 +78,7 @@ fn a_lend_into_a_full_slot_is_refused() {
     assert_eq!(hand.recall(), None);
     rt.poll(|_| {});
     assert_eq!(hand.lend(3), Err(3), "a return is waiting");
-    assert_eq!(hand.take(), Some(1));
+    assert_eq!(hand.take(), Some(Handback::Recalled(1)));
     hand.lend(3).unwrap();
     assert_eq!(rt.poll(|_| {}).copied(), Some(3));
 }
@@ -91,7 +95,7 @@ fn a_lend_is_refused_while_a_recall_is_raised() {
     assert_eq!(hand.recall(), None);
     assert_eq!(hand.lend(2), Err(2), "the recall is pending");
     assert_eq!(rt.poll(|_| {}), None, "returned");
-    assert_eq!(hand.take(), Some(1));
+    assert_eq!(hand.take(), Some(Handback::Recalled(1)));
     hand.lend(2).unwrap();
     assert_eq!(rt.poll(|_| unreachable!()).copied(), Some(2));
 }
@@ -146,7 +150,9 @@ fn a_dropped_audio_end_returns_what_it_holds() {
     drop(rt);
     assert!(hand.borrower_gone());
     assert_eq!(drops.get(), 0, "the drop destroys nothing");
-    let back = hand.take().expect("the held value came back");
+    let Some(Handback::Dropped(back)) = hand.take() else {
+        panic!("the held value comes back as dropped");
+    };
     assert!(!back.1, "as it was: `last` is the control end's to run");
     assert!(hand.take().is_none(), "once");
     drop(back);

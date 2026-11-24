@@ -24,8 +24,9 @@
 //!   it); a returned value has one taker, so an `Acquire` load suffices. The
 //!   taker then empties the slot with a `Release` read-modify-write, so the
 //!   next writer's claim is ordered after the move.
-//! - Every change of the slot field is a read-modify-write that keeps the
-//!   recall bit, so a recall raised meanwhile is never lost.
+//! - Every change of the slot field is a read-modify-write that keeps every
+//!   other bit, so a recall raised meanwhile is never lost, nor the marks the
+//!   audio end leaves as it goes (below).
 //! - A recall of a value still on offer cancels the offer at once (the control
 //!   end takes it back without the audio end); one already taken raises the
 //!   bit, which the audio end clears when it returns the value. Only the audio
@@ -45,7 +46,7 @@
 //! The audio end never destroys the value it was lent. Dropped while it holds
 //! one, it hands the value back as it is (`last` is not run: the control end
 //! does what a returned value needs), and the control end's
-//! [`take`](Handoff::take) yields it. The slot may be busy or on offer at that
+//! [`take`](Handoff::take) yields it as [`Handback::Dropped`]. The slot may be busy or on offer at that
 //! moment and a drop cannot come back later, so the value goes to a second
 //! cell, the *orphan*, which only the dropping end writes, once, and only the
 //! control end reads, after the `Acquire` load that shows it written. The same
@@ -229,6 +230,25 @@ impl<T> Shared<T> {
     }
 }
 
+/// How a value came back to the control end ([`Handoff::take`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handback<T> {
+    /// The audio end answered a recall at a poll: `last` was run on the value.
+    Recalled(T),
+    /// The audio end was dropped while it held the value: it is as it was,
+    /// and `last` was not run on it.
+    Dropped(T),
+}
+
+impl<T> Handback<T> {
+    /// The value, whichever way it came back.
+    pub fn into_inner(self) -> T {
+        match self {
+            Self::Recalled(value) | Self::Dropped(value) => value,
+        }
+    }
+}
+
 /// The control end of a [`handoff`]: lends the value, recalls it and takes it
 /// back.
 pub struct Handoff<T> {
@@ -296,7 +316,9 @@ impl<T> Handoff<T> {
 
     /// Asks for the value back. A value still on offer is withdrawn and
     /// returned here at once; one the audio end holds comes back through
-    /// [`take`](Self::take) after its next poll. `None` in that case.
+    /// [`take`](Self::take) after its next poll. `None` in that case. Once the
+    /// audio end is gone a recall with nothing on offer stays raised, which
+    /// changes nothing: a lend is refused for the end being gone.
     pub fn recall(&mut self) -> Option<T> {
         if self.shared.take_offer(MAIN_BUSY) {
             let value = self.shared.read();
@@ -307,15 +329,19 @@ impl<T> Handoff<T> {
         None
     }
 
-    /// The value the audio end returned, if it has: at a poll that answered a
-    /// recall, with `last` run on it, or by being dropped while it held one,
-    /// with the value as it was.
-    pub fn take(&mut self) -> Option<T> {
+    /// The value the audio end returned, if it has, and how: at a poll that
+    /// answered a recall, with `last` run on it, or by being dropped while it
+    /// held one, with the value as it was. The two cannot both be waiting: an
+    /// audio end that returned its value holds none to leave behind. One that
+    /// answered a recall and was then dropped yields
+    /// [`Recalled`](Handback::Recalled), with
+    /// [`borrower_gone`](Self::borrower_gone) true.
+    pub fn take(&mut self) -> Option<Handback<T>> {
         let state = self.shared.state.load(Ordering::Acquire);
         if state & SLOT == RETURNED {
             let value = self.shared.read();
             self.shared.set_slot(EMPTY, false);
-            return Some(value);
+            return Some(Handback::Recalled(value));
         }
         if state & ORPHAN != 0 {
             let value = self.shared.orphan.with_mut(|orphan| {
@@ -327,7 +353,7 @@ impl<T> Handoff<T> {
                 unsafe { (*orphan).assume_init_read() }
             });
             self.shared.state.fetch_and(!ORPHAN, Ordering::Release);
-            return Some(value);
+            return Some(Handback::Dropped(value));
         }
         None
     }
@@ -347,7 +373,8 @@ impl<T> Rt<T> {
     ///
     /// Wait-free: a few atomic operations and at most one move each way. It
     /// does not allocate, and drops nothing (a value leaves only into the
-    /// slot).
+    /// slot). `last` must not panic: it runs with the slot claimed, which an
+    /// unwind would leave claimed, and the value would drop in it.
     pub fn poll(&mut self, last: impl FnOnce(&mut T)) -> Option<&mut T> {
         let state = self.shared.state.load(Ordering::Acquire);
         if self.held.is_none() && state & SLOT == OFFERED {
