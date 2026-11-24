@@ -274,7 +274,7 @@ fn the_chorus_flanger_and_phaser_are_blended_by_the_graph() {
 fn the_reverbs_are_blended_by_the_graph() {
     check_io(
         "freeverb (General MIDI room)",
-        &|| FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        &|| FreeverbNode::<f32>::from(FreeverbConfig::new()),
         1,
         2,
         0,

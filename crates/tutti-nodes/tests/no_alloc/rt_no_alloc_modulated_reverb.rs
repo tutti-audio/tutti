@@ -101,7 +101,7 @@ fn the_swept_delay_corners_are_allocation_free_and_finite() {
     );
 }
 
-/// Freeverb at every corner, the live node and the General MIDI send: the room and the damping
+/// Freeverb at every corner: the room and the damping
 /// from far below `0` to far past `1` and not a number, and each as a hostile control signal. The comb
 /// loop gain is held to 0.98 and the all-passes' response sums to under 3 each, so a bounded
 /// input stays under `0.015 * 8 * 50 * 81` times itself.
@@ -135,20 +135,7 @@ fn freeverb_corners_are_allocation_free_and_finite() {
             None,
         );
     }
-    sweep(
-        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
-        &HELD,
-        1.5,
-        None,
-    );
-    // The send has no cells to write: the sweep above drives nothing but its input.
-    assert_eq!(
-        FreeverbNode::<f32>::from(FreeverbConfig::general_midi())
-            .param_set()
-            .params()
-            .count(),
-        0
-    );
+    // The sweeps drive the node's two cells.
     assert_eq!(
         FreeverbNode::<f32>::from(FreeverbConfig::new())
             .param_set()

@@ -239,7 +239,6 @@ fn reverb_fdn::FdnConfig::controls
 fn reverb_fdn::FdnConfig::layout
 fn reverb_fdn::FdnConfig::new
 fn reverb_freeverb::FreeverbConfig::controls
-fn reverb_freeverb::FreeverbConfig::general_midi
 fn reverb_freeverb::FreeverbConfig::new
 fn reverb_plate::PlateReverbConfig::bandwidth
 fn reverb_plate::PlateReverbConfig::damping
