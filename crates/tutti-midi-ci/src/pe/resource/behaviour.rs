@@ -869,6 +869,18 @@ fn only_an_untyped_resource_holds_binary_data() {
     assert_eq!(json_bytes, PeData::LocalOn(PeLocalOn(true)));
 }
 
+// M2-103 §6.1.6: Property Data is JSON unless `mediaType` declares another type; a
+// parameter of `application/json` does not make the data another type.
+/// Spec: m2-103/6.1.6#1
+#[test]
+fn json_with_parameters_decodes_as_a_typed_value() {
+    let media = MediaType::new("application/json; charset=utf-8").unwrap();
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&media), b"true"),
+        Ok(PeData::LocalOn(PeLocalOn(true)))
+    );
+}
+
 // M2-103 §10: a Partial Set is for JSON; binary data has no pointers.
 #[test]
 fn a_partial_change_does_not_apply_to_binary_data() {
