@@ -128,19 +128,33 @@ pub enum ControlValid {
 }
 
 /// How the reader takes one control: what a `control_set!` row declares.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Control {
     /// How it is read.
     pub read: ControlRead,
     /// Which values it accepts.
     pub valid: ControlValid,
-    /// Whether the kernel's [`tail_of`](crate::Kernel::tail_of) reads it: whether this control
-    /// alone can change the ring-out. `false` is a promise that the tail never reads it, which a
-    /// driven port of it then does not widen to the ceiling. A control counts as driven for
-    /// every block its port has a source, a flat signal and automation at rest included, so a
-    /// node with an automated ring control reports its ceiling from the automation's first
-    /// event on.
-    pub rings: bool,
+    /// What the kernel's [`tail_of`](crate::Kernel::tail_of) does with it.
+    pub ring: Ring,
+}
+
+/// What a control does to the kernel's ring-out ([`Control::ring`]): whether
+/// [`tail_of`](crate::Kernel::tail_of) reads it and, if so, where it is longest. A control
+/// counts as driven for every block its port has a source, a flat signal and automation at
+/// rest included. A driven port may take any value later, so the node reports the most the
+/// kernel rings over the driven controls' whole range, the others as their cells set them
+/// ([`KernelNode`](crate::KernelNode)).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Ring {
+    /// The tail never reads it: driving it leaves the ring-out as it is.
+    Never,
+    /// The tail is non-decreasing toward this raw value (the `f64` the cell and the port
+    /// carry, in the control's unit), whatever the other controls are: the value is the end of
+    /// the range, or any value at or past the point the kernel clamps it at.
+    LongestAt(f64),
+    /// The tail reads it and the longest value is not stated: driving it reports the kernel's
+    /// ceiling ([`Kernel::tail`](crate::Kernel::tail)).
+    Unstated,
 }
 
 impl Control {
@@ -148,7 +162,7 @@ impl Control {
     pub const RAMP: Self = Self {
         read: ControlRead::Ramp,
         valid: ControlValid::Finite,
-        rings: true,
+        ring: Ring::Unstated,
     };
 
     /// The row flag `whole`: a moved cell lands whole.
@@ -170,12 +184,22 @@ impl Control {
     }
 
     /// The row flag `no_ring`: the kernel's tail never reads this control, so driving it
-    /// leaves the ring-out as it is. A control without the flag is read by the tail: forgetting
-    /// the flag errs long.
+    /// leaves the ring-out as it is. A control without a ring flag is read by the tail and
+    /// [`Ring::Unstated`]: forgetting the flag errs long.
     #[must_use]
     pub(crate) const fn no_ring(self) -> Self {
         Self {
-            rings: false,
+            ring: Ring::Never,
+            ..self
+        }
+    }
+
+    /// The row flag `longest = raw`: the tail is longest at `raw`, the port's own raw scale
+    /// ([`Ring::LongestAt`]).
+    #[must_use]
+    pub(crate) const fn longest(self, raw: f64) -> Self {
+        Self {
+            ring: Ring::LongestAt(raw),
             ..self
         }
     }
@@ -255,15 +279,17 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// hold of a live value that has no caller to refuse it to. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
 /// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
-/// than [`MAX_SIGNALS`] do not compile), `not_nan` (accepts `+-inf`) and `no_ring` (the
-/// kernel's tail never reads it: see [`Control::rings`]). A flag that is
-/// not one of these does not compile.
+/// than [`MAX_SIGNALS`] do not compile), `not_nan` (accepts `+-inf`), `no_ring` (the
+/// kernel's tail never reads it) and `longest = raw` (the tail is longest at that raw value of
+/// the control, in the unit's raw scale; see [`Ring`]). A row with neither of the last two is
+/// read by the tail with no longest value stated. A flag that is not one of these does not
+/// compile.
 macro_rules! control_set {
     (
         $set:ident($s:ident): $controls:ty = $base:expr;
         live: ($($live:tt)+);
         $($kind:ident $([$ix:tt])? => $unit:ty = $f:ident $([$pi:literal])? $(via $ranged:ty)?
-            $({ $($flag:ident),* })?),+ ;
+            $({ $($flag:ident $(= $val:expr)?),* })?),+ ;
         $($items:tt)*
     ) => {
         impl $crate::params::ControlSet for $set {
@@ -286,7 +312,7 @@ macro_rules! control_set {
 
             fn control(&self, k: usize) -> $crate::params::Control {
                 const ALL: &[$crate::params::Control] = &[$(
-                    $crate::params::Control::RAMP $($(.$flag())*)?
+                    $crate::params::Control::RAMP $($(.$flag($($val)?))*)?
                 ),+];
                 const _: () = assert!(
                     $crate::params::Control::fast_count(ALL) <= $crate::MAX_SIGNALS,
@@ -500,10 +526,32 @@ impl<S: ControlSet> Params<S> {
         self.primed = true;
     }
 
-    /// Whether a control signal drives a control the tail reads ([`Control::rings`]) in the
-    /// block, a fast one included.
+    /// Whether a control signal drives a control the tail reads ([`Control::ring`] is not
+    /// [`Ring::Never`]) in the block, a fast one included.
     pub(crate) fn ring_driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
-        (0..self.cells.len()).any(|k| self.controls[k].rings && io.param(k).frames().is_some())
+        (0..self.cells.len())
+            .any(|k| self.controls[k].ring != Ring::Never && io.param(k).frames().is_some())
+    }
+
+    /// The controls the tail is longest at, given which ports drive a control in the block:
+    /// each driven control with a [`Ring::LongestAt`] at that value, every other as its cell
+    /// holds it. `None` when a driven control the tail reads has no value stated. It depends
+    /// on which ports are driven, not on the values they carry.
+    pub(crate) fn longest<G: Float>(&mut self, io: &Io<'_, G>) -> Option<S::Controls> {
+        let n = self.cells.len();
+        let mut value = [0.0f64; MAX_CONTROLS];
+        for (k, v) in value[..n].iter_mut().enumerate() {
+            let control = self.controls[k];
+            *v = match control.ring {
+                Ring::LongestAt(raw) if io.param(k).frames().is_some() => raw,
+                Ring::Unstated if io.param(k).frames().is_some() => return None,
+                _ => {
+                    let x = self.cells[k].load(Relaxed);
+                    self.good[k].read_if(x, control.accepts(x))
+                }
+            };
+        }
+        Some(self.set.assemble(&value[..n]))
     }
 
     /// The addresses of the cells, in port order.
