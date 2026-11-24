@@ -10,7 +10,9 @@ use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, MutexGuard, Weak};
 
-use tutti_graph::{DeclaredUnit, EffectiveCell, ErasedPublished, NodeKey, ParamSet, PassError};
+use tutti_graph::{
+    DeclaredUnit, EffectiveCell, ErasedPublished, ErasedSetting, NodeKey, ParamSet, PassError,
+};
 use tutti_rt::Mutex;
 use tutti_rt::ParamCell;
 use tutti_units::UnitAddr;
@@ -351,14 +353,23 @@ impl ValueTable {
         }
     }
 
-    /// Registers the published values of `node`, from what its parts said of
-    /// it. Control thread.
-    pub(crate) fn provide_node(&self, node: NodeKey, published: &[ErasedPublished]) {
-        self.params.lock().slots.extend(
+    /// Registers the published values and settings of `node`, from what its
+    /// parts said of it. Control thread.
+    pub(crate) fn provide_node(
+        &self,
+        node: NodeKey,
+        published: &[ErasedPublished],
+        settings: &[ErasedSetting],
+    ) {
+        let mut params = self.params.lock();
+        params.slots.extend(
             published
                 .iter()
                 .filter_map(|entry| slot::slot_of(node, entry)),
         );
+        params
+            .slots
+            .extend(settings.iter().map(|entry| slot::setting_of(node, entry)));
     }
 
     /// Writes `assign` as [`Session::set`](crate::Session::set) does, for the

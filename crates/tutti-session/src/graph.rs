@@ -48,7 +48,6 @@ use crate::fork::PendingExport;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::MaxBlock;
 use tutti_graph::Compensation;
-use tutti_graph::ErasedPublished;
 #[cfg(feature = "testing")]
 use tutti_graph::fade_gains;
 use tutti_graph::{BusOutputPort, Buses, EdgeFade, EdgeGain, NodeBus};
@@ -60,6 +59,7 @@ use tutti_graph::{
     Edge as RawEdge, EdgeId, InputPort as RawIn, NodeKey, OutputPort as RawOut, PortSink,
     PortSource,
 };
+use tutti_graph::{ErasedPublished, ErasedSetting};
 use tutti_graph::{
     EventCapacity, EventInletNode, EventInletWriter, EventTapId, MeterId, MeterSpec, MissingSource,
     TapId,
@@ -242,6 +242,8 @@ struct Held {
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
     /// Registered as the node's slots, each under its kind.
     published: Vec<ErasedPublished>,
+    /// Registered as the node's slots, each under its kind.
+    settings: Vec<ErasedSetting>,
 }
 
 impl Held {
@@ -255,7 +257,7 @@ impl Held {
 
     /// Registers the published values under `node`.
     fn provide_slots(&self, values: &ValueTable, node: NodeKey) {
-        values.provide_node(node, &self.published);
+        values.provide_node(node, &self.published, &self.settings);
     }
 }
 
@@ -265,6 +267,7 @@ pub(crate) struct Kept<C> {
     params: Option<ParamSet>,
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
     published: Vec<ErasedPublished>,
+    settings: Vec<ErasedSetting>,
 }
 
 /// What a swap does with a fade over a node that does not fit the running
@@ -989,6 +992,7 @@ impl<F: Float> Graph<F> {
             params,
             reclaimer,
             published,
+            settings,
         } = node.into_parts();
         (
             NodeParts::new(node, (), fork, None),
@@ -997,6 +1001,7 @@ impl<F: Float> Graph<F> {
                 params,
                 reclaimer,
                 published,
+                settings,
             },
         )
     }
@@ -1099,6 +1104,7 @@ impl<F: Float> Graph<F> {
             params,
             reclaimer,
             published,
+            settings,
         } = placed;
         let held = Held {
             controls: Box::new(controls),
@@ -1106,6 +1112,7 @@ impl<F: Float> Graph<F> {
             params,
             reclaimer,
             published,
+            settings,
         };
         if let Some(entry) = self.nodes.get_mut(&node) {
             held.provide(&self.values, node, outgoing);

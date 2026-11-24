@@ -29,6 +29,7 @@ pub(crate) mod param_event;
 pub(crate) mod play;
 pub(crate) mod rates;
 pub(crate) mod render_mode;
+pub(crate) mod setting;
 pub(crate) mod shape;
 pub(crate) mod time;
 pub(crate) mod wake;
@@ -46,6 +47,7 @@ use crate::node::controls::ParamSet;
 use crate::node::fork::ForkSource;
 use crate::node::io::Io;
 use crate::node::render_mode::RenderMode;
+use crate::node::setting::ErasedSetting;
 use crate::node::shape::Shape;
 use crate::node::time::Offset;
 use crate::node::time::{Env, TransportPosition};
@@ -758,6 +760,9 @@ pub struct NodeParts<C, F: Float = f32> {
     /// The node's published values, one per cell, each under its kind; empty
     /// for a node that publishes nothing.
     pub published: Vec<ErasedPublished>,
+    /// The node's settings, one per cell, each under its kind; empty for a
+    /// node with none.
+    pub settings: Vec<ErasedSetting>,
 }
 
 impl<C, F: Float> NodeParts<C, F> {
@@ -790,6 +795,7 @@ impl<C, F: Float> NodeParts<C, F> {
             params: None,
             reclaimer,
             published: Vec::new(),
+            settings: Vec::new(),
         }
     }
 
@@ -798,6 +804,13 @@ impl<C, F: Float> NodeParts<C, F> {
     #[must_use]
     pub fn params(mut self, params: ParamSet) -> Self {
         self.params = Some(params);
+        self
+    }
+
+    /// The node's settings: what a session's key sets and reads them through.
+    #[must_use]
+    pub fn settings(mut self, settings: Vec<ErasedSetting>) -> Self {
+        self.settings = settings;
         self
     }
 
