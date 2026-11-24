@@ -279,7 +279,7 @@ pub(crate) fn graph_tail_of<G: TailGraph>(
 
     // A node's own figure is `alone` when nothing upstream still owes and
     // `fed` otherwise. Upstream owes when a node there has a figure other
-    // than `Tail::None`, with a frame count or not: an unknown or unbounded
+    // than `Tail::None` or zero frames, with a frame count or not: an unknown or unbounded
     // tail adds nothing to the sum (`unknown_nodes` and `unbounded` carry it,
     // so the total stays the answer for the part of the graph that spoke),
     // but what it rings still excites the node after it. Arrival is the
@@ -300,7 +300,7 @@ pub(crate) fn graph_tail_of<G: TailGraph>(
             .samples()
             .filter(|&s| s <= limit)
             .unwrap_or(Samples::ZERO);
-        if fed || tail != Tail::None {
+        if fed || !matches!(tail, Tail::None | Tail::Finite(Samples::ZERO)) {
             owes.insert(node);
         }
         applied.insert(node, tail);
@@ -781,6 +781,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// An upstream whose figure is zero frames owes nothing: the node after
+    /// it keeps its alone figure.
+    #[test]
+    fn a_node_after_one_that_owes_zero_frames_keeps_its_alone_figure() {
+        let g = Toy {
+            nodes: vec![(Tail::None, vec![]), (Tail::None, vec![Some(0)])],
+            outputs: vec![Some(1)],
+        };
+        let owed = |n: usize| match n {
+            0 => Owed::declared(finite(0)),
+            _ => Owed {
+                alone: finite(100),
+                fed: finite(5000),
+            },
+        };
+        assert_eq!(
+            graph_tail_of(&g, R, owed).samples(),
+            Some(Samples::new(100))
+        );
     }
 
     /// An empty graph has no tail rather than an unknown one.
