@@ -524,9 +524,16 @@ fn a_restart_that_stopped_the_stream_is_retried() {
     fake.show(&["A", "B"], Some("B"));
     assert_eq!(wants(&poll(&mut live, base, 100)).len(), 1);
 
-    // This device-free session has no card to resolve: the restart stops the
-    // stream and then fails, leaving the old spec.
-    let err = live.restart(DeviceRestart::default());
+    // A restart onto a stereo device that declares a six-channel placement is
+    // refused by the re-rate hook, which runs after the stop: the stream stays
+    // stopped and the old spec stays.
+    let (replacement, _replacement_stream) = ManualStreamDriver::new();
+    let err = live.restart_on(
+        spec_at(48_000.0),
+        replacement,
+        None,
+        Some(ChannelTopology::default_for(ChannelLayout::clamped(6)).unwrap()),
+    );
     assert!(err.is_err());
     assert!(!live.device().is_running(), "stopped");
     assert_eq!(
