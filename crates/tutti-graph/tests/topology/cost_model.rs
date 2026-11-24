@@ -50,9 +50,7 @@ fn node(key: u64) -> PortSource {
 /// more than one.
 fn with_pool(workers: usize) -> (Editor, Executor) {
     let (ed, mut exec) = Editor::new(common::prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     (ed, exec)
 }
 
@@ -113,13 +111,11 @@ fn render(exec: &mut Executor, inputs: usize, outputs: usize, blocks: &[usize]) 
             })
             .collect();
         let ins: Vec<&[f32]> = chans.iter().map(Vec::as_slice).collect();
-        let mut chunk = vec![vec![0.0f32; n]; outputs];
+        let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
+        for (a, c) in all
+            .iter_mut()
+            .zip(common::block_in(exec, n, &ins, outputs, &t))
         {
-            let mut outs: Vec<&mut [f32]> = chunk.iter_mut().map(Vec::as_mut_slice).collect();
-            let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-            exec.process(n, &t, &ins, &mut outs);
-        }
-        for (a, c) in all.iter_mut().zip(chunk) {
             a.extend(c);
         }
         frame += n as u64;
@@ -178,37 +174,39 @@ fn packed_siblings_render_bit_identically() {
         commit(&mut ed, &mut exec);
         exec
     };
-    let serial = {
-        let mut exec = build(1);
-        let plan = exec.plan().expect("a plan").clone();
-        plan.verify().expect("sound");
-        // The input, the three heavy gains, the packed light ones (twelve
-        // gains in fewer tasks), the sum and its output.
-        let heavy = |op: tutti_graph::OpId| {
-            matches!(plan.ops()[op.index()], tutti_graph::Op::Node { unit, .. }
-                if plan.units()[unit.index()].shape.cost == Cost::Heavy
-                    && plan.units()[unit.index()].shape.audio_in().count() == 1)
-        };
-        let mut light_tasks = 0;
-        for t in plan.tasks() {
-            let ops = &plan.task_ops()[t.range()];
-            if ops.iter().any(|&o| heavy(o)) {
-                assert_eq!(ops.len(), 1, "a heavy gain shares a task");
-            } else if ops.len() > 1 {
-                light_tasks += 1;
+    let serial = common::agree_across_workers(
+        WORKERS,
+        |workers| {
+            let mut exec = build(workers);
+            if workers == 1 {
+                let plan = exec.plan().expect("a plan").clone();
+                plan.verify().expect("sound");
+                // The input, the three heavy gains, the packed light ones
+                // (twelve gains in fewer tasks), the sum and its output.
+                let heavy = |op: tutti_graph::OpId| {
+                    matches!(plan.ops()[op.index()], tutti_graph::Op::Node { unit, .. }
+                        if plan.units()[unit.index()].shape.cost == Cost::Heavy
+                            && plan.units()[unit.index()].shape.audio_in().count() == 1)
+                };
+                let mut light_tasks = 0;
+                for t in plan.tasks() {
+                    let ops = &plan.task_ops()[t.range()];
+                    if ops.iter().any(|&o| heavy(o)) {
+                        assert_eq!(ops.len(), 1, "a heavy gain shares a task");
+                    } else if ops.len() > 1 {
+                        light_tasks += 1;
+                    }
+                }
+                assert!(light_tasks >= 1, "some light gains packed");
+                assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
+            } else {
+                assert!(exec.is_parallel());
             }
-        }
-        assert!(light_tasks >= 1, "some light gains packed");
-        assert!(plan.tasks().len() < 1 + 15 + 1, "{:?}", plan.tasks());
-        render(&mut exec, 1, 1, &ragged())
-    };
+            render(&mut exec, 1, 1, &ragged())
+        },
+        |r| bits(r),
+    );
     assert!(serial[0].iter().any(|&x| x != 0.0));
-    for workers in WORKERS {
-        let mut exec = build(workers);
-        assert!(exec.is_parallel());
-        let parallel = render(&mut exec, 1, 1, &ragged());
-        assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-    }
 }
 
 /// A pool that counts the blocks it is asked to run, and records the last

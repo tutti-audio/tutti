@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tutti_graph::testing as common;
 
-use common::{WORKERS, bits, prepare, test_pool};
+use common::{WORKERS, bits, prepare};
 
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::{
     Buses, Chase, Cx, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort,
-    Executor, Fade, FadeLaw, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
+    Executor, Fade, FadeLaw, Io, Node, Prepare, Shape, Status, Unforkable,
 };
 use tutti_graph::{NodeKey, OutputPort, PortSource};
 use tutti_ump::{CCNumber, MidiChannel, U7, Ump};
@@ -177,10 +177,7 @@ fn block(exec: &mut Executor) -> Vec<f32> {
 }
 
 fn blocks(exec: &mut Executor, outputs: usize) -> Vec<Vec<f32>> {
-    let mut out = vec![vec![0.0; BLOCK]; outputs];
-    let mut slices: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(BLOCK, &TransportPosition::default(), &[], &mut slices);
-    out
+    common::block(exec, BLOCK, outputs)
 }
 
 fn cut() -> Fade {
@@ -340,12 +337,10 @@ fn a_chase_past_its_declared_capacity_is_counted() {
 /// worker count.
 #[test]
 fn a_chase_renders_bit_identically_in_parallel() {
-    fn render(workers: usize) -> Vec<Vec<u32>> {
+    fn render(workers: usize) -> Vec<Vec<f32>> {
         let log = tutti_fixtures::Record::new();
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let keys = 1..=6u64;
         for k in keys.clone() {
             ed.insert(
@@ -392,12 +387,9 @@ fn a_chase_renders_bit_identically_in_parallel() {
             run(&mut exec);
         }
         assert_eq!(exec.is_parallel(), workers > 1);
-        bits(&all)
+        all
     }
-    let serial = render(1);
-    for w in WORKERS {
-        assert_eq!(render(w), serial, "{w} participants");
-    }
+    common::agree_across_workers(WORKERS, render, |all| bits(all));
 }
 
 /// A replace queued behind a running crossfade (A to B fading, B to C
