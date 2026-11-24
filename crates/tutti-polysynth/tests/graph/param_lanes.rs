@@ -114,13 +114,13 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
     .unwrap();
     ed.insert(NodeKey(1), "clip", MidiClipNode::new([note]));
     let params = ed.insert(SYNTH, "synth", synth).controls;
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(SYNTH, 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))));
+    )
+    .expect("the edge wires");
+    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);
     if let Some(d) = drive {
@@ -139,8 +139,8 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         }
         let lane = ControlLaneNode::from(config);
         ed.insert(LANE, "lane", lane);
-        ed.spec_mut()
-            .connect_param(at, EventOutputPort::new(LANE, 0));
+        ed.connect_param(at, EventOutputPort::new(LANE, 0))
+            .expect("the param wires");
         ed.commit().expect("the lane commits");
     }
     let mut r = Renderer::new(ed, exec);

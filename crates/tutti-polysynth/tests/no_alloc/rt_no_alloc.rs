@@ -470,15 +470,17 @@ fn a_clip_into_a_synth_is_allocation_free() {
                 .oscillator(OscillatorType::Saw),
         ),
     );
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         EventInputPort::new(NodeKey(2), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-    );
-    ed.spec_mut().topology.set_outputs(
+    )
+    .expect("the edge wires");
+    ed.set_outputs(
         (0..2).map(|port| {
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),
-    );
+    )
+    .expect("the sources exist");
     ed.commit().expect("commits");
     let at = |frame: usize, playing: bool| {
         TransportPosition::new(

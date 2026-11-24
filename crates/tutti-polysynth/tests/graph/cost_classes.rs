@@ -98,7 +98,8 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     let sources = LIGHT + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
+    ed.set_outputs([PortSource::Zero; 2])
+        .expect("the sources exist");
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));
         ed.insert(clip, "clip", MidiClipNode::new(notes(k)));
@@ -113,15 +114,20 @@ fn graph(workers: usize, declared: bool) -> Executor {
                 ed.insert(key, "synth", synth(32, 1));
             }
         }
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(key, 0),
             EventEdge::Direct(EventOutputPort::new(clip, 0)),
-        );
+        )
+        .expect("the edge wires");
         // The bus is the graph's fan-in: each output channel holds every
         // synth's matching port, and the graph sums them.
         for c in 0..2u16 {
             let from = PortSource::Node(OutputPort::new(key, c));
-            ed.spec_mut().topology.connect_output(c as usize, from);
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Output((c as usize) as u16),
+                from: tutti_graph::Edge::Direct(from),
+            })
+            .expect("the edge wires");
         }
     }
     ed.commit().expect("commits");
