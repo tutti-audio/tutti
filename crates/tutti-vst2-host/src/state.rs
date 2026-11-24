@@ -295,10 +295,19 @@ mod tests {
         assert!(err.to_string().contains("none of the tags"));
     }
 
+    /// A tag is all four bytes: one that differs only in its last byte is no tag.
     #[test]
     fn unknown_header() {
-        let err = parse_state_header(b"XXX\0payload").unwrap_err();
-        assert!(err.to_string().contains("none of the tags"));
+        for data in [&b"XXX\0payload"[..], b"CHK\0payload", b"PRM\0payload"] {
+            let err = parse_state_header(data).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Vst2Error::StateFrame(StateFrameError::Unframed { format: "VST2" })
+                ),
+                "{data:?}: {err}"
+            );
+        }
     }
 
     #[test]
