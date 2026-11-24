@@ -402,7 +402,7 @@ fn the_trim_is_read_after_the_prepare_hook() {
             editor.insert(key, "test:late", ForkByClone(Late { pos: 0 }));
             let width = editor.spec().topology.outputs.len();
             editor
-                .set_outputs(vec![
+                .wire_outputs(vec![
                     tutti_graph::PortSource::Node(
                         tutti_graph::OutputPort::new(key, 0)
                     );
@@ -554,7 +554,7 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
         editor.insert(key, "test:level", Const::mono(level));
         let width = editor.spec().topology.outputs.len();
         editor
-            .set_outputs(vec![
+            .wire_outputs(vec![
                 tutti_graph::PortSource::Node(
                     tutti_graph::OutputPort::new(key, 0)
                 );

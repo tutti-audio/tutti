@@ -102,7 +102,7 @@ fn chain_engine(outputs: usize) -> Engine {
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
-    ed.set_outputs((0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))))
+    ed.wire_outputs((0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -361,7 +361,7 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         .expect("the edge wires");
         last = k;
     }
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(last, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(last, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine =

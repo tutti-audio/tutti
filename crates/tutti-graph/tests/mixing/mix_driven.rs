@@ -627,7 +627,7 @@ fn solo() -> (Editor, tutti_graph::Executor) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1)]).expect("the sources exist");
     ed.set_mix(key(1), Mix::new(0.25)).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();

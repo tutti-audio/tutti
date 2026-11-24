@@ -79,7 +79,7 @@ fn peak(node: &mut dyn tutti_graph::Node, beat: f64) -> f32 {
 fn graph_with(node: VoiceNode<f32>) -> (Editor, Executor, tutti_sampler::VoiceNodeHandle<f32>) {
     let (mut ed, mut exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     let handle = ed.insert(NodeKey(1), "voice", node).controls;
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

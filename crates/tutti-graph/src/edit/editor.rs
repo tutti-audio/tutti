@@ -156,7 +156,7 @@ impl Limits {
 /// [`Editor::new`] builds the editor and its executor together, from one
 /// [`Prepare`]. Nodes are added with [`insert`](Self::insert) (which
 /// prepares the unit and returns its typed controls), wired through
-/// [`connect_edge`](Self::connect_edge), [`set_outputs`](Self::set_outputs) and the calls beside them, and shipped
+/// [`connect_edge`](Self::connect_edge), [`wire_outputs`](Self::wire_outputs) and the calls beside them, and shipped
 /// with [`commit`](Self::commit),
 /// which validates and compiles the spec against the plan sent last and
 /// sends a commit — the new [`Plan`] and only the units that changed — over a
@@ -205,7 +205,7 @@ impl Limits {
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
 /// editor
-///     .set_outputs([PortSource::Node(OutputPort::new(half, 0))])
+///     .wire_outputs([PortSource::Node(OutputPort::new(half, 0))])
 ///     .expect("the node exists");
 /// editor.commit().expect("compiles");
 ///

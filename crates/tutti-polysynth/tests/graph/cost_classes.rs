@@ -98,7 +98,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     }
     let sources = LIGHT + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.set_outputs([PortSource::Zero; 2])
+    ed.wire_outputs([PortSource::Zero; 2])
         .expect("the sources exist");
     for k in 0..sources {
         let (clip, key) = (NodeKey(100 + k), NodeKey(k + 1));

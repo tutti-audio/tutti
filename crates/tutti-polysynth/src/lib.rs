@@ -60,7 +60,7 @@
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
 //! editor
-//!     .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(synth_key, port))))
+//!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(synth_key, port))))
 //!     .expect("the ports exist");
 //! editor.commit().expect("a one-node graph commits");
 //!

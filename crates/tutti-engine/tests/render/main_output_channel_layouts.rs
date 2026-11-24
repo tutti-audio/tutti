@@ -29,7 +29,7 @@ fn main_output(outputs: usize, wire: &[usize]) -> (Editor, tutti_graph::Executor
         MaxBlock::of(Samples::new(256)),
     ));
     ed.insert(NodeKey(1), "sine", ForkByClone(Sine::new(Hz::new(440.0))));
-    ed.set_outputs((0..outputs).map(|ch| {
+    ed.wire_outputs((0..outputs).map(|ch| {
         if wire.contains(&ch) {
             PortSource::Node(OutputPort::new(NodeKey(1), 0))
         } else {

@@ -82,7 +82,7 @@ fn graph(workers: usize, declared: bool) -> Executor {
     ed.resize_inputs(ChannelLayout::STEREO);
     let sources = PANNERS + HEAVY;
     // Two silent main outputs, which the fan-in below fills.
-    ed.set_outputs([PortSource::Zero; 2])
+    ed.wire_outputs([PortSource::Zero; 2])
         .expect("the sources exist");
     for k in 0..sources {
         let key = NodeKey(k + 1);

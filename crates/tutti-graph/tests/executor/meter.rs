@@ -83,7 +83,7 @@ fn constants(r: &mut Rig, values: &[f32]) {
         );
         outputs.push(out(key));
     }
-    r.ed.set_outputs(outputs).expect("the sources exist");
+    r.ed.wire_outputs(outputs).expect("the sources exist");
 }
 
 fn commit(r: &mut Rig) {
@@ -208,7 +208,7 @@ fn a_spike_is_held_until_read_and_read_once() {
             done: false,
         }),
     );
-    r.ed.set_outputs(vec![out(1)]).expect("the sources exist");
+    r.ed.wire_outputs(vec![out(1)]).expect("the sources exist");
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
             .expect("the sources exist");
@@ -471,7 +471,7 @@ fn output_bits(workers: usize, main_output: bool, track: bool) -> Vec<u32> {
         .expect("the edge wires");
         outputs.push(out(gain));
     }
-    r.ed.set_outputs(outputs.clone())
+    r.ed.wire_outputs(outputs.clone())
         .expect("the sources exist");
     let mut readers = Vec::new();
     if main_output {
@@ -553,7 +553,7 @@ fn a_narrowed_node_silences_the_lanes_past_its_width_and_commits() {
         }),
     );
     let port = |p| PortSource::Node(OutputPort::new(NodeKey(1), p));
-    r.ed.set_outputs(vec![port(0)]).expect("the sources exist");
+    r.ed.wire_outputs(vec![port(0)]).expect("the sources exist");
     let mut m =
         r.ed.open_meter(MeterId::of(1), MeterSpec::raw(vec![port(0), port(1)]))
             .expect("the sources exist");
@@ -620,7 +620,7 @@ fn the_main_output_reads_at_the_outputs_time() {
     })
     .expect("the edge wires");
     // Output 0 is the latent path, output 1 the bare pulse (delayed to meet it).
-    r.ed.set_outputs(vec![out(3), out(1)])
+    r.ed.wire_outputs(vec![out(3), out(1)])
         .expect("the sources exist");
     let mut main_output =
         r.ed.open_meter(MeterId::of(1), MeterSpec::Outputs)
@@ -713,7 +713,7 @@ fn a_main_output_meter_cannot_outgrow_its_cells() {
     let _main_output =
         r.ed.open_meter(MeterId::of(2), MeterSpec::Outputs)
             .expect("the sources exist");
-    r.ed.set_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
+    r.ed.wire_outputs(vec![PortSource::Zero; tutti_buffers::MAX_CHANNELS + 1])
         .expect("the sources exist");
     assert!(matches!(
         r.ed.commit(),

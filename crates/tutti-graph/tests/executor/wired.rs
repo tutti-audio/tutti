@@ -183,7 +183,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.set_outputs(vec![PortSource::Node(out(PROBE, 2))])
+    ed.wire_outputs(vec![PortSource::Node(out(PROBE, 2))])
         .expect("the sources exist");
     steps.push(step(&mut ed, &mut exec, &seen, 1));
     // Back to nothing: the last source of each input goes, the output
@@ -196,7 +196,7 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         sink: tutti_graph::PortSink::Port(at(2)),
         from: from(1),
     });
-    ed.set_outputs(vec![]).expect("the sources exist");
+    ed.wire_outputs(vec![]).expect("the sources exist");
     ed.close_tap(TapId::of(1)).expect("open");
     drop(tap);
     steps.push(step(&mut ed, &mut exec, &seen, 0));

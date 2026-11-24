@@ -53,7 +53,7 @@
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
 //! editor
-//!     .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))?;
+//!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))?;
 //! editor.commit()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```

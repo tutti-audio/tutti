@@ -618,7 +618,7 @@ fn a_source_is_structural_and_a_range_is_a_control() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "dc", Unforkable(common::TestNode::new(dc(1.0))));
     ed.insert(key(2), "driver", Forkable(driver(0)));
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),
@@ -686,7 +686,7 @@ fn a_fork_carries_the_driven_lane() {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "dc", Forkable(dc(1.0)));
     ed.insert(key(2), "driver", Forkable(driver(0)));
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),

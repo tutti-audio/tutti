@@ -738,7 +738,7 @@ fn connecting_and_removing_a_bus_edge_round_trips_through_the_editor() {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![out_port(2, 0)])
+    ed.wire_outputs(vec![out_port(2, 0)])
         .expect("the sources exist");
     // The author's own lane: the constant into the sink at a weight of 0.25.
     let own = lane(2, 0, out_port(3, 0));
@@ -927,7 +927,7 @@ fn a_fork_of_a_bus_edge_renders_the_fold() {
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
     ed.insert(key(2), "mono", ForkByClone(Mono));
     ed.connect_bus(from(1, 0), bus_ref(2, 0)).unwrap();
-    ed.set_outputs(vec![out_port(2, 0)])
+    ed.wire_outputs(vec![out_port(2, 0)])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let (fork_ed, fork_exec) = ed
@@ -1031,7 +1031,7 @@ fn a_same_topology_main_output_edge_is_the_hand_wired_plan() {
 #[test]
 fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     let before = ed.revision();
     assert_eq!(
@@ -1044,7 +1044,7 @@ fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
     // Declared, but three unassigned channels have no place in a named stereo.
     let (mut ed, _exec) = editor(&[(1, source(3, unassigned(3)))], 3);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     let before = ed.revision();
     assert!(matches!(
@@ -1065,7 +1065,7 @@ fn an_undeclared_main_output_refuses_a_bus_edge_and_stores_nothing() {
 fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     let (mut ed, _exec) = editor(&[(1, source(2, smpte(2)))], 2);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),
@@ -1080,7 +1080,7 @@ fn a_main_output_lane_on_an_ordinary_output_source_is_refused() {
     assert!(ed.spec().main_output_sources.is_empty());
 
     // The other order: the ordinary source arrives after the main output edge.
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     tutti_graph::testing::feed_output(&mut ed, 0, [out_port(1, 0)]);
@@ -1108,7 +1108,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
         .expect("the edge wires");
     }
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");
@@ -1137,7 +1137,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
     );
     // A re-declaration it folds to re-lowers: stereo to mono is 0.5 L + 0.5 R.
     ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1159,7 +1159,7 @@ fn a_redeclared_main_output_that_no_longer_folds_fails_the_commit() {
 fn main_output_edges_connect_disconnect_and_go_with_their_node() {
     let (mut ed, mut exec) = editor(&[(1, source(2, smpte(2))), (3, source(2, smpte(2)))], 0);
     ed.declare_main_output(Some(smpte(2).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 2])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 2])
         .expect("the sources exist");
     ed.connect_bus_to_main_output(from(3, 0)).unwrap();
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
@@ -1209,7 +1209,7 @@ fn a_fork_of_a_main_output_edge_renders_the_fold() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "stereo", ForkByClone(Stereo));
     ed.declare_main_output(Some(smpte(1).topology), ed.spec().main_output_id);
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_bus_to_main_output(from(1, 0)).unwrap();
     ed.commit().expect("commits");

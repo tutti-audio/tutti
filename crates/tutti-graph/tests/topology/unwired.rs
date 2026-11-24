@@ -105,7 +105,7 @@ fn rig() -> (Editor, Executor) {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(out(X, 0)),
         PortSource::Node(out(X, 1)),
     ])
@@ -479,7 +479,7 @@ fn a_tap_lane_on_a_lost_port_reads_silence() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let konst = |width| Unforkable(TestNode::new(Kind::Const { value: 0.5, width }));
     ed.insert(X, "const", konst(2));
-    ed.set_outputs(vec![PortSource::Node(out(X, 0))])
+    ed.wire_outputs(vec![PortSource::Node(out(X, 0))])
         .expect("the sources exist");
     let mut tap = ed
         .open_tap(

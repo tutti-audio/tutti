@@ -140,7 +140,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),

@@ -184,7 +184,7 @@ fn process_is_allocation_free_in_steady_state_on(workers: usize) {
         from: from(8, 0),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(9), 0)),
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
     ])
@@ -298,7 +298,7 @@ fn a_bounded_event_merge_is_allocation_free_on(workers: usize) {
     };
     wire(&mut ed, 1);
     wire(&mut ed, 2);
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(4), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -367,7 +367,7 @@ fn crossfades_are_allocation_free_on(workers: usize) {
         from: Edge::Direct(PortSource::MainInput(1)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0)),
         PortSource::Node(OutputPort::new(NodeKey(3), 0)),
     ])
@@ -481,7 +481,7 @@ fn a_held_chase_is_delivered_allocation_free_on(workers: usize) {
             Unforkable(HeldChaser(Arc::clone(&a[k as usize]))),
         );
     }
-    ed.set_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_outputs((1..=KEYS).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let mut out = vec![vec![0.0f32; 64]; KEYS as usize];
@@ -557,7 +557,7 @@ fn a_replace_queued_behind_a_running_fade_chases_without_allocating() {
         Arc::new(AtomicU64::new(0)),
     );
     ed.insert(NodeKey(1), "chaser", Unforkable(HeldChaser(Arc::clone(&a))));
-    ed.set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let mut out = vec![0.0f32; 64];
@@ -907,7 +907,7 @@ fn modulated_params_are_allocation_free_on(workers: usize) {
             from: from(2, 0),
         })
         .expect("the edge wires");
-        ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
             .expect("the sources exist");
     }
     let cut = ParamIn {
@@ -1041,7 +1041,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
             from: from(2, 0),
         })
         .expect("the edge wires");
-        ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
             .expect("the sources exist");
     }
     let port = |p| EventInputPort::new(NodeKey(1), p);
@@ -1123,7 +1123,7 @@ fn scheduled_params_are_allocation_free_on(workers: usize) {
             from: from(2, 0),
         })
         .expect("the edge wires");
-        ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
             .expect("the sources exist");
     }
     ed.commit().expect("commits");
@@ -1265,7 +1265,7 @@ fn an_azimuth_param_port_is_allocation_free() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1309,7 +1309,7 @@ fn a_range_published_while_blocks_render_is_allocation_free() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1360,7 +1360,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     let (mut ed, mut exec) = Editor::new(prepare(256));
     ed.insert(NodeKey(1), "sink", Unforkable(AzimuthSink));
     ed.insert(NodeKey(4), "segs", Unforkable(SeamEvery));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     let azimuth = ParamIn {
         node: NodeKey(1),
@@ -1382,7 +1382,7 @@ fn removing_a_node_with_a_moved_range_frees_nothing_on_the_audio_thread() {
     }
     ed.remove(NodeKey(1));
     ed.remove(NodeKey(4));
-    ed.set_outputs(Vec::new()).expect("the sources exist");
+    ed.wire_outputs(Vec::new()).expect("the sources exist");
     ed.commit().expect("commits");
     for _ in 0..8 {
         exec.process(64, &transport, &[], &mut [&mut out[..64]]);
@@ -1466,7 +1466,7 @@ fn reporting_nodes_are_allocation_free_on(workers: usize) {
         .expect("the edge wires");
         outputs.push(PortSource::Node(OutputPort::new(fx, 0)));
     }
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1543,7 +1543,7 @@ fn fan_in_is_allocation_free_on(workers: usize) {
                         })
                         .expect("the edge wires");
                     }
-                    ed.set_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
+                    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                         .expect("the sources exist");
                 } else {
                     ed.resize_outputs(1);
@@ -1636,7 +1636,7 @@ fn weighted_fan_in_is_allocation_free_on(workers: usize, driven: bool) {
                     })
                     .expect("the edge wires");
                 }
-                ed.set_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
+                ed.wire_outputs(vec![PortSource::Node(OutputPort::new(sink, 0))])
                     .expect("the sources exist");
             } else {
                 ed.resize_outputs(1);
@@ -1866,7 +1866,7 @@ fn mode_graph(workers: usize) -> (Editor, tutti_graph::Executor) {
         from: from(8, 0),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(9), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -1942,7 +1942,7 @@ fn own_bypass_toggling_is_allocation_free_on(workers: usize) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -2231,7 +2231,7 @@ fn a_swap_is_allocation_free_on(workers: usize) {
             }),
         );
     }
-    ed.set_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_outputs((1..=NODES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let transport = TransportPosition::default();
@@ -2295,7 +2295,7 @@ fn edge_fades_are_allocation_free() {
         ed.insert(NodeKey(n), "const", Unforkable(TestNode::new(k)));
     }
     let src = |n: u64| PortSource::Node(OutputPort::new(NodeKey(n), 0));
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),
@@ -2529,7 +2529,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     ed.resize_inputs(ChannelLayout::MONO);
     let first = pdc_pair(&mut ed, 1, 40);
     let out_of = |node: NodeKey| PortSource::Node(OutputPort::new(node, 0));
-    ed.set_outputs(vec![out_of(first)])
+    ed.wire_outputs(vec![out_of(first)])
         .expect("the sources exist");
     let cap = Samples::new(1 << 16);
     let mut tap = ed
@@ -2574,7 +2574,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
     // event tap and the held keys are in them.
     let second = pdc_pair(&mut ed, 10, 25);
     event_pdc(&mut ed, 20);
-    ed.set_outputs(vec![out_of(first), out_of(second)])
+    ed.wire_outputs(vec![out_of(first), out_of(second)])
         .expect("the sources exist");
     let events = ed
         .open_event_tap(
@@ -2612,7 +2612,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![out_of(first), out_of(second), out_of(wide)])
+    ed.wire_outputs(vec![out_of(first), out_of(second), out_of(wide)])
         .expect("the sources exist");
     ed.commit().expect("commits");
     applied(&mut exec);
@@ -2705,7 +2705,7 @@ fn applying_a_commit_allocates_nothing_on(workers: usize) {
         .expect("the edge wires");
     ed.connect_events(sink(312, 1), efb(128))
         .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         out_of(first),
         out_of(second),
         out_of(wide),
@@ -3194,7 +3194,7 @@ fn a_pool_set_across_a_commit_in_flight_allocates_nothing() {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(200), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, 4);
@@ -3234,7 +3234,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
         })),
     );
     let port = |p| PortSource::Node(OutputPort::new(node, p));
-    ed.set_outputs(vec![port(0), port(1), port(2)])
+    ed.wire_outputs(vec![port(0), port(1), port(2)])
         .expect("the sources exist");
     let mut wide = ed
         .open_heard_tap(TapId::of(1), 3, Samples::new(1024))
@@ -3256,7 +3256,7 @@ fn an_output_tap_opened_again_at_another_width_swaps_without_allocating() {
     run(&mut exec, 4);
 
     // The main output narrows to one channel and its tap is opened again.
-    ed.set_outputs(vec![port(0)]).expect("the sources exist");
+    ed.wire_outputs(vec![port(0)]).expect("the sources exist");
     let mut narrow = ed
         .open_heard_tap(TapId::of(1), 1, Samples::new(1024))
         .expect("the outputs exist");

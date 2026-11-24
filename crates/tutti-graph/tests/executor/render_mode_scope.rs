@@ -46,7 +46,7 @@ fn render(mode: RenderMode, participants: usize) {
     for k in 0..SOURCES as u64 {
         ed.insert(NodeKey(k), "alloc", Unforkable(Allocating));
     }
-    ed.set_outputs((0..SOURCES as u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_outputs((0..SOURCES as u64).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

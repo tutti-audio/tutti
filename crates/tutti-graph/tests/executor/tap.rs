@@ -85,7 +85,7 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
         .expect("the edge wires");
         gains.push(out(gain));
     }
-    ed.set_outputs(gains.clone()).expect("the sources exist");
+    ed.wire_outputs(gains.clone()).expect("the sources exist");
     gains
 }
 

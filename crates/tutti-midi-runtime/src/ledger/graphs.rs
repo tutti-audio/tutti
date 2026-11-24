@@ -746,7 +746,7 @@ fn forkable_rig() -> (
         },
     );
     connect(&mut ed, 1, 2);
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .expect("the sources exist");
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)

@@ -589,7 +589,7 @@ mod logged {
             })
             .expect("the edge wires");
         }
-        ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
+        ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
             .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();

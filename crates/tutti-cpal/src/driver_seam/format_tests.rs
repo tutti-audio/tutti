@@ -17,7 +17,7 @@ fn block(level: f32) -> OutputBlock<f32> {
     let transport = Transport::new(rate);
     let (mut ed, exec) = Editor::new(Prepare::new(rate, MaxBlock::of(Samples::new(512))));
     ed.insert(NodeKey(1), "dc", Const::mono(level));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0)); 2])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0)); 2])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

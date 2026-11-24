@@ -93,7 +93,7 @@ fn topology(ed: &mut Editor) {
         from: Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+    ed.wire_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
         .expect("the sources exist");
 }
 
@@ -439,7 +439,7 @@ fn wide(workers: usize) -> (Editor, Executor) {
         .expect("the edge wires");
         outputs.extend((0..3).map(|port| PortSource::Node(OutputPort::new(probe, port))));
     }
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, workers);
     (ed, exec)

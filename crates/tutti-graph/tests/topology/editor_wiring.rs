@@ -443,22 +443,22 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
     assert_eq!(ed.revision(), before, "disconnect_events changed nothing");
 }
 
-/// `set_outputs` makes channel `c` exactly its `c`th source, heard in a
+/// `wire_outputs` makes channel `c` exactly its `c`th source, heard in a
 /// render, and refuses a source that does not exist, changing nothing.
 #[test]
-fn set_outputs_wires_one_source_per_channel() {
+fn wire_outputs_wires_one_source_per_channel() {
     let (mut ed, mut exec) = editor();
     ed.insert(key(1), "level", Unforkable(Level(0.25)));
     ed.insert(key(2), "level", Unforkable(Level(0.5)));
-    ed.set_outputs([out(1), PortSource::Zero]).expect("wires");
-    ed.set_outputs([out(2), out(1)]).expect("replaces");
+    ed.wire_outputs([out(1), PortSource::Zero]).expect("wires");
+    ed.wire_outputs([out(2), out(1)]).expect("replaces");
     let [left, right] = render(&mut ed, &mut exec);
     assert!(left.iter().all(|&s| s == 0.5));
     assert!(right.iter().all(|&s| s == 0.25));
 
     let before = ed.spec().clone();
     assert_eq!(
-        ed.set_outputs([out(1), out(7)]),
+        ed.wire_outputs([out(1), out(7)]),
         Err(WireError::Missing(MissingSource::Node { node: key(7) })),
     );
     assert_eq!(*ed.spec(), before);

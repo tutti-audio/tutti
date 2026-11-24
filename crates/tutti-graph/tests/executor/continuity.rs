@@ -476,7 +476,8 @@ fn rig(workers: usize, inbox: &Inbox) -> Harness {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.set_outputs(vec![audio(SUM)]).expect("the sources exist");
+    ed.wire_outputs(vec![audio(SUM)])
+        .expect("the sources exist");
     ed.connect_events(EventInputPort::new(EL, 0), EventEdge::Direct(src(EC)))
         .expect("the edge wires");
     let at = EventInputPort::new(REC, 0);
@@ -785,7 +786,7 @@ fn bank_continues_the_old_history(workers: usize) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
+    ed.wire_outputs(vec![PortSource::MainInput(0), audio(LAG_NODE)])
         .expect("the sources exist");
     ed.commit().expect("commits");
     // Impulses at 162 (in the ring when the commit lands at 192), 197 and 282.
@@ -827,7 +828,8 @@ fn bank_continues_the_old_history(workers: usize) {
     ));
     let id = ed.spec().main_output_id.next();
     ed.declare_main_output(ed.spec().main_output, id);
-    ed.set_outputs(vec![audio(NEW)]).expect("the sources exist");
+    ed.wire_outputs(vec![audio(NEW)])
+        .expect("the sources exist");
     ed.commit().expect("declares the new main output");
     for b in 3..5 {
         let bufs = step(&mut ed, &mut exec, b * BLOCK);
@@ -932,7 +934,7 @@ fn a_rate_change(workers: usize) {
             Samples::new(MAX_BLOCK),
         ))],
     );
-    ed.set_outputs(vec![audio(SUM_NODE)])
+    ed.wire_outputs(vec![audio(SUM_NODE)])
         .expect("the sources exist");
     let sink = EventInputPort::new(SINK, 0);
     ed.connect_events(sink, EventEdge::Direct(src(EMIT)))

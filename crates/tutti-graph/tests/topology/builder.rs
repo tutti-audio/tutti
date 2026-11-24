@@ -257,7 +257,7 @@ mod net_rule {
 }
 
 /// The same graph written twice — through the builder, and by hand through
-/// `Editor::insert` and `spec_mut` — gives equal specs, equal plans and a
+/// `Editor::insert` and the wiring calls — gives equal specs, equal plans and a
 /// bit-identical render. It covers every kind of wiring the builder writes:
 /// a main input, a node-to-node edge, a feedback edge, a main output
 /// fed by `set_output` and one by `connect_output`, and an event edge.
@@ -330,7 +330,7 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         from: Edge::Direct(PortSource::Node(from(0, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
     ])
@@ -650,7 +650,7 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);

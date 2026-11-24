@@ -80,7 +80,7 @@ fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(1), "lane", lane);
     ed.insert(NodeKey(2), "probe", Unforkable(Probe));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .expect("the sources exist");
     ed.connect_param(
         ParamIn {

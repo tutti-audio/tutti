@@ -106,7 +106,7 @@ fn wire(ed: &mut Editor) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
         .expect("the sources exist");
     let emit = EventOutputPort::new(EMIT, 0);
     ed.connect_events(EventInputPort::new(EVLAG, 0), EventEdge::Direct(emit))
@@ -324,7 +324,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(LAG, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(LAG, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -341,7 +341,7 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
         from: Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
         .expect("the sources exist");
     log.lock().clear();
 
@@ -507,7 +507,7 @@ fn assert_poisoned(mut ed: Editor, mut exec: Executor, cause: &str) {
 fn a_panic_in_prepare_poisons_the_editor() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -541,7 +541,7 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
         .expect("the edge wires");
     ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
         .expect("the edge exists");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(0), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(0), 0))])
         .expect("the sources exist");
     ed.commit().expect("sample-accurate at 48 kHz");
     exec.apply_pending();

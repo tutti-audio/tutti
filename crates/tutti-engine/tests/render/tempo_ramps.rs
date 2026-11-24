@@ -88,7 +88,7 @@ fn graph(log: &Log) -> (Editor, Executor) {
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     ed.insert(NodeKey(1), "beats", Unforkable(BeatLog(log.clone())));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     (ed, exec)

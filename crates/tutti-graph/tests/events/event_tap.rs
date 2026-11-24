@@ -173,7 +173,7 @@ fn rig(workers: usize, no_alloc: bool, m: usize) -> Rig {
         from: Edge::Direct(out(90)),
     })
     .expect("the edge wires");
-    ed.set_outputs([out(91)]).expect("the sources exist");
+    ed.wire_outputs([out(91)]).expect("the sources exist");
     Rig {
         ed,
         exec,

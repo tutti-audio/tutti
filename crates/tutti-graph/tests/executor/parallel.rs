@@ -320,7 +320,7 @@ fn build(ed: &mut Editor) {
         from: from(50, 0),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(out(9, 0)),
         PortSource::Node(out(40, 0)),
         PortSource::Node(out(41, 1)),
@@ -638,7 +638,7 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))))
+    ed.wire_outputs((1..=6).map(|k| PortSource::Node(out(k, 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let input = vec![0.5f32; MAX_BLOCK];
@@ -773,7 +773,7 @@ fn the_executor_waits_by_its_pools_budget() {
         at(3, 0),
         [Edge::Direct(PortSource::Node(out(1, 0)))],
     );
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(out(2, 0)),
         PortSource::Node(out(3, 0)),
     ])
@@ -844,7 +844,7 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
             .expect("the edge wires");
             outputs.push(PortSource::Node(out(fx.0, 0)));
         }
-        ed.set_outputs(outputs).expect("the sources exist");
+        ed.wire_outputs(outputs).expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

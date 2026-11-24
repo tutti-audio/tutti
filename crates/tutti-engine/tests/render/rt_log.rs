@@ -45,7 +45,7 @@ fn an_engine_renders_a_nodes_records_to_its_readers_from_the_block_after_the_fil
         MaxBlock::of(Samples::new(64)),
     ));
     ed.insert(NodeKey(1), "logger", Unforkable(Logger));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let mut exec = exec;

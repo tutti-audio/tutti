@@ -39,7 +39,7 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
 pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
         .expect("the sources exist");
 }
 

@@ -56,7 +56,7 @@ fn graph(unit: SoundFontUnit<f32>, rate: f64, frame: u64) -> (Editor, Executor) 
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .expect("the edge wires");
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..2).map(|port| {
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),

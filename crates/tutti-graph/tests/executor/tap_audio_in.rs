@@ -61,7 +61,7 @@ fn tap_with_ring(frames: &[(f32, f32)], ring: usize) -> TapReader {
         }),
     );
     let port = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
-    ed.set_outputs(vec![port(0), port(1)])
+    ed.wire_outputs(vec![port(0), port(1)])
         .expect("the sources exist");
     let reader = ed
         .open_tap(

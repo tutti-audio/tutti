@@ -99,7 +99,7 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(PLUGIN, 0)),
         PortSource::Node(OutputPort::new(DRY, 0)),
     ])

@@ -65,7 +65,7 @@ fn render(
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe(read)));
     }
-    ed.set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

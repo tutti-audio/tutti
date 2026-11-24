@@ -1290,7 +1290,7 @@ fn a_mode_stored_mid_block_lands_on_the_next_block() {
             from: direct(1),
         })
         .expect("the edge wires");
-        ed.set_outputs(vec![out(2, 0)]).expect("the sources exist");
+        ed.wire_outputs(vec![out(2, 0)]).expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1382,7 +1382,7 @@ fn a_fork_copies_the_mode_and_starts_steady() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

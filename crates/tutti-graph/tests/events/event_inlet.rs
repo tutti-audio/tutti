@@ -580,7 +580,7 @@ fn graph(
         })
         .expect("the edge wires");
     }
-    ed.set_outputs([out(30)]).expect("the sources exist");
+    ed.wire_outputs([out(30)]).expect("the sources exist");
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),

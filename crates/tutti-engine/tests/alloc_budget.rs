@@ -129,7 +129,8 @@ fn graph(nodes: usize) -> (Editor, Executor) {
         .expect("the edge wires");
     }
     let last = PortSource::Node(OutputPort::new(NodeKey(nodes as u64), 0));
-    ed.set_outputs(vec![last, last]).expect("the sources exist");
+    ed.wire_outputs(vec![last, last])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -238,7 +239,7 @@ fn fan(nodes: usize, pooled: bool) -> (Editor, Executor) {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(
+    ed.wire_outputs(
         [1, 2]
             .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),

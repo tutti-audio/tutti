@@ -47,7 +47,7 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
     })
     .expect("the edge wires");
     // The filter's single output on both device channels.
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

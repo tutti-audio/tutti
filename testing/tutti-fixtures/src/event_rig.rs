@@ -147,7 +147,7 @@ impl EventRig {
         );
         if output == Output::Mono {
             editor
-                .set_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
+                .wire_outputs(vec![PortSource::Node(OutputPort::new(Self::SINK, 0))])
                 .expect("the sources exist");
         }
         Self {

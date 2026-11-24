@@ -79,7 +79,7 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
         from: Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -207,7 +207,7 @@ fn set_tail_does_not_cut_a_fade() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

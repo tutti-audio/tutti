@@ -221,7 +221,7 @@
 //! let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 //! editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 //! let out = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
-//! editor.set_outputs([out(0), out(1)]).expect("the ports exist");
+//! editor.wire_outputs([out(0), out(1)]).expect("the ports exist");
 //! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapOptions::new(Samples::new(256))).expect("the ports exist");
 //! editor.commit().expect("compiles");
 //! executor.apply_pending();

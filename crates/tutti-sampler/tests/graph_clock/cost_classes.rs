@@ -94,7 +94,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     }
     let sources = READS + STRETCHED;
     // Two silent main outputs, which the fan-in below fills.
-    ed.set_outputs([PortSource::Zero; 2])
+    ed.wire_outputs([PortSource::Zero; 2])
         .expect("the sources exist");
     let mut outputs = Vec::new();
     for k in 0..sources {
@@ -129,7 +129,7 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
         }
     }
     if !bus {
-        ed.set_outputs(outputs).expect("the sources exist");
+        ed.wire_outputs(outputs).expect("the sources exist");
     }
     ed.commit().expect("commits");
     exec.apply_pending();

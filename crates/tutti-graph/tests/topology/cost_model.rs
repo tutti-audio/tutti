@@ -77,7 +77,7 @@ fn fans(ed: &mut Editor, fans: usize, lanes: usize, gains: Option<Cost>, sums: O
         }
         outputs.push(node(s));
     }
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
 }
 
 /// `lanes` chains of `depth` gains declaring `cost`, each off the main
@@ -96,7 +96,7 @@ fn wide(ed: &mut Editor, lanes: usize, depth: usize, cost: Option<Cost>) {
         }
         wire(ed, s, l as u16, last);
     }
-    ed.set_outputs(vec![node(s)]).expect("the sources exist");
+    ed.wire_outputs(vec![node(s)]).expect("the sources exist");
 }
 
 /// Render `blocks` (input on every channel), every output's samples.
@@ -171,7 +171,7 @@ fn packed_siblings_render_bit_identically() {
             wire(&mut ed, l + 1, 0, PortSource::MainInput(0));
             wire(&mut ed, s, l as u16, node(l + 1));
         }
-        ed.set_outputs(vec![node(s)]).expect("the sources exist");
+        ed.wire_outputs(vec![node(s)]).expect("the sources exist");
         commit(&mut ed, &mut exec);
         exec
     };

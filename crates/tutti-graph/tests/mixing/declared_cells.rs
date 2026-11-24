@@ -167,7 +167,7 @@ fn render(to: &[(UnitAddr, f64)]) -> [Vec<f32>; 4] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
@@ -303,7 +303,7 @@ fn the_contract_fork_check_covers_each_declared_param() {
 fn a_fork_starts_from_each_indexs_value() {
     let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
     let controls = ed.insert(NODE, "bank", bank()).controls;
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..4)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
@@ -346,7 +346,7 @@ fn an_old_form_node_and_a_new_form_node_share_a_graph() {
     ];
     ed.insert(SRC, "steps", tutti_graph::ForkByClone(Steps { to }));
     // Outputs: the old node's read, then the bank's cutoff, band 1 and q.
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(OLD, 0)),
         PortSource::Node(OutputPort::new(NODE, 0)),
         PortSource::Node(OutputPort::new(NODE, 2)),

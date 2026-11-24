@@ -115,7 +115,7 @@ fn render(sparse: Sparse, to: &[(UnitAddr, f64)]) -> [Vec<f32>; 3] {
         "steps",
         tutti_graph::ForkByClone(Steps { to: to.to_vec() }),
     );
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..3)
             .map(|port| PortSource::Node(OutputPort::new(NODE, port)))
             .collect::<Vec<_>>(),
@@ -281,7 +281,7 @@ impl Rig {
     fn new(node: impl tutti_graph::IntoNode) -> Self {
         let (mut ed, mut exec): (Editor, Executor) = Editor::new(prepare(64));
         ed.insert(NODE, "node", node);
-        ed.set_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
+        ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
             .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();

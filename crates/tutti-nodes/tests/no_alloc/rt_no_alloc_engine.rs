@@ -83,7 +83,7 @@ fn build_engine_with_chain() -> Engine {
     wire(strip, 1, eq, 0);
     wire(limiter, 0, strip, 0);
     wire(limiter, 1, strip, 1);
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(limiter, port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(limiter, port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");

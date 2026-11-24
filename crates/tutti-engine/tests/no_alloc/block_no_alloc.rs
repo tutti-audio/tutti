@@ -78,7 +78,7 @@ fn rolling_state_with(
         from: Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
         .expect("the sources exist");
     let reader = tap.then(|| {
         let sources: Vec<_> = ed

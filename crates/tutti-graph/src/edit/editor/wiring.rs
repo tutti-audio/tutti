@@ -221,7 +221,7 @@ impl<F: Float> Editor<F> {
     /// Refused, changing nothing: [`WireError::Missing`] for a source that
     /// names a node that does not exist, a port past its node's outputs or a
     /// main input past the graph's.
-    pub fn set_outputs(
+    pub fn wire_outputs(
         &mut self,
         sources: impl IntoIterator<Item = PortSource>,
     ) -> Result<(), WireError> {

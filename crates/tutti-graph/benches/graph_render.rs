@@ -263,7 +263,8 @@ fn executor_for(shape: &Topo) -> Executor {
             last
         }
     };
-    ed.set_outputs(vec![node(last)]).expect("the sources exist");
+    ed.wire_outputs(vec![node(last)])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -393,7 +394,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             .expect("the edge wires");
         }
     }
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(
         NodeKey(n as u64 - 1),
         0,
     ))])

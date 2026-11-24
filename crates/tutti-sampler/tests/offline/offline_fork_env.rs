@@ -56,7 +56,7 @@ fn prepare() -> Prepare {
 fn graph<N: IntoNode>(node: N, width: u16) -> (Editor, Executor, N::Controls) {
     let (mut ed, mut exec) = Editor::new(prepare());
     let controls = ed.insert(NodeKey(1), "under test", node).controls;
-    ed.set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -232,7 +232,7 @@ fn a_voice_behind_another_node_is_forked_too() {
         from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(1), 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

@@ -245,7 +245,7 @@ fn dry_is_the_aligned_input_bit_for_bit_and_the_node_keeps_running() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     ed.set_mix(key(1), Mix::DRY).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -525,7 +525,7 @@ fn a_mix_stored_mid_block_lands_on_the_next_block() {
             from: Edge::Direct(out(1, 0)),
         })
         .expect("the edge wires");
-        ed.set_outputs(vec![out(2, 0)]).expect("the sources exist");
+        ed.wire_outputs(vec![out(2, 0)]).expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -589,7 +589,7 @@ fn solo(mix: Option<Mix>) -> (Editor, tutti_graph::Executor) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     if let Some(m) = mix {
         ed.set_mix(key(1), m).expect("a node");
     }
@@ -679,7 +679,7 @@ fn a_node_inserted_at_a_removed_nodes_key_starts_active_and_wet() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     assert_eq!(ed.mix(key(1)), Mix::WET);
     assert_eq!(ed.mode(key(1)), NodeMode::Active);
     ed.commit().expect("commits");
@@ -713,7 +713,7 @@ fn a_mix_set_while_a_commit_is_in_flight_is_read_back_and_lands_on_the_unit() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     ed.commit().expect("commits");
     ed.set_mix(key(1), Mix::new(0.5)).expect("a node");
     assert_eq!(ed.mix(key(1)), Mix::new(0.5));
@@ -829,7 +829,7 @@ fn a_mix_of_a_node_with_no_pass_is_refused() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![out(1, 0), out(1, 1)])
+    ed.wire_outputs(vec![out(1, 0), out(1, 1)])
         .expect("the sources exist");
     ed.commit().expect("nothing hears its pass yet");
 

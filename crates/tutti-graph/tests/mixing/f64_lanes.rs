@@ -113,7 +113,7 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .expect("the sources exist");
     ed.connect_param(at, EventOutputPort::new(SRC, 0))
         .expect("the param wires");
@@ -234,7 +234,7 @@ fn a_range_change_lands_on_the_next_block() {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .expect("the sources exist");
     ed.connect_param(at, EventOutputPort::new(SRC, 0))
         .expect("the param wires");
@@ -310,7 +310,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
     let from = PortSource::Node(OutputPort::new(LANE, 0));
-    ed.set_outputs([from]).expect("the sources exist");
+    ed.wire_outputs([from]).expect("the sources exist");
     let id = EdgeId {
         sink: PortSink::Output(0),
         from: Edge::Direct(from),
@@ -344,7 +344,7 @@ fn an_f64_mix_ramps_in_f64() {
         from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -422,7 +422,7 @@ fn render_segment(
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "lane", lane);
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
-    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+    ed.wire_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
         .expect("the sources exist");
     ed.connect_param(
         ParamIn {

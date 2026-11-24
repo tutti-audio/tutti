@@ -475,7 +475,7 @@ fn a_clip_into_a_synth_is_allocation_free() {
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .expect("the edge wires");
-    ed.set_outputs(
+    ed.wire_outputs(
         (0..2).map(|port| {
             tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(2), port))
         }),

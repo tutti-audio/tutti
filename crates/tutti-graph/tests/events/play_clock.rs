@@ -99,7 +99,7 @@ fn rig(lat: usize, forkable: bool) -> Rig {
         from: Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     Rig { ed, exec }

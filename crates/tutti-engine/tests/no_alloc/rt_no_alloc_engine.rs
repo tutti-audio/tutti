@@ -94,7 +94,7 @@ fn graph_engine_with_timed_transport_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -174,7 +174,7 @@ fn a_published_tempo_map_is_taken_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -235,7 +235,7 @@ fn a_step_map_is_followed_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -294,7 +294,7 @@ fn a_step_map_is_followed_without_allocating() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(4_096)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -359,7 +359,7 @@ fn the_heard_tap_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "tone", Unforkable(TransportTone));
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let mut engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
@@ -451,7 +451,7 @@ fn graph_engine_with_env_clock_and_metronome_is_allocation_free() {
     let (clock, sink) = (NodeKey(1), NodeKey(2));
     ed.insert(clock, "clock", Unforkable(BeatWalk));
     let _ = ed.insert(sink, "click", click);
-    ed.set_outputs(
+    ed.wire_outputs(
         [(sink, 0), (sink, 1), (clock, 0), (clock, 1)]
             .into_iter()
             .map(|(node, port)| PortSource::Node(OutputPort::new(node, port))),
@@ -544,7 +544,7 @@ fn graph_engine_on_a_worker_pool_is_allocation_free() {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(
+    ed.wire_outputs(
         [11, 12]
             .map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
@@ -605,7 +605,7 @@ fn a_714_main_output_block_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
@@ -666,7 +666,7 @@ fn a_declared_main_output_into_a_stated_device_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
@@ -721,7 +721,7 @@ fn a_live_routing_and_ramping_output_gains_are_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
@@ -797,7 +797,7 @@ fn a_routing_crossfade_is_allocation_free() {
         tutti_buffers::MaxBlock::of(tutti_units::Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
-    ed.set_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+    ed.wire_outputs((0..12).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("twelve is within the cap");
@@ -890,7 +890,7 @@ fn a_main_output_change_crossfaded_across_several_blocks_is_allocation_free() {
     ed.insert(NodeKey(1), "wide", Unforkable(TwelveWide));
     ed.insert(NodeKey(2), "latent", Unforkable(Latent));
     let wire = |ed: &mut Editor, width: u16| {
-        ed.set_outputs((0..width).map(|port| {
+        ed.wire_outputs((0..width).map(|port| {
             // The old main output's last channel is the latent source's, so every
             // other channel of it is aligned by a ring; the new main output has none.
             let node = if width == 12 && port == 11 { 2 } else { 1 };

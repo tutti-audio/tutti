@@ -120,7 +120,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
         .expect("the param wires");
         outputs.push(PortSource::Node(OutputPort::new(p, 0)));
     }
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     (ed, exec)
 }
@@ -1023,7 +1023,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         from: Edge::Direct(PortSource::Node(OutputPort::new(saw, 0))),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(filter, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);

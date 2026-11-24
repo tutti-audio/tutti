@@ -165,7 +165,7 @@ fn live_graph(key: NodeKey, node: impl IntoNode) -> Editor {
     let (mut editor, _exec) = Editor::new(prepare_at(SAMPLE_RATE));
     let _ = editor.insert(key, "vst2", node);
     editor
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
         .expect("the sources exist");
     editor
 }
@@ -256,7 +256,7 @@ fn a_plugin_without_chunks_forks_with_its_program_and_parameters() {
     let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
     editor.insert(key, "fork", tutti_graph::Unforkable(fork));
     editor
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
         .expect("the sources exist");
     editor.commit().expect("commits");
     let mut renderer = Renderer::new(editor, exec);
@@ -471,7 +471,7 @@ fn a_live_fork_keeps_the_live_render_mode() {
         let (mut editor, exec) = Editor::new(prepare_at(SAMPLE_RATE));
         editor.insert(key, "fork", tutti_graph::Unforkable(fork));
         editor
-            .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+            .wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
             .expect("the sources exist");
         editor.commit().expect("commits");
         let _ = Renderer::new(editor, exec).render(BLOCK);

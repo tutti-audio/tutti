@@ -38,7 +38,7 @@ fn gain_graph(g: f32) -> (Editor, Executor) {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -184,7 +184,7 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
         from: Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     dc(&mut exec, 16);
@@ -361,7 +361,7 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -501,7 +501,7 @@ fn events_go_to_the_incoming_unit_only() {
         tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(emitter, 0)),
     )
     .expect("the edge wires");
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));

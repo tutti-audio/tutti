@@ -634,7 +634,7 @@ impl Error for ForkError {
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
 /// editor
-///     .set_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
+///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
 ///     .expect("the node exists");
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
 /// ```
@@ -710,7 +710,7 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
 /// editor
-///     .set_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
+///     .wire_outputs([tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(NodeKey(1), 0))])
 ///     .expect("the node exists");
 /// assert_eq!(
 ///     editor.fork(ForkTarget::MainOutput, prepare).err(),

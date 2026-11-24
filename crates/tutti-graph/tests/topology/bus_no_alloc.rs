@@ -112,7 +112,7 @@ fn rig(workers: usize) -> (Editor, Executor) {
     ed.set_mode(key(3), NodeMode::Bypassed).expect("folds");
     ed.set_mix(key(4), Mix::DRY).expect("a mix");
     let out = |n: u64, port: u16| PortSource::Node(OutputPort::new(key(n), port));
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         out(2, 0),
         out(2, 1),
         out(3, 0),

@@ -79,7 +79,7 @@ impl Rig {
                 cells: Arc::clone(cells),
             }),
         );
-        ed.set_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
+        ed.wire_outputs([PortSource::Node(OutputPort::new(NODE, 0))])
             .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();

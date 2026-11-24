@@ -544,7 +544,8 @@ fn flags(n: u64) -> Flags {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![out(n + 1)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(n + 1)])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -617,7 +618,8 @@ fn a_sum_is_constant_when_its_live_addends_are() {
             })
             .expect("the edge wires");
         }
-        ed.set_outputs(vec![out(n + 1)]).expect("the sources exist");
+        ed.wire_outputs(vec![out(n + 1)])
+            .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

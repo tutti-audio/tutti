@@ -570,7 +570,7 @@ impl Rig {
         let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
         ed.insert(key(1), "one", Unforkable(TestNode::new(dc(1.0))));
         ed.insert(key(2), "two", Unforkable(TestNode::new(dc(2.0))));
-        ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+        ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
             .expect("the sources exist");
         ed.connect_edge(tutti_graph::EdgeId {
             sink: tutti_graph::PortSink::Output(0),
@@ -906,7 +906,8 @@ impl Mixer {
             ed.set_edge_gain(port_edge(n + 1, k), amp(weights[k as usize - 1]))
                 .expect("the edge exists");
         }
-        ed.set_outputs(vec![out(n + 1)]).expect("the sources exist");
+        ed.wire_outputs(vec![out(n + 1)])
+            .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -1076,7 +1077,7 @@ fn a_fork_carries_the_edge_gains() {
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
     ed.insert(key(2), "b", ForkByClone(Level(2.0)));
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),
@@ -1125,7 +1126,7 @@ fn a_fork_starts_at_the_base_the_knob_wrote() {
     }
     let (mut ed, exec) = Editor::new(prepare(BLOCK));
     ed.insert(key(1), "a", ForkByClone(Level(1.0)));
-    ed.set_outputs(vec![tutti_graph::PortSource::Zero; 1])
+    ed.wire_outputs(vec![tutti_graph::PortSource::Zero; 1])
         .expect("the sources exist");
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Output(0),

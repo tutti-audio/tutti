@@ -92,7 +92,7 @@
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
 //! editor
-//!     .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(beats, port))))
+//!     .wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(beats, port))))
 //!     .expect("the ports exist");
 //! editor.commit().expect("the graph compiles");
 //!

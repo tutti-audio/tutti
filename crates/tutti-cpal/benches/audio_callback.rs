@@ -37,7 +37,7 @@ fn state(outputs: usize, tap_open: bool) -> (Arc<AudioCallbackState>, Option<Tap
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "sine", Osc::sine(Hz::new(440.0)));
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])

@@ -127,7 +127,7 @@ fn rig() -> Rig {
             level: 0.0,
         }),
     );
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -433,7 +433,7 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
         from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
     })
     .expect("the edge wires");
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(A, 0)),
         PortSource::Node(OutputPort::new(B, 0)),
     ])

@@ -412,7 +412,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
             }
         }
     }
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

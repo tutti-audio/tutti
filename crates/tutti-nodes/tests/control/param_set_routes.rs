@@ -124,7 +124,7 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ));
     let probe = NodeKey(1);
     ed.insert(probe, "probe", Unforkable(Probe));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
         .expect("the sources exist");
     let at = ParamIn {
         node: probe,

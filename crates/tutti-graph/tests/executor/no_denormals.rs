@@ -85,7 +85,7 @@ fn render_probes(workers: usize, entry: Entry) {
         })
         .expect("the edge wires");
     }
-    ed.set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+    ed.wire_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();

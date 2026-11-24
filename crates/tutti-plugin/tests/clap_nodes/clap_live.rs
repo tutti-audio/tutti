@@ -182,7 +182,7 @@ fn run_live(
         })
         .expect("the edge wires");
     }
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
         .expect("the sources exist");
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;

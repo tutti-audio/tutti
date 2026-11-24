@@ -1695,7 +1695,7 @@ fn forked(log: &Log, blocks: usize, mid_note: bool) -> (Editor, Executor) {
     ed.insert(NodeKey(2), "hear", ForkByClone(Hear(log.clone(), 2)));
     ed.connect_events(at(2), EventEdge::Direct(out(1)))
         .expect("the edge wires");
-    ed.set_outputs(vec![tutti_graph::PortSource::Node(
+    ed.wire_outputs(vec![tutti_graph::PortSource::Node(
         tutti_graph::OutputPort::new(NodeKey(2), 0),
     )])
     .expect("the sources exist");

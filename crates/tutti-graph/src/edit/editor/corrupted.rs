@@ -120,7 +120,7 @@ fn a_fork_source_from_an_older_generation_is_refused() {
     let pre = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "const", ForkByClone(Dc));
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.spec_mut().generations.insert(NodeKey(1), 7);
     assert_eq!(
@@ -143,7 +143,7 @@ fn an_entry_without_a_cell_commits_as_a_unity_lane() {
             width: 1,
         })),
     );
-    ed.set_outputs(vec![out(1, 0)]).expect("the sources exist");
+    ed.wire_outputs(vec![out(1, 0)]).expect("the sources exist");
     let id = EdgeId {
         sink: PortSink::Output(0),
         from: Edge::Direct(out(1, 0)),

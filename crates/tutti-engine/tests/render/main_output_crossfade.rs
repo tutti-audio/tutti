@@ -33,7 +33,7 @@ impl Pool for Counting {
 /// Six sines, each through its own gain (keys 11 to 16), the main output's two
 /// channels taking `pair`.
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
-    ed.set_outputs(
+    ed.wire_outputs(
         pair.map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
     )

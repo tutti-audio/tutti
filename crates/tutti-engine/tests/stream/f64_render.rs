@@ -39,7 +39,7 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
-    ed.set_outputs(vec![
+    ed.wire_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
     ])

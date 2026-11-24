@@ -73,7 +73,7 @@ fn one_napper() -> (Editor, Executor, Placements) {
     let placements = Placements::default();
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
     ed.insert(NAP, "napper", ForkByClone(Napper::new(&placements)));
-    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NAP, 0))])
+    ed.wire_outputs(vec![PortSource::Node(OutputPort::new(NAP, 0))])
         .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -206,7 +206,7 @@ fn run(workers: usize) -> (Vec<Vec<f32>>, Vec<[usize; 3]>) {
         .chain([&pulse])
         .map(|&node| PortSource::Node(OutputPort::new(node, 0)))
         .collect();
-    ed.set_outputs(outputs).expect("the sources exist");
+    ed.wire_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

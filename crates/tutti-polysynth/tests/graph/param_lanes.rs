@@ -119,7 +119,7 @@ fn render_with_knob(synth: PolySynth<f32>, drive: Option<Drive>) -> ([Vec<f32>; 
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .expect("the edge wires");
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(SYNTH, port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     let driven = drive.as_ref().map(|d| d.param);

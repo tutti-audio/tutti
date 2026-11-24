@@ -55,7 +55,7 @@ fn graph(frame: u64) -> (Editor, Executor) {
         EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
     )
     .expect("the edge wires");
-    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
+    ed.wire_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(NodeKey(2), port))))
         .expect("the sources exist");
     ed.commit().expect("commits");
     (ed, exec)
