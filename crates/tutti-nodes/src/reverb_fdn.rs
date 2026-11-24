@@ -112,7 +112,7 @@ control_set! {
     Depth => Bipolar = modulation { whole },
     Rate => Hz = rate { whole },
     StereoSpread => StereoWidth = width { whole },
-    GainDb => Db = wet { whole },
+    GainDb => Db = wet { whole, no_ring },
     Freeze => bool = freeze { whole };
 
     fn defaults(&self) -> FdnControls {
@@ -222,5 +222,21 @@ impl<F: FftFloat + Lerp> Kernel for FdnKernel<F> {
         self.running
             .as_mut()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(&r.ramps, controls))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::non_ringing;
+    use tutti_units::{UnitAddr, UnitParam};
+
+    /// The wet gain is the one control the tail does not read.
+    #[test]
+    fn only_the_wet_gain_is_flagged_no_ring() {
+        for freezable in [false, true] {
+            let set = FdnSet { freezable };
+            assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::GainDb)]);
+        }
     }
 }

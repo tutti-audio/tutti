@@ -35,7 +35,7 @@ use support::active::{Activate, Active, ActiveExt};
 use support::main_thread;
 
 use tutti_buffers::InputOutput;
-use tutti_clap_host::{AudioPortFlags, ClapLoaded, ClapProcessContext, LoadOptions};
+use tutti_clap_host::{AudioPortFlags, ClapLoaded, ClapProcessContext, LoadOptions, NoteSend};
 use tutti_clap_test_plugin::{PREFERRED_DIALECT_DEFAULT, REPORTED_LATENCY_SAMPLES, probe_tag};
 use tutti_graph::Offset;
 use tutti_ump::{MidiGroup, Sysex7Packets, Ump};
@@ -73,6 +73,8 @@ struct ProbeControls {
     last_render_mode: unsafe extern "C" fn() -> u32,
     set_preferred_dialect: unsafe extern "C" fn(u32),
     set_port0_dialects: unsafe extern "C" fn(u32),
+    set_port0_info_refused: unsafe extern "C" fn(u32),
+    set_note_in_ports: unsafe extern "C" fn(u32),
 }
 
 impl ProbeControls {
@@ -98,9 +100,17 @@ impl ProbeControls {
             let set_port0_dialects = *lib
                 .get::<unsafe extern "C" fn(u32)>(b"tutti_test_plugin_set_port0_dialects\0")
                 .expect("set_port0_dialects symbol present");
+            let set_port0_info_refused = *lib
+                .get::<unsafe extern "C" fn(u32)>(b"tutti_test_plugin_set_port0_info_refused\0")
+                .expect("set_port0_info_refused symbol present");
+            let set_note_in_ports = *lib
+                .get::<unsafe extern "C" fn(u32)>(b"tutti_test_plugin_set_note_in_ports\0")
+                .expect("set_note_in_ports symbol present");
             Self {
                 _lib: lib,
+                set_note_in_ports,
                 set_port0_dialects,
+                set_port0_info_refused,
                 set_port_layout,
                 set_render_mode,
                 reset_delay,
@@ -127,6 +137,12 @@ impl ProbeControls {
     }
     fn set_port0_dialects(&self, raw: u32) {
         unsafe { (self.set_port0_dialects)(raw) }
+    }
+    fn set_note_in_ports(&self, count: u32) {
+        unsafe { (self.set_note_in_ports)(count) }
+    }
+    fn set_port0_info_refused(&self, refused: bool) {
+        unsafe { (self.set_port0_info_refused)(u32::from(refused)) }
     }
 }
 
@@ -190,6 +206,8 @@ impl Drop for ProbeSession<'_> {
         self.controls
             .set_preferred_dialect(PREFERRED_DIALECT_DEFAULT);
         self.controls.set_port0_dialects(PREFERRED_DIALECT_DEFAULT);
+        self.controls.set_port0_info_refused(false);
+        self.controls.set_note_in_ports(2);
     }
 }
 
@@ -724,7 +742,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     );
     assert_eq!(
         in0.dialect_to_send(),
-        Some(NoteDialect::Clap),
+        NoteSend::CLAP_AND_MIDI,
         "port 0 supports CLAP, so that is what an absent preference falls back to"
     );
 
@@ -754,7 +772,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     );
     assert_eq!(
         in0.dialect_to_send(),
-        Some(NoteDialect::Clap),
+        NoteSend::CLAP_AND_MIDI,
         "but the dialect actually sent is one the host advertised"
     );
 
@@ -769,7 +787,7 @@ fn host_does_not_invent_a_preferred_note_dialect() {
     assert_eq!(in1.preferred_dialect, None);
     assert_eq!(
         in1.dialect_to_send(),
-        Some(NoteDialect::Midi),
+        NoteSend::Midi,
         "port 1 supports MIDI only, so the fallback cannot be CLAP"
     );
 
@@ -793,29 +811,34 @@ fn notes_follow_the_input_note_ports_dialect() {
     use clap_sys::ext::note_ports::CLAP_NOTE_DIALECT_MIDI;
 
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
-    assert!(
-        !session.load().sends_midi_notes(main_thread()),
+    assert_eq!(
+        session.load().note_send(main_thread()),
+        NoteSend::CLAP_AND_MIDI,
         "port 0 prefers CLAP"
     );
 
     session
         .controls
         .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
-    assert!(session.load().sends_midi_notes(main_thread()));
+    assert_eq!(session.load().note_send(main_thread()), NoteSend::Midi);
     let mut active = session.activate();
-    assert!(active.sends_midi_notes(), "read at activation");
+    assert_eq!(active.note_send(), NoteSend::Midi, "read at activation");
 
     session
         .controls
         .set_preferred_dialect(PREFERRED_DIALECT_DEFAULT);
     active.reactivate().expect("reactivates");
-    assert!(!active.sends_midi_notes(), "re-read at re-activation");
+    assert_eq!(
+        active.note_send(),
+        NoteSend::CLAP_AND_MIDI,
+        "re-read at re-activation"
+    );
 
     session
         .controls
         .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
     active.reactivate().expect("reactivates");
-    assert!(active.sends_midi_notes());
+    assert_eq!(active.note_send(), NoteSend::Midi);
 }
 
 /// `note-ports.h`: `clap_event_midi` goes only to a note port that declares
@@ -828,15 +851,77 @@ fn midi_goes_only_to_note_ports_that_declare_the_midi_dialect() {
 
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
     assert_eq!(
-        session.load().midi_capable_ports(main_thread()),
-        Ok(vec![true, true])
+        session.load().note_sends(main_thread()),
+        Ok(vec![NoteSend::CLAP_AND_MIDI, NoteSend::Midi])
     );
 
     session.controls.set_port0_dialects(CLAP_NOTE_DIALECT_CLAP);
     assert_eq!(
-        session.load().midi_capable_ports(main_thread()),
-        Ok(vec![false, true]),
+        session.load().note_sends(main_thread()),
+        Ok(vec![NoteSend::CLAP_ONLY, NoteSend::Midi]),
         "port 0 declared no MIDI dialect"
+    );
+}
+
+/// A plugin that declares no input note port is sent CLAP note events alone,
+/// by the first-port answer; it has no port to list. A port it counts but will
+/// not describe is another kind, tested below.
+#[test]
+fn a_plugin_with_no_input_note_port_is_sent_clap_notes() {
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    session.controls.set_note_in_ports(0);
+    let loaded = session.load();
+    assert_eq!(loaded.note_port_count(main_thread(), true), 0);
+    assert_eq!(loaded.note_send(main_thread()), NoteSend::CLAP_ONLY);
+    assert_eq!(loaded.note_sends(main_thread()), Ok(vec![]));
+}
+
+/// A port the plugin counts but will not describe is sent nothing, by the
+/// first-port answer as by the per-port list.
+#[test]
+fn a_note_port_the_plugin_will_not_describe_is_sent_nothing() {
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    session.controls.set_port0_info_refused(true);
+    let loaded = session.load();
+    assert_eq!(loaded.note_port_count(main_thread(), true), 2);
+    assert_eq!(loaded.note_send(main_thread()), NoteSend::Nothing);
+    assert_eq!(
+        loaded.note_sends(main_thread()),
+        Ok(vec![NoteSend::Nothing, NoteSend::Midi])
+    );
+}
+
+/// `note-ports.h`: a host sends only a dialect the port supports. A port that
+/// lists only MPE or MIDI 2.0 takes neither dialect this host sends, so it is
+/// sent nothing, read at activation; a preference the port does not list is
+/// not sent either.
+#[test]
+fn notes_are_sent_only_a_dialect_the_note_port_supports() {
+    use clap_sys::ext::note_ports::{
+        CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE,
+        CLAP_NOTE_DIALECT_MIDI2,
+    };
+
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    for only in [CLAP_NOTE_DIALECT_MIDI_MPE, CLAP_NOTE_DIALECT_MIDI2] {
+        session.controls.set_port0_dialects(only);
+        session.controls.set_preferred_dialect(only);
+        assert_eq!(session.load().note_send(main_thread()), NoteSend::Nothing);
+        assert_eq!(
+            session.activate().note_send(),
+            NoteSend::Nothing,
+            "read at activation"
+        );
+    }
+
+    session.controls.set_port0_dialects(CLAP_NOTE_DIALECT_CLAP);
+    session
+        .controls
+        .set_preferred_dialect(CLAP_NOTE_DIALECT_MIDI);
+    assert_eq!(
+        session.load().note_send(main_thread()),
+        NoteSend::CLAP_ONLY,
+        "MIDI is preferred but not supported"
     );
 }
 

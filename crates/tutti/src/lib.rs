@@ -954,10 +954,10 @@ pub mod midi {
         TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
-        HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages,
-        SyncOut, SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, ClipNote, HarmonyChanges, HarmonyChangesError,
+        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
+        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
     pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]

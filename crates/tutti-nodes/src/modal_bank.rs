@@ -65,7 +65,7 @@ pub struct ModalBankSet {
 control_set! {
     ModalBankSet(s): ModalControls = s.start;
     live: (all);
-    Frequency => Hz = frequency { whole },
+    Frequency => Hz = frequency { whole, no_ring },
     Decay => Seconds = decay { whole };
 
     fn defaults(&self) -> ModalControls {
@@ -155,9 +155,11 @@ impl<F: Float> Kernel for ModalBankKernel<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::reported_tail;
     use tutti_dsp::Mode;
+    use tutti_graph::ParamNode;
     use tutti_graph::contract::{assert_declared_tail, prepared};
-    use tutti_units::Gain;
+    use tutti_units::{Gain, UnitParam};
 
     const RATE: SampleRate = SampleRate::SR_48K;
 
@@ -181,6 +183,34 @@ mod tests {
     #[test]
     fn a_bank_has_at_least_one_mode() {
         assert!(Modes::try_from(&[][..]).is_err());
+    }
+
+    /// The tail reads the decay and no frequency: moving the frequency alone leaves the
+    /// reported tail, which is what its `no_ring` flag promises.
+    #[test]
+    fn the_frequency_does_not_change_the_reported_tail() {
+        let impulse = tutti_fixtures::signal::impulse::<f32>(tutti_units::Samples::new(64));
+        let reported = |hz: f64| {
+            let n = node();
+            assert!(n.param_set().set(UnitParam::Frequency, hz));
+            let mut n = prepared(n, RATE, 64);
+            reported_tail(&mut n, &[&impulse, &impulse])
+        };
+        let set = ModalBankSet {
+            start: ModalControls {
+                frequency: Hz::new(440.0),
+                decay: Seconds::new(1.0),
+            },
+        };
+        assert_eq!(
+            crate::test_support::non_ringing(&set),
+            [tutti_units::UnitAddr::first(UnitParam::Frequency)]
+        );
+        let base = reported(440.0);
+        assert!(matches!(base, Some(Tail::Finite(_))), "{base:?}");
+        for hz in [20.0, 100.0, 5_000.0, 20_000.0] {
+            assert_eq!(reported(hz), base, "{hz} Hz");
+        }
     }
 
     /// The declared tail covers the ring-out.

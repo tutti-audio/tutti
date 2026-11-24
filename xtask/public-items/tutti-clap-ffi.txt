@@ -30,6 +30,7 @@ fn events::header_size
 fn events::input_raw_for_test
 fn events::output_raw_for_test
 fn gui::Plugin::close_gui
+fn gui::Plugin::editor_kind
 fn gui::Plugin::gui_hints
 fn gui::Plugin::has_editor
 fn gui::Plugin::has_floating_editor

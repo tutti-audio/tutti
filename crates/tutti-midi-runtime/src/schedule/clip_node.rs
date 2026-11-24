@@ -43,8 +43,9 @@
 //! end, and nothing is left sounding.
 //!
 //! Which note-off is a note's is decided when the clip is set: a note-off
-//! belongs to the earliest-listed note-on of its key that is at or before
-//! it in time and not already taken, in the order the events are given. A
+//! belongs to the earliest-listed note-on of its key that plays before it
+//! (on an earlier beat, or on its beat and listed before it) and is not
+//! already taken, in the order the events are given. A
 //! host that lists each note's on and off together gets its notes exactly.
 //! A list already in time order (a parsed file) pairs notes of one key
 //! first on, first off, which is right for notes that overlap and, for a
@@ -71,9 +72,10 @@ use tutti_graph::{
 use tutti_midi_protocol::Midi2Translator;
 use tutti_rt::{Publisher, Reader};
 use tutti_ump::{
-    Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, U7, Ump, Voice1, Voice2,
+    Bank, CCNumber, Message, MidiChannel, MidiGroup, NoteKey, NoteNumber, NoteVelocity, U7, Ump,
+    Voice1, Voice2,
 };
-use tutti_units::{Beat, FramesPerBeat};
+use tutti_units::{Beat, BeatDuration, FramesPerBeat};
 
 use crate::ledger::{Class, NoteLedger, Sending};
 
@@ -113,6 +115,8 @@ pub const CLIP_EVENT_DENSITY: EventDensity = EventDensity::per_frame(1);
 /// paired to its note-on, and the chase table that makes a jump to a beat
 /// a binary search.
 ///
+/// [`notes`](Self::notes) lists the notes the pairing gives.
+///
 /// Collect a clip from [`TimedMidiEvent`]s in any order; the sorting, the
 /// translation of MIDI 1.0 events to MIDI 2.0 and the pairing are done there,
 /// so the thread that publishes it does none of it. Two clips are equal when
@@ -125,13 +129,71 @@ pub struct ClipEvents {
     /// in beat order; the states in the order a chase sends them
     /// ([`chase_table`]). Built on the control side with the clip.
     chase: Box<[Box<[Setter]>]>,
+    /// Parallel to `events`: at a note-on's index, the index of the note-off
+    /// that ends it. Built on the control side with the clip; only
+    /// [`notes`](Self::notes) reads it.
+    ends: Box<[Option<u32>]>,
+}
+
+/// A note of a clip: a note-on and the note-off that ends it, if one does
+/// ([`ClipEvents::notes`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipNote {
+    /// The UMP group.
+    pub group: MidiGroup,
+    /// The channel.
+    pub channel: MidiChannel,
+    /// The key.
+    pub note: NoteNumber,
+    /// The Note On velocity at MIDI 2.0 width: a clip stores MIDI 2.0, so a
+    /// MIDI 1.0 velocity is the specification's scaling of it.
+    pub velocity: NoteVelocity,
+    /// Where the note starts.
+    pub start: Beat,
+    /// How long it lasts, from its note-on to its note-off; `None` for a
+    /// note-on no note-off ends: it sounds until playback stops or jumps, or
+    /// the clip is replaced.
+    pub length: Option<BeatDuration>,
 }
 
 impl ClipEvents {
-    /// Control thread: builds the chase table.
+    /// Control thread: builds the chase table and the note ends.
     fn new(events: Box<[ClipEvent]>) -> Self {
         let chase = chase_table(&events);
-        Self { events, chase }
+        let ends = note_ends(&events);
+        Self {
+            events,
+            chase,
+            ends,
+        }
+    }
+
+    /// The clip's notes in the order of their note-ons in the clip, each with
+    /// the length its note-off gives it. A note-off that ends no note-on is
+    /// not a note. Control thread; allocates nothing.
+    pub fn notes(&self) -> impl Iterator<Item = ClipNote> + '_ {
+        self.events
+            .iter()
+            .zip(&*self.ends)
+            .enumerate()
+            .filter_map(|(i, (event, end))| {
+                // A note-on is the event that carries its own id.
+                event.note.filter(|id| id.index() as usize == i)?;
+                let Ok(Message::Midi2(address, Voice2::NoteOn { note, velocity, .. })) =
+                    event.timed.event().decode()
+                else {
+                    return None;
+                };
+                let start = event.timed.beat();
+                Some(ClipNote {
+                    group: address.group,
+                    channel: address.channel,
+                    note,
+                    velocity,
+                    start,
+                    length: end.map(|off| self.events[off as usize].timed.beat() - start),
+                })
+            })
     }
 
     /// How many events the clip holds.
@@ -251,20 +313,34 @@ fn chase_table(events: &[ClipEvent]) -> Box<[Box<[Setter]>]> {
     table.into_values().map(Vec::into_boxed_slice).collect()
 }
 
+/// For each note-on of `events`, the index of its note-off (see
+/// [`ClipEvents::notes`]); `None` elsewhere. Control thread.
+fn note_ends(events: &[ClipEvent]) -> Box<[Option<u32>]> {
+    let mut ends = vec![None; events.len()];
+    for (i, event) in events.iter().enumerate() {
+        if let Some(id) = event.note
+            && id.index() as usize != i
+        {
+            ends[id.index() as usize] = Some(i as u32);
+        }
+    }
+    ends.into()
+}
+
 /// One event of a clip, with the note it starts or ends.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ClipEvent {
     timed: TimedMidiEvent,
     /// For a note-on, its own id; for a note-off, the id of the note-on it
     /// ends; `None` for a note-off that ends none, and for any other message.
-    note: Option<ClipNote>,
+    note: Option<NoteId>,
 }
 
 /// A note's id: the index of its note-on in the sorted clip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ClipNote(NonZeroU32);
+struct NoteId(NonZeroU32);
 
-impl ClipNote {
+impl NoteId {
     fn from_index(index: u32) -> Self {
         Self(NonZeroU32::new(index + 1).expect("clip index below u32::MAX"))
     }
@@ -369,13 +445,15 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
             *first += 1;
         }
         let beat = v[i].1.timed.beat().get();
-        let found = list[*first..]
-            .iter()
-            .copied()
-            .find(|&o| !taken[o as usize] && v[o as usize].1.timed.beat().get() <= beat);
+        // A note-on ends at a note-off that plays after it: on a later beat,
+        // or on its own beat and later in the list.
+        let found = list[*first..].iter().copied().find(|&o| {
+            let on = v[o as usize].1.timed.beat().get();
+            !taken[o as usize] && (on < beat || (on == beat && (o as usize) < i))
+        });
         if let Some(o) = found {
             taken[o as usize] = true;
-            let id = Some(ClipNote::from_index(o));
+            let id = Some(NoteId::from_index(o));
             v[o as usize].1.note = id;
             v[i].1.note = id;
         }
@@ -383,7 +461,7 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
     // A note-on no note-off ends is a note too.
     for (i, (_, e)) in v.iter_mut().enumerate() {
         if e.note.is_none() && matches!(class_of(&e.timed), Class::On(_)) {
-            e.note = Some(ClipNote::from_index(i as u32));
+            e.note = Some(NoteId::from_index(i as u32));
         }
     }
     v.sort_by(|a, b| a.1.timed.beat().get().total_cmp(&b.1.timed.beat().get()));
@@ -396,7 +474,7 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
         .map(|(_, mut e)| {
             e.note = e
                 .note
-                .map(|id| ClipNote::from_index(to_sorted[id.index() as usize]));
+                .map(|id| NoteId::from_index(to_sorted[id.index() as usize]));
             e
         })
         .collect()
@@ -502,7 +580,7 @@ impl std::fmt::Debug for MidiClipNode {
 #[derive(Debug)]
 struct Play {
     walk: Walk,
-    held: NoteLedger<ClipNote>,
+    held: NoteLedger<NoteId>,
 }
 
 impl MidiClipNode {
@@ -550,7 +628,7 @@ impl Beated for ClipEvent {
 /// wherever playback stops or jumps (a seek, a loop wrap), then chase the
 /// channel state the clip set before the jump's beat.
 struct Playing<'a, 'w, 'c> {
-    sending: Sending<'a, 'w, ClipNote>,
+    sending: Sending<'a, 'w, NoteId>,
     chase: &'c [Box<[Setter]>],
 }
 

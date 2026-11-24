@@ -25,7 +25,7 @@ use crate::support;
 use support::main_thread;
 
 use dpi::{LogicalSize, PhysicalSize, Size};
-use tutti_clap_host::{ClapLoaded, ContentScale, LoadOptions};
+use tutti_clap_host::{ClapError, ClapLoaded, ContentScale, LoadOptions};
 use tutti_clap_test_plugin::{
     GUI_ASPECT_H, GUI_ASPECT_W, GUI_CALL_ADJUST_SIZE, GUI_CALL_CAN_RESIZE, GUI_CALL_CREATE,
     GUI_CALL_DESTROY, GUI_CALL_GET_RESIZE_HINTS, GUI_CALL_GET_SIZE, GUI_CALL_HIDE,
@@ -36,7 +36,7 @@ use tutti_clap_test_plugin::{
     GuiCapture, GuiMode,
 };
 use tutti_fixtures::StandInWindow;
-use tutti_plugin_types::{Control, EditorWindow};
+use tutti_plugin_types::{Control, EditorCapabilities, EditorError, EditorWindow, PluginError};
 
 /// Serializes whole scenarios — set mode → reset → load → drive → read — so one
 /// test cannot observe another's calls or run against another's selected
@@ -1195,8 +1195,9 @@ fn the_floating_path_asks_only_the_floating_question() {
 
 /// No geometry call is made on a floating window.
 ///
-/// `set_scale`, `set_parent`, `can_resize`, `adjust_size` and `set_size` are all
-/// marked `[main-thread & !floating]` in `ext/gui.h`. A host that calls them
+/// `set_parent`, `can_resize`, `adjust_size` and `set_size` are marked
+/// `[main-thread & !floating]` in `ext/gui.h`, and the open sequence sends a
+/// floating window no `set_scale`. A host that calls the `!floating` ones
 /// anyway is misbehaving against a window it does not own, and plugins with a
 /// validation layer print exactly that.
 ///
@@ -1228,6 +1229,84 @@ fn a_floating_editor_is_asked_for_no_geometry() {
              out"
         );
     }
+}
+
+/// `ext/gui.h`: `adjust_size` and `set_size` are `[main-thread & !floating]`, so
+/// a resize of a floating editor is refused before the plugin is called.
+#[test]
+fn a_floating_editor_is_not_resized() {
+    let probe = Probe::acquire(GuiMode::FloatingOnly);
+    let mut loaded = probe.load();
+    loaded
+        .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
+        .expect("floating open should succeed");
+    gui_reset();
+
+    let err = loaded
+        .resize_editor(main_thread(), native_size(GUI_WIDTH, GUI_HEIGHT))
+        .expect_err("a floating editor's size is the plugin's");
+
+    assert!(
+        matches!(err, ClapError::FloatingEditor),
+        "the error names the floating editor, got: {err}"
+    );
+    // The caller of the shared vocabulary's resize gets the typed refusal, not
+    // a plugin failure's text.
+    assert!(matches!(
+        EditorWindow::set_editor_size(
+            &mut loaded,
+            main_thread(),
+            native_size(GUI_WIDTH, GUI_HEIGHT)
+        ),
+        Err(PluginError::Editor(EditorError::FloatingEditor))
+    ));
+    assert!(
+        calls(&probe.capture()).is_empty(),
+        "no size call reaches a floating window"
+    );
+}
+
+/// `ext/gui.h`: `can_resize` and `get_resize_hints` are
+/// `[main-thread & !floating]`: a floating editor reports no resizing and no
+/// hints without the plugin being asked.
+#[test]
+fn a_floating_editor_reports_no_resize_capabilities_without_asking() {
+    let probe = Probe::acquire(GuiMode::FloatingOnly);
+    let mut loaded = probe.load();
+    loaded
+        .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
+        .expect("floating open should succeed");
+    gui_reset();
+
+    let caps = loaded.editor_capabilities(main_thread());
+
+    assert_eq!(caps, EditorCapabilities::default());
+    assert!(!caps.resize.resizable);
+    assert!(
+        calls(&probe.capture()).is_empty(),
+        "neither can_resize nor get_resize_hints is called on a floating window"
+    );
+}
+
+/// `ext/gui.h`: `set_scale` is plain `[main-thread]`, so a floating editor is
+/// still told its window's scale (on a physical-pixel window api).
+#[test]
+fn a_floating_editor_is_told_its_scale() {
+    let probe = Probe::acquire(GuiMode::FloatingOnly);
+    let mut loaded = probe.load();
+    loaded
+        .open_floating_editor_with(main_thread(), Some(StandInWindow.handle()), TEST_TITLE)
+        .expect("floating open should succeed");
+    gui_reset();
+
+    let _ = loaded.rescale_editor(main_thread(), ContentScale::new(2.0).expect("a scale"));
+
+    assert_eq!(
+        calls(&probe.capture()).contains(&GUI_CALL_SET_SCALE),
+        !PLATFORM_USES_LOGICAL_PIXELS,
+        "set_scale is allowed on a floating window, and sent where the api counts \
+         in physical pixels"
+    );
 }
 
 /// The suggested title reaches the plugin verbatim.

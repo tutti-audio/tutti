@@ -113,7 +113,7 @@ control_set! {
     FreeverbSet(s): FreeverbControls = FreeverbControls::GENERAL_MIDI;
     live: (if s.cells { 2 } else { 0 });
     RoomSize => Mix = room { whole },
-    Damping => Mix = damp { whole };
+    Damping => Mix = damp { whole, no_ring };
 
     fn defaults(&self) -> FreeverbControls {
         FreeverbControls::GENERAL_MIDI
@@ -231,5 +231,19 @@ impl<F: Float + Lerp> Kernel for FreeverbKernel<F> {
         self.running
             .as_ref()
             .map_or(Tail::Unknown, |r| r.bank.tail_of(controls))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::non_ringing;
+    use tutti_units::{UnitAddr, UnitParam};
+
+    /// The damping is the one control the tail does not read.
+    #[test]
+    fn only_the_damping_is_flagged_no_ring() {
+        let set = FreeverbSet { cells: true };
+        assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::Damping)]);
     }
 }
