@@ -292,6 +292,12 @@ impl OutputStream {
         }
     }
 
+    /// Returns the sample rate of the running stream, or of the config the
+    /// next start would use.
+    pub fn sample_rate(&self) -> SampleRate {
+        self.spec.sample_rate
+    }
+
     /// Returns the channel layout of the running stream, or of the config the
     /// next start would use. This is the width [`process_audio`](crate::process_audio)
     /// is handed.
