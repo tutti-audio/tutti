@@ -284,7 +284,8 @@ impl<F: Float> Editor<F> {
     /// The frames are on the clock of [`EventTapReader::rate`], the rate the
     /// graph is prepared at now.
     ///
-    /// Opening an id again replaces it. A tap the topology does not name
+    /// Opening an id again ends the reader it replaces
+    /// ([`EventTapReader::source_gone`]). A tap the topology does not name
     /// compiles to nothing. The port must exist now, in the spec as edited
     /// (uncommitted edits included): a key no node has or a port past the
     /// node's event outputs is refused with [`MissingSource`] and nothing is
@@ -326,6 +327,14 @@ impl<F: Float> Editor<F> {
                 if usize::from(port) >= width {
                     return Err(MissingSource::EventInputPort { node, port, width });
                 }
+            }
+        }
+        // The reader this replaces ends as a replaced audio tap's does.
+        if let Some(Closed { meta, unsent }) = self.event_taps.close(id) {
+            if unsent {
+                meta.raise();
+            } else {
+                self.link.end_tap(meta);
             }
         }
         let (reader, writer) = EventTapReader::pair(id, capacity, self.prepare.sample_rate());

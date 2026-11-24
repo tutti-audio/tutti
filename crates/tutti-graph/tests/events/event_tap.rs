@@ -551,11 +551,28 @@ fn an_event_tap_reads_source_gone_once_its_node_is_removed() {
         "what the ring held is read first"
     );
 
+    // Opening the id again ends the reader it replaces, once that commit runs.
+    let again =
+        r.ed.open_event_tap(
+            EventTapId::of(2),
+            EventInputPort::new(NodeKey(3), 0),
+            options(),
+        )
+        .unwrap();
+    assert!(
+        !input.source_gone(),
+        "not before the commit that replaces it"
+    );
+    commit(&mut r);
+    render(&mut r, &[100], 100);
+    assert!(input.source_gone(), "the replaced reader ends");
+    assert!(!again.source_gone());
+
     // Input tap: ends when the node it is on is removed.
     r.ed.remove(NodeKey(3));
     commit(&mut r);
     render(&mut r, &[100], 100);
-    assert!(input.source_gone());
+    assert!(again.source_gone());
 }
 
 /// A source behind a node of declared latency L = 15, beside an output path of
