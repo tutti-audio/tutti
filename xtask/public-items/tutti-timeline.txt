@@ -29,6 +29,13 @@ fn audio::TransportAudio::tempo_generation
 fn audio::TransportAudio::tempo_reader
 fn clock::Control::apply
 fn clock::Control::read
+fn clock::TransportClock::advance
+fn clock::TransportClock::ahead
+fn clock::TransportClock::begin
+fn clock::TransportClock::follow
+fn clock::TransportClock::new
+fn clock::TransportClock::publish_position
+fn clock::TransportClock::sample_rate
 fn clock::TransportClock::set_sample_rate
 fn fsm::TransportFsm::complete_declick
 fn fsm::TransportFsm::declick_outcome

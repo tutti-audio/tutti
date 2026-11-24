@@ -368,6 +368,12 @@ fn metadata::Processing::new
 fn metadata::Processing::with_measured
 fn midi::WireMidi::at
 fn midi::group_of_port
+fn midi_intake::MidiIntake::admit
+fn midi_intake::MidiIntake::lose
+fn midi_intake::MidiIntake::lost
+fn midi_intake::MidiIntake::new_chunk
+fn midi_intake::MidiIntake::push
+fn midi_intake::MidiIntake::push_displacing
 fn note_expression::NoteExpressionChanges::add_change
 fn note_expression::NoteExpressionChanges::is_empty
 fn note_expression::NoteExpressionChanges::new
