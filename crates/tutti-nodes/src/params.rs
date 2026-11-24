@@ -136,7 +136,10 @@ pub struct Control {
     pub valid: ControlValid,
     /// Whether the kernel's [`tail_of`](crate::Kernel::tail_of) reads it: whether this control
     /// alone can change the ring-out. `false` is a promise that the tail never reads it, which a
-    /// driven port of it then does not widen to the ceiling.
+    /// driven port of it then does not widen to the ceiling. A control counts as driven for
+    /// every block its port has a source, a flat signal and automation at rest included, so a
+    /// node with an automated ring control reports its ceiling from the automation's first
+    /// event on.
     pub rings: bool,
 }
 

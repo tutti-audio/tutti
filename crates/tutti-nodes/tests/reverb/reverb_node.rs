@@ -424,10 +424,13 @@ fn ceiling(node: &FreeverbNode<f32>) -> usize {
     }
 }
 
-/// A driven room may take any value after the block, so a block whose port is low reports the
-/// ceiling the shape declares, not the figure of the low room.
+/// A port has frames for every block it has a source, so a signal that is flat for the block
+/// (here, low) is a driven room: it may take any value after the block, and the block reports
+/// the ceiling the shape declares, not the figure of the low room. An automation source at rest
+/// also hands frames (`tutti-graph`'s `ParamState::port` frames a port whenever it has a source);
+/// a node-level drive cannot deliver a param event, so a flat signal is the nearest this pins.
 #[test]
-fn a_driven_room_reports_the_ceiling_not_the_blocks_figure() {
+fn a_flat_signal_on_the_room_reports_the_ceiling_not_the_blocks_figure() {
     let none: Option<&[f32]> = None;
     let low = vec![0.1f32; BLOCK];
     let mut rig = Rig::new(live(controls(0.5, 0.5)));
