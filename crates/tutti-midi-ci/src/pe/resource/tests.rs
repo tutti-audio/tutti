@@ -7,7 +7,7 @@ use tutti_platform::Instant;
 
 use tutti_ump::{ControlValue, ManufacturerBytesError, ManufacturerId, MidiChannel, U7};
 
-use super::super::header::{PeEncoding, PePage};
+use super::super::header::{PeEncoding, PePage, PeSetScope};
 use super::super::limits::{MediaType, PeTextError, PropertyNameError, ResourceId};
 use super::super::partial::PartialUpdate;
 use super::super::tree::PeJson;
@@ -1154,7 +1154,9 @@ fn an_inquiry_for_resource_list_is_refused_what_it_does_not_declare() {
     ));
     assert!(matches!(
         init.get(&ResourceGet::new(target()).flow_controlled(), now),
-        Err(CallError::Refused(RequestRefused::FlowControlNotDeclared(_)))
+        Err(CallError::Refused(RequestRefused::FlowControlNotDeclared(
+            _
+        )))
     ));
     assert!(matches!(
         init.subscribe(&ResourceGet::new(target()), now),
@@ -1277,7 +1279,7 @@ fn a_set_is_checked_against_its_entry() {
     assert!(matches!(
         partial.check(&local_on),
         Err(RequestRefused::CannotSet {
-            scope: "in part",
+            scope: PeSetScope::Partial,
             ..
         })
     ));
@@ -1289,7 +1291,7 @@ fn a_set_is_checked_against_its_entry() {
     assert!(matches!(
         read_only.check(&entry_of(StandardResource::ChannelMode)),
         Err(RequestRefused::CannotSet {
-            scope: "in whole",
+            scope: PeSetScope::Whole,
             ..
         })
     ));

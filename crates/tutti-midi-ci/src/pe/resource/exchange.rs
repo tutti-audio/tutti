@@ -12,7 +12,8 @@ use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousReques
 use super::super::chunk::{PeRequestId, split_message};
 use super::super::flow::PeMessageKind;
 use super::super::header::{
-    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeStatus, PeSubscription, PeUpdateCommand,
+    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeSetScope, PeStatus, PeSubscription,
+    PeUpdateCommand,
 };
 use super::super::initiator::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeSet, PeSettings};
 use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
@@ -1098,7 +1099,7 @@ fn set_replaces_the_data_and_get_reads_it_back() {
     assert!(matches!(
         link.served.last(),
         Some(ResponderEvent::Changed {
-            how: ChangeKind::Full,
+            how: PeSetScope::Whole,
             ..
         })
     ));
@@ -1147,7 +1148,7 @@ fn a_partial_set_changes_what_a_later_get_returns() {
     assert!(matches!(
         link.served.last(),
         Some(ResponderEvent::Changed {
-            how: ChangeKind::Partial,
+            how: PeSetScope::Partial,
             ..
         })
     ));
