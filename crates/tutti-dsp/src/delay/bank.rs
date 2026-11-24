@@ -277,6 +277,9 @@ impl<F: Float + Lerp> DelayBank<F> {
     /// highest value is the longest ring only because the figure rises with the time and with
     /// each feedback, neither of which is negative: a control the figure falls with needs its
     /// own extreme passed.
+    ///
+    /// The figure is for the times as they settle: a time still moving is covered in length,
+    /// not in level.
     #[must_use]
     pub fn tail_of(&self, ramps: &DelayRamps<F>, controls: &DelayControls) -> Tail {
         let width = self.lines.len();
@@ -319,7 +322,10 @@ impl<F: Float + Lerp> DelayBank<F> {
 
     /// The first echo and the passes to the floor at loop gain `gain`, each as long as `longest`
     /// frames and the spread of the read (the echo `k` is spread over `k + 1` frames at most for a
-    /// linear read; [`ring_seconds`] allows two a pass, a cubic read's three need one more).
+    /// linear read; [`ring_seconds`] allows two a pass, and a cubic read's four taps reach one
+    /// frame further). A read at a fixed fraction amplifies no frequency, which bounds an
+    /// echo's energy; the peak of a dense input is measured, at 0.2, 0.5 and 0.8 of a frame
+    /// and loop gains 0.6 and 0.99.
     fn ring(&self, gain: Feedback, longest: Samples) -> Tail {
         let spread = match self.interpolation {
             InterpolationMode::CubicHermite => 1,

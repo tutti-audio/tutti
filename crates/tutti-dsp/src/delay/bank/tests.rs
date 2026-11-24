@@ -976,7 +976,9 @@ fn a_synced_delay_rings_for_the_longest_line() {
 /// step, four longest-periods long) every frame from the tail past the last input is at most
 /// the floor of the render's peak. No feedback, a mid feedback, the stable bound with the
 /// cross-feedback, two channels of different times crossed and read by the cubic at a
-/// fractional delay, a delay in flight from a long, loud setting to a short, quiet one, and a
+/// fractional delay, the cubic alone at 0.2, 0.5 and 0.8 of a frame past 80 frames (a read
+/// that disperses and whose taps sum to as much as 1.25 in magnitude) at a mid loop gain and
+/// at the stable bound, a delay in flight from a long, loud setting to a short, quiet one, and a
 /// synced one under a tempo; at 8 kHz.
 #[test]
 fn the_tail_covers_the_ring_out_of_every_stimulus() {
@@ -1022,6 +1024,54 @@ fn the_tail_covers_the_ring_out_of_every_stimulus() {
             controls(0.0203, 0.5, 0.3),
             controls(0.0203, 0.5, 0.3),
             241,
+            None,
+        ),
+        (
+            "cubic at 0.2 of a frame, mid",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.010025, 0.6, 0.0),
+            controls(0.010025, 0.6, 0.0),
+            81,
+            None,
+        ),
+        (
+            "cubic at 0.2 of a frame, the bound",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.010025, 0.99, 0.0),
+            controls(0.010025, 0.99, 0.0),
+            81,
+            None,
+        ),
+        (
+            "cubic at 0.5 of a frame, mid",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.0100625, 0.6, 0.0),
+            controls(0.0100625, 0.6, 0.0),
+            81,
+            None,
+        ),
+        (
+            "cubic at 0.5 of a frame, the bound",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.0100625, 0.99, 0.0),
+            controls(0.0100625, 0.99, 0.0),
+            81,
+            None,
+        ),
+        (
+            "cubic at 0.8 of a frame, mid",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.0101, 0.6, 0.0),
+            controls(0.0101, 0.6, 0.0),
+            81,
+            None,
+        ),
+        (
+            "cubic at 0.8 of a frame, the bound",
+            mono(InterpolationMode::CubicHermite),
+            controls(0.0101, 0.99, 0.0),
+            controls(0.0101, 0.99, 0.0),
+            81,
             None,
         ),
         (
