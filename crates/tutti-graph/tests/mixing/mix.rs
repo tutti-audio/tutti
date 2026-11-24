@@ -128,14 +128,11 @@ impl Rig {
     /// Render `blocks` (each a block length) of the signal `x`; the
     /// executor's output.
     fn run(&mut self, blocks: &[usize], x: &dyn Fn(u64) -> f32) -> Vec<f32> {
-        let mut all = Vec::new();
-        for &n in blocks {
-            let input: Vec<f32> = (0..n as u64).map(|i| x(self.frame + i)).collect();
-            let a = self.harness.block(n, &input);
-            all.extend(&a[0]);
-            self.frame += n as u64;
-        }
-        all
+        let mut all = self.harness.run_with(blocks, self.frame, |start, n| {
+            (0..n as u64).map(|i| x(start + i)).collect()
+        });
+        self.frame += blocks.iter().map(|&n| n as u64).sum::<u64>();
+        all.swap_remove(0)
     }
 
     fn frames(&mut self, frames: usize, x: &dyn Fn(u64) -> f32) -> Vec<f32> {
@@ -517,9 +514,7 @@ fn a_mix_moving_during_a_fade_follows_frame_by_frame() {
 fn a_mix_stored_mid_block_lands_on_the_next_block() {
     for workers in WORKERS {
         let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(common::test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let (hook, handle) = Rendezvous::new();
         ed.insert(key(1), "hook", Unforkable(hook));
         ed.insert(key(2), "gain", Unforkable(TestNode::new(plain())));

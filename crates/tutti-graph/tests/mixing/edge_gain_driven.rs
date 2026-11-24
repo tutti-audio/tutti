@@ -143,42 +143,23 @@ fn at_port(node: u64) -> InputPort {
     at(node)
 }
 
-/// Render `blocks` blocks on `workers` participants.
-fn render(rig: &Rig, workers: usize, blocks: usize) -> Vec<f32> {
-    let mut harness = Harness::with_workers(BLOCK, workers);
-    if let Some((id, range)) = rig.range {
-        harness.start_edge_gain_range(id, range);
-    }
-    harness.switch(&rig.graph(), &rig.kinds);
-    let mut got = Vec::new();
-    for b in 0..blocks {
-        let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-    }
-    got
-}
-
-/// `blocks` more blocks of `harness`.
+/// `blocks` more blocks of `harness`, from frame 0: output 0.
 fn run(harness: &mut Harness, blocks: usize) -> Vec<f32> {
-    let mut got = Vec::new();
-    for b in 0..blocks {
-        let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-    }
-    got
+    harness.run(&vec![BLOCK; blocks], 0).swap_remove(0)
 }
 
+/// `blocks` blocks on one and on four participants, bit for bit; the
+/// one-participant output 0.
 fn render_both(rig: &Rig, blocks: usize) -> Vec<f32> {
-    let serial = render(rig, 1, blocks);
-    let parallel = render(rig, 4, blocks);
-    assert_eq!(
-        serial.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        parallel.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        "parallel differs from serial"
-    );
-    serial
+    let serial = common::agree_across_workers([4], |workers| {
+        let mut harness = Harness::with_workers(BLOCK, workers);
+        if let Some((id, range)) = rig.range {
+            harness.start_edge_gain_range(id, range);
+        }
+        harness.switch(&rig.graph(), &rig.kinds);
+        common::bits_of(&run(&mut harness, blocks))
+    });
+    serial.into_iter().map(f32::from_bits).collect()
 }
 
 /// The weight a driver of this `latency` offset gives frame `n`: the step of
