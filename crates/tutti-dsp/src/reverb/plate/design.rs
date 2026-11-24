@@ -225,7 +225,7 @@ impl PlateControls {
     /// Designs the controls into `out` in place, at `rate`: the network the bank runs (the
     /// input bandwidth, which a network does not describe, is the bank's). A control outside
     /// its range is clamped and a non-finite one takes its [`DEFAULT`](Self::DEFAULT) value.
-    /// A network is about 111 KB, so it is built where it lives; no allocation.
+    /// A network is about 115 KB, so it is built where it lives; no allocation.
     ///
     /// # Panics
     ///
