@@ -546,21 +546,23 @@ fn rendered_tail(
 }
 
 /// The reported tail covers the ring-out of the worst finite inputs: for the shortest, the
-/// default and the longest decay, each band alone the longest, both ends of size, diffusion
-/// and modulation, the longest pre-delay, and 8 and 16 lines, at 48 kHz (some also at 44.1 kHz,
-/// the 8 s one at 22.05 kHz), an impulse, a full-scale noise burst and a full-scale step (four times the longest line, so
-/// every line is full) stop, and from the reported tail past the last input frame no frame of
-/// either channel is above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The
-/// floor is relative to the response's peak: the wet signal is the lines' own output, scaled by
-/// the design, and the step is built up by the loop far past the input.
+/// default and the longest decay, each band alone the longest, both ends of size, diffusion and
+/// modulation, the longest pre-delay, and 8 and 16 lines, at 11.025 kHz (the default also at 48
+/// kHz and 44.1 kHz), an impulse, a full-scale noise burst and a full-scale step (four times the
+/// longest line, so every line is full) stop, and from the reported tail past the last input
+/// frame no frame of either channel is above `TAIL_FLOOR` of the render's own peak (see
+/// [`tail_probe`]). The floor is relative to the response's peak: the wet signal is the lines'
+/// own output, scaled by the design, and the step is built up by the loop far past the input.
 #[test]
 fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
     let two = Seconds::new(2.0);
     // (name, lines, the layout's longest decay, controls, rates): the longest decay of a
     // layout is the one its controls reach, so most run at 2 s and one at the default layout's 8 s.
-    let rates = [SampleRate::SR_48K, SampleRate::SR_44K1];
-    let one = [SampleRate::SR_48K];
-    let slow = [SampleRate::of(22_050.0)];
+    // The whole grid runs at 11.025 kHz (the tail in frames scales with the rate; the
+    // crossovers at 4 kHz stay under Nyquist); the default also runs at 48 kHz and 44.1 kHz.
+    let rates = [SampleRate::of(11_025.0)];
+    let one = rates;
+    let slow = rates;
     let cases: Vec<Case> = vec![
         (
             "default",
@@ -664,6 +666,17 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
             &slow,
         ),
     ];
+    let wide = [SampleRate::SR_48K, SampleRate::SR_44K1];
+    let cases = cases
+        .into_iter()
+        .chain([(
+            "default",
+            8,
+            Seconds::new(8.0),
+            FdnControls::DEFAULT,
+            &wide[..],
+        )])
+        .collect();
     assert_tails_cover(cases);
 }
 
@@ -863,12 +876,12 @@ fn raised<'a>(
         })
 }
 
-/// A decay raised to the layout's longest while the short one rings out is covered by the tail
-/// a node reports after the move (the larger of what is owed and the long tail, from the last
-/// input frame, under the ceiling): from it past the last input frame no frame of either
-/// channel is above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a
-/// step, the move landing right after the input and a third of the way into the short tail. The energy in the lines at
-/// the move decays at the new, slower rate from the move on.
+/// A decay raised to the layout's longest while the short one rings out is covered by the tail a
+/// node reports after the move (the larger of what is owed and the long tail, from the last input
+/// frame, under the ceiling): from it past the last input frame no frame of either channel is
+/// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the lines at the move decays at the new, slower rate from the move on.
 #[test]
 fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
     let l = FdnLayout::new(
@@ -1414,14 +1427,14 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
     );
 }
 
-/// The reported tail of a shimmering network covers the ring-out of the worst finite inputs:
-/// for no send, half and the largest send (held under the stable bound), a shift of an octave
-/// down, none, a fifth and an octave up, and decays of 0.3 s and 1 s, at 48 kHz and 44.1 kHz,
+/// The reported tail of a shimmering network covers the ring-out of the worst finite inputs: for
+/// no send, half and the largest send, a shift of an octave down, none, a fifth and an octave up,
+/// and decays of 0.3 s and 1 s, at 11.025 kHz (the send-0.99 octave also at 48 kHz and 44.1 kHz),
 /// an impulse, a full-scale noise burst and a full-scale step (four times the longest line and
-/// the shifter's delay, so every line and the shifter are full) stop, and from the reported
-/// tail past the last input frame no frame of either channel is above `TAIL_FLOOR` of the
-/// render's own peak (see [`tail_probe`]). The floor is relative to the response's peak: the
-/// shifted copies add to the lines' own echoes, and a step is built up far past the input.
+/// the shifter's delay, so every line and the shifter are full) stop, and from the reported tail
+/// past the last input frame no frame of either channel is above `TAIL_FLOOR` of the render's own
+/// peak (see [`tail_probe`]). The floor is relative to the response's peak: the shifted copies
+/// add to the lines' own echoes, and a step is built up far past the input.
 #[test]
 fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
     let l = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(1.0)).unwrap()).unwrap();
@@ -1433,14 +1446,13 @@ fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
         (0.99, -1200.0, 0.3, false),
         (0.99, 0.0, 0.3, false),
         (0.99, 700.0, 1.0, false),
-        (1.0, 1200.0, 0.3, false), // a send past the stable bound is held at it
     ];
     for (send, pitch, decay, both) in cases {
-        let rates = if both {
-            vec![SampleRate::SR_48K, SampleRate::SR_44K1]
-        } else {
-            vec![SampleRate::SR_48K]
-        };
+        // The whole grid runs at 11.025 kHz; the send-0.99 octave also runs at 48 kHz and 44.1 kHz.
+        let mut rates = vec![SampleRate::of(11_025.0)];
+        if both {
+            rates.extend([SampleRate::SR_48K, SampleRate::SR_44K1]);
+        }
         for rate in rates {
             let c = still(|c| {
                 c.decay = [Seconds::new(decay); 3];

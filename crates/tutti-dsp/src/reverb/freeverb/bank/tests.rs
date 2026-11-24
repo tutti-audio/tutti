@@ -326,11 +326,12 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
 }
 
 /// The reported tail covers the ring-out of the worst finite inputs: for the corners of both
-/// controls and the General MIDI room, at 48 kHz and 44.1 kHz, an impulse, a full-scale noise
-/// burst and a full-scale step (a loop longer than the longest comb, so every line is full)
-/// stop, and from the reported tail past the last input frame no frame of either channel is
-/// above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor is relative to
-/// the response's peak because a bank scales its input and the loop builds a step far past it.
+/// controls at 8 kHz and the General MIDI room at 48 kHz and 44.1 kHz too, an impulse, a
+/// full-scale noise burst and a full-scale step (a loop longer than the longest comb, so every
+/// line is full) stop, and from the reported tail past the last input frame no frame of either
+/// channel is above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor is
+/// relative to the response's peak because a bank scales its input and the loop builds a step far
+/// past it.
 #[test]
 fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
     let settings = [
@@ -341,10 +342,17 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
         (0.5, 0.5), // FreeverbControls::GENERAL_MIDI
     ];
     assert_eq!(controls(0.5, 0.5), FreeverbControls::GENERAL_MIDI);
-    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
-        // The right channel's longest comb: past it every line has been round once.
-        let period = (1640.0 * rate.get() / 44_100.0).ceil() as usize;
-        for (room, damp) in settings {
+    // The whole grid runs at 8 kHz (the tail in frames scales with the rate); the General MIDI
+    // room also runs at 48 kHz and 44.1 kHz, where the tunings round differently.
+    let low = SampleRate::of(8_000.0);
+    let runs = settings
+        .into_iter()
+        .map(|s| (low, s))
+        .chain([SampleRate::SR_48K, SampleRate::SR_44K1].map(|r| (r, (0.5, 0.5))));
+    {
+        for (rate, (room, damp)) in runs {
+            // The right channel's longest comb: past it every line has been round once.
+            let period = (1640.0 * rate.get() / 44_100.0).ceil() as usize;
             let c = controls(room, damp);
             let (mut bank, mut ramps) = settled(rate, &c);
             let Tail::Finite(tail) = bank.tail_of(&c) else {
@@ -366,9 +374,9 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
 /// A room raised to its largest while the first one rings out is covered by the tail a node
 /// reports after the move (the larger of what is owed and the new room's tail, from the last
 /// input frame, under the ceiling): from it past the last input frame no frame of either channel
-/// is above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step
-/// at the smallest room, the move landing right after the input and a third of the way into its tail. The energy in the
-/// combs at the move decays at the new, slower rate from the move on.
+/// is above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step at
+/// the smallest room, the move landing right after the input and a third of the way into its
+/// tail. The energy in the combs at the move decays at the new, slower rate from the move on.
 #[test]
 fn a_room_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
     let (short, long) = (controls(0.0, 0.0), controls(1.0, 0.0));

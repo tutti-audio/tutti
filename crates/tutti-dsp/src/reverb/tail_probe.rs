@@ -6,6 +6,12 @@
 //! carries is its own response, not the input (a bank scales its input, and a loop builds a
 //! step up far past it). A frame at or past the tail is under the floor when it is at most
 //! `TAIL_FLOOR` of the largest absolute sample of the whole render, every channel.
+//!
+//! The peak is taken over the whole render, the input period included, so a quiet tail after a
+//! loud build-up is judged against the build-up. That is the audible reference, and it is the
+//! lenient one for a step, whose response peaks as the input stops. The impulse and the noise
+//! burst, whose responses peak early or at random, keep the check honest, which is why all
+//! three stimuli run.
 
 use tutti_buffers::Float;
 use tutti_fixtures::signal::{impulse, peak};
@@ -30,7 +36,8 @@ pub(crate) fn stimuli<F: Float>(burst: usize) -> [(&'static str, Vec<F>); 3] {
 }
 
 /// The frames to render for `input_frames` of input and a reported `tail`: the input, the
-/// tail, and then `period` more or a fifth of the tail, whichever is longer, to see a violation.
+/// tail, and then `period` more or a fifth of the tail, whichever is longer. That window past the
+/// tail is the probe's limit: a violation later than it is not seen.
 pub(crate) fn run_length(input_frames: usize, tail: usize, period: usize) -> usize {
     input_frames + tail + period.max(tail / 5)
 }
@@ -44,6 +51,10 @@ pub(crate) fn padded<F: Float>(input: &[F], frames: usize) -> Vec<F> {
 
 /// Asserts that every frame of `channels` at and after `tail` frames past the last of
 /// `input_frames` of input is at most [`TAIL_FLOOR`] of the render's peak.
+///
+/// A tail of `T` after a last input frame at index `n - 1` keeps frames `n ..= n - 1 + T`. The
+/// check starts at frame `n - 1 + T`, the last frame the tail keeps, so it is one frame stricter
+/// than the node's cut, which silences from frame `n + T`.
 ///
 /// # Panics
 ///
@@ -72,36 +83,16 @@ pub(crate) fn assert_tail_covers<F: Float>(
     );
 }
 
-/// Whether some frame of `channels` at or after `after` frames past the last of
-/// `input_frames` of input is above [`TAIL_FLOOR`] of the render's peak: the ring-out outlasts
-/// `after`, which is what a tail reported as unbounded claims.
+/// What a node's tail clock reports when the settings move to a longer tail while `owed` frames
+/// of the old ring-out are left: the larger of `owed` and the new settings' tail `current`,
+/// from the last input frame, held under the bank's `ceiling`.
 ///
-/// # Panics
-///
-/// When the render is silent or ends before that frame.
-pub(crate) fn rings_past<F: Float>(
-    what: &str,
-    input_frames: usize,
-    after: usize,
-    channels: &[&[F]],
-) -> bool {
-    let top = channels.iter().map(|c| peak(c)).fold(F::ZERO, F::max);
-    let top = top.to_f64();
-    assert!(top > 0.0, "{what}: the render is silent");
-    let floor = TAIL_FLOOR.to_amplitude().get() * top;
-    let from = input_frames - 1 + after;
-    assert!(
-        channels.iter().all(|c| c.len() > from),
-        "{what}: the render ends before frame {from}"
-    );
-    channels
-        .iter()
-        .any(|c| c[from..].iter().any(|y| y.abs().to_f64() > floor))
-}
-
-/// What a node's tail clock reports when the settings move to a longer
-/// tail `current` frames after the last input, while `owed` of the old ring-out is left: the
-/// longer of the two, measured from the last input frame, held under the bank's `ceiling`.
+/// This restates the rule of the node's tail clock (`TailClock::advance` in
+/// `tutti-nodes/src/tail_clock.rs`: the ring is the larger of what is owed and the current
+/// settings' tail, under the ceiling, from the last non-silent input frame). tutti-dsp cannot
+/// name tutti-nodes, so a change to the clock needs a change here; the node-level test
+/// `the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tail` checks that
+/// the node applies the rule.
 pub(crate) fn raised_tail(owed: usize, current: usize, ceiling: usize) -> usize {
     owed.max(current).min(ceiling)
 }
