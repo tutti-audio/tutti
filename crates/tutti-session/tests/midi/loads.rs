@@ -212,7 +212,7 @@ fn a_clip_file_loads_as_its_notes_and_its_header_tempo() {
     assert_eq!(loaded.track(0).unwrap().events.len(), 5);
     // The Program Change is the one header message nothing uses.
     assert_eq!(
-        loaded.report().dropped,
+        loaded.report().unplayed,
         [Unplayed::Header {
             tick: Tick(0),
             packet: program_change
@@ -330,7 +330,7 @@ fn a_repaired_file_reports_what_the_read_added() {
             ReadRepair::DefaultTimeSignature { track: 0 },
         ]
     );
-    assert!(report.dropped.is_empty());
+    assert!(report.unplayed.is_empty());
     assert!(!report.is_clean());
     assert_eq!(
         loaded.tempo().unwrap().seconds_at(Beat::new(2.0)),
@@ -351,7 +351,7 @@ fn an_event_with_no_packet_is_reported_at_its_beat() {
         &[track(&[&TEMPO_120, &THREE_FOUR, &escape, &note(0, 60)])],
     );
     let loaded = load(&mut session(), write(dir.path(), "esc.mid", &bytes)).expect("loads");
-    let dropped = &loaded.report().dropped;
+    let dropped = &loaded.report().unplayed;
     assert_eq!(dropped.len(), 1);
     let Unplayed::Smf {
         track, beat, why, ..
@@ -395,7 +395,7 @@ fn smpte_smf(division: u16, events: &[&[u8]]) -> Vec<u8> {
 /// Where the bare `F7` escape of `file`'s track, the one event with no
 /// packet, lands, in beats.
 fn escape_beat(loaded: &LoadedMidi) -> Beat {
-    let dropped = &loaded.report().dropped;
+    let dropped = &loaded.report().unplayed;
     assert_eq!(dropped.len(), 1);
     let Unplayed::Smf { beat, .. } = &dropped[0] else {
         panic!("a Standard MIDI File's event: {:?}", dropped[0]);

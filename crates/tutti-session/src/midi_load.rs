@@ -145,7 +145,7 @@ pub struct LoadedTrack {
 }
 
 /// Something of a file that a load does not play, listed in
-/// [`LoadReport::dropped`]: each variant is one kind of file's own account of
+/// [`LoadReport::unplayed`]: each variant is one kind of file's own account of
 /// what it left out.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -199,7 +199,7 @@ pub struct LoadReport {
     /// have no packet, in track order. For a Clip File, the messages of its
     /// header that the load does nothing with, in header order, then the packets
     /// of its sequence that are no message, in sequence order.
-    pub dropped: Vec<Unplayed>,
+    pub unplayed: Vec<Unplayed>,
     /// The Time Signature events no meter holds, so no change of meter was
     /// made for them, each with its sequence's track (format 2), or `None`
     /// for the file's one timeline.
@@ -212,7 +212,7 @@ impl LoadReport {
     #[must_use]
     pub fn is_clean(&self) -> bool {
         self.repairs.is_empty()
-            && self.dropped.is_empty()
+            && self.unplayed.is_empty()
             && self.refused_time_signatures.is_empty()
     }
 }
@@ -445,13 +445,13 @@ fn convert_clip(file: &ClipFile, report: &mut LoadReport) -> (Vec<LoadedTrack>, 
             .into_iter()
             .map(|refused| (None, refused)),
     );
-    report.dropped.extend(
+    report.unplayed.extend(
         file.header()
             .unused_messages()
             .map(|(tick, packet)| Unplayed::Header { tick, packet }),
     );
     let timeline = file.timeline();
-    report.dropped.extend(
+    report.unplayed.extend(
         timeline
             .unknown
             .into_iter()
@@ -477,7 +477,7 @@ fn clip_of(
 
 /// `timeline` as a clip, its dropped events added to `report` as track `index`'s.
 fn clip_from(report: &mut LoadReport, index: usize, timeline: SmfTimeline) -> Arc<ClipEvents> {
-    report.dropped.extend(
+    report.unplayed.extend(
         timeline
             .dropped
             .into_iter()
