@@ -388,7 +388,7 @@ impl ForeignLaneControls {
     /// Sets the lane's range, the span its offsets scale by and the clamp,
     /// from the next block. Control thread; the value it replaces is freed
     /// by the lane's [`reclaim`](LaneControls::reclaim).
-    pub fn set_range(&self, range: ParamRange) {
+    pub fn publish_range(&self, range: ParamRange) {
         self.range.publish(range);
     }
 }
@@ -1357,7 +1357,7 @@ mod tests {
                 panic!("a plugin lane reads its own cell");
             };
             let _held = reader.lend();
-            controls.set_range(ParamRange::of(0.25, 0.75));
+            controls.publish_range(ParamRange::of(0.25, 0.75));
         }
         assert_eq!(
             controls.range.retired_len(),
@@ -1378,11 +1378,11 @@ mod tests {
     #[test]
     fn a_plugin_lane_and_its_fork_read_the_range_set_before_them() {
         let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
-        controls.set_range(ParamRange::of(0.1, 0.9));
+        controls.publish_range(ParamRange::of(0.1, 0.9));
         assert_eq!(node.range.load(), ParamRange::of(0.1, 0.9));
         assert_eq!(controls.lane().range(), (0.1, 0.9));
         let mut fork = node.fork_fresh();
-        controls.set_range(ParamRange::of(0.2, 0.3));
+        controls.publish_range(ParamRange::of(0.2, 0.3));
         assert_eq!(node.range.load(), ParamRange::of(0.2, 0.3));
         assert_eq!(fork.range.load(), ParamRange::of(0.1, 0.9));
     }

@@ -1540,7 +1540,7 @@ fn store_range<F: Float>(
     range: ParamRange,
 ) {
     if let Controls::Foreign(c) = controls {
-        c.set_range(range);
+        c.publish_range(range);
         return;
     }
     match bind {
