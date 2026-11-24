@@ -951,7 +951,10 @@ mod process {
 /// `EventsDropped` at the node, and only that. The server is terminated and
 /// recovery reloads the plugin at the same key; a second block of 300 is cut
 /// the same, so the node's reports total twice the cut. The cut is the graph's,
-/// not the plugin's, so `losses()` stays empty throughout.
+/// not the plugin's, so `losses()` stays empty throughout: each chunk is
+/// answered before the next thing happens to its server, since a chunk the
+/// server is killed under, or falls behind on, is a real loss of its 256
+/// events and is counted as one.
 #[test]
 fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     use tutti_fixtures::midi;
@@ -984,6 +987,18 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         .unwrap();
     let notes = || (0..300).map(|i| midi::note_on(MidiChannel::FIRST, (i % 128) as u8, 0xFFFF));
     let losses = |s: &Session| s.plugin_view(node).unwrap().losses();
+    let answered = |s: &Session| {
+        tutti_fixtures::wait_until(
+            "the chunk in flight to be answered",
+            tutti_fixtures::HANG_GUARD,
+            || {
+                s.plugin_view(node)
+                    .unwrap()
+                    .diagnostics()
+                    .chunk_in_flight_answered()
+            },
+        );
+    };
     let _ = pump(&mut s);
     assert_eq!(losses(&s), Losses::NONE, "nothing sent yet");
 
@@ -991,6 +1006,7 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     let mut dropped = 0;
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
+    answered(&s);
     dropped += dropped_at(pump(&mut s), node.into());
     assert_eq!(dropped, cut);
     assert_eq!(
@@ -999,6 +1015,9 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
         "the graph's cut, not the plugin's"
     );
 
+    // The server has answered every chunk it was sent, so its death takes
+    // none of the node's events with it.
+    answered(&s);
     let first = pid_of(&s, node).expect("served");
     s.plugin_view(node)
         .unwrap()
@@ -1014,14 +1033,17 @@ fn dropped_events_at_the_node_accumulate_across_a_reload_of_its_plugin() {
     dropped += dropped_at(pump(&mut s), node.into());
     assert_eq!(dropped, cut, "the reload drops nothing more");
 
+    answered(&s);
     writer.push_all(notes().map(|n| (Stamp::NextBlock, n)));
     let _ = pump(&mut s);
+    answered(&s);
     dropped += dropped_at(pump(&mut s), node.into());
     assert_eq!(
         dropped,
         cut + cut,
         "the reloaded plugin's node is cut the same: the reports add"
     );
+    answered(&s);
     assert_eq!(losses(&s), Losses::NONE);
 }
 
