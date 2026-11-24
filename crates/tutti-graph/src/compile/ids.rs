@@ -16,8 +16,9 @@
 //! not. So an id is the id of a row of *some* table of its kind, which is a
 //! row of the plan's table when it came from that plan; verify does not check
 //! a plan's ids against its tables, and a plan assembled from another plan's
-//! ids is not covered. Runs of a list are [`Span`](crate::Span)s, made the
-//! same way by the list they index.
+//! ids is not covered. Runs of a list are [`Span`](crate::Span)s: made only by
+//! the list they index, renamed only by the lowering as the list's elements
+//! are, and built by no other code (the empty span is `Default`).
 
 use bytemuck::TransparentWrapper;
 use std::marker::PhantomData;

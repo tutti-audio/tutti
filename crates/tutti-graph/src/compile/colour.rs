@@ -308,20 +308,28 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
                 event_out,
                 params,
                 ..
-            } => Op::Node {
-                unit,
-                audio_in,
-                audio_out,
-                event_in,
-                event_out,
-                in_place: audio_list[audio_in.range()]
+            } => {
+                let in_place = audio_list[audio_in.range()]
                     .iter()
                     .zip(&audio_list[audio_out.range()])
                     .enumerate()
                     .filter(|&(_, (input, output))| input == output)
-                    .fold(InPlaceMask::NONE, |mask, (c, _)| mask.with(c)),
-                params,
-            },
+                    .fold(InPlaceMask::NONE, |mask, (c, _)| mask.with(c));
+                // Only a node that accepts in-place aliasing was offered it.
+                debug_assert!(
+                    in_place == InPlaceMask::NONE || units.shapes[unit].in_place,
+                    "a node that does not alias in place shares an input and an output slot"
+                );
+                Op::Node {
+                    unit,
+                    audio_in,
+                    audio_out,
+                    event_in,
+                    event_out,
+                    in_place,
+                    params,
+                }
+            }
             op => op,
         })
         .collect();

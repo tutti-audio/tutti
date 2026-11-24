@@ -82,8 +82,9 @@ pub struct UnitIdx(pub u32);
 /// A contiguous run of the elements `T` of one of a plan's flattened lists.
 ///
 /// Only the list it indexes makes one (appending a run to it returns the run),
-/// so a span names a run of the list it was made for: it is in range, and it
-/// is a run of that kind of element. It has no public constructor.
+/// and the lowering renames one as the list's elements are renamed, so a span
+/// names a run of a list of that element, in range for the plan it came from.
+/// It has no public constructor (the empty span is `Default`).
 pub struct Span<T> {
     start: u32,
     len: u32,
@@ -95,10 +96,15 @@ impl<T> Span<T> {
     pub(crate) fn extend(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
         let start = list.len();
         list.extend(items);
-        Self::of(start, list.len())
+        Self {
+            start: start as u32,
+            len: (list.len() - start) as u32,
+            list: PhantomData,
+        }
     }
 
-    /// The run `start..end` of a list.
+    /// The run `start..end` of a list, for a test that corrupts one.
+    #[cfg(test)]
     pub(crate) fn of(start: usize, end: usize) -> Self {
         Self {
             start: start as u32,
@@ -125,8 +131,9 @@ impl<T> Span<T> {
         self.len == 0
     }
 
-    /// The same positions of a list whose elements `U` replace `T` one for one
-    /// (the lowering renames every element of a list and keeps its places).
+    /// The same positions of a list whose elements `U` replace `T` one for one.
+    /// The lowering's one rename: [`Op::map`] calls it, because `colour` maps
+    /// every element of each operand list in place and keeps its positions.
     pub(crate) fn retype<U>(self) -> Span<U> {
         Span {
             start: self.start,
@@ -146,7 +153,11 @@ impl<T> Copy for Span<T> {}
 
 impl<T> Default for Span<T> {
     fn default() -> Self {
-        Self::of(0, 0)
+        Self {
+            start: 0,
+            len: 0,
+            list: PhantomData,
+        }
     }
 }
 
@@ -1072,33 +1083,31 @@ impl NodeTables {
 
             // Built and sorted once here, so the executor never sorts per
             // call.
-            let start = audio_borrows.len();
-            audio_borrows.extend(
+            let audio = Span::extend(
+                &mut audio_borrows,
                 ain.iter()
                     .enumerate()
                     .filter(|&(c, _)| !in_place.get(c))
-                    .map(|(c, &s)| (s, Role::Read(c as u8))),
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        aout.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
             );
-            audio_borrows.extend(
-                aout.iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
-            );
-            audio_borrows[start..].sort_unstable();
-            let audio = Span::of(start, audio_borrows.len());
-            let start = event_borrows.len();
-            event_borrows.extend(
+            audio_borrows[audio.range()].sort_unstable();
+            let event = Span::extend(
+                &mut event_borrows,
                 ein.iter()
                     .enumerate()
-                    .map(|(c, &s)| (s, Role::Read(c as u8))),
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        eout.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
             );
-            event_borrows.extend(
-                eout.iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
-            );
-            event_borrows[start..].sort_unstable();
-            let event = Span::of(start, event_borrows.len());
+            event_borrows[event.range()].sort_unstable();
 
             let form = match (ain, aout, ein.is_empty() && eout.is_empty()) {
                 (_, _, false) => Form::General,

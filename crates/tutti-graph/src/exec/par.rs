@@ -102,7 +102,7 @@ use tutti_buffers::Float;
 use tutti_platform::with_no_denormals;
 use tutti_rt::{BlockWaits, ClaimTable, Held, Participant, SplitMut, SplitRw, TaskGraph};
 
-use crate::compile::plan::{Op, Plan, Span};
+use crate::compile::plan::{Op, Plan};
 use crate::edges::rtlog::LogLane;
 use crate::exec::Flags;
 use crate::exec::arena::{Arena, Line};
@@ -223,7 +223,7 @@ pub(crate) struct Par {
     flags: Vec<AtomicU8>,
     claims: Claims,
     /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: IdTable<PlanUnitId, Span<Inject>>,
+    inject_spans: IdTable<PlanUnitId, std::ops::Range<usize>>,
     workers: Vec<Worker>,
     worker_claims: ClaimTable,
 }
@@ -290,16 +290,16 @@ impl Par {
             &successors,
         );
         let units = plan.units.len();
-        let mut inject_spans = IdTable::filled(units, Span::default());
+        let mut inject_spans = IdTable::filled(units, 0..0);
         let mut n_inject = 0u32;
         for (i, u) in inject_units.enumerate() {
-            let span = inject_spans[u];
-            inject_spans[u] = if span.is_empty() {
-                Span::of(i, i + 1)
+            let run = &mut inject_spans[u];
+            if run.start == run.end {
+                *run = i..i + 1;
             } else {
-                debug_assert_eq!(span.range().end, i, "injects sorted by unit");
-                Span::of(span.range().start, i + 1)
-            };
+                debug_assert_eq!(run.end, i, "injects sorted by unit");
+                run.end = i + 1;
+            }
             n_inject += 1;
         }
         let spreads = participants > 1 && plan.tasks.len() > 1;
@@ -398,7 +398,7 @@ struct Frame<'s, F: Float = f32> {
     cap: usize,
     inputs: &'s [&'s [F]],
     /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: &'s IdTableSlice<PlanUnitId, Span<Inject>>,
+    inject_spans: &'s IdTableSlice<PlanUnitId, std::ops::Range<usize>>,
     due: Deliveries<'s>,
 }
 
@@ -779,8 +779,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     .expect("the delta placed every unit the plan runs");
                 let mut has_inject = self.has_inject.one(unit.index());
                 let mut has_due = self.has_due.one(unit.index());
-                let span = fx.inject_spans[unit];
-                let mut inject = self.inject.run(span.range());
+                let mut inject = self.inject.run(fx.inject_spans[unit].clone());
                 let (mut a, flags) = self.audio.parts();
                 let mut e = self.events.slots();
                 let head = Head {
