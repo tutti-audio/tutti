@@ -106,11 +106,21 @@ pub enum ConvolverError {
     },
 }
 
-/// The convolution of a node: one engine per channel, or one matrix of paths.
+/// The convolution of a node: one engine per channel, the inputs folded to mono into one
+/// engine per output channel, or one matrix of paths.
 #[derive(Clone, Debug)]
 enum Engine<F: FftFloat> {
     /// One convolver per channel; its length is the width.
     PerChannel(Vec<Convolver<F>>),
+    /// Every input folded to mono, then one convolver per output channel.
+    Folded {
+        convolvers: Vec<Convolver<F>>,
+        /// The fold of the input bus to mono.
+        fold: Fold<F>,
+        /// The folded mono block. [`FOLD_SCRATCH`] frames from construction, and the graph's
+        /// block from `prepare`: a block is rendered in pieces of this length.
+        mono: Vec<F>,
+    },
     /// Every (input, output) path.
     Matrix(Box<MatrixConvolver<F>>),
 }
@@ -118,7 +128,7 @@ enum Engine<F: FftFloat> {
 impl<F: FftFloat> Engine<F> {
     fn ir_length(&self) -> Samples {
         match self {
-            Self::PerChannel(cs) => cs
+            Self::PerChannel(cs) | Self::Folded { convolvers: cs, .. } => cs
                 .iter()
                 .map(Convolver::<F>::ir_length)
                 .max()
@@ -129,7 +139,7 @@ impl<F: FftFloat> Engine<F> {
 
     fn latency(&self) -> Samples {
         match self {
-            Self::PerChannel(cs) => cs[0].latency(),
+            Self::PerChannel(cs) | Self::Folded { convolvers: cs, .. } => cs[0].latency(),
             Self::Matrix(m) => m.latency(),
         }
     }
@@ -139,13 +149,24 @@ impl<F: FftFloat> Engine<F> {
             Self::PerChannel(cs) => {
                 Self::PerChannel(cs.iter().map(Convolver::<F>::fresh).collect())
             }
+            Self::Folded {
+                convolvers,
+                fold,
+                mono,
+            } => Self::Folded {
+                convolvers: convolvers.iter().map(Convolver::<F>::fresh).collect(),
+                fold: fold.clone(),
+                mono: vec![F::ZERO; mono.len()],
+            },
             Self::Matrix(m) => Self::Matrix(Box::new(m.fresh())),
         }
     }
 
     fn reset(&mut self) {
         match self {
-            Self::PerChannel(cs) => cs.iter_mut().for_each(Convolver::<F>::reset),
+            Self::PerChannel(cs) | Self::Folded { convolvers: cs, .. } => {
+                cs.iter_mut().for_each(Convolver::<F>::reset);
+            }
             Self::Matrix(m) => m.reset(),
         }
     }
@@ -295,29 +316,31 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
                 got: irs.len(),
             });
         }
-        let fold = match layout {
-            IrLayout::Folded => Some(
-                Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
+        // One convolver per output channel: a lone response is shared by all of them.
+        let per_channel = || -> Vec<Convolver<F>> {
+            if shared {
+                let head = convolver(irs[0]);
+                (0..usize::from(n_out.count()))
+                    .map(|_| head.fresh())
+                    .collect()
+            } else {
+                irs.iter().map(|ir| convolver(*ir)).collect()
+            }
+        };
+        let engine = match layout {
+            IrLayout::PerChannel => Engine::PerChannel(per_channel()),
+            IrLayout::Folded => Engine::Folded {
+                fold: Fold::<F>::between(&input, &tutti_buffers::Bed::Mono.topology()).map_err(
                     |source| ConvolverError::NoFold {
                         width: n_in.count(),
                         source,
                     },
                 )?,
-            ),
-            _ => None,
-        };
-        let engine = match layout {
-            IrLayout::PerChannel | IrLayout::Folded if shared => {
-                let head = convolver(irs[0]);
-                Engine::PerChannel(
-                    (0..usize::from(n_out.count()))
-                        .map(|_| head.fresh())
-                        .collect(),
-                )
-            }
-            IrLayout::PerChannel | IrLayout::Folded => {
-                Engine::PerChannel(irs.iter().map(|ir| convolver(*ir)).collect())
-            }
+                convolvers: per_channel(),
+                // Sized before `prepare` so an unprepared node renders in pieces rather than
+                // index an empty scratch; `prepare` resizes it to the graph's block.
+                mono: vec![F::ZERO; FOLD_SCRATCH],
+            },
             IrLayout::TrueStereo | IrLayout::Ambisonic(_) => {
                 let matrix = MatrixConvolverConfig::new(n_in, n_out, irs).block_size(block_size);
                 Engine::Matrix(Box::new(
@@ -330,7 +353,7 @@ impl<F: FftFloat + Lerp, S: Sample> TryFrom<ConvolverConfig<'_, S>> for Convolve
                 ))
             }
         };
-        Ok(Self::assemble(engine, layout, input, output, fold))
+        Ok(Self::assemble(engine, input, output))
     }
 }
 
@@ -454,7 +477,6 @@ impl<F: FftFloat + Lerp> TryFrom<FirConvolverConfig<'_>> for ConvolverNode<F> {
 #[derive(Clone)]
 pub struct ConvolverNode<F: FftFloat + Lerp> {
     engine: Engine<F>,
-    layout: IrLayout,
     /// The input bus: the layout's input for the output bus.
     inputs: ChannelTopology,
     /// The output bus, the config's.
@@ -469,13 +491,6 @@ pub struct ConvolverNode<F: FftFloat + Lerp> {
     /// The ring-out owed after the last non-silent input frame: the longest IR's, past the
     /// latency. It says when a block is wholly past the tail and the node parks.
     clock: TailClock,
-    /// The fold of every input to mono, for an [`IrLayout::Folded`] node; `None`
-    /// otherwise. Built at construction, applied to whole planes.
-    fold: Option<Fold<F>>,
-    /// The folded mono block, for a folded node. [`FOLD_SCRATCH`] frames from construction, and
-    /// at `prepare` the graph's maximum block, which is also the longest piece a call renders
-    /// at once.
-    mono: Vec<F>,
     /// The gain the previous block ended on — where this block's ramp starts.
     /// `None` until the first block and after `reset`, which then starts on the
     /// current value instead of ramping in from nothing.
@@ -490,7 +505,6 @@ impl<F: FftFloat + Lerp> std::fmt::Debug for ConvolverNode<F> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ConvolverNode")
             .field("engine", &self.engine)
-            .field("layout", &self.layout)
             .field("gain", &self.gain)
             .field("latency_samples", &self.latency_samples)
             .field("declared_delay", &self.declared_delay)
@@ -502,36 +516,20 @@ impl<F: FftFloat + Lerp> std::fmt::Debug for ConvolverNode<F> {
 
 impl<F: FftFloat + Lerp> ConvolverNode<F> {
     /// The node over `engine`, which a config has checked.
-    fn assemble(
-        engine: Engine<F>,
-        layout: IrLayout,
-        inputs: ChannelTopology,
-        outputs: ChannelTopology,
-        fold: Option<Fold<F>>,
-    ) -> Self {
+    fn assemble(engine: Engine<F>, inputs: ChannelTopology, outputs: ChannelTopology) -> Self {
         let latency_samples = engine.latency();
         let clock = TailClock::new(
             tail_frames(ring_out(engine.ir_length())),
             latency_samples.get() as u64,
         );
-        // Sized before `prepare` so an unprepared folded node renders in pieces rather than
-        // index an empty scratch; `prepare` resizes it to the graph's block.
-        let mono = if fold.is_some() {
-            vec![F::ZERO; FOLD_SCRATCH]
-        } else {
-            Vec::new()
-        };
         Self {
             engine,
-            layout,
             inputs,
             outputs,
             gain: Param::new(Amplitude::UNITY),
             latency_samples,
             declared_delay: Samples::ZERO,
             clock,
-            fold,
-            mono,
             last: None,
             good: LastGood::fixed(F::ONE),
         }
@@ -664,16 +662,20 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         let n_in = usize::from(self.inputs.width().count());
         let n = usize::from(self.outputs.width().count());
         match &mut self.engine {
-            Engine::PerChannel(convolvers) => match &self.fold {
-                None => {
-                    for (c, convolver) in convolvers.iter_mut().enumerate() {
-                        convolver.process(
-                            Mono::new(input(c)),
-                            MonoMut::new(&mut outputs.get(c)[at..at + size]),
-                        );
-                    }
+            Engine::PerChannel(convolvers) => {
+                for (c, convolver) in convolvers.iter_mut().enumerate() {
+                    convolver.process(
+                        Mono::new(input(c)),
+                        MonoMut::new(&mut outputs.get(c)[at..at + size]),
+                    );
                 }
-                Some(fold) => {
+            }
+            Engine::Folded {
+                convolvers,
+                fold,
+                mono,
+            } => {
+                {
                     // Folded once per block, not once per output channel.
                     // The inputs, a block long each, as one table on the stack: a
                     // fold exists only at a width with an order, at most one bus.
@@ -683,7 +685,7 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                         *slot = input(c);
                     }
                     let folded = Planes::new(&table[..width]).and_then(|planes| {
-                        fold.fold_planar_channel(planes, 0, MonoMut::new(&mut self.mono[..size]))
+                        fold.fold_planar_channel(planes, 0, MonoMut::new(&mut mono[..size]))
                     });
                     debug_assert!(
                         folded.is_ok(),
@@ -691,16 +693,16 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
                     );
                     if folded.is_err() {
                         // Not folded: silent, never the previous block's mono.
-                        self.mono[..size].fill(F::ZERO);
+                        mono[..size].fill(F::ZERO);
                     }
                     for (c, convolver) in convolvers.iter_mut().enumerate() {
                         convolver.process(
-                            Mono::new(&self.mono[..size]),
+                            Mono::new(&mono[..size]),
                             MonoMut::new(&mut outputs.get(c)[at..at + size]),
                         );
                     }
                 }
-            },
+            }
             Engine::Matrix(matrix) => {
                 let frames = at..at + size;
                 let (heard, heard_n) = slice_in((0..n_in).map(|c| inputs.get(c)), &frames);
@@ -761,7 +763,11 @@ impl<F: FftFloat + Lerp> ConvolverNode<F> {
         outputs: &mut Outputs<'_, '_, F>,
         driven: Option<&[F]>,
     ) {
-        let step = self.mono.len().max(1);
+        // A folded node renders in pieces its scratch holds; the others take the span whole.
+        let step = match &self.engine {
+            Engine::Folded { mono, .. } => mono.len().max(1),
+            Engine::PerChannel(_) | Engine::Matrix(_) => usize::MAX,
+        };
         let mut at = span.start;
         while at < span.end {
             let n = step.min(span.end - at);
@@ -808,7 +814,9 @@ impl<F: FftFloat + Lerp> Node<F> for ConvolverNode<F> {
     }
 
     fn prepare(&mut self, p: &Prepare) {
-        self.mono = vec![F::ZERO; p.max_block().get()];
+        if let Engine::Folded { mono, .. } = &mut self.engine {
+            *mono = vec![F::ZERO; p.max_block().get()];
+        }
     }
 
     /// Channel-outer over planar slices: each channel's convolver consumes its
@@ -892,15 +900,12 @@ impl<F: FftFloat + Lerp> ParamNode<F> for ConvolverNode<F> {
         gain.detach();
         Self {
             engine: self.engine.fresh(),
-            layout: self.layout,
             inputs: self.inputs,
             outputs: self.outputs,
             gain,
             latency_samples: self.latency_samples,
             declared_delay: self.declared_delay,
             clock: TailClock::new(self.clock.ceiling(), self.latency_samples.get() as u64),
-            fold: self.fold.clone(),
-            mono: vec![F::ZERO; self.mono.len()],
             last: None,
             good: self.good,
         }
@@ -1145,7 +1150,9 @@ mod tests {
                 .iter()
                 .map(|c| Arc::clone(c.spectra()))
                 .collect::<Vec<_>>(),
-            Engine::Matrix(_) => unreachable!("a shared IR is per channel"),
+            Engine::Folded { .. } | Engine::Matrix(_) => {
+                unreachable!("a shared IR is per channel")
+            }
         };
         let all = spectra(&node);
         let first = Arc::clone(&all[0]);
