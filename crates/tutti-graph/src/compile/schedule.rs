@@ -1,7 +1,7 @@
 //! Compiler passes 2 and 3 over the units: the direct dependencies with the
 //! cycles refused, then the one serial order.
 
-use crate::compile::ids::{Id, PlanUnitId};
+use crate::compile::ids::PlanUnitId;
 use crate::compile::order;
 use crate::compile::shapes::Units;
 use crate::compile::{CompileError, CycleEdge};
@@ -85,14 +85,14 @@ pub(super) fn acyclic(graph: &ValidGraph, units: &Units) -> Result<Dependencies,
 
 /// The units in the one deterministic topological order, dependencies first.
 ///
-/// Takes the acyclic [`Dependencies`]; returns every unit exactly once, each
-/// after all of its predecessors.
-pub(super) fn order(dependencies: &Dependencies) -> Vec<PlanUnitId> {
+/// Takes the acyclic [`Dependencies`] and the `units` they are over; returns
+/// every unit exactly once, each after all of its predecessors.
+pub(super) fn order(dependencies: &Dependencies, units: &Units) -> Vec<PlanUnitId> {
     let sorted = order::kahn(&dependencies.preds);
     debug_assert!(sorted.cyclic.is_empty(), "the SCC pass left a cycle");
     sorted
         .order
         .into_iter()
-        .map(PlanUnitId::from_index)
+        .map(|i| units.keys.id(i).expect("a unit of the graph"))
         .collect()
 }

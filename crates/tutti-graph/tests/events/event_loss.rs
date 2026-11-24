@@ -441,7 +441,7 @@ fn the_merge_slot_is_sized_to_the_smaller_of_the_bound_and_the_writers() {
             .iter()
             .filter_map(|op| match *op {
                 tutti_graph::Op::EventMerge { dst, bound, .. } => {
-                    Some((plan.event_slot_capacity()[dst as usize], bound))
+                    Some((plan.event_slot_capacity()[dst.index()], bound))
                 }
                 _ => None,
             })

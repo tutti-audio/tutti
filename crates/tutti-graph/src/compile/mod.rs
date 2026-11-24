@@ -296,7 +296,7 @@ pub fn compile(
     prev: Option<&Plan>,
 ) -> Result<(Plan, Delta), CompileError> {
     let checked = shapes::check(graph, shapes, prepare)?;
-    let order = schedule::order(&schedule::acyclic(graph, &checked)?);
+    let order = schedule::order(&schedule::acyclic(graph, &checked)?, &checked);
     let timing = timing::solve(graph, &checked, prepare, prev);
     let program = emit::emit(graph, &checked, &order, &timing, prepare);
     let tasks = coarsen::group(&program, &checked, prepare.max_block().samples());

@@ -121,26 +121,27 @@ proptest! {
 /// overwrite by the first's last reader. Anything else could be run
 /// concurrently by a parallel executor and would clobber a live buffer.
 fn brute_force_interference(plan: &tutti_graph::Plan) {
-    use tutti_graph::PortKind;
+    use tutti_graph::{OpId, Value};
     let n = plan.ops().len();
     // before[b] = every op that happens before b: its dependencies, and
     // theirs. Ops are in topological order, so one forward pass is enough.
-    let mut before: Vec<BTreeSet<u32>> = Vec::with_capacity(n);
+    let deps = plan.op_dependencies();
+    let mut before: Vec<BTreeSet<OpId>> = Vec::with_capacity(n);
     for b in 0..n {
         let mut set = BTreeSet::new();
-        for &a in plan.op_dependencies(b) {
+        for &a in deps.row(b) {
             set.insert(a);
-            set.extend(before[a as usize].iter().copied());
+            set.extend(before[a.index()].iter().copied());
         }
         before.push(set);
     }
-    let before = |a: u32, b: u32| before[b as usize].contains(&a);
-    let readers = |v: &tutti_graph::Value| {
-        let r = v.readers;
-        &plan.value_readers()[r.start as usize..(r.start + r.len) as usize]
-    };
-    for kind in [PortKind::Audio, PortKind::Event] {
-        let values = plan.values(kind);
+    let before = |a: OpId, b: OpId| before[b.index()].contains(&a);
+    fn check<S: Copy + PartialEq + std::fmt::Debug>(
+        kind: &str,
+        values: &[Value<S>],
+        readers: impl Fn(&Value<S>) -> Vec<OpId>,
+        before: impl Fn(OpId, OpId) -> bool,
+    ) {
         for (i, u) in values.iter().enumerate() {
             for v in &values[i + 1..] {
                 if u.slot != v.slot {
@@ -152,7 +153,7 @@ fn brute_force_interference(plan: &tutti_graph::Plan) {
                     (v, u)
                 };
                 let clean = std::iter::once(first.writer)
-                    .chain(readers(first).iter().copied())
+                    .chain(readers(first))
                     .all(|t| before(t, second.writer));
                 let in_place = readers(first).contains(&second.writer)
                     && readers(first)
@@ -160,14 +161,17 @@ fn brute_force_interference(plan: &tutti_graph::Plan) {
                         .all(|&r| r == second.writer || before(r, second.writer));
                 assert!(
                     clean || in_place,
-                    "{kind:?} values written by ops {} and {} share slot {} but may overlap",
-                    first.writer,
-                    second.writer,
+                    "{kind} values written by ops {} and {} share slot {:?} but may overlap",
+                    first.writer.index(),
+                    second.writer.index(),
                     u.slot
                 );
             }
         }
     }
+    let readers = |r: tutti_graph::Span<OpId>| plan.value_readers()[r.range()].to_vec();
+    check("Audio", plan.audio_values(), |v| readers(v.readers), before);
+    check("Event", plan.event_values(), |v| readers(v.readers), before);
 }
 
 proptest! {
