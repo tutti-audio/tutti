@@ -127,7 +127,7 @@ impl FollowKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum UnfollowCause {
-    /// An `unfollow_*` call.
+    /// The app called an `unfollow_*`.
     Requested,
     /// The input node it read was removed from the graph.
     InputGone,
