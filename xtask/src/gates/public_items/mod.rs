@@ -6,6 +6,10 @@
 //! holds one row per item, so an added item is a line in the diff of the pull request
 //! that adds it, and that pull request argues for it.
 //!
+//! This is the ratchet. The exact count (`cargo public-api` lines, derives and trait impls
+//! included) is printed by `cargo xtask doc` and is not enforced: two pull requests that each
+//! pass alone would fail together on the merged count, while rows merge as a set.
+//!
 //! **Where it reads.** The files `check-building` reads (comments and literals blanked;
 //! no `tests`, `benches` or `examples` directory, no `tests.rs`), less `src/main.rs`,
 //! `src/bin/`, every file a `#[cfg(test)] mod name;` declares (and the files under it) and

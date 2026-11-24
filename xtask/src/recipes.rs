@@ -56,9 +56,9 @@ pub(crate) enum Step {
     Release(Version),
     /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
     /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
-    /// With the flag, the lines of each crate's text are also held to its row of
-    /// `xtask/public-api-counts.txt` (`gates/public_api_counts.rs`), reusing the texts.
-    UmbrellaApi(Option<String>, bool),
+    /// Without a directory it then prints each crate's `public-api` line count, reusing the
+    /// texts (`gates/public_api_counts.rs`).
+    UmbrellaApi(Option<String>),
     /// `affected <base>`: print the packages the diff from `<base>` can reach as
     /// `-p` flags, or `all` (`gates/affected.rs`).
     Affected(String),
@@ -104,16 +104,11 @@ impl Step {
                 "wasm-bindgen-test-runner --version == Cargo.lock's wasm-bindgen, or fail"
                     .to_owned()
             }
-            Step::UmbrellaApi(dir, counts) => format!(
-                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in{}",
+            Step::UmbrellaApi(dir) => format!(
+                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in; without a directory, then a table of each crate's public-api line count",
                 dir.as_ref().map_or(String::new(), |d| format!(
                     " (the texts of {d}/<package>.txt instead)"
-                )),
-                if *counts {
-                    "; then the lines of each crate under crates/ against xtask/public-api-counts.txt"
-                } else {
-                    ""
-                }
+                ))
             ),
             Step::Affected(base) => format!(
                 "affected: git diff --name-only {base}...HEAD, then the packages it reaches as -p flags (or all)"
@@ -408,7 +403,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "doc",
         "",
-        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, umbrella-api and each crate's public-api count against xtask/public-api-counts.txt (needs cargo-public-api)",
+        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, umbrella-api and a table of each crate's public-api count (needs cargo-public-api)",
     ),
     ("check-loom", "", "clippy under --cfg loom"),
     (
@@ -787,7 +782,7 @@ impl Planner<'_> {
                 self.lines(&[
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps --all-features"#,
                 ]);
-                self.out.push(Step::UmbrellaApi(None, true));
+                self.out.push(Step::UmbrellaApi(None));
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(CHECK_LOOM),
@@ -838,7 +833,7 @@ impl Planner<'_> {
             }
             "umbrella-api" => {
                 let [dir] = Self::params(name, args, [""])?;
-                self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir), false));
+                self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
             }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;

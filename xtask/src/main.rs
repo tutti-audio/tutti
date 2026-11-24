@@ -171,7 +171,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
             Ok(())
         }
         Step::Fuzz { target, secs } => fuzz(target.as_deref(), *secs, ctx),
-        Step::UmbrellaApi(dir, counts) => umbrella_api(ctx, dir.as_deref(), *counts),
+        Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -272,10 +272,9 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
 /// `umbrella-api [<dir>]`: the unnameable types of what the umbrella exports and
 /// the seeds ranked by how many each pulls in. The texts come from `public-api`
 /// for each crate the umbrella exports from and each crate their signatures name,
-/// or from `<dir>/<package>.txt` when a directory is given. With `counts`, every crate
-/// under `crates/` also has its text's lines held to its row of the counts file, the
-/// texts already read reused.
-fn umbrella_api(ctx: &Ctx, dir: Option<&str>, counts: bool) -> Result<(), u8> {
+/// or from `<dir>/<package>.txt` when a directory is given. Without a directory, the lines of
+/// every crate under `crates/` are then printed as a table, the texts already read reused.
+fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
     let lib_path = ctx.root.join("crates/tutti/src/lib.rs");
     let lib = std::fs::read_to_string(&lib_path).map_err(|e| {
         eprintln!("xtask: cannot read {}: {e}", lib_path.display());
@@ -372,21 +371,23 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>, counts: bool) -> Result<(), u8> {
         "umbrella-api: {} unnameable type(s)",
         analysis.missing.len()
     );
-    let counted = !counts || public_api_counts(ctx, &fetch)?;
-    if analysis.missing.is_empty() && counted {
+    if dir.is_none() {
+        print_counts(ctx, &fetch)?;
+    }
+    if analysis.missing.is_empty() {
         Ok(())
     } else {
         Err(1)
     }
 }
 
-/// Every crate under `crates/` against its row of the counts file: whether all hold.
-fn public_api_counts(
+/// The `public-api` line count of every crate under `crates/`, as a table.
+fn print_counts(
     ctx: &Ctx,
     fetch: &dyn Fn(&str) -> Result<Option<String>, String>,
-) -> Result<bool, u8> {
+) -> Result<(), u8> {
     let fail = |e: String| {
-        eprintln!("xtask: public-api-counts: {e}");
+        eprintln!("xtask: public-api: {e}");
         1
     };
     let mut actual = std::collections::BTreeMap::new();
@@ -401,19 +402,10 @@ fn public_api_counts(
             .ok_or_else(|| fail(format!("{name}: no public-api text")))?;
         actual.insert(name, gates::count_api(&text));
     }
-    let rows = std::fs::read_to_string(ctx.root.join(gates::COUNTS_LIST)).ok();
-    let findings = gates::check_counts(rows.as_deref(), &actual);
-    findings.iter().for_each(|f| println!("{f}"));
-    if findings.is_empty() {
-        println!("public-api-counts: OK ({} crates)", actual.len());
-    } else {
-        println!(
-            "public-api-counts: the counts of the tree, as {} reads them:",
-            gates::COUNTS_LIST
-        );
-        print!("{}", gates::render_counts(&actual));
-    }
-    Ok(findings.is_empty())
+    gates::count_table(&actual)
+        .iter()
+        .for_each(|line| println!("{line}"));
+    Ok(())
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding

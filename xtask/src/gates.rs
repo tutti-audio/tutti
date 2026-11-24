@@ -61,8 +61,7 @@ mod vst3_sdk;
 mod width;
 
 pub(crate) use public_api_counts::{
-    LIST as COUNTS_LIST, check as check_counts, count as count_api, render as render_counts,
-    skipped as skipped_in_counts,
+    count as count_api, skipped as skipped_in_counts, table as count_table,
 };
 pub(crate) use recipe_lists::Listed;
 pub(crate) use umbrella_api::collect;
