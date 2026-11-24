@@ -127,54 +127,35 @@ impl ClapLoaded {
         self.plugin.note_port_count(main, is_input)
     }
 
-    /// What notes to the first input note port are sent: see
-    /// [`NotePortInfo::dialect_to_send`]. A plugin with no note port gets CLAP
-    /// note events.
+    /// What the first input note port is sent, as [`note_sends`](Self::note_sends)
+    /// answers for it; CLAP note events alone for a plugin with no input note
+    /// port.
     pub fn note_send(&self, main: MainThreadMarker) -> NoteSend {
-        self.note_port_info(main, 0, true)
-            .map_or(NoteSend::Clap, |port| port.dialect_to_send())
+        if self.note_port_count(main, true) == 0 {
+            return NoteSend::CLAP_ONLY;
+        }
+        self.note_send_at(main, 0)
     }
 
-    /// What notes to each input note port are sent: the same question as
-    /// [`note_send`](Self::note_send), asked of every port. Empty for a plugin
-    /// with no input note port.
-    ///
-    /// # Errors
-    ///
-    /// [`TooManyNotePorts`] when the plugin declares more than 16, before any
-    /// port is read.
-    pub(crate) fn note_sends(
-        &self,
-        main: MainThreadMarker,
-    ) -> Result<Vec<NoteSend>, TooManyNotePorts> {
-        let count = input_note_ports(self.note_port_count(main, true))?;
-        Ok((0..count)
-            .map(|index| {
-                self.note_port_info(main, index, true)
-                    .map_or(NoteSend::Nothing, |port| port.dialect_to_send())
-            })
-            .collect())
+    /// What input note port `index` is sent; nothing for one the plugin will
+    /// not describe.
+    fn note_send_at(&self, main: MainThreadMarker, index: u32) -> NoteSend {
+        self.note_port_info(main, index, true)
+            .map_or(NoteSend::Nothing, |port| port.dialect_to_send())
     }
 
-    /// For each input note port, whether it declares the MIDI dialect
-    /// (`CLAP_NOTE_DIALECT_MIDI` in `supported_dialects`), which
-    /// `clap_event_midi` and SysEx may be sent to. Empty for a plugin with no
-    /// input note port: it declared no event it takes.
+    /// What each input note port is sent. Empty for a plugin with no input
+    /// note port. A port the plugin declares but will not describe is sent
+    /// nothing.
     ///
     /// # Errors
     ///
     /// [`TooManyNotePorts`] when the plugin declares more than 16 (one for each
     /// UMP Group), before any port is read.
-    pub fn midi_capable_ports(
-        &self,
-        main: MainThreadMarker,
-    ) -> Result<Vec<bool>, TooManyNotePorts> {
+    pub fn note_sends(&self, main: MainThreadMarker) -> Result<Vec<NoteSend>, TooManyNotePorts> {
         let count = input_note_ports(self.note_port_count(main, true))?;
         Ok((0..count)
-            .map(|index| {
-                self.note_port_info(main, index, true)
-                    .is_some_and(|port| port.supported_dialects.contains(NoteDialects::MIDI))
-            })
+            .map(|index| self.note_send_at(main, index))
             .collect())
     }
 

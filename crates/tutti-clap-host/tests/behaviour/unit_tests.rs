@@ -1134,7 +1134,7 @@ fn test_note_port_dialect_to_send() {
     // inventing one (for example, reporting Midi2).
     assert_eq!(
         port(NoteDialects::CLAP | NoteDialects::MIDI, None).dialect_to_send(),
-        NoteSend::Clap,
+        NoteSend::CLAP_AND_MIDI,
     );
     assert_eq!(
         port(NoteDialects::MIDI, None).dialect_to_send(),
@@ -1165,7 +1165,7 @@ fn test_note_port_dialect_to_send() {
     // A preference the port does not list is not sent: a supported dialect is.
     assert_eq!(
         port(NoteDialects::CLAP, Some(NoteDialect::Midi)).dialect_to_send(),
-        NoteSend::Clap,
+        NoteSend::CLAP_ONLY,
     );
     assert_eq!(
         port(NoteDialects::MIDI, Some(NoteDialect::Clap)).dialect_to_send(),
