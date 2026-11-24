@@ -13,7 +13,9 @@
 //!   occurrences in rust-analyzer's SCIP index (`scip.rs`), minus the definition,
 //!   minus an `impl` header's own mention of its type. A reference is test code
 //!   when its file is under `tests`, `benches`, `examples` or `testing`, is
-//!   `tests.rs`, `testing.rs` or `*_tests.rs`, or lies in a `#[cfg(test)]` item.
+//!   `tests.rs`, `testing.rs` or `*_tests.rs`, belongs to a module whose `mod` line carries
+//!   `#[cfg(feature = "testing")]` or `"contract"` (also inside `any(test, ..)`), or lies in a
+//!   `#[cfg(test)]` item.
 //!
 //! Items used by being implemented are left out: what a `trait` block declares,
 //! what an `impl <Trait> for <Type>` block holds, and a public trait that some
@@ -24,7 +26,7 @@
 //! What the report cannot see: an item reached only through a trait object or a
 //! macro expansion may show as unreferenced; trait methods are not listed; a
 //! `pub` item the umbrella re-exports is filtered by name, not by path; code
-//! behind a `cfg` of another platform is not indexed; visibility is read from the
+//! behind a `cfg` of another platform is not indexed (the index has every cargo feature on); visibility is read from the
 //! declaration's text (`pub ` and no restriction).
 
 use super::lex::{blank, find_word_from, ident_at, is_test_file, strip_attrs, test_ranges};
@@ -406,6 +408,8 @@ fn implemented(code: &str) -> Vec<String> {
 
 /// A file's blanked text and its line starts.
 struct Src {
+    /// The file as written: attributes keep their strings.
+    text: String,
     code: String,
     starts: Vec<usize>,
     tests: Vec<(usize, usize)>,
@@ -424,6 +428,7 @@ impl Src {
             })
             .collect();
         Src {
+            text: text.to_owned(),
             code,
             starts,
             tests,
@@ -449,6 +454,64 @@ fn test_path(path: &str) -> bool {
         || name.ends_with("_tests.rs")
 }
 
+/// The features whose modules hold test support.
+const TEST_FEATURES: [&str; 2] = ["testing", "contract"];
+
+/// For each module on the path of `crates/<c>/src/..` (`src/a/b.rs` is `a`, then
+/// `b`), the files that may declare it and its name.
+fn module_chain(path: &str) -> Vec<(Vec<String>, String)> {
+    let Some(rest) = path
+        .strip_prefix("crates/")
+        .and_then(|r| r.split_once("/src/"))
+    else {
+        return Vec::new();
+    };
+    let (krate, rest) = rest;
+    let root = format!("crates/{krate}/src");
+    let mut mods: Vec<&str> = rest.trim_end_matches(".rs").split('/').collect();
+    if mods.last() == Some(&"mod") {
+        mods.pop();
+    }
+    (0..mods.len())
+        .map(|i| {
+            let dir = std::iter::once(root.as_str())
+                .chain(mods[..i].iter().copied())
+                .collect::<Vec<_>>()
+                .join("/");
+            let candidates = if i == 0 {
+                vec![format!("{root}/lib.rs"), format!("{root}/main.rs")]
+            } else {
+                vec![format!("{dir}.rs"), format!("{dir}/mod.rs")]
+            };
+            (candidates, mods[i].to_owned())
+        })
+        .collect()
+}
+
+/// Whether `text` declares `mod <name>` behind a `cfg` that names a test-support
+/// feature (`feature = "testing"`, also inside `any(test, ..)`), and not under `not`.
+fn declared_for_tests(text: &str, name: &str) -> bool {
+    let mut from = 0;
+    while let Some(p) = find_word_from(text, "mod", from) {
+        from = p + 3;
+        let (ident, _) = ident_at(text, p + 3);
+        if ident != name {
+            continue;
+        }
+        let start = text[..p].rfind([';', '{', '}']).map_or(0, |i| i + 1);
+        let attrs: String = text[start..p].split_whitespace().collect();
+        if attrs.contains("cfg(")
+            && !attrs.contains("not(")
+            && TEST_FEATURES
+                .iter()
+                .any(|f| attrs.contains(&format!("feature=\"{f}\"")))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// The files read so far.
 struct Sources<'a> {
     tree: &'a dyn Tree,
@@ -456,11 +519,30 @@ struct Sources<'a> {
 }
 
 impl<'a> Sources<'a> {
+    /// Reads `path` and the files that declare its modules.
     fn load(&mut self, path: &str) {
         if !self.files.contains_key(path) {
             let src = self.tree.read(path).map(|t| Src::new(&t));
             self.files.insert(path.to_owned(), src);
+            for (candidates, _) in module_chain(path) {
+                for c in candidates {
+                    self.load(&c);
+                }
+            }
         }
+    }
+
+    /// Whether `path` is test code by its place alone, or belongs to a module
+    /// declared under a test-support feature (`#[cfg(feature = "testing")] mod`),
+    /// directly or through a parent module.
+    fn test_file(&self, path: &str) -> bool {
+        test_path(path)
+            || module_chain(path).iter().any(|(candidates, name)| {
+                candidates
+                    .iter()
+                    .filter_map(|c| self.get(c))
+                    .any(|parent| declared_for_tests(&parent.text, name))
+            })
     }
 
     fn get(&self, path: &str) -> Option<&Src> {
@@ -468,7 +550,7 @@ impl<'a> Sources<'a> {
     }
 
     fn is_test(&self, path: &str, line: usize) -> bool {
-        test_path(path)
+        self.test_file(path)
             || self
                 .get(path)
                 .is_some_and(|s| s.tests.iter().any(|&(a, b)| a <= line && line <= b))
@@ -578,6 +660,9 @@ pub(crate) fn report(
             continue;
         }
         sources.load(&doc.path);
+        if sources.test_file(&doc.path) {
+            continue;
+        }
         let Some(src) = sources.get(&doc.path) else {
             continue;
         };
@@ -658,6 +743,9 @@ pub(crate) fn report(
     for path in tree.files("crates", &lex::skipped) {
         if path.ends_with(".rs") && !test_path(&path) {
             sources.load(&path);
+            if sources.test_file(&path) {
+                continue;
+            }
             if let Some(s) = sources.get(&path) {
                 let production = strip_ranges(&s.code, &test_ranges(&s.code));
                 implemented_by.extend(implemented(&production));
@@ -747,6 +835,9 @@ tests refers to (rust-analyzer's SCIP index; an `impl` header's mention of its t
 Left out: items declared in a `trait` block, items of an `impl <Trait> for <Type>` block, and a\n\
 public trait that some non-test `impl .. <Trait> for ..` under crates/ implements (by name).\n\
 A definition inside a macro invocation is kept and labelled `in macro`.\n\
+Test code: files under tests/, benches/, examples/, testing/; tests.rs, testing.rs, *_tests.rs; any file of a\n\
+module whose `mod` line carries cfg(feature = \"testing\") or \"contract\"; and #[cfg(test)] items.\n\
+The index is built with every cargo feature on.\n\
 It cannot see: use only through a trait object or a macro expansion (may show as unreferenced);\n\
 trait methods (not listed); a re-exported item used by an app (filtered by name); code behind a\n\
 cfg of another platform (macOS and Windows code is not indexed on Linux).\n";
@@ -819,6 +910,34 @@ mod tests {
             symbol_name("rust-analyzer cargo tutti-graph 0.0.1 exec/Executor#"),
             Some(("tutti-graph".to_owned(), "Executor".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_file_under_a_test_feature_module_is_test_code() {
+        let tree = crate::gates::fake::Mem::with(&[
+            (
+                "crates/c/src/lib.rs",
+                "#[cfg(feature = \"testing\")]\npub mod testing;\n#[cfg(any(test, feature = \"contract\"))]\nmod contract;\n#[cfg(not(feature = \"testing\"))]\nmod real;\nmod plain;\n",
+            ),
+            ("crates/c/src/testing.rs", ""),
+            ("crates/c/src/contract/mod.rs", "mod deep;\n"),
+            ("crates/c/src/contract/deep.rs", ""),
+            ("crates/c/src/real.rs", ""),
+            ("crates/c/src/plain.rs", ""),
+        ]);
+        let mut s = Sources {
+            tree: &tree,
+            files: BTreeMap::new(),
+        };
+        let is = |s: &mut Sources, p: &str| {
+            s.load(p);
+            s.test_file(p)
+        };
+        assert!(is(&mut s, "crates/c/src/testing.rs"));
+        assert!(is(&mut s, "crates/c/src/contract/mod.rs"));
+        assert!(is(&mut s, "crates/c/src/contract/deep.rs"));
+        assert!(!is(&mut s, "crates/c/src/real.rs"));
+        assert!(!is(&mut s, "crates/c/src/plain.rs"));
     }
 
     #[test]

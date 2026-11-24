@@ -388,7 +388,13 @@ fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>) -> Result<(), 
         }
     }
     let index = ctx.target.join("unused-public.scip");
+    // Every cargo feature on, so code behind a feature (a device layer) is indexed.
+    let config = ctx.target.join("unused-public-ra.json");
+    std::fs::write(&config, r#"{"cargo": {"features": "all"}}"#)
+        .map_err(|e| fail(format!("{}: {e}", config.display())))?;
     let ra = Cmd::sh("rust-analyzer scip .")
+        .arg("--config-path")
+        .arg(config.display().to_string())
         .arg("--output")
         .arg(index.display().to_string());
     eprintln!("+ {}", ra.display());
