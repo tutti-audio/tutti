@@ -322,9 +322,8 @@ fn a_state_the_fresh_instance_refuses_is_a_named_fork_error() {
         ),
     );
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     match editor.fork(
         ForkTarget::Node(key),
         prepare.with_render_mode(RenderMode::Offline),
@@ -418,9 +417,8 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         ),
     );
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
 
     let (fork_ed, fork_exec) = editor
         .fork(
@@ -459,9 +457,8 @@ fn render_fork_of(client: PluginClient, blocks: usize) -> Editor {
         ),
     );
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),
@@ -655,9 +652,8 @@ fn live_graph(client: PluginClient) -> (Editor, tutti_graph::Executor) {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     (live, exec)
 }
 
@@ -845,10 +841,11 @@ fn feed_chord(live: &mut Editor, plugin: NodeKey, n: u8, on: usize, off: usize) 
     });
     let clip = NodeKey(1);
     live.insert(clip, "clip", MidiClipNode::new(events));
-    live.spec_mut().connect_events(
+    live.connect_events(
         EventInputPort::new(plugin, 0),
         EventEdge::Direct(EventOutputPort::new(clip, 0)),
-    );
+    )
+    .expect("the edge wires");
 }
 
 /// **A chord bigger than the plugin's chunk of MIDI ends, and the export
@@ -935,10 +932,11 @@ fn feed_note(live: &mut Editor, plugin: NodeKey, frame: usize) {
         )
         .unwrap()]),
     );
-    live.spec_mut().connect_events(
+    live.connect_events(
         EventInputPort::new(plugin, 0),
         EventEdge::Direct(EventOutputPort::new(clip, 0)),
-    );
+    )
+    .expect("the edge wires");
 }
 
 /// **A chunk that begins inside a block, or inside a render pass, still
@@ -977,9 +975,8 @@ fn a_clip_note_in_a_chunk_that_begins_mid_block_lands_on_its_frame() {
             ),
         );
         feed_note(&mut live, key, NOTE_FRAME);
-        live.spec_mut()
-            .topology
-            .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+        live.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+            .expect("the sources exist");
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
             ..Default::default()
@@ -1062,13 +1059,13 @@ fn a_clip_nodes_note_reaches_the_plugins_event_input_on_its_frame() {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.spec_mut().connect_events(
+    live.connect_events(
         EventInputPort::new(key, 0),
         EventEdge::Direct(EventOutputPort::new(clip, 0)),
-    );
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    )
+    .expect("the edge wires");
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -1184,18 +1181,21 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             "sink",
             tutti_graph::ForkByClone(MidiSink(seen.clone())),
         );
-        live.spec_mut().connect_events(
+        live.connect_events(
             EventInputPort::new(key, 0),
             EventEdge::Direct(EventOutputPort::new(clip, 0)),
-        );
-        live.spec_mut().connect_events(
+        )
+        .expect("the edge wires");
+        live.connect_events(
             EventInputPort::new(sink, 0),
             EventEdge::Direct(EventOutputPort::new(key, 0)),
-        );
-        live.spec_mut().topology.set_outputs(vec![
+        )
+        .expect("the edge wires");
+        live.set_outputs(vec![
             PortSource::Node(OutputPort::new(key, 0)),
             PortSource::Node(OutputPort::new(sink, 0)),
-        ]);
+        ])
+        .expect("the sources exist");
         let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
             sample_rate: SampleRate::of(SAMPLE_RATE),
             ..Default::default()
@@ -1263,16 +1263,14 @@ fn an_export_is_aligned_when_the_plugin_latency_moves_offline() {
         ),
     );
     for port in 0..inputs {
-        live.spec_mut().topology.edges.insert(
-            tutti_graph::InputPort::new(key, port as u16),
-            vec![tutti_graph::Edge::Direct(PortSource::Node(
-                OutputPort::new(src, 0),
-            ))],
-        );
+        live.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(key, port as u16)),
+            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(src, 0))),
+        })
+        .expect("the edge wires");
     }
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
 
     let graph = fork_graph(&live, rate);
     let latency = graph.reported_latency();
@@ -1442,10 +1440,11 @@ fn an_export_of_plugins_is_bit_identical_on_a_pool() {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.spec_mut().topology.set_outputs(vec![
+    live.set_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(9), 0)),
         PortSource::Node(OutputPort::new(NodeKey(10), 0)),
-    ]);
+    ])
+    .expect("the sources exist");
     let export = |pooled: bool| {
         let rate = SampleRate::of(SAMPLE_RATE);
         let (editor, mut executor) = fork_pair(&live, rate);
@@ -1570,9 +1569,8 @@ fn a_fork_of_a_refused_rate_is_silent_and_a_failed_fault() {
         ),
     );
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     let (fork_ed, fork_exec) = editor
         .fork(
             ForkTarget::Node(key),

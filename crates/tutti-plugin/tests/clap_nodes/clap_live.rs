@@ -176,14 +176,14 @@ fn run_live(
         )
         .controls;
     for port in 0..inputs {
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(key, port as u16),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(src, 0)))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(key, port as u16)),
+            from: Edge::Direct(PortSource::Node(OutputPort::new(src, 0))),
+        })
+        .expect("the edge wires");
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     ed.commit().expect("the graph compiles");
     let declared = ed.spec().topology.nodes[&key].latency;
 

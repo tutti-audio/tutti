@@ -88,13 +88,13 @@ fn automation_reaches_the_plugin_through_its_event_input() {
             tutti_timeline::TempoReader::constant(tutti_units::Bpm::of(120.0)).expect("a tempo"),
         ),
     );
-    live.spec_mut().connect_events(
+    live.connect_events(
         EventInputPort::new(key, 0),
         EventEdge::Direct(EventOutputPort::new(auto_key, 0)),
-    );
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))]);
+    )
+    .expect("the edge wires");
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(key, 0))])
+        .expect("the sources exist");
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
@@ -158,14 +158,14 @@ fn render_gain(
     );
     if let Some(lane) = feeder {
         live.insert(NodeKey(1), "lane", lane);
-        live.spec_mut().connect_events(
+        live.connect_events(
             EventInputPort::new(PLUGIN, 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .expect("the edge wires");
     }
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))]);
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(PLUGIN, 0))])
+        .expect("the sources exist");
     let timeline = Arc::new(OfflineTimeline::new(&OfflineTimelineConfig {
         sample_rate: SampleRate::of(SAMPLE_RATE),
         ..Default::default()
