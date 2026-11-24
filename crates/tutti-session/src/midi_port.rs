@@ -28,8 +28,8 @@
 //! the port opens: it releases the notes its device holds before it goes, and
 //! survives an unplug and a replug, so what is wired to it stays wired. An
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
-//! whose events the session sends to the device each update; the clips feeding it
-//! send their setup again when its device returns.
+//! whose events the session sends to the device each update; the clips
+//! feeding it send their setup again when its device returns.
 
 use std::future::Future;
 use std::pin::Pin;
