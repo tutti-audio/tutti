@@ -498,3 +498,57 @@ fn an_output_the_network_lacks_has_no_response() {
     n.frequency_response(1, &[Hz::new(100.0)], &mut g);
     assert!(g[0].re.is_nan());
 }
+
+fn bands(low: f64, mid: f64, high: f64) -> Absorption {
+    Absorption::Bands {
+        low: Amplitude::new(low),
+        mid: Amplitude::new(mid),
+        high: Amplitude::new(high),
+        crossover: [Hz::new(300.0), Hz::new(4_000.0)],
+    }
+}
+
+/// The peak of the response over a fine grid, dense toward DC.
+fn fine_peak(a: &Absorption, rate: SampleRate) -> f64 {
+    let n = 100_000;
+    (0..=n)
+        .map(|k| {
+            let w = std::f64::consts::PI * (f64::from(k) / f64::from(n)).powi(2);
+            a.response(w, rate).norm()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The largest magnitude response of bands that fall with frequency is the low band's gain
+/// exactly (every term is a nonnegative weight on a response of magnitude at most 1, which is
+/// 1 at DC). For bands that rise somewhere it is a bound that never undercuts the peak of a
+/// fine grid of the response and stays within a hundredth over it, and where the bands are
+/// not monotone the peak is above every one of the three gains.
+#[test]
+fn the_sup_of_bands_is_their_low_gain_when_they_fall_and_a_tight_bound_when_they_do_not() {
+    for rate in [
+        SampleRate::SR_44K1,
+        SampleRate::SR_48K,
+        SampleRate::of(96_000.0),
+    ] {
+        for (low, mid, high) in [(0.9, 0.5, 0.1), (0.8, 0.8, 0.8), (0.99, 0.99, 0.0)] {
+            assert_eq!(bands(low, mid, high).sup(rate), low, "{low} {mid} {high}");
+        }
+        for (low, mid, high) in [
+            (0.05, 0.99, 0.99),
+            (0.05, 0.99, 0.05),
+            (0.4, 0.99, 0.6),
+            (0.5, 0.2, 0.9),
+            (0.0, 1.0, 0.0),
+        ] {
+            let a = bands(low, mid, high);
+            let (sup, fine) = (a.sup(rate), fine_peak(&a, rate));
+            assert!(sup >= fine, "{low} {mid} {high}: {sup} under {fine}");
+            assert!(sup <= fine + 1e-2, "{low} {mid} {high}: {sup} over {fine}");
+        }
+        assert!(
+            bands(0.05, 0.99, 0.99).sup(rate) > 1.1,
+            "the peak is above every gain"
+        );
+    }
+}

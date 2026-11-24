@@ -5,7 +5,7 @@ use tutti_units::{Amplitude, Db, Hz, SampleRate, SampleSpan, Samples, Seconds};
 use crate::{DecayTime, System};
 
 use super::gain::decay_seconds;
-use super::{AllPass, AllPassForm, Band, Fdn, Matrix, Network, NetworkStage, energy};
+use super::{Absorption, AllPass, AllPassForm, Band, Fdn, Matrix, Network, NetworkStage, energy};
 
 /// How far from 1 a gain may be and still be lossless.
 const LOSSLESS_TOLERANCE: f64 = 1e-6;
@@ -164,13 +164,29 @@ impl Fdn {
 
     /// The slowest line's per-frame figures in `band`: `(20 log10 ρ, 20 log10 σ,
     /// m)` where `ρ = max_i g_i^(1/m_i)` is the slowest amplitude factor per
-    /// frame, `σ = max(‖A‖₂, 1)` and `m` the longest line, or `None` when a
-    /// line cannot be analysed (a gain that is NaN or negative, a length that is
-    /// not positive). A line with a nested all-pass is read at its peak group
-    /// delay, `D (1 + |g|) / (1 - |g|)`, and a one-pole absorption at its peak,
-    /// [`peak_delay`](super::Absorption::peak_delay): conservative
-    /// readings that are not part of the proof in [`rt60_bound`](Fdn::rt60_bound).
+    /// frame (`g_i` the line's gain in `band`), `σ = max(‖A‖₂, 1)` and `m` the longest
+    /// line, or `None` when a line cannot be analysed (a gain that is NaN or negative, a
+    /// length that is not positive). A line with a nested all-pass is read at its peak
+    /// group delay, `D (1 + |g|) / (1 - |g|)`, and a one-pole absorption at its peak,
+    /// [`peak_delay`](super::Absorption::peak_delay): conservative readings that are not part
+    /// of the proof in [`rt60_bound`](Fdn::rt60_bound). The figure of the band alone: the
+    /// spectral radius reads it; the decay bound reads [`slowest_peak`](Self::slowest_peak).
     pub(super) fn slowest(&self, band: Band) -> Option<(f64, f64, f64)> {
+        self.per_frame(|a| a.gain(band))
+    }
+
+    /// [`slowest`](Self::slowest) with each line's `g_i` its absorption's largest magnitude
+    /// response over every frequency ([`Absorption::sup`], which never undercuts the peak),
+    /// not its gain at the three nominal band points: where the band gains are not monotone
+    /// the response between the crossovers is above every one of them. For gains that fall
+    /// with frequency, and for a gain or a one-pole, it is the largest nominal gain and the
+    /// figure is the largest of the three bands'.
+    pub(super) fn slowest_peak(&self, rate: SampleRate) -> Option<(f64, f64, f64)> {
+        self.per_frame(|a| Amplitude::new(a.sup(rate)))
+    }
+
+    /// The per-frame figures of [`slowest`](Self::slowest) with line gain `gain(absorption)`.
+    fn per_frame(&self, gain: impl Fn(&Absorption) -> Amplitude) -> Option<(f64, f64, f64)> {
         let mut db_rho = f64::NEG_INFINITY;
         let mut longest = 0.0f64;
         for l in self.lines.iter() {
@@ -179,7 +195,7 @@ impl Fdn {
                 d.delay.get() * (1.0 + g) / (1.0 - g)
             });
             let m = l.length.get() + peak + l.absorption.peak_delay().get() + self.loop_delay.get();
-            let db_g = Db::from_amplitude(l.absorption.gain(band)).get();
+            let db_g = Db::from_amplitude(gain(&l.absorption)).get();
             if m.is_nan() || m <= 0.0 || db_g.is_nan() {
                 return None;
             }
@@ -193,16 +209,20 @@ impl Fdn {
         ))
     }
 
-    /// An RT60 in `band` that never undercuts the true decay: the slowest
+    /// An RT60 that never undercuts the true decay: the slowest
     /// line's, `-60 / (fs dB(σ ρ))`, `dB = 20 log10`, with `ρ = max_i g_i^(1/m_i)` the slowest
-    /// amplitude factor per frame and `σ = max(‖A‖₂, 1)`. Infinite when
-    /// `σρ ≥ 1` or a line cannot be analysed. For a diagonal `A` it equals
-    /// [`rt60`](Self::rt60).
+    /// amplitude factor per frame, `g_i` the largest magnitude response of line `i`'s
+    /// absorption over every frequency ([`slowest_peak`](Self::slowest_peak)), and
+    /// `σ = max(‖A‖₂, 1)`. Infinite when `σρ ≥ 1` or a line cannot be analysed. For a
+    /// diagonal `A` whose absorptions do not rise with frequency it equals the
+    /// [`rt60`](Self::rt60) of the slowest band.
     ///
     /// **Why it covers.** Take the lines as shift registers of `m_i` samples
-    /// (`u` = frames since a sample entered), absorption `g_i` applied to a
-    /// sample as it leaves and `A` mapping the leaving samples onto the entering
-    /// ones. With `w = ρ²`, weigh each sample's energy by `w^u`:
+    /// (`u` = frames since a sample entered), absorption `g_i` applied to a sample as it
+    /// leaves and `A` mapping the leaving samples onto the entering ones. (`g_i` is the
+    /// peak of the absorption's magnitude response over every frequency, which a filter's
+    /// memory is read as, like the group delays of the all-passes and the one-poles read at
+    /// their peaks: conservative readings, not part of this proof.) With `w = ρ²`, weigh each sample's energy by `w^u`:
     /// `V = Σ x² w^u`. A step shifts every sample (`u → u+1`, so `V` is
     /// multiplied by `w`), except that the samples leaving at `u = m_i - 1` are
     /// scaled by `g_i ≤ ρ^(m_i)`, mapped by `A` (norm `≤ σ`) and enter at
@@ -221,12 +241,11 @@ impl Fdn {
     /// [`rt60`](Self::rt60), the length-weighted mean, is not such a bound: for
     /// a mixing `A` with lines of different decay it can be shorter than the
     /// slowest line's.
-    fn rt60_bound(&self, band: Band, rate: SampleRate) -> Seconds {
-        let rate = rate.get();
+    fn rt60_bound(&self, rate: SampleRate) -> Seconds {
         if self.lines.is_empty() {
             return Seconds::ZERO;
         }
-        let Some((db_rho, db_sigma, _)) = self.slowest(band) else {
+        let Some((db_rho, db_sigma, _)) = self.slowest_peak(rate) else {
             return Seconds::new(f64::INFINITY);
         };
         let per_frame = db_rho + db_sigma;
@@ -235,20 +254,64 @@ impl Fdn {
         } else if per_frame == f64::NEG_INFINITY {
             0.0
         } else {
-            -60.0 / (rate * per_frame)
+            -60.0 / (rate.get() * per_frame)
         })
     }
 
     /// The frames the lag of [`rt60_bound`](Fdn::rt60_bound) exceeds the
     /// longest line by, `(m-1) log σ / -log(σρ)`: zero where `σ = 1` (a
     /// structured matrix), a few frames for a measured-orthogonal one.
-    fn lag_extra_frames(&self, band: Band) -> f64 {
-        match self.slowest(band) {
+    fn lag_extra_frames(&self, rate: SampleRate) -> f64 {
+        match self.slowest_peak(rate) {
             Some((db_rho, db_sigma, m)) if db_rho + db_sigma < 0.0 => {
                 (m - 1.0).max(0.0) * db_sigma / -(db_rho + db_sigma)
             }
             _ => 0.0,
         }
+    }
+
+    /// How many lines' echoes can sum at one output frame, the figure the bound adds
+    /// `20 log10` of to the floor's depth: the tail is measured against the output's own
+    /// peak, which a single echo can set, while the bound is of the state.
+    ///
+    /// A diagonal `A` keeps each line's echoes apart, and an output channel sums its row:
+    /// `Σ|c_i| / max|c_i|` of the widest channel after the width stage `(M + wS, M - wS)`
+    /// (the channel `L' = (1 + w)/2 L + (1 - w)/2 R`, so `|(1 + w)/2| |c_L| + |(1 - w)/2|
+    /// |c_R|` per line). A mixing `A` routes every line's echo into any other's, so every
+    /// line the outputs tap can sum in one channel: their count. 1 for a network with no
+    /// output or silent outputs.
+    fn coincident_lines(&self, width: f64) -> f64 {
+        let rows = &self.output.rows;
+        let tapped = |i: usize| {
+            rows.iter()
+                .any(|r| r.get(i).is_some_and(|c| c.magnitude().get() > 0.0))
+        };
+        if self.mixing() || !width.is_finite() {
+            return (0..self.lines.len()).filter(|&i| tapped(i)).count().max(1) as f64;
+        }
+        let gain = |r: usize, i: usize| {
+            rows.get(r)
+                .and_then(|row| row.get(i))
+                .map_or(0.0, |c| c.magnitude().get())
+        };
+        let (own, cross) = ((1.0 + width) / 2.0, ((1.0 - width) / 2.0).abs());
+        let channels = if rows.len() >= 2 { 2 } else { rows.len() };
+        let weight = |r: usize, i: usize| {
+            if channels == 2 {
+                own.abs() * gain(r, i) + cross * gain(1 - r, i)
+            } else {
+                gain(r, i)
+            }
+        };
+        (0..channels)
+            .filter_map(|r| {
+                let top = (0..self.lines.len())
+                    .map(|i| weight(r, i))
+                    .fold(0.0, f64::max);
+                let sum: f64 = (0..self.lines.len()).map(|i| weight(r, i)).sum();
+                (top > 0.0).then(|| sum / top)
+            })
+            .fold(1.0, f64::max)
     }
 
     /// Whether every gain is 1 (within a tolerance), `A` is orthogonal and the
@@ -450,11 +513,14 @@ impl System for Network {
     /// How long the wet signal rings after the input stops, until it is `floor`
     /// below what it carried: the pre-delay, plus each stage's transit (the
     /// longest line, the longest tap, an all-pass's delay times the trips of its
-    /// train, a FIR's length), plus the slowest band's
-    /// `Fdn::rt60_bound` times `|floor| / 60` (with the
-    /// lag the bound's proof adds). It uses the bound,
-    /// not the estimate, so it never undercuts a mixing network whose lines
-    /// differ.
+    /// train, a FIR's length), plus each recirculating stage's `Fdn::rt60_bound`
+    /// (its absorptions read at their peak response over every frequency) times
+    /// `(|floor| + 20 log10 n) / 60` (with the lag the bound's proof adds), `n` the lines
+    /// that can sum at one output frame (`Fdn::coincident_lines`: the bound is of the state,
+    /// and the output's peak, which the floor is under, can be a single echo while a late
+    /// one is the sum of `n`). It uses the bound, not the estimate, so it never
+    /// undercuts a mixing network whose lines differ or an absorption that rises between
+    /// its bands.
     ///
     /// [`DecayTime::Unbounded`] when a loop never settles (lossless, or a gain at 1
     /// or above), or when `floor` is NaN. A positive `floor` is read as 0 dB.
@@ -483,11 +549,10 @@ impl System for Network {
                     if f.is_lossless() {
                         return DecayTime::Unbounded;
                     }
-                    for band in Band::ALL {
-                        let seconds = f.rt60_bound(band, self.rate).get() * depth / 60.0
-                            + f.lag_extra_frames(band) / self.rate.get();
-                        decay = decay.max(seconds);
-                    }
+                    let depth = depth + 20.0 * libm::log10(f.coincident_lines(self.width.get()));
+                    let seconds = f.rt60_bound(self.rate).get() * depth / 60.0
+                        + f.lag_extra_frames(self.rate) / self.rate.get();
+                    decay = decay.max(seconds);
                 }
                 NetworkStage::Fir(s) => frames += s.length.get() as f64,
             }

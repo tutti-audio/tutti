@@ -80,14 +80,19 @@ impl Absorption {
             .fold(0.0, f64::max)
     }
 
-    /// A bound on the largest `|G(e^jw)|`: the gain of a [`Gain`](Self::Gain), the
-    /// exact peak of a one-pole (at DC or at Nyquist), and for bands the largest
-    /// of a grid of 4096 frequencies plus what the response can move between two
-    /// of them (its slope is at most `2 p / (1 - p)` times each term's weight, for
-    /// each pole `p`). Tighter than the `majorant` at `r = 1` when the bands
-    /// rise with frequency, where the sum of the magnitudes of the three weights
-    /// exceeds the peak.
-    fn sup(&self, rate: SampleRate) -> f64 {
+    /// A bound on the largest `|G(e^jw)|` over every frequency, which never undercuts it: the
+    /// gain of a [`Gain`](Self::Gain), the exact peak of a one-pole (at DC or at Nyquist), and
+    /// for bands the exact peak where the gains do not rise with frequency (`low >= mid >=
+    /// high`: every term of `high + (mid - high) L2 + (low - mid) L1` is then a nonnegative
+    /// weight on a response of magnitude at most 1, which is 1 at DC, so the peak is `low`).
+    /// Otherwise it is read on a grid of 4096 frequencies from DC to Nyquist: between two
+    /// neighbours `w0 < w1` the response is no more than half their sum plus `K (w1 - w0) / 2`,
+    /// `K` the slope bound at `w0`, `sum_p |c_p| 2 p (1 - p)^2 / |1 - p e^-jw0|^3` over the two
+    /// poles `p` and the weights `c_p` (the slope of `((1 - p) / (1 - p e^-jw))^2`, which falls
+    /// with `w`), so the true peak is under the largest such bound. Infinity for gains that
+    /// are not loop gains. Tighter than the `majorant` at `r = 1` when the bands rise with
+    /// frequency, where the sum of the magnitudes of the three weights exceeds the peak.
+    pub(super) fn sup(&self, rate: SampleRate) -> f64 {
         let Absorption::Bands {
             low,
             mid,
@@ -99,8 +104,10 @@ impl Absorption {
         };
         const POINTS: usize = 4096;
         let (low, mid, high) = (low.get(), mid.get(), high.get());
-        let pole = |fc: Hz| cutoff_pole(fc, rate);
-        let (p1, p2) = (pole(crossover[0]), pole(crossover[1]));
+        let (p1, p2) = (
+            cutoff_pole(crossover[0], rate),
+            cutoff_pole(crossover[1], rate),
+        );
         if [low, mid, high].iter().any(|g| !g.is_finite() || *g < 0.0)
             || ![p1, p2]
                 .iter()
@@ -108,15 +115,40 @@ impl Absorption {
         {
             return f64::INFINITY;
         }
-        let slope =
-            (mid - high).abs() * 2.0 * p2 / (1.0 - p2) + (low - mid).abs() * 2.0 * p1 / (1.0 - p1);
-        let peak = (0..=POINTS)
-            .map(|k| {
-                self.response(std::f64::consts::PI * k as f64 / POINTS as f64, rate)
-                    .norm()
-            })
-            .fold(0.0, f64::max);
-        peak + slope * std::f64::consts::PI / POINTS as f64 / 2.0
+        if low >= mid && mid >= high {
+            return low;
+        }
+        let (c2, c1) = ((mid - high).abs(), (low - mid).abs());
+        // `L = ((1 - p) / (1 - p z^-1))^2` at `w`, as (re, im).
+        let l = |p: f64, w: f64| {
+            let (re, im) = (1.0 - p * libm::cos(w), p * libm::sin(w));
+            let den = re * re + im * im;
+            let (hr, hi) = ((1.0 - p) * re / den, -(1.0 - p) * im / den);
+            (hr * hr - hi * hi, 2.0 * hr * hi)
+        };
+        let magnitude = |w: f64| {
+            let ((a, b), (c, d)) = (l(p1, w), l(p2, w));
+            libm::hypot(
+                high + (mid - high) * c + (low - mid) * a,
+                (mid - high) * d + (low - mid) * b,
+            )
+        };
+        // The slope bound of one term at `w`: `2 p (1 - p)^2 / |1 - p e^-jw|^3`.
+        let slope = |p: f64, w: f64| {
+            let d = 1.0 - 2.0 * p * libm::cos(w) + p * p;
+            2.0 * p * (1.0 - p) * (1.0 - p) / (d * libm::sqrt(d))
+        };
+        let step = std::f64::consts::PI / POINTS as f64;
+        let mut peak = 0.0f64;
+        let mut here = magnitude(0.0);
+        for k in 0..POINTS {
+            let w = step * k as f64;
+            let next = magnitude(step * (k + 1) as f64);
+            let k_w = c2 * slope(p2, w) + c1 * slope(p1, w);
+            peak = peak.max(0.5 * (here + next) + 0.5 * k_w * step);
+            here = next;
+        }
+        peak
     }
 
     /// `sum |g_k| r^-k` over the impulse response of one trip, for `r` in

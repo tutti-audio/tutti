@@ -561,7 +561,7 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
     let rates = [SampleRate::SR_48K, SampleRate::SR_44K1];
     let one = [SampleRate::SR_48K];
     let slow = [SampleRate::of(22_050.0)];
-    let cases: Vec<(&str, usize, Seconds, FdnControls, &[SampleRate])> = vec![
+    let cases: Vec<Case> = vec![
         (
             "default",
             8,
@@ -664,6 +664,16 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
             &slow,
         ),
     ];
+    assert_tails_cover(cases);
+}
+
+/// One case of the ring-out tests: its name, the line count, the layout's longest decay, the
+/// controls and the rates it runs at.
+type Case<'a> = (&'a str, usize, Seconds, FdnControls, &'a [SampleRate]);
+
+/// Every case's reported tail covers the ring-out of an impulse, a full-scale noise burst and a
+/// full-scale step (see [`tail_probe`]).
+fn assert_tails_cover(cases: Vec<Case>) {
     for (name, lines, max, c, rates) in cases {
         let layout =
             FdnLayout::new(lines, MaxDecay::new(max).unwrap(), FreezeMode::Decaying).unwrap();
@@ -680,6 +690,126 @@ fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
                 tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&y[0], &y[1]]);
             }
         }
+    }
+}
+
+/// The reported tail covers the ring-out where the echoes of several lines coincide in one
+/// output channel and sum, and the output's own peak, which the floor is under, can be a
+/// single echo: no diffusion at 8 s (parallel combs, the smallest room, no modulation), two
+/// lines at the longest setting, and only the low band long at 8 s. Each rang past the tail
+/// by up to 3.75 dB over the floor while the bound covered the state alone.
+#[test]
+fn the_reported_tail_covers_the_ring_out_where_the_echoes_of_lines_sum() {
+    let (two, eight) = (Seconds::new(2.0), Seconds::new(8.0));
+    let slow = [SampleRate::of(22_050.0)];
+    let one = [SampleRate::SR_48K];
+    assert_tails_cover(vec![
+        (
+            "no diffusion, smallest, 8 s",
+            8,
+            eight,
+            still(|c| {
+                c.decay = [eight; 3];
+                c.size = Mix::new(0.0);
+                c.diffusion = Mix::new(0.0);
+            }),
+            &slow,
+        ),
+        (
+            "two lines, longest",
+            2,
+            two,
+            controls(|c| {
+                c.decay = [two; 3];
+                c.size = Mix::new(1.0);
+            }),
+            &one,
+        ),
+        (
+            "only the low band long, 8 s",
+            8,
+            eight,
+            controls(|c| c.decay = [Seconds::new(0.05), eight, Seconds::new(0.05)]),
+            &slow,
+        ),
+    ]);
+}
+
+/// A band profile that is not monotone (the mid band long over a short low band, or a short
+/// high band) has a response between the crossovers above every nominal band gain, which the
+/// bank scales to peak at 0.9999 where it would exceed 1: the loop gain per trip is near 1
+/// at some frequency whatever the bands say. The reported tail reads the absorption's peak,
+/// not its three nominal points, so the finite ones cover the ring-out and the others are
+/// unbounded.
+#[test]
+fn the_reported_tail_covers_the_ring_out_of_a_band_profile_that_is_not_monotone() {
+    let (low, two) = (Seconds::new(0.05), Seconds::new(2.0));
+    let slow = [SampleRate::of(22_050.0)];
+    assert_tails_cover(vec![
+        (
+            "mid 2 s, low and high short",
+            8,
+            two,
+            controls(|c| c.decay = [two, low, low]),
+            &slow,
+        ),
+        (
+            "mid and high 2 s, low 0.3 s",
+            8,
+            two,
+            controls(|c| c.decay = [two, Seconds::new(0.3), two]),
+            &[SampleRate::SR_48K],
+        ),
+        (
+            "mid 1 s, low and high short",
+            8,
+            two,
+            controls(|c| c.decay = [Seconds::new(1.0), low, low]),
+            &[SampleRate::SR_48K],
+        ),
+    ]);
+}
+
+/// The settings whose peak response per trip is at or near 1 report an unbounded tail, and it
+/// is warranted: the render of a noise burst or a step is still above the floor ten seconds
+/// after the last input frame (the floor under the render's own peak; at 0.9999 per trip the
+/// true ring-out is hours).
+#[test]
+fn an_unbounded_tail_of_a_band_profile_that_is_not_monotone_is_warranted() {
+    let (low, two, eight) = (Seconds::new(0.05), Seconds::new(2.0), Seconds::new(8.0));
+    let rate = SampleRate::SR_48K;
+    let cases: Vec<(&str, Seconds, FdnControls)> = vec![
+        ("[2, 0.05, 2]", two, controls(|c| c.decay = [two, low, two])),
+        (
+            "[8, 0.05, 0.05], size 0.5",
+            eight,
+            controls(|c| c.decay = [eight, low, low]),
+        ),
+        (
+            "[8, 0.05, 8]",
+            eight,
+            controls(|c| c.decay = [eight, low, eight]),
+        ),
+    ];
+    for (name, max, c) in cases {
+        let layout = FdnLayout::new(8, MaxDecay::new(max).unwrap(), FreezeMode::Decaying).unwrap();
+        let period = longest_line(rate);
+        let (mut bank, mut ramps) = at_rest(&layout, rate, &c);
+        assert_eq!(bank.tail_of(&ramps, &c), Tail::Unbounded, "{name}");
+        let ten = 10 * rate.get() as usize;
+        let rings = tail_probe::stimuli::<f32>(4 * period).map(|(input_name, input)| {
+            let frames = input.len() + ten + period;
+            let y = rendered_tail(&mut bank, &mut ramps, &input, frames);
+            let what = format!("{name}, {input_name}");
+            (
+                input_name,
+                tail_probe::rings_past(&what, input.len(), ten, &[&y[0], &y[1]]),
+            )
+        });
+        assert!(
+            rings.iter().any(|(_, rings)| *rings),
+            "{name}: no input rings past ten seconds: {rings:?}"
+        );
     }
 }
 

@@ -72,6 +72,33 @@ pub(crate) fn assert_tail_covers<F: Float>(
     );
 }
 
+/// Whether some frame of `channels` at or after `after` frames past the last of
+/// `input_frames` of input is above [`TAIL_FLOOR`] of the render's peak: the ring-out outlasts
+/// `after`, which is what a tail reported as unbounded claims.
+///
+/// # Panics
+///
+/// When the render is silent or ends before that frame.
+pub(crate) fn rings_past<F: Float>(
+    what: &str,
+    input_frames: usize,
+    after: usize,
+    channels: &[&[F]],
+) -> bool {
+    let top = channels.iter().map(|c| peak(c)).fold(F::ZERO, F::max);
+    let top = top.to_f64();
+    assert!(top > 0.0, "{what}: the render is silent");
+    let floor = TAIL_FLOOR.to_amplitude().get() * top;
+    let from = input_frames - 1 + after;
+    assert!(
+        channels.iter().all(|c| c.len() > from),
+        "{what}: the render ends before frame {from}"
+    );
+    channels
+        .iter()
+        .any(|c| c[from..].iter().any(|y| y.abs().to_f64() > floor))
+}
+
 /// What a node's tail clock reports when the settings move to a longer
 /// tail `current` frames after the last input, while `owed` of the old ring-out is left: the
 /// longer of the two, measured from the last input frame, held under the bank's `ceiling`.
