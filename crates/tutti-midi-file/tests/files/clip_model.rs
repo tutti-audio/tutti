@@ -11,12 +11,13 @@ use tutti_midi_file::{
     ClipFileError, FileEvent, Meta, MidiFile, MidiFileKind, ReadError, SmfDivision, Tick, Track,
     TracksError,
 };
+use tutti_music::{Meter, TimeSignature};
 use tutti_ump::ControlValue;
 use tutti_ump::{
     Address, DeltaTicks, Flex, FlexTempo, JrTicks, Message, MidiChannel, MidiGroup, NoteNumber,
     NoteVelocity, Stream, TicksPerQuarterNote, U7, Ump, Utility, Voice1,
 };
-use tutti_units::{Beat, Bpm, Seconds};
+use tutti_units::{BarNumber, Beat, Bpm, Seconds};
 
 const TPQ: u16 = 96;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
@@ -236,6 +237,93 @@ fn the_tempo_map_is_the_set_tempo_messages() {
     assert_eq!(
         metrical(&bare).tempo_map().constant_tempo(),
         Some(Bpm::of(120.0))
+    );
+}
+
+/// **The meter map is the Set Time Signature messages** (Flex Data, M2-104
+/// section 7.5.4; M2-116 section 6.1.2 lets the sequence hold several): 3/4 from
+/// the start, then 6/8 at beat 3, the downbeat of bar 2. Bars of 3 quarters
+/// are the same length in both signatures, so bar 2 starts at beat 3.
+/// Spec: m2-116/6.1.2#4
+#[test]
+fn the_meter_map_is_the_set_time_signature_messages() {
+    let q = u32::from(TPQ);
+    let file = read_bytes(clip(&[
+        dcs(0),
+        dctpq(TPQ),
+        dcs(0),
+        start(),
+        dcs(0),
+        signature(3, 2),
+        dcs(3 * q),
+        signature(6, 3),
+        dcs(3 * q),
+        end(),
+    ]))
+    .unwrap();
+    let view = metrical(&file);
+    let map = view.meter_map();
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(3, 4));
+    assert_eq!(map.at(Beat::new(2.9)), TimeSignature::of(3, 4));
+    assert_eq!(map.at(Beat::new(3.0)), TimeSignature::of(6, 8));
+    assert_eq!(map.bar_start(BarNumber::new(2)), Beat::new(3.0));
+    assert!(view.refused_time_signatures().is_empty());
+
+    let bare = read_bytes(clip(&valid())).unwrap();
+    assert_eq!(
+        metrical(&bare).meter_map().at(Beat::new(0.0)),
+        TimeSignature::of(4, 4)
+    );
+}
+
+/// **A header Set Time Signature is the meter from beat 0** (M2-116 section
+/// 6.1.2), as the header's Set Tempo is the tempo from tick 0; one the sequence
+/// states at tick 0 replaces it.
+/// Spec: m2-116/6.1.2#1
+#[test]
+fn a_header_set_time_signature_is_the_meter_from_beat_zero() {
+    let header = [dcs(0), set_tempo(100.0), dcs(0), time_signature()];
+    let held = read_bytes(clip(&with_header(&header))).unwrap();
+    assert_eq!(
+        metrical(&held).meter_map().at(Beat::new(0.0)),
+        TimeSignature::of(3, 4)
+    );
+
+    let mut parts = vec![dcs(0), dctpq(TPQ)];
+    parts.extend(header);
+    parts.extend([dcs(0), start(), dcs(0), signature(6, 3), dcs(0), end()]);
+    let replaced = read_bytes(clip(&parts)).unwrap();
+    let map = metrical(&replaced).meter_map();
+    assert_eq!(map.changes().len(), 1);
+    assert_eq!(map.at(Beat::new(0.0)), TimeSignature::of(6, 8));
+}
+
+/// A Flex denominator field of 0 is non-standard (M2-104 section 7.5.4): the
+/// message makes no meter change and is listed as the wire states it.
+#[test]
+fn a_flex_time_signature_denominator_of_zero_is_refused() {
+    let file = read_bytes(clip(&[
+        dcs(0),
+        dctpq(TPQ),
+        dcs(0),
+        start(),
+        dcs(0),
+        signature(3, 0),
+        dcs(0),
+        end(),
+    ]))
+    .unwrap();
+    let view = metrical(&file);
+    assert_eq!(view.meter_map().at(Beat::new(0.0)), TimeSignature::of(4, 4));
+    let refused = view.refused_time_signatures();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(
+        (
+            refused[0].beat,
+            refused[0].numerator,
+            refused[0].denominator_power
+        ),
+        (Beat::new(0.0), 3, 0)
     );
 }
 
@@ -568,16 +656,23 @@ fn program_change() -> Ump {
     .into()
 }
 
-fn time_signature() -> Ump {
+/// A Flex Data Set Time Signature (M2-104 section 7.5.4): the denominator
+/// field is the power of two, 2 for a quarter and 3 for an eighth.
+fn signature(numerator: u8, denominator: u8) -> Ump {
     Message::Flex(
         MidiGroup::FIRST,
         Flex::SetTimeSignature(tutti_ump::FlexTimeSignature {
-            numerator: 3,
-            denominator: 2,
+            numerator,
+            denominator,
             thirty_seconds: 8,
         }),
     )
     .into()
+}
+
+/// 3/4 as a Flex Data Set Time Signature.
+fn time_signature() -> Ump {
+    signature(3, 2)
 }
 
 /// A clip whose header after the DCTPQ is `header` (each behind a DCS of 0

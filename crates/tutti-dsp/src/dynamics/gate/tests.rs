@@ -1,7 +1,7 @@
 use crate::testing::uniform;
-use tutti_buffers::{Float, Mono, Planes, PlanesMut};
+use tutti_buffers::{ChannelLayout, Float, Mono, Planes, PlanesMut};
 use tutti_rt::SplitMix64;
-use tutti_units::{CompressionRatio, Db, SampleRate, Seconds};
+use tutti_units::{Amplitude, CompressionRatio, Db, Hz, Q, SampleRate, Samples, Seconds};
 
 use super::*;
 use crate::testing::noise;
@@ -92,7 +92,7 @@ fn hostile() -> Vec<GateControls> {
 
 /// A bank at `rate` at rest on `c`: set and at rest, nothing ramping.
 fn bank_at<F: Float + SimdLanes + Lerp>(c: &GateControls, rate: SampleRate) -> GateBank<F> {
-    let mut bank = GateBank::new(rate);
+    let mut bank = GateBank::new(ChannelLayout::STEREO, rate);
     bank.retarget(c);
     bank.jump_to_target();
     bank
@@ -946,7 +946,7 @@ fn an_expander_follows_the_release_toward_its_gain() {
         ratio: CompressionRatio::new(2.0),
         ..controls(-20.0, 0.0, 0.0, tau, range)
     };
-    let mut bank = GateBank::<f64>::new(RATE);
+    let mut bank = GateBank::<f64>::new(ChannelLayout::MONO, RATE);
     bank.retarget(&c);
     bank.jump_to_target();
     let mut key = vec![1.0; 100];
@@ -972,5 +972,47 @@ fn an_expander_follows_the_release_toward_its_gain() {
             "frame {n}: {} against {want}",
             out[100 + n]
         );
+    }
+}
+
+/// A running gate follows its key filter control. A 250 Hz key whose peak through a 1 kHz
+/// high-pass (the closed-form magnitude `w^2 / sqrt((1 - w^2)^2 + (w / q)^2)` at the prewarped
+/// `w = tan(pi f / fs) / tan(pi fc / fs)`) is 0.3 dB under the threshold, and whose full level
+/// is over it, opens the gate while the filter is off, leaves it closed once it is high-pass,
+/// and opens it again when it is off.
+#[test]
+fn a_running_gate_switches_its_key_filter_and_back() {
+    let (f, fc, q, a): (f64, f64, f64, f64) =
+        (250.0, 1_000.0, std::f64::consts::FRAC_1_SQRT_2, 0.5);
+    let pi = std::f64::consts::PI;
+    let w = (pi * f / RATE.get()).tan() / (pi * fc / RATE.get()).tan();
+    let filtered_db = 20.0 * a.log10() + 20.0 * (w * w / (1.0 - w * w).hypot(w / q)).log10();
+    let c = GateControls {
+        key_cutoff: Hz::new(fc),
+        key_q: Q::new(q),
+        ..controls(filtered_db + 0.3, 0.0, 0.0, 0.0, -80.0)
+    };
+    let key: Vec<f32> =
+        tutti_fixtures::signal::sine(Hz::new(f), Amplitude::new(a), RATE, Samples::new(24_000));
+    let ones = vec![1.0f32; key.len()];
+    let mut bank = runner(&c);
+    for (filter, opens) in [
+        (KeyFilter::Off, true),
+        (KeyFilter::HighPass, false),
+        (KeyFilter::Off, true),
+    ] {
+        bank.retarget(&GateControls {
+            key_filter: filter,
+            ..c
+        });
+        let out = run_mono(&mut bank, &ones, &key, None);
+        let highest = out[out.len() - 4800..]
+            .iter()
+            .fold(f32::MIN, |m, &g| m.max(g));
+        if opens {
+            assert!(highest > 0.999, "{filter:?}: gain {highest}");
+        } else {
+            assert!(highest < 1e-3, "{filter:?}: gain {highest}");
+        }
     }
 }

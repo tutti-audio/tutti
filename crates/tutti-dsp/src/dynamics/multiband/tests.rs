@@ -740,6 +740,11 @@ fn a_reset_bank_renders_as_a_fresh_one() {
     k.retarget(&loud);
     run(&mut k, &[&vec![0.9f32; 5_000]]);
     k.reset();
+    assert_eq!(
+        format!("{:?}", k.compressors),
+        format!("{:?}", bank(1, 3).compressors),
+        "a reset bank's compressors are a fresh bank's"
+    );
     let got = run(&mut k, &[&x]);
     assert!(
         got[0]

@@ -274,6 +274,12 @@ impl<D: Destination> core::fmt::Debug for UmpOut<D> {
     }
 }
 
+/// The stamp stream of an output that has sent nothing: JR Timestamps from
+/// origin zero and the JR Clock cadence, both at `sample_rate`.
+pub(crate) fn fresh_stream(sample_rate: tutti_units::SampleRate) -> tutti_midi_runtime::JrStream {
+    tutti_midi_runtime::JrStream::new(sample_rate).clock(sample_rate)
+}
+
 impl<D: Destination> UmpOut<D> {
     /// An output onto `destination`, stamping *and clocking* at `sample_rate`.
     ///
@@ -285,12 +291,11 @@ impl<D: Destination> UmpOut<D> {
     /// §7.2.2.3 has a receiver that has seen no JR Clock render messages "as
     /// soon as possible", discarding the timing entirely.
     pub(crate) fn new(destination: D, sample_rate: tutti_units::SampleRate) -> Self {
-        let stream = tutti_midi_runtime::JrStream::new(sample_rate).clock(sample_rate);
-        Self::resumed(destination, stream)
+        Self::resumed(destination, fresh_stream(sample_rate))
     }
 
     /// An output onto `destination` that carries on `stream`, the stamp stream
-    /// of an output that was closed ([`into_stream`](Self::into_stream)).
+    /// of an output that was closed.
     pub(crate) fn resumed(destination: D, stream: tutti_midi_runtime::JrStream) -> Self {
         Self {
             destination,
@@ -873,8 +878,7 @@ impl MidiState {
             .iter()
             .flat_map(tutti_midi_hardware::DeviceEvents::pending)
             .collect();
-        let rate = graph.prepared().sample_rate();
-        let edits = self.ports.poll(&mut io, graph, rate, pending, polled, out);
+        let edits = self.ports.poll(&mut io, graph, pending, polled, out);
         if !self.watch_failure_reported
             && let Some(why) = self
                 .device_events
