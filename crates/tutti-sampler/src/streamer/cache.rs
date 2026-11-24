@@ -148,7 +148,7 @@ impl<F: Float> LruCache<F> {
     /// A wave larger than the whole byte budget is refused, and evicts
     /// nothing: admitting it would empty the cache for one file and still
     /// leave it over budget. Its holder keeps it (a stream that cannot seek
-    /// holds its file on its writer, `RegionOut::set_resident`).
+    /// holds its file on its writer, as its `Source::Whole`).
     pub fn insert(&self, key: Identity, wave: Arc<Wave<F>>) {
         let size = wave_bytes(&wave);
         if size > self.max_bytes {

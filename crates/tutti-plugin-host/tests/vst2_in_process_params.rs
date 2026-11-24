@@ -237,7 +237,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         ControlProgram::default(),
         ParamRange::of(0.0, 1.0),
     )
-    .knob(0.25)
+    .knob(Normalized::of(0.25))
     .build()
     .0;
 
