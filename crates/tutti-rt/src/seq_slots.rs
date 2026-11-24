@@ -41,6 +41,13 @@
 //! records the generation only after a sweep that no write overlapped, so a
 //! copy a write tore is read again by the next drain and never missed.
 //!
+//! Both ends say where they are as a [`Generation`]:
+//! [`SeqSlotsWriter::written`] and [`SeqSlotsReader::swept`]. Once `swept` has
+//! reached a `written`, every slot's latest write up to it has been collected
+//! by a drain, and so handed to the drain's callback or dropped as stale by a
+//! new epoch. A sweep a write overlapped does not move `swept`, so it lags
+//! and never runs ahead.
+//!
 //! The `loom` model in `tests/seq_slots_loom.rs` runs this code.
 
 use std::sync::Arc;
@@ -59,9 +66,38 @@ struct Stamped<T> {
     epoch: u32,
 }
 
-/// Whether epoch `a` is before epoch `b`, as 32-bit serial numbers.
+/// Whether serial `a` is before serial `b`, as 32-bit serial numbers.
 const fn before(a: u32, b: u32) -> bool {
     (a.wrapping_sub(b) as i32) < 0
+}
+
+/// A count of a slot array's writes, as a wrapping 32-bit serial.
+///
+/// The writer's is [`SeqSlotsWriter::written`], the reader's
+/// [`SeqSlotsReader::swept`]. [`get`](Self::get) and [`new`](Self::new) carry one
+/// through an atomic word to another thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Generation(u32);
+
+impl Generation {
+    /// The generation a raw serial names.
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The raw serial.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+
+    /// Whether this generation is `other` or later, as serial numbers: exact
+    /// while the two are less than `2^31` writes apart.
+    #[must_use]
+    pub const fn has_reached(self, other: Self) -> bool {
+        !before(self.0, other.0)
+    }
 }
 
 /// `len` empty slots holding a `T` each, as the writer and the reader.
@@ -119,6 +155,13 @@ impl<T: Pod> SeqSlotsWriter<T> {
         // reads the cells sees the write.
         self.generation = self.generation.wrapping_add(1);
         self.dirty.store(self.generation, Ordering::Release);
+    }
+
+    /// The generation of the last [`write`](Self::write): how many writes
+    /// there have been, wrapping.
+    #[must_use]
+    pub const fn written(&self) -> Generation {
+        Generation(self.generation)
     }
 
     /// Ends the epoch: every write made so far is stale, and no drain that
@@ -181,6 +224,15 @@ impl<T: Pod> SeqSlotsReader<T> {
     pub fn drain_in_epoch(&mut self, apply: impl FnMut(usize, T, u32)) {
         self.collect();
         self.finish(apply);
+    }
+
+    /// The generation of the last drain no write overlapped. Once it
+    /// [has reached](Generation::has_reached) a [`SeqSlotsWriter::written`],
+    /// every slot's latest write up to that one has been handed to a drain's
+    /// callback, or dropped as stale by a new epoch.
+    #[must_use]
+    pub const fn swept(&self) -> Generation {
+        Generation(self.generation)
     }
 
     /// The epoch now: the number of [`new_epoch`](SeqSlotsWriter::new_epoch)
