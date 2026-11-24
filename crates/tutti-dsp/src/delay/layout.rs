@@ -40,7 +40,7 @@ pub const DELAY_SLEW: f64 = 0.125;
 pub const MAX_DELAY_CHANNELS: usize = MAX_WIDTH;
 
 /// Where a running delay's times come from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum DelaySync {
     /// Seconds: channel 0's time is [`DelayControls::time`], and the channels past the first
