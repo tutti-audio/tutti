@@ -984,9 +984,6 @@ impl Loaded for Ipc {
         latency: false,
     };
 
-    /// The pipeline's chunk follows the device's callback.
-    const FOLLOWS_QUANTUM: bool = true;
-
     /// The width the load settled on. The slab and the server's pipeline run
     /// that width and cannot run the other without a reload, and the load reply
     /// names the settled width, not the plugin's capability, so a load that

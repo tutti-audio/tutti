@@ -109,13 +109,12 @@ impl Prepare {
         self
     }
 
-    /// This activation, for a device whose callbacks carry `quantum` frames
-    /// (`None`: no callback is known): what a format that follows the device's
-    /// callback ([`Loaded::FOLLOWS_QUANTUM`](crate::Loaded::FOLLOWS_QUANTUM))
-    /// sizes its pipeline by.
+    /// This activation, for a device whose callbacks carry `quantum` frames:
+    /// what a served plugin's pipeline is sized by. Unset by
+    /// [`new`](Self::new).
     #[must_use]
-    pub const fn with_quantum(mut self, quantum: Option<MaxBlock>) -> Self {
-        self.quantum = quantum;
+    pub const fn with_quantum(mut self, quantum: MaxBlock) -> Self {
+        self.quantum = Some(quantum);
         self
     }
 

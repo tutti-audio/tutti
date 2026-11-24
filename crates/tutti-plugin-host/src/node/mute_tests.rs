@@ -122,9 +122,11 @@ impl Rig {
 
     /// The plugin is asked for `rate` the way the pump path asks.
     fn ask(&self, rate: SampleRate) {
-        self.inner
-            .lock()
-            .set_sample_rate(main_thread(), rate, None)
+        let mut instance = self.inner.lock();
+        instance.want(|w| w.with_rate(rate));
+        instance.rate_asked();
+        instance
+            .reconcile(Some(main_thread()), None)
             .expect("the change starts");
     }
 

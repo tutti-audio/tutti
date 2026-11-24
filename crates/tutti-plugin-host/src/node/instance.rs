@@ -728,11 +728,7 @@ impl<L: Loaded> Instance<L> {
     /// Records what the graph wants: `change` applied to the wanted `Prepare`.
     /// Nothing is activated until [`reconcile`](Self::reconcile) runs.
     pub(super) fn want(&mut self, change: impl FnOnce(Prepare) -> Prepare) {
-        let mut wanted = change(self.wanted());
-        if !L::FOLLOWS_QUANTUM {
-            wanted = wanted.with_quantum(None);
-        }
-        self.state.want(wanted);
+        self.state.want(change(self.wanted()));
     }
 
     /// The graph asks for a rate again: a refusal of an earlier ask settles at
@@ -741,6 +737,14 @@ impl<L: Loaded> Instance<L> {
         if let Some(silence) = self.silence {
             self.silence(silence.asked_again());
         }
+    }
+
+    /// Whether the Processor's pipeline follows the device's callback size
+    /// ([`Processor::retune`] takes it): a plugin its shell activated itself
+    /// is a served one, whose pipeline does; an in-process one is not restarted
+    /// for a change of it.
+    fn follows_quantum(&self) -> bool {
+        self.origin.is_none()
     }
 
     /// Whether the plugin runs at less than the host wants: another rate, a
@@ -752,14 +756,17 @@ impl<L: Loaded> Instance<L> {
         };
         wanted.rate() != applied.rate()
             || wanted.max_block().get() > applied.max_block().get()
-            || (L::FOLLOWS_QUANTUM && wanted.quantum() != applied.quantum())
+            || (self.follows_quantum() && wanted.quantum() != applied.quantum())
     }
 
     /// Activates the plugin again at what the host wants, when it runs at less
     /// ([`behind`](Self::behind)) and nothing is under way; otherwise a refusal
     /// the graph has left is settled. Without the main thread nothing can be
-    /// activated: the nodes render silence until a pump on it does (the
-    /// instance's tick, the node's `prepare`).
+    /// activated. The nodes render silence only when the rate differs (the
+    /// output would be at the wrong pitch) until a pump on the main thread
+    /// activates the plugin (the instance's tick, the node's `prepare`); a
+    /// larger block ceiling or another callback size alone leaves the plugin
+    /// audible, its blocks split to the ceiling it was told.
     ///
     /// With `rt`, the node's own realtime end out of any executor (its
     /// `prepare`), the exchange runs to the end here; without, the recall waits
@@ -782,7 +789,9 @@ impl<L: Loaded> Instance<L> {
             return Ok(());
         }
         let Some(main) = main else {
-            if self.silence.is_none() {
+            let wrong_rate =
+                self.state.wanted().map(|w| w.rate()) != self.state.applied().map(|a| a.rate());
+            if wrong_rate && self.silence.is_none() {
                 self.silence(Silence::Unprepared);
             }
             return Ok(());
@@ -1031,27 +1040,24 @@ impl<L: Loaded> Instance<L> {
     }
 }
 
-/// What the node's `prepare` does for a rate, as a test asks it.
-#[cfg(test)]
-impl<L: Loaded> Instance<L> {
-    pub(super) fn set_sample_rate(
-        &mut self,
-        main: MainThreadMarker,
-        rate: SampleRate,
-        rt: Option<&mut Rt<L::Processor>>,
-    ) -> Result<(), String> {
-        self.want(|w| w.with_rate(rate));
-        self.rate_asked();
-        self.reconcile(Some(main), rt)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use tutti_fixtures::main_thread;
     use tutti_vst2_host::Vst2Loaded;
 
     use super::*;
+
+    /// What the node's `prepare` does for a rate: wanted, then reconciled.
+    fn ask<L: Loaded>(
+        instance: &mut Instance<L>,
+        main: MainThreadMarker,
+        rate: SampleRate,
+        rt: Option<&mut Rt<L::Processor>>,
+    ) -> Result<(), String> {
+        instance.want(|w| w.with_rate(rate));
+        instance.rate_asked();
+        instance.reconcile(Some(main), rt)
+    }
 
     /// **A load with no block is refused** as an unsupported block (a rate is a
     /// `SampleRate`, so it cannot be none).
@@ -1154,9 +1160,13 @@ mod tests {
         )
         .expect("loads");
         assert!(instance.take_reports().is_empty(), "nothing to report yet");
-        instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect("a real rate is taken");
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect("a real rate is taken");
         assert_eq!(
             instance.state.applied().map(|p| p.rate()),
             Some(SampleRate::SR_96K)
@@ -1185,9 +1195,7 @@ mod tests {
         )
         .expect("loads");
         assert!(rt.poll(Processor::stop).is_some(), "lent at the load");
-        instance
-            .set_sample_rate(main, SampleRate::SR_96K, None)
-            .expect("the change starts");
+        ask(&mut instance, main, SampleRate::SR_96K, None).expect("the change starts");
         assert!(rt.poll(Processor::stop).is_none(), "handed back");
         assert!(instance.state.is_parked(), "waits for the Processor");
         let _ = instance.pump(main);
@@ -1204,7 +1212,7 @@ mod tests {
     fn a_rate_and_callback_size_wanted_without_the_main_thread_are_applied_by_the_next_pump() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         let quantum = MaxBlock::of(Samples::new(32));
-        instance.want(|w| w.with_rate(SampleRate::SR_96K).with_quantum(Some(quantum)));
+        instance.want(|w| w.with_rate(SampleRate::SR_96K).with_quantum(quantum));
         instance.rate_asked();
         instance.reconcile(None, None).expect("nothing is refused");
         assert!(!cycled(&fake), "no main thread: nothing activated");
@@ -1352,9 +1360,13 @@ mod tests {
     fn a_restart_that_would_not_stop_is_stuck_not_a_refused_rate() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.stick_deactivations(1);
-        let why = instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("the fake will not stop");
+        let why = ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("the fake will not stop");
         assert!(why.contains("would not stop"), "{why}");
         let reports = instance.take_reports();
         assert!(
@@ -1374,9 +1386,13 @@ mod tests {
     fn a_refused_rate_is_rolled_back_and_the_rate_taken_after_it_is_reported_once() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.refuse_rate(Some(SampleRate::SR_96K));
-        instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("refused");
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("refused");
         let reports = instance.take_reports();
         assert!(
             matches!(
@@ -1403,9 +1419,13 @@ mod tests {
         );
 
         fake.refuse_rate(None);
-        instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect("taken");
+        ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect("taken");
         let reports = instance.take_reports();
         assert!(
             matches!(reports.as_slice(), [PluginInvalidation::RateRestored]),
@@ -1423,9 +1443,13 @@ mod tests {
     fn a_panic_during_a_restart_reports_the_death_and_no_refusal() {
         let (mut instance, mut rt, fake) = adopted(RenderModeSupport::OnActivation);
         fake.panic_in_activate(true);
-        let why = instance
-            .set_sample_rate(main_thread(), SampleRate::SR_96K, Some(&mut rt))
-            .expect_err("the plugin is lost");
+        let why = ask(
+            &mut instance,
+            main_thread(),
+            SampleRate::SR_96K,
+            Some(&mut rt),
+        )
+        .expect_err("the plugin is lost");
         assert!(
             why.starts_with("plugin was lost changing to sample rate 96000"),
             "{why}"

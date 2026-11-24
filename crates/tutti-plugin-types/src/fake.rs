@@ -972,7 +972,6 @@ impl Loaded for FakeLoaded {
     type Controller = FakeController;
 
     const RESTARTS: RestartRules = RestartRules::CLAP;
-    const FOLLOWS_QUANTUM: bool = true;
 
     fn widths(&self) -> Widths {
         Widths::new(!self.shared.only_32_bit.load(Ordering::Relaxed))

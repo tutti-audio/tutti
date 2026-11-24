@@ -839,9 +839,12 @@ mod tests {
         block(&mut old, 0);
         fake.refuse_rate(Some(SampleRate::SR_44K1));
         let main = main_thread();
-        let _ = inner
-            .lock()
-            .set_sample_rate(main, SampleRate::SR_44K1, None);
+        {
+            let mut instance = inner.lock();
+            instance.want(|w| w.with_rate(SampleRate::SR_44K1));
+            instance.rate_asked();
+            let _ = instance.reconcile(Some(main), None);
+        }
         let mut frame = BLOCK as u64;
         while inner.lock().ready_to_rehand() == Err(RebindError::Restarting) {
             block(&mut old, frame);

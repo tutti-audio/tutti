@@ -503,7 +503,7 @@ fn the_processor_chunk_is_its_configured_chunk() {
     );
     // A fresh activation takes the device's callback size, as a retune does.
     let (ipc, _server) = mock();
-    let quantum = Some(MaxBlock::of(Samples::new(40)));
+    let quantum = MaxBlock::of(Samples::new(40));
     let (fresh, _controller) = match ipc.activate(main_thread(), prepare(48).with_quantum(quantum))
     {
         Ok(halves) => halves,

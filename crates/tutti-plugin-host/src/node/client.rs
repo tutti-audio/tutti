@@ -770,9 +770,10 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
         self.sample_rate = p.sample_rate();
         let main = MainThreadMarker::new();
         self.inner.lock().want(|w| {
-            w.with_rate(p.sample_rate())
-                .with_max_block(p.max_block())
-                .with_quantum(p.quantum())
+            let wanted = tutti_plugin_types::Prepare::new(p.sample_rate(), p.max_block())
+                .with_format(w.format())
+                .with_mode(w.mode());
+            p.quantum().map_or(wanted, |q| wanted.with_quantum(q))
         });
         self.inner.lock().rate_asked();
         if self.retune(p) {

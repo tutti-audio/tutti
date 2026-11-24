@@ -856,9 +856,11 @@ mod owed_tests {
     /// does: the Processor is recalled, so the node's next block hands it
     /// back and renders without it.
     fn recall(inner: &tutti_rt::Mutex<crate::node::instance::Instance<Vst2Loaded>>) {
-        inner
-            .lock()
-            .set_sample_rate(main_thread(), SampleRate::SR_44K1, None)
+        let mut instance = inner.lock();
+        instance.want(|w| w.with_rate(SampleRate::SR_44K1));
+        instance.rate_asked();
+        instance
+            .reconcile(Some(main_thread()), None)
             .expect("the change starts");
     }
 
