@@ -29,8 +29,9 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// # The tail
 ///
-/// The declared tail is the ceiling, unbounded since the freeze can hold the tail. The node narrows it each block to what the controls in force ring, and once the
-/// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
+/// The declared tail is the ceiling, unbounded since the freeze can hold the tail. The node
+/// narrows it each block to what the controls in force ring, and once the input has been
+/// silent for that long it cuts the room off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the ramps;
 /// the lines are the layout's worst case (its most lines at the longest length the size and the
