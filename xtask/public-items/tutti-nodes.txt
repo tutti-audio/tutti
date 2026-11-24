@@ -18,6 +18,7 @@ enum granular::GranularError
 enum lfo::LfoSync
 enum params::ControlRead
 enum params::ControlValid
+enum params::Ring
 enum polarity::PolarityError
 enum reconcile::Feed
 enum reconcile::ReconcileError
