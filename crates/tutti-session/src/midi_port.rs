@@ -461,8 +461,16 @@ impl InputShared {
     /// port whose handles were all dropped stays shut.
     fn open(&self, device: MidiDeviceId, info: Arc<MidiInputInfo>) -> Published {
         let mut inbox = self.inbox.lock();
-        if matches!(inbox.door, Door::Closed(Shut::Away)) {
-            inbox.door = Door::Open(device);
+        match inbox.door {
+            Door::Closed(Shut::Away) => inbox.door = Door::Open(device),
+            Door::Closed(Shut::Released) => {}
+            Door::Open(_) => {
+                debug_assert!(
+                    false,
+                    "a connection opened on a port whose door was open: a connection is closed first"
+                );
+                inbox.door = Door::Open(device);
+            }
         }
         let presence = inbox.presence != Presence::Live;
         inbox.presence = Presence::Live;
@@ -473,7 +481,8 @@ impl InputShared {
     }
 
     /// The port is away for `cause` and reads [`Presence::Lost`]; whether that
-    /// differs from what the handles read. Closing the connection shut the door.
+    /// differs from what the handles read. Closing the connection already shut the door,
+    /// so presence can read [`Presence::Live`] behind a closed door until this runs.
     fn away(&self, cause: PortCause) -> bool {
         let mut inbox = self.inbox.lock();
         let lost = Presence::Lost(cause);
