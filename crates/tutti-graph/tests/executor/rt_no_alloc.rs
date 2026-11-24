@@ -1083,7 +1083,7 @@ fn param_events_are_allocation_free_on(workers: usize) {
 /// a ramp or a segment into each of a consumer's two event inputs on
 /// frames spread over blocks of every length, one already late, and one on a
 /// beat a stopped transport never reaches. Each lands in the param list the
-/// consumer counts, so the merge into the overlay ran.
+/// consumer counts, so the merge into the view ran.
 fn scheduled_params_are_allocation_free_on(workers: usize) {
     let counts = [Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0))];
     let (mut ed, mut exec) = Editor::new(prepare(256));

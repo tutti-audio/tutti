@@ -61,7 +61,7 @@ pub(crate) fn merge_params(sources: &[&[ParamEvent]], out: &mut CappedVec<ParamE
 /// Walks `sources` (each sorted by offset) in `(offset, source index)` order
 /// and calls `keep(source index, event)` for each of the first `room` that
 /// land, with the note-off rule of [`merge_into`]. Returns how many it
-/// dropped. At most [`crate::MAX_PORTS`] `* 2` sources.
+/// dropped. At most [`crate::MAX_PORTS`] `* 3` sources.
 pub(crate) fn merge_walk(
     sources: &[&[Event]],
     room: usize,
@@ -78,7 +78,7 @@ pub(crate) fn merge_walk(
             .sum();
         others = room.saturating_sub(offs);
     }
-    let mut heads = [0usize; 2 * crate::MAX_PORTS];
+    let mut heads = [0usize; 3 * crate::MAX_PORTS];
     let heads = &mut heads[..sources.len()];
     let (mut kept, mut dropped) = (0usize, 0u32);
     loop {

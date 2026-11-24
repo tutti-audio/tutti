@@ -260,9 +260,19 @@ impl<F: Float> Editor<F> {
     /// counted ([`EventTapReader::take_lost`]).
     ///
     /// A tap of an output copies what the port wrote. A tap of an input copies
-    /// what its node reads there: the node's sources merged in the order the
-    /// node is handed them, after their own latency delays. (An aligned tap reads an input whose only
-    /// source is a feedback edge undelayed.)
+    /// what its node is handed there this block, after the node's declared
+    /// input bound: its sources merged in the order the node is handed them
+    /// (after their own latency delays), the events of a delay that went
+    /// away, the closes of an edge that was cut, and the commands scheduled to
+    /// the port. A bypassed node is handed only the closes of the keys and
+    /// pedals it held, at the block's first frame, so its tap carries those
+    /// and none of the events it discards; a parked node (bypassed, its fade
+    /// done, everything it held closed) is handed nothing, and its tap
+    /// carries nothing. An aligned tap of an input is delayed whatever feeds
+    /// it, a feedback edge included; its delay holds one block of scheduled
+    /// commands beyond what the input's sources can write, and what does not
+    /// fit is counted with the other dropped events
+    /// ([`Executor::dropped_event_count`](crate::Executor::dropped_event_count)).
     ///
     /// What the reader gets is the MIDI events the port carries, each with the
     /// frame it was due on ([`TapEvent`](crate::TapEvent)); ramps, segments,
