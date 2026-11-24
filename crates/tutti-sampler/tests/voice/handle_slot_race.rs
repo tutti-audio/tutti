@@ -7,9 +7,12 @@
 //! counter before and after, so a call that began after a transition returned,
 //! or ended before one began, is ordered against it without a clock. The pool is
 //! drained between the threads' rounds, as an audio callback drains it, and
-//! nothing here waits on time: the threads take turns with the drain.
+//! nothing here asserts a time: the threads take turns with the drain, and the
+//! one real-time limit guards a hang.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::SeqCst};
+
+use tutti_fixtures::{HANG_GUARD, wait_until};
 
 use tutti_sampler::testing::{MockTransport, loop_frames, wait_for_open};
 use tutti_sampler::{
@@ -75,13 +78,13 @@ impl Drop for SetOnDrop<'_> {
     }
 }
 
-/// Spins until `blocks` passes `seen` (the pool has drained since), or the
-/// drain is gone (`over`: its thread panicked).
+/// Waits until `blocks` passes `seen` (the pool has drained since), or the
+/// drain is gone (`over`: its thread panicked). The limit only guards a hang.
 fn next_drain(blocks: &AtomicU64, seen: u64, over: &AtomicBool) {
-    while blocks.load(SeqCst) == seen {
+    wait_until("the pool's next drain", HANG_GUARD, || {
         assert!(!over.load(SeqCst), "the drain is gone");
-        std::thread::yield_now();
-    }
+        blocks.load(SeqCst) != seen
+    });
 }
 
 fn open_streams(
@@ -224,12 +227,14 @@ fn a_command_reaches_the_voice_holding_the_slot_when_it_is_queued() {
         // The audio side: drains every block, and tends the streamer.
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
         let _gone = SetOnDrop(&drain_gone);
-        while !(a.is_finished() && b.is_finished()) {
+        // Each look drains once; the limit only guards a hang of the two threads.
+        wait_until("both threads to finish", HANG_GUARD, || {
             tutti_sampler::testing::block(&mut pool, &transport, RATE, BLOCK);
             handle.collect_retired();
             let _ = streamer.step_until_idle(1_000);
             blocks.fetch_add(1, SeqCst);
-        }
+            a.is_finished() && b.is_finished()
+        });
         let (rounds, rests) = a.join().expect("A ran");
         (rounds, b.join().expect("B ran"), rests)
     });
