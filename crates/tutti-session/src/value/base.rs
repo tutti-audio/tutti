@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tutti_music::MeterMap;
 use tutti_rt::Mutex;
 use tutti_tempo::{TempoMap, TempoPoint};
-use tutti_timeline::{ProjectMeter, TransportSettings};
+use tutti_timeline::TransportSettings;
 use tutti_units::{Beat, Bpm};
 
 use super::error::SetRefusal;
@@ -262,7 +262,11 @@ impl Bases {
     /// Drops the steps a follower laid and publishes the base again, for the
     /// maps it stepped.
     #[cfg(feature = "midi")]
-    pub(crate) fn release(&self, settings: &TransportSettings, meter: &ProjectMeter) {
+    pub(crate) fn release(
+        &self,
+        settings: &TransportSettings,
+        meter: &tutti_timeline::ProjectMeter,
+    ) {
         if let Some(tempo) = self.tempo.release() {
             settings.set_tempo_map(tempo);
         }

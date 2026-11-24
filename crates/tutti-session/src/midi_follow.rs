@@ -114,10 +114,21 @@ pub enum FollowKind {
     MachineControl,
 }
 
-/// Why a follower ended without an `unfollow_*` call.
+impl FollowKind {
+    /// Whether the follower lays steps over the base tempo and meter, which
+    /// ending it publishes again: the Flex follower and Beat Clock do, MTC and
+    /// Machine Control carry no tempo.
+    pub(crate) const fn owns_tempo(self) -> bool {
+        matches!(self, Self::Tempo | Self::Clock(ClockKind::BeatClock))
+    }
+}
+
+/// Why a follower stopped.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum UnfollowCause {
+    /// An `unfollow_*` call.
+    Requested,
     /// The input node it read was removed from the graph.
     InputGone,
 }
@@ -362,6 +373,22 @@ pub(crate) struct Follow {
     pub(crate) tap: FollowTap,
 }
 
+/// The end of `follower`, for the explicit `unfollow_*` and the follower whose
+/// input is gone alike: publishes the base again when it laid steps and returns
+/// the event that says it stopped.
+pub(crate) fn ended(
+    bases: &Bases,
+    settings: &TransportSettings,
+    meter: &ProjectMeter,
+    follower: FollowKind,
+    cause: UnfollowCause,
+) -> MidiEvent {
+    if follower.owns_tempo() {
+        bases.release(settings, meter);
+    }
+    MidiEvent::Unfollowed { follower, cause }
+}
+
 /// What a `Poll` phase reads besides the follower.
 pub(crate) struct FollowCx<'a> {
     pub(crate) settings: &'a TransportSettings,
@@ -392,26 +419,15 @@ impl Follow {
 }
 
 impl FollowCx<'_> {
-    /// Reports that the follower `follower` ended because its input is gone
-    /// ([`MidiEvent::Unfollowed`]) and, when it laid steps over the base
-    /// (`owns_maps`), publishes the base again as `unfollow_*` does. The caller
-    /// has dropped the follower.
+    /// Reports the end of `follower` into `out`, publishing the base again when
+    /// it laid steps ([`ended`]). The caller has dropped the follower.
     pub(crate) fn end(
         &self,
         follower: FollowKind,
-        owns_maps: bool,
+        cause: UnfollowCause,
         out: &mut Vec<crate::SessionEvent>,
     ) {
-        if owns_maps {
-            self.bases.release(self.settings, self.meter);
-        }
-        out.push(
-            MidiEvent::Unfollowed {
-                follower,
-                cause: UnfollowCause::InputGone,
-            }
-            .into(),
-        );
+        out.push(ended(self.bases, self.settings, self.meter, follower, cause).into());
     }
 
     /// Places what was heard at the next block start and publishes the new
@@ -811,7 +827,7 @@ impl ClockFollow {
 
     /// Whether it steps the tempo, so nothing else follows one.
     pub(crate) fn owns_tempo(&self) -> bool {
-        matches!(self.core, Clock::BeatClock(_))
+        FollowKind::Clock(self.kind()).owns_tempo()
     }
 
     /// The error the follower read at the last poll
