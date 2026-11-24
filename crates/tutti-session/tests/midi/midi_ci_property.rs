@@ -11,12 +11,13 @@ use tutti_platform::Instant;
 
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
-    CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DeviceBody,
-    JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
-    PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits,
-    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, ReplyData, RequestRefused,
-    ResourceEntry, ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
-    ResponderSettings, SimultaneousRequests, StandardResource, StateId, StreamLimit,
+    CallError, CanSet, CiCategories, CiDeviceId, CiHeader, CiMessage, CustomResource, Decoded,
+    DeviceBody, JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue,
+    PeCapabilities, PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage,
+    PeReassemblyLimits, PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText,
+    ReplyData, RequestRefused, ResourceEntry, ResourceId, ResourceResponder, ResourceStore,
+    ResourceTarget, ResponderAction, ResponderSettings, SimultaneousRequests, StandardResource,
+    StateId, StreamLimit,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -134,8 +135,8 @@ impl PePeer {
                 continue;
             };
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
-            if let Decoded::Message(CiMessage::Discovery { header, .. }) = &decoded {
-                self.responder.accept(header.source, MaxSysexSize::of(512));
+            if let Decoded::Message(CiMessage::Discovery { source, .. }) = &decoded {
+                self.responder.accept(*source, MaxSysexSize::of(512));
                 let data = ReplyData::new(DeviceBody::new(
                     DeviceIdentity {
                         manufacturer: ManufacturerId::of(0x41),
@@ -148,8 +149,9 @@ impl PePeer {
                 ));
                 answers.extend(
                     CiMessage::DiscoveryReply {
-                        header: CiHeader::new(self.muid),
-                        to: header.source,
+                        device_id: CiDeviceId::FunctionBlock,
+                        source: self.muid,
+                        to: *source,
                         data,
                     }
                     .packets(MidiGroup::FIRST)

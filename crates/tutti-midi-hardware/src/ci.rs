@@ -1359,7 +1359,7 @@ fn send(out: &mut OpenOutput, sends: &[(MidiGroup, CiMessage)]) -> Losses {
 mod tests {
     use std::time::Duration;
 
-    use tutti_midi_ci::{CiCategories, DeviceBody, DiscoveryData};
+    use tutti_midi_ci::{CiCategories, CiDeviceId, DeviceBody, DiscoveryData};
     use tutti_midi_device::{EndpointId, PortDirection};
 
     use super::*;
@@ -1401,7 +1401,8 @@ mod tests {
     #[test]
     fn a_ci_message_the_device_has_no_room_for_whole_is_not_sent_in_part() {
         let message = CiMessage::Discovery {
-            header: CiHeader::new(Muid::of(0x0012_3456)),
+            device_id: CiDeviceId::FunctionBlock,
+            source: Muid::of(0x0012_3456),
             data: DiscoveryData::new(DeviceBody::new(
                 identity(),
                 CiCategories::empty(),
@@ -1468,7 +1469,8 @@ mod tests {
         // A peer's Discovery arrives on Group 0 in two polls; Group 1 is refused
         // again in both and is not reported again.
         let message = CiMessage::Discovery {
-            header: CiHeader::new(Muid::of(0x0012_3456)),
+            device_id: CiDeviceId::FunctionBlock,
+            source: Muid::of(0x0012_3456),
             data: DiscoveryData::new(DeviceBody::new(
                 identity(),
                 CiCategories::empty(),

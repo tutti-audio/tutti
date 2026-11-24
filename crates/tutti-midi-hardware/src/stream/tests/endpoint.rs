@@ -350,11 +350,11 @@ fn a_new_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
         ),
         "the old MUID is invalidated first: {sent:?}"
     );
-    let [_, (g, CiMessage::Discovery { header, data })] = sent.as_slice() else {
+    let [_, (g, CiMessage::Discovery { source, data, .. })] = sent.as_slice() else {
         panic!("an Invalidate MUID, then one Discovery: {sent:?}");
     };
     assert_eq!(*g, GROUP_0);
-    assert_ne!(header.source, old, "a fresh MUID");
+    assert_ne!(*source, old, "a fresh MUID");
     assert_eq!(data.body.identity, other);
 }
 

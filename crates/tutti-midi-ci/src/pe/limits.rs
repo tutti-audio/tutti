@@ -257,10 +257,25 @@ impl MediaType {
     /// names.
     pub const OCTET_STREAM: Self = Self::of("application/octet-stream");
 
-    /// Whether this is `application/json`, however its case is spelt.
+    /// Whether this is `application/json`, however its case is spelt and whatever
+    /// parameters (`; charset=utf-8`) follow.
     #[must_use]
     pub fn is_json(&self) -> bool {
-        self.as_str().eq_ignore_ascii_case("application/json")
+        self.essence().eq_ignore_ascii_case("application/json")
+    }
+
+    /// Whether `other` has this type and subtype, whatever their case and
+    /// parameters: the one rule by which a media type is matched.
+    pub(crate) fn same_type(&self, other: &Self) -> bool {
+        self.essence().eq_ignore_ascii_case(other.essence())
+    }
+
+    /// The type and subtype, without parameters and the spaces around them.
+    fn essence(&self) -> &str {
+        let text = self.as_str();
+        text.split_once(';')
+            .map_or(text, |(essence, _)| essence)
+            .trim()
     }
 }
 
@@ -534,6 +549,34 @@ mod tests {
             PeTextError::from(TextError::Bom),
             PeTextError::Character { .. }
         ));
+    }
+
+    /// M2-103 §6.1.6: the data is JSON when the type and subtype are
+    /// `application/json`, whatever the case, the parameters and the spaces round
+    /// the semicolon; a parameter that names the type does not make another type
+    /// JSON.
+    #[test]
+    fn json_is_judged_by_type_and_subtype() {
+        let is_json = |text: &str| MediaType::new(text).unwrap().is_json();
+        for json in [
+            "application/json",
+            "Application/JSON;charset=UTF-8",
+            "application/json; charset=utf-8",
+            "application/json ;charset=utf-8",
+            "  application/json  ;  a=b; c=d",
+        ] {
+            assert!(is_json(json), "{json}");
+        }
+        for other in [
+            "application/octet-stream; x=application/json",
+            "application/jsonx",
+            "text/application/json",
+            "x/application/json;a=b",
+            ";application/json",
+        ] {
+            assert!(!is_json(other), "{other}");
+        }
+        assert_eq!(MediaType::JSON.as_str(), "application/json");
     }
 
     /// An ordinary mixed-case suffix is accepted by the types that take one.
