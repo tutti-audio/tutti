@@ -26,13 +26,18 @@
 //! [`Editor::take_event_losses`]: crate::Editor::take_event_losses
 //! [`Editor::take_unreported_event_losses`]: crate::Editor::take_unreported_event_losses
 
-use crate::compile::ids::{DelayId, EventFeedbackId, PlanUnitId};
+use crate::compile::ids::{EventDelayId, EventFeedbackId, PlanUnitId};
 
 use crate::NodeKey;
 use tutti_rt::{CappedVec, CounterWriter, RingWriter};
 
-use crate::compile::plan::{FeedbackKey, Plan};
+use crate::compile::plan::Plan;
 use crate::model::spec::EventOutputPort;
+
+/// `count` as the `u32` a log entry holds.
+fn clamp(count: u64) -> u32 {
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
 
 /// Entries one block's log holds (and, per worker, one parallel block's).
 pub(crate) const LOG_CAPACITY: usize = 64;
@@ -154,31 +159,18 @@ impl Dropped {
 
     /// `count` events lost in the FIFO of the plan's delay `delay`, charged
     /// to the output port that feeds it.
-    pub(crate) fn charge_delay(&mut self, plan: &Plan, delay: DelayId, count: u64) {
-        // A tap of an input merges several sources, so its loss is nobody's.
-        let from = match plan.program.delays[delay].key.event_origin() {
-            Some(crate::EventTapPort::Out(from)) => Some(from),
-            _ => None,
-        };
-        self.charge(from, count);
+    pub(crate) fn charge_delay(&mut self, plan: &Plan, delay: EventDelayId, count: u64) {
+        match plan.program.event_delays[delay].key.origin() {
+            crate::EventTapPort::Out(from) => self.charge_source(from, clamp(count)),
+            // A tap of an input merges several sources, so its loss is nobody's.
+            crate::EventTapPort::In(_) => self.count(count),
+        }
     }
 
     /// As [`charge_delay`](Self::charge_delay), for the plan's event feedback
     /// `feedback`.
     pub(crate) fn charge_feedback(&mut self, plan: &Plan, feedback: EventFeedbackId, count: u64) {
-        let from = match plan.program.event_feedback[feedback].key {
-            FeedbackKey::Event { from, .. } => Some(from),
-            FeedbackKey::Audio { .. } => None,
-        };
-        self.charge(from, count);
-    }
-
-    fn charge(&mut self, from: Option<EventOutputPort>, count: u64) {
-        let n = u32::try_from(count).unwrap_or(u32::MAX);
-        match from {
-            Some(from) => self.charge_source(from, n),
-            None => self.count(count),
-        }
+        self.charge_source(plan.program.event_feedback[feedback].key.from, clamp(count));
     }
 
     fn note(&mut self, owner: Owner, port: Option<u16>, count: u32, recovered: u32) {

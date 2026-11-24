@@ -2,7 +2,6 @@
 //! outputs and captures.
 
 use super::node_op::Flags;
-use super::state::Ring;
 use crate::compile::ids::{AudioSlotId, EventSlotId};
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
 use crate::event::merge::{merge_params, merge_walk};
@@ -15,24 +14,6 @@ use crate::node::MAX_PORTS;
 use crate::node::param_event::ParamEvent;
 use tutti_buffers::Float;
 use tutti_units::Samples;
-
-/// An audio delay's ring.
-#[inline]
-pub(crate) fn audio_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut AudioRing<F> {
-    match r {
-        Some(Ring::Audio(a)) => a,
-        _ => unreachable!("an audio delay on an event ring"),
-    }
-}
-
-/// An event delay's FIFO.
-#[inline]
-pub(crate) fn event_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut EventFifo {
-    match r {
-        Some(Ring::Event(f)) => f,
-        _ => unreachable!("an event delay on an audio ring"),
-    }
-}
 
 /// [`Op::MainInput`](crate::Op::MainInput).
 #[inline]

@@ -14,8 +14,8 @@ use crate::compile::ids::{
     TableSlice,
 };
 use crate::compile::plan::{
-    Csr, DelayKey, DelaySpec, EventSlotCapacity, FeedbackKey, GainPortOp, InputBound, Op,
-    ParamPortOp, Span, Value,
+    AudioDelay, AudioDelayKey, AudioFeedbackKey, Csr, EventDelay, EventDelayKey, EventFeedbackKey,
+    EventSlotCapacity, GainPortOp, InputBound, Op, ParamPortOp, Span, Value,
 };
 use crate::compile::program::{ARef, ByValue, Capacities, ERef, Program};
 use crate::compile::shapes::Units;
@@ -38,8 +38,8 @@ struct Written {
 }
 
 /// The audio feedback key of `f`: the edge, and the generation of its source.
-fn audio_feedback_key(graph: &ValidGraph, f: FeedbackFrom) -> FeedbackKey {
-    FeedbackKey::Audio {
+fn audio_feedback_key(graph: &ValidGraph, f: FeedbackFrom) -> AudioFeedbackKey {
+    AudioFeedbackKey {
         from: f.from,
         generation: graph.generation(f.from.node),
         delay: f.delay,
@@ -52,8 +52,8 @@ fn event_feedback_key(
     at: EventInputPort,
     from: EventOutputPort,
     delay: Samples,
-) -> FeedbackKey {
-    FeedbackKey::Event {
+) -> EventFeedbackKey {
+    EventFeedbackKey {
         at,
         from,
         generation: graph.generation(from.node),
@@ -62,7 +62,7 @@ fn event_feedback_key(
 }
 
 /// The id of the feedback keyed `key` among the sorted feedback `list`.
-fn feedback_in<F: Id>(key: FeedbackKey, list: &TableSlice<F, FeedbackKey>) -> F {
+fn feedback_in<F: Id, K: Ord + Copy>(key: K, list: &TableSlice<F, K>) -> F {
     list.search_by_key(&key, |k| *k)
         .expect("feedback keys are collected before they are read")
 }
@@ -140,7 +140,7 @@ impl<'a> Emitter<'a> {
     /// value once, in channel order.
     fn new(graph: &'a ValidGraph, units: &'a Units, timing: &'a Timing, prepare: &Prepare) -> Self {
         let topology = graph.topology();
-        let audio_feedback: Table<AudioFeedbackId, FeedbackKey> = topology
+        let audio_feedback: Table<AudioFeedbackId, AudioFeedbackKey> = topology
             .edges
             .values()
             .flatten()
@@ -151,7 +151,7 @@ impl<'a> Emitter<'a> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        let event_feedback: Table<EventFeedbackId, FeedbackKey> = graph
+        let event_feedback: Table<EventFeedbackId, EventFeedbackKey> = graph
             .events()
             .iter()
             .flat_map(|(&at, sources)| {
@@ -195,7 +195,8 @@ impl<'a> Emitter<'a> {
                 event_values: Table::default(),
                 value_readers: Vec::new(),
                 deps: Csr::default(),
-                delays: Table::default(),
+                audio_delays: Table::default(),
+                event_delays: Table::default(),
                 audio_feedback,
                 event_feedback,
                 taps: Table::default(),
@@ -259,15 +260,12 @@ impl<'a> Emitter<'a> {
 
     /// What an event feedback slot holds: all its FIFO can hold at its
     /// source's declared rate.
-    fn feedback_capacity(&self, key: &FeedbackKey) -> EventSlotCapacity {
-        match *key {
-            FeedbackKey::Event { from, delay, .. } => EventSlotCapacity::fifo(
-                self.units.shape_of(from.node).event_capacity,
-                delay,
-                self.block,
-            ),
-            FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
-        }
+    fn feedback_capacity(&self, key: &EventFeedbackKey) -> EventSlotCapacity {
+        EventSlotCapacity::fifo(
+            self.units.shape_of(key.from.node).event_capacity,
+            key.delay,
+            self.block,
+        )
     }
 
     // ---- values and ops ------------------------------------------------------
@@ -422,7 +420,7 @@ impl<'a> Emitter<'a> {
 
     /// The audio value of `source` through its PDC delay to the time `to`,
     /// keyed `key`; a port a checked graph names.
-    fn align_source(&mut self, source: PortSource, to: Latency, key: DelayKey) -> ARef {
+    fn align_source(&mut self, source: PortSource, to: Latency, key: AudioDelayKey) -> ARef {
         let (v, dep) = self
             .source(source)
             .expect("a validated edge reads a port of its source");
@@ -435,7 +433,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         from: EventOutputPort,
         to: Latency,
-        key: DelayKey,
+        key: EventDelayKey,
     ) -> EventValueId {
         let v = self.event_source(from);
         let by = self.departure(from.node).gap_to(to);
@@ -444,11 +442,11 @@ impl<'a> Emitter<'a> {
 
     /// `v` through its PDC delay of `by` frames, keyed `key`: the value itself
     /// when `by` is zero (no op), else the output of a `Delay` ring.
-    fn align_audio(&mut self, v: AudioValueId, by: Samples, key: DelayKey) -> ARef {
+    fn align_audio(&mut self, v: AudioValueId, by: Samples, key: AudioDelayKey) -> ARef {
         if by.is_zero() {
             return ARef::Val(v);
         }
-        let delay = self.program.delays.push(DelaySpec { key, len: by });
+        let delay = self.program.audio_delays.push(AudioDelay { key, len: by });
         let dst = self.new_audio();
         let op = self.push(Op::Delay {
             delay,
@@ -463,14 +461,11 @@ impl<'a> Emitter<'a> {
     /// not zero (the value itself otherwise). The delayed value holds all its
     /// FIFO can: what can fall due in one block, from every port that writes
     /// the stream.
-    fn align_event(&mut self, v: EventValueId, by: Samples, key: DelayKey) -> EventValueId {
+    fn align_event(&mut self, v: EventValueId, by: Samples, key: EventDelayKey) -> EventValueId {
         if by.is_zero() {
             return v;
         }
-        let Some(from) = key.event_origin() else {
-            unreachable!("an event delay is keyed as events")
-        };
-        let ports: Vec<EventOutputPort> = match from {
+        let ports: Vec<EventOutputPort> = match key.origin() {
             crate::EventTapPort::Out(port) => vec![port],
             crate::EventTapPort::In(at) => self
                 .graph
@@ -486,7 +481,7 @@ impl<'a> Emitter<'a> {
             by,
             self.block,
         );
-        let delay = self.program.delays.push(DelaySpec { key, len: by });
+        let delay = self.program.event_delays.push(EventDelay { key, len: by });
         let dst = self.new_event(capacity);
         let op = self.push(Op::EventDelay {
             delay,
@@ -563,7 +558,7 @@ impl<'a> Emitter<'a> {
                         // source like any other (see the module docs of
                         // `compile`, step 4).
                         Edge::Direct(from) => {
-                            self.align_source(from, arrival, DelayKey::Audio { at, from })
+                            self.align_source(from, arrival, AudioDelayKey::Edge { at, from })
                         }
                         Edge::Feedback(f) => ARef::Fb(feedback_in(
                             audio_feedback_key(graph, f),
@@ -587,7 +582,7 @@ impl<'a> Emitter<'a> {
                                 value: self.align_event_source(
                                     from,
                                     arrival,
-                                    DelayKey::EdgeGain { id, from },
+                                    EventDelayKey::EdgeGain { id, from },
                                 ),
                             });
                     refs.push(Addend {
@@ -627,7 +622,7 @@ impl<'a> Emitter<'a> {
                         EventEdge::Direct(from) => ERef::Val(self.align_event_source(
                             from,
                             arrival,
-                            DelayKey::Event { at, from },
+                            EventDelayKey::Edge { at, from },
                         )),
                     })
                     .collect();
@@ -673,7 +668,7 @@ impl<'a> Emitter<'a> {
                 let at = ParamIn { node: key, param };
                 let from = graph.params().get(&at).copied()?;
                 let value =
-                    self.align_event_source(from, arrival, DelayKey::ParamEvent { at, from });
+                    self.align_event_source(from, arrival, EventDelayKey::ParamEvent { at, from });
                 Some(ParamPortOp {
                     port,
                     param,
@@ -693,7 +688,7 @@ impl<'a> Emitter<'a> {
         &mut self,
         sources: &[PortSource],
         align: crate::TapAlign,
-        key: impl Fn(usize, PortSource) -> DelayKey,
+        key: impl Fn(usize, PortSource) -> AudioDelayKey,
     ) -> Vec<ARef> {
         let total = self.timing.total;
         sources
@@ -756,7 +751,7 @@ impl<'a> Emitter<'a> {
                         let r = self.align_source(
                             source,
                             output_time,
-                            DelayKey::Output {
+                            AudioDelayKey::Output {
                                 channel,
                                 from: source,
                             },
@@ -770,7 +765,7 @@ impl<'a> Emitter<'a> {
                                 value: self.align_event_source(
                                     from,
                                     output_time,
-                                    DelayKey::EdgeGain { id, from },
+                                    EventDelayKey::EdgeGain { id, from },
                                 ),
                             });
                         Addend { r, lane, drive }
@@ -808,7 +803,7 @@ impl<'a> Emitter<'a> {
             };
             // Delaying silence is silence: a zero channel reports its
             // compensation (as `latency::plan` does) but gets no ring.
-            let key = DelayKey::Output {
+            let key = AudioDelayKey::Output {
                 channel,
                 from: source,
             };
@@ -820,7 +815,7 @@ impl<'a> Emitter<'a> {
                         src = self.align_audio(v, d, key);
                     }
                     _ => {
-                        delay = Some(self.program.delays.push(DelaySpec { key, len: d }));
+                        delay = Some(self.program.audio_delays.push(AudioDelay { key, len: d }));
                     }
                 }
             }
@@ -859,7 +854,7 @@ impl<'a> Emitter<'a> {
                     })
                     .collect(),
                 crate::TapSpec::Ports { sources, align } => {
-                    self.lanes(sources, *align, |lane, from| DelayKey::Tap {
+                    self.lanes(sources, *align, |lane, from| AudioDelayKey::Tap {
                         tap,
                         lane,
                         from,
@@ -921,7 +916,7 @@ impl<'a> Emitter<'a> {
                 (crate::TapAlign::ToOutput, ERef::Val(v)) => ERef::Val(self.align_event(
                     v,
                     at_time.gap_to(timing.total),
-                    DelayKey::EventTap { tap, from },
+                    EventDelayKey::EventTap { tap, from },
                 )),
                 _ => carried,
             };
@@ -942,7 +937,7 @@ impl<'a> Emitter<'a> {
             let srcs: Vec<ARef> = match spec {
                 crate::MeterSpec::Outputs => output_refs[..timing.main_output_width].to_vec(),
                 crate::MeterSpec::Ports { sources, align } => {
-                    self.lanes(sources, *align, |lane, from| DelayKey::Meter {
+                    self.lanes(sources, *align, |lane, from| AudioDelayKey::Meter {
                         meter,
                         lane,
                         from,
@@ -971,10 +966,7 @@ impl<'a> Emitter<'a> {
             .program
             .audio_feedback
             .iter_enumerated()
-            .map(|(feedback, key)| match *key {
-                FeedbackKey::Audio { from, .. } => (feedback, from),
-                FeedbackKey::Event { .. } => unreachable!("audio feedback keys are audio"),
-            })
+            .map(|(feedback, key)| (feedback, key.from))
             .collect();
         for (feedback, from) in audio {
             let src = self
@@ -990,10 +982,7 @@ impl<'a> Emitter<'a> {
             .program
             .event_feedback
             .iter_enumerated()
-            .map(|(feedback, key)| match *key {
-                FeedbackKey::Event { from, .. } => (feedback, from),
-                FeedbackKey::Audio { .. } => unreachable!("event feedback keys are events"),
-            })
+            .map(|(feedback, key)| (feedback, key.from))
             .collect();
         for (feedback, from) in events {
             let src = self.event_source(from);

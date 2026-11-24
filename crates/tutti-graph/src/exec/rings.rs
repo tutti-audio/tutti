@@ -14,7 +14,7 @@
 //!
 //! # Retuning keeps history
 //!
-//! A ring's state is keyed by its [`DelayKey`](crate::DelayKey) and survives a
+//! A ring's state is keyed by its [`AudioDelayKey`](crate::AudioDelayKey) or [`EventDelayKey`](crate::EventDelayKey) and survives a
 //! recompile. When the recompile changes its *length* from `n` to `m`, it keeps
 //! the most recent `min(n, m)` inputs and zero-fills the older end — exactly
 //! the state a ring of length `m` would have had if it had seen the same
