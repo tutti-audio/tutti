@@ -11,12 +11,11 @@ use crate::support::{Division, RawEvent, build_smf};
 use std::sync::Arc;
 
 use tutti_midi_file::{
-    FileEvent, Meta, MidiFile, OutOfOrder, ReadError, Refusal, SmfDivision, StandardMidiFile,
-    TextKind, Tick, TimelineDrop, Track, TracksError,
+    Meta, MidiFile, OutOfOrder, ReadError, SmfDivision, SmfEvent, StandardMidiFile, TextKind, Tick,
+    TimelineDrop, Track, TracksError,
 };
 use tutti_ump::{
-    Address, Message, MidiChannel, MidiGroup, NoteNumber, SysexStatus, TicksPerQuarterNote, U7,
-    Ump, Voice1,
+    Message, MidiChannel, MidiGroup, NoteNumber, SysexStatus, TicksPerQuarterNote, U7, Ump, Voice1,
 };
 use tutti_units::{Beat, Bpm};
 
@@ -24,14 +23,13 @@ const TPQ: u16 = 480;
 const DIVISION: TicksPerQuarterNote = TicksPerQuarterNote::of(TPQ);
 const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
-fn on(tick: u64, key: u8) -> (Tick, FileEvent) {
+fn on(tick: u64, key: u8) -> (Tick, SmfEvent) {
     (
         Tick(tick),
-        Message::midi1(
-            MidiChannel::FIRST,
-            Voice1::note_on(NoteNumber::of(key), U7::of(100)),
-        )
-        .into(),
+        SmfEvent::Channel {
+            channel: MidiChannel::FIRST,
+            message: Voice1::note_on(NoteNumber::of(key), U7::of(100)),
+        },
     )
 }
 
@@ -84,19 +82,19 @@ fn tick_arithmetic_past_the_ends_of_u64_is_none() {
 fn a_note_is_an_on_at_its_start_and_an_off_at_its_end() {
     let ch = MidiChannel::of(4);
     let track = Track::new().note(Tick(100), Tick(150), ch, NoteNumber::of(60), U7::of(90));
-    let at = |m| Address::first(ch) == m;
     assert_eq!(track.events().len(), 2);
     let (t0, e0) = &track.events()[0];
     let (t1, e1) = &track.events()[1];
     assert_eq!((*t0, *t1), (Tick(100), Tick(150)));
     assert!(matches!(
-        e0.message(),
-        Some(Message::Midi1(a, Voice1::NoteOn { note, velocity }))
-            if at(*a) && note.get() == 60 && velocity.get() == 90
+        e0,
+        SmfEvent::Channel { channel, message: Voice1::NoteOn { note, velocity } }
+            if *channel == ch && note.get() == 60 && velocity.get() == 90
     ));
     assert!(matches!(
-        e1.message(),
-        Some(Message::Midi1(a, Voice1::NoteOff { note, .. })) if at(*a) && note.get() == 60
+        e1,
+        SmfEvent::Channel { channel, message: Voice1::NoteOff { note, .. } }
+            if *channel == ch && note.get() == 60
     ));
     assert_eq!(track.end(), Tick(150));
 }
@@ -144,14 +142,8 @@ fn a_tempo_is_a_meta_event_at_its_tick() {
     assert_eq!(
         track.events(),
         [
-            (
-                Tick(0),
-                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())
-            ),
-            (
-                Tick(960),
-                FileEvent::Meta(Meta::text(TextKind::Marker, "B"))
-            ),
+            (Tick(0), SmfEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())),
+            (Tick(960), SmfEvent::Meta(Meta::text(TextKind::Marker, "B"))),
         ]
     );
     assert_eq!(track.end(), Tick(960));
@@ -164,10 +156,10 @@ fn push_refuses_an_event_before_the_last() {
     let track = Track::new()
         .push(
             Tick(10),
-            Message::midi1(
-                MidiChannel::FIRST,
-                Voice1::note_on(NoteNumber::of(60), U7::of(1)),
-            ),
+            SmfEvent::Channel {
+                channel: MidiChannel::FIRST,
+                message: Voice1::note_on(NoteNumber::of(60), U7::of(1)),
+            },
         )
         .unwrap()
         .push(Tick(10), Meta::tempo(Bpm::of(100.0)).unwrap())
@@ -279,7 +271,7 @@ fn a_sysex_event_is_its_sysex7_packets_at_its_beat() {
         timeline.dropped,
         [(
             Beat::new(2.0),
-            FileEvent::Escape(vec![0xF0, 0x90, 0xF7].into()),
+            SmfEvent::Escape(vec![0xF0, 0x90, 0xF7].into()),
             TimelineDrop::BareEscape
         ),]
     );
@@ -308,19 +300,16 @@ fn sysex7(packets: &[(Beat, Ump)]) -> Vec<(Beat, SysexStatus, Vec<u8>)> {
 #[test]
 fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
     let track = Track::new()
-        .push(
-            Tick(0),
-            FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00])),
-        )
+        .push(Tick(0), SmfEvent::SysEx(common::start(&[0x43, 0x12, 0x00])))
         .unwrap()
         .push(
             Tick(200),
-            FileEvent::Escape(vec![0x43, 0x12, 0x00, 0x43, 0x12, 0x00].into()),
+            SmfEvent::Escape(vec![0x43, 0x12, 0x00, 0x43, 0x12, 0x00].into()),
         )
         .unwrap()
         .push(
             Tick(300),
-            FileEvent::Escape(vec![0x43, 0x12, 0x00, 0xF7].into()),
+            SmfEvent::Escape(vec![0x43, 0x12, 0x00, 0xF7].into()),
         )
         .unwrap();
     let f = file(vec![track]);
@@ -347,11 +336,11 @@ fn a_divided_sysex_is_a_start_continues_and_an_end_each_at_its_events_beat() {
 fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_intervene() {
     let part: Vec<u8> = (1..=8).collect();
     let track = Track::new()
-        .push(Tick(0), FileEvent::SysEx(common::start(&part.clone())))
+        .push(Tick(0), SmfEvent::SysEx(common::start(&part.clone())))
         .unwrap()
         .push(Tick(10), Meta::text(TextKind::Marker, "m"))
         .unwrap()
-        .push(Tick(20), FileEvent::Escape(vec![9, 0xF7].into()))
+        .push(Tick(20), SmfEvent::Escape(vec![9, 0xF7].into()))
         .unwrap();
     let timeline = metrical(&file(vec![track])).timeline();
     let beat = |ticks: f64| Beat::new(ticks / f64::from(TPQ));
@@ -372,9 +361,9 @@ fn a_divided_sysex_part_over_six_bytes_is_several_packets_and_a_meta_event_may_i
 /// Spec: smf/track-chunks#20, smf/track-chunks#21
 #[test]
 fn a_bare_escape_and_an_unfinished_divided_message_are_dropped_and_listed() {
-    let escape = FileEvent::Escape(vec![0xF3, 0x01].into());
-    let first = FileEvent::SysEx(common::start(&[1, 2]));
-    let second = FileEvent::Escape(vec![3, 0xF7].into());
+    let escape = SmfEvent::Escape(vec![0xF3, 0x01].into());
+    let first = SmfEvent::SysEx(common::start(&[1, 2]));
+    let second = SmfEvent::Escape(vec![3, 0xF7].into());
     let f = read_bytes(build_smf(
         1,
         Division::Metrical(TPQ),
@@ -428,8 +417,8 @@ fn a_format_2_file_has_no_metrical_view_but_each_track_has_a_timeline() {
 /// listed as `NotSevenBit`.
 #[test]
 fn an_eight_bit_divided_message_is_listed() {
-    let part = FileEvent::SysEx(common::start(&[1]));
-    let end = FileEvent::Escape(vec![0x90, 0xF7].into());
+    let part = SmfEvent::SysEx(common::start(&[1]));
+    let end = SmfEvent::Escape(vec![0x90, 0xF7].into());
     let track = Track::new()
         .push(Tick(0), part.clone())
         .unwrap()
@@ -478,19 +467,6 @@ fn a_refused_track_list_names_the_rule_and_where() {
         config(crate::common::format2(SMF_DIVISION, vec![])),
         TracksError::NoTracks
     );
-    // An SMF holds the first Group only.
-    let g2 = Message::midi1(
-        Address::new(MidiGroup::of(1), MidiChannel::FIRST),
-        Voice1::note_on(NoteNumber::of(60), U7::of(1)),
-    );
-    let t = Track::new().push(Tick(0), g2).unwrap();
-    assert_eq!(
-        config(crate::common::format0(SMF_DIVISION, t)),
-        TracksError::Refused {
-            track: 0,
-            refusal: Refusal::SmfGroup
-        }
-    );
 }
 
 // ---- bytes in and out ------------------------------------------------------
@@ -529,14 +505,8 @@ fn two_tempos_on_one_tick_are_kept_and_the_later_governs() {
     assert_eq!(
         track.events(),
         [
-            (
-                Tick(0),
-                FileEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())
-            ),
-            (
-                Tick(0),
-                FileEvent::Meta(Meta::tempo(Bpm::of(60.0)).unwrap())
-            ),
+            (Tick(0), SmfEvent::Meta(Meta::tempo(Bpm::of(90.0)).unwrap())),
+            (Tick(0), SmfEvent::Meta(Meta::tempo(Bpm::of(60.0)).unwrap())),
         ]
     );
     let file = crate::common::format0(SmfDivision::per_quarter(480), track).unwrap();

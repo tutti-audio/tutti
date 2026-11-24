@@ -290,7 +290,8 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         click: Arc<tutti_nodes::ClickSettings>,
     ) {
         use crate::value::{
-            BaseSlot, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SlotId, TempoCell,
+            BaseSlot, ClickVolumeSlot, LoopCell, PublishedSlot, SettingSlot, SettingWord, SlotId,
+            TempoCell, WordSlot,
         };
         let bases = &self.transport.bases;
         table.provide_staged(
@@ -324,10 +325,10 @@ impl<K: AppKey, C: Clock> Session<K, C> {
         self.midi.provide_values(table);
         table.provide(
             SlotId::ClickMode,
-            Arc::new(SettingSlot {
+            WordSlot::new::<tutti_nodes::MetronomeMode>(Arc::new(SettingSlot {
                 owner: click,
                 project: tutti_nodes::ClickSettings::mode,
-            }) as SlotCell<tutti_nodes::MetronomeMode>,
+            })) as SlotCell<SettingWord>,
         );
     }
 }

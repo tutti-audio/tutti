@@ -13,10 +13,10 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology, Float, InputOutput, Mono, Planes, PlanesMut};
 use tutti_dsp::BlockMismatch;
 use tutti_graph::{
-    BusRole, Cx, HasParam, HasParams, InBus, IntoNode, Io, MAX_PORTS, Node, NodeParts, Offset,
-    OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
+    BusRole, Cx, ErasedSetting, HasParam, HasParams, HasSetting, InBus, IntoNode, Io, MAX_PORTS,
+    Node, NodeParts, Offset, OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Tail};
+use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -335,11 +335,6 @@ impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
 }
 
 impl<K: Kernel> KernelNode<K> {
-    /// The node's cells and the set that addresses them.
-    pub(crate) fn params(&self) -> &Params<K::Set> {
-        &self.params
-    }
-
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
     /// before the node goes live.
@@ -840,6 +835,10 @@ impl<K: Kernel> ParamNode<K::Float> for KernelNode<K> {
         self.params.bind(ParamSet::builder()).build()
     }
 
+    fn settings(&self) -> Vec<ErasedSetting> {
+        self.params.set().settings()
+    }
+
     /// A clone with every cell detached (at its value now) and silent.
     fn fork_fresh(&self) -> Self {
         let mut fork = self.clone();
@@ -858,6 +857,14 @@ where
 }
 
 impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasControls<P> {}
+
+/// A kernel node has the settings its [`ControlSet`] declares.
+impl<K: Kernel, S: Setting> HasSetting<S> for KernelNode<K>
+where
+    K::Set: HasSetting<S>,
+{
+    type Word = <K::Set as HasSetting<S>>::Word;
+}
 
 /// Inserted with its [`ParamSet`] as its controls and a fork that starts from the values
 /// last set through it ([`tutti_graph::param_parts`]).

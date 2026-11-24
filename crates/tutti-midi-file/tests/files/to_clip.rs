@@ -13,9 +13,9 @@ use crate::common::{encoded_clip, read_bytes, read_clip};
 use crate::support::{Division, RawEvent, build_smf};
 use core::num::NonZeroU8;
 use tutti_midi_file::{
-    ClipFile, DropReason, FileEvent, Layout, Lead, LeadTrack, LyricChange, Meta, MicrosPerQuarter,
-    OtherMetaKind, SmfDivision, SmfPart, SmpteFractionalFrames, SmpteOffset, StandardMidiFile,
-    TextKind, Tick, Track,
+    ClipFile, DropReason, Layout, Lead, LeadTrack, LyricChange, Meta, MicrosPerQuarter,
+    OtherMetaKind, SmfDivision, SmfEvent, SmfPart, SmpteFractionalFrames, SmpteOffset,
+    StandardMidiFile, TextKind, Tick, Track,
 };
 use tutti_midi_protocol::{SmpteFrameRate, SmpteTimecode};
 use tutti_ump::{
@@ -28,11 +28,11 @@ use tutti_units::{Beat, Seconds};
 const TPQ: u16 = 480;
 const SMF_DIVISION: SmfDivision = SmfDivision::per_quarter(TPQ);
 
-fn meta(m: Meta) -> FileEvent {
-    FileEvent::Meta(m)
+fn meta(m: Meta) -> SmfEvent {
+    SmfEvent::Meta(m)
 }
 
-fn text(kind: TextKind, s: &str) -> FileEvent {
+fn text(kind: TextKind, s: &str) -> SmfEvent {
     meta(Meta::text(kind, s))
 }
 
@@ -40,7 +40,7 @@ fn flex(f: Flex) -> Ump {
     Message::Flex(MidiGroup::FIRST, f).into()
 }
 
-fn format0(events: Vec<(u64, FileEvent)>) -> StandardMidiFile {
+fn format0(events: Vec<(u64, SmfEvent)>) -> StandardMidiFile {
     crate::common::format0(SMF_DIVISION, track(events)).unwrap()
 }
 
@@ -53,10 +53,10 @@ fn format0_lead(lead: LeadTrack) -> StandardMidiFile {
 }
 
 /// The packet of an SMF event that is a message.
-fn packet(event: FileEvent) -> Ump {
+fn packet(event: SmfEvent) -> Ump {
     match event {
-        FileEvent::Message(message) => Ump::from(message),
-        _ => unreachable!("the event is a message"),
+        SmfEvent::Channel { channel, message } => Ump::from(Message::midi1(channel, message)),
+        _ => unreachable!("the event is a channel message"),
     }
 }
 
@@ -316,7 +316,7 @@ fn the_first_set_tempo_has_the_delta_clockstamp_of_start_of_clip() {
 fn a_complete_sysex_is_sysex7_packets() {
     let smf = format0(vec![(
         5,
-        FileEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6])),
+        SmfEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6])),
     )]);
     let converted = metrical(&smf).to_clip().unwrap();
     assert!(converted.dropped.is_empty());
@@ -338,10 +338,10 @@ fn a_complete_sysex_is_sysex7_packets() {
 
 #[test]
 fn a_sysex_that_is_not_one_complete_message_is_reported() {
-    let divided = FileEvent::SysEx(common::start(&[0x7E, 1, 2]));
-    let rest = FileEvent::Escape(vec![3, 0xF7].into());
+    let divided = SmfEvent::SysEx(common::start(&[0x7E, 1, 2]));
+    let rest = SmfEvent::Escape(vec![3, 0xF7].into());
     // An `F0` event with an 8-bit byte is read as the escape of the bytes it sends.
-    let eight_bit = FileEvent::Escape(vec![0xF0, 0x7E, 0x80, 0xF7].into());
+    let eight_bit = SmfEvent::Escape(vec![0xF0, 0x7E, 0x80, 0xF7].into());
     let smf = read_bytes(build_smf(
         0,
         Division::Metrical(TPQ),
@@ -529,7 +529,7 @@ fn what_has_no_successor_is_reported_with_its_tick() {
             data: vec![1, 2].into(),
         })
     };
-    let escape = FileEvent::Escape(vec![0xF3, 1].into());
+    let escape = SmfEvent::Escape(vec![0xF3, 1].into());
     let offset = SmpteOffset::new(
         SmpteTimecode::origin(SmpteFrameRate::Fps25),
         SmpteFractionalFrames::of(0),
@@ -705,7 +705,7 @@ fn a_dropped_field_sorts_among_the_dropped_events_by_tick_then_track() {
 /// event is Unknown Metadata Text.
 #[test]
 fn text_that_flex_cannot_carry_is_reported() {
-    let latin1 = FileEvent::Meta(Meta::Text {
+    let latin1 = SmfEvent::Meta(Meta::Text {
         kind: TextKind::Lyric,
         bytes: vec![b'c', b'a', b'f', 0xE9].into(),
     });
@@ -771,7 +771,7 @@ fn text_is_composed_to_nfc_without_a_byte_order_mark() {
 #[test]
 fn property_exchange_and_empty_text_are_reported() {
     // F0 7E 7F 0D <sub-ID#2> ... F7, the bytes after the F0.
-    let ci = |sub_id2: u8| FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x0D, sub_id2, 0x02]));
+    let ci = |sub_id2: u8| SmfEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x0D, sub_id2, 0x02]));
     let smf = format0(vec![
         (0, ci(0x34)), // Inquiry: Get Property Data
         (1, ci(0x3F)), // Notify
@@ -818,7 +818,7 @@ fn the_clip_round_trips_through_its_bytes() {
                 (480, note(0, 62)),
                 (
                     960,
-                    FileEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6, 7])),
+                    SmfEvent::SysEx(common::complete(&[0x7E, 1, 2, 3, 4, 5, 6, 7])),
                 ),
             ]))
             .copyright("a rather long copyright notice"),
@@ -841,14 +841,14 @@ fn the_clip_round_trips_through_its_bytes() {
     assert_eq!(again, clip);
 }
 
-fn tempo_event(micros: u32) -> FileEvent {
+fn tempo_event(micros: u32) -> SmfEvent {
     meta(Meta::Tempo {
         micros_per_quarter: MicrosPerQuarter::of(micros),
         extra: Box::default(),
     })
 }
 
-fn signature_meta(numerator: u8, power: u8) -> FileEvent {
+fn signature_meta(numerator: u8, power: u8) -> SmfEvent {
     meta(Meta::TimeSignature {
         numerator,
         denominator_power: power,
@@ -969,7 +969,7 @@ fn events_on_their_grids_are_not_moved() {
     assert_eq!(at_ticks(&done.clip, is_tempo), [0, 960, 3360]);
 }
 
-fn smf_at(tpq: u16, events: Vec<(u64, FileEvent)>) -> StandardMidiFile {
+fn smf_at(tpq: u16, events: Vec<(u64, SmfEvent)>) -> StandardMidiFile {
     crate::common::format0(SmfDivision::per_quarter(tpq), track(events)).unwrap()
 }
 
