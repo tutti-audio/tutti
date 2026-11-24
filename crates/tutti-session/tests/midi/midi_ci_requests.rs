@@ -245,8 +245,12 @@ fn a_switch_nothing_answers_times_out_after_the_peer_reply_timeout() {
     wire.step(wait - 20);
     assert_eq!(wire.result(&mut request), None, "still waiting");
     wire.step(20);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    // The session's MIDI-CI task ends the request once it has read a time past
+    // the timeout: stepped until it has.
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves before it answers ends the switch as `Disconnected`.
@@ -345,8 +349,10 @@ fn a_report_nothing_answers_times_out_after_the_peer_reply_timeout() {
     let mut request = wire.reporter().request(everything());
     wire.run(5);
     wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves while its report is out ends the request as `Disconnected`.

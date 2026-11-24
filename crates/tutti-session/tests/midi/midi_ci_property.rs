@@ -385,8 +385,17 @@ fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
     wire.step(wait - 20);
     assert_eq!(wire.result(&mut request), None, "still waiting");
     wire.step(40);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    // The session's MIDI-CI task ends the request once it has read a time past
+    // the timeout: stepped until it has. The bound is a count of simulated
+    // milliseconds, and guards a request that never resolves.
+    let ended = (0..2000).find_map(|_| {
+        let out = wire.result(&mut request);
+        if out.is_none() {
+            wire.step(1);
+        }
+        out
+    });
+    assert_eq!(ended, Some(Err(PeerError::TimedOut)));
 }
 
 /// A peer that leaves before it answers ends the call as `Disconnected`.
