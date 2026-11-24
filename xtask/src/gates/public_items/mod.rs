@@ -28,6 +28,10 @@
 //! `fn edit::Editor::replace`, `struct stream::OutputSpec`, `trait node::Node`. The same
 //! key can occur twice (a `cfg` twin per platform, two `impl` blocks): the list is a
 //! multiset, and each occurrence has its row.
+//! The module path is part of the key, so an item moved to another file is one row deleted
+//! and one row added: a pure move reads as a matched pair in the diff. A `pub` item in a
+//! private module that nothing re-exports has a row too, which is intended: an item that
+//! never leaves its crate is `pub(crate)`.
 //!
 //! **Lists.** `<crate>.txt` holds `#` lines and one key per line, sorted;
 //! `cargo xtask write-public-items` rewrites them from the tree. A crate with no file has
