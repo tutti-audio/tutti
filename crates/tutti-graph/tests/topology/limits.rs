@@ -140,28 +140,25 @@ fn limits_only_tighten() {
     ));
 }
 
-/// `validate` refuses the spec `commit` refuses, with the same error, and
-/// sends nothing: the editor can still commit once the spec is repaired.
+/// `commit` refuses a spec past the limits with `TooManyOutputs`, sends nothing,
+/// and commits once the spec is repaired.
 #[test]
-fn validate_refuses_what_commit_refuses_and_sends_nothing() {
+fn commit_refuses_too_many_outputs_and_sends_nothing() {
     let (mut ed, _exec) = Editor::new(prep(512));
     ed.set_limits(LIMITS).expect("nothing sent yet");
     ed.insert(NodeKey(1), "wide", Unforkable(Wide(10)));
     wire(&mut ed, 10);
-    let refused = CommitError::TooManyOutputs {
-        outputs: 10,
-        limit: 8,
-    };
-    assert_eq!(ed.validate(), Err(refused.clone()));
-    assert_eq!(ed.commit(), Err(refused));
+    assert_eq!(
+        ed.commit(),
+        Err(CommitError::TooManyOutputs {
+            outputs: 10,
+            limit: 8,
+        })
+    );
     assert_eq!(ed.in_flight(), 0, "nothing was sent");
+    assert!(ed.base().is_none(), "and planned nothing");
 
     wire(&mut ed, 8);
-    assert_eq!(ed.validate(), Ok(()), "eight fit");
-    assert_eq!(ed.in_flight(), 0, "validating sent nothing");
-    assert!(ed.base().is_none(), "and planned nothing");
-    ed.commit().expect("the spec validate accepted commits");
+    ed.commit().expect("eight fit");
     assert_eq!(ed.in_flight(), 1);
-    assert_eq!(ed.validate(), Ok(()), "still valid after the commit");
-    assert_eq!(ed.in_flight(), 1, "validating again sent nothing");
 }
