@@ -12,7 +12,7 @@ use clap_sys::events::{
 };
 use tutti_clap_host::{
     ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
-    NoteExpressionType, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
+    NoteExpressionType, NoteSend, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
     ParameterQueue,
 };
 use tutti_graph::Offset;
@@ -34,6 +34,7 @@ fn at(k: usize) -> Offset {
 /// A fresh list `event` was added to: its first event is what it converts to.
 fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     list.add_midi(event);
     list
 }

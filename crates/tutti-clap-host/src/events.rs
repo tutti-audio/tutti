@@ -939,9 +939,11 @@ pub struct InputEventList {
     /// parameter and bank each channel of each Group has had selected.
     midi1_translator: Midi1Translator,
     /// The input note ports the plugin has: a Group is note port `group`.
+    /// Zero for a plugin with none, which is no MIDI destination and is sent
+    /// notes as CLAP note events.
     ports: usize,
-    /// What each input note port is sent: [`NoteSend::Clap`] for a port past
-    /// the plugin's last.
+    /// What each input note port is sent: [`NoteSend::CLAP_ONLY`] past the
+    /// plugin's last, and for the notes of a plugin with no port.
     sends: [NoteSend; MidiGroup::COUNT as usize],
     /// Messages of a Group the plugin has no note port for: see
     /// [`groups_dropped`](Self::groups_dropped).
@@ -976,8 +978,8 @@ impl InputEventList {
             refused: 0,
             notes: Self::per_note_state(tutti_ump::GroupSpan::of(1)),
             midi1_translator: Midi1Translator::new(),
-            ports: 1,
-            sends: [NoteSend::CLAP_AND_MIDI; MidiGroup::COUNT as usize],
+            ports: 0,
+            sends: [NoteSend::CLAP_ONLY; MidiGroup::COUNT as usize],
             groups_dropped: 0,
             sysex: sysex_assembler(),
         }
@@ -1007,9 +1009,11 @@ impl InputEventList {
     /// the note port of its number: Group 0 reaches port 0, Group 1 port 1,
     /// and a Group past the last port is dropped and counted the same way,
     /// never folded onto another Group's channels (M2-104 section 2.1.2). An
-    /// empty list is one port that takes CLAP note events only, as a plugin
-    /// with no note port is sent. A list never given is every port taking
-    /// CLAP note events and MIDI.
+    /// empty list is a plugin with no input note port, which is the state of a
+    /// new list: it is sent notes as CLAP note events (on Group 0 only), and
+    /// is no MIDI destination, so a controller, system message or SysEx for it
+    /// is dropped without being counted: nothing was lost that it declared it
+    /// takes.
     ///
     /// Forgets the per-note state and every MIDI 1.0 selection, and allocates
     /// it (about 270 KiB for each port): off the audio thread, at activation.
@@ -1026,7 +1030,7 @@ impl InputEventList {
             .ok()
             .and_then(tutti_ump::GroupSpan::new)
             .ok_or(TooManyNotePorts(ports.len()))?;
-        self.ports = usize::from(span.get());
+        self.ports = ports.len();
         self.sends = [NoteSend::CLAP_ONLY; MidiGroup::COUNT as usize];
         self.sends[..ports.len()].copy_from_slice(ports);
         self.notes = Self::per_note_state(span);
@@ -1047,7 +1051,8 @@ impl InputEventList {
     /// takes no MIDI dialect. Each is dropped whole, never heard on another
     /// Group's channels. Zero while every Group the host sends has a port that
     /// takes what is sent it. Utility messages name no port and are not
-    /// counted.
+    /// counted, and a plugin with no input note port is no destination for MIDI
+    /// at all: what is sent it is not counted.
     pub fn groups_dropped(&self) -> u64 {
         self.groups_dropped
     }
@@ -1255,8 +1260,8 @@ impl InputEventList {
                 | Voice1::PitchBend(_) => self.add_bytes(time, address, message),
             },
             Message::Midi2(address, voice) => self.add_voice2(time, address, voice),
-            Message::System(_, system) => {
-                if let Some(port) = self.midi_port(0) {
+            Message::System(group, system) => {
+                if let Some(port) = self.midi_port(u16::from(group.get())) {
                     self.push_bytes(time, port, &[system.bytes().padded()]);
                 }
             }
@@ -1279,7 +1284,7 @@ impl InputEventList {
         let port = u16::from(address.group.get());
         let send = self.sends.get(usize::from(port)).copied();
         match send {
-            Some(send) if usize::from(port) < self.ports && send != NoteSend::Nothing => {
+            Some(send) if usize::from(port) < self.ports.max(1) && send != NoteSend::Nothing => {
                 Some((port, send))
             }
             _ => {
@@ -1289,9 +1294,13 @@ impl InputEventList {
         }
     }
 
-    /// Input note port `port`, or `None` (counted) when the plugin has no such
-    /// port or it takes no `clap_event_midi`.
+    /// Input note port `port`, or `None` when it takes no `clap_event_midi`:
+    /// counted when the plugin has input note ports and not this one, or this
+    /// one takes no MIDI; not counted for a plugin with none.
     fn midi_port(&mut self, port: u16) -> Option<u16> {
+        if self.ports == 0 {
+            return None;
+        }
         let takes = usize::from(port) < self.ports && self.sends[usize::from(port)].takes_midi();
         if !takes {
             self.groups_dropped += 1;
@@ -2410,6 +2419,7 @@ mod tests {
     /// event a packet is, at the default per-note state.
     fn from_midi(event: &UmpAt) -> InputEventList {
         let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         list.add_midi(event);
         list
     }
@@ -2510,6 +2520,7 @@ mod tests {
             ),
         );
         let mut list = InputEventList::new(InputRooms::new(8));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         list.add_midi(&pc);
         let got: Vec<(u32, [u8; 3])> = list
             .events()
@@ -2525,6 +2536,7 @@ mod tests {
         );
         // Room for two: none of the three is staged, and all are counted.
         let mut tight = InputEventList::new(InputRooms::new(2));
+        tight.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         let room = tight.events.capacity();
         for _ in 0..room.saturating_sub(1) {
             tight.add_midi(&(at(0), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
@@ -2553,6 +2565,7 @@ mod tests {
     fn a_ports_worth_of_banked_program_changes_fits_its_midi_room() {
         const UMPS: usize = 64;
         let mut list = InputEventList::new(InputRooms::for_port(NonZeroU32::new(64).unwrap()));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         let pc = (
             at(0),
             midi::program_change(
@@ -2599,6 +2612,7 @@ mod tests {
     fn a_spec_word_banked_program_change_is_three_midi_events() {
         let pc = packet(5, &[0x40C1_0001, (9 << 24) | (1 << 8) | 5]);
         let mut list = InputEventList::new(InputRooms::new(8));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         list.add_midi(&pc);
         let got: Vec<[u8; 3]> = list
             .events()
@@ -2810,6 +2824,7 @@ mod tests {
         )
         .layout();
         let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         list.midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),
@@ -3576,6 +3591,64 @@ mod tests {
             "the accepting ports still get notes"
         );
         assert_eq!(list.groups_dropped(), 4);
+    }
+
+    /// A plugin with no input note port, which is also a new list, is sent its
+    /// notes as CLAP note events and is no MIDI destination: a controller,
+    /// system message or SysEx for it is dropped, and not counted, since it
+    /// declared nothing it takes.
+    #[test]
+    fn a_plugin_with_no_input_note_port_is_sent_notes_and_no_midi_uncounted() {
+        let sysex = {
+            let packets =
+                tutti_ump::Sysex7Packets::from_payload(MidiGroup::FIRST, &[0x7E, 0x09, 0x01])
+                    .expect("seven-bit bytes");
+            (at(0), packets.into_iter().next().expect("one packet"))
+        };
+        let clock = (
+            at(0),
+            Ump::from(Message::System(MidiGroup::FIRST, System::TimingClock)),
+        );
+        for configured in [false, true] {
+            let mut list = InputEventList::new(InputRooms::new(1024));
+            if configured {
+                list.set_note_ports(&[]).unwrap();
+            }
+            list.add_midi(&packet(0, &[0x4090_3C00, 0xFFFF_0000]));
+            list.add_midi(&cc_message(0));
+            list.add_midi(&sysex);
+            list.add_midi(&clock);
+            assert!(
+                matches!(list.events(), [ClapEvent::NoteOn(_)]),
+                "{:?}",
+                list.events()
+            );
+            assert_eq!(list.groups_dropped(), 0);
+        }
+    }
+
+    /// M2-104 section 7.6: a System message names a Group, and goes to that
+    /// Group's note port as every other message does, never folded onto
+    /// another's; one for a Group with no port is dropped and counted.
+    #[test]
+    fn a_system_message_goes_to_its_groups_port() {
+        let clock = |group: u8| -> UmpAt {
+            (
+                at(0),
+                Ump::from(Message::System(
+                    MidiGroup::new(group).unwrap(),
+                    System::TimingClock,
+                )),
+            )
+        };
+        let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::CLAP_ONLY, NoteSend::CLAP_AND_MIDI])
+            .unwrap();
+        list.add_midi(&clock(1));
+        assert!(matches!(list.events(), [ClapEvent::Midi(m)] if m.port_index == 1));
+        list.add_midi(&clock(2));
+        assert_eq!(list.events().len(), 1, "Group 2 has no port");
+        assert_eq!(list.groups_dropped(), 1);
     }
 
     /// A port that takes CLAP note events without the MIDI dialect is sent its
@@ -4783,6 +4856,7 @@ mod tests {
         let (first, second) = long_packets.split_at(MIDI_STACK_CAPACITY);
         let short = sysex_packets(&body, 3);
         let mut list = InputEventList::new(InputRooms::new(MIDI_STACK_CAPACITY));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         assert_no_alloc::assert_no_alloc(|| {
             list.clear();
             list.add_midi_events(&short);
@@ -4808,6 +4882,7 @@ mod tests {
     #[test]
     fn sysex_drops_are_whole_and_counted() {
         let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         let over = fx::sysex_payload(tutti_plugin_types::SYSEX_MESSAGE_CAPACITY - 1); // framed: one past
         for block in sysex_packets(&over, 0).chunks(MIDI_STACK_CAPACITY) {
             list.clear();

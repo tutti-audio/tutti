@@ -192,14 +192,18 @@ fn a_group_without_a_note_port_is_dropped_and_counted() {
         &mut list,
         Ump::from(Message::System(group(1), System::TimingClock)),
     );
+    add(
+        &mut list,
+        Ump::from(Message::System(group(0), System::TimingClock)),
+    );
     let events = drain(&mut list);
     assert_eq!(events.len(), 2, "{events:?}");
     assert_eq!(note_on(&events[0]).2, 60, "only Group 0's note is heard");
     assert_eq!(midi_bytes(&events[1]), (0, [0xF8, 0, 0]));
     assert_eq!(
         list.groups_dropped(),
-        2,
-        "the Group 1 note and the Group 2 CC"
+        3,
+        "the Group 1 note, the Group 2 CC and the Group 1 clock"
     );
 }
 
@@ -634,6 +638,7 @@ fn an_rpn_is_four_control_changes_every_time() {
 #[test]
 fn an_nrpn_selects_with_cc_99_and_98() {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     add(
         &mut list,
         Ump::from(Message::midi2(
@@ -658,6 +663,7 @@ fn an_nrpn_selects_with_cc_99_and_98() {
 #[test]
 fn a_banked_program_change_is_three_messages_every_time() {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     let bank = Bank {
         msb: U7::of(5),
         lsb: U7::of(9),

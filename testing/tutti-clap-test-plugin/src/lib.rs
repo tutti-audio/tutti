@@ -2004,9 +2004,22 @@ pub unsafe extern "C" fn tutti_test_plugin_set_note_out_ports(count: u32) {
     NOTE_OUT_PORTS.store(count.min(1), Ordering::SeqCst);
 }
 
+/// How many input note ports the plugin declares: its two, or none.
+static NOTE_IN_PORTS: AtomicU32 = AtomicU32::new(2);
+
+/// Sets how many input note ports the plugin declares (`0` or `2`). Read when
+/// the host scans its note ports.
+///
+/// # Safety
+/// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tutti_test_plugin_set_note_in_ports(count: u32) {
+    NOTE_IN_PORTS.store(count.min(2), Ordering::SeqCst);
+}
+
 unsafe extern "C" fn note_ports_count(_plugin: *const clap_plugin, is_input: bool) -> u32 {
     if is_input {
-        2
+        NOTE_IN_PORTS.load(Ordering::SeqCst)
     } else {
         NOTE_OUT_PORTS.load(Ordering::SeqCst)
     }

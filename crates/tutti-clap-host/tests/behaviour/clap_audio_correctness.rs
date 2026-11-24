@@ -74,6 +74,7 @@ struct ProbeControls {
     set_preferred_dialect: unsafe extern "C" fn(u32),
     set_port0_dialects: unsafe extern "C" fn(u32),
     set_port0_info_refused: unsafe extern "C" fn(u32),
+    set_note_in_ports: unsafe extern "C" fn(u32),
 }
 
 impl ProbeControls {
@@ -102,8 +103,12 @@ impl ProbeControls {
             let set_port0_info_refused = *lib
                 .get::<unsafe extern "C" fn(u32)>(b"tutti_test_plugin_set_port0_info_refused\0")
                 .expect("set_port0_info_refused symbol present");
+            let set_note_in_ports = *lib
+                .get::<unsafe extern "C" fn(u32)>(b"tutti_test_plugin_set_note_in_ports\0")
+                .expect("set_note_in_ports symbol present");
             Self {
                 _lib: lib,
+                set_note_in_ports,
                 set_port0_dialects,
                 set_port0_info_refused,
                 set_port_layout,
@@ -132,6 +137,9 @@ impl ProbeControls {
     }
     fn set_port0_dialects(&self, raw: u32) {
         unsafe { (self.set_port0_dialects)(raw) }
+    }
+    fn set_note_in_ports(&self, count: u32) {
+        unsafe { (self.set_note_in_ports)(count) }
     }
     fn set_port0_info_refused(&self, refused: bool) {
         unsafe { (self.set_port0_info_refused)(u32::from(refused)) }
@@ -199,6 +207,7 @@ impl Drop for ProbeSession<'_> {
             .set_preferred_dialect(PREFERRED_DIALECT_DEFAULT);
         self.controls.set_port0_dialects(PREFERRED_DIALECT_DEFAULT);
         self.controls.set_port0_info_refused(false);
+        self.controls.set_note_in_ports(2);
     }
 }
 
@@ -854,9 +863,21 @@ fn midi_goes_only_to_note_ports_that_declare_the_midi_dialect() {
     );
 }
 
+/// A plugin that declares no input note port is sent CLAP note events alone,
+/// by the first-port answer; it has no port to list. A port it counts but will
+/// not describe is another kind, tested below.
+#[test]
+fn a_plugin_with_no_input_note_port_is_sent_clap_notes() {
+    let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
+    session.controls.set_note_in_ports(0);
+    let loaded = session.load();
+    assert_eq!(loaded.note_port_count(main_thread(), true), 0);
+    assert_eq!(loaded.note_send(main_thread()), NoteSend::CLAP_ONLY);
+    assert_eq!(loaded.note_sends(main_thread()), Ok(vec![]));
+}
+
 /// A port the plugin counts but will not describe is sent nothing, by the
-/// first-port answer as by the per-port list; a plugin with no note port is
-/// what is sent CLAP notes.
+/// first-port answer as by the per-port list.
 #[test]
 fn a_note_port_the_plugin_will_not_describe_is_sent_nothing() {
     let session = ProbeSession::begin(LAYOUT_SYMMETRIC_STEREO, RENDER_INERT);
