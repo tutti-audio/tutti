@@ -36,7 +36,7 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed, Reopened,
 };
 use crate::{ClockKind, ClockOffset, FollowClock, FollowMachineControl, FollowTempo};
 use crate::{EventOutputPort, Key, MidiError, MidiEvent, MidiNodes};
@@ -1042,13 +1042,7 @@ impl MidiState {
             return (Vec::new(), false);
         };
         let actions = clock.heard(cx, out);
-        let mut edited = false;
-        if clock.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(clock.tap_id()) {
-                clock.set_tap(tap);
-            }
-        }
+        let edited = clock.tap.reopen(graph) == Reopened::Opened;
         (actions, edited)
     }
 
@@ -1070,13 +1064,7 @@ impl MidiState {
             .into_iter()
             .map(ClockAction::at_next_block)
             .collect();
-        let mut edited = false;
-        if machine.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(machine.tap_id()) {
-                machine.set_tap(tap);
-            }
-        }
+        let edited = machine.tap.reopen(graph) == Reopened::Opened;
         (actions, edited)
     }
 
@@ -1098,13 +1086,7 @@ impl MidiState {
         // What the tap holds is read at the scale it was opened at, then the
         // tap is reopened if the graph has been re-prepared at another rate.
         let heard = follow.heard();
-        let mut edited = false;
-        if follow.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(follow.tap_id()) {
-                follow.set_tap(tap);
-            }
-        }
+        let edited = follow.tap.reopen(graph) == Reopened::Opened;
         cx.apply(&heard, out);
         edited
     }

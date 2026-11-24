@@ -158,3 +158,35 @@ fn a_follower_hears_its_source_after_a_re_rate() {
         assert!(heard, "{} did not hear its source", follower.name);
     }
 }
+
+/// **A follower whose input node is gone stops editing the graph.** Each
+/// follower follows, its input node is removed and the graph is re-rated: the
+/// tap cannot be re-opened, and once the re-rate has settled no later update
+/// commits for it.
+#[test]
+fn a_follower_whose_input_is_gone_commits_nothing() {
+    for follower in FOLLOWERS {
+        let (mut s, _fake) = rig();
+        (follower.follow)(&mut s);
+        let _ = s.update();
+        let input = s.input();
+        let _ = s.remove(input);
+        let _ = s.update();
+        s.graph().set_sample_rate(SampleRate::SR_44K1).unwrap();
+        for _ in 0..4 {
+            let _ = s.update();
+            blocks(&mut s, 8);
+        }
+        let settled = s.graph_ref().testing().commits_sent();
+        for _ in 0..5 {
+            let _ = s.update();
+            blocks(&mut s, 1);
+        }
+        assert_eq!(
+            s.graph_ref().testing().commits_sent(),
+            settled,
+            "{} edited the graph after its input went",
+            follower.name
+        );
+    }
+}
