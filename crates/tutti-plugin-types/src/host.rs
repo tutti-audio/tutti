@@ -605,11 +605,14 @@ pub trait Processor: Send {
     }
 
     /// How this Processor follows the graph's rate, block ceiling and device
-    /// quantum without a restart: `None`, the default, when only a
-    /// [`Lifecycle`](crate::Lifecycle) reconfiguration can, and the control
-    /// side then also restarts the plugin for a change of the quantum. The
+    /// quantum without a restart. `None`, the default: a rate or a larger
+    /// block ceiling reaches the plugin only through a
+    /// [`Lifecycle`](crate::Lifecycle) reconfiguration, and the quantum is
+    /// nothing to it, so a change of the quantum alone restarts nothing. The
     /// served pipeline sets it: it tells its server the rate by a queued
-    /// command and settles its chunk from the block and quantum.
+    /// command and settles its chunk from the block and quantum, and with no
+    /// Processor in hand to call it on, a change of the quantum is an
+    /// activation too.
     ///
     /// Called from the node's `prepare`, which runs off the audio thread with
     /// the node out of any executor, so it may allocate; it starts the

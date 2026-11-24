@@ -759,12 +759,15 @@ impl State {
         }
     }
 
-    /// Whether the plugin runs at less than the host wants and only an
-    /// activation can give it: another rate, a block ceiling above the one it
-    /// was told, another width, or (`follows_quantum`: its Processor retunes
-    /// live) another callback size. The render mode is not compared: a mode is
-    /// asked for by its own call, and a plugin without one keeps it only as a
-    /// record.
+    /// Whether what the plugin has differs from what the host wants in
+    /// something that matters to its Processor: another rate, a block ceiling
+    /// above the one it was told, another width, or, for a Processor that
+    /// retunes live (`follows_quantum`: its [`RETUNE`](crate::Processor::RETUNE)
+    /// is set), another callback size. A node that holds such a Processor
+    /// retunes it first and records it ([`retuned`](Self::retuned)); what this
+    /// still answers `true` for is given by an activation. The render mode is
+    /// not compared: a mode is asked for by its own call, and a plugin without
+    /// one keeps it only as a record.
     #[must_use]
     pub fn behind(&self, follows_quantum: bool) -> bool {
         let (Some(wanted), Some(applied)) = (self.wanted(), self.applied) else {
