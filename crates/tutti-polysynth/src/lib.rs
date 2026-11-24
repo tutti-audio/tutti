@@ -31,6 +31,7 @@
 //! use tutti_polysynth::{
 //!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
 //! };
+//! use tutti_dsp::LadderSaturation;
 //! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
 //! use tutti_graph::NodeKey;
@@ -44,6 +45,7 @@
 //!         .filter(FilterType::Moog {
 //!             cutoff: Hz::new(2000.0),
 //!             resonance: Resonance::new(0.7),
+//!             saturation: LadderSaturation::PerStage,
 //!         })
 //!         .envelope(Adsr {
 //!             attack: Seconds::new(0.01),

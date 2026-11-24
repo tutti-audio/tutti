@@ -59,6 +59,7 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 /// ```
 /// use std::num::NonZeroUsize;
 /// use tutti_buffers::MaxBlock;
+/// use tutti_dsp::LadderSaturation;
 /// use tutti_units::{Hz, Resonance, SampleRate, Samples};
 /// use tutti_graph::{Prepare, Renderer};
 /// use tutti_polysynth::{FilterType, OscillatorType, PolySynth, SynthConfig};
@@ -67,7 +68,11 @@ use tutti_voicing::{Controller, Effect, Glide, MasterGain, NoteControl, Stop};
 ///     SynthConfig::new()
 ///         .oscillator(OscillatorType::Saw)
 ///         .polyphony(NonZeroUsize::new(8).unwrap())
-///         .filter(FilterType::Moog { cutoff: Hz::new(2_000.0), resonance: Resonance::new(0.5) }),
+///         .filter(FilterType::Moog {
+///             cutoff: Hz::new(2_000.0),
+///             resonance: Resonance::new(0.5),
+///             saturation: LadderSaturation::PerStage,
+///         }),
 /// );
 /// assert_eq!(synth.active_voice_count(), 0);
 ///
@@ -177,7 +182,6 @@ impl<F: SynthFloat> PolySynth<F> {
         VoiceBank::new(
             config.oscillator,
             &config.filter,
-            config.ladder_saturation,
             &config.envelope,
             sample_rate,
             config.polyphony.get(),

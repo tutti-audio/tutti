@@ -369,7 +369,6 @@ impl<F: SynthFloat> VoiceBank<F> {
     pub(crate) fn new(
         oscillator: OscillatorType,
         filter: &FilterType,
-        saturation: LadderSaturation,
         envelope: &Adsr,
         sample_rate: SampleRate,
         voices: usize,
@@ -393,7 +392,7 @@ impl<F: SynthFloat> VoiceBank<F> {
         };
         let filter = match *filter {
             FilterType::None => Filter::None,
-            FilterType::Moog { .. } => Filter::Ladder(saturation),
+            FilterType::Moog { saturation, .. } => Filter::Ladder(saturation),
             FilterType::Svf { q, mode, .. } => {
                 let ty = match mode {
                     SvfMode::Lowpass => SvfType::LowPass,

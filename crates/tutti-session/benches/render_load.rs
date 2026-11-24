@@ -127,6 +127,7 @@ impl Variant {
     }
 }
 
+use tutti_dsp::LadderSaturation;
 use tutti_graph::{Cost, Cx, Event, Io, Node, Offset, Prepare, Shape, Status, Unforkable};
 use tutti_platform::Instant;
 use tutti_polysynth::{Adsr, FilterType, OscillatorType, PolySynth, SynthConfig};
@@ -255,6 +256,7 @@ fn scene(block: usize, workers: Workers, variant: Variant) -> Session {
                 .filter(FilterType::Moog {
                     cutoff: Hz::new(1_200.0),
                     resonance: Resonance::new(0.3),
+                    saturation: LadderSaturation::PerStage,
                 })
                 .envelope(Adsr::new(
                     Seconds::new(0.005),
