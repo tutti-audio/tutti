@@ -25,10 +25,11 @@ use tutti_graph::{
     Cx, Edge, Editor, Event, EventEdge, EventInputPort, EventKind, EventOutputPort, Executor,
     ForkByClone, ForkCause, ForkSource, ForkTarget, Forked, InputPort, IntoNode, Io, MissingSource,
     Node, NodeKey, NodeParts, Offset, Op, OutputPort, PortSource, Prepare, RenderMode, Shape,
-    Status, TapAlign, TapEvent, TransportPosition, note_off_room,
+    Status, TapAlign, TapEvent, TransportPosition, Unforkable, note_off_room,
 };
-use tutti_ump::{MidiChannel, U7, Ump};
-use tutti_units::{Frame, Latency, Samples};
+use tutti_graph::{NodeMode, Scheduled};
+use tutti_ump::{CCNumber, Message, MidiChannel, U7, U14, Ump, Voice1};
+use tutti_units::{At, Frame, Latency, Samples};
 
 const MAX_BLOCK: usize = 512;
 
@@ -703,6 +704,9 @@ struct Probe {
     ports: usize,
     /// The event capacity the probe declares; 0 declares none.
     capacity: u32,
+    /// Whether the probe has an event output, so a bypass discards its events
+    /// (a node with no outputs is never bypassed).
+    audible: bool,
 }
 
 impl Probe {
@@ -712,7 +716,11 @@ impl Probe {
 
 impl Node for Probe {
     fn shape(&self) -> Shape {
-        let shape = Shape::EMPTY.events(self.ports as u16, 0);
+        let shape = if self.audible {
+            Shape::EMPTY.events(self.ports as u16, 1)
+        } else {
+            Shape::EMPTY.events(self.ports as u16, 0)
+        };
         if self.capacity > 0 {
             shape.event_capacity(tutti_graph::testing::cap_of(self.capacity))
         } else {
@@ -755,6 +763,7 @@ fn fan_in(r: &mut Rig, probe_ports: usize) -> tutti_fixtures::Record<TapEvent> {
             heard: heard.clone(),
             ports: probe_ports,
             capacity: 0,
+            audible: false,
         }),
     );
     for from in [1, 2] {
@@ -864,6 +873,7 @@ fn an_aligned_input_tap_is_sized_for_every_source_of_the_input() {
             heard: heard.clone(),
             ports: 1,
             capacity: 1,
+            audible: false,
         }),
     );
     for from in [1, 2] {
@@ -993,5 +1003,224 @@ fn the_parallel_event_taps_are_bit_identical_and_allocation_free() {
     for workers in [2, 3, 4] {
         let mut p = rig(workers, true, 40);
         assert_eq!(serial, run_busy(&mut p), "{workers} workers");
+    }
+}
+
+/// MIDI 1.0 sustain pedal (CC 64) at `value`.
+fn pedal(value: u8) -> Ump {
+    midi::m1_cc(MidiChannel::FIRST, CCNumber::SUSTAIN, U7::of(value))
+}
+
+/// MIDI 1.0 pitch bend on channel 0.
+fn bend(value: u16) -> Ump {
+    Ump::from(Message::midi1(
+        MidiChannel::FIRST,
+        Voice1::PitchBend(U14::of(value)),
+    ))
+}
+
+/// What a cut edge into a probe leaves behind, per probe: what it heard and
+/// what its raw and its aligned input tap carried.
+struct Cut {
+    heard: Vec<TapEvent>,
+    raw: Vec<TapEvent>,
+    aligned: Vec<TapEvent>,
+}
+
+/// `pairs` scripts each holding a key, the sustain pedal and an off-centre
+/// bend feed one probe each over an event edge, with an input tap on every
+/// probe (raw and aligned); the edges are cut after the first block and two
+/// more blocks render on `workers` participants.
+fn cut_edges(workers: usize, pairs: u64) -> Vec<Cut> {
+    let mut r = rig(workers, workers > 1, 40);
+    let held = vec![(3, on(60)), (5, pedal(127)), (7, bend(0))];
+    let mut taps = Vec::new();
+    for i in 0..pairs {
+        r.ed.insert(
+            NodeKey(10 + i),
+            "script",
+            Unforkable(Script::new(held.clone())),
+        );
+        let heard = tutti_fixtures::Record::new();
+        r.ed.insert(
+            NodeKey(20 + i),
+            "probe",
+            ForkByClone(Probe {
+                heard: heard.clone(),
+                ports: 1,
+                capacity: 0,
+                audible: false,
+            }),
+        );
+        let input = EventInputPort::new(NodeKey(20 + i), 0);
+        r.ed.spec_mut()
+            .connect_events(input, EventEdge::Direct(port(10 + i, 0)));
+        let open = |r: &mut Rig, id, align| {
+            r.ed.open_event_tap(
+                EventTapId::of(id),
+                input,
+                EventTapOptions::new(EventCapacity::of(64)).align(align),
+            )
+            .expect("the input exists")
+        };
+        let raw = open(&mut r, 2 * i + 1, TapAlign::Raw);
+        let aligned = open(&mut r, 2 * i + 2, TapAlign::ToOutput);
+        taps.push((heard, raw, aligned));
+    }
+    commit(&mut r);
+    render(&mut r, &[64], 64);
+    for i in 0..pairs {
+        let input = EventInputPort::new(NodeKey(20 + i), 0);
+        assert!(r.ed.spec_mut().disconnect_events(input, port(10 + i, 0)));
+    }
+    commit(&mut r);
+    assert_eq!(r.exec.is_parallel(), workers > 1 && pairs > 1);
+    render(&mut r, &[64], 128);
+    taps.into_iter()
+        .map(|(heard, mut raw, mut aligned)| Cut {
+            heard: heard.lock().unwrap().to_vec(),
+            raw: drain(&mut raw),
+            aligned: drain(&mut aligned),
+        })
+        .collect()
+}
+
+/// **An input tap carries what the node is handed, the closes of a cut edge
+/// included.** A script holds key 60, the sustain pedal and an off-centre
+/// bend on an edge that is then cut: the node is sent, at the first frame of
+/// the next block, the pedal up, the bend centred (0x2000) and the key's note
+/// off, and the raw tap carries exactly those at those frames. The aligned
+/// one is later by the gap to the output time (40).
+#[test]
+fn an_input_tap_carries_the_closes_of_a_cut_edge() {
+    let cut = &cut_edges(1, 1)[0];
+    let expect = vec![
+        at(3, on(60)),
+        at(5, pedal(127)),
+        at(7, bend(0)),
+        at(64, pedal(0)),
+        at(64, bend(0x2000)),
+        at(64, off(60)),
+    ];
+    assert_eq!(cut.heard, expect, "what the node was handed");
+    assert_eq!(cut.raw, expect);
+    let later: Vec<TapEvent> = expect
+        .iter()
+        .map(|e| at(e.frame.get() + 40, e.ump))
+        .collect();
+    assert_eq!(cut.aligned, later);
+}
+
+/// The taps of several probes on the pool carry what the one-participant
+/// render's do, event for event.
+#[test]
+fn the_closes_of_cut_edges_reach_input_taps_on_the_pool() {
+    let serial = cut_edges(1, 4);
+    for workers in [2, 3] {
+        let pooled = cut_edges(workers, 4);
+        for (s, p) in serial.iter().zip(&pooled) {
+            assert_eq!(s.raw, p.raw, "{workers} workers");
+            assert_eq!(s.aligned, p.aligned, "{workers} workers");
+        }
+    }
+    assert!(
+        serial
+            .iter()
+            .all(|c| c.raw.len() == 6 && c.aligned.len() == 6)
+    );
+}
+
+/// **A scheduled event command to an input is in the input tap**, at the
+/// frame it is delivered on, after the edge's events of that frame.
+#[test]
+fn an_input_tap_carries_a_scheduled_event() {
+    for align in [TapAlign::Raw, TapAlign::ToOutput] {
+        let mut r = rig(1, false, 40);
+        script(&mut r, 1, Script::new(vec![(3, on(1))]));
+        let heard = tutti_fixtures::Record::new();
+        r.ed.insert(
+            NodeKey(3),
+            "probe",
+            ForkByClone(Probe {
+                heard: heard.clone(),
+                ports: 1,
+                capacity: 0,
+                audible: false,
+            }),
+        );
+        let input = EventInputPort::new(NodeKey(3), 0);
+        r.ed.spec_mut()
+            .connect_events(input, EventEdge::Direct(port(1, 0)));
+        let mut tap =
+            r.ed.open_event_tap(
+                EventTapId::of(1),
+                input,
+                EventTapOptions::new(EventCapacity::of(64)).align(align),
+            )
+            .expect("the input exists");
+        commit(&mut r);
+        r.ed.schedule(
+            At::Frame(Frame::new(70)),
+            input,
+            Scheduled::Event(EventKind::Midi(on(5))),
+        )
+        .expect("room");
+        render(&mut r, &[64], 128);
+        let by = if align == TapAlign::Raw { 0 } else { 40 };
+        assert_eq!(
+            heard.lock().unwrap().to_vec(),
+            vec![at(3, on_port(on(1), 0)), at(70, on(5))]
+        );
+        assert_eq!(
+            drain(&mut tap),
+            vec![at(3 + by, on_port(on(1), 0)), at(70 + by, on(5))],
+            "{align:?}"
+        );
+    }
+}
+
+/// **A bypassed node's input tap carries what the bypass sends it**: the
+/// close of the key it held, and none of the events it discards.
+#[test]
+fn a_bypassed_nodes_input_tap_carries_its_closes() {
+    for align in [TapAlign::Raw, TapAlign::ToOutput] {
+        let mut r = rig(1, false, 40);
+        r.ed.insert(
+            NodeKey(1),
+            "script",
+            Unforkable(Script::new(vec![(3, on(60)), (100, on(2))])),
+        );
+        let heard = tutti_fixtures::Record::new();
+        r.ed.insert(
+            NodeKey(3),
+            "probe",
+            Unforkable(Probe {
+                heard: heard.clone(),
+                ports: 1,
+                capacity: 0,
+                audible: true,
+            }),
+        );
+        let input = EventInputPort::new(NodeKey(3), 0);
+        r.ed.spec_mut()
+            .connect_events(input, EventEdge::Direct(port(1, 0)));
+        let mut tap =
+            r.ed.open_event_tap(
+                EventTapId::of(1),
+                input,
+                EventTapOptions::new(EventCapacity::of(64)).align(align),
+            )
+            .expect("the input exists");
+        commit(&mut r);
+        render(&mut r, &[64], 64);
+        r.ed.set_mode(NodeKey(3), NodeMode::Bypassed)
+            .expect("a node");
+        commit(&mut r);
+        render(&mut r, &[64], 192);
+        let by = if align == TapAlign::Raw { 0 } else { 40 };
+        let node = vec![at(3, on_port(on(60), 0)), at(64, off(60))];
+        assert_eq!(heard.lock().unwrap().to_vec(), node, "{align:?}");
+        let tapped: Vec<TapEvent> = node.iter().map(|e| at(e.frame.get() + by, e.ump)).collect();
+        assert_eq!(drain(&mut tap), tapped, "{align:?}");
     }
 }
