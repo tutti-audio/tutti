@@ -124,9 +124,8 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
     ));
     let probe = NodeKey(1);
     ed.insert(probe, "probe", Unforkable(Probe));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(probe, 0))])
+        .expect("the sources exist");
     let at = ParamIn {
         node: probe,
         param: UnitParam::Cutoff.into(),
@@ -168,8 +167,8 @@ fn an_lfo_lane_sweeps_around_a_real_filters_cutoff_cell() {
             .range(range),
     );
     ed.insert(NodeKey(2), "lane", lane);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(NodeKey(2), 0));
+    ed.connect_param(at, EventOutputPort::new(NodeKey(2), 0))
+        .expect("the param wires");
     ed.commit().expect("the lane commits");
 
     let mut r = Renderer::new(ed, exec);
@@ -252,8 +251,8 @@ fn render_chorus(
                 .range(range),
         );
         ed.insert(NodeKey(9_000), "lane", lane);
-        ed.spec_mut()
-            .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
+        ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
+            .expect("the param wires");
         ed.commit().expect("the lane commits");
     }
     (
@@ -425,8 +424,8 @@ fn render_lfo(param: UnitParam, range: ParamRange, depth: f64) -> (Vec<f32>, f64
             .range(range),
     );
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
+    ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
+        .expect("the param wires");
     ed.commit().expect("the lane commits");
     let out = r.render(60_000).swap_remove(0);
     (out, knob.load(Ordering::Acquire))
@@ -527,8 +526,8 @@ where
         .expect("the node declares it as a port");
     let lane = ControlLaneNode::from(UnitLaneConfig::new(param, program).knob(knob).range(range));
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(NodeKey(9_000), 0));
+    ed.connect_param(at, EventOutputPort::new(NodeKey(9_000), 0))
+        .expect("the param wires");
     ed.commit().expect("the lane commits");
     r.render_input(Planes::new(&[input]).unwrap())
         .swap_remove(0)
@@ -793,12 +792,12 @@ fn shelf_handed_back(block: usize) -> Vec<f32> {
     );
     let lane_out = EventOutputPort::new(NodeKey(9_000), 0);
     ed.insert(NodeKey(9_000), "lane", lane);
-    ed.spec_mut().connect_param(at, lane_out);
+    ed.connect_param(at, lane_out).expect("the param wires");
     ed.commit().expect("the lane commits");
     let dc = vec![1.0; 512];
     let mut out = r.render_input(Planes::new(&[&dc]).unwrap()).swap_remove(0);
     let ed = r.editor_mut();
-    assert!(ed.spec_mut().disconnect_param(at, lane_out));
+    assert!(ed.disconnect_param(at, lane_out));
     ed.commit().expect("the removal commits");
     out.extend(r.render_input(Planes::new(&[&dc]).unwrap()).swap_remove(0));
     out

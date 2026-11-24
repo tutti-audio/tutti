@@ -65,10 +65,11 @@ const SR: f64 = 48_000.0;
 
 /// Wire `from`'s output `out` into `node`'s input `port`.
 fn wire(ed: &mut Editor, node: NodeKey, port: u16, from: NodeKey, out: u16) {
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(node, port),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(from, out)))],
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(node, port)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(from, out))),
+    })
+    .expect("the edge wires");
 }
 
 /// A rolling transport driving a three-node chain (this crate's nodes: the
@@ -101,9 +102,8 @@ fn chain_engine(outputs: usize) -> Engine {
     wire(&mut ed, eq, 0, osc, 0);
     wire(&mut ed, strip, 0, eq, 0);
     wire(&mut ed, strip, 1, eq, 0);
-    ed.spec_mut().topology.set_outputs(
-        (0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))),
-    );
+    ed.set_outputs((0..outputs).map(|c| PortSource::Node(OutputPort::new(strip, (c % 2) as u16))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
 
@@ -354,15 +354,15 @@ fn depth_graph_engine(depth: usize, ours: bool) -> Engine {
         };
         let k = NodeKey(1 + i as u64);
         ed.insert(k, "lowpass", Unforkable(f));
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(k, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(last, 0)))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(k, 0)),
+            from: Edge::Direct(PortSource::Node(OutputPort::new(last, 0))),
+        })
+        .expect("the edge wires");
         last = k;
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(last, 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(last, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let engine =
         Engine::new(&Transport::new(SampleRate::of(SR)), &mut ed, exec).expect("within the limits");

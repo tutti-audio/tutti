@@ -70,10 +70,18 @@ fn rig(azimuth: ParamRange, elevation: ParamRange) -> (Editor, Executor) {
     ));
     ed.insert(NodeKey(PROBE), "probe", ForkByClone(Probe));
     for c in 0..2 {
-        ed.spec_mut()
-            .topology
-            .outputs
-            .push(vec![PortSource::Node(OutputPort::new(NodeKey(PROBE), c))]);
+        {
+            let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+            ed.resize_outputs(usize::from(channel) + 1);
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Output(channel),
+                from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(
+                    NodeKey(PROBE),
+                    c,
+                ))),
+            })
+            .expect("the edge wires")
+        };
     }
     ed.set_param_range(at(UnitParam::Azimuth), azimuth)
         .expect("a probe");
@@ -92,8 +100,8 @@ fn lane(ed: &mut Editor, key: u64, param: UnitParam, program: &ControlProgram, k
             .range(ed.param_range_cell(at(param)).expect("committed")),
     );
     ed.insert(NodeKey(key), "lane", node);
-    ed.spec_mut()
-        .connect_param(at(param), EventOutputPort::new(NodeKey(key), 0));
+    ed.connect_param(at(param), EventOutputPort::new(NodeKey(key), 0))
+        .expect("the param wires");
 }
 
 /// Rolls `blocks` blocks of `n` frames from `start`; each output's frames.

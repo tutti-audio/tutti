@@ -99,16 +99,16 @@ fn channel_sum(c: &mut Criterion) {
         for block in BLOCKS {
             let (mut ed, mut exec) =
                 Editor::new(Prepare::new(SR, MaxBlock::of(Samples::new(block))));
-            ed.spec_mut().topology.inputs = ChannelLayout::from(sources * width);
-            ed.spec_mut()
-                .topology
-                .set_outputs(vec![PortSource::Zero; width as usize]);
+            ed.resize_inputs(ChannelLayout::from(sources * width));
+            ed.set_outputs(vec![PortSource::Zero; width as usize])
+                .expect("the sources exist");
             for channel in 0..width {
                 for k in 0..sources {
-                    ed.spec_mut().topology.connect_output(
-                        channel as usize,
-                        PortSource::MainInput(k * width + channel),
-                    );
+                    ed.connect_edge(tutti_graph::EdgeId {
+                        sink: tutti_graph::PortSink::Output((channel as usize) as u16),
+                        from: tutti_graph::Edge::Direct(PortSource::MainInput(k * width + channel)),
+                    })
+                    .expect("the edge wires");
                 }
             }
             ed.commit().expect("commits");

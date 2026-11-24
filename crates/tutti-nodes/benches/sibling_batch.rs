@@ -344,13 +344,14 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
         MaxBlock::of(Samples::new(frames)),
     ));
     let w = kind.width();
-    ed.spec_mut().topology.inputs = ChannelLayout::try_from(w).expect("a test width is small");
+    ed.resize_inputs(ChannelLayout::try_from(w).expect("a test width is small"));
     let mut outputs = Vec::with_capacity(members * w);
     let feed = |ed: &mut Editor, node: NodeKey, port: u16, c: usize| {
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(node, port),
-            vec![Edge::Direct(PortSource::MainInput(c as u16))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(node, port)),
+            from: Edge::Direct(PortSource::MainInput(c as u16)),
+        })
+        .expect("the edge wires");
     };
     match variant {
         Variant::None => {
@@ -411,7 +412,7 @@ fn graph(kind: Kind, variant: Variant, members: usize, frames: usize) -> Executo
             }
         }
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.set_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

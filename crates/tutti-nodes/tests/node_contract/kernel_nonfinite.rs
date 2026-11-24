@@ -582,14 +582,15 @@ mod logged {
             }),
         );
         ed.insert(fx, "fx", node);
-        let topology = &mut ed.spec_mut().topology;
         for port in 0..2u16 {
-            topology.edges.insert(
-                InputPort::new(fx, port),
-                vec![Edge::Direct(PortSource::Node(OutputPort::new(src, port)))],
-            );
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Port(InputPort::new(fx, port)),
+                from: Edge::Direct(PortSource::Node(OutputPort::new(src, port))),
+            })
+            .expect("the edge wires");
         }
-        topology.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))));
+        ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(fx, port))))
+            .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
