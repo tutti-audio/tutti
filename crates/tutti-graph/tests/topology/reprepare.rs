@@ -90,26 +90,30 @@ fn units(inbox: &Inbox) -> Vec<(NodeKey, Box<dyn Node>)> {
 }
 
 fn wire(ed: &mut Editor) {
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
-    let t = &mut spec.topology;
-    t.edges.insert(
-        InputPort::new(LAG, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    t.edges.insert(
-        InputPort::new(SUM, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0)))],
-    );
-    t.edges.insert(
-        InputPort::new(SUM, 1),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    t.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))]);
+    ed.resize_inputs(ChannelLayout::MONO);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(LAG, 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(SUM, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0))),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(SUM, 1)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
+        .expect("the sources exist");
     let emit = EventOutputPort::new(EMIT, 0);
-    spec.connect_events(EventInputPort::new(EVLAG, 0), EventEdge::Direct(emit));
+    ed.connect_events(EventInputPort::new(EVLAG, 0), EventEdge::Direct(emit))
+        .expect("the edge wires");
     for from in [EventOutputPort::new(EVLAG, 0), emit] {
-        spec.connect_events(EventInputPort::new(REC, 0), EventEdge::Direct(from));
+        ed.connect_events(EventInputPort::new(REC, 0), EventEdge::Direct(from))
+            .expect("the edge wires");
     }
 }
 
@@ -256,13 +260,11 @@ fn a_feedback_edge_shorter_than_the_new_block_is_refused_first() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.insert(LAG, "smooth", Unforkable(TestNode::new(Kind::Smooth)));
     let at = InputPort::new(LAG, 0);
-    ed.spec_mut().topology.edges.insert(
-        at,
-        vec![Edge::Feedback(FeedbackFrom::new(
-            OutputPort::new(LAG, 0),
-            Samples::new(96),
-        ))],
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at),
+        from: Edge::Feedback(FeedbackFrom::new(OutputPort::new(LAG, 0), Samples::new(96))),
+    })
+    .expect("the edge wires");
     ed.commit().expect("96 >= 64");
     exec.apply_pending();
     ed.collect();
@@ -315,15 +317,15 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
         log: Arc::clone(log),
     };
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(LAG, "look", Unforkable(unit(&log)));
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(LAG, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(LAG, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(LAG, 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(LAG, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -334,13 +336,13 @@ fn every_unit_is_re_prepared_and_its_new_latency_compiled() {
 
     // Uncommitted: inserted and wired, then the rate changes.
     ed.insert(SUM, "look", Unforkable(unit(&log)));
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(SUM, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0)))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(SUM, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(LAG, 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(SUM, 0))])
+        .expect("the sources exist");
     log.lock().clear();
 
     let p = prep(96_000.0, 64);
@@ -505,9 +507,8 @@ fn assert_poisoned(mut ed: Editor, mut exec: Executor, cause: &str) {
 fn a_panic_in_prepare_poisons_the_editor() {
     let (mut ed, mut exec) = Editor::new(prep(48_000.0, 64));
     ed.insert(NodeKey(1), "fragile", Unforkable(FragileAt96k));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -536,12 +537,12 @@ fn a_resolution_that_coarsens_on_prepare_poisons_the_editor() {
         EventOutputPort::new(NodeKey(0), 0),
         EventInputPort::new(NodeKey(1), 0),
     );
-    ed.spec_mut().connect_events(at, EventEdge::Direct(from));
-    ed.spec_mut()
-        .require_resolution(at, from, tutti_graph::Resolution::Sample);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(0), 0))]);
+    ed.connect_events(at, EventEdge::Direct(from))
+        .expect("the edge wires");
+    ed.require_resolution(at, from, tutti_graph::Resolution::Sample)
+        .expect("the edge exists");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(0), 0))])
+        .expect("the sources exist");
     ed.commit().expect("sample-accurate at 48 kHz");
     exec.apply_pending();
     ed.collect();

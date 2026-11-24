@@ -88,10 +88,11 @@ fn rig(k: u32, sinks: u64) -> Executor {
     for s in 0..sinks {
         let n = NodeKey(2 + s);
         ed.insert(n, "sink", Unforkable(Sink::new()));
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(n, 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .expect("the edge wires");
     }
     ed.commit().expect("commits");
     exec.apply_pending();

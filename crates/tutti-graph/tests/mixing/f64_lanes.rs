@@ -113,11 +113,10 @@ fn render(ramp: Ramp, range: Option<ParamRange>) -> Vec<f64> {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(SRC, 0));
+    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+        .expect("the sources exist");
+    ed.connect_param(at, EventOutputPort::new(SRC, 0))
+        .expect("the param wires");
     if let Some(range) = range {
         ed.set_param_range(at, range).expect("a range");
     }
@@ -235,11 +234,10 @@ fn a_range_change_lands_on_the_next_block() {
         node: LANE,
         param: UnitParam::Cutoff.into(),
     };
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
-    ed.spec_mut()
-        .connect_param(at, EventOutputPort::new(SRC, 0));
+    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+        .expect("the sources exist");
+    ed.connect_param(at, EventOutputPort::new(SRC, 0))
+        .expect("the param wires");
     ed.commit().expect("commits");
     exec.apply_pending();
     let mut block = |ed: &mut Editor<f64>| {
@@ -312,7 +310,7 @@ fn an_f64_edge_weight_ramps_in_f64() {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "dc", ForkByClone(Dc(FINE)));
     let from = PortSource::Node(OutputPort::new(LANE, 0));
-    ed.spec_mut().topology.set_outputs([from]);
+    ed.set_outputs([from]).expect("the sources exist");
     let id = EdgeId {
         sink: PortSink::Output(0),
         from: Edge::Direct(from),
@@ -341,13 +339,13 @@ fn an_f64_mix_ramps_in_f64() {
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(NodeKey(5), "dc", ForkByClone(Dc(FINE)));
     ed.insert(LANE, "double", ForkByClone(Double));
-    ed.spec_mut().topology.connect(
-        tutti_graph::InputPort::new(LANE, 0),
-        tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(LANE, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(5), 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     let first = block(&mut exec, &mut ed);
@@ -424,16 +422,16 @@ fn render_segment(
     let (mut ed, mut exec): (Editor<f64>, Executor<f64>) = Editor::with_format(prepare(FRAMES));
     ed.insert(LANE, "lane", lane);
     ed.insert(SRC, "segment", ForkByClone(Segment(segment)));
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(LANE, 0))]);
-    ed.spec_mut().connect_param(
+    ed.set_outputs([PortSource::Node(OutputPort::new(LANE, 0))])
+        .expect("the sources exist");
+    ed.connect_param(
         ParamIn {
             node: LANE,
             param: param.into(),
         },
         EventOutputPort::new(SRC, 0),
-    );
+    )
+    .expect("the param wires");
     ed.commit().expect("commits");
     exec.apply_pending();
     block(&mut exec, &mut ed)

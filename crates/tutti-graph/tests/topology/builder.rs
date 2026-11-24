@@ -312,28 +312,34 @@ fn builder_builds_what_a_hand_written_spec_builds() {
         test_node,
         Unforkable(TestNode::new(Kind::Consumer { inputs: 1 })),
     );
-    let spec = ed.spec_mut();
-    spec.topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let at = |node: u64, port: u16| InputPort::new(NodeKey(node), port);
     let from = |node: u64, port: u16| OutputPort::new(NodeKey(node), port);
-    spec.topology
-        .edges
-        .insert(at(0, 0), vec![Edge::Direct(PortSource::MainInput(0))]);
-    spec.topology.edges.insert(
-        at(0, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay))],
-    );
-    spec.topology
-        .edges
-        .insert(at(1, 0), vec![Edge::Direct(PortSource::Node(from(0, 0)))]);
-    spec.topology.set_outputs(vec![
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(0, 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(0, 1)),
+        from: Edge::Feedback(FeedbackFrom::new(from(1, 0), fb_delay)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(1, 0)),
+        from: Edge::Direct(PortSource::Node(from(0, 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![
         PortSource::Node(from(1, 0)),
         PortSource::Node(from(3, 0)),
-    ]);
-    spec.connect_events(
+    ])
+    .expect("the sources exist");
+    ed.connect_events(
         EventInputPort::new(NodeKey(3), 0),
         EventEdge::Direct(EventOutputPort::new(NodeKey(2), 0)),
-    );
+    )
+    .expect("the edge wires");
     ed.commit().expect("commits");
     let mut by_hand = Renderer::new(ed, exec);
     by_hand.render(1); // installs the plan the builder installed eagerly
@@ -644,9 +650,8 @@ fn every_writer_normalises_silence_to_the_empty_set() {
     // `Editor::remove` leaves an emptied channel empty.
     let (mut ed, _exec) = Editor::new(prepare(64));
     ed.insert(NodeKey(1), "w", node(0, 1));
-    ed.spec_mut()
-        .topology
-        .set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    ed.set_outputs([PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .expect("the sources exist");
     ed.remove(NodeKey(1));
     assert_eq!(ed.spec().topology.outputs, vec![Vec::<PortSource>::new()]);
 }

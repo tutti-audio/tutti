@@ -55,7 +55,7 @@ impl Rig {
             let k = Kind::Const { value, width: 1 };
             ed.insert(key(n), "const", Unforkable(TestNode::new(k)));
         }
-        ed.spec_mut().topology.outputs = vec![(1..=values.len() as u64).map(out).collect()];
+        tutti_graph::testing::feed_output(&mut ed, 0, (1..=values.len() as u64).map(out));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -234,7 +234,7 @@ fn parallel_equals_one_participant_for_a_graph_mid_fade() {
             let k = Kind::Const { value, width: 1 };
             ed.insert(key(i as u64 + 1), "const", Unforkable(TestNode::new(k)));
         }
-        ed.spec_mut().topology.outputs = vec![(1..=8).map(out).collect()];
+        tutti_graph::testing::feed_output(&mut ed, 0, (1..=8).map(out));
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

@@ -31,15 +31,15 @@ fn gain(g: f32) -> TestNode {
 /// 0, committed and applied.
 fn gain_graph(g: f32) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(128));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(NODE, "gain", Unforkable(gain(g)));
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NODE, 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -169,7 +169,7 @@ impl Node for DropProbe {
 #[test]
 fn the_outgoing_unit_retires_on_the_control_thread() {
     let (mut ed, mut exec) = Editor::new(prepare(128));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let dropped = Arc::new(AtomicU8::new(0));
     ed.insert(
         NODE,
@@ -179,13 +179,13 @@ fn the_outgoing_unit_retires_on_the_control_thread() {
             dropped: Arc::clone(&dropped),
         }),
     );
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NODE, 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     dc(&mut exec, 16);
     ed.collect();
@@ -304,10 +304,15 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.spec_mut()
-        .topology
-        .outputs
-        .push(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
+    {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        ed.resize_outputs(usize::from(channel) + 1);
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Output(channel),
+            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lagged, 0))),
+        })
+        .expect("the edge wires")
+    };
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -356,9 +361,8 @@ fn a_shape_mismatch_is_refused() {
         "lag",
         Unforkable(TestNode::new(Kind::Lag { latency: 3 })),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(lagged, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -492,13 +496,13 @@ fn events_go_to_the_incoming_unit_only() {
     );
     ed.insert(NODE, "count", Unforkable(EventCount(Arc::clone(&old))));
     let to = EventInputPort::new(NODE, 0);
-    ed.spec_mut().connect_events(
+    ed.connect_events(
         to,
         tutti_graph::EventEdge::Direct(tutti_graph::EventOutputPort::new(emitter, 0)),
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    )
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let note = EventKind::Midi(midi::m1_note_on(MidiChannel::FIRST, 60, U7::of(100)));
     let mut out = vec![0.0f32; 64];

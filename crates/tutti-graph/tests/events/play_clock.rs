@@ -94,12 +94,13 @@ fn rig(lat: usize, forkable: bool) -> Rig {
         ed.insert(LATENT, "latent", Unforkable(Latent(lat)));
         ed.insert(PROBE, "probe", Unforkable(Probe));
     }
-    let t = &mut ed.spec_mut().topology;
-    t.edges.insert(
-        InputPort::new(PROBE, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0)))],
-    );
-    t.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(PROBE, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     Rig { ed, exec }
 }

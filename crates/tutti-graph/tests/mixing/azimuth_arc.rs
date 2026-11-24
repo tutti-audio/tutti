@@ -101,11 +101,11 @@ fn graph(
     let (mut ed, exec) = Editor::new(Prepare::new(RATE, MaxBlock::of(Samples::new(256))));
     ed.insert(NodeKey(PROBE), "probe", Unforkable(Probe(0.0)));
     ed.insert(NodeKey(SENDER), "sender", Unforkable(Sender(sends)));
-    let s = ed.spec_mut();
-    s.topology
-        .set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))));
+    ed.set_outputs((0..2).map(|c| PortSource::Node(OutputPort::new(NodeKey(PROBE), c))))
+        .expect("the sources exist");
     for p in [UnitParam::Azimuth, UnitParam::Elevation] {
-        s.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0));
+        ed.connect_param(at(p), EventOutputPort::new(NodeKey(SENDER), 0))
+            .expect("the param wires");
     }
     for &(p, r) in ranges {
         ed.set_param_range(at(p), r).expect("a range");
@@ -307,9 +307,8 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "sender",
         Unforkable(Sender(vec![(64, step)])),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))));
+    ed.set_outputs((0..WIDTH).map(|k| PortSource::Node(OutputPort::new(probe(k), 0))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let run = |ed: &mut Editor, exec: &mut Executor, frames: usize| {
         let chans = common::block(exec, frames, WIDTH as usize);
@@ -322,13 +321,14 @@ fn declick(base: f32, target: f32, workers: usize) -> Vec<f32> {
         "undriven reads the base"
     );
     for k in 0..WIDTH {
-        ed.spec_mut().connect_param(
+        ed.connect_param(
             ParamIn {
                 node: probe(k),
                 param: UnitParam::Azimuth.into(),
             },
             EventOutputPort::new(NodeKey(SENDER), 0),
-        );
+        )
+        .expect("the param wires");
     }
     ed.commit().expect("commits");
     exec.apply_pending();

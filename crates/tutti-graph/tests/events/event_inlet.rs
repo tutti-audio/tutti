@@ -532,10 +532,11 @@ fn graph(
         Forkable(Kind::Consumer { inputs: n }),
     );
     for k in 1..=n {
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(10), k - 1),
             EventEdge::Direct(EventOutputPort::new(NodeKey(u64::from(k)), 0)),
-        );
+        )
+        .expect("the edge wires");
     }
     // Heavy audio chains beside the inlets, so the cost model has work worth
     // a thread: the plan is spread on a pool only when that pays.
@@ -558,23 +559,28 @@ fn graph(
                     width: 1,
                 }),
             );
-            ed.spec_mut().topology.connect(
-                InputPort::new(NodeKey(base + g), 0),
-                Edge::Direct(out(base + g - 1)),
-            );
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(base + g), 0)),
+                from: Edge::Direct(out(base + g - 1)),
+            })
+            .expect("the edge wires");
         }
     }
     let sum = if heavy { 5 } else { 1 };
     ed.insert(NodeKey(30), "sum", Forkable(Kind::Sum { inputs: sum }));
-    let topology = &mut ed.spec_mut().topology;
-    topology.connect(InputPort::new(NodeKey(30), 0), Edge::Direct(out(10)));
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(30), 0)),
+        from: Edge::Direct(out(10)),
+    })
+    .expect("the edge wires");
     for c in (0..4u16).filter(|_| heavy) {
-        topology.connect(
-            InputPort::new(NodeKey(30), c + 1),
-            Edge::Direct(out(103 + u64::from(c) * 10)),
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(30), c + 1)),
+            from: Edge::Direct(out(103 + u64::from(c) * 10)),
+        })
+        .expect("the edge wires");
     }
-    ed.spec_mut().topology.set_outputs([out(30)]);
+    ed.set_outputs([out(30)]).expect("the sources exist");
     let tap = tap.then(|| {
         ed.open_event_tap(
             EventTapId::of(1),

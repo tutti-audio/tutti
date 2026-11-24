@@ -162,9 +162,17 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
     // Nothing changed: the commit sends nothing and reports nothing.
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     // Main input 0, then the aux input.
-    ed.spec_mut().connect(at(0), from(0));
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(0)),
+        from: from(0),
+    })
+    .expect("the edge wires");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.spec_mut().connect(at(2), from(1));
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(2)),
+        from: from(1),
+    })
+    .expect("the edge wires");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
     // A tap alone consumes main output 1; a main output takes aux out.
     let tap = ed
@@ -175,15 +183,20 @@ fn scenario(workers: usize) -> Vec<(Vec<Rewired>, Read)> {
         )
         .expect("the port exists");
     steps.push(step(&mut ed, &mut exec, &seen, 0));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(out(PROBE, 2))]);
+    ed.set_outputs(vec![PortSource::Node(out(PROBE, 2))])
+        .expect("the sources exist");
     steps.push(step(&mut ed, &mut exec, &seen, 1));
     // Back to nothing: the last source of each input goes, the output
     // leaves, the tap closes.
-    ed.spec_mut().disconnect(at(0), from(0));
-    ed.spec_mut().disconnect(at(2), from(1));
-    ed.spec_mut().topology.set_outputs(vec![]);
+    ed.disconnect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(0)),
+        from: from(0),
+    });
+    ed.disconnect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(2)),
+        from: from(1),
+    });
+    ed.set_outputs(vec![]).expect("the sources exist");
     ed.close_tap(TapId::of(1)).expect("open");
     drop(tap);
     steps.push(step(&mut ed, &mut exec, &seen, 0));
@@ -340,10 +353,11 @@ fn a_bus_edge_marks_every_channel_port_of_its_bus() {
 #[test]
 fn a_feedback_edge_marks_the_input_and_the_source_output() {
     let (mut ed, mut exec, a, _b) = pair();
-    ed.spec_mut().connect(
-        InputPort::new(PROBE, 1),
-        Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples::new(16))),
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(PROBE, 1)),
+        from: Edge::Feedback(FeedbackFrom::new(out(PROBE, 0), Samples::new(16))),
+    })
+    .expect("the edge wires");
     let report = ed.commit().expect("commits");
     render(&mut exec, 0);
     assert_eq!(a.read(), (0b10, 0b01, 0, 0));
@@ -380,10 +394,11 @@ fn a_shape_with_64_ports_reads_bit_63() {
         })),
     );
     ed.insert(PROBE, "wide", Unforkable(Wide(Arc::clone(&seen))));
-    ed.spec_mut().connect(
-        InputPort::new(PROBE, 63),
-        Edge::Direct(PortSource::Node(out(SRC, 63))),
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(PROBE, 63)),
+        from: Edge::Direct(PortSource::Node(out(SRC, 63))),
+    })
+    .expect("the edge wires");
     let _tap = ed
         .open_tap(
             TapId::of(1),
@@ -417,7 +432,11 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
     );
     let from = Edge::Direct(PortSource::Node(out(SRC, 0)));
     let sink = InputPort::new(PROBE, 0);
-    ed.spec_mut().connect(sink, from);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(sink),
+        from: from,
+    })
+    .expect("the edge wires");
     let _ = ed.commit().expect("commits");
     render(&mut exec, 0);
     ed.collect();
@@ -467,7 +486,11 @@ fn a_fade_in_counts_as_wired_at_once() {
     let (mut ed, mut exec, seen, _) = heard_edge();
     let sink = InputPort::new(PROBE, 1);
     let from = Edge::Direct(PortSource::Node(out(SRC, 1)));
-    ed.spec_mut().connect(sink, from);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(sink),
+        from: from,
+    })
+    .expect("the edge wires");
     let id = EdgeId {
         sink: PortSink::Port(sink),
         from,

@@ -34,6 +34,97 @@ use tutti_units::{Frame, Latency, SampleRate, Samples, Tail};
 
 pub const RATE: SampleRate = SampleRate::SR_48K;
 
+/// Makes `edges` exactly the sources of audio input `at`, through the editor's
+/// wiring calls.
+pub fn feed_input<F: Float>(
+    ed: &mut Editor<F>,
+    at: crate::InputPort,
+    edges: impl IntoIterator<Item = crate::Edge>,
+) {
+    let held = ed
+        .spec()
+        .topology
+        .edges
+        .get(&at)
+        .cloned()
+        .unwrap_or_default();
+    for from in held {
+        ed.disconnect_edge(crate::EdgeId {
+            sink: crate::PortSink::Port(at),
+            from,
+        });
+    }
+    for from in edges {
+        ed.connect_edge(crate::EdgeId {
+            sink: crate::PortSink::Port(at),
+            from,
+        })
+        .expect("the edge wires");
+    }
+}
+
+/// Makes `sources` exactly the sources of main output `channel`, widening the
+/// main output to reach it.
+pub fn feed_output<F: Float>(
+    ed: &mut Editor<F>,
+    channel: u16,
+    sources: impl IntoIterator<Item = crate::PortSource>,
+) {
+    if ed.spec().topology.outputs.len() <= usize::from(channel) {
+        ed.resize_outputs(usize::from(channel) + 1);
+    }
+    let held = ed.spec().topology.outputs[usize::from(channel)].clone();
+    for from in held {
+        ed.disconnect_edge(crate::EdgeId {
+            sink: crate::PortSink::Output(channel),
+            from: crate::Edge::Direct(from),
+        });
+    }
+    for from in sources {
+        ed.connect_edge(crate::EdgeId {
+            sink: crate::PortSink::Output(channel),
+            from: crate::Edge::Direct(from),
+        })
+        .expect("the edge wires");
+    }
+}
+
+/// Wires `ed`'s nodes as `spec` wires its own: the main input width, every
+/// audio edge, every main output source and every event edge, and nothing
+/// else.
+pub fn wire_like<F: Float>(ed: &mut Editor<F>, spec: &crate::GraphSpec) {
+    ed.resize_inputs(spec.topology.inputs);
+    let ports: Vec<_> = ed.spec().topology.edges.keys().copied().collect();
+    for at in ports {
+        if !spec.topology.edges.contains_key(&at) {
+            feed_input(ed, at, []);
+        }
+    }
+    let held: Vec<_> = ed
+        .spec()
+        .events
+        .iter()
+        .map(|(at, e)| (*at, e.clone()))
+        .collect();
+    for (at, edges) in held {
+        for edge in edges {
+            ed.disconnect_events(at, edge);
+        }
+    }
+    for (at, edges) in &spec.topology.edges {
+        feed_input(ed, *at, edges.iter().copied());
+    }
+    for (channel, sources) in spec.topology.outputs.iter().enumerate() {
+        feed_output(ed, channel as u16, sources.iter().copied());
+    }
+    ed.resize_outputs(spec.topology.outputs.len());
+    for (at, edges) in &spec.events {
+        for edge in edges {
+            ed.connect_events(*at, *edge).expect("the edge wires");
+        }
+    }
+}
+
 /// [`DECLICK`](crate::DECLICK) in frames at [`RATE`].
 pub fn declick() -> usize {
     crate::declick_frames(RATE).get()

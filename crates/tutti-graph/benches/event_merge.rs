@@ -118,10 +118,11 @@ fn rig(k: u64, n: u32, mix: Mix) -> Executor {
     ed.insert(NodeKey(100), "sink", Unforkable(Sink::new()));
     for i in 0..k {
         ed.insert(NodeKey(i + 1), "source", Unforkable(Source::new(n, mix)));
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(i + 1), 0)),
-        );
+        )
+        .expect("the edge wires");
     }
     ed.commit().expect("commits");
     exec.apply_pending();

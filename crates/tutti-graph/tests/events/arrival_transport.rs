@@ -88,12 +88,13 @@ fn encode(t: &TransportPosition) -> [f32; 2] {
 }
 
 fn topology(ed: &mut Editor) {
-    let t = &mut ed.spec_mut().topology;
-    t.edges.insert(
-        InputPort::new(PROBE, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0)))],
-    );
-    t.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))));
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(PROBE, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(LATENT, 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs((0..3).map(|port| PortSource::Node(OutputPort::new(PROBE, port))))
+        .expect("the sources exist");
 }
 
 struct Rig {
@@ -431,13 +432,14 @@ fn wide(workers: usize) -> (Editor, Executor) {
         let (latent, probe) = (NodeKey(10 + i as u64), NodeKey(20 + i as u64));
         ed.insert(latent, "latent", Unforkable(Latent(lat)));
         ed.insert(probe, "probe", Unforkable(Probe));
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(probe, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(latent, 0)))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(probe, 0)),
+            from: Edge::Direct(PortSource::Node(OutputPort::new(latent, 0))),
+        })
+        .expect("the edge wires");
         outputs.extend((0..3).map(|port| PortSource::Node(OutputPort::new(probe, port))));
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.set_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     common::pooled_fresh(&mut exec, workers);
     (ed, exec)

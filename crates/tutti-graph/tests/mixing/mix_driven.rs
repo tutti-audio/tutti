@@ -620,12 +620,14 @@ impl tutti_graph::Node for Triple {
 
 fn solo() -> (Editor, tutti_graph::Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(key(1), "triple", tutti_graph::ForkByClone(Triple));
-    ed.spec_mut()
-        .topology
-        .connect(at(1), Edge::Direct(PortSource::MainInput(0)));
-    ed.spec_mut().topology.set_outputs(vec![out(1)]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(at(1)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![out(1)]).expect("the sources exist");
     ed.set_mix(key(1), Mix::new(0.25)).expect("a node");
     ed.commit().expect("commits");
     exec.apply_pending();
@@ -668,12 +670,14 @@ fn the_mix_cell_is_the_one_writer() {
     }
     // A commit that recompiles with nothing moved keeps the cell, and so does
     // one with nothing to send.
-    ed.spec_mut()
-        .topology
-        .nodes
-        .get_mut(&key(1))
-        .expect("node")
-        .kind = "triple again".into();
+    ed.set_edge_gain(
+        tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(at(1)),
+            from: Edge::Direct(PortSource::MainInput(0)),
+        },
+        tutti_units::Gain::UNITY,
+    )
+    .expect("the edge exists");
     for _ in 0..2 {
         ed.commit().expect("commits");
         exec.apply_pending();

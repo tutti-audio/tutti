@@ -199,11 +199,7 @@ fn at_max_block(
             .editor
             .insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
     }
-    let spec = harness.editor.spec_mut();
-    spec.topology.edges = desc.spec.topology.edges.clone();
-    spec.topology.outputs = desc.spec.topology.outputs.clone();
-    spec.topology.inputs = desc.spec.topology.inputs;
-    spec.events = desc.spec.events.clone();
+    common::wire_like(&mut harness.editor, &desc.spec);
     harness.editor.commit().expect("a generated graph commits");
     harness.exec.apply_pending();
     harness.editor.collect();
@@ -335,8 +331,12 @@ proptest! {
             let mut harness = Harness::with_workers(MAX_BLOCK, workers);
             // `open_tap` refuses a source the editor's spec lacks, and the
             // harness compiles `spec` itself: give the editor the same nodes.
-            harness.editor.spec_mut().topology.nodes = spec.topology.nodes.clone();
-            harness.editor.spec_mut().topology.inputs = spec.topology.inputs;
+            for (&k, kind) in &desc.kinds {
+                harness
+                    .editor
+                    .insert(k, "test", Unforkable(common::TestNode::new(kind.clone())));
+            }
+            harness.editor.resize_inputs(spec.topology.inputs);
             let mut tap = harness.editor.open_tap(TapId::of(1), outputs, TapOptions::new(Samples::new(1 << 16))).expect("the sources exist");
             let mut heard = harness.editor.open_heard_tap(TapId::of(2), channels, Samples::new(1 << 16)).expect("the sources exist");
             harness.switch(&valid, &desc.kinds);

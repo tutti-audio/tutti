@@ -521,15 +521,15 @@ fn placed<F: Word>(built: &Built, workers: usize) -> Harness<F> {
         let unit = Unforkable(TestNode::<F>::in_format(kind.clone()));
         harness.editor.insert(key, "test", unit);
     }
-    let spec = harness.editor.spec_mut();
-    spec.topology.edges.clone_from(&built.topology.edges);
-    spec.topology.outputs.clone_from(&built.topology.outputs);
-    spec.topology.inputs = built.topology.inputs;
-    for &(id, _) in &built.weights {
-        spec.set_edge_gain(id, EdgeGain::default());
-    }
+    common::wire_like(
+        &mut harness.editor,
+        &tutti_graph::GraphSpec::new(built.topology.clone()),
+    );
     for &(id, w) in &built.weights {
-        harness.start_edge_gain(id, Gain::new(w));
+        harness
+            .editor
+            .set_edge_gain(id, Gain::new(w))
+            .expect("the edge exists");
     }
     for &(key, mode) in &built.modes {
         harness.start_mode(key, mode);
@@ -549,10 +549,11 @@ fn edit<F: Word>(harness: &mut Harness<F>, decoy: NodeKey, edit: Edit) {
     match edit {
         Edit::Insert(latency) | Edit::Replace(latency) => {
             ed.insert(decoy, "decoy", lag(latency));
-            ed.spec_mut().topology.edges.insert(
-                InputPort::new(decoy, 0),
-                vec![Edge::Direct(PortSource::MainInput(0))],
-            );
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Port(InputPort::new(decoy, 0)),
+                from: Edge::Direct(PortSource::MainInput(0)),
+            })
+            .expect("the edge wires");
             ed.commit().expect("the decoy commits");
         }
         Edit::Remove => {

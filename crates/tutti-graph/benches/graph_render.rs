@@ -214,10 +214,11 @@ fn executor_for(shape: &Topo) -> Executor {
     };
     let lowpass = |i: usize| -> Box<dyn Node> { Box::new(Lowpass::new(cutoff(i), 0.7)) };
     let wire = |ed: &mut Editor, sink: NodeKey, port: u16, from: PortSource| {
-        ed.spec_mut()
-            .topology
-            .edges
-            .insert(InputPort::new(sink, port), vec![Edge::Direct(from)]);
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(sink, port)),
+            from: Edge::Direct(from),
+        })
+        .expect("the edge wires");
     };
     let node = |k: NodeKey| PortSource::Node(OutputPort::new(k, 0));
     let last = match *shape {
@@ -248,7 +249,7 @@ fn executor_for(shape: &Topo) -> Executor {
             sum
         }
         Topo::Nops(n) => {
-            ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+            ed.resize_inputs(ChannelLayout::MONO);
             let mut from = PortSource::MainInput(0);
             let mut last = NodeKey(0);
             for i in 0..n {
@@ -262,7 +263,7 @@ fn executor_for(shape: &Topo) -> Executor {
             last
         }
     };
-    ed.spec_mut().topology.set_outputs(vec![node(last)]);
+    ed.set_outputs(vec![node(last)]).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -375,7 +376,7 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
     let prepare = Prepare::new(SampleRate::of(SR), MaxBlock::of(Samples::new(MAX_BLOCK)));
     let (mut ed, mut exec) = Editor::new(prepare);
     let width = nop().width;
-    ed.spec_mut().topology.inputs = ChannelLayout::from_count(width);
+    ed.resize_inputs(ChannelLayout::from_count(width));
     for i in 0..n {
         let k = NodeKey(i as u64);
         ed.insert(k, "nop", Unforkable(Box::new(nop()) as Box<dyn Node>));
@@ -385,18 +386,18 @@ fn form_executor(n: usize, nop: impl Fn() -> FormNop) -> Executor {
             } else {
                 PortSource::Node(OutputPort::new(NodeKey(i as u64 - 1), c))
             };
-            ed.spec_mut()
-                .topology
-                .edges
-                .insert(InputPort::new(k, c), vec![Edge::Direct(from)]);
+            ed.connect_edge(tutti_graph::EdgeId {
+                sink: tutti_graph::PortSink::Port(InputPort::new(k, c)),
+                from: Edge::Direct(from),
+            })
+            .expect("the edge wires");
         }
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(
-            NodeKey(n as u64 - 1),
-            0,
-        ))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(
+        NodeKey(n as u64 - 1),
+        0,
+    ))])
+    .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

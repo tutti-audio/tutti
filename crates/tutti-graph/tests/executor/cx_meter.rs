@@ -65,9 +65,8 @@ fn render(
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe(read)));
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
+    ed.set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

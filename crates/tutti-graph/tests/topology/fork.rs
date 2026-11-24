@@ -337,7 +337,8 @@ fn a_value_set_after_insert_reaches_the_fork() {
     let (mut ed, mut exec) = Editor::new(prepare(64));
     let key = NodeKey(1);
     let controls = ed.insert(key, "level", Level::new(0.5)).controls;
-    ed.spec_mut().topology.set_outputs(vec![out(key, 0)]);
+    ed.set_outputs(vec![out(key, 0)])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -370,12 +371,13 @@ fn a_node_without_a_fork_source_is_not_forkable() {
             width: 1,
         })),
     );
-    let t = &mut ed.spec_mut().topology;
-    t.edges.insert(
-        InputPort::new(NodeKey(1), 0),
-        vec![Edge::Direct(out(NodeKey(2), 0))],
-    );
-    t.set_outputs(vec![out(NodeKey(1), 0)]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(1), 0)),
+        from: Edge::Direct(out(NodeKey(2), 0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     let pre = prepare(64);
     assert_eq!(
         ed.fork(ForkTarget::MainOutput, pre).err(),
@@ -391,7 +393,8 @@ fn a_node_without_a_fork_source_is_not_forkable() {
     // (`a_main_output_fork_holds_only_what_the_outputs_reach`).
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "boxed", Unforkable(gain().into_node().0));
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     assert_eq!(
         ed.fork(ForkTarget::MainOutput, pre).err(),
         Some(ForkError::NotForkable { key: NodeKey(1) })
@@ -399,7 +402,8 @@ fn a_node_without_a_fork_source_is_not_forkable() {
 
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(3), "gain", gain());
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(3), 0)]);
+    ed.set_outputs(vec![out(NodeKey(3), 0)])
+        .expect("the sources exist");
     assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
     ed.insert(NodeKey(3), "boxed", Unforkable(gain().into_node().0));
     assert_eq!(
@@ -480,9 +484,8 @@ fn a_forked_unit_that_fails_while_rendering_is_a_fork_fault() {
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "gain", gain());
     ed.insert(NodeKey(4), "watched", Watched(Arc::clone(&flag)));
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(4), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(4), 0)])
+        .expect("the sources exist");
 
     let (fork, _fork_exec) = ed.fork(ForkTarget::MainOutput, pre).expect("forks");
     assert_eq!(fork.fork_health(), Ok(()));
@@ -552,9 +555,8 @@ fn a_failing_fork_source_is_a_named_error_with_its_cause() {
     let (mut ed, _exec) = Editor::new(pre);
     ed.insert(NodeKey(1), "gain", gain());
     ed.insert(NodeKey(5), "plugin-like", Failing);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(5), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(5), 0)])
+        .expect("the sources exist");
 
     let err = ed
         .fork(ForkTarget::MainOutput, pre)
@@ -596,9 +598,8 @@ fn a_node_fork_fans_out_as_clone_isolated_does() {
             let (mut ed, _exec) = Editor::new(prepare(64));
             let key = NodeKey(7);
             ed.insert(key, "consts", ForkByClone(unit));
-            ed.spec_mut()
-                .topology
-                .set_outputs(vec![PortSource::Zero; graph_outs]);
+            ed.set_outputs(vec![PortSource::Zero; graph_outs])
+                .expect("the sources exist");
             let (fe, fx) = ed.fork(ForkTarget::Node(key), prepare(64)).expect("forks");
             let got = render(fe, fx, 64);
             assert_eq!(bits(&got), bits(&want), "{node_outs} into {graph_outs}");
@@ -652,26 +653,33 @@ fn a_node_fork_holds_exactly_what_feeds_the_node() {
             width: 1,
         })),
     );
-    let spec = ed.spec_mut();
-    let t = &mut spec.topology;
-    t.edges
-        .insert(InputPort::new(a, 0), vec![Edge::Direct(out(osc, 0))]);
-    t.edges.insert(
-        InputPort::new(a, 1),
-        vec![Edge::Feedback(FeedbackFrom::new(
-            OutputPort::new(fb, 0),
-            Samples::new(64),
-        ))],
-    );
-    t.edges
-        .insert(InputPort::new(target, 0), vec![Edge::Direct(out(a, 0))]);
-    t.edges
-        .insert(InputPort::new(after, 0), vec![Edge::Direct(out(target, 0))]);
-    t.set_outputs(vec![out(after, 0), out(side, 0)]);
-    spec.connect_events(
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(a, 0)),
+        from: Edge::Direct(out(osc, 0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(a, 1)),
+        from: Edge::Feedback(FeedbackFrom::new(OutputPort::new(fb, 0), Samples::new(64))),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(target, 0)),
+        from: Edge::Direct(out(a, 0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(after, 0)),
+        from: Edge::Direct(out(target, 0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![out(after, 0), out(side, 0)])
+        .expect("the sources exist");
+    ed.connect_events(
         EventInputPort::new(target, 0),
         EventEdge::Direct(EventOutputPort::new(emit, 0)),
-    );
+    )
+    .expect("the edge wires");
     ed.commit().expect("the live graph commits");
 
     let (fe, fx) = ed
@@ -710,9 +718,8 @@ fn the_live_graph_is_unaffected_while_a_fork_renders() {
             },
         );
         let controls = ed.insert(NodeKey(2), "level", level).controls;
-        ed.spec_mut()
-            .topology
-            .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)]);
+        ed.set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)])
+            .expect("the sources exist");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -762,7 +769,8 @@ fn a_replace_moves_forking_to_the_new_unit() {
     let key = NodeKey(1);
     let (mut ed, mut exec) = Editor::new(prepare(64));
     ed.insert(key, "consts", consts(1, 0.5));
-    ed.spec_mut().topology.set_outputs(vec![out(key, 0)]);
+    ed.set_outputs(vec![out(key, 0)])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -781,26 +789,6 @@ fn a_replace_moves_forking_to_the_new_unit() {
     assert_eq!(
         ed.fork(ForkTarget::MainOutput, prepare(64)).err(),
         Some(ForkError::NotForkable { key })
-    );
-}
-
-/// **A fork source from an older generation is refused**, loudly: if the
-/// spec's generation at a key moved on without a new source (written
-/// through `spec_mut`, or by a `package` placing units the editor never
-/// saw), forking would copy a unit that is no longer there. Debug builds
-/// assert; release builds return `NotForkable`.
-#[test]
-#[cfg_attr(debug_assertions, should_panic(expected = "is from generation 0"))]
-fn a_fork_source_from_an_older_generation_is_refused() {
-    let pre = prepare(64);
-    let (mut ed, _exec) = Editor::new(pre);
-    ed.insert(NodeKey(1), "consts", consts(1, 0.5));
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
-    assert!(ed.fork(ForkTarget::MainOutput, pre).is_ok());
-    ed.spec_mut().generations.insert(NodeKey(1), 7);
-    assert_eq!(
-        ed.fork(ForkTarget::MainOutput, pre).err(),
-        Some(ForkError::NotForkable { key: NodeKey(1) })
     );
 }
 
@@ -826,13 +814,15 @@ fn a_fork_carries_event_capacity_and_its_own_marks() {
     ed.insert(fold, "fold", Forkable(Kind::Consumer { inputs: 1 }));
     ed.insert(emit2, "emit", emitter());
     ed.insert(fold2, "fold", Forkable(Kind::Consumer { inputs: 1 }));
-    let spec = ed.spec_mut();
-    spec.topology.set_outputs(vec![out(fold, 0), out(fold2, 0)]);
+    ed.set_outputs(vec![out(fold, 0), out(fold2, 0)])
+        .expect("the sources exist");
     for (e, f) in [(emit, fold), (emit2, fold2)] {
         let at = EventInputPort::new(f, 0);
         let from = EventOutputPort::new(e, 0);
-        spec.connect_events(at, EventEdge::Direct(from));
-        spec.require_resolution(at, from, Resolution::Sample);
+        ed.connect_events(at, EventEdge::Direct(from))
+            .expect("the edge wires");
+        ed.require_resolution(at, from, Resolution::Sample)
+            .expect("the edge exists");
     }
 
     let (fe, mut fx) = ed.fork(ForkTarget::Node(fold), pre).expect("forks");
@@ -911,7 +901,8 @@ fn a_fork_by_clone_node_forks_from_reset() {
         "ramp",
         tutti_graph::ForkByClone(Ramp { n: 7.0 }),
     );
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     ed.commit().unwrap();
     let mut live = Renderer::new(ed, exec);
     let before = live.render(300);
@@ -929,9 +920,8 @@ fn a_fork_by_clone_node_forks_from_reset() {
     let (mut plain, _exec) = Editor::new(prepare(256));
     plain.insert(NodeKey(1), "ramp", Unforkable(Ramp { n: 0.0 }));
     plain
-        .spec_mut()
-        .topology
-        .set_outputs(vec![out(NodeKey(1), 0)]);
+        .set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     assert_eq!(
         plain.fork(ForkTarget::MainOutput, prepare(256)).err(),
         Some(ForkError::NotForkable { key: NodeKey(1) })
@@ -956,16 +946,16 @@ fn a_main_output_fork_holds_only_what_the_outputs_reach() {
         "idle",
         tutti_graph::ForkByClone(Ramp { n: 0.0 }),
     );
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     let (fork, _fork_exec) = ed
         .fork(ForkTarget::MainOutput, prepare(256))
         .expect("the unrouted, unforkable node is not asked");
     let keys: Vec<NodeKey> = fork.spec().topology.nodes.keys().copied().collect();
     assert_eq!(keys, vec![NodeKey(1)]);
 
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0), out(NodeKey(2), 0)])
+        .expect("the sources exist");
     assert_eq!(
         ed.fork(ForkTarget::MainOutput, prepare(256)).err(),
         Some(ForkError::NotForkable { key: NodeKey(2) })
@@ -1114,7 +1104,15 @@ fn witness(ed: &mut Editor, key: NodeKey, how: How, value: u32) -> (Arc<AtomicU3
             threads: Arc::clone(&threads),
         }),
     );
-    ed.spec_mut().topology.outputs.push(vec![out(key, 0)]);
+    {
+        let channel = u16::try_from(ed.spec().topology.outputs.len()).expect("a width");
+        ed.resize_outputs(usize::from(channel) + 1);
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Output(channel),
+            from: tutti_graph::Edge::Direct(out(key, 0)),
+        })
+        .expect("the edge wires")
+    };
     (cell, threads)
 }
 
@@ -1128,7 +1126,8 @@ fn a_gathered_fork_is_the_live_graph_at_the_gather() {
     let pre = prepare(64);
     let (mut ed, mut exec) = Editor::new(pre);
     let level = ed.insert(NodeKey(1), "level", Level::new(0.5)).controls;
-    ed.spec_mut().topology.set_outputs(vec![out(NodeKey(1), 0)]);
+    ed.set_outputs(vec![out(NodeKey(1), 0)])
+        .expect("the sources exist");
     let (cell, _) = witness(&mut ed, NodeKey(2), How::Deferred, 3);
     ed.insert(NodeKey(3), "other", consts(1, 100.0));
     ed.commit().expect("commits");
@@ -1144,9 +1143,8 @@ fn a_gathered_fork_is_the_live_graph_at_the_gather() {
     // Every kind of live edit, after the gather.
     assert!(level.set(UnitParam::Volume, 0.9));
     cell.store(7, Ordering::SeqCst);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![out(NodeKey(3), 0), out(NodeKey(3), 0)]);
+    ed.set_outputs(vec![out(NodeKey(3), 0), out(NodeKey(3), 0)])
+        .expect("the sources exist");
     ed.commit().expect("the live rewire commits");
     exec.apply_pending();
     ed.collect();
@@ -1338,8 +1336,8 @@ fn a_gather_failure_is_named_before_a_build_failure() {
 }
 
 /// **A build whose commit fails hands back the half-built graph**: a spec
-/// the live editor holds uncommitted and invalid (an edge into an input
-/// port the node does not have) gathers, and fails at the build's commit as
+/// the live editor holds uncommitted and invalid (a feedback edge shorter
+/// than the block) gathers, and fails at the build's commit as
 /// `ForkError::Commit`; the pinned unit already placed in the fork's editor
 /// comes back inside the `ForkRemains` and drops with them, here, not on
 /// the build thread.
@@ -1348,11 +1346,17 @@ fn a_build_whose_commit_fails_hands_back_the_graph() {
     let pre = prepare(64);
     let (mut ed, _exec) = Editor::new(pre);
     let (_, pinned) = witness(&mut ed, NodeKey(1), How::Pinned, 1);
-    // Key 1 has no inputs: an edge into its port 0 does not validate.
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NodeKey(1), 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
+    // A feedback edge shorter than the block compiles to nothing.
+    ed.insert(NodeKey(2), "gain", gain());
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(2), 0)),
+        from: Edge::Feedback(tutti_graph::FeedbackFrom::new(
+            tutti_graph::OutputPort::new(NodeKey(2), 0),
+            tutti_units::Samples::new(1),
+        )),
+    })
+    .expect("the edge wires");
+    tutti_graph::testing::feed_output(&mut ed, 1, [out(NodeKey(2), 0)]);
     let pending = ed
         .fork_gather(ForkTarget::MainOutput, pre)
         .expect("gathers: the spec is checked at the commit");

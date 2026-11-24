@@ -82,7 +82,7 @@ fn graph(plugin: Plugin) -> (Editor, Executor) {
 
 fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(prepared);
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(PLUGIN, "plugin", Unforkable(plugin));
     ed.insert(
         DRY,
@@ -92,17 +92,18 @@ fn graph_at(plugin: Plugin, prepared: Prepare) -> (Editor, Executor) {
             width: 1,
         })),
     );
-    let t = &mut ed.spec_mut().topology;
     for k in [PLUGIN, DRY] {
-        t.edges.insert(
-            InputPort::new(k, 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(k, 0)),
+            from: Edge::Direct(PortSource::MainInput(0)),
+        })
+        .expect("the edge wires");
     }
-    t.set_outputs(vec![
+    ed.set_outputs(vec![
         PortSource::Node(OutputPort::new(PLUGIN, 0)),
         PortSource::Node(OutputPort::new(DRY, 0)),
-    ]);
+    ])
+    .expect("the sources exist");
     (ed, exec)
 }
 

@@ -74,13 +74,13 @@ fn graph_at(tail: Tail, prepared: Prepare) -> (Editor, Executor, Arc<AtomicUsize
             calls: Arc::clone(&calls),
         }),
     );
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NODE, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0)))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NODE, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(SRC, 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NODE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -200,15 +200,15 @@ fn set_tail_does_not_cut_a_fade() {
     let gain = |g: f32| TestNode::new(Kind::Gain { gain: g, width: 1 });
     let (mut ed, mut exec, _) = graph(Tail::None);
     // A gain node at its own key: the fade needs a unit whose shape matches.
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     ed.insert(NodeKey(2), "gain", Unforkable(gain(1.0)));
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NodeKey(2), 0),
-        vec![Edge::Direct(PortSource::MainInput(0))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(2), 0)),
+        from: Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

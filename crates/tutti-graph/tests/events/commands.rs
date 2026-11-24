@@ -127,9 +127,8 @@ fn rig() -> Rig {
             level: 0.0,
         }),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(PROBE, 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -343,7 +342,7 @@ fn a_command_needs_a_port_and_an_orphan_is_counted() {
         .schedule(At::Frame(Frame::new(2000)), to(), tag(9))
         .expect_err("and the editor knows it");
     rig.ed.remove(PROBE);
-    rig.ed.spec_mut().topology.outputs.clear();
+    rig.ed.resize_outputs(0);
     rig.ed.commit().expect("commits");
     for _ in 0..40 {
         rig.exec.process(64, &t, &[], &mut []);
@@ -418,26 +417,27 @@ fn a_scheduled_command_is_compensated_like_an_upstream_event() {
     );
     ed.insert(A, "n", Unforkable(Impulse(exec_log.clone())));
     ed.insert(B, "n", Unforkable(Impulse(exec_log.clone())));
-    let t = &mut ed.spec_mut().topology;
-    t.inputs = ChannelLayout::MONO;
-    t.edges.insert(
-        tutti_graph::InputPort::new(LAT, 0),
-        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
-    );
-    t.edges.insert(
-        tutti_graph::InputPort::new(A, 0),
-        vec![tutti_graph::Edge::Direct(PortSource::Node(
-            OutputPort::new(LAT, 0),
-        ))],
-    );
-    t.edges.insert(
-        tutti_graph::InputPort::new(B, 0),
-        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
-    );
-    t.set_outputs(vec![
+    ed.resize_inputs(ChannelLayout::MONO);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(LAT, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(A, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(LAT, 0))),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(B, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![
         PortSource::Node(OutputPort::new(A, 0)),
         PortSource::Node(OutputPort::new(B, 0)),
-    ]);
+    ])
+    .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -891,18 +891,17 @@ fn beat_resolution_matches_a_hand_computed_table() {
             ed.insert(sink, "impulse", Unforkable(Impulse(log.clone())));
         };
         build(&mut ed, &log);
-        let t = &mut ed.spec_mut().topology;
-        t.inputs = ChannelLayout::MONO;
-        t.edges.insert(
-            tutti_graph::InputPort::new(lat, 0),
-            vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
-        );
-        t.edges.insert(
-            tutti_graph::InputPort::new(sink, 0),
-            vec![tutti_graph::Edge::Direct(PortSource::Node(
-                OutputPort::new(lat, 0),
-            ))],
-        );
+        ed.resize_inputs(ChannelLayout::MONO);
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(lat, 0)),
+            from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+        })
+        .expect("the edge wires");
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(sink, 0)),
+            from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
+        })
+        .expect("the edge wires");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -937,18 +936,17 @@ fn an_unroutable_command_is_timed_by_its_nodes_arrival() {
         Unforkable(common::TestNode::new(common::Kind::Lag { latency: 20 })),
     );
     ed.insert(sink, "impulse", Unforkable(Impulse(log.clone())));
-    let t = &mut ed.spec_mut().topology;
-    t.inputs = ChannelLayout::MONO;
-    t.edges.insert(
-        tutti_graph::InputPort::new(lat, 0),
-        vec![tutti_graph::Edge::Direct(PortSource::MainInput(0))],
-    );
-    t.edges.insert(
-        tutti_graph::InputPort::new(sink, 0),
-        vec![tutti_graph::Edge::Direct(PortSource::Node(
-            OutputPort::new(lat, 0),
-        ))],
-    );
+    ed.resize_inputs(ChannelLayout::MONO);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(lat, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::MainInput(0)),
+    })
+    .expect("the edge wires");
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(sink, 0)),
+        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(lat, 0))),
+    })
+    .expect("the edge wires");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -1331,7 +1329,7 @@ fn a_param_command_to_a_node_without_param_events_is_refused() {
         .schedule(At::Frame(Frame::new(100)), to(), ramp(4.0))
         .expect("the probe declares param events");
     rig.ed.insert(PROBE, "plain", Unforkable(Plain));
-    rig.ed.spec_mut().topology.outputs.clear();
+    rig.ed.resize_outputs(0);
     rig.ed.commit().expect("commits");
     let t = TransportPosition::default();
     for _ in 0..4 {

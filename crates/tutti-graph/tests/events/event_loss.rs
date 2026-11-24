@@ -127,10 +127,11 @@ fn rig(
             }),
         );
         for p in 0..scripts.len() {
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 EventInputPort::new(NodeKey(100), next),
                 EventEdge::Direct(EventOutputPort::new(key, p as u16)),
-            );
+            )
+            .expect("the edge wires");
             next += 1;
         }
     }
@@ -321,8 +322,8 @@ impl Bounded {
         );
         let input = self.input();
         self.ed
-            .spec_mut()
-            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)));
+            .connect_events(input, EventEdge::Direct(EventOutputPort::new(key, 0)))
+            .expect("the edge wires");
     }
 
     fn input(&self) -> EventInputPort {
@@ -544,10 +545,11 @@ fn a_declared_input_bound_covers_flushed_events_and_scheduled_commands() {
             tutti_graph::Unforkable(Once { written: false }),
         );
         for node in [1, 2] {
-            ed.spec_mut().connect_events(
+            ed.connect_events(
                 input,
                 EventEdge::Direct(EventOutputPort::new(NodeKey(node), 0)),
-            );
+            )
+            .expect("the edge wires");
         }
         ed.commit().expect("commits");
         exec.apply_pending();
@@ -613,10 +615,11 @@ fn a_lone_writer_within_the_bound_gets_no_merge() {
                 scripts: vec![Script { ons: 1, offs: 0 }],
             }),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .expect("the edge wires");
         ed.commit().expect("commits");
         exec.apply_pending();
         let plan = exec.plan().expect("applied");
@@ -743,10 +746,11 @@ fn a_bypassed_node_is_sent_at_most_its_bound_of_closes_a_block() {
                 next: 40,
             }),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(100), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .expect("the edge wires");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();
@@ -874,10 +878,11 @@ fn a_cut_keeps_late_note_offs_and_delivers_in_frame_order() {
             "writer",
             tutti_graph::Unforkable(EarlyOnsLateOffs),
         );
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             input,
             EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
-        );
+        )
+        .expect("the edge wires");
         ed.commit().expect("commits");
         exec.apply_pending();
         ed.collect();

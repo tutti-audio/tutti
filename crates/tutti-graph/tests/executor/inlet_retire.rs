@@ -27,9 +27,8 @@ fn render(exec: &mut tutti_graph::Executor, blocks: usize) {
 }
 
 fn outputs(ed: &mut Editor) {
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))));
+    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(KEY, port))))
+        .expect("the sources exist");
 }
 
 /// Replacing an inlet through a cut and through a crossfade, then removing
@@ -62,9 +61,8 @@ fn replacing_and_removing_an_inlet_drops_it_on_the_control_side() {
     }
 
     ed.remove(KEY);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Zero; 2]);
+    ed.set_outputs(vec![PortSource::Zero; 2])
+        .expect("the sources exist");
     ed.commit().expect("compiles");
     exec.apply_pending();
     render(&mut exec, 2);

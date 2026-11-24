@@ -370,38 +370,59 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
     let id = ed.spec().main_output_id.next();
 
     let calls: Vec<(&str, Box<dyn Fn(&mut Editor)>)> = vec![
-        ("resize_outputs", Box::new(|e| drop(e.resize_outputs(1)))),
+        (
+            "resize_outputs",
+            Box::new(|e| {
+                let _ = e.resize_outputs(1);
+            }),
+        ),
         (
             "connect_edge",
-            Box::new(move |e| drop(e.connect_edge(wire))),
+            Box::new(move |e| {
+                let _ = e.connect_edge(wire);
+            }),
         ),
         (
             "connect_param",
-            Box::new(move |e| drop(e.connect_param(at, driver))),
+            Box::new(move |e| {
+                let _ = e.connect_param(at, driver);
+            }),
         ),
         (
             "connect_edge_gain",
-            Box::new(move |e| drop(e.connect_edge_gain(wire, driver))),
+            Box::new(move |e| {
+                let _ = e.connect_edge_gain(wire, driver);
+            }),
         ),
         (
             "declare_main_output",
-            Box::new(move |e| drop(e.declare_main_output(topology, id))),
+            Box::new(move |e| {
+                let _ = e.declare_main_output(topology, id);
+            }),
         ),
         (
             "disconnect_edge_gain",
-            Box::new(move |e| drop(e.disconnect_edge_gain(wire, driver))),
+            Box::new(move |e| {
+                let _ = e.disconnect_edge_gain(wire, driver);
+            }),
         ),
         (
             "clear_edge_gain",
-            Box::new(move |e| drop(e.clear_edge_gain(wire))),
+            Box::new(move |e| {
+                let _ = e.clear_edge_gain(wire);
+            }),
         ),
         (
             "disconnect_param",
-            Box::new(move |e| drop(e.disconnect_param(at, driver))),
+            Box::new(move |e| {
+                let _ = e.disconnect_param(at, driver);
+            }),
         ),
         (
             "disconnect_edge",
-            Box::new(move |e| drop(e.disconnect_edge(wire))),
+            Box::new(move |e| {
+                let _ = e.disconnect_edge(wire);
+            }),
         ),
     ];
     for (name, call) in &calls {

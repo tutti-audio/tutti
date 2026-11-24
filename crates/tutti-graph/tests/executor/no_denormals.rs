@@ -76,17 +76,17 @@ fn render_probes(workers: usize, entry: Entry) {
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
     pooled(&mut exec, workers);
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(NodeKey(k), 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(k), 0)),
+            from: Edge::Direct(PortSource::MainInput(0)),
+        })
+        .expect("the edge wires");
     }
-    ed.spec_mut()
-        .topology
-        .set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))));
+    ed.set_outputs((1..=PROBES).map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     assert_eq!(exec.is_parallel(), workers > 1, "{workers} workers");

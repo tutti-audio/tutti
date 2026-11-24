@@ -14,7 +14,7 @@ use tutti_graph::{
     Editor, Executor, ForkCause, ForkSource, ForkTarget, Forked, IntoNode, MissingSource, Node,
     NodeParts, Op, RenderMode, TapReader, TransportPosition,
 };
-use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions, TapSpec};
+use tutti_graph::{MeterId, MeterSpec, NodeKey, TapAlign, TapId, TapOptions};
 use tutti_units::{Beat, Bpm, Frame, Samples};
 
 /// A `Kind` whose fork is a fresh node of the same kind.
@@ -54,7 +54,7 @@ fn out(node: u64) -> PortSource {
 /// output channel: different latencies, so the compiler aligns the outputs.
 /// Returns the sources of the six gains.
 fn build(ed: &mut Editor) -> Vec<PortSource> {
-    ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    ed.resize_inputs(ChannelLayout::MONO);
     let mut gains = Vec::new();
     for k in 0..CHAINS {
         let (lag, gain) = (10 + k, 20 + k);
@@ -73,18 +73,19 @@ fn build(ed: &mut Editor) -> Vec<PortSource> {
                 width: 1,
             }),
         );
-        let t = &mut ed.spec_mut().topology;
-        t.edges.insert(
-            InputPort::new(NodeKey(lag), 0),
-            vec![Edge::Direct(PortSource::MainInput(0))],
-        );
-        t.edges.insert(
-            InputPort::new(NodeKey(gain), 0),
-            vec![Edge::Direct(out(lag))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(lag), 0)),
+            from: Edge::Direct(PortSource::MainInput(0)),
+        })
+        .expect("the edge wires");
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(gain), 0)),
+            from: Edge::Direct(out(lag)),
+        })
+        .expect("the edge wires");
         gains.push(out(gain));
     }
-    ed.spec_mut().topology.set_outputs(gains.clone());
+    ed.set_outputs(gains.clone()).expect("the sources exist");
     gains
 }
 
@@ -912,12 +913,11 @@ fn opening_an_id_again_replaces_the_tap() {
     );
 }
 
-/// A tap's lanes are fixed by how it was opened: editing `TapSpec::Ports`' sources to
-/// another length through the spec is refused at the commit (the writer the
-/// executor holds has that many rings), and opening the id again at another
-/// width replaces the tap at the new one, lanes and all.
+/// Opening a tap's id again at another width replaces the tap at the new
+/// one, lanes and all (the writer the executor holds has the width it was
+/// opened with).
 #[test]
-fn a_tap_cannot_change_its_width_under_its_writer() {
+fn reopening_a_tap_at_another_width_replaces_it() {
     let mut r = rig(1, false);
     let _wide =
         r.ed.open_tap(
@@ -927,19 +927,6 @@ fn a_tap_cannot_change_its_width_under_its_writer() {
         )
         .expect("the sources exist");
     commit(&mut r);
-    let Some(TapSpec::Ports { sources, .. }) = r.ed.spec_mut().topology.taps.get_mut(&TapId::of(1))
-    else {
-        panic!("a ports tap")
-    };
-    sources.push(PortSource::Zero);
-    assert_eq!(
-        r.ed.commit(),
-        Err(tutti_graph::CommitError::TapWidth {
-            tap: TapId::of(1),
-            sources: 4,
-            opened: 3
-        })
-    );
     // Reopening at width 1 replaces it, and the lanes are the new tap's.
     let mut narrow =
         r.ed.open_tap(
@@ -1046,7 +1033,7 @@ fn a_narrowed_node_silences_the_tap_lanes_past_its_width_and_commits() {
 #[test]
 fn a_tap_on_a_main_input_that_goes_missing_reads_silence() {
     let mut r = rig(1, false);
-    r.ed.spec_mut().topology.inputs = ChannelLayout::STEREO;
+    r.ed.resize_inputs(ChannelLayout::STEREO);
     let mut tap =
         r.ed.open_tap(
             TapId::of(1),
@@ -1055,7 +1042,7 @@ fn a_tap_on_a_main_input_that_goes_missing_reads_silence() {
         )
         .expect("both inputs exist when it opens");
     // The graph goes back to one input before anything is committed.
-    r.ed.spec_mut().topology.inputs = ChannelLayout::MONO;
+    r.ed.resize_inputs(ChannelLayout::MONO);
     commit(&mut r);
     block(&mut r, 100, 0);
     let mut got = Vec::new();
