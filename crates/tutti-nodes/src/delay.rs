@@ -877,11 +877,11 @@ mod tests {
         assert_declared_tail(&mut node, RATE);
     }
 
-    /// A feedback a signal drives high for a block, over a cell at none, is reported at the
-    /// driven value: 0.9 on a stereo pair of 10 frames is `ceil(ln 1e-3 / ln 0.9) = 66` trips,
-    /// 67 periods of 12 frames, where the cell alone is the one echo (12 frames).
+    /// A feedback a signal drives is a control the tail reads, so the block reports the
+    /// ceiling the shape declares, whatever the signal's value; the cell alone, at no feedback,
+    /// is the one echo of a stereo pair of 10 frames (12 frames).
     #[test]
-    fn a_driven_feedback_is_reported_at_the_driven_value() {
+    fn a_driven_feedback_reports_the_ceiling_not_the_blocks_figure() {
         let build = || {
             prepared(
                 DelayNode::<f32>::from(
@@ -893,17 +893,17 @@ mod tests {
             )
         };
         let driven = vec![0.9f32; 64];
-        let Some(Tail::Finite(got)) = reported(&mut build(), &click(64), &[None, Some(&driven)])
-        else {
-            panic!("a finite reported tail")
-        };
-        let trips = (1e-3f64.ln() / 0.9f64.ln()).ceil() as usize;
-        let want = (1 + trips) * 12;
-        assert!(got.get() >= want - 1, "{got:?}, wanted {want}");
+        let mut node = build();
+        let ceiling = node.shape().tail;
+        assert_ne!(ceiling, Tail::Unknown);
+        assert_eq!(
+            reported(&mut node, &click(64), &[None, Some(&driven)]),
+            Some(ceiling)
+        );
         let Some(Tail::Finite(cell)) = reported(&mut build(), &click(64), &[]) else {
             panic!("a finite reported tail")
         };
-        assert!(cell.get() < got.get(), "the cell alone: {cell:?}");
+        assert!(cell.get().abs_diff(12) <= 1, "the cell alone: {cell:?}");
     }
 
     /// A feedback at the stable bound on half a second of delay rings past what a graph takes
