@@ -56,9 +56,8 @@ fn prepare() -> Prepare {
 fn graph<N: IntoNode>(node: N, width: u16) -> (Editor, Executor, N::Controls) {
     let (mut ed, mut exec) = Editor::new(prepare());
     let controls = ed.insert(NodeKey(1), "under test", node).controls;
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();
@@ -228,15 +227,13 @@ fn a_voice_behind_another_node_is_forked_too() {
             .expect("a finite gain and a nonempty width"),
     );
     ed.insert(NodeKey(2), "pass", ForkByClone(Pass));
-    ed.spec_mut().topology.edges.insert(
-        tutti_graph::InputPort::new(NodeKey(2), 0),
-        vec![tutti_graph::Edge::Direct(PortSource::Node(
-            OutputPort::new(NodeKey(1), 0),
-        ))],
-    );
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(tutti_graph::InputPort::new(NodeKey(2), 0)),
+        from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(1), 0))),
+    })
+    .expect("the edge wires");
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

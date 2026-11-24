@@ -94,7 +94,8 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
     }
     let sources = READS + STRETCHED;
     // Two silent main outputs, which the fan-in below fills.
-    ed.spec_mut().topology.set_outputs([PortSource::Zero; 2]);
+    ed.set_outputs([PortSource::Zero; 2])
+        .expect("the sources exist");
     let mut outputs = Vec::new();
     for k in 0..sources {
         let key = NodeKey(k + 1);
@@ -117,14 +118,18 @@ fn graph(wave: &Arc<Wave>, workers: usize, declared: bool, bus: bool) -> Executo
             if bus {
                 // The graph's fan-in: output channel `c` holds every
                 // source's port `c`, and the graph sums them.
-                ed.spec_mut().topology.connect_output(c as usize, from);
+                ed.connect_edge(tutti_graph::EdgeId {
+                    sink: tutti_graph::PortSink::Output((c as usize) as u16),
+                    from: tutti_graph::Edge::Direct(from),
+                })
+                .expect("the edge wires");
             } else {
                 outputs.push(from);
             }
         }
     }
     if !bus {
-        ed.spec_mut().topology.set_outputs(outputs);
+        ed.set_outputs(outputs).expect("the sources exist");
     }
     ed.commit().expect("commits");
     exec.apply_pending();
