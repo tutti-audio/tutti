@@ -1,16 +1,29 @@
 //! What a Host's [`Admission`](crate::Admission) asks of a Client, and how it
 //! judges the answer.
 
+use std::fmt;
+use std::sync::Arc;
+
 use crate::{
     AuthChallenge, AuthMethods, AuthState, Command, Digest, EndpointIdentity, Nonce,
     UserAuthChallenge, UserAuthState, UserAuthentication, Username,
 };
 
-/// The secrets an [`Admission`](crate::Admission) that challenges holds.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Challenge<'a> {
-    SharedSecret(&'a str),
-    Users(&'a [(Username, String)]),
+/// The secrets an [`Admission`](crate::Admission) that challenges holds: a
+/// shared handle, cloned once when a Host enters the challenged state.
+#[derive(Clone)]
+pub(crate) enum Challenge {
+    SharedSecret(Arc<str>),
+    Users(Arc<[(Username, String)]>),
+}
+
+impl fmt::Debug for Challenge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::SharedSecret(_) => "SharedSecret(..)",
+            Self::Users(_) => "Users(..)",
+        })
+    }
 }
 
 /// Why a challenge is issued.
@@ -33,9 +46,9 @@ pub(crate) enum Verdict {
     UnknownUser,
 }
 
-impl Challenge<'_> {
+impl Challenge {
     /// The method a Client must advertise to be challenged.
-    pub(crate) fn required(self) -> AuthMethods {
+    pub(crate) fn required(&self) -> AuthMethods {
         match self {
             Self::SharedSecret(_) => AuthMethods::SHARED_SECRET,
             Self::Users(_) => AuthMethods::USER,
@@ -44,7 +57,7 @@ impl Challenge<'_> {
 
     /// The challenge command, with the state `because` maps to.
     pub(crate) fn command(
-        self,
+        &self,
         nonce: Nonce,
         because: Because,
         identity: EndpointIdentity,
@@ -72,7 +85,7 @@ impl Challenge<'_> {
 
     /// The verdict on an Invitation with Authentication, or `None` when the
     /// challenge is not a shared secret's.
-    pub(crate) fn judge_secret(self, nonce: &Nonce, answer: &Digest) -> Option<Verdict> {
+    pub(crate) fn judge_secret(&self, nonce: &Nonce, answer: &Digest) -> Option<Verdict> {
         match self {
             Self::SharedSecret(secret) => Some(verdict(&Digest::of_secret(nonce, secret), answer)),
             Self::Users(_) => None,
@@ -81,7 +94,7 @@ impl Challenge<'_> {
 
     /// The verdict on an Invitation with User Authentication, or `None` when
     /// the challenge is not a user's.
-    pub(crate) fn judge_user(self, nonce: &Nonce, answer: &UserAuthentication) -> Option<Verdict> {
+    pub(crate) fn judge_user(&self, nonce: &Nonce, answer: &UserAuthentication) -> Option<Verdict> {
         match self {
             Self::Users(users) => Some(
                 users

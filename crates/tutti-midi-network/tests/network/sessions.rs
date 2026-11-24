@@ -404,7 +404,8 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
 /// Spec: m2-124/6.4#13, m2-124/6.7#2, m2-124/6.8#2
 #[test]
 fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
-    let users = || Admission::Users(vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())]);
+    let users =
+        || Admission::Users(vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())].into());
     let cases = [
         (Admission::SharedSecret("5483".into()), Credentials::none()),
         (
@@ -535,10 +536,9 @@ fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_in
 
 fn users_sim(user: &str, password: &str) -> Sim {
     Sim::new(
-        host_with(Admission::Users(vec![(
-            Username::new("Rosa").unwrap(),
-            "RPBqBno".into(),
-        )])),
+        host_with(Admission::Users(
+            vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())].into(),
+        )),
         Credentials::none().user(Username::new(user).unwrap(), password),
         SessionConfig::default(),
     )

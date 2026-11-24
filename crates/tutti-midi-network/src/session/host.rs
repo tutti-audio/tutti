@@ -6,7 +6,7 @@ use std::time::Duration;
 use tutti_platform::Instant;
 
 use super::{Core, Phase, Role, Session};
-use crate::challenge::{Because, Verdict};
+use crate::challenge::{Because, Challenge, Verdict};
 use crate::{
     Admission, ByeReason, Command, Digest, EndpointIdentity, Event, Header, Invitation, NakReason,
     Nonce, SessionConfig, SessionState, UserAuthentication,
@@ -21,6 +21,8 @@ const AUTH_FAILURE_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug)]
 pub(crate) struct Challenged {
+    /// What the Client was challenged with.
+    challenge: Challenge,
     nonce: Nonce,
     since: Instant,
     failures: u8,
@@ -34,7 +36,7 @@ pub(crate) enum HostOpening {
     /// The Host waits for its application to accept or decline.
     Confirming { since: Instant },
     /// The Host waits for the answer to its challenge.
-    Challenged(Challenged),
+    Challenged(Box<Challenged>),
 }
 
 /// Whether a Host has room for another Client.
@@ -117,15 +119,12 @@ impl HostRole {
         core: &mut Core<Self>,
         now: Instant,
         header: Header,
-        judge: impl FnOnce(crate::challenge::Challenge<'_>, &Nonce) -> Option<Verdict>,
+        judge: impl FnOnce(&Challenge, &Nonce) -> Option<Verdict>,
     ) {
         let local = core.local;
         match &mut core.phase {
             Phase::Opening(HostOpening::Challenged(c)) => {
-                let Some(challenge) = self.admission.challenge() else {
-                    return core.nak(NakReason::NotExpected, header);
-                };
-                let Some(verdict) = judge(challenge, &c.nonce) else {
+                let Some(verdict) = judge(&c.challenge, &c.nonce) else {
                     return core.nak(NakReason::NotExpected, header);
                 };
                 if verdict == Verdict::Right {
@@ -145,7 +144,7 @@ impl HostRole {
                 } else {
                     Because::DigestWrong
                 };
-                let again = challenge.command(c.nonce, because, local);
+                let again = c.challenge.command(c.nonce, because, local);
                 let delay = AUTH_FAILURE_DELAY * 2u32.pow(u32::from(c.failures) - 1);
                 c.delayed = Some((now + delay, again));
             }
@@ -219,12 +218,8 @@ impl Role for HostRole {
                 return core.out.push(Command::Pending(local));
             }
             Phase::Opening(HostOpening::Challenged(c)) => {
-                let nonce = c.nonce;
-                if let Some(challenge) = self.admission.challenge() {
-                    core.out
-                        .push(challenge.command(nonce, Because::Invited, local));
-                }
-                return;
+                let again = c.challenge.command(c.nonce, Because::Invited, local);
+                return core.out.push(again);
             }
             Phase::Closing { .. } => return,
             Phase::Idle => {}
@@ -249,12 +244,13 @@ impl Role for HostRole {
             };
             core.out
                 .push(challenge.command(nonce, Because::Invited, local));
-            core.phase = Phase::Opening(HostOpening::Challenged(Challenged {
+            core.phase = Phase::Opening(HostOpening::Challenged(Box::new(Challenged {
+                challenge,
                 nonce,
                 since: now,
                 failures: 0,
                 delayed: None,
-            }));
+            })));
         } else if *self.admission == Admission::Confirm {
             core.out.push(Command::Pending(local));
             core.phase = Phase::Opening(HostOpening::Confirming { since: now });
