@@ -12,6 +12,10 @@
 //! every output sample (`(input + 1.0) · gain`, silence in), so the fork's
 //! samples show the gain it started from.
 
+/// An allocation inside an `RtScope` aborts the running test.
+#[global_allocator]
+static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
+
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock, Planes, PlanesMut};
 use tutti_clap_host::ClapLoaded;
