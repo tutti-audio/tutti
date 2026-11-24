@@ -56,7 +56,7 @@ const WORKERS: [usize; 4] = [1, 2, 4, 8];
 /// Adds `from`'s port 0 to the sources of main output 0: the graph sums them.
 fn out(ed: &mut Editor, from: NodeKey) {
     ed.connect_edge(tutti_graph::EdgeId {
-        sink: tutti_graph::PortSink::Output((0) as u16),
+        sink: tutti_graph::PortSink::Output(0),
         from: tutti_graph::Edge::Direct(PortSource::Node(OutputPort::new(from, 0))),
     })
     .expect("the edge wires");

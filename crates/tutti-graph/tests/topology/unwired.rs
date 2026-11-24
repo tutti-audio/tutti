@@ -101,7 +101,7 @@ fn rig() -> (Editor, Executor) {
     ] {
         ed.connect_edge(tutti_graph::EdgeId {
             sink: tutti_graph::PortSink::Port(at),
-            from: from,
+            from,
         })
         .expect("the edge wires");
     }

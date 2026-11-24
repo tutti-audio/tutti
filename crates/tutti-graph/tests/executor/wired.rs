@@ -434,7 +434,7 @@ fn heard_edge() -> (Editor, Executor, Arc<Seen>, EdgeId) {
     let sink = InputPort::new(PROBE, 0);
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Port(sink),
-        from: from,
+        from,
     })
     .expect("the edge wires");
     let _ = ed.commit().expect("commits");
@@ -488,7 +488,7 @@ fn a_fade_in_counts_as_wired_at_once() {
     let from = Edge::Direct(PortSource::Node(out(SRC, 1)));
     ed.connect_edge(tutti_graph::EdgeId {
         sink: tutti_graph::PortSink::Port(sink),
-        from: from,
+        from,
     })
     .expect("the edge wires");
     let id = EdgeId {
