@@ -110,6 +110,15 @@ pub mod feeds {
     }
 }
 
+/// Which of the output's channels must pass the floor.
+#[derive(Clone, Copy)]
+enum Sounds {
+    /// Each of the first `n` channels.
+    Each(usize),
+    /// At least one of the first `n` channels.
+    Any(usize),
+}
+
 /// How one row steps its node.
 pub struct Gate {
     feed: Feed,
@@ -117,7 +126,7 @@ pub struct Gate {
     warm: usize,
     floor: f32,
     blocks: usize,
-    every_channel: bool,
+    sounds: Sounds,
     warm_moves: bool,
 }
 
@@ -131,7 +140,7 @@ impl Gate {
             warm: 16,
             floor: 1e-6,
             blocks: 240,
-            every_channel: false,
+            sounds: Sounds::Each(1),
             warm_moves: false,
         }
     }
@@ -162,7 +171,14 @@ impl Gate {
 
     /// Every output channel, not the first alone, must sound.
     pub fn every_channel(mut self) -> Self {
-        self.every_channel = true;
+        self.sounds = Sounds::Each(usize::MAX);
+        self
+    }
+
+    /// The output must sound in at least one of its first `channels` channels, not in the
+    /// first alone.
+    pub fn any_of(mut self, channels: usize) -> Self {
+        self.sounds = Sounds::Any(channels);
         self
     }
 
@@ -268,12 +284,23 @@ impl Gate {
 
     /// The checked output channels must pass the floor.
     fn sounds(&self, label: &str, output: Planes<'_, f32>) {
-        let checked = if self.every_channel { usize::MAX } else { 1 };
-        for (c, plane) in output.iter().enumerate().take(checked) {
-            assert!(
-                plane.samples().iter().any(|s| s.abs() > self.floor),
-                "{label}: channel {c} rendered silence; the gate would walk no DSP"
-            );
+        let passes = |samples: &[f32]| samples.iter().any(|s| s.abs() > self.floor);
+        match self.sounds {
+            Sounds::Each(checked) => {
+                for (c, plane) in output.iter().enumerate().take(checked) {
+                    assert!(
+                        passes(plane.samples()),
+                        "{label}: channel {c} rendered silence; the gate would walk no DSP"
+                    );
+                }
+            }
+            Sounds::Any(checked) => assert!(
+                output
+                    .iter()
+                    .take(checked)
+                    .any(|plane| passes(plane.samples())),
+                "{label}: the node rendered silence; the gate would walk no DSP"
+            ),
         }
     }
 }
@@ -303,4 +330,9 @@ fn record(peak: f32) {
 /// A bus of `width` channels on the engine's order.
 pub fn bus(width: u16) -> ChannelTopology {
     ChannelTopology::default_for(ChannelLayout::from(width)).expect("a test width is one bus")
+}
+
+/// A bus of `width` channels with no assigned speaker roles.
+pub fn unassigned_bus(width: impl Into<ChannelLayout>) -> ChannelTopology {
+    ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
