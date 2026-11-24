@@ -29,8 +29,7 @@ pub(crate) trait Visit<T> {
     fn stop(&mut self, at: Option<Offset>);
     /// Playback jumped to `beat` at `at`: a seek, a loop wrap, or (unless
     /// [`start`](Self::start) is overridden) a start. `events` are the
-    /// source's, and
-    /// `frames_per_beat` the rate the walk places them at
+    /// source's, and `frames_per_beat` the rate the walk places them at
     /// ([`lands_on_first_frame`]).
     fn jump(
         &mut self,
@@ -40,8 +39,9 @@ pub(crate) trait Visit<T> {
         events: &[T],
     );
     /// Playback starts at `beat` at `at`: it was stopped (or the walk was
-    /// told to [`forget`](Walk::forget) where it was), or its receiver needs its setup again
-    /// ([`Walk::resend`]) at a jump. A jump the source may treat as any other
+    /// told to [`forget`](Walk::forget) where it was), or its receiver needs
+    /// its setup again ([`Walk::resend`]) at a jump. A jump the source may
+    /// treat as any other
     /// ([`jump`](Self::jump), the default).
     fn start(
         &mut self,

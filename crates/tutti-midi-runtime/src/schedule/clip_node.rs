@@ -558,7 +558,8 @@ impl MidiClipControls {
     /// Plays `events` from the next block on. The node ends every note the
     /// previous clip left sounding, on that block's first frame. A clip equal
     /// to the one in force (the same events, each note-off paired to the same
-    /// note-on) changes nothing: no note is cut. Control thread.
+    /// note-on, and the same header) changes nothing: no note is cut. Control
+    /// thread.
     pub fn set(&self, events: impl Into<Arc<ClipEvents>>) {
         let events = events.into();
         let _serial = self.serial.lock();
