@@ -186,7 +186,8 @@ fn assert_renders(out: &[Vec<f32>], dc: f32, what: &str) {
 
 /// A chunk blob as `Control::save_state` frames it.
 fn chunk_state(payload: &[u8]) -> Vec<u8> {
-    let mut blob = b"CHK\0".to_vec();
+    let mut blob = b"CHK\x01".to_vec();
+    blob.extend_from_slice(&(-1i32).to_le_bytes()); // no program to select
     blob.extend_from_slice(payload);
     blob
 }
