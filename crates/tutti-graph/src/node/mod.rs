@@ -754,8 +754,9 @@ pub struct NodeParts<C, F: Float = f32> {
     pub fork: Option<Box<dyn ForkSource<F>>>,
     /// The node's params by address; `None` for a node with none.
     pub params: Option<ParamSet>,
-    /// What frees the values the node's published cells retired; `None` for a
-    /// node that publishes nothing.
+    /// What frees the values the node's own unpublished cells retired; `None`
+    /// for a node whose every cell is a published entry (the session sweeps
+    /// those itself).
     pub reclaimer: Option<Box<dyn Reclaim + Send>>,
     /// The node's published values, one per cell, each under its kind; empty
     /// for a node that publishes nothing.
@@ -767,13 +768,14 @@ pub struct NodeParts<C, F: Float = f32> {
 
 impl<C, F: Float> NodeParts<C, F> {
     /// The unit, its controls, its fork source and what frees what its
-    /// published cells retired (`None` for a node that publishes nothing),
-    /// each stated by the caller. No params until [`params`](Self::params)
-    /// says so.
+    /// unpublished cells retired (`None` when every cell is published), each
+    /// stated by the caller. No params until [`params`](Self::params) says so.
     ///
     /// The reclaimer is a clone of the node's controls (or of the cells they
-    /// hold); the session runs it on every update, on the control thread, for
-    /// as long as the node is in. A call that leaves it out does not compile:
+    /// hold) that are not published entries; the session runs it on every
+    /// update, on the control thread, for as long as the node is in, after it
+    /// has swept the node's published entries. A call that leaves it out does
+    /// not compile:
     ///
     /// ```compile_fail,E0061
     /// # use tutti_graph::{Node, NodeParts};
@@ -816,8 +818,9 @@ impl<C, F: Float> NodeParts<C, F> {
 
     /// The node's published value of the kind `K`, read and replaced through
     /// `cell`, whose value is `K::Value`. `N` is the node that declares the
-    /// kind ([`HasPublished`]). The cell's publisher belongs in the node's
-    /// reclaimer too.
+    /// kind ([`HasPublished`]). The session sweeps the cell
+    /// ([`Published`]'s `Reclaim`) with the node's other entries, so it is not
+    /// the reclaimer's.
     #[must_use]
     pub fn published<N: HasPublished<K>, K: PublishedKind>(
         mut self,

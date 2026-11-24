@@ -238,9 +238,12 @@ struct Held {
     /// The node's type: the owner its params are addressed under.
     owner: std::any::TypeId,
     params: Option<ParamSet>,
-    /// Run by [`Graph::reclaim`].
+    /// Run by [`Graph::reclaim`] after the published entries, for the node's
+    /// state that is not published.
     reclaimer: Option<Box<dyn tutti_rt::Reclaim + Send>>,
-    /// Registered as the node's slots, each under its kind.
+    /// Registered as the node's slots, each under its kind, and swept by
+    /// [`Graph::reclaim`]: an entry of a kind the session does not address has
+    /// no slot and is swept all the same.
     published: Vec<ErasedPublished>,
     /// Registered as the node's slots, each under its kind.
     settings: Vec<ErasedSetting>,
@@ -1468,9 +1471,10 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// Runs every node's reclaimer ([`NodeParts::reclaimer`], kept by
-    /// [`add`](Self::add) and [`replace`](Self::replace), dropped with
-    /// the node), the editor's param range cells ([`Editor::reclaim`]) and
+    /// Sweeps every node's published entries ([`NodeParts::published`]) and
+    /// then its reclaimer ([`NodeParts::reclaimer`], for what the node does not
+    /// publish), both kept by [`add`](Self::add) and [`replace`](Self::replace)
+    /// and dropped with the node, the editor's param range cells ([`Editor::reclaim`]) and
     /// (`plugin`) every hosted plugin's meter cell,
     /// so a cell that stopped publishing still has what it retired freed.
     /// Returns how many retired values are still pinned. Control thread:
@@ -1479,8 +1483,15 @@ impl<F: Float> Graph<F> {
         let pinned: usize = self
             .nodes
             .values()
-            .filter_map(|entry| entry.controls.as_ref()?.reclaimer.as_ref())
-            .map(|reclaimer| reclaimer.reclaim())
+            .filter_map(|entry| entry.controls.as_ref())
+            .map(|held| {
+                let entries: usize = held.published.iter().map(ErasedPublished::reclaim).sum();
+                entries
+                    + held
+                        .reclaimer
+                        .as_ref()
+                        .map_or(0, |reclaimer| reclaimer.reclaim())
+            })
             .sum();
         // The editor's range cells: a range a control moved or a commit
         // rewrote retires the one a block may still hold.

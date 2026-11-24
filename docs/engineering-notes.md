@@ -249,9 +249,11 @@ Rules:
   when the only `reclaim` caller was the hardware MIDI port set's owner.
   Every publisher now reclaims on a control-side tick it already has: the
   session's `Phase::Reclaim` sweeps its graph's table (each node's
-  reclaimer, which the node's `NodeParts::reclaimer` hands the graph as the node
-  goes in through `add` or `crossfade` and which leaves with the node:
-  clips, harmony, the MIDI input, voices; and each hosted plugin's
+  published entries, which `NodeParts::published` hands the graph as the node
+  goes in through `add` or `crossfade` (clips, harmony, a voice's window,
+  loop, direction and speed), then its reclaimer for what it does not publish
+  (`NodeParts::reclaimer`: the MIDI input, a voice's steering, a pool, a lane's
+  program); both leave with the node; and each hosted plugin's
   `PluginTimeSignature`, which a `clear_meter` leaves following no project meter)
   and its own cells (`ProjectMeter`, `Modulation`,
   `HardwareMidiInputs::collect`). `bevy-tutti`'s `reclaim_graph` only runs
