@@ -90,11 +90,18 @@ fn note_change(
     for &c in changes {
         assert!(all.push(c));
     }
-    TuningMessage::NoteChange {
-        timing,
-        bank: bank.map(U7::of),
-        program: U7::of(program),
-        changes: all,
+    let program = U7::of(program);
+    match (timing, bank) {
+        (Timing::RealTime, bank) => TuningMessage::RealTimeNoteChange {
+            bank: bank.map(U7::of),
+            program,
+            changes: all,
+        },
+        (Timing::NonRealTime, bank) => TuningMessage::NoteChange {
+            bank: U7::of(bank.expect("a Non-Real Time change names its bank")),
+            program,
+            changes: all,
+        },
     }
 }
 
@@ -288,12 +295,7 @@ fn a_change_for_a_program_there_is_no_room_for_is_refused_and_counted() {
         let before = core.losses().refused;
         say(
             core,
-            note_change(
-                Timing::NonRealTime,
-                bank,
-                program,
-                &[change(60, word(70, 0))],
-            ),
+            note_change(Timing::RealTime, bank, program, &[change(60, word(70, 0))]),
         );
         core.losses().refused - before
     };
@@ -403,7 +405,7 @@ fn the_programs_tuning_and_the_channels_octave_offset_add() {
     let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 0, &[change(60, word(61, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 0, &[change(60, word(61, 0))]),
     );
     say(
         &mut core,
@@ -419,7 +421,7 @@ fn a_key_dump_stores_the_table_and_no_change_keeps_a_key() {
     let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 5, &[change(50, word(53, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 5, &[change(50, word(53, 0))]),
     );
     let mut words = [TuningFrequency::NO_CHANGE; 128];
     for k in 0..128u8 {
@@ -489,7 +491,7 @@ fn the_percussion_channel_takes_no_key_tuning() {
     );
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 0, &[change(40, word(45, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 0, &[change(40, word(45, 0))]),
     );
     say(
         &mut core,
@@ -507,7 +509,7 @@ fn a_keys_tuning_is_apart_from_the_channels_pitch() {
     let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 0, &[change(60, word(61, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 0, &[change(60, word(61, 0))]),
     );
     let out = core
         .universal(Heard {
@@ -531,7 +533,7 @@ fn a_retarget_and_a_glide_carry_the_tuning_of_their_keys() {
         &mut core,
         note_change(
             Timing::NonRealTime,
-            None,
+            Some(0),
             0,
             &[change(60, word(60, 0x1000)), change(64, word(63, 0))],
         ),
@@ -568,7 +570,7 @@ fn general_midi_on_returns_the_channels_to_program_zero_and_keeps_the_tables() {
     let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 3, &[change(60, word(65, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 3, &[change(60, word(65, 0))]),
     );
     rpn(&mut core, 0, Rpn::TUNING_PROGRAM_SELECT, 3);
     say(&mut core, octave(Timing::NonRealTime, 1, cents(&[(0, 5)])));
@@ -594,7 +596,7 @@ fn a_relative_registered_controller_steps_the_program() {
     let mut core = VoiceAllocator::new(SAMPLE);
     say(
         &mut core,
-        note_change(Timing::NonRealTime, None, 1, &[change(60, word(61, 0))]),
+        note_change(Timing::NonRealTime, Some(0), 1, &[change(60, word(61, 0))]),
     );
     step(
         &mut core,

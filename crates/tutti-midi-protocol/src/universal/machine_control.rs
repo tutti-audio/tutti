@@ -5,7 +5,7 @@
 //! [`read()`](fn@crate::read) turns a message into
 //! [`Universal::MachineControl`](crate::Universal::MachineControl) (a
 //! [`MmcCommands`] list) or
-//! [`Universal::MachineControlResponse`](crate::Universal::MachineControlResponse)
+//! [`UniversalRead::MachineControlResponse`](crate::UniversalRead::MachineControlResponse)
 //! (a [`MmcFields`] list). Each list holds the validated bytes of one message and
 //! yields typed [`MmcCommand`]s or [`MmcInfoField`]s; it allocates nothing and is
 //! `Copy`.
