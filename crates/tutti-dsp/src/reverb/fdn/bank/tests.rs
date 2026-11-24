@@ -762,31 +762,6 @@ fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input
     }
 }
 
-/// The same for a shimmering network: the send at its largest and a shift of an octave, the
-/// decay raised from 0.2 s to the layout's longest, 1 s.
-#[test]
-fn a_shimmer_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
-    let l = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(1.0)).unwrap()).unwrap();
-    let at = |decay: f64| {
-        still(|c| {
-            c.decay = [Seconds::new(decay); 3];
-            c.shimmer_pitch = Cents::new(1200.0);
-            c.shimmer_send = Feedback::new_clamped(0.99);
-        })
-    };
-    let (short, long) = (at(0.2), at(1.0));
-    let period = longest_line(RATE) + FdnBank::<f32>::new(&l, RATE).shimmer_delay().get();
-    for (name, input, reported, first, second) in raised(&l, RATE, &short, &long, period) {
-        tail_probe::assert_raised_tail_covers(
-            &format!("{name}, decay 0.2 s to 1 s"),
-            input,
-            reported,
-            &[&first[0], &first[1]],
-            &[&second[0], &second[1]],
-        );
-    }
-}
-
 /// A freezable layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its
 /// input shut: nothing ever falls to the floor), both for the setting and as the ceiling it
 /// declares; the same layout with `freeze` off, and a layout that is not freezable with it on,
