@@ -24,7 +24,7 @@ use tutti_graph::NodeKey;
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, Playback, StreamHandle, StreamReader,
-    StreamStart, Voice, VoiceNode, VoiceSource, VoiceWindow,
+    StreamStart, VoiceNode, VoiceWindow,
 };
 use tutti_session::BufferMainOutput;
 use tutti_session::{
@@ -232,15 +232,10 @@ fn disk_voice(reader: StreamReader<f32>, beat: f64) -> DiskVoice<f32> {
     DiskVoice::from_reader(reader, VoiceWindow::from(Beat::new(beat)))
 }
 
-fn node_of(source: VoiceSource<f32>) -> VoiceNode<f32> {
-    VoiceNode::with_channels(
-        Voice {
-            source,
-            play: Playback::default(),
-        },
-        2u16,
-    )
-    .expect("a finite gain and a nonempty width")
+/// A node over `voice`, which `stream` steers.
+fn disk_node_of(voice: DiskVoice<f32>, stream: StreamHandle<f32>) -> VoiceNode<f32> {
+    VoiceNode::streaming(voice, stream, Playback::default())
+        .expect("a finite gain and a nonempty width")
 }
 
 /// **A disk-streamed clip exports its file, from the frame its beat falls
@@ -259,21 +254,24 @@ fn a_disk_voice_exports_its_file_from_its_beat_and_matches_memory() {
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, RATE as u32, LEN);
     // A stream serves one live voice, so each of the two has its own.
-    let ((_streamer, reader), (_other, other_reader)) = (streamer_on(&path), streamer_on(&path));
+    let (((_streamer, _stream), reader), ((_other, other_stream), other_reader)) =
+        (streamer_on(&path), streamer_on(&path));
 
     let mut session = session();
     let (disk_node, memory_node): (NodeKey, NodeKey) = {
         let bare = disk_voice(reader, 3.0);
-        let wrapped = node_of(VoiceSource::Disk(disk_voice(other_reader, 3.0)));
+        let wrapped = disk_node_of(disk_voice(other_reader, 3.0), other_stream);
         let mut wave = tutti_buffers::Wave::new(2, SampleRate::of(RATE));
         for i in 0..LEN {
             wave.append(Interleaved::new(&[value(i), -value(i)], wave.layout()).unwrap())
                 .unwrap();
         }
-        let memory = node_of(VoiceSource::Memory(
+        let memory = VoiceNode::new(
             MemorySource::placed(Arc::new(wave), VoiceWindow::from(Beat::new(3.0)))
                 .expect("a placeable wave"),
-        ));
+            Playback::default(),
+        )
+        .expect("a finite gain and a nonempty width");
         let graph = session.graph();
         let bare = graph.add(bare);
         graph.connect(bare, MainOutput).unwrap();
@@ -320,11 +318,11 @@ fn a_node_export_of_a_disk_voice_plays_its_file() {
     let dir = tempfile::tempdir().expect("a temp dir");
     let path = dir.path().join("ramp.wav");
     write_ramp(&path, RATE as u32, 4_800);
-    let (_streamer, reader) = streamer_on(&path);
+    let ((_streamer, stream), reader) = streamer_on(&path);
 
     let mut session = session();
     let voice = {
-        let voice = node_of(VoiceSource::Disk(disk_voice(reader, 1.0)));
+        let voice = disk_node_of(disk_voice(reader, 1.0), stream);
         session.graph().add(voice)
     };
     let planes = render_stem(&mut session, on(1.0, &timeline(120.0)), voice.erase());

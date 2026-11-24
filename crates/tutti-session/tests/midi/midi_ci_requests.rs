@@ -234,19 +234,20 @@ fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     assert_eq!(wire.state(), ProfileState::Disabled);
 }
 
-/// A switch no one answers resolves `TimedOut` once the peer reply timeout has
-/// passed since it was sent, and not before.
+/// A switch no one answers resolves `TimedOut`. The time it takes is pinned with
+/// constructed instants in `tutti-midi-hardware`'s MIDI-CI tests: here the
+/// session's MIDI-CI task also steps, on the real clock, so a request's deadline
+/// may start on either clock and only the outcome is asserted.
 #[test]
-fn a_switch_nothing_answers_times_out_after_the_peer_reply_timeout() {
+fn a_switch_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(Reply::Silent, Reply::Answer);
     let mut request = wire.profile().enable(four());
     wire.run(5);
-    let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
-    wire.step(wait - 20);
-    assert_eq!(wire.result(&mut request), None, "still waiting");
-    wire.step(20);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves before it answers ends the switch as `Disconnected`.
@@ -338,15 +339,18 @@ fn a_report_the_peer_naks_is_refused_with_its_nak() {
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Responder));
 }
 
-/// A report no one answers resolves `TimedOut` after the peer reply timeout.
+/// A report no one answers resolves `TimedOut`: the outcome only, as for a
+/// switch.
 #[test]
-fn a_report_nothing_answers_times_out_after_the_peer_reply_timeout() {
+fn a_report_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(Reply::Answer, Reply::Silent);
     let mut request = wire.reporter().request(everything());
     wire.run(5);
     wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves while its report is out ends the request as `Disconnected`.
