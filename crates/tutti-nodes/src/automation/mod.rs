@@ -25,7 +25,8 @@ mod recording;
 #[doc(hidden)]
 pub use control_lane::LaneProbe;
 pub use control_lane::{
-    ControlLaneNode, ForeignLaneConfig, ForeignLaneControls, LaneControls, UnitLaneConfig,
+    ControlLaneNode, ForeignLane, ForeignLaneConfig, ForeignLaneControls, LaneControls, LaneKind,
+    PortLane, UnitLaneConfig,
 };
 pub use lane::{AutomationLaneConfig, AutomationLaneNode, LiveAutomationLane};
 pub use recording::{AutomationRecorder, RecordMode, RecordingConfig};

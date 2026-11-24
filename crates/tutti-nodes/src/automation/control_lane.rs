@@ -24,58 +24,167 @@ use tutti_units::{
 
 use crate::SOURCE_EVENT_CAPACITY;
 
-/// How a lane builds a segment for its target: the typed key (or foreign
-/// id) bound in, so the lane itself is not generic.
-type MakeSegment = dyn Fn(f64, f64, Law) -> ParamSegment + Send + Sync;
+/// How a lane's value reaches one kind of parameter.
+///
+/// The kinds are [`PortLane`] and [`ForeignLane`]; nothing else implements
+/// it. A [`ControlLaneNode`] is built for one, from a [`UnitLaneConfig`] or a
+/// [`ForeignLaneConfig`].
+pub trait LaneKind: kind::Kind {}
 
-/// Where a lane's target range lives, for the control side: what its
-/// controls read and a fork copies.
-enum RangeSource {
-    /// A native port's own cell (`Editor::param_range_cell`): the port
-    /// clamps, the lane reads the span.
-    Port(ParamRangeCell),
-    /// The lane's own cell (a plugin parameter): the span, and the clamp.
-    /// Its [`ForeignLaneControls`] hold the same cell, and are its one writer.
-    Own(Arc<Publisher<ParamRange>>),
-    /// None: an unranged target takes no modulation.
-    None,
-}
+/// A lane into a param port: a node's declared param, a node's mix, or an
+/// edge's gain. It reads the port's own knob and range cells, the port clamps
+/// what it sends, and a program that is automation alone is sent as the
+/// curve's own shaped pieces.
+#[derive(Clone, Copy, Debug)]
+pub struct PortLane;
 
-impl RangeSource {
-    /// The range now. Control side: it locks.
-    fn current(&self) -> ParamRange {
-        match self {
-            Self::Port(c) => c.current(),
-            Self::Own(p) => *p.current(),
-            Self::None => ParamRange::UNBOUNDED,
+/// A lane into a parameter addressed by id (a hosted plugin's). It owns its
+/// knob and its range, clamps its own pieces to that range, and sends points
+/// only.
+#[derive(Clone, Copy, Debug)]
+pub struct ForeignLane;
+
+impl LaneKind for PortLane {}
+impl LaneKind for ForeignLane {}
+
+mod kind {
+    use super::{
+        Arc, ForeignLane, Law, ParamId, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
+        PortLane, Publisher, Reader, Samples, UnitAddr, UnitParam,
+    };
+
+    /// What [`LaneKind`](super::LaneKind) holds for the lane's walk.
+    pub trait Kind: Send + Sync + 'static {
+        /// How the kind names its parameter.
+        type Addr: Copy + Send + Sync + 'static;
+        /// The target's range as the control side holds it: what a fork
+        /// freezes.
+        type Source: Clone + Send + Sync + 'static;
+        /// The target's range as the node reads it, lent once per block.
+        type Range: Send + 'static;
+        /// Whether a program that is automation alone is sent as the curve's
+        /// own shaped pieces (exact mode).
+        const SHAPED: bool;
+
+        /// The built-in param behind `addr`, which says whether its values
+        /// run on a circle ([`UnitParam::is_circular`]): the one place a lane
+        /// asks. `None` for a parameter of no tutti unit.
+        fn unit(addr: Self::Addr) -> Option<UnitParam>;
+
+        /// A segment for `addr` from `from` to `to` along `law`. The values
+        /// are the parameter's own raw numbers (a param's raw unit values, or
+        /// a foreign parameter's own normalisation): a lane is built for an
+        /// address, not for a unit type, so they are bare `f64` from here to
+        /// the segment, as [`ParamSegment::unit`] and [`ParamSegment::by_id`]
+        /// take them.
+        fn segment(addr: Self::Addr, from: f64, to: f64, law: Law) -> ParamSegment;
+
+        /// A reader of `source`, registered here. Control side: allocates.
+        fn reader(source: &Self::Source) -> Self::Range;
+
+        /// The range now, in a cell of its own. Control side: it locks.
+        fn frozen(source: &Self::Source) -> Self::Source;
+
+        /// The range this block.
+        fn load(range: &mut Self::Range) -> ParamRange;
+
+        /// `value` as the lane sends it under `range`.
+        fn clamp(range: ParamRange, value: f64) -> f64;
+
+        /// Where along a piece from `from` to `to` the lane ends it early, as
+        /// a fraction of the piece: the first bound of `range` it crosses.
+        fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64>;
+    }
+
+    impl Kind for PortLane {
+        type Addr = UnitAddr;
+        /// The port's own cell (`Editor::param_range_cell`); `None` for an
+        /// unranged target, which takes no modulation.
+        type Source = Option<ParamRangeCell>;
+        type Range = Option<ParamRangeReader>;
+        const SHAPED: bool = true;
+
+        fn unit(addr: UnitAddr) -> Option<UnitParam> {
+            Some(addr.param)
+        }
+
+        fn segment(addr: UnitAddr, from: f64, to: f64, law: Law) -> ParamSegment {
+            ParamSegment::unit(addr, from, to, Samples::new(0)).law(law)
+        }
+
+        fn reader(source: &Self::Source) -> Self::Range {
+            source.as_ref().map(ParamRangeCell::reader)
+        }
+
+        fn frozen(source: &Self::Source) -> Self::Source {
+            source.as_ref().map(ParamRangeCell::detached)
+        }
+
+        #[inline]
+        fn load(range: &mut Self::Range) -> ParamRange {
+            range
+                .as_mut()
+                .map_or(ParamRange::UNBOUNDED, ParamRangeReader::load)
+        }
+
+        /// The port clamps for itself, per frame.
+        #[inline]
+        fn clamp(_: ParamRange, value: f64) -> f64 {
+            value
+        }
+
+        #[inline]
+        fn cut(_: ParamRange, _: f64, _: f64) -> Option<f64> {
+            None
         }
     }
 
-    /// The reader the lane's node lends once per block, registered here.
-    /// Control side: allocates.
-    fn reader(&self) -> RangeReader {
-        match self {
-            Self::Port(c) => RangeReader::Cell(c.reader()),
-            Self::Own(p) => RangeReader::Own(p.reader()),
-            Self::None => RangeReader::None,
+    impl Kind for ForeignLane {
+        type Addr = ParamId;
+        /// The lane's own cell, which its `ForeignLaneControls` publish to.
+        type Source = Arc<Publisher<ParamRange>>;
+        type Range = Reader<ParamRange>;
+        const SHAPED: bool = false;
+
+        fn unit(_: ParamId) -> Option<UnitParam> {
+            None
         }
-    }
-}
 
-/// A lane node's reading of its [`RangeSource`]: lent once per block.
-enum RangeReader {
-    Cell(ParamRangeReader),
-    Own(Reader<ParamRange>),
-    None,
-}
+        fn segment(id: ParamId, from: f64, to: f64, law: Law) -> ParamSegment {
+            ParamSegment::by_id(id, from, to, Samples::new(0)).law(law)
+        }
 
-impl RangeReader {
-    #[inline]
-    fn load(&mut self) -> ParamRange {
-        match self {
-            Self::Cell(r) => r.load(),
-            Self::Own(r) => *r.lend(),
-            Self::None => ParamRange::UNBOUNDED,
+        fn reader(source: &Self::Source) -> Self::Range {
+            source.reader()
+        }
+
+        fn frozen(source: &Self::Source) -> Self::Source {
+            Arc::new(Publisher::new(*source.current()))
+        }
+
+        #[inline]
+        fn load(range: &mut Self::Range) -> ParamRange {
+            *range.lend()
+        }
+
+        #[inline]
+        fn clamp(range: ParamRange, value: f64) -> f64 {
+            let (lo, hi) = (range.min(), range.max());
+            if lo.is_nan() || hi.is_nan() || lo > hi {
+                value
+            } else {
+                value.clamp(lo, hi)
+            }
+        }
+
+        #[inline]
+        fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64> {
+            [range.min(), range.max()]
+                .into_iter()
+                .filter(|x| x.is_finite())
+                .filter(|&x| (from - x) * (to - x) < 0.0)
+                .map(|x| (x - from) / (to - from))
+                .min_by(f64::total_cmp)
         }
     }
 }
@@ -91,11 +200,6 @@ struct Shared {
     /// Set by [`LaneControls::resync`]: the next block sends at frame 0.
     resync: AtomicBool,
     knob: Option<ParamCell>,
-    range: RangeSource,
-    /// The built-in param the lane drives; `None` for a foreign one. A
-    /// circular one ([`UnitParam::is_circular`]) takes the short arc between
-    /// its values and sums its offsets as `wrap(base + offsets)`.
-    unit: Option<UnitParam>,
     thinned: AtomicU64,
     truncated: AtomicU64,
     unranged: AtomicU64,
@@ -125,10 +229,10 @@ impl LaneProbe {
 }
 
 /// The handles a [`ControlLaneNode`]'s owner keeps: the program it
-/// evaluates, its knob, and its counters. Cheap to clone; every clone reaches
-/// the same lane. A plugin lane's range is set through its
-/// [`ForeignLaneControls`]; a built-in parameter's is its port's
-/// (`Editor::set_param_range`).
+/// evaluates, a reading of its knob, and its counters. Cheap to clone; every clone reaches the same
+/// lane. A port lane's knob and range are its port's own cells, written
+/// through the port (`Editor::set_param_range`, the param's `Param`); a
+/// foreign lane's are its own, written through its [`ForeignLaneControls`].
 #[derive(Clone, Debug)]
 pub struct LaneControls(Arc<Shared>);
 
@@ -144,20 +248,15 @@ impl LaneControls {
         self.0.program.publish(program);
     }
 
-    /// Frees the programs and the ranges the lane has let go of since their
-    /// last publish (one a block still held when [`publish`](Self::publish) or
-    /// a plugin lane's range change replaced it), without publishing; returns
-    /// how many are still held. Control thread, every tick of its owner (the
-    /// [`Modulation`](crate::Modulation) reconciler's
-    /// [`reclaim`](crate::Modulation::reclaim)); with nothing retired it is a
-    /// lock and a length check per cell. A port's range cell is its editor's
-    /// to sweep.
+    /// Frees the programs the lane has let go of since its last publish (one
+    /// a block still held when [`publish`](Self::publish) replaced it),
+    /// without publishing; returns how many are still held. Control thread,
+    /// every tick of its owner (the [`Modulation`](crate::Modulation)
+    /// reconciler's [`reclaim`](crate::Modulation::reclaim)); with nothing
+    /// retired it is a lock and a length check. A foreign lane's owner calls
+    /// [`ForeignLaneControls::reclaim`], which frees its ranges too.
     pub fn reclaim(&self) -> usize {
-        let range = match &self.0.range {
-            RangeSource::Own(c) => c.reclaim(),
-            RangeSource::Port(_) | RangeSource::None => 0,
-        };
-        self.0.program.reclaim() + range
+        self.0.program.reclaim()
     }
 
     /// How many programs the lane's cell holds retired: replaced, and not
@@ -192,28 +291,13 @@ impl LaneControls {
         self.0.resync.store(true, Ordering::Release);
     }
 
-    /// Writes the knob the lane reads: a native lane's is its target's own
-    /// `Param` cell (so this is a param write), a plugin lane's its own.
-    /// `false` for a lane built without one.
-    pub fn store(&self, value: f64) -> bool {
-        match &self.0.knob {
-            Some(k) => {
-                k.store(value, Ordering::Release);
-                true
-            }
-            None => false,
-        }
-    }
-
-    /// The knob now, if the lane has one.
+    /// The knob the lane reads now, if it has one: a port lane's is its
+    /// port's own cell, a foreign lane's its own. The parameter's own raw
+    /// number, as the lane sends it; a foreign lane's controls read it typed
+    /// ([`ForeignLaneControls::value`]).
+    #[must_use]
     pub fn value(&self) -> Option<f64> {
         self.0.knob.as_ref().map(|k| k.load(Ordering::Acquire))
-    }
-
-    /// The range the lane reads, `(min, max)`; unbounded when it has none.
-    pub fn range(&self) -> (f64, f64) {
-        let r = self.0.range.current();
-        (r.min(), r.max())
     }
 
     /// Blocks whose grid the lane thinned to stay within
@@ -296,15 +380,15 @@ struct Seen {
 /// - **A piece in flight continues** across a block edge untouched: the
 ///   lane does not re-send it, so what the target renders does not depend
 ///   on where blocks fall.
-/// - **Exact mode.** A native target whose program is automation alone
-///   receives the curve's own shaped pieces (as `AutomationLaneNode` sent
-///   them); a curve that cannot say its pieces takes the grid. A plugin
-///   lane never uses it: a plugin receives points.
+/// - **Exact mode.** A [`PortLane`] whose program is automation alone
+///   sends the curve's own shaped pieces (as `AutomationLaneNode` sent
+///   them); a curve that cannot say its pieces takes the grid. A
+///   [`ForeignLane`] never uses it: a plugin receives points.
 /// - **Steady.** When nothing moves (stopped with no seconds-clock layer,
 ///   or no layers but constant ones, and every input arrived) the lane
 ///   sends one held value and no grid.
-/// - **The clamp** is the native port's, per frame. A plugin lane clamps
-///   its own pieces, split where they cross a bound.
+/// - **The clamp** is the port's, per frame, for a [`PortLane`]. A
+///   [`ForeignLane`] clamps its own pieces, split where they cross a bound.
 ///
 /// - **Capacity.** It sends at most [`SOURCE_EVENT_CAPACITY`] segments a
 ///   block, as a [`SourceNode`](crate::SourceNode) does. Past it the lane
@@ -326,27 +410,28 @@ struct Seen {
 /// No allocation on the audio thread: per-input state is a fixed array of
 /// [`MAX_LANE_INPUTS`], and the block's events are built in a buffer
 /// reserved at `prepare`.
-pub struct ControlLaneNode {
+pub struct ControlLaneNode<K: LaneKind> {
     shared: Arc<Shared>,
     /// A reader of `shared.program`, registered when the node is built (a
     /// fork builds a node over a new cell, and registers there).
     program: Reader<ControlProgram>,
+    /// The parameter the lane sends to.
+    addr: K::Addr,
+    /// The target's range as the control side holds it: what a fork freezes.
+    source: K::Source,
     /// A reader of the target's range, registered with the node and lent
     /// once per block.
-    range: RangeReader,
-    make: Arc<MakeSegment>,
-    /// A native port (exact mode allowed; the port clamps).
-    native: bool,
+    range: K::Range,
     walk: Walk,
     seen: Seen,
     scratch: Vec<ParamEvent>,
 }
 
-impl std::fmt::Debug for ControlLaneNode {
+impl<K: LaneKind> std::fmt::Debug for ControlLaneNode<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ControlLaneNode")
             .field("program", &self.program)
-            .field("native", &self.native)
+            .field("shaped", &K::SHAPED)
             .field("scratch_len", &self.scratch.len())
             .finish_non_exhaustive()
     }
@@ -370,7 +455,8 @@ fn fresh_seen() -> Seen {
 }
 
 /// The controls of a lane for a foreign unit's parameter, from
-/// [`ForeignLaneConfig::build`]: its [`LaneControls`] and the range it owns.
+/// [`ForeignLaneConfig::build`]: its [`LaneControls`], and the knob and the
+/// range it owns.
 /// Cheap to clone; every clone reaches the same lane.
 #[derive(Clone, Debug)]
 pub struct ForeignLaneControls {
@@ -379,7 +465,7 @@ pub struct ForeignLaneControls {
 }
 
 impl ForeignLaneControls {
-    /// The lane's program, knob and counters.
+    /// The lane's program and counters.
     #[must_use]
     pub fn lane(&self) -> &LaneControls {
         &self.lane
@@ -387,9 +473,35 @@ impl ForeignLaneControls {
 
     /// Sets the lane's range, the span its offsets scale by and the clamp,
     /// from the next block. Control thread; the value it replaces is freed
-    /// by the lane's [`reclaim`](LaneControls::reclaim).
+    /// by [`reclaim`](Self::reclaim).
     pub fn publish_range(&self, range: ParamRange) {
         self.range.publish(range);
+    }
+
+    /// Writes the lane's knob, the base its offsets add to. `false` for a
+    /// lane built without one.
+    pub fn store(&self, value: Normalized) -> bool {
+        match &self.lane.0.knob {
+            Some(k) => {
+                k.store(value.get(), Ordering::Release);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The knob now, if the lane has one.
+    #[must_use]
+    pub fn value(&self) -> Option<Normalized> {
+        self.lane.value().map(Normalized::clamped)
+    }
+
+    /// Frees the programs and the ranges the lane has let go of since their
+    /// last publish, as [`LaneControls::reclaim`] does for the programs
+    /// alone; returns how many are still held. Control thread, every tick of
+    /// its owner.
+    pub fn reclaim(&self) -> usize {
+        self.lane.reclaim() + self.range.reclaim()
     }
 }
 
@@ -437,18 +549,13 @@ impl UnitLaneConfig {
     }
 }
 
-impl From<UnitLaneConfig> for ControlLaneNode {
+impl From<UnitLaneConfig> for ControlLaneNode<PortLane> {
     fn from(config: UnitLaneConfig) -> Self {
-        let param = config.param;
         Self::build(
             Arc::new(config.program),
             config.knob,
-            config.range.map_or(RangeSource::None, RangeSource::Port),
-            Some(param.param),
-            Arc::new(move |from, to, shape| {
-                ParamSegment::unit(param, from, to, Samples::new(0)).law(shape)
-            }),
-            true,
+            config.param,
+            config.range,
         )
     }
 }
@@ -463,7 +570,7 @@ pub struct ForeignLaneConfig {
     id: ParamId,
     program: ControlProgram,
     range: ParamRange,
-    knob: Option<f64>,
+    knob: Option<Normalized>,
 }
 
 impl ForeignLaneConfig {
@@ -481,7 +588,7 @@ impl ForeignLaneConfig {
 
     /// A knob of the lane's own, starting at `knob`.
     #[must_use]
-    pub fn knob(mut self, knob: f64) -> Self {
+    pub fn knob(mut self, knob: Normalized) -> Self {
         self.knob = Some(knob);
         self
     }
@@ -489,18 +596,13 @@ impl ForeignLaneConfig {
     /// The lane, and the controls that set its range: the one way to build
     /// a lane for a foreign parameter.
     #[must_use]
-    pub fn build(self) -> (ControlLaneNode, ForeignLaneControls) {
-        let id = self.id;
+    pub fn build(self) -> (ControlLaneNode<ForeignLane>, ForeignLaneControls) {
         let range = Arc::new(Publisher::new(self.range));
         let node = ControlLaneNode::build(
             Arc::new(self.program),
-            self.knob.map(|k| Arc::new(AtomicF64::new(k)).into()),
-            RangeSource::Own(Arc::clone(&range)),
-            None,
-            Arc::new(move |from, to, shape| {
-                ParamSegment::by_id(id, from, to, Samples::new(0)).law(shape)
-            }),
-            false,
+            self.knob.map(|k| Arc::new(AtomicF64::new(k.get())).into()),
+            self.id,
+            Arc::clone(&range),
         );
         let controls = ForeignLaneControls {
             lane: node.controls(),
@@ -510,7 +612,7 @@ impl ForeignLaneConfig {
     }
 }
 
-impl ControlLaneNode {
+impl<K: LaneKind> ControlLaneNode<K> {
     const SHAPE: Shape = Shape::EMPTY
         .events(1, 1)
         .param_events()
@@ -528,27 +630,23 @@ impl ControlLaneNode {
     fn build(
         program: Arc<ControlProgram>,
         knob: Option<ParamCell>,
-        range: RangeSource,
-        unit: Option<UnitParam>,
-        make: Arc<MakeSegment>,
-        native: bool,
+        addr: K::Addr,
+        source: K::Source,
     ) -> Self {
         let shared = Shared {
             program: Publisher::from_arc(program),
             resync: AtomicBool::new(false),
             knob,
-            range,
-            unit,
             thinned: AtomicU64::new(0),
             truncated: AtomicU64::new(0),
             unranged: AtomicU64::new(0),
         };
         Self {
             program: shared.program.reader(),
-            range: shared.range.reader(),
+            range: K::reader(&source),
             shared: Arc::new(shared),
-            make,
-            native,
+            addr,
+            source,
             walk: fresh_walk(),
             seen: fresh_seen(),
             scratch: Vec::with_capacity(SOURCE_EVENT_CAPACITY.get() as usize),
@@ -565,7 +663,7 @@ impl ControlLaneNode {
     /// piece in flight. Control thread.
     #[must_use]
     pub fn fork_fresh(&self) -> Self {
-        Self::fresh_over(&self.shared, &self.make, self.native)
+        Self::fresh_over(&self.shared, self.addr, &self.source)
     }
 
     /// [`fork_fresh`](Self::fork_fresh) from a lane's parts, for the fork
@@ -573,16 +671,12 @@ impl ControlLaneNode {
     /// with `Publisher::current` (an owning read under the publisher's lock,
     /// never a lend), the knob and the range, so it needs no read state of
     /// its own.
-    fn fresh_over(s: &Shared, make: &Arc<MakeSegment>, native: bool) -> Self {
+    fn fresh_over(s: &Shared, addr: K::Addr, source: &K::Source) -> Self {
         // Depth cells of its own, so a depth moved after the fork does not
         // reach it.
         let program = Arc::new(s.program.current().detached());
         let knob = s.knob.as_ref().map(ParamCell::detached);
-        let range = match &s.range {
-            RangeSource::None => RangeSource::None,
-            r => RangeSource::Own(Arc::new(Publisher::new(r.current()))),
-        };
-        Self::build(program, knob, range, s.unit, Arc::clone(make), native)
+        Self::build(program, knob, addr, K::frozen(source))
     }
 }
 
@@ -667,15 +761,16 @@ enum Overflow {
 }
 
 /// One block's walk, borrowed together.
-struct Block<'b> {
+struct Block<'b, K: LaneKind> {
     cx: &'b Cx<'b>,
     program: &'b ControlProgram,
     knob: Option<f64>,
-    range: (f64, f64),
+    range: ParamRange,
     span: f64,
+    addr: K::Addr,
+    /// The built-in param behind `addr`: a circular one takes the short arc
+    /// between its values and sums its offsets as `wrap(base + offsets)`.
     unit: Option<UnitParam>,
-    native: bool,
-    make: &'b MakeSegment,
     stride: u64,
     /// Thinning failed already: drop past the capacity instead.
     truncate: bool,
@@ -684,7 +779,7 @@ struct Block<'b> {
     depths: DepthSnapshot,
 }
 
-impl Block<'_> {
+impl<K: LaneKind> Block<'_, K> {
     fn len(&self) -> usize {
         self.cx.env.block_len.get()
     }
@@ -776,7 +871,8 @@ impl Block<'_> {
         };
         let pf = p as f64;
         let moving = self.inputs_moving(walk, pf);
-        let make = self.make;
+        let addr = self.addr;
+        let make = |from: f64, to: f64, law: Law| K::segment(addr, from, to, law);
         let next_at = |d: Option<f64>| d.map(|d| abs + Samples::new(d.ceil().max(1.0) as usize));
         let flight = |seg: Option<(ParamSegment, f64, f64)>, next: Option<f64>| Flight {
             seg: seg.map(|s| s.0),
@@ -802,8 +898,8 @@ impl Block<'_> {
             })
         };
 
-        // Exact mode: a native target's pure automation, rolling.
-        if self.native && self.program.is_pure_automation() && moving.is_none() {
+        // Exact mode: a port's pure automation, rolling.
+        if K::SHAPED && self.program.is_pure_automation() && moving.is_none() {
             let curve = self.program.automation().map(|c| &**c);
             if let (Some(curve), Some(f)) = (curve, fpb) {
                 let exact = match curve.segment_at(t.beat()) {
@@ -924,26 +1020,17 @@ impl Block<'_> {
         };
         let ins_end = self.inputs_at(walk, pf + d);
         let mut v1 = self.value_before(&end, &ins_end[..n_in]).unwrap_or(v0);
-        // A plugin lane clamps, split where the piece crosses a bound.
-        if !self.native {
-            let (lo, hi) = self.range;
-            let (a, b) = (v0, v1);
-            let cross = [lo, hi]
-                .into_iter()
-                .filter(|x| x.is_finite())
-                .filter(|&x| (a - x) * (b - x) < 0.0)
-                .map(|x| (x - a) / (b - a))
-                .min_by(f64::total_cmp);
-            if let Some(x) = cross {
-                // The first frame at or past the crossing. A crossing on a frame
-                // can compute a hair past it (the piece's end is a left limit,
-                // a nanobeat early): a position within a thousandth of a frame
-                // of a whole one is that frame's own.
-                let k = (x * d - 1e-3).ceil();
-                if k >= 1.0 && k < d {
-                    v1 = a + (b - a) * k / d;
-                    d = k;
-                }
+        // A lane that clamps its own pieces ends this one where it crosses
+        // a bound.
+        if let Some(x) = K::cut(self.range, v0, v1) {
+            // The first frame at or past the crossing. A crossing on a frame
+            // can compute a hair past it (the piece's end is a left limit,
+            // a nanobeat early): a position within a thousandth of a frame
+            // of a whole one is that frame's own.
+            let k = (x * d - 1e-3).ceil();
+            if k >= 1.0 && k < d {
+                v1 = v0 + (v1 - v0) * k / d;
+                d = k;
             }
         }
         let (v0, v1) = (self.clamp(v0), self.clamp(v1));
@@ -966,14 +1053,10 @@ impl Block<'_> {
         Ok(())
     }
 
-    /// A plugin lane's clamp; a native port clamps for itself.
+    /// `v` as the lane sends it: clamped by a lane that clamps its own
+    /// pieces.
     fn clamp(&self, v: f64) -> f64 {
-        let (lo, hi) = self.range;
-        if self.native || lo.is_nan() || hi.is_nan() || lo > hi {
-            v
-        } else {
-            v.clamp(lo, hi)
-        }
+        K::clamp(self.range, v)
     }
 
     /// The block's walk from `walk`: points in frame order into `out`.
@@ -1110,7 +1193,7 @@ fn has_seconds(program: &ControlProgram) -> bool {
     })
 }
 
-impl<F: Float> Node<F> for ControlLaneNode {
+impl<F: Float, K: LaneKind> Node<F> for ControlLaneNode<K> {
     /// No audio; one event input (signal sources), one event output
     /// (segments to the target).
     ///
@@ -1141,9 +1224,9 @@ impl<F: Float> Node<F> for ControlLaneNode {
             .as_ref()
             .map(|k| k.load(Ordering::Acquire))
             .filter(|k| k.is_finite());
-        let live = self.range.load();
-        let range = (live.min(), live.max());
-        let span = live.view(s.unit).span();
+        let range = K::load(&mut self.range);
+        let unit = K::unit(self.addr);
+        let span = range.view(unit).span();
         let span = if span.is_finite() && span >= 0.0 {
             span
         } else {
@@ -1153,7 +1236,7 @@ impl<F: Float> Node<F> for ControlLaneNode {
         if offsets && !span.is_finite() {
             s.unranged.fetch_add(1, Ordering::Relaxed);
         }
-        let range_bits = (range.0.to_bits(), range.1.to_bits());
+        let range_bits = (range.min().to_bits(), range.max().to_bits());
         let depths = program.depth_snapshot();
         if seq != self.seen.seq {
             // A new program: forget every input it does not read, so a
@@ -1188,15 +1271,14 @@ impl<F: Float> Node<F> for ControlLaneNode {
         let at_zero = (due || changed || moved || resync).then_some(changed && !moved && !resync);
 
         let events = io.events(Self::IN).params();
-        let mut block = Block {
+        let mut block = Block::<K> {
             cx,
             program,
             knob,
             range,
             span,
-            unit: s.unit,
-            native: self.native,
-            make: &*self.make,
+            addr: self.addr,
+            unit,
             stride: u64::from(CONTROL_GRID.stride()),
             truncate: false,
             seconds: has_seconds(program),
@@ -1258,33 +1340,33 @@ impl<F: Float> Node<F> for ControlLaneNode {
 
 /// A lane's fork source: [`ControlLaneNode::fork_fresh`] at the gather,
 /// from the lane's parts. It holds no lane, so no per-block read state.
-struct LaneFork {
+struct LaneFork<K: LaneKind> {
     shared: Arc<Shared>,
-    make: Arc<MakeSegment>,
-    native: bool,
+    addr: K::Addr,
+    source: K::Source,
 }
 
-impl<F: Float> ForkSource<F> for LaneFork {
+impl<F: Float, K: LaneKind> ForkSource<F> for LaneFork<K> {
     fn fork(&self, _mode: RenderMode) -> Result<Forked<F>, ForkCause> {
-        Ok(Forked::new(Box::new(ControlLaneNode::fresh_over(
+        Ok(Forked::new(Box::new(ControlLaneNode::<K>::fresh_over(
             &self.shared,
-            &self.make,
-            self.native,
+            self.addr,
+            &self.source,
         ))))
     }
 }
 
 /// Inserted with its [`LaneControls`], and a fork that reads the last
 /// published program and the knob and range values at the gather.
-impl<F: Float> IntoNode<F> for ControlLaneNode {
+impl<F: Float, K: LaneKind> IntoNode<F> for ControlLaneNode<K> {
     type Controls = LaneControls;
 
     fn into_parts(self) -> NodeParts<LaneControls, F> {
         let controls = self.controls();
-        let fork = LaneFork {
+        let fork = LaneFork::<K> {
             shared: Arc::clone(&self.shared),
-            make: Arc::clone(&self.make),
-            native: self.native,
+            addr: self.addr,
+            source: self.source.clone(),
         };
         NodeParts::new(Box::new(self), controls, Some(Box::new(fork)), None)
     }
@@ -1323,7 +1405,7 @@ mod tests {
         assert_eq!(exact_span(max / 2.0 + 10.0, max / 2.0 + 10.0), None);
     }
 
-    fn foreign(range: ParamRange) -> (ControlLaneNode, ForeignLaneControls) {
+    fn foreign(range: ParamRange) -> (ControlLaneNode<ForeignLane>, ForeignLaneControls) {
         ForeignLaneConfig::new(ParamId::new(0), ControlProgram::default(), range).build()
     }
 
@@ -1346,29 +1428,28 @@ mod tests {
         assert!(gone.upgrade().is_none(), "freed by the reclaim");
     }
 
-    /// **A plugin lane's range a block still held when it was set anew is freed
-    /// by the lane's next `reclaim`**, with no further set.
+    /// **A foreign lane's range a block still held when it was set anew is
+    /// freed by its controls' next `reclaim`**, with no further set; the
+    /// program-only `LaneControls::reclaim` leaves it.
     #[test]
     fn reclaim_frees_a_range_a_block_held_across_its_replacement() {
         let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
         {
             // A block in progress across the range change.
-            let RangeReader::Own(reader) = &mut node.range else {
-                panic!("a plugin lane reads its own cell");
-            };
-            let _held = reader.lend();
+            let _held = node.range.lend();
             controls.publish_range(ParamRange::of(0.25, 0.75));
         }
-        assert_eq!(
-            controls.range.retired_len(),
-            1,
-            "retired, pinned until a scan"
-        );
         assert_eq!(controls.lane().reclaim(), 0);
         assert_eq!(
             controls.range.retired_len(),
+            1,
+            "retired, pinned until its owner's scan"
+        );
+        assert_eq!(controls.reclaim(), 0);
+        assert_eq!(
+            controls.range.retired_len(),
             0,
-            "freed by the lane's reclaim"
+            "freed by the foreign controls' reclaim"
         );
     }
 
@@ -1379,11 +1460,10 @@ mod tests {
     fn a_plugin_lane_and_its_fork_read_the_range_set_before_them() {
         let (mut node, controls) = foreign(ParamRange::of(0.0, 1.0));
         controls.publish_range(ParamRange::of(0.1, 0.9));
-        assert_eq!(node.range.load(), ParamRange::of(0.1, 0.9));
-        assert_eq!(controls.lane().range(), (0.1, 0.9));
+        assert_eq!(*node.range.lend(), ParamRange::of(0.1, 0.9));
         let mut fork = node.fork_fresh();
         controls.publish_range(ParamRange::of(0.2, 0.3));
-        assert_eq!(node.range.load(), ParamRange::of(0.2, 0.3));
-        assert_eq!(fork.range.load(), ParamRange::of(0.1, 0.9));
+        assert_eq!(*node.range.lend(), ParamRange::of(0.2, 0.3));
+        assert_eq!(*fork.range.lend(), ParamRange::of(0.1, 0.9));
     }
 }

@@ -168,8 +168,8 @@ pub enum EdgeGainError {
 ///
 /// The cell holds the base as an `f64` (an `AtomicF64`, the [`Gain`]'s own
 /// width, which is what a control lane's knob is). **The base is the lane's
-/// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] and a
-/// route's `LaneControls::store` writes into the same cell, so a routed
+/// knob, and the cell is its one writer's**: [`Editor::set_edge_gain`] writes
+/// it and a route's lane reads it, so a routed
 /// modulation moves around the base and the base is what the gain returns to. The
 /// range is the param port's own cell ([`ParamRanges`] over the one address
 /// [`EdgeGain::ADDR`]), so the driven step clamps to it as a port does and a

@@ -1009,6 +1009,14 @@ impl ParamRangeCell {
     pub fn same_cell(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+
+    /// A cell of its own holding the range now, in no editor's table: what a
+    /// fork reads, so a range set after the fork does not reach it. Control
+    /// side: it locks and allocates.
+    #[must_use]
+    pub fn detached(&self) -> Self {
+        Self(Arc::new(Publisher::new(self.current())))
+    }
 }
 
 /// A param port's live range as the audio thread reads it: a [`Reader`] on
