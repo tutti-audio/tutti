@@ -1847,9 +1847,9 @@ impl<F: Float> Midi<'_, F> {
     ///
     /// **A follower whose input node is removed ends** at the
     /// [`Poll`](crate::Phase::Poll) after the removal is applied, once it has
-    /// applied what its tap still held: it is dropped, the base maps are published again as
-    /// [`unfollow_tempo`](Self::unfollow_tempo) does, and the update reports
-    /// [`MidiEvent::Unfollowed`].
+    /// applied what its tap still held: it is dropped, the base maps are
+    /// published again as [`unfollow_tempo`](Self::unfollow_tempo) does, and
+    /// the update reports [`MidiEvent::Unfollowed`].
     ///
     /// # Errors
     ///
