@@ -88,12 +88,12 @@ const RATE: f64 = 48_000.0;
 
 /// Plays the transport from beat 0 and renders `frames` frames in 512-frame
 /// blocks.
-fn roll(s: &mut Session, frames: usize) {
+pub(crate) fn roll(s: &mut Session, frames: usize) {
     play(s);
     blocks(s, frames.div_ceil(512));
 }
 
-fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
+pub(crate) fn note_ons(seen: &Seen) -> Vec<(u64, u8)> {
     seen.lock()
         .unwrap()
         .iter()
