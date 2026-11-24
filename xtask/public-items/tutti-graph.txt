@@ -489,6 +489,7 @@ fn exec::Executor::plan
 fn exec::Executor::play_reading
 fn exec::Executor::prepare
 fn exec::Executor::recovered_event_count
+fn exec::Executor::reported_tail
 fn exec::Executor::set_pool
 fn exec::Executor::unrouted_command_count
 fn exec::command::ScheduleError::is_transient

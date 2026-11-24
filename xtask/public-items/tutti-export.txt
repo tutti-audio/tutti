@@ -11,6 +11,7 @@ enum error::RenderError
 enum error::Unmeasured
 enum job::EventLossPolicy
 enum job::JobError
+enum job::TailPolicy
 enum normalize::Normalize
 enum output::Feed
 enum output::GainSource
@@ -34,6 +35,7 @@ fn control::Progress::frames
 fn control::Progress::output
 fn control::Progress::stage
 fn graph::RenderGraph::assemble
+fn graph::RenderGraph::declared_tail
 fn graph::RenderGraph::prepare
 fn graph::RenderGraph::reported_latency
 fn graph::RenderGraph::reported_tail
@@ -44,11 +46,12 @@ fn graph::Setup::rt_log
 fn job::Job::event_loss
 fn job::Job::latency
 fn job::Job::length
+fn job::Job::max_output_length
+fn job::Job::max_total
 fn job::Job::new
-fn job::Job::output_length
 fn job::Job::rate
 fn job::Job::tail
-fn job::Job::total
+fn job::TailPolicy::bound
 fn normalize::Normalize::gain_for_rendered
 fn normalize::Normalize::lufs
 fn normalize::Normalize::peak
@@ -81,6 +84,7 @@ fn output::Produced::into_buffers
 fn output::Produced::into_file
 fn render
 fn render::plan::RenderPlan::of
+fn render::plan::RenderPlan::of_frames
 fn render::sink::BlockCursor::window
 fn render_one
 fn rendered::Rendered::apply_gain
