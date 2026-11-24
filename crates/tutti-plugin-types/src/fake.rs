@@ -238,6 +238,17 @@ impl CallLog {
     }
 }
 
+/// What a test runs inside every `process` call, before the block does anything:
+/// set once, read without a lock.
+#[derive(Default)]
+struct DuringProcess(std::sync::OnceLock<Box<dyn Fn() + Send + Sync>>);
+
+impl std::fmt::Debug for DuringProcess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DuringProcess").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 struct Shared {
     log: CallLog,
@@ -250,6 +261,7 @@ struct Shared {
     panic_in_rebuild: AtomicBool,
     panic_in_latency: AtomicBool,
     process_fails: AtomicBool,
+    during_process: DuringProcess,
     latency: AtomicUsize,
     tail: AtomicUsize,
     outputs: AtomicU32,
@@ -369,6 +381,7 @@ impl FakePlugin {
             panic_in_rebuild: AtomicBool::new(false),
             panic_in_latency: AtomicBool::new(false),
             process_fails: AtomicBool::new(false),
+            during_process: DuringProcess::default(),
             latency: AtomicUsize::new(0),
             tail: AtomicUsize::new(0),
             outputs: AtomicU32::new(2),
@@ -472,6 +485,20 @@ impl FakePlugin {
     /// Makes `rebuild` panic.
     pub fn panic_in_rebuild(&self, panic: bool) {
         self.0.panic_in_rebuild.store(panic, Ordering::Relaxed);
+    }
+
+    /// Runs `hook` inside every `Processor::process` call, on the thread that
+    /// calls it, before the block does anything: a test's way to act while the
+    /// plugin is being called. Set once.
+    ///
+    /// # Panics
+    ///
+    /// If a hook is already set.
+    pub fn during_process(&self, hook: impl Fn() + Send + Sync + 'static) {
+        assert!(
+            self.0.during_process.0.set(Box::new(hook)).is_ok(),
+            "a hook is already set"
+        );
     }
 
     /// Makes every block fail (`Processor::process` returns an error) while
@@ -1094,6 +1121,9 @@ impl Processor for FakeProcessor {
             FloatWidth::F64 => &self.shared.blocks_64,
         }
         .fetch_add(1, Ordering::Relaxed);
+        if let Some(hook) = self.shared.during_process.0.get() {
+            hook();
+        }
         self.drain
             .drain(|id, value| log.push(Call::Edit(id, value)));
         if self.shared.process_fails.load(Ordering::Relaxed) {

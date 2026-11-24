@@ -38,6 +38,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::Generation;
 
@@ -66,6 +67,7 @@ pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, E
         applied: AtomicU32::new(0),
         pulse: AtomicU64::new(0),
         unhanded: AtomicU64::new(0),
+        block_nanos: AtomicU64::new(0),
         epoch: reader.epoch_watch(),
         reader: AudioThreadCell::new(reader),
     });
@@ -81,6 +83,8 @@ struct Shared {
     /// How many times the audio side visited the slots (a block, a parked
     /// poll): the control side's sign that the node is running.
     pulse: AtomicU64,
+    /// The period of the node's blocks in nanoseconds, as prepared (0 before).
+    block_nanos: AtomicU64,
     /// Waits that ended at their limit with the audio side running and the
     /// writes not handed to the plugin ([`Verdict::Unhanded`]).
     unhanded: AtomicU64,
@@ -189,7 +193,13 @@ impl EditPost {
     /// The wait for every write made so far, begun at `now`.
     pub(super) fn settle(&self, now: Instant) -> Settle {
         let target = self.0.state.lock().writer.written();
-        Settle::new(target, self.0.pulse.load(Ordering::Relaxed), now)
+        let period = Duration::from_nanos(self.0.block_nanos.load(Ordering::Relaxed));
+        Settle::new(
+            target,
+            self.0.pulse.load(Ordering::Relaxed),
+            now,
+            Settle::window_for(period),
+        )
     }
 
     /// The verdict of `settle` at `now`.
@@ -231,6 +241,12 @@ impl EditPost {
         self.0.unhanded.load(Ordering::Relaxed)
     }
 
+    /// The reader, held as the control side holds it while it applies a write.
+    #[cfg(test)]
+    pub(super) fn hold(&self) -> tutti_rt::BorrowGuard<'_, EditReader> {
+        self.0.reader.try_borrow_mut().expect("the reader is free")
+    }
+
     /// Whether every write made so far has been handed to the plugin: what a
     /// call that cannot wait asks.
     pub(super) fn is_settled(&self) -> bool {
@@ -247,9 +263,11 @@ impl EditPost {
     /// out of band ([`Control::set_parameter_out_of_band`]), for a node that
     /// drains nothing. Control thread, main thread.
     ///
-    /// `false` when the node holds the reader (it is draining now, so it is not
-    /// idle): nothing is taken. The reader is held across the applies, so a
-    /// block that starts meanwhile drains nothing and takes the values after.
+    /// `false` when the node holds the reader: it holds it for the whole of a
+    /// block (see [`EditPort::claim`]), so a refusal means a block is running
+    /// and nothing is taken. The reader is held across the applies, so a block
+    /// that starts meanwhile drains nothing, and goes on without the values:
+    /// they reach the plugin with the next one.
     pub(super) fn apply_idle(&self, main: MainThreadMarker, control: &mut dyn Control) -> bool {
         let Some(mut reader) = self.0.reader.try_borrow_mut() else {
             return false;
@@ -274,17 +292,23 @@ impl EditPost {
 pub(super) struct EditPort(Arc<Shared>);
 
 impl EditPort {
-    /// Hands `apply` each parameter written since the last drain, with its
-    /// latest value and the epoch the drain observed, and answers how far the
-    /// slots are swept: every write up to it was handed over or made stale. A
-    /// refused claim (the control side applies an idle node's writes) hands
-    /// nothing and answers `None`: the slots keep what they hold for the next
-    /// visit. Counts the visit either way.
-    pub(super) fn drain(&self, apply: impl FnMut(ParamId, Normalized, u32)) -> Option<Generation> {
+    /// Takes the slots' reader for a block (or a parked flush): held until the
+    /// block's hand-off is published, so the control side's
+    /// [`apply_idle`](EditPost::apply_idle), which takes the same reader, is
+    /// refused exactly while the plugin is inside the block. A refused claim
+    /// (the control side is applying a node it found idle) is `None`: the block
+    /// goes on without draining, and the slots keep what they hold. Counts the
+    /// visit either way. Wait-free.
+    pub(super) fn claim(&self) -> Option<EditClaim<'_>> {
         self.0.pulse.fetch_add(1, Ordering::Relaxed);
-        let mut reader = self.0.reader.try_borrow_mut()?;
-        reader.drain_in_epoch(apply);
-        Some(reader.swept())
+        Some(EditClaim(self.0.reader.try_borrow_mut()?))
+    }
+
+    /// The period of the node's blocks, as prepared: what a wait's window is
+    /// made of ([`Settle::window_for`]). Control side, at prepare.
+    pub(super) fn set_block_period(&self, period: Duration) {
+        let nanos = u64::try_from(period.as_nanos()).unwrap_or(u64::MAX);
+        self.0.block_nanos.store(nanos, Ordering::Relaxed);
     }
 
     /// Tells the control side the plugin has what the slots held up to `swept`.
@@ -302,6 +326,19 @@ impl EditPort {
     /// The control side's end of the same slots.
     pub(super) fn post(&self) -> EditPost {
         EditPost(Arc::clone(&self.0))
+    }
+}
+
+/// The slots' reader, held by the node for one block.
+pub(super) struct EditClaim<'a>(tutti_rt::BorrowGuard<'a, EditReader>);
+
+impl EditClaim<'_> {
+    /// Hands `apply` each parameter written since the last drain, with its
+    /// latest value and the epoch the drain observed, and answers how far the
+    /// slots are swept: every write up to it was handed over or made stale.
+    pub(super) fn drain(&mut self, apply: impl FnMut(ParamId, Normalized, u32)) -> Generation {
+        self.0.drain_in_epoch(apply);
+        self.0.swept()
     }
 }
 
@@ -324,7 +361,9 @@ mod tests {
 
     fn drained(port: &EditPort) -> Vec<(ParamId, f64)> {
         let mut out = Vec::new();
-        let _ = port.drain(|id, value, _| out.push((id, value.get())));
+        if let Some(mut claim) = port.claim() {
+            claim.drain(|id, value, _| out.push((id, value.get())));
+        }
         out
     }
 
@@ -374,7 +413,7 @@ mod tests {
         assert!(post.is_settled(), "no write is settled");
         post.write(id(1), Normalized::of(0.25)).unwrap();
         assert!(!post.is_settled());
-        let swept = port.drain(|_, _, _| {}).expect("the claim is free");
+        let swept = port.claim().expect("the claim is free").drain(|_, _, _| {});
         assert!(!post.is_settled(), "drained is not handed to the plugin");
         port.publish(swept);
         assert!(post.is_settled(), "a published sweep reaches the write");
@@ -431,9 +470,11 @@ mod tests {
         params.prepare(64);
         params.begin();
         post.write(id(1), Normalized::of(0.75)).unwrap();
-        let _ = port.drain(|param, value, epoch| {
-            params.write(param, at_frame(0), value.get(), epoch);
-        });
+        port.claim()
+            .expect("the claim is free")
+            .drain(|param, value, epoch| {
+                params.write(param, at_frame(0), value.get(), epoch);
+            });
         post.reset();
         let held = post.0.reader.try_borrow_mut().expect("free");
         super::super::client::void_stale_edits(Some(&port), &mut params);
@@ -451,7 +492,9 @@ mod tests {
         let (post, port) = host_edits([id(1)]);
         post.write(id(1), Normalized::of(0.25)).unwrap();
         let mut observed = None;
-        let _ = port.drain(|_, _, epoch| observed = Some(epoch));
+        port.claim()
+            .expect("the claim is free")
+            .drain(|_, _, epoch| observed = Some(epoch));
         let observed = observed.expect("drained");
         post.reset();
         assert!(tutti_plugin_types::epoch_before(observed, port.epoch()));

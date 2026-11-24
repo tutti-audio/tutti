@@ -143,7 +143,7 @@ where
         if let Some(main) = MainThreadMarker::new() {
             return Some(work(main, &mut self.inner.lock()));
         }
-        self.off_main(false, work)
+        self.off_main(Waits::Unsettled, work).ran()
     }
 
     /// [`on_main`](Self::on_main) for a call whose answer holds the host's
@@ -153,6 +153,7 @@ where
     /// for them, polled, within the deadline.
     fn on_main_settled<R: Send + 'static>(
         &self,
+        waits: Waits,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
     ) -> Settled<R> {
         if let Some(main) = MainThreadMarker::new() {
@@ -162,31 +163,29 @@ where
                 Settled::Busy
             };
         }
-        self.off_main(true, work)
-            .map_or(Settled::Unavailable, Settled::Ran)
+        self.off_main(waits, work)
     }
 
     /// `work` posted to the main thread's next tick, waited for within
-    /// [`OFF_MAIN_DEADLINE`]; after the host's writes when `settled`.
+    /// [`OFF_MAIN_DEADLINE`]; after the host's writes as `waits` says.
     fn off_main<R: Send + 'static>(
         &self,
-        settled: bool,
+        waits: Waits,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
-    ) -> Option<R> {
+    ) -> Settled<R> {
         if !self.work.is_pumped() {
-            return None;
+            return Settled::Unavailable;
         }
         let (answer, wait) = sync_channel(1);
-        self.submit(settled, work, move |ran| {
-            if let Some(ran) = ran {
-                let _ = answer.send(ran);
-            }
+        self.submit(waits, work, move |settled| {
+            let _ = answer.send(settled);
         });
         await_answer(
             &wait,
             OffMainWait::new(OFF_MAIN_DEADLINE, Instant::now()),
             Instant::now,
         )
+        .unwrap_or(Settled::Unavailable)
     }
 
     /// `work` on the plugin on the main thread, answered into an [`Answer`]
@@ -196,28 +195,30 @@ where
     /// thread to hop to); a job dropped unrun cancels the answer.
     fn on_main_answer<R: Send + 'static>(
         &self,
-        settled: bool,
+        waits: Waits,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> Option<R> + Send + 'static,
     ) -> Answer<Option<R>> {
         let (tx, answer) = Answer::channel();
         // A dropped receiver has no one to tell.
-        self.submit(settled, work, move |ran| drop(tx.send(ran.flatten())));
+        self.submit(waits, work, move |settled| {
+            drop(tx.send(settled.ran().flatten()));
+        });
         answer
     }
 
-    /// Runs `work` on the main thread, under the instance lock, and hands what
-    /// it returns to `done` (`None` when there is no main thread to run it).
-    /// With `settled`, `work` runs after every write made before this call is
-    /// handed to the plugin, by the node's blocks or its parked polls: a wait
-    /// that is polled, once per main-thread tick, never slept. A node idle for
-    /// a whole window has its writes applied out of band first.
+    /// Runs `work` on the main thread, under the instance lock, and hands how it
+    /// went to `done`. With `waits` other than [`Waits::Unsettled`], `work` runs
+    /// after every write made before this call is handed to the plugin, by the
+    /// node's blocks or its parked polls: a wait that is polled, once per
+    /// main-thread tick, never slept. A node idle for a whole window has its
+    /// writes applied out of band first.
     fn submit<R: Send + 'static>(
         &self,
-        settled: bool,
+        waits: Waits,
         work: impl FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send + 'static,
-        done: impl FnOnce(Option<R>) + Send + 'static,
+        done: impl FnOnce(Settled<R>) + Send + 'static,
     ) {
-        let wait = settled.then(|| self.edits.settle(Instant::now()));
+        let wait = (waits != Waits::Unsettled).then(|| self.edits.settle(Instant::now()));
         let host = Host {
             inner: Arc::clone(&self.inner),
             post: self.edits.clone(),
@@ -226,6 +227,7 @@ where
         let job = Job {
             host,
             wait,
+            waits,
             work: Box::new(work),
             done: Box::new(done),
         };
@@ -234,7 +236,7 @@ where
         } else if self.work.is_pumped() {
             requeue(None, job);
         } else {
-            (job.done)(None);
+            (job.done)(Settled::Unavailable);
         }
     }
 
@@ -278,15 +280,39 @@ where
     }
 }
 
+/// What a call waits for before it runs, and what it does when the running
+/// node never hands the writes over ([`Verdict::Unhanded`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Waits {
+    /// The host's writes are not waited for.
+    Unsettled,
+    /// A read: it answers what the plugin holds when the wait ends unhanded.
+    Read,
+    /// A save: it does not run when the wait ends unhanded, since a state
+    /// missing a write must not be handed back as the plugin's: it is
+    /// [`Settled::Busy`].
+    Save,
+}
+
 /// How a call that holds the host's writes in its answer ran.
 enum Settled<R> {
-    /// It ran, with every write handed to the plugin.
+    /// It ran.
     Ran(R),
     /// It did not run: a write has not reached the plugin, and this call cannot
-    /// wait for it.
+    /// wait for it, or the running node never handed it over.
     Busy,
     /// It did not run: the main thread did not answer.
     Unavailable,
+}
+
+impl<R> Settled<R> {
+    /// What the call returned, if it ran.
+    fn ran(self) -> Option<R> {
+        match self {
+            Self::Ran(ran) => Some(ran),
+            Self::Busy | Self::Unavailable => None,
+        }
+    }
 }
 
 /// What a deferred job holds of the backend: everything but the plugin's
@@ -301,8 +327,9 @@ struct Host<L: InProcess> {
 struct Job<L: InProcess, R> {
     host: Host<L>,
     wait: Option<Settle>,
+    waits: Waits,
     work: Box<dyn FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send>,
-    done: Box<dyn FnOnce(Option<R>) + Send>,
+    done: Box<dyn FnOnce(Settled<R>) + Send>,
 }
 
 /// One poll of a job that waits for the host's writes, on the main thread. A
@@ -311,8 +338,11 @@ struct Job<L: InProcess, R> {
 /// window has its writes applied out of band, then `work` runs; a node that
 /// turns out to be running (it holds the slots) is waited for again.
 ///
-/// An [`Unhanded`](Verdict::Unhanded) wait runs `work` at once too, counted
-/// ([`EditPost::count_unhanded`](super::host_edits::EditPost::count_unhanded)).
+/// An [`Unhanded`](Verdict::Unhanded) wait is counted
+/// ([`EditPost::count_unhanded`](super::host_edits::EditPost::count_unhanded))
+/// and ends the wait without an out-of-band apply: a read runs `work` and
+/// answers what the plugin holds, a save does not run and answers
+/// [`Settled::Busy`].
 ///
 /// **The one case that does not settle**: with no collector to queue on (it was
 /// never pumped, or it is gone), `work` runs at once and the writes are not
@@ -335,6 +365,10 @@ where
         // The node runs, so no out-of-band apply: the call answers what the
         // plugin holds, and the miss is counted.
         job.host.post.count_unhanded();
+        if job.waits == Waits::Save {
+            (job.done)(Settled::Busy);
+            return;
+        }
         tracing::warn!(
             "a read waited for the host's writes and the running node never handed them over"
         );
@@ -351,7 +385,7 @@ where
     }
     let ran = (job.work)(main, &mut instance);
     drop(instance);
-    (job.done)(Some(ran));
+    (job.done)(Settled::Ran(ran));
 }
 
 /// Queues `job` for the next tick. A collector that is gone hands it back: on
@@ -379,7 +413,7 @@ where
                 step(main, job);
             }
             // Off the main thread nothing can run it.
-            None => (job.done)(None),
+            None => (job.done)(Settled::Unavailable),
         }
     }
 }
@@ -431,19 +465,19 @@ where
     /// that does not wait: a call made on the main thread with no pumped
     /// collector runs at once.
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
-        self.on_main_answer(true, move |main, instance| {
+        self.on_main_answer(Waits::Read, move |main, instance| {
             instance.control()?.parameter(main, id)
         })
     }
 
     fn parameter_descriptors(&self) -> Answer<Option<Vec<ParameterInfo>>> {
-        self.on_main_answer(false, |main, instance| {
+        self.on_main_answer(Waits::Unsettled, |main, instance| {
             Some(instance.control()?.parameters(main))
         })
     }
 
     fn parameter_normalized(&self, id: ParamId, plain: f64) -> Answer<Option<Normalized>> {
-        self.on_main_answer(false, move |main, instance| {
+        self.on_main_answer(Waits::Unsettled, move |main, instance| {
             instance.control()?.parameter_normalized(main, id, plain)
         })
     }
@@ -512,7 +546,7 @@ where
     /// [`Control::parameter_text`]
     /// answers it (VST2's only for the value it currently holds).
     fn parameter_text(&self, id: ParamId, value: Normalized) -> Option<String> {
-        match self.on_main_settled(move |main, instance| {
+        match self.on_main_settled(Waits::Read, move |main, instance| {
             instance.control()?.parameter_text(main, id, value)
         }) {
             Settled::Ran(text) => text,
@@ -525,7 +559,7 @@ where
     /// **On VST2 this writes**, since its opcode parses by applying.
     fn parameter_value_from_text(&self, id: ParamId, text: &str) -> Option<Normalized> {
         let text = text.to_owned();
-        match self.on_main_settled(move |main, instance| {
+        match self.on_main_settled(Waits::Read, move |main, instance| {
             instance
                 .control()?
                 .parameter_value_from_text(main, id, &text)
@@ -546,7 +580,7 @@ where
     /// it is [`StateError::Busy`] while a write has not reached the plugin: ask
     /// again, or ask off the main thread.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
-        match self.on_main_settled(move |main, instance| {
+        match self.on_main_settled(Waits::Save, move |main, instance| {
             instance.control().map(|control| {
                 control
                     .save_state(main, state_use)
@@ -823,13 +857,12 @@ mod off_main_tests {
         (unit, handle)
     }
 
-    /// **A wait that the running node never covers ends at its limit**: the node
-    /// visits the slots (its pulse moves) and hands nothing to the plugin, as a
-    /// node whose every flush is refused does. The call answers once, at once,
-    /// what the plugin holds, applies nothing out of band, and the miss is counted.
+    /// What a call of `waits` made of a wait that the running node never covered:
+    /// how many times its work ran, how it was answered (`Ran` or not), and the
+    /// misses counted. The node visits the slots (its pulse moves) and hands
+    /// nothing to the plugin, as a node whose every flush is refused does.
     /// Driven by constructed instants: the wait began before its limit.
-    #[test]
-    fn a_running_node_that_never_hands_the_writes_over_ends_the_wait_counted() {
+    fn an_unhanded_call(waits: super::Waits) -> (u32, bool, u64) {
         use std::sync::atomic::{AtomicU32, Ordering};
         let main = main_thread();
         let (_collector, work) = MainWork::new();
@@ -838,21 +871,17 @@ mod off_main_tests {
         let port = client.edits.as_ref().expect("an in-process node has slots");
         let post = port.post();
         let began = tutti_platform::Instant::now() - super::super::settle::LIMIT * 2;
-        let wait = {
-            post.write(ParamId::new(1), Normalized::of(0.25))
-                .expect("a declared parameter");
-            post.settle(began)
-        };
-        // The node runs: it drains the write and hands nothing over.
-        let _ = port.drain(|_, _, _| {});
+        post.write(ParamId::new(1), Normalized::of(0.25))
+            .expect("a declared parameter");
+        let wait = post.settle(began);
+        // The node runs: it visits the slots and hands nothing over.
+        drop(port.claim());
         let ran = std::sync::Arc::new(AtomicU32::new(0));
-        let answered = std::sync::Arc::new(AtomicU32::new(0));
-        let (counted, told) = (
-            std::sync::Arc::clone(&ran),
-            std::sync::Arc::clone(&answered),
-        );
+        let ran_ok = std::sync::Arc::new(AtomicU32::new(0));
+        let (counted, told) = (std::sync::Arc::clone(&ran), std::sync::Arc::clone(&ran_ok));
         let job = super::Job {
             wait: Some(wait),
+            waits,
             host: super::Host {
                 inner: std::sync::Arc::clone(&client.inner),
                 post: post.clone(),
@@ -861,14 +890,32 @@ mod off_main_tests {
             work: Box::new(move |_, _| {
                 counted.fetch_add(1, Ordering::Relaxed);
             }),
-            done: Box::new(move |ran| {
-                told.fetch_add(u32::from(ran.is_some()), Ordering::Relaxed);
+            done: Box::new(move |settled| {
+                told.fetch_add(u32::from(settled.ran().is_some()), Ordering::Relaxed);
             }),
         };
         super::step(main, job);
-        assert_eq!(ran.load(Ordering::Relaxed), 1, "the work ran once");
-        assert_eq!(answered.load(Ordering::Relaxed), 1, "and was answered");
-        assert_eq!(post.unhanded(), 1, "the miss is counted");
+        (
+            ran.load(Ordering::Relaxed),
+            ran_ok.load(Ordering::Relaxed) == 1,
+            post.unhanded(),
+        )
+    }
+
+    /// **A read whose wait the running node never covers answers what the plugin
+    /// holds**, once, at once, with the miss counted, and applies nothing out of
+    /// band.
+    #[test]
+    fn an_unhanded_read_answers_what_the_plugin_holds_counted() {
+        assert_eq!(an_unhanded_call(super::Waits::Read), (1, true, 1));
+    }
+
+    /// **A save whose wait the running node never covers does not run**: a state
+    /// missing a write is not handed back as the plugin's; it answers busy, and the
+    /// miss is counted.
+    #[test]
+    fn an_unhanded_save_does_not_run_and_is_counted() {
+        assert_eq!(an_unhanded_call(super::Waits::Save), (0, false, 1));
     }
 
     /// **A settled call on a gone collector runs once, at once, and does not
@@ -901,6 +948,7 @@ mod off_main_tests {
             std::sync::Arc::clone(&answered),
         );
         let job = super::Job {
+            waits: super::Waits::Read,
             wait: Some(post.settle(tutti_platform::Instant::now())),
             host: super::Host {
                 inner: std::sync::Arc::clone(&client.inner),
@@ -910,8 +958,8 @@ mod off_main_tests {
             work: Box::new(move |_, _| {
                 counted.fetch_add(1, Ordering::Relaxed);
             }),
-            done: Box::new(move |ran| {
-                told.fetch_add(u32::from(ran.is_some()), Ordering::Relaxed);
+            done: Box::new(move |settled| {
+                told.fetch_add(u32::from(settled.ran().is_some()), Ordering::Relaxed);
             }),
         };
         super::step(main, job);

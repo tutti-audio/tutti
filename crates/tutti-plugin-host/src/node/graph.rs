@@ -39,6 +39,7 @@ use super::client::{
     InProcessClient, Inputs, PluginNode, Rendered, drain_edits, publish_edits, render_with,
     void_stale_edits,
 };
+use super::host_edits::EditPort;
 use crate::{Call, NodeControls, Snapshot, param_input, transport_info};
 use tutti_plugin_types::{BlockStatus, ProcessOutput, Processing};
 use tutti_plugin_types::{
@@ -135,6 +136,14 @@ where
             .map(NonZeroUsize::get);
         this.params
             .prepare(chunk.unwrap_or_else(|| p.max_block().get()));
+        // What a wait for the host's writes takes its idle window from: the
+        // longest block this node is prepared for.
+        if let Some(edits) = this.edits.as_ref() {
+            let frames = p.max_block().get() as f64;
+            edits.set_block_period(std::time::Duration::from_secs_f64(
+                frames / p.sample_rate().get(),
+            ));
+        }
         this.segments.prepare(this.params.room());
     }
 
@@ -149,13 +158,22 @@ where
     fn poll_parked(&mut self) {
         let this = &mut self.client;
         let Some(processor) = this.rt.poll(Processor::stop) else {
+            // No Processor on the audio side, so no pulse: the one place where
+            // "no pulse" is a fact (nobody on the audio side holds the plugin),
+            // not a guess from a quiet window.
             return;
         };
-        if this.edits.is_none() {
+        let Some(edits) = this.edits.as_ref() else {
             return;
-        }
+        };
+        // The reader is the claim on calling the plugin: held across the flush
+        // and its publish, so the control side's out-of-band apply is refused
+        // while the plugin is called here; refused here, no call is made.
+        let Some(mut claim) = edits.claim() else {
+            return;
+        };
         this.params.begin();
-        drain_edits(this.edits.as_ref(), &mut this.params, &mut this.swept, 0);
+        drain_edits(Some(&mut claim), &mut this.params, &mut this.swept, 0);
         void_stale_edits(this.edits.as_ref(), &mut this.params);
         if !this.params.chunk().is_empty() {
             let flushed = processor.flush_parameters(this.params.chunk()).is_ok();
@@ -196,6 +214,16 @@ where
         // (stopped) when the control side recalled it. Taken once, here, so
         // its chunk (`Processor::chunk`) is read from the one the block runs.
         let mut processor = this.rt.poll(Processor::stop);
+        // The reader is the claim on calling the plugin: held for the whole block,
+        // through the Processor's call and the publish of the hand-off, so the
+        // control side's out-of-band apply is refused exactly while a block runs.
+        // A claim the control side holds (it is applying) means the plugin is
+        // being called from there: no claim, no call. The block is refused whole,
+        // renders what an unlent block renders and is counted with it.
+        let mut claim = this.edits.as_ref().and_then(EditPort::claim);
+        if this.edits.is_some() && claim.is_none() {
+            processor = None;
+        }
         let chunk = processor
             .as_deref()
             .and_then(Processor::chunk)
@@ -245,12 +273,7 @@ where
                 // first frame; a node with no Processor leaves them in their
                 // slots.
                 if processor.is_some() {
-                    drain_edits(
-                        this.edits.as_ref(),
-                        &mut this.params,
-                        &mut this.swept,
-                        phase,
-                    );
+                    drain_edits(claim.as_mut(), &mut this.params, &mut this.swept, phase);
                 }
                 this.midi.clear();
                 this.chords.changes.clear();
@@ -466,7 +489,7 @@ where
         this.scales.changes.clear();
         this.params.begin();
         if processor.is_some() {
-            drain_edits(this.edits.as_ref(), &mut this.params, &mut this.swept, 0);
+            drain_edits(claim.as_mut(), &mut this.params, &mut this.swept, 0);
         }
         let midi = &mut this.midi;
         let intake = &mut this.intake;

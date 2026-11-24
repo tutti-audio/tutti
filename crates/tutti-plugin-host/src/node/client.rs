@@ -44,7 +44,7 @@ use tutti_timeline::TempoReader;
 use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
-use super::host_edits::EditPort;
+use super::host_edits::{EditClaim, EditPort};
 use super::instance::{Figures, Instance, Lost};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
@@ -717,32 +717,22 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
 /// Moves the host's parameter writes since the last call into the block's
 /// changes, at chunk frame `at`: each is sent though the plugin has the value
 /// from this node already, since the write says where it stands, and carries
-/// the epoch it was drained in. Answers how far the slots are swept, for
-/// [`publish_edits`] once the changes are handed to the plugin;
-/// `None` when the reader was not free. Allocation-free, and takes no lock.
-pub(super) fn take_edits(
-    edits: Option<&EditPort>,
-    params: &mut ParamDelivery,
-    at: usize,
-) -> Option<Generation> {
-    let offset = chunk_offset(at);
-    edits?.drain(|id, value, epoch| {
-        params.write(id, offset, value.get(), epoch);
-    })
-}
-
-/// Drains the host's writes into the chunk being filled, at chunk frame `at`,
-/// and keeps in `swept` how far the slots are swept until the chunk is handed
-/// to the plugin ([`publish_edits`]).
+/// the epoch it was drained in. Keeps in `swept` how far the slots are swept,
+/// until the changes are handed to the plugin ([`publish_edits`]). Allocation-free,
+/// and takes no lock.
 pub(super) fn drain_edits(
-    edits: Option<&EditPort>,
+    claim: Option<&mut EditClaim<'_>>,
     params: &mut ParamDelivery,
     swept: &mut Option<Generation>,
     at: usize,
 ) {
-    if let Some(reached) = take_edits(edits, params, at) {
-        *swept = Some(reached);
-    }
+    let Some(claim) = claim else {
+        return;
+    };
+    let offset = chunk_offset(at);
+    *swept = Some(claim.drain(|id, value, epoch| {
+        params.write(id, offset, value.get(), epoch);
+    }));
 }
 
 /// The chunk reached the plugin: tells the control side every write up to the

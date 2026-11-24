@@ -534,6 +534,81 @@ mod tests {
         );
     }
 
+    /// **A block holds the slots' reader while the plugin is called**, so the
+    /// control side's out-of-band apply, which takes the same reader, is refused
+    /// exactly while a block runs: attempted from inside `process`, it takes
+    /// nothing; between blocks it applies.
+    #[test]
+    fn an_idle_apply_attempted_inside_a_block_is_refused() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let (fake, post, mut unit, inner) = edited_node();
+        let id = ParamId::new(1);
+        post.write(id, tutti_units::Normalized::of(0.25))
+            .expect("a declared parameter");
+        // A control surface of a second fake, which the refused apply never
+        // reaches: the hook runs inside the audio scope, where the node's own
+        // instance lock may not be taken.
+        let (other, loaded) = FakePlugin::new();
+        other.declare(&[(id, false)]);
+        let prepare = Prepare::new(SR, MaxBlock::new(Samples::new(BLOCK)).expect("a block"));
+        let Ok((_processor, controller)) = loaded.activate(main_thread(), prepare) else {
+            panic!("the fake activates");
+        };
+        let controller = std::sync::Mutex::new(controller);
+        let (refused, applied) = (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+        {
+            let post = post.clone();
+            let (refused, applied) = (Arc::clone(&refused), Arc::clone(&applied));
+            fake.during_process(move || {
+                let mut control = controller.lock().expect("one thread");
+                let took = post.apply_idle(main_thread(), &mut *control);
+                let counter = if took { &applied } else { &refused };
+                counter.fetch_add(1, Ordering::Relaxed);
+            });
+        }
+        unit.block();
+        assert_eq!(
+            refused.load(Ordering::Relaxed),
+            1,
+            "refused inside the block"
+        );
+        assert_eq!(applied.load(Ordering::Relaxed), 0);
+        assert_eq!(
+            block_params(&fake),
+            [(id, 0.25)],
+            "the block took the write the apply could not"
+        );
+        assert!(
+            post.apply_idle(main_thread(), inner.lock().control().expect("alive")),
+            "between blocks the apply takes the reader"
+        );
+    }
+
+    /// **A block that finds the reader held by the control side does not call the
+    /// plugin**: no claim, no call. It is refused whole, renders what an unlent
+    /// block renders, is counted with them, and the write stays owed.
+    #[test]
+    fn a_block_that_finds_the_reader_held_does_not_call_the_plugin() {
+        let (fake, post, mut unit, _inner) = edited_node();
+        let id = ParamId::new(1);
+        post.write(id, tutti_units::Normalized::of(0.25))
+            .expect("a declared parameter");
+        let held = post.hold();
+        unit.block();
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|call| matches!(call, Call::Process(_))),
+            "the plugin was called beside the control side: {:?}",
+            fake.calls()
+        );
+        assert_eq!(unit.node.client.params.losses().unlent.get(), 1, "counted");
+        drop(held);
+        unit.block();
+        assert_eq!(block_params(&fake), [(id, 0.25)], "and the write was kept");
+    }
+
     /// **A write owed after a failed block, with no load, is sent by the next**
     /// (the positive case of the test above).
     #[test]

@@ -10,9 +10,13 @@ use std::time::Duration;
 use tutti_platform::Instant;
 use tutti_rt::Generation;
 
-/// How long the wait gives the audio side, without a sign of it, before it
-/// calls the node idle: several blocks of the longest period a device runs at.
+/// The least a wait gives the audio side, without a sign of it, before it calls
+/// the node idle. A node whose blocks are longer than this gives a window of
+/// several of its own block periods ([`Settle::window_for`]).
 pub(super) const WINDOW: Duration = Duration::from_millis(100);
+
+/// How many block periods of the node a window spans at least.
+const PERIODS: u32 = 4;
 
 /// The most a wait gives the audio side to hand the writes over, running or
 /// not: the out-of-process side's allowance for a parameter flush before a
@@ -24,7 +28,11 @@ pub(super) const LIMIT: Duration = Duration::from_secs(6);
 /// What the wait makes of its state at an instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Verdict {
-    /// The audio side has handed the writes to the plugin.
+    /// The audio side has taken the writes: handed them to the plugin, or, for a
+    /// parameter the format forbids applying outside a block (CLAP
+    /// `REQUIRES_PROCESS` of an active plugin), held them for the next block. A
+    /// held write is not the plugin's value yet: a read or a save made while no
+    /// block runs does not show it until one does.
     Covered,
     /// The audio side is running, or the window is open: poll again.
     Waiting,
@@ -53,19 +61,28 @@ pub(super) struct Settle {
     target: Generation,
     due: Instant,
     limit: Instant,
+    window: Duration,
     pulse: u64,
 }
 
 impl Settle {
     /// A wait for the writes up to `target`, begun at `began` with the audio
     /// side's `pulse` as it showed.
-    pub(super) fn new(target: Generation, pulse: u64, began: Instant) -> Self {
+    pub(super) fn new(target: Generation, pulse: u64, began: Instant, window: Duration) -> Self {
         Self {
             target,
-            due: began + WINDOW,
+            due: began + window,
             limit: began + LIMIT,
+            window,
             pulse,
         }
+    }
+
+    /// The window for a node whose blocks last `period` (zero when unknown):
+    /// the longer of [`WINDOW`] and a few block periods, so a block that runs
+    /// longer than the minimum window is not taken for an idle node.
+    pub(super) fn window_for(period: Duration) -> Duration {
+        WINDOW.max(period * PERIODS)
     }
 
     /// The writes the wait is for: those up to this generation.
@@ -90,7 +107,7 @@ impl Settle {
             return Verdict::Unhanded;
         }
         self.pulse = shown.pulse;
-        self.due = now + WINDOW;
+        self.due = now + self.window;
         Verdict::Waiting
     }
 }
@@ -108,7 +125,7 @@ mod tests {
     }
 
     fn settle(began: Instant) -> Settle {
-        Settle::new(Generation::new(3), 7, began)
+        Settle::new(Generation::new(3), 7, began, WINDOW)
     }
 
     /// **A wait whose writes are covered ends at once, window or not.**
@@ -205,5 +222,28 @@ mod tests {
         let mut wait = settle(began);
         assert_eq!(wait.poll(shown(true, 9), began + LIMIT), Verdict::Covered);
         assert_eq!(wait.poll(shown(false, 7), began + LIMIT), Verdict::Idle);
+    }
+
+    /// **A long block is not an idle node**: 4,800 frames at 48 kHz is a 100 ms
+    /// block, and the window made for it outlasts the minimum, so a wait that has
+    /// seen no new pulse for 100 ms still waits.
+    #[test]
+    fn a_window_follows_the_block_period() {
+        let period = Duration::from_secs_f64(4800.0 / 48_000.0);
+        assert_eq!(Settle::window_for(Duration::ZERO), WINDOW, "unknown period");
+        assert_eq!(Settle::window_for(ms(5)), WINDOW, "short blocks");
+        assert_eq!(Settle::window_for(period), period * 4);
+        let began = Instant::now();
+        let mut wait = Settle::new(Generation::new(3), 7, began, Settle::window_for(period));
+        assert_eq!(
+            wait.poll(shown(false, 7), began + ms(100)),
+            Verdict::Waiting,
+            "a block in progress is not idle"
+        );
+        assert_eq!(
+            wait.poll(shown(false, 7), began + ms(400)),
+            Verdict::Idle,
+            "after the longer window"
+        );
     }
 }
