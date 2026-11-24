@@ -464,6 +464,11 @@ where
     /// idle for a window): the main thread's ticks poll for it. The one case
     /// that does not wait: a call made on the main thread with no pumped
     /// collector runs at once.
+    ///
+    /// A write the format holds for the next block (CLAP `REQUIRES_PROCESS` of
+    /// an active plugin) counts as taken: with no block running (a parked node,
+    /// or audio stopped) it is not visible to this read, or to a save, until a
+    /// block runs.
     fn parameter_value(&self, id: ParamId) -> Answer<Option<Normalized>> {
         self.on_main_answer(Waits::Read, move |main, instance| {
             instance.control()?.parameter(main, id)
@@ -578,7 +583,11 @@ where
     /// the plugin, and [`StateError::Unavailable`] if that does not come within
     /// the deadline. On the main thread, which cannot wait for a node to drain,
     /// it is [`StateError::Busy`] while a write has not reached the plugin: ask
-    /// again, or ask off the main thread.
+    /// again, or ask off the main thread. A wait the running node never covers
+    /// ends in [`StateError::Busy`] too (counted), never in a state missing the
+    /// write. A write the format holds for the next block (CLAP
+    /// `REQUIRES_PROCESS` of an active plugin) counts as taken: with no block
+    /// running it is not in the state until a block runs.
     fn save_state(&self, state_use: StateUse) -> Result<Vec<u8>, StateError> {
         match self.on_main_settled(Waits::Save, move |main, instance| {
             instance.control().map(|control| {

@@ -552,6 +552,13 @@ pub trait Processor: Send {
     /// allows for flushing parameters; VST2 and AU a direct set of each
     /// parameter's last value.
     ///
+    /// A value the format forbids applying outside a block (CLAP
+    /// `REQUIRES_PROCESS` of an active plugin) counts as taken when the Processor
+    /// holds it for the next block, which delivers it at frame 0: the call is
+    /// `Ok`, the plugin does not hold the value yet, and a read of it before a
+    /// block runs answers the old one. A load before that block makes the
+    /// held value stale, and the Processor drops it.
+    ///
     /// The default refuses: a Processor takes parameters in a block only.
     ///
     /// # Errors

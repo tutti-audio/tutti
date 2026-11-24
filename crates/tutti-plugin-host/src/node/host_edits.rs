@@ -110,7 +110,9 @@ struct PostState {
     /// one writer: [`EditPost::write`] stores here in the critical section that
     /// writes the slot, and [`EditPost::reset`] clears it in the one that bumps
     /// the epoch. At most one entry per declared parameter (the ids are fixed for
-    /// the activation), so it never grows past the slot count.
+    /// the activation), so it never grows past the slot count. [`EditPost::write`]
+    /// scans it linearly for the parameter, as it scans `to_inform`: the scan is
+    /// over at most that many entries, on the control thread, under the lock.
     latest: Vec<(ParamId, Normalized, Generation)>,
 }
 
@@ -213,7 +215,9 @@ impl EditPost {
 
     /// The newest value of each parameter written whose write the plugin has
     /// not been handed: host state a copy of the plugin starts from. Takes
-    /// nothing from the slots, so the node's blocks still deliver it.
+    /// nothing from the slots, so the node's blocks still deliver it. It can
+    /// include a value the node has drained and not yet published: for a fork,
+    /// the same value applied twice.
     pub(super) fn undelivered(&self) -> Vec<(ParamId, Normalized)> {
         let (latest, through) = {
             let state = self.0.state.lock();

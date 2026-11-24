@@ -32,7 +32,7 @@ pub(crate) struct ProcessorParts {
     pub ranges: Reader<RangeTable>,
     pub drain: EditReader,
     /// Room for one carried edit per declared parameter.
-    pub carried: CappedVec<(ParamId, Normalized)>,
+    pub carried: CappedVec<(ParamId, Normalized, u32)>,
     pub reports: ReportSink,
     pub reports_dropped: Arc<AtomicU64>,
 }
@@ -57,7 +57,7 @@ pub struct ClapProcessor {
     pub(crate) drain: EditReader,
     /// The Controller's edits to parameters that require `process`, which a
     /// flush drained and left for the next block.
-    pub(crate) carried: CappedVec<(ParamId, Normalized)>,
+    pub(crate) carried: CappedVec<(ParamId, Normalized, u32)>,
     /// The plugin's own parameter edits (its output `PARAM_VALUE` and gesture
     /// events), on their way to the Controller's `take_reported_edits`.
     pub(crate) reports: ReportSink,

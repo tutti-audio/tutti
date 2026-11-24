@@ -20,6 +20,7 @@ use tutti_clap_ffi::{Planar, ProcessCall, ProcessError};
 use tutti_graph::UmpAt;
 use tutti_plugin_types::TransportChange;
 use tutti_plugin_types::WireMidi;
+use tutti_plugin_types::epoch_before;
 use tutti_rt::CappedVec;
 use tutti_units::{Normalized, ParamId};
 
@@ -345,8 +346,13 @@ impl ClapProcessor {
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
             // What a flush left for a block goes first.
-            for &(id, value) in self.carried.as_slice() {
-                input_events.add_param_edit(id, value.get(), &table.ranges, table.claims);
+            // What a load made stale since a flush held it is dropped: the load
+            // moved the Controller's slots' epoch past the one the value kept.
+            let epoch = drain.epoch();
+            for &(id, value, held) in self.carried.as_slice() {
+                if !epoch_before(held, epoch) {
+                    input_events.add_param_edit(id, value.get(), &table.ranges, table.claims);
+                }
             }
             self.carried.clear();
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
@@ -402,10 +408,11 @@ impl ClapProcessor {
             let input_events = &mut self.scratch.input_events;
             let drain = &mut self.drain;
             let carried = &mut self.carried;
+            let epoch = drain.epoch();
             input_events.add_param_edits(&table.ranges, table.claims, |each| {
                 drain.drain(|id, value| {
                     if ParamBounds::find(&table.ranges, id).is_some_and(|b| b.requires_process) {
-                        refused += u64::from(!carry(carried, id, value));
+                        refused += u64::from(!carry(carried, id, value, epoch));
                     } else {
                         each(id, value);
                     }
@@ -416,7 +423,7 @@ impl ClapProcessor {
                     changes,
                     &table.ranges,
                     table.claims,
-                    |id, value| refused += u64::from(!carry(carried, id, value)),
+                    |id, value| refused += u64::from(!carry(carried, id, value, epoch)),
                 );
             }
         }
@@ -625,22 +632,29 @@ pub(super) fn build_clap_transport(transport: &TransportInfo) -> clap_event_tran
 }
 
 /// Keeps an edit a flush could not deliver for the next block: the newest of
-/// a parameter. `false` when the room is full, which it cannot be: the room is
-/// one entry per declared parameter, ids are distinct, and the list of ids is
-/// fixed for an activation (a rescan that adds or removes one reactivates the
-/// plugin and builds a new Processor). The scan is over the held parameters,
-/// which are those that require `process`: few.
-fn carry(carried: &mut CappedVec<(ParamId, Normalized)>, id: ParamId, value: Normalized) -> bool {
+/// a parameter, with the epoch of the Controller's slots it was held in (a load
+/// moves it past, and the block drops what it made stale). `false` when the room
+/// is full, which it cannot be: the room is one entry per declared parameter,
+/// ids are distinct, and the list of ids is fixed for an activation (a rescan
+/// that adds or removes one reactivates the plugin and builds a new Processor).
+/// The scan is over the held parameters, which are those that require
+/// `process`: few.
+fn carry(
+    carried: &mut CappedVec<(ParamId, Normalized, u32)>,
+    id: ParamId,
+    value: Normalized,
+    epoch: u32,
+) -> bool {
     match carried
         .as_mut_slice()
         .iter_mut()
-        .find(|(known, _)| *known == id)
+        .find(|(known, ..)| *known == id)
     {
         Some(entry) => {
-            entry.1 = value;
+            (entry.1, entry.2) = (value, epoch);
             true
         }
-        None => carried.push((id, value)),
+        None => carried.push((id, value, epoch)),
     }
 }
 

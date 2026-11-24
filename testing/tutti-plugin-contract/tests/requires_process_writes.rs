@@ -117,3 +117,78 @@ fn a_requires_process_write_waits_for_a_block_in_process() {
 fn a_requires_process_write_waits_for_a_block_out_of_process() {
     served(a_requires_process_write_waits_for_a_block);
 }
+
+/// **A flush that holds a `REQUIRES_PROCESS` value back has taken it**: it answers
+/// `Ok` (so a node publishes the sweep and a wait over that write is covered),
+/// the plugin does not hold the value until a block runs, and the next block
+/// delivers it at frame 0. This is the Processor's side of a parked node's flush
+/// and of the server's `ApplyParameters`.
+#[test]
+fn a_flush_that_holds_a_requires_process_value_back_has_taken_it_for_the_next_block() {
+    use tutti_graph::Offset;
+    use tutti_plugin_contract::{Active, RATE, Render, prepare, transcript};
+    use tutti_plugin_types::{ParameterChanges, Processor};
+    let mut a = Active::activate(
+        Clap::load(),
+        prepare(RATE, BLOCK, tutti_buffers::FloatWidth::F32),
+    )
+    .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"));
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(Param::Aux.id(), Offset::ZERO, Normalized::of(WRITTEN)));
+    Processor::flush_parameters(a.processor(), &changes)
+        .expect("the flush takes the change, holding its value back");
+    let before = transcript::<Clap, _>(a.controller_mut());
+    assert!(
+        before.of(Kind::Flush).count() == 0
+            && before
+                .of(Kind::Param)
+                .all(|e| e.id != Param::Aux.id().get()),
+        "the plugin holds nothing before a block: {:?}",
+        before.events
+    );
+    a.silent(BLOCK);
+    let after = transcript::<Clap, _>(a.controller_mut());
+    let delivered: Vec<_> = after
+        .of(Kind::Param)
+        .filter(|e| e.id == Param::Aux.id().get())
+        .map(|e| (e.offset, e.value))
+        .collect();
+    assert_eq!(
+        delivered,
+        [(0, WRITTEN)],
+        "the next block delivers it at frame 0"
+    );
+    assert_eq!(after.of(Kind::Flush).count(), 0, "and nothing was flushed");
+}
+
+/// **A carried edit a load made stale is not delivered**: a flush holds a
+/// `REQUIRES_PROCESS` value back, a state load replaces the values, and the first
+/// block after it does not send the held value over the loaded one.
+#[test]
+fn a_carried_edit_a_load_made_stale_is_not_delivered() {
+    use tutti_graph::Offset;
+    use tutti_plugin_contract::{Active, RATE, Render, prepare, transcript};
+    use tutti_plugin_types::{Control, ParameterChanges, Processor};
+    let mut a = Active::activate(
+        Clap::load(),
+        prepare(RATE, BLOCK, tutti_buffers::FloatWidth::F32),
+    )
+    .unwrap_or_else(|(_, why)| panic!("activation refused: {why:?}"));
+    let state = a
+        .controller_mut()
+        .save_state(main_thread(), StateUse::Project)
+        .expect("saves");
+    let mut changes = ParameterChanges::reserved(1, 1);
+    assert!(changes.add_change(Param::Aux.id(), Offset::ZERO, Normalized::of(WRITTEN)));
+    Processor::flush_parameters(a.processor(), &changes).expect("the flush holds the value");
+    a.controller_mut()
+        .load_state(main_thread(), &state, StateUse::Project)
+        .expect("the state loads");
+    a.silent(BLOCK);
+    let told = transcript::<Clap, _>(a.controller_mut());
+    assert!(
+        told.of(Kind::Param).all(|e| e.id != Param::Aux.id().get()),
+        "the held value outlived the load: {:?}",
+        told.events
+    );
+}
