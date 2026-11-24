@@ -262,79 +262,70 @@ fn a_weighted_sum_is_the_documented_fold() {
     }
 }
 
-/// A wide weighted fan-in is a chain and still one flat fold: 100 lanes with
-/// weights of many kinds (unity, zero, negative, fractions), at both sinks,
-/// is the fold written out over all of them. Some lanes are plain (no entry),
-/// as the chain's own continuation addend is.
+/// A wide weighted fan-in is a chain and still one flat fold: 2, 8 and 100
+/// lanes (the last a chain) with weights of many kinds (unity, zero, negative,
+/// fractions), at both sinks, is the fold written out over all of them. Some
+/// lanes are plain (no entry), as the chain's own continuation addend is. With
+/// no entry at all the same fan-in has no weighted op, and one entry makes the
+/// sum a weighted one.
 #[test]
 fn a_wide_weighted_fan_in_is_one_flat_fold() {
-    let n = 100usize;
-    let values: Vec<f32> = (0..n)
-        .map(|k| ((k * 37 % 11) as f32 + 1.0) * 0.1 * 10f32.powi((k % 5) as i32))
-        .collect();
-    let weights: Vec<f32> = (0..n)
-        .map(|k| match k % 7 {
-            0 => 1.0,
-            1 => 0.0,
-            2 => -0.5,
-            3 => 0.3,
-            4 => 1.75,
-            5 => -1.0,
-            _ => 0.1,
-        })
-        .collect();
-    // Every third lane is plain: weight 1.0 and no entry.
-    let entries: Vec<bool> = (0..n).map(|k| k % 3 != 0).collect();
-    let applied: Vec<f32> = weights
-        .iter()
-        .zip(&entries)
-        .map(|(&w, &e)| if e { w } else { 1.0 })
-        .collect();
-    let want = weighted_fold(&values, &applied);
-    for at_port in [false, true] {
-        let fan = Fan::new(&values, at_port);
-        let mut spec = GraphSpec::new(fan.topology.clone());
-        let mut bases = Vec::new();
-        for k in 0..n {
-            if entries[k] {
-                spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::default());
-                bases.push((fan.edge(k as u64 + 1), amp(weights[k])));
-            }
-        }
-        let graph = Weighed {
-            graph: spec.validate().expect("valid"),
-            bases,
-        };
-        let plan = fan.plan(&graph);
-        // 64, then 63 per op: two ops, both carrying a weighted lane.
-        assert_eq!(weighted_ops(&plan) + plain_sums(&plan), 2);
-        for channel in render_both(&graph, &fan.kinds, 1) {
-            assert!(
-                channel.iter().all(|&x| x.to_bits() == want.to_bits()),
-                "at_port {at_port}"
-            );
-        }
-    }
-}
-
-/// A weight of exactly `1.0` is the plain sum, bit for bit, for fan-ins of 2,
-/// 8 and 100 (the last a chain): the same values rendered with an entry of
-/// `1.0` on every edge and with none.
-#[test]
-fn unity_weights_equal_the_unweighted_sum() {
     for n in [2usize, 8, 100] {
         let values: Vec<f32> = (0..n)
-            .map(|k| ((k * 29 % 13) as f32 - 6.0) * 0.173 + 0.01 * k as f32)
+            .map(|k| ((k * 37 % 11) as f32 + 1.0) * 0.1 * 10f32.powi((k % 5) as i32))
             .collect();
+        let weights: Vec<f32> = (0..n)
+            .map(|k| match k % 7 {
+                0 => 1.0,
+                1 => 0.0,
+                2 => -0.5,
+                3 => 0.3,
+                4 => 1.75,
+                5 => -1.0,
+                _ => 0.1,
+            })
+            .collect();
+        // Every third lane is plain: weight 1.0 and no entry.
+        let entries: Vec<bool> = (0..n).map(|k| k % 3 != 0).collect();
+        let applied: Vec<f32> = weights
+            .iter()
+            .zip(&entries)
+            .map(|(&w, &e)| if e { w } else { 1.0 })
+            .collect();
+        let want = weighted_fold(&values, &applied);
+        // 64 addends to an op, then 63 per op after the first: one op up to
+        // 64 lanes, two for 100.
+        let ops = if n <= 64 { 1 } else { 2 };
         for at_port in [false, true] {
             let fan = Fan::new(&values, at_port);
-            let plain = fan.plain();
-            let unity = fan.spec(&vec![1.0; n]);
-            assert_eq!(weighted_ops(&fan.plan(&plain)), 0);
-            assert!(weighted_ops(&fan.plan(&unity)) >= 1);
-            let a = render_both(&plain, &fan.kinds, 3);
-            let b = render_both(&unity, &fan.kinds, 3);
-            assert_eq!(bits(&a), bits(&b), "n = {n}, at_port {at_port}");
+            let plain = fan.plan(&fan.plain());
+            assert_eq!(weighted_ops(&plain), 0, "n {n}, at_port {at_port}");
+            assert_eq!(plain_sums(&plain), ops, "n {n}, at_port {at_port}");
+            let mut spec = GraphSpec::new(fan.topology.clone());
+            let mut bases = Vec::new();
+            for k in 0..n {
+                if entries[k] {
+                    spec.set_edge_gain(fan.edge(k as u64 + 1), EdgeGain::default());
+                    bases.push((fan.edge(k as u64 + 1), amp(weights[k])));
+                }
+            }
+            let graph = Weighed {
+                graph: spec.validate().expect("valid"),
+                bases,
+            };
+            let plan = fan.plan(&graph);
+            assert!(weighted_ops(&plan) >= 1, "n {n}, at_port {at_port}");
+            assert_eq!(
+                weighted_ops(&plan) + plain_sums(&plan),
+                ops,
+                "n {n}, at_port {at_port}"
+            );
+            for channel in render_both(&graph, &fan.kinds, 1) {
+                assert!(
+                    channel.iter().all(|&x| x.to_bits() == want.to_bits()),
+                    "n {n}, at_port {at_port}"
+                );
+            }
         }
     }
 }

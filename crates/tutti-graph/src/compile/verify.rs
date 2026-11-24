@@ -1227,14 +1227,8 @@ mod tests {
         bad.task_activation.push(0);
         assert!(verify(&bad).unwrap_err().0.contains("two tasks"));
 
-        // A cross-task edge missing from task_succ (needs two tasks).
-        let mut bad = good.clone();
-        assert!(bad.tasks.len() >= 2, "the pair has independent tasks");
-        assert!(!bad.program.deps.targets.is_empty());
-        bad.task_succ = no_successors(bad.tasks.len());
-        bad.task_activation = Table::filled(bad.tasks.len(), 0);
-        // Only fails if some edge crossed tasks; the pair's generator → output
-        // edges are fused, so add a cross edge by splitting a task.
+        // A cross-task edge missing from task_succ: the pair's generator ->
+        // output edges are fused, so split a task to make one cross.
         let crossing = {
             let mut t = good.clone();
             let span = t.tasks.as_slice()[0];
@@ -1249,6 +1243,8 @@ mod tests {
             }
             t
         };
+        assert!(crossing.tasks.len() >= 2, "the pair splits into two tasks");
+        assert!(!crossing.program.deps.targets.is_empty());
         assert!(verify(&crossing).unwrap_err().0.contains("crosses task"));
 
         // A task's ops out of ascending order (a packed task may hold ops
