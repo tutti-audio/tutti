@@ -311,6 +311,9 @@ struct Job<L: InProcess, R> {
 /// window has its writes applied out of band, then `work` runs; a node that
 /// turns out to be running (it holds the slots) is waited for again.
 ///
+/// An [`Unhanded`](Verdict::Unhanded) wait runs `work` at once too, counted
+/// ([`EditPost::unhanded`](super::host_edits::EditPost::unhanded)).
+///
 /// **The one case that does not settle**: with no collector to queue on (it was
 /// never pumped, or it is gone), `work` runs at once and the writes are not
 /// waited for. A call made on the main thread with no pumped collector is that
@@ -327,6 +330,14 @@ where
     });
     if verdict == Verdict::Waiting && job.host.work.is_pumped() {
         return requeue(Some(main), job);
+    }
+    if verdict == Verdict::Unhanded {
+        // The node runs, so no out-of-band apply: the call answers what the
+        // plugin holds, and the miss is counted.
+        job.host.post.count_unhanded();
+        tracing::warn!(
+            "a read waited for the host's writes and the running node never handed them over"
+        );
     }
     let mut instance = job.host.inner.lock();
     if verdict == Verdict::Idle {
@@ -810,6 +821,54 @@ mod off_main_tests {
             .expect("a declared parameter");
         unit.block();
         (unit, handle)
+    }
+
+    /// **A wait that the running node never covers ends at its limit**: the node
+    /// visits the slots (its pulse moves) and hands nothing to the plugin, as a
+    /// node whose every flush is refused does. The call answers once, at once,
+    /// what the plugin holds, applies nothing out of band, and the miss is counted.
+    /// Driven by constructed instants: the wait began before its limit.
+    #[test]
+    fn a_running_node_that_never_hands_the_writes_over_ends_the_wait_counted() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let main = main_thread();
+        let (_collector, work) = MainWork::new();
+        let (unit, _handle) = load(&work);
+        let client = &unit.node.client;
+        let port = client.edits.as_ref().expect("an in-process node has slots");
+        let post = port.post();
+        let began = tutti_platform::Instant::now() - super::super::settle::LIMIT * 2;
+        let wait = {
+            post.write(ParamId::new(1), Normalized::of(0.25))
+                .expect("a declared parameter");
+            post.settle(began)
+        };
+        // The node runs: it drains the write and hands nothing over.
+        let _ = port.drain(|_, _, _| {});
+        let ran = std::sync::Arc::new(AtomicU32::new(0));
+        let answered = std::sync::Arc::new(AtomicU32::new(0));
+        let (counted, told) = (
+            std::sync::Arc::clone(&ran),
+            std::sync::Arc::clone(&answered),
+        );
+        let job = super::Job {
+            wait: Some(wait),
+            host: super::Host {
+                inner: std::sync::Arc::clone(&client.inner),
+                post: post.clone(),
+                work,
+            },
+            work: Box::new(move |_, _| {
+                counted.fetch_add(1, Ordering::Relaxed);
+            }),
+            done: Box::new(move |ran| {
+                told.fetch_add(u32::from(ran.is_some()), Ordering::Relaxed);
+            }),
+        };
+        super::step(main, job);
+        assert_eq!(ran.load(Ordering::Relaxed), 1, "the work ran once");
+        assert_eq!(answered.load(Ordering::Relaxed), 1, "and was answered");
+        assert_eq!(post.unhanded(), 1, "the miss is counted");
     }
 
     /// **A settled call on a gone collector runs once, at once, and does not

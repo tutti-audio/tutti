@@ -65,6 +65,7 @@ pub(super) fn host_edits(ids: impl IntoIterator<Item = ParamId>) -> (EditPost, E
         }),
         applied: AtomicU32::new(0),
         pulse: AtomicU64::new(0),
+        unhanded: AtomicU64::new(0),
         epoch: reader.epoch_watch(),
         reader: AudioThreadCell::new(reader),
     });
@@ -80,6 +81,9 @@ struct Shared {
     /// How many times the audio side visited the slots (a block, a parked
     /// poll): the control side's sign that the node is running.
     pulse: AtomicU64,
+    /// Waits that ended at their limit with the audio side running and the
+    /// writes not handed to the plugin ([`Verdict::Unhanded`]).
+    unhanded: AtomicU64,
     /// The one reader of the slots: claimed by whoever drains.
     reader: AudioThreadCell<EditReader>,
     /// The slots' epoch, read without the reader: a node whose claim is refused
@@ -213,6 +217,18 @@ impl EditPost {
             })
             .map(|(id, value, _)| (id, value))
             .collect()
+    }
+
+    /// Counts a wait that ended unhanded: its call answered what the plugin
+    /// holds, short of a write.
+    pub(super) fn count_unhanded(&self) {
+        self.0.unhanded.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many waits ended unhanded since the plugin loaded.
+    #[cfg(test)]
+    pub(super) fn unhanded(&self) -> u64 {
+        self.0.unhanded.load(Ordering::Relaxed)
     }
 
     /// Whether every write made so far has been handed to the plugin: what a

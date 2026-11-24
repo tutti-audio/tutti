@@ -14,6 +14,13 @@ use tutti_rt::Generation;
 /// calls the node idle: several blocks of the longest period a device runs at.
 pub(super) const WINDOW: Duration = Duration::from_millis(100);
 
+/// The most a wait gives the audio side to hand the writes over, running or
+/// not: the out-of-process side's allowance for a parameter flush before a
+/// read proceeds (`Timeouts::param_wait`, `param` 5 s plus a 1 s reply margin;
+/// this crate does not depend on the transport that names it). Both hostings
+/// proceed with what the plugin holds after their limit.
+pub(super) const LIMIT: Duration = Duration::from_secs(6);
+
 /// What the wait makes of its state at an instant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Verdict {
@@ -24,6 +31,11 @@ pub(super) enum Verdict {
     /// A whole window passed with no sign of the audio side: nothing will
     /// drain the writes, and the control side applies them itself.
     Idle,
+    /// The audio side ran for the whole [`LIMIT`] and did not hand the writes to
+    /// the plugin (every flush refused, every block failed, values left owed): the
+    /// call answers what the plugin holds. It does not apply out of band, since
+    /// a running node may be inside a block.
+    Unhanded,
 }
 
 /// What the audio side shows now.
@@ -40,6 +52,7 @@ pub(super) struct Shown {
 pub(super) struct Settle {
     target: Generation,
     due: Instant,
+    limit: Instant,
     pulse: u64,
 }
 
@@ -50,6 +63,7 @@ impl Settle {
         Self {
             target,
             due: began + WINDOW,
+            limit: began + LIMIT,
             pulse,
         }
     }
@@ -60,16 +74,20 @@ impl Settle {
     }
 
     /// The verdict at `now`. A window that ends while the pulse has moved
-    /// since it opened opens again: the audio side is running and will drain.
+    /// since it opened opens again: the audio side is running and will drain,
+    /// until the [`LIMIT`] ends the wait.
     pub(super) fn poll(&mut self, shown: Shown, now: Instant) -> Verdict {
         if shown.covered {
             return Verdict::Covered;
         }
-        if now < self.due {
+        if now < self.due && now < self.limit {
             return Verdict::Waiting;
         }
         if shown.pulse == self.pulse {
             return Verdict::Idle;
+        }
+        if now >= self.limit {
+            return Verdict::Unhanded;
         }
         self.pulse = shown.pulse;
         self.due = now + WINDOW;
@@ -142,5 +160,50 @@ mod tests {
             wait.poll(shown(false, 9), first_end + WINDOW + WINDOW),
             Verdict::Idle
         );
+    }
+
+    /// **A pulse that moves for the whole limit ends the wait**, to the
+    /// instant: just before the limit the window reopens, at it the audio side
+    /// is called to have run without handing the writes over.
+    #[test]
+    fn a_moving_pulse_ends_at_the_limit() {
+        let began = Instant::now();
+        let mut wait = settle(began);
+        let mut pulse = 7;
+        let mut at = began;
+        // One tick every window, the pulse moving each time, to the last window
+        // before the limit.
+        while at + WINDOW < began + LIMIT {
+            at = at + WINDOW;
+            pulse += 1;
+            assert_eq!(wait.poll(shown(false, pulse), at), Verdict::Waiting);
+        }
+        pulse += 1;
+        assert_eq!(
+            wait.poll(shown(false, pulse), began + LIMIT - ms(1)),
+            Verdict::Waiting,
+            "just before the limit"
+        );
+        pulse += 1;
+        assert_eq!(
+            wait.poll(shown(false, pulse), began + LIMIT),
+            Verdict::Unhanded,
+            "at the limit"
+        );
+        assert_eq!(
+            wait.poll(shown(false, pulse + 1), began + LIMIT + ms(9000)),
+            Verdict::Unhanded,
+            "and after it"
+        );
+    }
+
+    /// **Covered still wins at the limit**, and a quiet pulse past it is idle,
+    /// not unhanded: nothing ran, so the control side may apply.
+    #[test]
+    fn the_limit_does_not_outrank_covered_or_idle() {
+        let began = Instant::now();
+        let mut wait = settle(began);
+        assert_eq!(wait.poll(shown(true, 9), began + LIMIT), Verdict::Covered);
+        assert_eq!(wait.poll(shown(false, 7), began + LIMIT), Verdict::Idle);
     }
 }
