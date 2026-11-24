@@ -41,7 +41,6 @@ impl<F: Float> Editor<F> {
             }
         }
         let was = self.spec.has_edge(id);
-        self.touch();
         match (id.sink, id.from) {
             (PortSink::Port(at), edge) => self.spec.connect(at, edge),
             (PortSink::Output(channel), Edge::Direct(source)) => {
@@ -51,7 +50,11 @@ impl<F: Float> Editor<F> {
             }
             (PortSink::Output(_), Edge::Feedback(_)) => {}
         }
-        Ok(!was && self.spec.has_edge(id))
+        let added = !was && self.spec.has_edge(id);
+        if added {
+            self.touch();
+        }
+        Ok(added)
     }
 
     /// Removes the audio edge `id` and its gain entry with it (a stale entry
@@ -59,8 +62,7 @@ impl<F: Float> Editor<F> {
     /// one that is not (a node or channel that does not exist included) is
     /// not an error, as removing an edge twice is not.
     pub fn disconnect_edge(&mut self, id: EdgeId) -> bool {
-        self.touch();
-        match (id.sink, id.from) {
+        let removed = match (id.sink, id.from) {
             (PortSink::Port(at), edge) => self.spec.disconnect(at, edge),
             (PortSink::Output(channel), Edge::Direct(source))
                 if usize::from(channel) < self.spec.topology.outputs.len() =>
@@ -68,7 +70,11 @@ impl<F: Float> Editor<F> {
                 self.spec.disconnect_output(usize::from(channel), source)
             }
             (PortSink::Output(_), _) => false,
+        };
+        if removed {
+            self.touch();
         }
+        removed
     }
 
     /// Adds the event edge `edge` into event input `at`; a port holds the set
@@ -93,7 +99,6 @@ impl<F: Float> Editor<F> {
     /// feedback edge from one source are two edges), and the source's
     /// resolution mark with the last of them. Returns whether it was there.
     pub fn disconnect_events(&mut self, at: EventInputPort, edge: EventEdge) -> bool {
-        self.touch();
         let Some(sources) = self.spec.events.get_mut(&at) else {
             return false;
         };
@@ -109,6 +114,7 @@ impl<F: Float> Editor<F> {
         if !source_left {
             self.spec.clear_resolution(at, from);
         }
+        self.touch();
         true
     }
 
@@ -125,16 +131,20 @@ impl<F: Float> Editor<F> {
     pub fn connect_param(&mut self, at: ParamIn, from: EventOutputPort) -> Result<(), WireError> {
         self.check_node(at.node)?;
         self.check_event_out(from)?;
-        self.touch();
-        self.spec.connect_param(at, from);
+        if self.spec.connect_param(at, from) != Some(from) {
+            self.touch();
+        }
         Ok(())
     }
 
     /// Stops driving param port `at` from `from`: the port reads its base
     /// again. Returns whether `from` was its source.
     pub fn disconnect_param(&mut self, at: ParamIn, from: EventOutputPort) -> bool {
-        self.touch();
-        self.spec.disconnect_param(at, from)
+        let removed = self.spec.disconnect_param(at, from);
+        if removed {
+            self.touch();
+        }
+        removed
     }
 
     /// Drives edge `id`'s gain from event output `from`
@@ -156,31 +166,38 @@ impl<F: Float> Editor<F> {
     ) -> Result<(), WireError> {
         self.check_gain_edge(id)?;
         self.check_event_out(from)?;
-        self.touch();
+        let had = self.spec.gains.contains_key(&id);
         self.declare_lane(id);
-        self.spec.connect_edge_gain(id, from);
+        if self.spec.connect_edge_gain(id, from) != Some(from) || !had {
+            self.touch();
+        }
         Ok(())
     }
 
     /// Stops driving edge `id`'s gain from `from`; the edge keeps its entry,
     /// and reads its base. Returns whether `from` was its source.
     pub fn disconnect_edge_gain(&mut self, id: EdgeId, from: EventOutputPort) -> bool {
-        self.touch();
-        self.spec.disconnect_edge_gain(id, from)
+        let removed = self.spec.disconnect_edge_gain(id, from);
+        if removed {
+            self.touch();
+        }
+        removed
     }
 
     /// Removes edge `id`'s gain entry: the edge is plain again. Returns
     /// whether it had one.
     pub fn clear_edge_gain(&mut self, id: EdgeId) -> bool {
-        self.touch();
-        self.spec.clear_edge_gain(id).is_some()
+        let cleared = self.spec.clear_edge_gain(id).is_some();
+        if cleared {
+            self.touch();
+        }
+        cleared
     }
 
     /// Makes the graph's main output `width` channels wide. A new channel is
     /// silent; a channel cut takes its sources and their gain entries with
     /// it. Returns whether the width changed.
     pub fn resize_outputs(&mut self, width: usize) -> bool {
-        self.touch();
         let outputs = &mut self.spec.topology.outputs;
         if outputs.len() == width {
             return false;
@@ -189,6 +206,7 @@ impl<F: Float> Editor<F> {
         self.spec
             .gains
             .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= width));
+        self.touch();
         true
     }
 
@@ -197,11 +215,19 @@ impl<F: Float> Editor<F> {
     /// ([`GraphSpec::main_output`](crate::GraphSpec::main_output),
     /// [`GraphSpec::main_output_id`](crate::GraphSpec::main_output_id)). A
     /// bus edge into the main output folds to the declared topology at the
-    /// next commit.
-    pub fn declare_main_output(&mut self, main_output: Option<ChannelTopology>, id: MainOutputId) {
-        self.touch();
+    /// next commit. Returns whether either changed.
+    pub fn declare_main_output(
+        &mut self,
+        main_output: Option<ChannelTopology>,
+        id: MainOutputId,
+    ) -> bool {
+        if self.spec.main_output == main_output && self.spec.main_output_id == id {
+            return false;
+        }
         self.spec.main_output = main_output;
         self.spec.main_output_id = id;
+        self.touch();
+        true
     }
 
     fn check_node(&self, node: crate::NodeKey) -> Result<(), MissingSource> {

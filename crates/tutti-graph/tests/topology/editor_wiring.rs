@@ -348,3 +348,76 @@ fn declare_main_output_writes_the_declaration_and_its_generation() {
     assert_eq!(ed.spec().main_output, Some(topology));
     assert_eq!(ed.spec().main_output_id, id);
 }
+
+/// A wiring call moves the revision when it changes the graph and leaves it
+/// where it was when it changes nothing: each call is made twice, in an order
+/// where the first has something to do, and the second finds the graph as the
+/// first left it.
+#[test]
+fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
+    let (mut ed, _exec) = editor();
+    ed.insert(key(1), "level", Unforkable(Level(0.25)));
+    ed.insert(key(2), "events", Unforkable(Events));
+    let wire = into_output(0, out(1));
+    let driver = EventOutputPort::new(key(2), 0);
+    let at = ParamIn {
+        node: key(1),
+        param: UnitParam::Volume.into(),
+    };
+    let sink = EventInputPort::new(key(2), 0);
+    let edge = EventEdge::Direct(driver);
+    let topology = Some(tutti_buffers::ChannelTopology::STEREO);
+    let id = ed.spec().main_output_id.next();
+
+    let calls: Vec<(&str, Box<dyn Fn(&mut Editor)>)> = vec![
+        ("resize_outputs", Box::new(|e| drop(e.resize_outputs(1)))),
+        (
+            "connect_edge",
+            Box::new(move |e| drop(e.connect_edge(wire))),
+        ),
+        (
+            "connect_param",
+            Box::new(move |e| drop(e.connect_param(at, driver))),
+        ),
+        (
+            "connect_edge_gain",
+            Box::new(move |e| drop(e.connect_edge_gain(wire, driver))),
+        ),
+        (
+            "declare_main_output",
+            Box::new(move |e| drop(e.declare_main_output(topology, id))),
+        ),
+        (
+            "disconnect_edge_gain",
+            Box::new(move |e| drop(e.disconnect_edge_gain(wire, driver))),
+        ),
+        (
+            "clear_edge_gain",
+            Box::new(move |e| drop(e.clear_edge_gain(wire))),
+        ),
+        (
+            "disconnect_param",
+            Box::new(move |e| drop(e.disconnect_param(at, driver))),
+        ),
+        (
+            "disconnect_edge",
+            Box::new(move |e| drop(e.disconnect_edge(wire))),
+        ),
+    ];
+    for (name, call) in &calls {
+        let before = ed.revision();
+        call(&mut ed);
+        assert_ne!(ed.revision(), before, "{name} changed the graph");
+        let before = ed.revision();
+        call(&mut ed);
+        assert_eq!(ed.revision(), before, "{name} changed nothing");
+    }
+
+    ed.connect_events(sink, edge).expect("wires");
+    let before = ed.revision();
+    assert!(ed.disconnect_events(sink, edge));
+    assert_ne!(ed.revision(), before, "disconnect_events changed the graph");
+    let before = ed.revision();
+    assert!(!ed.disconnect_events(sink, edge));
+    assert_eq!(ed.revision(), before, "disconnect_events changed nothing");
+}
