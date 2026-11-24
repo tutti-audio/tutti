@@ -15,7 +15,8 @@ use tutti_session::{
 };
 use tutti_tempo::TempoMap;
 use tutti_ump::{
-    Flex, FlexTempo, Message, MidiChannel, MidiGroup, NoteNumber, TicksPerQuarterNote, U7,
+    Flex, FlexTempo, FlexTimeSignature, Message, MidiChannel, MidiGroup, NoteNumber,
+    TicksPerQuarterNote, U7,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Seconds};
 
@@ -109,7 +110,7 @@ fn a_midi_file_loads_from_bytes_as_its_tracks() {
 /// A MIDI 2.0 Clip File (M2-116) loads as its notes over its Flex Data tempo: at
 /// 96 ticks a quarter, a note from tick 0 to 96 is beat 0 to 1, one from tick 192
 /// to 288 is beat 2 to 3, and a Set Tempo of 120 beats a minute makes two beats a
-/// second.
+/// second. Its Set Time Signature of 3/4 is the loaded meter.
 #[test]
 fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
     let division = TicksPerQuarterNote::of(96);
@@ -117,6 +118,18 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
         .push(
             Tick(0),
             Message::Flex(MidiGroup::FIRST, Flex::SetTempo(FlexTempo::new(50_000_000))),
+        )
+        .unwrap()
+        .push(
+            Tick(0),
+            Message::Flex(
+                MidiGroup::FIRST,
+                Flex::SetTimeSignature(FlexTimeSignature {
+                    numerator: 3,
+                    denominator: 2,
+                    thirty_seconds: 8,
+                }),
+            ),
         )
         .unwrap()
         .note(
@@ -143,8 +156,9 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
 
     let loaded = tutti_fixtures::block_on(session().midi().load_midi(bytes)).expect("loads");
 
-    // The Set Tempo message and two notes, a note-on and a note-off each.
-    assert_eq!(loaded.track(0).unwrap().events.len(), 5);
+    // The Set Tempo and Set Time Signature messages and two notes, a note-on and a
+    // note-off each.
+    assert_eq!(loaded.track(0).unwrap().events.len(), 6);
     let view = loaded
         .file()
         .timebase()
@@ -164,6 +178,9 @@ fn a_clip_file_loads_as_its_notes_and_its_flex_data_tempo() {
     );
     let seconds = loaded.tempo().unwrap().seconds_at(Beat::new(2.0));
     assert!((seconds.get() - 1.0).abs() < 1e-9, "{seconds:?}");
+    let meter = loaded.meter().expect("one timeline").current();
+    assert_eq!(meter.changes().len(), 1);
+    assert_eq!(meter.changes()[0].signature, TimeSignature::of(3, 4));
 }
 
 /// A format 1 file lands each track as a clip over the file's one tempo map

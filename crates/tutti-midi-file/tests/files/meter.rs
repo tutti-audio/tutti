@@ -62,6 +62,17 @@ fn a_sequences_meter_is_its_own_tracks() {
     assert_eq!(meters[1].at(Beat::new(3.0)), TimeSignature::of(5, 4));
 }
 
+/// SMF 1.0 section 3.3: a denominator power of 0 is a whole note, a legal 4/1.
+#[test]
+fn an_smf_denominator_power_of_zero_is_a_whole_note() {
+    let file = smf(0, &[&[0, 0xFF, 0x58, 4, 4, 0, 24, 8]]);
+    assert_eq!(
+        metrical(&file).meter_map().at(Beat::new(0.0)),
+        TimeSignature::of(4, 1)
+    );
+    assert!(metrical(&file).refused_time_signatures().is_empty());
+}
+
 /// A numerator of 0 is no time signature: it is no change, and it is listed.
 #[test]
 fn a_time_signature_no_meter_holds_is_listed_and_makes_no_change() {
