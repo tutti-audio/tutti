@@ -23,6 +23,20 @@ fn empty_state(rate: SampleRate) -> Arc<AudioCallbackState> {
     Arc::new(AudioCallbackState::new(graph))
 }
 
+/// An engine on a device of the default host recorded as `opened`: the host is
+/// opened (it lists nothing) and no device is resolved.
+fn on_device(opened: Opened) -> AudioEngine {
+    let target = (
+        crate::DeviceHost::open(crate::AudioHost::Default).expect("the default host opens"),
+        OutputConfig::from(DeviceSelector::Default),
+        tutti_platform::Executor::new(),
+    );
+    AudioEngine {
+        stream: tutti_engine::OutputStream::new(manual_spec()),
+        origin: Origin::Device { target, opened },
+    }
+}
+
 fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
     crate::TuttiDriver::new(engine, empty_state(SampleRate::SR_48K))
 }
@@ -35,15 +49,23 @@ fn driver_over(engine: AudioEngine) -> crate::TuttiDriver {
 /// driver ends in `Ok(None)`.
 #[test]
 fn the_opened_name_tells_a_supplied_driver_from_an_unnamed_device() {
-    let mut engine = AudioEngine::from_spec(manual_spec());
+    let engine = AudioEngine::from_spec(manual_spec());
     assert_eq!(engine.opened_name().unwrap(), None, "a supplied driver");
-    engine.opened = Opened::Named("Card".into());
-    assert_eq!(engine.opened_name().unwrap().as_deref(), Some("Card"));
-    engine.opened = Opened::Unnamed("no name".into());
-    assert!(engine.opened_name().is_err(), "a device that would not say");
-    engine.opened = Opened::Named("Card".into());
+    assert_eq!(
+        on_device(Opened::Named("Card".into()))
+            .opened_name()
+            .unwrap()
+            .as_deref(),
+        Some("Card")
+    );
+    assert!(
+        on_device(Opened::Unnamed("no name".into()))
+            .opened_name()
+            .is_err(),
+        "a device that would not say"
+    );
 
-    let mut driver = driver_over(engine);
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
     let (manual, _stream) = ManualStreamDriver::new();
     driver
         .switch(manual_spec(), manual, |_, _| {
@@ -58,9 +80,7 @@ fn the_opened_name_tells_a_supplied_driver_from_an_unnamed_device() {
 /// is recorded only once the stream runs.
 #[test]
 fn a_failed_restart_keeps_the_opened_name() {
-    let mut engine = AudioEngine::from_spec(manual_spec());
-    engine.opened = Opened::Named("Card".into());
-    let mut driver = driver_over(engine);
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
     let (manual, _stream) = ManualStreamDriver::new();
     driver
         .switch(manual_spec(), manual, |_, _| {
@@ -131,4 +151,22 @@ fn selecting_a_device_on_a_spec_built_engine_is_refused() {
         driver.select_device(DeviceSelector::Default),
         Err(DeviceError::InvalidDevice(_))
     ));
+}
+
+/// **A switch onto a supplied driver keeps the device on record**: the driver
+/// can still select a device for the restart that opens it again, and names none
+/// meanwhile.
+#[test]
+fn a_switch_to_a_supplied_driver_keeps_the_device_to_restart_onto() {
+    let mut driver = driver_over(on_device(Opened::Named("Card".into())));
+    let (manual, _stream) = ManualStreamDriver::new();
+    driver
+        .switch(manual_spec(), manual, |_, _| {
+            Ok::<(), crate::DeviceError>(())
+        })
+        .unwrap();
+    assert_eq!(driver.opened_name().unwrap(), None);
+    driver
+        .select_device(DeviceSelector::Default)
+        .expect("the device is still on record");
 }

@@ -140,8 +140,8 @@ fn output_config(
     )
 }
 
-/// What an engine built from a bare spec answers a call that needs a device.
-pub(crate) fn no_device() -> DeviceError {
+/// What an engine with no device to open answers a call that needs one.
+fn no_device() -> DeviceError {
     DeviceError::InvalidDevice(
         "this engine was built from a bare spec and has no device to open; \
          use `start_with` and supply a driver"
@@ -160,13 +160,98 @@ pub(crate) fn no_device() -> DeviceError {
 /// Backend errors go to the stream's [`faults`](OutputStream::faults).
 pub struct AudioEngine {
     pub(crate) stream: OutputStream,
-    /// `None` for an engine built from a bare spec — no host, no device, so
-    /// nothing to re-resolve on start. That is what makes a device-free
-    /// lifecycle test possible.
-    pub(crate) target: Option<Target>,
-    /// What the stream last started is running on, kept so that naming it
-    /// never enumerates the host.
-    pub(crate) opened: Opened,
+    /// What the stream runs on: the device it re-resolves on start, or a
+    /// driver the caller supplied.
+    pub(crate) origin: Origin,
+}
+
+/// What an engine's stream runs on.
+#[derive(Debug)]
+pub(crate) enum Origin {
+    /// The device: where a start finds it again, and the name it opened under,
+    /// kept so that naming it never enumerates the host.
+    Device { target: Target, opened: Opened },
+    /// A driver the caller supplied: no device, by design. `was` is the
+    /// device it replaced, which a restart opens again; `None` for an engine
+    /// built from a bare spec, which never had one.
+    Supplied { was: Option<Target> },
+}
+
+impl Origin {
+    /// The device to resolve: the one this engine runs on or last ran on.
+    ///
+    /// # Errors
+    /// [`DeviceError::InvalidDevice`] for an engine that never had a device.
+    pub(crate) fn target(&self) -> Result<&Target> {
+        match self {
+            Self::Device { target, .. }
+            | Self::Supplied {
+                was: Some(target), ..
+            } => Ok(target),
+            Self::Supplied { was: None } => Err(no_device()),
+        }
+    }
+
+    /// As [`target`](Self::target), to select another device on.
+    pub(crate) fn target_mut(&mut self) -> Result<&mut Target> {
+        match self {
+            Self::Device { target, .. }
+            | Self::Supplied {
+                was: Some(target), ..
+            } => Ok(target),
+            Self::Supplied { was: None } => Err(no_device()),
+        }
+    }
+
+    fn into_target(self) -> Option<Target> {
+        match self {
+            Self::Device { target, .. } => Some(target),
+            Self::Supplied { was } => was,
+        }
+    }
+
+    /// The name of the device opened, `Ok(None)` for a supplied driver.
+    pub(crate) fn opened_name(&self) -> Result<Option<String>> {
+        match self {
+            Self::Device { opened, .. } => opened.name().map(Some),
+            Self::Supplied { .. } => Ok(None),
+        }
+    }
+
+    /// The origin after a stream started on `opened`: the device, or with
+    /// `None` a supplied driver that keeps the device on record.
+    ///
+    /// # Errors
+    /// [`DeviceError::InvalidDevice`] for a device opened by an engine that
+    /// has none.
+    pub(crate) fn started(self, opened: Option<Opened>) -> Result<Self> {
+        match (self.into_target(), opened) {
+            (Some(target), Some(opened)) => Ok(Self::Device { target, opened }),
+            (was, None) => Ok(Self::Supplied { was }),
+            (None, Some(_)) => Err(no_device()),
+        }
+    }
+
+    /// Records a restart's stream as running on the device `opened`.
+    pub(crate) fn reopened(&mut self, now: Opened) {
+        match self {
+            Self::Device { opened, .. } => *opened = now,
+            Self::Supplied { was } => {
+                if let Some(target) = was.take() {
+                    *self = Self::Device {
+                        target,
+                        opened: now,
+                    };
+                }
+            }
+        }
+    }
+
+    /// Records the stream as running on a supplied driver, keeping the device.
+    pub(crate) fn supply(&mut self) {
+        let was = std::mem::replace(self, Self::Supplied { was: None }).into_target();
+        *self = Self::Supplied { was };
+    }
 }
 
 /// The device an engine resolves, with what opens its stream: its host, its config and
@@ -180,7 +265,8 @@ pub(crate) type Target = (DeviceHost, OutputConfig, Executor);
 pub struct Resolved<D = CpalDriver> {
     spec: OutputSpec,
     driver: D,
-    opened: Opened,
+    /// The device's name; `None` for a supplied driver.
+    opened: Option<Opened>,
 }
 
 impl<D> Resolved<D> {
@@ -199,7 +285,7 @@ impl<D> Resolved<D> {
         Self {
             spec,
             driver,
-            opened: Opened::Supplied,
+            opened: None,
         }
     }
 }
@@ -215,8 +301,6 @@ impl<D> std::fmt::Debug for Resolved<D> {
 /// The device a stream runs on, as the engine learned it when it opened.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Opened {
-    /// The caller's own driver: no device, by design.
-    Supplied,
     /// A device, and its name.
     Named(String),
     /// A device the host could not name.
@@ -228,12 +312,10 @@ impl Opened {
         device_name(device).map_or_else(|e| Self::Unnamed(e.to_string()), Self::Named)
     }
 
-    /// The name, `Ok(None)` for a supplied driver, or an error for a device the
-    /// host could not name.
-    pub(crate) fn name(&self) -> Result<Option<String>> {
+    /// The name, or an error for a device the host could not name.
+    pub(crate) fn name(&self) -> Result<String> {
         match self {
-            Self::Supplied => Ok(None),
-            Self::Named(name) => Ok(Some(name.clone())),
+            Self::Named(name) => Ok(name.clone()),
             Self::Unnamed(why) => Err(DeviceError::InvalidDevice(format!(
                 "the opened device could not be named: {why}"
             ))),
@@ -286,8 +368,10 @@ impl AudioEngine {
         )?;
         Ok(Self {
             stream: OutputStream::new(spec),
-            target: Some((host, config, executor.clone())),
-            opened: Opened::of(&device),
+            origin: Origin::Device {
+                target: (host, config, executor.clone()),
+                opened: Opened::of(&device),
+            },
         })
     }
 
@@ -303,8 +387,7 @@ impl AudioEngine {
     pub fn from_spec(spec: OutputSpec) -> Self {
         Self {
             stream: OutputStream::new(spec),
-            target: None,
-            opened: Opened::Supplied,
+            origin: Origin::Supplied { was: None },
         }
     }
 
@@ -352,7 +435,7 @@ impl AudioEngine {
         }
         let (driver, spec, opened) = self.resolve()?;
         self.stream.start_at(state, spec, driver)?;
-        self.opened = opened;
+        self.origin.reopened(opened);
         Ok(())
     }
 
@@ -361,7 +444,7 @@ impl AudioEngine {
     /// can see the config the stream will run at before it runs
     /// (`TuttiDriver::restart_with`).
     pub(crate) fn resolve(&self) -> Result<(CpalDriver, OutputSpec, Opened)> {
-        Self::resolve_target(self.target.as_ref())
+        Self::resolve_target(self.origin.target()?)
     }
 
     /// Resolves the selected device and reads its config, without opening a
@@ -376,18 +459,15 @@ impl AudioEngine {
         Ok(Resolved {
             spec,
             driver,
-            opened,
+            opened: Some(opened),
         })
     }
 
     /// [`resolve`](Self::resolve) for a bare `target`, which a restart reads
     /// while the stream is borrowed elsewhere.
     pub(crate) fn resolve_target(
-        target: Option<&Target>,
+        (host, config, executor): &Target,
     ) -> Result<(CpalDriver, OutputSpec, Opened)> {
-        let Some((host, config, executor)) = target else {
-            return Err(no_device());
-        };
         let device = host.device(DeviceDirection::Output, &config.device)?;
         let name = device_name(&device).unwrap_or_default();
         let (spec, format) = spec_from_supported(
@@ -432,7 +512,10 @@ impl AudioEngine {
             driver,
             opened,
         } = resolved;
-        crate::TuttiDriver::take_over(host, spec, driver, rerate, self.target, opened)
+        match self.origin.started(opened) {
+            Ok(origin) => crate::TuttiDriver::take_over(host, spec, driver, rerate, origin),
+            Err(e) => Err((host, e.into())),
+        }
     }
 
     /// Starts a stream at the current [`spec`](OutputStream::spec) through `driver`.
@@ -472,10 +555,7 @@ impl AudioEngine {
     /// [`DeviceError::InvalidDevice`] on an engine built with
     /// [`from_spec`](Self::from_spec), which has no device to select.
     pub fn select_device(&mut self, sel: DeviceSelector) -> Result<()> {
-        let Some((_, current, _)) = &mut self.target else {
-            return Err(no_device());
-        };
-        current.select(sel);
+        self.origin.target_mut()?.1.select(sel);
         Ok(())
     }
 
@@ -492,7 +572,7 @@ impl AudioEngine {
     /// [`DeviceError::InvalidDevice`] when the device opened but the host could
     /// not name it.
     pub fn opened_name(&self) -> Result<Option<String>> {
-        self.opened.name()
+        self.origin.opened_name()
     }
 }
 
