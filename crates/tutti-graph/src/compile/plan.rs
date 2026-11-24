@@ -1355,9 +1355,10 @@ impl Plan {
         &self.program.sum_lanes
     }
 
-    /// Successors of each op in the dependency DAG.
-    pub fn op_successors(&self) -> Csr<OpId> {
-        self.program.deps.inverse()
+    /// The ops each op waits for: the dependency DAG, each edge from an
+    /// earlier op to a later one.
+    pub fn op_dependencies(&self) -> &Csr<OpId> {
+        &self.program.deps
     }
 
     /// Tasks after coarsening (chains fused, cheap siblings packed): each is

@@ -123,21 +123,19 @@ proptest! {
 fn brute_force_interference(plan: &tutti_graph::Plan) {
     use tutti_graph::{OpId, Value};
     let n = plan.ops().len();
-    let succ = plan.op_successors();
-    // reach[a] = every op reachable from a (strictly).
-    let reach: Vec<BTreeSet<OpId>> = (0..n)
-        .map(|a| {
-            let mut seen = BTreeSet::new();
-            let mut stack: Vec<OpId> = succ.row(a).to_vec();
-            while let Some(x) = stack.pop() {
-                if seen.insert(x) {
-                    stack.extend_from_slice(succ.row(x.index()));
-                }
-            }
-            seen
-        })
-        .collect();
-    let before = |a: OpId, b: OpId| reach[a.index()].contains(&b);
+    // before[b] = every op that happens before b: its dependencies, and
+    // theirs. Ops are in topological order, so one forward pass is enough.
+    let deps = plan.op_dependencies();
+    let mut before: Vec<BTreeSet<OpId>> = Vec::with_capacity(n);
+    for b in 0..n {
+        let mut set = BTreeSet::new();
+        for &a in deps.row(b) {
+            set.insert(a);
+            set.extend(before[a.index()].iter().copied());
+        }
+        before.push(set);
+    }
+    let before = |a: OpId, b: OpId| before[b.index()].contains(&a);
     fn check<S: Copy + PartialEq + std::fmt::Debug>(
         kind: &str,
         values: &[Value<S>],
