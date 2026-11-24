@@ -817,9 +817,15 @@ fn reverb::freeverb::bank::FreeverbBank::tail
 fn reverb::freeverb::bank::FreeverbBank::tail_of
 fn reverb::freeverb::bank::FreeverbRamps::jump_to_target
 fn reverb::freeverb::design::FreeverbControls::feedback
+fn reverb::network::Absorption::bands
 fn reverb::network::Absorption::gain
 fn reverb::network::Absorption::peak_delay
 fn reverb::network::Band::index
+fn reverb::network::BandAbsorption::crossover
+fn reverb::network::BandAbsorption::high
+fn reverb::network::BandAbsorption::low
+fn reverb::network::BandAbsorption::mid
+fn reverb::network::BandAbsorption::peak
 fn reverb::network::Network::clear
 fn reverb::network::Network::new
 fn reverb::network::gain::rt60_from_gain
@@ -1251,6 +1257,7 @@ struct reverb::freeverb::bank::FreeverbBank
 struct reverb::freeverb::bank::FreeverbRamps
 struct reverb::freeverb::design::FreeverbControls
 struct reverb::network::AllPass
+struct reverb::network::BandAbsorption
 struct reverb::network::Fdn
 struct reverb::network::FirSummary
 struct reverb::network::Line
