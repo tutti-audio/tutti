@@ -18,8 +18,9 @@
 //! - The MTC Full Message (Real Time `01 01`, M1 p.53 and T-9): a whole SMPTE
 //!   position in one message, as [`MtcFullMessage`].
 //! - MIDI Machine Control (RP-013): Real Time `06` commands as [`MmcCommands`]
-//!   and `07` responses as [`MmcFields`], with every command and information
-//!   field of the specification typed ([`MmcCommand`], [`MmcInfoField`]).
+//!   and `07` responses as [`MmcFields`] ([`UniversalRead::MachineControlResponse`]),
+//!   with every command and information field of the specification typed
+//!   ([`MmcCommand`], [`MmcInfoField`]).
 //! - The MIDI Tuning Standard (`08`): [`TuningMessage`], with its
 //!   [frequency data](crate::TuningFrequency). A dump whose checksum does not hold is
 //!   [`UniversalRead::BadChecksum`], not `Unread`.
@@ -48,7 +49,7 @@ use crate::tuning::TuningMessage;
 use alloc::boxed::Box;
 
 pub use machine_control::*;
-pub use write::{NotWritable, UNIVERSAL_MAX_PAYLOAD, UniversalPayload};
+pub use write::{UNIVERSAL_MAX_PAYLOAD, UniversalPayload};
 
 use tutti_ump::{
     DeviceIdentity, Message, MidiGroup, Sysex7Packet, SysexAssembler, SysexMessage, SysexStatus,
@@ -501,9 +502,13 @@ pub enum GeneralMidiMode {
     Off,
 }
 
-/// A Universal message this crate reads. Fields are the wire's values, in the
-/// type that holds them; what a value means (a curve, a displacement) is the
+/// A Universal message an app sends and a receiver reads: every variant has a
+/// payload ([`Addressed::payload`]). Fields are the wire's values, in the type
+/// that holds them; what a value means (a curve, a displacement) is the
 /// consumer's.
+///
+/// What a receiver hears and no sender names is a [`UniversalRead`] of its own:
+/// a Machine Control Response and a truncated Machine Control command.
 // Copy, and read on the audio thread: boxing the table or the changes would allocate there.
 #[allow(clippy::large_enum_variant)]
 #[non_exhaustive]
@@ -533,18 +538,21 @@ pub enum Universal {
     /// MIDI Machine Control commands (Real Time `06`, RP-013 p.2). The
     /// header's recipient is the destination: a device, a group or all.
     MachineControl(machine_control::MmcCommands),
-    /// A Machine Control Command message that ends in a COMMAND SEGMENT whose
-    /// count is more than the bytes left in the message (RP-013 p.40 b): the
-    /// segment was cut short. Holds the commands before it, whole and not yet
-    /// acted on, and none when the segment is first. Only read; no writer can
-    /// name it.
-    MachineControlTruncated(machine_control::MmcCommands),
-    /// MIDI Machine Control responses (Real Time `07`, RP-013 p.2). The
-    /// header's device ID is the source, and always a device's own.
-    MachineControlResponse(machine_control::MmcFields),
 }
 
 /// A Universal message and who its header names.
+///
+/// A Machine Control Response comes from a device, so it is no `Universal` and
+/// has no recipient ([`UniversalRead::MachineControlResponse`]):
+///
+/// ```compile_fail,E0599
+/// use tutti_midi_protocol::{Addressed, MmcFields, Recipient, Universal};
+///
+/// let _ = Addressed {
+///     to: Recipient::AllCall,
+///     message: Universal::MachineControlResponse(MmcFields::new()),
+/// };
+/// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Addressed {
     /// The recipient in the header.
@@ -569,8 +577,27 @@ pub struct BadChecksum {
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UniversalRead {
-    /// A Universal message this crate reads.
+    /// A Universal message an app can send.
     Universal(Addressed),
+    /// A Machine Control Response (Real Time `07`, RP-013 p.2): the header's
+    /// device ID is the source, and always a device's own. Written with
+    /// [`MmcFields::payload`].
+    MachineControlResponse {
+        /// The device that sent it.
+        from: SysexDeviceId,
+        /// The information fields.
+        fields: machine_control::MmcFields,
+    },
+    /// A Machine Control Command message that ends in a COMMAND SEGMENT whose
+    /// count is more than the bytes left in the message (RP-013 p.40 b): the
+    /// segment was cut short. No sender names it.
+    MachineControlTruncated {
+        /// Where the message was going.
+        to: Recipient,
+        /// The commands before the segment, whole and not yet acted on, and
+        /// none when the segment is first.
+        before: machine_control::MmcCommands,
+    },
     /// A tuning dump whose checksum field is not the XOR of the bytes before it
     /// (MTS, Checksum Calculation). The spec says nothing of what a receiver
     /// does with one; an instrument does not apply it ([`UniversalReader`]
@@ -599,21 +626,7 @@ pub enum UniversalRead {
 pub fn read(message: SysexMessage<'_>) -> UniversalRead {
     let payload = message.payload();
     match payload.first() {
-        Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => match read::parse(payload) {
-            read::Parsed::Message(to, message) => {
-                UniversalRead::Universal(Addressed { to, message })
-            }
-            read::Parsed::BadChecksum {
-                to,
-                expected,
-                found,
-            } => UniversalRead::BadChecksum(BadChecksum {
-                to,
-                expected,
-                found,
-            }),
-            read::Parsed::Unread => UniversalRead::Unread,
-        },
+        Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => read::parse(payload),
         _ => UniversalRead::Foreign,
     }
 }
@@ -677,7 +690,8 @@ impl UniversalReader {
     /// skipped; every UMP of its own Group is taken, because a message of the
     /// Group that is not a Continue ends an open SysEx (M2-104 section 7.7.1).
     /// Returns the Universal message that UMP completed, if it was addressed to
-    /// this device or to all.
+    /// this device or to all: a sendable [`Universal`] message, never a Machine
+    /// Control Response or a truncated command.
     pub fn push(&mut self, ump: Ump) -> Option<Heard> {
         if ump.group().is_some_and(|g| g != self.group) {
             return None;
@@ -696,10 +710,6 @@ impl UniversalReader {
             }
             _ => return None,
         };
-        // A response is a controller's to read, from a device that is not this one.
-        if matches!(message, Universal::MachineControlResponse(_)) {
-            return None;
-        }
         let to = self.is_for_us(recipient)?;
         Some(Heard { to, message })
     }

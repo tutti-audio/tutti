@@ -17,6 +17,7 @@ use tutti_buffers::{Float, SampleFormat};
 use tutti_units::{SampleRate, Samples};
 
 use crate::callback::{AudioCallbackState, MAX_FRAMES, OutputBlock};
+use crate::callback_frames::CallbackFrames;
 use crate::faults::StreamFaults;
 use crate::latency::StreamLatency;
 
@@ -165,6 +166,8 @@ pub struct OutputStream {
     faults: Arc<StreamFaults>,
     /// The output callback's reported delay, shared with each run's block.
     latency: Arc<StreamLatency>,
+    /// The frames of the output callback, shared with each run's block.
+    callback_frames: Arc<CallbackFrames>,
     running: Option<Box<dyn RunningStream>>,
 }
 
@@ -188,6 +191,7 @@ impl OutputStream {
             spec,
             faults: Arc::new(StreamFaults::new()),
             latency: Arc::new(StreamLatency::new()),
+            callback_frames: Arc::new(CallbackFrames::new()),
             running: None,
         }
     }
@@ -218,15 +222,24 @@ impl OutputStream {
         Arc::clone(&self.latency)
     }
 
+    /// The sizes of the output callbacks since the last
+    /// [`take`](CallbackFrames::take): the size the device delivers, which the
+    /// spec's [`quantum`](OutputSpec::quantum) only asked for. Empty again
+    /// after a restart.
+    pub fn callback_frames(&self) -> Arc<CallbackFrames> {
+        Arc::clone(&self.callback_frames)
+    }
+
     /// Starts a stream at the current [`spec`](Self::spec) through `driver`.
     /// Clears [`faults`](Self::faults), so a restart after a disconnect reads
-    /// healthy again, and the latency reading: the new stream has reported no
-    /// delay yet.
+    /// healthy again, and the latency and callback-size readings: the new
+    /// stream has reported none yet.
     ///
     /// # Errors
     /// [`StartError::AlreadyRunning`] if a stream is running (it is left
     /// running and the driver is not opened); otherwise whatever the driver's
-    /// [`open`](StreamDriver::open) reports.
+    /// [`open`](StreamDriver::open) reports. A stream whose device was lost is
+    /// released before the driver opens.
     pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
         state: Arc<AudioCallbackState<F>>,
@@ -235,10 +248,15 @@ impl OutputStream {
         if self.is_running() {
             return Err(StartError::AlreadyRunning);
         }
+        // A stream still held here is one whose device was lost: it is released
+        // before the next opens, so two are never held.
+        self.stop();
         self.faults.clear();
         self.latency.reset();
+        self.callback_frames.reset();
         let block = OutputBlock::new(state, self.spec.channels)
             .with_latency(Arc::clone(&self.latency))
+            .with_callback_frames(Arc::clone(&self.callback_frames))
             .with_faults(Arc::clone(&self.faults));
         let running = driver
             .open(&self.spec, block, Arc::clone(&self.faults))

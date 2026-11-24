@@ -29,13 +29,14 @@
 //!   Clock, MTC, Machine Control and Flex Data, JR timestamps).
 //! - [`MidiClockDecoder`] and [`MtcDecoder`]: the inbound half of
 //!   sync (Beat Clock and MTC decoders), beside the master that sends them.
-//! - [`ClockFollower`]: what a transport that follows an outside Beat Clock or MTC does
-//!   (tempo, play, stop, locate, lock), as a pure state machine; the session places it.
+//! - [`BeatClockFollower`] and [`MtcFollower`]: what a transport that follows an outside
+//!   Beat Clock or MTC does (tempo, play, stop, locate, lock), as pure state machines; the
+//!   session places them.
 //! - [`MpeTranslator`]: the inbound state (`live`) that rewrites classic-MPE channel
 //!   spread into native MIDI 2.0 per-note messages, and [`MpeTransformNode`], the same
 //!   as a node of one event stream.
 //!
-//! The MPE zone types (`MpeMode`, `MpeZoneConfig`, ...) are
+//! The MPE zone types (`MpeMode`, `Mpe11Zone`, ...) are
 //! `tutti-midi-protocol`'s; `MidiInputNode::mpe` takes a `MpeMode` from there.
 //! So are the `SmpteFrameRate` and the `SmpteTimecode` the decoders assemble.
 //!
@@ -208,8 +209,7 @@ pub use live::{
     ArrivalClock, DeviceGeneration, DeviceInput, DeviceWriters, GenerationWriter, InputId,
     InputInlets, InputReaders, InputWriters, LIVE_INLET_CAPACITY, MIDI_INPUT_DENSITY,
     MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts, MidiKeys,
-    MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, SendUniversalError,
-    compile_routes,
+    MpeTransformControls, MpeTransformNode, MpeTranslator, RouteRule, compile_routes,
 };
 pub use mpe_features::{MpeFeaturesError, ask_mpe_features, mpe_features};
 pub use mpe_zones::mpe_zones;
@@ -228,9 +228,9 @@ pub use schedule::{
     MidiClipNode, TimedHarmony, TimedMidiEvent,
 };
 pub use sync::{
-    ClockEvent, ClockFollower, ClockKind, ClockOffset, ClockPosition, ClockTransportState,
-    MachineControlEvent, MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder,
-    MtcDirection, SegmentFault,
+    BeatClockEvent, BeatClockFollower, ClockEvent, ClockTransportState, MachineControlEvent,
+    MachineControlFollower, MidiClockDecoder, MtcCycle, MtcDecoder, MtcDirection, MtcEvent,
+    MtcFollower, SegmentFault,
 };
 pub use taken::Taken;
 pub use tempo_follower::{Followed, TempoFollower};

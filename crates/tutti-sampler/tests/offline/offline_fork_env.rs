@@ -27,7 +27,7 @@ use tutti_graph::{
     Status, TransportPosition,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::{MemorySource, Playback, SlotId, Voice, VoiceNode, VoicePool, VoiceSource};
+use tutti_sampler::{MemorySource, Playback, SlotId, VoiceNode, VoicePool};
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_44K1;
@@ -45,13 +45,6 @@ fn ramp_wave() -> Arc<Wave> {
 
 fn placed() -> MemorySource<f32> {
     MemorySource::placed(ramp_wave(), VoiceWindow::from(Beat::new(0.0))).expect("a placeable wave")
-}
-
-fn voice() -> Voice<f32> {
-    Voice {
-        source: VoiceSource::Memory(placed()),
-        play: Playback::default(),
-    }
 }
 
 fn prepare() -> Prepare {
@@ -129,7 +122,7 @@ fn a_forked_pool_steals_no_commands_from_the_live_one() {
 #[test]
 fn a_forked_voice_node_reads_its_renders_transport_not_the_live_one() {
     let (ed, mut exec, _handle) = graph(
-        VoiceNode::with_channels(voice(), ChannelLayout::STEREO)
+        VoiceNode::with_channels(placed(), Playback::default(), ChannelLayout::STEREO)
             .expect("a finite gain and a nonempty width"),
         2,
     );
@@ -231,7 +224,7 @@ fn a_voice_behind_another_node_is_forked_too() {
     ed.insert(
         NodeKey(1),
         "voice",
-        VoiceNode::with_channels(voice(), ChannelLayout::MONO)
+        VoiceNode::with_channels(placed(), Playback::default(), ChannelLayout::MONO)
             .expect("a finite gain and a nonempty width"),
     );
     ed.insert(NodeKey(2), "pass", ForkByClone(Pass));

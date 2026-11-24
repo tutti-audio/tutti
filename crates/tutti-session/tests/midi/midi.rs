@@ -110,7 +110,7 @@ fn plan_nodes(s: &Session) -> usize {
         .testing()
         .sent_plan()
         .expect("a plan")
-        .order()
+        .units()
         .len()
 }
 
@@ -1065,7 +1065,9 @@ fn a_port_that_loses_events_is_reported() {
 #[test]
 fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     use tutti_midi_ci::Muid;
-    use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
+    use tutti_midi_ci::{
+        CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
+    };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_ump::BlockName;
     use tutti_ump::{
@@ -1102,7 +1104,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
     let raw = EndpointId::from_raw(7);
     let peer = Muid::of(0x0012_3456);
     let later = Muid::of(0x0045_6789);
-    let data = DiscoveryData::new(
+    let data = ReplyData::new(DeviceBody::new(
         tutti_ump::DeviceIdentity {
             manufacturer: tutti_ump::ManufacturerId::of(0x41),
             family: [tutti_ump::U7::of(1); 2],
@@ -1111,7 +1113,7 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
         },
         CiCategories::empty(),
         MaxSysexSize::of(256),
-    );
+    ));
     let mut assembler = SysexAssembler::boxed(256, 1, 16);
     let start = Instant::now();
     let mut noticed = false;
@@ -1214,9 +1216,9 @@ fn a_midi_ci_peer_that_answers_discovery_is_in_the_ports_info() {
 fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
-        CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
+        CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DeviceBody,
         MaxSysexSize, ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileState,
-        StandardProfile,
+        ReplyData, StandardProfile,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
@@ -1309,11 +1311,11 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
             };
             match CiMessage::decode(assembler.message(done).payload()) {
                 Decoded::Message(CiMessage::Discovery { header, .. }) => {
-                    let data = DiscoveryData::new(
+                    let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROFILE_CONFIGURATION,
                         MaxSysexSize::of(256),
-                    );
+                    ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
                             header: CiHeader::new(peer),
@@ -1548,9 +1550,9 @@ impl MpePeer {
         now: Instant,
     ) {
         use tutti_midi_ci::{
-            CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DiscoveryData,
+            CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DeviceBody,
             MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
-            ProfileTarget, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
+            ProfileTarget, ReplyData, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
             SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
@@ -1582,7 +1584,7 @@ impl MpePeer {
             }
             match decoded {
                 Decoded::Message(CiMessage::Discovery { header, .. }) => {
-                    let data = DiscoveryData::new(
+                    let data = ReplyData::new(DeviceBody::new(
                         DeviceIdentity {
                             manufacturer: ManufacturerId::of(0x41),
                             family: [U7::of(1); 2],
@@ -1591,7 +1593,7 @@ impl MpePeer {
                         },
                         CiCategories::PROFILE_CONFIGURATION | CiCategories::PROCESS_INQUIRY,
                         MaxSysexSize::of(256),
-                    );
+                    ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
                             header: CiHeader::new(self.muid),
@@ -1683,22 +1685,25 @@ impl MpePeer {
                     ),
                     Reply::Silent => {}
                 },
-                Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => answers
+                Decoded::Message(inquiry @ CiMessage::ProcessCapabilitiesInquiry { .. }) => answers
                     .extend(
                         CiMessage::ProcessCapabilitiesReply {
-                            header: at(CiDeviceId::FunctionBlock),
-                            to: header.source,
+                            source: self.muid,
+                            ci_version: CI_VERSION,
+                            to: inquiry.header().source,
                             features: tutti_midi_ci::ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
                     ),
-                Decoded::Message(CiMessage::MessageReportInquiry { header, scope, .. }) => {
+                Decoded::Message(inquiry @ CiMessage::MessageReportInquiry { scope, .. }) => {
+                    let header = inquiry.header();
                     match self.report {
                         Reply::Answer => {
                             answers.extend(
                                 CiMessage::MessageReportReply {
-                                    header: at(header.device_id),
+                                    source: self.muid,
+                                    ci_version: CI_VERSION,
                                     to: header.source,
                                     scope,
                                 }
@@ -1757,7 +1762,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
     use tutti_fixtures::midi::BendRanges;
     use tutti_midi_ci::{ProfileChange, ProfileState};
     use tutti_midi_hardware::{ChannelCount, ProfilesChange};
-    use tutti_midi_protocol::{MpeZoneConfig, MpeZones, PitchBendSensitivity};
+    use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone, ProfileZones};
     use tutti_session::ListedProfile;
     use tutti_ump::{CCNumber, Message, Voice2};
 
@@ -1861,7 +1866,7 @@ fn a_devices_enabling_the_mpe_profile_switches_its_inputs_rules() {
             .expect("the peer lists Profiles")
             .profiles()
             .mpe_zones(),
-        Some(MpeZones::single(MpeZoneConfig::profile(
+        Some(ProfileZones::single(ProfileZone::new(
             MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(4)).unwrap(),
             PitchBendSensitivity::MPE_PROFILE_DEFAULT
         )))
@@ -1919,7 +1924,7 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
     use tutti_midi_ci::Muid;
     use tutti_midi_ci::{
         CI_VERSION, ChannelControllers, CiCategories, CiDeviceId, CiHeader, CiMessage, DataControl,
-        Decoded, DiscoveryData, MaxSysexSize, NoteData, ProcessFeatures, ReportRequest,
+        Decoded, DeviceBody, MaxSysexSize, NoteData, ProcessFeatures, ReplyData, ReportRequest,
         ReportScope, SystemMessages,
     };
     use tutti_midi_device::{Capabilities, Endpoint, FunctionBlock, Supports};
@@ -2010,11 +2015,11 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
             };
             match CiMessage::decode(assembler.message(done).payload()) {
                 Decoded::Message(CiMessage::Discovery { header, .. }) => {
-                    let data = DiscoveryData::new(
+                    let data = ReplyData::new(DeviceBody::new(
                         identity(ManufacturerId::of(0x41)),
                         CiCategories::PROCESS_INQUIRY,
                         MaxSysexSize::of(256),
-                    );
+                    ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
                             header: CiHeader::new(peer),
@@ -2025,27 +2030,27 @@ fn a_midi_ci_peers_message_report_is_asked_for_through_the_session() {
                         .unwrap(),
                     );
                 }
-                Decoded::Message(CiMessage::ProcessCapabilitiesInquiry { header, .. }) => {
+                Decoded::Message(inquiry @ CiMessage::ProcessCapabilitiesInquiry { .. }) => {
                     answers.extend(
                         CiMessage::ProcessCapabilitiesReply {
-                            header: at(CiDeviceId::FunctionBlock),
-                            to: header.source,
+                            source: peer,
+                            ci_version: CI_VERSION,
+                            to: inquiry.header().source,
                             features: ProcessFeatures::MIDI_MESSAGE_REPORT,
                         }
                         .packets(MidiGroup::FIRST)
                         .unwrap(),
                     );
                 }
-                Decoded::Message(CiMessage::MessageReportInquiry {
-                    header,
-                    control,
-                    scope,
-                    ..
-                }) => {
+                Decoded::Message(
+                    inquiry @ CiMessage::MessageReportInquiry { control, scope, .. },
+                ) => {
+                    let header = inquiry.header();
                     inquiries.push((header.device_id, control, scope));
                     answers.extend(
                         CiMessage::MessageReportReply {
-                            header: at(header.device_id),
+                            source: peer,
+                            ci_version: CI_VERSION,
                             to: header.source,
                             scope,
                         }

@@ -4,7 +4,7 @@ use tutti_buffers::Float;
 use tutti_buffers::{ChannelLayout, ChannelTopology, InputOutput, MaxBlock};
 use tutti_dsp::{
     Antialiasing, AntialiasingError, BlockMismatch, COEFF_INTERVAL, Lerp, OversamplingFactor,
-    ShapeKind, WaveshaperBank, WaveshaperControls,
+    ShapeKind, Waveshape, WaveshaperBank, WaveshaperControls,
 };
 use tutti_graph::{Cost, Shape};
 use tutti_units::{Drive, SampleRate, Samples, Tail};
@@ -73,10 +73,9 @@ pub type DistortionNode<F> = KernelNode<DistortionKernel<F>>;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DistortionConfig {
     width: ChannelLayout,
-    kind: ShapeKind,
+    shape: Waveshape,
     controls: WaveshaperControls,
     factor: Option<OversamplingFactor>,
-    antialiasing: Antialiasing,
 }
 
 impl DistortionConfig {
@@ -86,10 +85,9 @@ impl DistortionConfig {
     pub fn new(width: impl Into<ChannelLayout>, kind: ShapeKind) -> Self {
         Self {
             width: width.into(),
-            kind,
+            shape: Waveshape::new(kind),
             controls: WaveshaperControls::DEFAULT,
             factor: None,
-            antialiasing: Antialiasing::Off,
         }
     }
 
@@ -125,7 +123,7 @@ impl DistortionConfig {
     /// ([`ShapeKind::max_antialiasing`]): `SecondOrder` is refused for `Tanh`, `Atan`,
     /// `Crush` and `SoftCrush`.
     pub fn antialiasing(mut self, order: Antialiasing) -> Result<Self, AntialiasingError> {
-        self.antialiasing = self.kind.antialiasing(order)?;
+        self.shape = self.shape.antialiasing(order)?;
         Ok(self)
     }
 }
@@ -163,7 +161,6 @@ impl DistortionSet {
 /// The waveshaper as a [`Kernel`]: a [`WaveshaperBank`] of one curve, at the prepared rate.
 #[derive(Clone, Debug)]
 pub struct DistortionKernel<F: Float> {
-    kind: ShapeKind,
     input: ChannelTopology,
     /// The bank, at the rate it shapes at: the oversampled one when there is oversampling.
     bank: WaveshaperBank<F>,
@@ -173,8 +170,6 @@ pub struct DistortionKernel<F: Float> {
     factor: Option<OversamplingFactor>,
     /// The oversampling, once prepared at a rate its filters can be designed for.
     oversampled: Option<Oversampled<F>>,
-    /// What the node was asked to shape with.
-    antialiasing: Antialiasing,
 }
 
 impl<F: Float + Lerp> DistortionKernel<F> {
@@ -182,13 +177,11 @@ impl<F: Float + Lerp> DistortionKernel<F> {
     /// placeholder: an unprepared node renders nothing.
     fn new(config: &DistortionConfig, input: ChannelTopology) -> Self {
         Self {
-            kind: config.kind,
             input,
-            bank: WaveshaperBank::<F>::new(config.kind, SampleRate::SR_48K),
+            bank: WaveshaperBank::<F>::new(config.shape, SampleRate::SR_48K),
             applied: false,
             factor: config.factor,
             oversampled: None,
-            antialiasing: config.antialiasing,
         }
     }
 
@@ -212,10 +205,10 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
     /// Antialiasing makes every curve at least `Moderate`: the curve and its antiderivatives
     /// run in `f64`.
     fn shape(&self) -> Shape {
-        let cost = match (self.factor, self.kind) {
+        let cost = match (self.factor, self.bank.shape().kind()) {
             (Some(_), _) => Cost::Heavy,
             (None, ShapeKind::Softsign | ShapeKind::HardClip)
-                if self.antialiasing == Antialiasing::Off =>
+                if self.bank.shape().antialiasing_order() == Antialiasing::Off =>
             {
                 Cost::Light
             }
@@ -233,9 +226,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             .oversampled
             .as_ref()
             .map_or(rate, |o| o.plan.high_rate());
-        self.bank = WaveshaperBank::<F>::new(self.kind, shaping)
-            .antialiasing(self.antialiasing)
-            .expect("the config refused an order the kind lacks");
+        self.bank = WaveshaperBank::<F>::new(self.bank.shape(), shaping);
         self.applied = false;
     }
 
@@ -280,7 +271,7 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             .oversampled
             .as_ref()
             .map_or(Samples::ZERO, |o| o.plan.latency());
-        cascade + self.antialiasing.delay(self.factor())
+        cascade + self.bank.shape().antialiasing_order().delay(self.factor())
     }
 
     /// The half-bands' response is symmetric about its delay, so what rings after the input
@@ -291,7 +282,13 @@ impl<F: Float + Lerp> Kernel for DistortionKernel<F> {
             .oversampled
             .as_ref()
             .map_or(Samples::ZERO, |o| Samples::new(o.plan.latency().get() + 1));
-        match cascade + self.antialiasing.ring_out(self.factor()) {
+        match cascade
+            + self
+                .bank
+                .shape()
+                .antialiasing_order()
+                .ring_out(self.factor())
+        {
             Samples::ZERO => Tail::None,
             frames => Tail::Finite(frames),
         }

@@ -1,6 +1,4 @@
 use super::*;
-use crate::test_rng::uniform;
-use tutti_rt::SplitMix64;
 fn cross_correlate(a: &[f64], b: &[f64]) -> CrossCorrelation {
     super::cross_correlate(Mono::new(a), Mono::new(b))
 }
@@ -22,8 +20,7 @@ fn an_integer_buffer_correlates_at_its_nominal_level() {
 }
 
 fn noise(len: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..len).map(|_| uniform(&mut rng, -1.0, 1.0)).collect()
+    tutti_fixtures::uniform_noise(seed, len)
 }
 
 /// A hand-worked case: `a = [1, 2, 3]`, `b = [0, 1, 0.5]`, with

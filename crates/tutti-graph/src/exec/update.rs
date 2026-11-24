@@ -6,14 +6,15 @@ use tutti_rt::CappedVec;
 use tutti_units::Samples;
 
 use super::commit::{Commit, Incoming, Relined, cut_fades, retire_fade, send_back};
-use super::stage::{RingFrom, Route, Staged, sort_by_offset};
-use super::state::{Gone, Inject, Ring, State, Unit};
+use super::stage::{AudioCarry, EventCarry, Route, Staged, sort_by_offset};
+use super::state::{Gone, Inject, State, Unit};
 use super::{Executor, Suspension, place, place_all};
 use crate::NodeKey;
 use crate::compile::ids::{Generation, PlanUnitId, TableSlice};
 use crate::compile::plan::Plan;
 use crate::event::types::Event;
 use crate::exec::held::Held;
+use crate::exec::rings::EventFifo;
 use crate::model::gain::SumLane;
 use crate::model::spec::{EventInputPort, EventOutputPort};
 
@@ -23,7 +24,9 @@ impl<F: Float> Executor<F> {
     /// public so a caller can install a commit without rendering.
     ///
     /// Delay rings, feedback state and units carry over by key (see
-    /// [`DelayKey`](crate::DelayKey) and [`FeedbackKey`](crate::FeedbackKey)). An event delay or event feedback
+    /// [`AudioDelayKey`](crate::AudioDelayKey), [`EventDelayKey`](crate::EventDelayKey),
+    /// [`AudioFeedbackKey`](crate::AudioFeedbackKey) and
+    /// [`EventFeedbackKey`](crate::EventFeedbackKey)). An event delay or event feedback
     /// whose key disappears flushes its pending events to its sink when the
     /// sink survives: they arrive on the sink's next call, keeping their
     /// relative spacing, with the earliest at offset 0.
@@ -395,29 +398,70 @@ impl<F: Float> Executor<F> {
         // PDC rings and FIFOs: one moves in whole when its length stands, and
         // is copied into the ring built for its new length when it does not.
         // A ring copied from one that another ring then takes: before it goes.
-        for (i, from) in st.rings.iter().enumerate() {
-            if let RingFrom::Copy { from } = *from
-                && let (Some(Ring::Audio(n)), Some(Some(Ring::Audio(o)))) =
-                    (new.rings[i].as_mut(), old.rings.get(from as usize))
+        for (delay, from) in plan.program.audio_delays.ids().zip(&st.audio_delays) {
+            if let AudioCarry::Copy { from } = *from
+                && let (Some(n), Some(Some(o))) = (
+                    new.audio_delays[delay.index()].as_mut(),
+                    old.audio_delays.get(from.index()),
+                )
             {
                 n.transfer_from(o);
             }
         }
-        for (i, from) in st.rings.iter().enumerate() {
+        debug_assert_eq!(plan.program.audio_delays.len(), st.audio_delays.len());
+        for (delay, from) in plan.program.audio_delays.ids().zip(&st.audio_delays) {
+            let i = delay.index();
             match *from {
-                RingFrom::New | RingFrom::Copy { .. } => {}
-                RingFrom::Keep { from, rate } => {
-                    let mut ring = old.rings.get_mut(from as usize).and_then(Option::take);
-                    if let Some(Ring::Event(f)) = &mut ring {
-                        f.retune(plan.delays.as_slice()[i].len);
+                AudioCarry::New | AudioCarry::Copy { .. } => {}
+                AudioCarry::Keep { from } => {
+                    new.audio_delays[i] = old
+                        .audio_delays
+                        .get_mut(from.index())
+                        .and_then(Option::take);
+                }
+                AudioCarry::Move { from } => {
+                    let carried = old
+                        .audio_delays
+                        .get_mut(from.index())
+                        .and_then(Option::take);
+                    match (new.audio_delays[i].as_mut(), carried) {
+                        (Some(n), Some(o)) => {
+                            n.transfer_from(&o);
+                            place(&mut st.spare_audio, o);
+                        }
+                        (None, Some(o)) => {
+                            debug_assert!(false, "a moved ring has a ring built for it");
+                            place(&mut st.spare_audio, o);
+                        }
+                        (_, None) => {}
+                    }
+                }
+            }
+        }
+        debug_assert_eq!(plan.program.event_delays.len(), st.event_delays.len());
+        for (delay, from) in plan.program.event_delays.ids().zip(&st.event_delays) {
+            let i = delay.index();
+            match *from {
+                EventCarry::New => {}
+                EventCarry::Keep { from, rate } => {
+                    let mut fifo = old
+                        .event_delays
+                        .get_mut(from.index())
+                        .and_then(Option::take);
+                    if let Some(f) = &mut fifo {
+                        f.retune(plan.program.event_delays[delay].len);
                         f.resize(rate, max_block);
                     }
-                    new.rings[i] = ring;
+                    new.event_delays[i] = fifo;
                 }
-                RingFrom::Move { from } => {
-                    let carried = old.rings.get_mut(from as usize).and_then(Option::take);
-                    let lost = move_ring(new.rings[i].as_mut(), carried, &mut st.spare_rings);
-                    self.dropped.charge_delay(plan, i as u32, lost as u64);
+                EventCarry::Move { from } => {
+                    let carried = old
+                        .event_delays
+                        .get_mut(from.index())
+                        .and_then(Option::take);
+                    let lost =
+                        move_fifo(new.event_delays[i].as_mut(), carried, &mut st.spare_events);
+                    self.dropped.charge_delay(plan, delay, lost as u64);
                 }
             }
         }
@@ -426,32 +470,22 @@ impl<F: Float> Executor<F> {
                 new.audio_fb[i] = old.audio_fb.get_mut(j as usize).and_then(Option::take);
             }
         }
-        for (i, from) in st.event_fb.iter().enumerate() {
+        debug_assert_eq!(plan.program.event_feedback.len(), st.event_fb.len());
+        for (feedback, from) in plan.program.event_feedback.ids().zip(&st.event_fb) {
+            let i = feedback.index();
             match *from {
-                RingFrom::New | RingFrom::Copy { .. } => {}
-                RingFrom::Keep { from, rate } => {
-                    let mut fifo = old.event_fb.get_mut(from as usize).and_then(Option::take);
+                EventCarry::New => {}
+                EventCarry::Keep { from, rate } => {
+                    let mut fifo = old.event_fb.get_mut(from.index()).and_then(Option::take);
                     if let Some(f) = &mut fifo {
                         f.resize(rate, max_block);
                     }
                     new.event_fb[i] = fifo;
                 }
-                RingFrom::Move { from } => {
-                    let carried = old
-                        .event_fb
-                        .get_mut(from as usize)
-                        .and_then(Option::take)
-                        .map(Ring::Event);
-                    let mut target = new.event_fb[i].take().map(Ring::Event);
-                    let lost = move_ring(target.as_mut(), carried, &mut st.spare_rings);
-                    new.event_fb[i] = match target {
-                        Some(Ring::Event(f)) => Some(f),
-                        other => {
-                            debug_assert!(other.is_none(), "a feedback FIFO is an event FIFO");
-                            None
-                        }
-                    };
-                    self.dropped.charge_feedback(plan, i as u32, lost as u64);
+                EventCarry::Move { from } => {
+                    let carried = old.event_fb.get_mut(from.index()).and_then(Option::take);
+                    let lost = move_fifo(new.event_fb[i].as_mut(), carried, &mut st.spare_events);
+                    self.dropped.charge_feedback(plan, feedback, lost as u64);
                 }
             }
         }
@@ -469,17 +503,20 @@ impl<F: Float> Executor<F> {
             if let Some(j) = *from {
                 let writer = old.meters.get_mut(j as usize).and_then(Option::take);
                 if let Some(w) = &writer {
-                    w.set_width(plan.meters.as_slice()[i].1);
+                    w.set_width(plan.program.meters.as_slice()[i].1);
                 }
                 new.meters[i] = writer;
             }
         }
+        // A driven state keeps its place across commits that keep the declick
+        // length (not the rate: distinct rates can round to one length).
+        let same_declick = old_plan.is_none_or(|o| o.prepare.declick() == plan.prepare.declick());
         for (i, from) in st.lanes.iter().enumerate() {
             if let Some(carried) = from
                 .and_then(|j| old.lanes.get_mut(j as usize))
                 .map(SumLane::carry)
             {
-                new.lanes[i].adopt(carried, max_block, &mut st.spare_drives);
+                new.lanes[i].adopt(carried, max_block, same_declick, &mut st.spare_drives);
             }
         }
 
@@ -516,7 +553,7 @@ impl<F: Float> Executor<F> {
                 }
             }
             for g in &st.gone_delays {
-                if let Some(Some(Ring::Event(f))) = old.rings.get_mut(g.from as usize)
+                if let Some(Some(f)) = old.event_delays.get_mut(g.from.index())
                     && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
                 {
                     let mut lost =
@@ -529,7 +566,7 @@ impl<F: Float> Executor<F> {
                 }
             }
             for g in &st.gone_feedback {
-                if let Some(Some(f)) = old.event_fb.get(g.from as usize)
+                if let Some(Some(f)) = old.event_fb.get(g.from.index())
                     && let Some((u, shell)) = flush_target(plan, inject, has_inject, g.at)
                 {
                     let lost = f.flush_into(&mut shell.events);
@@ -600,8 +637,8 @@ impl<F: Float> Executor<F> {
                     // is owed to the delay's FIFO, which pours it in behind
                     // what is in flight.
                     Route::Delay(i) => {
-                        let placed = match new.rings[i as usize].as_mut() {
-                            Some(Ring::Event(f)) => {
+                        let placed = match new.event_delays[i.index()].as_mut() {
+                            Some(f) => {
                                 let owed = owing.clone().all(|h| f.owe(h));
                                 // What fits goes in now, as the close of a
                                 // cut edge always did; the rest pours as
@@ -609,7 +646,7 @@ impl<F: Float> Executor<F> {
                                 f.pour();
                                 owed
                             }
-                            _ => false,
+                            None => false,
                         };
                         if !placed {
                             // The FIFO was built with its table.
@@ -720,31 +757,23 @@ fn fill(to: &mut CappedVec<Event>, events: &[Event]) -> u32 {
     u32::try_from(events.len() - kept).unwrap_or(u32::MAX)
 }
 
-/// `carried`, copied into `target`, the ring built for its new length: both
+/// `carried`, copied into `target`, the FIFO built for its new length: both
 /// go on, the old one to `spare`. Returns how many events a FIFO that was
 /// built too small could not keep.
-fn move_ring<F: Float>(
-    target: Option<&mut Ring<F>>,
-    carried: Option<Ring<F>>,
-    spare: &mut CappedVec<Ring<F>>,
+fn move_fifo(
+    target: Option<&mut EventFifo>,
+    carried: Option<EventFifo>,
+    spare: &mut CappedVec<EventFifo>,
 ) -> usize {
     match (target, carried) {
-        (Some(Ring::Audio(n)), Some(Ring::Audio(o))) => {
-            n.transfer_from(&o);
-            place(spare, Ring::Audio(o));
-            0
-        }
-        (Some(Ring::Event(n)), Some(Ring::Event(mut o))) => {
+        (Some(n), Some(mut o)) => {
             let lost = n.transfer_from(&mut o);
-            place(spare, Ring::Event(o));
+            place(spare, o);
             lost
         }
-        (_, Some(o)) => {
-            debug_assert!(false, "a carried ring has a ring built for it");
-            let lost = match &o {
-                Ring::Event(f) => f.queued(),
-                Ring::Audio(_) => 0,
-            };
+        (None, Some(o)) => {
+            debug_assert!(false, "a moved FIFO has a FIFO built for it");
+            let lost = o.queued();
             place(spare, o);
             lost
         }

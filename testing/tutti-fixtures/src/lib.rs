@@ -6,7 +6,8 @@
 //! [`Fnv`], a bit hash; [`wait_until`] and its [`HANG_GUARD`], a bounded wait
 //! for another thread, [`for_each_row`], a table test's row runner, and
 //! [`unique_name`], a name for what the OS shares; [`macos_major`], the macOS
-//! release a test runs on; and [`sf2`], a SoundFont built in memory.
+//! release a test runs on; [`fixed_blocks`] and [`cycle_blocks`], a total cut into
+//! the blocks a test renders under; and [`sf2`], a SoundFont built in memory.
 //!
 //! A test finds a repo file through [`repo_root`] and [`asset`], never through
 //! a relative `..` path, so moving a crate never changes what a test reads.
@@ -57,6 +58,7 @@ mod alloc_count;
 #[cfg_attr(not(target_os = "macos"), path = "au/other.rs")]
 mod au;
 mod block_on;
+mod blocks;
 mod digest;
 mod env;
 #[cfg(feature = "graph")]
@@ -96,7 +98,8 @@ pub use alloc_count::{ThreadCounting, allocations};
 )]
 pub use au::*;
 pub use block_on::{block_on, block_on_within};
-pub use digest::{Fnv, Noise, noise};
+pub use blocks::{cycle_blocks, fixed_blocks};
+pub use digest::{Fnv, Noise, noise, uniform, uniform_noise};
 pub use env::{ScopedEnv, cases, remove_env, set_env};
 #[cfg(feature = "graph")]
 pub use event_rig::{BlockClock, EventRig, Output, Seen, Sink, heard};

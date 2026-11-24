@@ -3,7 +3,7 @@
 //! 2012, eq. 4 and 5) and of the RBJ bell under the bilinear map, computed here.
 
 use core::f64::consts::PI;
-use tutti_fixtures::signal::sine;
+use tutti_fixtures::signal::{amplitude_at, sine};
 use tutti_units::{Amplitude, Samples};
 
 use tutti_buffers::ChannelLayout;
@@ -23,24 +23,17 @@ const RUN: usize = 24_000;
 const WINDOW: usize = 4_800;
 
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    Db::new(db).to_amplitude().get()
 }
 
 /// The amplitude of the component at `f` in the last [`WINDOW`] frames of `x`, by correlation
 /// with a sine and a cosine over whole periods.
 fn component(x: &[f32], f: f64) -> f64 {
-    let start = x.len() - WINDOW;
-    let (mut s, mut c) = (0.0, 0.0);
-    for (i, &v) in x[start..].iter().enumerate() {
-        let w = 2.0 * PI * f * (start + i) as f64 / FS;
-        s += f64::from(v) * w.sin();
-        c += f64::from(v) * w.cos();
-    }
-    2.0 * s.hypot(c) / WINDOW as f64
+    amplitude_at(&x[x.len() - WINDOW..], Hz::new(f), SR)
 }
 
 fn db(ratio: f64) -> f64 {
-    20.0 * ratio.log10()
+    Amplitude::new(ratio).to_db().get()
 }
 
 /// The compressor's reduction at `level` dB, positive.

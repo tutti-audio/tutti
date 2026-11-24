@@ -40,8 +40,8 @@ fn reclaim_frees_a_request_a_block_held_across_the_next() {
         let _held = node.mpe_request.lend();
         controls.set_mpe_profile(
             MidiGroup::FIRST,
-            Some(tutti_midi_protocol::MpeZones::single(
-                tutti_midi_protocol::MpeZoneConfig::profile(
+            Some(tutti_midi_protocol::ProfileZones::single(
+                tutti_midi_protocol::ProfileZone::new(
                     tutti_ump::MpeZoneSpan::new(MidiChannel::of(0), tutti_ump::MpeChannels::of(4))
                         .unwrap(),
                     tutti_midi_protocol::PitchBendSensitivity::MPE_PROFILE_DEFAULT,

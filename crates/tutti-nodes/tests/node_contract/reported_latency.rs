@@ -33,7 +33,7 @@ const BLOCK: usize = 64;
 /// Run `node` (prepared here) over `frames` frames of a unit impulse at frame
 /// 0 on every input, through `process` in [`BLOCK`]-frame blocks. Returns one
 /// `Vec` per output.
-fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
+pub(crate) fn impulse_response<N: Node>(node: N, frames: usize) -> Vec<Vec<f32>> {
     let mut node = prepared(node, SR, BLOCK);
     let ins = usize::from(node.shape().audio_in().count());
     let mut out: Vec<Vec<f32>> = Vec::new();
@@ -300,7 +300,10 @@ fn a_delay_insert_adds_no_compensation_to_the_other_paths() {
         &[Samples::new(0); 3],
         "no output pre-rolls"
     );
-    assert!(plan.delays().is_empty(), "the compiler spliced a delay");
+    assert!(
+        plan.audio_delays().is_empty() && plan.event_delays().is_empty(),
+        "the compiler spliced a delay"
+    );
 }
 
 /// A summing bus does not hide the latency of what feeds it.

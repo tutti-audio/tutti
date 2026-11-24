@@ -24,25 +24,28 @@ fn with_lsb(current: U14, lsb: U7) -> U14 {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub(crate) struct Channel {
-    pub(crate) is_percussion_channel: bool,
+    /// Whether this is the percussion channel: a Program Change on it selects
+    /// from the percussion bank, whatever Bank Select holds.
+    percussion: bool,
 
-    bank_number: i32,
+    /// The bank and the program the channel plays.
+    bank: tutti_sf2::Bank,
+    program: U7,
     /// The Bank Select (CC 0 and 32) received and not yet applied (M1 p.13). The
-    /// next Program Change makes it the `bank_number`.
+    /// next Program Change applies it.
     pending_bank: U14,
-    patch_number: i32,
 
     reverb_send: u8,
     chorus_send: u8,
 }
 
 impl Channel {
-    pub(crate) fn new(is_percussion_channel: bool) -> Self {
+    pub(crate) fn new(percussion: bool) -> Self {
         let mut channel = Self {
-            is_percussion_channel,
-            bank_number: 0,
+            percussion,
+            bank: tutti_sf2::Bank::Melodic(U7::of(0)),
+            program: U7::of(0),
             pending_bank: U14::of(0),
-            patch_number: 0,
             reverb_send: 0,
             chorus_send: 0,
         };
@@ -53,9 +56,9 @@ impl Channel {
     }
 
     pub(crate) fn reset(&mut self) {
-        self.bank_number = if self.is_percussion_channel { 128 } else { 0 };
+        self.bank = self.bank_of(U7::of(0));
         self.pending_bank = U14::of(0);
-        self.patch_number = 0;
+        self.program = U7::of(0);
 
         self.reverb_send = 40;
         self.chorus_send = 0;
@@ -72,32 +75,45 @@ impl Channel {
         self.pending_bank = with_lsb(self.pending_bank, value);
     }
 
-    /// A Program Change: the held bank takes effect (M1 p.13), by its MSB (a
-    /// SoundFont's bank is one number, which MIDI sends as the MSB), and the
-    /// program is selected.
-    pub(crate) fn program_change(&mut self, program: U7) {
-        self.bank_number = i32::from(self.pending_bank.get() >> 7);
-
-        if self.is_percussion_channel {
-            self.bank_number += 128;
+    /// The bank a Bank Select of MSB `msb` names on this channel (a
+    /// SoundFont's bank is one number, which MIDI sends as the MSB): the
+    /// percussion bank on the percussion channel, whatever the MSB.
+    fn bank_of(&self, msb: U7) -> tutti_sf2::Bank {
+        if self.percussion {
+            tutti_sf2::Bank::Percussion
+        } else {
+            tutti_sf2::Bank::Melodic(msb)
         }
-        self.patch_number = i32::from(program.get());
     }
 
-    /// Selects a preset's bank and program at once: a melodic bank is held as
-    /// Bank Select and the Program Change applies it; the percussion bank
-    /// (`wBank` 128) is the channel's bank as it is.
-    pub(crate) fn select(&mut self, bank: tutti_sf2::Bank, program: U7) {
-        match bank {
-            tutti_sf2::Bank::Melodic(msb) => {
-                self.pending_bank = with_msb(msb);
-                self.program_change(program);
-            }
-            tutti_sf2::Bank::Percussion => {
-                self.bank_number = i32::from(tutti_sf2::Bank::PERCUSSION_NUMBER);
-                self.patch_number = i32::from(program.get());
-            }
+    /// The MSB a Bank Select sends for `bank` on this channel, `None` for a
+    /// bank MIDI cannot name here: the percussion bank on a melodic channel,
+    /// a melodic bank on the percussion channel.
+    fn msb_of(&self, bank: tutti_sf2::Bank) -> Option<U7> {
+        match (bank, self.percussion) {
+            (tutti_sf2::Bank::Melodic(msb), false) => Some(msb),
+            (tutti_sf2::Bank::Percussion, true) => Some(U7::of(0)),
+            _ => None,
         }
+    }
+
+    /// A Program Change: the held bank takes effect (M1 p.13) and the program
+    /// is selected.
+    pub(crate) fn program_change(&mut self, program: U7) {
+        let msb = U7::masked((self.pending_bank.get() >> 7) as u8);
+        self.bank = self.bank_of(msb);
+        self.program = program;
+    }
+
+    /// Selects a preset's bank and program at once, as they are: the channel
+    /// plays that preset, whichever channel it is. A melodic bank is also held
+    /// as Bank Select, as the message that names it would leave it.
+    pub(crate) fn select(&mut self, bank: tutti_sf2::Bank, program: U7) {
+        if let tutti_sf2::Bank::Melodic(msb) = bank {
+            self.pending_bank = with_msb(msb);
+        }
+        self.bank = bank;
+        self.program = program;
     }
 
     /// The most messages [`chase`](Self::chase) writes: a Program Change with
@@ -111,7 +127,7 @@ impl Channel {
     /// along; the Bank Select received and not yet applied, which waits for
     /// the next Program Change (M1 p.13); and the two effect sends.
     pub(crate) fn chase(&self, emit: &mut impl FnMut(Voice2)) {
-        let fresh = Self::new(self.is_percussion_channel);
+        let fresh = Self::new(self.percussion);
         let cc = |controller: CCNumber, value: u8| Voice2::ControlChange {
             controller,
             value: ControlValue::from(U7::masked(value)),
@@ -119,16 +135,12 @@ impl Channel {
         // What the receiver holds as Bank Select once the messages so far
         // are read: nothing, then the bank's MSB if a Program Change goes.
         let mut held = fresh.pending_bank;
-        if (self.bank_number, self.patch_number) != (fresh.bank_number, fresh.patch_number) {
-            // `program_change` made the bank number of the held bank's MSB,
-            // plus 128 on the percussion channel.
-            let bank = self.bank_number - if self.is_percussion_channel { 128 } else { 0 };
-            if let (Some(msb), Some(program)) = (
-                u8::try_from(bank).ok().and_then(U7::new),
-                u8::try_from(self.patch_number).ok().and_then(U7::new),
-            ) {
+        if (self.bank, self.program) != (fresh.bank, fresh.program) {
+            // A bank a Program Change cannot name on this channel is not
+            // chased: the receiver stays on its own.
+            if let Some(msb) = self.msb_of(self.bank) {
                 emit(Voice2::ProgramChange {
-                    program,
+                    program: self.program,
                     bank: Some(Bank {
                         msb,
                         lsb: U7::of(0),
@@ -165,12 +177,14 @@ impl Channel {
         self.chorus_send = value as u8;
     }
 
-    pub(crate) fn bank_number(&self) -> i32 {
-        self.bank_number
+    /// The bank the channel plays.
+    pub(crate) fn bank(&self) -> tutti_sf2::Bank {
+        self.bank
     }
 
-    pub(crate) fn patch_number(&self) -> i32 {
-        self.patch_number
+    /// The program the channel plays.
+    pub(crate) fn program(&self) -> U7 {
+        self.program
     }
 
     /// What CC 91 adds to a voice's reverb send, as a fraction of full level:
@@ -192,6 +206,49 @@ impl Channel {
 mod tests {
     use super::*;
     use tutti_ump::ControlValue;
+
+    /// **A chase carries the selection a Program Change can name on the
+    /// channel, and no other.** A melodic channel on bank 2, program 40 and
+    /// the percussion channel on kit 8 each chase one Program Change that puts
+    /// a fresh channel of the same kind on the same bank and program; the
+    /// percussion bank on a melodic channel and a melodic bank on the
+    /// percussion channel chase none.
+    #[test]
+    fn a_chase_carries_what_a_program_change_can_name_on_the_channel() {
+        use tutti_sf2::Bank as Sf2;
+        let cases = [
+            (false, Sf2::Melodic(U7::of(2)), 40, true),
+            (true, Sf2::Percussion, 8, true),
+            (false, Sf2::Percussion, 8, false),
+            (true, Sf2::Melodic(U7::of(2)), 40, false),
+        ];
+        for (percussion, bank, program, carried) in cases {
+            let mut channel = Channel::new(percussion);
+            channel.select(bank, U7::of(program));
+            let mut fresh = Channel::new(percussion);
+            let mut changes = 0;
+            channel.chase(&mut |m| match m {
+                Voice2::ProgramChange { program, bank } => {
+                    if let Some(bank) = bank {
+                        fresh.select_bank_coarse(bank.msb);
+                    }
+                    fresh.program_change(program);
+                    changes += 1;
+                }
+                Voice2::ControlChange { .. } => {}
+                other => panic!("a chase sends no {other:?}"),
+            });
+            let what = format!("percussion channel {percussion}, {bank:?}");
+            assert_eq!(changes, usize::from(carried), "{what}");
+            if carried {
+                assert_eq!(
+                    (fresh.bank(), fresh.program()),
+                    (bank, U7::of(program)),
+                    "{what}"
+                );
+            }
+        }
+    }
 
     /// A chased effect send is the 7-bit value upscaled Min-Center-Max (M2-115 section 3):
     /// the centre 64 is exactly `0x8000_0000`, 127 is full scale, `0xFFFF_FFFF`, and a value

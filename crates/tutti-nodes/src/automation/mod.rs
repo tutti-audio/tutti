@@ -24,8 +24,11 @@ mod recording;
 // re-exported here for the automation consumers.
 #[doc(hidden)]
 pub use control_lane::LaneProbe;
-pub use control_lane::{ControlLaneNode, ForeignLaneConfig, LaneControls, UnitLaneConfig};
-pub use lane::{AutomationLaneConfig, AutomationLaneNode, LiveAutomationLane};
+pub use control_lane::{
+    ControlLaneNode, ForeignLane, ForeignLaneConfig, ForeignLaneControls, LaneControls, LaneKind,
+    PortLane, UnitLaneConfig,
+};
+pub use lane::{AutomationLaneConfig, AutomationLaneNode};
 pub use recording::{AutomationRecorder, RecordMode, RecordingConfig};
 pub use tutti_modulation::Curve;
 

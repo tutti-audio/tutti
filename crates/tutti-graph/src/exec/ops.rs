@@ -2,8 +2,7 @@
 //! outputs and captures.
 
 use super::node_op::Flags;
-use super::state::Ring;
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::{AudioSlotId, EventSlotId};
 use crate::compile::plan::{EMPTY_SLOT, GainPortOp, InputBound, ZERO_SLOT};
 use crate::event::merge::{merge_params, merge_walk};
 use crate::event::types::Event;
@@ -14,24 +13,7 @@ use crate::model::gain::{self, SumLane, Weight};
 use crate::node::MAX_PORTS;
 use crate::node::param_event::ParamEvent;
 use tutti_buffers::Float;
-
-/// An audio delay's ring.
-#[inline]
-pub(crate) fn audio_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut AudioRing<F> {
-    match r {
-        Some(Ring::Audio(a)) => a,
-        _ => unreachable!("an audio delay on an event ring"),
-    }
-}
-
-/// An event delay's FIFO.
-#[inline]
-pub(crate) fn event_ring<F: Float>(r: &mut Option<Ring<F>>) -> &mut EventFifo {
-    match r {
-        Some(Ring::Event(f)) => f,
-        _ => unreachable!("an event delay on an audio ring"),
-    }
-}
+use tutti_units::Samples;
 
 /// [`Op::MainInput`](crate::Op::MainInput).
 #[inline]
@@ -90,7 +72,8 @@ pub(crate) fn delay_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized>(
 /// `dst` is the first addend's own slot in the in-place form. That addend is
 /// then not borrowed for reading: it is weighted in place (`dst = +0.0 + w *
 /// dst`, which turns a `-0.0` into `+0.0`, as `+0.0 + w * a_0` does) and the
-/// rest are added into it.
+/// rest are added into it. `declick` is the plan's declick length
+/// ([`Prepare::declick`](crate::Prepare)), which every lane's fade runs over.
 #[inline]
 pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Sized>(
     arena: &mut A,
@@ -98,9 +81,10 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
     events: &E,
     list: &[AudioSlotId],
     lanes: &mut [SumLane<F>],
-    gains: &[GainPortOp],
+    gains: &[GainPortOp<EventSlotId>],
     dst: AudioSlotId,
     frames: usize,
+    declick: Samples,
 ) {
     debug_assert!(!list.is_empty() && list.len() <= MAX_PORTS);
     debug_assert!(lanes.is_empty() || lanes.len() == list.len());
@@ -111,8 +95,8 @@ pub(crate) fn sum_op<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: Even
         let source = gains
             .iter()
             .find(|g| usize::from(g.lane) == k)
-            .map(|g| (g.from, &events.pev(EventSlotId::new(g.slot))[..]));
-        *w = SumLane::weight(lane, frames, source);
+            .map(|g| (g.from, &events.pev(g.slot)[..]));
+        *w = SumLane::weight(lane, frames, declick, source);
     }
     // Requests, then sorted by slot; the order of addition is the `Read`
     // index, among the live addends.

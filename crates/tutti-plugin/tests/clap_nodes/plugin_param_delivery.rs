@@ -28,11 +28,11 @@ use clap_probe::{ProbeEnv, Rig, load_probe, render};
 use param_probe::{extra, knob, knobs, load_param_probe, until};
 use tutti_fixtures::machine_lock;
 use tutti_graph::{ForkTarget, Prepare, RenderMode, TransportPosition};
-use tutti_nodes::automation::{ControlLaneNode, LaneControls};
+use tutti_nodes::automation::{ControlLaneNode, ForeignLane, ForeignLaneControls};
 use tutti_plugin_host::PluginHandle;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
-use tutti_units::ParamId;
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
+use tutti_units::{Normalized, ParamId};
 
 const SAMPLE_RATE: f64 = 48_000.0;
 const BLOCK: usize = 256;
@@ -53,7 +53,7 @@ fn read(handle: &PluginHandle, i: usize) -> Option<f32> {
 }
 
 /// A rolling graph with the plugin fed by `lanes`.
-fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode>) -> Rig {
+fn rig(client: tutti_plugin::PluginClient, lanes: Vec<ControlLaneNode<ForeignLane>>) -> Rig {
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -113,7 +113,7 @@ fn an_unchanged_value_is_not_sent_again() {
     let (client, handle) = load_param_probe(PARAMS, SAMPLE_RATE);
     let (knobs, lanes) = knobs(PARAMS, value);
     let mut rig = rig(client, lanes);
-    let resend = |knobs: &[LaneControls]| knobs.iter().for_each(LaneControls::resync);
+    let resend = |knobs: &[ForeignLaneControls]| knobs.iter().for_each(|k| k.lane().resync());
 
     assert!(until(
         SETTLE,
@@ -135,7 +135,7 @@ fn an_unchanged_value_is_not_sent_again() {
         "a value held still was sent again"
     );
 
-    assert!(knobs[3].store(0.875));
+    assert!(knobs[3].store(Normalized::of(0.875)));
     assert!(until(
         SETTLE,
         || {
@@ -185,7 +185,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         "the edit reached the plugin"
     );
     for _ in 0..100 {
-        knobs[p].resync();
+        knobs[p].lane().resync();
         rig.run_answered(BLOCK, |_, _| 0.0);
     }
     // Every block was answered by the server, so any resend has crossed it.
@@ -196,7 +196,7 @@ fn an_edit_on_the_plugin_survives_a_held_host_value() {
         "a held host value overwrote the plugin-side edit"
     );
 
-    assert!(knobs[p].store(0.5));
+    assert!(knobs[p].store(Normalized::of(0.5)));
     assert!(
         until(
             SETTLE,
@@ -241,7 +241,7 @@ fn an_export_renders_an_edit_made_in_the_plugin_as_live_does() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let held = knob(GAIN, gain_at(-6.0));
+    let held = knob(GAIN, gain_at(-6.0)).0;
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(FORK_BLOCK)),

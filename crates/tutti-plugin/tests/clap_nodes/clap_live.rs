@@ -25,6 +25,7 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
+use crate::ramp_source::{RampSource, ramp};
 use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
@@ -35,37 +36,14 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
-use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
+use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_plugin_ipc::RING_SLOTS;
 use tutti_timeline::Transport;
-use tutti_units::{SampleRate, Samples, Tail};
+use tutti_units::{SampleRate, Samples};
 
 /// What the probe declares and delays by (`REPORTED_LATENCY_SAMPLES`).
 const PROBE_LATENCY: usize = 137;
-
-/// Input frame `t`: distinct, never zero, exact in `f32`.
-fn ramp(t: u64) -> f32 {
-    ((t % 997) + 1) as f32 / 1024.0
-}
-
-/// The ramp as a graph source, read off each block's `Env`.
-struct RampSource;
-
-impl Node for RampSource {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let first = cx.env.frame.get();
-        for (i, s) in io.output(0).iter_mut().enumerate() {
-            *s = ramp(first + i as u64);
-        }
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
 
 /// What a live run saw.
 struct Run {
@@ -168,11 +146,18 @@ fn settled(controls: &tutti_plugin_host::PluginControls, refused: u64, skipped: 
     );
 }
 
-/// Render `blocks` callbacks of `quantum` frames at `rate`, each once the
+/// Render `blocks` callbacks of `delivered` frames at `rate` (the graph
+/// prepared for `quantum`), each once the
 /// chunk before it is settled, through an engine whose graph is the ramp into the probe. With
 /// `burst_at`, the callbacks from that block (counted after warm-up) on run
 /// [`BURST`] in a row with no pause, as a device does when it catches up.
-fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -> Run {
+fn run_live(
+    rate: f64,
+    quantum: usize,
+    delivered: usize,
+    blocks: usize,
+    burst_at: Option<usize>,
+) -> Run {
     let probe = load_probe(rate);
     let inputs = probe.client.inputs();
     let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(quantum)))
@@ -204,8 +189,8 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
 
     let transport = Transport::new(SampleRate::of(rate));
     let engine = Engine::new(&transport, &mut ed, exec).expect("the engine builds");
-    let warm_up = 8 + declared.get().div_ceil(quantum);
-    let mut buf = vec![0.0f32; quantum];
+    let warm_up = 8 + declared.get().div_ceil(delivered);
+    let mut buf = vec![0.0f32; delivered];
     let (mut silent, mut wrong) = (Vec::new(), Vec::new());
     let (mut misses, mut lates) = (Vec::new(), Vec::new());
     let (mut refuses, mut skips) = (Vec::new(), Vec::new());
@@ -231,7 +216,7 @@ fn run_live(rate: f64, quantum: usize, blocks: usize, burst_at: Option<usize>) -
         ed.collect();
         if b >= warm_up {
             let at = b - warm_up;
-            let first = (b * quantum) as u64;
+            let first = (b * delivered) as u64;
             if controls.chunk_outcomes().missed.get() > missed {
                 misses.push(at);
             }
@@ -413,7 +398,12 @@ fn judged_run(what: &str, run: impl FnOnce() -> Run, from: usize, neutral: Range
 
 fn assert_live(rate: f64, quantum: usize) {
     let what = format!("{quantum}-frame callbacks");
-    let run = judged_run(&what, || run_live(rate, quantum, 200, None), 0, 0..0);
+    let run = judged_run(
+        &what,
+        || run_live(rate, quantum, quantum, 200, None),
+        0,
+        0..0,
+    );
     assert_eq!(
         run.declared,
         Samples::new(PROBE_LATENCY + quantum),
@@ -467,7 +457,7 @@ fn a_burst_of_callbacks_loses_blocks_but_never_corrupts_them() {
     let window = BURST_AT..BURST_AT + BURST + RING_SLOTS;
     let run = judged_run(
         "a burst of callbacks",
-        || run_live(48_000.0, QUANTUM, BLOCKS, Some(BURST_AT)),
+        || run_live(48_000.0, QUANTUM, QUANTUM, BLOCKS, Some(BURST_AT)),
         SETTLE,
         window,
     );

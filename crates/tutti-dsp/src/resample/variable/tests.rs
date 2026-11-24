@@ -1,6 +1,6 @@
 use super::*;
 use std::f64::consts::TAU;
-use tutti_rt::SplitMix64;
+use tutti_units::{Hz, SampleRate};
 
 /// The head's step for `ratio` in `2^-32` frames, rounded to nearest.
 fn counts(ratio: f64) -> u64 {
@@ -43,7 +43,12 @@ fn run<F: Float>(
 }
 
 fn sine(f: f64, frames: usize) -> Vec<f64> {
-    (0..frames).map(|n| (TAU * f * n as f64).sin()).collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        tutti_units::Amplitude::new(1.0),
+        SampleRate::of(1.0),
+        Samples::new(frames),
+    )
 }
 
 /// Least-squares fit of `a cos + b sin` at `f` cycles per frame over `y`: the amplitude, and
@@ -71,13 +76,6 @@ fn fit(y: &[f64], f: f64) -> (f64, f64) {
     (a.hypot(b), (rest / y.len() as f64).sqrt())
 }
 
-fn noise(frames: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..frames)
-        .map(|_| f64::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0)
-        .collect()
-}
-
 /// At a ratio of exactly 1 every read sits on an input frame, where the kernel is 1 and
 /// every other tap is a sinc zero (`sin(pi m)` to the rounding of `pi m`, at most 1e-15 over
 /// 63 taps): the output is the input delayed by the latency, to 1e-13 in `f64`. At `f32`
@@ -90,7 +88,7 @@ fn at_unity_the_output_is_the_input_delayed_by_the_latency() {
         .map(|n| (n, 1.0))
         .collect();
     let total: usize = blocks.iter().map(|b| b.0).sum();
-    let x = noise(total + 64, 7);
+    let x = tutti_fixtures::uniform_noise::<f64>(7, total + 64);
     let latency = VariableResampler::<f64>::LATENCY.get();
     let (y, popped) = run(
         &mut VariableResampler::<f64>::new(ChannelLayout::MONO),

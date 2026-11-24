@@ -297,9 +297,14 @@ fn a_dead_reader_is_reopened_or_reads_reader_failed() {
     let port = input(&mut s, &keys);
 
     fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
-    let _ = s.update();
+    let events = s.update();
     assert_eq!(port.presence(), Presence::Live, "reopened at once");
     assert!(!fake.connected_inputs().is_empty());
+    assert_eq!(
+        changed(&events, port.id()),
+        [],
+        "a reopen that says the same raises no change"
+    );
 
     fake.refuse_input_opens(true);
     fake.kill_input_reader(EndpointId::from_raw(1), InputFault::PortBroken);
@@ -328,7 +333,7 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     plug(&fake, 1, "Keys", PortDirection::Input);
     let _ = s.update();
     let keys = device(&mut s, "Keys");
-    let before = s.graph_ref().testing().sent_plan().map(|p| p.order().len());
+    let before = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
     let mut nodes = Vec::new();
     for _ in 0..3 {
         let port = input(&mut s, &keys);
@@ -344,7 +349,7 @@ fn an_unrouted_port_that_is_removed_leaves_the_graph() {
     for node in nodes {
         assert!(!s.graph_ref().contains(node), "{node:?} left");
     }
-    let after = s.graph_ref().testing().sent_plan().map(|p| p.order().len());
+    let after = s.graph_ref().testing().sent_plan().map(|p| p.units().len());
     assert_eq!(before, after, "nothing was left in the plan");
 }
 

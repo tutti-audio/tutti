@@ -217,9 +217,10 @@ fn a_layout_takes_a_routing_for_its_own_bus_and_defaults_by_its_width() {
     for w in [1u16, 3, 6] {
         let f = DelayLayout::new(bus(w), MAX);
         assert!(f.routing().is_none(), "width {w}");
+        assert_eq!(f.times(), &ChannelTimes::linked(), "width {w}");
         assert_eq!(
-            f.timing(),
-            &DelayTiming::Free(ChannelTimes::linked()),
+            f.notes(),
+            &NoteTimes::all(NoteDuration::QUARTER),
             "width {w}"
         );
     }
@@ -282,24 +283,27 @@ fn channel_times_refuse_what_is_not_a_time_and_what_does_not_fit() {
     );
 }
 
-/// A delay's times are seconds or notes, the last the builder is told: `synced` after `times`
-/// is synced and `times` after `synced` is in seconds, so no layout holds both.
+/// A layout holds its seconds and its notes together, in whichever order the builder is told
+/// them: a running delay reads the one its sync says.
 #[test]
-fn a_layout_is_timed_by_seconds_or_by_notes_never_both() {
-    let notes = NoteTimes::all(NoteDuration::QUARTER);
+fn a_layout_holds_its_seconds_and_its_notes_together() {
+    let notes = NoteTimes::all(NoteDuration::from(NoteValue::EIGHTH));
     let seconds = ChannelTimes::try_from(&[Seconds::new(0.5)][..]).unwrap();
-    let synced = stereo_builder()
-        .times(seconds)
-        .synced(notes)
-        .build()
-        .unwrap();
-    assert_eq!(synced.timing(), &DelayTiming::Synced(notes));
-    let free = stereo_builder()
-        .synced(notes)
-        .times(seconds)
-        .build()
-        .unwrap();
-    assert_eq!(free.timing(), &DelayTiming::Free(seconds));
+    for layout in [
+        stereo_builder()
+            .times(seconds)
+            .notes(notes)
+            .build()
+            .unwrap(),
+        stereo_builder()
+            .notes(notes)
+            .times(seconds)
+            .build()
+            .unwrap(),
+    ] {
+        assert_eq!(layout.times(), &seconds);
+        assert_eq!(layout.notes(), &notes);
+    }
 }
 
 /// Notes are for every channel or one for each: a different count is refused at the width it
@@ -308,16 +312,16 @@ fn a_layout_is_timed_by_seconds_or_by_notes_never_both() {
 fn note_times_fit_the_width_they_are_built_for() {
     let eighth = NoteDuration::from(NoteValue::EIGHTH);
     let two = NoteTimes::try_from(&[NoteDuration::QUARTER, eighth][..]).unwrap();
-    assert!(stereo_builder().synced(two).build().is_ok());
+    assert!(stereo_builder().notes(two).build().is_ok());
     assert!(
         stereo_builder()
-            .synced(NoteTimes::all(eighth))
+            .notes(NoteTimes::all(eighth))
             .build()
             .is_ok()
     );
     assert_eq!(
         DelayLayout::builder(bus(3), MAX)
-            .synced(two)
+            .notes(two)
             .build()
             .unwrap_err(),
         DelayLayoutError::Notes(NoteTimesError::Length { width: 3, got: 2 })

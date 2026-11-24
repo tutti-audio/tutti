@@ -2,7 +2,6 @@ use super::*;
 use crate::{SampleRange, StftConfig, stft_magnitude};
 use core::num::NonZeroUsize;
 use tutti_buffers::Mono;
-use tutti_rt::SplitMix64;
 use tutti_units::{SampleRate, Samples};
 
 const RATE: f64 = 16_000.0;
@@ -20,10 +19,7 @@ fn transform(samples: &[f64]) -> StftMagnitude {
 }
 
 fn noise(len: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..len)
-        .map(|_| crate::test_rng::uniform(&mut rng, -1.0, 1.0))
-        .collect()
+    tutti_fixtures::uniform_noise(seed, len)
 }
 
 fn config(coefficients: u16) -> MfccConfig {

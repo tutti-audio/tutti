@@ -777,14 +777,15 @@ mod tests {
     #[test]
     fn a_failed_send_keeps_an_mpe_notes_channel() {
         use tutti_midi_protocol::{
-            MemberCount, MpeZoneConfig, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
+            MemberCount, Mpe11Zone, PerNoteTranslation, PitchBendSensitivity, TranslationMode,
         };
         use tutti_ump::{Address, Attribute, BendValue, ExtremeValues, NoteNumber, NoteVelocity};
-        let zone = MpeZoneConfig::lower(
+        let zone = Mpe11Zone::lower(
             MemberCount::of(2),
             PitchBendSensitivity::MPE_MASTER_DEFAULT,
             PitchBendSensitivity::MPE_MEMBER_DEFAULT,
-        );
+        )
+        .layout();
         let midi1_translator = Midi1Translator::with_mode(TranslationMode {
             extremes: ExtremeValues::Scaled,
             per_note: PerNoteTranslation::Mpe(zone),

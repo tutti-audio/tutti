@@ -48,12 +48,9 @@ fn an_enabled_profile_is_a_profile_zone_with_the_default_bend_range() {
     // sensitivity starts at 48 HCUs.
     let zones = mpe_zones(&dialect(&[(2, 6)])).unwrap();
     let zone = zones.zone_of(MidiChannel::of(2)).unwrap();
-    assert_eq!(zone.master_channel(), MidiChannel::of(2));
-    assert_eq!(zone.channel_count().get(), 6);
-    assert_eq!(
-        zone.pitch_bend_range_for(MidiChannel::of(5)),
-        PitchBendSensitivity::MPE_PROFILE_DEFAULT
-    );
+    assert_eq!(zone.manager(), MidiChannel::of(2));
+    assert_eq!(zone.layout().channel_count().get(), 6);
+    assert_eq!(zone.range(), PitchBendSensitivity::MPE_PROFILE_DEFAULT);
     assert!(zones.zone_of(MidiChannel::of(8)).is_none());
 }
 

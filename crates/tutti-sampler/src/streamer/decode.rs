@@ -65,7 +65,7 @@ pub(super) fn unreadable(asset: &Asset) -> OpenError {
 
 /// What a stream's ring is fed from: a decoder that seeks in the file, or the
 /// file decoded whole.
-pub(super) enum Source<F: RingFloat> {
+pub(crate) enum Source<F: RingFloat> {
     #[cfg(codec)]
     Stream(tutti_codec::WaveMetadata, Box<tutti_codec::FileIn<F>>),
     Whole(Arc<Wave<F>>),

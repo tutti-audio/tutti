@@ -32,8 +32,10 @@
 //!
 //! [`read()`](fn@read) parses one whole System Exclusive message as a Universal one
 //! ([`Universal`]: Identity Request and Reply, General MIDI On and Off, Master
-//! Volume, Balance, Fine and Coarse Tuning, and MIDI Machine Control commands and
-//! responses, [`MmcCommand`] and [`MmcInfoField`]), and [`UniversalReader`] is an
+//! Volume, Balance, Fine and Coarse Tuning, and MIDI Machine Control commands,
+//! [`MmcCommand`]). A Machine Control response, which only a device sends,
+//! is read as [`UniversalRead::MachineControlResponse`]: its
+//! [`MmcInfoField`]s and the device they are from. [`UniversalReader`] is an
 //! instrument's edge for it: a Group's UMPs in, the messages addressed to the
 //! instrument ([`SysexDeviceId`], or the all-call) out.
 //!
@@ -114,7 +116,7 @@
 //! [`song_position`](fn@song_position) converts a beat to a Song Position
 //! Pointer and [`SmpteTimecode::from_seconds`] a time to a timecode (each
 //! `None` outside its field, never clamped); [`MtcTimeCode::nibbles`] gives
-//! a timecode's Quarter Frame pieces; [`MpeZoneConfig`], [`MpeZones`] and [`MpeMode`] are the
+//! a timecode's Quarter Frame pieces; [`Mpe11Zone`], [`ProfileZone`] and [`MpeMode`] are the
 //! MPE zone layout (RP-053, and the MIDI-CI MPE Profile's, M2-120), checked
 //! at construction; and [`TuningMessage`] and
 //! its types are the MIDI Tuning Standard's wire values.
@@ -161,13 +163,13 @@ pub use midi1::midi1;
 pub use midi1_translator::Midi1Translator;
 pub use midi2_translator::Midi2Translator;
 pub use mode::{PerNoteTranslation, TranslationMode};
-#[cfg(feature = "serde")]
-pub use mpe::InvalidMpeZoneConfig;
 pub use mpe::InvalidMpeZones;
 pub use mpe::{
-    ChannelResponse, ControllerSupport, Mcm, MemberCount, MpeFeatures, MpeMode, MpeSpec, MpeZone,
-    MpeZoneConfig, MpeZones, NotMemberCount, PitchBendSupport,
+    ChannelResponse, ControllerSupport, Mcm, MemberCount, Mpe11Zone, Mpe11Zones, MpeFeatures,
+    MpeLayout, MpeMode, MpeZone, NotMemberCount, PitchBendSupport, ProfileZone, ProfileZones,
 };
+#[cfg(feature = "serde")]
+pub use mpe::{InvalidMpeLayout, InvalidProfileZone};
 pub use per_note_management::{PerNoteManager, PerNotePolicy};
 pub use sensitivity::PitchBendSensitivity;
 #[cfg(feature = "serde")]
@@ -205,8 +207,8 @@ pub use universal::{
     MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags, MtcFullMessage,
     MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa, NotMmcPosition,
     NotMmcSegmentCount, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-    NotQuarterFramePiece, NotSysexDeviceId, NotWritable, QuarterFrame, QuarterFrameCycle,
-    QuarterFramePiece, Recipient, RunReference, SysexDeviceId, UNIVERSAL_MAX_PAYLOAD, Universal,
-    UniversalPayload, UniversalRead, UniversalReader, VitcInsert, read,
+    NotQuarterFramePiece, NotSysexDeviceId, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
+    Recipient, RunReference, SysexDeviceId, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
+    UniversalRead, UniversalReader, VitcInsert, read,
 };
 pub use voice::channel_voice;

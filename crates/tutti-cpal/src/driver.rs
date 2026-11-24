@@ -13,13 +13,14 @@ use std::sync::Arc;
 
 use tutti_buffers::Float;
 use tutti_engine::{
-    AudioCallbackState, OutputSpec, OutputStream, StartError, Stopped, StreamDriver, StreamHost,
+    AudioCallbackState, OutputQuantum, OutputSpec, OutputStream, StartError, Stopped, StreamDriver,
+    StreamHost,
 };
 
 use crate::Result;
 use crate::driver_seam::CpalDriver;
 use crate::host::DeviceSelector;
-use crate::output::{AudioEngine, Opened, Target};
+use crate::output::{AudioEngine, Origin};
 
 /// The output device lifecycle a host holds: start, restart on another device
 /// or rate, stop.
@@ -33,8 +34,7 @@ use crate::output::{AudioEngine, Opened, Target};
 /// See the [crate-level example](crate) for building one.
 pub struct TuttiDriver<F: Float = f32> {
     host: StreamHost<F>,
-    target: Option<Target>,
-    opened: Opened,
+    origin: Origin,
 }
 
 // Hand-rolled: the host holds the RT-side graph handles and is not `Debug`
@@ -61,15 +61,10 @@ where
     /// side ([`Stopped::apply_pending`]) because the stream it stopped was the
     /// only renderer.
     pub fn new(audio_engine: AudioEngine, callback_state: Arc<AudioCallbackState<F>>) -> Self {
-        let AudioEngine {
-            stream,
-            target,
-            opened,
-        } = audio_engine;
+        let AudioEngine { stream, origin } = audio_engine;
         Self {
             host: StreamHost::new(stream, callback_state),
-            target,
-            opened,
+            origin,
         }
     }
 
@@ -85,12 +80,15 @@ where
     /// Restarts the stream on a (possibly different) output device, which
     /// must run at the rate the graph was built at.
     ///
-    /// Stops the current stream, selects `device` (a
-    /// [`DeviceSelector`], or an `Option<DeviceId>`
-    /// with `None` for the default), reads its config and starts a
-    /// new stream on it.
+    /// Selects `device` (a [`DeviceSelector`], or an `Option<DeviceId>`
+    /// with `None` for the default), stops the current stream, reads the
+    /// device's config and starts a new stream on it.
     ///
     /// # Errors
+    ///
+    /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) when
+    /// the driver has never had a device (built from a bare spec), **with the
+    /// stream left running**: the refusal comes before the stop.
     ///
     /// [`DeviceError::RateChanged`](crate::DeviceError::RateChanged) when the device now
     /// runs at another rate, **with the stream left stopped**: this driver
@@ -131,15 +129,49 @@ where
         device: impl Into<DeviceSelector>,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
     ) -> core::result::Result<(), E> {
-        self.host.stop();
-        if let Some((_, current, _)) = &mut self.target {
-            current.select(device.into());
+        self.origin.target_mut()?.1.select(device.into());
+        self.restart_selected(rerate)
+    }
+
+    /// [`restart_with`](Self::restart_with) asking the device for callbacks of
+    /// `quantum` frames; a backend may round the size it opens at. The request
+    /// stays `quantum` from then on, so a later restart asks for it too; a restart that fails puts back what
+    /// was requested before.
+    ///
+    /// # Errors
+    ///
+    /// As [`restart_with`](Self::restart_with), and
+    /// [`DeviceError::QuantumUnavailable`](crate::DeviceError::QuantumUnavailable)
+    /// when the device does not offer `quantum`.
+    pub fn restart_with_quantum<E: From<crate::DeviceError>>(
+        &mut self,
+        device: impl Into<DeviceSelector>,
+        quantum: OutputQuantum,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), E> {
+        let (_, config, _) = self.origin.target_mut()?;
+        config.select(device.into());
+        let requested = config.quantum.replace(quantum);
+        let restarted = self.restart_selected(rerate);
+        if restarted.is_err()
+            && let Ok((_, config, _)) = self.origin.target_mut()
+        {
+            config.quantum = requested;
         }
+        restarted
+    }
+
+    /// The stop, resolve and start of a restart onto the target as it is now.
+    fn restart_selected<E: From<crate::DeviceError>>(
+        &mut self,
+        rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
+    ) -> core::result::Result<(), E> {
+        self.host.stop();
         let mut opened = None;
         self.host
             .restart_with(
                 || {
-                    let (driver, spec, now) = AudioEngine::resolve_target(self.target.as_ref())?;
+                    let (driver, spec, now) = AudioEngine::resolve_target(self.origin.target()?)?;
                     opened = Some(now);
                     Ok((spec, driver))
                 },
@@ -147,7 +179,7 @@ where
             )
             .map_err(Restart::into_user)?;
         if let Some(opened) = opened {
-            self.opened = opened;
+            self.origin.reopened(opened)?;
         }
         Ok(())
     }
@@ -184,7 +216,7 @@ where
                 |spec, stopped| rerate(spec, stopped).map_err(Restart::Hook),
             )
             .map_err(Restart::into_user)?;
-        self.opened = Opened::Supplied;
+        self.origin.supply();
         Ok(())
     }
 
@@ -195,8 +227,7 @@ where
         spec: OutputSpec,
         driver: D,
         rerate: impl FnOnce(&OutputSpec, &Stopped<'_, F>) -> core::result::Result<(), E>,
-        target: Option<Target>,
-        opened: Opened,
+        origin: Origin,
     ) -> core::result::Result<Self, (StreamHost<F>, E)>
     where
         D::Error: Into<crate::DeviceError>,
@@ -205,11 +236,7 @@ where
             || Ok((spec, driver)),
             |spec, stopped| rerate(spec, stopped).map_err(Restart::Hook),
         ) {
-            Ok(()) => Ok(Self {
-                host,
-                target,
-                opened,
-            }),
+            Ok(()) => Ok(Self { host, origin }),
             Err(e) => Err((host, e.into_user())),
         }
     }
@@ -266,7 +293,7 @@ where
     /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) when the device
     /// opened but the host could not name it.
     pub fn opened_name(&self) -> Result<Option<String>> {
-        self.opened.name()
+        self.origin.opened_name()
     }
 
     /// Selects a device for the next [`restart`](Self::restart).
@@ -275,10 +302,7 @@ where
     /// [`DeviceError::InvalidDevice`](crate::DeviceError::InvalidDevice) on a
     /// driver built from a bare spec, which has no device to select.
     pub fn select_device(&mut self, sel: DeviceSelector) -> Result<&mut Self> {
-        let Some((_, current, _)) = &mut self.target else {
-            return Err(crate::output::no_device());
-        };
-        current.select(sel);
+        self.origin.target_mut()?.1.select(sel);
         Ok(self)
     }
 

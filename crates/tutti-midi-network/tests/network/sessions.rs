@@ -12,7 +12,8 @@ use tutti_midi_network::{
     Credentials, DatagramBuilder, Digest, EndedBy, Event, Fec, Host, HostConfig, IdleInterval,
     Invitation, MAX_QUEUED_EVENTS, NakReason, NetworkEndpoint, Nonce, PingId, Requests, Retransmit,
     RetransmitErrorReason, RetransmitRefusal, RetransmitRequest, SendError, SequenceNumber,
-    SessionConfig, SessionState, Timer, UmpData, UserAuthChallenge, UserAuthState, Username,
+    SessionConfig, SessionState, Timer, UmpData, UserAuthChallenge, UserAuthState,
+    UserAuthentication, Username,
 };
 
 use crate::sim::{Direction, Fate, Sim, client_addr, fixed_nonce, host_addr, identity, note_on};
@@ -403,7 +404,8 @@ fn five_failed_digests_end_the_invitation_with_authentication_failed() {
 /// Spec: m2-124/6.4#13, m2-124/6.7#2, m2-124/6.8#2
 #[test]
 fn a_client_with_no_matching_credentials_is_told_there_is_no_matching_method() {
-    let users = || Admission::Users(vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())]);
+    let users =
+        || Admission::Users(vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())].into());
     let cases = [
         (Admission::SharedSecret("5483".into()), Credentials::none()),
         (
@@ -534,10 +536,9 @@ fn an_authenticated_invitation_without_an_invitation_is_rejected_for_no_prior_in
 
 fn users_sim(user: &str, password: &str) -> Sim {
     Sim::new(
-        host_with(Admission::Users(vec![(
-            Username::new("Rosa").unwrap(),
-            "RPBqBno".into(),
-        )])),
+        host_with(Admission::Users(
+            vec![(Username::new("Rosa").unwrap(), "RPBqBno".into())].into(),
+        )),
         Credentials::none().user(Username::new(user).unwrap(), password),
         SessionConfig::default(),
     )
@@ -1862,6 +1863,118 @@ fn a_host_naks_a_pending_or_a_challenge_as_not_expected() {
         assert_eq!(nak.reason, NakReason::NotExpected);
         assert_eq!(nak.refused, command.header());
         assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+    }
+}
+
+/// A Host that challenged with one method refuses an answer of the other as not
+/// expected, quoting the header, keeps the challenge and counts no failure: the
+/// next wrong digest of the right method is the first failure, delayed 100 ms.
+/// (No M2-124 id covers an answer of the wrong method.)
+#[test]
+fn a_host_naks_an_answer_of_the_other_method_and_keeps_its_challenge() {
+    let rosa = Username::new("Rosa").unwrap();
+    let user_answer = |digest| {
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
+            digest,
+            username: Username::new("Rosa").unwrap(),
+        }))
+    };
+    let cases = [
+        // A shared-secret challenge, answered as a user.
+        (
+            Admission::SharedSecret("5483".into()),
+            AuthMethods::SHARED_SECRET,
+            user_answer(Digest::new([0; 32])),
+            Command::InvitationWithAuth(Digest::new([0; 32])),
+        ),
+        // A users challenge, answered with a shared secret.
+        (
+            Admission::Users(vec![(rosa, "RPBqBno".into())].into()),
+            AuthMethods::USER,
+            Command::InvitationWithAuth(Digest::new([0; 32])),
+            user_answer(Digest::new([0; 32])),
+        ),
+    ];
+    for (admission, methods, other, same) in cases {
+        let mut sim = Sim::new(
+            host_with(admission),
+            Credentials::none(),
+            SessionConfig::default(),
+        );
+        let peer = "10.0.0.9:7000".parse().unwrap();
+        let start = sim.now;
+        let invite = datagram(&Command::Invitation(Invitation {
+            methods,
+            identity: identity("Guess", "G-1"),
+        }));
+        sim.host.on_message(peer, &invite, start);
+        let mut sent = Vec::new();
+        while let Some(t) = sim.host.poll_transmit() {
+            sent.push(t);
+        }
+        assert_eq!(sent.len(), 1, "the challenge");
+        assert_eq!(sim.host.state(peer), SessionState::AuthenticationRequired);
+
+        sim.host.on_message(peer, &datagram(&other), start);
+        let mut naks = Vec::new();
+        while let Some(t) = sim.host.poll_transmit() {
+            naks.extend(
+                tutti_midi_network::parse(&t.payload)
+                    .unwrap()
+                    .map(Result::unwrap),
+            );
+        }
+        let [Command::Nak(nak)] = &naks[..] else {
+            panic!("expected one NAK, got {naks:?}")
+        };
+        assert_eq!(nak.reason, NakReason::NotExpected);
+        assert_eq!(nak.refused, other.header());
+        assert_eq!(sim.host.state(peer), SessionState::AuthenticationRequired);
+
+        // No failure was counted: the next wrong digest is the first, and is
+        // answered after 100 ms rather than 200 ms.
+        sim.host.on_message(peer, &datagram(&same), start);
+        sim.host.on_timeout(start + ms(99));
+        assert!(sim.host.poll_transmit().is_none());
+        sim.host.on_timeout(start + ms(100));
+        assert!(sim.host.poll_transmit().is_some());
+    }
+}
+
+/// A Host is never the one an Accepted is meant for, and a Client never the
+/// one an Invitation with Authentication is meant for: each refuses it as not
+/// expected, quoting the header, and no Session is harmed. (No M2-124 id covers
+/// either.)
+#[test]
+fn a_host_naks_an_accepted_and_a_client_naks_an_authenticated_invitation_as_not_expected() {
+    let mut sim = established();
+    let accepted = Command::Accepted(identity("Laptop", "CLIENT-1"));
+    sim.host
+        .on_message(client_addr(), &datagram(&accepted), sim.now);
+    sim.flush();
+    let [Command::Nak(nak)] = &sim.commands(Direction::HostToClient)[..] else {
+        panic!("expected one NAK for the Accepted")
+    };
+    assert_eq!(nak.reason, NakReason::NotExpected);
+    assert_eq!(nak.refused, accepted.header());
+    assert_eq!(sim.host.state(client_addr()), SessionState::Established);
+
+    for command in [
+        Command::InvitationWithAuth(Digest::new([0; 32])),
+        Command::InvitationWithUserAuth(Box::new(UserAuthentication {
+            digest: Digest::new([0; 32]),
+            username: Username::new("Rosa").unwrap(),
+        })),
+    ] {
+        sim.log.clear();
+        sim.client
+            .on_message(host_addr(), &datagram(&command), sim.now);
+        sim.flush();
+        assert_eq!(
+            naks_from_client(&sim),
+            vec![(NakReason::NotExpected, command.header().word())]
+        );
+        assert_eq!(sim.client.state(), SessionState::Established);
     }
 }
 

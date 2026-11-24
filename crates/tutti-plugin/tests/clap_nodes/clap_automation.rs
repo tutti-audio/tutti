@@ -25,7 +25,9 @@ use tutti_graph::{
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, ForeignLaneConfig, Trajectory};
+use tutti_nodes::automation::{
+    Breakpoint, ControlLaneNode, Curve, ForeignLane, ForeignLaneConfig, Trajectory,
+};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
@@ -65,11 +67,13 @@ fn automation_reaches_the_plugin_through_its_event_input() {
         .render_mode(render::TAG_ONLY)
         .gain_enabled(true);
     let probe = load_probe(SAMPLE_RATE);
-    let automation = ControlLaneNode::from(ForeignLaneConfig::new(
+    let automation = ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(Constant(0.75))),
         ParamRange::of(0.0, 1.0),
-    ));
+    )
+    .build()
+    .0;
     let prepare = Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -131,7 +135,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// declared latency is not rendered in `TAG_ONLY` mode, so the figure is
 /// the chunk, not `declared_latency`.
 fn render_gain(
-    feeder: Option<ControlLaneNode>,
+    feeder: Option<ControlLaneNode<ForeignLane>>,
     schedule: &[(u64, ParamKind)],
     blocks: usize,
 ) -> (Vec<f32>, usize) {
@@ -350,11 +354,13 @@ fn a_lane_drives_a_plugin_parameter_along_its_curve() {
     );
     // 120 BPM at 48 kHz: 24 000 frames a beat, so frame 1500.
     env.add_breakpoint(Breakpoint::new(Beat::new(0.0625), Hz::new(0.75)));
-    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
+    let lane = ForeignLaneConfig::new(
         GAIN,
         ControlProgram::from_curve(Arc::new(env.clone())),
         ParamRange::of(0.0, 1.0),
-    ));
+    )
+    .build()
+    .0;
     let (out, latency) = render_gain(Some(lane), &[], 10);
     let beat = |f: usize| Beat::new(f as f64 / 24_000.0);
     follows(

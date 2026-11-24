@@ -6,7 +6,7 @@
 use crate::harness::bus;
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{ChannelLayout, ChannelTopology};
-use tutti_fixtures::midi;
+use tutti_fixtures::{cycle_blocks, midi};
 use tutti_graph::contract::Direct;
 use tutti_graph::{Node, ParamNode, ParamSet, TransportPosition};
 use tutti_music::{NoteDuration, NoteValue};
@@ -126,15 +126,7 @@ fn lane_graph(max: usize) -> (tutti_graph::Editor, tutti_graph::Executor) {
 
 /// The block schedule the lane rigs render: ragged, up to 128 frames.
 fn lane_blocks(total: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, 128, 7, 64, 127, 33, 2, 100][i % 8].min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
+    cycle_blocks(&[1, 128, 7, 64, 127, 33, 2, 100], total)
 }
 
 /// One block of the lane graph at the host's clock `clock` (113 BPM,
@@ -365,7 +357,10 @@ fn lane_program(k: usize, generation: u32) -> tutti_modulation::ControlProgram {
 fn lane_for(
     k: usize,
     range: tutti_graph::ParamRangeCell,
-) -> tutti_nodes::automation::ControlLaneNode {
+) -> (
+    tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::PortLane>,
+    tutti_rt::ParamCell,
+) {
     use atomic_float::AtomicF64;
     use std::sync::Arc;
     use tutti_nodes::automation::ControlLaneNode as L;
@@ -381,11 +376,13 @@ fn lane_for(
         6 => ParamKey::<Hz>::RATE.addr(),
         _ => ParamKey::<Db>::THRESHOLD.addr(),
     };
-    L::from(
+    let knob: tutti_rt::ParamCell = Arc::new(AtomicF64::new(400.0 + k as f64)).into();
+    let lane = L::from(
         UnitLaneConfig::new(addr, lane_program(k, 0))
-            .knob(Arc::new(AtomicF64::new(400.0 + k as f64)).into())
+            .knob(knob.clone())
             .range(range),
-    )
+    );
+    (lane, knob)
 }
 
 /// 200 lanes into the params of 25 [`Probe8`]s (one lane per port: a port
@@ -395,7 +392,7 @@ fn lanes_200(
 ) -> (
     tutti_graph::Editor,
     tutti_graph::Executor,
-    Vec<tutti_nodes::automation::LaneControls>,
+    Vec<(tutti_nodes::automation::LaneControls, tutti_rt::ParamCell)>,
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{EventOutputPort, ParamIn, ParamRange, Prepare, Unforkable};
@@ -428,9 +425,9 @@ fn lanes_200(
     ed.commit().expect("commits");
     let mut controls = Vec::new();
     for k in 0..200 {
-        let lane = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
+        let (lane, knob) = lane_for(k, ed.param_range_cell(at(k)).expect("committed"));
         let key = NodeKey(2000 + k as u64);
-        controls.push(ed.insert(key, "lane", lane).controls);
+        controls.push((ed.insert(key, "lane", lane).controls, knob));
         ed.spec_mut()
             .connect_param(at(k), EventOutputPort::new(key, 0));
     }
@@ -444,18 +441,21 @@ fn lanes_200(
 /// 9th port.
 fn lane_moves(
     ed: &mut tutti_graph::Editor,
-    controls: &[tutti_nodes::automation::LaneControls],
+    controls: &[(tutti_nodes::automation::LaneControls, tutti_rt::ParamCell)],
     block: usize,
 ) {
     use tutti_graph::NodeKey;
     use tutti_graph::{ParamIn, ParamRange};
     if block % 10 == 9 {
-        for (k, c) in controls.iter().enumerate() {
+        for (k, (c, _)) in controls.iter().enumerate() {
             c.publish(lane_program(k, block as u32));
         }
     }
-    for (k, c) in controls.iter().enumerate().skip(block % 7).step_by(7) {
-        c.store(f64::from(300.0 + ((k + block) % 13) as f32 * 20.0));
+    for (k, (_, knob)) in controls.iter().enumerate().skip(block % 7).step_by(7) {
+        knob.store(
+            f64::from(300.0 + ((k + block) % 13) as f32 * 20.0),
+            std::sync::atomic::Ordering::Release,
+        );
     }
     if block % 15 == 14 {
         for k in (block % 9..200).step_by(9) {
@@ -961,7 +961,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         Source as ModSource, SourceKey, TargetDecl, TargetKey, Waveform,
     };
     use tutti_nodes::testing::Osc;
-    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType, Target};
+    use tutti_nodes::{Feed, ModHost, Modulation, SvfFilterConfig, SvfFilterNode, SvfType};
     use tutti_units::{
         Beat, Bipolar, Bpm, Hz, ParamAddr, PhaseIncrement, Q, Samples, Seconds, UnitParam,
     };
@@ -969,22 +969,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     struct Host {
         filter: NodeKey,
         saw: NodeKey,
-        knobs: [Option<tutti_rt::ParamCell>; 2],
     }
     impl ModHost for Host {
-        fn target(&self, t: TargetKey) -> Option<Target> {
-            let TargetKey::Param { param, .. } = t else {
-                return None;
-            };
-            let knob = match param.as_unit() {
-                Some(a) if a == UnitParam::Cutoff => self.knobs[0].clone(),
-                Some(a) if a == UnitParam::Q => self.knobs[1].clone(),
-                _ => return None,
-            };
-            Some(Target::Native {
-                node: self.filter,
-                knob,
-            })
+        fn node(&self, _: u64) -> Option<NodeKey> {
+            Some(self.filter)
         }
         fn feed(&self, _: SourceKey) -> Option<Feed> {
             Some(Feed::Audio(self.saw))
@@ -994,7 +982,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     let route = |s: u64, p, depth: f64| RouteDecl {
         source: SourceKey(s),
         to: RouteTarget::Param(at(p)),
-        depth: Bipolar::of(depth),
+        depth: tutti_rt::Param::new(Bipolar::of(depth)),
         polarity: Polarity::Bipolar,
         curve: Law::Linear,
     };
@@ -1028,12 +1016,10 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     exec.process(128, &transport, &[], &mut [&mut out[..]]);
     ed.collect();
 
-    let host = Host {
-        filter,
-        saw,
-        knobs: [params.cell(UnitParam::Cutoff), params.cell(UnitParam::Q)],
-    };
-    let sources = [
+    let host = Host { filter, saw };
+    let cell = |at: tutti_graph::ParamIn| params.cell(at.param);
+    let mirror = |_: NodeKey, _: tutti_units::ParamId| None;
+    let lfo = |rate: f64| {
         (
             SourceKey(1),
             ModSource::Lfo {
@@ -1042,12 +1028,15 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
                     seed: 0,
                 },
                 clock: LayerClock::Seconds {
-                    rate: Hz::new(2.0),
+                    rate: Hz::new(rate),
                     phase: PhaseIncrement::new(0.0),
                     anchor: None,
                 },
             },
-        ),
+        )
+    };
+    let mut sources = [
+        lfo(2.0),
         (
             SourceKey(2),
             ModSource::Follower {
@@ -1056,7 +1045,7 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
             },
         ),
     ];
-    let mut routes = [
+    let routes = [
         (RouteKey(1), route(1, UnitParam::Cutoff, 0.2)),
         (RouteKey(2), route(2, UnitParam::Q, 0.3)),
     ];
@@ -1084,7 +1073,11 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
         routes: &routes,
         targets: &targets,
     };
-    assert!(m.apply(&decl, &mut ed, &host).expect("applies").commit);
+    assert!(
+        m.apply(&decl, &mut ed, &host, &cell, &mirror)
+            .expect("applies")
+            .commit
+    );
     m.commit(&mut ed).expect("commits");
     // Warm-up outside the gate: the commit lands, the connects' declick
     // runs out.
@@ -1094,14 +1087,16 @@ fn an_apply_that_republishes_is_allocation_free_on_the_audio_thread() {
     }
     let mut sounded = false;
     for i in 0..40 {
-        routes[0].1.depth = Bipolar::of(if i % 2 == 0 { 0.4 } else { 0.1 });
+        sources[0] = lfo(if i % 2 == 0 { 3.0 } else { 2.0 });
         let decl = Declarations {
             sources: &sources,
             routes: &routes,
             targets: &targets,
         };
-        let applied = m.apply(&decl, &mut ed, &host).expect("applies");
-        assert!(!applied.commit, "a depth edit sends no plan");
+        let applied = m
+            .apply(&decl, &mut ed, &host, &cell, &mirror)
+            .expect("applies");
+        assert!(!applied.commit, "a rate edit sends no plan");
         assert_eq!(applied.republished.len(), 1, "the LFO's lane republished");
         for _ in 0..4 {
             exec.process(128, &transport, &[], &mut [&mut out[..]]);
@@ -1266,10 +1261,11 @@ fn the_synced_delay_following_a_moving_tempo_is_allocation_free_and_finite() {
     ];
     let layout = DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(MaxDelay::CAP))
         .interpolation(InterpolationMode::CubicHermite)
-        .synced(NoteTimes::try_from(&notes[..]).expect("two notes"))
+        .notes(NoteTimes::try_from(&notes[..]).expect("two notes"))
         .build()
         .unwrap();
     let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+        sync: tutti_nodes::DelaySync::Synced,
         feedback: Feedback::new(0.5),
         cross_feedback: Feedback::new(0.25),
         ..DelayControls::DEFAULT

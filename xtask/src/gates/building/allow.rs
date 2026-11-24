@@ -112,7 +112,7 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-dsp/src/waveshape.rs",
-        "WaveshaperBank::antialiasing",
+        "Waveshape::antialiasing",
         CHAIN,
         "an antialiasing order is valid for a curve: validity of the kind and the order together, which neither type can carry",
     ),
@@ -120,7 +120,7 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
         "crates/tutti-nodes/src/distortion.rs",
         "DistortionConfig::antialiasing",
         CHAIN,
-        "the same validity as `WaveshaperBank::antialiasing`: the config holds the kind the order must be valid for",
+        "the same validity as `Waveshape::antialiasing`: the config holds the kind the order must be valid for",
     ),
     ty(
         "crates/tutti-buffers/src/input_output.rs",
@@ -463,12 +463,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ty(
         "crates/tutti-nodes/",
         "UnitLaneConfig",
-        WIDTH,
-        NO_AUDIO_PORT,
-    ),
-    ty(
-        "crates/tutti-nodes/",
-        "ForeignLaneConfig",
         WIDTH,
         NO_AUDIO_PORT,
     ),

@@ -17,7 +17,7 @@ use tutti_graph::{
     Cost, Cx, Editor, Executor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable,
 };
 use tutti_graph::{OutputPort, PortSource};
-use tutti_sampler::{MemorySource, Playback, Voice, VoiceNode, VoicePool, VoiceSource, Wave};
+use tutti_sampler::{MemorySource, Playback, VoiceNode, VoicePool, Wave};
 use tutti_units::{Beat, Bpm, SampleRate, Samples, StretchFactor};
 
 const SR: f64 = 48_000.0;
@@ -45,16 +45,14 @@ fn tone(secs: f64) -> Arc<Wave> {
 }
 
 fn stretched(wave: &Arc<Wave>) -> VoiceNode<f32> {
-    VoiceNode::new(Voice {
-        source: VoiceSource::Memory(
-            MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
-        ),
-        play: Playback {
+    VoiceNode::new(
+        MemorySource::placed(Arc::clone(wave), VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave"),
+        Playback {
             stretch: StretchFactor::new(0.5),
             ..Default::default()
         },
-    })
+    )
     .expect("a finite gain and a nonempty width")
 }
 
@@ -162,13 +160,11 @@ fn render(exec: &mut Executor, channels: usize) -> Vec<Vec<f32>> {
 #[test]
 fn each_node_declares_its_class() {
     let wave = tone(0.1);
-    let plain = VoiceNode::new(Voice {
-        source: VoiceSource::Memory(
-            MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
-                .expect("a placeable wave"),
-        ),
-        play: Playback::default(),
-    })
+    let plain = VoiceNode::new(
+        MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
+            .expect("a placeable wave"),
+        Playback::default(),
+    )
     .expect("a finite gain and a nonempty width");
     assert_eq!(
         MemorySource::new(Arc::clone(&wave))
@@ -205,10 +201,10 @@ fn moderate_reads_pack_and_render_bit_identically() {
             bare.tasks().len()
         );
         for t in plan.tasks() {
-            let ops = &plan.task_ops()[t.start as usize..(t.start + t.len) as usize];
+            let ops = &plan.task_ops()[t.range()];
             let heavy = ops.iter().filter(|&&o| {
-                matches!(plan.ops()[o as usize], tutti_graph::Op::Node { unit, .. }
-                    if plan.units()[unit as usize].shape.cost == Cost::Heavy)
+                matches!(plan.ops()[o.index()], tutti_graph::Op::Node { unit, .. }
+                    if plan.units()[unit.index()].shape.cost == Cost::Heavy)
             });
             assert!(heavy.count() <= 1, "two stretched voices share a task");
         }

@@ -18,6 +18,7 @@ const MAX: MaxDelay = MaxDelay::of(Seconds::new(1.0));
 
 fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
     DelayControls {
+        sync: DelaySync::Free,
         time: Seconds::new(time),
         feedback: Feedback::new(feedback),
         cross_feedback: Feedback::new(cross),
@@ -66,7 +67,7 @@ impl Rig {
     }
 
     fn retarget(&mut self, c: &DelayControls) {
-        self.bank.retarget(&mut self.ramps, c);
+        self.bank.retarget(&mut self.ramps, c, None);
     }
 
     /// `audio` (one slice per channel) through the bank in blocks of `block`, with the
@@ -530,7 +531,7 @@ fn a_clone_keeps_the_capacity_and_the_echoes_in_flight() {
 fn an_f64_impulse_arrives_at_the_delay() {
     let mut bank = DelayBank::<f64>::new(&mono(InterpolationMode::Linear), BINARY);
     let mut ramps = DelayRamps::<f64>::new(1);
-    bank.retarget(&mut ramps, &controls(20.0 / 1024.0, 0.0, 0.0));
+    bank.retarget(&mut ramps, &controls(20.0 / 1024.0, 0.0, 0.0), None);
     ramps.jump_to_target();
     let mut x = vec![0.0f64; 64];
     x[0] = 1.0;
@@ -554,7 +555,7 @@ fn an_f64_impulse_arrives_at_the_delay() {
 fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
     let mut bank = DelayBank::<f64>::new(layout, BINARY);
     let mut ramps = DelayRamps::<f64>::new(1);
-    bank.retarget(&mut ramps, c);
+    bank.retarget(&mut ramps, c, None);
     ramps.jump_to_target();
     let ins: Vec<&[f64]> = x.iter().map(Vec::as_slice).collect();
     let mut out = vec![vec![0.0f64; x[0].len()]; x.len()];
@@ -578,7 +579,7 @@ fn run_wide(layout: &DelayLayout, c: &DelayControls, x: &[Vec<f64>]) -> Vec<Vec<
 /// is off by 1e-8.
 #[test]
 fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (16usize, 200usize);
     let x = wide_signal(len);
     let mono = mono(InterpolationMode::Linear);
@@ -589,7 +590,7 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
             .collect()
     };
     let y = run_wide(&mono, &controls(time, 0.0, 0.0), std::slice::from_ref(&x));
-    assert_close_f64(&y[0], &delayed(&x), 0.0);
+    assert_close(&y[0], &delayed(&x), 0.0);
 
     let g = 0.6;
     let mut v = vec![0.0f64; len];
@@ -597,14 +598,14 @@ fn an_f64_bank_returns_a_wide_signal_d_frames_later_and_runs_the_loop_in_f64() {
         v[n] = x[n] + g * n.checked_sub(d).map_or(0.0, |k| v[k]);
     }
     let y = run_wide(&mono, &controls(time, 0.6, 0.0), &[x]);
-    assert_close_f64(&y[0], &delayed(&v), 2.0f64.powi(-45));
+    assert_close(&y[0], &delayed(&v), 2.0f64.powi(-45));
 }
 
 /// The cross-fed loop of an `f64` bank is the two-channel recursion `v0[n] = x[n] + g v0[n -
 /// d] + c v1[n - d]`, `v1[n] = g v1[n - d] + c v0[n - d]` of the swap routing, to 2^-45.
 #[test]
 fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (8usize, 120usize);
     let x = wide_signal(len);
     let (g, c) = (0.3, 0.4);
@@ -625,22 +626,31 @@ fn an_f64_ping_pong_runs_the_coupled_loop_in_f64() {
         &controls(d as f64 / 1024.0, 0.3, 0.4),
         &[x, vec![0.0; len]],
     );
-    assert_close_f64(&y[0], &delayed(&v0), 2.0f64.powi(-45));
-    assert_close_f64(&y[1], &delayed(&v1), 2.0f64.powi(-45));
+    assert_close(&y[0], &delayed(&v0), 2.0f64.powi(-45));
+    assert_close(&y[1], &delayed(&v1), 2.0f64.powi(-45));
 }
 
 /// A mono synced delay of `note` that holds up to four seconds.
 fn synced(note: NoteDuration) -> DelayLayout {
     DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
-        .synced(NoteTimes::all(note))
+        .notes(NoteTimes::all(note))
         .build()
         .unwrap()
 }
 
-/// A rig of a synced `layout` at rest on `tempo`.
+/// `time`, with no feedback, read while `sync`.
+fn timed(sync: DelaySync, time: f64) -> DelayControls {
+    DelayControls {
+        sync,
+        ..controls(time, 0.0, 0.0)
+    }
+}
+
+/// A rig of `layout` at rest, synced, on `tempo`.
 fn synced_at(layout: &DelayLayout, tempo: Bpm) -> Rig {
     let mut rig = Rig::at(layout, &DelayControls::DEFAULT, BINARY);
-    rig.bank.retarget_tempo(&mut rig.ramps, tempo);
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Synced, 0.0), Some(tempo));
     rig.ramps.jump_to_target();
     rig
 }
@@ -683,7 +693,11 @@ fn a_tempo_change_ramps_the_time_at_the_slew() {
     for (g, &y) in settled.iter().enumerate().skip(512) {
         assert!((y - (g as f32 + 1.0 - 512.0)).abs() < 1e-3, "frame {g}");
     }
-    rig.bank.retarget_tempo(&mut rig.ramps, Bpm::of(60.0));
+    rig.bank.retarget(
+        &mut rig.ramps,
+        &timed(DelaySync::Synced, 0.0),
+        Some(Bpm::of(60.0)),
+    );
     assert_eq!(rig.ramps.times[0].target().span().get(), 1024.0);
     let moved = rig.run(&[ramp(1024, 2048)]).remove(0);
     for (i, &y) in moved.iter().enumerate() {
@@ -696,21 +710,132 @@ fn a_tempo_change_ramps_the_time_at_the_slew() {
     }
 }
 
-/// A synced delay is not told its time by the control: a control at any time leaves the
-/// note's, and a delay timed in seconds ignores the tempo.
+/// The source not in use moves nothing, and is kept. A quarter note at 120 bpm is 512 frames:
+/// a time control of any value while synced leaves it, and a switch to free then aims at
+/// that control (0.25 s, 256 frames). A tempo of any value while free leaves the 256, and a
+/// switch to synced then aims at the note at that tempo (30 bpm: 2 s, 2048 frames).
 #[test]
-fn only_a_synced_delay_follows_the_tempo_and_only_a_free_one_the_control() {
-    let mut synced_rig = synced_at(&synced(NoteDuration::QUARTER), Bpm::of(120.0));
-    synced_rig
-        .bank
-        .retarget(&mut synced_rig.ramps, &controls(3.0, 0.0, 0.0));
-    assert_eq!(synced_rig.ramps.times[0].target().span().get(), 512.0);
+fn the_time_while_synced_and_the_tempo_while_free_move_nothing_and_are_kept() {
+    let layout = synced(NoteDuration::QUARTER);
+    let target = |rig: &Rig| rig.ramps.times[0].target().span().get();
 
-    let mut free = Rig::at(
-        &mono(InterpolationMode::Linear),
-        &controls(0.25, 0.0, 0.0),
+    let mut rig = synced_at(&layout, Bpm::of(120.0));
+    let tempo = Some(Bpm::of(120.0));
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Synced, 0.25), tempo);
+    assert_eq!(target(&rig), 512.0);
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Free, 0.25), tempo);
+    assert_eq!(target(&rig), 256.0);
+
+    let tempo = Some(Bpm::of(30.0));
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Free, 0.25), tempo);
+    assert_eq!(target(&rig), 256.0);
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Synced, 0.25), tempo);
+    assert_eq!(target(&rig), 2048.0);
+}
+
+/// A synced delay with no tempo yet holds: its times stay aimed where they were (256 frames),
+/// and the first tempo aims them at the note (a quarter at 120 bpm, 512 frames).
+#[test]
+fn a_synced_delay_with_no_tempo_yet_holds_its_times() {
+    let mut rig = Rig::at(
+        &synced(NoteDuration::QUARTER),
+        &timed(DelaySync::Free, 0.25),
         BINARY,
     );
-    free.bank.retarget_tempo(&mut free.ramps, Bpm::of(30.0));
-    assert_eq!(free.ramps.times[0].target().span().get(), 256.0);
+    rig.bank
+        .retarget(&mut rig.ramps, &timed(DelaySync::Synced, 0.25), None);
+    assert_eq!(rig.ramps.times[0].target().span().get(), 256.0);
+    assert!(!rig.ramps.times[0].moving());
+    rig.bank.retarget(
+        &mut rig.ramps,
+        &timed(DelaySync::Synced, 0.25),
+        Some(Bpm::of(120.0)),
+    );
+    assert_eq!(rig.ramps.times[0].target().span().get(), 512.0);
+}
+
+/// A switch on a running delay keeps what the lines hold and moves each channel's time from
+/// where it is to the other source's at `DELAY_SLEW` (1/8 frame of delay per frame), with no
+/// jump, in both directions, for channels linked in seconds and for a channel with a time of
+/// its own.
+///
+/// The input is the ramp `x[g] = g + 1` on both channels, which a fractional read reproduces
+/// exactly, so the output at frame `g` is `g + 1 - delay(g)`: the delay each channel has at
+/// that frame, read off the output. `i` frames after a switch a channel `dist` frames from
+/// its new time is `min(i + 1, 8 * dist) / 8` frames along. The first frames after a switch
+/// read input fed before it: the lines were not emptied.
+///
+/// At 1024 frames a second: free, channel 0 is 0.25 s (256 frames) and channel 1 follows it
+/// or holds 0.75 s (768); synced at 120 bpm, channel 0 is a quarter (512) and channel 1 a
+/// half (1024).
+#[test]
+fn a_switch_on_a_running_delay_keeps_the_lines_and_slews_every_channel_from_where_it_was() {
+    let notes =
+        NoteTimes::try_from(&[NoteDuration::QUARTER, NoteDuration::new(NoteValue::HALF)][..])
+            .unwrap();
+    let builder = || {
+        DelayLayout::builder(ChannelTopology::STEREO, MaxDelay::of(Seconds::new(4.0))).notes(notes)
+    };
+    let own = ChannelTimes::try_from(&[Seconds::new(0.75)][..]).unwrap();
+    let cases = [
+        ("linked", builder().build().unwrap(), [256.0f64, 256.0]),
+        (
+            "a time of its own",
+            builder().times(own).build().unwrap(),
+            [256.0, 768.0],
+        ),
+    ];
+    let synced_frames = [512.0f64, 1024.0];
+    let tempo = Some(Bpm::of(120.0));
+    // Longer than the longest move: 768 frames of delay at 1/8 a frame.
+    const RUN: usize = 6400;
+    for (name, layout, free_frames) in cases {
+        let mut rig = Rig::at(&layout, &timed(DelaySync::Free, 0.25), BINARY);
+        let mut g = 0usize;
+        let mut run = |rig: &mut Rig, len: usize| -> (usize, Vec<Vec<f32>>) {
+            let x: Vec<f32> = (g..g + len).map(|g| g as f32 + 1.0).collect();
+            let first = g;
+            g += len;
+            (first, rig.run(&[x.clone(), x]))
+        };
+        // Settled, free: each channel reads its own seconds.
+        let (first, y) = run(&mut rig, 2048);
+        for c in 0..2 {
+            let at = first + 2047;
+            let want = at as f64 + 1.0 - free_frames[c];
+            assert!(
+                (f64::from(y[c][2047]) - want).abs() < 1e-2,
+                "{name}, channel {c}, settled"
+            );
+        }
+        let switches = [
+            (DelaySync::Synced, free_frames, synced_frames),
+            (DelaySync::Free, synced_frames, free_frames),
+        ];
+        for (sync, from, to) in switches {
+            rig.bank.retarget(&mut rig.ramps, &timed(sync, 0.25), tempo);
+            let (first, y) = run(&mut rig, RUN);
+            for c in 0..2 {
+                let dist = (to[c] - from[c]).abs();
+                let sign = (to[c] - from[c]).signum();
+                for (i, &v) in y[c].iter().enumerate() {
+                    let along = ((i + 1) as f64 / 8.0).min(dist);
+                    let delay = if dist == 0.0 {
+                        from[c]
+                    } else {
+                        from[c] + sign * along
+                    };
+                    let want = (first + i) as f64 + 1.0 - delay;
+                    assert!(
+                        (f64::from(v) - want).abs() < 1e-2,
+                        "{name}, to {sync:?}, channel {c}, frame {i}: {v}, wanted {want}"
+                    );
+                }
+            }
+        }
+    }
 }

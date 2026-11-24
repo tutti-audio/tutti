@@ -44,7 +44,7 @@
 //! the same at any participant count, so a wrong estimate never changes a
 //! sample.
 
-use crate::compile::ids::{Id, PlanUnitId, TableSlice};
+use crate::compile::ids::{PlanUnitId, TableSlice};
 use crate::compile::plan::Op;
 use crate::node::shape::Shape;
 use tutti_units::Samples;
@@ -171,8 +171,8 @@ const EVENTS: Work = Work {
 
 /// The estimated work of `op`, whose node ops run units of `shapes` (by
 /// plan unit index).
-pub(crate) fn op_work(
-    op: &Op,
+pub(crate) fn op_work<A, E>(
+    op: &Op<A, E>,
     shapes: &TableSlice<PlanUnitId, Shape>,
     sum_lanes: &[Option<crate::EdgeId>],
 ) -> Work {
@@ -182,21 +182,21 @@ pub(crate) fn op_work(
         | Op::Output { .. }
         | Op::Capture { .. }
         | Op::Tap { .. } => COPY,
-        Op::Meter { srcs, .. } => meter_work(u64::from(srcs.len)),
-        Op::Sum { srcs, .. } => sum_work(u64::from(srcs.len), 0),
+        Op::Meter { srcs, .. } => meter_work(srcs.len() as u64),
+        Op::Sum { srcs, .. } => sum_work(srcs.len() as u64, 0),
         // A driven lane also runs the param step per frame (one more unit
         // each for its values and its clamp), over the weight of a plain one.
         Op::WeightedSum {
             srcs, lanes, gains, ..
         } => sum_work(
-            u64::from(srcs.len),
-            sum_lanes[lanes.range()].iter().flatten().count() as u64 + u64::from(gains.len),
+            srcs.len() as u64,
+            sum_lanes[lanes.range()].iter().flatten().count() as u64 + gains.len() as u64,
         ),
         Op::EventDelay { .. }
         | Op::EventMerge { .. }
         | Op::EventCapture { .. }
         | Op::EventTap { .. } => EVENTS,
-        Op::Node { unit, .. } => node_work(&shapes[PlanUnitId::new(unit)]),
+        Op::Node { unit, .. } => node_work(&shapes[unit]),
     }
 }
 

@@ -62,8 +62,14 @@ use crate::stream::{OutputSpec, RunningStream, StreamDriver};
 /// ```
 #[derive(Debug)]
 pub struct ManualStreamDriver<F: Float = f32> {
-    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
-    faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
+    slot: Arc<Mutex<Option<Open<F>>>>,
+}
+
+/// An open stream: the callback to run and the record its faults go to.
+#[derive(Debug)]
+struct Open<F: Float> {
+    block: OutputBlock<F>,
+    faults: Arc<StreamFaults>,
 }
 
 /// The caller's half of a [`ManualStreamDriver`], used to run callbacks by
@@ -74,8 +80,7 @@ pub struct ManualStreamDriver<F: Float = f32> {
 /// this type is for tests and tools, not the audio thread.
 #[derive(Debug)]
 pub struct ManualStream<F: Float = f32> {
-    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
-    faults: Arc<Mutex<Option<Arc<StreamFaults>>>>,
+    slot: Arc<Mutex<Option<Open<F>>>>,
 }
 
 impl<F: Float> ManualStreamDriver<F> {
@@ -84,13 +89,11 @@ impl<F: Float> ManualStreamDriver<F> {
     #[must_use]
     pub fn new() -> (Self, ManualStream<F>) {
         let slot = Arc::new(Mutex::new(None));
-        let faults = Arc::new(Mutex::new(None));
         (
             Self {
                 slot: Arc::clone(&slot),
-                faults: Arc::clone(&faults),
             },
-            ManualStream { slot, faults },
+            ManualStream { slot },
         )
     }
 }
@@ -98,7 +101,7 @@ impl<F: Float> ManualStreamDriver<F> {
 impl<F: Float> ManualStream<F> {
     fn with_block<R>(&self, f: impl FnOnce(&mut OutputBlock<F>) -> R) -> Option<R> {
         let mut guard = self.slot.lock();
-        guard.as_mut().map(f)
+        guard.as_mut().map(|open| f(&mut open.block))
     }
 
     /// Runs one callback, exactly as a device driver would, into a buffer of
@@ -153,16 +156,17 @@ impl<F: Float> ManualStream<F> {
             Some(os_ns) => b.render_at(&mut out, os_ns, delay),
             None => b.render_delayed_with(&mut out, delay, |x| x),
         })?;
-        if let Some(faults) = self.faults.lock().as_ref() {
-            faults.delivered();
+        if let Some(open) = self.slot.lock().as_ref() {
+            open.faults.delivered();
         }
         Some(out)
     }
 
     /// Returns the frames the last callback actually rendered: its own, at most
-    /// [`MAX_FRAMES`](crate::MAX_FRAMES).
-    pub fn last_rendered_frames(&self) -> Option<usize> {
-        self.with_block(|b| b.last_rendered_frames())
+    /// [`MAX_FRAMES`](crate::MAX_FRAMES). `None` if no stream is open or no
+    /// callback has run.
+    pub fn callback_frames(&self) -> Option<Samples> {
+        self.with_block(|b| b.callback_frames()).flatten()
     }
 
     /// Returns the channel count this stream was opened at.
@@ -172,11 +176,11 @@ impl<F: Float> ManualStream<F> {
 
     /// Delivers a backend error exactly as a driver's error callback would
     /// at the instant `now` ([`StreamFaults::record`]), so a test can exercise
-    /// the fault path without unplugging a device. Does nothing before the
-    /// stream is first opened.
+    /// the fault path without unplugging a device. Does nothing while no
+    /// stream is open.
     pub fn fail(&self, kind: BackendErrorKind, err: &dyn Display, now: Instant) {
-        if let Some(faults) = self.faults.lock().as_ref() {
-            faults.record(kind, err, now);
+        if let Some(open) = self.slot.lock().as_ref() {
+            open.faults.record(kind, err, now);
         }
     }
 
@@ -191,7 +195,7 @@ impl<F: Float> ManualStream<F> {
 /// the stream: every [`ManualStream`] call then returns `None`.
 #[derive(Debug)]
 pub struct ManualRunning<F: Float = f32> {
-    slot: Arc<Mutex<Option<OutputBlock<F>>>>,
+    slot: Arc<Mutex<Option<Open<F>>>>,
 }
 
 impl<F: Float> RunningStream for ManualRunning<F> {
@@ -216,12 +220,11 @@ impl<F: Float> StreamDriver<F> for ManualStreamDriver<F> {
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
     ) -> Result<ManualRunning<F>, Infallible> {
-        // The stream's sink reaches the handle here rather than through a
-        // separate wiring call: `open` is the one place both the driver and
-        // the sink are in scope, and a generic `start_with` cannot know it is
-        // holding a manual driver.
-        *self.faults.lock() = Some(faults);
-        *self.slot.lock() = Some(block);
+        // The block and its fault sink reach the handle here rather than
+        // through a separate wiring call: `open` is the one place both the
+        // driver and the sink are in scope, and a generic `start_with` cannot
+        // know it is holding a manual driver.
+        *self.slot.lock() = Some(Open { block, faults });
         Ok(ManualRunning { slot: self.slot })
     }
 }

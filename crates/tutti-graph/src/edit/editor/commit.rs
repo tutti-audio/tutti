@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tutti_buffers::Float;
 
-use tutti_curve::declick_frames;
-
 use super::lifecycle::Resume;
 use super::{BusLanes, CommitError, Editor, Fading, starting};
 use crate::compile::plan::{Delta, Placement, Plan};
@@ -106,32 +104,6 @@ impl<F: Float> Editor<F> {
         self.link.check_fade_room(starting(delta))
     }
 
-    /// Whether the spec as it stands would be accepted by
-    /// [`commit`](Self::commit): the refusals that depend on the spec alone,
-    /// checked now and without sending anything or changing the editor.
-    ///
-    /// It checks, in order, the [`Limits`](crate::Limits) on the main output's width, that every
-    /// open tap and meter still fits the reader opened for it, that every
-    /// node that may be bypassed or mixed has a dry path, and that the spec
-    /// lowers (its bus edges) and validates as a graph. It does not look at
-    /// the editor's state or at the units: a [`CommitError::Poisoned`],
-    /// [`CommitError::Repreparing`], [`CommitError::Backpressure`],
-    /// [`CommitError::MissingUnit`] or a compile against the plan sent last
-    /// is `commit`'s to report. A host that edits and wants to know whether
-    /// the edit stands asks here, then commits.
-    ///
-    /// # Errors
-    ///
-    /// [`CommitError::TooManyOutputs`], [`CommitError::TapWidth`],
-    /// [`CommitError::MeterWidth`], [`CommitError::Unplaced`] (a node whose
-    /// dry path is not declared), [`CommitError::Invalid`] or
-    /// [`CommitError::Compile`] (the bus edges do not lower): the same
-    /// values `commit` returns for them.
-    pub fn validate(&self) -> Result<(), CommitError> {
-        self.check_spec()?;
-        Self::lower_and_validate(&self.spec, &self.shapes).map(|_| ())
-    }
-
     /// Refuses a main output generation the attached host has no folds for.
     fn check_main_output_published(&self) -> Result<(), CommitError> {
         let outputs = self.spec.topology.outputs.len();
@@ -148,8 +120,7 @@ impl<F: Float> Editor<F> {
         Ok(())
     }
 
-    /// The cheap checks of [`validate`](Self::validate), before the spec is
-    /// lowered: what [`commit`](Self::commit) asks even when nothing changed.
+    /// The cheap checks, before the spec is lowered: what [`commit`](Self::commit) asks even when nothing changed.
     fn check_spec(&self) -> Result<(), CommitError> {
         self.limits.outputs(self.spec.topology.outputs.len())?;
         self.check_main_output_published()?;
@@ -320,11 +291,6 @@ impl<F: Float> Editor<F> {
     /// and shapes, the old main output's wiring, until it ends.
     pub fn set_main_output_fade(&mut self, fade: Option<Fade>) {
         self.main_output.fade = fade.filter(|f| !f.is_cut());
-    }
-
-    /// The fade a main output change takes ([`set_main_output_fade`](Self::set_main_output_fade)).
-    pub fn main_output_fade(&self) -> Option<Fade> {
-        self.main_output.fade
     }
 
     /// The spec lowered and validated, as [`lower_and_validate`](Self::lower_and_validate)
@@ -518,10 +484,9 @@ impl<F: Float> Editor<F> {
         let spec = &self.spec;
         let values = &self.values;
         let (ranges, modes_cells) = (&mut self.cells.ranges, &mut self.cells.modes);
-        let declick = declick_frames(plan.prepare.sample_rate());
         let params = |key: NodeKey, ports: usize, max: usize| {
             let declared = plan.unit(key).map(|u| u.shape.params);
-            ranges.state(key, ports, max, declick, declared, values)
+            ranges.state(key, ports, max, declared, values)
         };
         let gains = self.cells.gains.for_plan(&plan, spec, values, bus_weights);
         let modes = |key: NodeKey| modes_cells.state(key, &plan, values);
@@ -549,7 +514,7 @@ impl<F: Float> Editor<F> {
         );
         // Everything applying needs that is a function of the plan is built
         // here, so the audio thread only swaps and moves.
-        let (max, declick) = (plan.prepare.max_block().get(), declick);
+        let max = plan.prepare.max_block().get();
         let mode_cells = &self.cells.modes;
         let old = self.life.plan().map(Arc::clone);
         self.stager.stage(
@@ -561,7 +526,7 @@ impl<F: Float> Editor<F> {
                 mix_lane: &|key| {
                     mode_cells
                         .get(key)
-                        .map(|cell| ParamState::lane(max, declick, cell.ranges()))
+                        .map(|cell| ParamState::lane(max, cell.ranges()))
                 },
             },
         );

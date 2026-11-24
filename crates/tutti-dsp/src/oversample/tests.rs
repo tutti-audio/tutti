@@ -4,7 +4,7 @@ use tutti_units::Hz;
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut};
-use tutti_units::{Db, SampleRate, Samples};
+use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use super::*;
 
@@ -33,14 +33,14 @@ fn plan(factor: OversamplingFactor) -> OversamplingPlan {
     Oversampling::new(factor).plan(RATE).unwrap()
 }
 
-fn db(amplitude: f64) -> f64 {
-    20.0 * amplitude.log10()
-}
-
+/// `frames` samples of a unit sine with `bin` whole cycles in every [`WINDOW`] samples.
 fn sine(bin: usize, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|n| libm::sin(TAU * bin as f64 * n as f64 / WINDOW as f64) as f32)
-        .collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(bin as f64),
+        Amplitude::new(1.0),
+        SampleRate::of(WINDOW as f64),
+        Samples::new(frames),
+    )
 }
 
 /// `x` up and down in blocks of `block`, `process` between at the high rate (the oversampled
@@ -188,7 +188,10 @@ fn the_up_sampler_rejects_its_images() {
                     continue;
                 }
                 checked += 1;
-                let level = db(amplitude_at(window, Hz::new(image), SampleRate::of(f_hi)));
+                let level =
+                    Amplitude::new(amplitude_at(window, Hz::new(image), SampleRate::of(f_hi)))
+                        .to_db()
+                        .get();
                 assert!(
                     level <= -100.0 + MARGIN_DB,
                     "{factor:?}: image at {image} Hz is {level} dB"
@@ -217,7 +220,10 @@ fn the_down_sampler_rejects_what_would_alias() {
                     n_hi += 1;
                 }
             });
-            let level = db(amplitude_at(&y[SETTLE..], Hz::new(f), SampleRate::of(BASE)));
+            let level =
+                Amplitude::new(amplitude_at(&y[SETTLE..], Hz::new(f), SampleRate::of(BASE)))
+                    .to_db()
+                    .get();
             assert!(
                 level <= -100.0 + MARGIN_DB,
                 "{factor:?}: the tone at {g} Hz leaves {level} dB at {f} Hz"

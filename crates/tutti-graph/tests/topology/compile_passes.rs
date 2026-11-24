@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use common::{Harness, Kind, SpecBehaviour, input_signal};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::{
-    CompileError, CycleEdge, DelayKey, EventEdge, EventInputPort, EventOutputPort, GraphInvalid,
-    GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
+    AudioDelayKey, CompileError, CycleEdge, EventEdge, EventInputPort, EventOutputPort,
+    GraphInvalid, GraphSpec, Op, PortKind, Shape, Shapes, Unforkable, compile,
 };
 use tutti_graph::{
     Edge, Feed, FeedbackFrom, InputDelay, InputPort, Invalid, NodeSpec, OutputPort, PortSource,
@@ -230,6 +230,17 @@ fn shapes_of_spec(t: &Topology) -> Shapes {
         .collect()
 }
 
+/// The nodes in the order the plan runs them: its node ops, in op order.
+fn order(plan: &tutti_graph::Plan) -> Vec<NodeKey> {
+    plan.ops()
+        .iter()
+        .filter_map(|op| match *op {
+            Op::Node { unit, .. } => Some(plan.units()[unit.index()].key),
+            _ => None,
+        })
+        .collect()
+}
+
 fn compiled(t: &Topology) -> tutti_graph::Plan {
     let valid = GraphSpec::new(t.clone()).validate().expect("valid");
     compile(&valid, &shapes_of_spec(t), &common::prepare(PREP), None)
@@ -296,8 +307,8 @@ fn the_order_is_topology_topo_order() {
     assert_eq!(shapes().len(), 13, "the shape list is the coverage");
     for (name, t) in shapes() {
         assert_eq!(
-            compiled(&t).order(),
-            t.topo_order().expect("acyclic").as_slice(),
+            order(&compiled(&t)),
+            t.topo_order().expect("acyclic"),
             "{name}"
         );
     }
@@ -337,7 +348,65 @@ fn ties_break_by_key_across_edge_kinds() {
     )
     .unwrap()
     .0;
-    assert_eq!(plan.order(), &[x, a, b]);
+    assert_eq!(order(&plan), [x, a, b]);
+}
+
+/// An event input is read through a view its node op writes: the view is
+/// never the slot it is merged from (the op reads the one and writes the
+/// other), each input has a view of its own, and an input nothing feeds
+/// reads the empty slot.
+#[test]
+fn an_event_inputs_view_is_its_own_slot_written_by_the_node_op() {
+    let (x, a) = (NodeKey(1), NodeKey(5));
+    let mut t = Topology::default();
+    t.nodes.insert(x, spec("src", 0, 0));
+    t.nodes.insert(a, spec("ev", 0, 0));
+    let mut g = GraphSpec::new(t);
+    g.connect_events(
+        EventInputPort::new(a, 0),
+        EventEdge::Direct(EventOutputPort::new(x, 0)),
+    );
+    let shapes: Shapes = [
+        (x, Shape::EMPTY.events(0, 1)),
+        (a, Shape::EMPTY.events(2, 0)),
+    ]
+    .into();
+    let plan = compile(
+        &g.validate().unwrap(),
+        &shapes,
+        &common::prepare(PREP),
+        None,
+    )
+    .unwrap()
+    .0;
+    let (src, views): (Vec<_>, Vec<_>) = plan
+        .ops()
+        .iter()
+        .find_map(|op| match *op {
+            Op::Node {
+                unit,
+                event_src,
+                event_in,
+                ..
+            } if plan.units()[unit.index()].key == a => Some((
+                plan.event_list()[event_src.range()].to_vec(),
+                plan.event_list()[event_in.range()].to_vec(),
+            )),
+            _ => None,
+        })
+        .expect("the node op");
+    assert_eq!((src.len(), views.len()), (2, 2), "a view for each input");
+    assert!(
+        views.iter().all(|v| !src.contains(v)),
+        "a view is not its source"
+    );
+    assert_ne!(views[0], views[1], "each input its own view");
+    assert_eq!(
+        src[1],
+        tutti_graph::EventSlotId::EMPTY,
+        "an unwired input reads the empty slot"
+    );
+    plan.verify().expect("sound");
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +423,7 @@ fn pdc_delays_equal_latency_delays() {
         let rec = delays(&t, SampleRate::SR_48K);
         let comp = rec.compensation().clone();
 
-        let mut want_in: Vec<(DelayKey, Samples)> = rec
+        let mut want_in: Vec<(AudioDelayKey, Samples)> = rec
             .inputs()
             .iter()
             .map(|d| {
@@ -362,35 +431,35 @@ fn pdc_delays_equal_latency_delays() {
                 let [Edge::Direct(from)] = t.edges[&sink][..] else {
                     unreachable!("latency::plan delays only direct edges")
                 };
-                (DelayKey::Audio { at: sink, from }, by)
+                (AudioDelayKey::Edge { at: sink, from }, by)
             })
             .collect();
         want_in.sort();
-        let mut got_in: Vec<(DelayKey, Samples)> = plan
-            .delays()
+        let mut got_in: Vec<(AudioDelayKey, Samples)> = plan
+            .audio_delays()
             .iter()
-            .filter(|d| matches!(d.key, DelayKey::Audio { .. }))
+            .filter(|d| matches!(d.key, AudioDelayKey::Edge { .. }))
             .map(|d| (d.key, d.len))
             .collect();
         got_in.sort();
         assert_eq!(got_in, want_in, "{name}: input delays");
 
-        let want_out: Vec<(DelayKey, Samples)> = rec
+        let want_out: Vec<(AudioDelayKey, Samples)> = rec
             .outputs()
             .iter()
             .filter(|d| !t.outputs[d.channel].is_empty())
             .map(|d| {
-                let key = DelayKey::Output {
+                let key = AudioDelayKey::Output {
                     channel: d.channel as u16,
                     from: t.outputs[d.channel][0],
                 };
                 (key, d.by)
             })
             .collect();
-        let got_out: Vec<(DelayKey, Samples)> = plan
-            .delays()
+        let got_out: Vec<(AudioDelayKey, Samples)> = plan
+            .audio_delays()
             .iter()
-            .filter(|d| matches!(d.key, DelayKey::Output { .. }))
+            .filter(|d| matches!(d.key, AudioDelayKey::Output { .. }))
             .map(|d| (d.key, d.len))
             .collect();
         assert_eq!(got_out, want_out, "{name}: output alignment");
@@ -430,11 +499,12 @@ fn a_diamond_of_3_and_7_delays_the_short_branch_by_4() {
     edge(&mut t, at(D, 1), out(C, 0));
     t.set_outputs(vec![PortSource::Node(out(D, 0))]);
     let plan = compiled(&t);
-    let delays: Vec<_> = plan.delays().iter().map(|d| (d.key, d.len)).collect();
+    assert!(plan.event_delays().is_empty(), "nothing else is delayed");
+    let delays: Vec<_> = plan.audio_delays().iter().map(|d| (d.key, d.len)).collect();
     assert_eq!(
         delays,
         vec![(
-            DelayKey::Audio {
+            AudioDelayKey::Edge {
                 at: at(D, 0),
                 from: PortSource::Node(out(B, 0)),
             },
@@ -590,8 +660,8 @@ fn feedback_edges_break_cycles() {
     let (plan, _) =
         compile(&valid, &gain_kinds(&[A, B]), &common::prepare(PREP), None).expect("compiles");
     plan.verify().expect("sound");
-    assert_eq!(plan.feedback(PortKind::Audio).len(), 1);
-    assert_eq!(plan.feedback(PortKind::Event).len(), 1);
+    assert_eq!(plan.audio_feedback().len(), 1);
+    assert_eq!(plan.event_feedback().len(), 1);
     let captures = plan
         .ops()
         .iter()
@@ -696,19 +766,15 @@ fn colouring_respects_the_partial_order_not_the_serial_one() {
         PortSource::Node(out(C, 0)),
     ]);
     let plan = compiled(&t);
-    assert_eq!(
-        plan.order(),
-        &[A, B, C],
-        "the serial order the test assumes"
-    );
+    assert_eq!(order(&plan), [A, B, C], "the serial order the test assumes");
     let slot_of = |key: NodeKey| {
-        let unit = plan.units().iter().position(|u| u.key == key).unwrap() as u32;
+        let unit = plan.units().iter().position(|u| u.key == key).unwrap();
         plan.ops()
             .iter()
             .find_map(|op| match *op {
                 Op::Node {
                     unit: u, audio_out, ..
-                } if u == unit => Some(plan.audio_list()[audio_out.start as usize]),
+                } if u.index() == unit => Some(plan.audio_list()[audio_out.range().start]),
                 _ => None,
             })
             .unwrap()
@@ -824,9 +890,9 @@ fn chains_coarsen_into_one_task() {
     let plan = compiled(&diamond);
     assert!(plan.tasks().len() > 1);
     // Every op is in exactly one task.
-    let mut seen: Vec<u32> = plan.task_ops().to_vec();
+    let mut seen: Vec<usize> = plan.task_ops().iter().map(|o| o.index()).collect();
     seen.sort();
-    assert_eq!(seen, (0..plan.ops().len() as u32).collect::<Vec<_>>());
+    assert_eq!(seen, (0..plan.ops().len()).collect::<Vec<_>>());
 }
 
 /// Placement diffs keys, not shapes: a surviving key keeps its index, a
@@ -896,11 +962,11 @@ fn a_main_input_merging_with_a_latent_path_is_delayed() {
     t.set_outputs(vec![PortSource::Node(out(C, 0))]);
 
     let plan = compiled(&t);
-    let key = DelayKey::Audio {
+    let key = AudioDelayKey::Edge {
         at: at(C, 1),
         from: PortSource::MainInput(0),
     };
-    assert_eq!(plan.delay(key), Samples::new(48));
+    assert_eq!(plan.audio_delay(key), Samples::new(48));
     // The pure pass agrees.
     assert_eq!(
         delays(&t, SampleRate::SR_48K).inputs(),
@@ -977,12 +1043,12 @@ fn an_event_source_counts_toward_arrival_in_both_solves() {
     .expect("compiles")
     .0;
 
-    let key = DelayKey::Audio {
+    let key = AudioDelayKey::Edge {
         at: at(C, 0),
         from: PortSource::Node(out(B, 0)),
     };
     assert_eq!(
-        plan.delay(key),
+        plan.audio_delay(key),
         Samples::new(64),
         "the dry port waits for the events"
     );

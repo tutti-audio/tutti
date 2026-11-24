@@ -13,8 +13,11 @@ use tutti_platform::Instant;
 
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
-use tutti_midi_runtime::{ClockKind, MidiClockDecoder};
-use tutti_session::{FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent};
+use tutti_midi_runtime::{BeatClockFollower, MidiClockDecoder};
+use tutti_session::{
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowTempo, MidiError, MidiEvent, Session,
+    SessionEvent, UnfollowCause,
+};
 use tutti_timeline::MotionCommand;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
 use tutti_units::{At, Bpm, Losses, SampleRate};
@@ -320,11 +323,13 @@ fn a_beat_clock_follower_is_the_tempo_source_and_mtc_is_not() {
         Err(MidiError::NotFollowingClock)
     ));
     let events = s.update();
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::ClockUnfollowed)))
-    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        SessionEvent::Midi(MidiEvent::Unfollowed {
+            follower: FollowKind::Clock(_),
+            cause: UnfollowCause::Requested
+        })
+    )));
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
 }
 
@@ -401,10 +406,10 @@ fn a_locked_rolling_beat_clock_reads_an_error_under_slip() {
         }
     }
     let error = error.expect("a locked, rolling follower reads an error");
-    let tutti_midi_runtime::ClockOffset::Beat(error) = error else {
+    let ClockOffset::Beat(error) = error else {
         panic!("a Beat Clock follower reads beats: {error:?}");
     };
-    assert!(error.get().abs() < tutti_midi_runtime::ClockFollower::SLIP.get());
+    assert!(error.get().abs() < BeatClockFollower::SLIP.get());
 }
 
 /// **MTC running backward is reported and stops the transport.** Four forward

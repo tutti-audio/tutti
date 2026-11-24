@@ -30,6 +30,7 @@ fn frames(frames: f64) -> Seconds {
 /// A delay's controls: `time`, the feedback and the cross-feedback.
 fn controls(time: Seconds, feedback: f64, cross: f64) -> DelayControls {
     DelayControls {
+        sync: tutti_nodes::DelaySync::Free,
         time,
         feedback: Feedback::new(feedback),
         cross_feedback: Feedback::new(cross),

@@ -32,7 +32,7 @@ use tutti_units::{
     SamplePosition, SampleRate, Samples, Seconds,
 };
 
-use tutti_rt::SplitMix64;
+use tutti_rt::{Param, SplitMix64};
 
 use crate::curve::Curve;
 use crate::program::{
@@ -75,7 +75,7 @@ pub struct RouteKey(pub u64);
 ///
 /// An edge is named by the host's own key for it (`Edge`): what it stands for
 /// (the sink and the source of a graph edge) is the host's to resolve, as a
-/// node's key is (`ModHost::target` of `tutti-nodes`), and the compile never
+/// node's key is (`ModHost::node` of `tutti-nodes`), and the compile never
 /// looks inside it.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum TargetKey {
@@ -186,24 +186,44 @@ pub enum RouteTarget {
 ///
 /// Plain data, built with a struct literal: every field is independent, and
 /// [`compile`] refuses a combination it cannot run ([`ProgramCompileError`]).
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// Two routes are equal when their depth is the same cell and every other
+/// field is equal, so a write to the depth is no change of the declaration.
+#[derive(Clone, Debug)]
 pub struct RouteDecl {
     /// What modulates.
     pub source: SourceKey,
     /// What it modulates.
     pub to: RouteTarget,
     /// A fraction of the target's range (of the scale, for a depth route).
-    pub depth: Bipolar,
+    /// The cell a route into a param binds to its layer: the lane reads it at
+    /// every evaluation, so a write to it republishes no program. A depth
+    /// route's is read when compiled. A host keeps the cell across applies: a
+    /// route rebuilt with a new cell is a changed route (every lane it feeds
+    /// is recompiled and republished).
+    pub depth: Param<Bipolar>,
     /// Both ways or one.
     pub polarity: Polarity,
     /// The response curve on the magnitude.
     pub curve: Law,
 }
 
+impl PartialEq for RouteDecl {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.to == other.to
+            && self.depth.ptr_eq(&other.depth)
+            && self.polarity == other.polarity
+            && self.curve == other.curve
+    }
+}
+
 impl RouteDecl {
-    fn amount(&self) -> Amount {
+    /// The amount with `depth`: a layer's route carries none (its cell is
+    /// bound to the program, so a write to it changes no program), a depth
+    /// route's is read now.
+    fn amount(&self, depth: Bipolar) -> Amount {
         Amount {
-            depth: self.depth,
+            depth,
             polarity: self.polarity,
             curve: self.curve,
         }
@@ -590,6 +610,8 @@ pub fn compile(
 
     // Layers and input layers, per target.
     let mut layers: BTreeMap<TargetKey, (Vec<Layer>, Vec<InputLayer>)> = BTreeMap::new();
+    // Each such layer's depth cell: the route's own.
+    let mut depths: BTreeMap<TargetKey, Vec<(LayerId, Param<Bipolar>)>> = BTreeMap::new();
     // Each layer's source (and its depth source), to name one a program
     // refuses.
     let mut origin: BTreeMap<LayerId, SourceKey> = BTreeMap::new();
@@ -618,12 +640,16 @@ pub fn compile(
         let id = layer_id(key, scaler);
         let entry = layers.entry(target).or_default();
         origin.insert(id, route.source);
+        depths
+            .entry(target)
+            .or_default()
+            .push((id, route.depth.handle()));
         match &sources[&route.source] {
             Source::Follower { .. } | Source::NoteEnvelope { .. } => {
                 entry.1.push(InputLayer {
                     id,
                     source: nodes[&route.source].id,
-                    amount: route.amount(),
+                    amount: route.amount(Bipolar::ZERO),
                 });
                 edges.insert((route.source, target));
             }
@@ -635,14 +661,14 @@ pub fn compile(
                     DepthBy {
                         clock,
                         wave,
-                        amount: by.amount(),
+                        amount: by.amount(by.depth.load()),
                     }
                 });
                 entry.0.push(Layer {
                     id,
                     clock,
                     wave,
-                    amount: route.amount(),
+                    amount: route.amount(Bipolar::ZERO),
                     depth_by,
                 });
             }
@@ -659,7 +685,7 @@ pub fn compile(
         if let Some(automation) = decl.automation.clone() {
             builder = builder.automation(automation);
         }
-        let program = builder.build().map_err(|e| match e {
+        let mut program = builder.build().map_err(|e| match e {
             ProgramError::TooManyLayers { count } | ProgramError::TooManyDepths { count } => {
                 ProgramCompileError::TooManyLayers { target, count }
             }
@@ -675,6 +701,11 @@ pub fn compile(
                     ProgramCompileError::BadSource(s)
                 }),
         })?;
+        let cells = depths.remove(&target).unwrap_or_default();
+        let count = cells.len();
+        program
+            .bind_depths(cells)
+            .map_err(|_| ProgramCompileError::TooManyLayers { target, count })?;
         programs.insert(target, program);
     }
 

@@ -6,7 +6,7 @@
 //! its own unit.
 
 use super::*;
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::AudioSlotId;
 use crate::compile::plan::NodePorts;
 use crate::model::mode::{MixState, NodeMode};
 
@@ -31,14 +31,15 @@ pub(super) fn moded_node_op<
 
     // The mix's lane, before anything reads the block's mix (it moves while
     // the node is parked too, as the mix's snapshot does).
-    let source = plan.param_ports[rec.params.range()]
+    let source = plan.program.param_ports[rec.params.range()]
         .last()
         .filter(|p| p.is_mix())
-        .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));
-    u.mode.mix.drive_step(frames, source);
+        .map(|p| (p.from, &st.events.pev(p.slot)[..]));
+    let declick = plan.prepare.declick();
+    u.mode.mix.drive_step(frames, declick, source);
 
     let want = u.mode.seen();
-    if want != u.mode.heading() && u.mode.toggle(want) {
+    if want != u.mode.heading() && u.mode.toggle(want, declick) {
         // Un-bypass: its state is stale. Reset before the first call.
         u.node.reset();
         u.quiet = Samples::ZERO;
@@ -69,7 +70,7 @@ pub(super) fn moded_node_op<
 
     let ended = run_node_op(u, head, st);
 
-    let seg = u.mode.step(frames);
+    let seg = u.mode.step(frames, declick);
     if seg.is_steady() && seg.steady == NodeMode::Active && seg.mix.is_wet() {
         return ended;
     }
@@ -136,7 +137,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
-    if rec.params.len != 0 || u.params.busy() {
+    if !rec.params.is_empty() || u.params.busy() {
         run_params(u, head, st);
     }
     if !u.mode.is_stale() {
@@ -165,7 +166,11 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     // Events sent to a parked node are discarded: flushed ones, the closes
     // still owed to it and commands. Nothing it was sent goes unclosed: every
     // unit keeps a `held_in` table for each event input (`ModeState::new`),
-    // which a bypass closes on its way out.
+    // which a bypass closes on its way out. Its views are empty: what an
+    // input tap reads there is what the node is handed, which is nothing.
+    for &s in ein {
+        st.events.slot_mut(s).clear();
+    }
     if !ein.is_empty() {
         let unit = rec.unit;
         if *st.has_inject {

@@ -49,15 +49,13 @@ use std::sync::Arc;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::ChannelSet;
-use tutti_buffers::{BufferError, Interleaved, InterleavedMut, Wave};
+use tutti_buffers::{BufferError, Interleaved, InterleavedMut};
 use tutti_platform::Asset;
 use tutti_rt::{MAX_POS_RING_FRAMES, PosReader, PosRing, PosWriter, Publisher, Reader};
 use tutti_units::Samples;
 
-#[cfg(codec)]
-use tutti_codec::FileIn;
-
 use super::command::StreamId;
+use super::decode::Source;
 use super::loops::{Arrangement, Content, Mapping, RingControl, RingMap};
 use crate::Loop;
 use crate::nonempty;
@@ -103,10 +101,6 @@ impl<F: RingFloat> std::fmt::Debug for Ring<F> {
 }
 
 impl<F: RingFloat> Ring<F> {
-    pub(crate) fn region_id(&self) -> StreamId {
-        self.region_id
-    }
-
     /// Declared width — the file's own layout.
     pub(crate) fn channels(&self) -> ChannelLayout {
         nonempty(self.channels.width())
@@ -216,25 +210,22 @@ impl<F: RingFloat> Ring<F> {
 /// The audio thread's handle on a region's ring.
 pub(crate) type SharedReader<F> = Arc<Ring<F>>;
 
-/// The streamer's end of a region's ring: the writer, its source (a disk
-/// decoder, or the file resident whole) and what it holds (`loops::Content`).
+/// The streamer's end of a region's ring: the writer, the [`Source`] it reads
+/// the file from and what it holds (`loops::Content`).
 /// Streamer-thread-local.
 pub(crate) struct RegionOut<F: RingFloat> {
     ring: Arc<Ring<F>>,
     /// The ring's one writer.
     writer: PosWriter<F>,
     content: Content<F>,
-    /// Incremental disk decoder for real streaming. `None` means this region
-    /// reads the file resident whole (`resident`).
-    #[cfg(codec)]
-    decoder: Option<FileIn<F>>,
+    /// What the ring is fed from: a decoder that seeks in the file, or the
+    /// file decoded whole (a format that cannot seek), which is held here and
+    /// not only in the LRU cache, so a file too large to cache still streams.
+    source: Source<F>,
     /// Whether the decoder's current fault has been logged, so a stream that
     /// keeps reading past it logs once.
     #[cfg(codec)]
     fault_logged: bool,
-    /// The file decoded whole, for a format that cannot seek. Held here, not
-    /// only in the LRU cache, so a file too large to cache still streams.
-    resident: Option<Arc<Wave<F>>>,
     /// Test seam: runs where the stream reads its file, and may block or
     /// panic (a decode that panics).
     #[cfg(test)]
@@ -256,21 +247,10 @@ impl<F: RingFloat> RegionOut<F> {
         self.content = content;
     }
 
-    /// Install an incremental disk decoder.
-    #[cfg(codec)]
-    pub(crate) fn set_decoder(&mut self, decoder: FileIn<F>) {
-        self.decoder = Some(decoder);
-    }
-
     /// Run `hook` where this region reads its file (tests).
     #[cfg(test)]
     pub(crate) fn set_read_hook(&mut self, hook: super::decode::ReadHook) {
         self.read_hook = Some(hook);
-    }
-
-    /// Hold the file resident whole (a format that cannot seek).
-    pub(crate) fn set_resident(&mut self, wave: Arc<Wave<F>>) {
-        self.resident = Some(wave);
     }
 
     /// Declared ring width — the file's own layout.
@@ -346,50 +326,46 @@ impl<F: RingFloat> RegionOut<F> {
             hook(self.ring.region_id, at);
         }
         let channels = self.ring.channels();
-        #[cfg(codec)]
-        if let Some(decoder) = self.decoder.as_mut() {
-            let ch = usize::from(self.writer.layout().count());
-            if decoder.cursor() != Samples::new(at) && decoder.seek(Samples::new(at)).is_err() {
-                out.fill(F::ZERO);
-                return false;
-            }
-            // Frames read before a fault are kept; the rest is silence.
-            let Ok(view) = InterleavedMut::new(&mut *out, self.writer.layout()) else {
-                // `out` is not whole frames of the file's width: nothing read,
-                // and the refill's `false` faults the stream as a decode fault.
-                out.fill(F::ZERO);
+        match &mut self.source {
+            #[cfg(codec)]
+            Source::Stream(_, decoder) => {
+                let ch = usize::from(self.writer.layout().count());
+                if decoder.cursor() != Samples::new(at) && decoder.seek(Samples::new(at)).is_err() {
+                    out.fill(F::ZERO);
+                    return false;
+                }
+                // Frames read before a fault are kept; the rest is silence.
+                let Ok(view) = InterleavedMut::new(&mut *out, self.writer.layout()) else {
+                    // `out` is not whole frames of the file's width: nothing read,
+                    // and the refill's `false` faults the stream as a decode fault.
+                    out.fill(F::ZERO);
+                    if !self.fault_logged {
+                        self.fault_logged = true;
+                        tracing::warn!(
+                            "read of {} refused: the buffer is not whole frames of the file's width",
+                            self.ring.asset.name()
+                        );
+                    }
+                    return false;
+                };
+                let got = decoder
+                    .fill_sequential_interleaved(view)
+                    .map_or(0, Samples::get);
+                out[got * ch..].fill(F::ZERO);
+                let Some(fault) = decoder.error() else {
+                    self.fault_logged = false;
+                    return true;
+                };
                 if !self.fault_logged {
                     self.fault_logged = true;
                     tracing::warn!(
-                        "read of {} refused: the buffer is not whole frames of the file's width",
+                        "decode fault at frame {at} of {}: {fault}; the stream plays silence from there",
                         self.ring.asset.name()
                     );
                 }
-                return false;
-            };
-            let got = decoder
-                .fill_sequential_interleaved(view)
-                .map_or(0, Samples::get);
-            out[got * ch..].fill(F::ZERO);
-            let Some(fault) = decoder.error() else {
-                self.fault_logged = false;
-                return true;
-            };
-            if !self.fault_logged {
-                self.fault_logged = true;
-                tracing::warn!(
-                    "decode fault at frame {at} of {}: {fault}; the stream plays silence from there",
-                    self.ring.asset.name()
-                );
-            }
-            return false;
-        }
-        match self.resident.as_deref() {
-            Some(wave) => super::io::wave_io::read_wave(wave, at, out, channels),
-            None => {
-                out.fill(F::ZERO);
                 false
             }
+            Source::Whole(wave) => super::io::wave_io::read_wave(wave, at, out, channels),
         }
     }
 
@@ -456,6 +432,9 @@ impl RegionBuffer {
         fade_frames: Samples,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let layout = nonempty(channels.into());
+        // A test's ring is fed by hand: its file is an empty wave of its width.
+        let empty =
+            tutti_buffers::Wave::new(usize::from(layout.count()), tutti_units::SampleRate::SR_48K);
         Self::for_file(
             region_id,
             asset,
@@ -463,11 +442,13 @@ impl RegionBuffer {
             ChannelSet::default_for(layout),
             None,
             fade_frames,
+            Source::Whole(Arc::new(empty)),
         )
     }
 
-    /// `RegionBuffer::with_capacity` for a file `len` long (`None`: not known), whose
-    /// readers crossfade over `fade_frames` output frames at a jump.
+    /// A region's ring for a file `len` long (`None`: not known) read from
+    /// `source`, whose readers crossfade over `fade_frames` output frames at a
+    /// jump.
     pub(crate) fn for_file<F: RingFloat>(
         region_id: StreamId,
         asset: impl Into<Asset>,
@@ -475,6 +456,7 @@ impl RegionBuffer {
         channels: ChannelSet,
         len: Option<Samples>,
         fade_frames: Samples,
+        source: Source<F>,
     ) -> (RegionOut<F>, SharedReader<F>, PosReader<F>) {
         let width = nonempty(channels.width());
         let frames = capacity.clamp(4096, MAX_POS_RING_FRAMES);
@@ -498,11 +480,9 @@ impl RegionBuffer {
             ring: Arc::clone(&ring),
             writer,
             content: Content::new(mapping),
-            #[cfg(codec)]
-            decoder: None,
+            source,
             #[cfg(codec)]
             fault_logged: false,
-            resident: None,
             #[cfg(test)]
             read_hook: None,
         };
@@ -582,10 +562,18 @@ mod tests {
         let path = dir.path().join("cut.flac");
         std::fs::write(&path, &bytes[..bytes.len() * 9 / 10]).expect("write");
 
-        let decoder = FileIn::<f32>::open(&path).expect("a cut file still opens");
+        let meta = tutti_codec::read_wave_metadata(path.clone()).expect("a cut file's header");
+        let decoder = tutti_codec::FileIn::<f32>::open(&path).expect("a cut file still opens");
         let total = decoder.total_frames().expect("flac reports a length").get();
-        let (mut writer, _ring, _reader) = ring(4096, 2);
-        writer.set_decoder(decoder);
+        let (mut writer, _ring, _reader) = RegionBuffer::for_file(
+            StreamId::of(1),
+            PathBuf::new(),
+            4096,
+            meta.channel_set,
+            None,
+            Samples::new(0),
+            Source::Stream(meta, Box::new(decoder)),
+        );
 
         let mut out = vec![1.0f32; total * 2];
         assert!(!writer.read_file(0, &mut out), "the cut is a fault");

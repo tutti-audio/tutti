@@ -75,6 +75,8 @@ mod bounce;
 mod builder;
 #[cfg(feature = "plugin")]
 mod bypass;
+#[cfg(feature = "device")]
+mod callback_size;
 mod clock;
 #[cfg(feature = "device")]
 mod device;
@@ -215,7 +217,6 @@ pub use error::{
 pub use error::{MidiError, RouteDeclarer};
 #[cfg(feature = "soundfont")]
 pub use general_midi::GeneralMidi;
-pub use graph::ModKeys;
 #[cfg(feature = "testing")]
 pub use graph::{AudioSide, Testing};
 pub use graph::{
@@ -253,7 +254,10 @@ pub use midi_ci::{
     Subscribe, Subscription, SubscriptionCause, SwitchProfile, WholeProfile,
 };
 #[cfg(feature = "midi")]
-pub use midi_follow::{FollowClock, FollowMachineControl, FollowTempo};
+pub use midi_follow::{
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
+    UnfollowCause,
+};
 #[cfg(feature = "midi")]
 pub use midi_held::HeldReader;
 #[cfg(feature = "midi")]

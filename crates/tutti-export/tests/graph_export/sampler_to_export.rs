@@ -44,7 +44,7 @@
 
 use crate::support::{EncodeConfig, ExportConfig, RenderConfig};
 use tutti_buffers::Interleaved;
-use tutti_fixtures::signal::rms_f64;
+use tutti_fixtures::signal::rms;
 
 use std::f64::consts::TAU;
 use std::sync::Arc;
@@ -250,7 +250,7 @@ fn render_and_measure(dir: &std::path::Path, name: &str, stretch: f64, cents: f6
     .unwrap();
     let left = read_left(&path);
     let w = window(&left);
-    (dominant_hz(w), rms_f64(w))
+    (dominant_hz(w), rms(w))
 }
 
 const SEMITONE: f64 = 1.059_463_094_359_295_3; // 2^(1/12)
@@ -401,5 +401,5 @@ fn a_sampler_render_survives_integer_quantization() {
         "an octave-up voice must still measure ~{want:.1} Hz after 16-bit \
          quantization, got {hz:.1} Hz"
     );
-    assert!(rms_f64(w) > 0.05, "quantized render is near-silent");
+    assert!(rms(w) > 0.05, "quantized render is near-silent");
 }

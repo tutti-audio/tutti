@@ -7,8 +7,8 @@ use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
 use tutti_midi_ci::Initiator;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    MaxSysexSize,
+    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
+    DiscoveryData, MaxSysexSize, ReplyData, ReplyVersion2,
 };
 use tutti_midi_device::INQUIRY_TIMEOUT;
 use tutti_ump::{
@@ -46,12 +46,16 @@ pub(super) fn peer() -> Muid {
     Muid::of(0x0012_3456)
 }
 
-fn peer_data() -> DiscoveryData {
+fn peer_data() -> ReplyData {
     peer_data_of(CiCategories::empty())
 }
 
-fn peer_data_of(categories: CiCategories) -> DiscoveryData {
-    DiscoveryData::new(identity(), categories, MaxSysexSize::of(256))
+fn peer_data_of(categories: CiCategories) -> ReplyData {
+    ReplyData::new(DeviceBody::new(
+        identity(),
+        categories,
+        MaxSysexSize::of(256),
+    ))
 }
 
 pub(super) fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
@@ -146,17 +150,17 @@ fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group()
     // Path 0.
     assert_eq!(payload[13..16], [0x41, 0x00, 0x00]);
     assert_eq!(payload[16..24], [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert_eq!(data.identity, identity());
+    assert_eq!(data.body.identity, identity());
     assert_eq!(payload[24], 0b1_1100);
     assert_eq!(
-        data.categories,
+        data.body.categories,
         CiCategories::PROFILE_CONFIGURATION
             | CiCategories::PROPERTY_EXCHANGE
             | CiCategories::PROCESS_INQUIRY
     );
     assert_eq!(payload[25..29], [0x00, 0x04, 0x00, 0x00]);
     assert_eq!(payload[29], 0);
-    assert_eq!(data.max_sysex_size, MaxSysexSize::of(512));
+    assert_eq!(data.body.max_sysex_size, MaxSysexSize::of(512));
 }
 
 /// An Endpoint whose blocks all declare no MIDI-CI runs none: nothing is sent
@@ -217,7 +221,7 @@ fn messages_are_routed_by_group() {
     let _ = received(&wire);
     let discovery = CiMessage::Discovery {
         header: CiHeader::new(peer()),
-        data: peer_data(),
+        data: DiscoveryData::new(peer_data().body),
     };
     say(&wire, MidiGroup::of(5), &discovery, 200);
     let _ = polled(&mut wire, 210);
@@ -302,8 +306,10 @@ fn a_reply_to_discovery_makes_the_peer_appear_and_is_reported_once() {
 fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     let (mut wire, ours) = midi1_running();
     let _ = polled(&mut wire, 10_000);
-    let mut data = peer_data();
-    data.output_path_id = Some(U7::of(5));
+    let data = DiscoveryData {
+        body: peer_data().body,
+        output_path_id: Some(U7::of(5)),
+    };
     say(
         &wire,
         GROUP_0,
@@ -321,9 +327,14 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     };
     assert_eq!(*group, GROUP_0);
     assert_eq!((header.source, *to), (ours, peer()));
-    assert_eq!(data.output_path_id, Some(U7::of(5)));
-    assert_eq!(data.function_block, None);
-    assert_eq!(data.identity, identity());
+    assert_eq!(
+        data.version_2,
+        Some(ReplyVersion2 {
+            output_path_id: U7::of(5),
+            function_block: None
+        })
+    );
+    assert_eq!(data.body.identity, identity());
     assert!(wire.session.ci_peers(&wire.id).is_empty());
 }
 
@@ -475,7 +486,7 @@ fn a_reply_to_discovery_is_addressed_to_one_device() {
         GROUP_0,
         &CiMessage::Discovery {
             header: CiHeader::new(peer()),
-            data: peer_data(),
+            data: DiscoveryData::new(peer_data().body),
         },
         40,
     );
@@ -888,8 +899,11 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();
-    data.identity = model_identity(9);
-    data.function_block = Some(tutti_ump::FunctionBlockId::new(0).unwrap());
+    data.body.identity = model_identity(9);
+    data.version_2 = Some(ReplyVersion2 {
+        output_path_id: U7::of(0),
+        function_block: Some(tutti_ump::FunctionBlockId::new(0).unwrap()),
+    });
     say(
         &wire,
         GROUP_0,
@@ -1219,7 +1233,7 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
 /// Group are no zone.
 #[test]
 fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
-    use tutti_midi_protocol::{MpeZoneConfig, PitchBendSensitivity};
+    use tutti_midi_protocol::{PitchBendSensitivity, ProfileZone};
     let (mut wire, ours) = peer_declaring(CiCategories::PROFILE_CONFIGURATION);
     known_profiles(&mut wire, ours, vec![], vec![ProfileId::MPE], vec![]);
     let zones = |wire: &Wire| wire.session.profiles(&wire.id)[0].mpe_zones();
@@ -1227,7 +1241,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
     for (channels, zone) in [
         (
             5,
-            Some(MpeZoneConfig::profile(
+            Some(ProfileZone::new(
                 MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(5)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
             )),
@@ -1235,7 +1249,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         (1, None),
         (
             16,
-            Some(MpeZoneConfig::profile(
+            Some(ProfileZone::new(
                 MpeZoneSpan::new(MidiChannel::of(0), MpeChannels::of(16)).unwrap(),
                 PitchBendSensitivity::MPE_PROFILE_DEFAULT,
             )),
@@ -1255,7 +1269,7 @@ fn an_enabled_mpe_profile_is_a_zone_of_the_channels_its_report_gave() {
         let _ = polled(&mut wire, 130);
         assert_eq!(
             zones(&wire),
-            zone.map(tutti_midi_protocol::MpeZones::single),
+            zone.map(tutti_midi_protocol::ProfileZones::single),
             "{channels} channels"
         );
     }
@@ -1675,10 +1689,8 @@ fn answer_capabilities(wire: &mut Wire, ours: Muid, features: ProcessFeatures) {
         wire,
         GROUP_0,
         &CiMessage::ProcessCapabilitiesReply {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             features,
         },
@@ -1805,10 +1817,8 @@ fn a_report_asks_with_table_43_and_ends_with_the_peers_end() {
         &wire,
         GROUP_0,
         &CiMessage::MessageReportReply {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             scope: declared,
         },
@@ -1957,10 +1967,8 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         &wire,
         GROUP_0,
         &CiMessage::ProcessCapabilitiesInquiry {
-            header: CiHeader {
-                device_id: CiDeviceId::FunctionBlock,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
         },
         40,
@@ -1969,10 +1977,8 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
         &wire,
         GROUP_0,
         &CiMessage::MessageReportInquiry {
-            header: CiHeader {
-                device_id: CiDeviceId::Group,
-                ..CiHeader::new(peer())
-            },
+            source: peer(),
+            ci_version: CI_VERSION,
             to: ours,
             control: DataControl::Full,
             scope: ReportScope::Group {
@@ -2001,9 +2007,9 @@ fn the_session_answers_a_process_inquiry_as_a_device_with_nothing_to_report() {
 use crate::{PropertyCall, PropertyChange};
 use tutti_midi_ci::{
     BodyLimit, BufferLimit, PE_TIMEOUT, PeCapabilities, PeCapabilitiesFailure, PeCiMessage, PeData,
-    PeLocalOn, PeReassemblyLimits, PeResource, PeSettings, ResourceEntry, ResourceEvent,
-    ResourceGet, ResourceInitiator, ResourceResponder, ResourceStore, ResourceTarget,
-    ResponderSettings, SimultaneousRequests, StreamLimit,
+    PeLocalOn, PeReassemblyLimits, PeSettings, ResourceEntry, ResourceEvent, ResourceGet,
+    ResourceInitiator, ResourceResponder, ResourceStore, ResourceTarget, ResponderSettings,
+    SimultaneousRequests, StandardResource, StreamLimit,
 };
 
 fn property_events(polled: &[Polled]) -> Vec<&PropertyChange> {
@@ -2041,7 +2047,11 @@ fn pe_limits() -> PeReassemblyLimits {
 
 fn local_on(on: bool) -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
+    store.declare(
+        ResourceEntry::standard(StandardResource::LocalOn)
+            .build()
+            .unwrap(),
+    );
     store
         .put(None, PeData::LocalOn(PeLocalOn(on)))
         .expect("declared");
@@ -2265,7 +2275,7 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
     let [handle] = &*peers else {
         panic!("the peer is listed: {peers:?}");
     };
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::LocalOn).unwrap());
     wire.session
         .ask_property(handle.ask(PropertyCall::Get(get)))
         .unwrap();
@@ -2287,7 +2297,7 @@ fn the_session_initiates_property_exchange_with_a_peer_that_declared_it() {
     assert_eq!(
         got,
         Some((
-            ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
+            ResourceTarget::try_from(StandardResource::LocalOn).unwrap(),
             Ok(PeData::LocalOn(PeLocalOn(false)))
         ))
     );
@@ -2308,7 +2318,7 @@ fn the_session_serves_its_store_to_a_peer_that_declared_property_exchange() {
     });
     assert_eq!(list, Some(local_on(true).resource_list()));
 
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::LocalOn).unwrap());
     let init = far.init.as_mut().unwrap();
     let (_, actions) = init.get(&get, wire.at(300)).unwrap();
     let said = Far::sends_of(actions);
@@ -2365,7 +2375,7 @@ fn a_lost_peer_drops_its_property_exchange() {
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::LocalOn)
+        ResourceEntry::standard(StandardResource::LocalOn)
             .can_subscribe(true)
             .build()
             .unwrap(),
@@ -2404,7 +2414,7 @@ fn ask_and_pump(wire: &mut Wire, far: &mut Far, call: PropertyCall, ms: u64) -> 
 #[test]
 fn a_subscription_starts_and_ends_through_the_session() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
     let answers = property_answers(&all);
     let Some(id) = answers.iter().find_map(|a| match a {
@@ -2477,7 +2487,7 @@ fn subscription_chunk(
 /// A subscribed far end whose Subscription the session's Initiator holds.
 fn held_subscription() -> (Wire, Muid, Far, tutti_midi_ci::SubscribeId) {
     let (mut wire, ours, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::LocalOn).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::LocalOn).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Subscribe(get), 300);
     let id = property_answers(&all)
         .into_iter()
@@ -2497,7 +2507,7 @@ fn an_update_of_a_held_subscription_is_answered_once_with_200_and_not_by_the_res
     let (mut wire, _, mut far, _) = held_subscription();
     let _ = ci_sent(&wire);
     let now = wire.at(600);
-    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
     let actions = far
         .resp
         .publish(
@@ -2598,7 +2608,7 @@ fn the_end_of_an_unheld_subscription_reaches_the_responder_and_is_answered_404()
 #[test]
 fn a_call_the_peers_resource_list_refuses_is_a_not_sent_answer() {
     let (mut wire, _, mut far) = ready_property_peer(subscribable());
-    let get = ResourceGet::new(ResourceTarget::try_from(PeResource::DeviceInfo).unwrap());
+    let get = ResourceGet::new(ResourceTarget::try_from(StandardResource::DeviceInfo).unwrap());
     let all = ask_and_pump(&mut wire, &mut far, PropertyCall::Get(get), 300);
     let answers = property_answers(&all);
     assert!(
@@ -2616,7 +2626,7 @@ fn a_call_for_a_peer_that_is_gone_is_refused_or_reported_not_sent() {
     let handle = wire.session.property_peers(&wire.id)[0].clone();
     let get = || {
         PropertyCall::Get(ResourceGet::new(
-            ResourceTarget::try_from(PeResource::LocalOn).unwrap(),
+            ResourceTarget::try_from(StandardResource::LocalOn).unwrap(),
         ))
     };
 
@@ -2761,7 +2771,9 @@ fn a_served_resource_is_not_subscribable_and_a_subscription_start_is_refused() {
         _ => None,
     });
     let list = list.expect("the ResourceList came");
-    let entry = list.entry(&PeResource::LocalOn).expect("LocalOn is listed");
+    let entry = list
+        .entry(&StandardResource::LocalOn)
+        .expect("LocalOn is listed");
     assert!(!entry.can_subscribe());
 
     // A Start sent anyway, past the Initiator's own check, gets the refusal.
@@ -2786,7 +2798,7 @@ fn a_served_resource_is_not_subscribable_and_a_subscription_start_is_refused() {
                 PeAction::Send(message) => say(&wire, GROUP_0, &message, ms),
                 PeAction::Capabilities(_) if !started => {
                     started = true;
-                    let name = PeResource::LocalOn.name();
+                    let name = StandardResource::LocalOn.name();
                     let (_, sends) = init
                         .start(PeCall::Subscribe(PeGet::new(name)), wire.at(ms))
                         .unwrap();

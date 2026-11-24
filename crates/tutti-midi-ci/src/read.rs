@@ -49,9 +49,10 @@ use tutti_ump::{
 };
 
 use super::{
-    CI_SUB_ID_1, CiCategories, CiDeviceId, DataControl, Destination, DetailsData, DiscoveryData,
-    InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures, ProfileChannels, ProfileId,
-    ProfileList, ProfileLists, ProfileTarget, ReportScope, SpecificData,
+    CI_SUB_ID_1, CiCategories, CiDeviceId, DataControl, Destination, DetailsData, DeviceBody,
+    DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
+    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReplyData, ReplyVersion2,
+    ReportScope, SpecificData,
 };
 
 type Res<T> = winnow::ModalResult<T, ContextError>;
@@ -139,36 +140,61 @@ fn max_sysex_size(input: &mut &[u8]) -> Res<MaxSysexSize> {
         .parse_next(input)
 }
 
-/// A reply's Function Block: absent (a Version 1 peer) and `7F` are `None`; 0 to
-/// 31 a block; anything else malformed (§5.6.2).
+/// A reply's Function Block: `7F` is `None`; 0 to 31 a block; anything else malformed (§5.6.2).
 fn function_block(input: &mut &[u8]) -> Res<Option<FunctionBlockId>> {
     alt((
-        eof.value(None),
         literal(NO_FUNCTION_BLOCK_WIRE).value(None),
         any.verify_map(FunctionBlockId::new).map(Some),
     ))
     .parse_next(input)
 }
 
-fn discovery(is_reply: bool, input: &mut &[u8]) -> Res<DiscoveryData> {
-    seq!(DiscoveryData {
+fn device_body(input: &mut &[u8]) -> Res<DeviceBody> {
+    seq!(DeviceBody {
         identity: identity,
         categories: u7.map(|c| CiCategories::from_bits_truncate(c.get())),
         max_sysex_size: max_sysex_size,
-        output_path_id: u7_or_none,
-        function_block: |i: &mut &[u8]| if is_reply {
-            function_block(i)
-        } else {
-            Ok(None)
-        },
     })
     .parse_next(input)
 }
 
-/// The body of a Discovery (`is_reply` false) or a Reply to Discovery, or
-/// `None` when it is malformed.
-pub(super) fn discovery_body(is_reply: bool, mut body: &[u8]) -> Option<DiscoveryData> {
-    discovery(is_reply, &mut body).ok()
+fn discovery(input: &mut &[u8]) -> Res<DiscoveryData> {
+    seq!(DiscoveryData {
+        body: device_body,
+        output_path_id: u7_or_none,
+    })
+    .parse_next(input)
+}
+
+/// The Version 2 fields of a Reply, or `None` when the message ended before them.
+fn reply_v2(input: &mut &[u8]) -> Res<Option<ReplyVersion2>> {
+    alt((
+        eof.value(None),
+        seq!(ReplyVersion2 {
+            output_path_id: u7,
+            function_block: function_block,
+        })
+        .map(Some),
+    ))
+    .parse_next(input)
+}
+
+fn reply(input: &mut &[u8]) -> Res<ReplyData> {
+    seq!(ReplyData {
+        body: device_body,
+        version_2: reply_v2,
+    })
+    .parse_next(input)
+}
+
+/// The body of a Discovery, or `None` when it is malformed.
+pub(super) fn discovery_body(mut body: &[u8]) -> Option<DiscoveryData> {
+    discovery(&mut body).ok()
+}
+
+/// The body of a Reply to Discovery, or `None` when it is malformed.
+pub(super) fn reply_body(mut body: &[u8]) -> Option<ReplyData> {
+    reply(&mut body).ok()
 }
 
 /// A 14-bit value, least significant byte first.

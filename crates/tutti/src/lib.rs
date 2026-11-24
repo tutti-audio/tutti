@@ -290,8 +290,8 @@ pub use tutti_session::{ParamRef, RouteSpec};
 /// ```
 pub mod nodes {
     pub use tutti_nodes::automation::{
-        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode,
-        ForeignLaneConfig, LiveAutomationLane, RecordMode, RecordingConfig, Trajectory,
+        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode, ForeignLane,
+        ForeignLaneConfig, LaneKind, PortLane, RecordMode, RecordingConfig, Trajectory,
         UnitLaneConfig,
     };
     pub use tutti_nodes::{
@@ -306,7 +306,7 @@ pub mod nodes {
         ConvolverNode, CrossoverConfig, CrossoverError, CrossoverNode, CutAlignment,
         CutFilterConfig, CutFilterNode, DcBlockerConfig, DcBlockerNode, Decoding,
         DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DelayTiming, DiodeClipperConfig, DiodeClipperNode,
+        DelayLayoutError, DelayNode, DelaySync, DiodeClipperConfig, DiodeClipperNode,
         DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
         DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
         EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
@@ -339,7 +339,7 @@ pub mod nodes {
     /// and `*Controls` handle, and the `HasControl` and `Control*` traits that connect
     /// them. An application that only inserts nodes does not name these.
     pub mod kernel {
-        pub use tutti_nodes::automation::LaneControls;
+        pub use tutti_nodes::automation::{ForeignLaneControls, LaneControls};
         pub use tutti_nodes::{
             AdditiveKernel, AdditiveSet, AmbisonicDecoderKernel, AmbisonicDecoderSet,
             AmbisonicEncoderKernel, AmbisonicRotatorKernel, AutoPanControls, AutoPanKernel,
@@ -359,7 +359,7 @@ pub mod nodes {
             HysteresisControls, HysteresisKernel, HysteresisSet, KarplusStrongKernel,
             KarplusStrongSet, Kernel, KernelConfig, KernelNode, LadderControls, LadderKernel,
             LadderSet, LevellerControls, LevellerKernel, LevellerSet, LimiterControls,
-            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet,
+            LimiterKernel, LimiterSet, ModDelayControls, ModDelayKernel, ModDelaySet, ModHost,
             ModalBankKernel, ModalBankSet, MultibandControls, NoControls, PhaserControls,
             PhaserKernel, PhaserSet, PitchShifterKernel, PitchShifterSet, PlateControls,
             PlateKernel, PlateSet, ReconcileError, RingModControls, RingModKernel, RingModSet,
@@ -530,10 +530,10 @@ pub mod session {
         SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
-        OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec, OutputStrip,
-        QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault, StreamFaultKind,
-        StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, CallbackFrames, CallbackSpan, GraphEngineError, LOAD_MEAN_TIME_CONSTANT,
+        Lagging, OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum,
+        OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
+        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -615,9 +615,9 @@ pub mod session {
     ))]
     pub use tutti_session::{AudioData, LoadAudio, LoadedAudio, LoadingAudio, Tier};
     pub use tutti_session::{
-        AutomationTake, MixRef, ModInput, ModKeys, ModRefusal, ModRouteId, ModSourceId, ModState,
-        ModTarget, Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged,
-        RouteError, RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
+        AutomationTake, MixRef, ModInput, ModRefusal, ModRouteId, ModSourceId, ModState, ModTarget,
+        Mods, ModsView, NoAutomation, NoSuchModRoute, NoSuchModSource, Problem, Ranged, RouteError,
+        RouteInfo, SourceInfo, SourceName, TargetName, declare_targets,
     };
     #[cfg(feature = "device")]
     pub use tutti_session::{
@@ -903,12 +903,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl, NotADeviceId, NotASysexSize,
-        NotProfileChannels, NoteData, ProcessError, ProcessFeatures, ProfileChange,
-        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
-        SystemMessages,
+        DetailsData, DeviceBody, DiscoveryData, EnabledMpeZones, InquiryTarget,
+        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
+        ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
+        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
+        ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
@@ -944,20 +944,19 @@ pub mod midi {
     pub use tutti_midi_hardware::{MidiThread, NotFound, SeedError, StartFailed};
     pub use tutti_midi_protocol::{
         ChannelResponse, ControllerSupport, InvalidMpeZones, Mcm, MemberCount, MmcSegmentCount,
-        MmcSegmentError, MpeFeatures, MpeMode, MpeSpec, MpeZone, MpeZoneConfig, MpeZones, MtcRate,
+        MmcSegmentError, Mpe11Zone, Mpe11Zones, MpeFeatures, MpeLayout, MpeMode, MpeZone, MtcRate,
         NotMemberCount, NotMmcSegmentCount, NotSysexDeviceId, NotTimecodeHours, NotTimecodeMinutes,
-        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, SmpteFrameRate, SmpteTimecode,
-        SysexDeviceId, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
+        NotTimecodeSeconds, PitchBendSensitivity, PitchBendSupport, ProfileZone, ProfileZones,
+        SmpteFrameRate, SmpteTimecode, SysexDeviceId, TimecodeHours, TimecodeMinutes,
+        TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClipEventsKind, ClockKind, ClockOffset, HarmonyChanges, HarmonyChangesError,
-        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
-        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
-        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
+        HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts,
+        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages,
+        SyncOut, SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{
-        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
-    };
+    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
@@ -1010,10 +1009,11 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, DroppedEvent, FollowClock, FollowMachineControl, FollowTempo, HeldReader,
-        InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, Midi,
-        MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError, NotInstrument,
-        OpenMidiSink, Stamping, TrackError,
+        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
+        FollowMachineControl, FollowTempo, HeldReader, InstrumentHandle, LoadMidi, LoadReport,
+        LoadedMidi, LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule,
+        MidiSink, NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError,
+        UnfollowCause,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -1094,9 +1094,9 @@ pub mod midi {
             MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
             MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
             NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-            NotQuarterFramePiece, NotWritable, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
-            Recipient, RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
-            UniversalRead, UniversalReader, VitcInsert,
+            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
+            RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload, UniversalRead,
+            UniversalReader, VitcInsert,
         };
     }
 
@@ -1146,22 +1146,24 @@ pub mod midi {
             NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds,
             OpaqueBody, PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate,
             PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
-            PeBasicChannelTx, PeBodyError, PeCacheTime, PeCapabilities, PeCapabilitiesFailure,
-            PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry, PeChannelList, PeChannelMode,
-            PeChunkError, PeCluster, PeColumn, PeController, PeCtrl, PeCtrlMapEntry, PeCtrlMapList,
-            PeCurrentMode, PeData, PeDataError, PeDataFault, PeDecimal, PeDeviceInfo, PeEncoding,
-            PeEndedBy, PeError, PeExtensions, PeExternalSync, PeExtra, PeExtraError, PeFlowControl,
-            PeHeaderError, PeHeaderTooLong, PeJson, PeJsonError, PeJsonSchema, PeLink, PeLocalOn,
-            PeMessage, PeMidiMode, PeModeEntry, PeModeList, PeObject, PeOpaque, PeOutcome, PePage,
-            PeProgramEntry, PeProgramList, PeReassemblyError, PeReply, PeRequestId, PeResource,
-            PeResourceList, PeResponse, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus,
-            PeStatusClass, PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable,
-            PeVersion, Place, Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused,
-            ResIdUse, ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent,
-            ResourceFailure, ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget,
-            ResponderEvent, RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction,
-            SimultaneousRequests, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
-            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            PeBasicChannelTx, PeBinary, PeBodyError, PeCacheTime, PeCapabilities,
+            PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
+            PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
+            PeCtrlMapEntry, PeCtrlMapList, PeCurrentMode, PeData, PeDataError, PeDataFault,
+            PeDecimal, PeDeviceInfo, PeEncoding, PeEndedBy, PeError, PeExtensions, PeExternalSync,
+            PeExtra, PeExtraError, PeFlowControl, PeHeaderError, PeHeaderTooLong, PeJson,
+            PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
+            PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
+            PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
+            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
+            PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place, Priority,
+            PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
+            ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
+            ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
+            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

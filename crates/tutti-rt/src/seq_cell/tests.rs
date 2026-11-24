@@ -93,30 +93,38 @@ fn a_concurrent_reader_never_sees_a_mixed_copy() {
 }
 
 /// `try_read` returns the sequence of the last write, the same until the
-/// next write and greater after it; nothing before the first write; `None`
+/// next write and greater after it; `Never` before the first write; `Torn`
 /// while a write is in progress, never a retry.
 #[test]
 fn a_try_read_returns_a_sequence_unique_per_write() {
     let mut writer = SeqWriter::<u64>::new();
     let reader = writer.reader();
-    assert_eq!(reader.try_read(), None, "never written");
+    assert_eq!(reader.try_read(), Attempt::Never, "never written");
     writer.write(7);
-    let (first, value) = reader.try_read().expect("a completed write");
+    let Attempt::Stable(first, value) = reader.try_read() else {
+        panic!("a completed write");
+    };
     assert_eq!(value, 7);
     assert_eq!(
         reader.try_read(),
-        Some((first, 7)),
+        Attempt::Stable(first, 7),
         "the same until a write"
     );
     writer.write(7);
-    let (second, _) = reader.try_read().expect("a completed write");
+    let Attempt::Stable(second, _) = reader.try_read() else {
+        panic!("a completed write");
+    };
     assert!(
         second > first,
         "a rewrite of the same value is a new sequence"
     );
     // What a write leaves between its odd mark and its closing store.
     reader.cell[0].store(second + 1, Ordering::Relaxed);
-    assert_eq!(reader.try_read(), None, "a write in progress");
+    assert_eq!(reader.try_read(), Attempt::Torn, "a write in progress");
     reader.cell[0].store(second, Ordering::Relaxed);
-    assert_eq!(reader.try_read(), Some((second, 7)), "settled again");
+    assert_eq!(
+        reader.try_read(),
+        Attempt::Stable(second, 7),
+        "settled again"
+    );
 }

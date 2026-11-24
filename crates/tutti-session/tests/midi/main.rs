@@ -85,6 +85,12 @@ mod midi_clock_follow;
 // The session follows MIDI Machine Control from the input and sends it from the transport.
 #[cfg(feature = "midi-hardware")]
 mod midi_machine_control;
+// A follower hears its source after the graph is re-rated.
+#[cfg(feature = "midi-hardware")]
+mod midi_follow_rerate;
+// A follower whose input node is removed ends, says so, and releases what it held.
+#[cfg(feature = "midi-hardware")]
+mod midi_follow_ends;
 // A sink on the system clock: no device, the timer's blocks.
 #[cfg(feature = "midi")]
 mod system_clock;

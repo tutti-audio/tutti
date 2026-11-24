@@ -56,10 +56,6 @@ const PROCESS_TIMEOUT_PERIODS: u32 = 4;
 /// is safe here and merely stops it giving up prematurely.
 const MIN_PROCESS_TIMEOUT: Duration = Duration::from_millis(2);
 
-/// Ceiling, for the degenerate case of a very large block: past this the reply
-/// cannot help any live block and continuing to wait only starves the queue.
-const MAX_PROCESS_TIMEOUT: Duration = Duration::from_millis(50);
-
 /// How long [`read_news`] waits for the control connection to say more
 /// once it has gone quiet: news the server sent is already in the socket.
 const DRAIN_UNSOLICITED: Duration = Duration::from_millis(1);
@@ -97,14 +93,17 @@ const RATE_SLICE: Duration = Duration::from_millis(100);
 const MAX_BEHIND: u64 = RING_SLOTS as u64 - 1;
 
 /// The bridge thread's reply timeout for one block: [`PROCESS_TIMEOUT_PERIODS`]
-/// of that block's own period, clamped to
-/// [`MIN_PROCESS_TIMEOUT`]..=[`MAX_PROCESS_TIMEOUT`].
+/// of that block's own period, and never under [`MIN_PROCESS_TIMEOUT`]. It has
+/// no ceiling: the wait is counted in periods, so while the bridge thread waits
+/// the audio thread queues at most that many commands whatever the block's
+/// length, and a long block is given the same share of its period as a short
+/// one.
 ///
 /// `num_samples` stays raw: it comes off the IPC wire, where the unit mandate
 /// stops.
 fn process_timeout(num_samples: usize, rate: SampleRate) -> Duration {
     let period = Duration::from_secs_f64(num_samples as f64 / rate.get());
-    (period * PROCESS_TIMEOUT_PERIODS).clamp(MIN_PROCESS_TIMEOUT, MAX_PROCESS_TIMEOUT)
+    (period * PROCESS_TIMEOUT_PERIODS).max(MIN_PROCESS_TIMEOUT)
 }
 
 /// Whether block `seq` is far enough behind the newest submitted block that its
@@ -932,17 +931,15 @@ pub(super) fn handle_control(
     let receives = matches!(object, Object::State);
     // Held until the answer: where the object is read by name, it stays until
     // then.
-    let _held = match object {
-        Object::Blob(blob) => Some(ipc::send_object(stream, id, request, blob)?),
-        Object::Slab(slab) => {
-            ipc::send_object(stream, id, request, slab)?;
-            None
-        }
-        Object::None | Object::State => {
-            ipc::send_object(stream, id, request, ())?;
-            None
-        }
-    };
+    let _held = ipc::send_detached(
+        stream,
+        id,
+        request,
+        match object {
+            Object::Detached(detached) => Some(detached),
+            Object::None | Object::State => None,
+        },
+    )?;
     // A timeout here is **not** connection-level: the socket is synchronised and
     // the session is healthy, the plugin simply has not answered yet. Propagating
     // would `crash()` it, and the caller would be told the session is fine
@@ -1623,16 +1620,15 @@ mod tests {
         }
     }
 
-    /// Every production block size / rate combination the engine can present.
-    /// A chunk is one device callback (`MAX_CHUNK` at most), so the timeout
-    /// must hold at every size.
+    /// Block sizes and rates a device can present, a long period included: a
+    /// chunk is one device callback, so the timeout must hold at every size.
     const RATES: [SampleRate; 4] = [
         SampleRate::SR_44K1,
         SampleRate::SR_48K,
         SampleRate::SR_96K,
         SampleRate::SR_192K,
     ];
-    const BLOCKS: [usize; 4] = [64, 128, 256, 512];
+    const BLOCKS: [usize; 7] = [64, 128, 256, 512, 2_400, 4_800, 8_192];
 
     fn period(num_samples: usize, rate: SampleRate) -> Duration {
         Duration::from_secs_f64(num_samples as f64 / rate.get())
@@ -1655,8 +1651,8 @@ mod tests {
                     "n={n} rate={rate}: timeout {t:?} exceeds {PROCESS_TIMEOUT_PERIODS} periods ({limit:?})"
                 );
                 assert!(
-                    t <= MAX_PROCESS_TIMEOUT,
-                    "n={n} rate={rate}: timeout {t:?} over the ceiling"
+                    t >= limit,
+                    "n={n} rate={rate}: timeout {t:?} is under {PROCESS_TIMEOUT_PERIODS} periods ({limit:?})"
                 );
             }
         }
@@ -1676,7 +1672,7 @@ mod tests {
                 let t = process_timeout(n, rate);
                 let ring_lifetime = period(n, rate) * MAX_BEHIND as u32;
                 assert!(
-                    t >= ring_lifetime.min(MAX_PROCESS_TIMEOUT),
+                    t >= ring_lifetime,
                     "n={n} rate={rate}: timeout {t:?} gives up before the slot \
                      is recycled ({ring_lifetime:?})"
                 );

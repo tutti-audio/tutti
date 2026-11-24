@@ -10,8 +10,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tutti_midi_ci::{
-    MediaType, OpaqueBody, PeData, PeDataError, PeDataFault, PeResource, PeState, Place,
-    RequestRefused, ResourceFailure, StateId,
+    MediaType, PeData, PeDataError, PeDataFault, PeState, Place, RequestRefused, ResourceFailure,
+    StandardResource, StateId,
 };
 use tutti_midi_device::SavedDevice;
 
@@ -55,10 +55,8 @@ impl Future for SavePeerState {
                     fault: PeDataFault::OfResource(other.resource()),
                 })))
             })?;
-            let (media_type, bytes) = match state.body() {
-                OpaqueBody::Binary { media_type, bytes } => (media_type.clone(), bytes.clone()),
-                OpaqueBody::Json(json) => (MediaType::JSON, json.encode()),
-            };
+            let (media_type, bytes) = state.body().to_wire();
+            let media_type = media_type.unwrap_or(MediaType::JSON);
             Ok(PeerState::new(SavedPeer::Device(device), media_type, bytes))
         }))
     }
@@ -89,8 +87,13 @@ impl ListedPeer {
     /// The State resource the peer's ResourceList names, or why there is none.
     fn state_resource(&self) -> Result<ListedResource, PeerError<PeFailure>> {
         self.resources()
-            .and_then(|peer| peer.listed().find(|l| *l.resource() == PeResource::State))
-            .ok_or(refusal(RequestRefused::NotListed(PeResource::State)))
+            .and_then(|peer| {
+                peer.listed()
+                    .find(|l| *l.resource() == StandardResource::State)
+            })
+            .ok_or(refusal(RequestRefused::NotListed(
+                StandardResource::State.into(),
+            )))
     }
 
     /// Saves the device's state: a Get of its State resource's `fullState`

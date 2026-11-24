@@ -222,12 +222,12 @@ fn the_switch_starts_off_and_both_ends_see_it() {
 /// `85 * 28/16 + 15/16` (85 whole periods and 5 samples), the peak `3/4`.
 #[test]
 fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
-    use crate::compile::ids::{AudioSlotId, Id};
+    use crate::compile::ids::AudioSlotId;
     use crate::exec::arena::Arena;
     const FRAMES: usize = 600;
     let mut arena = Arena::<f64>::new(1, FRAMES);
     for (i, x) in arena
-        .slot_mut(AudioSlotId::new(0), FRAMES)
+        .slot_mut(AudioSlotId::ZERO, FRAMES)
         .iter_mut()
         .enumerate()
     {
@@ -239,7 +239,7 @@ fn an_f64_block_is_metered_across_chunks_at_its_analytic_peak_and_rms() {
         &mut writer,
         &arena,
         &[crate::exec::Flags::NONE][..],
-        &[AudioSlotId::new(0)],
+        &[AudioSlotId::ZERO],
         FRAMES,
     );
     let level = reader.read()[0];

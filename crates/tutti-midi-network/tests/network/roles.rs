@@ -214,8 +214,8 @@ fn a_device_in_both_roles_presents_one_identity_in_the_txt_record_and_every_comm
     let admissions = [
         Admission::Open,
         Admission::Confirm,
-        Admission::SharedSecret("pw".to_owned()),
-        Admission::Users(vec![(Username::new("Rosa").unwrap(), "pw".to_owned())]),
+        Admission::SharedSecret("pw".into()),
+        Admission::Users(vec![(Username::new("Rosa").unwrap(), "pw".to_owned())].into()),
     ];
     let asker: SocketAddr = "10.0.0.5:5000".parse().unwrap();
     for admission in admissions {

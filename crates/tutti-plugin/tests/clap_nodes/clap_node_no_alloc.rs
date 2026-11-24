@@ -32,7 +32,7 @@ use tutti_modulation::{
     Waveform,
 };
 use tutti_music::{BeatsPerBar, MeterChange, MeterMap, NoteValue, TimeSignature};
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, ForeignLaneConfig, Law, Trajectory};
+use tutti_nodes::automation::{Breakpoint, ForeignLaneConfig, Law, Trajectory};
 use tutti_ump::{MidiChannel, NoteVelocity, U7};
 use tutti_units::{Beat, BeatsPerCycle, Bpm, Samples};
 use tutti_units::{Bipolar, ParamId, PhaseIncrement};
@@ -105,9 +105,10 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
         .layers(vec![lfo])
         .build()
         .expect("a valid program");
-    let lfo = ControlLaneNode::from(
-        ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::of(0.0, 1.0)).knob(0.5),
-    );
+    let lfo = ForeignLaneConfig::new(ParamId::new(77), program, ParamRange::of(0.0, 1.0))
+        .knob(tutti_units::Normalized::of(0.5))
+        .build()
+        .0;
     let prepare = tutti_graph::Prepare::new(
         tutti_units::SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
@@ -123,11 +124,13 @@ fn a_bound_plugin_does_not_allocate_on_the_audio_thread() {
                 .law(Law::PowerIn(Exponent::of(2.0))),
         );
     }
-    let lane = ControlLaneNode::from(ForeignLaneConfig::new(
+    let lane = ForeignLaneConfig::new(
         ParamId::new(78),
         ControlProgram::from_curve(Arc::new(env)),
         ParamRange::of(0.0, 1.0),
-    ));
+    )
+    .build()
+    .0;
     let (mut rig, mut sender) = Rig::prepared_with_keys(
         probe
             .client

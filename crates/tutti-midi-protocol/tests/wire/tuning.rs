@@ -56,7 +56,7 @@ fn table_bytes() -> (Vec<u8>, KeyTable) {
 #[test]
 fn frequency_data_is_a_semitone_and_a_fraction_most_significant_byte_first() {
     let change = |kk: u8, xx: u8, yy: u8, zz: u8| {
-        let TuningMessage::NoteChange { changes, .. } =
+        let TuningMessage::RealTimeNoteChange { changes, .. } =
             tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x00, 0x01, kk, xx, yy, zz])
         else {
             panic!()
@@ -76,7 +76,7 @@ fn frequency_data_is_a_semitone_and_a_fraction_most_significant_byte_first() {
 /// compares bytes against.
 #[test]
 fn seven_f_seven_f_seven_f_is_the_no_change_word() {
-    let TuningMessage::NoteChange { changes, .. } =
+    let TuningMessage::RealTimeNoteChange { changes, .. } =
         tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x00, 0x01, 0x30, 0x7F, 0x7F, 0x7F])
     else {
         panic!()
@@ -229,8 +229,7 @@ fn the_scale_octave_dumps_are_twelve_offsets_and_a_checksum() {
 /// disagrees with the bytes is not the message.
 #[test]
 fn a_single_note_change_carries_ll_changes_and_ll_is_its_length() {
-    let TuningMessage::NoteChange {
-        timing,
+    let TuningMessage::RealTimeNoteChange {
         bank,
         program,
         changes,
@@ -240,7 +239,7 @@ fn a_single_note_change_carries_ll_changes_and_ll_is_its_length() {
     else {
         panic!()
     };
-    assert_eq!((timing, bank, program), (Timing::RealTime, None, U7::of(4)));
+    assert_eq!((bank, program), (None, U7::of(4)));
     let got: Vec<(u8, u32)> = changes
         .as_slice()
         .iter()
@@ -259,7 +258,8 @@ fn a_single_note_change_carries_ll_changes_and_ll_is_its_length() {
         UniversalRead::Unread
     );
     // No changes at all is a message with none.
-    let TuningMessage::NoteChange { changes, .. } = tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x04, 0x00])
+    let TuningMessage::RealTimeNoteChange { changes, .. } =
+        tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x04, 0x00])
     else {
         panic!()
     };
@@ -277,26 +277,15 @@ fn the_bank_form_of_the_note_change_is_real_or_non_real_time_by_its_header() {
     let mut nrt = vec![0x7E, 0x7F];
     nrt.extend(body);
     let (
+        TuningMessage::RealTimeNoteChange { bank: ba, .. },
         TuningMessage::NoteChange {
-            timing: a,
-            bank: ba,
-            ..
-        },
-        TuningMessage::NoteChange {
-            timing: b,
-            bank: bb,
-            program,
-            ..
+            bank: bb, program, ..
         },
     ) = (tuning(&rt), tuning(&nrt))
     else {
         panic!()
     };
-    assert_eq!((a, b), (Timing::RealTime, Timing::NonRealTime));
-    assert_eq!(
-        (ba, bb, program),
-        (Some(U7::of(2)), Some(U7::of(2)), U7::of(3))
-    );
+    assert_eq!((ba, bb, program), (Some(U7::of(2)), U7::of(2), U7::of(3)));
     // 08 02 is defined in real time only.
     assert_eq!(
         parse(&[0x7E, 0x7F, 0x08, 0x02, 0x00, 0x00]),
@@ -386,7 +375,7 @@ fn scale_octave_tuning_has_two_forms_and_two_timings() {
 /// A key above 127 cannot be on the wire; a note-number byte of 7F is key 127.
 #[test]
 fn key_127_is_the_top_key() {
-    let TuningMessage::NoteChange { changes, .. } =
+    let TuningMessage::RealTimeNoteChange { changes, .. } =
         tuning(&[0x7F, 0x7F, 0x08, 0x02, 0x00, 0x01, 0x7F, 0x7F, 0x00, 0x00])
     else {
         panic!()
@@ -405,7 +394,7 @@ fn a_message_of_127_changes_is_read() {
     for k in 0..127u8 {
         p.extend([k, k, 0x00, 0x00]);
     }
-    let TuningMessage::NoteChange { changes, .. } = tuning(&p) else {
+    let TuningMessage::RealTimeNoteChange { changes, .. } = tuning(&p) else {
         panic!()
     };
     assert_eq!(changes.as_slice().len(), 127);

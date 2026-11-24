@@ -41,6 +41,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tutti_buffers::MaxBlock;
+use tutti_fixtures::{cycle_blocks, fixed_blocks};
 use tutti_graph::{Curvature, Exponent};
 
 use proptest::prelude::*;
@@ -992,9 +993,9 @@ fn a_delay_appearing_on_a_param_source_holds_its_last_value() {
         let delay = ed
             .base()
             .expect("a plan")
-            .delays()
+            .event_delays()
             .iter()
-            .find(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. }))
+            .find(|d| matches!(d.key, tutti_graph::EventDelayKey::ParamEvent { .. }))
             .map(|d| d.len);
         assert_eq!(
             delay,
@@ -1062,9 +1063,9 @@ fn a_param_source_counts_toward_arrival_in_both_solves() {
     );
     assert!(
         !plan
-            .delays()
+            .event_delays()
             .iter()
-            .any(|d| matches!(d.key, tutti_graph::DelayKey::ParamEvent { .. })),
+            .any(|d| matches!(d.key, tutti_graph::EventDelayKey::ParamEvent { .. })),
         "the target waits for the source; the source is not delayed"
     );
     let out = render(&mut exec, &mut ed, 128, 64);
@@ -1213,22 +1214,14 @@ fn a_reprepare_hands_param_state_back() {
 /// The block schedules a segment test renders under: one frame, odd and
 /// even fixed sizes, the maximum, and a ragged one.
 fn segment_schedules(total: usize) -> Vec<Vec<usize>> {
-    let fixed = |n: usize| {
-        let mut v = vec![n; total / n];
-        if !total.is_multiple_of(n) {
-            v.push(total % n);
-        }
-        v
-    };
-    let mut ragged = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, 128, 7, 64, 127, 33, 2][i % 7].min(total - sum);
-        ragged.push(n);
-        sum += n;
-        i += 1;
-    }
-    vec![fixed(1), fixed(7), fixed(64), fixed(65), fixed(128), ragged]
+    vec![
+        fixed_blocks(1, total),
+        fixed_blocks(7, total),
+        fixed_blocks(64, total),
+        fixed_blocks(65, total),
+        fixed_blocks(128, total),
+        cycle_blocks(&[1, 128, 7, 64, 127, 33, 2], total),
+    ]
 }
 
 /// A probe whose `Cutoff` (base 0) is driven by one `Ramps` source sending

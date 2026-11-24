@@ -28,7 +28,7 @@ fn magnitude(filter: Cookbook, center: f64, f: f64) -> f64 {
 }
 
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    Db::new(db).to_amplitude().get()
 }
 
 /// The cookbook's low-pass is `Q` at the center (`-3.0103 dB` at `Q = 1/sqrt(2)`), 1 at DC

@@ -1,6 +1,6 @@
 //! A node's mix is a modulation target: an event output (a control lane) drives it through
 //! `GraphSpec::connect_param` at `NodeMix::ADDR`, with the param port's rules,
-//! its source is aligned to the node (`DelayKey::ParamEvent`), and the mix cell
+//! its source is aligned to the node (`EventDelayKey::ParamEvent`), and the mix cell
 //! is the lane's one knob (`Editor::mix_cell`).
 //!
 //! Every figure is analytic: the expected render is `y * m + x̂ * (1 - m)` with
@@ -153,46 +153,44 @@ impl Rig {
     }
 }
 
-/// Render `blocks` blocks of `BLOCK` frames on `workers` participants,
-/// the node's output and the input.
-fn render(rig: &Rig, workers: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let mut harness = Harness::with_workers(BLOCK, workers);
-    if let Some(base) = rig.base {
-        harness.start_mix(key(2), base);
-    }
-    if let Some(range) = rig.range {
-        harness.start_param_range(mix_of(2), range);
-    }
-    harness.switch(&rig.graph(), &rig.kinds);
-    run(&mut harness, 0, blocks)
-}
-
-/// `blocks` more blocks of `harness` from frame `from`.
+/// `blocks` more blocks of `harness` from frame `from`: the node's output
+/// and the input.
 fn run(harness: &mut Harness, from: usize, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let (mut got, mut x) = (Vec::new(), Vec::new());
-    for b in 0..blocks {
-        let input = input_signal((from + b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-        x.extend(&input);
-    }
-    (got, x)
+    let got = harness
+        .run(&vec![BLOCK; blocks], from as u64)
+        .swap_remove(0);
+    (got, input_signal(from as u64, blocks * BLOCK))
 }
 
-/// One-participant and four participants, bit for bit; the one-participant render.
+/// `blocks` blocks of `BLOCK` frames on one and on four participants, the
+/// node's output bit for bit; the one-participant render, with the input.
 fn render_both(rig: &Rig, blocks: usize) -> (Vec<f32>, Vec<f32>) {
-    let serial = render(rig, 1, blocks);
-    let parallel = render(rig, 4, blocks);
-    assert_eq!(
-        serial.0.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        parallel.0.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        "parallel differs from serial"
-    );
-    serial
+    common::agree_across_workers(
+        [4],
+        |workers| {
+            let mut harness = Harness::with_workers(BLOCK, workers);
+            if let Some(base) = rig.base {
+                harness.start_mix(key(2), base);
+            }
+            if let Some(range) = rig.range {
+                harness.start_param_range(mix_of(2), range);
+            }
+            harness.switch(&rig.graph(), &rig.kinds);
+            run(&mut harness, 0, blocks)
+        },
+        |r| common::bits_of(&r.0),
+    )
 }
 
-fn delay_of(plan: &tutti_graph::Plan, key: tutti_graph::DelayKey) -> Option<usize> {
-    plan.delays()
+fn audio_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::AudioDelayKey) -> Option<usize> {
+    plan.audio_delays()
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.len.get())
+}
+
+fn event_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::EventDelayKey) -> Option<usize> {
+    plan.event_delays()
         .iter()
         .find(|d| d.key == key)
         .map(|d| d.len.get())
@@ -440,9 +438,9 @@ fn a_late_lane_delays_the_audio_to_the_node() {
     let rig = Rig::new(plain(), 32, None);
     let plan = plan_of(&rig);
     assert_eq!(
-        delay_of(
+        audio_delay_of(
             &plan,
-            tutti_graph::DelayKey::Audio {
+            tutti_graph::AudioDelayKey::Edge {
                 at: at(2),
                 from: PortSource::MainInput(0)
             }
@@ -450,9 +448,9 @@ fn a_late_lane_delays_the_audio_to_the_node() {
         Some(32)
     );
     assert_eq!(
-        delay_of(
+        event_delay_of(
             &plan,
-            tutti_graph::DelayKey::ParamEvent {
+            tutti_graph::EventDelayKey::ParamEvent {
                 at: mix_of(2),
                 from: lane_out(1)
             }
@@ -473,7 +471,7 @@ fn a_late_lane_delays_the_audio_to_the_node() {
 
 /// A lane that arrives **early** is delayed to the node's arrival: the source
 /// declares 48 frames of latency it does not realise, so the lane gets a
-/// 48-frame event ring (`DelayKey::ParamEvent` at the mix's address) and its
+/// 48-frame event ring (`EventDelayKey::ParamEvent` at the mix's address) and its
 /// event stamped `f` lands on frame `f + 48`; until then the lane reads the
 /// base (the set mix).
 #[test]
@@ -482,9 +480,9 @@ fn an_early_lane_is_delayed_to_the_node() {
     rig.base = Some(Mix::new(0.25));
     let plan = plan_of(&rig);
     assert_eq!(
-        delay_of(
+        event_delay_of(
             &plan,
-            tutti_graph::DelayKey::ParamEvent {
+            tutti_graph::EventDelayKey::ParamEvent {
                 at: mix_of(2),
                 from: lane_out(1)
             }

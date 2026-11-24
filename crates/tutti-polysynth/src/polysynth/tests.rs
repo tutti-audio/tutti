@@ -491,7 +491,6 @@ fn a_sub_voice_is_silent_while_gated_off_and_sounds_once_on() {
     let mut bank = VoiceBank::<f32>::new(
         OscillatorType::Saw,
         &FilterType::None,
-        tutti_dsp::LadderSaturation::PerStage,
         &Adsr::new(
             Seconds::new(0.001),
             Seconds::new(0.1),
@@ -1549,6 +1548,7 @@ fn a_registered_brightness_controller_sets_only_the_addressed_slide() {
             .filter(FilterType::Moog {
                 cutoff: Hz::new(1000.0),
                 resonance: Resonance::new(0.5),
+                saturation: tutti_dsp::LadderSaturation::PerStage,
             })
             .envelope(Adsr {
                 attack: Seconds::new(0.001),
@@ -1707,6 +1707,7 @@ fn a_note_slide_reaches_only_its_voice() {
             .filter(FilterType::Moog {
                 cutoff: Hz::new(1000.0),
                 resonance: Resonance::new(0.5),
+                saturation: tutti_dsp::LadderSaturation::PerStage,
             })
             .envelope(Adsr {
                 attack: Seconds::new(0.001),
@@ -3151,7 +3152,7 @@ fn device_control(device: u8, sub_id: u8, lsb: u8, msb: u8) -> Vec<u8> {
 /// The RMS of each output channel over the last of two blocks of 4410 frames
 /// (a tenth of a second: a whole number of cycles of a 440 Hz sine) after
 /// `events`, the note being at its sustain.
-fn rms_after(synth: &mut Hand, events: &[Ump]) -> (f32, f32) {
+fn rms_after(synth: &mut Hand, events: &[Ump]) -> (f64, f64) {
     queue_midi(synth, events);
     let (mut left, mut right) = (vec![0.0; 4410], vec![0.0; 4410]);
     for _ in 0..2 {
@@ -3175,7 +3176,7 @@ fn master_volume_scales_the_output_by_the_square_of_the_value() {
         &mut s,
         &midi::sysex_packets(0, &device_control(0x7F, 0x01, 0x00, 0x40)),
     );
-    let expected = (8192.0_f32 / 16383.0).powi(2);
+    let expected = (8192.0_f64 / 16383.0).powi(2);
     assert!(
         (after / before - expected).abs() < 0.01,
         "{} against {expected}",
@@ -3237,11 +3238,11 @@ fn a_master_volume_change_ramps_and_does_not_click() {
     heard.extend_from_slice(&left);
     let step = heard
         .windows(2)
-        .map(|w| (w[1] - w[0]).abs())
-        .fold(0.0, f32::max);
+        .map(|w| f64::from((w[1] - w[0]).abs()))
+        .fold(0.0, f64::max);
     // A 440 Hz sine of peak `before * sqrt 2` at 44.1 kHz moves at most
     // 2 pi 440 / 44100 of its peak a frame.
-    let slope = 2.0 * std::f32::consts::PI * 440.0 / 44_100.0 * before * 2.0_f32.sqrt();
+    let slope = 2.0 * std::f64::consts::PI * 440.0 / 44_100.0 * before * 2.0_f64.sqrt();
     assert!(step < slope * 1.5, "{step} against {slope}");
     assert!(
         heard.iter().take(16).any(|s| s.abs() > 0.0) && heard.last().unwrap().abs() < 1e-3,
@@ -3539,33 +3540,33 @@ fn a_glide_leaves_its_source_keys_tuned_pitch() {
     assert!((freq - 277.1826).abs() < 0.3, "{freq}");
 }
 
-/// A config's `ladder_saturation` reaches the voice bank, and unset it is per stage: a unit sine
+/// A Moog filter's `saturation` reaches the voice bank: a unit sine
 /// at 100 Hz through the ladder at 18 kHz with no resonance is quasi-static, so its peak is
-/// `tanh` of the unit peak applied once by `Input` and four times by `PerStage` (the default).
+/// `tanh` of the unit peak applied once by `Input` and four times by `PerStage`.
 /// The oscillators carry no constant, so the sine's peak stands for the wide constant.
 #[test]
-fn the_ladder_saturates_per_stage_unless_set() {
+fn a_moog_filters_saturation_reaches_the_voice_bank() {
     use crate::bank::CONTROL_BLOCK;
     use tutti_dsp::LadderSaturation;
     use tutti_units::{Phase, SampleRate};
     let rate = SampleRate::of(48_000.0);
     let base = SynthConfig::new()
         .oscillator(OscillatorType::Sine)
-        .filter(FilterType::Moog {
-            cutoff: Hz::new(18_000.0),
-            resonance: Resonance::NONE,
-        })
         .envelope(Adsr::new(
             Seconds::new(0.0),
             Seconds::new(0.0),
             Amplitude::new(1.0),
             Seconds::new(0.1),
         ));
-    for (config, times) in [
-        (base.clone(), 4),
-        (base.clone().ladder_saturation(LadderSaturation::Input), 1),
-        (base.ladder_saturation(LadderSaturation::PerStage), 4),
+    for (saturation, times) in [
+        (LadderSaturation::Input, 1),
+        (LadderSaturation::PerStage, 4),
     ] {
+        let config = base.clone().filter(FilterType::Moog {
+            cutoff: Hz::new(18_000.0),
+            resonance: Resonance::NONE,
+            saturation,
+        });
         let mut bank = PolySynth::build_bank(&config, rate, UnisonVoices::ONE);
         bank.set_pitch(0, Hz::new(100.0));
         bank.set_filter(0, 1, Hz::new(18_000.0), Resonance::NONE);
@@ -3586,8 +3587,7 @@ fn the_ladder_saturates_per_stage_unless_set() {
         let want = (0..times).fold(1.0f32, |x, _| x.tanh());
         assert!(
             (peak - want).abs() < 0.01 * want,
-            "{:?}: peak {peak}, want {want}",
-            config.ladder_saturation
+            "{saturation:?}: peak {peak}, want {want}"
         );
     }
 }

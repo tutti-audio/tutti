@@ -35,8 +35,7 @@ use tutti_graph::contract::Direct;
 use tutti_sampler::testing::MockTransport;
 use tutti_sampler::{
     DiskStreamer, DiskStreamerConfig, DiskVoice, Loop, Manual, MemorySource, Playback, SlotId,
-    StepOutcome, StreamHandle, StreamStart, Voice, VoiceNode, VoicePool, VoicePoolHandle,
-    VoiceSource,
+    StepOutcome, StreamHandle, StreamStart, VoiceNode, VoicePool, VoicePoolHandle,
 };
 use tutti_units::{Beat, Bpm, Cents, PlaybackRate, SampleRate, StretchFactor};
 
@@ -487,11 +486,8 @@ impl Clips {
                 let source =
                     MemorySource::placed(Arc::clone(&wave), VoiceWindow::from(Beat::new(0.0)))
                         .expect("a placeable wave");
-                let node = VoiceNode::new(Voice {
-                    source: VoiceSource::Memory(source),
-                    play: Playback::default(),
-                })
-                .expect("a finite gain and a nonempty width");
+                let node = VoiceNode::new(source, Playback::default())
+                    .expect("a finite gain and a nonempty width");
                 Direct::new(node, SampleRate::of(SR), block)
             })
             .collect();

@@ -850,6 +850,11 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
         tutti_buffers::ChannelSet::from(topology),
         None,
         Samples::new(0),
+        // Fed by hand below: the file is an empty wave of the ring's width.
+        crate::streamer::Source::Whole(Arc::new(tutti_buffers::Wave::new(
+            width,
+            SampleRate::SR_48K,
+        ))),
     );
     writer.reset(AT);
     writer.set_play(AT);

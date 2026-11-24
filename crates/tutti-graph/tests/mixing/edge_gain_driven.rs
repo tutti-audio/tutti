@@ -1,7 +1,7 @@
 //! Edge gain: an
 //! edge's gain can be **driven** by an event output (a control lane,
 //! `GraphSpec::connect_edge_gain`), with the param port's rules, and its
-//! source is aligned to the edge's sink (`DelayKey::EdgeGain`).
+//! source is aligned to the edge's sink (`EventDelayKey::EdgeGain`).
 //!
 //! Every figure is analytic: the expected render is the fold with the weight
 //! the driver's steps give at each frame, written out in the test. The
@@ -12,13 +12,14 @@ use tutti_graph::testing as common;
 
 use std::collections::BTreeMap;
 
-use common::{Harness, Kind, SpecBehaviour, driver_value, input_signal, prepare};
+use common::{Harness, Kind, SpecBehaviour, TestNode, driver_value, input_signal, prepare};
+use tutti_buffers::MaxBlock;
 use tutti_graph::{
     CompileError, Edge, EdgeId, Editor, EventOutputPort, ForkCause, ForkSource, Forked,
     GraphInvalid, GraphSpec, InputPort, IntoNode, Node, NodeKey, NodeParts, OutputPort, ParamRange,
-    PortSink, PortSource, RenderMode, Topology, Unforkable, ValidGraph, compile,
+    PortSink, PortSource, Prepare, RenderMode, Topology, Unforkable, ValidGraph, compile,
 };
-use tutti_units::{Gain, Samples, Tail};
+use tutti_units::{Gain, SampleRate, Samples, Tail};
 
 const BLOCK: usize = 32;
 const PERIOD: u64 = 16;
@@ -142,42 +143,26 @@ fn at_port(node: u64) -> InputPort {
     at(node)
 }
 
-/// Render `blocks` blocks on `workers` participants.
-fn render(rig: &Rig, workers: usize, blocks: usize) -> Vec<f32> {
-    let mut harness = Harness::with_workers(BLOCK, workers);
-    if let Some((id, range)) = rig.range {
-        harness.start_edge_gain_range(id, range);
-    }
-    harness.switch(&rig.graph(), &rig.kinds);
-    let mut got = Vec::new();
-    for b in 0..blocks {
-        let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-    }
-    got
-}
-
-/// `blocks` more blocks of `harness`.
+/// `blocks` more blocks of `harness`, from frame 0: output 0.
 fn run(harness: &mut Harness, blocks: usize) -> Vec<f32> {
-    let mut got = Vec::new();
-    for b in 0..blocks {
-        let input = input_signal((b * BLOCK) as u64, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        got.extend(&a[0]);
-    }
-    got
+    harness.run(&vec![BLOCK; blocks], 0).swap_remove(0)
 }
 
+/// `blocks` blocks on one and on four participants, bit for bit; the
+/// one-participant output 0.
 fn render_both(rig: &Rig, blocks: usize) -> Vec<f32> {
-    let serial = render(rig, 1, blocks);
-    let parallel = render(rig, 4, blocks);
-    assert_eq!(
-        serial.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        parallel.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
-        "parallel differs from serial"
-    );
-    serial
+    common::agree_across_workers(
+        [4],
+        |workers| {
+            let mut harness = Harness::with_workers(BLOCK, workers);
+            if let Some((id, range)) = rig.range {
+                harness.start_edge_gain_range(id, range);
+            }
+            harness.switch(&rig.graph(), &rig.kinds);
+            run(&mut harness, blocks)
+        },
+        |r| common::bits_of(r),
+    )
 }
 
 /// The weight a driver of this `latency` offset gives frame `n`: the step of
@@ -188,8 +173,15 @@ fn stepped(n: usize, shift: usize) -> Option<f32> {
     Some(driver_value(f - f % PERIOD, PERIOD) as f32)
 }
 
-fn delay_of(plan: &tutti_graph::Plan, key: tutti_graph::DelayKey) -> Option<usize> {
-    plan.delays()
+fn audio_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::AudioDelayKey) -> Option<usize> {
+    plan.audio_delays()
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.len.get())
+}
+
+fn event_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::EventDelayKey) -> Option<usize> {
+    plan.event_delays()
         .iter()
         .find(|d| d.key == key)
         .map(|d| d.len.get())
@@ -329,6 +321,83 @@ fn a_source_that_goes_is_declicked_to_the_base() {
     }
 }
 
+/// A driven lane fading to its base keeps its state across a re-prepare to a
+/// rate with the same declick length: 48 kHz and 48.05 kHz both declick over
+/// 240 frames, so the fade goes on where it was, over the same smootherstep.
+#[test]
+fn a_fading_lane_survives_a_re_prepare_to_a_rate_of_the_same_declick() {
+    let base = 0.75f32;
+    let mut rig = Rig::new(&[dc(1.0), driver(0)], &[1], Where::Output);
+    rig.kinds.insert(
+        key(2),
+        Kind::GainDriver {
+            period: 1 << 20,
+            latency: 0,
+        },
+    );
+    let id = rig.drive(1, 2);
+    let held = driver_value(0, 1 << 20) as f32;
+
+    // Built through the editor, which owns the prepare a re-prepare changes.
+    let mut harness = Harness::new(BLOCK);
+    for (&k, kind) in &rig.kinds {
+        harness
+            .editor
+            .insert(k, "unit", Unforkable(TestNode::new(kind.clone())));
+    }
+    let spec = harness.editor.spec_mut();
+    spec.topology.edges = rig.spec.topology.edges.clone();
+    spec.topology.outputs = rig.spec.topology.outputs.clone();
+    spec.connect_edge_gain(id, lane_out(2));
+    harness.start_edge_gain(id, amp(base));
+    harness.outputs = 1;
+    land(&mut harness);
+    run(&mut harness, 2);
+    harness
+        .editor
+        .spec_mut()
+        .disconnect_edge_gain(id, lane_out(2));
+    land(&mut harness);
+    let mut got = run(&mut harness, 1);
+
+    let rate = SampleRate::of(48_050.0);
+    let d = common::declick();
+    assert_eq!(
+        tutti_graph::declick_frames(rate),
+        Samples::new(d),
+        "the two rates declick alike"
+    );
+    harness
+        .editor
+        .reprepare(Prepare::new(rate, MaxBlock::of(Samples::new(BLOCK))))
+        .expect("reprepares");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    got.extend(run(&mut harness, d / BLOCK + 1));
+
+    for (j, &g) in got.iter().enumerate() {
+        let w = if j < d {
+            let (out, inn) = common::smooth_gains(j, d);
+            f64::from(held) * out + f64::from(base) * inn
+        } else {
+            f64::from(base)
+        };
+        assert!(
+            (f64::from(g) - w).abs() < 1e-6,
+            "frame {j}: {g}, smootherstep {w}"
+        );
+    }
+}
+
+/// Commits, lets the executor take it and the editor collect what comes back.
+fn land(harness: &mut Harness) {
+    harness.editor.commit().expect("commits");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+}
+
 /// A driven lane's state survives a commit that keeps its edge: the held
 /// value does not fall back to the base.
 #[test]
@@ -368,9 +437,9 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
     let id = rig.drive(1, 2);
     let plan = plan_of(&rig);
     assert_eq!(
-        delay_of(
+        audio_delay_of(
             &plan,
-            tutti_graph::DelayKey::Audio {
+            tutti_graph::AudioDelayKey::Edge {
                 at: at_port(3),
                 from: out(1)
             }
@@ -378,9 +447,9 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
         Some(32)
     );
     assert_eq!(
-        delay_of(
+        event_delay_of(
             &plan,
-            tutti_graph::DelayKey::EdgeGain {
+            tutti_graph::EventDelayKey::EdgeGain {
                 id,
                 from: lane_out(2)
             }
@@ -400,7 +469,7 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
 
 /// A lane that arrives **early** is delayed to the sink's arrival: the
 /// source declares 48 frames of latency it does not realise, so the lane gets
-/// a 48-frame event ring (`DelayKey::EdgeGain`) and its event stamped `f`
+/// a 48-frame event ring (`EventDelayKey::EdgeGain`) and its event stamped `f`
 /// lands on frame `f + 48`; until then the lane reads its base. At a port and
 /// at an output channel (where the output time is the sink's arrival).
 #[test]
@@ -410,9 +479,9 @@ fn an_early_lane_is_delayed_to_the_edge() {
         let id = rig.drive(1, 2);
         let plan = plan_of(&rig);
         assert_eq!(
-            delay_of(
+            event_delay_of(
                 &plan,
-                tutti_graph::DelayKey::EdgeGain {
+                tutti_graph::EventDelayKey::EdgeGain {
                     id,
                     from: lane_out(2)
                 }
@@ -438,9 +507,9 @@ fn a_late_lane_raises_the_output_time() {
     let plan = plan_of(&rig);
     assert_eq!(plan.total_latency().samples(), Samples::new(32));
     assert_eq!(
-        delay_of(
+        audio_delay_of(
             &plan,
-            tutti_graph::DelayKey::Output {
+            tutti_graph::AudioDelayKey::Output {
                 channel: 0,
                 from: out(1)
             }

@@ -30,19 +30,9 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::SampleRate;
 
-/// Wire-deserialization fallback for [`ControlRequest::LoadPlugin::block_size`]
-/// when a message arrives without the field. The operative value at runtime
-/// comes from `config.max_buffer_size` (see `subprocess::launch`); this is
-/// only a safety net.
-pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512;
-
-/// The format a message that names none asks for: 32-bit, which every plugin processes.
+/// The format a configuration that names none asks for: 32-bit, which every plugin processes.
 pub(crate) fn default_format() -> FloatWidth {
     FloatWidth::F32
-}
-
-fn default_block_size() -> usize {
-    DEFAULT_BLOCK_SIZE
 }
 
 /// A state staged for the next load: what [`ControlRequest::LoadPlugin`] declares
@@ -151,22 +141,19 @@ pub enum AudioReply {
         /// Wall-clock time the plugin spent in `process`, in microseconds.
         latency_us: u64,
         /// Echo of the request's [`ProcessAudioData::seq`].
-        #[serde(default)]
         seq: u64,
         /// MIDI the plugin emitted during the block.
-        #[serde(default, with = "super::wire::midi")]
+        #[serde(with = "super::wire::midi")]
         midi_out: MidiEventVec,
         /// What the plugin said of itself at the end of the block (CLAP's
         /// process status). `Sleep` is sent only when the
         /// block's output was silent, so the host may park on it.
-        #[serde(default)]
         status: BlockStatus,
         /// The server did not publish the block's audio, for any reason: its
         /// input slot had been recycled before it ran, the block did not fit
         /// the slab or the plugin's ports, an output channel was not written,
         /// or the plugin refused the sample rate. The host reads the block as
         /// silence, and counts a missed one refused.
-        #[serde(default)]
         refused: bool,
     },
     /// The changes of an [`ApplyParameters`](AudioRequest::ApplyParameters) are
@@ -212,11 +199,9 @@ messages! {
         /// Maximum frames per [`ProcessAudio`](AudioRequest::ProcessAudio) block. The
         /// plugin sizes its internal buffers from this, so a later block may not
         /// exceed it.
-        #[serde(default = "default_block_size")]
         block_size: usize,
         /// Sample format the host would rather exchange; the subprocess replies
         /// with what it actually negotiated.
-        #[serde(default = "default_format")]
         preferred_format: FloatWidth,
         /// The state this load restores, staged before it
         /// ([`StageState`](ControlRequest::StageState)): what the host expects the
@@ -224,7 +209,6 @@ messages! {
         /// do not agree (a state staged and none declared, or the reverse, or
         /// another length), so a stage left over from another load is never
         /// restored by this one.
-        #[serde(default)]
         state: Option<StagedState>,
     }
     ->
@@ -236,7 +220,6 @@ messages! {
         /// Catalog identity (name, vendor, version, native class, editor).
         descriptor: Box<PluginDescriptor>,
         /// Engine-wiring data from instantiation (bus widths, latency, f64).
-        #[serde(default)]
         loaded: Box<PluginWiring>,
         /// The sample format actually agreed on, which may differ from the
         /// host's preference.
@@ -244,7 +227,6 @@ messages! {
         /// The plugin refused the staged state
         /// ([`ControlRequest::StageState`]): it loaded at its defaults. `None`
         /// when it took the state, and when none was staged.
-        #[serde(default)]
         state_error: Option<StateError>,
     };
     /// Enter or leave an automation gesture, so the plugin can record it.
@@ -262,7 +244,6 @@ messages! {
     /// One parameter's normalized value, or `None` if the plugin declined.
     ParameterValue {
         /// Normalized `0.0..=1.0`.
-        #[serde(with = "super::wire::normalized_opt")]
         value: Option<Normalized>,
     };
     /// Ask for every parameter the plugin declares.
@@ -431,7 +412,6 @@ messages! {
         /// Which parameter — opaque handle or positional index, per format.
         param_id: tutti_units::ParamId,
         /// The value to render, normalized.
-        #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
     }
     ->
@@ -458,7 +438,6 @@ messages! {
     /// could not parse it, and the caller must leave its field unchanged.
     ParameterValueFromText {
         /// The parsed value, normalized.
-        #[serde(with = "super::wire::normalized_opt")]
         value: Option<Normalized>,
     };
     /// A plugin state to restore into the plugin the **next**
@@ -492,7 +471,6 @@ messages! {
         /// Which parameter — opaque handle or positional index, per format.
         param_id: tutti_units::ParamId,
         /// The value to convert, normalized.
-        #[serde(with = "super::wire::normalized")]
         value: tutti_units::Normalized,
     }
     ->
@@ -517,7 +495,6 @@ messages! {
     /// [`ParameterPlain`].
     ParameterNormalized {
         /// The normalized value.
-        #[serde(with = "super::wire::normalized_opt")]
         value: Option<Normalized>,
     };
     /// Open the plugin's editor on the served instance itself, in this server

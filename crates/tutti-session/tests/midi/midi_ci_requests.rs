@@ -13,11 +13,13 @@ use tutti_midi_ci::{
     PeTerminator, ProfileChannels, ProfileState, ReportRequest, ReportScope, SystemMessages,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
-use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
+use tutti_midi_hardware::{ChannelCount, InputFault};
 use tutti_session::Peer as _;
+use tutti_session::Resource as _;
 use tutti_session::{
-    ChannelProfile, ListedProfile, MidiInput, MidiRouteRule, PeerError, ReportPeer, Session,
+    ChannelProfile, ListedProfile, MidiInput, MidiRouteRule, PeerError, PeerEvent, ReportPeer,
+    ResourceFact, Session, SessionEvent,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
 
@@ -234,19 +236,20 @@ fn a_switch_the_peer_naks_is_refused_with_its_nak() {
     assert_eq!(wire.state(), ProfileState::Disabled);
 }
 
-/// A switch no one answers resolves `TimedOut` once the peer reply timeout has
-/// passed since it was sent, and not before.
+/// A switch no one answers resolves `TimedOut`. The time it takes is pinned with
+/// constructed instants in `tutti-midi-hardware`'s MIDI-CI tests: here the
+/// session's MIDI-CI task also steps, on the real clock, so a request's deadline
+/// may start on either clock and only the outcome is asserted.
 #[test]
-fn a_switch_nothing_answers_times_out_after_the_peer_reply_timeout() {
+fn a_switch_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(Reply::Silent, Reply::Answer);
     let mut request = wire.profile().enable(four());
     wire.run(5);
-    let wait = PEER_REPLY_TIMEOUT.as_millis() as u64;
-    wire.step(wait - 20);
-    assert_eq!(wire.result(&mut request), None, "still waiting");
-    wire.step(20);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves before it answers ends the switch as `Disconnected`.
@@ -338,15 +341,18 @@ fn a_report_the_peer_naks_is_refused_with_its_nak() {
     assert_eq!(nak.status, NakStatus::Terminate(PeTerminator::Responder));
 }
 
-/// A report no one answers resolves `TimedOut` after the peer reply timeout.
+/// A report no one answers resolves `TimedOut`: the outcome only, as for a
+/// switch.
 #[test]
-fn a_report_nothing_answers_times_out_after_the_peer_reply_timeout() {
+fn a_report_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(Reply::Answer, Reply::Silent);
     let mut request = wire.reporter().request(everything());
     wire.run(5);
     wire.step(PEER_REPLY_TIMEOUT.as_millis() as u64);
-    wire.run(1);
-    assert_eq!(wire.result(&mut request), Some(Err(PeerError::TimedOut)));
+    assert_eq!(
+        settled_by(&mut wire, &mut request),
+        Err(PeerError::TimedOut)
+    );
 }
 
 /// A peer that leaves while its report is out ends the request as `Disconnected`.
@@ -615,4 +621,34 @@ fn a_report_after_another_kind_is_asked_again() {
     for request in [&mut a1, &mut b, &mut a2] {
         assert_eq!(wire.result(request), Some(Ok(())));
     }
+}
+
+/// A reader that died is reopened by the session, and the new connection has
+/// found none of the old one's peers: the handle reads the new info and the
+/// update says the Info changed, once.
+#[test]
+fn a_reopened_reader_raises_one_info_change_and_the_handle_reads_it() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    assert_eq!(wire.port().info().peers().len(), 1, "the peer was found");
+    wire.fake
+        .kill_input_reader(EndpointId::from_raw(MpePeer::RAW), InputFault::PortBroken);
+    wire.ms += 1;
+    let events = update_at(&mut wire.s, wire.start + Duration::from_millis(wire.ms));
+    let infos = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                SessionEvent::Peer(PeerEvent::ResourceChanged {
+                    id,
+                    fact: ResourceFact::Info,
+                }) if *id == wire.port().id()
+            )
+        })
+        .count();
+    assert_eq!(infos, 1, "one Info change: {events:?}");
+    assert!(
+        wire.port().info().peers().is_empty(),
+        "the new connection has found no peer yet"
+    );
 }

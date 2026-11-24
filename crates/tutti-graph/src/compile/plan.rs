@@ -1,14 +1,14 @@
 //! The compiled form: [`Plan`] (immutable, structure-of-arrays) and [`Delta`]
 //! (which units a runtime must insert, retire or replace to run it).
 //!
-//! Everything here is plain data — `Vec`s of `u32` indices and a closed
+//! Everything here is plain data — `Vec`s of typed ids and a closed
 //! [`Op`] enum, never `Box<dyn Fn>` — so a `Plan` is `Send + Sync` and can be
 //! published to the audio thread as one value, and a
 //! verifier or a test can read every decision the compiler made.
 //!
 //! # Slots
 //!
-//! Every buffer a plan names is a **slot**: a `u32` index into one of two
+//! Every buffer a plan names is a **slot**: a typed index into one of two
 //! arenas, one per port kind. The layout of each arena is fixed:
 //!
 //! ```text
@@ -31,19 +31,21 @@
 //! Every piece of state that outlives a block is keyed so that a recompile
 //! carries it exactly when it is still the same wire:
 //!
-//! - **A PDC delay** is keyed by **(sink port, source port)** — [`DelayKey`].
+//! - **A PDC delay** is keyed by **(sink port, source port)** — [`AudioDelayKey`] for
+//!   audio, [`EventDelayKey`] for events.
 //!   Rewiring a sink to another source starts a fresh (silent) ring: the
 //!   previous source's past audio is never played out of the new wire. Pending events
 //!   of an event delay whose key disappears are flushed to the sink at offset
 //!   0 of the next block if the sink survives (a dropped note-off is a stuck
 //!   note), and dropped with it otherwise.
 //! - **A feedback edge** delays by exactly the `delay` its edge declares (see
-//!   [`FeedbackKey`]). Audio feedback is keyed by the source port, *its unit
+//!   [`AudioFeedbackKey`], [`EventFeedbackKey`]). Audio feedback is keyed by the source port, *its unit
 //!   generation* and the delay, so a replaced unit's last output does not
 //!   feed the new loop and a changed delay starts a fresh ring. Event
 //!   feedback is keyed per edge (sink, source, generation, delay), and a
 //!   disappearing key flushes like a PDC event delay.
 
+use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
 use crate::NodeKey;
@@ -51,14 +53,17 @@ use crate::{EdgeId, InputPort, OutputPort, PortSource};
 use tutti_units::{Latency, Samples, Tail, UnitAddr};
 
 use crate::compile::VerifyError;
+use crate::compile::coarsen::Tasks;
 use crate::compile::ids::{
-    AudioFeedbackId, AudioSlotId, AudioValueId, DelayId, EventFeedbackId, EventSlotId,
-    EventValueId, Generation, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table,
-    TableSlice, TaskId, raw,
+    AudioDelayId, AudioFeedbackId, AudioSlotId, EventDelayId, EventFeedbackId, EventSlotId,
+    Generation, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
+    TaskId,
 };
+use crate::compile::program::{BySlot, Program};
+use crate::compile::timing::Timing;
 use crate::exec::arena::Role;
 use crate::model::fade::Fade;
-use crate::model::spec::{EventInputPort, EventOutputPort};
+use crate::model::spec::{EventInputPort, EventOutputPort, ValidGraph};
 use crate::node::io::PortKind;
 use crate::node::param::ParamIn;
 use crate::node::shape::Shape;
@@ -76,60 +81,167 @@ pub(crate) const EMPTY_SLOT: EventSlotId = EventSlotId::EMPTY;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UnitIdx(pub u32);
 
-/// A contiguous run of a plan's flattened index lists.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Span {
-    /// First element.
-    pub start: u32,
-    /// Element count.
-    pub len: u32,
+/// A contiguous run of the elements `T` of one of a plan's flattened lists.
+///
+/// Only the list it indexes makes one (appending a run to it returns the run),
+/// and the lowering renames one as the list's elements are renamed, so a span
+/// names a run of a list of that element, in range for the plan it came from.
+/// It has no public constructor (the empty span is `Default`).
+pub struct Span<T> {
+    start: u32,
+    len: u32,
+    list: PhantomData<fn() -> T>,
 }
 
-impl Span {
+impl<T> Span<T> {
     /// Appends `items` to `list` and returns the run they occupy.
-    pub(crate) fn extend<T>(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
+    pub(crate) fn extend(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
         let start = list.len();
         list.extend(items);
         Self {
             start: start as u32,
             len: (list.len() - start) as u32,
+            list: PhantomData,
         }
     }
 
-    /// The run `start..end` of a list.
+    /// The run `start..end` of a list, for a test that corrupts one.
+    #[cfg(test)]
     pub(crate) fn of(start: usize, end: usize) -> Self {
         Self {
             start: start as u32,
             len: (end - start) as u32,
+            list: PhantomData,
         }
     }
 
-    pub(crate) fn range(self) -> std::ops::Range<usize> {
+    /// The positions the run occupies in its list.
+    #[must_use]
+    pub fn range(self) -> std::ops::Range<usize> {
         self.start as usize..(self.start + self.len) as usize
+    }
+
+    /// How many elements the run holds.
+    #[must_use]
+    pub fn len(self) -> usize {
+        self.len as usize
+    }
+
+    /// Whether the run holds nothing.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    /// The same positions of a list whose elements `U` replace `T` one for one.
+    /// The lowering's one rename: [`Op::map`] calls it, because `colour` maps
+    /// every element of each operand list in place and keeps its positions.
+    pub(crate) fn retype<U>(self) -> Span<U> {
+        Span {
+            start: self.start,
+            len: self.len,
+            list: PhantomData,
+        }
     }
 }
 
-/// Which PDC delay a ring belongs to.
+impl<T> Clone for Span<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Span<T> {}
+
+impl<T> Default for Span<T> {
+    fn default() -> Self {
+        Self {
+            start: 0,
+            len: 0,
+            list: PhantomData,
+        }
+    }
+}
+
+impl<T> PartialEq for Span<T> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.start, self.len) == (other.start, other.len)
+    }
+}
+
+impl<T> Eq for Span<T> {}
+
+impl<T> std::hash::Hash for Span<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (self.start, self.len).hash(state);
+    }
+}
+
+impl<T> std::fmt::Debug for Span<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Span")
+            .field("start", &self.start)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
+/// Which PDC delay of audio a ring belongs to.
 ///
 /// The ring's **state is keyed by this**, so it survives any recompile that
 /// keeps the key: an unrelated edit does not click. The key names both ends
 /// of the wire, so rewiring a sink to another source starts a fresh (silent)
 /// ring and the previous source's past audio is never played out of the new
-/// wire. Pending events of an event delay whose key disappears are flushed
-/// to the sink at the start of its next block if the sink survives (a
-/// dropped note-off would be a stuck note), and dropped with it otherwise.
+/// wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DelayKey {
+pub enum AudioDelayKey {
     /// An audio input port, delayed to align with the node's latest input.
-    Audio {
+    Edge {
         /// The sink port.
         at: InputPort,
         /// What feeds it: a node port or a main input channel.
         from: PortSource,
     },
+    /// A main output channel, delayed to align with the slowest channel.
+    Output {
+        /// The graph output channel.
+        channel: u16,
+        /// What feeds it.
+        from: PortSource,
+    },
+    /// One lane of an aligned meter, delayed like an output channel.
+    Meter {
+        /// The meter.
+        meter: crate::MeterId,
+        /// The lane within it.
+        lane: usize,
+        /// What feeds it.
+        from: PortSource,
+    },
+    /// One lane of an aligned tap, delayed like an output channel.
+    Tap {
+        /// The tap.
+        tap: crate::TapId,
+        /// The lane within it.
+        lane: usize,
+        /// What feeds it.
+        from: PortSource,
+    },
+}
+
+/// Which PDC delay of events a FIFO belongs to.
+///
+/// The FIFO's state is keyed by this, as an [`AudioDelayKey`]'s ring is.
+/// Pending events of a delay whose key disappears are flushed to the sink at
+/// the start of its next block if the sink survives (a dropped note-off would
+/// be a stuck note), and dropped with it otherwise; a
+/// [`ParamEvent`](Self::ParamEvent), an [`EdgeGain`](Self::EdgeGain) and an
+/// [`EventTap`](Self::EventTap) are not flushed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EventDelayKey {
     /// One source of an event input port. Each source of a fan-in port can
     /// need a different delay.
-    Event {
+    Edge {
         /// The sink.
         at: EventInputPort,
         /// The source.
@@ -157,22 +269,6 @@ pub enum DelayKey {
         /// The event output that drives it.
         from: EventOutputPort,
     },
-    /// A main output channel, delayed to align with the slowest channel.
-    Output {
-        /// The graph output channel.
-        channel: u16,
-        /// What feeds it.
-        from: PortSource,
-    },
-    /// One lane of an aligned meter, delayed like an output channel.
-    Meter {
-        /// The meter.
-        meter: crate::MeterId,
-        /// The lane within it.
-        lane: usize,
-        /// What feeds it.
-        from: PortSource,
-    },
     /// An aligned event tap's source, delayed to the output time as an event
     /// edge into an output-time sink would be.
     EventTap {
@@ -181,41 +277,40 @@ pub enum DelayKey {
         /// The event port copied.
         from: crate::EventTapPort,
     },
-    /// One lane of an aligned tap, delayed like an output channel.
-    Tap {
-        /// The tap.
-        tap: crate::TapId,
-        /// The lane within it.
-        lane: usize,
-        /// What feeds it.
-        from: PortSource,
-    },
 }
 
-impl DelayKey {
-    /// The event port whose stream this delay carries; `None` for an audio
-    /// delay.
-    pub(crate) fn event_origin(self) -> Option<crate::EventTapPort> {
+impl EventDelayKey {
+    /// The event port whose stream this delay carries.
+    pub(crate) fn origin(self) -> crate::EventTapPort {
         match self {
-            Self::Event { from, .. }
+            Self::Edge { from, .. }
             | Self::ParamEvent { from, .. }
-            | Self::EdgeGain { from, .. } => Some(crate::EventTapPort::Out(from)),
-            Self::EventTap { from, .. } => Some(from),
-            _ => None,
+            | Self::EdgeGain { from, .. } => crate::EventTapPort::Out(from),
+            Self::EventTap { from, .. } => from,
         }
     }
 }
 
-/// One PDC delay in a plan.
+/// One PDC delay of audio in a plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DelaySpec {
+pub struct AudioDelay {
     /// Its state key.
-    pub key: DelayKey,
+    pub key: AudioDelayKey,
     /// Its length. Never zero — a zero delay is no op at all.
     pub len: Samples,
 }
 
-/// Which feedback delay a slot is read from.
+/// One PDC delay of events in a plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EventDelay {
+    /// Its state key.
+    pub key: EventDelayKey,
+    /// Its length. Never zero — a zero delay is no op at all.
+    pub len: Samples,
+}
+
+/// Which audio feedback delay a slot is read from: an audio output port of a
+/// unit generation, shared by every reader.
 ///
 /// **A feedback edge delays by exactly the `delay` its edge declares**,
 /// whatever length the current block is: a ring of that length for audio, a
@@ -224,45 +319,36 @@ pub struct DelaySpec {
 /// and `compile` refuses a delay shorter than the `MaxBlock` it is compiling
 /// for, because a block cannot read samples it has not yet produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum FeedbackKey {
-    /// An audio output port of a unit generation. Shared by every reader.
-    Audio {
-        /// The source port.
-        from: OutputPort,
-        /// The source unit's generation.
-        generation: u32,
-        /// The edge's delay.
-        delay: Samples,
-    },
-    /// One event feedback edge.
-    Event {
-        /// The sink port.
-        at: EventInputPort,
-        /// The source port.
-        from: EventOutputPort,
-        /// The source unit's generation.
-        generation: u32,
-        /// The edge's delay.
-        delay: Samples,
-    },
+pub struct AudioFeedbackKey {
+    /// The source port.
+    pub from: OutputPort,
+    /// The source unit's generation.
+    pub generation: u32,
+    /// The edge's delay.
+    pub delay: Samples,
 }
 
-impl FeedbackKey {
-    /// The delay this feedback applies.
-    pub const fn delay(&self) -> Samples {
-        match *self {
-            Self::Audio { delay, .. } | Self::Event { delay, .. } => delay,
-        }
-    }
+/// Which event feedback delay a slot is read from: one event feedback edge,
+/// delayed as an [`AudioFeedbackKey`]'s is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EventFeedbackKey {
+    /// The sink port.
+    pub at: EventInputPort,
+    /// The source port.
+    pub from: EventOutputPort,
+    /// The source unit's generation.
+    pub generation: u32,
+    /// The edge's delay.
+    pub delay: Samples,
 }
 
 /// One feedback slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct FeedbackSpec {
+pub struct FeedbackSpec<K, S> {
     /// What it carries.
-    pub key: FeedbackKey,
+    pub key: K,
     /// Its slot, in the arena of its kind.
-    pub slot: u32,
+    pub slot: S,
 }
 
 /// A node's declared event-input bound, as its merge holds it.
@@ -271,7 +357,7 @@ pub struct InputBound {
     /// The most events the merged input keeps ([`Shape::event_input_capacity`]).
     pub capacity: NonZeroU32,
     /// The plan unit whose input it is: what is cut is charged to it.
-    pub unit: u32,
+    pub unit: PlanUnitId,
 }
 
 /// How many events one event slot holds per block, in the two currencies a
@@ -406,6 +492,37 @@ impl EventSlotCapacity {
     }
 }
 
+/// The writers of what a delayed copy of an event input holds, over a delay
+/// of `len` frames at blocks of `block`: `sources`' declared capacities, then
+/// one writer for the commands scheduled to the input. Its rate is the room
+/// for one block's commands (`COMMAND_CAPACITY`) spread over the delay's
+/// blocks, so the FIFO holds that once, not once a block; a command past it
+/// is counted lost at the tap like any other refusal.
+pub(crate) fn input_writers(
+    sources: impl IntoIterator<Item = Option<NonZeroU32>>,
+    len: Samples,
+    block: usize,
+) -> Vec<Option<NonZeroU32>> {
+    let blocks = crate::exec::rings::EventFifo::blocks(len.get(), block);
+    let commands = crate::COMMAND_CAPACITY.div_ceil(blocks);
+    sources
+        .into_iter()
+        .chain([NonZeroU32::new(u32::try_from(commands).unwrap_or(u32::MAX))])
+        .collect()
+}
+
+/// What an event input's view holds at most of its source's events: the
+/// source's `price`, and under the node's declared input bound `bound`, no
+/// more than that. The one price `emit` gives a view and `verify` demands of
+/// it; the room for the commands and flushed events a block adds is staged
+/// with the executor (`stage.rs`).
+pub(crate) fn view_capacity(
+    price: EventSlotCapacity,
+    bound: Option<NonZeroU32>,
+) -> EventSlotCapacity {
+    price.bounded(bound)
+}
+
 /// One node of the plan, resolved to its place in the unit store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PlanUnit {
@@ -426,26 +543,30 @@ pub struct PlanUnit {
 
 /// One step of the plan.
 ///
-/// Slot fields index the arena of the op's kind; `Span`s index
-/// [`Plan::audio_list`] or [`Plan::event_list`].
+/// Slot fields name a slot of the arena of the op's kind, tables name a row by
+/// its typed id, and `Span`s are runs of [`Plan::audio_list`],
+/// [`Plan::event_list`] or another list of the plan. An op names its audio and
+/// event operands by `A` and `E`: a plan's are [`AudioSlotId`] and
+/// [`EventSlotId`] (what this documents); the compiler's `emit` names values
+/// until `colour` gives them slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Op {
+pub enum Op<A, E> {
     /// Copy a main input channel into a slot.
     MainInput {
         /// The main input channel.
         channel: u16,
         /// Audio slot written.
-        dst: u32,
+        dst: A,
     },
     /// Delay one audio channel by a PDC ring. `src == dst` is the in-place
     /// form.
     Delay {
-        /// Index into [`Plan::delays`].
-        delay: u32,
+        /// Index into [`Plan::audio_delays`].
+        delay: AudioDelayId,
         /// Audio slot read.
-        src: u32,
+        src: A,
         /// Audio slot written.
-        dst: u32,
+        dst: A,
     },
     /// Sum several audio slots into one: the fan-in of a port or an output
     /// channel. The value is the left fold
@@ -457,9 +578,9 @@ pub enum Op {
         /// Audio slots read, in source order (into [`Plan::audio_list`]): at
         /// least 2, at most [`MAX_PORTS`](crate::MAX_PORTS). A wider fan-in is
         /// a chain whose next op reads the last result first.
-        srcs: Span,
+        srcs: Span<A>,
         /// Audio slot written.
-        dst: u32,
+        dst: A,
     },
     /// A [`Sum`](Self::Sum) with at least one **weighted lane**: the value is
     /// the left fold `((+0.0 + w_0 * a_0) + w_1 * a_1) + ..` in the graph's float `F`, a
@@ -474,37 +595,37 @@ pub enum Op {
     WeightedSum {
         /// Audio slots read, in source order (into [`Plan::audio_list`]): at
         /// least 1, at most [`MAX_PORTS`](crate::MAX_PORTS).
-        srcs: Span,
+        srcs: Span<A>,
         /// Audio slot written; the first addend's own slot in the in-place
         /// form, as for `Sum`.
-        dst: u32,
+        dst: A,
         /// One entry per addend, in the same order (into
         /// [`Plan::sum_lanes`]): the edge whose gain weights it, or `None`
         /// for a plain addend (an edge with no entry, or the previous result
         /// of a chain).
-        lanes: Span,
+        lanes: Span<Option<EdgeId>>,
         /// The driven lanes among them, in lane order (into
         /// [`Plan::gain_ports`]): the sum reads each one's event source.
         /// Empty when no entry of this op has a source.
-        gains: Span,
+        gains: Span<GainPortOp<E>>,
     },
     /// Delay one event stream.
     EventDelay {
-        /// Index into [`Plan::delays`].
-        delay: u32,
+        /// Index into [`Plan::event_delays`].
+        delay: EventDelayId,
         /// Event slot read.
-        src: u32,
+        src: E,
         /// Event slot written.
-        dst: u32,
+        dst: E,
     },
     /// Merge several event streams by `(offset, source order)` — event
     /// fan-in. PortSource order is the source port's
     /// `(NodeKey, port)`.
     EventMerge {
         /// Event slots read, in source order (into [`Plan::event_list`]).
-        srcs: Span,
+        srcs: Span<E>,
         /// Event slot written.
-        dst: u32,
+        dst: E,
         /// The node's [`Shape::event_input_capacity`] when `dst` is its
         /// input: the merge keeps at most this many events and charges what
         /// it cuts to the node.
@@ -513,68 +634,164 @@ pub enum Op {
     /// Run a unit.
     Node {
         /// Index into [`Plan::units`].
-        unit: u32,
+        unit: PlanUnitId,
         /// Audio slot per input channel (into [`Plan::audio_list`]).
-        audio_in: Span,
+        audio_in: Span<A>,
         /// Audio slot per output channel.
-        audio_out: Span,
-        /// Event slot per input port (into [`Plan::event_list`]).
-        event_in: Span,
+        audio_out: Span<A>,
+        /// Event slot per input port: what each input is merged from (into
+        /// [`Plan::event_list`]): the merge of its edges, a feedback slot or
+        /// the empty slot. Read by this op.
+        event_src: Span<E>,
+        /// Event slot per input port: the view of each input, the events the
+        /// node is handed there this block. This op writes it from
+        /// `event_src`, the unit's flushed events, its scheduled commands, its
+        /// declared input bound and, when it is bypassed, the closes it owes;
+        /// the node, the held-key tables and the input taps read it.
+        event_in: Span<E>,
         /// Event slot per output port.
-        event_out: Span,
+        event_out: Span<E>,
         /// Channels whose output slot *is* their input slot.
         in_place: InPlaceMask,
         /// The node's driven params, in port order (into
         /// [`Plan::param_ports`]); a declared param not listed reads its
         /// base. Their sources are read by this op, before the node runs.
-        params: Span,
+        params: Span<ParamPortOp<E>>,
     },
     /// Write a main output channel, through its alignment ring if it has one.
     Output {
         /// The graph output channel.
         channel: u16,
         /// Audio slot read.
-        src: u32,
-        /// Index into [`Plan::delays`], when the channel is delayed.
-        delay: Option<u32>,
+        src: A,
+        /// Index into [`Plan::audio_delays`], when the channel is delayed.
+        delay: Option<AudioDelayId>,
     },
     /// Push a block of every lane of a tap into its rings, together.
     Tap {
         /// Index into `Plan::taps`.
-        tap: u32,
+        tap: PlanTapId,
         /// Audio slot per lane (into [`Plan::audio_list`]).
-        srcs: Span,
+        srcs: Span<A>,
     },
     /// Push every MIDI event of an event slot into an event tap's ring, each
-    /// stamped with its frame. The slot is an output port's, or the merge a
-    /// node reads at an input.
+    /// stamped with its frame. The slot is an output port's, or the view a
+    /// node is handed at an input (or that view delayed).
     EventTap {
         /// Index into `Plan::event_taps`.
-        tap: u32,
+        tap: PlanEventTapId,
         /// Event slot read.
-        src: u32,
+        src: E,
     },
     /// Fold a block of every lane of a meter into its cells.
     Meter {
         /// Index into `Plan::meters`.
-        meter: u32,
+        meter: PlanMeterId,
         /// Audio slot per lane (into [`Plan::audio_list`]).
-        srcs: Span,
+        srcs: Span<A>,
     },
     /// Push an audio port's block into its feedback ring.
     Capture {
-        /// Index into [`Plan::feedback`] (audio).
-        feedback: u32,
+        /// Index into [`Plan::audio_feedback`].
+        feedback: AudioFeedbackId,
         /// Audio slot read.
-        src: u32,
+        src: A,
     },
     /// Queue an event port's events into its feedback delay.
     EventCapture {
-        /// Index into [`Plan::feedback`] (events).
-        feedback: u32,
+        /// Index into [`Plan::event_feedback`].
+        feedback: EventFeedbackId,
         /// Event slot read.
-        src: u32,
+        src: E,
     },
+}
+
+impl<A, E> Op<A, E> {
+    /// This op with its audio operands `a` and event operands `e` renamed;
+    /// spans, indices and the in-place mask are kept.
+    pub(crate) fn map<A2, E2>(self, a: impl Fn(A) -> A2, e: impl Fn(E) -> E2) -> Op<A2, E2> {
+        match self {
+            Op::MainInput { channel, dst } => Op::MainInput {
+                channel,
+                dst: a(dst),
+            },
+            Op::Delay { delay, src, dst } => Op::Delay {
+                delay,
+                src: a(src),
+                dst: a(dst),
+            },
+            Op::Sum { srcs, dst } => Op::Sum {
+                srcs: srcs.retype(),
+                dst: a(dst),
+            },
+            Op::WeightedSum {
+                srcs,
+                dst,
+                lanes,
+                gains,
+            } => Op::WeightedSum {
+                srcs: srcs.retype(),
+                dst: a(dst),
+                lanes,
+                gains: gains.retype(),
+            },
+            Op::EventDelay { delay, src, dst } => Op::EventDelay {
+                delay,
+                src: e(src),
+                dst: e(dst),
+            },
+            Op::EventMerge { srcs, dst, bound } => Op::EventMerge {
+                srcs: srcs.retype(),
+                dst: e(dst),
+                bound,
+            },
+            Op::Node {
+                unit,
+                audio_in,
+                audio_out,
+                event_src,
+                event_in,
+                event_out,
+                in_place,
+                params,
+            } => Op::Node {
+                unit,
+                audio_in: audio_in.retype(),
+                audio_out: audio_out.retype(),
+                event_src: event_src.retype(),
+                event_in: event_in.retype(),
+                event_out: event_out.retype(),
+                in_place,
+                params: params.retype(),
+            },
+            Op::Output {
+                channel,
+                src,
+                delay,
+            } => Op::Output {
+                channel,
+                src: a(src),
+                delay,
+            },
+            Op::Tap { tap, srcs } => Op::Tap {
+                tap,
+                srcs: srcs.retype(),
+            },
+            Op::EventTap { tap, src } => Op::EventTap { tap, src: e(src) },
+            Op::Meter { meter, srcs } => Op::Meter {
+                meter,
+                srcs: srcs.retype(),
+            },
+            Op::Capture { feedback, src } => Op::Capture {
+                feedback,
+                src: a(src),
+            },
+            Op::EventCapture { feedback, src } => Op::EventCapture {
+                feedback,
+                src: e(src),
+            },
+        }
+    }
 }
 
 /// One driven param port of a node op: the fused param step the op
@@ -586,7 +803,7 @@ pub enum Op {
 /// ([`Editor::set_param_range`](crate::Editor::set_param_range)), so moving a
 /// range never changes the plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ParamPortOp {
+pub struct ParamPortOp<E> {
     /// Its index in the node's declared params
     /// ([`Shape::params`](crate::Shape::params)), or [`MIX_PORT`](Self::MIX_PORT):
     /// the node's [`Mix`](tutti_units::Mix), which no node declares and the
@@ -599,10 +816,10 @@ pub struct ParamPortOp {
     /// source changed and leaves one that only moved slots alone.
     pub from: EventOutputPort,
     /// The event slot it reads its source's events from.
-    pub slot: u32,
+    pub slot: E,
 }
 
-impl ParamPortOp {
+impl<E> ParamPortOp<E> {
     /// The sentinel [`port`](Self::port) of a node's mix, [`NodeMix::ADDR`](crate::NodeMix::ADDR):
     /// past every declared index, so it is the last entry of an op's span.
     pub const MIX_PORT: u16 = u16::MAX;
@@ -622,7 +839,7 @@ impl ParamPortOp {
 /// It carries no range, as a param port does not: the value is clamped to the
 /// lane's live range, a control the executor reads per block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GainPortOp {
+pub struct GainPortOp<E> {
     /// The lane's index among the op's addends (its entry of the op's
     /// `lanes`).
     pub lane: u16,
@@ -630,7 +847,7 @@ pub struct GainPortOp {
     /// source's ramp) is kept by.
     pub from: EventOutputPort,
     /// The event slot it reads its source's events from.
-    pub slot: u32,
+    pub slot: E,
 }
 
 /// How the executor borrows one node op's buffers — decided at compile time,
@@ -802,14 +1019,18 @@ pub(crate) struct NodeRec {
     pub(crate) eout: u16,
     /// The audio borrow requests, sorted (into [`NodeTables::audio_borrows`]):
     /// every input not aliased in place, and every output.
-    pub(crate) borrows: Span,
+    pub(crate) borrows: Span<(AudioSlotId, Role)>,
     /// The event borrow requests, sorted (into [`NodeTables::event_borrows`]):
-    /// every input and every output.
-    pub(crate) event_borrows: Span,
+    /// every input's view and every output.
+    pub(crate) event_borrows: Span<(EventSlotId, Role)>,
+    /// The requests of the step that fills the views, sorted (into
+    /// [`NodeTables::event_assemble`]): each input's source read as
+    /// `Role::Read(port)`, each view written as `Role::Write(port)`.
+    pub(crate) event_assemble: Span<(EventSlotId, Role)>,
     /// How the call borrows its buffers.
     pub(crate) form: Form,
     /// The node's driven params (into [`Plan::param_ports`]).
-    pub(crate) params: Span,
+    pub(crate) params: Span<ParamPortOp<EventSlotId>>,
     /// Its declared params, which the step walks in port order.
     pub(crate) declared: crate::node::param::ParamPorts,
 }
@@ -830,6 +1051,8 @@ pub(crate) struct NodeTables {
     pub(crate) audio_borrows: Vec<(AudioSlotId, Role)>,
     /// Event borrow requests, each record's run sorted.
     pub(crate) event_borrows: Vec<(EventSlotId, Role)>,
+    /// The requests that fill each record's views, each run sorted.
+    pub(crate) event_assemble: Vec<(EventSlotId, Role)>,
 }
 
 /// The slots of one node op's ports.
@@ -877,25 +1100,26 @@ impl NodeRec {
 }
 
 impl NodeTables {
-    /// Lower every [`Op::Node`] of `ops`. Records a unit no op runs as a
+    /// Lower every [`Op::Node`] of `program`. Records a unit no op runs as a
     /// zero-port `Audio` record, which the verifier then reports through the
     /// unit-use count rather than here.
     pub(crate) fn lower(
-        ops: &[Op],
-        audio_list: &[AudioSlotId],
-        event_list: &[EventSlotId],
+        program: &Program<BySlot>,
         units: &TableSlice<PlanUnitId, PlanUnit>,
     ) -> Self {
+        let (audio_list, event_list) = (&program.audio_list, &program.event_list);
         let mut recs: Table<PlanUnitId, Option<NodeRec>> = Table::filled(units.len(), None);
         let mut audio_slots = Vec::new();
         let mut event_slots = Vec::new();
         let mut audio_borrows = Vec::new();
         let mut event_borrows = Vec::new();
-        for op in ops {
+        let mut event_assemble = Vec::new();
+        for op in &program.ops {
             let Op::Node {
                 unit,
                 audio_in,
                 audio_out,
+                event_src,
                 event_in,
                 event_out,
                 in_place,
@@ -904,11 +1128,7 @@ impl NodeTables {
             else {
                 continue;
             };
-            // The public op names its unit by raw index.
-            let unit = PlanUnitId::new(unit);
-            let Some(pu) = units.get(unit) else {
-                continue;
-            };
+            let pu = &units[unit];
             let ain = &audio_list[audio_in.range()];
             let aout = &audio_list[audio_out.range()];
             let ein = &event_list[event_in.range()];
@@ -923,33 +1143,44 @@ impl NodeTables {
 
             // Built and sorted once here, so the executor never sorts per
             // call.
-            let start = audio_borrows.len();
-            audio_borrows.extend(
+            let audio = Span::extend(
+                &mut audio_borrows,
                 ain.iter()
                     .enumerate()
                     .filter(|&(c, _)| !in_place.get(c))
-                    .map(|(c, &s)| (s, Role::Read(c as u8))),
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        aout.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
             );
-            audio_borrows.extend(
-                aout.iter()
-                    .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
-            );
-            audio_borrows[start..].sort_unstable();
-            let audio = Span::of(start, audio_borrows.len());
-            let start = event_borrows.len();
-            event_borrows.extend(
+            audio_borrows[audio.range()].sort_unstable();
+            let event = Span::extend(
+                &mut event_borrows,
                 ein.iter()
                     .enumerate()
-                    .map(|(c, &s)| (s, Role::Read(c as u8))),
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        eout.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
             );
-            event_borrows.extend(
-                eout.iter()
+            event_borrows[event.range()].sort_unstable();
+            let assemble = Span::extend(
+                &mut event_assemble,
+                event_list[event_src.range()]
+                    .iter()
                     .enumerate()
-                    .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    .map(|(c, &s)| (s, Role::Read(c as u8)))
+                    .chain(
+                        ein.iter()
+                            .enumerate()
+                            .map(|(c, &s)| (s, Role::Write(c as u8))),
+                    ),
             );
-            event_borrows[start..].sort_unstable();
-            let event = Span::of(start, event_borrows.len());
+            event_assemble[assemble.range()].sort_unstable();
 
             let form = match (ain, aout, ein.is_empty() && eout.is_empty()) {
                 (_, _, false) => Form::General,
@@ -980,6 +1211,7 @@ impl NodeTables {
                 eout: eout.len() as u16,
                 borrows: audio,
                 event_borrows: event,
+                event_assemble: assemble,
                 form,
                 params,
                 declared: pu.shape.params,
@@ -990,11 +1222,10 @@ impl NodeTables {
         }
         let recs = recs
             .into_iter()
-            .zip(units)
-            .enumerate()
-            .map(|(u, (r, pu))| {
+            .zip(units.iter_enumerated())
+            .map(|(r, (unit, pu))| {
                 r.unwrap_or(NodeRec {
-                    unit: PlanUnitId::from_index(u),
+                    unit,
                     store: pu.idx,
                     generation: Generation::new(pu.generation),
                     arrival: pu.arrival,
@@ -1013,6 +1244,7 @@ impl NodeTables {
                     eout: 0,
                     borrows: Span::default(),
                     event_borrows: Span::default(),
+                    event_assemble: Span::default(),
                     form: Form::Audio,
                     params: Span::default(),
                     declared: pu.shape.params,
@@ -1025,25 +1257,44 @@ impl NodeTables {
             event_slots,
             audio_borrows,
             event_borrows,
+            event_assemble,
         }
     }
 }
 
 /// Compressed sparse rows: row `i` is `targets[offsets[i]..offsets[i + 1]]`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Csr {
+///
+/// A row's targets are `T`, the typed id of the table they index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Csr<T> {
     pub(crate) offsets: Vec<u32>,
-    pub(crate) targets: Vec<u32>,
+    pub(crate) targets: Vec<T>,
 }
 
-impl Csr {
-    /// The rows of a table of typed successor lists.
-    pub(crate) fn from_ids<R: Id, T: Id>(rows: &TableSlice<R, Vec<T>>) -> Self {
-        let raw_rows: Vec<Vec<u32>> = rows.iter().map(|row| raw(row).to_vec()).collect();
-        Self::from_rows(&raw_rows)
+impl<T> Default for Csr<T> {
+    fn default() -> Self {
+        Self {
+            offsets: Vec::new(),
+            targets: Vec::new(),
+        }
+    }
+}
+
+impl<T> Csr<T> {
+    /// Number of rows.
+    pub fn rows(&self) -> usize {
+        self.offsets.len().saturating_sub(1)
     }
 
-    pub(crate) fn from_rows(rows: &[Vec<u32>]) -> Self {
+    /// Row `i`.
+    pub fn row(&self, i: usize) -> &[T] {
+        &self.targets[self.offsets[i] as usize..self.offsets[i + 1] as usize]
+    }
+}
+
+impl<T: Copy> Csr<T> {
+    /// The rows of a table of typed lists, in the table's order.
+    pub(crate) fn from_table<R: Id>(rows: &TableSlice<R, Vec<T>>) -> Self {
         let mut offsets = Vec::with_capacity(rows.len() + 1);
         let mut targets = Vec::new();
         offsets.push(0);
@@ -1054,19 +1305,28 @@ impl Csr {
         Self { offsets, targets }
     }
 
-    /// Row `i`.
-    pub fn row(&self, i: usize) -> &[u32] {
-        &self.targets[self.offsets[i] as usize..self.offsets[i + 1] as usize]
+    /// Row `r`.
+    pub(crate) fn of<R: Id>(&self, r: R) -> &[T] {
+        self.row(r.index())
     }
 
-    /// Row `r`, as the ids of a kind its targets name.
-    pub(crate) fn ids<R: Id, T: Id>(&self, r: R) -> &[T] {
-        bytemuck::cast_slice(self.row(r.index()))
+    /// Every row as a typed list, in row order.
+    pub(crate) fn to_table<R: Id>(&self) -> Table<R, Vec<T>> {
+        (0..self.rows()).map(|i| self.row(i).to_vec()).collect()
     }
+}
 
-    /// Number of rows.
-    pub fn rows(&self) -> usize {
-        self.offsets.len().saturating_sub(1)
+impl Csr<OpId> {
+    /// The rows the other way round: row `a` of the result lists the rows
+    /// that name `a`, ascending.
+    pub(crate) fn inverse(&self) -> Self {
+        let mut rows: Table<OpId, Vec<OpId>> = (0..self.rows()).map(|_| Vec::new()).collect();
+        for (b, row) in self.to_table::<OpId>().iter_enumerated() {
+            for &a in row {
+                rows[a].push(b);
+            }
+        }
+        Self::from_table(&rows)
     }
 }
 
@@ -1074,13 +1334,13 @@ impl Csr {
 /// and the slot the colouring gave it. Kept in the plan so the verifier — and
 /// a test — can check the colouring against the op DAG without recomputing it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Value {
+pub struct Value<S> {
     /// The slot it lives in.
-    pub slot: u32,
+    pub slot: S,
     /// The op that writes it.
-    pub writer: u32,
+    pub writer: OpId,
     /// The ops that read it (into [`Plan::value_readers`]).
-    pub readers: Span,
+    pub readers: Span<OpId>,
 }
 
 /// The compiled, immutable form of a graph, produced by
@@ -1106,9 +1366,9 @@ pub struct Value {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub(crate) prepare: Prepare,
-    pub(crate) ops: Table<OpId, Op>,
-    pub(crate) audio_list: Vec<AudioSlotId>,
-    pub(crate) event_list: Vec<EventSlotId>,
+    /// The ops and everything they name: lists, values, dependencies, keyed
+    /// state and the arenas.
+    pub(crate) program: Program<BySlot>,
     /// Every event edge, `(source port, sink port)`, direct and feedback,
     /// sorted: what the executor compares across a commit to close the held
     /// keys of an edge that ended (`held.rs`), and the sources an input tap's
@@ -1116,27 +1376,12 @@ pub struct Plan {
     /// sizes that FIFO from, so the two agree; verify re-derives the size
     /// from this list and refuses a plan where they do not.
     pub(crate) event_edges: Vec<(EventOutputPort, EventInputPort)>,
-    pub(crate) op_succ: Csr,
-    pub(crate) tasks: Table<TaskId, Span>,
+    pub(crate) tasks: Table<TaskId, Span<OpId>>,
     pub(crate) task_ops: Vec<OpId>,
-    pub(crate) task_succ: Csr,
+    pub(crate) task_succ: Csr<TaskId>,
     pub(crate) task_activation: Table<TaskId, u32>,
-    pub(crate) audio_slots: u32,
-    pub(crate) event_slots: u32,
-    pub(crate) event_slot_capacity: Table<EventSlotId, EventSlotCapacity>,
-    pub(crate) audio_feedback: Table<AudioFeedbackId, FeedbackSpec>,
-    pub(crate) event_feedback: Table<EventFeedbackId, FeedbackSpec>,
-    pub(crate) delays: Table<DelayId, DelaySpec>,
-    pub(crate) taps: Table<PlanTapId, crate::TapId>,
-    /// The event taps the topology names, by id. An op names one by its index
-    /// here; a tap whose port does not exist has an entry and no op, so its
-    /// writer is carried across plans and resumes when the port returns.
-    pub(crate) event_taps: Table<PlanEventTapId, crate::EventTapId>,
-    /// The meters the plan measures, with their lane counts.
-    pub(crate) meters: Table<PlanMeterId, (crate::MeterId, usize)>,
     pub(crate) units: Table<PlanUnitId, PlanUnit>,
     pub(crate) store_len: u32,
-    pub(crate) order: Vec<NodeKey>,
     pub(crate) main_inputs: u16,
     pub(crate) compensation: Vec<Samples>,
     /// The main output generation the spec carried when this plan was committed.
@@ -1151,20 +1396,8 @@ pub struct Plan {
     /// has a bank): the total of the plan the main output change was made from, kept
     /// by a plan that continues the same crossfade.
     pub(crate) bank_total: Latency,
-    pub(crate) audio_values: Table<AudioValueId, Value>,
-    pub(crate) event_values: Table<EventValueId, Value>,
-    pub(crate) value_readers: Vec<OpId>,
-    pub(crate) param_ports: Vec<ParamPortOp>,
-    /// The driven lanes of every [`Op::WeightedSum`], flattened (its `gains`
-    /// span indexes this).
-    pub(crate) gain_ports: Vec<GainPortOp>,
-    /// The lanes of every [`Op::WeightedSum`], flattened (its `lanes` span
-    /// indexes this): the edge of each weighted addend, `None` for a plain
-    /// one. The executor keeps one lane state per entry, and carries a
-    /// weighted lane's across a commit by its [`EdgeId`].
-    pub(crate) sum_lanes: Vec<Option<EdgeId>>,
-    /// The node ops, lowered for the executor. Derived from the fields
-    /// above; `verify` checks each record against its op.
+    /// The node ops, lowered for the executor. Derived from the program and
+    /// the units; `verify` checks each record against its op.
     pub(crate) nodes: NodeTables,
 }
 
@@ -1177,6 +1410,44 @@ const _: fn() = || {
 };
 
 impl Plan {
+    /// The plan of `program`, whose ops `tasks` partition, over `units`.
+    pub(super) fn new(
+        prepare: &Prepare,
+        program: Program<BySlot>,
+        tasks: Tasks,
+        units: Table<PlanUnitId, PlanUnit>,
+        store_len: u32,
+        graph: &ValidGraph,
+        timing: Timing,
+    ) -> Self {
+        let nodes = NodeTables::lower(&program, &units);
+        let mut event_edges: Vec<(EventOutputPort, EventInputPort)> = graph
+            .events()
+            .iter()
+            .flat_map(|(&at, edges)| edges.iter().map(move |e| (e.from(), at)))
+            .collect();
+        event_edges.sort();
+        Self {
+            prepare: *prepare,
+            program,
+            event_edges,
+            tasks: tasks.tasks,
+            task_ops: tasks.task_ops,
+            task_succ: tasks.succ,
+            task_activation: tasks.activation,
+            units,
+            store_len,
+            main_inputs: graph.topology().inputs.count(),
+            compensation: timing.compensation,
+            main_output_id: crate::MainOutputId::GENESIS,
+            main_output_bank: graph.main_output_bank(),
+            rendered_outputs: timing.rendered_outputs,
+            total_latency: timing.total,
+            bank_total: timing.bank_total,
+            nodes,
+        }
+    }
+
     /// Checks the plan against its op DAG: no slot shared by ops that may run
     /// concurrently, every read of the value it was meant to read, feedback
     /// read before it is captured. [`compile()`](fn@crate::compile) runs this in
@@ -1204,16 +1475,14 @@ impl Plan {
         crate::compile::verify::verify_fades(prev, self, delta)
     }
 
-    /// The audio slots of `span` in [`audio_list`](Self::audio_list), as the raw
-    /// values the ops carry.
-    pub(crate) fn audio_slots(&self, span: Span) -> &[u32] {
-        &raw(&self.audio_list)[span.range()]
+    /// The audio slots of `span` in [`audio_list`](Self::audio_list).
+    pub(crate) fn audio_slots(&self, span: Span<AudioSlotId>) -> &[AudioSlotId] {
+        &self.program.audio_list[span.range()]
     }
 
-    /// The event slots of `span` in [`event_list`](Self::event_list), as raw
-    /// values.
-    pub(crate) fn event_slots(&self, span: Span) -> &[u32] {
-        &raw(&self.event_list)[span.range()]
+    /// The event slots of `span` in [`event_list`](Self::event_list).
+    pub(crate) fn event_slots(&self, span: Span<EventSlotId>) -> &[EventSlotId] {
+        &self.program.event_list[span.range()]
     }
 
     /// What this plan was compiled for. An executor refuses a plan prepared
@@ -1223,41 +1492,42 @@ impl Plan {
     }
 
     /// The ops, in serial order.
-    pub fn ops(&self) -> &[Op] {
-        self.ops.as_slice()
+    pub fn ops(&self) -> &[Op<AudioSlotId, EventSlotId>] {
+        self.program.ops.as_slice()
     }
 
     /// The flattened audio slot lists [`Op`] spans index.
-    pub fn audio_list(&self) -> &[u32] {
-        raw(&self.audio_list)
+    pub fn audio_list(&self) -> &[AudioSlotId] {
+        &self.program.audio_list
     }
 
     /// The flattened event slot lists [`Op`] spans index.
-    pub fn event_list(&self) -> &[u32] {
-        raw(&self.event_list)
+    pub fn event_list(&self) -> &[EventSlotId] {
+        &self.program.event_list
     }
 
     /// The flattened lane lists of [`Op::WeightedSum`]: per addend, the edge
     /// whose gain weights it, or `None` for a plain addend.
     pub fn sum_lanes(&self) -> &[Option<EdgeId>] {
-        &self.sum_lanes
+        &self.program.sum_lanes
     }
 
-    /// Successors of each op in the dependency DAG.
-    pub fn op_successors(&self) -> &Csr {
-        &self.op_succ
+    /// The ops each op waits for: the dependency DAG, each edge from an
+    /// earlier op to a later one.
+    pub fn op_dependencies(&self) -> &Csr<OpId> {
+        &self.program.deps
     }
 
     /// Tasks after coarsening (chains fused, cheap siblings packed): each is
     /// a run of op indices (into [`task_ops`](Self::task_ops)), ascending,
     /// that execute back to back on one thread.
-    pub fn tasks(&self) -> &[Span] {
+    pub fn tasks(&self) -> &[Span<OpId>] {
         self.tasks.as_slice()
     }
 
     /// Op indices, grouped by task.
-    pub fn task_ops(&self) -> &[u32] {
-        raw(&self.task_ops)
+    pub fn task_ops(&self) -> &[OpId] {
+        &self.task_ops
     }
 
     /// Distinct predecessor tasks of each task — the initial activation count
@@ -1270,15 +1540,15 @@ impl Plan {
     /// feedback slots.
     pub fn slots(&self, kind: PortKind) -> u32 {
         match kind {
-            PortKind::Audio => self.audio_slots,
-            PortKind::Event => self.event_slots,
+            PortKind::Audio => self.program.sizing.audio.len() as u32,
+            PortKind::Event => self.program.sizing.events.len() as u32,
         }
     }
 
     /// How many events each event slot holds per block (see the module
     /// docs), by slot index.
     pub fn event_slot_capacity(&self) -> &[EventSlotCapacity] {
-        self.event_slot_capacity.as_slice()
+        self.program.sizing.events.as_slice()
     }
 
     /// What event output port `port` declared it writes per block
@@ -1307,64 +1577,89 @@ impl Plan {
     }
 
     /// Whether what an event tap's source carries includes param events: the
-    /// port itself writes them, or, for an input, a port with an edge into it
-    /// does.
+    /// port itself writes them, or, for an input, its node takes them (a
+    /// scheduled command can carry one) or a port with an edge into it
+    /// writes them.
     pub(crate) fn event_tap_params(&self, source: crate::EventTapPort) -> bool {
         match source {
             crate::EventTapPort::Out(port) => self.event_port_params(port),
-            crate::EventTapPort::In(at) => self
-                .event_edges
-                .iter()
-                .any(|&(from, to)| to == at && self.event_port_params(from)),
+            crate::EventTapPort::In(at) => {
+                self.unit(at.node).is_some_and(|u| u.shape.param_events)
+                    || self
+                        .event_edges
+                        .iter()
+                        .any(|&(from, to)| to == at && self.event_port_params(from))
+            }
         }
     }
 
-    /// The declared capacity of each output port that writes what an event
-    /// tap's source carries: the port itself, or, for an input, every port
-    /// with an edge into it (what the node can receive there, summed).
-    pub(crate) fn event_tap_ports(&self, source: crate::EventTapPort) -> Vec<Option<NonZeroU32>> {
+    /// The declared capacity of each writer of what an event tap's source
+    /// carries over a delay of `len` frames at blocks of `block`: the output
+    /// port itself, or, for an input, every port with an edge into it and
+    /// the commands scheduled to it ([`input_writers`]).
+    pub(crate) fn event_tap_ports(
+        &self,
+        source: crate::EventTapPort,
+        len: Samples,
+        block: usize,
+    ) -> Vec<Option<NonZeroU32>> {
         match source {
             crate::EventTapPort::Out(port) => vec![self.event_port_capacity(port)],
-            crate::EventTapPort::In(at) => self
-                .event_edges
-                .iter()
-                .filter(|&&(_, to)| to == at)
-                .map(|&(from, _)| self.event_port_capacity(from))
-                .collect(),
+            crate::EventTapPort::In(at) => input_writers(
+                self.event_edges
+                    .iter()
+                    .filter(|&&(_, to)| to == at)
+                    .map(|&(from, _)| self.event_port_capacity(from)),
+                len,
+                block,
+            ),
         }
     }
 
     /// What the delay FIFO of an event tap's source holds: the `fifo` bound of
-    /// each writing port, added.
+    /// each writer, added.
     pub(crate) fn event_tap_fifo(
         &self,
         source: crate::EventTapPort,
         len: Samples,
         block: usize,
     ) -> EventSlotCapacity {
-        EventSlotCapacity::fifo_sum(self.event_tap_ports(source), len, block)
+        EventSlotCapacity::fifo_sum(self.event_tap_ports(source, len, block), len, block)
     }
 
     /// The rate an event tap's delay ring is sized from: the note-off room of
-    /// each writing port's capacity (or `default`), added.
-    pub(crate) fn event_tap_rate(&self, source: crate::EventTapPort, default: usize) -> usize {
-        self.event_tap_ports(source)
+    /// each writer's capacity (or `default`), added.
+    pub(crate) fn event_tap_rate(
+        &self,
+        source: crate::EventTapPort,
+        len: Samples,
+        block: usize,
+        default: usize,
+    ) -> usize {
+        self.event_tap_ports(source, len, block)
             .into_iter()
             .map(|c| crate::event::writer::note_off_room(c.map_or(default, |n| n.get() as usize)))
             .sum()
     }
 
-    /// Feedback slots of `kind`.
-    pub fn feedback(&self, kind: PortKind) -> &[FeedbackSpec] {
-        match kind {
-            PortKind::Audio => self.audio_feedback.as_slice(),
-            PortKind::Event => self.event_feedback.as_slice(),
-        }
+    /// The audio feedback slots.
+    pub fn audio_feedback(&self) -> &[FeedbackSpec<AudioFeedbackKey, AudioSlotId>] {
+        self.program.audio_feedback.as_slice()
     }
 
-    /// Every PDC delay.
-    pub fn delays(&self) -> &[DelaySpec] {
-        self.delays.as_slice()
+    /// The event feedback slots.
+    pub fn event_feedback(&self) -> &[FeedbackSpec<EventFeedbackKey, EventSlotId>] {
+        self.program.event_feedback.as_slice()
+    }
+
+    /// Every PDC delay of audio.
+    pub fn audio_delays(&self) -> &[AudioDelay] {
+        self.program.audio_delays.as_slice()
+    }
+
+    /// Every PDC delay of events.
+    pub fn event_delays(&self) -> &[EventDelay] {
+        self.program.event_delays.as_slice()
     }
 
     /// Every node, in key order.
@@ -1375,12 +1670,6 @@ impl Plan {
     /// The unit store length this plan needs.
     pub fn store_len(&self) -> u32 {
         self.store_len
-    }
-
-    /// Node keys in evaluation order — the same order
-    /// `Topology::topo_order` gives when there are no event edges.
-    pub fn order(&self) -> &[NodeKey] {
-        &self.order
     }
 
     /// Main input width.
@@ -1425,30 +1714,32 @@ impl Plan {
         self.total_latency
     }
 
-    /// Every value of `kind`: the buffers the plan moves, each with its
-    /// slot, writer and readers.
-    pub fn values(&self, kind: PortKind) -> &[Value] {
-        match kind {
-            PortKind::Audio => self.audio_values.as_slice(),
-            PortKind::Event => self.event_values.as_slice(),
-        }
+    /// Every audio value: the buffers the plan moves, each with its slot,
+    /// writer and readers.
+    pub fn audio_values(&self) -> &[Value<AudioSlotId>] {
+        self.program.audio_values.as_slice()
+    }
+
+    /// Every event value.
+    pub fn event_values(&self) -> &[Value<EventSlotId>] {
+        self.program.event_values.as_slice()
     }
 
     /// The flattened reader lists [`Value::readers`] spans index.
-    pub fn value_readers(&self) -> &[u32] {
-        raw(&self.value_readers)
+    pub fn value_readers(&self) -> &[OpId] {
+        &self.program.value_readers
     }
 
     /// Every modulated param port, grouped by node op (the `params` span of
     /// [`Op::Node`] indexes this).
-    pub fn param_ports(&self) -> &[ParamPortOp] {
-        &self.param_ports
+    pub fn param_ports(&self) -> &[ParamPortOp<EventSlotId>] {
+        &self.program.param_ports
     }
 
     /// The flattened driven lanes of every [`Op::WeightedSum`]: its `gains`
     /// span indexes this.
-    pub fn gain_ports(&self) -> &[GainPortOp] {
-        &self.gain_ports
+    pub fn gain_ports(&self) -> &[GainPortOp<EventSlotId>] {
+        &self.program.gain_ports
     }
 
     /// The unit compiled for `key`.
@@ -1458,16 +1749,22 @@ impl Plan {
 
     /// Where the unit compiled for `key` sits in [`units`](Self::units).
     pub(crate) fn unit_id(&self, key: NodeKey) -> Option<PlanUnitId> {
-        self.units
-            .as_slice()
-            .binary_search_by_key(&key, |u| u.key)
-            .ok()
-            .map(PlanUnitId::from_index)
+        self.units.search_by_key(&key, |u| u.key)
     }
 
-    /// The PDC delay on `key`, or zero.
-    pub fn delay(&self, key: DelayKey) -> Samples {
-        self.delays
+    /// The PDC delay of audio on `key`, or zero.
+    pub fn audio_delay(&self, key: AudioDelayKey) -> Samples {
+        self.program
+            .audio_delays
+            .iter()
+            .find(|d| d.key == key)
+            .map_or(Samples::ZERO, |d| d.len)
+    }
+
+    /// The PDC delay of events on `key`, or zero.
+    pub fn event_delay(&self, key: EventDelayKey) -> Samples {
+        self.program
+            .event_delays
             .iter()
             .find(|d| d.key == key)
             .map_or(Samples::ZERO, |d| d.len)
@@ -1478,10 +1775,11 @@ impl Plan {
         let Some((pos, _)) = self.units.iter_enumerated().find(|(_, u)| u.key == key) else {
             return InPlaceMask::NONE;
         };
-        self.ops
+        self.program
+            .ops
             .iter()
             .find_map(|op| match *op {
-                Op::Node { unit, in_place, .. } if PlanUnitId::new(unit) == pos => Some(in_place),
+                Op::Node { unit, in_place, .. } if unit == pos => Some(in_place),
                 _ => None,
             })
             .unwrap_or(InPlaceMask::NONE)
@@ -1550,7 +1848,7 @@ mod tests {
     fn a_direct_lowering_borrows_exactly_the_ports_buffers_in_ascending_slot_order() {
         const OUT: [[u32; 2]; 4] = [[10, 20], [20, 10], [30, 5], [7, 8]];
         const IN: [[u32; 2]; 4] = [[50, 60], [60, 50], [50, 50], [4, 40]];
-        let slot = AudioSlotId::new;
+        let slot = |s: u32| crate::compile::ids::id_at::<AudioSlotId>(s as usize);
         let mut lowered = 0;
         for (ins, outs) in Direct::SHAPES {
             for out in OUT.map(|o| o.map(slot)) {
@@ -1621,7 +1919,6 @@ mod tests {
     #[test]
     fn every_node_record_carries_what_the_plan_says() {
         use crate::NodeKey;
-        use crate::compile::ids::PlanUnitId;
         use crate::compile::{Shapes, compile};
         use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort, GraphSpec};
         use crate::node::shape::Shape;
@@ -1703,11 +2000,12 @@ mod tests {
         assert_eq!(plan.nodes.recs.len(), plan.units.len(), "a record a unit");
         assert_eq!(plan.units.len(), rows.len());
         let mut forms = Vec::new();
-        for op in &plan.ops {
+        for op in &plan.program.ops {
             let Op::Node {
                 unit,
                 audio_in,
                 audio_out,
+                event_src,
                 event_in,
                 event_out,
                 in_place,
@@ -1716,7 +2014,6 @@ mod tests {
             else {
                 continue;
             };
-            let unit = PlanUnitId::new(unit);
             let rec = &plan.nodes.recs[unit];
             let pu = &plan.units[unit];
             let shape = shapes[&pu.key];
@@ -1746,10 +2043,11 @@ mod tests {
                 "only the in-place node is aliased: {at}"
             );
 
-            let ain = &plan.audio_list[audio_in.range()];
-            let aout = &plan.audio_list[audio_out.range()];
-            let ein = &plan.event_list[event_in.range()];
-            let eout = &plan.event_list[event_out.range()];
+            let ain = &plan.program.audio_list[audio_in.range()];
+            let aout = &plan.program.audio_list[audio_out.range()];
+            let ein = &plan.program.event_list[event_in.range()];
+            let esrc = &plan.program.event_list[event_src.range()];
+            let eout = &plan.program.event_list[event_out.range()];
             let counts = [rec.ain, rec.aout, rec.ein, rec.eout].map(usize::from);
             assert_eq!(
                 counts,
@@ -1805,6 +2103,11 @@ mod tests {
             assert_eq!(
                 plan.nodes.event_borrows[rec.event_borrows.range()],
                 sorted([reads(ein, InPlaceMask::NONE), writes(eout)].concat()),
+                "{at}"
+            );
+            assert_eq!(
+                plan.nodes.event_assemble[rec.event_assemble.range()],
+                sorted([reads(esrc, InPlaceMask::NONE), writes(ein)].concat()),
                 "{at}"
             );
 

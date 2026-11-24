@@ -1,6 +1,5 @@
 use super::*;
-use tutti_buffers::Float;
-use tutti_rt::SplitMix64;
+use tutti_fixtures::uniform_noise;
 use tutti_units::SampleRate;
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -13,9 +12,6 @@ fn sine(freq: Hz, amp: f64) -> Vec<f64> {
         SR,
         tutti_units::Samples::new(N),
     )
-    .into_iter()
-    .map(f64::from)
-    .collect()
 }
 
 fn saw(freq: Hz, amp: f64) -> Vec<f64> {
@@ -25,13 +21,6 @@ fn saw(freq: Hz, amp: f64) -> Vec<f64> {
             let phase = (f * i as f64 / SR.get()).fract();
             (2.0 * phase - 1.0) * amp
         })
-        .collect()
-}
-
-fn white_noise() -> Vec<f64> {
-    let mut rng = SplitMix64::new(1);
-    (0..N)
-        .map(|_| (f64::from_fraction_bits(rng.next_u64()) * 2.0 - 1.0) * 0.5)
         .collect()
 }
 
@@ -141,7 +130,10 @@ fn aperiodic_buffers_are_unvoiced() {
     for (label, samples) in [
         ("zeros", vec![0.0f64; N]),
         ("dc", vec![0.5f64; N]),
-        ("noise", white_noise()),
+        (
+            "noise",
+            uniform_noise::<f64>(1, N).iter().map(|v| v * 0.5).collect(),
+        ),
     ] {
         let mut det = detector();
         let (min_period, max_period) = fill_cmndf(&mut det, &samples);

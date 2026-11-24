@@ -48,7 +48,7 @@ use tutti_units::{
     ArcDegrees, Azimuth, Normalized, ParamAddr, Quantity, Samples, UnitAddr, UnitParam,
 };
 
-use crate::exec::lane::{Declick, arc_in, control_in, ramp_in, wrap_in};
+use crate::exec::lane::{Progress, arc_in, control_in, declick_gains, ramp_in, wrap_in};
 use crate::model::spec::EventOutputPort;
 use crate::node::param_event::{ParamEvent, ParamKind, Timing, arrival, segment_progress};
 use tutti_curve::{Law, Piece};
@@ -1009,6 +1009,14 @@ impl ParamRangeCell {
     pub fn same_cell(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+
+    /// A cell of its own holding the range now, in no editor's table: what a
+    /// fork reads, so a range set after the fork does not reach it. Control
+    /// side: it locks and allocates.
+    #[must_use]
+    pub fn detached(&self) -> Self {
+        Self(Arc::new(Publisher::new(self.current())))
+    }
 }
 
 /// A param port's live range as the audio thread reads it: a [`Reader`] on
@@ -1048,10 +1056,10 @@ pub(crate) struct PortState<F: Float> {
     last: F,
     /// The base at the end of the last block.
     last_base: F,
-    /// Where the declick fades from; meaningful while `declick` runs.
+    /// Where the declick fades from; meaningful while `progress` runs.
     hold: F,
     /// The declick's progress; idle when none runs.
-    declick: Declick,
+    progress: Progress,
     /// Its event source's ramp: the source's own, so it is reset when the
     /// source changes and kept otherwise.
     ramp: Ramp,
@@ -1067,8 +1075,8 @@ enum Shown {
 }
 
 impl<F: Float> PortState<F> {
-    /// A port that has not run, declicking over `declick`.
-    fn new(declick: Samples) -> Self {
+    /// A port that has not run.
+    fn new() -> Self {
         Self {
             fresh: true,
             source: None,
@@ -1077,7 +1085,7 @@ impl<F: Float> PortState<F> {
             last: F::ZERO,
             last_base: F::ZERO,
             hold: F::ZERO,
-            declick: Declick::idle(declick),
+            progress: Progress::default(),
             ramp: Ramp::default(),
         }
     }
@@ -1091,8 +1099,6 @@ pub(crate) struct ParamState<F: Float> {
     ports: Vec<PortState<F>>,
     /// What the ports delivered this block.
     delivered: PortFrames<F>,
-    /// The declick's length: [`DECLICK`](crate::DECLICK) at the graph's rate.
-    declick: Samples,
     /// Whether any port delivered frames this block, is mid-declick, or has
     /// yet to run: a unit for which this is false and whose op lists no
     /// driven port skips the whole step.
@@ -1166,7 +1172,6 @@ impl<F: Float> Default for ParamState<F> {
         Self {
             ports: Vec::new(),
             delivered: PortFrames::new(0, 0),
-            declick: Samples::ZERO,
             busy: false,
             ranges: Vec::new(),
             lanes: Vec::new(),
@@ -1182,7 +1187,6 @@ impl<F: Float> ParamState<F> {
     pub(crate) fn new(
         ports: usize,
         max: usize,
-        declick: Samples,
         ranges: Vec<ParamRangeReader>,
         lanes: Vec<EffectiveCell>,
     ) -> Self {
@@ -1190,9 +1194,8 @@ impl<F: Float> ParamState<F> {
             return Self::default();
         }
         Self {
-            ports: vec![PortState::new(declick); ports],
+            ports: vec![PortState::new(); ports],
             delivered: PortFrames::new(ports, max),
-            declick,
             // Its first block runs the step whatever the plan says, to
             // seed each port (see `PortState::fresh`).
             busy: true,
@@ -1212,8 +1215,8 @@ impl<F: Float> ParamState<F> {
     /// State for **one** port at blocks of up to `max` frames, clamping to
     /// `ranges`: an edge gain's lane, which runs the
     /// param port's step on its own.
-    pub(crate) fn lane(max: usize, declick: Samples, ranges: &ParamRanges) -> Self {
-        Self::new(1, max, declick, ranges.readers(), ranges.lanes())
+    pub(crate) fn lane(max: usize, ranges: &ParamRanges) -> Self {
+        Self::new(1, max, ranges.readers(), ranges.lanes())
     }
 
     /// Reads no lane from the cells: for a state that is dropped while its
@@ -1233,10 +1236,9 @@ impl<F: Float> ParamState<F> {
         self.ports[0].fresh = false;
     }
 
-    /// Whether the state can serve blocks of up to `max` frames, declicking
-    /// over `declick` frames.
-    pub(crate) fn fits(&self, max: usize, declick: Samples) -> bool {
-        self.delivered.max >= max && self.declick == declick
+    /// Whether the state can serve blocks of up to `max` frames.
+    pub(crate) fn fits(&self, max: usize) -> bool {
+        self.delivered.max >= max
     }
 
     /// Port `k`'s values this block, after [`port`](Self::port): `None` when
@@ -1272,12 +1274,14 @@ impl<F: Float> ParamState<F> {
     /// ([`ParamRanges`]): clamped, or for a circular param wrapped (and held
     /// to its arc). A circular param's frames jump by 360 across the seam
     /// (see the module docs): a consumer smooths on the arc, not on the
-    /// frames.
+    /// frames. A change of source fades over `declick` frames
+    /// ([`Prepare::declick`](crate::Prepare)).
     pub(crate) fn port(
         &mut self,
         k: usize,
         param: UnitAddr,
         frames: usize,
+        declick: Samples,
         m: Option<(EventOutputPort, &[ParamEvent])>,
         base: Option<F>,
     ) {
@@ -1290,7 +1294,7 @@ impl<F: Float> ParamState<F> {
             {
                 lane.release();
             }
-            *st = PortState::new(self.declick);
+            *st = PortState::new();
             st.shown = Shown::Idle;
             return;
         };
@@ -1303,11 +1307,11 @@ impl<F: Float> ParamState<F> {
             // The source changed: fade from where the port was, and start
             // the new source's ramp at rest.
             st.hold = if st.modulated { st.last } else { b1 };
-            st.declick.restart();
+            st.progress.restart(declick);
             st.source = source;
             st.ramp = Ramp::default();
         }
-        let fading = st.declick.running();
+        let fading = st.progress.running();
         if source.is_none() && !fading {
             if st.shown != Shown::Idle
                 && let Some(lane) = self.lanes.get(k)
@@ -1373,11 +1377,11 @@ impl<F: Float> ParamState<F> {
         if fading {
             let circular = param.param.is_circular();
             for (i, o) in out.iter_mut().enumerate() {
-                let j = st.declick.done() + Samples::new(i);
-                if j >= st.declick.len() {
+                let j = st.progress.done(declick) + Samples::new(i);
+                if j >= declick {
                     break;
                 }
-                let (out, inn) = st.declick.gains::<F>(j);
+                let (out, inn) = declick_gains::<F>(j, declick);
                 *o = if circular {
                     // A crossfade of two bearings would sweep through the
                     // mean; the fade turns the short arc by the incoming gain.
@@ -1389,7 +1393,7 @@ impl<F: Float> ParamState<F> {
                     st.hold * out + *o * inn
                 };
             }
-            st.declick.advance(Samples::new(frames));
+            st.progress.advance(Samples::new(frames), declick);
         }
         st.last = out[frames - 1];
         st.last_base = b1;

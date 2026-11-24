@@ -15,7 +15,7 @@ fn render<F: Float>(cloud: &mut Granular<F>, settings: &GrainSettings, frames: u
 }
 
 fn hann(n: usize, length: usize) -> f64 {
-    0.5 - 0.5 * (2.0 * core::f64::consts::PI * n as f64 / length as f64).cos()
+    tutti_fixtures::signal::hann(n, length)
 }
 
 /// The window's derived bound: its phasor, set exactly every 64 frames, is within `4 * 64 eps`

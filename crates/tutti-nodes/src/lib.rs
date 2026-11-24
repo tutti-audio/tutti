@@ -345,7 +345,7 @@ pub use delay::{DelayConfig, DelayKernel, DelayNode, DelaySet};
 // `tutti-dsp`'s only.
 pub use tutti_dsp::{
     ChannelTimes, ChannelTimesError, DelayControls, DelayLayout, DelayLayoutBuilder,
-    DelayLayoutError, DelayTiming, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
+    DelayLayoutError, DelaySync, FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError,
     InterpolationMode, MaxDelay, MaxDelayError, NoteTimes, NoteTimesError,
 };
 
@@ -570,7 +570,7 @@ pub use signal::{
 // Declarations compiled and applied to an `Editor` as lanes, signal-source
 // nodes and edges.
 mod reconcile;
-pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError, Target};
+pub use reconcile::{Applied, Feed, ModHost, Modulation, ReconcileError};
 mod convolution;
 pub use convolution::{
     ConvolverConfig, ConvolverError, ConvolverNode, FirConvolverConfig, IrLayout,

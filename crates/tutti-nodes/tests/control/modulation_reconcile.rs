@@ -7,7 +7,8 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tutti_fixtures::Record;
+use tutti_fixtures::{Record, cycle_blocks};
+use tutti_rt::{Param, ParamCell};
 
 use tutti_buffers::MaxBlock;
 use tutti_ump::{MidiChannel, NoteNumber, U7};
@@ -29,7 +30,7 @@ use tutti_modulation::{
 };
 use tutti_music::FrameClock;
 use tutti_nodes::testing::Through;
-use tutti_nodes::{Feed, ModHost, Modulation, ReconcileError, Target};
+use tutti_nodes::{Applied, Feed, ModHost, Modulation, ReconcileError};
 use tutti_ump::{Message, Voice1};
 use tutti_units::{
     Amplitude, At, Beat, Bipolar, Bpm, Frame, Hz, ParamAddr, PhaseIncrement, SampleRate, Samples,
@@ -244,36 +245,44 @@ impl Node for Capture {
 struct Host {
     targets: BTreeMap<u64, (NodeKey, Arc<AtomicF64>)>,
     foreign: BTreeMap<u64, NodeKey>,
-    /// A foreign target's event input; 0 where absent.
-    foreign_port: BTreeMap<u64, u16>,
     /// Native targets resolved without a knob cell.
     bare: BTreeMap<u64, NodeKey>,
     feeds: BTreeMap<SourceKey, Feed>,
 }
 
 impl ModHost for Host {
-    fn target(&self, t: TargetKey) -> Option<Target> {
-        let TargetKey::Param { node: bits, .. } = t else {
-            return None;
-        };
-        if let Some(&node) = self.foreign.get(&bits) {
-            return Some(Target::Foreign {
-                node,
-                port: self.foreign_port.get(&bits).copied().unwrap_or(0),
-                knob: Some(0.5),
-            });
-        }
-        if let Some(&node) = self.bare.get(&bits) {
-            return Some(Target::Native { node, knob: None });
-        }
-        let (node, knob) = self.targets.get(&bits)?;
-        Some(Target::Native {
-            node: *node,
-            knob: Some(Arc::clone(knob).into()),
-        })
+    fn node(&self, bits: u64) -> Option<NodeKey> {
+        self.foreign
+            .get(&bits)
+            .or_else(|| self.bare.get(&bits))
+            .copied()
+            .or_else(|| self.targets.get(&bits).map(|(node, _)| *node))
     }
     fn feed(&self, s: SourceKey) -> Option<Feed> {
         self.feeds.get(&s).copied()
+    }
+}
+
+impl Host {
+    /// The node's own cell for the param, as a session's values hold it: the
+    /// knob of the target node `at` names, none for a bare one.
+    fn cell(&self, at: ParamIn) -> Option<ParamCell> {
+        self.targets
+            .values()
+            .find(|(node, _)| *node == at.node)
+            .map(|(_, knob)| Arc::clone(knob).into())
+    }
+
+    /// `m.apply` with this host's keys, knobs and (always 0.5) plugin values.
+    fn apply(
+        &self,
+        m: &mut Modulation,
+        decl: &Declarations<'_>,
+        ed: &mut Editor,
+    ) -> Result<Applied, ReconcileError> {
+        m.apply(decl, ed, self, &|at| self.cell(at), &|_, _| {
+            Some(Some(tutti_units::Normalized::of(0.5)))
+        })
     }
 }
 
@@ -305,7 +314,7 @@ impl Decl {
             RouteDecl {
                 source,
                 to: RouteTarget::Param(to),
-                depth: Bipolar::of(depth),
+                depth: Param::new(Bipolar::of(depth)),
                 polarity: Polarity::Bipolar,
                 curve: Law::Linear,
             },
@@ -332,10 +341,18 @@ impl Decl {
         self.sources.retain(|(s, _)| *s != k);
     }
 
+    fn set_polarity(&mut self, k: RouteKey, polarity: Polarity) {
+        for (r, d) in &mut self.routes {
+            if *r == k {
+                d.polarity = polarity;
+            }
+        }
+    }
+
     fn set_depth(&mut self, k: RouteKey, depth: f64) {
         for (r, d) in &mut self.routes {
             if *r == k {
-                d.depth = Bipolar::of(depth);
+                d.depth.store(Bipolar::of(depth));
             }
         }
     }
@@ -446,21 +463,6 @@ fn render(ed: &mut Editor, exec: &mut Executor, n: usize, total: usize) -> Vec<V
     all
 }
 
-/// A ragged block schedule up to `max`, summing to `total`.
-fn ragged(total: usize, max: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, max, 7, 64, max - 1, 33, 2, 100][i % 8]
-            .min(max)
-            .min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
-}
-
 /// `500 + 1000 · depth · sin(2π · rate · play / RATE)`: a bipolar linear
 /// sine route on a `0..=1000` target with knob 500, play counted from the
 /// executor's first frame (stopped, it runs from 0 there).
@@ -512,7 +514,7 @@ fn rig(max: usize) -> Rig {
     host.feeds.insert(kick, Feed::Audio(key(10)));
     decl.route(2, kick, cutoff_of(2), -0.6);
     let mut m = Modulation::new();
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(applied.commit);
     m.commit(&mut ed).expect("commits");
     Rig {
@@ -578,22 +580,23 @@ fn the_8_1_example_renders_its_analytic_values() {
     assert!(low < 0.33, "the pad dips: {low}");
 }
 
-/// **A depth edit keeps phase and sends no plan.** The edit is a
-/// republish: `apply` asks for no commit, the commit sends nothing (the
-/// plan sent last is the same `Arc`), and from one grid step after the
-/// block it lands in the cutoff is the same sine at the new depth, its
-/// phase unbroken.
+/// **A depth edit keeps phase and sends no plan.** The write is to the
+/// route's cell, which the lane reads: `apply` has nothing to republish and
+/// asks for no commit, the commit sends nothing (the plan sent last is the
+/// same `Arc`), and from one grid step after the block it lands in the
+/// cutoff is the same sine at the new depth, its phase unbroken.
 #[test]
 fn a_depth_edit_keeps_phase_and_sends_no_plan() {
     let mut r = rig(128);
     let before = render(&mut r.ed, &mut r.exec, 128, 12_800);
     let plan = Arc::clone(r.ed.base().expect("committed"));
     r.decl.set_depth(r.lfo, 0.5);
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(!applied.commit, "a depth edit needs no commit");
-    assert_eq!(applied.republished, vec![cutoff_of(1)]);
+    assert!(applied.republished.is_empty(), "the lane reads the cell");
     r.m.commit(&mut r.ed).expect("commits");
     assert!(
         Arc::ptr_eq(&plan, r.ed.base().expect("committed")),
@@ -642,7 +645,7 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
     let r1 = decl.route(1, wobble, cutoff_of(1), 0.3);
     let mut m = Modulation::new();
     assert!(
-        m.apply(&decl.get(), &mut ed, &host)
+        host.apply(&mut m, &decl.get(), &mut ed)
             .expect("applies")
             .commit
     );
@@ -652,7 +655,7 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
 
     decl.targets[0].1.max = 2000.0;
     decl.set_depth(r1, 0.1);
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(!applied.commit, "range and depth: no commit");
     m.commit(&mut ed).expect("commits");
     assert!(Arc::ptr_eq(&plan, ed.base().expect("committed")));
@@ -678,11 +681,11 @@ fn range_and_depth_edits_need_no_commit_and_a_follower_route_one() {
     decl.route(2, kick, cutoff_of(1), -0.5);
     ed.collect();
     assert_eq!(ed.in_flight(), 0);
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(applied.commit, "a follower route is a commit");
     m.commit(&mut ed).expect("commits");
     assert_eq!(ed.in_flight(), 1, "exactly one plan sent");
-    let again = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let again = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert_eq!(again, tutti_nodes::Applied::default(), "nothing to do");
 }
 
@@ -701,7 +704,10 @@ fn a_removed_source_leaves_no_node_and_no_layer() {
     // Probe 2 keeps a lane: an LFO route of its own.
     decl.route(3, SourceKey(1), cutoff_of(2), 0.1);
     render(&mut r.ed, &mut r.exec, 128, 1_024);
-    let applied = r.m.apply(&decl.get(), &mut r.ed, &r.host).expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.commit);
     r.m.commit(&mut r.ed).expect("commits");
     assert!(r.m.source(kick).is_none());
@@ -736,7 +742,8 @@ fn a_knob_written_after_a_route_edit_is_the_knob() {
     let knob = Arc::clone(&r.host.targets[&1].1);
     knob.store(300.0, std::sync::atomic::Ordering::Release);
     r.decl.set_depth(r.lfo, 0.2);
-    r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
         .expect("applies");
     let a = render(&mut r.ed, &mut r.exec, 128, 2_048);
     knob.store(700.0, std::sync::atomic::Ordering::Release);
@@ -775,7 +782,7 @@ fn resync_rig() -> (Rig, SourceKey) {
     let zero = decl.source(2, ModSource::Macro { value: 0.0 });
     let lfo = decl.route(2, zero, cutoff_of(2), 0.5);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     let mut r = Rig {
         ed,
@@ -805,9 +812,10 @@ fn resync_rig() -> (Rig, SourceKey) {
 fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
     let (mut r, env) = resync_rig();
     r.decl.route(3, env, cutoff_of(2), 0.5);
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.commit, "a new edge");
     assert!(applied.resync, "the apply says a resync is owed");
     assert_eq!(r.m.resyncs_owed(), 1);
@@ -836,16 +844,18 @@ fn a_held_note_envelope_newly_routed_reads_its_level_at_once() {
 fn a_route_dropped_and_readded_without_a_commit_resyncs() {
     let (mut r, env) = resync_rig();
     r.decl.route(3, env, cutoff_of(2), 0.5);
-    r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
         .expect("applies");
     r.m.commit(&mut r.ed).expect("commits");
     render(&mut r.ed, &mut r.exec, 128, 1_024);
     let plan = Arc::clone(r.ed.base().expect("committed"));
 
     r.decl.drop_route(RouteKey(3));
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.commit, "the edge would go");
     let gap = render(&mut r.ed, &mut r.exec, 128, 512);
     assert!(
@@ -855,7 +865,8 @@ fn a_route_dropped_and_readded_without_a_commit_resyncs() {
     );
 
     r.decl.route(3, env, cutoff_of(2), 0.5);
-    r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
         .expect("applies");
     assert_eq!(r.m.resyncs_owed(), 1);
     r.m.commit(&mut r.ed).expect("commits");
@@ -883,7 +894,8 @@ fn a_follower_takes_no_resync() {
         Err(ScheduleError::NoSuchPort { to })
     );
     r.decl.route(4, SourceKey(2), cutoff_of(1), 0.1);
-    r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
         .expect("applies");
     assert_eq!(r.m.resyncs_owed(), 0);
 }
@@ -921,7 +933,7 @@ fn a_host_key_is_never_taken() {
     host.feeds.insert(pulse, Feed::Audio(NodeKey(2)));
     decl.route(1, pulse, cutoff_of(1), -0.6);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     let lane = m.lane(cutoff_of(1)).expect("a lane").0;
     let source = m.source(pulse).expect("a follower");
@@ -956,7 +968,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     decl.route(1, one, param, 0.25);
     let mut m = Modulation::new();
     assert!(
-        m.apply(&decl.get(), &mut ed, &host)
+        host.apply(&mut m, &decl.get(), &mut ed)
             .expect("applies")
             .commit
     );
@@ -971,7 +983,7 @@ fn a_foreign_target_takes_a_lane_on_its_event_input() {
     assert!((last(&log) - 0.75).abs() < 1e-6, "{}", last(&log));
 
     decl.targets[0].1.max = 0.7;
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(!applied.commit, "a range edit is a store");
     render(&mut ed, &mut exec, 128, 512);
     assert!((last(&log) - 0.675).abs() < 1e-6, "{}", last(&log));
@@ -995,7 +1007,7 @@ fn a_rebind_to_another_param_list_rebinds_in_the_same_apply() {
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, one, cutoff_of(1), 0.25);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     let got = render(&mut ed, &mut exec, 128, 1_024);
     assert_eq!(got[0][1_023], 250.0);
@@ -1010,7 +1022,7 @@ fn a_rebind_to_another_param_list_rebinds_in_the_same_apply() {
             knob,
         }),
     );
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(applied.unresolved_targets.is_empty());
     assert!(applied.commit, "a lane on the new unit's cell");
     assert!(m.lane(cutoff_of(1)).is_some(), "the lane is rebuilt");
@@ -1019,7 +1031,7 @@ fn a_rebind_to_another_param_list_rebinds_in_the_same_apply() {
     assert_eq!(got[0][1_023], 250.0);
 
     decl.targets[0].1.max = 2_000.0;
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(!applied.commit, "a range edit is a store");
     let got = render(&mut ed, &mut exec, 128, 1_024);
     assert_eq!(got[0][1_023], 500.0);
@@ -1027,7 +1039,7 @@ fn a_rebind_to_another_param_list_rebinds_in_the_same_apply() {
 
 /// **A removed feed node leaves its source unresolved, not every apply
 /// refused.** The rig's pulse (the follower's feed) is removed, then the
-/// LFO's depth is edited: the apply succeeds, the follower is unresolved
+/// LFO's polarity is edited: the apply succeeds, the follower is unresolved
 /// and its node goes, and the commit is accepted. A note envelope whose
 /// MIDI node is removed keeps its node, fed nothing.
 #[test]
@@ -1035,10 +1047,11 @@ fn a_removed_feed_node_leaves_its_source_unresolved() {
     let mut r = rig(128);
     render(&mut r.ed, &mut r.exec, 128, 128);
     r.ed.remove(key(10));
-    r.decl.set_depth(r.lfo, 0.2);
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    r.decl.set_polarity(r.lfo, Polarity::Unipolar);
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert_eq!(applied.unresolved_sources, vec![SourceKey(2)]);
     assert_eq!(applied.republished, vec![cutoff_of(1)]);
     assert!(r.m.source(SourceKey(2)).is_none(), "the follower went");
@@ -1047,9 +1060,10 @@ fn a_removed_feed_node_leaves_its_source_unresolved() {
 
     let (mut r, env) = resync_rig();
     r.ed.remove(key(10));
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.unresolved_sources.is_empty());
     assert!(r.m.source(env).is_some(), "the envelope stays, unfed");
     r.m.commit(&mut r.ed).expect("commits");
@@ -1081,7 +1095,7 @@ fn a_port_with_another_event_source_is_refused() {
     decl.target(cutoff_of(3), 0.0, 1.0);
     decl.route(9, SourceKey(1), cutoff_of(3), 0.1);
     assert_eq!(
-        r.m.apply(&decl.get(), &mut r.ed, &r.host),
+        r.host.apply(&mut r.m, &decl.get(), &mut r.ed),
         Err(ReconcileError::PortTaken(cutoff_of(3)))
     );
     assert_eq!(state(&r.ed, &r.m, &targets, &sources), before);
@@ -1109,9 +1123,10 @@ fn a_key_the_host_takes_is_followed() {
             level: 0.0,
         }),
     );
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.commit);
     let (new_lane, new_follower) = (
         r.m.lane(cutoff_of(1)).expect("a lane").0,
@@ -1163,7 +1178,7 @@ fn two_targets_on_one_port_are_refused() {
     let targets = [cutoff_of(1), cutoff_of(7)];
     let before = state(&ed, &m, &targets, &[lfo]);
     assert_eq!(
-        m.apply(&decl.get(), &mut ed, &host),
+        host.apply(&mut m, &decl.get(), &mut ed),
         Err(ReconcileError::SharedPort {
             first: cutoff_of(1),
             second: cutoff_of(7),
@@ -1186,9 +1201,10 @@ fn a_target_moved_to_another_key_on_its_port_takes_it() {
     r.host.targets.insert(7, one);
     r.decl.targets[0].0 = cutoff_of(7);
     r.decl.routes[0].1.to = RouteTarget::Param(cutoff_of(7));
-    let applied =
-        r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-            .expect("applies");
+    let applied = r
+        .host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+        .expect("applies");
     assert!(applied.commit);
     assert!(r.m.lane(cutoff_of(1)).is_none());
     assert!(r.m.lane(cutoff_of(7)).is_some());
@@ -1219,7 +1235,7 @@ fn a_replace_with_the_same_params_keeps_modulating() {
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, one, cutoff_of(1), 0.25);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     render(&mut ed, &mut exec, 128, 1_024);
 
@@ -1233,7 +1249,7 @@ fn a_replace_with_the_same_params_keeps_modulating() {
             knob,
         }),
     );
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(applied.unresolved_targets.is_empty());
     m.commit(&mut ed).expect("commits");
     let got = render(&mut ed, &mut exec, 128, 1_024);
@@ -1242,7 +1258,7 @@ fn a_replace_with_the_same_params_keeps_modulating() {
     }
 
     decl.targets[0].1.max = 2_000.0;
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     let got = render(&mut ed, &mut exec, 128, 1_024);
     assert_eq!(got[0][1_023], 500.0);
 }
@@ -1265,7 +1281,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, one, param, 0.25);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     render(&mut ed, &mut exec, 128, 256);
 
@@ -1277,7 +1293,7 @@ fn a_taken_lanes_unwiring_keeps_the_hosts_edges() {
         delay: Samples::new(128),
     };
     ed.spec_mut().connect_events(to, feedback);
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     let edges = &ed.spec().events[&to];
     assert!(
         edges.contains(&feedback),
@@ -1334,7 +1350,7 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
         host.feeds.insert(loop_, Feed::Audio(feed));
         decl.route(7, loop_, cutoff_of(1), 0.2);
         assert_eq!(
-            r.m.apply(&decl.get(), &mut r.ed, &host),
+            host.apply(&mut r.m, &decl.get(), &mut r.ed),
             Err(ReconcileError::Cycle { route: RouteKey(7) }),
             "fed by {feed:?}"
         );
@@ -1342,7 +1358,8 @@ fn a_follower_downstream_of_its_target_is_refused_by_route() {
     }
     let mut decl = r.decl.clone();
     decl.route(7, SourceKey(2), cutoff_of(1), 0.2);
-    r.m.apply(&decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &decl.get(), &mut r.ed)
         .expect("the kick is upstream");
     r.m.commit(&mut r.ed).expect("the graph agrees");
 }
@@ -1387,7 +1404,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
     host.feeds.insert(kick, Feed::Audio(key(10)));
     decl.route(2, kick, cutoff_of(2), -0.6);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     render(&mut ed, &mut exec, 128, 384);
     host.targets[&1]
@@ -1412,7 +1429,7 @@ fn an_export_is_the_live_render_on_a_native_param() {
         c.drain(..37);
     }
     head.0.advance(Samples::new(128 - 37), None);
-    for n in ragged(total - (128 - 37), 128) {
+    for n in cycle_blocks(&[1, 128, 7, 64, 127, 33, 2, 100], total - (128 - 37)) {
         head.roll(&mut ed, &mut exec, n, &mut live);
     }
     let (mut head, mut export) = (Playhead::new(), Vec::new());
@@ -1454,7 +1471,7 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
     let s = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, s, pan, 0.25);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     let got = render(&mut ed, &mut exec, 128, 512);
     // 0 + 0.25 · 1 · 2 (the span), past the connect's declick.
@@ -1473,16 +1490,18 @@ fn a_lane_on_a_param_with_no_typed_key_reaches_its_port() {
 fn steady(r: &mut Rig) {
     let before = r.m.skipped();
     for _ in 0..2 {
-        let applied =
-            r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
-                .expect("applies");
+        let applied = r
+            .host
+            .apply(&mut r.m, &r.decl.get(), &mut r.ed)
+            .expect("applies");
         assert!(!applied.commit && applied.republished.is_empty());
     }
     assert!(r.m.skipped() > before, "a steady apply is skipped");
 }
 
 fn reapply(r: &mut Rig) -> tutti_nodes::Applied {
-    r.m.apply(&r.decl.get(), &mut r.ed, &r.host)
+    r.host
+        .apply(&mut r.m, &r.decl.get(), &mut r.ed)
         .expect("applies")
 }
 
@@ -1536,6 +1555,68 @@ fn a_steady_apply_is_skipped_and_renders_the_same() {
     }
 }
 
+/// The rig with a macro of 1 at depth 0.2 on probe 1's cutoff (`0..=1000`,
+/// knob 500), scaled by a macro of 0.5 through a depth route of depth 1:
+/// the offset is `1000 * 0.2 * 1 * 0.5` = 100, so 600. Steady; returns the
+/// scaled route and its depth route.
+fn scaled_rig() -> (Rig, RouteKey, RouteKey) {
+    let mut r = rig(128);
+    r.decl.routes.clear();
+    r.decl.sources.clear();
+    let full = r.decl.source(5, ModSource::Macro { value: 1.0 });
+    let half = r.decl.source(6, ModSource::Macro { value: 0.5 });
+    let scaled = r.decl.route(7, full, cutoff_of(1), 0.2);
+    let by = r.decl.route(8, half, cutoff_of(1), 1.0);
+    for (k, route) in &mut r.decl.routes {
+        if *k == by {
+            route.to = RouteTarget::Depth(scaled);
+        }
+    }
+    render(&mut r.ed, &mut r.exec, 128, 128);
+    reapply(&mut r);
+    r.m.commit(&mut r.ed).expect("commits");
+    near(tail(&mut r), 600.0);
+    steady(&mut r);
+    (r, scaled, by)
+}
+
+/// The probe's last frame after 1024 more.
+fn tail(r: &mut Rig) -> f32 {
+    render(&mut r.ed, &mut r.exec, 128, 1_024)[0][1_023]
+}
+
+fn near(got: f32, want: f32) {
+    assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+}
+
+/// **A depth write to a route that a depth route scales lands from the cell.**
+/// In [`scaled_rig`]'s state (600), writing the scaled route's depth to 0.6
+/// after a steady state commits and republishes nothing, and the next
+/// block reads `1000 * 0.6 * 0.5` = 300, so 800.
+#[test]
+fn a_depth_write_to_a_scaled_route_lands_from_its_cell() {
+    let (mut r, scaled, _) = scaled_rig();
+    r.decl.set_depth(scaled, 0.6);
+    let applied = reapply(&mut r);
+    assert!(!applied.commit && applied.republished.is_empty());
+    near(tail(&mut r), 800.0);
+}
+
+/// **A depth route's own depth write is applied.** The depth route's cell is
+/// read when compiled, so only the memo's record of it makes the apply run:
+/// from [`scaled_rig`]'s state (scaled depth 0.2, scale `0.5 * 1`), writing
+/// the depth route's depth to 0.5 republishes the cutoff's program without a
+/// commit, and the next block reads `1000 * 0.2 * (0.5 * 0.5)` = 50, so 550.
+#[test]
+fn a_depth_routes_own_depth_write_is_applied() {
+    let (mut r, _, by) = scaled_rig();
+    r.decl.set_depth(by, 0.5);
+    let applied = reapply(&mut r);
+    assert!(!applied.commit);
+    assert_eq!(applied.republished, vec![cutoff_of(1)]);
+    near(tail(&mut r), 550.0);
+}
+
 /// A source edit (an LFO's rate) is republished.
 #[test]
 fn a_source_edit_after_a_steady_state_is_republished() {
@@ -1545,13 +1626,26 @@ fn a_source_edit_after_a_steady_state_is_republished() {
     assert_eq!(reapply(&mut r).republished, vec![cutoff_of(1)]);
 }
 
-/// A route edit (its depth) is republished.
+/// A route edit (its polarity) is republished.
 #[test]
 fn a_route_edit_after_a_steady_state_is_republished() {
     let mut r = rig(128);
     steady(&mut r);
-    r.decl.set_depth(r.lfo, 0.5);
+    r.decl.routes[0].1.polarity = Polarity::Unipolar;
     assert_eq!(reapply(&mut r).republished, vec![cutoff_of(1)]);
+}
+
+/// A depth write is the lane's to read from the route's cell: the apply
+/// republishes nothing and, the declarations being equal, is skipped.
+#[test]
+fn a_depth_write_after_a_steady_state_republishes_nothing() {
+    let mut r = rig(128);
+    steady(&mut r);
+    let before = r.m.skipped();
+    r.decl.set_depth(r.lfo, 0.5);
+    let applied = reapply(&mut r);
+    assert!(applied.republished.is_empty() && !applied.commit);
+    assert_eq!(r.m.skipped(), before + 1);
 }
 
 /// A range edit is stored into the port's range.
@@ -1710,14 +1804,14 @@ fn foreign_rig() -> (Editor, Host, Decl, Modulation, TargetKey) {
     let one = decl.source(1, ModSource::Macro { value: 1.0 });
     decl.route(1, one, param, 0.25);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     for _ in 0..2 {
-        let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+        let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
         assert!(!applied.commit);
     }
     let before = m.skipped();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(m.skipped() > before, "a steady apply is skipped");
     (ed, host, decl, m, param)
 }
@@ -1736,34 +1830,11 @@ fn drives(ed: &Editor, lane: NodeKey, to: EventInputPort) -> bool {
 fn a_foreign_target_on_another_node_after_a_steady_state_moves_the_lane() {
     let (mut ed, mut host, decl, mut m, param) = foreign_rig();
     host.foreign.insert(50, key(51));
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    let applied = host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     assert!(applied.commit, "the lane is rewired");
     let lane = m.lane(param).expect("a lane").0;
     assert!(drives(&ed, lane, EventInputPort::new(key(51), 0)));
     assert!(!drives(&ed, lane, EventInputPort::new(key(50), 0)));
-}
-
-/// A foreign target the host resolves to another event input of the same
-/// node moves its lane there.
-#[test]
-fn a_foreign_target_on_another_port_after_a_steady_state_moves_the_lane() {
-    let (mut ed, mut host, decl, mut m, param) = foreign_rig();
-    host.foreign.insert(50, key(51));
-    host.foreign_port.insert(50, 0);
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
-    m.commit(&mut ed).expect("commits");
-    for _ in 0..3 {
-        m.apply(&decl.get(), &mut ed, &host).expect("applies");
-    }
-    let before = m.skipped();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
-    assert!(m.skipped() > before, "steady again");
-    host.foreign_port.insert(50, 1);
-    let applied = m.apply(&decl.get(), &mut ed, &host).expect("applies");
-    assert!(applied.commit, "the lane is rewired");
-    let lane = m.lane(param).expect("a lane").0;
-    assert!(drives(&ed, lane, EventInputPort::new(key(51), 1)));
-    assert!(!drives(&ed, lane, EventInputPort::new(key(51), 0)));
 }
 
 /// A native target resolved with no knob cell, to another node, moves its
@@ -1830,7 +1901,7 @@ fn a_declared_range_reaches_the_ports_cell_at_f64() {
     let wobble = decl.source(1, sine(2.0));
     decl.route(1, wobble, cutoff_of(1), 0.3);
     let mut m = Modulation::new();
-    m.apply(&decl.get(), &mut ed, &host).expect("applies");
+    host.apply(&mut m, &decl.get(), &mut ed).expect("applies");
     m.commit(&mut ed).expect("commits");
     let at = ParamIn {
         node: key(1),

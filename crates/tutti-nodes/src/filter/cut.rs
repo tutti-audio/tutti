@@ -227,7 +227,7 @@ mod tests {
 
     /// The amplitude of a sine whose samples are `x`.
     fn level(x: &[f32]) -> f64 {
-        f64::from(rms(x)) * 2f64.sqrt()
+        rms(x) * 2f64.sqrt()
     }
 
     /// `input` through `node` in blocks of 1024.

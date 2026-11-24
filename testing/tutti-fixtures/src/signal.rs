@@ -1,14 +1,14 @@
 //! The signals a test feeds a node or checks one against, defined once: a sine,
 //! an impulse, the tone readings [`lock_in`] and [`amplitude_at`], the level
-//! readings [`peak`], [`peak_planes`], [`rms`] and [`rms_f64`], the bit patterns
+//! readings [`peak`], [`peak_planes`] and [`rms`], the bit patterns
 //! of a render ([`bits`]), the impulse responses [`decay_ir`] and [`room_ir`],
 //! and a float WAV on disk ([`write_wav_f32`], [`read_wav_f32`]), and the
-//! narrowing check [`wide_signal`] with [`assert_close_f64`].
+//! narrowing check [`wide_signal`] with [`assert_close`].
 //!
 //! A stretched step edge's smear is [`stretched_edge_spread`].
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
-//! this crate's root. The figures are plain `f32` samples, except the `f64` narrowing
+//! this crate's root. The figures are samples of any width `F`, except the `f64` narrowing
 //! check's; only the arguments that name a quantity are units.
 //!
 //! These are definitions, not references: a test pins an analytic figure with
@@ -16,19 +16,19 @@
 //! another render.
 
 use std::path::Path;
-use tutti_buffers::Sample;
+use tutti_buffers::{Float, Sample};
 use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds, StretchFactor};
 
 /// `len` samples of a sine: `amplitude * sin(2 pi * hz * i / rate)` for sample
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).
 ///
 /// The phase is `step * i` in `f64` (no running sum) and the result narrowed once to
-/// the `f32` sample, so the figure carries no error that grows with `i`.
-pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<f32> {
+/// the sample width `F`, so the figure carries no error that grows with `i`.
+pub fn sine<F: Float>(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<F> {
     let step = std::f64::consts::TAU * hz.get() / rate.get();
     let amp = amplitude.get();
     (0..len.get())
-        .map(|i| (amp * (step * i as f64).sin()) as f32)
+        .map(|i| F::from_f64(amp * (step * i as f64).sin()))
         .collect()
 }
 
@@ -49,6 +49,21 @@ pub fn lock_in<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> (f64, f64) {
     (re * k, im * k)
 }
 
+/// `|H(w)|` of the response `h`: the magnitude of `sum h[n] e^{-j w n}`, by direct summation,
+/// at the angular frequency `w` in radians a frame.
+pub fn dtft_magnitude(h: &[f64], w: f64) -> f64 {
+    let (re, im) = h.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &x)| {
+        let a = w * n as f64;
+        (re + x * a.cos(), im - x * a.sin())
+    });
+    re.hypot(im)
+}
+
+/// The periodic Hann window at point `n` of `length`: `0.5 - 0.5 cos(2 pi n / length)`.
+pub fn hann(n: usize, length: usize) -> f64 {
+    0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / length as f64).cos()
+}
+
 /// The amplitude of [`lock_in`].
 pub fn amplitude_at<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> f64 {
     let (re, im) = lock_in(x, hz, rate);
@@ -58,7 +73,7 @@ pub fn amplitude_at<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> f64 {
 /// `len` samples of silence but for a single `1.0` at sample 0.
 ///
 /// An empty `len` gives an empty vector.
-pub fn impulse(len: Samples) -> Vec<f32> {
+pub fn impulse<F: Float>(len: Samples) -> Vec<F> {
     impulse_at(len, Samples::new(0))
 }
 
@@ -67,45 +82,39 @@ pub fn impulse(len: Samples) -> Vec<f32> {
 /// # Panics
 ///
 /// If `at` is not inside `len`.
-pub fn impulse_at(len: Samples, at: Samples) -> Vec<f32> {
-    let mut x = vec![0.0; len.get()];
+pub fn impulse_at<F: Float>(len: Samples, at: Samples) -> Vec<F> {
+    let mut x = vec![F::ZERO; len.get()];
     if len.get() > 0 || at.get() > 0 {
-        x[at.get()] = 1.0;
+        x[at.get()] = F::ONE;
     }
     x
 }
 
 /// The largest absolute sample of `x` (`0.0` for an empty slice).
 ///
-/// A `NaN` sample is skipped, as `f32::max` skips it.
-pub fn peak(x: &[f32]) -> f32 {
-    x.iter().fold(0.0, |m, s| m.max(s.abs()))
+/// A `NaN` sample is skipped, as the float `max` skips it.
+pub fn peak<F: Float>(x: &[F]) -> F {
+    x.iter().fold(F::ZERO, |m, &s| m.max(s.abs()))
 }
 
 /// The largest absolute sample over every plane of `planes` (`0.0` when there are none).
 ///
 /// A `NaN` sample is skipped, as in [`peak`].
-pub fn peak_planes<P: AsRef<[f32]>>(planes: &[P]) -> f32 {
-    planes.iter().fold(0.0, |m, p| m.max(peak(p.as_ref())))
+pub fn peak_planes<F: Float, P: AsRef<[F]>>(planes: &[P]) -> F {
+    planes.iter().fold(F::ZERO, |m, p| m.max(peak(p.as_ref())))
 }
 
 /// The root mean square of **every** sample of `x`: the square root of the
-/// mean of the squares, summed in `f64` and narrowed once. `0.0` for an empty
-/// slice.
+/// mean of the squares, summed in `f64`, at any sample width. `0.0` for an
+/// empty slice.
 ///
 /// The denominator is `x.len()`, so a stereo reading is taken over each plane
 /// on its own (or over an interleaved slice as one signal), never over frames.
-/// [`rms_f64`] is the same figure before the narrowing.
-pub fn rms(x: &[f32]) -> f32 {
-    rms_f64(x) as f32
-}
-
-/// [`rms`] without the final narrowing to `f32`. An empty slice reads `0.0`.
-pub fn rms_f64(x: &[f32]) -> f64 {
+pub fn rms<F: Float>(x: &[F]) -> f64 {
     if x.is_empty() {
         return 0.0;
     }
-    let sum: f64 = x.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+    let sum: f64 = x.iter().map(|&s| s.to_f64() * s.to_f64()).sum();
     (sum / x.len() as f64).sqrt()
 }
 
@@ -228,10 +237,9 @@ pub fn wide_signal(frames: usize) -> Vec<f64> {
 /// The Hann-windowed DFT of `x` at exactly `at`, as `(re, im)`: the sum over `n` of
 /// `w[n] x[n] e^{-j 2 pi at n / rate}`, with `w` the periodic Hann window of `x.len()` points.
 pub fn hann_dft(x: &[f64], at: Hz, rate: SampleRate) -> (f64, f64) {
-    let m = x.len() as f64;
     let step = -std::f64::consts::TAU * at.get() / rate.get();
     x.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &v)| {
-        let w = 0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / m).cos();
+        let w = hann(n, x.len());
         let a = step * n as f64;
         (re + v * w * a.cos(), im + v * w * a.sin())
     })
@@ -283,17 +291,15 @@ pub fn hann_image_leak(f: Hz, length: Samples, rate: SampleRate) -> f64 {
 ///
 /// If the lengths differ or a frame is farther than `tolerance`.
 #[track_caller]
-pub fn assert_close_f64(got: &[f64], want: &[f64], tolerance: f64) {
+pub fn assert_close<F: Float>(got: &[F], want: &[F], tolerance: f64) {
     assert_eq!(got.len(), want.len(), "block lengths differ");
-    if let Some(i) = (0..got.len()).find(|&i| {
-        let diff = (got[i] - want[i]).abs();
-        diff.is_nan() || diff > tolerance
-    }) {
+    let diff = |i: usize| (got[i].to_f64() - want[i].to_f64()).abs();
+    if let Some(i) = (0..got.len()).find(|&i| diff(i).is_nan() || diff(i) > tolerance) {
         panic!(
             "frame {i}: got {} want {} (|diff| {:e} over tolerance {tolerance:e})",
-            got[i],
-            want[i],
-            (got[i] - want[i]).abs()
+            got[i].to_f64(),
+            want[i].to_f64(),
+            diff(i)
         );
     }
 }
@@ -339,7 +345,7 @@ mod tests {
     fn sine_frequency_finds_the_sine_within_the_image_leakage() {
         let rate = SampleRate::SR_48K;
         let (f, measure, step) = (1234.5, Samples::new(16_384), Samples::new(4096));
-        let x: Vec<f64> = sine(Hz::new(f), Amplitude::new(0.5), rate, Samples::new(30_000))
+        let x: Vec<f64> = sine::<f32>(Hz::new(f), Amplitude::new(0.5), rate, Samples::new(30_000))
             .iter()
             .map(|&v| f64::from(v))
             .collect();
@@ -356,7 +362,7 @@ mod tests {
     #[test]
     fn a_sine_is_the_analytic_one() {
         // 12 kHz at 48 kHz: four samples a period, 0, A, 0, -A.
-        let x = sine(
+        let x: Vec<f32> = sine(
             Hz::new(12_000.0),
             Amplitude::new(0.5),
             SampleRate::SR_48K,
@@ -364,33 +370,33 @@ mod tests {
         );
         assert_eq!(x[0], 0.0);
         assert!((x[1] - 0.5).abs() < 1e-6 && (x[3] + 0.5).abs() < 1e-6);
-        let y = sine(
+        let y: Vec<f32> = sine(
             Hz::new(1_000.0),
             Amplitude::new(0.5),
             SampleRate::SR_48K,
             Samples::new(48_000),
         );
-        assert!((rms(&y) - 0.5 / 2f32.sqrt()).abs() < 1e-6);
+        assert!((rms(&y) - 0.5 / 2f64.sqrt()).abs() < 1e-6);
         assert!((peak(&y) - 0.5).abs() < 1e-6);
     }
 
     /// An impulse is one `1.0` at the asked frame and nothing else.
     #[test]
     fn an_impulse_is_one_sample() {
-        assert_eq!(impulse(Samples::new(4)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(impulse::<f32>(Samples::new(4)), [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(
-            impulse_at(Samples::new(4), Samples::new(2)),
+            impulse_at::<f32>(Samples::new(4), Samples::new(2)),
             [0.0, 0.0, 1.0, 0.0]
         );
-        assert!(impulse(Samples::new(0)).is_empty());
+        assert!(impulse::<f32>(Samples::new(0)).is_empty());
     }
 
     /// The readings of a known buffer, the empty one included.
     #[test]
     fn the_levels_of_a_known_buffer() {
-        assert_eq!(peak(&[0.25, -0.75, 0.5]), 0.75);
-        assert_eq!(rms(&[3.0, -3.0, 3.0, -3.0]), 3.0);
-        assert_eq!((peak(&[]), rms(&[])), (0.0, 0.0));
+        assert_eq!(peak(&[0.25f32, -0.75, 0.5]), 0.75);
+        assert_eq!(rms(&[3.0f32, -3.0, 3.0, -3.0]), 3.0);
+        assert_eq!((peak::<f32>(&[]), rms::<f32>(&[])), (0.0, 0.0));
     }
 
     /// The peak over planes is the largest of the planes' peaks, whatever
@@ -400,23 +406,21 @@ mod tests {
         let planes = [vec![0.25, -0.5], vec![0.125, 0.75, -0.25]];
         assert_eq!(peak_planes(&planes), 0.75);
         assert_eq!(peak_planes(&[[0.5f32, -1.0], [0.25, 0.0]]), 1.0);
-        assert_eq!(peak_planes::<Vec<f32>>(&[]), 0.0);
+        assert_eq!(peak_planes::<f32, Vec<f32>>(&[]), 0.0);
     }
 
     /// A full-scale sine over whole periods reads `1 / sqrt 2`, at `f64`
-    /// precision, and `rms` is that figure narrowed once.
+    /// precision.
     #[test]
     fn a_full_scale_sine_reads_one_over_root_two_in_f64() {
-        let x = sine(
+        let x: Vec<f64> = sine(
             Hz::new(1_000.0),
             Amplitude::new(1.0),
             SampleRate::SR_48K,
             Samples::new(48_000),
         );
         let want = std::f64::consts::FRAC_1_SQRT_2;
-        assert!((rms_f64(&x) - want).abs() < 1e-7, "{}", rms_f64(&x));
-        assert_eq!(rms(&x), rms_f64(&x) as f32);
-        assert_eq!(rms_f64(&[]), 0.0);
+        assert!((rms(&x) - want).abs() < 1e-7, "{}", rms(&x));
     }
 
     /// Negative zero has its own bits.

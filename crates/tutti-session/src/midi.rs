@@ -36,10 +36,13 @@ use crate::graph::{Feeder, Graph};
 use crate::instrument::open_keys;
 use crate::midi_follow::{
     CLOCK_TAP_CAPACITY, ClockAction, ClockFollow, FOLLOW_TAP_CAPACITY, Follow, FollowCx,
-    MACHINE_TAP_CAPACITY, MachineFollow, Placed,
+    MACHINE_TAP_CAPACITY, MachineFollow, Placed, Reopened,
+};
+use crate::{
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl, FollowTempo,
+    UnfollowCause,
 };
 use crate::{EventOutputPort, Key, MidiError, MidiEvent, MidiNodes};
-use crate::{FollowClock, FollowMachineControl, FollowTempo};
 
 /// What a [`Midi`] call returns: the area's one error.
 type Result<T> = std::result::Result<T, MidiError>;
@@ -174,8 +177,7 @@ pub(crate) const MIDI_OUT_TAP_CAPACITY: tutti_graph::EventCapacity =
 
 /// Whether a host's own sink ([`MidiSink`](crate::MidiSink)) is sent JR
 /// Timestamps (M2-104-UM §7.2.2.2). It gates timestamps, not delivery: with it
-/// off the events still go out, unstamped. A device's output has no such choice:
-/// it stamps iff its negotiated configuration receives JR Timestamps.
+/// off the events still go out, unstamped.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[non_exhaustive]
@@ -188,34 +190,65 @@ pub enum Stamping {
     Jr,
 }
 
-/// A UMP MIDI output and its JR stamp stream: where one output node's events
-/// go, an output port's device or a sink's [`MidiOut`](tutti_midi_runtime::MidiOut).
+/// Where a timed batch is queued: a host's own sink ([`HostSink`]) or a
+/// device's output, and whether the batch is JR-stamped first.
+pub(crate) trait Destination {
+    /// Whether a batch is JR-stamped before it is queued.
+    fn stamps(&self) -> bool;
+
+    /// Queues `events`; returns how many events the caller must count as
+    /// refused. A destination that counts its own refusals returns 0.
+    fn queue_timed(&mut self, events: &[Outgoing]) -> usize;
+}
+
+/// A host's own sink ([`MidiSink`](crate::MidiSink)) and whether it is sent JR
+/// Timestamps; fixed when the sink opens.
+pub(crate) struct HostSink {
+    sink: Arc<dyn tutti_midi_runtime::MidiOut>,
+    stamping: Stamping,
+}
+
+impl HostSink {
+    /// `sink`, JR-stamped as `stamping` says.
+    pub(crate) fn new(sink: Arc<dyn tutti_midi_runtime::MidiOut>, stamping: Stamping) -> Self {
+        Self { sink, stamping }
+    }
+}
+
+impl Destination for HostSink {
+    fn stamps(&self) -> bool {
+        self.stamping == Stamping::Jr
+    }
+
+    /// Returns how many events the sink refused, not counting the JR stamps
+    /// among them.
+    fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
+        let taken = self.sink.queue_timed(events).packets();
+        events[taken..]
+            .iter()
+            .filter(|event| !event.ump.is_jr())
+            .count()
+    }
+}
+
+/// A UMP MIDI output and its JR stamp stream: the batching of one output
+/// node's events onto one [`Destination`] `D`, a host's sink or a device's
+/// output.
 ///
-/// The sink carries UMP words to the wire, so JR Timestamps and other
-/// MIDI-2-only messages survive, which is the whole reason this type exists:
-/// a device's output puts them in its device's wire form (`OpenOutput`), and
-/// stamps only when the device receives them.
-///
-/// The sink is a value this type holds: a host's own `MidiOut`
-/// ([`new`](Self::new)), or, with the `midi-hardware` feature, the
-/// `OpenOutput` of a device. Sends take `&mut self`.
+/// The destination carries UMP words, so JR Timestamps and other MIDI-2-only
+/// messages survive, which is the whole reason this type exists. Sends take
+/// `&mut self`.
 ///
 /// The [`JrStream`](tutti_midi_runtime::JrStream) is the whole endpoint's,
 /// not one drain's: a per-drain origin would restart each at zero and
 /// interleave stamps that walk backwards.
-///
-/// A device's output is erased behind the backend (`OpenOutput`), so there is
-/// one path and no `#[cfg]` per platform: a Linux ALSA seq-UMP output stamps
-/// exactly as a CoreMIDI one does.
-pub(crate) struct UmpOut {
-    sink: Sink,
-    stream: tutti_midi_runtime::JrStream,
-    /// Whether a host's own sink is JR-stamped. Separate from "is there an
-    /// output" on purpose: stamping off must still *send*, just without
-    /// timestamps. Folding the two together would make disabling the stamper
-    /// silently mute MIDI out. A device's output says for itself
-    /// ([`is_stamping`](Self::is_stamping)).
-    stamping: Stamping,
+pub(crate) struct UmpOut<D: Destination> {
+    /// Where batches are queued. Also read by the device port's
+    /// `impl UmpOut<OpenOutput>` in `midi_port.rs`.
+    pub(crate) destination: D,
+    /// Also read by the device port's `impl UmpOut<OpenOutput>` in
+    /// `midi_port.rs`, which parks it across a close.
+    pub(crate) stream: tutti_midi_runtime::JrStream,
     /// Scratch for the stamped block, reused across sends: stamping runs
     /// once per block and the result is only borrowed, straight to
     /// `MidiOut::queue`. `JrStream::stamp` clears it on entry, so nothing
@@ -225,56 +258,24 @@ pub(crate) struct UmpOut {
     rebased: Vec<UmpAt>,
     /// Scratch: when each offset of the batch is sent, by offset.
     sends: Vec<(Offset, SendAt)>,
-    /// Scratch for the batch as the sink takes it, with its send times.
+    /// Scratch for the batch as the destination takes it, with its send times.
     outgoing: Vec<Outgoing>,
     /// Scratch a drain collects its whole run of events into
     /// ([`route_drain`]), so one drain is one batch.
     drained: Vec<(Frame, Ump)>,
 }
 
-/// What an [`UmpOut`] sends into.
-enum Sink {
-    /// A host's own sink.
-    Host(Arc<dyn tutti_midi_runtime::MidiOut>),
-    /// A device's output, in its wire form.
-    #[cfg(feature = "midi-hardware")]
-    Device(Box<tutti_midi_hardware::OpenOutput>),
-}
-
-impl Sink {
-    /// Queues `events`; returns how many events the host's sink refused, not
-    /// counting the JR stamps among them. A device's output counts its own
-    /// refusals in its losses.
-    fn queue_timed(&mut self, events: &[Outgoing]) -> usize {
-        match self {
-            Self::Host(sink) => {
-                let taken = sink.queue_timed(events).packets();
-                events[taken..]
-                    .iter()
-                    .filter(|event| !event.ump.is_jr())
-                    .count()
-            }
-            #[cfg(feature = "midi-hardware")]
-            Self::Device(out) => {
-                let _ = out.queue_timed(events);
-                0
-            }
-        }
-    }
-}
-
-impl core::fmt::Debug for UmpOut {
+impl<D: Destination> core::fmt::Debug for UmpOut<D> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("UmpOut")
             .field("origin", &self.stream.origin())
-            .field("stamping", &self.is_stamping())
+            .field("stamping", &self.destination.stamps())
             .finish_non_exhaustive()
     }
 }
 
-impl UmpOut {
-    /// Wraps a host's UMP output sink, stamping *and clocking* at
-    /// `sample_rate`, with stamping off ([`set_stamping`](Self::set_stamping)).
+impl<D: Destination> UmpOut<D> {
+    /// An output onto `destination`, stamping *and clocking* at `sample_rate`.
     ///
     /// No group: JR Timestamps are groupless utility messages (M2-104-UM
     /// §2.1.2), so a stamp applies to the whole stream.
@@ -283,23 +284,17 @@ impl UmpOut {
     /// (§7.2.2.1). Without it the stamps this type exists to emit are inert:
     /// §7.2.2.3 has a receiver that has seen no JR Clock render messages "as
     /// soon as possible", discarding the timing entirely.
-    pub(crate) fn new(
-        sink: Arc<dyn tutti_midi_runtime::MidiOut>,
-        sample_rate: tutti_units::SampleRate,
-    ) -> Self {
-        Self::over(Sink::Host(sink), sample_rate)
-    }
-
-    fn over(sink: Sink, sample_rate: tutti_units::SampleRate) -> Self {
+    pub(crate) fn new(destination: D, sample_rate: tutti_units::SampleRate) -> Self {
         let stream = tutti_midi_runtime::JrStream::new(sample_rate).clock(sample_rate);
-        Self::with_stream(sink, stream)
+        Self::resumed(destination, stream)
     }
 
-    fn with_stream(sink: Sink, stream: tutti_midi_runtime::JrStream) -> Self {
+    /// An output onto `destination` that carries on `stream`, the stamp stream
+    /// of an output that was closed ([`into_stream`](Self::into_stream)).
+    pub(crate) fn resumed(destination: D, stream: tutti_midi_runtime::JrStream) -> Self {
         Self {
-            sink,
+            destination,
             stream,
-            stamping: Stamping::Off,
             stamped: Vec::new(),
             rebased: Vec::new(),
             sends: Vec::new(),
@@ -308,71 +303,10 @@ impl UmpOut {
         }
     }
 
-    /// Sets whether a host's own sink is JR-stamped. A device's output stamps
-    /// iff its configuration receives JR Timestamps, whatever this says.
-    pub(crate) fn set_stamping(&mut self, stamping: Stamping) {
-        self.stamping = stamping;
-    }
-
     /// Moves the stamp stream to `rate`, the graph's after a re-prepare: JR
     /// time carries on from where it stood ([`JrStream::at_rate`](tutti_midi_runtime::JrStream::at_rate)).
     pub(crate) fn set_rate(&mut self, rate: tutti_units::SampleRate) {
         self.stream = self.stream.at_rate(rate);
-    }
-
-    /// Whether it JR-stamps.
-    #[must_use]
-    pub(crate) fn is_stamping(&self) -> bool {
-        match &self.sink {
-            Sink::Host(_) => self.stamping == Stamping::Jr,
-            #[cfg(feature = "midi-hardware")]
-            Sink::Device(out) => out.config().rx_jr,
-        }
-    }
-
-    /// The device output this sends into, if it is one.
-    #[cfg(feature = "midi-hardware")]
-    #[must_use]
-    pub(crate) fn device(&self) -> Option<&tutti_midi_hardware::OpenOutput> {
-        match &self.sink {
-            Sink::Device(out) => Some(out),
-            Sink::Host(_) => None,
-        }
-    }
-
-    /// The device output this sends into, if it is one, to follow what its
-    /// device settled.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn device_mut(&mut self) -> Option<&mut tutti_midi_hardware::OpenOutput> {
-        match &mut self.sink {
-            Sink::Device(out) => Some(out),
-            Sink::Host(_) => None,
-        }
-    }
-
-    /// An output over `output`, stamping and clocking at `sample_rate`.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn of_device(
-        output: tutti_midi_hardware::OpenOutput,
-        sample_rate: tutti_units::SampleRate,
-    ) -> Self {
-        Self::over(Sink::Device(Box::new(output)), sample_rate)
-    }
-
-    /// An output over `output` that carries on `stream`, the stamp stream of
-    /// an output that was closed ([`into_stream`](Self::into_stream)).
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn resumed(
-        output: tutti_midi_hardware::OpenOutput,
-        stream: tutti_midi_runtime::JrStream,
-    ) -> Self {
-        Self::with_stream(Sink::Device(Box::new(output)), stream)
-    }
-
-    /// The stamp stream, which outlives the sink it stamped for.
-    #[cfg(feature = "midi-hardware")]
-    pub(crate) fn into_stream(self) -> tutti_midi_runtime::JrStream {
-        self.stream
     }
 
     /// Sends a batch of events, each on its frame on the graph's clock. The
@@ -383,7 +317,7 @@ impl UmpOut {
     ///
     /// With `timing`, each event is sent at the time its frame has on the OS
     /// clock ([`OutputPlan`]: the frame's instant, plus the audio output's
-    /// latency, less the device's, plus the offset), and the sink schedules it;
+    /// latency, less the device's, plus the offset), and the destination schedules it;
     /// without, every event goes at once. An event whose time is more than
     /// [`MAX_OUTPUT_AHEAD`](tutti_midi_runtime::MAX_OUTPUT_AHEAD) ahead is not
     /// sent, and the call returns how many events were refused, those a host's
@@ -440,7 +374,7 @@ impl UmpOut {
     /// `self.sends` has for its offset, else at once. The JR Clock cadence
     /// advances only by the events handed in, so a silent stream never clocks.
     fn send_batch(&mut self, events: &[UmpAt]) -> usize {
-        if !self.is_stamping() {
+        if !self.destination.stamps() {
             return self.send_all(events);
         }
         // Taken out and put back so `stream` and the buffer can be borrowed
@@ -470,7 +404,7 @@ impl UmpOut {
         }));
         // One `queue_timed` for the batch: a backend may pack several UMP
         // messages into one packet.
-        let refused = self.sink.queue_timed(&out);
+        let refused = self.destination.queue_timed(&out);
         self.outgoing = out;
         refused
     }
@@ -525,8 +459,8 @@ impl LossReaders {
 /// ([`UmpOut::send_frames`]), so the spacing of the whole drain, not of a
 /// chunk of it, is what the stamps and the send times keep. With no output the
 /// events are counted as refused in `losses`. Returns how many events did not go.
-fn route_drain(
-    out: Option<&mut UmpOut>,
+fn route_drain<D: Destination>(
+    out: Option<&mut UmpOut<D>>,
     losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
     fill: impl FnOnce(&mut dyn FnMut(Frame, Ump)),
@@ -1042,14 +976,17 @@ impl MidiState {
             return (Vec::new(), false);
         };
         let actions = clock.heard(cx, out);
-        let mut edited = false;
-        if clock.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(clock.tap_id()) {
-                clock.set_tap(tap);
-            }
+        let reopened = clock.tap.reopen(graph);
+        if reopened == Reopened::Gone
+            && let Some(ended) = self.clock.take()
+        {
+            cx.end(
+                FollowKind::Clock(ended.kind()),
+                UnfollowCause::InputGone,
+                out,
+            );
         }
-        (actions, edited)
+        (actions, reopened == Reopened::Opened)
     }
 
     /// `Phase::Poll`, for the Machine Control the session follows: reads its
@@ -1070,14 +1007,12 @@ impl MidiState {
             .into_iter()
             .map(ClockAction::at_next_block)
             .collect();
-        let mut edited = false;
-        if machine.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(machine.tap_id()) {
-                machine.set_tap(tap);
-            }
+        let reopened = machine.tap.reopen(graph);
+        if reopened == Reopened::Gone {
+            self.machine = None;
+            cx.end(FollowKind::MachineControl, UnfollowCause::InputGone, out);
         }
-        (actions, edited)
+        (actions, reopened == Reopened::Opened)
     }
 
     /// `Phase::Poll`, for the tempo the session follows: reports what
@@ -1098,15 +1033,13 @@ impl MidiState {
         // What the tap holds is read at the scale it was opened at, then the
         // tap is reopened if the graph has been re-prepared at another rate.
         let heard = follow.heard();
-        let mut edited = false;
-        if follow.tap_rate() != graph.prepared().sample_rate() {
-            edited = true;
-            if let Some(tap) = graph.taps().reopen_event(follow.tap_id()) {
-                follow.set_tap(tap);
-            }
-        }
+        let reopened = follow.tap.reopen(graph);
         cx.apply(&heard, out);
-        edited
+        if reopened == Reopened::Gone {
+            self.follow = None;
+            cx.end(FollowKind::Tempo, UnfollowCause::InputGone, out);
+        }
+        reopened == Reopened::Opened
     }
 
     /// The outputs' taps are on one scale of frames, the rate they were opened
@@ -1146,9 +1079,9 @@ impl MidiState {
 /// counted as refused), each event on its frame. The events the tap had no room
 /// for ([`EventTapReader::take_lost`]) are counted lost, and those that did not
 /// go refused, in `losses`.
-pub(crate) fn drain_events(
+pub(crate) fn drain_events<D: Destination>(
     tap: &mut EventTapReader,
-    out: Option<&mut UmpOut>,
+    out: Option<&mut UmpOut<D>>,
     losses: &mut LossWriters,
     timing: Option<&OutputTiming>,
 ) {
@@ -1937,6 +1870,12 @@ impl<F: Float> Midi<'_, F> {
     /// steps laid so far stay over the base, and the tempo in force stays until
     /// the new source sends one.
     ///
+    /// **A follower whose input node is removed ends** at the next
+    /// [`Poll`](crate::Phase::Poll) that finds its tap gone (when the graph's rate
+    /// changes): it is dropped, the base maps are published again as
+    /// [`unfollow_tempo`](Self::unfollow_tempo) does, and the update reports
+    /// [`MidiEvent::Unfollowed`].
+    ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node,
@@ -1963,15 +1902,15 @@ impl<F: Float> Midi<'_, F> {
     /// app's tempo map and meter as they stand now, for the ones the follower
     /// stepped. The transport takes them at the next block at its current
     /// beat, so the playhead does not jump, and the tempo from there on is the
-    /// base's. Reported as [`MidiEvent::TempoUnfollowed`] by the next update.
+    /// base's. Reported as [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
     /// [`MidiError::NotFollowing`] when nothing is followed.
     pub fn unfollow_tempo(&mut self) -> Result<()> {
         self.state.follow.take().ok_or(MidiError::NotFollowing)?;
-        self.release_maps();
-        self.state.follow_events.push(MidiEvent::TempoUnfollowed);
+        let event = self.ended(FollowKind::Tempo);
+        self.state.follow_events.push(event);
         Ok(())
     }
 
@@ -1983,21 +1922,21 @@ impl<F: Float> Midi<'_, F> {
     /// [`Poll`](crate::Phase::Poll) phase. **Off by default**: until this is
     /// called, a Timing Clock or a Quarter Frame changes nothing.
     ///
-    /// **[`ClockKind::BeatClock`](tutti_midi_runtime::ClockKind::BeatClock)**:
+    /// **[`ClockKind::BeatClock`]**:
     /// the tempo fit from the Timing Clocks' spacing is published into the
     /// tempo map as [`follow_tempo`](Self::follow_tempo)'s is (and reported as
     /// [`MidiEvent::TempoFollowed`]), Start plays from beat 0, Continue plays
     /// from where the source counted to, Stop stops, and a Song Position
     /// Pointer locates to its sixteenth notes (M1 pp.27 to 31).
     ///
-    /// **[`ClockKind::Mtc`](tutti_midi_runtime::ClockKind::Mtc)**: the position
+    /// **[`ClockKind::Mtc`]**: the position
     /// Quarter Frames spell drives the playhead, `00:00:00:00` being beat 0 on
     /// the tempo map in force. The transport plays once the follower locks,
     /// locates when the source jumps, and a Full Message locates.
     ///
     /// **Lock** is reported as [`MidiEvent::ClockLocked`] and
     /// [`MidiEvent::ClockUnlocked`]; the rules and constants are those of
-    /// `tutti_midi_runtime::ClockFollower`. A source silent for its dropout
+    /// `tutti_midi_runtime::BeatClockFollower` and `MtcFollower`. A source silent for its dropout
     /// unlocks and stops the transport it was rolling.
     ///
     /// A command is placed on the frame its message arrived on, 20 ms on, and
@@ -2012,18 +1951,22 @@ impl<F: Float> Midi<'_, F> {
     /// **Drift is corrected.** In each poll while the transport rolls, the
     /// beat the source counts is compared with the beat the transport reaches
     /// at the next block ([`clock_error`](Self::clock_error)), and the tempo
-    /// published is the fit trimmed to close the error in `ClockFollower::CATCH_UP`
+    /// published is the fit trimmed to close the error in `BeatClockFollower::CATCH_UP`
     /// (4 seconds), by at most 2% of the fit. A trim goes into the map as any
-    /// tempo does, a step of at least `ClockFollower::TEMPO_STEP` and one point
+    /// tempo does, a step of at least `BeatClockFollower::TEMPO_STEP` and one point
     /// a beat at most, so an error stays within `TEMPO_STEP * CATCH_UP / 60`
-    /// (0.0067 beat) and the fit's noise. An error past `ClockFollower::SLIP` (a
+    /// (0.0067 beat) and the fit's noise. An error past `BeatClockFollower::SLIP` (a
     /// quarter of a beat) locates to the source's beat once and is reported as
     /// [`MidiEvent::ClockSlipped`]. MTC has no tempo to trim, and the same slip rule
-    /// reads its time against the transport's at `ClockFollower::MTC_SLIP_FRAMES` (2
+    /// reads its time against the transport's at `MtcFollower::SLIP_FRAMES` (2
     /// frames). A source off nominal speed is followed by those locates alone; MTC
     /// running backward stops the transport ([`MidiEvent::ClockReversed`]).
     ///
     /// **One clock at a time**: following again replaces the first.
+    ///
+    /// **A follower whose input node is removed ends** as
+    /// [`follow_tempo`](Self::follow_tempo)'s does ([`MidiEvent::Unfollowed`]); a
+    /// Beat Clock one frees the tempo for another follower.
     ///
     /// # Errors
     ///
@@ -2033,12 +1976,10 @@ impl<F: Float> Midi<'_, F> {
     /// [`MidiError::TempoSourceTaken`] for a Beat Clock follow while
     /// [`follow_tempo`](Self::follow_tempo) is active. Nothing changes.
     pub fn follow_clock(&mut self, follow: FollowClock) -> Result<()> {
-        if follow.kind() == tutti_midi_runtime::ClockKind::BeatClock && self.state.follow.is_some()
-        {
+        if follow.kind() == ClockKind::BeatClock && self.state.follow.is_some() {
             return Err(MidiError::TempoSourceTaken);
         }
         let tap = self.follow_tap(follow.input(), follow.group(), CLOCK_TAP_CAPACITY)?;
-        let core = tutti_midi_runtime::ClockFollower::new(follow.kind());
         // A second follow replaces the first; the base is published again
         // before the second steps it.
         if let Some(first) = self.state.clock.take()
@@ -2046,7 +1987,7 @@ impl<F: Float> Midi<'_, F> {
         {
             self.release_maps();
         }
-        self.state.clock = Some(ClockFollow::new(core, tap));
+        self.state.clock = Some(ClockFollow::new(follow.kind(), tap));
         Ok(())
     }
 
@@ -2057,14 +1998,14 @@ impl<F: Float> Midi<'_, F> {
     /// not read one: not locked, not rolling, or a locate that has not landed
     /// yet.
     #[must_use]
-    pub fn clock_error(&self) -> Option<tutti_midi_runtime::ClockOffset> {
+    pub fn clock_error(&self) -> Option<ClockOffset> {
         self.state.clock.as_ref().and_then(ClockFollow::error)
     }
 
     /// Stops following ([`follow_clock`](Self::follow_clock)): the transport
     /// keeps the motion it had, and the app's tempo map and meter are
     /// published again for the ones a Beat Clock follower stepped. Reported as
-    /// [`MidiEvent::ClockUnfollowed`] by the next update.
+    /// [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2075,22 +2016,27 @@ impl<F: Float> Midi<'_, F> {
             .clock
             .take()
             .ok_or(MidiError::NotFollowingClock)?;
-        if clock.owns_tempo() {
-            self.release_maps();
-        }
-        self.state.follow_events.push(MidiEvent::ClockUnfollowed);
+        let event = self.ended(FollowKind::Clock(clock.kind()));
+        self.state.follow_events.push(event);
         Ok(())
     }
 
     /// Drops the steps a follower laid and publishes the base again, for the
     /// maps it stepped.
     fn release_maps(&self) {
-        if let Some(tempo) = self.bases.tempo.release() {
-            self.settings.set_tempo_map(tempo);
-        }
-        if let Some(meter) = self.bases.meter.release() {
-            self.meter.set_meter(meter);
-        }
+        self.bases.release(self.settings, &self.meter);
+    }
+
+    /// An `unfollow_*` of `follower`: publishes the base again for the maps it
+    /// stepped and returns the event for the next update.
+    fn ended(&self, follower: FollowKind) -> MidiEvent {
+        crate::midi_follow::ended(
+            &self.bases,
+            self.settings,
+            &self.meter,
+            follower,
+            UnfollowCause::Requested,
+        )
     }
 
     // --- Machine Control ---
@@ -2121,6 +2067,9 @@ impl<F: Float> Midi<'_, F> {
     /// **One at a time**: following again replaces the first, forgetting the
     /// groups it was assigned to.
     ///
+    /// **A follower whose input node is removed ends**, reported as
+    /// [`MidiEvent::Unfollowed`].
+    ///
     /// # Errors
     ///
     /// [`MidiError::NotAnInput`] when `follow.input` is not an input port's input node and
@@ -2138,7 +2087,7 @@ impl<F: Float> Midi<'_, F> {
 
     /// Stops following Machine Control ([`follow_machine_control`](Self::follow_machine_control)):
     /// the transport keeps the motion it had. Reported as
-    /// [`MidiEvent::MachineControlUnfollowed`] by the next update.
+    /// [`MidiEvent::Unfollowed`] by the next update.
     ///
     /// # Errors
     ///
@@ -2148,9 +2097,8 @@ impl<F: Float> Midi<'_, F> {
             .machine
             .take()
             .ok_or(MidiError::NotFollowingMachineControl)?;
-        self.state
-            .follow_events
-            .push(MidiEvent::MachineControlUnfollowed);
+        let event = self.ended(FollowKind::MachineControl);
+        self.state.follow_events.push(event);
         Ok(())
     }
 
@@ -2267,11 +2215,10 @@ mod tests {
         }
     }
 
-    fn out_with_counter(stamping: Stamping) -> (UmpOut, Arc<AtomicUsize>) {
+    fn out_with_counter(stamping: Stamping) -> (UmpOut<HostSink>, Arc<AtomicUsize>) {
         let count = Arc::new(AtomicUsize::new(0));
-        let mut out = UmpOut::new(Arc::new(CountingSink(count.clone())), SampleRate::SR_48K);
-        out.set_stamping(stamping);
-        (out, count)
+        let sink = HostSink::new(Arc::new(CountingSink(count.clone())), stamping);
+        (UmpOut::new(sink, SampleRate::SR_48K), count)
     }
 
     fn note(offset: usize) -> UmpAt {
@@ -2362,7 +2309,8 @@ mod tests {
     #[test]
     fn a_batch_of_frames_is_a_block_from_its_first_frame() {
         let log = Arc::new(tutti_rt::Mutex::new(Vec::new()));
-        let mut out = UmpOut::new(Arc::new(Recording(log.clone())), SampleRate::SR_48K);
+        let sink = |stamping| HostSink::new(Arc::new(Recording(log.clone())), stamping);
+        let mut out = UmpOut::new(sink(Stamping::Off), SampleRate::SR_48K);
         out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         let sent = log.lock().remove(0);
         let span = Samples::new(1_000);
@@ -2372,7 +2320,7 @@ mod tests {
             [250, 0, 999].map(|o| Offset::of(Samples::new(o), span)),
             "each event's spacing from the earliest"
         );
-        out.set_stamping(Stamping::Jr);
+        let mut out = UmpOut::new(sink(Stamping::Jr), SampleRate::SR_48K);
         let before = out.origin();
         out.send_frames(&[at(1_250), at(1_000), at(1_999)], None);
         assert_eq!(
@@ -2390,8 +2338,7 @@ mod tests {
     #[test]
     fn events_on_one_frame_share_that_frames_send_time() {
         let t0 = Instant::now() + Duration::from_secs(60);
-        let (mut out, log) = timed_out();
-        out.set_stamping(Stamping::Jr);
+        let (mut out, log) = timed_out(Stamping::Jr);
         let timing = timing_at(t0, OutputTerms::default());
         let map = timing.map.unwrap();
         out.send_frames(&[at(1_000), at(2_000), at(1_000)], Some(&timing));
@@ -2431,9 +2378,10 @@ mod tests {
         log.lock().clone()
     }
 
-    fn timed_out() -> (UmpOut, Arc<tutti_rt::Mutex<Vec<Outgoing>>>) {
+    fn timed_out(stamping: Stamping) -> (UmpOut<HostSink>, Arc<tutti_rt::Mutex<Vec<Outgoing>>>) {
         let log = Arc::new(tutti_rt::Mutex::new(Vec::new()));
-        let out = UmpOut::new(Arc::new(Timed(log.clone())), SampleRate::SR_48K);
+        let sink = HostSink::new(Arc::new(Timed(log.clone())), stamping);
+        let out = UmpOut::new(sink, SampleRate::SR_48K);
         (out, log)
     }
 
@@ -2443,7 +2391,7 @@ mod tests {
     #[test]
     fn frames_are_sent_at_their_instants_spaced_by_the_rate() {
         let t0 = Instant::now() + Duration::from_secs(60);
-        let (mut out, log) = timed_out();
+        let (mut out, log) = timed_out(Stamping::Off);
         let timing = timing_at(t0, OutputTerms::default());
         let refused = out.send_frames(&[at(1_000), at(2_000), at(3_000)], Some(&timing));
         assert_eq!(refused, 0);
@@ -2469,7 +2417,7 @@ mod tests {
     fn the_terms_shift_every_event() {
         let t0 = Instant::now() + Duration::from_secs(60);
         let sent_with = |terms: OutputTerms| {
-            let (mut out, log) = timed_out();
+            let (mut out, log) = timed_out(Stamping::Off);
             out.send_frames(&[at(1_000), at(2_000)], Some(&timing_at(t0, terms)));
             taken(&log)
         };
@@ -2496,8 +2444,7 @@ mod tests {
     #[test]
     fn a_jr_stamp_is_sent_at_its_events_time() {
         let t0 = Instant::now() + Duration::from_secs(60);
-        let (mut out, log) = timed_out();
-        out.set_stamping(Stamping::Jr);
+        let (mut out, log) = timed_out(Stamping::Jr);
         let timing = timing_at(t0, OutputTerms::default());
         out.send_frames(&[at(1_000), at(2_000)], Some(&timing));
         let sent = log.lock().clone();
@@ -2524,7 +2471,7 @@ mod tests {
     #[test]
     fn an_event_beyond_the_cap_is_refused_and_counted() {
         let t0 = Instant::now() + Duration::from_secs(60);
-        let (mut out, log) = timed_out();
+        let (mut out, log) = timed_out(Stamping::Off);
         let timing = timing_at(t0, OutputTerms::default());
         let beyond = 48_000 * 3;
         let refused = out.send_frames(&[at(1_000), at(beyond)], Some(&timing));
@@ -2535,7 +2482,7 @@ mod tests {
     /// With no timing, every event is sent at once, as before.
     #[test]
     fn without_timing_every_event_is_sent_now() {
-        let (mut out, log) = timed_out();
+        let (mut out, log) = timed_out(Stamping::Off);
         out.send_frames(&[at(1_000), at(2_000)], None);
         assert!(log.lock().iter().all(|e| e.send == SendAt::Now));
     }

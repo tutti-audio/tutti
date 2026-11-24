@@ -579,7 +579,7 @@ fn declared_capacities_size_merges_and_delays_so_nothing_is_lost() {
         .ops()
         .iter()
         .filter_map(|op| match *op {
-            Op::EventMerge { dst, .. } => Some(p.event_slot_capacity()[dst as usize]),
+            Op::EventMerge { dst, .. } => Some(p.event_slot_capacity()[dst.index()]),
             _ => None,
         })
         .max_by_key(|c| c.declared)
@@ -805,8 +805,8 @@ fn a_fifo_whose_bound_a_reprepare_lowered_delivers_its_backlog_on_time() {
     exec.apply_pending();
     ed.collect();
     // A command onto the delayed port inside the backlog's block: the sink's
-    // overlay merges it with the port's 512 events, past the slack the
-    // overlay has without the widening (89 + 88 planned + 256 commands).
+    // view merges it with the port's 512 events, past the slack the
+    // view has without the widening (89 + 88 planned + 256 commands).
     // Timeline frame 360 is the sink's frame 1 000: its arrival is 640.
     ed.schedule(
         At::Frame(Frame::new(1_000 - LEN as u64)),

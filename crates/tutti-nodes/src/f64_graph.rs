@@ -26,7 +26,7 @@ use tutti_dsp::{
     LadderType, ShapeKind, Stages, SvfType,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
-use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+use tutti_fixtures::signal::{assert_close, wide_signal};
 use tutti_graph::IntoNode;
 use tutti_graph::contract::Direct;
 use tutti_units::{
@@ -68,7 +68,7 @@ fn the_delay_returns_a_wide_signal_sixteen_frames_on() {
     let want: Vec<f64> = (0..256usize)
         .map(|n| n.checked_sub(16).map_or(0.0, |k| x[k]))
         .collect();
-    assert_close_f64(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
+    assert_close(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
 }
 
 /// A limiter under its threshold is its input delayed by the lookahead, its gain being
@@ -96,7 +96,7 @@ fn the_limiter_under_its_threshold_returns_a_wide_signal_a_lookahead_late() {
     let want: Vec<f64> = (0..x.len())
         .map(|n| n.checked_sub(latency).map_or(0.0, |k| x[k]))
         .collect();
-    assert_close_f64(d.output().plane(0).samples(), &want, F64_TOLERANCE);
+    assert_close(d.output().plane(0).samples(), &want, F64_TOLERANCE);
 }
 
 /// A compressor with its knee wholly above the level, an open gate, a brickwall ceiling above
@@ -117,7 +117,7 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
             ..CompressorControls::DEFAULT
         }),
     );
-    assert_close_f64(&render(compressor, RATE, &input)[0], &x, F64_TOLERANCE);
+    assert_close(&render(compressor, RATE, &input)[0], &x, F64_TOLERANCE);
     let gate = GateNode::<f64>::from(GateConfig::new(ChannelTopology::MONO).controls(
         GateControls {
             threshold: Db::new(-40.0),
@@ -128,19 +128,19 @@ fn the_dynamics_that_do_nothing_return_a_wide_signal_as_it_is() {
             ..GateControls::DEFAULT
         },
     ));
-    assert_close_f64(&render(gate, RATE, &input)[0], &x, F64_TOLERANCE);
+    assert_close(&render(gate, RATE, &input)[0], &x, F64_TOLERANCE);
     let brickwall = BrickwallLimiterNode::<f64>::from(BrickwallLimiterConfig::new(
         ChannelTopology::STEREO,
         Db::new(0.0),
     ));
-    assert_close_f64(&render(brickwall, RATE, &input)[0], &x, F64_TOLERANCE);
+    assert_close(&render(brickwall, RATE, &input)[0], &x, F64_TOLERANCE);
     let shaper = TransientShaperNode::<f64>::from(TransientShaperConfig::new(ChannelLayout::MONO));
-    assert_close_f64(&render(shaper, RATE, &input)[0], &x, F64_TOLERANCE);
+    assert_close(&render(shaper, RATE, &input)[0], &x, F64_TOLERANCE);
     let band = DynamicEqNode::<f64>::from(
         DynamicEqConfig::new(ChannelLayout::MONO, Hz::new(1_000.0), Q::new(1.0))
             .range(Db::new(0.0)),
     );
-    assert_close_f64(&render(band, RATE, &input)[0], &x, F64_TOLERANCE);
+    assert_close(&render(band, RATE, &input)[0], &x, F64_TOLERANCE);
 }
 
 /// A crusher at 32 bits and no hold passes a 29-bit signal exactly.
@@ -150,7 +150,7 @@ fn the_bit_crusher_at_thirty_two_bits_passes_a_wide_signal_exactly() {
     let node = BitCrusherNode::<f64>::from(
         BitCrusherConfig::new(ChannelLayout::MONO).bits(BitDepth::new(32.0)),
     );
-    assert_close_f64(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
+    assert_close(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
 }
 
 /// The soft-sign curve is `h x / (1 + |h x|)` at the drive `h`.
@@ -162,7 +162,7 @@ fn the_distortion_is_the_softsign_curve_of_a_wide_signal() {
     let node = DistortionNode::<f64>::from(
         DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign).drive(Drive::new(1.7)),
     );
-    assert_close_f64(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
+    assert_close(&render(node, RATE, &on(1, &x))[0], &want, F64_TOLERANCE);
 }
 
 /// A tremolo at depth 0 has the gain 1 at every frame, so it returns its input.
@@ -171,7 +171,7 @@ fn the_tremolo_at_depth_zero_returns_a_wide_signal() {
     let x = wide_signal(300);
     let node =
         TremoloNode::<f64>::from(TremoloConfig::new(ChannelLayout::MONO).depth(Bipolar::of(0.0)));
-    assert_close_f64(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
+    assert_close(&render(node, RATE, &on(1, &x))[0], &x, F64_TOLERANCE);
 }
 
 /// A ring modulator at a quarter of the rate multiplies by the carrier `0, 1, 0, -1, ...`.
@@ -187,7 +187,7 @@ fn the_ring_modulator_at_a_quarter_of_the_rate_multiplies_by_zero_one_zero_minus
         .enumerate()
         .map(|(n, &x)| x * [0.0, 1.0, 0.0, -1.0][n % 4])
         .collect();
-    assert_close_f64(&out, &want, F64_TOLERANCE);
+    assert_close(&out, &want, F64_TOLERANCE);
 }
 
 /// A auto-pan at a quarter of the rate and full depth sits at the centre, hard right, the
@@ -216,8 +216,8 @@ fn the_natural_stereo_width_returns_a_wide_pair() {
     let y: Vec<f64> = x.iter().rev().map(|v| v - 0.3).collect();
     let node = StereoWidthNode::<f64>::from(StereoWidthConfig::new());
     let out = render(node, RATE, &[x.clone(), y.clone()]);
-    assert_close_f64(&out[0], &x, F64_TOLERANCE);
-    assert_close_f64(&out[1], &y, F64_TOLERANCE);
+    assert_close(&out[0], &x, F64_TOLERANCE);
+    assert_close(&out[1], &y, F64_TOLERANCE);
 }
 
 /// A constant of 29 bits through an all-pass or a low-pass of unity DC gain, once settled,

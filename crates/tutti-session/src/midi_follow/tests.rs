@@ -1,6 +1,5 @@
 use super::*;
 use crate::{MidiEvent, SessionEvent};
-use tutti_midi_runtime::ClockOffset;
 use tutti_music::MeterMap;
 use tutti_units::{SampleRate, Samples};
 
@@ -10,6 +9,18 @@ const DECLICK: u64 = 240;
 
 fn at(frame: u64) -> Seconds {
     Frame::new(frame).to_seconds(RATE)
+}
+
+/// What a poll at `stand` places against: 120 bpm.
+fn poll(stand: &Stand) -> Poll<'_> {
+    static MAP: std::sync::LazyLock<TempoMap> =
+        std::sync::LazyLock::new(|| TempoMap::constant(Bpm::of(120.0)).expect("a tempo"));
+    Poll {
+        stand,
+        tempo: Bpm::of(120.0),
+        map: &MAP,
+        now: stand.seconds,
+    }
 }
 
 /// A transport at 2 s (beat 4 at 120 bpm), rolling, whose next block starts at
@@ -61,25 +72,29 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
     let stand = rolling();
     let mut out = Vec::new();
     let events = vec![
-        ClockEvent::Locate {
-            position: ClockPosition::Beat(Beat::new(0.0)),
+        BeatClockEvent::Clock(ClockEvent::Locate {
+            position: Beat::new(0.0),
             at: at(96_000),
-        },
-        ClockEvent::Play,
-        ClockEvent::Tempo {
+        }),
+        BeatClockEvent::Clock(ClockEvent::Play),
+        BeatClockEvent::Tempo {
             tempo: Bpm::of(90.0),
             at: at(96_000),
         },
-        ClockEvent::Stop { at: at(96_480) },
+        BeatClockEvent::Clock(ClockEvent::Stop { at: at(96_480) }),
     ];
-    let (actions, tempos) = lay(
+    let mut tempos = Vec::new();
+    let actions = lay::<BeatClockFollower>(
         events,
         ClockKind::BeatClock,
         false,
-        &stand,
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&stand),
         &mut out,
+        |event, _| {
+            if let BeatClockEvent::Tempo { tempo, at: heard } = event {
+                tempos.push((tempo, placed_frame(heard, RATE, stand.next())));
+            }
+        },
     );
     // The source ends stopped, so the locate is not advanced.
     assert_eq!(
@@ -105,22 +120,7 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
 #[test]
 fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
     let stand = rolling();
-    for (position, expected) in [
-        (ClockPosition::Beat(Beat::new(8.0)), 8.04),
-        (ClockPosition::Time(Seconds::new(10.0)), 20.04),
-    ] {
-        let (actions, _) = lay(
-            vec![ClockEvent::Locate {
-                position,
-                at: at(96_000),
-            }],
-            ClockKind::BeatClock,
-            true,
-            &stand,
-            Bpm::of(120.0),
-            &map(120.0),
-            &mut Vec::new(),
-        );
+    let placed = |actions: Vec<Placed>| {
         let [
             Placed {
                 action: ClockAction::Locate(beat),
@@ -131,11 +131,34 @@ fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
             panic!("one placed locate: {actions:?}");
         };
         assert_eq!(frame, Frame::new(96_960));
-        assert!(
-            (beat.get() - expected).abs() < 1e-9,
-            "{position:?}: {beat:?}"
-        );
-    }
+        beat
+    };
+    let actions = lay::<BeatClockFollower>(
+        vec![BeatClockEvent::Clock(ClockEvent::Locate {
+            position: Beat::new(8.0),
+            at: at(96_000),
+        })],
+        ClockKind::BeatClock,
+        true,
+        &poll(&stand),
+        &mut Vec::new(),
+        |_, _| {},
+    );
+    let beat = placed(actions);
+    assert!((beat.get() - 8.04).abs() < 1e-9, "{beat:?}");
+    let actions = lay::<MtcFollower>(
+        vec![MtcEvent::Clock(ClockEvent::Locate {
+            position: Seconds::new(10.0),
+            at: at(96_000),
+        })],
+        ClockKind::Mtc,
+        true,
+        &poll(&stand),
+        &mut Vec::new(),
+        |_, _| {},
+    );
+    let beat = placed(actions);
+    assert!((beat.get() - 20.04).abs() < 1e-9, "{beat:?}");
 }
 
 /// **A tempo step lands on the beat the transport reaches at its placed
@@ -184,20 +207,28 @@ fn a_stopped_transport_stands_where_it_is() {
 #[test]
 fn a_reversed_source_is_reported_and_stopped() {
     let mut out = Vec::new();
-    let (actions, _) = lay(
+    let actions = lay::<MtcFollower>(
         vec![
-            ClockEvent::Reversed,
-            ClockEvent::Stop { at: at(96_000) },
-            ClockEvent::Slipped {
-                error: ClockOffset::Time(Seconds::new(0.1)),
-            },
+            MtcEvent::Reversed,
+            MtcEvent::Clock(ClockEvent::Stop { at: at(96_000) }),
+            MtcEvent::Clock(ClockEvent::Slipped {
+                error: Seconds::new(0.1),
+            }),
         ],
         ClockKind::Mtc,
         false,
-        &rolling(),
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&rolling()),
         &mut out,
+        |event, out| {
+            if event == MtcEvent::Reversed {
+                out.push(
+                    MidiEvent::ClockReversed {
+                        kind: ClockKind::Mtc,
+                    }
+                    .into(),
+                );
+            }
+        },
     );
     assert_eq!(
         actions,
@@ -219,4 +250,62 @@ fn a_reversed_source_is_reported_and_stopped() {
             error: ClockOffset::Time(_)
         })
     ));
+}
+
+/// A graph at 48 kHz with one node that has an event output, and a tap of
+/// that output's port.
+fn tapped() -> (crate::Graph, tutti_graph::NodeKey, FollowTap) {
+    let mut graph = crate::Graph::new(
+        2,
+        RATE,
+        tutti_buffers::MaxBlock::of(Samples::new(64)),
+        None,
+        #[cfg(feature = "plugin")]
+        tutti_timeline::TempoReader::fixed(map(120.0)),
+    );
+    let node = tutti_graph::NodeKey::from(graph.add(tutti_midi_runtime::MidiClipNode::new([])));
+    let reader = graph
+        .taps()
+        .open_event(
+            crate::EventOutputPort::new(node, 0),
+            tutti_graph::EventTapOptions::new(tutti_graph::EventCapacity::of(16))
+                .align(tutti_graph::TapAlign::Raw),
+        )
+        .expect("the port exists");
+    let _ = graph.commit();
+    (graph, node, FollowTap::new(reader, "test"))
+}
+
+/// **`reopen` answers for what the graph did to the tap.** At the graph's own
+/// rate the tap is `Unchanged` and the graph is not edited; after a re-rate it
+/// is `Opened` on the new rate, then `Unchanged` again; once its node is gone
+/// it is `Gone`, and asking again edits nothing.
+#[test]
+fn reopen_answers_unchanged_opened_and_gone() {
+    let (mut graph, node, mut tap) = tapped();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+    assert!(
+        !graph.has_uncommitted_edits(),
+        "nothing was asked of the graph"
+    );
+
+    graph
+        .set_sample_rate(SampleRate::SR_44K1)
+        .expect("re-rates");
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Opened);
+    assert_eq!(tap.rate(), SampleRate::SR_44K1);
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
+
+    let _ = graph.remove(node).expect("the node is in the graph");
+    graph.set_sample_rate(SampleRate::SR_48K).expect("re-rates");
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    let _ = graph.commit();
+    assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
+    assert!(
+        !graph.has_uncommitted_edits(),
+        "a gone tap edits nothing on the second ask"
+    );
 }
