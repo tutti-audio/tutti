@@ -188,6 +188,34 @@ pub enum UnitParam {
     Index = 45,
 }
 
+/// The name of a discrete setting a node has: one word by its encoding, set
+/// and read through the node's key (`key.sync()`), as a param is by its kind.
+///
+/// A setting is not a param: it has no address, no port and no unit, and cannot
+/// be modulated or automated. A node has at most one setting of a kind, and the
+/// kind fixes nothing about the word's type: a delay's sync and an LFO's sync
+/// are both [`Sync`](Self::Sync), each in its own enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum SettingKind {
+    /// How a node is timed: free in seconds or Hz, or locked to the beat.
+    Sync = 0,
+    /// Which filter a detector hears its key through.
+    KeyFilter = 1,
+}
+
+impl SettingKind {
+    /// The kind a `u16` discriminant stands for, `None` for an unknown one.
+    #[must_use]
+    pub const fn from_u16(id: u16) -> Option<Self> {
+        match id {
+            0 => Some(Self::Sync),
+            1 => Some(Self::KeyFilter),
+            _ => None,
+        }
+    }
+}
+
 /// The error converting a `u16` that is not a known [`UnitParam`]
 /// discriminant.
 ///

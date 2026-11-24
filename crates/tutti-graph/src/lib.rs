@@ -698,6 +698,7 @@ pub use node::fork::{
     ForkBuild, ForkByClone, ForkCause, ForkError, ForkFault, ForkFaultKind, ForkHealth,
     ForkRemains, ForkSource, ForkTarget, Forked, PendingFork, Unforkable,
 };
+pub use node::setting::{ErasedSetting, HasSetting};
 pub use tutti_curve::{Curvature, DECLICK, Exponent, FadeLaw, Law, declick_frames};
 // The audio graph as a value, and the two passes over it. `plan` is the
 // latency pass and is exported as `latency_plan`.
@@ -779,7 +780,7 @@ pub mod __private {
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};
-    pub use tutti_units::{UnitAddr, UnitParam};
+    pub use tutti_units::{SettingKind, UnitAddr, UnitParam};
 }
 
 #[cfg(test)]

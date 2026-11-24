@@ -42,6 +42,7 @@ use tutti_units::UnitParam;
 
 use crate::RenderMode;
 use crate::node::fork::{ForkBuild, ForkCause, ForkSource, Forked};
+use crate::node::setting::ErasedSetting;
 use tutti_buffers::Float;
 
 use crate::node::declare::ParamValue;
@@ -234,6 +235,12 @@ pub trait ParamNode<F: Float = f32>: Node<F> + Sized {
     /// address). Control thread; may allocate.
     fn param_set(&self) -> ParamSet;
 
+    /// The cells of this node's settings, each under its kind: what a
+    /// session's key sets and reads them through. None by default.
+    fn settings(&self) -> Vec<ErasedSetting> {
+        Vec::new()
+    }
+
     /// A copy of this node that shares **nothing** with it — its own
     /// `Param` cells (at the values this node's hold now), its own state —
     /// returned to the state of a freshly prepared node. What a fork runs.
@@ -311,6 +318,7 @@ impl<F: Float, N: ParamNode<F>> ForkSource<F> for ParamFork<N> {
 pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<ParamSet, F> {
     let fork = ParamFork::new(&node);
     let params = fork.params.clone();
+    let settings = ParamNode::<F>::settings(&node);
     NodeParts::new(
         Box::new(node),
         fork.params.clone(),
@@ -318,6 +326,7 @@ pub fn param_parts<F: Float, N: ParamNode<F> + Clone>(node: N) -> NodeParts<Para
         None,
     )
     .params(params)
+    .settings(settings)
 }
 
 /// A [`ParamNode`] inserted as one: the wrapper that makes `Params(node)` an

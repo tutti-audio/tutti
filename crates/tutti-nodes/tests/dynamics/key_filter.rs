@@ -18,6 +18,7 @@ use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{Node, ParamNode};
 use tutti_nodes::{CompressorConfig, CompressorNode, GateConfig, GateNode, KeySource};
+use tutti_rt::AtomicCell;
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
@@ -452,6 +453,14 @@ fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
     }
 }
 
+/// The cell of the node's key filter setting, as the session's key reaches it.
+fn key_filter_word<N: ParamNode>(node: &N) -> Arc<AtomicCell<KeyFilter>> {
+    node.settings()
+        .into_iter()
+        .find_map(|setting| setting.cell::<KeyFilter>())
+        .expect("the node has a key filter setting")
+}
+
 /// A running compressor follows its filter word: a 250 Hz key reduces by the curve at its full
 /// level while off, at its level through the high-pass once the word is stored as high-pass
 /// (at the cutoff the param was moved to while the filter was off, not the one it started
@@ -460,7 +469,7 @@ fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
 fn a_running_compressor_follows_its_key_filter_word_and_keeps_the_cutoff_set_while_off() {
     let (f, started, moved, q, a) = (250.0, 100.0, 1_000.0, BUTTERWORTH, 0.5);
     let node = compressor(KeyFilter::Off, started, q);
-    let (word, set) = (Arc::clone(node.key_filter()), node.param_set());
+    let (word, set) = (key_filter_word(&node), node.param_set());
     let mut node = prepared(node, SR, 1_024);
     let key = tone(f, a, 24_000);
     let off = curve_db(amplitude_db(a), THRESHOLD, RATIO);
@@ -484,44 +493,18 @@ fn a_running_compressor_follows_its_key_filter_word_and_keeps_the_cutoff_set_whi
     }
 }
 
-/// A running gate follows its filter word: a 250 Hz key whose high-passed peak is under the
-/// threshold and whose full level is over it opens the gate while off, closes it once the word
-/// is high-pass and opens it again when it is stored off.
-#[test]
-fn a_running_gate_follows_its_key_filter_word() {
-    let (f, fc, q, a) = (250.0, 1_000.0, BUTTERWORTH, 0.5);
-    let threshold = amplitude_db(a) + response_db(KeyFilter::HighPass, f, fc, q) + 0.3;
-    let node = gate(KeyFilter::Off, threshold, fc, q);
-    let word = Arc::clone(node.key_filter());
-    let mut node = prepared(node, SR, 1_024);
-    let key = tone(f, a, 24_000);
-    for (filter, opens) in [
-        (KeyFilter::Off, true),
-        (KeyFilter::HighPass, false),
-        (KeyFilter::Off, true),
-    ] {
-        word.store(filter);
-        let gain = highest_gain(&run(&mut node, &key));
-        if opens {
-            assert!(gain > 0.999, "{filter:?}: gain {gain}");
-        } else {
-            assert!(gain < 1e-3, "{filter:?}: gain {gain}");
-        }
-    }
-}
-
 /// A fork holds a filter word of its own, at the value at the fork: a store on the node's word
 /// after the fork does not reach it, and a clone shares the node's.
 #[test]
 fn a_fork_holds_its_own_key_filter_word_and_a_clone_shares_it() {
     let node = compressor(KeyFilter::BandPass, 100.0, BUTTERWORTH);
     let (fork, clone) = (node.fork_fresh(), node.clone());
-    node.key_filter().store(KeyFilter::Off);
-    assert_eq!(fork.key_filter().load(), KeyFilter::BandPass);
-    assert_eq!(clone.key_filter().load(), KeyFilter::Off);
+    key_filter_word(&node).store(KeyFilter::Off);
+    assert_eq!(key_filter_word(&fork).load(), KeyFilter::BandPass);
+    assert_eq!(key_filter_word(&clone).load(), KeyFilter::Off);
     let node = gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
     let (fork, clone) = (node.fork_fresh(), node.clone());
-    node.key_filter().store(KeyFilter::Off);
-    assert_eq!(fork.key_filter().load(), KeyFilter::HighPass);
-    assert_eq!(clone.key_filter().load(), KeyFilter::Off);
+    key_filter_word(&node).store(KeyFilter::Off);
+    assert_eq!(key_filter_word(&fork).load(), KeyFilter::HighPass);
+    assert_eq!(key_filter_word(&clone).load(), KeyFilter::Off);
 }

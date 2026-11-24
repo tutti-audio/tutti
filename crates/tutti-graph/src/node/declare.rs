@@ -544,7 +544,12 @@ pub fn input<'a, F: Float>(
 ///   [`AtomicCell`](tutti_rt::AtomicCell) (a clone shares it, a fork gets its
 ///   own at the value it holds), `cells.mode()` hands it out, and the config
 ///   has a chained option `.mode(Mode::On)`; the node reads `cells.mode().load()`
-///   once per block.
+///   once per block. A setting written `sync @ Sync: LfoSync = LfoSync::Free` (a
+///   [`SettingKind`](tutti_units::SettingKind) after `@`) is one the session's key
+///   sets and reads (`key.sync()`): the macro writes the node's
+///   [`HasSetting`](crate::HasSetting) for the kind and the cell in
+///   [`ParamNode::settings`](crate::ParamNode::settings), which
+///   [`param_parts`](crate::param_parts) puts in the node's [`NodeParts`](crate::NodeParts).
 ///
 /// - **A published value**, `published { events: ClipEventsKind }`
 ///   (`name: Kind`), is a value a session writes at `update()` and the node
@@ -787,7 +792,7 @@ macro_rules! declare_params {
         $(required { $($req:ident : $rty:ty),* $(,)? })?
         $(params { $($ptoks:tt)* })?
         $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
-        $(settings { $($sname:ident : $sty:ty = $sdefault_value:expr),+ $(,)? })?
+        $(settings { $($sname:ident $(@ $skind:ident)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
         $(published { $($pubtoks:tt)* })?
     }) => {
         $crate::declare_params!(@pub {
@@ -796,7 +801,7 @@ macro_rules! declare_params {
             $cells [$($($ln : $lb,)+)?] [$($($ln,)+)?] [$(marker $($ln,)+)?],
             [$($($req : $rty,)*)?]
             [$($($oname : $oty = $odefault,)+)?]
-            [$($($sname : $sty = $sdefault_value,)+)?]
+            [$($($sname [$($skind)?] : $sty = $sdefault_value,)+)?]
         } { $($($ptoks)*)? } [] [] @ $($($pubtoks)*)?);
     };
 
@@ -881,7 +886,7 @@ macro_rules! declare_params {
         $cells:ident [$($ld:tt)*] [$($lu:tt)*] [$(marker $($lm:ident,)+)?],
         [$($req:ident : $rty:ty,)*]
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
-        [$($sname:ident : $sty:ty = $sdefault:expr,)*]
+        [$($sname:ident [$($skind:ident)?] : $sty:ty = $sdefault:expr,)*]
     } [$(
         [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$default:expr]]
     )*]) => {
@@ -1033,7 +1038,21 @@ macro_rules! declare_params {
                 $crate::Node::<__LaneF>::reset(&mut fork);
                 fork
             }
+
+            fn settings(&self) -> ::std::vec::Vec<$crate::ErasedSetting> {
+                #[allow(unused_mut)]
+                let mut settings = ::std::vec::Vec::new();
+                $($(
+                    settings.push($crate::ErasedSetting::new::<
+                        $ty,
+                        { $crate::__private::SettingKind::$skind as u16 },
+                    >($crate::__private::Arc::clone(&self.cells.$sname)));
+                )?)*
+                settings
+            }
         }
+
+        $($($crate::declare_params!(@keyed $gall $ty, $skind, $sty);)?)*
 
         $($crate::declare_params!(@has $gall $ty, $pk);)*
         $($crate::declare_params!(@has $gall $ty, $dk);)*
@@ -1067,6 +1086,13 @@ macro_rules! declare_params {
                 }
                 parts
             }
+        }
+    };
+
+    // `$ty` has a setting of the kind `$kind`, held as the word `$word`.
+    (@keyed [$($g:tt)*] $ty:ty, $kind:ident, $word:ty) => {
+        impl<$($g)*> $crate::HasSetting<{ $crate::__private::SettingKind::$kind as u16 }> for $ty {
+            type Word = $word;
         }
     };
 
@@ -1157,7 +1183,7 @@ macro_rules! declare_params {
 
         impl<$($g)*> $ty {
             $(
-                #[doc = concat!("The setting `", stringify!($name), "`: `store` on the control side, `load` once per block on the audio side. The owner hands out the cell until the session's key target takes it.")]
+                #[doc = concat!("The setting `", stringify!($name), "`: `store` on the control side, `load` once per block on the audio side. The owner hands out the cell: a node's settings are set through its key instead, and the session's click through its target.")]
                 pub fn $name(&self) -> &$crate::__private::AtomicCell<$st> {
                     &self.$name
                 }

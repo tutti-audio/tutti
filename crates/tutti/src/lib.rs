@@ -464,9 +464,9 @@ pub mod types {
         ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
         ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
         Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread,
-        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
-        UnitParam, UnitParamOutOfRange, Velocity,
+        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SettingKind, Speed,
+        SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
+        TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }
@@ -488,11 +488,12 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
-        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
-        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
-        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
-        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Inputs,
+        IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
+        ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell, PublishedKind,
+        RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, Shape, Status, Unforkable,
+        declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,

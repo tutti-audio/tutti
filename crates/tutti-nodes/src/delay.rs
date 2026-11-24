@@ -12,9 +12,9 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
     DelaySync, GAIN_RAMP, Lerp,
 };
-use tutti_graph::{Cost, Shape};
+use tutti_graph::{Cost, ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
-use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds, SettingKind, Tail};
 
 #[cfg(doc)]
 use tutti_buffers::ChannelTopology;
@@ -79,8 +79,9 @@ impl DelayConfig {
 /// # Seconds or notes
 ///
 /// The delay is timed in seconds or in notes, and a running delay switches between the two:
-/// [`sync`](KernelNode::sync) is the word it reads, once per block, [`DelaySync::Free`] or
-/// [`DelaySync::Synced`]. It is a setting, not a param: it has no port and is not modulated.
+/// the node's `sync` setting is the word it reads, once per block, [`DelaySync::Free`] or
+/// [`DelaySync::Synced`]; `session.set(key.sync().to(DelaySync::Synced))` sets it. It is a
+/// setting, not a param: it has no port and is not modulated.
 ///
 /// While synced, each channel is delayed by its [`NoteDuration`](tutti_music::NoteDuration) of
 /// the layout ([`DelayLayoutBuilder::notes`](tutti_dsp::DelayLayoutBuilder::notes), a quarter
@@ -140,16 +141,6 @@ impl<F: Float + Lerp> From<DelayConfig> for DelayNode<F> {
     }
 }
 
-impl<F: Float + Lerp> DelayNode<F> {
-    /// The word that says whether the delay is timed in seconds or in notes, shared with the
-    /// running node and its clones: `store` lands at the node's next block. Clone the `Arc`
-    /// before the node is inserted; a fork holds a word of its own, at the value at the fork.
-    #[must_use]
-    pub fn sync(&self) -> &Arc<AtomicCell<DelaySync>> {
-        &self.params().set().sync
-    }
-}
-
 /// The delay's controls: the time and the feedback, which are read per frame when the
 /// graph drives them, and the cross-feedback.
 ///
@@ -171,9 +162,23 @@ control_set! {
         DelayControls::DEFAULT
     }
 
+    fn settings(&self) -> Vec<ErasedSetting> {
+        vec![ErasedSetting::new::<Self, SYNC>(Arc::clone(&self.sync))]
+    }
+
     fn detach(&mut self) {
         self.sync = Arc::new(AtomicCell::new(self.sync.load()));
     }
+}
+
+/// The kind of the delay's sync word.
+const SYNC: u16 = SettingKind::Sync as u16;
+
+/// The word that says whether the delay is timed in seconds or in notes: the node reads it
+/// once per block, and a store lands at the next. A clone shares it; a fork holds one of its
+/// own, at the value at the fork.
+impl HasSetting<SYNC> for DelaySet {
+    type Word = DelaySync;
 }
 
 impl DelaySet {
@@ -889,6 +894,14 @@ mod tests {
         }
     }
 
+    /// The cell of the node's sync setting, as the session's key reaches it.
+    fn sync_word(node: &DelayNode<f32>) -> Arc<AtomicCell<DelaySync>> {
+        tutti_graph::ParamNode::<f32>::settings(node)
+            .into_iter()
+            .find_map(|setting| setting.cell::<DelaySync>())
+            .expect("a delay has a sync setting")
+    }
+
     /// The sync word is read by the running node: a delay at 0.25 s (256 frames) echoes there
     /// while free; after the word is stored as synced its time moves to its quarter note at
     /// 120 bpm (512 frames) at 1/8 frame a frame, which takes 2048 frames, and an impulse after
@@ -898,7 +911,7 @@ mod tests {
         let layout = DelayLayout::new(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)));
         let config = DelayConfig::new(layout).controls(controls(frames(256.0), 0.0, 0.0));
         let mut node = prepared(DelayNode::<f32>::from(config), RATE, 4096);
-        let sync = Arc::clone(node.sync());
+        let sync = sync_word(&node);
         let echo_of = |node: &mut DelayNode<f32>| -> Vec<usize> {
             block_at(node, 120.0, true, &click(2048))
                 .iter()
@@ -926,8 +939,8 @@ mod tests {
             ..DelayControls::DEFAULT
         }));
         let (fork, clone) = (node.fork_fresh(), node.clone());
-        node.sync().store(DelaySync::Free);
-        assert_eq!(fork.sync().load(), DelaySync::Synced);
-        assert_eq!(clone.sync().load(), DelaySync::Free);
+        sync_word(&node).store(DelaySync::Free);
+        assert_eq!(sync_word(&fork).load(), DelaySync::Synced);
+        assert_eq!(sync_word(&clone).load(), DelaySync::Free);
     }
 }

@@ -8,13 +8,13 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use tutti_graph::{ErasedPublished, NodeKey};
+use tutti_graph::{ErasedPublished, ErasedSetting, NodeKey};
 use tutti_music::MeterMap;
-use tutti_nodes::{ClickLevel, ClickSettings, MetronomeMode};
+use tutti_nodes::{ClickLevel, ClickSettings, DelaySync, KeyFilter, LfoSync, MetronomeMode};
 use tutti_rt::{AtomicCell, AtomicWord, Mutex};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{LoopEdit, LoopRegion, ProjectMeter, Transport, TransportSettings};
-use tutti_units::{Amplitude, At};
+use tutti_units::{Amplitude, At, SettingKind};
 
 use super::error::SetRefusal;
 use super::saved::capture;
@@ -76,6 +76,8 @@ pub enum SlotId {
     SourceValue(ModSourceId),
     /// A param's automation curve, by the key the reconciler holds it under.
     Automation(TargetKey),
+    /// A node's setting of a kind, the word it reads once per block.
+    Setting(NodeKey, SettingKind),
     /// A node's mode.
     Mode(NodeKey),
     /// A node's mix.
@@ -124,6 +126,7 @@ impl SlotId {
             | Self::SourceRate(_)
             | Self::SourceValue(_)
             | Self::Automation(_)
+            | Self::Setting(..)
             | Self::Mode(_)
             | Self::Mix(_)
             | Self::Gain(_)
@@ -139,6 +142,7 @@ impl SlotId {
     /// The node the value is of, or `None` for one of the session's own.
     pub(crate) const fn node(self) -> Option<NodeKey> {
         match self {
+            Self::Setting(node, _) => Some(node),
             #[cfg(feature = "midi")]
             Self::ClipEvents(node) | Self::Harmony(node) => Some(node),
             #[cfg(feature = "sampler")]
@@ -600,6 +604,33 @@ node_slot_target!(
     Speed
 );
 
+/// Generates a [`Key`](crate::Key)'s method for each setting kind, from the
+/// node's [`HasSetting`](tutti_graph::HasSetting): only a node that has the
+/// setting has the method.
+macro_rules! setting_methods {
+    ($($name:ident => $kind:ident, $doc:literal;)+) => {
+        impl<N: ?Sized> crate::Key<N> {$(
+            #[doc = $doc]
+            #[must_use]
+            pub const fn $name(
+                self,
+            ) -> SettingTarget<<N as tutti_graph::HasSetting<{ SettingKind::$kind as u16 }>>::Word>
+            where
+                N: tutti_graph::HasSetting<{ SettingKind::$kind as u16 }>,
+            {
+                SettingTarget::new(SlotId::Setting(self.erase(), SettingKind::$kind))
+            }
+        )+}
+    };
+}
+
+setting_methods! {
+    sync => Sync,
+        "How the node is timed, free or locked to the beat (only a node with the setting has this method).";
+    key_filter => KeyFilter,
+        "Which filter the detector hears its key through (only a node with the setting has this method).";
+}
+
 /// Generates a [`Key`](crate::Key)'s method for each published kind, from the
 /// node's [`HasPublished`](tutti_graph::HasPublished): only a node that
 /// publishes the kind has the method.
@@ -667,9 +698,10 @@ slot_target!(
     SlotId::MpeMode
 );
 
-/// A session setting held in one atomic word ([`AtomicWord`]): the click's
-/// [`MetronomeMode`], as `session.click().mode()` names it. The audio thread
-/// reads it once per block; a write lands at once.
+/// A setting held in one atomic word ([`AtomicWord`]): the click's
+/// [`MetronomeMode`], as `session.click().mode()` names it, or a node's, as its
+/// key names it (`key.sync()`, `key.key_filter()`). The audio thread reads it
+/// once per block; a write lands at once.
 pub struct SettingTarget<T> {
     id: SlotId,
     value: PhantomData<fn() -> T>,
@@ -869,6 +901,31 @@ pub(crate) fn slot_of(node: NodeKey, entry: &ErasedPublished) -> Option<(SlotId,
         }
     }
     None
+}
+
+/// The slot a node's setting cell is registered as under `node`: each kind has the
+/// words the nodes that declare it hold, and a node whose cell holds another word has
+/// nothing that can address it, and is left out.
+pub(crate) fn setting_of(node: NodeKey, entry: &ErasedSetting) -> Option<(SlotId, Erased)> {
+    let erased = match entry.kind() {
+        SettingKind::Sync => word::<DelaySync>(entry).or_else(|| word::<LfoSync>(entry)),
+        SettingKind::KeyFilter => word::<KeyFilter>(entry),
+    };
+    Some((SlotId::Setting(node, entry.kind()), erased?))
+}
+
+/// `entry`'s cell as the slot of its word, when it holds a `W`.
+fn word<W: AtomicWord + PartialEq + Send + Sync + 'static>(
+    entry: &ErasedSetting,
+) -> Option<Erased> {
+    fn itself<T>(cell: &AtomicCell<T>) -> &AtomicCell<T> {
+        cell
+    }
+    let slot = SettingSlot {
+        owner: entry.cell::<W>()?,
+        project: itself::<W>,
+    };
+    Some(erase(Arc::new(slot) as SlotCell<W>))
 }
 
 /// The tempo map, in the transport's settings.

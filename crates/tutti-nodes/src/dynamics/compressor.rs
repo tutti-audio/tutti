@@ -9,9 +9,9 @@ use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, CompressorBank, CompressorControls, CompressorSignals,
     KeyFilter, KeySource, Lerp, SimdLanes,
 };
-use tutti_graph::Shape;
+use tutti_graph::{ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, Tail};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, SettingKind, Tail};
 
 use super::keyed_shape;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -47,8 +47,8 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// The detector hears the key through a [`KeyFilter`], a high-pass or a band-pass, and the
 /// signal the gain is applied to is never filtered. The filter is a setting a running node
-/// switches, off by default ([`CompressorControls::key_filter`] starts it): [`key_filter`](KernelNode::key_filter) is the word the node reads
-/// once per grid period, and [`KeyFilter::Off`] leaves the filter unrun. The node always has
+/// switches, off by default ([`CompressorControls::key_filter`] starts it): the node's `key_filter` setting is the word it reads
+/// once per grid period (`session.set(key.key_filter().to(KeyFilter::HighPass))`), and [`KeyFilter::Off`] leaves the filter unrun. The node always has
 /// the cutoff ([`UnitParam::Cutoff`](tutti_units::UnitParam::Cutoff), [`Hz`], 100 Hz) and the Q
 /// ([`UnitParam::Q`](tutti_units::UnitParam::Q), [`Q`], Butterworth) after the makeup, so
 /// eight params in all; while the filter is off they are not in use and are kept, and a switch
@@ -139,17 +139,6 @@ impl<F: Float + SimdLanes + Lerp> From<CompressorConfig> for CompressorNode<F> {
     }
 }
 
-impl<F: Float + SimdLanes + Lerp> CompressorNode<F> {
-    /// The word that says which [`KeyFilter`] the detector hears the key through, shared with
-    /// the running node and its clones: `store` lands at the node's next grid period. Clone
-    /// the `Arc` before the node is inserted; a fork holds a word of its own, at the value at
-    /// the fork.
-    #[must_use]
-    pub fn key_filter(&self) -> &Arc<AtomicCell<KeyFilter>> {
-        &self.params().set().key_filter
-    }
-}
-
 /// The compressor's controls: threshold, knee, ratio, attack, release and makeup, then the key
 /// filter's cutoff and Q. It holds the key filter's word too, which is not a port: the
 /// controls it assembles read it.
@@ -180,9 +169,23 @@ control_set! {
         CompressorControls::DEFAULT
     }
 
+    fn settings(&self) -> Vec<ErasedSetting> {
+        vec![ErasedSetting::new::<Self, KEY_FILTER>(Arc::clone(&self.key_filter))]
+    }
+
     fn detach(&mut self) {
         self.key_filter = Arc::new(AtomicCell::new(self.key_filter.load()));
     }
+}
+
+/// The kind of the key filter's word.
+const KEY_FILTER: u16 = SettingKind::KeyFilter as u16;
+
+/// Which [`KeyFilter`] the detector hears the key through: the node reads it once per grid
+/// period, and a store lands at the next. A clone shares it; a fork holds one of its own, at
+/// the value at the fork.
+impl HasSetting<KEY_FILTER> for CompressorSet {
+    type Word = KeyFilter;
 }
 
 /// The compressor as a [`Kernel`]: a [`CompressorBank`] sized at the prepared rate, its

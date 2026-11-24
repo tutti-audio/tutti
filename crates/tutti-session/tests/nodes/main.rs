@@ -13,6 +13,7 @@ mod bus_strip;
 mod multiband_params;
 mod node_mix;
 mod node_mode;
+mod node_settings;
 #[path = "../support/offline.rs"]
 mod offline;
 mod param_units;
