@@ -160,9 +160,9 @@ fn run_mono<F: Float + SimdLanes + Lerp>(
     run(bank, &[audio, audio], &[key, key], signal).remove(0)
 }
 
-/// A level of `db` as an amplitude, from the definition.
+/// A level of `db` as an amplitude.
 fn amplitude(db: f64) -> f32 {
-    10f64.powf(db / 20.0) as f32
+    Db::new(db).to_amplitude().get() as f32
 }
 
 /// The design holds the figures its definition gives: the hold is `floor(hold * rate)`
@@ -783,24 +783,9 @@ fn an_infinite_key_opens_the_gate_and_does_not_latch_it() {
     );
 }
 
-/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
-/// `key`.
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, keyed by `key`.
 fn run_f64(c: &GateControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
-    let mut bank = GateBank::<f64>::new(RATE);
-    bank.retarget(c);
-    bank.jump_to_target();
-    let mut out = vec![0.0f64; audio.len()];
-    bank.process(
-        GateSignals::default(),
-        Planes::new(&[key]).unwrap(),
-        &mut InputOutput::paired(
-            Planes::new(&[audio]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    out
+    run(&mut bank_at::<f64>(c, RATE), &[audio], &[key], None).remove(0)
 }
 
 /// An open gate (a key over the threshold, an instant attack) has gain `range + 1 (1 -
@@ -879,7 +864,7 @@ fn an_f32_three_hundred_second_release_at_192_khz_still_closes_along_the_closed_
 /// The last frame of a constant key `under` dB under `threshold` dB, gating a signal of ones in
 /// an `f64` bank at rest on `c` (no times, so the follower is on its target at once).
 fn settled_gain_under(c: &GateControls, under: f64) -> f64 {
-    let level = 10f64.powf((c.threshold.get() - under) / 20.0);
+    let level = Db::new(c.threshold.get() - under).to_amplitude().get();
     let key = vec![level; 64];
     run_f64(c, &vec![1.0; 64], &key)[63]
 }

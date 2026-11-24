@@ -13,9 +13,6 @@ fn sine(freq: Hz, amp: f64) -> Vec<f64> {
         SR,
         tutti_units::Samples::new(N),
     )
-    .into_iter()
-    .map(f64::from)
-    .collect()
 }
 
 fn saw(freq: Hz, amp: f64) -> Vec<f64> {

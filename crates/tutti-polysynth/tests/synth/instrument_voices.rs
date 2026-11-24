@@ -58,9 +58,7 @@ fn peak_near(signal: &[f32], near: f64) -> f64 {
 }
 
 fn peak(signal: &[f32]) -> f64 {
-    signal
-        .iter()
-        .fold(0.0_f64, |m, &x| m.max(f64::from(x).abs()))
+    f64::from(tutti_fixtures::signal::peak(signal))
 }
 
 #[test]

@@ -90,7 +90,7 @@ fn each_output_is_the_sum_of_its_paths_by_definition() {
     for (ni, no) in [(2u16, 2u16), (3, 2), (1, 4), (4, 3)] {
         let irs: Vec<Vec<f32>> = (0..ni * no)
             .map(|p| {
-                noise(100 + u32::from(p), 40 + 37 * usize::from(p))
+                noise::<f32>(100 + u32::from(p), 40 + 37 * usize::from(p))
                     .iter()
                     .map(|v| v * 0.2)
                     .collect()

@@ -103,9 +103,12 @@ fn mean<F: Float>(x: &[F]) -> f64 {
 }
 
 fn tone(freq: f64, amplitude: f32, len: usize) -> Vec<f32> {
-    (0..len)
-        .map(|n| amplitude * libm::sin(2.0 * PI * freq * n as f64 / RATE.get()) as f32)
-        .collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(freq),
+        tutti_units::Amplitude::new(f64::from(amplitude)),
+        RATE,
+        tutti_units::Samples::new(len),
+    )
 }
 
 /// The reduction in dB of the static curve at a hard knee, from its definition.
@@ -128,11 +131,11 @@ fn curve(level: f64, threshold: f64, ratio: f64, knee: f64) -> f64 {
 }
 
 fn db(amplitude: f64) -> f64 {
-    20.0 * libm::log10(amplitude)
+    tutti_units::Amplitude::new(amplitude).to_db().get()
 }
 
 fn linear(db: f64) -> f64 {
-    libm::pow(10.0, db / 20.0)
+    tutti_units::Db::new(db).to_amplitude().get()
 }
 
 /// The warped frequency ratio `tan(pi f / fs) / tan(pi fc / fs)` of the bilinear transform.

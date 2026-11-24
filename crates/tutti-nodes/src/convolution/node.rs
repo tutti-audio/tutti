@@ -1198,7 +1198,7 @@ mod tests {
     /// `tolerance`), about 3e-4 here, and that is the bound used.
     #[test]
     fn a_long_ir_cut_into_levels_convolves_at_any_block_size() {
-        let ir: Vec<f32> = crate::test_support::noise(1, 6000)
+        let ir: Vec<f32> = crate::test_support::noise::<f32>(1, 6000)
             .iter()
             .map(|v| v * 0.1)
             .collect();
@@ -1714,7 +1714,7 @@ mod layouts {
     fn a_matrix_node_is_the_direct_sum_of_its_paths() {
         let irs: Vec<Vec<f32>> = (0..4)
             .map(|p| {
-                noise(40 + p, 1500 + 700 * p as usize)
+                noise::<f32>(40 + p, 1500 + 700 * p as usize)
                     .iter()
                     .map(|v| v * 0.05)
                     .collect()
@@ -1832,7 +1832,7 @@ mod layouts {
     /// A node's nodes of each layout, with responses long enough to be cut into levels.
     fn long_layouts() -> Vec<(&'static str, ConvolverNode<f32>)> {
         let long = |seed: u32, len: usize| -> Vec<f32> {
-            noise(seed, len).iter().map(|v| v * 0.05).collect()
+            noise::<f32>(seed, len).iter().map(|v| v * 0.05).collect()
         };
         let four: Vec<Vec<f32>> = (0..4)
             .map(|p| long(10 + p, 2500 + 90 * p as usize))

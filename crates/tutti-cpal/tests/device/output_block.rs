@@ -12,7 +12,7 @@
 //! Expected values are stated from each format's own arithmetic, never by
 //! calling the conversion under test.
 
-use crate::support::{dc_state, dc_state_f64};
+use crate::support::dc_state;
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Sample;
 use tutti_engine::OutputBlock;
@@ -53,7 +53,7 @@ fn silence_is_zero_in_every_signed_and_float_format() {
 #[test]
 fn an_f64_graph_reaches_every_native_format_by_the_same_rule() {
     fn check<S: Sample + std::fmt::Debug>(expected: S, label: &str) {
-        let mut block = OutputBlock::new(dc_state_f64(0.5, 2), ChannelLayout::STEREO);
+        let mut block = OutputBlock::new(dc_state(0.5f64, 2), ChannelLayout::STEREO);
         let mut out = [S::SILENCE; 64];
         block.render_delayed(&mut out, None);
         assert!(

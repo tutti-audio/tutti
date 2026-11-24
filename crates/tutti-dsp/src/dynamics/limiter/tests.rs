@@ -91,23 +91,23 @@ fn runner(c: &LimiterControls) -> LimiterBank<f32> {
 
 /// `audio` (one slice per channel) through `bank` in blocks of `block`, with the threshold
 /// and ceiling control signals when given.
-fn run_in(
-    bank: &mut LimiterBank<f32>,
-    audio: &[&[f32]],
-    signals: [Option<&[f32]>; 2],
+fn run_in<F: Float>(
+    bank: &mut LimiterBank<F>,
+    audio: &[&[F]],
+    signals: [Option<&[F]>; 2],
     block: usize,
-) -> Vec<Vec<f32>> {
+) -> Vec<Vec<F>> {
     let n = audio[0].len();
-    let mut out = vec![vec![0.0f32; n]; audio.len()];
+    let mut out = vec![vec![F::ZERO; n]; audio.len()];
     let mut at = 0;
     while at < n {
         let end = (at + block).min(n);
-        let a: Vec<&[f32]> = audio.iter().map(|c| &c[at..end]).collect();
+        let a: Vec<&[F]> = audio.iter().map(|c| &c[at..end]).collect();
         let signals = LimiterSignals {
             threshold: signals[0].map(|l| Mono::new(&l[at..end])),
             ceiling: signals[1].map(|l| Mono::new(&l[at..end])),
         };
-        let mut outs: Vec<&mut [f32]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
+        let mut outs: Vec<&mut [F]> = out.iter_mut().map(|c| &mut c[at..end]).collect();
         bank.process(
             signals,
             &mut InputOutput::paired(Planes::new(&a).unwrap(), PlanesMut::new(&mut outs).unwrap())
@@ -119,7 +119,7 @@ fn run_in(
     out
 }
 
-fn run(bank: &mut LimiterBank<f32>, audio: &[&[f32]]) -> Vec<Vec<f32>> {
+fn run<F: Float>(bank: &mut LimiterBank<F>, audio: &[&[F]]) -> Vec<Vec<F>> {
     run_in(bank, audio, [None, None], CHUNK)
 }
 
@@ -128,9 +128,9 @@ fn run_mono(bank: &mut LimiterBank<f32>, audio: &[f32]) -> Vec<f32> {
     run(bank, &[audio, audio]).remove(0)
 }
 
-/// A level of `db` as an amplitude, from the definition.
+/// A level of `db` as an amplitude.
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    Db::new(db).to_amplitude().get()
 }
 
 /// How many ulps (`f32::EPSILON`) over its ceiling a limiter's sample peak may land: the
@@ -996,21 +996,11 @@ fn the_set_extremes_keep_their_meaning_on_the_signal_path() {
 
 mod true_peak;
 
-/// `x` through a mono `f64` bank at 48 kHz set to `c`, in one block.
+/// `x` through a mono `f64` bank at 48 kHz set to `c`.
 fn run_f64(c: &LimiterControls, x: &[f64]) -> Vec<f64> {
     let mut bank = LimiterBank::<f64>::new(ChannelLayout::MONO, LOOKAHEAD, RATE);
     bank.retarget(c);
-    let mut out = vec![0.0f64; x.len()];
-    bank.process(
-        LimiterSignals::default(),
-        &mut InputOutput::paired(
-            Planes::new(&[x]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    out
+    run(&mut bank, &[x]).remove(0)
 }
 
 /// Under a threshold at the ceiling the gain is `10^0 = 1`: an `f64` signal of more than 24

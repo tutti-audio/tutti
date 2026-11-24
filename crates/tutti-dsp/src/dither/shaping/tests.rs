@@ -34,9 +34,12 @@ fn rate(hz: f64) -> SampleRate {
 /// A sine of amplitude 0.25 at 997 Hz, far from clipping and incommensurate with every block
 /// size used here.
 fn tone(n: usize, sample_rate: f64) -> Vec<f64> {
-    (0..n)
-        .map(|i| 0.25 * libm::sin(2.0 * PI * 997.0 * i as f64 / sample_rate))
-        .collect()
+    tutti_fixtures::signal::sine(
+        tutti_units::Hz::new(997.0),
+        Amplitude::new(0.25),
+        rate(sample_rate),
+        tutti_units::Samples::new(n),
+    )
 }
 
 fn sink(shaping: Option<&NoiseShaping>) -> DitherSink<Collect, f64> {

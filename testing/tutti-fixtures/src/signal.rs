@@ -8,7 +8,7 @@
 //! A stretched step edge's smear is [`stretched_edge_spread`].
 //!
 //! Noise is [`noise`](crate::noise) and a bit hash is [`Fnv`](crate::Fnv), both in
-//! this crate's root. The figures are plain `f32` samples, except the `f64` narrowing
+//! this crate's root. The figures are samples of any width `F`, except the `f64` narrowing
 //! check's; only the arguments that name a quantity are units.
 //!
 //! These are definitions, not references: a test pins an analytic figure with
@@ -23,12 +23,12 @@ use tutti_units::{Amplitude, Hz, SampleRate, Samples, Seconds, StretchFactor};
 /// `i`, with phase 0 at sample 0 (the first sample is exactly `0.0`).
 ///
 /// The phase is `step * i` in `f64` (no running sum) and the result narrowed once to
-/// the `f32` sample, so the figure carries no error that grows with `i`.
-pub fn sine(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<f32> {
+/// the sample width `F`, so the figure carries no error that grows with `i`.
+pub fn sine<F: Float>(hz: Hz, amplitude: Amplitude, rate: SampleRate, len: Samples) -> Vec<F> {
     let step = std::f64::consts::TAU * hz.get() / rate.get();
     let amp = amplitude.get();
     (0..len.get())
-        .map(|i| (amp * (step * i as f64).sin()) as f32)
+        .map(|i| F::from_f64(amp * (step * i as f64).sin()))
         .collect()
 }
 
@@ -58,7 +58,7 @@ pub fn amplitude_at<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> f64 {
 /// `len` samples of silence but for a single `1.0` at sample 0.
 ///
 /// An empty `len` gives an empty vector.
-pub fn impulse(len: Samples) -> Vec<f32> {
+pub fn impulse<F: Float>(len: Samples) -> Vec<F> {
     impulse_at(len, Samples::new(0))
 }
 
@@ -67,10 +67,10 @@ pub fn impulse(len: Samples) -> Vec<f32> {
 /// # Panics
 ///
 /// If `at` is not inside `len`.
-pub fn impulse_at(len: Samples, at: Samples) -> Vec<f32> {
-    let mut x = vec![0.0; len.get()];
+pub fn impulse_at<F: Float>(len: Samples, at: Samples) -> Vec<F> {
+    let mut x = vec![F::ZERO; len.get()];
     if len.get() > 0 || at.get() > 0 {
-        x[at.get()] = 1.0;
+        x[at.get()] = F::ONE;
     }
     x
 }
@@ -331,7 +331,7 @@ mod tests {
     fn sine_frequency_finds_the_sine_within_the_image_leakage() {
         let rate = SampleRate::SR_48K;
         let (f, measure, step) = (1234.5, Samples::new(16_384), Samples::new(4096));
-        let x: Vec<f64> = sine(Hz::new(f), Amplitude::new(0.5), rate, Samples::new(30_000))
+        let x: Vec<f64> = sine::<f32>(Hz::new(f), Amplitude::new(0.5), rate, Samples::new(30_000))
             .iter()
             .map(|&v| f64::from(v))
             .collect();
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn a_sine_is_the_analytic_one() {
         // 12 kHz at 48 kHz: four samples a period, 0, A, 0, -A.
-        let x = sine(
+        let x: Vec<f32> = sine(
             Hz::new(12_000.0),
             Amplitude::new(0.5),
             SampleRate::SR_48K,
@@ -356,7 +356,7 @@ mod tests {
         );
         assert_eq!(x[0], 0.0);
         assert!((x[1] - 0.5).abs() < 1e-6 && (x[3] + 0.5).abs() < 1e-6);
-        let y = sine(
+        let y: Vec<f32> = sine(
             Hz::new(1_000.0),
             Amplitude::new(0.5),
             SampleRate::SR_48K,
@@ -369,12 +369,12 @@ mod tests {
     /// An impulse is one `1.0` at the asked frame and nothing else.
     #[test]
     fn an_impulse_is_one_sample() {
-        assert_eq!(impulse(Samples::new(4)), [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(impulse::<f32>(Samples::new(4)), [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(
-            impulse_at(Samples::new(4), Samples::new(2)),
+            impulse_at::<f32>(Samples::new(4), Samples::new(2)),
             [0.0, 0.0, 1.0, 0.0]
         );
-        assert!(impulse(Samples::new(0)).is_empty());
+        assert!(impulse::<f32>(Samples::new(0)).is_empty());
     }
 
     /// The readings of a known buffer, the empty one included.
@@ -399,7 +399,7 @@ mod tests {
     /// precision.
     #[test]
     fn a_full_scale_sine_reads_one_over_root_two_in_f64() {
-        let x = sine(
+        let x: Vec<f64> = sine(
             Hz::new(1_000.0),
             Amplitude::new(1.0),
             SampleRate::SR_48K,

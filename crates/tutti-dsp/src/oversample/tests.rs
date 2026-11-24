@@ -1,10 +1,10 @@
 use core::f64::consts::TAU;
-use tutti_fixtures::signal::amplitude_at;
+use tutti_fixtures::signal::{amplitude_at, sine};
 use tutti_units::Hz;
 
 use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, Mono, MonoMut};
-use tutti_units::{Db, SampleRate, Samples};
+use tutti_units::{Amplitude, Db, SampleRate, Samples};
 
 use super::*;
 
@@ -31,16 +31,6 @@ const MARGIN_DB: f64 = 3.0;
 
 fn plan(factor: OversamplingFactor) -> OversamplingPlan {
     Oversampling::new(factor).plan(RATE).unwrap()
-}
-
-fn db(amplitude: f64) -> f64 {
-    20.0 * amplitude.log10()
-}
-
-fn sine(bin: usize, frames: usize) -> Vec<f32> {
-    (0..frames)
-        .map(|n| libm::sin(TAU * bin as f64 * n as f64 / WINDOW as f64) as f32)
-        .collect()
 }
 
 /// `x` up and down in blocks of `block`, `process` between at the high rate (the oversampled
@@ -142,7 +132,12 @@ fn a_passband_sine_round_trips_delayed_within_the_ripple() {
         let plan = plan(factor);
         let latency = plan.latency().get();
         for bin in [60, TONE_BIN, 1800] {
-            let x = sine(bin, SETTLE + WINDOW);
+            let x: Vec<f32> = sine(
+                Hz::new(bin as f64),
+                Amplitude::new(1.0),
+                SampleRate::of(WINDOW as f64),
+                Samples::new(SETTLE + WINDOW),
+            );
             let mut os = plan.state::<f32>(MaxBlock::of(Samples::new(128)));
             let y = pass_through(&mut os, &x, 100);
             let worst = (SETTLE..x.len())
@@ -169,7 +164,12 @@ fn the_up_sampler_rejects_its_images() {
     for factor in FACTORS {
         let f = TONE_BIN as f64 / WINDOW as f64 * BASE;
         let f_hi = BASE * factor.get() as f64;
-        let x = sine(TONE_BIN, SETTLE + WINDOW);
+        let x: Vec<f32> = sine(
+            Hz::new(TONE_BIN as f64),
+            Amplitude::new(1.0),
+            SampleRate::of(WINDOW as f64),
+            Samples::new(SETTLE + WINDOW),
+        );
         let mut os = plan(factor).state::<f32>(MaxBlock::of(Samples::new(256)));
         let mut high = Vec::new();
         through(&mut os, &x, 256, |h, out| {
@@ -188,7 +188,10 @@ fn the_up_sampler_rejects_its_images() {
                     continue;
                 }
                 checked += 1;
-                let level = db(amplitude_at(window, Hz::new(image), SampleRate::of(f_hi)));
+                let level =
+                    Amplitude::new(amplitude_at(window, Hz::new(image), SampleRate::of(f_hi)))
+                        .to_db()
+                        .get();
                 assert!(
                     level <= -100.0 + MARGIN_DB,
                     "{factor:?}: image at {image} Hz is {level} dB"
@@ -217,7 +220,10 @@ fn the_down_sampler_rejects_what_would_alias() {
                     n_hi += 1;
                 }
             });
-            let level = db(amplitude_at(&y[SETTLE..], Hz::new(f), SampleRate::of(BASE)));
+            let level =
+                Amplitude::new(amplitude_at(&y[SETTLE..], Hz::new(f), SampleRate::of(BASE)))
+                    .to_db()
+                    .get();
             assert!(
                 level <= -100.0 + MARGIN_DB,
                 "{factor:?}: the tone at {g} Hz leaves {level} dB at {f} Hz"

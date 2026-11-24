@@ -107,12 +107,12 @@ fn tone(cycles: f64, phase: f64, a: f64, frames: usize) -> Vec<f32> {
 }
 
 fn db(ratio: f64) -> f64 {
-    20.0 * ratio.log10()
+    Amplitude::new(ratio).to_db().get()
 }
 
 /// The bound a true-peak bank keeps: the ceiling and its margin, in amplitude.
 fn bound() -> f64 {
-    CEILING * 10f64.powf(LimiterBank::<f32>::TRUE_PEAK_MARGIN.get() / 20.0)
+    CEILING * LimiterBank::<f32>::TRUE_PEAK_MARGIN.to_amplitude().get()
 }
 
 /// The bound of a tone of `cycles` of the rate: its own band limit in place of the passband's,

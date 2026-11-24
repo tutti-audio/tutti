@@ -19,6 +19,7 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
+use crate::ramp_source::{RampSource, ramp};
 use tutti_buffers::{Planes, PlanesMut};
 // The live side waits for the server's answer to each block; the fork is *not*: it waits for each
 // block, which is the property under test.
@@ -43,6 +44,7 @@ use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::Timeouts;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
+use tutti_units::Db;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -61,12 +63,6 @@ fn gain_at(db: f64) -> Normalized {
     Normalized::clamped((db - GAIN_DB_MIN) / (GAIN_DB_MAX - GAIN_DB_MIN))
 }
 
-/// The linear amplitude the probe multiplies by at `db`, computed as the probe
-/// does (`10^(dB/20)` in f64, then to f32).
-fn amplitude(db: f64) -> f32 {
-    10f64.powf(db / 20.0) as f32
-}
-
 /// Input sample `i` of block `b`: distinct everywhere, small, exact in f32.
 fn input(b: usize, i: usize) -> f32 {
     ((b * BLOCK + i) % 997) as f32 / 1024.0
@@ -76,7 +72,7 @@ fn input(b: usize, i: usize) -> f32 {
 /// tagged and scaled.
 fn expected(b: usize, db: f64) -> Vec<f32> {
     (0..BLOCK)
-        .map(|i| (input(b - 1, i) + TAG_P0C0) * amplitude(db))
+        .map(|i| (input(b - 1, i) + TAG_P0C0) * Db::new(db).to_amplitude().get() as f32)
         .collect()
 }
 
@@ -428,7 +424,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         )
         .expect("a graph holding a plugin forks");
     let out = Renderer::new(fork_ed, fork_exec).render(BLOCK * 8);
-    let want = TAG_P0C0 * amplitude(-6.0);
+    let want = TAG_P0C0 * Db::new(-6.0).to_amplitude().get() as f32;
     assert!(
         out[0][..BLOCK].iter().all(|&s| s == 0.0),
         "pipeline latency"
@@ -1231,36 +1227,6 @@ fn a_plugins_midi_out_keeps_its_place_against_its_audio() {
             "the MIDI-out's note-on on the frame its audio sounds: {seen:?}"
         );
     }
-}
-
-/// A ramp source reading its block's `Env`: frame `t` is [`ramp`]`(t)`. Forks
-/// by clone (it holds nothing), so an export of a graph it feeds forks it.
-#[derive(Clone)]
-struct RampSource;
-
-/// Input frame `t` of the alignment test: distinct, never zero, exact in f32.
-fn ramp(t: u64) -> f32 {
-    ((t % 997) + 1) as f32 / 1024.0
-}
-
-impl tutti_graph::Node for RampSource {
-    fn shape(&self) -> tutti_graph::Shape {
-        tutti_graph::Shape::source_unassigned(tutti_buffers::ChannelLayout::MONO)
-            .tail(tutti_units::Tail::Unbounded)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(
-        &mut self,
-        cx: &tutti_graph::Cx<'_>,
-        mut io: tutti_graph::Io<'_>,
-    ) -> tutti_graph::Status {
-        let first = cx.env.frame.get();
-        for (i, s) in io.output(0).iter_mut().enumerate() {
-            *s = ramp(first + i as u64);
-        }
-        tutti_graph::Status::Modified
-    }
-    fn reset(&mut self) {}
 }
 
 /// **An export is aligned when the plugin's latency moves in offline mode.**

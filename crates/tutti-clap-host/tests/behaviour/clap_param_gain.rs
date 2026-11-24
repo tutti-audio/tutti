@@ -171,9 +171,9 @@ fn normalized_for_db(db: f64) -> f64 {
     (db - GAIN_DB_MIN) / (GAIN_DB_MAX - GAIN_DB_MIN)
 }
 
-/// `10^(dB/20)`, the amplitude a given decibel figure scales by.
+/// The amplitude a given decibel figure scales by.
 fn amplitude_for_db(db: f64) -> f32 {
-    10f64.powf(db / 20.0) as f32
+    tutti_units::Db::new(db).to_amplitude().get() as f32
 }
 
 /// Drive one block with the given parameter changes, returning output channel 0.

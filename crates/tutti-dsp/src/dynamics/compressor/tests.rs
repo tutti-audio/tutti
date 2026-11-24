@@ -161,9 +161,9 @@ fn run<F: Float + SimdLanes + Lerp>(
     run_in(bank, audio, key, signal, CHUNK)
 }
 
-/// A level of `db` as an amplitude, from the definition.
+/// A level of `db` as an amplitude.
 fn amplitude(db: f64) -> f32 {
-    10f64.powf(db / 20.0) as f32
+    Db::new(db).to_amplitude().get() as f32
 }
 
 /// The static curve of the compressor from its definition (Giannoulis, Massberg and
@@ -779,24 +779,9 @@ fn a_huge_knee_is_held_and_the_gain_returns_to_the_static_curve() {
     }
 }
 
-/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, in one block, keyed by
-/// `key`.
+/// `audio` through an `f64` bank at 48 kHz set to `c` and at rest, keyed by `key`.
 fn run_f64(c: &CompressorControls, audio: &[f64], key: &[f64]) -> Vec<f64> {
-    let mut bank = CompressorBank::<f64>::new(RATE);
-    bank.retarget(c);
-    bank.jump_to_target();
-    let mut out = vec![0.0f64; audio.len()];
-    bank.process(
-        CompressorSignals::default(),
-        Planes::new(&[key]).unwrap(),
-        &mut InputOutput::paired(
-            Planes::new(&[audio]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    out
+    run(&mut bank_at::<f64>(c, RATE), &[audio], &[key], None).remove(0)
 }
 
 /// A key level `-12.04 dB` or so that no `f32` holds: the value `wide_signal` starts at,

@@ -48,9 +48,9 @@ fn pole(tau: Seconds) -> f64 {
     (-1.0 / (tau.get() * RATE.get())).exp()
 }
 
-/// The amplitude of `db`, from the definition.
+/// The amplitude of `db`.
 fn amplitude(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
+    Db::new(db).to_amplitude().get()
 }
 
 /// A level of `LEVEL` held for `n` frames: a square wave, whose magnitude is steady.

@@ -73,11 +73,6 @@ fn through(db: f64, xs: &[f32]) -> Vec<f32> {
     render_blocks(controls(db), xs, None, 64).remove(0)
 }
 
-/// The ceiling of `db` from its definition, `10^(db/20)`.
-fn amplitude_of(db: f64) -> f64 {
-    10f64.powf(db / 20.0)
-}
-
 /// `y = clamp(x, -c, c)`, from the definition.
 fn definition(x: f32, c: f32) -> f32 {
     if x > c {
@@ -96,11 +91,8 @@ fn definition(x: f32, c: f32) -> f32 {
 fn the_ceiling_is_the_amplitude_of_the_decibels() {
     for db in [-96.0f64, -24.0, -6.0, -0.3, 0.0, 3.0, 12.0] {
         let c = f64::from(through(db, &[1e30])[0]);
-        assert!(
-            (c / amplitude_of(db) - 1.0).abs() < 1e-6,
-            "{db} dB: {c} against {}",
-            amplitude_of(db)
-        );
+        let want = Db::new(db).to_amplitude().get();
+        assert!((c / want - 1.0).abs() < 1e-6, "{db} dB: {c} against {want}");
     }
     assert_eq!(through(f64::INFINITY, &[1e30])[0], 1e30);
     assert_eq!(through(f64::NEG_INFINITY, &[1e30])[0], 0.0);
