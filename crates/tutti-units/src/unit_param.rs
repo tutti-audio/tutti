@@ -188,6 +188,54 @@ pub enum UnitParam {
     Index = 45,
 }
 
+/// The name of a discrete setting a node has: one word by its encoding, set
+/// and read through the node's key (`key.sync()`), as a param is by its kind.
+///
+/// A setting is not a param: it has no address, no port and no unit, and cannot
+/// be modulated or automated. A node has at most one setting of a kind, and the
+/// kind fixes nothing about the word's type: a delay's sync and an LFO's sync
+/// are both [`Sync`](Self::Sync), each in its own enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum SettingKind {
+    /// How a node is timed: free in seconds or Hz, or locked to the beat.
+    Sync = 0,
+    /// Which filter a detector hears its key through.
+    KeyFilter = 1,
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// A [`SettingKind`] as a type: what a node's `HasSetting<S>` names, so a kind
+/// no node can mistake for another and a number is never one.
+///
+/// Sealed: [`SyncSetting`] and [`KeyFilterSetting`] are the kinds.
+pub trait Setting: sealed::Sealed + 'static {
+    /// The kind the marker stands for.
+    const KIND: SettingKind;
+}
+
+macro_rules! setting_markers {
+    ($($(#[$doc:meta])* $marker:ident => $kind:ident;)+) => {$(
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy)]
+        pub enum $marker {}
+        impl sealed::Sealed for $marker {}
+        impl Setting for $marker {
+            const KIND: SettingKind = SettingKind::$kind;
+        }
+    )+};
+}
+
+setting_markers! {
+    /// [`SettingKind::Sync`] as a type.
+    SyncSetting => Sync;
+    /// [`SettingKind::KeyFilter`] as a type.
+    KeyFilterSetting => KeyFilter;
+}
+
 /// The error converting a `u16` that is not a known [`UnitParam`]
 /// discriminant.
 ///

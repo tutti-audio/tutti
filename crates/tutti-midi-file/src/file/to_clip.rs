@@ -19,7 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::{Lead, SysEx};
 use crate::{
-    ClipFile, ClipHeader, ClipSequence, FileEvent, Meta, MetricalView, MicrosPerQuarter, TextKind,
+    ClipFile, ClipHeader, ClipSequence, Meta, MetricalView, MicrosPerQuarter, SmfEvent, TextKind,
     Tick,
 };
 
@@ -112,7 +112,7 @@ pub enum DropReason {
 #[non_exhaustive]
 pub enum SmfPart {
     /// An event of the track.
-    Event(FileEvent),
+    Event(SmfEvent),
     /// A field of the track, at tick 0.
     Lead(Lead),
 }
@@ -152,7 +152,7 @@ pub struct Altered {
     /// Where it was.
     pub tick: Tick,
     /// The event.
-    pub event: FileEvent,
+    pub event: SmfEvent,
     /// What the clip's text changes of it.
     pub change: LyricChange,
 }
@@ -170,7 +170,7 @@ pub struct Moved {
     /// Where the clip has it.
     pub to: Tick,
     /// The event.
-    pub event: FileEvent,
+    pub event: SmfEvent,
 }
 
 /// The result of [`MetricalView::to_clip`]: the clip and what it left out.
@@ -228,8 +228,8 @@ fn snap(tick: u64, origin: u64, step: u64, end: u64) -> u64 {
 
 /// Whether `event` is a Set Tempo with a tempo: not a zero, which has no Flex
 /// form.
-fn has_tempo(event: &FileEvent) -> bool {
-    matches!(event, FileEvent::Meta(meta @ Meta::Tempo { .. }) if meta.bpm().is_some())
+fn has_tempo(event: &SmfEvent) -> bool {
+    matches!(event, SmfEvent::Meta(meta @ Meta::Tempo { .. }) if meta.bpm().is_some())
 }
 
 /// Whether a Time Signature converts: a whole-note denominator or a numerator
@@ -361,14 +361,16 @@ fn convert_lead(track: usize, lead: &Lead) -> std::result::Result<Vec<Ump>, Drop
 
 /// What one SMF event becomes: its clip events (in order) and where among its
 /// tick's they go, or the reason it has none.
-fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<Ump>), DropReason> {
+fn convert(ev: &SmfEvent) -> std::result::Result<(Rank, Vec<Ump>), DropReason> {
     let other = |events| Ok((Rank::Other, events));
     match ev {
-        // Already a UMP: a MIDI 1.0 channel message on the first Group.
-        FileEvent::Message(message) => other(vec![Ump::from(*message)]),
+        // A MIDI 1.0 channel message on the first Group.
+        SmfEvent::Channel { channel, message } => {
+            other(vec![super::channel_packet(*channel, *message)])
+        }
         // A divided message's first packet is not one complete message.
-        FileEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),
-        FileEvent::SysEx(SysEx::Complete(body)) => {
+        SmfEvent::SysEx(SysEx::Start(_)) => Err(DropReason::SysexNotComplete),
+        SmfEvent::SysEx(SysEx::Complete(body)) => {
             let body: Vec<u8> = body.iter().map(|b| b.get()).collect();
             if is_property_exchange(&body) {
                 return Err(DropReason::PropertyExchange);
@@ -378,8 +380,8 @@ fn convert(ev: &FileEvent) -> std::result::Result<(Rank, Vec<Ump>), DropReason> 
                 SysexMessage::from_framed(&whole).map_err(|_| DropReason::SysexNotComplete)?;
             other(message.packets(MidiGroup::FIRST).collect())
         }
-        FileEvent::Escape(_) => Err(DropReason::NoSuccessor),
-        FileEvent::Meta(meta) => match meta {
+        SmfEvent::Escape(_) => Err(DropReason::NoSuccessor),
+        SmfEvent::Meta(meta) => match meta {
             Meta::Tempo {
                 micros_per_quarter, ..
             } if micros_per_quarter.get() == 0 => Err(DropReason::ZeroTempo),
@@ -534,7 +536,7 @@ impl MetricalView<'_> {
             ticks_per_quarter: tpq,
         } = self;
         // Track order, then the track's own: the stable sort by tick keeps it.
-        let mut all: Vec<(Tick, usize, &FileEvent)> = file
+        let mut all: Vec<(Tick, usize, &SmfEvent)> = file
             .tracks()
             .iter()
             .enumerate()
@@ -559,7 +561,7 @@ impl MetricalView<'_> {
             track: usize,
             from: Tick,
             to: Tick,
-            event: &'a FileEvent,
+            event: &'a SmfEvent,
             superseded: bool,
         }
         let mut landings: Vec<Landing<'_>> = Vec::with_capacity(all.len());
@@ -572,7 +574,7 @@ impl MetricalView<'_> {
             // section 7.5.3): it is dropped and replaces no other.
             let is_tempo = has_tempo(event);
             let bar = match event {
-                FileEvent::Meta(Meta::TimeSignature {
+                SmfEvent::Meta(Meta::TimeSignature {
                     numerator,
                     denominator_power,
                     ..
@@ -616,7 +618,7 @@ impl MetricalView<'_> {
             landings.iter().any(|l| {
                 l.to == Tick(0)
                     && !l.superseded
-                    && matches!(l.event, FileEvent::Meta(m) if wanted(m))
+                    && matches!(l.event, SmfEvent::Meta(m) if wanted(m))
             })
         };
         let mut placed: Vec<(Tick, Rank, Ump)> = Vec::new();
@@ -630,7 +632,7 @@ impl MetricalView<'_> {
         }
         let mut lyrics = Lyrics::default();
         for (index, landing) in landings.iter().enumerate() {
-            if let FileEvent::Meta(Meta::Text {
+            if let SmfEvent::Meta(Meta::Text {
                 kind: TextKind::Lyric,
                 bytes,
             }) = landing.event

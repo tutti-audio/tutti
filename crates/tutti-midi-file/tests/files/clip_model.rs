@@ -9,7 +9,7 @@ use tutti_fixtures::midi;
 use tutti_midi_ci::{NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget};
 use tutti_midi_file::{
     ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipSequence,
-    FileEvent, MidiFile, MidiFileKind, ReadError, SmfDivision, SmfParseError, SmfReadError,
+    MidiFile, MidiFileKind, ReadError, SmfDivision, SmfEvent, SmfParseError, SmfReadError,
     StandardMidiFile, Tick,
 };
 use tutti_music::{Meter, TimeSignature};
@@ -590,24 +590,26 @@ fn a_midi2_note_on_at_velocity_zero_is_neither_start_nor_end() {
 fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     let message = |on: bool| {
         let (note, velocity) = (NoteNumber::of(64), U7::of(90));
-        Message::Midi1(
-            Address::first(MidiChannel::FIRST),
-            if on {
-                Voice1::NoteOn { note, velocity }
-            } else {
-                Voice1::NoteOff { note, velocity }
-            },
-        )
+        if on {
+            Voice1::NoteOn { note, velocity }
+        } else {
+            Voice1::NoteOff { note, velocity }
+        }
     };
+    let smf_event = |on| SmfEvent::Channel {
+        channel: MidiChannel::FIRST,
+        message: message(on),
+    };
+    let packet = |on| Message::Midi1(Address::first(MidiChannel::FIRST), message(on));
     let smf = crate::common::format0(
         SMF_DIVISION,
-        common::track(vec![(0, message(true).into()), (96, message(false).into())]),
+        common::track(vec![(0, smf_event(true)), (96, smf_event(false))]),
     )
     .unwrap();
     let clip = ClipFile::new(
         DIVISION,
         ClipHeader::new(),
-        sequence(vec![(0, message(true).into()), (96, message(false).into())]),
+        sequence(vec![(0, packet(true).into()), (96, packet(false).into())]),
     )
     .unwrap();
     let a = read_bytes(encoded(&smf)).unwrap();
@@ -615,8 +617,8 @@ fn an_smf_and_a_clip_of_the_same_messages_pair_the_same_notes() {
     assert_eq!(a.tracks()[0].notes(), b.sequence().notes());
     // The file's Set Tempo and Time Signature come first.
     assert_eq!(
-        a.tracks()[0].events()[2].1,
-        FileEvent::Message(b.sequence().events()[0].1.decode().unwrap())
+        a.tracks()[0].events()[2].1.packet(),
+        Some(b.sequence().events()[0].1)
     );
 }
 

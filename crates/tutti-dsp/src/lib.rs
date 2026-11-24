@@ -255,6 +255,8 @@ mod spatial;
 mod spectral;
 mod stft;
 #[cfg(test)]
+mod tail_probe;
+#[cfg(test)]
 mod testing;
 mod viterbi;
 
