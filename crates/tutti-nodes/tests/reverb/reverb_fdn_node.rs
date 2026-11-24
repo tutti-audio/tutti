@@ -681,7 +681,8 @@ fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
 
 /// The declared tail is a figure the graph takes or it is unbounded: the default 8 s room at
 /// 192 kHz declares a finite ceiling within `MAX_NODE_TAIL` (sixty seconds, converted at the
-/// rate) and under 2 million frames: nothing stretches it), a 19 s room at 48 kHz too, and the longest layout
+/// rate) and under 2.1 million frames (the 8 s decay to a floor 6 dB deeper, 8.8 s, with the
+/// longest pre-delay and line: nothing stretches it), a 19 s room at 48 kHz too, and the longest layout
 /// the type allows (60 s at 192 kHz, 11.5 million frames and more) declares `Tail::Unbounded`
 /// and not a finite figure the graph would refuse or count as never decaying. The node still
 /// narrows an unbounded ceiling to what rings: a thawed room reports and parks on its own.
@@ -701,7 +702,7 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
     );
     assert!(default.get() as f64 > 8.0 * 192_000.0);
     assert!(
-        default.get() < 2_000_000,
+        default.get() < 2_100_000,
         "nothing stretches the ceiling: {default:?}"
     );
     let nineteen =
@@ -714,14 +715,15 @@ fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
             && long.get() as f64 > 19.0 * 48_000.0,
         "{long:?}"
     );
-    // A 40 s room at 96 kHz is past 2.88 million frames (what bounded a tail at 48 kHz) and
-    // within the sixty seconds the graph takes at that rate.
-    let forty = FdnLayout::new(8, MaxDecay::of(Seconds::new(40.0)), FreezeMode::Decaying).unwrap();
-    let Tail::Finite(room) = at(forty, SampleRate::SR_96K) else {
+    // A 36 s room at 96 kHz (a 40 s one, its floor 6 dB deeper, is past the sixty seconds and
+    // unbounded) is past 2.88 million frames (what bounded a tail at 48 kHz) and within the
+    // sixty seconds the graph takes at that rate.
+    let room = FdnLayout::new(8, MaxDecay::of(Seconds::new(36.0)), FreezeMode::Decaying).unwrap();
+    let Tail::Finite(room) = at(room, SampleRate::SR_96K) else {
         panic!("a finite ceiling")
     };
     assert!(
-        room.get() as f64 > 40.0 * 96_000.0
+        room.get() as f64 > 36.0 * 96_000.0
             && room <= MAX_NODE_TAIL.to_samples_ceil(SampleRate::SR_96K),
         "{room:?}"
     );

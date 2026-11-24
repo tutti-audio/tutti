@@ -139,13 +139,14 @@ pub use process::{
 };
 pub use process_initiator::{ProcessAction, ProcessError, ProcessInitiator, ReportRequest};
 pub use profile::{
-    ChannelsDetail, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
-    NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError, ProfileId, ProfileList,
-    ProfileLists, ProfileOnRequest, ProfileSpecific, ProfileState, ProfileTarget,
-    SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY, SUB_ID2_PROFILE_DETAILS_REPLY,
-    SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED, SUB_ID2_PROFILE_INQUIRY,
-    SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY, SUB_ID2_PROFILE_SPECIFIC_DATA,
-    SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData, StandardProfile,
+    ChannelsDetail, CountedVersion, DetailsData, InquiryTarget, ListTooLong, ManufacturerProfile,
+    NotCountedVersion, NotProfileChannels, NotSetProfileOn, ProfileChannels, ProfileDataError,
+    ProfileFormat, ProfileId, ProfileList, ProfileLists, ProfileOnRequest, ProfileSpecific,
+    ProfileState, ProfileTarget, SUB_ID2_PROFILE_ADDED, SUB_ID2_PROFILE_DETAILS_INQUIRY,
+    SUB_ID2_PROFILE_DETAILS_REPLY, SUB_ID2_PROFILE_DISABLED, SUB_ID2_PROFILE_ENABLED,
+    SUB_ID2_PROFILE_INQUIRY, SUB_ID2_PROFILE_REMOVED, SUB_ID2_PROFILE_REPLY,
+    SUB_ID2_PROFILE_SPECIFIC_DATA, SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON, SpecificData,
+    StandardProfile,
 };
 pub use profile_details::ProfileDetails;
 pub use rotary::{RotaryControl, RotarySpeaker, RotaryValue};
@@ -595,13 +596,11 @@ pub enum CiMessage {
     SetProfileOn {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
+        /// The Message Format Version, the address and the Channels requested
+        /// there: a Version 1 sender has no count field.
+        format: ProfileFormat,
         /// The device asked.
         to: Muid,
-        /// The address and the Channels requested there. A Version 1 sender has
-        /// no count field and it reads as 0.
-        target: ProfileTarget,
         /// The Profile to enable.
         profile: ProfileId,
     },
@@ -619,12 +618,10 @@ pub enum CiMessage {
     ProfileEnabled {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
-        /// The address and `Number Channels enabled` there: 0 for a Group or
-        /// Function Block address, and for a Version 1 sender, which has no
-        /// such field.
-        target: ProfileTarget,
+        /// The Message Format Version, the address and `Number Channels
+        /// enabled` there: 0 for a Group or Function Block address, and none
+        /// for a Version 1 sender, which has no such field.
+        format: ProfileFormat,
         /// The Profile.
         profile: ProfileId,
     },
@@ -633,11 +630,9 @@ pub enum CiMessage {
     ProfileDisabled {
         /// MUID of the sender.
         source: Muid,
-        /// CI message version.
-        ci_version: CiVersion,
-        /// The address and `Number Channels disabled` there: as
-        /// [`ProfileEnabled`](Self::ProfileEnabled).
-        target: ProfileTarget,
+        /// The Message Format Version, the address and `Number Channels
+        /// disabled` there: as [`ProfileEnabled`](Self::ProfileEnabled).
+        format: ProfileFormat,
         /// The Profile.
         profile: ProfileId,
     },
@@ -702,26 +697,11 @@ impl CiMessage {
     #[must_use]
     pub fn header(&self) -> CiHeader {
         match self {
-            CiMessage::SetProfileOn {
-                source,
-                ci_version,
-                target,
-                ..
-            }
-            | CiMessage::ProfileEnabled {
-                source,
-                ci_version,
-                target,
-                ..
-            }
-            | CiMessage::ProfileDisabled {
-                source,
-                ci_version,
-                target,
-                ..
-            } => CiHeader {
-                device_id: target.address(),
-                ci_version: *ci_version,
+            CiMessage::SetProfileOn { source, format, .. }
+            | CiMessage::ProfileEnabled { source, format, .. }
+            | CiMessage::ProfileDisabled { source, format, .. } => CiHeader {
+                device_id: format.address(),
+                ci_version: format.ci_version(),
                 source: *source,
             },
             CiMessage::ProcessCapabilitiesInquiry {
@@ -887,19 +867,19 @@ impl CiMessage {
             CiMessage::MessageReportReply { scope, .. } => out.extend(scope.bitmap_bytes()),
             CiMessage::ProfileReply { profiles, .. } => profiles.encode_body(out),
             CiMessage::SetProfileOn {
-                profile, target, ..
-            } => profile::encode_with_count(*profile, target.channels(), out),
+                profile, format, ..
+            } => format.encode_body(*profile, out),
             // Two reserved bytes (Table 25).
             CiMessage::SetProfileOff { profile, .. } => {
                 out.extend(profile.to_bytes());
                 out.extend([0, 0]);
             }
             CiMessage::ProfileEnabled {
-                profile, target, ..
+                profile, format, ..
             }
             | CiMessage::ProfileDisabled {
-                profile, target, ..
-            } => profile::encode_with_count(*profile, target.channels(), out),
+                profile, format, ..
+            } => format.encode_body(*profile, out),
             CiMessage::ProfileAdded { profile, .. } | CiMessage::ProfileRemoved { profile, .. } => {
                 out.extend(profile.to_bytes());
             }
@@ -1094,14 +1074,14 @@ impl CiMessage {
                     profiles,
                 })
             }
-            (SUB_ID2_SET_PROFILE_ON, Some(to)) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::SetProfileOn {
+            (SUB_ID2_SET_PROFILE_ON, Some(to)) => {
+                read::format_body(header, body).map(|(format, profile)| CiMessage::SetProfileOn {
                     source: header.source,
-                    ci_version: header.ci_version,
+                    format,
                     to,
-                    target,
                     profile,
-                }),
+                })
+            }
             (SUB_ID2_SET_PROFILE_OFF, Some(to)) => {
                 read::profile_body(body).map(|profile| CiMessage::SetProfileOff {
                     header,
@@ -1109,20 +1089,22 @@ impl CiMessage {
                     profile,
                 })
             }
-            (SUB_ID2_PROFILE_ENABLED, None) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::ProfileEnabled {
+            (SUB_ID2_PROFILE_ENABLED, None) => {
+                read::format_body(header, body).map(|(format, profile)| CiMessage::ProfileEnabled {
                     source: header.source,
-                    ci_version: header.ci_version,
-                    target,
+                    format,
                     profile,
-                }),
-            (SUB_ID2_PROFILE_DISABLED, None) => read::profile_target_body(header.device_id, body)
-                .map(|(target, profile)| CiMessage::ProfileDisabled {
-                    source: header.source,
-                    ci_version: header.ci_version,
-                    target,
-                    profile,
-                }),
+                })
+            }
+            (SUB_ID2_PROFILE_DISABLED, None) => {
+                read::format_body(header, body).map(|(format, profile)| {
+                    CiMessage::ProfileDisabled {
+                        source: header.source,
+                        format,
+                        profile,
+                    }
+                })
+            }
             (SUB_ID2_PROFILE_ADDED, None) => {
                 read::profile_body(body).map(|profile| CiMessage::ProfileAdded { header, profile })
             }

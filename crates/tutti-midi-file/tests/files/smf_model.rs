@@ -1,4 +1,4 @@
-//! The Standard MIDI File half of [`MidiFile`], against bytes built from the
+//! The Standard MIDI File half of [`StandardMidiFile`], against bytes built from the
 //! SMF 1.0 spec (`support`: an encoder and a decoder written from it, sharing
 //! no code with the crate, so they are the second opinion on the bytes).
 //!
@@ -14,8 +14,8 @@ use tutti_fixtures::{RangeContract, check_range_contract};
 
 use tutti_midi_file::{
     FileEvent, Meta, MicrosPerQuarter, MidiFile, MidiFileKind, OtherMetaKind, PairedNote,
-    ReadError, SmfDivision, SmfParseError, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind,
-    Tick, Timebase, TracksError,
+    ReadError, SmfDivision, SmfParseError, SmfReadError, SmpteFractionalFrames, SmpteOffset,
+    StandardMidiFile, SysEx, TextKind, Tick, Timebase, TracksError,
 };
 use tutti_midi_protocol::{
     SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
@@ -58,7 +58,7 @@ fn off(channel: u8, key: u8, vel: u8) -> FileEvent {
     .into()
 }
 
-fn read(bytes: &[u8]) -> MidiFile {
+fn read(bytes: &[u8]) -> StandardMidiFile {
     read_bytes(bytes).expect("reads")
 }
 
@@ -639,7 +639,7 @@ fn a_zero_division_is_refused() {
     let bytes = build_smf(0, Division::Metrical(0), &[vec![]]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::ZeroTicksPerBeat
@@ -682,7 +682,7 @@ fn a_chunk_cut_short_is_truncated() {
     let cut = &bytes[..bytes.len() - 5];
     assert!(matches!(
         read_bytes(cut),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::ChunkCutOff
@@ -691,7 +691,7 @@ fn a_chunk_cut_short_is_truncated() {
     // Cut inside the 8-byte chunk header of the track.
     assert!(matches!(
         read_bytes(&bytes[..14 + 5]),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::ChunkCutOff
@@ -715,7 +715,7 @@ fn a_file_missing_a_track_is_truncated() {
     let cut = &two[..one.len()];
     assert!(matches!(
         read_bytes(cut),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset,
             cause: SmfParseError::TracksCutOff
@@ -737,7 +737,7 @@ fn a_track_that_ends_mid_event_is_a_parse_error() {
     // The header chunk is 14 bytes and the track chunk's own header 8.
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::ChannelData
@@ -759,7 +759,7 @@ fn a_meta_event_longer_than_its_chunk_is_an_event_cut_off() {
     assert!(
         matches!(
             err,
-            ReadError::Smf {
+            SmfReadError::Parse {
                 track: Some(0),
                 offset: 22,
                 cause: SmfParseError::EventCutOff
@@ -783,7 +783,7 @@ fn a_chunk_past_the_declared_tracks_is_named_where_it_starts() {
     bytes.extend_from_slice(&[0x00, 0xFF, 0x2F, 0x00]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset,
             cause: SmfParseError::ExtraTracks
@@ -1025,7 +1025,7 @@ fn a_file_reads_and_writes_a_path() {
     let path = dir.path().join("x.mid");
     let file = crate::common::format0(SMF_DIVISION, track(vec![(0, on(0, 60, 1))])).unwrap();
     file.write(&path).unwrap();
-    assert_eq!(MidiFile::read(&path).unwrap(), file);
+    assert_eq!(MidiFile::read(&path).unwrap(), MidiFile::Standard(file));
     assert!(matches!(
         MidiFile::read(dir.path().join("absent.mid")),
         Err(ReadError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound
@@ -1036,8 +1036,11 @@ fn a_file_reads_and_writes_a_path() {
 #[test]
 fn bytes_of_neither_container_are_named_as_such() {
     assert!(matches!(
-        read_bytes(b"RIFF....WAVE"),
+        MidiFile::from_bytes(b"RIFF....WAVE"),
         Err(ReadError::UnknownFormat)
     ));
-    assert!(matches!(read_bytes(b""), Err(ReadError::UnknownFormat)));
+    assert!(matches!(
+        MidiFile::from_bytes(b""),
+        Err(ReadError::UnknownFormat)
+    ));
 }

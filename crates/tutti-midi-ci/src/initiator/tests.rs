@@ -54,8 +54,7 @@ fn reply(address: CiDeviceId, enabled: &[ProfileId], disabled: &[ProfileId]) -> 
 fn enabled(address: CiDeviceId, p: ProfileId, channels: u16) -> Decoded {
     Decoded::Message(CiMessage::ProfileEnabled {
         source: Muid::of(PEER),
-        ci_version: CI_VERSION,
-        target: target_at(address, channels),
+        format: ProfileFormat::current(target_at(address, channels)),
         profile: p,
     })
 }
@@ -63,8 +62,7 @@ fn enabled(address: CiDeviceId, p: ProfileId, channels: u16) -> Decoded {
 fn disabled(address: CiDeviceId, p: ProfileId, channels: u16) -> Decoded {
     Decoded::Message(CiMessage::ProfileDisabled {
         source: Muid::of(PEER),
-        ci_version: CI_VERSION,
-        target: target_at(address, channels),
+        format: ProfileFormat::current(target_at(address, channels)),
         profile: p,
     })
 }
@@ -328,8 +326,7 @@ fn a_report_from_another_source_is_not_this_peers() {
     let (mut i, _, _) = start();
     let other = Decoded::Message(CiMessage::ProfileEnabled {
         source: Muid::of(OTHER),
-        ci_version: CI_VERSION,
-        target: target_at(channel(0), 1),
+        format: ProfileFormat::current(target_at(channel(0), 1)),
         profile: profile(1),
     });
     assert!(i.on_message(&other, Instant::now()).is_empty());
@@ -355,20 +352,37 @@ fn a_report_at_one_address_leaves_the_same_profile_at_another_alone() {
 /// Spec: m2-101/5.3#4
 #[test]
 fn a_version_1_peers_report_has_no_channel_count() {
-    let (mut i, _, _) = start();
-    i.on_message(
+    let (mut i, _, now) = start();
+    let target = ProfileTarget::Channel {
+        channel: MidiChannel::of(0),
+        channels: ProfileChannels::of(1),
+    };
+    i.set_on(target, profile(1), now).unwrap();
+    let actions = i.on_message(
         &Decoded::Message(CiMessage::ProfileEnabled {
             source: Muid::of(PEER),
-            ci_version: CiVersion::of(1),
-            target: target_at(channel(0), 0),
+            format: ProfileFormat::Version1 {
+                address: channel(0),
+            },
             profile: profile(1),
         }),
-        Instant::now(),
+        now,
     );
     assert_eq!(
         i.table().get(channel(0), profile(1)).unwrap().channels(),
         None
     );
+    // The answer to the request carries none either.
+    assert!(actions.contains(&ProfileAction::Resolved {
+        request: ProfileRequest::SetOn {
+            address: channel(0),
+            profile: profile(1)
+        },
+        outcome: ProfileOutcome::Reported {
+            state: ProfileState::Enabled,
+            channels: None,
+        },
+    }));
 }
 
 /// Spec: m2-101/7.8#1
@@ -384,7 +398,7 @@ fn set_on_a_channel_sends_the_request_with_its_channel_count() {
         ProfileAction::Send(CiMessage::SetProfileOn {
             source,
             to,
-            target: sent,
+            format: sent,
             profile: p,
             ..
         }),
@@ -396,7 +410,7 @@ fn set_on_a_channel_sends_the_request_with_its_channel_count() {
         (*source, *to, *p),
         (Muid::of(OURS), Muid::of(PEER), profile(1))
     );
-    assert_eq!(*sent, target);
+    assert_eq!(*sent, ProfileFormat::current(target));
 }
 
 /// Spec: m2-101/7.8#1
@@ -409,12 +423,12 @@ fn set_on_a_group_or_function_block_asks_for_zero_channels() {
     ] {
         let (mut i, _, now) = start();
         let actions = i.set_on(target, profile(1), now).unwrap();
-        let [ProfileAction::Send(CiMessage::SetProfileOn { target: sent, .. })] = &actions[..]
+        let [ProfileAction::Send(CiMessage::SetProfileOn { format: sent, .. })] = &actions[..]
         else {
             panic!("a Set On");
         };
         assert_eq!(sent.address(), address);
-        assert!(sent.channels().is_by_address());
+        assert!(sent.channels().is_some_and(ProfileChannels::is_by_address));
     }
 }
 
@@ -449,7 +463,7 @@ fn set_on_resolves_on_the_enabled_report_of_that_profile_at_that_address() {
         request,
         outcome: ProfileOutcome::Reported {
             state: ProfileState::Enabled,
-            channels: ProfileChannels::of(2)
+            channels: Some(ProfileChannels::of(2)),
         },
     }));
     assert_eq!(i.deadline(), None);
@@ -468,7 +482,7 @@ fn set_on_answered_by_a_disabled_report_is_the_peer_unable_to_comply() {
         },
         outcome: ProfileOutcome::Reported {
             state: ProfileState::Disabled,
-            channels: ProfileChannels::BY_ADDRESS
+            channels: Some(ProfileChannels::BY_ADDRESS),
         },
     }));
 }
@@ -498,7 +512,7 @@ fn set_off_resolves_on_the_disabled_report_or_the_enabled_one_if_the_peer_could_
             },
             outcome: ProfileOutcome::Reported {
                 state,
-                channels: ProfileChannels::of(1)
+                channels: Some(ProfileChannels::of(1)),
             },
         }));
     }
@@ -510,8 +524,7 @@ fn a_report_from_another_muid_does_not_resolve_a_request() {
     i.set_off(channel(0), profile(1), now).unwrap();
     let other = Decoded::Message(CiMessage::ProfileDisabled {
         source: Muid::of(OTHER),
-        ci_version: CI_VERSION,
-        target: target_at(channel(0), 1),
+        format: ProfileFormat::current(target_at(channel(0), 1)),
         profile: profile(1),
     });
     assert!(i.on_message(&other, now).is_empty());
