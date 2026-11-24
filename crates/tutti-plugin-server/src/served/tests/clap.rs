@@ -1700,7 +1700,7 @@ fn a_render_mode_toggle_does_not_cycle_the_plugin() {
     instance.set_render_mode(main_thread(), RenderMode::Offline);
     assert_eq!(crate::test_utils::clap_probe_activation_count(), 0);
     assert_eq!(
-        instance.state.prepare().map(|p| p.mode()),
+        instance.state.applied().map(|p| p.mode()),
         Some(RenderMode::Offline)
     );
     instance.set_render_mode(main_thread(), RenderMode::Realtime);
