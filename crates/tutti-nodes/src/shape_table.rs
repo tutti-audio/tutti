@@ -559,7 +559,7 @@ fn each_node_declares_its_shape() {
             check(
                 LfoNode::from(
                     LfoConfig::new(LfoShape::Sine)
-                        .rate(Some(Hz::new(2.0)))
+                        .rate(Hz::new(2.0))
                         .depth(Bipolar::of(0.25)),
                 ),
                 Facts::default()
@@ -567,16 +567,16 @@ fn each_node_declares_its_shape() {
                     .bases(&some(&[0.25, 2.0])),
             )
         }),
-        ("lfo (beat-synced: its span is its clock)", || {
+        ("lfo (beat-synced: the rate is kept)", || {
             check(
                 LfoNode::from(
                     LfoConfig::new(LfoShape::Sine)
-                        .beat_sync(Some(BeatsPerCycle::of(4.0)))
+                        .beat_sync(BeatsPerCycle::of(4.0))
                         .depth(Bipolar::of(0.5)),
                 ),
                 Facts::default()
-                    .params(&[UnitParam::Depth])
-                    .bases(&[Some(0.5), None]),
+                    .params(&[UnitParam::Depth, UnitParam::Rate])
+                    .bases(&some(&[0.5, 1.0])),
             )
         }),
     ];

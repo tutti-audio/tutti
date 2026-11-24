@@ -2,10 +2,11 @@
 //! moved and with their param ports fed per frame.
 
 use crate::harness::{Gate, bus, feeds};
+use std::sync::Arc;
 use tutti_buffers::ChannelTopology;
 use tutti_nodes::{
-    DelayConfig, DelayControls, DelayLayout, DelayNode, LfoConfig, LfoNode, LfoShape, MaxDelay,
-    ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, Stagger,
+    DelayConfig, DelayControls, DelayLayout, DelayNode, LfoConfig, LfoNode, LfoShape, LfoSync,
+    MaxDelay, ModDelayConfig, ModDelayNode, PhaserConfig, PhaserNode, Stages, Stagger,
 };
 use tutti_units::{BeatsPerCycle, Feedback, Hz, PhaseIncrement, Seconds, UnitParam};
 
@@ -41,16 +42,26 @@ fn phaser(width: u16, stages: usize, step: f64) -> PhaserNode<f32> {
 /// The free-running sine, the random-smooth shape (hashed on its own path, fast enough to
 /// step inside the warm-up) and the beat-synced path, which walks the block's `Env` frame by
 /// frame; its quarter-cycle offset puts the stopped transport's beat 0 on the sine's peak.
+/// The synced node's sync word is stored every 20 blocks (under the 2400-frame ramp's 37.5),
+/// so the measured blocks run both clocks, the ramp, and a switch inside the ramp.
 fn lfo() {
     let gate = Gate::new(feeds::silence).warm(32).blocks(5_000);
-    let free = LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(2.0_f64)));
+    let free = LfoConfig::new(LfoShape::Sine).rate(Hz::new(2.0_f64));
     gate.run("lfo sine", LfoNode::from(free), |_, _| {});
-    let random = LfoConfig::new(LfoShape::RandomSmooth).rate(Some(Hz::new(200.0_f64)));
+    let random = LfoConfig::new(LfoShape::RandomSmooth).rate(Hz::new(200.0_f64));
     gate.run("lfo random", LfoNode::from(random), |_, _| {});
     let beat = LfoConfig::new(LfoShape::Sine)
-        .beat_sync(Some(BeatsPerCycle::of(4.0)))
+        .beat_sync(BeatsPerCycle::of(4.0))
         .phase_offset(PhaseIncrement::new(0.25));
-    gate.run("lfo beat-synced", LfoNode::from(beat), |_, _| {});
+    let node = LfoNode::from(beat);
+    let sync = Arc::clone(node.sync());
+    gate.run("lfo beat-synced, switching", node, |_, i| {
+        sync.store(if (i / 20) % 2 == 0 {
+            LfoSync::Synced
+        } else {
+            LfoSync::Free
+        });
+    });
 }
 
 /// The delay is shorter than the warm-up so its wet-only output is audible at the check; the
