@@ -36,7 +36,6 @@ fn denormals::with_no_denormals
 fn executor::Executor::downgrade
 fn executor::Executor::new
 fn executor::Executor::run_until_stalled
-fn executor::Executor::sleep
 fn executor::Executor::sleep_until
 fn executor::Executor::spawn
 fn executor::Executor::spawn_dedicated
@@ -50,7 +49,6 @@ fn executor::WeakExecutor::upgrade
 fn executor::join
 fn executor::join_within
 fn executor::native::Executor::spawn_threads
-fn executor::timers::Sleep::deadline
 fn executor::timers::Timer::sleep
 fn executor::timers::Timer::sleep_until
 fn executor::wasm::Executor::drive_on_page

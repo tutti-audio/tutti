@@ -73,7 +73,6 @@ fn output::Output::feed
 fn output::Output::main_output
 fn output::Output::tap
 fn output::Output::target
-fn output::Placement::channel_set
 fn output::Placement::layout
 fn output::Placement::new
 fn output::Placement::of_width
