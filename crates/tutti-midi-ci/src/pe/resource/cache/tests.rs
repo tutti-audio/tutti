@@ -10,16 +10,16 @@ use super::super::super::flow::PeMessageKind;
 use super::super::super::header::{PeCacheTime, PePage, PeReply, PeStatus, PeUpdateCommand};
 use super::super::super::tree::PeJson;
 use super::super::exchange::{
-    Script, custom, entry_target, get, json, paginating_list, program, program_page, sent_gets,
-    subscribed_script, target, update,
+    Script, custom, custom_entry, custom_name, entry_target, get, json, paginating_list, program,
+    program_page, sent_gets, subscribed_script, target, update,
 };
 use super::super::{
-    CanSet, PeCacheScope, PeData, PeLocalOn, PeOpaque, PeProgramList, PeResource, PeResourceList,
-    ResourceEntry, ResourceEvent, ResourceGet, ResourceSet,
+    CanSet, PeCacheScope, PeData, PeLocalOn, PeOpaque, PeProgramList, PeResourceList,
+    ResourceEntry, ResourceEvent, ResourceGet, ResourceSet, StandardResource,
 };
 
 fn page(offset: u32) -> ResourceGet {
-    ResourceGet::new(entry_target(PeResource::ProgramList, "g")).paged(PePage {
+    ResourceGet::new(entry_target(StandardResource::ProgramList, "g")).paged(PePage {
         offset,
         limit: NonZeroU32::new(3).unwrap(),
     })
@@ -119,7 +119,7 @@ fn pages_expire_each_on_its_own_cache_time() {
 #[test]
 fn a_subscription_update_overrides_the_cache_time() {
     let (mut script, id) = subscribed_script();
-    let read = get(PeResource::LocalOn);
+    let read = get(StandardResource::LocalOn);
     let sent = sent_gets(&script);
     let (_, actions) = script.init.get(&read, script.now).unwrap();
     script.take(actions);
@@ -143,13 +143,12 @@ fn a_subscription_update_overrides_the_cache_time() {
 #[test]
 fn a_set_drops_what_a_get_held() {
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(PeResource::LocalOn)
-            .can_set(CanSet::Full)
+        ResourceEntry::standard(StandardResource::LocalOn)
             .build()
             .unwrap(),
     );
     let mut script = Script::new(&list);
-    let read = get(PeResource::LocalOn);
+    let read = get(StandardResource::LocalOn);
     let ask = |script: &mut Script| {
         let sent = sent_gets(script);
         let (_, actions) = script.init.get(&read, script.now).unwrap();
@@ -165,7 +164,7 @@ fn a_set_drops_what_a_get_held() {
     };
     let set = |script: &mut Script, status: PeStatus| {
         let new = ResourceSet::full(
-            target(PeResource::LocalOn),
+            target(StandardResource::LocalOn),
             PeData::LocalOn(PeLocalOn(true)),
         )
         .unwrap();
@@ -192,7 +191,7 @@ fn a_set_drops_what_a_get_held() {
 #[test]
 fn a_reply_overtaken_by_a_subscription_update_is_not_cached() {
     let (mut script, id) = subscribed_script();
-    let read = get(PeResource::LocalOn);
+    let read = get(StandardResource::LocalOn);
     let sent = sent_gets(&script);
     let (_, actions) = script.init.get(&read, script.now).unwrap();
     script.take(actions);
@@ -224,7 +223,7 @@ fn walk_at(script: &mut Script, at: Duration, asked: &[(u8, Option<u32>)]) -> bo
     let sent = sent_gets(script);
     script.events.clear();
     script.now = script.start() + at;
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let (_, actions) = script
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
@@ -286,7 +285,7 @@ fn a_page_a_walk_held_answers_a_get_of_the_same_page() {
     ));
     assert!(!get_at(&mut script, &page(3), secs(10), Some(30)));
     // Another limit is another request.
-    let other = ResourceGet::new(entry_target(PeResource::ProgramList, "g")).paged(PePage {
+    let other = ResourceGet::new(entry_target(StandardResource::ProgramList, "g")).paged(PePage {
         offset: 3,
         limit: NonZeroU32::new(2).unwrap(),
     });
@@ -297,13 +296,13 @@ fn a_page_a_walk_held_answers_a_get_of_the_same_page() {
 /// subscription's id.
 fn subscribed_list() -> (Script, crate::SubscribeId) {
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(PeResource::ProgramList)
+        ResourceEntry::standard(StandardResource::ProgramList)
             .can_subscribe(true)
             .build()
             .unwrap(),
     );
     let mut script = Script::new(&list);
-    let target = entry_target(PeResource::ProgramList, "g");
+    let target = entry_target(StandardResource::ProgramList, "g");
     let (_, actions) = script
         .init
         .subscribe(&ResourceGet::new(target), script.now)
@@ -349,8 +348,7 @@ fn a_subscription_update_drops_every_page_a_walk_held() {
 fn a_set_drops_every_page_a_get_held() {
     let resource = custom("X-ScoreList");
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(resource.clone())
-            .schema(json(r#"{"title":"Score List","type":"array"}"#))
+        custom_entry("X-ScoreList", r#"{"title":"Score List","type":"array"}"#)
             .can_paginate(true)
             .can_set(CanSet::Full)
             .build()
@@ -379,7 +377,10 @@ fn a_set_drops_every_page_a_get_held() {
     assert!(!read(&mut script, 0) && !read(&mut script, 3), "held");
     let new = ResourceSet::full(
         target(resource.clone()),
-        PeData::Opaque(PeOpaque::new(resource.clone(), PeJson::Array(Vec::new())).unwrap()),
+        PeData::Opaque(PeOpaque::new(
+            custom_name("X-ScoreList"),
+            PeJson::Array(Vec::new()),
+        )),
     )
     .unwrap();
     let (_, actions) = script.init.set(&new, script.now).unwrap();
@@ -510,7 +511,7 @@ fn a_walk_from_the_cache_keeps_a_manufacturer_property() {
         }
         script.reply_with(id, PeMessageKind::GET_REPLY, header, page.encode());
     };
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let size = NonZeroU32::new(3).unwrap();
     let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();
     script.take(actions);
@@ -536,7 +537,7 @@ fn a_walk_from_the_cache_keeps_a_manufacturer_property() {
 #[test]
 fn a_walk_page_overtaken_by_a_subscription_update_is_not_cached() {
     let (mut script, id) = subscribed_list();
-    let get = ResourceGet::new(entry_target(PeResource::ProgramList, "g"));
+    let get = ResourceGet::new(entry_target(StandardResource::ProgramList, "g"));
     let (_, actions) = script
         .init
         .get_list(&get, NonZeroU32::new(3).unwrap(), script.now)
@@ -560,8 +561,7 @@ fn a_walk_page_overtaken_by_a_subscription_update_is_not_cached() {
 fn a_walk_page_overtaken_by_a_set_is_not_cached() {
     let resource = custom("X-ScoreList");
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(resource.clone())
-            .schema(json(r#"{"title":"Score List","type":"array"}"#))
+        custom_entry("X-ScoreList", r#"{"title":"Score List","type":"array"}"#)
             .can_paginate(true)
             .can_set(CanSet::Full)
             .build()
@@ -575,7 +575,10 @@ fn a_walk_page_overtaken_by_a_set_is_not_cached() {
     let walk_id = script.last_get_id();
     let new = ResourceSet::full(
         target(resource.clone()),
-        PeData::Opaque(PeOpaque::new(resource.clone(), PeJson::Array(Vec::new())).unwrap()),
+        PeData::Opaque(PeOpaque::new(
+            custom_name("X-ScoreList"),
+            PeJson::Array(Vec::new()),
+        )),
     )
     .unwrap();
     let (_, actions) = script.init.set(&new, script.now).unwrap();
@@ -610,8 +613,7 @@ fn a_walk_page_overtaken_by_a_set_is_not_cached() {
 fn a_walk_of_a_custom_list_is_served_from_the_cache() {
     let resource = custom("X-ScoreList");
     let list = PeResourceList::new().with(
-        ResourceEntry::builder(resource.clone())
-            .schema(json(r#"{"title":"Score List","type":"array"}"#))
+        custom_entry("X-ScoreList", r#"{"title":"Score List","type":"array"}"#)
             .can_paginate(true)
             .build()
             .unwrap(),
@@ -636,7 +638,7 @@ fn a_walk_of_a_custom_list_is_served_from_the_cache() {
     }
     assert_eq!(sent_gets(&script), 2);
     let sent_json = json(r#"[{"n":1,"x":[1.5]},"a",{"n":2},null]"#);
-    let want = PeData::Opaque(PeOpaque::new(resource, sent_json).unwrap());
+    let want = PeData::Opaque(PeOpaque::new(custom_name("X-ScoreList"), sent_json));
     assert_eq!(got(&script, call), want);
     script.events.clear();
     let (call, actions) = script.init.get_list(&get, size, script.now).unwrap();

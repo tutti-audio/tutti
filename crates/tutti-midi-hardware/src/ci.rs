@@ -1632,16 +1632,15 @@ mod tests {
     #[test]
     fn a_set_through_one_group_is_read_through_another_and_by_the_app() {
         use tutti_midi_ci::{
-            CanSet, PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits, PeResource, PeSettings,
-            ResourceEntry, ResourceEvent, ResourceGet, ResourceInitiator, ResourceSet,
-            ResourceTarget, SimultaneousRequests,
+            PeCapabilities, PeData, PeLocalOn, PeReassemblyLimits, PeSettings, ResourceEntry,
+            ResourceEvent, ResourceGet, ResourceInitiator, ResourceSet, ResourceTarget,
+            SimultaneousRequests, StandardResource,
         };
         let (mut out, _counters) = output();
         let now = Instant::now();
         let mut store = ResourceStore::new();
         store.declare(
-            ResourceEntry::builder(PeResource::LocalOn)
-                .can_set(CanSet::Full)
+            ResourceEntry::standard(StandardResource::LocalOn)
                 .build()
                 .unwrap(),
         );
@@ -1660,7 +1659,7 @@ mod tests {
             },
             body_limit: tutti_midi_ci::BodyLimit::of(1 << 16),
         };
-        let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+        let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
         let mut ends = Vec::new();
         for member in &mut running.members {
             member.server.accept(peer, MAX_SYSEX);
@@ -1777,7 +1776,7 @@ mod tests {
                 "{group:?}"
             );
             let call = PropertyCall::Get(ResourceGet::new(
-                ResourceTarget::try_from(tutti_midi_ci::PeResource::LocalOn).unwrap(),
+                ResourceTarget::try_from(tutti_midi_ci::StandardResource::LocalOn).unwrap(),
             ));
             running.start_properties(
                 &mut vec![PropertyAsk {

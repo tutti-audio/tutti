@@ -12,7 +12,7 @@ use super::super::tree::PeObject;
 use super::data::PeData;
 use super::entry::ResourceEntry;
 use super::fields::PeDataError;
-use super::kind::{CanSet, PeResource, ResIdUse};
+use super::kind::{CanSet, PeResource, ResIdUse, StandardResource};
 use super::link::{LinkRole, PeLink};
 
 /// An inquiry that the rules of Property Exchange refuse.
@@ -114,11 +114,24 @@ impl TryFrom<PeResource> for ResourceTarget {
     }
 }
 
+impl TryFrom<StandardResource> for ResourceTarget {
+    type Error = RequestRefused;
+
+    /// The Resource without an entry.
+    ///
+    /// # Errors
+    ///
+    /// [`RequestRefused::ResIdRequired`] for a Resource that has entries.
+    fn try_from(resource: StandardResource) -> Result<Self, RequestRefused> {
+        Self::try_from(PeResource::from(resource))
+    }
+}
+
 impl ResourceTarget {
     /// The State list, a Resource with no entry.
     pub(super) fn state_list() -> Self {
         Self {
-            resource: PeResource::StateList,
+            resource: StandardResource::StateList.into(),
             res_id: None,
         }
     }
@@ -128,7 +141,11 @@ impl ResourceTarget {
     /// # Errors
     ///
     /// [`RequestRefused::ResIdUnused`] for a Resource that has no entries.
-    pub fn entry(resource: PeResource, res_id: ResourceId) -> Result<Self, RequestRefused> {
+    pub fn entry(
+        resource: impl Into<PeResource>,
+        res_id: ResourceId,
+    ) -> Result<Self, RequestRefused> {
+        let resource = resource.into();
         if resource.res_id_use() == ResIdUse::Unused {
             return Err(RequestRefused::ResIdUnused(resource));
         }
