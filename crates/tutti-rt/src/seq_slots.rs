@@ -80,7 +80,9 @@ const fn before(a: u32, b: u32) -> bool {
 pub struct Generation(u32);
 
 impl Generation {
-    /// The generation a raw serial names.
+    /// The generation a raw serial names: for the side that receives one
+    /// another thread published with [`get`](Self::get). The two ends make
+    /// their own.
     #[must_use]
     pub const fn new(raw: u32) -> Self {
         Self(raw)
