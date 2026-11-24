@@ -11,6 +11,18 @@ fn at(frame: u64) -> Seconds {
     Frame::new(frame).to_seconds(RATE)
 }
 
+/// What a poll at `stand` places against: 120 bpm.
+fn poll(stand: &Stand) -> Poll<'_> {
+    static MAP: std::sync::LazyLock<TempoMap> =
+        std::sync::LazyLock::new(|| TempoMap::constant(Bpm::of(120.0)).expect("a tempo"));
+    Poll {
+        stand,
+        tempo: Bpm::of(120.0),
+        map: &MAP,
+        now: stand.seconds,
+    }
+}
+
 /// A transport at 2 s (beat 4 at 120 bpm), rolling, whose next block starts at
 /// frame 96 512.
 fn rolling() -> Stand {
@@ -71,14 +83,18 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
         },
         BeatClockEvent::Clock(ClockEvent::Stop { at: at(96_480) }),
     ];
-    let (actions, tempos) = lay::<BeatClockFollower>(
+    let mut tempos = Vec::new();
+    let actions = lay::<BeatClockFollower>(
         events,
         ClockKind::BeatClock,
         false,
-        &stand,
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&stand),
         &mut out,
+        |event, _| {
+            if let BeatClockEvent::Tempo { tempo, at: heard } = event {
+                tempos.push((tempo, placed_frame(heard, RATE, stand.next())));
+            }
+        },
     );
     // The source ends stopped, so the locate is not advanced.
     assert_eq!(
@@ -117,31 +133,29 @@ fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
         assert_eq!(frame, Frame::new(96_960));
         beat
     };
-    let (actions, _) = lay::<BeatClockFollower>(
+    let actions = lay::<BeatClockFollower>(
         vec![BeatClockEvent::Clock(ClockEvent::Locate {
             position: Beat::new(8.0),
             at: at(96_000),
         })],
         ClockKind::BeatClock,
         true,
-        &stand,
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&stand),
         &mut Vec::new(),
+        |_, _| {},
     );
     let beat = placed(actions);
     assert!((beat.get() - 8.04).abs() < 1e-9, "{beat:?}");
-    let (actions, _) = lay::<MtcFollower>(
+    let actions = lay::<MtcFollower>(
         vec![MtcEvent::Clock(ClockEvent::Locate {
             position: Seconds::new(10.0),
             at: at(96_000),
         })],
         ClockKind::Mtc,
         true,
-        &stand,
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&stand),
         &mut Vec::new(),
+        |_, _| {},
     );
     let beat = placed(actions);
     assert!((beat.get() - 20.04).abs() < 1e-9, "{beat:?}");
@@ -193,7 +207,7 @@ fn a_stopped_transport_stands_where_it_is() {
 #[test]
 fn a_reversed_source_is_reported_and_stopped() {
     let mut out = Vec::new();
-    let (actions, _) = lay::<MtcFollower>(
+    let actions = lay::<MtcFollower>(
         vec![
             MtcEvent::Reversed,
             MtcEvent::Clock(ClockEvent::Stop { at: at(96_000) }),
@@ -203,10 +217,18 @@ fn a_reversed_source_is_reported_and_stopped() {
         ],
         ClockKind::Mtc,
         false,
-        &rolling(),
-        Bpm::of(120.0),
-        &map(120.0),
+        &poll(&rolling()),
         &mut out,
+        |event, out| {
+            if event == MtcEvent::Reversed {
+                out.push(
+                    MidiEvent::ClockReversed {
+                        kind: ClockKind::Mtc,
+                    }
+                    .into(),
+                );
+            }
+        },
     );
     assert_eq!(
         actions,

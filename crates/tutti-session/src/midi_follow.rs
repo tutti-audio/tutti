@@ -494,15 +494,12 @@ impl Stand {
     }
 }
 
-/// A runtime clock follower as the session drives it: its steps, polls and
-/// steers, the unit it counts positions in, and what only it says.
+/// A runtime clock follower as the session drives it.
 trait Source {
     /// The unit positions are counted in.
     type Position: Copy;
     /// The follower's event.
     type Event: Copy;
-    /// What only this follower says, beside a [`ClockEvent`].
-    type Own: Copy;
 
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(Self::Event));
     fn poll(&mut self, now: Seconds, out: &mut impl FnMut(Self::Event));
@@ -512,17 +509,9 @@ trait Source {
         now: Seconds,
         out: &mut impl FnMut(Self::Event),
     );
-    /// The part of `event` every source says, or what only this one does.
-    fn split(event: Self::Event) -> Result<ClockEvent<Self::Position>, Self::Own>;
-    /// Acts on `own`: a tempo is stepped at the frame `placed` puts it on, a
-    /// reversal is reported as of `kind`.
-    fn own(
-        own: Self::Own,
-        kind: ClockKind,
-        placed: impl Fn(Seconds) -> Frame,
-        tempos: &mut Vec<(Bpm, Frame)>,
-        out: &mut Vec<crate::SessionEvent>,
-    );
+    /// The [`ClockEvent`] in `event`, or `event` back when it is one only this
+    /// follower says.
+    fn clock(event: Self::Event) -> Result<ClockEvent<Self::Position>, Self::Event>;
     /// An error in the source's unit, as the app reads it.
     fn offset(error: Self::Position) -> ClockOffset;
     /// Where the transport is on graph frame `frame`.
@@ -535,7 +524,6 @@ trait Source {
 impl Source for BeatClockFollower {
     type Position = Beat;
     type Event = BeatClockEvent;
-    type Own = (Bpm, Seconds);
 
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(BeatClockEvent)) {
         Self::step(self, ump, at, out);
@@ -554,21 +542,11 @@ impl Source for BeatClockFollower {
         Self::steer(self, transport, now, out);
     }
 
-    fn split(event: BeatClockEvent) -> Result<ClockEvent<Beat>, (Bpm, Seconds)> {
+    fn clock(event: BeatClockEvent) -> Result<ClockEvent<Beat>, BeatClockEvent> {
         match event {
             BeatClockEvent::Clock(clock) => Ok(clock),
-            BeatClockEvent::Tempo { tempo, at } => Err((tempo, at)),
+            tempo @ BeatClockEvent::Tempo { .. } => Err(tempo),
         }
-    }
-
-    fn own(
-        (tempo, at): (Bpm, Seconds),
-        _kind: ClockKind,
-        placed: impl Fn(Seconds) -> Frame,
-        tempos: &mut Vec<(Bpm, Frame)>,
-        _out: &mut Vec<crate::SessionEvent>,
-    ) {
-        tempos.push((tempo, placed(at)));
     }
 
     fn offset(error: Beat) -> ClockOffset {
@@ -587,7 +565,6 @@ impl Source for BeatClockFollower {
 impl Source for MtcFollower {
     type Position = Seconds;
     type Event = MtcEvent;
-    type Own = ();
 
     fn step(&mut self, ump: Ump, at: Seconds, out: &mut impl FnMut(MtcEvent)) {
         Self::step(self, ump, at, out);
@@ -601,21 +578,11 @@ impl Source for MtcFollower {
         Self::steer(self, transport, now, out);
     }
 
-    fn split(event: MtcEvent) -> Result<ClockEvent<Seconds>, ()> {
+    fn clock(event: MtcEvent) -> Result<ClockEvent<Seconds>, MtcEvent> {
         match event {
             MtcEvent::Clock(clock) => Ok(clock),
-            MtcEvent::Reversed => Err(()),
+            reversed @ MtcEvent::Reversed => Err(reversed),
         }
-    }
-
-    fn own(
-        (): (),
-        kind: ClockKind,
-        _placed: impl Fn(Seconds) -> Frame,
-        _tempos: &mut Vec<(Bpm, Frame)>,
-        out: &mut Vec<crate::SessionEvent>,
-    ) {
-        out.push(MidiEvent::ClockReversed { kind }.into());
     }
 
     fn offset(error: Seconds) -> ClockOffset {
@@ -627,44 +594,55 @@ impl Source for MtcFollower {
     }
 
     fn beat_of(position: Seconds, lag: Seconds, _tempo: Bpm, map: &TempoMap) -> Beat {
-        map.beat_at_seconds(Seconds::new(position.get() + lag.get()))
+        map.beat_at_seconds(position + lag)
     }
 }
 
-/// What a poll's events ask of the transport, placed, and the tempos to step.
-/// Reports go to `out`. `rolling` is whether the source is rolling after them;
-/// a locate while it is not is not advanced.
+/// Where the transport stands at a poll: the frame, the tempo and the map the
+/// source's events are placed against, and the `now` of the poll.
+struct Poll<'a> {
+    stand: &'a Stand,
+    tempo: Bpm,
+    map: &'a TempoMap,
+    now: Seconds,
+}
+
+/// What a poll's events ask of the transport, placed. Reports go to `out`; an
+/// event only this follower says goes to `other`, in order, with `out`.
+/// `rolling` is whether the source is rolling after them; a locate while it is
+/// not is not advanced.
 fn lay<S: Source>(
     events: Vec<S::Event>,
     kind: ClockKind,
     rolling: bool,
-    stand: &Stand,
-    tempo: Bpm,
-    map: &TempoMap,
+    poll: &Poll<'_>,
     out: &mut Vec<crate::SessionEvent>,
-) -> (Vec<Placed>, Vec<(Bpm, Frame)>) {
+    mut other: impl FnMut(S::Event, &mut Vec<crate::SessionEvent>),
+) -> Vec<Placed> {
+    let Poll {
+        stand, tempo, map, ..
+    } = *poll;
     let rate = stand.rate;
     let next = stand.next();
     let placed = |at: Seconds| placed_frame(at, rate, next);
     // Where the source is on the frame `at` is placed on.
     let beat_of = |position: S::Position, at: Seconds| {
         let lag = if rolling {
-            Seconds::new((placed(at).to_seconds(rate) - at).get().max(0.0))
+            (placed(at).to_seconds(rate) - at).max(Seconds::ZERO)
         } else {
-            Seconds::new(0.0)
+            Seconds::ZERO
         };
         S::beat_of(position, lag, tempo, map)
     };
-    let mut tempos = Vec::new();
     let mut actions: Vec<Placed> = Vec::new();
     // A bare Play lands where the command before it did.
     let mut last = At::Frame(next + tutti_graph::declick_frames(rate));
-    let mut events = events.into_iter().map(S::split).peekable();
+    let mut events = events.into_iter().map(S::clock).peekable();
     while let Some(event) = events.next() {
         let event = match event {
             Ok(clock) => clock,
-            Err(own) => {
-                S::own(own, kind, placed, &mut tempos, out);
+            Err(event) => {
+                other(event, out);
                 continue;
             }
         };
@@ -701,7 +679,7 @@ fn lay<S: Source>(
             }
         }
     }
-    (actions, tempos)
+    actions
 }
 
 /// The follower of the kind the app picked, holding only that kind's state.
@@ -779,57 +757,74 @@ impl ClockFollow {
         if lost > 0 {
             tracing::warn!("midi: the clock follower's tap lost {lost} events");
         }
-        let now = instant(cx.playhead.frame());
         let stand = Stand::of(&cx.playhead);
         let map = cx.settings.tempo_map();
-        let rolling = self.rolling;
-        let (actions, tempos, rolling) = match &mut self.core {
-            Clock::BeatClock(f) => drive(
-                f,
-                ClockKind::BeatClock,
-                &arrived,
-                now,
-                rolling,
-                cx,
-                &stand,
-                &map,
-                out,
-            ),
+        let poll = Poll {
+            stand: &stand,
+            tempo: cx.settings.current_tempo(),
+            map: &map,
+            now: instant(cx.playhead.frame()),
+        };
+        let was_rolling = self.rolling;
+        let placed = |at: Seconds| placed_frame(at, stand.rate, stand.next());
+        let (actions, rolling) = match &mut self.core {
+            Clock::BeatClock(f) => {
+                let mut tempos = Vec::new();
+                let driven = drive(
+                    f,
+                    ClockKind::BeatClock,
+                    &arrived,
+                    was_rolling,
+                    &poll,
+                    out,
+                    |event, _| {
+                        if let BeatClockEvent::Tempo { tempo, at } = event {
+                            tempos.push((tempo, placed(at)));
+                        }
+                    },
+                );
+                cx.apply_tempos(&tempos, &stand, out);
+                driven
+            }
             Clock::Mtc(f) => drive(
                 f,
                 ClockKind::Mtc,
                 &arrived,
-                now,
-                rolling,
-                cx,
-                &stand,
-                &map,
+                was_rolling,
+                &poll,
                 out,
+                |event, out| {
+                    if event == MtcEvent::Reversed {
+                        out.push(
+                            MidiEvent::ClockReversed {
+                                kind: ClockKind::Mtc,
+                            }
+                            .into(),
+                        );
+                    }
+                },
             ),
         };
         self.rolling = rolling;
-        if self.owns_tempo() {
-            cx.apply_tempos(&tempos, &stand, out);
-        }
         actions
     }
 }
 
-/// One poll of `source`: the messages that `arrived`, the silence to `now`, and
-/// a steer against the transport. The placed commands, the tempos to step and
-/// whether the source is rolling after them.
-#[allow(clippy::too_many_arguments)]
+/// One poll of `source`: the messages that `arrived`, the silence to `poll.now`,
+/// and a steer against the transport. The placed commands and whether the
+/// source is rolling after them.
 fn drive<S: Source>(
     source: &mut S,
     kind: ClockKind,
     arrived: &[(Ump, Seconds)],
-    now: Seconds,
     was_rolling: bool,
-    cx: &FollowCx<'_>,
-    stand: &Stand,
-    map: &TempoMap,
+    poll: &Poll<'_>,
     out: &mut Vec<crate::SessionEvent>,
-) -> (Vec<Placed>, Vec<(Bpm, Frame)>, bool) {
+    other: impl FnMut(S::Event, &mut Vec<crate::SessionEvent>),
+) -> (Vec<Placed>, bool) {
+    let Poll {
+        stand, map, now, ..
+    } = *poll;
     let mut events = Vec::new();
     for &(ump, at) in arrived {
         source.step(ump, at, &mut |e| events.push(e));
@@ -838,7 +833,7 @@ fn drive<S: Source>(
     let rolling = events
         .iter()
         .rev()
-        .find_map(|e| match S::split(*e) {
+        .find_map(|e| match S::clock(*e) {
             Ok(ClockEvent::Play) => Some(true),
             Ok(ClockEvent::Stop { .. }) => Some(false),
             _ => None,
@@ -846,20 +841,10 @@ fn drive<S: Source>(
         .unwrap_or(was_rolling);
     // The drift between the source and the transport, read at the frame a
     // command lands on; a transport that is not rolling has none.
-    let steered =
-        (rolling && cx.playhead.playing()).then(|| S::transport(stand, map, stand.next()));
+    let steered = (rolling && stand.playing).then(|| S::transport(stand, map, stand.next()));
     let lands = stand.next().to_seconds(stand.rate);
     source.steer(steered, lands, &mut |e| events.push(e));
-    let (actions, tempos) = lay::<S>(
-        events,
-        kind,
-        rolling,
-        stand,
-        cx.settings.current_tempo(),
-        map,
-        out,
-    );
-    (actions, tempos, rolling)
+    (lay::<S>(events, kind, rolling, poll, out, other), rolling)
 }
 
 /// The one Machine Control follower a session has: its core and its tap.
