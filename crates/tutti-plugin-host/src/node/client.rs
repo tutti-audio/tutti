@@ -86,7 +86,8 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// Whether the plugin is lost, read with no lock ([`Instance::lost_latch`]).
     lost: Arc<Lost>,
     /// Whether the plugin runs at the rate it kept after refusing the graph's:
-    /// the node renders silence ([`Instance::silenced`]).
+    /// the node renders silence ([`Instance::silenced`]). The instance holds
+    /// the other clone and outlives the node, so the node's drop never frees it.
     pub(super) silenced: Arc<Silenced>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance

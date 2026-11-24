@@ -154,17 +154,21 @@ impl Silence {
 /// ([`Instance::restored`]), and readable with no lock by the nodes over the
 /// instance. A node renders silence while it holds:
 /// a plugin at the wrong rate would sound pitch-shifted.
+///
+/// `Relaxed`: no data is behind the flag. The Processor reaches a node through
+/// its handoff, never on the strength of this bool, so a read one block late is
+/// a block at the old state.
 #[derive(Debug, Default)]
 pub(super) struct Silenced(AtomicBool);
 
 impl Silenced {
     /// Whether the nodes render silence.
     pub(super) fn holds(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.load(Ordering::Relaxed)
     }
 
     fn set(&self, silenced: bool) {
-        self.0.store(silenced, Ordering::Release);
+        self.0.store(silenced, Ordering::Relaxed);
     }
 }
 
