@@ -3958,7 +3958,8 @@ mod tests {
         };
         assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_PRESSURE);
         assert_eq!(e.note_id, on.note_id);
-        assert!((e.value - f64::from(0x2A_u8) / 127.0).abs() < 0.01);
+        // M2-115: a 7-bit value at or below centre is shifted, 0x2A to 0x5400_0000.
+        assert_eq!(e.value, f64::from(0x5400_0000_u32) / f64::from(u32::MAX));
 
         let mut list = InputEventList::new(InputRooms::new(1024));
         list.set_note_ports(&[NoteSend::Midi]).unwrap();
