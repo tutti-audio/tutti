@@ -5,7 +5,8 @@ use super::super::{
     SUB_ID2_PROCESS_CAPABILITIES_INQUIRY, SimultaneousRequests,
 };
 use super::super::{
-    DetailsData, InquiryTarget, ProfileId, ProfileSpecific, ProfileTarget, SpecificData,
+    DetailsData, InquiryTarget, ProfileFormat, ProfileId, ProfileSpecific, ProfileTarget,
+    SpecificData,
 };
 use super::super::{Unread, UnreadReason};
 use super::*;
@@ -590,9 +591,8 @@ fn a_set_on_set_off_or_details_inquiry_to_us_is_nakked_0x04_with_the_profile_id(
             0x22u8,
             on(channel, PEER, OURS, |header, to| CiMessage::SetProfileOn {
                 source: header.source,
-                ci_version: header.ci_version,
                 to,
-                target: target_at(channel, 1),
+                format: ProfileFormat::current(target_at(channel, 1)),
                 profile: piano(),
             }),
         ),
@@ -636,9 +636,8 @@ fn a_set_on_for_another_muid_is_not_nakked() {
     let set = on(CiDeviceId::Group, PEER, OTHER, |header, to| {
         CiMessage::SetProfileOn {
             source: header.source,
-            ci_version: header.ci_version,
             to,
-            target: ProfileTarget::Group,
+            format: ProfileFormat::current(ProfileTarget::Group),
             profile: piano(),
         }
     });
@@ -660,8 +659,7 @@ fn what_an_initiator_reads_is_not_answered_by_the_management_core() {
         }),
         Decoded::Message(CiMessage::ProfileEnabled {
             source: Muid::of(PEER),
-            ci_version: CI_VERSION,
-            target: ProfileTarget::FunctionBlock,
+            format: ProfileFormat::current(ProfileTarget::FunctionBlock),
             profile: piano(),
         }),
         Decoded::Message(CiMessage::ProfileAdded {
