@@ -93,9 +93,9 @@ use tutti_platform::Instant;
 use tutti_ump::{DeviceIdentity, U7};
 
 use super::{
-    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage, PeMessageKind,
-    ProcessFeatures, ProfileLists, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
+    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
+    DiscoveryData, EndpointInfo, EndpointStatus, MaxSysexSize, Muid, Nak, NakStatus, PeCiMessage,
+    PeMessageKind, ProcessFeatures, ProfileLists, ReplyData, ReportScope, SUB_ID2_ENDPOINT_INQUIRY,
 };
 use tutti_ump::FunctionBlockId;
 
@@ -132,29 +132,42 @@ pub enum CiAction {
 /// What Discovery told about a peer, and what was learned since.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CiPeer {
-    data: DiscoveryData,
-    instance_id: Option<ProductInstanceId>,
-    asked: bool,
+    data: ReplyData,
+    instance: InstanceInquiry,
+}
+
+/// Where the Endpoint Inquiry for a peer's Product Instance Id stands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum InstanceInquiry {
+    /// Not asked: the peer's Reply named no Function Block, or it NAKed.
+    NotAsked,
+    /// Asked, no answer yet.
+    Pending,
+    /// Answered.
+    Answered(ProductInstanceId),
 }
 
 impl CiPeer {
     /// What its Reply to Discovery declared: identity, categories, receivable
     /// size, and the Output Path ID and Function Block of the reply.
     #[must_use]
-    pub fn discovery(&self) -> &DiscoveryData {
+    pub fn discovery(&self) -> &ReplyData {
         &self.data
     }
 
     /// The Function Block the peer represents, `None` for none (`0x7F`).
     #[must_use]
     pub fn function_block(&self) -> Option<FunctionBlockId> {
-        self.data.function_block
+        self.data.function_block()
     }
 
     /// Its Endpoint's Product Instance Id, once an Endpoint Inquiry was answered.
     #[must_use]
     pub fn product_instance_id(&self) -> Option<&ProductInstanceId> {
-        self.instance_id.as_ref()
+        match &self.instance {
+            InstanceInquiry::Answered(id) => Some(id),
+            _ => None,
+        }
     }
 }
 
@@ -170,7 +183,7 @@ struct Round {
 /// One MIDI-CI Device on one Group of one connection.
 pub struct CiDevice<R> {
     muid: Muid,
-    own: DiscoveryData,
+    own: DeviceBody,
     entropy: R,
     peers: BTreeMap<Muid, CiPeer>,
     round: Round,
@@ -204,7 +217,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         let muid = draw(&mut entropy, |_| false);
         let mut device = Self {
             muid,
-            own: DiscoveryData::new(identity, categories, max_sysex_size),
+            own: DeviceBody::new(identity, categories, max_sysex_size),
             entropy,
             peers: BTreeMap::new(),
             round: Round {
@@ -280,16 +293,10 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                         self.collide(now, actions);
                     }
                 } else {
-                    let mut reply = self.own;
-                    // §5.6.1: the Reply returns the Output Path ID of the Discovery;
-                    // a Version 1 Discovery has none, which an initiator with a
-                    // single output sets to 0 (§5.5.4).
-                    reply.output_path_id = Some(data.output_path_id.unwrap_or_default());
-                    reply.function_block = None;
                     actions.push(CiAction::Send(CiMessage::DiscoveryReply {
                         header: self.header(),
                         to: header.source,
-                        data: reply,
+                        data: ReplyData::answering(data, self.own),
                     }));
                 }
             }
@@ -320,10 +327,10 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             CiMessage::EndpointReply { header, to, info } => {
                 if *to == self.muid
                     && let Some(peer) = self.peers.get_mut(&header.source)
-                    && peer.asked
+                    && peer.instance == InstanceInquiry::Pending
                 {
                     let EndpointInfo::ProductInstanceId(id) = info;
-                    peer.instance_id = Some(*id);
+                    peer.instance = InstanceInquiry::Answered(*id);
                     actions.push(CiAction::Updated(header.source));
                 }
             }
@@ -332,8 +339,9 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                 if *to == self.muid
                     && nak.nak_sub_id2.get() == SUB_ID2_ENDPOINT_INQUIRY
                     && let Some(peer) = self.peers.get_mut(&header.source)
+                    && peer.instance == InstanceInquiry::Pending
                 {
-                    peer.asked = false;
+                    peer.instance = InstanceInquiry::NotAsked;
                 }
             }
             CiMessage::ProfileInquiry { header, to } => {
@@ -455,7 +463,7 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }
     }
 
-    fn on_reply(&mut self, source: Muid, data: DiscoveryData, actions: &mut Vec<CiAction>) {
+    fn on_reply(&mut self, source: Muid, data: ReplyData, actions: &mut Vec<CiAction>) {
         if !self.round.replied.insert(source) {
             // §5.9.2: a second reply with the same MUID.
             actions.push(CiAction::Send(CiMessage::InvalidateMuid {
@@ -467,13 +475,16 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             }
             return;
         }
-        let asks = data.function_block.is_some();
+        let asks = data.function_block().is_some();
         self.peers.insert(
             source,
             CiPeer {
                 data,
-                instance_id: None,
-                asked: asks,
+                instance: if asks {
+                    InstanceInquiry::Pending
+                } else {
+                    InstanceInquiry::NotAsked
+                },
             },
         );
         actions.push(CiAction::Found(source));
@@ -526,12 +537,9 @@ impl<R: FnMut() -> u32> CiDevice<R> {
         }));
     }
 
-    /// The body of the Discovery this device sends: Output Path 0, no Function Block.
+    /// The body of the Discovery this device sends: Output Path 0.
     fn sent_discovery(&self) -> DiscoveryData {
-        let mut data = self.own;
-        data.output_path_id = Some(U7::default());
-        data.function_block = None;
-        data
+        DiscoveryData::new(self.own)
     }
 
     fn header(&self) -> CiHeader {

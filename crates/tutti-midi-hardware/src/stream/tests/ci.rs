@@ -7,8 +7,8 @@ use crate::{Answer, CiChange, PeerId, Polled, ReportEnd};
 use tutti_midi_ci::Initiator;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DiscoveryData,
-    MaxSysexSize,
+    CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
+    DiscoveryData, MaxSysexSize, ReplyData, ReplyV2,
 };
 use tutti_midi_device::INQUIRY_TIMEOUT;
 use tutti_ump::{
@@ -46,12 +46,16 @@ pub(super) fn peer() -> Muid {
     Muid::of(0x0012_3456)
 }
 
-fn peer_data() -> DiscoveryData {
+fn peer_data() -> ReplyData {
     peer_data_of(CiCategories::empty())
 }
 
-fn peer_data_of(categories: CiCategories) -> DiscoveryData {
-    DiscoveryData::new(identity(), categories, MaxSysexSize::of(256))
+fn peer_data_of(categories: CiCategories) -> ReplyData {
+    ReplyData::new(DeviceBody::new(
+        identity(),
+        categories,
+        MaxSysexSize::of(256),
+    ))
 }
 
 pub(super) fn polled(wire: &mut Wire, ms: u64) -> Vec<Polled> {
@@ -146,17 +150,17 @@ fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group()
     // Path 0.
     assert_eq!(payload[13..16], [0x41, 0x00, 0x00]);
     assert_eq!(payload[16..24], [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert_eq!(data.identity, identity());
+    assert_eq!(data.body.identity, identity());
     assert_eq!(payload[24], 0b1_1100);
     assert_eq!(
-        data.categories,
+        data.body.categories,
         CiCategories::PROFILE_CONFIGURATION
             | CiCategories::PROPERTY_EXCHANGE
             | CiCategories::PROCESS_INQUIRY
     );
     assert_eq!(payload[25..29], [0x00, 0x04, 0x00, 0x00]);
     assert_eq!(payload[29], 0);
-    assert_eq!(data.max_sysex_size, MaxSysexSize::of(512));
+    assert_eq!(data.body.max_sysex_size, MaxSysexSize::of(512));
 }
 
 /// An Endpoint whose blocks all declare no MIDI-CI runs none: nothing is sent
@@ -217,7 +221,7 @@ fn messages_are_routed_by_group() {
     let _ = received(&wire);
     let discovery = CiMessage::Discovery {
         header: CiHeader::new(peer()),
-        data: peer_data(),
+        data: DiscoveryData::new(peer_data().body),
     };
     say(&wire, MidiGroup::of(5), &discovery, 200);
     let _ = polled(&mut wire, 210);
@@ -302,8 +306,10 @@ fn a_reply_to_discovery_makes_the_peer_appear_and_is_reported_once() {
 fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     let (mut wire, ours) = midi1_running();
     let _ = polled(&mut wire, 10_000);
-    let mut data = peer_data();
-    data.output_path_id = Some(U7::of(5));
+    let data = DiscoveryData {
+        body: peer_data().body,
+        output_path_id: Some(U7::of(5)),
+    };
     say(
         &wire,
         GROUP_0,
@@ -321,9 +327,14 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     };
     assert_eq!(*group, GROUP_0);
     assert_eq!((header.source, *to), (ours, peer()));
-    assert_eq!(data.output_path_id, Some(U7::of(5)));
-    assert_eq!(data.function_block, None);
-    assert_eq!(data.identity, identity());
+    assert_eq!(
+        data.v2,
+        Some(ReplyV2 {
+            output_path_id: U7::of(5),
+            function_block: None
+        })
+    );
+    assert_eq!(data.body.identity, identity());
     assert!(wire.session.ci_peers(&wire.id).is_empty());
 }
 
@@ -475,7 +486,7 @@ fn a_reply_to_discovery_is_addressed_to_one_device() {
         GROUP_0,
         &CiMessage::Discovery {
             header: CiHeader::new(peer()),
-            data: peer_data(),
+            data: DiscoveryData::new(peer_data().body),
         },
         40,
     );
@@ -888,8 +899,11 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
 
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();
-    data.identity = model_identity(9);
-    data.function_block = Some(tutti_ump::FunctionBlockId::new(0).unwrap());
+    data.body.identity = model_identity(9);
+    data.v2 = Some(ReplyV2 {
+        output_path_id: U7::of(0),
+        function_block: Some(tutti_ump::FunctionBlockId::new(0).unwrap()),
+    });
     say(
         &wire,
         GROUP_0,

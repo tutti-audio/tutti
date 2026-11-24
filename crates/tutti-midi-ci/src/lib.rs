@@ -76,9 +76,9 @@ pub use deadline::Deadline;
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
-    CiCategories, DiscoveryData, MaxSysexSize, NotASysexSize, SUB_ID2_ACK, SUB_ID2_DISCOVERY,
-    SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY, SUB_ID2_ENDPOINT_REPLY,
-    SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
+    CiCategories, DeviceBody, DiscoveryData, MaxSysexSize, NotASysexSize, ReplyData, ReplyV2,
+    SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY,
+    SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
 };
 pub use drawbar::{
     Drawbar, DrawbarSetting, NotADrawbarSetting, ORGAN_HIGHEST_NOTE, ORGAN_LOWEST_NOTE,
@@ -449,18 +449,18 @@ pub enum CiMessage {
     Discovery {
         /// Addressing preamble.
         header: CiHeader,
-        /// Advertised identity and capabilities. Its Function Block is not on
-        /// the wire of a Discovery and is ignored.
+        /// Advertised identity and capabilities, and the initiator's Output Path ID.
         data: DiscoveryData,
     },
-    /// Reply to Discovery (M2-101 §5.6): the same body, to the initiator.
+    /// Reply to Discovery (M2-101 §5.6): the same device body, to the initiator.
     DiscoveryReply {
         /// Addressing preamble.
         header: CiHeader,
         /// The initiator, whose MUID the Discovery came from.
         to: Muid,
-        /// Advertised identity and capabilities.
-        data: DiscoveryData,
+        /// Advertised identity and capabilities, the echoed Output Path ID and
+        /// the Function Block.
+        data: ReplyData,
     },
     /// Invalidate MUID: tells a device its MUID collided and it must pick a new
     /// one (M2-101 §5.9). Always to the Broadcast MUID. Carries the target MUID.
@@ -827,8 +827,8 @@ impl CiMessage {
         }
         header.encode(self.sub_id2(), self.destination(), out);
         match self {
-            CiMessage::Discovery { data, .. } => data.encode_body(false, out),
-            CiMessage::DiscoveryReply { data, .. } => data.encode_body(true, out),
+            CiMessage::Discovery { data, .. } => data.encode_body(out),
+            CiMessage::DiscoveryReply { data, .. } => data.encode_body(out),
             CiMessage::InvalidateMuid { target, .. } => out.extend(target.to_bytes()),
             CiMessage::EndpointInquiry { status, .. } => out.extend([status.get().get()]),
             CiMessage::EndpointReply { info, .. } => info.encode_body(out),
@@ -962,12 +962,13 @@ impl CiMessage {
             Destination::Broadcast => None,
         };
         let message = match (sub_id2, unicast) {
-            (SUB_ID2_DISCOVERY, None) => DiscoveryData::decode_body(false, body)
-                .map(|data| CiMessage::Discovery { header, data }),
+            (SUB_ID2_DISCOVERY, None) => {
+                DiscoveryData::decode_body(body).map(|data| CiMessage::Discovery { header, data })
+            }
             (SUB_ID2_INVALIDATE_MUID, None) => {
                 read::target_body(body).map(|target| CiMessage::InvalidateMuid { header, target })
             }
-            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => DiscoveryData::decode_body(true, body)
+            (SUB_ID2_DISCOVERY_REPLY, Some(to)) => ReplyData::decode_body(body)
                 .map(|data| CiMessage::DiscoveryReply { header, to, data }),
             (SUB_ID2_ENDPOINT_INQUIRY, Some(to)) => match read::endpoint_inquiry_body(body) {
                 None => None,

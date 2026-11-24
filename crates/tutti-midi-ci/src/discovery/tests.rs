@@ -5,11 +5,15 @@ use tutti_ump::ManufacturerId;
 use tutti_ump::SoftwareRevision;
 
 fn is_malformed(body: &[u8], is_reply: bool) -> bool {
-    DiscoveryData::decode_body(is_reply, body).is_none()
+    if is_reply {
+        ReplyData::decode_body(body).is_none()
+    } else {
+        DiscoveryData::decode_body(body).is_none()
+    }
 }
 
-fn sample_discovery() -> DiscoveryData {
-    DiscoveryData {
+fn sample_body() -> DeviceBody {
+    DeviceBody {
         identity: DeviceIdentity {
             manufacturer: ManufacturerId::of(0xA109),
             family: [0x34, 0x24].map(U7::of),
@@ -18,21 +22,31 @@ fn sample_discovery() -> DiscoveryData {
         },
         categories: CiCategories::PROFILE_CONFIGURATION | CiCategories::PROPERTY_EXCHANGE,
         max_sysex_size: MaxSysexSize::of(512),
+    }
+}
+
+fn sample_discovery() -> DiscoveryData {
+    DiscoveryData {
+        body: sample_body(),
         output_path_id: Some(U7::of(0x05)),
-        function_block: FunctionBlockId::new(3),
+    }
+}
+
+fn sample_reply() -> ReplyData {
+    ReplyData {
+        body: sample_body(),
+        v2: Some(ReplyV2 {
+            output_path_id: U7::of(0x05),
+            function_block: FunctionBlockId::new(3),
+        }),
     }
 }
 
 #[test]
 fn discovery_round_trips() {
-    // A Discovery carries no Function Block field (Table 6), so it decodes
-    // as no Function Block regardless of what the struct held.
     let msg = CiMessage::Discovery {
         header: header(),
-        data: DiscoveryData {
-            function_block: None,
-            ..sample_discovery()
-        },
+        data: sample_discovery(),
     };
     let bytes = msg.encode();
     assert_eq!(bytes[3], SUB_ID2_DISCOVERY);
@@ -48,10 +62,12 @@ fn discovery_carries_the_special_manufacturer_id_7c() {
     let msg = CiMessage::Discovery {
         header: header(),
         data: DiscoveryData {
-            function_block: None,
-            identity: DeviceIdentity {
-                manufacturer: ManufacturerId::MIDI2_NON_COMMERCIAL,
-                ..sample_discovery().identity
+            body: DeviceBody {
+                identity: DeviceIdentity {
+                    manufacturer: ManufacturerId::MIDI2_NON_COMMERCIAL,
+                    ..sample_body().identity
+                },
+                ..sample_body()
             },
             ..sample_discovery()
         },
@@ -66,11 +82,12 @@ fn discovery_carries_the_special_manufacturer_id_7c() {
 fn discovery_and_reply_have_the_version_2_trailers() {
     // Table 6 appends 1 byte Output Path ID; Table 8 appends Output Path
     // Instance ID *and* Function Block. The two directions differ by exactly
-    // one byte, which is why the struct alone can't decide the encoding.
+    // one byte.
     let d = sample_discovery();
+    let r = sample_reply();
 
     let mut discovery = Vec::new();
-    d.encode_body(false, &mut discovery);
+    d.encode_body(&mut discovery);
     assert_eq!(discovery.len(), 17);
     assert_eq!(
         discovery[16], 0x05,
@@ -78,22 +95,14 @@ fn discovery_and_reply_have_the_version_2_trailers() {
     );
 
     let mut reply = Vec::new();
-    d.encode_body(true, &mut reply);
+    r.encode_body(&mut reply);
     assert_eq!(reply.len(), 18);
     assert_eq!(reply[16], 0x05, "path id echoed");
     assert_eq!(reply[16 + 1], 0x03, "Function Block follows it");
 
     // Both directions decode back to what they encoded.
-    assert_eq!(
-        DiscoveryData::decode_body(true, &reply).expect("reply decodes"),
-        d
-    );
-    assert_eq!(
-        DiscoveryData::decode_body(false, &discovery)
-            .expect("discovery decodes")
-            .output_path_id,
-        Some(U7::of(0x05))
-    );
+    assert_eq!(ReplyData::decode_body(&reply), Some(r));
+    assert_eq!(DiscoveryData::decode_body(&discovery), Some(d));
 }
 
 // M2-101 Tables 6 and 8 mark the Output Path ID and the Function Block as added
@@ -104,32 +113,63 @@ fn discovery_and_reply_have_the_version_2_trailers() {
 /// Spec: m2-101/5.3#6, m2-101/5.4#7
 #[test]
 fn a_version_1_body_has_no_output_path_and_no_function_block() {
-    let d = sample_discovery();
-    for is_reply in [false, true] {
-        let mut body = Vec::new();
-        d.encode_body(is_reply, &mut body);
-        body.truncate(16);
-        let back = DiscoveryData::decode_body(is_reply, &body).expect("v1 body decodes");
-        assert_eq!(back.identity, d.identity);
-        assert_eq!(back.max_sysex_size, d.max_sysex_size);
-        assert_eq!(back.output_path_id, None, "reply {is_reply}");
-        assert_eq!(back.function_block, None, "reply {is_reply}");
-    }
+    let mut body = Vec::new();
+    sample_reply().encode_body(&mut body);
+    body.truncate(16);
+    let reply = ReplyData::decode_body(&body).expect("v1 reply decodes");
+    assert_eq!(reply.body, sample_body());
+    assert_eq!(reply.v2, None);
+    assert_eq!(reply.function_block(), None);
+    let discovery = DiscoveryData::decode_body(&body).expect("v1 discovery decodes");
+    assert_eq!(discovery.body, sample_body());
+    assert_eq!(discovery.output_path_id, None);
 }
 
-// A body written with no Output Path ID is the Version 1 body: 16 bytes, with no
-// Function Block after it either.
+// A Version 1 body is 16 bytes in either direction, and a Version 2 Reply holds
+// its path id and Function Block together: a Reply with a Function Block
+// round-trips, which a body with one and no path id could not.
 #[test]
-fn a_body_with_no_output_path_encodes_as_version_1() {
-    let d = DiscoveryData {
+fn the_version_1_body_is_16_bytes_and_a_version_2_reply_round_trips_its_block() {
+    let mut body = Vec::new();
+    DiscoveryData {
+        output_path_id: None,
+        ..sample_discovery()
+    }
+    .encode_body(&mut body);
+    assert_eq!(body.len(), 16);
+    body.clear();
+    ReplyData {
+        v2: None,
+        ..sample_reply()
+    }
+    .encode_body(&mut body);
+    assert_eq!(body.len(), 16);
+    body.clear();
+    sample_reply().encode_body(&mut body);
+    assert_eq!(ReplyData::decode_body(&body), Some(sample_reply()));
+}
+
+/// Spec: m2-101/5.6.1#1
+#[test]
+fn a_reply_answering_a_discovery_echoes_its_path_id_and_a_version_1_one_is_path_0() {
+    let reply = ReplyData::answering(&sample_discovery(), sample_body());
+    assert_eq!(
+        reply.v2,
+        Some(ReplyV2 {
+            output_path_id: U7::of(0x05),
+            function_block: None
+        })
+    );
+    let version_1 = DiscoveryData {
         output_path_id: None,
         ..sample_discovery()
     };
-    for is_reply in [false, true] {
-        let mut body = Vec::new();
-        d.encode_body(is_reply, &mut body);
-        assert_eq!(body.len(), 16, "reply {is_reply}");
-    }
+    assert_eq!(
+        ReplyData::answering(&version_1, sample_body())
+            .v2
+            .map(|v2| v2.output_path_id),
+        Some(U7::of(0))
+    );
 }
 
 // The Reply of a device that sends Message Format Version 1 is a whole message
@@ -137,14 +177,13 @@ fn a_body_with_no_output_path_encodes_as_version_1() {
 /// Spec: m2-101/5.3#6, m2-101/5.4#7
 #[test]
 fn a_version_1_discovery_reply_message_is_read() {
-    let d = sample_discovery();
     let mut bytes = CiMessage::DiscoveryReply {
         header: CiHeader {
             ci_version: CiVersion::of(0x01),
             ..header()
         },
         to: Muid::of(DST),
-        data: d,
+        data: sample_reply(),
     }
     .encode();
     bytes.truncate(13 + 16);
@@ -152,9 +191,8 @@ fn a_version_1_discovery_reply_message_is_read() {
         CiMessage::DiscoveryReply { header, to, data } => {
             assert_eq!(header.ci_version, CiVersion::of(0x01));
             assert_eq!(to, Muid::of(DST));
-            assert_eq!(data.output_path_id, None);
-            assert_eq!(data.function_block, None);
-            assert_eq!(data.categories, d.categories);
+            assert_eq!(data.v2, None);
+            assert_eq!(data.body, sample_body());
         }
         other => panic!("expected a Discovery Reply, got {other:?}"),
     }
@@ -165,7 +203,7 @@ fn a_version_1_discovery_reply_message_is_read() {
 #[test]
 fn a_reply_shorter_than_version_1_is_malformed() {
     let mut body = Vec::new();
-    sample_discovery().encode_body(true, &mut body);
+    sample_reply().encode_body(&mut body);
     for len in [0, 11, 12, 15] {
         assert!(is_malformed(&body[..len], true), "{len} bytes");
         assert!(is_malformed(&body[..len], false), "{len} bytes");
@@ -174,7 +212,7 @@ fn a_reply_shorter_than_version_1_is_malformed() {
     let mut bytes = CiMessage::DiscoveryReply {
         header: header(),
         to: Muid::of(DST),
-        data: sample_discovery(),
+        data: sample_reply(),
     }
     .encode();
     bytes.truncate(13 + 15);
@@ -188,18 +226,18 @@ fn a_reply_shorter_than_version_1_is_malformed() {
 }
 
 #[test]
-fn discovery_reply_keeps_is_reply_flag() {
+fn a_discovery_reply_round_trips() {
     let msg = CiMessage::DiscoveryReply {
         header: header(),
         to: Muid::of(DST),
-        data: sample_discovery(),
+        data: sample_reply(),
     };
     let bytes = msg.encode();
     assert_eq!(bytes[3], SUB_ID2_DISCOVERY_REPLY);
     match decoded(&bytes) {
         CiMessage::DiscoveryReply { to, data, .. } => {
             assert_eq!(to, Muid::of(DST));
-            assert_eq!(data, sample_discovery());
+            assert_eq!(data, sample_reply());
         }
         other => panic!("expected Discovery reply, got {other:?}"),
     }
@@ -207,10 +245,9 @@ fn discovery_reply_keeps_is_reply_flag() {
 
 #[test]
 fn categories_survive_round_trip() {
-    let d = sample_discovery();
     let mut body = Vec::new();
-    d.encode_body(true, &mut body);
-    let back = DiscoveryData::decode_body(true, &body).expect("decodes");
+    sample_reply().encode_body(&mut body);
+    let back = ReplyData::decode_body(&body).expect("decodes").body;
     assert!(
         back.categories
             .contains(CiCategories::PROFILE_CONFIGURATION)
@@ -227,9 +264,9 @@ fn the_category_bits_are_table_7s_and_a_peers_deprecated_d1_is_dropped() {
     assert_eq!(CiCategories::PROPERTY_EXCHANGE.bits(), 0x08);
     assert_eq!(CiCategories::PROCESS_INQUIRY.bits(), 0x10);
     let mut body = Vec::new();
-    sample_discovery().encode_body(true, &mut body);
+    sample_reply().encode_body(&mut body);
     body[11] = 0x02 | 0x04;
-    let back = DiscoveryData::decode_body(true, &body).expect("decodes");
+    let back = ReplyData::decode_body(&body).expect("decodes").body;
     assert_eq!(back.categories, CiCategories::PROFILE_CONFIGURATION);
 }
 
@@ -238,7 +275,7 @@ fn the_category_bits_are_table_7s_and_a_peers_deprecated_d1_is_dropped() {
 #[test]
 fn a_receivable_size_under_128_is_malformed() {
     let mut body = Vec::new();
-    sample_discovery().encode_body(false, &mut body);
+    sample_discovery().encode_body(&mut body);
     let size = |body: &mut [u8], v: u32| {
         body[12..16].copy_from_slice(&[
             (v & 0x7F) as u8,
@@ -261,13 +298,13 @@ fn a_receivable_size_under_128_is_malformed() {
 #[test]
 fn the_function_block_of_a_reply_is_0_to_31_or_none() {
     let mut body = Vec::new();
-    sample_discovery().encode_body(true, &mut body);
+    sample_reply().encode_body(&mut body);
     let at = 16 + 1;
     for (raw, expected) in [(0, Some(0)), (31, Some(31)), (0x7F, None)] {
         body[at] = raw;
-        let got = DiscoveryData::decode_body(true, &body).unwrap();
+        let got = ReplyData::decode_body(&body).unwrap();
         assert_eq!(
-            got.function_block.map(FunctionBlockId::get),
+            got.function_block().map(FunctionBlockId::get),
             expected,
             "{raw}"
         );
@@ -284,7 +321,7 @@ fn the_function_block_of_a_reply_is_0_to_31_or_none() {
 #[test]
 fn a_byte_with_its_top_bit_set_is_malformed() {
     let mut body = Vec::new();
-    sample_discovery().encode_body(true, &mut body);
+    sample_reply().encode_body(&mut body);
     for i in [0, 3, 8, 11, 16] {
         let mut bad = body.clone();
         bad[i] |= 0x80;
@@ -312,7 +349,7 @@ fn the_receivable_size_is_a_range_checked_value() {
 #[test]
 fn the_identity_is_written_in_the_tables_order() {
     let mut body = Vec::new();
-    sample_discovery().encode_body(false, &mut body);
+    sample_discovery().encode_body(&mut body);
     assert_eq!(
         &body[..11],
         [0x00, 0x21, 0x09, 0x34, 0x24, 0x55, 0x00, 1, 2, 3, 4]

@@ -9,7 +9,7 @@ use super::super::{
 };
 use super::super::{Unread, UnreadReason};
 use super::*;
-use crate::PeStatus;
+use crate::{PeStatus, ReplyV2};
 use tutti_ump::ManufacturerId;
 use tutti_ump::SoftwareRevision;
 
@@ -45,25 +45,31 @@ fn device(
     (device, actions, now)
 }
 
-fn data(path: u8, block: Option<u8>) -> DiscoveryData {
-    let mut data = DiscoveryData::new(identity(), CiCategories::empty(), MaxSysexSize::of(128));
-    data.output_path_id = Some(U7::of(path));
-    data.function_block = block.map(|b| FunctionBlockId::new(b).unwrap());
-    data
+fn body() -> DeviceBody {
+    DeviceBody::new(identity(), CiCategories::empty(), MaxSysexSize::of(128))
 }
 
 fn reply(from: u32, to: u32, block: Option<u8>) -> Decoded {
     Decoded::Message(CiMessage::DiscoveryReply {
         header: CiHeader::new(Muid::of(from)),
         to: Muid::of(to),
-        data: data(0, block),
+        data: ReplyData {
+            body: body(),
+            v2: Some(ReplyV2 {
+                output_path_id: U7::of(0),
+                function_block: block.map(|b| FunctionBlockId::new(b).unwrap()),
+            }),
+        },
     })
 }
 
 fn discovery(from: u32, path: u8) -> Decoded {
     Decoded::Message(CiMessage::Discovery {
         header: CiHeader::new(Muid::of(from)),
-        data: data(path, None),
+        data: DiscoveryData {
+            body: body(),
+            output_path_id: Some(U7::of(path)),
+        },
     })
 }
 
@@ -86,7 +92,7 @@ fn a_new_device_sends_a_discovery_from_its_muid_to_everyone_on_output_path_0() {
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(data.output_path_id, Some(U7::of(0)));
-    assert_eq!(data.max_sysex_size, MaxSysexSize::of(512));
+    assert_eq!(data.body.max_sysex_size, MaxSysexSize::of(512));
     assert_eq!(
         sent(&actions)[0].destination(),
         Destination::Broadcast,
@@ -121,7 +127,7 @@ fn a_reply_to_our_discovery_finds_the_peer() {
     assert_eq!(actions, vec![CiAction::Found(Muid::of(PEER))]);
     let peer = device.peer(Muid::of(PEER)).expect("found");
     assert_eq!(peer.function_block(), None);
-    assert_eq!(peer.discovery().identity, identity());
+    assert_eq!(peer.discovery().body.identity, identity());
     assert_eq!(peer.product_instance_id(), None);
 }
 
@@ -162,8 +168,13 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
     };
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
-    assert_eq!(data.output_path_id, Some(U7::of(9)));
-    assert_eq!(data.function_block, None);
+    assert_eq!(
+        data.v2,
+        Some(ReplyV2 {
+            output_path_id: U7::of(9),
+            function_block: None
+        })
+    );
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(device.muid(), Muid::of(OURS));
 }
