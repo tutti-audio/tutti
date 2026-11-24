@@ -42,8 +42,7 @@ use tutti_graph::{
 use tutti_graph::{OutputPort, PortSource};
 use tutti_music::LoopRange;
 use tutti_timeline::{
-    AfterLocate, FadeOut, LoopEdit, MotionCommand, Recording, TakeId, Timeline, Transport,
-    TransportCommand,
+    AfterLocate, FadeOut, LoopEdit, MotionCommand, Recording, Timeline, Transport, TransportCommand,
 };
 use tutti_ump::{MidiChannel, U7};
 use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Samples, Tail};
@@ -446,7 +445,7 @@ fn a_takes_recording_commands_reach_a_nodes_env_on_their_frame() {
     let transport = Transport::new(SampleRate::of(SR));
     let log = Record::new();
     let (engine, _ed) = graph_engine(&transport, 256, Unforkable(RecLog(log.clone())), 1);
-    let take = TakeId::of(1);
+    let take = transport.motion().next_take_id();
     transport
         .motion()
         .schedule(At::Frame(Frame::new(300)), Recording::Start(take))

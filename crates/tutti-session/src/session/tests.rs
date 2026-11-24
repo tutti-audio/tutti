@@ -182,7 +182,7 @@ fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
 fn a_take_is_refused_while_the_capacity_is_open_and_taken_once_a_render_passes_their_stop() {
     use crate::transport_handle::When;
     use tutti_buffers::InterleavedMut;
-    use tutti_timeline::{RECORDING_CAPACITY, Recording, TakeId, TimedError};
+    use tutti_timeline::{RECORDING_CAPACITY, Recording, TimedError};
     use tutti_units::Frame;
 
     let mut s = Session::builder()
@@ -191,25 +191,27 @@ fn a_take_is_refused_while_the_capacity_is_open_and_taken_once_a_render_passes_t
         .expect("builds");
     let handle = s.transport_handle();
     let stop_at = Frame::new(1_000);
-    let take = |n: u64| TakeId::of(n);
-    for n in 1..=RECORDING_CAPACITY as u64 {
+    let takes: Vec<_> = (0..RECORDING_CAPACITY)
+        .map(|_| handle.next_take_id())
+        .collect();
+    for &take in &takes {
         handle
-            .send_recording(Recording::Start(take(n)), When::NextBlock)
+            .send_recording(Recording::Start(take), When::NextBlock)
             .expect("room");
         handle
-            .send_recording(Recording::Stop(take(n)), When::Frame(stop_at))
+            .send_recording(Recording::Stop(take), When::Frame(stop_at))
             .expect("room");
     }
     let sent = handle.scheduled_outstanding();
     handle
-        .send_recording(Recording::Start(take(1)), When::NextBlock)
+        .send_recording(Recording::Start(takes[0]), When::NextBlock)
         .expect("a take already open is a no-op");
     handle
-        .send_recording(Recording::Stop(take(99)), When::NextBlock)
+        .send_recording(Recording::Stop(handle.next_take_id()), When::NextBlock)
         .expect("a take never started is a no-op");
     assert_eq!(handle.scheduled_outstanding(), sent, "neither sent");
 
-    let extra = Recording::Start(take(17));
+    let extra = Recording::Start(handle.next_take_id());
     assert_eq!(
         handle.send_recording(extra, When::NextBlock),
         Err(TimedError::Full(extra))

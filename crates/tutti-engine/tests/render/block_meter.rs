@@ -21,7 +21,7 @@ use tutti_music::LoopRange;
 use tutti_music::{MeterChange, MeterMap, TimeSignature};
 use tutti_nodes::{ClickNode, ClickNodeConfig, ClickSettings, MetronomeMode};
 use tutti_timeline::{
-    LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Recording, TakeId, Transport,
+    LoopEdit, MotionCommand, OfflineTimeline, OfflineTimelineConfig, Recording, Transport,
     render_graph,
 };
 use tutti_units::{Amplitude, At, Beat, Frame, SampleRate, Samples};
@@ -129,7 +129,7 @@ fn a_recording_only_click_sounds_from_a_takes_start_to_its_stop() {
     let clicks = |mode| {
         let transport = Transport::new(SampleRate::of(SR));
         let engine = click_engine(&transport, mode);
-        let take = TakeId::of(1);
+        let take = transport.motion().next_take_id();
         for (frame, recording) in [
             (20_000, Recording::Start(take)),
             (50_000, Recording::Stop(take)),

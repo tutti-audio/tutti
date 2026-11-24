@@ -191,6 +191,15 @@ impl TransportHandle {
     /// [`TimedError::Full`] with the command when [`RECORDING_CAPACITY`] takes
     /// are open (none with a `Stop` the engine has rendered past), or when the
     /// transport's command queue is full.
+    /// The id of the next take, minted by the transport it records on.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+    )]
+    pub(crate) fn next_take_id(&self) -> TakeId {
+        self.transport.motion().next_take_id()
+    }
+
     #[cfg_attr(
         not(feature = "capture"),
         expect(dead_code, reason = "a take (feature `capture`) is the one sender")

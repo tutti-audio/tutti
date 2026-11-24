@@ -41,8 +41,11 @@ use super::loop_region::LoopEdit;
 use super::motion::MotionCommand;
 
 tutti_rt::id! {
-    /// One take of a session: the number its take events carry.
-    pub struct TakeId: named;
+    /// One take of a session: the number its take events carry. Minted by the
+    /// transport whose recording it starts and stops
+    /// ([`MotionFsm::next_take_id`](super::MotionFsm::next_take_id)), so no two
+    /// takes on one transport share an id.
+    pub struct TakeId;
 }
 
 /// The most takes recording at once: the audio side's set of

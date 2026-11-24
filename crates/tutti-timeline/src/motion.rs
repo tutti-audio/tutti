@@ -36,6 +36,7 @@ use super::timed::{
     CommandQueue, RECORDING_CAPACITY, Recording, TakeId, TimedError, TransportCommand,
 };
 use std::sync::atomic::AtomicU8;
+use tutti_rt::Mint;
 use tutti_units::At;
 use tutti_units::Beat;
 
@@ -218,6 +219,8 @@ pub struct MotionFsm {
     home: Arc<ArrayQueue<Home>>,
     /// The read side of the loop region the engine publishes.
     loop_region: LoopReader,
+    /// Numbers the takes recording on this transport, shared by every clone.
+    takes: Arc<Mint>,
 }
 
 /// What outlives an engine: the FSM, the loop region and the takes recording.
@@ -294,7 +297,15 @@ impl MotionFsm {
             timed: CommandQueue::new(),
             home,
             loop_region,
+            takes: Arc::new(Mint::new()),
         }
+    }
+
+    /// The id of the next take to record on this transport: no two takes on
+    /// it, from any clone of this handle, share one.
+    #[must_use]
+    pub fn next_take_id(&self) -> TakeId {
+        TakeId::mint(&self.takes)
     }
 
     /// The loop region the engine holds, as of its last edit: the bounds

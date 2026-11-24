@@ -72,6 +72,7 @@ fn motion::MotionFsm::cancel_scheduled
 fn motion::MotionFsm::late_command_count
 fn motion::MotionFsm::loop_region
 fn motion::MotionFsm::new
+fn motion::MotionFsm::next_take_id
 fn motion::MotionFsm::schedule
 fn motion::MotionFsm::scheduled_outstanding
 fn motion::MotionFsm::send

@@ -62,7 +62,7 @@ use tutti_dsp::{DitherShape, DitherSink, NoiseShaping};
 use tutti_engine::StreamLatency;
 use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::{Staged, StagedCommitError};
-use tutti_rt::{Bell, Listener, Mint};
+use tutti_rt::{Bell, Listener};
 use tutti_tempo::TempoMap;
 use tutti_timeline::{Recording, TakeId};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
@@ -429,12 +429,11 @@ impl Anchor {
     }
 }
 
-/// The takes of a session: their numbering, and the channel their pumps report through
-/// to [`Session::update`]. Unbounded, read only by the control thread, so a pump never
+/// The takes of a session: the channel their pumps report through to
+/// [`Session::update`]. Unbounded, read only by the control thread, so a pump never
 /// waits.
 #[derive(Debug)]
 pub(crate) struct Takes {
-    mint: Mint,
     tx: Sender<TakeEvent>,
     rx: Receiver<TakeEvent>,
 }
@@ -442,16 +441,7 @@ pub(crate) struct Takes {
 impl Takes {
     pub(crate) fn new() -> Self {
         let (tx, rx) = channel();
-        Self {
-            mint: Mint::new(),
-            tx,
-            rx,
-        }
-    }
-
-    /// The id of the next take begun.
-    pub(crate) fn next_id(&self) -> TakeId {
-        TakeId::mint(&self.mint)
+        Self { tx, rx }
     }
 
     /// Pushes every event the pumps sent since the last call onto `out`, in the order
@@ -1075,7 +1065,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .taps()
             .open_ports(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
 
-        let id = self.inputs.takes().next_id();
+        let id = self.transport.handle.next_take_id();
         // The transport records from the punch-in to the punch-out, or to the
         // take's end. A start the transport refuses fails the arm; a
         // punch-out it refuses ends the take through the stop that follows.
@@ -1561,8 +1551,8 @@ mod tests {
             stop: Arc::default(),
         };
         let mut takes = Takes::new();
-        let id = takes.next_id();
         let handle = TransportHandle::new(tutti_timeline::Transport::new(SampleRate::SR_48K));
+        let id = handle.next_take_id();
         let report = Report::new(&takes, id, Arc::default(), Recorder::new(handle, id));
         let executor = tutti_platform::Executor::new();
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
