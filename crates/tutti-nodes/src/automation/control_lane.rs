@@ -26,10 +26,51 @@ use crate::SOURCE_EVENT_CAPACITY;
 
 /// How a lane's value reaches one kind of parameter.
 ///
-/// The kinds are [`PortLane`] and [`ForeignLane`]; nothing else implements
-/// it. A [`ControlLaneNode`] is built for one, from a [`UnitLaneConfig`] or a
-/// [`ForeignLaneConfig`].
-pub trait LaneKind: kind::Kind {}
+/// The kinds are [`PortLane`] and [`ForeignLane`]; the trait is sealed, so
+/// nothing else implements it. A [`ControlLaneNode`] is built for one, from a
+/// [`UnitLaneConfig`] or a [`ForeignLaneConfig`]. Its items are what the
+/// lane's walk asks of its kind.
+pub trait LaneKind: sealed::Sealed + Send + Sync + 'static {
+    /// How the kind names its parameter.
+    type Addr: Copy + Send + Sync + 'static;
+    /// The target's range as the control side holds it: what a fork
+    /// freezes.
+    type Source: Clone + Send + Sync + 'static;
+    /// The target's range as the node reads it, lent once per block.
+    type Range: Send + 'static;
+    /// Whether a program that is automation alone is sent as the curve's
+    /// own shaped pieces (exact mode).
+    const SHAPED: bool;
+
+    /// The built-in param behind `addr`, which says whether its values
+    /// run on a circle ([`UnitParam::is_circular`]): the one place a lane
+    /// asks. `None` for a parameter of no tutti unit.
+    fn unit(addr: Self::Addr) -> Option<UnitParam>;
+
+    /// A segment for `addr` from `from` to `to` along `law`. The values
+    /// are the parameter's own raw numbers (a param's raw unit values, or
+    /// a foreign parameter's own normalisation): a lane is built for an
+    /// address, not for a unit type, so they are bare `f64` from here to
+    /// the segment, as [`ParamSegment::unit`] and [`ParamSegment::by_id`]
+    /// take them.
+    fn segment(addr: Self::Addr, from: f64, to: f64, law: Law) -> ParamSegment;
+
+    /// A reader of `source`, registered here. Control side: allocates.
+    fn reader(source: &Self::Source) -> Self::Range;
+
+    /// The range now, in a cell of its own. Control side: it locks.
+    fn frozen(source: &Self::Source) -> Self::Source;
+
+    /// The range this block.
+    fn load(range: &mut Self::Range) -> ParamRange;
+
+    /// `value` as the lane sends it under `range`.
+    fn clamp(range: ParamRange, value: f64) -> f64;
+
+    /// Where along a piece from `from` to `to` the lane ends it early, as
+    /// a fraction of the piece: the first bound of `range` it crosses.
+    fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64>;
+}
 
 /// A lane into a param port: a node's declared param, a node's mix, or an
 /// edge's gain. It reads the port's own knob and range cells, the port clamps
@@ -44,148 +85,101 @@ pub struct PortLane;
 #[derive(Clone, Copy, Debug)]
 pub struct ForeignLane;
 
-impl LaneKind for PortLane {}
-impl LaneKind for ForeignLane {}
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::PortLane {}
+    impl Sealed for super::ForeignLane {}
+}
 
-mod kind {
-    use super::{
-        Arc, ForeignLane, Law, ParamId, ParamRange, ParamRangeCell, ParamRangeReader, ParamSegment,
-        PortLane, Publisher, Reader, Samples, UnitAddr, UnitParam,
-    };
+impl LaneKind for PortLane {
+    type Addr = UnitAddr;
+    /// The port's own cell (`Editor::param_range_cell`); `None` for an
+    /// unranged target, which takes no modulation.
+    type Source = Option<ParamRangeCell>;
+    type Range = Option<ParamRangeReader>;
+    const SHAPED: bool = true;
 
-    /// What [`LaneKind`](super::LaneKind) holds for the lane's walk.
-    pub trait Kind: Send + Sync + 'static {
-        /// How the kind names its parameter.
-        type Addr: Copy + Send + Sync + 'static;
-        /// The target's range as the control side holds it: what a fork
-        /// freezes.
-        type Source: Clone + Send + Sync + 'static;
-        /// The target's range as the node reads it, lent once per block.
-        type Range: Send + 'static;
-        /// Whether a program that is automation alone is sent as the curve's
-        /// own shaped pieces (exact mode).
-        const SHAPED: bool;
-
-        /// The built-in param behind `addr`, which says whether its values
-        /// run on a circle ([`UnitParam::is_circular`]): the one place a lane
-        /// asks. `None` for a parameter of no tutti unit.
-        fn unit(addr: Self::Addr) -> Option<UnitParam>;
-
-        /// A segment for `addr` from `from` to `to` along `law`. The values
-        /// are the parameter's own raw numbers (a param's raw unit values, or
-        /// a foreign parameter's own normalisation): a lane is built for an
-        /// address, not for a unit type, so they are bare `f64` from here to
-        /// the segment, as [`ParamSegment::unit`] and [`ParamSegment::by_id`]
-        /// take them.
-        fn segment(addr: Self::Addr, from: f64, to: f64, law: Law) -> ParamSegment;
-
-        /// A reader of `source`, registered here. Control side: allocates.
-        fn reader(source: &Self::Source) -> Self::Range;
-
-        /// The range now, in a cell of its own. Control side: it locks.
-        fn frozen(source: &Self::Source) -> Self::Source;
-
-        /// The range this block.
-        fn load(range: &mut Self::Range) -> ParamRange;
-
-        /// `value` as the lane sends it under `range`.
-        fn clamp(range: ParamRange, value: f64) -> f64;
-
-        /// Where along a piece from `from` to `to` the lane ends it early, as
-        /// a fraction of the piece: the first bound of `range` it crosses.
-        fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64>;
+    fn unit(addr: UnitAddr) -> Option<UnitParam> {
+        Some(addr.param)
     }
 
-    impl Kind for PortLane {
-        type Addr = UnitAddr;
-        /// The port's own cell (`Editor::param_range_cell`); `None` for an
-        /// unranged target, which takes no modulation.
-        type Source = Option<ParamRangeCell>;
-        type Range = Option<ParamRangeReader>;
-        const SHAPED: bool = true;
+    fn segment(addr: UnitAddr, from: f64, to: f64, law: Law) -> ParamSegment {
+        ParamSegment::unit(addr, from, to, Samples::new(0)).law(law)
+    }
 
-        fn unit(addr: UnitAddr) -> Option<UnitParam> {
-            Some(addr.param)
-        }
+    fn reader(source: &Self::Source) -> Self::Range {
+        source.as_ref().map(ParamRangeCell::reader)
+    }
 
-        fn segment(addr: UnitAddr, from: f64, to: f64, law: Law) -> ParamSegment {
-            ParamSegment::unit(addr, from, to, Samples::new(0)).law(law)
-        }
+    fn frozen(source: &Self::Source) -> Self::Source {
+        source.as_ref().map(ParamRangeCell::detached)
+    }
 
-        fn reader(source: &Self::Source) -> Self::Range {
-            source.as_ref().map(ParamRangeCell::reader)
-        }
+    #[inline]
+    fn load(range: &mut Self::Range) -> ParamRange {
+        range
+            .as_mut()
+            .map_or(ParamRange::UNBOUNDED, ParamRangeReader::load)
+    }
 
-        fn frozen(source: &Self::Source) -> Self::Source {
-            source.as_ref().map(ParamRangeCell::detached)
-        }
+    /// The port clamps for itself, per frame.
+    #[inline]
+    fn clamp(_: ParamRange, value: f64) -> f64 {
+        value
+    }
 
-        #[inline]
-        fn load(range: &mut Self::Range) -> ParamRange {
-            range
-                .as_mut()
-                .map_or(ParamRange::UNBOUNDED, ParamRangeReader::load)
-        }
+    #[inline]
+    fn cut(_: ParamRange, _: f64, _: f64) -> Option<f64> {
+        None
+    }
+}
 
-        /// The port clamps for itself, per frame.
-        #[inline]
-        fn clamp(_: ParamRange, value: f64) -> f64 {
+impl LaneKind for ForeignLane {
+    type Addr = ParamId;
+    /// The lane's own cell, which its `ForeignLaneControls` publish to.
+    type Source = Arc<Publisher<ParamRange>>;
+    type Range = Reader<ParamRange>;
+    const SHAPED: bool = false;
+
+    fn unit(_: ParamId) -> Option<UnitParam> {
+        None
+    }
+
+    fn segment(id: ParamId, from: f64, to: f64, law: Law) -> ParamSegment {
+        ParamSegment::by_id(id, from, to, Samples::new(0)).law(law)
+    }
+
+    fn reader(source: &Self::Source) -> Self::Range {
+        source.reader()
+    }
+
+    fn frozen(source: &Self::Source) -> Self::Source {
+        Arc::new(Publisher::new(*source.current()))
+    }
+
+    #[inline]
+    fn load(range: &mut Self::Range) -> ParamRange {
+        *range.lend()
+    }
+
+    #[inline]
+    fn clamp(range: ParamRange, value: f64) -> f64 {
+        let (lo, hi) = (range.min(), range.max());
+        if lo.is_nan() || hi.is_nan() || lo > hi {
             value
-        }
-
-        #[inline]
-        fn cut(_: ParamRange, _: f64, _: f64) -> Option<f64> {
-            None
+        } else {
+            value.clamp(lo, hi)
         }
     }
 
-    impl Kind for ForeignLane {
-        type Addr = ParamId;
-        /// The lane's own cell, which its `ForeignLaneControls` publish to.
-        type Source = Arc<Publisher<ParamRange>>;
-        type Range = Reader<ParamRange>;
-        const SHAPED: bool = false;
-
-        fn unit(_: ParamId) -> Option<UnitParam> {
-            None
-        }
-
-        fn segment(id: ParamId, from: f64, to: f64, law: Law) -> ParamSegment {
-            ParamSegment::by_id(id, from, to, Samples::new(0)).law(law)
-        }
-
-        fn reader(source: &Self::Source) -> Self::Range {
-            source.reader()
-        }
-
-        fn frozen(source: &Self::Source) -> Self::Source {
-            Arc::new(Publisher::new(*source.current()))
-        }
-
-        #[inline]
-        fn load(range: &mut Self::Range) -> ParamRange {
-            *range.lend()
-        }
-
-        #[inline]
-        fn clamp(range: ParamRange, value: f64) -> f64 {
-            let (lo, hi) = (range.min(), range.max());
-            if lo.is_nan() || hi.is_nan() || lo > hi {
-                value
-            } else {
-                value.clamp(lo, hi)
-            }
-        }
-
-        #[inline]
-        fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64> {
-            [range.min(), range.max()]
-                .into_iter()
-                .filter(|x| x.is_finite())
-                .filter(|&x| (from - x) * (to - x) < 0.0)
-                .map(|x| (x - from) / (to - from))
-                .min_by(f64::total_cmp)
-        }
+    #[inline]
+    fn cut(range: ParamRange, from: f64, to: f64) -> Option<f64> {
+        [range.min(), range.max()]
+            .into_iter()
+            .filter(|x| x.is_finite())
+            .filter(|&x| (from - x) * (to - x) < 0.0)
+            .map(|x| (x - from) / (to - from))
+            .min_by(f64::total_cmp)
     }
 }
 
