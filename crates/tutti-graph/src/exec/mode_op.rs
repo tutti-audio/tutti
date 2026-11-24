@@ -166,7 +166,11 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     // Events sent to a parked node are discarded: flushed ones, the closes
     // still owed to it and commands. Nothing it was sent goes unclosed: every
     // unit keeps a `held_in` table for each event input (`ModeState::new`),
-    // which a bypass closes on its way out.
+    // which a bypass closes on its way out. Its views are empty: what an
+    // input tap reads there is what the node is handed, which is nothing.
+    for &s in ein {
+        st.events.slot_mut(s).clear();
+    }
     if !ein.is_empty() {
         let unit = rec.unit;
         if *st.has_inject {
