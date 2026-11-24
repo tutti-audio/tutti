@@ -163,9 +163,10 @@ impl<F: Float> ManualStream<F> {
     }
 
     /// Returns the frames the last callback actually rendered: its own, at most
-    /// [`MAX_FRAMES`](crate::MAX_FRAMES).
-    pub fn last_rendered_frames(&self) -> Option<usize> {
-        self.with_block(|b| b.last_rendered_frames())
+    /// [`MAX_FRAMES`](crate::MAX_FRAMES). `None` if no stream is open or no
+    /// callback has run.
+    pub fn callback_frames(&self) -> Option<Samples> {
+        self.with_block(|b| b.callback_frames()).flatten()
     }
 
     /// Returns the channel count this stream was opened at.
