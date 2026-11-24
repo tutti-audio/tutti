@@ -351,12 +351,6 @@ impl Placement {
     pub fn topology(&self) -> Option<&ChannelTopology> {
         self.0.topology()
     }
-
-    /// The lanes as one value: their width and, when it has one, their topology.
-    #[must_use]
-    pub fn channel_set(&self) -> &ChannelSet {
-        &self.0
-    }
 }
 
 /// The audio an output reads.
