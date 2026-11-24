@@ -9,7 +9,6 @@ use tutti_graph::testing as common;
 
 use std::sync::Arc;
 
-use common::TestPool;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::midi;
 use tutti_graph::NodeKey;
@@ -194,7 +193,7 @@ impl Rig {
         let log: Log = tutti_fixtures::Record::new();
         let (ed, mut exec) = Editor::with_event_capacity(prep, 64);
         if matches!(mode, Mode::Parallel) {
-            exec.set_pool(Some(TestPool::new(2)));
+            common::pooled_fresh(&mut exec, 2);
         }
         let mut r = Self {
             ed,
@@ -288,8 +287,7 @@ impl Rig {
 
     /// Render one block of `MAX` frames.
     fn block(&mut self) {
-        let t = TransportPosition::default();
-        self.exec.process(MAX, &t, &[], &mut []);
+        common::block(&mut self.exec, MAX, 0);
         self.frame += MAX as u64;
     }
 
@@ -1978,9 +1976,7 @@ mod no_alloc {
     fn run(workers: usize) {
         let prep = common::prepare(MAX);
         let (mut ed, mut exec) = Editor::with_event_capacity(prep, 64);
-        if workers > 1 {
-            exec.set_pool(Some(TestPool::new(workers)));
-        }
+        common::pooled_fresh(&mut exec, workers);
         let mail = Mail::new(Vec::with_capacity(64));
         let n = Arc::new(AtomicU64::new(0));
         ed.insert(NodeKey(1), "src", Unforkable(Src { mail: mail.clone() }));
