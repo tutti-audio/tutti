@@ -149,7 +149,6 @@ enum pe::initiator::PeCall
 enum pe::initiator::PeCapabilitiesFailure
 enum pe::initiator::PeChange
 enum pe::initiator::PeError
-enum pe::initiator::PeKind
 enum pe::initiator::PeNotification
 enum pe::initiator::PeOutcome
 enum pe::initiator::PeUnreadable
@@ -193,7 +192,6 @@ enum pe::resource::link::LinkRole
 enum pe::resource::request::ActionError
 enum pe::resource::request::RequestRefused
 enum pe::resource::request::SetBody
-enum pe::resource::server::ChangeKind
 enum pe::resource::server::PublishError
 enum pe::resource::server::ResponderAction
 enum pe::resource::server::ResponderEvent

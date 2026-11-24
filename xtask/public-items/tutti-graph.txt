@@ -140,7 +140,6 @@ fn compile::main_output::fold_to_topology_with
 fn compile::main_output::fold_to_width
 fn compile::plan::Csr::row
 fn compile::plan::Csr::rows
-fn compile::plan::Delta::is_empty
 fn compile::plan::EventSlotCapacity::covering
 fn compile::plan::EventSlotCapacity::events
 fn compile::plan::EventSlotCapacity::holds
@@ -153,10 +152,8 @@ fn compile::plan::Plan::audio_feedback
 fn compile::plan::Plan::audio_list
 fn compile::plan::Plan::audio_values
 fn compile::plan::Plan::compensation
-fn compile::plan::Plan::event_delay
 fn compile::plan::Plan::event_delays
 fn compile::plan::Plan::event_feedback
-fn compile::plan::Plan::event_input_capacity
 fn compile::plan::Plan::event_list
 fn compile::plan::Plan::event_port_capacity
 fn compile::plan::Plan::event_slot_capacity
@@ -170,11 +167,8 @@ fn compile::plan::Plan::main_outputs
 fn compile::plan::Plan::op_dependencies
 fn compile::plan::Plan::ops
 fn compile::plan::Plan::param_ports
-fn compile::plan::Plan::prepare
 fn compile::plan::Plan::rendered_outputs
 fn compile::plan::Plan::slots
-fn compile::plan::Plan::store_len
-fn compile::plan::Plan::sum_lanes
 fn compile::plan::Plan::task_activation
 fn compile::plan::Plan::task_ops
 fn compile::plan::Plan::tasks
@@ -493,7 +487,6 @@ fn exec::Executor::main_output_fade
 fn exec::Executor::pending_prepare
 fn exec::Executor::plan
 fn exec::Executor::play_reading
-fn exec::Executor::pool
 fn exec::Executor::prepare
 fn exec::Executor::recovered_event_count
 fn exec::Executor::set_pool
@@ -556,7 +549,6 @@ fn model::graph::InputPort::new
 fn model::graph::InputPort::node
 fn model::graph::InputPort::port
 fn model::graph::Invalid::is_fatal
-fn model::graph::MeterSpec::align
 fn model::graph::MeterSpec::aligned
 fn model::graph::MeterSpec::lanes
 fn model::graph::MeterSpec::raw
@@ -567,10 +559,8 @@ fn model::graph::NodeSpec::tail
 fn model::graph::OutputPort::new
 fn model::graph::OutputPort::node
 fn model::graph::OutputPort::port
-fn model::graph::TapSpec::align
 fn model::graph::TapSpec::aligned
 fn model::graph::TapSpec::lanes
-fn model::graph::TapSpec::raw
 fn model::graph::Topology::connect
 fn model::graph::Topology::connect_output
 fn model::graph::Topology::disconnect
@@ -580,7 +570,6 @@ fn model::graph::Topology::topo_order
 fn model::graph::Topology::unconnected
 fn model::graph::Topology::validate
 fn model::graph::Valid::get
-fn model::graph::Valid::into_inner
 fn model::mode::NodeMix::lane_range
 fn model::pass::Pass::contributions
 fn model::pass::Pass::inputs
@@ -914,6 +903,8 @@ fn testing::TestPool::with_waits
 fn testing::agree_across_workers
 fn testing::bits
 fn testing::bits_of
+fn testing::block
+fn testing::block_in
 fn testing::cap_of
 fn testing::declick
 fn testing::driver_value
