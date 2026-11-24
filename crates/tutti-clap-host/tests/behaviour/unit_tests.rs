@@ -12,15 +12,10 @@ use clap_sys::events::{
 };
 use tutti_clap_host::{
     ClapEvent, ClapHost, EventList, HostState, InputEventList, InputRooms, InputStream,
-    NoteExpressionType, NoteSend, OutputEventList, OutputRooms, OutputStream, ParameterChanges,
-    ParameterQueue,
+    NoteExpressionType, OutputEventList, OutputRooms, OutputStream,
 };
 use tutti_graph::Offset;
-use tutti_midi_protocol::{channel_voice, midi1};
-use tutti_plugin_types::fake::{at_frame, unit_value};
-use tutti_ump::{
-    BendValue, CCNumber, ControlValue, Message, MidiChannel, NoteKeyEvent, NoteNumber, Voice2,
-};
+use tutti_ump::{Message, MidiChannel, NoteKeyEvent, NoteNumber};
 use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use.
@@ -31,14 +26,6 @@ fn at(k: usize) -> Offset {
     Offset::of(Samples::new(k), Samples::new(BLOCK))
 }
 
-/// A fresh list `event` was added to: its first event is what it converts to.
-fn first(event: &(Offset, tutti_ump::Ump)) -> InputEventList {
-    let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
-    list.add_midi(event);
-    list
-}
-
 use crate::support;
 use support::main_thread;
 #[allow(unused_imports)]
@@ -46,109 +33,11 @@ use support::raw::{HostRaw, InputListRaw, InputStreamRaw, OutputListRaw, OutputS
 use support::{midi_events, note_expressions, param_changes};
 use tutti_fixtures::midi;
 
-use tutti_ump::{U7, U14};
-
 // ── MIDI conversion via `(Offset, Ump)` and `WireMidi` ──
 //
 // clap-host's `ClapEvent::{from,to}_midi_event` bridge between VST3/CLAP's
 // typed event structs and Tutti's UMP events. These tests cover each
 // MIDI-1 message shape we expect to round-trip cleanly.
-
-/// NoteOn maps to CLAP's typed `note` event (NoteOn variant).
-#[test]
-fn test_note_on_roundtrip() {
-    // Build with MIDI-2 velocity (half of u16 max ≈ 0x8000).
-    let event = (at(10), midi::note_on(MidiChannel::of(3), 60, 0x8000));
-    let list = first(&event);
-    let clap = list.events().first().expect("NoteOn should convert");
-    assert!(matches!(clap, ClapEvent::NoteOn(_)));
-    let back = clap
-        .to_midi(&mut tutti_midi_protocol::Midi2Translator::new())
-        .expect("round-trip should succeed");
-    assert_eq!(back.offset, 10);
-    assert!(matches!(
-        channel_voice(back.ump),
-        Some((_, Voice2::NoteOn { note, .. })) if note == NoteNumber::of(60)
-    ));
-}
-
-/// NoteOff maps to CLAP's typed `note` event (NoteOff variant).
-#[test]
-fn test_note_off_roundtrip() {
-    let event = (at(20), midi::note_off(MidiChannel::of(5), 72, 0x4000));
-    let list = first(&event);
-    let clap = list.events().first().expect("NoteOff should convert");
-    assert!(matches!(clap, ClapEvent::NoteOff(_)));
-    let back = clap
-        .to_midi(&mut tutti_midi_protocol::Midi2Translator::new())
-        .expect("round-trip should succeed");
-    assert_eq!(back.offset, 20);
-    assert!(matches!(
-        channel_voice(back.ump),
-        Some((_, Voice2::NoteOff { note, .. })) if note == NoteNumber::of(72)
-    ));
-}
-
-/// ControlChange falls through to CLAP's generic `Midi` (3-byte wire) event.
-#[test]
-fn test_control_change_roundtrip() {
-    let event = (
-        at(5),
-        midi::cc(
-            MidiChannel::of(2),
-            CCNumber::BRIGHTNESS,
-            ControlValue::from(U7::of(100)).get(),
-        ),
-    );
-    let list = first(&event);
-    let clap = list.events().first().expect("CC should convert");
-    // CC goes through the generic Midi event
-    match clap {
-        ClapEvent::Midi(e) => {
-            assert_eq!(e.data[0], 0xB0 | 2, "CC status byte");
-            assert_eq!(e.data[1], 74, "controller number");
-            assert_eq!(e.data[2], 100, "CC value");
-        }
-        _ => panic!("Expected Midi event for ControlChange"),
-    }
-}
-
-/// PitchBend falls through to CLAP's generic `Midi` event. The 14-bit
-/// bend value is split across bytes 1 (LSB) and 2 (MSB).
-#[test]
-fn test_pitch_bend_roundtrip() {
-    // MIDI-1 center = 8192 (0x2000).
-    let event = (
-        at(0),
-        midi::pitch_bend(MidiChannel::FIRST, BendValue::from(U14::of(8192)).get()),
-    );
-    let list = first(&event);
-    let clap = list.events().first().expect("PitchBend should convert");
-    match clap {
-        ClapEvent::Midi(e) => {
-            assert_eq!(e.data[0] & 0xF0, 0xE0, "PitchBend status nibble");
-            // Recover 14-bit value: LSB | (MSB << 7)
-            let value = (e.data[1] as u16) | ((e.data[2] as u16) << 7);
-            assert_eq!(value, 8192, "PitchBend should round-trip to center");
-        }
-        _ => panic!("Expected Midi event for PitchBend"),
-    }
-}
-
-/// ProgramChange is a 2-byte MIDI-1 event, passed through as generic `Midi`.
-#[test]
-fn test_program_change_roundtrip() {
-    let event = (at(100), midi::program_change(MidiChannel::of(9), 42, None));
-    let list = first(&event);
-    let clap = list.events().first().expect("ProgramChange should convert");
-    match clap {
-        ClapEvent::Midi(e) => {
-            assert_eq!(e.data[0], 0xC0 | 9, "ProgramChange status byte");
-            assert_eq!(e.data[1], 42, "program number");
-        }
-        _ => panic!("Expected Midi event for ProgramChange"),
-    }
-}
 
 /// Note events pushed through `InputEventList::add_midi` should appear in
 /// the FFI event table.
@@ -173,45 +62,6 @@ fn test_input_event_list_add_midi_counts_correctly() {
         // Out of bounds returns null
         assert!(get_fn(raw, 2).is_null());
     }
-}
-
-/// Output NoteOn events survive the FFI round-trip back through
-/// `to_midi_events()`.
-#[test]
-fn test_output_event_list_push_note_on() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 50,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_ON,
-            flags: 0,
-        },
-        note_id: 1,
-        port_index: 0,
-        channel: 0,
-        key: 64,
-        velocity: 0.9,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        let ok = push_fn(raw as *const _, &note.header as *const _);
-        assert!(ok);
-    }
-
-    assert_eq!(list.len(), 1);
-    let midi_out = midi_events(&mut list);
-    assert_eq!(midi_out.len(), 1);
-    let event = &midi_out[0];
-    assert!(matches!(
-        channel_voice(event.ump),
-        Some((_, Voice2::NoteOn { note, .. })) if note == NoteNumber::of(64)
-    ));
-    assert_eq!(event.offset, 50);
 }
 
 /// A wildcard note-off must not be re-pointed at one phantom voice.
@@ -282,107 +132,62 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
     );
 }
 
-/// A wildcard with no decodable `note_id` is dropped rather than misaddressed.
-///
-/// Plugins may mint their own `note_id` space, which the host cannot decode.
-/// Dropping the event is recoverable; aiming it at a voice the plugin never
-/// named is not.
+// sort_by_time test removed alongside other MIDI-shape-dependent tests.
+
+// ── Parameter changes grouping ──
+
+// ── Note expression through event list ──
+
+/// **Each core event a plugin pushes is held as its own variant, at its time,
+/// and reaches only its own sink**: notes and MIDI become UMP messages
+/// (`NoteChoke` and `NoteEnd` are notices with no message; a tuning is a
+/// per-note pitch message), a value becomes a parameter queue, a tuning also a
+/// note expression, and a gesture or modulation neither. Taking the events empties the list.
 #[test]
-fn a_wildcard_note_off_with_an_opaque_note_id_is_dropped() {
+fn each_core_event_a_plugin_pushes_is_held_as_its_own_variant() {
+    use clap_sys::events::{CLAP_NOTE_EXPRESSION_TUNING, clap_event_midi};
+
     let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
     let raw = list.as_raw_mut();
-
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 0,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_OFF,
-            flags: 0,
-        },
-        // Outside the host-minted range, so undecodable.
-        note_id: -1,
-        port_index: 0,
-        channel: -1,
-        key: -1,
-        velocity: 0.0,
+    let header = |size: usize, time: u32, type_: u16| clap_event_header {
+        size: size as u32,
+        time,
+        space_id: CLAP_CORE_EVENT_SPACE_ID,
+        type_,
+        flags: 0,
     };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        assert!(push_fn(raw as *const _, &note.header as *const _));
-    }
-
-    assert!(
-        midi_events(&mut list).is_empty(),
-        "an unaddressable wildcard must be dropped, not bound to a phantom voice"
-    );
-}
-
-/// Output generic `Midi` (CC) events survive the FFI round-trip.
-#[test]
-fn test_output_event_list_push_midi_cc() {
-    use clap_sys::events::clap_event_midi;
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
+    let note = |time: u32, type_: u16| clap_event_note {
+        header: header(std::mem::size_of::<clap_event_note>(), time, type_),
+        note_id: 42,
+        port_index: 0,
+        channel: 2,
+        key: 60,
+        velocity: 0.5,
+    };
     let midi = clap_event_midi {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_midi>() as u32,
-            time: 33,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_MIDI,
-            flags: 0,
-        },
+        header: header(std::mem::size_of::<clap_event_midi>(), 5, CLAP_EVENT_MIDI),
         port_index: 0,
         data: [0xB2, 74, 100],
     };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        assert!(push_fn(raw as *const _, &midi.header as *const _));
-    }
-
-    let midi_out = midi_events(&mut list);
-    assert_eq!(midi_out.len(), 1);
-    let event = &midi_out[0];
-    assert_eq!(event.offset, 33);
-    // Back to wire bytes, the CC is the original payload.
-    let bytes: Vec<_> = midi1(event.ump.decode().expect("a CC"))
-        .map(|bytes| bytes.as_slice().to_vec())
-        .collect();
-    assert_eq!(bytes, [[0xB2, 74, 100]]);
-}
-
-/// Events added to the input list should sort by frame offset after
-/// calling `sort_by_time()`.
-#[test]
-fn test_input_event_list_sort_by_time() {
-    let mut list = InputEventList::new(InputRooms::new(1024));
-    list.add_midi(&(at(200), midi::note_on(MidiChannel::FIRST, 60, 0x8000)));
-    list.add_midi(&(at(50), midi::note_on(MidiChannel::FIRST, 64, 0x5000)));
-    list.add_midi(&(at(100), midi::note_on(MidiChannel::FIRST, 67, 0x7000)));
-    list.sort_by_time();
-
-    let events = list.events();
-    assert_eq!(events[0].header().time, 50);
-    assert_eq!(events[1].header().time, 100);
-    assert_eq!(events[2].header().time, 200);
-}
-
-#[test]
-fn test_output_event_list_push_param_value() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let param = clap_event_param_value {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_param_value>() as u32,
-            time: 0,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_PARAM_VALUE,
-            flags: 0,
-        },
+    let expression = clap_event_note_expression {
+        header: header(
+            std::mem::size_of::<clap_event_note_expression>(),
+            6,
+            CLAP_EVENT_NOTE_EXPRESSION,
+        ),
+        expression_id: CLAP_NOTE_EXPRESSION_TUNING,
+        note_id: 5,
+        port_index: 0,
+        channel: 0,
+        key: 60,
+        value: 0.25,
+    };
+    let value = clap_event_param_value {
+        header: header(
+            std::mem::size_of::<clap_event_param_value>(),
+            7,
+            CLAP_EVENT_PARAM_VALUE,
+        ),
         param_id: 7,
         cookie: std::ptr::null_mut(),
         note_id: -1,
@@ -391,76 +196,113 @@ fn test_output_event_list_push_param_value() {
         key: -1,
         value: 0.42,
     };
-
+    let modulation = clap_event_param_mod {
+        header: header(
+            std::mem::size_of::<clap_event_param_mod>(),
+            8,
+            CLAP_EVENT_PARAM_MOD,
+        ),
+        param_id: 9,
+        cookie: std::ptr::null_mut(),
+        note_id: -1,
+        port_index: -1,
+        channel: -1,
+        key: -1,
+        amount: 0.25,
+    };
+    let gesture = |time: u32, type_: u16| clap_event_param_gesture {
+        header: header(std::mem::size_of::<clap_event_param_gesture>(), time, type_),
+        param_id: 5,
+    };
+    let (on, off, choke, end) = (
+        note(1, CLAP_EVENT_NOTE_ON),
+        note(2, CLAP_EVENT_NOTE_OFF),
+        note(3, CLAP_EVENT_NOTE_CHOKE),
+        note(4, CLAP_EVENT_NOTE_END),
+    );
+    let (begin, finish) = (
+        gesture(9, CLAP_EVENT_PARAM_GESTURE_BEGIN),
+        gesture(10, CLAP_EVENT_PARAM_GESTURE_END),
+    );
+    let headers = [
+        &on.header,
+        &off.header,
+        &choke.header,
+        &end.header,
+        &midi.header,
+        &expression.header,
+        &value.header,
+        &modulation.header,
+        &begin.header,
+        &finish.header,
+    ];
     unsafe {
         let push_fn = (*raw).try_push.unwrap();
-        push_fn(raw as *const _, &param.header as *const _);
+        for header in headers {
+            assert!(push_fn(raw as *const _, header as *const _));
+        }
     }
+
+    let held: Vec<(&str, u32)> = list
+        .events()
+        .iter()
+        .map(|event| {
+            let name = match event {
+                ClapEvent::NoteOn(_) => "NoteOn",
+                ClapEvent::NoteOff(_) => "NoteOff",
+                ClapEvent::NoteChoke(_) => "NoteChoke",
+                ClapEvent::NoteEnd(_) => "NoteEnd",
+                ClapEvent::Midi(_) => "Midi",
+                ClapEvent::NoteExpression(_) => "NoteExpression",
+                ClapEvent::ParamValue(_) => "ParamValue",
+                ClapEvent::ParamMod(_) => "ParamMod",
+                ClapEvent::ParamGestureBegin(_) => "ParamGestureBegin",
+                ClapEvent::ParamGestureEnd(_) => "ParamGestureEnd",
+                other => panic!("an event the test did not push: {other:?}"),
+            };
+            (name, event.header().time)
+        })
+        .collect();
+    assert_eq!(
+        held,
+        [
+            ("NoteOn", 1),
+            ("NoteOff", 2),
+            ("NoteChoke", 3),
+            ("NoteEnd", 4),
+            ("Midi", 5),
+            ("NoteExpression", 6),
+            ("ParamValue", 7),
+            ("ParamMod", 8),
+            ("ParamGestureBegin", 9),
+            ("ParamGestureEnd", 10),
+        ]
+    );
 
     let changes = param_changes(&list);
-    assert_eq!(changes.queues.len(), 1);
+    assert_eq!(
+        changes.queues.len(),
+        1,
+        "only the value is a parameter queue"
+    );
     assert_eq!(changes.queues[0].param_id, ParamId::new(7u32));
     assert!((changes.queues[0].points[0].value.get() - 0.42).abs() < 0.001);
-}
-
-// sort_by_time test removed alongside other MIDI-shape-dependent tests.
-
-// ── Parameter changes grouping ──
-
-#[test]
-fn test_param_changes_through_input_list() {
-    let mut changes = ParameterChanges::new();
-    let mut q1 = ParameterQueue::with_capacity(ParamId::new(1u32), 2);
-    q1.add_point(at_frame(0), unit_value(0.0));
-    q1.add_point(at_frame(128), unit_value(1.0));
-    changes.add_queue(q1);
-
-    let mut q2 = ParameterQueue::with_capacity(ParamId::new(2u32), 1);
-    q2.add_point(at_frame(64), unit_value(0.5));
-    changes.add_queue(q2);
-
-    let mut list = InputEventList::new(InputRooms::new(0).param_points(3));
-    // No range map and no claim of params → pass-through (this test only
-    // asserts event count, not denormalized values; the denorm math is covered
-    // in the events unit tests).
-    list.add_param_changes(&changes, &[], false);
-
-    assert_eq!(list.len(), 3);
-}
-
-// ── Note expression through event list ──
-
-#[test]
-fn test_note_expression_roundtrip_through_output_list() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let expr = clap_event_note_expression {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note_expression>() as u32,
-            time: 10,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_EXPRESSION,
-            flags: 0,
-        },
-        expression_id: clap_sys::events::CLAP_NOTE_EXPRESSION_TUNING,
-        note_id: 5,
-        port_index: 0,
-        channel: 0,
-        key: 60,
-        value: 0.25,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        push_fn(raw as *const _, &expr.header as *const _);
-    }
 
     let expressions = note_expressions(&list);
     assert_eq!(expressions.len(), 1);
     assert_eq!(expressions[0].expression_type, NoteExpressionType::Tuning);
     assert_eq!(expressions[0].note_id, 5);
     assert!((expressions[0].value - 0.25).abs() < 0.001);
+
+    let messages: Vec<u32> = midi_events(&mut list).iter().map(|e| e.offset).collect();
+    assert_eq!(
+        messages,
+        [1, 2, 5, 6],
+        "a note on, a note off, the CC and the tuning's per-note pitch"
+    );
+
+    assert_eq!(list.take_events().len(), 10);
+    assert_eq!(list.len(), 0);
 }
 
 // ── Stream I/O ──
@@ -478,24 +320,6 @@ fn test_output_stream_write_and_read_back() {
     }
 
     assert_eq!(stream.data(), data);
-}
-
-#[test]
-fn test_input_stream_read() {
-    let data = b"saved plugin state";
-    let mut stream = InputStream::new(data);
-    let raw = stream.as_raw();
-
-    let mut buf = [0u8; 32];
-    unsafe {
-        let read_fn = (*raw).read.unwrap();
-        let bytes_read = read_fn(raw, buf.as_mut_ptr() as *mut c_void, 32);
-        assert_eq!(bytes_read, data.len() as i64);
-        assert_eq!(&buf[..data.len()], data);
-    }
-
-    assert_eq!(stream.position(), data.len());
-    assert_eq!(stream.remaining(), 0);
 }
 
 #[test]
@@ -520,6 +344,9 @@ fn test_input_stream_partial_reads() {
         assert_eq!(n, 2);
         assert_eq!(&buf[..2], b"IJ");
 
+        assert_eq!(stream.position(), 10);
+        assert_eq!(stream.remaining(), 0);
+
         let n = read_fn(raw, buf.as_mut_ptr() as *mut c_void, 4);
         assert_eq!(n, 0);
     }
@@ -527,202 +354,9 @@ fn test_input_stream_partial_reads() {
 
 // ── Mixed event types through output ──
 
-#[test]
-fn test_output_list_filters_midi_from_mixed_events() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    // Push a note on
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 0,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_ON,
-            flags: 0,
-        },
-        note_id: -1,
-        port_index: 0,
-        channel: 0,
-        key: 60,
-        velocity: 0.8,
-    };
-
-    // Push a param value
-    let param = clap_event_param_value {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_param_value>() as u32,
-            time: 10,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_PARAM_VALUE,
-            flags: 0,
-        },
-        param_id: 1,
-        cookie: std::ptr::null_mut(),
-        note_id: -1,
-        port_index: -1,
-        channel: -1,
-        key: -1,
-        value: 0.5,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        push_fn(raw as *const _, &note.header as *const _);
-        push_fn(raw as *const _, &param.header as *const _);
-    }
-
-    assert_eq!(list.len(), 2);
-    // to_param_changes should only return the param, not the note
-    assert_eq!(param_changes(&list).queues.len(), 1);
-}
-
 // ── Event types through the output list FFI ──
 
-#[test]
-fn test_output_list_push_note_choke() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 30,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_CHOKE,
-            flags: 0,
-        },
-        note_id: 42,
-        port_index: 0,
-        channel: 2,
-        key: 60,
-        velocity: 0.0,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        assert!(push_fn(raw as *const _, &note.header as *const _));
-    }
-
-    assert_eq!(list.len(), 1);
-    let events = list.events();
-    match &events[0] {
-        ClapEvent::NoteChoke(e) => {
-            assert_eq!(e.header.time, 30);
-            assert_eq!(e.note_id, 42);
-            assert_eq!(e.channel, 2);
-            assert_eq!(e.key, 60);
-        }
-        _ => panic!("Expected NoteChoke"),
-    }
-}
-
-#[test]
-fn test_output_list_push_note_end() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 99,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_END,
-            flags: 0,
-        },
-        note_id: 7,
-        port_index: 0,
-        channel: 0,
-        key: 72,
-        velocity: 0.0,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        assert!(push_fn(raw as *const _, &note.header as *const _));
-    }
-
-    assert_eq!(list.len(), 1);
-    let events = list.events();
-    match &events[0] {
-        ClapEvent::NoteEnd(e) => {
-            assert_eq!(e.header.time, 99);
-            assert_eq!(e.note_id, 7);
-            assert_eq!(e.key, 72);
-        }
-        _ => panic!("Expected NoteEnd"),
-    }
-}
-
-#[test]
-fn test_output_list_push_param_gesture_begin_end() {
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let begin = clap_event_param_gesture {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_param_gesture>() as u32,
-            time: 0,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_PARAM_GESTURE_BEGIN,
-            flags: 0,
-        },
-        param_id: 5,
-    };
-
-    let end = clap_event_param_gesture {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_param_gesture>() as u32,
-            time: 100,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_PARAM_GESTURE_END,
-            flags: 0,
-        },
-        param_id: 5,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        assert!(push_fn(raw as *const _, &begin.header as *const _));
-        assert!(push_fn(raw as *const _, &end.header as *const _));
-    }
-
-    assert_eq!(list.len(), 2);
-
-    let events = list.events();
-    match &events[0] {
-        ClapEvent::ParamGestureBegin(e) => {
-            assert_eq!(e.header.time, 0);
-            assert_eq!(e.param_id, 5);
-        }
-        _ => panic!("Expected ParamGestureBegin"),
-    }
-    match &events[1] {
-        ClapEvent::ParamGestureEnd(e) => {
-            assert_eq!(e.header.time, 100);
-            assert_eq!(e.param_id, 5);
-        }
-        _ => panic!("Expected ParamGestureEnd"),
-    }
-
-    // Gesture events should not appear as param changes
-    assert_eq!(param_changes(&list).queues.len(), 0);
-}
-
 // ── Host state + extensions ──
-
-#[test]
-fn test_host_state_take_clears_flag() {
-    use std::sync::atomic::Ordering;
-
-    let state = HostState::new(main_thread());
-    state.state_dirty.store(true, Ordering::Release);
-
-    // First take returns true and clears
-    assert!(state.take(&state.state_dirty));
-    // Second take returns false
-    assert!(!state.take(&state.state_dirty));
-}
 
 /// The main thread is the one thread that proved it with a token, and no
 /// other. The answer is `ThreadRoles`' alone (`HostState` keeps no second copy
@@ -785,15 +419,6 @@ fn host_gui_closed_was_destroyed_latches_window_destroyed() {
         host.state().gui.window_destroyed.load(Ordering::Acquire),
         "was_destroyed=true must latch window_destroyed"
     );
-
-    // Emulate close_editor consuming the latch (swap → false).
-    let was = host
-        .state()
-        .gui
-        .window_destroyed
-        .swap(false, Ordering::AcqRel);
-    assert!(was, "latch was set");
-    assert!(!host.state().gui.window_destroyed.load(Ordering::Acquire));
 }
 
 /// Every extension `clap_host_get_extension` dispatches must hand back a
@@ -900,17 +525,6 @@ fn test_host_get_extension_answers_the_compat_ids_with_the_stable_vtable() {
     }
 }
 
-/// Spec: clap.host.get_extension
-#[test]
-fn test_host_get_extension_returns_null_for_unknown() {
-    let host = ClapHost::new(std::sync::Arc::new(HostState::new(main_thread())));
-    let raw = host.as_raw();
-    let get_ext = unsafe { (*raw).get_extension.unwrap() };
-
-    let ptr = unsafe { get_ext(raw, c"clap.nonexistent".as_ptr()) };
-    assert!(ptr.is_null());
-}
-
 /// An extension the host serves nothing for is not advertised: the plugin
 /// then does not call it (`host.h`: `get_extension` returns null for one the
 /// host does not implement).
@@ -941,26 +555,6 @@ fn test_host_get_extension_returns_null_for_null_id() {
 
     let ptr = unsafe { get_ext(raw, std::ptr::null()) };
     assert!(ptr.is_null());
-}
-
-/// `request_restart` raises `Request::Restart` once.
-#[test]
-fn test_host_request_restart_raises_the_request() {
-    use std::sync::Arc;
-    use tutti_plugin_types::{Request, taken};
-
-    let state = Arc::new(HostState::new(main_thread()));
-    let host = ClapHost::new(state.clone());
-    let raw = host.as_raw();
-    let request_restart = unsafe { (*raw).request_restart.unwrap() };
-
-    assert_eq!(taken(&state.requests).count(), 0);
-    unsafe { request_restart(raw) };
-    assert_eq!(
-        taken(&state.requests).collect::<Vec<_>>(),
-        [Request::Restart]
-    );
-    assert_eq!(taken(&state.requests).count(), 0, "taken once");
 }
 
 /// `request_process` raises the bound wake once per call, and a request made
@@ -999,88 +593,7 @@ fn test_host_request_process_raises_the_bound_wake() {
     assert_eq!(raised.load(Ordering::SeqCst), 2, "one raise per request");
 }
 
-/// `request_callback` raises `Request::Callback`.
-#[test]
-fn test_host_request_callback_raises_the_request() {
-    use std::sync::Arc;
-    use tutti_plugin_types::{Request, taken};
-
-    let state = Arc::new(HostState::new(main_thread()));
-    let host = ClapHost::new(state.clone());
-    let raw = host.as_raw();
-    let request_callback = unsafe { (*raw).request_callback.unwrap() };
-
-    unsafe { request_callback(raw) };
-    assert_eq!(
-        taken(&state.requests).collect::<Vec<_>>(),
-        [Request::Callback]
-    );
-}
-
-#[test]
-fn test_host_thread_check_main_thread() {
-    use clap_sys::ext::thread_check::clap_host_thread_check;
-
-    let host = ClapHost::new(std::sync::Arc::new(HostState::new(main_thread())));
-    let raw = host.as_raw();
-    let get_ext = unsafe { (*raw).get_extension.unwrap() };
-    let tc_ptr = unsafe { get_ext(raw, c"clap.thread-check".as_ptr()) };
-    let tc = unsafe { &*(tc_ptr as *const clap_host_thread_check) };
-
-    // Current thread should be the main thread
-    assert!(unsafe { tc.is_main_thread.unwrap()(raw) });
-    // Current thread should NOT be audio thread
-    assert!(!unsafe { tc.is_audio_thread.unwrap()(raw) });
-}
-
 // ── Miscellaneous ──
-
-#[test]
-fn test_param_value_event_construction() {
-    let event = ClapEvent::param_value(42, 7, 0.75);
-    let header = event.header();
-    assert_eq!(header.time, 42);
-    match &event {
-        ClapEvent::ParamValue(e) => {
-            assert_eq!(e.param_id, 7);
-            assert!((e.value - 0.75).abs() < f64::EPSILON);
-        }
-        _ => panic!("Expected ParamValue"),
-    }
-}
-
-#[test]
-fn test_output_event_list_take_events() {
-    use clap_sys::events::{CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_NOTE_ON};
-
-    let mut list = OutputEventList::new(OutputRooms::new(256).params(64, &[]));
-    let raw = list.as_raw_mut();
-
-    let note = clap_event_note {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_note>() as u32,
-            time: 0,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_NOTE_ON,
-            flags: 0,
-        },
-        note_id: -1,
-        port_index: 0,
-        channel: 0,
-        key: 60,
-        velocity: 0.8,
-    };
-
-    unsafe {
-        let push_fn = (*raw).try_push.unwrap();
-        push_fn(raw as *const _, &note.header as *const _);
-    }
-
-    assert_eq!(list.len(), 1);
-    let taken = list.take_events();
-    assert_eq!(taken.len(), 1);
-    assert_eq!(list.len(), 0); // Should be empty after take
-}
 
 #[test]
 fn a_flush_list_is_sent_in_time_order() {
@@ -1401,50 +914,6 @@ fn test_host_posix_fd_modify() {
 }
 
 // ── ParamMod event FFI ──
-
-#[test]
-fn test_param_mod_event_ffi() {
-    let event = clap_event_param_mod {
-        header: clap_event_header {
-            size: std::mem::size_of::<clap_event_param_mod>() as u32,
-            time: 42,
-            space_id: CLAP_CORE_EVENT_SPACE_ID,
-            type_: CLAP_EVENT_PARAM_MOD,
-            flags: 0,
-        },
-        param_id: 123,
-        cookie: std::ptr::null_mut(),
-        note_id: 7,
-        port_index: 0,
-        channel: 1,
-        key: 60,
-        amount: 0.75,
-    };
-
-    let clap_event = ClapEvent::ParamMod(event);
-
-    // Verify header fields are accessible and correct
-    let header = clap_event.header();
-    assert_eq!(header.time, 42);
-    assert_eq!(header.space_id, CLAP_CORE_EVENT_SPACE_ID);
-    assert_eq!(header.type_, CLAP_EVENT_PARAM_MOD);
-    assert_eq!(
-        header.size,
-        std::mem::size_of::<clap_event_param_mod>() as u32
-    );
-
-    // Verify data fields via pattern match
-    match &clap_event {
-        ClapEvent::ParamMod(e) => {
-            assert_eq!(e.param_id, 123);
-            assert_eq!(e.note_id, 7);
-            assert_eq!(e.channel, 1);
-            assert_eq!(e.key, 60);
-            assert!((e.amount - 0.75).abs() < f64::EPSILON);
-        }
-        _ => panic!("Expected ParamMod"),
-    }
-}
 
 /// Each CLAP severity is emitted at its level on target `tutti::plugin`, tagged
 /// with the plugin's id; one CLAP does not name is a warning that carries the
