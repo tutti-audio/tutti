@@ -153,13 +153,13 @@ impl ProfileRequest {
 pub enum ProfileOutcome {
     /// A Set Profile On or Off was answered by a Report: the state the peer says
     /// the Profile is in now (it is the state asked for unless the peer could not
-    /// comply) and its Channel count, 0 for a Group or Function Block address or a
-    /// Version 1 peer.
+    /// comply) and its Channel count: 0 for a Group or Function Block address,
+    /// none from a Version 1 peer, whose Report has no such field.
     Reported {
         /// Enabled or disabled.
         state: ProfileState,
         /// The Number Channels field of the Report.
-        channels: ProfileChannels,
+        channels: Option<ProfileChannels>,
     },
     /// A Details Inquiry was answered with this data.
     Details(DetailsData),
@@ -584,7 +584,7 @@ impl ProfileInitiator {
                 request: pending.request,
                 outcome: ProfileOutcome::Reported {
                     state,
-                    channels: format.channels().unwrap_or(ProfileChannels::BY_ADDRESS),
+                    channels: format.channels(),
                 },
             });
         }

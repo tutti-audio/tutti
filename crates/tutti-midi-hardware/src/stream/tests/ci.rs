@@ -1240,7 +1240,7 @@ fn a_set_profile_on_names_the_channel_and_its_enabled_report_updates_the_table()
             },
             outcome: ProfileOutcome::Reported {
                 state: ProfileState::Enabled,
-                channels: ProfileChannels::of(3),
+                channels: Some(ProfileChannels::of(3)),
             },
         }]
     );
