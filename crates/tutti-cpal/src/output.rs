@@ -233,18 +233,22 @@ impl Origin {
     }
 
     /// Records a restart's stream as running on the device `opened`.
-    pub(crate) fn reopened(&mut self, now: Opened) {
+    ///
+    /// # Errors
+    /// [`DeviceError::InvalidDevice`] for an engine that has no device, as
+    /// [`started`](Self::started) answers.
+    pub(crate) fn reopened(&mut self, now: Opened) -> Result<()> {
         match self {
             Self::Device { opened, .. } => *opened = now,
             Self::Supplied { was } => {
-                if let Some(target) = was.take() {
-                    *self = Self::Device {
-                        target,
-                        opened: now,
-                    };
-                }
+                let target = was.take().ok_or_else(no_device)?;
+                *self = Self::Device {
+                    target,
+                    opened: now,
+                };
             }
         }
+        Ok(())
     }
 
     /// Records the stream as running on a supplied driver, keeping the device.
@@ -435,8 +439,7 @@ impl AudioEngine {
         }
         let (driver, spec, opened) = self.resolve()?;
         self.stream.start_at(state, spec, driver)?;
-        self.origin.reopened(opened);
-        Ok(())
+        self.origin.reopened(opened)
     }
 
     /// Resolve the selected device and read its config, without opening a

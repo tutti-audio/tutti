@@ -142,7 +142,7 @@ where
             )
             .map_err(Restart::into_user)?;
         if let Some(opened) = opened {
-            self.origin.reopened(opened);
+            self.origin.reopened(opened)?;
         }
         Ok(())
     }
