@@ -343,7 +343,9 @@ mod tests {
     }
 
     /// Every variant of `Universal` has a payload, and `read` gives back the
-    /// message it was written from, to each kind of recipient.
+    /// message it was written from, to each kind of recipient. The forms of
+    /// `TuningMessage` are read back one by one in the `write` module of
+    /// `tests/wire/universal.rs`; one sample of each nested kind is enough here.
     #[test]
     fn every_universal_message_is_written_and_read_back() {
         let samples = [

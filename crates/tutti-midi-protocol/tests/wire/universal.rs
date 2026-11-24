@@ -1907,6 +1907,12 @@ mod write {
                 program: U7::of(3),
             },
             TuningMessage::KeyDump {
+                bank: None,
+                program: U7::of(3),
+                name,
+                table: KeyTable::new(words),
+            },
+            TuningMessage::KeyDump {
                 bank: Some(U7::of(1)),
                 program: U7::of(3),
                 name,

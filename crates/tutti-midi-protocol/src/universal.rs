@@ -18,8 +18,9 @@
 //! - The MTC Full Message (Real Time `01 01`, M1 p.53 and T-9): a whole SMPTE
 //!   position in one message, as [`MtcFullMessage`].
 //! - MIDI Machine Control (RP-013): Real Time `06` commands as [`MmcCommands`]
-//!   and `07` responses as [`MmcFields`] ([`UniversalRead::MachineControlResponse`]), with every command and information
-//!   field of the specification typed ([`MmcCommand`], [`MmcInfoField`]).
+//!   and `07` responses as [`MmcFields`] ([`UniversalRead::MachineControlResponse`]),
+//!   with every command and information field of the specification typed
+//!   ([`MmcCommand`], [`MmcInfoField`]).
 //! - The MIDI Tuning Standard (`08`): [`TuningMessage`], with its
 //!   [frequency data](crate::TuningFrequency). A dump whose checksum does not hold is
 //!   [`UniversalRead::BadChecksum`], not `Unread`.
@@ -625,27 +626,7 @@ pub enum UniversalRead {
 pub fn read(message: SysexMessage<'_>) -> UniversalRead {
     let payload = message.payload();
     match payload.first() {
-        Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => match read::parse(payload) {
-            read::Parsed::Message(to, message) => {
-                UniversalRead::Universal(Addressed { to, message })
-            }
-            read::Parsed::Response { from, fields } => {
-                UniversalRead::MachineControlResponse { from, fields }
-            }
-            read::Parsed::Truncated { to, before } => {
-                UniversalRead::MachineControlTruncated { to, before }
-            }
-            read::Parsed::BadChecksum {
-                to,
-                expected,
-                found,
-            } => UniversalRead::BadChecksum(BadChecksum {
-                to,
-                expected,
-                found,
-            }),
-            read::Parsed::Unread => UniversalRead::Unread,
-        },
+        Some(&(UNIVERSAL_NON_REAL_TIME | UNIVERSAL_REAL_TIME)) => read::parse(payload),
         _ => UniversalRead::Foreign,
     }
 }
@@ -709,7 +690,8 @@ impl UniversalReader {
     /// skipped; every UMP of its own Group is taken, because a message of the
     /// Group that is not a Continue ends an open SysEx (M2-104 section 7.7.1).
     /// Returns the Universal message that UMP completed, if it was addressed to
-    /// this device or to all.
+    /// this device or to all: a sendable [`Universal`] message, never a Machine
+    /// Control Response or a truncated command.
     pub fn push(&mut self, ump: Ump) -> Option<Heard> {
         if ump.group().is_some_and(|g| g != self.group) {
             return None;
