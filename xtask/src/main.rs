@@ -450,7 +450,19 @@ fn unused_public(ctx: &Ctx, crates: &[String], out: Option<&str>, app: bool) -> 
     } else {
         gates::unused_public
     };
-    let text = make(&tree, &bytes, &crates, umbrella.as_deref()).map_err(fail)?;
+    let git = |args: &[&str]| {
+        process::Command::new("git")
+            .args(args)
+            .current_dir(&ctx.root)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+            .unwrap_or_default()
+    };
+    let mut built_at = git(&["rev-parse", "--short", "HEAD"]);
+    if !git(&["status", "--porcelain"]).is_empty() {
+        built_at.push_str(", with uncommitted changes");
+    }
+    let text = make(&tree, &bytes, &crates, umbrella.as_deref(), &built_at).map_err(fail)?;
     print!("{text}");
     if let Some(path) = out {
         if let Some(dir) = Path::new(path).parent() {

@@ -516,6 +516,19 @@ fn crate_of(path: &str) -> Option<&str> {
     path.strip_prefix("crates/")?.split('/').next()
 }
 
+/// How many of the scanned public item locations have no definition in `defined`.
+fn without_symbol(scanned: &[(&str, usize)], defined: &BTreeSet<(&str, usize)>) -> usize {
+    scanned.iter().filter(|l| !defined.contains(l)).count()
+}
+
+/// `header` with the lines that say what the index was built from after its first line.
+fn with_preamble(header: &str, built_at: &str) -> String {
+    let (title, rest) = header.split_once('\n').unwrap_or((header, ""));
+    format!(
+        "{title}\nindex built at commit {built_at}\nindex features: every cargo feature on, through the rust-analyzer config {{\"cargo\": {{\"features\": \"all\"}}}}; a reference under a feature that was off does not exist.\n{rest}"
+    )
+}
+
 /// What both reports read: the public items of the named crates with their
 /// references, the umbrella's reach, and the files read.
 struct Gathered<'a> {
@@ -525,6 +538,8 @@ struct Gathered<'a> {
     implemented_by: BTreeSet<String>,
     /// The public methods of each `(crate, type)`, as the scan counts them.
     methods: BTreeMap<(String, String), usize>,
+    /// Per crate: the public items scanned, and how many had no symbol in the index.
+    coverage: BTreeMap<String, (usize, usize)>,
 }
 
 /// Reads `index` for `crates` against `tree`. `umbrella` is `tutti`'s
@@ -656,8 +671,28 @@ fn gather<'a>(
             }
         }
     }
+    let mut coverage = BTreeMap::new();
+    for krate in crates {
+        let defined: BTreeSet<(&str, usize)> = items
+            .values()
+            .filter(|i| &i.krate == krate)
+            .map(|i| (i.file.as_str(), i.line))
+            .collect();
+        let mut locations = Vec::new();
+        for i in scanned.get(krate).into_iter().flatten() {
+            sources.load(&i.file);
+            if Kind::of(i.kind).is_some() && !sources.test_file(&i.file) {
+                locations.push((i.file.as_str(), i.line));
+            }
+        }
+        coverage.insert(
+            krate.clone(),
+            (locations.len(), without_symbol(&locations, &defined)),
+        );
+    }
     Ok(Gathered {
         items: items.into_values().collect(),
+        coverage,
         reach,
         sources,
         implemented_by,
@@ -672,8 +707,10 @@ pub(crate) fn report(
     index: &[u8],
     crates: &[String],
     umbrella: Option<&str>,
+    built_at: &str,
 ) -> Result<String, String> {
     let Gathered {
+        coverage,
         items,
         reach: names,
         sources,
@@ -682,7 +719,7 @@ pub(crate) fn report(
     } = gather(tree, index, crates, umbrella)?;
     let corpus = Corpus::read(tree);
     let mut out = String::new();
-    out.push_str(HEADER);
+    out.push_str(&with_preamble(HEADER, built_at));
     if names.is_none() {
         out.push_str("umbrella reachability not checked (cargo public-api did not run)\n");
     }
@@ -742,6 +779,11 @@ pub(crate) fn report(
             removed.umbrella,
             removed.in_macro
         );
+        let (scanned, missing) = coverage.get(krate).copied().unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "{krate}: scanned {scanned} public items, {missing} had no symbol in the index\n"
+        );
         total_rows += rows.len();
         total_items += 1;
     }
@@ -773,14 +815,17 @@ public trait that some non-test `impl .. <Trait> for ..` under crates/ implement
 A definition inside a macro invocation is kept and labelled `in macro`.\n\
 Test code: files under tests/, benches/, examples/, testing/; tests.rs, testing.rs, *_tests.rs; any file of a\n\
 module whose `mod` line carries cfg(feature = \"testing\") or \"contract\"; and #[cfg(test)] items.\n\
-The index is built with every cargo feature on.\n\
+Items the scan finds with no definition in the index are not listed; the count per crate is printed after its summary.\n\
+Absence from the list does not mean a production use when the item is among those (written by a macro, or behind a feature the index lacks).\n\
+An `examples/` directory is test code in this report and app-side code in `--app`: the two reports ask different questions.\n\
 A row is labelled `named in a macro` (refs none only) when a macro_rules! body names it, and `named in a doc example`\n\
 (with the first file:line) when a ``` block in a /// or //! comment, or in book/ Markdown, names it. Both\n\
 matches are by name (`.name(` or `Type::name`, `name(`, the bare type name) and can over-label.\n\
 It cannot see: use only through a trait object or a macro expansion (an item called only from one, such as\n\
 `Sweep::new` in `declare_params!`, may show as unreferenced: see the label); doc examples, which the index\n\
 does not read and nothing but `cargo test --doc` compiles: a row is not safe to delete until\n\
-`cargo test --doc --workspace` passes without the item, because a doc example may be its only user;\n\
+`cargo test --doc --workspace` passes without the item (a doc example may be its only user), and until the\n\
+workspace compiles with all targets after merging main (a row is true at one commit);\n\
 trait methods (not listed); a re-exported item used by an app (filtered by name); code behind a\n\
 cfg of another platform (macOS and Windows code is not indexed on Linux).\n";
 
@@ -880,6 +925,18 @@ mod tests {
         assert!(is(&mut s, "crates/c/src/contract/deep.rs"));
         assert!(!is(&mut s, "crates/c/src/real.rs"));
         assert!(!is(&mut s, "crates/c/src/plain.rs"));
+    }
+
+    #[test]
+    fn a_scanned_item_with_no_symbol_is_counted() {
+        let scanned = [("a.rs", 1), ("a.rs", 9), ("b.rs", 4)];
+        let defined = BTreeSet::from([("a.rs", 1), ("b.rs", 4)]);
+        assert_eq!(without_symbol(&scanned, &defined), 1);
+        let text = with_preamble("title\nrest\n", "abc123");
+        assert!(text.starts_with(
+            "title\nindex built at commit abc123\nindex features: every cargo feature on"
+        ));
+        assert!(text.ends_with("rest\n"));
     }
 
     #[test]

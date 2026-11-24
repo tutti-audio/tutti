@@ -13,7 +13,7 @@
 //! - **sibling production**: another crate's non-test code under `crates/`.
 
 use super::named::{Corpus, Hit};
-use super::{Gathered, Item, Kind, Reach, crate_of, gather};
+use super::{Gathered, Item, Kind, Reach, crate_of, gather, with_preamble};
 use crate::gates::Tree;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -244,8 +244,10 @@ pub(crate) fn app_report(
     index: &[u8],
     crates: &[String],
     umbrella: Option<&str>,
+    built_at: &str,
 ) -> Result<String, String> {
     let Gathered {
+        coverage,
         items,
         reach,
         sources,
@@ -260,7 +262,7 @@ pub(crate) fn app_report(
     let population: Vec<Item> = items.into_iter().filter(named).collect();
     let is_test = |f: &str, l: usize| sources.is_test(f, l);
     let is_reexport = |f: &str, l: usize| sources.is_reexport(f, l);
-    let mut out = String::from(HEADER);
+    let mut out = with_preamble(HEADER, built_at);
     out.push('\n');
     let mut totals = [0usize; 5];
     for krate in crates {
@@ -274,6 +276,11 @@ pub(crate) fn app_report(
             totals[r.group as usize] += 1;
         }
         out.push_str(&section(krate, &rows, &methods));
+        let (scanned, missing) = coverage.get(krate).copied().unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "{krate}: scanned {scanned} public items, {missing} had no symbol in the index\n"
+        );
     }
     let _ = writeln!(
         out,
@@ -293,7 +300,13 @@ A list to cut from, for the owner to decide item by item; not a proof. The popul
 method, struct, enum, trait, type, const or static the umbrella names (trait members and trait impls are\n\
 not listed). References come from rust-analyzer's SCIP index (every cargo feature on), minus the\n\
 definition, an `impl` header's mention of its type and a `pub use` statement. An item with a reference\n\
-from crates/tutti/, testing/tutti-book/ or any examples/ directory is not listed.\n\
+from crates/tutti/, testing/tutti-book/ or any examples/ directory is not listed (an `examples/` directory is\n\
+app-side code here and test code in the plain report: the two reports ask different questions).\n\
+A crate's own tests may drive it as an app does (tutti-session's do), so \"exercised only by tests\" means no\n\
+example, book chapter or umbrella test shows the item.\n\
+Items the scan finds with no definition in the index are not listed; the count per crate is printed after its\n\
+summary. Absence from the list does not mean a production use when the item is among those (written by a macro,\n\
+or behind a feature the index lacks).\n\
 Group exercised-by-nothing: no reference of any other kind (a row may carry `named in a macro`, see below).\n\
 Group documented-and-otherwise-unexercised: no reference, but a doc example names it (by name).\n\
 Group exercised-only-by-tests: at least one test reference (its own crate's or another's), no production\n\
@@ -308,7 +321,8 @@ order above (nothing / documented / only tests / inside its crate / sibling).\n\
 Doc examples (``` blocks in /// and //! comments) and the book's Markdown chapters are not in the index; they\n\
 are searched by name: `.name(` or `Type::name`, `name(`, the bare name; it can over-label. A `macro_rules!`\n\
 body naming an unreferenced item labels it `named in a macro`. A row is not safe to delete until\n\
-`cargo test --doc --workspace` passes without the item.\n\
+`cargo test --doc --workspace` passes without the item, and until the workspace compiles with all targets\n\
+after merging main (a row is true at one commit).\n\
 It cannot see: an item called only from a macro expansion (`Sweep::new` in `declare_params!`; see the label);\n\
 an app outside this repository; use through a trait object or a macro expansion;\n\
 cfg'd-out platforms (macOS and Windows code is not indexed on Linux); the Reach match is by crate\n\
