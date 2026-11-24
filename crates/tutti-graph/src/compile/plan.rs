@@ -545,7 +545,7 @@ pub struct PlanUnit {
 ///
 /// Slot fields name a slot of the arena of the op's kind, tables name a row by
 /// its typed id, and `Span`s are runs of [`Plan::audio_list`],
-/// the plan's event list or another list of the plan. An op names its audio and
+/// [`Plan::event_list`] or another list of the plan. An op names its audio and
 /// event operands by `A` and `E`: a plan's are [`AudioSlotId`] and
 /// [`EventSlotId`] (what this documents); the compiler's `emit` names values
 /// until `colour` gives them slots.
@@ -622,7 +622,7 @@ pub enum Op<A, E> {
     /// fan-in. PortSource order is the source port's
     /// `(NodeKey, port)`.
     EventMerge {
-        /// Event slots read, in source order (into the plan's event list).
+        /// Event slots read, in source order (into [`Plan::event_list`]).
         srcs: Span<E>,
         /// Event slot written.
         dst: E,
@@ -640,7 +640,7 @@ pub enum Op<A, E> {
         /// Audio slot per output channel.
         audio_out: Span<A>,
         /// Event slot per input port: what each input is merged from (into
-        /// the plan's event list): the merge of its edges, a feedback slot or
+        /// [`Plan::event_list`]): the merge of its edges, a feedback slot or
         /// the empty slot. Read by this op.
         event_src: Span<E>,
         /// Event slot per input port: the view of each input, the events the
@@ -1480,7 +1480,7 @@ impl Plan {
         &self.program.audio_list[span.range()]
     }
 
-    /// The event slots of `span` in the plan's event list.
+    /// The event slots of `span` in [`event_list`](Self::event_list).
     pub(crate) fn event_slots(&self, span: Span<EventSlotId>) -> &[EventSlotId] {
         &self.program.event_list[span.range()]
     }
@@ -1493,6 +1493,11 @@ impl Plan {
     /// The flattened audio slot lists [`Op`] spans index.
     pub fn audio_list(&self) -> &[AudioSlotId] {
         &self.program.audio_list
+    }
+
+    /// The flattened event slot lists [`Op`] spans index.
+    pub fn event_list(&self) -> &[EventSlotId] {
+        &self.program.event_list
     }
 
     /// The ops each op waits for: the dependency DAG, each edge from an
