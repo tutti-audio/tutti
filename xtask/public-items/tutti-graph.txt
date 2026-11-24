@@ -268,6 +268,7 @@ fn edges::event_tap::EventTapReader::drain
 fn edges::event_tap::EventTapReader::id
 fn edges::event_tap::EventTapReader::pop_into
 fn edges::event_tap::EventTapReader::rate
+fn edges::event_tap::EventTapReader::source_gone
 fn edges::event_tap::EventTapReader::take_lost
 fn edges::event_tap::EventTapReader::watch
 fn edges::inlet::InletNode::layout

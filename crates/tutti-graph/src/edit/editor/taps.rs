@@ -155,7 +155,7 @@ impl<F: Float> Editor<F> {
         reader
     }
 
-    /// Ends the reader of `id` when `id` is opened again: the commit that
+    /// Ends the reader of `id` when `id` is closed or opened again: the commit that
     /// carries the new writer leaves the old one out, and once the executor
     /// has applied it the old reader reads what its rings hold and then ends
     /// ([`TapReader::source_gone`]). A writer the executor never held ends its
@@ -203,7 +203,8 @@ impl<F: Float> Editor<F> {
     }
 
     /// Removes a tap: its ops leave the plan at the next commit and its
-    /// producers are freed on the control side.
+    /// producers are freed on the control side. A reader still held ends as
+    /// one whose sources were removed ([`TapReader::source_gone`]).
     ///
     /// # Errors
     ///
@@ -214,7 +215,7 @@ impl<F: Float> Editor<F> {
         if !self.spec.topology.taps.contains_key(&id) {
             return Err(CloseError::Tap(id));
         }
-        let _ = self.taps.close(id);
+        self.end_replaced_tap(id);
         self.spec_mut().topology.taps.remove(&id);
         Ok(())
     }
@@ -284,16 +285,18 @@ impl<F: Float> Editor<F> {
     /// The frames are on the clock of [`EventTapReader::rate`], the rate the
     /// graph is prepared at now.
     ///
-    /// Opening an id again replaces it. A tap the topology does not name
+    /// Opening an id again ends the reader it replaces
+    /// ([`EventTapReader::source_gone`]). A tap the topology does not name
     /// compiles to nothing. The port must exist now, in the spec as edited
     /// (uncommitted edits included): a key no node has or a port past the
     /// node's event outputs is refused with [`MissingSource`] and nothing is
-    /// opened. A port that narrows or vanishes **later** reads no events, the
-    /// commit succeeds, the reader is not told and nothing counts as lost (the
-    /// writer is kept, so the stream resumes if a node with that port
-    /// returns under the same key by [`replace`](Self::replace); a removed
-    /// node's key is not read again). A tap sees the port before the engine's
-    /// declick, as an audio tap does.
+    /// opened. A port that narrows **later** reads no events, the commit
+    /// succeeds, the reader is not told and nothing counts as lost (the writer
+    /// is kept, so the stream resumes if a node with that port returns under
+    /// the same key by [`replace`](Self::replace)). A node that is **removed**
+    /// ends the tap: its key is not read again, and once the plan without the
+    /// tap runs the reader reads [`EventTapReader::source_gone`]. A tap sees
+    /// the port before the engine's declick, as an audio tap does.
     ///
     /// # Errors
     ///
@@ -327,8 +330,10 @@ impl<F: Float> Editor<F> {
                 }
             }
         }
+        self.end_event_tap(id);
         let (reader, writer) = EventTapReader::pair(id, capacity, self.prepare.sample_rate());
-        self.event_taps.open(id, writer, (), reader.watch());
+        self.event_taps
+            .open(id, writer, reader.end_latch(), reader.watch());
         self.spec_mut().topology.event_taps.insert(
             id,
             EventTapSpec {
@@ -340,7 +345,8 @@ impl<F: Float> Editor<F> {
     }
 
     /// Removes an event tap: its op leaves the plan at the next commit and
-    /// its producer is freed on the control side.
+    /// its producer is freed on the control side. A reader still held ends
+    /// ([`EventTapReader::source_gone`]).
     ///
     /// # Errors
     ///
@@ -349,9 +355,21 @@ impl<F: Float> Editor<F> {
         if !self.spec.topology.event_taps.contains_key(&id) {
             return Err(CloseError::EventTap(id));
         }
-        let _ = self.event_taps.close(id);
+        self.end_event_tap(id);
         self.spec_mut().topology.event_taps.remove(&id);
         Ok(())
+    }
+
+    /// Ends the reader of `id` when the tap is closed or opened again, as
+    /// [`end_replaced_tap`](Self::end_replaced_tap) does for an audio tap.
+    fn end_event_tap(&mut self, id: EventTapId) {
+        if let Some(Closed { meta, unsent }) = self.event_taps.close(id) {
+            if unsent {
+                meta.raise();
+            } else {
+                self.link.end_tap(meta);
+            }
+        }
     }
 
     /// Closes every event tap whose [`EventTapReader`] was dropped, and

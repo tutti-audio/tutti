@@ -51,6 +51,9 @@ impl MidiPart {
         None
     }
 
+    /// No clip to tell.
+    pub(crate) fn receivers_gained<F: Float>(&self, _: &Graph<F>, _: &[NodeKey]) {}
+
     /// No output to drain.
     pub(crate) fn out_phase<F: Float>(&mut self, _: &mut Graph<F>, _: Instant) -> bool {
         false

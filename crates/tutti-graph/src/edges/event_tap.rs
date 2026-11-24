@@ -12,8 +12,9 @@
 //! in the topology compiles to nothing. Opening one refuses a port that does
 //! not exist then ([`MissingSource::EventPort`](crate::MissingSource)); a port
 //! that goes missing later (a node replaced by one with fewer event outputs, a
-//! removed node) is read as no events: the commit succeeds, the reader is not
-//! told, and nothing counts as lost.
+//! removed node) is read as no events: the commit succeeds and nothing counts
+//! as lost. The reader is told only when the node was removed
+//! ([`EventTapReader::source_gone`]).
 //!
 //! What crosses is [`EventKind::Midi`](crate::EventKind) only, each as a
 //! [`TapEvent`]: the packet and the absolute [`Frame`] it was due on (the
@@ -43,7 +44,7 @@
 //! thread.
 
 use std::cell::Cell;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use tutti_rt::{
     ControlDrop, Counter, CounterWriter, Overflow, RingReader, RingWriter, counter, ring,
@@ -52,6 +53,7 @@ use tutti_ump::Ump;
 use tutti_units::{Frame, SampleRate};
 
 use super::alive::Alive;
+use super::tap::TapEnd;
 use crate::compile::ids::EventSlotId;
 use crate::event::types::EventKind;
 use crate::event::writer::note_off_room;
@@ -198,6 +200,8 @@ pub struct EventTapReader {
     rate: SampleRate,
     /// The editor watches this: when it dies, the reader is gone.
     alive: Alive,
+    /// Raised by the editor when the node the tap is on was removed.
+    end: Arc<TapEnd>,
 }
 
 impl std::fmt::Debug for EventTapReader {
@@ -230,6 +234,7 @@ impl EventTapReader {
             lost_seen: Cell::new(0),
             rate,
             alive: Alive::default(),
+            end: Arc::new(TapEnd::new(None)),
         };
         (
             reader,
@@ -289,6 +294,24 @@ impl EventTapReader {
     #[must_use]
     pub fn rate(&self) -> SampleRate {
         self.rate
+    }
+
+    /// The latch the editor raises when the tap leaves the plan because the
+    /// node it is on was removed.
+    pub(crate) fn end_latch(&self) -> Arc<TapEnd> {
+        Arc::clone(&self.end)
+    }
+
+    /// Whether the tap was taken out of the plan because the node it is on
+    /// was removed, and no event will be written after what is in its ring.
+    ///
+    /// **Ask before reading the ring**, as for
+    /// [`TapReader::source_gone`](crate::TapReader::source_gone): a `true`
+    /// answer, then a read that finds nothing, is the end. A tap whose port
+    /// only narrowed, or whose node was replaced at the same key, never ends.
+    #[must_use]
+    pub fn source_gone(&self) -> bool {
+        self.end.is_raised()
     }
 
     /// A handle to see whether this reader is still alive: its strong count

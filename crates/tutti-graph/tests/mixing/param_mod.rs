@@ -528,6 +528,69 @@ fn a_base_move_under_modulation_ramps_across_the_block() {
     }
 }
 
+/// A port with an event source reads `Frames` on every block, also long after
+/// the source's last ramp ended: the trajectory at rest is still delivered per
+/// frame, at the ramp's end value. Before the source's first event the port
+/// reads `Frames` too, at the base (the source "has not spoken", and a base
+/// move ramps across the block, as the test above pins). A port with no source
+/// reads `Base`: before the connect, and after the disconnect's declick.
+#[test]
+fn a_connected_param_reads_frames_at_rest_and_base_once_disconnected() {
+    const BLOCK: usize = 64;
+    // The first block after the connect's fade, which the ramp then follows.
+    let spoken = (declick() / BLOCK + 1) * BLOCK;
+    let (cutoff, q) = (Cell::new(100.0), Cell::new(1.0));
+    let (mut ed, mut exec) = probe_graph(BLOCK, &cutoff, &q);
+    // One ramp, 10 frames long, inside the block at `spoken` after the connect
+    // (the undriven block renders first, so its frames are offset by one block).
+    let ramps = Ramps {
+        plan: vec![((spoken + BLOCK) as u64 + 4, UnitParam::Cutoff, 300.0, 10)],
+        segs: Vec::new(),
+        shaped: Vec::new(),
+        events: Vec::new(),
+    };
+    ed.insert(NodeKey(1), "ramp", Unforkable(ramps));
+    ed.commit().expect("commits");
+    let undriven = render(&mut exec, &mut ed, BLOCK, BLOCK);
+    assert!(
+        undriven[0].iter().all(|&x| x == 100.0),
+        "no source: the base"
+    );
+    assert!(undriven[2].iter().all(|&x| x == 0.0), "no source: Base");
+
+    let at = param(PROBE, UnitParam::Cutoff);
+    ed.connect_param(at, ev(1)).unwrap();
+    ed.commit().expect("connects");
+    let out = render(&mut exec, &mut ed, spoken + 5 * BLOCK, BLOCK);
+    let at_rest = spoken + 4 + 10;
+    for (i, &framed) in out[2].iter().enumerate() {
+        assert_eq!(
+            framed, 1.0,
+            "frame {i}: the cutoff port reads Frames, Q reads Base"
+        );
+    }
+    assert!(
+        // The connect's crossfade between equal values, to within f32 rounding.
+        out[0][..spoken].iter().all(|&x| (x - 100.0).abs() < 1e-3),
+        "before its first event the source leaves the base"
+    );
+    assert_eq!(
+        out[0][spoken + 4 + 9],
+        300.0,
+        "the ramp lands on its last frame"
+    );
+    assert!(
+        out[0][at_rest..].iter().all(|&x| x == 300.0),
+        "at rest, blocks after the ramp ended, every frame is its end value"
+    );
+
+    assert!(ed.disconnect_param(at, ev(1)));
+    ed.commit().expect("disconnects");
+    let off = render(&mut exec, &mut ed, spoken + BLOCK, BLOCK);
+    assert_eq!(*off[2].last().expect("rendered"), 0.0, "Base again");
+    assert_eq!(*off[0].last().expect("rendered"), 100.0, "on the base");
+}
+
 /// Connecting a source at full swing, and disconnecting it, crossfade over
 /// `DECLICK`: no frame-to-frame step larger than the fade's
 /// steepest slope (the smootherstep's, `15/8` per fade length), and a disconnected param is back on its base (`Base`) once the
