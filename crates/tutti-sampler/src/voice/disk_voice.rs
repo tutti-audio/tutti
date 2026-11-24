@@ -1,8 +1,6 @@
 //! Disk streaming sample playback, fed by the streamer thread.
 //!
-//! Two types, one tier: [`DiskSource`] is the reader of the streamer's ring (the
-//! ring and its width), and [`DiskVoice`] is a timeline clip
-//! over it: it places its read on the transport exactly as the memory tier's
+//! [`DiskVoice`] is a timeline clip over the streamer's ring: it places its read on the transport exactly as the memory tier's
 //! placed read does (`interp::place`, the same gate and step, from the block's
 //! `Env`) and reads the ring at that position through `LiveRead`: the ring
 //! indexed by position, the memory tier's tap layout, the
@@ -34,70 +32,7 @@ use super::memory_source::VoiceWindow;
 use super::offline_read::OfflineRead;
 use super::types::PlayDirection;
 use crate::lanes::{Gather, Lanes, UNPREPARED_FRAMES, audible_gain};
-use crate::streamer::{Cells, SharedReader, StatusCell, StreamFile, StreamReader};
-
-/// The streaming tier's bare reader: the streamer's ring and its width.
-/// A [`DiskVoice`] takes one and reads the ring by the clock.
-///
-/// The audio thread holds the ring through a `SharedReader` (an `Arc`) and
-/// the ring's one `PosReader`, which the voice owns and a clone does not
-/// get (`LiveRead`'s module docs): every access is an atomic.
-///
-/// It is not a graph node: it knows neither where on the timeline it plays
-/// nor its file. A [`DiskVoice`] is, and forks.
-pub struct DiskSource<F: SamplerFloat> {
-    /// Boxed: a voice in a pool should not carry the reader's jump state
-    /// inline (it is built on the control thread, where the box is).
-    read: Box<LiveRead<F>>,
-
-    /// Output width — the declaration.
-    channels: ChannelLayout,
-}
-
-// Hand-rolled: `read` holds the ring.
-impl<F: SamplerFloat> std::fmt::Debug for DiskSource<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DiskSource").finish_non_exhaustive()
-    }
-}
-
-impl<F: SamplerFloat> DiskSource<F> {
-    /// A source over `consumer` through its one position `reader` (test rings),
-    /// at the ring's own width.
-    #[cfg(test)]
-    pub(crate) fn new(consumer: SharedReader<F>, reader: tutti_rt::PosReader<F>) -> Self {
-        let width =
-            crate::voice_width(consumer.channels()).expect("a test ring's width is a voice's");
-        let place = Place::for_channels(consumer.channel_set(), width)
-            .expect("a test ring is placeable at its own width");
-        let control = consumer.control_reader();
-        Self::with_reader(
-            consumer,
-            Some(crate::streamer::RingReader::new(reader, control)),
-            width,
-            place,
-        )
-    }
-
-    /// A source over `consumer` through its one `reader` and the reader of its
-    /// map (`None`: silent), `width` wide (at most [`MAX_CHANNELS`],
-    /// the widest frame the read path stacks), placing the ring's channels by
-    /// `place`: the [`Place`] of the ring's topology into `width`
-    /// ([`Place::for_channels`], built, and so refusing, when the stream was
-    /// opened). The file's own width and order give the identity.
-    pub(crate) fn with_reader(
-        consumer: SharedReader<F>,
-        reader: Option<crate::streamer::RingReader<F>>,
-        width: ChannelLayout,
-        place: Place<F>,
-    ) -> Self {
-        let stride = width.count() as usize;
-        Self {
-            read: Box::new(LiveRead::new(consumer, reader, stride, place)),
-            channels: width,
-        }
-    }
-}
+use crate::streamer::{Cells, RingReader, SharedReader, StatusCell, StreamFile, StreamReader};
 
 // ---------------------------------------------------------------------------
 // DiskVoice — a timeline clip over a stream.
@@ -126,7 +61,7 @@ pub struct DiskVoiceConfig {
     pub file_sample_rate: SampleRate,
 }
 
-/// A `DiskSource`'s stream, placed on the timeline.
+/// A stream's ring, placed on the timeline.
 ///
 /// A timeline clip must sound only while the playhead is inside its
 /// `[start, start + duration)` window, and there play the file frame the
@@ -177,9 +112,10 @@ pub struct DiskVoice<F: SamplerFloat> {
     file_sample_rate: SampleRate,
 
     /// The rate `prepare` last gave this voice, `None` until one did: the
-    /// rate the step converts to. A fork never told a rate renders nothing
-    /// and says so rather than play off pitch; a live voice never told one
-    /// steps by the streamer's conversion for the session rate.
+    /// rate the step converts to. A fork never told a rate (and mode, which
+    /// `prepare` gives with it) renders nothing and says so rather than play
+    /// off pitch; a live voice never told one steps by the streamer's
+    /// conversion for the session rate.
     sample_rate: Option<SampleRate>,
 
     /// The transport as this voice reads it when it is a graph node of its
@@ -193,18 +129,12 @@ pub struct DiskVoice<F: SamplerFloat> {
     positions: Vec<Option<SamplePosition>>,
 }
 
-/// What a disk voice reads: the live stream's ring, or, in a fork for an
-/// offline render, the stream's file. Each arm holds only what its kind uses;
-/// both read the file's channels through a [`Place`] of their own, built from
-/// the stream's.
-#[derive(Clone)]
+/// What a disk voice reads. Each arm holds only what its kind uses; the ring
+/// and file arms read the file's channels through a [`Place`] of their own,
+/// built from the stream's.
 enum Reader<F: SamplerFloat> {
-    /// The streamer's ring, read by position through `LiveRead`.
-    ///
-    /// A clone of a live voice is this arm too, with the ring and the origin
-    /// but no ring reader (`LiveRead`'s module docs): it renders silence, and
-    /// is what a node's fork template holds, to be forked by
-    /// [`DiskVoice::fork_copy`].
+    /// A live voice: the streamer's ring, read by position through
+    /// `LiveRead`.
     Ring {
         /// Boxed: a voice in a pool should not carry the reader's jump state
         /// inline (it is built on the control thread, where the box is).
@@ -218,11 +148,41 @@ enum Reader<F: SamplerFloat> {
         /// at the file's rate until a rate is given.
         declick: usize,
     },
+    /// A clone of a live voice: what [`DiskVoice::fork_copy`] reads of the
+    /// stream, and nothing that reads the ring. It renders silence, and is
+    /// what a node's fork template holds.
+    Template(Template<F>),
     /// A fork's own file read ([`DiskVoice::fork_copy`]): it never touches the
     /// ring or the streamer. Boxed: a live voice (every voice in a pool)
     /// should not carry the pages' room, and it is built on the control
     /// thread, where a fork is taken.
     File(Box<Offline<F>>),
+}
+
+/// What a fork needs of a live voice's stream: the ring (for the loop and
+/// direction the streamer has applied, read when the fork is taken), the
+/// stream's file and status, and where the file's channels go.
+#[derive(Clone)]
+struct Template<F: SamplerFloat> {
+    ring: SharedReader<F>,
+    origin: Option<Origin<F>>,
+    place: Place<F>,
+}
+
+impl<F: SamplerFloat> Clone for Reader<F> {
+    /// A live voice clones to a template; a template to a template; a fork to
+    /// a fork. No ring reader is cloned: the ring has one.
+    fn clone(&self) -> Self {
+        match self {
+            Self::Ring { read, origin, .. } => Self::Template(Template {
+                ring: Arc::clone(read.ring()),
+                origin: origin.clone(),
+                place: read.place().clone(),
+            }),
+            Self::Template(template) => Self::Template(template.clone()),
+            Self::File(offline) => Self::File(offline.clone()),
+        }
+    }
 }
 
 /// What a live voice keeps of its stream for a fork to read.
@@ -254,9 +214,61 @@ struct Offline<F: SamplerFloat> {
     fault: Arc<FirstError>,
     /// Where the file's channels go in the voice's frame: the stream's.
     place: Place<F>,
-    /// The render mode `prepare` last gave this fork: its file read blocks on
-    /// the render's thread, which only an offline render allows.
-    render_mode: RenderMode,
+    /// The render mode `prepare` last gave this fork, `None` until one did
+    /// (the voice's rate is told with it): its file read blocks on the
+    /// render's thread, which only an offline render allows.
+    render_mode: Option<RenderMode>,
+}
+
+impl<F: SamplerFloat> Offline<F> {
+    /// The file read of a live voice's stream, as the stream stands now: the
+    /// loop and direction the streamer has applied (read from the ring's
+    /// published control: a loop it downgraded is the downgrade, not the
+    /// request), the file when the stream is still served (a stream that has
+    /// ended latches [`OfflineFault::StreamGone`] on `fault`), and no render
+    /// mode until `prepare`.
+    fn of_stream(
+        ring: &SharedReader<F>,
+        origin: Option<&Origin<F>>,
+        place: &Place<F>,
+        fault: Arc<FirstError>,
+    ) -> Self {
+        let applied = ring.applied();
+        let read = match origin {
+            Some(origin) if origin.status.closed() => {
+                fault.latch(OfflineFault::StreamGone);
+                None
+            }
+            Some(origin) => Some(OfflineRead::new(
+                Arc::clone(&origin.file),
+                applied.loop_,
+                Arc::clone(&fault),
+            )),
+            // A voice over a bare ring has no file.
+            None => None,
+        };
+        Self {
+            direction: applied.direction,
+            read,
+            fault,
+            place: place.clone(),
+            render_mode: None,
+        }
+    }
+
+    /// A fork of this fork: the same file read, failures latched on `fault`.
+    fn forked(&self, fault: Arc<FirstError>) -> Self {
+        Self {
+            direction: self.direction,
+            read: self
+                .read
+                .clone()
+                .map(|read| read.relatched(Arc::clone(&fault))),
+            fault,
+            place: self.place.clone(),
+            render_mode: self.render_mode,
+        }
+    }
 }
 
 /// Why a forked disk voice renders silence where its file should be, other
@@ -306,6 +318,10 @@ impl<F: SamplerFloat> std::fmt::Debug for Reader<F> {
                 .debug_struct("Ring")
                 .field("has_origin", &origin.is_some())
                 .finish_non_exhaustive(),
+            Self::Template(template) => f
+                .debug_struct("Template")
+                .field("has_origin", &template.origin.is_some())
+                .finish_non_exhaustive(),
             Self::File(offline) => f.debug_tuple("File").field(offline).finish(),
         }
     }
@@ -322,9 +338,9 @@ impl<F: SamplerFloat> std::fmt::Debug for DiskVoice<F> {
 }
 
 impl<F: SamplerFloat> Clone for DiskVoice<F> {
-    /// A copy sharing the stream (the ring, without its reader: see
-    /// `LiveRead`) and the control cell. Not a fork: see
-    /// `fork_copy`.
+    /// A copy sharing the stream and the control cell: a template when this
+    /// is a live voice (see [`Reader`]), allocating nothing but the placement's
+    /// own clone. Not a fork: see `fork_copy`.
     fn clone(&self) -> Self {
         Self {
             reader: self.reader.clone(),
@@ -342,26 +358,34 @@ impl<F: SamplerFloat> Clone for DiskVoice<F> {
 }
 
 impl<F: SamplerFloat> DiskVoice<F> {
-    /// Places a `DiskSource`'s stream on the timeline.
+    /// Places a stream on the timeline: its ring, read through its one
+    /// `reader` (the ring's position reader and the reader of its control,
+    /// registered by whoever built them, on the control side), `width` wide
+    /// (at most [`MAX_CHANNELS`], the widest frame the read path stacks),
+    /// placing the ring's channels by `place`: the [`Place`] of the ring's
+    /// topology into `width` ([`Place::for_channels`], built, and so refusing,
+    /// when the stream was opened).
     ///
     /// Construction (streamer stream registration, ring allocation) happens on
-    /// the ECS/streamer side; this only binds the already-built unit to a
+    /// the ECS/streamer side; this only binds the already-built stream to a
     /// timeline window. `shared_state` is the stream's `Cells`, and `origin` the
     /// stream's file, which a fork reads. A voice over a bare ring (a test's)
     /// has none, so its fork plays silence.
     pub(crate) fn new(
-        inner: DiskSource<F>,
+        (ring, reader): (SharedReader<F>, RingReader<F>),
+        (width, place): (ChannelLayout, Place<F>),
         shared_state: Arc<Cells>,
         config: DiskVoiceConfig,
         origin: Option<Origin<F>>,
     ) -> Self {
+        let stride = width.count() as usize;
         Self {
             reader: Reader::Ring {
-                read: inner.read,
+                read: Box::new(LiveRead::new(ring, reader, stride, place)),
                 origin,
                 declick: declick_frames(config.file_sample_rate).get(),
             },
-            channels: inner.channels,
+            channels: width,
             shared_state,
             window: config.window,
             file_sample_rate: config.file_sample_rate,
@@ -402,9 +426,9 @@ impl<F: SamplerFloat> DiskVoice<F> {
             ..
         } = reader;
         let file_rate = file.file_rate();
-        let inner = DiskSource::with_reader(ring, Some(reader), width, place);
         Self::new(
-            inner,
+            (ring, reader),
+            (width, place),
             cells,
             DiskVoiceConfig {
                 window,
@@ -430,6 +454,10 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// ([`fault`](Self::fault)): the export fails naming the voice rather than
     /// write its silence.
     ///
+    /// The fork knows no render rate and mode until `prepare` gives them
+    /// ([`set_render`](Self::set_render)): a fork of a fork keeps the pair it
+    /// had.
+    ///
     /// A seek's preroll is counted once, in
     /// [`FileIn::seek`](tutti_codec::FileIn::seek), which both the streamer's
     /// decoder and the fork's `OfflineRead` seek through.
@@ -438,52 +466,24 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// here): control thread only, as every fork is.
     pub(crate) fn fork_copy(&self) -> Self {
         let fault = Arc::new(FirstError::default());
-        let (read, direction, place, render_mode) = match &self.reader {
-            Reader::Ring { read, origin, .. } => {
-                let applied = read.ring().applied();
-                let file = match origin {
-                    Some(origin) if origin.status.closed() => {
-                        fault.latch(OfflineFault::StreamGone);
-                        None
-                    }
-                    Some(origin) => Some(OfflineRead::new(
-                        Arc::clone(&origin.file),
-                        applied.loop_,
-                        Arc::clone(&fault),
-                    )),
-                    // A voice over a bare ring has no file.
-                    None => None,
-                };
-                (
-                    file,
-                    applied.direction,
-                    read.place().clone(),
-                    RenderMode::Realtime,
-                )
-            }
-            Reader::File(offline) => (
-                offline
-                    .read
-                    .clone()
-                    .map(|read| read.relatched(Arc::clone(&fault))),
-                offline.direction,
-                offline.place.clone(),
-                offline.render_mode,
+        let (offline, sample_rate) = match &self.reader {
+            Reader::Ring { read, origin, .. } => (
+                Offline::of_stream(read.ring(), origin.as_ref(), read.place(), fault),
+                None,
             ),
+            Reader::Template(t) => (
+                Offline::of_stream(&t.ring, t.origin.as_ref(), &t.place, fault),
+                None,
+            ),
+            Reader::File(offline) => (offline.forked(fault), self.sample_rate),
         };
         Self {
-            reader: Reader::File(Box::new(Offline {
-                direction,
-                read,
-                fault,
-                place,
-                render_mode,
-            })),
+            reader: Reader::File(Box::new(offline)),
             channels: self.channels,
             shared_state: Arc::new(self.shared_state.detached()),
             window: self.window,
             file_sample_rate: self.file_sample_rate,
-            sample_rate: self.sample_rate,
+            sample_rate,
             clock: Clock::new(),
             positions: Vec::new(),
         }
@@ -494,7 +494,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
     pub(crate) fn live(&self) -> &LiveRead<F> {
         match &self.reader {
             Reader::Ring { read, .. } => read,
-            Reader::File(_) => panic!("a fork has no live read"),
+            Reader::Template(_) | Reader::File(_) => panic!("only a live voice has a live read"),
         }
     }
 
@@ -503,7 +503,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
     pub(crate) fn live_mut(&mut self) -> &mut LiveRead<F> {
         match &mut self.reader {
             Reader::Ring { read, .. } => read,
-            Reader::File(_) => panic!("a fork has no live read"),
+            Reader::Template(_) | Reader::File(_) => panic!("only a live voice has a live read"),
         }
     }
 
@@ -513,7 +513,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
     pub(crate) fn forked_loop(&self) -> Option<Option<super::Loop>> {
         match &self.reader {
             Reader::File(offline) => offline.read.as_ref().map(OfflineRead::loop_setting),
-            Reader::Ring { .. } => None,
+            Reader::Ring { .. } | Reader::Template(_) => None,
         }
     }
 
@@ -521,7 +521,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
     pub(crate) fn fault(&self) -> Option<Arc<FirstError>> {
         match &self.reader {
             Reader::File(offline) => Some(Arc::clone(&offline.fault)),
-            Reader::Ring { .. } => None,
+            Reader::Ring { .. } | Reader::Template(_) => None,
         }
     }
 
@@ -626,7 +626,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
                 .then(stretch),
             None => match self.reader {
                 Reader::File(_) => ReadRate::UNITY,
-                Reader::Ring { .. } => self.shared_state.read_rate(),
+                Reader::Ring { .. } | Reader::Template(_) => self.shared_state.read_rate(),
             },
         }
     }
@@ -672,7 +672,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         match &mut self.reader {
             Reader::File(offline) => {
                 lanes.clear(n, frames);
-                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, width);
                 offline.render(
                     clock,
                     range,
@@ -681,6 +681,14 @@ impl<F: SamplerFloat> DiskVoice<F> {
                     cx,
                     |i, f| lanes.put(i, &f[..w]),
                 );
+                true
+            }
+            Reader::Template(_) => {
+                let sounds = place(clock, range, gate, rate, &mut positions[..frames]);
+                if !sounds && !force_no_skip() {
+                    return false;
+                }
+                lanes.clear(n, frames);
                 true
             }
             Reader::Ring { read, declick, .. } => {
@@ -725,7 +733,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
                 offline.place(clock, range, (gate, rate), positions);
                 positions.iter().any(Option::is_some)
             }
-            Reader::Ring { .. } => place(clock, range, gate, rate, positions),
+            Reader::Ring { .. } | Reader::Template(_) => place(clock, range, gate, rate, positions),
         }
     }
 
@@ -749,9 +757,11 @@ impl<F: SamplerFloat> DiskVoice<F> {
         let rate = self.input_step();
         match &mut self.reader {
             Reader::File(offline) => {
-                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, width);
                 offline.read(positions, cx, |i, f| lanes.put(i, &f[..w]));
             }
+            // Cleared above: the template's frames are silent.
+            Reader::Template(_) => {}
             Reader::Ring { read, declick, .. } => {
                 let gain = self.shared_state.gain();
                 let mut out: Out<'_, fn(usize, &[F]), F> = Out::Lanes {
@@ -775,8 +785,9 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// A stretching voice's piece in which nothing sounds: the ring's reader
     /// claims nothing, as for a silent block of [`render_lanes`](Self::render_lanes).
     pub(crate) fn idle(&mut self) {
-        if let Reader::Ring { read, .. } = &mut self.reader {
-            read.silence();
+        match &mut self.reader {
+            Reader::Ring { read, .. } => read.silence(),
+            Reader::Template(_) | Reader::File(_) => {}
         }
     }
 
@@ -787,14 +798,16 @@ impl<F: SamplerFloat> DiskVoice<F> {
         self.sample_rate = Some(sample_rate);
         match &mut self.reader {
             Reader::Ring { declick, .. } => *declick = declick_frames(sample_rate).get(),
-            Reader::File(offline) => offline.render_mode = mode,
+            Reader::Template(_) => {}
+            Reader::File(offline) => offline.render_mode = Some(mode),
         }
     }
 
     /// Forget the read's jump state (a slot's flush at a jump, a reset).
     pub(crate) fn flush(&mut self) {
-        if let Reader::Ring { read, .. } = &mut self.reader {
-            read.reset();
+        match &mut self.reader {
+            Reader::Ring { read, .. } => read.reset(),
+            Reader::Template(_) | Reader::File(_) => {}
         }
     }
 
@@ -809,7 +822,7 @@ impl<F: SamplerFloat> DiskVoice<F> {
         out: &mut [&mut [F]],
     ) {
         let base = range.start;
-        let emit = |i: usize, f: &[F]| {
+        let mut emit = |i: usize, f: &[F]| {
             for (ch, &s) in out.iter_mut().zip(f) {
                 ch[base + i] = s;
             }
@@ -819,8 +832,14 @@ impl<F: SamplerFloat> DiskVoice<F> {
         let positions = &mut positions[..range.len()];
         match &mut self.reader {
             Reader::File(offline) => {
-                let cx = FileContext::new(&self.shared_state, self.sample_rate, width);
+                let cx = FileContext::new(&self.shared_state, width);
                 offline.render(clock, range, positions, (gate, rate), cx, emit);
+            }
+            Reader::Template(_) => {
+                let silent = [F::ZERO; MAX_CHANNELS];
+                for i in 0..range.len() {
+                    emit(i, &silent[..width.min(MAX_CHANNELS)]);
+                }
             }
             Reader::Ring { read, declick, .. } => {
                 place(clock, range.clone(), gate, rate, positions);
@@ -890,16 +909,13 @@ struct FileContext<F: SamplerFloat> {
     width: usize,
     /// The voice's output gain, as a sample factor.
     gain: F,
-    /// Whether `prepare` gave the voice a rate.
-    told_rate: bool,
 }
 
 impl<F: SamplerFloat> FileContext<F> {
-    fn new(shared_state: &Cells, sample_rate: Option<SampleRate>, width: usize) -> Self {
+    fn new(shared_state: &Cells, width: usize) -> Self {
         Self {
             width: width.min(MAX_CHANNELS),
             gain: audible_gain::<F>(shared_state.gain()),
-            told_rate: sample_rate.is_some(),
         }
     }
 }
@@ -944,11 +960,7 @@ impl<F: SamplerFloat> Offline<F> {
     fn read(
         &mut self,
         positions: &[Option<SamplePosition>],
-        FileContext {
-            width: w,
-            gain,
-            told_rate,
-        }: FileContext<F>,
+        FileContext { width: w, gain }: FileContext<F>,
         mut emit: impl FnMut(usize, &[F]),
     ) {
         let silent = [F::ZERO; MAX_CHANNELS];
@@ -958,17 +970,21 @@ impl<F: SamplerFloat> Offline<F> {
                 emit(i, &silent[..w]);
                 continue;
             };
-            // A copy never told a rate latches, inside its window.
-            if !told_rate {
-                self.fault.latch_static(&OfflineFault::NoRenderRate);
-                emit(i, &silent[..w]);
-                continue;
-            }
-            // Its read blocks on file I/O, which a realtime render never waits on.
-            if !self.render_mode.is_offline() {
-                self.fault.latch_static(&OfflineFault::PreparedRealtime);
-                emit(i, &silent[..w]);
-                continue;
+            // A copy `prepare` has not told a rate and mode latches, inside
+            // its window; its read blocks on file I/O, which a realtime
+            // render never waits on.
+            match self.render_mode {
+                None => {
+                    self.fault.latch_static(&OfflineFault::NoRenderRate);
+                    emit(i, &silent[..w]);
+                    continue;
+                }
+                Some(mode) if !mode.is_offline() => {
+                    self.fault.latch_static(&OfflineFault::PreparedRealtime);
+                    emit(i, &silent[..w]);
+                    continue;
+                }
+                Some(_) => {}
             }
             match self.read.as_mut() {
                 Some(read) => {
@@ -991,7 +1007,7 @@ impl<F: SamplerFloat> Node<F> for DiskVoice<F> {
     fn shape(&self) -> Shape {
         Shape::source_unassigned(self.channels)
             .tail(Tail::None)
-            // A `DiskSource`'s read, placed on the transport as a memory
+            // A stream's read, placed on the transport as a memory
             // voice is: `Moderate` for the same reason.
             .cost(tutti_graph::Cost::Moderate)
     }
@@ -1134,4 +1150,4 @@ fn force_no_skip() -> bool {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

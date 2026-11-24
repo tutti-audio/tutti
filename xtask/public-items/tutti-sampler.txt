@@ -249,7 +249,6 @@ struct testing::MockTransport
 struct voice::command::StreamingAddError
 struct voice::command::VoiceNodeHandle
 struct voice::command::VoicePoolHandle
-struct voice::disk_voice::DiskSource
 struct voice::disk_voice::DiskVoice
 struct voice::disk_voice::DiskVoiceConfig
 struct voice::disk_voice::DiskVoiceControls

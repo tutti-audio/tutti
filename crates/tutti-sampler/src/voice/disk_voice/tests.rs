@@ -31,8 +31,8 @@ fn run_block(voice: &mut DiskVoice<f32>, t: &MockTransport, n: usize) -> Vec<Vec
 /// mode renders it (an offline fork outside `RtScope`).
 fn under(voice: &mut DiskVoice<f32>, t: &MockTransport, rate: f64, n: usize) -> Vec<Vec<f32>> {
     let mode = match &voice.reader {
-        Reader::File(offline) => offline.render_mode,
-        Reader::Ring { .. } => RenderMode::Realtime,
+        Reader::File(offline) => offline.render_mode.unwrap_or(RenderMode::Realtime),
+        Reader::Ring { .. } | Reader::Template(_) => RenderMode::Realtime,
     };
     let prepare =
         Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(n))).with_render_mode(mode);
@@ -58,11 +58,25 @@ fn make_reader_at(samples: &[(f32, f32)], start: u64) -> (SharedReader<f32>, tut
     (reader, pos)
 }
 
-fn make_unit(samples: &[(f32, f32)]) -> (DiskSource<f32>, Arc<Cells>) {
-    let (reader, pos) = make_reader_with_samples(samples);
-    let state = Arc::new(Cells::new());
-    let unit = DiskSource::new(reader, pos);
-    (unit, state)
+/// A voice over the test ring `ring` (read through `pos`) at the ring's own
+/// width, with no stream origin.
+pub(crate) fn voice_over(
+    ring: SharedReader<f32>,
+    pos: tutti_rt::PosReader,
+    state: Arc<Cells>,
+    config: DiskVoiceConfig,
+) -> DiskVoice<f32> {
+    let width = crate::voice_width(ring.channels()).expect("a test ring's width is a voice's");
+    let place = Place::for_channels(ring.channel_set(), width)
+        .expect("a test ring is placeable at its own width");
+    let control = ring.control_reader();
+    DiskVoice::new(
+        (ring, RingReader::new(pos, control)),
+        (width, place),
+        state,
+        config,
+        None,
+    )
 }
 
 /// At unity rate a placed voice reads one file frame per output
@@ -117,9 +131,9 @@ fn make_clip_reader_at(
 ) -> DiskVoice<f32> {
     let state = Arc::new(Cells::new());
     let (ring, pos) = make_reader_at(samples, at);
-    let inner = DiskSource::new(ring, pos);
-    DiskVoice::new(
-        inner,
+    voice_over(
+        ring,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow {
@@ -128,7 +142,6 @@ fn make_clip_reader_at(
             },
             file_sample_rate: SampleRate::SR_44K1,
         },
-        None,
     )
 }
 
@@ -164,13 +177,14 @@ fn placement_gate_applies_src_ratio_exactly_once() {
     let samples: Vec<_> = (1..64).map(|i| (i as f32, i as f32)).collect();
     let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
-    let (inner, state) = make_unit(&samples);
-    let ring = Arc::clone(inner.read.ring());
+    let (ring, pos) = make_reader_with_samples(&samples);
+    let state = Arc::new(Cells::new());
     let src = 48_000.0 / 44_100.0;
     state.set_src_ratio(tutti_units::SrcRatio::new(src));
 
-    let mut reader = DiskVoice::new(
-        inner,
+    let mut reader = voice_over(
+        Arc::clone(&ring),
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow {
@@ -180,7 +194,6 @@ fn placement_gate_applies_src_ratio_exactly_once() {
             // The file's rate, as `ports.rs` hands it over: session × src.
             file_sample_rate: SampleRate::of(44_100.0 * src),
         },
-        None,
     );
 
     // Two seconds in at 120 BPM = beat 4.0.
@@ -401,25 +414,37 @@ fn a_clone_holds_no_live_reader() {
         .push_interleaved(&[0.5; 2 * 1_000])
         .expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let mut live = DiskVoice::new(
-        DiskSource::new(ring, pos),
+    let mut live = voice_over(
+        ring,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
-        None,
     );
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
     run_block(&mut live, &t, 64);
     let claimed = writer.in_flight_end();
     assert!(claimed > 0, "the live block claimed nothing");
     let mut clone = live.clone();
-    run_block(&mut clone, &t, 64);
+    let out = run_block(&mut clone, &t, 64);
+    assert!(
+        out.iter().flatten().all(|&s| s == 0.0),
+        "a clone renders silence"
+    );
     assert_eq!(
         writer.in_flight_end(),
         claimed,
         "a clone spoke for the live reader"
+    );
+    assert!(
+        clone.fork_copy().fault().is_some(),
+        "a clone of a live voice forks to a file read"
+    );
+    assert!(
+        clone.clone().fork_copy().fault().is_some(),
+        "a clone of a clone forks to a file read"
     );
 }
 
@@ -717,15 +742,14 @@ fn wide_clip_at(width: usize, at: u64) -> DiskVoice<f32> {
         .collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos);
-    DiskVoice::new(
-        inner,
+    voice_over(
+        reader,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
-        None,
     )
 }
 
@@ -863,14 +887,9 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
     let state = Arc::new(Cells::new());
     let place = Place::for_channels(reader.channel_set(), frame).expect("a test ring places");
     let control = reader.control_reader();
-    let inner = DiskSource::with_reader(
-        reader,
-        Some(crate::streamer::RingReader::new(pos, control)),
-        frame,
-        place,
-    );
     DiskVoice::new(
-        inner,
+        (reader, RingReader::new(pos, control)),
+        (frame, place),
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
@@ -1213,18 +1232,13 @@ fn outside_the_window_silences_every_channel() {
         let frames: Vec<f32> = (0..64 * width).map(|i| (i + 1) as f32).collect();
         let (ring, pos) = make_wide_reader(&frames, width);
         let state = Arc::new(Cells::new());
-        let inner = DiskSource::new(ring, pos);
-        assert_eq!(
-            inner.channels,
-            ChannelLayout::try_from(width).expect("a test width is small"),
-            "ring width must reach the unit"
-        );
 
         // Transport parked BEFORE the voice's start beat, so the placement
         // gate reports "outside".
         let transport = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
-        let voice = DiskVoice::new(
-            inner,
+        let voice = voice_over(
+            ring,
+            pos,
             state,
             DiskVoiceConfig {
                 window: VoiceWindow {
@@ -1233,7 +1247,11 @@ fn outside_the_window_silences_every_channel() {
                 },
                 file_sample_rate: SampleRate::SR_44K1,
             },
-            None,
+        );
+        assert_eq!(
+            voice.channels,
+            ChannelLayout::try_from(width).expect("a test width is small"),
+            "ring width must reach the unit"
         );
 
         // Pre-dirty the node's outputs so a missing write shows, in a
@@ -1300,14 +1318,14 @@ fn cached_stride_reads_every_channel_at_width_six() {
         .collect();
     let (ring, pos) = make_wide_reader(&frames, width);
     let state = Arc::new(Cells::new());
-    let mut voice = DiskVoice::new(
-        DiskSource::new(ring, pos),
+    let mut voice = voice_over(
+        ring,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
-        None,
     );
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
@@ -1357,7 +1375,7 @@ fn cached_stride_reads_every_channel_at_width_six() {
 /// through a clone of it — and the clone renders nothing.
 ///
 /// The clone half of the live-value rule, at the disk tier: a gain stored
-/// by value in `DiskSource` would be written on one copy and never
+/// by value in `DiskVoice` would be written on one copy and never
 /// reach the one that renders. The gain lives in the stream's control
 /// cell (`Cells`), which every clone shares (a fork detaches it,
 /// `fork_copy`).
@@ -1598,15 +1616,14 @@ fn a_skipped_block_forgets_the_fade_and_the_last_position() {
     let flat: Vec<f32> = (from..from + 2_000).map(|k| k as f32).collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos);
-    let mut voice = DiskVoice::new(
-        inner,
+    let mut voice = voice_over(
+        reader,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
-        None,
     );
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();
@@ -1651,15 +1668,14 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     let flat: Vec<f32> = (AT..AT + 2_000).map(|k| k as f32).collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos);
-    let mut voice = DiskVoice::new(
-        inner,
+    let mut voice = voice_over(
+        reader,
+        pos,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
             file_sample_rate: SampleRate::of(SR),
         },
-        None,
     );
     let mut scratch = crate::lanes::BlockScratch::new(BLOCK, 1);
     let mut clock = crate::voice::clock::Clock::new();

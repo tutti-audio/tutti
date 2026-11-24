@@ -46,11 +46,11 @@
 //! # The one reader
 //!
 //! The ring has one `PosReader`, and the voice that took it owns it, by
-//! value. A clone of the voice has no reader, and renders silence: the
-//! graph renders the unit it was given, never a clone of it. The one copy
-//! the graph takes, a fork, never reads the live ring anyway: it is built
-//! without the ring (`DiskVoice::fork_copy`) and reads the file instead. A block that reads nothing tells the ring so (`PosReader::idle`), so a
-//! paused voice holds no refill back.
+//! value. A clone of the voice holds no `LiveRead` at all (it is a template,
+//! `DiskVoice`'s docs), and a fork never reads the live ring: it is built
+//! without it (`DiskVoice::fork_copy`) and reads the file instead. A block
+//! that reads nothing tells the ring so (`PosReader::idle`), so a paused
+//! voice holds no refill back.
 
 use crate::SamplerFloat;
 use tutti_buffers::Float;
@@ -101,7 +101,7 @@ impl Fade {
 
 /// The reader's mutable state, apart from the ring it reads (so a block can
 /// borrow the ring's map while it changes this).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct State<F: Float> {
     /// Output width.
     width: usize,
@@ -134,41 +134,27 @@ struct State<F: Float> {
 #[derive(Debug)]
 pub(crate) struct LiveRead<F: SamplerFloat> {
     ring: SharedReader<F>,
-    /// The ring's one reader, this voice's alone (see the module docs);
-    /// `None` in a clone, or for a ring whose reader was taken.
+    /// The ring's one reader, this voice's alone (see the module docs).
     ///
     /// It holds the reader of the ring's published control (the map, and the
     /// direction and applied loop beside it) too, registered beside the
     /// position reader when the voice is built: a block lends it.
-    reader: Option<RingReader<F>>,
+    reader: RingReader<F>,
     /// Where the ring's channels go in the voice's frame: built once, on the
     /// control side, from the file's channels (`Place::for_channels`).
     place: Place<F>,
     st: State<F>,
 }
 
-impl<F: SamplerFloat> Clone for LiveRead<F> {
-    /// The same ring and read state, without the reader: a clone renders
-    /// silence (see the module docs).
-    fn clone(&self) -> Self {
-        Self {
-            ring: self.ring.clone(),
-            reader: None,
-            place: self.place.clone(),
-            st: self.st.clone(),
-        }
-    }
-}
-
 impl<F: SamplerFloat> LiveRead<F> {
     /// A reader over `ring` through its one `reader` and the reader of the
-    /// ring's control registered beside it (`None`: silent), `width` wide (at most
+    /// ring's control registered beside it, `width` wide (at most
     /// [`MAX_CHANNELS`]), placing the ring's channels by `place`. Both
     /// are registered by whoever built them, on the control side: building the
     /// pair is what may allocate, and this does not.
     pub(crate) fn new(
         ring: SharedReader<F>,
-        reader: Option<RingReader<F>>,
+        reader: RingReader<F>,
         width: usize,
         place: Place<F>,
     ) -> Self {
@@ -209,21 +195,19 @@ impl<F: SamplerFloat> LiveRead<F> {
     }
 
     /// The control as the voice's reader lends it (tests): the value one
-    /// block's lend would hold now. `None` in a clone.
+    /// block's lend would hold now.
     #[cfg(test)]
-    pub(crate) fn lent_control(&mut self) -> Option<crate::streamer::RingControl<F>> {
-        self.reader.as_mut().map(|reader| {
-            reader
-                .block(
-                    Samples::new(0),
-                    [
-                        Samples::new(0)..Samples::new(0),
-                        Samples::new(0)..Samples::new(0),
-                    ],
-                )
-                .control()
-                .clone()
-        })
+    pub(crate) fn lent_control(&mut self) -> crate::streamer::RingControl<F> {
+        self.reader
+            .block(
+                Samples::new(0),
+                [
+                    Samples::new(0)..Samples::new(0),
+                    Samples::new(0)..Samples::new(0),
+                ],
+            )
+            .control()
+            .clone()
     }
 
     /// The highest straight position read (tests).
@@ -259,14 +243,11 @@ impl<F: SamplerFloat> LiveRead<F> {
     /// What a block with no frame to play does to the reader, without
     /// writing the (all +0.0) frames: [`render`](Self::render)'s all-`None`
     /// path. The last position and the fade are forgotten and the ring's
-    /// reader claims no range. A clone changes nothing,
-    /// as there.
+    /// reader claims no range.
     pub(crate) fn silence(&mut self) {
-        if let Some(reader) = self.reader.as_mut() {
-            self.st.last = None;
-            self.st.fade = None;
-            reader.idle();
-        }
+        self.st.last = None;
+        self.st.fade = None;
+        self.reader.idle();
     }
 
     /// Render a block: frame `i` plays straight position `positions[i]`
@@ -301,13 +282,7 @@ impl<F: SamplerFloat> LiveRead<F> {
         let st = &mut self.st;
         let w = st.width;
         let silent = [F::ZERO; MAX_CHANNELS];
-        let Some(reader) = self.reader.as_mut() else {
-            // Severed, or a clone: nothing to read (not an underrun).
-            for i in 0..positions.len() {
-                out.put(at + i, &silent[..w]);
-            }
-            return;
-        };
+        let reader = &mut self.reader;
         let (mut lo, mut hi) = (u64::MAX, 0u64);
         for p in positions.iter().flatten() {
             let f = p.to_samples_floor().get() as u64;
