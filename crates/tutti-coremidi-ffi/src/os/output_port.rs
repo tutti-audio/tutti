@@ -8,7 +8,7 @@ use std::fmt;
 use std::time::Duration;
 
 use super::client::SharedClient;
-use super::endpoint::Endpoint;
+use super::endpoint::{Destination, Endpoint};
 use super::error::{Error, Operation, OsStatus};
 use super::event_list::{EventList, capacity};
 use super::host_clock::Timebase;
@@ -63,9 +63,20 @@ impl OutputPort {
     /// when a packet does not fit the list (a message is at most 4 words, so the
     /// buffer sized for `packets` holds them all), and [`Error::Call`] when
     /// CoreMIDI refuses the send (the destination went away).
+    ///
+    /// Only a destination receives; a source is another type:
+    ///
+    /// ```compile_fail,E0308
+    /// use tutti_coremidi_ffi::{Endpoint, OutputPort, Source};
+    /// use tutti_ump::Protocol;
+    ///
+    /// fn send_to_a_source(port: &OutputPort, source: &Endpoint<Source>) {
+    ///     let _ = port.send(source, Protocol::Midi2, &[]);
+    /// }
+    /// ```
     pub fn send(
         &self,
-        destination: &Endpoint,
+        destination: &Endpoint<Destination>,
         protocol: Protocol,
         packets: &[(Option<Duration>, Ump)],
     ) -> Result<(), Error> {

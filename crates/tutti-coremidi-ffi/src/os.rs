@@ -20,7 +20,10 @@ pub use crate::checks::find::FindError;
 pub use crate::checks::notification::Notification;
 pub use crate::checks::unique_id::UniqueId;
 pub use client::{SharedClient, StartClient};
-pub use endpoint::{Endpoint, destinations, find_destination, find_source, sources};
+pub use endpoint::{
+    Destination, Endpoint, EndpointKind, Source, destinations, find_destination, find_source,
+    sources,
+};
 pub use error::{Error, Operation, OsStatus};
 pub use host_clock::{Timebase, host_ticks};
 pub use input_port::InputPort;

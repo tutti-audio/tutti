@@ -1,7 +1,7 @@
 //! Edge gain: an
 //! edge's gain can be **driven** by an event output (a control lane,
 //! `GraphSpec::connect_edge_gain`), with the param port's rules, and its
-//! source is aligned to the edge's sink (`DelayKey::EdgeGain`).
+//! source is aligned to the edge's sink (`EventDelayKey::EdgeGain`).
 //!
 //! Every figure is analytic: the expected render is the fold with the weight
 //! the driver's steps give at each frame, written out in the test. The
@@ -189,8 +189,15 @@ fn stepped(n: usize, shift: usize) -> Option<f32> {
     Some(driver_value(f - f % PERIOD, PERIOD) as f32)
 }
 
-fn delay_of(plan: &tutti_graph::Plan, key: tutti_graph::DelayKey) -> Option<usize> {
-    plan.delays()
+fn audio_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::AudioDelayKey) -> Option<usize> {
+    plan.audio_delays()
+        .iter()
+        .find(|d| d.key == key)
+        .map(|d| d.len.get())
+}
+
+fn event_delay_of(plan: &tutti_graph::Plan, key: tutti_graph::EventDelayKey) -> Option<usize> {
+    plan.event_delays()
         .iter()
         .find(|d| d.key == key)
         .map(|d| d.len.get())
@@ -446,9 +453,9 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
     let id = rig.drive(1, 2);
     let plan = plan_of(&rig);
     assert_eq!(
-        delay_of(
+        audio_delay_of(
             &plan,
-            tutti_graph::DelayKey::Audio {
+            tutti_graph::AudioDelayKey::Edge {
                 at: at_port(3),
                 from: out(1)
             }
@@ -456,9 +463,9 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
         Some(32)
     );
     assert_eq!(
-        delay_of(
+        event_delay_of(
             &plan,
-            tutti_graph::DelayKey::EdgeGain {
+            tutti_graph::EventDelayKey::EdgeGain {
                 id,
                 from: lane_out(2)
             }
@@ -478,7 +485,7 @@ fn a_late_lane_delays_the_audio_to_the_edge() {
 
 /// A lane that arrives **early** is delayed to the sink's arrival: the
 /// source declares 48 frames of latency it does not realise, so the lane gets
-/// a 48-frame event ring (`DelayKey::EdgeGain`) and its event stamped `f`
+/// a 48-frame event ring (`EventDelayKey::EdgeGain`) and its event stamped `f`
 /// lands on frame `f + 48`; until then the lane reads its base. At a port and
 /// at an output channel (where the output time is the sink's arrival).
 #[test]
@@ -488,9 +495,9 @@ fn an_early_lane_is_delayed_to_the_edge() {
         let id = rig.drive(1, 2);
         let plan = plan_of(&rig);
         assert_eq!(
-            delay_of(
+            event_delay_of(
                 &plan,
-                tutti_graph::DelayKey::EdgeGain {
+                tutti_graph::EventDelayKey::EdgeGain {
                     id,
                     from: lane_out(2)
                 }
@@ -516,9 +523,9 @@ fn a_late_lane_raises_the_output_time() {
     let plan = plan_of(&rig);
     assert_eq!(plan.total_latency().samples(), Samples::new(32));
     assert_eq!(
-        delay_of(
+        audio_delay_of(
             &plan,
-            tutti_graph::DelayKey::Output {
+            tutti_graph::AudioDelayKey::Output {
                 channel: 0,
                 from: out(1)
             }

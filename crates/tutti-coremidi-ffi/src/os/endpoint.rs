@@ -8,7 +8,7 @@
 //! the kind asked for and to read that id.
 
 use crate::UniqueId;
-use crate::checks::find::{FindError, Kind, confirm};
+use crate::checks::find::{FindError, OBJECT_TYPE_DESTINATION, OBJECT_TYPE_SOURCE, confirm};
 use core_foundation::base::TCFType;
 use core_foundation::string::{CFString, CFStringRef};
 use coremidi_sys::{
@@ -17,6 +17,7 @@ use coremidi_sys::{
     MIDIObjectGetStringProperty, MIDIObjectRef, MIDIObjectType, kMIDIPropertyDisplayName,
     kMIDIPropertyName, kMIDIPropertyProtocolID, kMIDIPropertyUniqueID,
 };
+use std::marker::PhantomData;
 use std::ptr;
 use tutti_ump::{Protocol, read_protocol};
 
@@ -37,25 +38,65 @@ impl UniqueId {
     }
 }
 
-/// A source or destination CoreMIDI listed or was asked for by id.
+mod sealed {
+    /// The `MIDIObjectType` of the objects of one kind. Nameable only in this
+    /// crate, so no other crate can mark an endpoint as a kind CoreMIDI lacks.
+    pub trait Sealed {
+        /// The `MIDIObjectType` an endpoint of this kind has.
+        const OBJECT_TYPE: i32;
+    }
+}
+
+/// Which end of a connection an [`Endpoint`] is: [`Source`] or [`Destination`].
+/// Sealed.
+pub trait EndpointKind: sealed::Sealed {}
+
+/// The marker of a source: what a device sends from, which an
+/// [`InputPort`](crate::InputPort) connects to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Source;
+
+/// The marker of a destination: what a device receives at, which an
+/// [`OutputPort`](crate::OutputPort) sends to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Destination;
+
+impl sealed::Sealed for Source {
+    const OBJECT_TYPE: i32 = OBJECT_TYPE_SOURCE;
+}
+
+impl sealed::Sealed for Destination {
+    const OBJECT_TYPE: i32 = OBJECT_TYPE_DESTINATION;
+}
+
+impl EndpointKind for Source {}
+impl EndpointKind for Destination {}
+
+/// A source or destination CoreMIDI listed or was asked for by id, as `K` says.
 ///
 /// It owns its object reference privately and has no list position. The
 /// reference is CoreMIDI's, valid until the endpoint is removed; a read after
 /// that returns `None`, or the value of another object if CoreMIDI reuses the
 /// reference.
+///
+/// A source is what [`InputPort::connect`](crate::InputPort::connect) takes and a
+/// destination is what [`OutputPort::send`](crate::OutputPort::send) takes; the
+/// other kind does not compile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Endpoint {
+pub struct Endpoint<K: EndpointKind> {
     reference: MIDIEndpointRef,
     id: UniqueId,
+    kind: PhantomData<K>,
 }
 
-impl Endpoint {
+impl<K: EndpointKind> Endpoint<K> {
     /// The endpoint at `reference`, with the id it reads; `None` for the null
     /// reference or an object with no id.
     fn of(reference: MIDIEndpointRef) -> Option<Self> {
         Some(Self {
             reference,
             id: UniqueId::of(reference)?,
+            kind: PhantomData,
         })
     }
 
@@ -116,7 +157,7 @@ fn string_property(object: MIDIObjectRef, property: CFStringRef) -> Option<Strin
 /// The sources CoreMIDI lists now. A device that comes or goes while this runs
 /// may be missing from the list, never paired with another's id.
 #[must_use]
-pub fn sources() -> Vec<Endpoint> {
+pub fn sources() -> Vec<Endpoint<Source>> {
     // SAFETY: a plain query.
     let count = unsafe { MIDIGetNumberOfSources() };
     (0..count)
@@ -131,7 +172,7 @@ pub fn sources() -> Vec<Endpoint> {
 
 /// The destinations CoreMIDI lists now, as [`sources`] lists sources.
 #[must_use]
-pub fn destinations() -> Vec<Endpoint> {
+pub fn destinations() -> Vec<Endpoint<Destination>> {
     // SAFETY: a plain query.
     let count = unsafe { MIDIGetNumberOfDestinations() };
     (0..count)
@@ -149,8 +190,8 @@ pub fn destinations() -> Vec<Endpoint> {
 ///
 /// [`FindError::Missing`] when no object has the id, [`FindError::WrongKind`] when
 /// it is not a source, and [`FindError::Changed`] when the object reads another id.
-pub fn find_source(id: UniqueId) -> Result<Endpoint, FindError> {
-    find(id, Kind::Source)
+pub fn find_source(id: UniqueId) -> Result<Endpoint<Source>, FindError> {
+    find(id)
 }
 
 /// The destination with unique id `id`.
@@ -158,11 +199,11 @@ pub fn find_source(id: UniqueId) -> Result<Endpoint, FindError> {
 /// # Errors
 ///
 /// As [`find_source`], for a destination.
-pub fn find_destination(id: UniqueId) -> Result<Endpoint, FindError> {
-    find(id, Kind::Destination)
+pub fn find_destination(id: UniqueId) -> Result<Endpoint<Destination>, FindError> {
+    find(id)
 }
 
-fn find(id: UniqueId, kind: Kind) -> Result<Endpoint, FindError> {
+fn find<K: EndpointKind>(id: UniqueId) -> Result<Endpoint<K>, FindError> {
     let mut object: MIDIObjectRef = 0;
     let mut object_type: MIDIObjectType = 0;
     // SAFETY: `object` and `object_type` are valid out-pointers; an id no object
@@ -171,10 +212,11 @@ fn find(id: UniqueId, kind: Kind) -> Result<Endpoint, FindError> {
     if status != 0 || object == 0 {
         return Err(FindError::Missing(id));
     }
-    confirm(id, kind, object_type, UniqueId::of(object))?;
+    confirm(id, K::OBJECT_TYPE, object_type, UniqueId::of(object))?;
     Ok(Endpoint {
         reference: object,
         id,
+        kind: PhantomData,
     })
 }
 
@@ -187,7 +229,8 @@ mod tests {
     /// reaches the id check.
     #[test]
     fn the_null_reference_has_no_endpoint() {
-        assert_eq!(Endpoint::of(0), None);
+        assert_eq!(Endpoint::<Source>::of(0), None);
+        assert_eq!(Endpoint::<Destination>::of(0), None);
         assert_eq!(UniqueId::of(0), None);
     }
 
@@ -196,8 +239,8 @@ mod tests {
     fn an_id_no_endpoint_has_is_missing() {
         let taken: Vec<_> = sources()
             .iter()
-            .chain(&destinations())
             .map(Endpoint::id)
+            .chain(destinations().iter().map(Endpoint::id))
             .collect();
         let id = (i32::MIN..)
             .map(UniqueId::new)

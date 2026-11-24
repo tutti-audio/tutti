@@ -93,8 +93,12 @@ ids! {
     PlanUnitId;
     /// A task: a position in the plan's coarsened task list.
     TaskId;
-    /// A PDC delay: a position in [`Plan::delays`](crate::Plan::delays).
-    DelayId;
+    /// A PDC delay of audio: a position in
+    /// [`Plan::audio_delays`](crate::Plan::audio_delays).
+    AudioDelayId;
+    /// A PDC delay of events: a position in
+    /// [`Plan::event_delays`](crate::Plan::event_delays).
+    EventDelayId;
     /// An audio feedback: a position in
     /// [`Plan::audio_feedback`](crate::Plan::audio_feedback).
     AudioFeedbackId;

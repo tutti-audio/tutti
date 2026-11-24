@@ -903,12 +903,12 @@ pub mod midi {
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{
         ChannelControllers, ChannelsDetail, CiCategories, CiDeviceId, CiPeer, DataControl,
-        DetailsData, DiscoveryData, EnabledMpeZones, InquiryTarget, ManufacturerProfile,
-        MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl, NotADeviceId, NotASysexSize,
-        NotProfileChannels, NoteData, ProcessError, ProcessFeatures, ProfileChange,
-        ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest, ProfileRequestError,
-        ProfileState, ProfileTable, ReportRequest, ReportScope, SpecificData, StandardProfile,
-        SystemMessages,
+        DetailsData, DeviceBody, DiscoveryData, EnabledMpeZones, InquiryTarget,
+        ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
+        NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
+        ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
+        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
+        ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};

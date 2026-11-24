@@ -31,14 +31,15 @@
 //! Every piece of state that outlives a block is keyed so that a recompile
 //! carries it exactly when it is still the same wire:
 //!
-//! - **A PDC delay** is keyed by **(sink port, source port)** — [`DelayKey`].
+//! - **A PDC delay** is keyed by **(sink port, source port)** — [`AudioDelayKey`] for
+//!   audio, [`EventDelayKey`] for events.
 //!   Rewiring a sink to another source starts a fresh (silent) ring: the
 //!   previous source's past audio is never played out of the new wire. Pending events
 //!   of an event delay whose key disappears are flushed to the sink at offset
 //!   0 of the next block if the sink survives (a dropped note-off is a stuck
 //!   note), and dropped with it otherwise.
 //! - **A feedback edge** delays by exactly the `delay` its edge declares (see
-//!   [`FeedbackKey`]). Audio feedback is keyed by the source port, *its unit
+//!   [`AudioFeedbackKey`], [`EventFeedbackKey`]). Audio feedback is keyed by the source port, *its unit
 //!   generation* and the delay, so a replaced unit's last output does not
 //!   feed the new loop and a changed delay starts a fresh ring. Event
 //!   feedback is keyed per edge (sink, source, generation, delay), and a
@@ -54,8 +55,9 @@ use tutti_units::{Latency, Samples, Tail, UnitAddr};
 use crate::compile::VerifyError;
 use crate::compile::coarsen::Tasks;
 use crate::compile::ids::{
-    AudioFeedbackId, AudioSlotId, DelayId, EventFeedbackId, EventSlotId, Generation, Id, OpId,
-    PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice, TaskId,
+    AudioDelayId, AudioFeedbackId, AudioSlotId, EventDelayId, EventFeedbackId, EventSlotId,
+    Generation, Id, OpId, PlanEventTapId, PlanMeterId, PlanTapId, PlanUnitId, Table, TableSlice,
+    TaskId,
 };
 use crate::compile::program::{BySlot, Program};
 use crate::compile::timing::Timing;
@@ -184,27 +186,62 @@ impl<T> std::fmt::Debug for Span<T> {
     }
 }
 
-/// Which PDC delay a ring belongs to.
+/// Which PDC delay of audio a ring belongs to.
 ///
 /// The ring's **state is keyed by this**, so it survives any recompile that
 /// keeps the key: an unrelated edit does not click. The key names both ends
 /// of the wire, so rewiring a sink to another source starts a fresh (silent)
 /// ring and the previous source's past audio is never played out of the new
-/// wire. Pending events of an event delay whose key disappears are flushed
-/// to the sink at the start of its next block if the sink survives (a
-/// dropped note-off would be a stuck note), and dropped with it otherwise.
+/// wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum DelayKey {
+pub enum AudioDelayKey {
     /// An audio input port, delayed to align with the node's latest input.
-    Audio {
+    Edge {
         /// The sink port.
         at: InputPort,
         /// What feeds it: a node port or a main input channel.
         from: PortSource,
     },
+    /// A main output channel, delayed to align with the slowest channel.
+    Output {
+        /// The graph output channel.
+        channel: u16,
+        /// What feeds it.
+        from: PortSource,
+    },
+    /// One lane of an aligned meter, delayed like an output channel.
+    Meter {
+        /// The meter.
+        meter: crate::MeterId,
+        /// The lane within it.
+        lane: usize,
+        /// What feeds it.
+        from: PortSource,
+    },
+    /// One lane of an aligned tap, delayed like an output channel.
+    Tap {
+        /// The tap.
+        tap: crate::TapId,
+        /// The lane within it.
+        lane: usize,
+        /// What feeds it.
+        from: PortSource,
+    },
+}
+
+/// Which PDC delay of events a FIFO belongs to.
+///
+/// The FIFO's state is keyed by this, as an [`AudioDelayKey`]'s ring is.
+/// Pending events of a delay whose key disappears are flushed to the sink at
+/// the start of its next block if the sink survives (a dropped note-off would
+/// be a stuck note), and dropped with it otherwise; a
+/// [`ParamEvent`](Self::ParamEvent), an [`EdgeGain`](Self::EdgeGain) and an
+/// [`EventTap`](Self::EventTap) are not flushed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EventDelayKey {
     /// One source of an event input port. Each source of a fan-in port can
     /// need a different delay.
-    Event {
+    Edge {
         /// The sink.
         at: EventInputPort,
         /// The source.
@@ -232,22 +269,6 @@ pub enum DelayKey {
         /// The event output that drives it.
         from: EventOutputPort,
     },
-    /// A main output channel, delayed to align with the slowest channel.
-    Output {
-        /// The graph output channel.
-        channel: u16,
-        /// What feeds it.
-        from: PortSource,
-    },
-    /// One lane of an aligned meter, delayed like an output channel.
-    Meter {
-        /// The meter.
-        meter: crate::MeterId,
-        /// The lane within it.
-        lane: usize,
-        /// What feeds it.
-        from: PortSource,
-    },
     /// An aligned event tap's source, delayed to the output time as an event
     /// edge into an output-time sink would be.
     EventTap {
@@ -256,41 +277,40 @@ pub enum DelayKey {
         /// The event port copied.
         from: crate::EventTapPort,
     },
-    /// One lane of an aligned tap, delayed like an output channel.
-    Tap {
-        /// The tap.
-        tap: crate::TapId,
-        /// The lane within it.
-        lane: usize,
-        /// What feeds it.
-        from: PortSource,
-    },
 }
 
-impl DelayKey {
-    /// The event port whose stream this delay carries; `None` for an audio
-    /// delay.
-    pub(crate) fn event_origin(self) -> Option<crate::EventTapPort> {
+impl EventDelayKey {
+    /// The event port whose stream this delay carries.
+    pub(crate) fn origin(self) -> crate::EventTapPort {
         match self {
-            Self::Event { from, .. }
+            Self::Edge { from, .. }
             | Self::ParamEvent { from, .. }
-            | Self::EdgeGain { from, .. } => Some(crate::EventTapPort::Out(from)),
-            Self::EventTap { from, .. } => Some(from),
-            _ => None,
+            | Self::EdgeGain { from, .. } => crate::EventTapPort::Out(from),
+            Self::EventTap { from, .. } => from,
         }
     }
 }
 
-/// One PDC delay in a plan.
+/// One PDC delay of audio in a plan.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct DelaySpec {
+pub struct AudioDelay {
     /// Its state key.
-    pub key: DelayKey,
+    pub key: AudioDelayKey,
     /// Its length. Never zero — a zero delay is no op at all.
     pub len: Samples,
 }
 
-/// Which feedback delay a slot is read from.
+/// One PDC delay of events in a plan.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EventDelay {
+    /// Its state key.
+    pub key: EventDelayKey,
+    /// Its length. Never zero — a zero delay is no op at all.
+    pub len: Samples,
+}
+
+/// Which audio feedback delay a slot is read from: an audio output port of a
+/// unit generation, shared by every reader.
 ///
 /// **A feedback edge delays by exactly the `delay` its edge declares**,
 /// whatever length the current block is: a ring of that length for audio, a
@@ -299,43 +319,34 @@ pub struct DelaySpec {
 /// and `compile` refuses a delay shorter than the `MaxBlock` it is compiling
 /// for, because a block cannot read samples it has not yet produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum FeedbackKey {
-    /// An audio output port of a unit generation. Shared by every reader.
-    Audio {
-        /// The source port.
-        from: OutputPort,
-        /// The source unit's generation.
-        generation: u32,
-        /// The edge's delay.
-        delay: Samples,
-    },
-    /// One event feedback edge.
-    Event {
-        /// The sink port.
-        at: EventInputPort,
-        /// The source port.
-        from: EventOutputPort,
-        /// The source unit's generation.
-        generation: u32,
-        /// The edge's delay.
-        delay: Samples,
-    },
+pub struct AudioFeedbackKey {
+    /// The source port.
+    pub from: OutputPort,
+    /// The source unit's generation.
+    pub generation: u32,
+    /// The edge's delay.
+    pub delay: Samples,
 }
 
-impl FeedbackKey {
-    /// The delay this feedback applies.
-    pub const fn delay(&self) -> Samples {
-        match *self {
-            Self::Audio { delay, .. } | Self::Event { delay, .. } => delay,
-        }
-    }
+/// Which event feedback delay a slot is read from: one event feedback edge,
+/// delayed as an [`AudioFeedbackKey`]'s is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EventFeedbackKey {
+    /// The sink port.
+    pub at: EventInputPort,
+    /// The source port.
+    pub from: EventOutputPort,
+    /// The source unit's generation.
+    pub generation: u32,
+    /// The edge's delay.
+    pub delay: Samples,
 }
 
 /// One feedback slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct FeedbackSpec<S> {
+pub struct FeedbackSpec<K, S> {
     /// What it carries.
-    pub key: FeedbackKey,
+    pub key: K,
     /// Its slot, in the arena of its kind.
     pub slot: S,
 }
@@ -519,8 +530,8 @@ pub enum Op<A, E> {
     /// Delay one audio channel by a PDC ring. `src == dst` is the in-place
     /// form.
     Delay {
-        /// Index into [`Plan::delays`].
-        delay: DelayId,
+        /// Index into [`Plan::audio_delays`].
+        delay: AudioDelayId,
         /// Audio slot read.
         src: A,
         /// Audio slot written.
@@ -569,8 +580,8 @@ pub enum Op<A, E> {
     },
     /// Delay one event stream.
     EventDelay {
-        /// Index into [`Plan::delays`].
-        delay: DelayId,
+        /// Index into [`Plan::event_delays`].
+        delay: EventDelayId,
         /// Event slot read.
         src: E,
         /// Event slot written.
@@ -614,8 +625,8 @@ pub enum Op<A, E> {
         channel: u16,
         /// Audio slot read.
         src: A,
-        /// Index into [`Plan::delays`], when the channel is delayed.
-        delay: Option<DelayId>,
+        /// Index into [`Plan::audio_delays`], when the channel is delayed.
+        delay: Option<AudioDelayId>,
     },
     /// Push a block of every lane of a tap into its rings, together.
     Tap {
@@ -1549,18 +1560,23 @@ impl Plan {
     }
 
     /// The audio feedback slots.
-    pub fn audio_feedback(&self) -> &[FeedbackSpec<AudioSlotId>] {
+    pub fn audio_feedback(&self) -> &[FeedbackSpec<AudioFeedbackKey, AudioSlotId>] {
         self.program.audio_feedback.as_slice()
     }
 
     /// The event feedback slots.
-    pub fn event_feedback(&self) -> &[FeedbackSpec<EventSlotId>] {
+    pub fn event_feedback(&self) -> &[FeedbackSpec<EventFeedbackKey, EventSlotId>] {
         self.program.event_feedback.as_slice()
     }
 
-    /// Every PDC delay.
-    pub fn delays(&self) -> &[DelaySpec] {
-        self.program.delays.as_slice()
+    /// Every PDC delay of audio.
+    pub fn audio_delays(&self) -> &[AudioDelay] {
+        self.program.audio_delays.as_slice()
+    }
+
+    /// Every PDC delay of events.
+    pub fn event_delays(&self) -> &[EventDelay] {
+        self.program.event_delays.as_slice()
     }
 
     /// Every node, in key order.
@@ -1653,10 +1669,19 @@ impl Plan {
         self.units.search_by_key(&key, |u| u.key)
     }
 
-    /// The PDC delay on `key`, or zero.
-    pub fn delay(&self, key: DelayKey) -> Samples {
+    /// The PDC delay of audio on `key`, or zero.
+    pub fn audio_delay(&self, key: AudioDelayKey) -> Samples {
         self.program
-            .delays
+            .audio_delays
+            .iter()
+            .find(|d| d.key == key)
+            .map_or(Samples::ZERO, |d| d.len)
+    }
+
+    /// The PDC delay of events on `key`, or zero.
+    pub fn event_delay(&self, key: EventDelayKey) -> Samples {
+        self.program
+            .event_delays
             .iter()
             .find(|d| d.key == key)
             .map_or(Samples::ZERO, |d| d.len)
