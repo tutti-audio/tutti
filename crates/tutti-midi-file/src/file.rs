@@ -902,6 +902,16 @@ impl Track {
     /// (a chord). At one tick the events are in the order they were added: a
     /// Note Off lands before the Note On of a note that starts where it ends
     /// only when its note was added first.
+    ///
+    /// A track names no Group, so a note in another Group is not a program:
+    ///
+    /// ```compile_fail
+    /// use tutti_midi_file::{Tick, Track};
+    /// use tutti_ump::{Address, MidiChannel, MidiGroup, NoteNumber, U7};
+    ///
+    /// let second_group = Address::new(MidiGroup::of(1), MidiChannel::FIRST);
+    /// let _ = Track::new().note(Tick(0), Tick(1), second_group, NoteNumber::of(60), U7::of(64));
+    /// ```
     #[must_use]
     pub fn note(
         mut self,
