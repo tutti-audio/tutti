@@ -84,8 +84,9 @@
 
 use std::sync::Arc;
 
+use tutti_buffers::Float;
 use tutti_engine::Playhead;
-use tutti_graph::EventTapReader;
+use tutti_graph::{EventTapReader, TapEvent};
 use tutti_midi_protocol::SysexDeviceId;
 use tutti_midi_runtime::{
     BeatClockEvent, BeatClockFollower, ClockEvent, Followed, MachineControlEvent,
@@ -94,9 +95,10 @@ use tutti_midi_runtime::{
 use tutti_tempo::TempoMap;
 use tutti_timeline::{ProjectMeter, TransportSettings};
 use tutti_ump::{MidiGroup, Ump};
-use tutti_units::{At, Beat, Bpm, Frame, Seconds};
+use tutti_units::{At, Beat, Bpm, Frame, SampleRate, Seconds};
 
 use crate::MidiEvent;
+use crate::graph::Graph;
 use crate::value::{Bases, Steps};
 
 /// How many events the follower's tap holds between two polls. Set Tempo and
@@ -274,10 +276,69 @@ impl FollowMachineControl {
     }
 }
 
+/// A follower's reader of one input's channelless port. Its frames are on the
+/// rate it was opened at, so it is re-opened when the graph is re-rated.
+pub(crate) struct FollowTap {
+    reader: EventTapReader,
+    /// The follower's name in the warning of what the tap lost.
+    name: &'static str,
+}
+
+/// What [`FollowTap::reopen`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Reopened {
+    /// The tap is on the graph's rate.
+    Unchanged,
+    /// A new reader is open at the graph's rate.
+    Opened,
+    /// The tap's node is gone: nothing can be opened and the reader hears
+    /// nothing more.
+    Gone,
+}
+
+impl FollowTap {
+    /// A reader for the follower called `name`.
+    pub(crate) fn new(reader: EventTapReader, name: &'static str) -> Self {
+        Self { reader, name }
+    }
+
+    /// The rate its frames are on.
+    pub(crate) fn rate(&self) -> SampleRate {
+        self.reader.rate()
+    }
+
+    /// What the tap held, in order; warns of what it lost.
+    pub(crate) fn heard(&mut self) -> Vec<TapEvent> {
+        let heard = self.reader.drain().collect();
+        let lost = self.reader.take_lost();
+        if lost > 0 {
+            tracing::warn!("midi: the {} follower's tap lost {lost} events", self.name);
+        }
+        heard
+    }
+
+    /// Re-opens the tap when the graph is prepared at another rate than its
+    /// frames are on. The graph marks itself edited when it tries to open a tap
+    /// it holds; a tap it has dropped is `Gone` again at every call and edits
+    /// nothing.
+    pub(crate) fn reopen<F: Float>(&mut self, graph: &mut Graph<F>) -> Reopened {
+        if self.rate() == graph.prepared().sample_rate() {
+            return Reopened::Unchanged;
+        }
+        match graph.taps().reopen_event(self.reader.id()) {
+            Some(reader) => {
+                self.reader = reader;
+                Reopened::Opened
+            }
+            None => Reopened::Gone,
+        }
+    }
+}
+
 /// The one tempo follower a session has: its core and its tap.
 pub(crate) struct Follow {
     core: TempoFollower,
-    tap: EventTapReader,
+    pub(crate) tap: FollowTap,
 }
 
 /// What a `Poll` phase reads besides the follower.
@@ -292,33 +353,20 @@ pub(crate) struct FollowCx<'a> {
 impl Follow {
     /// A follower reading `tap`.
     pub(crate) fn new(core: TempoFollower, tap: EventTapReader) -> Self {
-        Self { core, tap }
-    }
-
-    /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
-        self.tap.rate()
-    }
-
-    /// The tap's id.
-    pub(crate) fn tap_id(&self) -> tutti_graph::EventTapId {
-        self.tap.id()
-    }
-
-    /// Replaces a tap the graph re-rated.
-    pub(crate) fn set_tap(&mut self, tap: EventTapReader) {
-        self.tap = tap;
+        Self {
+            core,
+            tap: FollowTap::new(tap, "tempo"),
+        }
     }
 
     /// What the tap held, decoded, in order; counts what it lost.
     pub(crate) fn heard(&mut self) -> Vec<Followed> {
         let core = self.core;
-        let heard = self.tap.drain().filter_map(|e| core.step(e.ump)).collect();
-        let lost = self.tap.take_lost();
-        if lost > 0 {
-            tracing::warn!("midi: the tempo follower's tap lost {lost} events");
-        }
-        heard
+        self.tap
+            .heard()
+            .into_iter()
+            .filter_map(|e| core.step(e.ump))
+            .collect()
     }
 }
 
@@ -692,7 +740,7 @@ enum Clock {
 /// follower lays its tempo over the base; MTC carries no tempo.
 pub(crate) struct ClockFollow {
     core: Clock,
-    tap: EventTapReader,
+    pub(crate) tap: FollowTap,
     /// Whether the source has said Play and not Stop since.
     rolling: bool,
 }
@@ -705,7 +753,7 @@ impl ClockFollow {
                 ClockKind::BeatClock => Clock::BeatClock(BeatClockFollower::new()),
                 ClockKind::Mtc => Clock::Mtc(MtcFollower::new()),
             },
-            tap,
+            tap: FollowTap::new(tap, "clock"),
             rolling: false,
         }
     }
@@ -724,21 +772,6 @@ impl ClockFollow {
         }
     }
 
-    /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
-        self.tap.rate()
-    }
-
-    /// The tap's id.
-    pub(crate) fn tap_id(&self) -> tutti_graph::EventTapId {
-        self.tap.id()
-    }
-
-    /// Replaces a tap the graph re-rated.
-    pub(crate) fn set_tap(&mut self, tap: EventTapReader) {
-        self.tap = tap;
-    }
-
     /// Reads the tap, publishes the tempo it heard and reports lock changes
     /// into `out`; what the transport is asked to do, placed on beats, in order.
     pub(crate) fn heard(
@@ -750,13 +783,10 @@ impl ClockFollow {
         let instant = |frame: Frame| frame.to_seconds(rate);
         let arrived: Vec<(Ump, Seconds)> = self
             .tap
-            .drain()
+            .heard()
+            .into_iter()
             .map(|event| (event.ump, instant(event.frame)))
             .collect();
-        let lost = self.tap.take_lost();
-        if lost > 0 {
-            tracing::warn!("midi: the clock follower's tap lost {lost} events");
-        }
         let stand = Stand::of(&cx.playhead);
         let map = cx.settings.tempo_map();
         let poll = Poll {
@@ -850,28 +880,16 @@ fn drive<S: Source>(
 /// The one Machine Control follower a session has: its core and its tap.
 pub(crate) struct MachineFollow {
     core: MachineControlFollower,
-    tap: EventTapReader,
+    pub(crate) tap: FollowTap,
 }
 
 impl MachineFollow {
     /// A follower of `core` reading `tap`.
     pub(crate) fn new(core: MachineControlFollower, tap: EventTapReader) -> Self {
-        Self { core, tap }
-    }
-
-    /// The tap's rate, to compare with the graph's.
-    pub(crate) fn tap_rate(&self) -> tutti_units::SampleRate {
-        self.tap.rate()
-    }
-
-    /// The tap's id.
-    pub(crate) fn tap_id(&self) -> tutti_graph::EventTapId {
-        self.tap.id()
-    }
-
-    /// Replaces a tap the graph re-rated.
-    pub(crate) fn set_tap(&mut self, tap: EventTapReader) {
-        self.tap = tap;
+        Self {
+            core,
+            tap: FollowTap::new(tap, "Machine Control"),
+        }
     }
 
     /// Reads the tap and reports the commands it did not act on into `out`;
@@ -884,12 +902,8 @@ impl MachineFollow {
         out: &mut Vec<crate::SessionEvent>,
     ) -> Vec<ClockAction> {
         let mut events = Vec::new();
-        for event in self.tap.drain() {
+        for event in self.tap.heard() {
             self.core.step(event.ump, &mut |e| events.push(e));
-        }
-        let lost = self.tap.take_lost();
-        if lost > 0 {
-            tracing::warn!("midi: the Machine Control follower's tap lost {lost} events");
         }
         let map = cx.settings.tempo_map();
         let mut actions = Vec::new();

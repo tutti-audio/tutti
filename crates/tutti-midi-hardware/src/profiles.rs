@@ -27,7 +27,7 @@ use tutti_midi_ci::{
     CiDeviceId, ProfileChange, ProfileChannels, ProfileEntry, ProfileId, ProfileRequest,
     ProfileState, ProfileTable, ProfileTarget, SpecificData, Whole,
 };
-use tutti_midi_protocol::{ChannelResponse, MpeZones, PitchBendSensitivity};
+use tutti_midi_protocol::{ChannelResponse, PitchBendSensitivity, ProfileZones};
 use tutti_ump::{MidiChannel, MpeOverlap};
 
 use crate::peer::{PeerRef, PeerRequestError};
@@ -321,11 +321,11 @@ impl PeerProfiles {
     /// zone sharing a Channel with a lower one is left out (section 3.4);
     /// [`refused_mpe_zones`](Self::refused_mpe_zones) lists those.
     #[must_use]
-    pub fn mpe_zones(&self) -> Option<MpeZones> {
+    pub fn mpe_zones(&self) -> Option<ProfileZones> {
         self.table
             .mpe_zones()
             .zones
-            .map(|set| MpeZones::profile(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
+            .map(|set| ProfileZones::new(&set, PitchBendSensitivity::MPE_PROFILE_DEFAULT))
     }
 
     /// The zones the peer enabled that [`mpe_zones`](Self::mpe_zones) leaves

@@ -1684,10 +1684,9 @@ impl crate::Chunks for StatusProbe {
 #[test]
 fn a_blocks_status_reaches_the_host_with_its_chunk() {
     let _lock = machine_lock();
-    // The bridge's per-block reply budget is four block periods, capped at
-    // 50 ms. At 4 kHz a 64-frame block is 16 ms long, so the budget is the
-    // cap: a loaded machine does not abandon a block, which is not what this
-    // test is about.
+    // The bridge's per-block reply budget is four block periods. At 4 kHz a
+    // 64-frame block is 16 ms long, so the budget is 64 ms: a loaded machine
+    // does not abandon a block, which is not what this test is about.
     let (bridge, _thread, _server, slab, replies) =
         stamped_server(None, true, SampleRate::new(4_000.0).unwrap());
     let mut batcher = Batcher::new(

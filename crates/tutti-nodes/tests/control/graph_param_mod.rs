@@ -82,6 +82,7 @@ fn delay_of(w: usize) -> DelayNode<f32> {
             MaxDelay::of(Seconds::new(0.01)),
         ))
         .controls(DelayControls {
+            sync: tutti_nodes::DelaySync::Free,
             time: Seconds::new(0.0003),
             feedback: Feedback::new(0.5),
             cross_feedback: Feedback::NONE,

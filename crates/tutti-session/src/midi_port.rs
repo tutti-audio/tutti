@@ -1309,7 +1309,7 @@ impl Ports {
             let Some(enabled) = peer.mpe_zones() else {
                 continue;
             };
-            let held: &mut Option<tutti_midi_protocol::MpeZones> =
+            let held: &mut Option<tutti_midi_protocol::ProfileZones> =
                 &mut zones[peer.at().peer().group.index()];
             *held = match *held {
                 None => Some(enabled),
