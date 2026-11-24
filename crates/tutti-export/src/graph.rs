@@ -317,7 +317,7 @@ impl<F: Float> RenderGraph<F> {
     /// For a caller that wants a [`Job`](crate::Job)'s tail to be what the
     /// graph's nodes can ring for at most: a reverb, a convolver, a hosted
     /// plugin that declared a decay. A render that spends what the nodes
-    /// *report* at the programme's end takes this as its ceiling
+    /// *report* as the tail renders takes this as its ceiling
     /// ([`TailPolicy::Reported`](crate::TailPolicy::Reported)). It returns the figure and its caveats
     /// rather than a frame count, because for two graphs there is no count:
     /// one that never decays, and one whose nodes were never taught to
@@ -359,8 +359,9 @@ impl<F: Float> RenderGraph<F> {
     /// skips it as at rest, and its declared ceiling after an upstream that
     /// does ([`Executor::reported_tail`](tutti_graph::Executor::reported_tail)).
     ///
-    /// Before a render it is the declared figure. A render reads it itself once
-    /// the programme has rendered ([`TailPolicy::Reported`](crate::TailPolicy::Reported)).
+    /// Before a render it is the declared figure. A render reads it itself at
+    /// the programme's end and after every block of the tail
+    /// ([`TailPolicy::Reported`](crate::TailPolicy::Reported)).
     pub fn reported_tail(&self) -> GraphTail {
         self.executor.reported_tail(&self.editor.spec().topology)
     }
