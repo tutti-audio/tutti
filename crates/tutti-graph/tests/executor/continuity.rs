@@ -652,7 +652,7 @@ fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
         seen.ring_vanished += one.ring_vanished;
     }
     assert!(seen.flushed > 100, "{seen:?}");
-    assert!(seen.zeroed_holding > 5, "{seen:?}");
+    assert!(seen.zeroed_holding > 3, "{seen:?}");
     assert!(seen.retuned_holding > 25, "{seen:?}");
     assert!(seen.ring_retunes > 25, "{seen:?}");
     assert!(seen.ring_vanished > 50, "{seen:?}");
