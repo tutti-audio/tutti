@@ -60,8 +60,8 @@ bitflags::bitflags! {
 ///   engine's plugin node reports one whenever the tempo is usable. See
 ///   `TransportPosition::samples`.
 /// - `position.continuous_samples` → `continousTimeSamples` (the monotonic
-///   clock that does not reset on loop; falls back to `position.samples` when
-///   unset, i.e. `0`)
+///   clock that does not reset on loop), sent as the count it is: `0` is the
+///   clock's first frame
 /// - `position.beat` → `projectTimeMusic`
 /// - `bar.start` → `barPositionMusic`
 /// - `loop_region` (when present) → `cycleStartMusic`/`cycleEndMusic`
@@ -167,14 +167,11 @@ pub fn to_process_context(
 
     if wants(need::NEED_CONTINOUS_TIME_SAMPLES) {
         // The continuous clock is monotonic across loop/cycle boundaries and is
-        // distinct from `projectTimeSamples`, which jumps back on a loop. Hosts
-        // that don't keep a separate continuous counter leave it `0` (unset);
-        // fall back to `samples` there so their behaviour is unchanged.
-        ctx.continousTimeSamples = if t.position.continuous_samples != 0 {
-            t.position.continuous_samples
-        } else {
-            t.position.samples.unwrap_or(0)
-        };
+        // distinct from `projectTimeSamples`, which jumps back on a loop. Its
+        // count is sent as it is: `0` is the first frame of the clock, never a
+        // sign to send project time, which would step the clock backward at the
+        // next block.
+        ctx.continousTimeSamples = t.position.continuous_samples;
     }
     if wants(need::NEED_SYSTEM_TIME)
         && let Some(ns) = t.system_time_ns
@@ -231,6 +228,7 @@ mod tests {
     fn populated_transport() -> TransportInfo {
         TransportInfo::new(SampleRate::of(48_000.0))
             .position_samples(1_234)
+            .continuous_samples(5_678)
             .beat(Beat::new(4.0))
             .bar(Beat::new(8.0), Default::default())
             .loop_region(LoopRegion::new(
@@ -284,7 +282,7 @@ mod tests {
 
         assert_eq!(ctx.sampleRate, 48_000.0);
         assert_eq!(ctx.projectTimeSamples, 1_234);
-        assert_eq!(ctx.continousTimeSamples, 1_234);
+        assert_eq!(ctx.continousTimeSamples, 5_678);
         assert_eq!(ctx.projectTimeMusic, 4.0);
         assert_eq!(ctx.barPositionMusic, 8.0);
         assert_eq!(ctx.cycleStartMusic, 2.0);
@@ -519,22 +517,24 @@ mod tests {
         );
     }
 
-    /// A host with no separate continuous clock leaves `continuous_samples`
-    /// unset (`0`); the continuous field then mirrors `projectTimeSamples`, so
-    /// nothing regresses for such hosts.
+    /// **The continuous clock's first frame is sent as 0, not as project
+    /// time.** A node's clock starts at 0 wherever the playhead is, and its next
+    /// block continues from the block's length: project time in its place would
+    /// make `continousTimeSamples` step backward, which the field never does.
     #[test]
-    fn continuous_samples_falls_back_when_unset() {
-        let t = populated_transport(); // continuous_samples defaults to 0
-        assert_eq!(t.position.continuous_samples, 0);
-        let ctx = to_process_context(&t, need::NEED_CONTINOUS_TIME_SAMPLES);
-
+    fn a_continuous_clock_at_zero_is_sent_as_zero() {
+        let first = populated_transport().continuous_samples(0);
+        let ctx = to_process_context(&first, need::NEED_CONTINOUS_TIME_SAMPLES);
         assert_eq!(ctx.projectTimeSamples, 1_234);
-        assert_eq!(ctx.continousTimeSamples, 1_234);
-        assert_eq!(ctx.projectTimeSamples, ctx.continousTimeSamples);
+        assert_eq!(ctx.continousTimeSamples, 0);
         assert_ne!(
             ctx.state & crate::sdk_enum_u32(StatesAndFlags_::kContTimeValid),
             0
         );
+
+        let next = populated_transport().continuous_samples(64);
+        let after = to_process_context(&next, need::NEED_CONTINOUS_TIME_SAMPLES);
+        assert_eq!(after.continousTimeSamples, 64);
     }
 
     /// Always-on fields (sampleRate, projectTimeSamples) are populated even

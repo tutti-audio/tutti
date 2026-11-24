@@ -239,9 +239,8 @@ fn smooth9<F: Float>(x: F) -> F {
 /// its segment from 0.
 ///
 /// Each order delays the signal: half a frame at first order, a whole frame at second
-/// ([`delay`](Self::delay)). A kind whose antiderivatives are not elementary to the order asked
-/// for refuses it ([`ShapeKind::max_antialiasing`], [`AntialiasingError`]); `Off` is the
-/// memoryless curve.
+/// ([`delay`](Self::delay)). Every curve has the first order and [`SecondOrderShape`] the second
+/// ([`Waveshape`]); `Off` is the memoryless curve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[non_exhaustive]
 pub enum Antialiasing {
@@ -250,8 +249,7 @@ pub enum Antialiasing {
     Off,
     /// The mean of the curve over the segment between two inputs.
     FirstOrder,
-    /// The second-order form over three inputs: `HardClip` and `Softsign`; the other kinds
-    /// shape at first order.
+    /// The second-order form over three inputs, of the curves of [`SecondOrderShape`].
     SecondOrder,
 }
 
@@ -284,16 +282,95 @@ impl Antialiasing {
     }
 }
 
-/// The order asked of a [`ShapeKind`] is above the highest it has.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{kind:?} has antialiasing up to {max:?}, not {order:?}")]
-pub struct AntialiasingError {
+/// The curves whose antiderivative has an elementary second antiderivative: the two a
+/// [`Waveshape`] takes at the [second order](Antialiasing::SecondOrder)
+/// ([`Waveshape::second_order`]). The others' antiderivatives are elementary to the first
+/// order only: `Tanh` (`ln cosh`), `Atan`, `Crush` and `SoftCrush` (a polynomial per step).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SecondOrderShape {
+    /// [`ShapeKind::HardClip`].
+    HardClip,
+    /// [`ShapeKind::Softsign`].
+    Softsign,
+}
+
+impl SecondOrderShape {
     /// The curve.
-    pub kind: ShapeKind,
-    /// The order asked.
-    pub order: Antialiasing,
-    /// The highest order the kind has ([`ShapeKind::max_antialiasing`]).
-    pub max: Antialiasing,
+    #[must_use]
+    pub const fn kind(self) -> ShapeKind {
+        match self {
+            Self::HardClip => ShapeKind::HardClip,
+            Self::Softsign => ShapeKind::Softsign,
+        }
+    }
+}
+
+/// The curve and order of a [`Waveshape`]: the second order holds only a curve that has it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Form {
+    Memoryless(ShapeKind),
+    FirstOrder(ShapeKind),
+    SecondOrder(SecondOrderShape),
+}
+
+/// A waveshaper's curve and the order of antialiasing it is shaped with: every curve has
+/// the first order, and [`SecondOrderShape`] has the second, so a pair that does not exist
+/// is not writable.
+///
+/// A curve without an elementary second antiderivative has no second order:
+///
+/// ```compile_fail,E0308
+/// use tutti_dsp::{ShapeKind, Waveshape};
+/// let _ = Waveshape::second_order(ShapeKind::Tanh);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Waveshape {
+    form: Form,
+}
+
+impl Waveshape {
+    /// The curve `kind` with no antialiasing ([`Antialiasing::Off`]): the memoryless curve.
+    #[must_use]
+    pub const fn new(kind: ShapeKind) -> Self {
+        Self {
+            form: Form::Memoryless(kind),
+        }
+    }
+
+    /// The curve shaped with [`Antialiasing::FirstOrder`], which every curve has.
+    #[must_use]
+    pub const fn first_order(self) -> Self {
+        Self {
+            form: Form::FirstOrder(self.kind()),
+        }
+    }
+
+    /// The curve `shape` shaped with [`Antialiasing::SecondOrder`].
+    #[must_use]
+    pub const fn second_order(shape: SecondOrderShape) -> Self {
+        Self {
+            form: Form::SecondOrder(shape),
+        }
+    }
+
+    /// The curve.
+    #[must_use]
+    pub const fn kind(&self) -> ShapeKind {
+        match self.form {
+            Form::Memoryless(kind) | Form::FirstOrder(kind) => kind,
+            Form::SecondOrder(shape) => shape.kind(),
+        }
+    }
+
+    /// The order it is shaped with.
+    #[must_use]
+    pub const fn antialiasing_order(&self) -> Antialiasing {
+        match self.form {
+            Form::Memoryless(_) => Antialiasing::Off,
+            Form::FirstOrder(_) => Antialiasing::FirstOrder,
+            Form::SecondOrder(_) => Antialiasing::SecondOrder,
+        }
+    }
 }
 
 /// The controls of a [`WaveshaperBank`].
@@ -311,20 +388,19 @@ impl WaveshaperControls {
     };
 }
 
-/// A waveshaper of any width in the float `F`: one curve ([`ShapeKind`]) at one drive shared by
-/// every channel, each channel shaped alone. Memoryless unless [`antialiasing`](Self::antialiasing)
-/// is on, when each channel keeps its last two inputs. At most [`MAX_CHANNELS`] channels wide.
+/// A waveshaper of any width in the float `F`: one [`Waveshape`] at one drive shared by
+/// every channel, each channel shaped alone. Memoryless unless the shape's
+/// [`Antialiasing`] is on, when each channel keeps its last two inputs. At most
+/// [`MAX_CHANNELS`] channels wide.
 ///
 /// Built on the control side for one rate; nothing it holds grows.
 #[derive(Clone, Copy, Debug)]
 pub struct WaveshaperBank<F: Float> {
-    kind: ShapeKind,
+    shape: Waveshape,
     /// The drive, ramping over [`GAIN_RAMP`].
     drive: Ramp<F>,
     /// The steps a drive ramp takes: [`GAIN_RAMP`] at the rate.
     steps: u32,
-    /// The order the bank shapes with, one the kind has.
-    antialiasing: Antialiasing,
     /// Each channel's last two inputs before the drive, newest first: per-sample values in `F`.
     history: [[F; 2]; MAX_CHANNELS],
     /// The closeness at which a quotient with no conditioned form takes its limit.
@@ -332,37 +408,25 @@ pub struct WaveshaperBank<F: Float> {
 }
 
 impl<F: Float + Lerp> WaveshaperBank<F> {
-    /// A waveshaper of `kind` at `rate`, at unity drive, to be set.
+    /// A waveshaper of `shape` at `rate`, at unity drive, to be set.
     #[must_use]
-    pub fn new(kind: ShapeKind, rate: SampleRate) -> Self {
+    pub fn new(shape: Waveshape, rate: SampleRate) -> Self {
         // 5 ms is a few hundred frames at any real rate; an absurd rate saturates rather
         // than panic, since a prepare must not.
         let steps = u32::try_from(GAIN_RAMP.to_samples_ceil(rate).get()).unwrap_or(u32::MAX);
         Self {
-            kind,
+            shape,
             drive: Ramp::new(F::from_unit(WaveshaperControls::DEFAULT.drive)),
             steps,
-            antialiasing: Antialiasing::Off,
             history: [[F::ZERO; 2]; MAX_CHANNELS],
             guard: Guard::new(),
         }
     }
 
-    /// Shapes with `order` of antialiasing; the default is [`Antialiasing::Off`].
-    ///
-    /// # Errors
-    ///
-    /// [`AntialiasingError`] when `order` is above what the kind has
-    /// ([`ShapeKind::max_antialiasing`]).
-    pub fn antialiasing(mut self, order: Antialiasing) -> Result<Self, AntialiasingError> {
-        self.antialiasing = self.kind.antialiasing(order)?;
-        Ok(self)
-    }
-
-    /// The order the bank shapes with.
+    /// The curve and the order the bank shapes with.
     #[must_use]
-    pub fn antialiasing_order(&self) -> Antialiasing {
-        self.antialiasing
+    pub fn shape(&self) -> Waveshape {
+        self.shape
     }
 
     /// Back to rest: the drive jumps to its target ([`jump_to_target`](Self::jump_to_target)) and
@@ -401,11 +465,11 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
         let frames = block.frames().get();
         let (input, mut output) = block.split();
         debug_assert!(width <= MAX_CHANNELS, "a bank is at most MAX_CHANNELS wide");
-        let kind = self.kind;
+        let kind = self.shape.kind();
         let blended = self.drive.blended_frames(frames);
         let taken = self.drive.steps_taken();
-        let order = self.antialiasing;
-        if order == Antialiasing::Off && signal.is_none() && blended == 0 {
+        let form = self.shape.form;
+        if matches!(form, Form::Memoryless(_)) && signal.is_none() && blended == 0 {
             let hardness = kind.hardness(self.drive.target());
             for c in 0..width {
                 let mut plane = output.plane_mut(c);
@@ -437,10 +501,14 @@ impl<F: Float + Lerp> WaveshaperBank<F> {
                     let (hardness, input) = (&hardness[..end - start], input.plane(c));
                     let (input, output) = (&input.samples()[start..end], plane.samples_mut());
                     let output = &mut output[start..end];
-                    if order == Antialiasing::Off {
-                        kind.shape_each(hardness, input, output);
-                    } else {
-                        kind.adaa_each(order, self.guard, hardness, input, output, history);
+                    match form {
+                        Form::Memoryless(_) => kind.shape_each(hardness, input, output),
+                        Form::FirstOrder(_) => {
+                            kind.first_each(self.guard, hardness, input, output, history);
+                        }
+                        Form::SecondOrder(shape) => {
+                            shape.second_each(self.guard, hardness, input, output, history);
+                        }
                     }
                 }
                 start = end;

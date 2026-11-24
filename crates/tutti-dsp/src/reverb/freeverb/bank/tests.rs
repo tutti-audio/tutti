@@ -4,6 +4,7 @@ use tutti_units::{Db, Mix, Real, Samples};
 
 use super::*;
 use crate::TAIL_FLOOR;
+use crate::reverb::tail_probe;
 use tutti_buffers::{BlockSide, InputOutput};
 
 // The tests pin the `f32` instantiation, the session's audio
@@ -322,6 +323,98 @@ fn the_tail_is_the_rt60_of_the_longest_comb_plus_the_chain() {
         "the ceiling is the room at its largest"
     );
     assert_eq!(TAIL_FLOOR, Db::new(-60.0));
+}
+
+/// The reported tail covers the ring-out of the worst finite inputs: for the corners of both
+/// controls at 8 kHz and the General MIDI room at 48 kHz and 44.1 kHz too, an impulse, a
+/// full-scale noise burst and a full-scale step (a loop longer than the longest comb, so every
+/// line is full) stop, and from the reported tail past the last input frame no frame of either
+/// channel is above `TAIL_FLOOR` of the render's own peak (see [`tail_probe`]). The floor is
+/// relative to the response's peak because a bank scales its input and the loop builds a step far
+/// past it.
+#[test]
+fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
+    let settings = [
+        (0.0, 0.0),
+        (0.0, 1.0),
+        (1.0, 0.0),
+        (1.0, 1.0),
+        (0.5, 0.5), // FreeverbControls::GENERAL_MIDI
+    ];
+    assert_eq!(controls(0.5, 0.5), FreeverbControls::GENERAL_MIDI);
+    // The whole grid runs at 8 kHz (the tail in frames scales with the rate); the General MIDI
+    // room also runs at 48 kHz and 44.1 kHz, where the tunings round differently.
+    let low = SampleRate::of(8_000.0);
+    let runs = settings
+        .into_iter()
+        .map(|s| (low, s))
+        .chain([SampleRate::SR_48K, SampleRate::SR_44K1].map(|r| (r, (0.5, 0.5))));
+    {
+        for (rate, (room, damp)) in runs {
+            // The right channel's longest comb: past it every line has been round once.
+            let period = (1640.0 * rate.get() / 44_100.0).ceil() as usize;
+            let c = controls(room, damp);
+            let (mut bank, mut ramps) = settled(rate, &c);
+            let Tail::Finite(tail) = bank.tail_of(&c) else {
+                panic!("room {room}, damping {damp}: a finite tail")
+            };
+            for (name, input) in tail_probe::stimuli::<f32>(4 * period) {
+                bank.reset();
+                ramps.jump_to_target();
+                let frames = tail_probe::run_length(input.len(), tail.get(), period);
+                let x = tail_probe::padded(&input, frames);
+                let (l, r) = run(&mut bank, &mut ramps, &x, 480);
+                let what = format!("{rate:?} room {room} damping {damp}, {name}");
+                tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&l, &r]);
+            }
+        }
+    }
+}
+
+/// A room raised to its largest while the first one rings out is covered by the tail a node
+/// reports after the move (the larger of what is owed and the new room's tail, from the last
+/// input frame, under the ceiling): from it past the last input frame no frame of either channel
+/// is above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step at
+/// the smallest room, the move landing right after the input and a third of the way into its
+/// tail. The energy in the combs at the move decays at the new, slower rate from the move on.
+#[test]
+fn a_room_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
+    let (short, long) = (controls(0.0, 0.0), controls(1.0, 0.0));
+    let period = (1640.0 * RATE.get() / 44_100.0).ceil() as usize;
+    let (mut bank, mut ramps) = settled(RATE, &short);
+    let (Tail::Finite(was), Tail::Finite(now), Tail::Finite(ceiling)) =
+        (bank.tail_of(&short), bank.tail_of(&long), bank.tail())
+    else {
+        panic!("finite tails")
+    };
+    for (moved_at, (name, input)) in [0, was.get() / 3].into_iter().flat_map(|at| {
+        tail_probe::stimuli::<f32>(4 * period)
+            .into_iter()
+            .map(move |s| (at, s))
+    }) {
+        bank.reset();
+        ramps.jump_to_target();
+        let (head, owed) = (input.len() + moved_at, was.get() - moved_at);
+        let reported = tail_probe::raised_tail(owed, now.get(), ceiling.get());
+        let (l1, r1) = run(
+            &mut bank,
+            &mut ramps,
+            &tail_probe::padded(&input, head),
+            480,
+        );
+        bank.retarget(&mut ramps, &long);
+        let rest = tail_probe::run_length(input.len(), reported, period) - head;
+        let (l2, r2) = run(&mut bank, &mut ramps, &vec![0.0; rest], 480);
+        let what = format!("{name}, room 0 to 1 at {moved_at} frames after the input");
+        tail_probe::assert_raised_tail_covers(
+            &what,
+            input.len(),
+            reported,
+            &[&l1, &r1],
+            &[&l2, &r2],
+        );
+        bank.retarget(&mut ramps, &short);
+    }
 }
 
 /// A room size and a damping that move mid-stream move the combs' feedback and damping over

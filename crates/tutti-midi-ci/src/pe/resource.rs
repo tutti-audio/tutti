@@ -49,7 +49,7 @@ pub use link::{
 pub use programs::{PeModeEntry, PeModeList, PeProgramEntry, PeProgramList};
 pub use request::{ActionError, RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody};
 pub use server::{
-    ChangeKind, PublishError, ResourceResponder, ResponderAction, ResponderEvent, ResponderSettings,
+    PublishError, ResourceResponder, ResponderAction, ResponderEvent, ResponderSettings,
 };
 pub use simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,

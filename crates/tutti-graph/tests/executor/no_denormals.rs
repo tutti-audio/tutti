@@ -24,7 +24,7 @@ use std::time::Duration;
 use tutti_buffers::MaxBlock;
 use tutti_platform::Instant;
 
-use common::{WORKERS, test_pool};
+use common::{WORKERS, pooled};
 use tutti_buffers::ChannelLayout;
 use tutti_graph::NodeKey;
 use tutti_graph::{
@@ -75,9 +75,7 @@ fn render_probes(workers: usize, entry: Entry) {
         SampleRate::SR_48K,
         MaxBlock::of(Samples::new(MAX_BLOCK)),
     ));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    pooled(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     for k in 1..=PROBES {
         ed.insert(NodeKey(k), "probe", Unforkable(Probe));

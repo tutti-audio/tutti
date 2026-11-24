@@ -31,7 +31,7 @@ use tutti_rt::{CappedVec, Gauge};
 
 use super::commit::{Commit, Participants, Rendered};
 use super::node_op::Flags;
-use super::par_for;
+use super::par::Par;
 use super::state::{Gone, Inject, State, Unit};
 use crate::EventTapPort;
 use crate::NodeKey;
@@ -43,7 +43,7 @@ use crate::edges::meter::MeterWriter;
 use crate::edges::tap::TapWriter;
 use crate::event::types::Event;
 use crate::exec::arena::Arena;
-use crate::exec::command::overlay_capacity;
+use crate::exec::command::COMMAND_CAPACITY;
 use crate::exec::held::{Held, Keys};
 use crate::exec::rings::{AudioRing, EventFifo};
 use crate::exec::slots::EventSlot;
@@ -170,12 +170,11 @@ impl<F: Float> Staged<F> {
     /// commit was sent. Control side: allocates.
     pub(super) fn set_participants(&mut self, plan: &Plan, participants: Option<usize>) {
         if let Some(state) = &mut self.state {
-            state.par = Some(par_for(
+            state.par = Some(Par::new(
                 plan,
                 participants.unwrap_or(0),
                 self.store_len,
                 state.inject.iter().map(|i| i.unit),
-                state.overlay,
             ));
         }
     }
@@ -454,20 +453,21 @@ impl Stager {
         let (lanes, lanes_from) = lanes(c, &cx);
         let drives = drives(c, &cx, input.mix_lane);
         let mut flush = self.flush(c, &cx, closers);
-        let sizes = Sizes::of(&cx, &delays.events, &efb_fifo, &flush);
+        let sizes = Sizes::of(&cx, &delays.events, &efb_fifo);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
-        let slot_capacity =
-            |i: EventSlotId| plan.program.sizing.events[i].events(cx.cap) + sizes.extra[i];
+        let views = view_rooms(&plan, &inject, sizes.widest);
+        let slot_capacity = |i: EventSlotId| {
+            (plan.program.sizing.events[i].events(cx.cap) + sizes.extra[i]).max(views[i].0)
+                + views[i].1
+        };
         let param_slots = param_slots(&plan);
-        let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store.length_for(c.delta.store_len as usize);
         let participants = self.pool.get().0;
-        let par = par_for(
+        let par = Par::new(
             &plan,
             participants,
             store_len,
             inject.iter().map(|i| i.unit),
-            overlay,
         );
         let state = State {
             arena: Arena::new(plan.program.sizing.audio.len(), cx.max_block),
@@ -497,7 +497,6 @@ impl Stager {
             inject,
             has_inject: Table::filled(plan.units.len(), false),
             has_due: Table::filled(plan.units.len(), false),
-            overlay,
             par: Some(par),
         };
         // The store grows by moving into one built here.
@@ -632,7 +631,7 @@ impl Stager {
         for (i, d) in plan.program.event_delays.iter().enumerate() {
             let carried = old_events.get(&d.key).filter(|_| cx.carry).copied();
             let src = d.key.origin();
-            let rate = plan.event_tap_rate(src, cx.cap);
+            let rate = plan.event_tap_rate(src, d.len, cx.max_block, cx.cap);
             let want = EventFifo::bound(d.len.get(), rate, cx.max_block);
             let have = carried.map(|j| (j, self.fifo_capacity(&d.key)));
             let (mut how, mut cap, over) = fit_fifo(have, want, rate);
@@ -733,7 +732,8 @@ impl Stager {
             .enumerate()
             .map(|(i, f)| {
                 let src = f.key.from;
-                let rate = plan.event_tap_rate(EventTapPort::Out(src), cx.cap);
+                let rate =
+                    plan.event_tap_rate(EventTapPort::Out(src), f.key.delay, cx.max_block, cx.cap);
                 let want = EventFifo::bound(f.key.delay.get(), rate, cx.max_block);
                 let carried = old_efb.get(&f.key).filter(|_| cx.carry).map(|&j| {
                     let have = self.feedback.get(&f.key).copied();
@@ -953,7 +953,6 @@ impl Stager {
                     unit,
                     port,
                     events: CappedVec::with_capacity(events),
-                    merged: CappedVec::with_capacity(events + widest),
                     live: false,
                     closed_from: 0,
                     owed: CappedVec::with_capacity(owed),
@@ -1004,11 +1003,6 @@ struct Sizes {
     extra: Table<EventSlotId, usize>,
     /// The widest event slot.
     widest: usize,
-    extra_total: usize,
-    flushed_total: usize,
-    held_total: usize,
-    /// Room for closes drained a block at a time, over every sink owed some.
-    drained_total: usize,
 }
 
 impl Sizes {
@@ -1016,7 +1010,6 @@ impl Sizes {
         cx: &Cx<'_>,
         rings: &FifoPlan<EventDelayId>,
         feedback: &FifoPlan<EventFeedbackId>,
-        flush: &Flush,
     ) -> Self {
         let plan = cx.plan;
         let extra = widen(cx, &rings.extra, &feedback.extra);
@@ -1028,26 +1021,31 @@ impl Sizes {
             .map(|(i, cap)| cap.events(cx.cap) + extra[i])
             .max()
             .unwrap_or(0);
-        let drained = flush
-            .rooms
-            .values()
-            .filter(|r| r.closers + r.carried > 0)
-            .count();
-        Self {
-            extra_total: extra.iter().sum(),
-            flushed_total: flush.rooms.values().map(|r| r.flush).sum(),
-            held_total: flush.rooms.values().map(|r| r.room).sum(),
-            drained_total: drained * widest.max(cx.cap),
-            extra,
-            widest,
+        Self { extra, widest }
+    }
+}
+
+/// What each view slot holds beyond its source, as `(floor, room)`: the
+/// slot holds at least `floor` events (a bypassed node's closes drain into
+/// it a block at a time, as many as the widest slot holds), and `room` more:
+/// the commands a block brings and the events flushed to the port. Slots
+/// that are no node's view get `(0, 0)`.
+fn view_rooms(plan: &Plan, inject: &[Inject], widest: usize) -> Table<EventSlotId, (usize, usize)> {
+    let mut rooms = Table::filled(plan.program.sizing.events.len(), (0, 0));
+    for op in &plan.program.ops {
+        let Op::Node { unit, .. } = *op else {
+            continue;
+        };
+        let ports = plan.nodes.recs[unit].ports(&plan.nodes);
+        for (port, &view) in ports.ein.iter().enumerate() {
+            let flushed = inject
+                .binary_search_by_key(&(unit, port as u16), |i| (i.unit, i.port))
+                .map_or(0, |i| inject[i].events.capacity());
+            let r = &mut rooms[view];
+            *r = (r.0.max(widest), r.1.max(flushed + COMMAND_CAPACITY));
         }
     }
-
-    /// Everything that can flow into one node's inputs at once, past the
-    /// slots: the overlay's room.
-    fn flowing(&self) -> usize {
-        self.flushed_total + self.held_total + self.extra_total + self.drained_total
-    }
+    rooms
 }
 
 /// What can flow into one injection buffer.
@@ -1233,10 +1231,21 @@ fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
     // Ops run in topological order, so a merge comes after what feeds it.
     for op in &plan.program.ops {
         match *op {
-            Op::Node { unit, .. } if plan.units[unit].shape.param_events => {
+            Op::Node {
+                unit, event_src, ..
+            } => {
                 let rec = &plan.nodes.recs[unit];
-                for &s in rec.ports(&plan.nodes).eout {
-                    has[s] = true;
+                let ports = rec.ports(&plan.nodes);
+                let takes = plan.units[unit].shape.param_events;
+                // A view carries the param events of its source, and those
+                // of the commands scheduled to a node that takes them.
+                for (&view, &src) in ports.ein.iter().zip(plan.event_slots(event_src)) {
+                    has[view] |= takes || (src != crate::compile::plan::EMPTY_SLOT && has[src]);
+                }
+                if takes {
+                    for &s in ports.eout {
+                        has[s] = true;
+                    }
                 }
             }
             Op::EventDelay { src, dst, .. } => {
@@ -1280,6 +1289,16 @@ fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventS
                     .sum::<usize>();
                 let e = &mut extra[dst];
                 *e = (*e).max(sum);
+            }
+            Op::Node {
+                unit, event_src, ..
+            } => {
+                let ports = plan.nodes.recs[unit].ports(&plan.nodes);
+                for (&view, &src) in ports.ein.iter().zip(plan.event_slots(event_src)) {
+                    let from = extra[src];
+                    let e = &mut extra[view];
+                    *e = (*e).max(from);
+                }
             }
             _ => {}
         }

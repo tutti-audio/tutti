@@ -413,7 +413,7 @@ fn a_width_change_without_a_new_main_output_cuts_the_fade() {
 /// pool, through a continuing commit, a re-declaration and its fade.
 #[test]
 fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
-    fn trace(pooled: bool) -> Vec<u32> {
+    fn trace(workers: usize) -> Vec<u32> {
         let nodes: Vec<(u64, Kind)> = (1..=8)
             .map(|k| {
                 (
@@ -426,9 +426,7 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
             })
             .collect();
         let mut r = rig_with(&nodes, &[1, 2]);
-        if pooled {
-            r.executor_mut().set_pool(Some(common::TestPool::new(4)));
-        }
+        common::pooled_fresh(r.executor_mut(), workers);
         let law = FadeLaw::EqualPower;
         let mut bits = Vec::new();
         let mut record = |r: &mut Renderer| {
@@ -456,12 +454,11 @@ fn a_carried_fade_renders_bit_for_bit_the_same_on_the_parallel_executor() {
         }
         bits
     }
-    let serial = trace(false);
+    let serial = common::agree_across_workers([4], trace, Clone::clone);
     assert!(
         serial.iter().any(|&b| b != 0),
         "the graph rendered something"
     );
-    assert_eq!(serial, trace(true));
 }
 
 /// As `declare`, two channels wide.
@@ -674,10 +671,7 @@ mod no_alloc {
 
     fn commit_and_render(workers: usize) {
         let mut r = rig();
-        if workers > 1 {
-            r.executor_mut()
-                .set_pool(Some(common::TestPool::new(workers)));
-        }
+        common::pooled_fresh(r.executor_mut(), workers);
         let law = FadeLaw::EqualPower;
         let run = |r: &mut Renderer| {
             let exec = r.executor_mut();

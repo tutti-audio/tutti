@@ -4,7 +4,7 @@
 use tutti_buffers::{ChannelLayout, MaxBlock};
 use tutti_buffers::{Float, Planes, PlanesMut};
 use tutti_graph::contract::{BlockRig, Direct, drive};
-use tutti_graph::testing::{bits, test_pool};
+use tutti_graph::testing::{agree_across_workers, bits, pooled};
 use tutti_graph::{
     Cx, ForkByClone, ForkTarget, GraphBuilder, Io, Node, ParamNode, ParamSet, Params, Prepare,
     Renderer, Shape, Status,
@@ -233,8 +233,8 @@ fn the_parallel_f64_render_of_param_nodes_is_bit_identical_to_the_one_participan
     let render = |workers: usize| {
         let (g, sets) = gain_graph(8);
         let mut r = g.renderer(prepare()).expect("builds at f64");
+        pooled(r.executor_mut(), workers);
         if workers > 1 {
-            r.executor_mut().set_pool(Some(test_pool(workers)));
             assert!(r.executor_mut().is_parallel(), "the plan runs on the pool");
         }
         for (k, set) in sets.iter().enumerate() {
@@ -242,10 +242,9 @@ fn the_parallel_f64_render_of_param_nodes_is_bit_identical_to_the_one_participan
         }
         r.render(64)
     };
-    let serial = render(1);
+    let serial = agree_across_workers([4], render, |r| bits(r));
     assert!(
         serial[0].iter().all(|&x| x == 4.5 * FINE),
         "the lanes sum exactly"
     );
-    assert_eq!(bits(&serial), bits(&render(4)));
 }

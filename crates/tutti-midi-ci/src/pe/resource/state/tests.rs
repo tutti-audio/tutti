@@ -11,7 +11,7 @@ use super::super::super::body::BodyLimit;
 use super::super::super::capabilities::PeCiMessage;
 use super::super::super::flow::PeMessageKind;
 use super::super::super::flow::{PeSignal, PeTerminator};
-use super::super::super::header::{PeEncoding, PeHeader, PeStatus};
+use super::super::super::header::{PeEncoding, PeHeader, PeSetScope, PeStatus};
 use super::super::super::initiator::PeOutcome;
 use super::super::super::limits::{MediaType, PeTextError, PropertyName};
 use super::super::super::tree::PeJson;
@@ -277,7 +277,7 @@ fn a_state_is_listed_fetched_and_restored_over_many_chunks() {
     assert!(matches!(
         link.served.last(),
         Some(ResponderEvent::Changed {
-            how: ChangeKind::Full,
+            how: PeSetScope::Whole,
             ..
         })
     ));
