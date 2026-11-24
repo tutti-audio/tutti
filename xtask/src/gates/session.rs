@@ -18,7 +18,7 @@
 //!    ([`super::umbrella::exports`]).
 
 use super::umbrella::exports;
-use super::use_tree::Leaf;
+use super::use_tree::{Kind, Leaf};
 use super::{Cargo, Report, Tree};
 
 const SESSION: &str = "tutti-session";
@@ -27,17 +27,18 @@ const SESSION_SRC: &str = "crates/tutti-session/src";
 /// or without `as NAME`), `self`, or a glob under a `tutti_` crate; `None` for a leaf
 /// that names an item or a glob of another crate.
 fn whole(l: &Leaf) -> Option<String> {
-    if !l.whole {
-        return None;
-    }
     let mut full: Vec<&str> = l.path.iter().map(String::as_str).collect();
-    if l.source == "*" {
-        full.push("*");
-        return l.krate().starts_with("tutti_").then(|| full.join("::"));
-    }
-    full.push(&l.source);
-    if l.is_self {
-        full.push("self");
+    match l.kind {
+        Kind::Item => return None,
+        Kind::Glob => {
+            full.push("*");
+            return l.krate().starts_with("tutti_").then(|| full.join("::"));
+        }
+        Kind::Crate => full.push(&l.source),
+        Kind::SelfOf => {
+            full.push(&l.source);
+            full.push("self");
+        }
     }
     Some(full.join("::"))
 }

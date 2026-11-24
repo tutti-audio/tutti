@@ -88,10 +88,6 @@ impl std::fmt::Debug for AutomationLaneNode {
     }
 }
 
-/// Another name for [`AutomationLaneNode`], kept for consumers that spell
-/// it this way. The lane is not generic over the trajectory's label.
-pub type LiveAutomationLane = AutomationLaneNode;
-
 /// What an [`AutomationLaneNode`] is made from: the curve it evaluates at the transport beat.
 ///
 /// The curve is held behind an `Arc` and read on the audio thread, so it must be cheap to

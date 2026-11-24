@@ -6,7 +6,7 @@
 //! its own unit.
 
 use super::*;
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id};
+use crate::compile::ids::AudioSlotId;
 use crate::compile::plan::NodePorts;
 use crate::model::mode::{MixState, NodeMode};
 
@@ -31,10 +31,10 @@ pub(super) fn moded_node_op<
 
     // The mix's lane, before anything reads the block's mix (it moves while
     // the node is parked too, as the mix's snapshot does).
-    let source = plan.param_ports[rec.params.range()]
+    let source = plan.program.param_ports[rec.params.range()]
         .last()
         .filter(|p| p.is_mix())
-        .map(|p| (p.from, &st.events.pev(EventSlotId::new(p.slot))[..]));
+        .map(|p| (p.from, &st.events.pev(p.slot)[..]));
     let declick = plan.prepare.declick();
     u.mode.mix.drive_step(frames, declick, source);
 
@@ -137,7 +137,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
-    if rec.params.len != 0 || u.params.busy() {
+    if !rec.params.is_empty() || u.params.busy() {
         run_params(u, head, st);
     }
     if !u.mode.is_stale() {

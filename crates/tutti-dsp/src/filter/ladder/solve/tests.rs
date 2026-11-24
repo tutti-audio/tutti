@@ -3,20 +3,14 @@ use core::f64::consts::TAU;
 use super::*;
 use crate::LadderDesign;
 use crate::newton::NEWTON_CAP;
-use crate::testing::{radau5_step, uniform};
-use tutti_rt::SplitMix64;
+use crate::testing::radau5_step;
+use tutti_fixtures::uniform_noise;
 use tutti_units::{Hz, Resonance, SampleRate};
 
 const RATE: SampleRate = SampleRate::SR_48K;
 
 fn coefficients(fc: f64, res: f64) -> LadderCoefficients<f64> {
     LadderCoefficients::from(&LadderDesign::new(Hz::new(fc), Resonance::new(res), RATE))
-}
-
-/// `n` seeded uniform values in `-1..1`.
-fn noise(n: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..n).map(|_| uniform(&mut rng, -1.0, 1.0)).collect()
 }
 
 /// The bound on `|F''|` of [`loop_residual`]: each factor `1 - tanh^2 y_i` of `F'` has
@@ -52,7 +46,7 @@ fn the_loop_residual_after_the_cap_is_the_derived_bound() {
             for drive in [0.1, 1.0, 8.0] {
                 let c = coefficients(fc, res);
                 let mut state = [0.0f64; 4];
-                for (i, v) in noise(4_000, 1 + i64::from(drive as i32) as u64)
+                for (i, v) in uniform_noise::<f64>(1 + i64::from(drive as i32) as u64, 4_000)
                     .iter()
                     .enumerate()
                 {
@@ -117,7 +111,7 @@ fn the_taps_are_bounded_by_the_saturators_before_them() {
                 (rest - bound).abs() < 0.01 * bound,
                 "{ty:?} {fc} Hz: {rest} at rest against {bound}"
             );
-            let peak = noise(20_000, 5).iter().fold(0.0f64, |p, v| {
+            let peak = uniform_noise::<f64>(5, 20_000).iter().fold(0.0f64, |p, v| {
                 p.max(nonlinear_ladder_step(&c, ty, &mut state, 1_000.0 * v, f64::tanh).abs())
             });
             assert!(peak <= bound, "{ty:?} {fc} Hz: {peak} over {bound}");

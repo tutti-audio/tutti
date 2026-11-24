@@ -112,6 +112,12 @@ impl Heard {
 /// Five equal-length planes: the unit's outputs for one stretch of frames.
 pub(crate) struct Planes<'a, F>(pub(crate) [&'a mut [F]; Plane::COUNT]);
 
+/// The key of a preset in the player's lookup: its bank in the upper 16 bits,
+/// its program in the lower.
+fn preset_id(bank: tutti_sf2::Bank, program: U7) -> i32 {
+    (i32::from(bank.get()) << 16) | i32::from(program.get())
+}
+
 /// The channel General MIDI plays percussion on.
 const PERCUSSION_CHANNEL: MidiChannel = MidiChannel::of(9);
 
@@ -242,11 +248,7 @@ impl<F: Float + SimdLanes> Player<F> {
             let (Some(bank), Some(patch)) = (preset.bank(), preset.patch()) else {
                 continue;
             };
-            // The preset ID is Int32, where the upper 16 bits represent the bank number
-            // and the lower 16 bits represent the patch number.
-            // This ID is used to search for presets by the combination of bank number
-            // and patch number.
-            let preset_id = (i32::from(bank.get()) << 16) | i32::from(patch.get());
+            let preset_id = preset_id(bank, patch);
             // Two presets with the same bank and program: the first in the file
             // is the active one (section 7.2).
             presets.entry(preset_id).or_insert(i);
@@ -299,14 +301,14 @@ impl<F: Float + SimdLanes> Player<F> {
     /// the font's first.
     fn preset_of(&self, channel: MidiChannel) -> usize {
         let info = &self.channels[channel.index()];
-        let id = (info.bank_number() << 16) | info.patch_number();
-        if let Some(&preset) = self.presets.get(&id) {
+        if let Some(&preset) = self.presets.get(&preset_id(info.bank(), info.program())) {
             return preset;
         }
-        let gm_id = if info.bank_number() < 128 {
-            info.patch_number()
-        } else {
-            128 << 16
+        let gm_id = match info.bank() {
+            tutti_sf2::Bank::Melodic(_) => {
+                preset_id(tutti_sf2::Bank::Melodic(U7::of(0)), info.program())
+            }
+            tutti_sf2::Bank::Percussion => preset_id(tutti_sf2::Bank::Percussion, U7::of(0)),
         };
         self.presets
             .get(&gm_id)
@@ -395,7 +397,7 @@ impl<F: Float + SimdLanes> Player<F> {
     pub(crate) fn program_change(&mut self, channel: MidiChannel, program: U7) {
         let info = &mut self.channels[channel.index()];
         info.program_change(program);
-        let id = (info.bank_number() << 16) | info.patch_number();
+        let id = preset_id(info.bank(), info.program());
         if !self.presets.contains_key(&id) {
             self.missing.0.fetch_add(1, Ordering::Relaxed);
         }

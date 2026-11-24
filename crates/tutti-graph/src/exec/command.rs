@@ -828,13 +828,14 @@ impl Overlay {
 /// outstanding command — so [`DueView::overlay`] can never be short.
 pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize {
     let widest = plan
+        .program
         .ops
         .iter()
         .filter_map(|op| match *op {
             crate::compile::plan::Op::Node { event_in, .. } => Some(
-                plan.event_list[event_in.range()]
+                plan.program.event_list[event_in.range()]
                     .iter()
-                    .map(|&s| plan.event_slot_capacity[s].events(cap))
+                    .map(|&s| plan.program.sizing.events[s].events(cap))
                     .sum::<usize>(),
             ),
             _ => None,

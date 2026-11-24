@@ -369,7 +369,7 @@ fn consts(texts: &[(&str, &str)]) -> Consts {
 fn exports(lib: &str) -> Vec<Ty> {
     uses(lib)
         .into_iter()
-        .filter(|l| !l.whole && l.krate().starts_with("tutti_"))
+        .filter(|l| !l.is_whole() && l.krate().starts_with("tutti_"))
         .map(|l| Ty {
             krate: l.krate().to_owned(),
             mods: l.path[1..].to_vec(),

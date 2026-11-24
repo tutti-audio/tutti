@@ -25,7 +25,9 @@ use tutti_graph::{
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{Breakpoint, ControlLaneNode, Curve, ForeignLaneConfig, Trajectory};
+use tutti_nodes::automation::{
+    Breakpoint, ControlLaneNode, Curve, ForeignLane, ForeignLaneConfig, Trajectory,
+};
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples};
 
@@ -133,7 +135,7 @@ fn automation_reaches_the_plugin_through_its_event_input() {
 /// declared latency is not rendered in `TAG_ONLY` mode, so the figure is
 /// the chunk, not `declared_latency`.
 fn render_gain(
-    feeder: Option<ControlLaneNode>,
+    feeder: Option<ControlLaneNode<ForeignLane>>,
     schedule: &[(u64, ParamKind)],
     blocks: usize,
 ) -> (Vec<f32>, usize) {

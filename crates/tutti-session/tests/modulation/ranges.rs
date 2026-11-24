@@ -259,15 +259,18 @@ fn a_range_write_republishes_no_program() {
             .clone()
     };
     let before = lane(&s).program();
-    assert_eq!(lane(&s).range(), (0.0, 1_000.0));
-    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(600.0)))
+    let tail = |side: &mut _| *render(side, 1_024, 128)[0].last().unwrap();
+    let near = |got: f32, want: f32| {
+        assert!((got - want).abs() < 1e-3, "{got} is not {want}");
+    };
+    // 500 + 0.5 * 0.4 * 1000.
+    near(tail(&mut side), 700.0);
+    s.set(probe.cutoff().range().to(Hz::new(0.0)..Hz::new(800.0)))
         .unwrap();
     settle(&mut s);
-    assert_eq!(
-        lane(&s).range(),
-        (0.0, 600.0),
-        "the lane reads the new range"
-    );
+    // The lane reads the new range's span, inside the bound: 500 + 0.5 *
+    // 0.4 * 800 (700 would be the old span).
+    near(tail(&mut side), 660.0);
     assert!(Arc::ptr_eq(&before, &lane(&s).program()));
 }
 

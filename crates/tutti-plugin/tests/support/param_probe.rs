@@ -19,10 +19,12 @@ use tutti_platform::Instant;
 
 use tutti_clap_test_plugin::EXTRA_PARAM_BASE;
 use tutti_modulation::ControlProgram;
-use tutti_nodes::automation::{ControlLaneNode, ForeignLaneConfig, LaneControls};
+use tutti_nodes::automation::{
+    ControlLaneNode, ForeignLane, ForeignLaneConfig, ForeignLaneControls,
+};
 use tutti_plugin::PluginClient;
 use tutti_plugin_host::PluginHandle;
-use tutti_units::ParamId;
+use tutti_units::{Normalized, ParamId};
 
 use crate::clap_probe::{ProbeEnv, load_probe};
 
@@ -34,12 +36,12 @@ pub fn extra(i: usize) -> ParamId {
 /// A host's value for plugin parameter `id`: a foreign control lane whose
 /// knob is at `value`, in the plugin's normalisation (doc 014 §5). It sends
 /// its knob on its first block and whenever the knob moves
-/// (`LaneControls::store`), and again on `LaneControls::resync`.
-pub fn knob(id: ParamId, value: f32) -> ControlLaneNode {
+/// (`ForeignLaneControls::store`), and again on `LaneControls::resync`.
+/// Returned with its controls.
+pub fn knob(id: ParamId, value: f32) -> (ControlLaneNode<ForeignLane>, ForeignLaneControls) {
     ForeignLaneConfig::new(id, ControlProgram::default(), ParamRange::of(0.0, 1.0))
-        .knob(f64::from(value))
+        .knob(Normalized::of(f64::from(value)))
         .build()
-        .0
 }
 
 /// The CLAP probe with `params` extra parameters, loaded through a real
@@ -52,9 +54,12 @@ pub fn load_param_probe(params: usize, sample_rate: f64) -> (PluginClient, Plugi
 
 /// One [`knob`] lane per extra parameter `0..n`, each at `value(i)`, and their
 /// controls.
-pub fn knobs(n: usize, value: impl Fn(usize) -> f32) -> (Vec<LaneControls>, Vec<ControlLaneNode>) {
-    let lanes: Vec<ControlLaneNode> = (0..n).map(|i| knob(extra(i), value(i))).collect();
-    (lanes.iter().map(ControlLaneNode::controls).collect(), lanes)
+pub fn knobs(
+    n: usize,
+    value: impl Fn(usize) -> f32,
+) -> (Vec<ForeignLaneControls>, Vec<ControlLaneNode<ForeignLane>>) {
+    let (lanes, controls) = (0..n).map(|i| knob(extra(i), value(i))).unzip();
+    (controls, lanes)
 }
 
 /// Polls `check` after each `step`, which renders and waits for the server's

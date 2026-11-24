@@ -31,14 +31,14 @@ use tutti_graph::{OutputPort, PortSource};
 use tutti_modulation::ControlProgram;
 use tutti_modulation::Curve;
 use tutti_music::{FrameClock, LoopRange};
-use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
+use tutti_nodes::automation::{ControlLaneNode, PortLane, UnitLaneConfig};
 use tutti_units::{Beat, Bpm, Hz, ParamKey, SampleRate, Samples, UnitParam};
 
 const RATE: f64 = 48_000.0;
 
 /// A lane sending `curve` to the cutoff, with no knob and no range: the
 /// automation-only lane every test here drives.
-fn automation(curve: impl Curve + 'static) -> ControlLaneNode {
+fn automation(curve: impl Curve + 'static) -> ControlLaneNode<PortLane> {
     ControlLaneNode::from(UnitLaneConfig::new(
         ParamKey::<Hz>::CUTOFF.addr(),
         ControlProgram::from_curve(Arc::new(curve)),
@@ -73,7 +73,7 @@ impl Node for Probe {
 }
 
 /// A lane sending `curve` to the probe's cutoff.
-fn graph(lane: ControlLaneNode) -> (Editor, Executor) {
+fn graph(lane: ControlLaneNode<PortLane>) -> (Editor, Executor) {
     let (mut ed, exec) = Editor::new(Prepare::new(
         SampleRate::of(RATE),
         MaxBlock::of(Samples::new(MAX)),
@@ -125,7 +125,7 @@ fn ragged(total: usize) -> Vec<usize> {
 /// frame's beat. Returns the rendered values.
 fn check_rolling(
     curve: &Trajectory<Hz>,
-    lane: ControlLaneNode,
+    lane: ControlLaneNode<PortLane>,
     blocks: &[usize],
     looping: Option<LoopRange>,
 ) -> Vec<f32> {
@@ -260,7 +260,12 @@ fn wraps_seeks_and_tempo_changes_stay_on_the_curve() {
 /// executor's frame count: it starts at 0 and the transport rolls from its
 /// first block) is a multiple of the control grid (`tutti_modulation::CONTROL_GRID`), and a line between two
 /// such frames. Returns the rendered values.
-fn check_grid(curve: &dyn Curve, lane: ControlLaneNode, blocks: &[usize], tol: f64) -> Vec<f32> {
+fn check_grid(
+    curve: &dyn Curve,
+    lane: ControlLaneNode<PortLane>,
+    blocks: &[usize],
+    tol: f64,
+) -> Vec<f32> {
     let (mut ed, mut exec) = graph(lane);
     let mut clock = FrameClock::new(Beat::new(0.0), TEMPO, SampleRate::of(RATE));
     let mut out = Vec::new();

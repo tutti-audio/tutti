@@ -85,7 +85,7 @@ impl Rig {
     pub fn prepared_with(
         client: PluginClient<Bound>,
         prepare: Prepare,
-        lanes: Vec<tutti_nodes::automation::ControlLaneNode>,
+        lanes: Vec<tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::ForeignLane>>,
     ) -> Self {
         Self::build(client, prepare, lanes, false).0
     }
@@ -96,7 +96,7 @@ impl Rig {
     pub fn prepared_with_keys(
         client: PluginClient<Bound>,
         prepare: Prepare,
-        lanes: Vec<tutti_nodes::automation::ControlLaneNode>,
+        lanes: Vec<tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::ForeignLane>>,
     ) -> (Self, tutti_midi_runtime::MidiKeys) {
         let (rig, keys) = Self::build(client, prepare, lanes, true);
         (rig, keys.expect("asked for keys"))
@@ -105,7 +105,7 @@ impl Rig {
     fn build(
         client: PluginClient<Bound>,
         prepare: Prepare,
-        lanes: Vec<tutti_nodes::automation::ControlLaneNode>,
+        lanes: Vec<tutti_nodes::automation::ControlLaneNode<tutti_nodes::automation::ForeignLane>>,
         keys: bool,
     ) -> (Self, Option<tutti_midi_runtime::MidiKeys>) {
         let (inputs, outputs) = (client.inputs(), client.outputs());

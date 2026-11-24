@@ -1,7 +1,7 @@
 //! Running a node op: its params, its mode and any crossfade, and the call
 //! into the node.
 
-use crate::compile::ids::{AudioSlotId, EventSlotId, Id, PlanUnitId};
+use crate::compile::ids::{AudioSlotId, EventSlotId, PlanUnitId};
 use std::cell::Cell;
 use tutti_buffers::Float;
 
@@ -194,7 +194,7 @@ pub(super) fn fading_node_op<
     let frames = h.frames;
     // The key's params, once for both units: the outgoing one hears the
     // modulation the incoming one does.
-    let modulated = h.rec.params.len != 0 || u.params.busy();
+    let modulated = !h.rec.params.is_empty() || u.params.busy();
     if modulated {
         run_params(u, h, st);
     }
@@ -244,7 +244,7 @@ pub(super) fn fading_node_op<
     // The outgoing unit's status, applied to its scratch as `finish` applies
     // one to the arena.
     for c in 0..aout.len() {
-        let o = x.scratch.slot_mut(AudioSlotId::from_index(c), frames);
+        let o = x.scratch.channel_mut(c, frames);
         match status {
             Status::Modified | Status::Masked { .. } => {}
             Status::Silent | Status::Idle => o.fill(F::ZERO),
@@ -273,7 +273,7 @@ pub(super) fn fading_node_op<
     let n = (x.len - x.done).min(frames);
     for (c, &s) in aout.iter().enumerate() {
         let y = st.arena.slot_mut(s, frames);
-        let out = x.scratch.slot(AudioSlotId::from_index(c), frames);
+        let out = x.scratch.channel(c, frames);
         for (i, (y, &o)) in y[..n].iter_mut().zip(&out[..n]).enumerate() {
             let (g_out, g_in) =
                 fade_gains::<F>(x.law, Samples::new(x.done + i), Samples::new(x.len));
@@ -436,7 +436,7 @@ pub(super) fn run_params<
     let (rec, frames, plan) = (h.rec, h.frames, h.plan);
     let Unit { node, params, .. } = u;
     params.begin();
-    let ports = &plan.param_ports[rec.params.range()];
+    let ports = &plan.program.param_ports[rec.params.range()];
     let mut next = ports.iter().peekable();
     let declared = rec.declared;
     let declick = plan.prepare.declick();
@@ -447,7 +447,7 @@ pub(super) fn run_params<
         let base = node.param_base(k).map(|b| F::from_unit(CellValue(b)));
         match next.next_if(|p| p.port as usize == k) {
             Some(p) => {
-                let events = st.events.pev(EventSlotId::new(p.slot));
+                let events = st.events.pev(p.slot);
                 params.port(k, param, frames, declick, Some((p.from, events)), base);
             }
             None => params.port(k, param, frames, declick, None, base),
@@ -526,7 +526,7 @@ pub(super) fn node_op_with<
     // still declicking off one; every other unit pays this one branch. Run
     // whether or not the node is then skipped, so its ramps and declick
     // advance with the timeline.
-    if !params_done && (rec.params.len != 0 || u.params.busy()) {
+    if !params_done && (!rec.params.is_empty() || u.params.busy()) {
         run_params(u, h, st);
     }
     if skip {

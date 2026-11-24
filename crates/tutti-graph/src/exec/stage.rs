@@ -21,7 +21,7 @@
 //! Everything the executor replaces goes back in the commit, freed on the
 //! control thread.
 
-use crate::compile::ids::{DelayId, EventSlotId, Id, PlanUnitId, Table};
+use crate::compile::ids::{DelayId, EventSlotId, PlanUnitId, Table};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use tutti_buffers::Float;
@@ -81,7 +81,7 @@ pub(super) enum Route {
     /// The edge goes on through the delay at this index of the plan: its FIFO
     /// was built with a table for owed closes, poured into the queue block by
     /// block, behind what is in flight.
-    Delay(u32),
+    Delay(DelayId),
     /// The edge ended: the table the source's held and owed keys merge into,
     /// drained into the sink's injection buffer as far as it takes now and
     /// block by block after.
@@ -394,7 +394,7 @@ impl Stager {
         let to_close: BTreeSet<DelayKey> = closers
             .iter()
             .filter_map(|k| match k.route {
-                Route::Delay(i) => Some(plan.delays[DelayId::new(i)].key),
+                Route::Delay(i) => Some(plan.program.delays[i].key),
                 _ => None,
             })
             .collect();
@@ -407,7 +407,7 @@ impl Stager {
         let sizes = Sizes::of(&cx, &ring_fifo, &efb_fifo, &flush);
         let (inject, shells) = self.shells(&cx, &flush, sizes.widest);
         let slot_capacity =
-            |i: EventSlotId| plan.event_slot_capacity[i].events(cx.cap) + sizes.extra[i];
+            |i: EventSlotId| plan.program.sizing.events[i].events(cx.cap) + sizes.extra[i];
         let param_slots = param_slots(&plan);
         let overlay = overlay_capacity(&plan, cx.cap, sizes.flowing());
         let store_len = self.store.length_for(c.delta.store_len as usize);
@@ -420,14 +420,16 @@ impl Stager {
             overlay,
         );
         let state = State {
-            arena: Arena::new(plan.audio_slots as usize, cx.max_block),
+            arena: Arena::new(plan.program.sizing.audio.len(), cx.max_block),
             flags: {
-                let mut v = vec![Flags::NONE; plan.audio_slots as usize];
+                let mut v = vec![Flags::NONE; plan.program.sizing.audio.len()];
                 v[0] = Flags::SILENCE;
                 v
             },
             events: plan
-                .event_slot_capacity
+                .program
+                .sizing
+                .events
                 .ids()
                 .map(|i| {
                     let params = if param_slots[i] { slot_capacity(i) } else { 0 };
@@ -535,21 +537,26 @@ impl Stager {
         let old_delays: BTreeMap<DelayKey, usize> = cx
             .old
             .map(|p| {
-                p.delays
+                p.program
+                    .delays
                     .iter()
                     .enumerate()
                     .map(|(i, d)| (d.key, i))
                     .collect()
             })
             .unwrap_or_default();
-        let old_by_source = ring_by_source(cx.old.map(|p| p.delays.as_slice()).unwrap_or_default());
+        let old_by_source = ring_by_source(
+            cx.old
+                .map(|p| p.program.delays.as_slice())
+                .unwrap_or_default(),
+        );
         let mut caps = BTreeMap::new();
         let mut owing = BTreeSet::new();
         let mut with_params = BTreeSet::new();
-        let mut rings = Vec::with_capacity(plan.delays.len());
-        let mut from = Vec::with_capacity(plan.delays.len());
-        let mut extra = vec![0; plan.delays.len()];
-        for (i, d) in plan.delays.iter().enumerate() {
+        let mut rings = Vec::with_capacity(plan.program.delays.len());
+        let mut from = Vec::with_capacity(plan.program.delays.len());
+        let mut extra = vec![0; plan.program.delays.len()];
+        for (i, d) in plan.program.delays.iter().enumerate() {
             let carried = old_delays.get(&d.key).filter(|_| cx.carry).copied();
             match d.key.event_origin() {
                 Some(src) => {
@@ -603,7 +610,11 @@ impl Stager {
                             from: j.map_or(0, |j| j as u32),
                         });
                     }
-                    Some(j) if cx.old.is_some_and(|p| p.delays.as_slice()[j].len == d.len) => {
+                    Some(j)
+                        if cx
+                            .old
+                            .is_some_and(|p| p.program.delays.as_slice()[j].len == d.len) =>
+                    {
                         rings.push(None);
                         from.push(RingFrom::Keep {
                             from: j as u32,
@@ -646,19 +657,22 @@ impl Stager {
         BTreeSet<FeedbackKey>,
     ) {
         let plan = cx.plan;
-        let keyed = |kind: &[crate::compile::plan::FeedbackSpec]| -> BTreeMap<FeedbackKey, usize> {
+        fn keyed<S>(
+            kind: &[crate::compile::plan::FeedbackSpec<S>],
+        ) -> BTreeMap<FeedbackKey, usize> {
             kind.iter().enumerate().map(|(i, f)| (f.key, i)).collect()
-        };
+        }
         let old_afb = cx
             .old
-            .map(|p| keyed(p.audio_feedback.as_slice()))
+            .map(|p| keyed(p.program.audio_feedback.as_slice()))
             .unwrap_or_default();
         let old_efb = cx
             .old
-            .map(|p| keyed(p.event_feedback.as_slice()))
+            .map(|p| keyed(p.program.event_feedback.as_slice()))
             .unwrap_or_default();
-        let mut audio_from = Vec::with_capacity(plan.audio_feedback.len());
+        let mut audio_from = Vec::with_capacity(plan.program.audio_feedback.len());
         let audio = plan
+            .program
             .audio_feedback
             .iter()
             .map(|f| {
@@ -669,9 +683,10 @@ impl Stager {
             .collect();
         let mut caps = BTreeMap::new();
         let mut with_params = BTreeSet::new();
-        let mut from = Vec::with_capacity(plan.event_feedback.len());
-        let mut extra = vec![0; plan.event_feedback.len()];
+        let mut from = Vec::with_capacity(plan.program.event_feedback.len());
+        let mut extra = vec![0; plan.program.event_feedback.len()];
         let event = plan
+            .program
             .event_feedback
             .iter()
             .enumerate()
@@ -749,14 +764,16 @@ impl Stager {
         let old_delays: BTreeMap<DelayKey, usize> = cx
             .old
             .map(|p| {
-                p.delays
+                p.program
+                    .delays
                     .iter()
                     .enumerate()
                     .map(|(i, d)| (d.key, i))
                     .collect()
             })
             .unwrap_or_default();
-        let plan_delay_keys: BTreeSet<DelayKey> = plan.delays.iter().map(|d| d.key).collect();
+        let plan_delay_keys: BTreeSet<DelayKey> =
+            plan.program.delays.iter().map(|d| d.key).collect();
         let gone_delays = old_delays
             .iter()
             .filter(|(k, _)| !(cx.carry && plan_delay_keys.contains(k)))
@@ -779,14 +796,16 @@ impl Stager {
         let old_efb: BTreeMap<FeedbackKey, usize> = cx
             .old
             .map(|p| {
-                p.event_feedback
+                p.program
+                    .event_feedback
                     .iter()
                     .enumerate()
                     .map(|(i, f)| (f.key, i))
                     .collect()
             })
             .unwrap_or_default();
-        let plan_efb: BTreeSet<FeedbackKey> = plan.event_feedback.iter().map(|f| f.key).collect();
+        let plan_efb: BTreeSet<FeedbackKey> =
+            plan.program.event_feedback.iter().map(|f| f.key).collect();
         let gone_feedback = old_efb
             .iter()
             .filter(|(k, _)| !(cx.carry && plan_efb.contains(k)))
@@ -881,11 +900,13 @@ impl Stager {
                 continue;
             }
             let delay = plan
+                .program
                 .delays
-                .iter()
-                .position(|d| d.key == DelayKey::Event { at, from });
+                .iter_enumerated()
+                .find(|(_, d)| d.key == DelayKey::Event { at, from })
+                .map(|(id, _)| id);
             let route = match delay {
-                Some(i) if in_plan => Route::Delay(i as u32),
+                Some(i) if in_plan => Route::Delay(i),
                 _ => Route::Sink(Held::new()),
             };
             closers.push(Closer { from, at, route });
@@ -979,7 +1000,9 @@ impl Sizes {
         let plan = cx.plan;
         let extra = widen(cx, &rings.extra, &feedback.extra);
         let widest = plan
-            .event_slot_capacity
+            .program
+            .sizing
+            .events
             .iter_enumerated()
             .map(|(i, cap)| cap.events(cx.cap) + extra[i])
             .max()
@@ -1045,38 +1068,38 @@ fn outlets<F: Float>(c: &mut Commit<F>, cx: &Cx<'_>) -> Outlets<F> {
     }
     let old_taps = cx
         .old
-        .map(|p| index(p.taps.iter().copied()))
+        .map(|p| index(p.program.taps.iter().copied()))
         .unwrap_or_default();
     let old_event_taps = cx
         .old
-        .map(|p| index(p.event_taps.iter().copied()))
+        .map(|p| index(p.program.event_taps.iter().copied()))
         .unwrap_or_default();
     let old_meters = cx
         .old
-        .map(|p| index(p.meters.iter().map(|(k, _)| *k)))
+        .map(|p| index(p.program.meters.iter().map(|(k, _)| *k)))
         .unwrap_or_default();
     let carried =
         |opened: bool, from: Option<&usize>| (!opened).then(|| from.map(|&i| i as u32)).flatten();
     let mut out = Outlets {
-        taps: Vec::with_capacity(plan.taps.len()),
-        taps_from: Vec::with_capacity(plan.taps.len()),
-        event_taps: Vec::with_capacity(plan.event_taps.len()),
-        event_taps_from: Vec::with_capacity(plan.event_taps.len()),
-        meters: Vec::with_capacity(plan.meters.len()),
-        meters_from: Vec::with_capacity(plan.meters.len()),
+        taps: Vec::with_capacity(plan.program.taps.len()),
+        taps_from: Vec::with_capacity(plan.program.taps.len()),
+        event_taps: Vec::with_capacity(plan.program.event_taps.len()),
+        event_taps_from: Vec::with_capacity(plan.program.event_taps.len()),
+        meters: Vec::with_capacity(plan.program.meters.len()),
+        meters_from: Vec::with_capacity(plan.program.meters.len()),
     };
-    for k in &plan.taps {
+    for k in &plan.program.taps {
         let w = open(&mut c.opened.taps, k);
         out.taps_from.push(carried(w.is_some(), old_taps.get(k)));
         out.taps.push(w);
     }
-    for k in &plan.event_taps {
+    for k in &plan.program.event_taps {
         let w = open(&mut c.opened.event_taps, k);
         out.event_taps_from
             .push(carried(w.is_some(), old_event_taps.get(k)));
         out.event_taps.push(w);
     }
-    for (k, lanes) in &plan.meters {
+    for (k, lanes) in &plan.program.meters {
         let w = open(&mut c.opened.meters, k);
         if let Some(w) = &w {
             w.set_width(*lanes);
@@ -1097,23 +1120,25 @@ fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane<F>>, Vec<Option<u
     let old_lanes: BTreeMap<crate::EdgeId, usize> = cx
         .old
         .map(|p| {
-            p.sum_lanes
+            p.program
+                .sum_lanes
                 .iter()
                 .enumerate()
                 .filter_map(|(i, id)| Some(((*id)?, i)))
                 .collect()
         })
         .unwrap_or_default();
-    let mut driven = vec![false; plan.sum_lanes.len()];
-    for op in &plan.ops {
+    let mut driven = vec![false; plan.program.sum_lanes.len()];
+    for op in &plan.program.ops {
         if let Op::WeightedSum { lanes, gains, .. } = *op {
-            for g in &plan.gain_ports[gains.range()] {
-                driven[lanes.start as usize + usize::from(g.lane)] = true;
+            for g in &plan.program.gain_ports[gains.range()] {
+                driven[lanes.range().start + usize::from(g.lane)] = true;
             }
         }
     }
-    let mut from = Vec::with_capacity(plan.sum_lanes.len());
+    let mut from = Vec::with_capacity(plan.program.sum_lanes.len());
     let lanes = plan
+        .program
         .sum_lanes
         .iter()
         .zip(&driven)
@@ -1144,7 +1169,7 @@ fn drives<F: Float>(
     mix_lane: &dyn Fn(NodeKey) -> Option<ParamState<F>>,
 ) -> Vec<(UnitIdx, ParamState<F>)> {
     let driven_of = |p: &Plan, rec: &crate::compile::plan::NodeRec| {
-        p.param_ports[rec.params.range()]
+        p.program.param_ports[rec.params.range()]
             .last()
             .is_some_and(ParamPortOp::is_mix)
     };
@@ -1180,30 +1205,30 @@ fn drives<F: Float>(
 /// among its inputs. Only these slots reserve room for them. A slot the
 /// colouring shares among values takes the union over the plan.
 fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
-    let mut has = Table::filled(plan.event_slot_capacity.len(), false);
-    for (f, spec) in plan.event_feedback.iter_enumerated() {
+    let mut has = Table::filled(plan.program.sizing.events.len(), false);
+    for (f, spec) in plan.program.event_feedback.iter_enumerated() {
         if let FeedbackKey::Event { from, .. } = spec.key {
-            has[f.slot()] |= plan.event_port_params(from);
+            has[plan.program.event_feedback[f].slot] |= plan.event_port_params(from);
         }
     }
     // Ops run in topological order, so a merge comes after what feeds it.
-    for op in &plan.ops {
+    for op in &plan.program.ops {
         match *op {
-            Op::Node { unit, .. } if plan.units[PlanUnitId::new(unit)].shape.param_events => {
-                let rec = &plan.nodes.recs[PlanUnitId::new(unit)];
+            Op::Node { unit, .. } if plan.units[unit].shape.param_events => {
+                let rec = &plan.nodes.recs[unit];
                 for &s in rec.ports(&plan.nodes).eout {
                     has[s] = true;
                 }
             }
             Op::EventDelay { src, dst, .. } => {
-                let from = has[EventSlotId::new(src)];
-                has[EventSlotId::new(dst)] |= from;
+                let from = has[src];
+                has[dst] |= from;
             }
             Op::EventMerge { srcs, dst, .. } => {
-                let any = plan.event_list[srcs.range()]
+                let any = plan.program.event_list[srcs.range()]
                     .iter()
                     .any(|&s| s != crate::compile::plan::EMPTY_SLOT && has[s]);
-                has[EventSlotId::new(dst)] |= any;
+                has[dst] |= any;
             }
             _ => {}
         }
@@ -1216,24 +1241,25 @@ fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
 /// that can be, and so is every merge downstream of it.
 fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventSlotId, usize> {
     let plan = cx.plan;
-    let mut extra = Table::filled(plan.event_slot_capacity.len(), 0usize);
-    for (f, &x) in plan.event_feedback.ids().zip(efb_extra) {
-        let e = &mut extra[f.slot()];
+    let mut extra = Table::filled(plan.program.sizing.events.len(), 0usize);
+    debug_assert_eq!(plan.program.event_feedback.len(), efb_extra.len());
+    for (f, &x) in plan.program.event_feedback.ids().zip(efb_extra) {
+        let e = &mut extra[plan.program.event_feedback[f].slot];
         *e = (*e).max(x);
     }
     // Ops run in topological order, so a merge comes after whatever feeds it.
-    for op in &plan.ops {
+    for op in &plan.program.ops {
         match *op {
             Op::EventDelay { delay, dst, .. } => {
-                let e = &mut extra[EventSlotId::new(dst)];
-                *e = (*e).max(ring_extra[delay as usize]);
+                let e = &mut extra[dst];
+                *e = (*e).max(ring_extra[delay.index()]);
             }
             Op::EventMerge { srcs, dst, .. } => {
-                let sum = plan.event_list[srcs.range()]
+                let sum = plan.program.event_list[srcs.range()]
                     .iter()
                     .map(|&s| extra[s])
                     .sum::<usize>();
-                let e = &mut extra[EventSlotId::new(dst)];
+                let e = &mut extra[dst];
                 *e = (*e).max(sum);
             }
             _ => {}
