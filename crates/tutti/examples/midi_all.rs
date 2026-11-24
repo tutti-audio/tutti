@@ -18,9 +18,9 @@
 //! [`MidiInput`](tutti::midi::MidiInput) lists), which needs a peer device.
 
 use tutti::midi::{
-    FileEvent, Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiFile, MidiGroup,
-    MidiHardwareConfig, MidiRouteRule, Mpe11Zone, Mpe11Zones, MpeMode, NoteNumber, NoteVelocity,
-    PitchBendSensitivity, SmfDivision, Tick, TicksPerQuarterNote, Track, U7, Voice1,
+    FileEvent, Layout, LeadTrack, MemberCount, Message, MidiChannel, MidiGroup, MidiHardwareConfig,
+    MidiRouteRule, Mpe11Zone, Mpe11Zones, MpeMode, NoteNumber, NoteVelocity, PitchBendSensitivity,
+    SmfDivision, StandardMidiFile, Tick, TicksPerQuarterNote, Track, U7, Voice1,
 };
 use tutti::polysynth::{PolySynth, SynthConfig};
 use tutti::session::{Start, TakeLatency, Trim};
@@ -73,7 +73,7 @@ fn session() -> Result<Session, Error> {
 
 /// A file built from a `Track`: four quarter notes up a scale, collected from
 /// `(Tick, event)` pairs, then written and read back as bytes (an SMF).
-fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
+fn file() -> Result<StandardMidiFile, Box<dyn std::error::Error>> {
     let track: Track = (0..4u8)
         .flat_map(|n| {
             let at = Tick::quarters(n.into(), DIVISION).expect("four quarters fit");
@@ -88,10 +88,10 @@ fn file() -> Result<MidiFile, Box<dyn std::error::Error>> {
             ]
         })
         .collect();
-    let built = MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?;
+    let built = StandardMidiFile::new(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?;
     let mut bytes = Vec::new();
     built.write(&mut bytes)?;
-    Ok(MidiFile::read(bytes)?)
+    Ok(StandardMidiFile::from_bytes(&bytes)?)
 }
 
 fn run() -> Result<Outcome, Box<dyn std::error::Error>> {

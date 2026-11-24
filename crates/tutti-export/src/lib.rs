@@ -89,7 +89,7 @@
 //! ```rust
 //! use tutti_timeline::FrozenClock;
 //! use tutti_units::{Hz, SampleRate, Samples, Seconds};
-//! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup};
+//! use tutti_export::{render, render_one, BufferTarget, Control, FileTarget, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 //! use tutti_graph::GraphBuilder;
@@ -105,7 +105,7 @@
 //!     RenderGraph::assemble(editor, executor, Setup::new()).expect("built together")
 //! };
 //!
-//! let job = Job::new(rate, Seconds::new(0.5).to_samples(rate), Samples::new(0), Samples::new(0))
+//! let job = Job::new(rate, Seconds::new(0.5).to_samples(rate), Samples::new(0), TailPolicy::Frames(Samples::ZERO))
 //!     .expect("a half second");
 //!
 //! // To buffers: planar, one `Vec` per channel, and `frames()` is FRAMES per
@@ -193,7 +193,7 @@ use control::Weights;
 pub use control::{CancelToken, Control, Outcome, Progress, Stage};
 
 mod job;
-pub use job::{EventLossPolicy, Job, JobError, MAX_FRAMES};
+pub use job::{EventLossPolicy, Job, JobError, MAX_FRAMES, TailPolicy};
 
 mod rendered;
 pub use rendered::{Rendered, RenderedError};

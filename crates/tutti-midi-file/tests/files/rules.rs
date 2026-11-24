@@ -12,8 +12,9 @@ use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_fixtures::{RangeContract, check_range_contract};
 use tutti_midi_file::{
-    FileEvent, Layout, Lead, LeadRepair, LeadTrack, Meta, MidiFile, Pattern, ReadRepair,
-    SmfDivision, SmpteFractionalFrames, SmpteOffset, SysEx, TextKind, Tick, Track, TracksError,
+    FileEvent, Layout, Lead, LeadRepair, LeadTrack, Meta, Pattern, ReadRepair, SmfDivision,
+    SmpteFractionalFrames, SmpteOffset, StandardMidiFile, SysEx, TextKind, Tick, Track,
+    TracksError,
 };
 use tutti_midi_protocol::{
     SmpteFrameRate, SmpteTimecode, TimecodeHours, TimecodeMinutes, TimecodeSeconds,
@@ -31,7 +32,7 @@ fn meta(delta: u32, kind: u8, data: &[u8]) -> RawEvent {
     RawEvent::new(delta, bytes)
 }
 
-fn read(format: u16, tracks: &[Vec<RawEvent>]) -> MidiFile {
+fn read(format: u16, tracks: &[Vec<RawEvent>]) -> StandardMidiFile {
     read_bytes(build_smf(format, Division::Metrical(TPQ), tracks)).unwrap()
 }
 
@@ -43,7 +44,7 @@ enum Format {
     Two,
 }
 
-fn smf(format: Format, mut tracks: Vec<Track>) -> Result<MidiFile, TracksError> {
+fn smf(format: Format, mut tracks: Vec<Track>) -> Result<StandardMidiFile, TracksError> {
     match format {
         Format::Zero => crate::common::format0(DIVISION, tracks.remove(0)),
         Format::One => crate::common::format1(DIVISION, tracks),
@@ -52,11 +53,11 @@ fn smf(format: Format, mut tracks: Vec<Track>) -> Result<MidiFile, TracksError> 
 }
 
 /// A format 0 file whose only track is `lead`.
-fn lead(lead: LeadTrack) -> MidiFile {
-    MidiFile::smf(DIVISION, Layout::Format0(lead)).unwrap()
+fn lead(lead: LeadTrack) -> StandardMidiFile {
+    StandardMidiFile::new(DIVISION, Layout::Format0(lead)).unwrap()
 }
 
-fn one(events: Vec<(u64, FileEvent)>) -> Result<MidiFile, TracksError> {
+fn one(events: Vec<(u64, FileEvent)>) -> Result<StandardMidiFile, TracksError> {
     smf(Format::Zero, vec![track(events)])
 }
 
@@ -111,7 +112,7 @@ fn played() -> Track {
 
 /// The body of the only track of `file`, from after its MTrk length, without
 /// the default tempo and time signature it is written with.
-fn body(file: &MidiFile) -> Vec<u8> {
+fn body(file: &StandardMidiFile) -> Vec<u8> {
     without_defaults(&encoded(file)[22..])
 }
 
@@ -167,7 +168,7 @@ fn a_sequence_number_and_a_track_name_are_written_first_at_time_0() {
 /// Spec: smf/sequence-number#2, smf/sequence-number#3
 #[test]
 fn a_format_2_pattern_is_its_number_or_its_place() {
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         DIVISION,
         Layout::Format2 {
             copyright: None,
@@ -179,7 +180,7 @@ fn a_format_2_pattern_is_its_number_or_its_place() {
         },
     )
     .unwrap();
-    let numbers = |f: &MidiFile| {
+    let numbers = |f: &StandardMidiFile| {
         sequences(f)
             .sequences()
             .map(|s| s.number())
@@ -196,7 +197,7 @@ fn a_format_2_pattern_is_its_number_or_its_place() {
 /// Spec: smf/sequence-number#4
 #[test]
 fn a_format_1_file_has_one_sequence_number_in_its_first_track() {
-    let written = MidiFile::smf(
+    let written = StandardMidiFile::new(
         DIVISION,
         Layout::Format1 {
             lead: LeadTrack::new(played()).numbered(5),
@@ -406,7 +407,7 @@ fn an_smpte_offset_is_at_the_start_of_the_track() {
 #[test]
 fn a_format_1_smpte_offset_is_the_first_tracks() {
     let at = offset(1, 2, 3, 4, SmpteFrameRate::Fps25, 5);
-    let written = MidiFile::smf(
+    let written = StandardMidiFile::new(
         DIVISION,
         Layout::Format1 {
             lead: LeadTrack::new(played()).smpte_start(at),
@@ -590,7 +591,7 @@ fn all_copyright_notices_are_one_event_first_in_the_first_track() {
         },
     ];
     for layout in layouts {
-        let file = MidiFile::smf(DIVISION, layout).unwrap();
+        let file = StandardMidiFile::new(DIVISION, layout).unwrap();
         assert_eq!(body(&file)[..7], [0, 0xFF, 0x02, 0x03, b'(', b'C', b')']);
         let back = read_bytes(encoded(&file)).unwrap();
         assert_eq!(back.copyright(), Some(&b"(C)"[..]));
@@ -623,7 +624,7 @@ fn a_cloned_read_track_carries_no_opening_metas() {
         .map(|(i, _)| unspecified(&read_file, i).into_iter().collect())
         .collect();
     let lead = LeadTrack::new(cloned.remove(0));
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         DIVISION,
         Layout::Format1 {
             lead,
@@ -656,7 +657,7 @@ fn a_format_2_pattern_writes_its_own_smpte_offset() {
         offset(1, 0, 0, 0, SmpteFrameRate::Fps25, 0),
         offset(2, 0, 0, 0, SmpteFrameRate::Fps25, 0),
     );
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         DIVISION,
         Layout::Format2 {
             copyright: None,
@@ -1242,7 +1243,7 @@ fn a_given_tempo_stays_and_the_missing_time_signature_joins_it() {
 #[test]
 fn a_read_file_without_tempo_and_time_signature_is_given_the_defaults() {
     let note = |delta| vec![RawEvent::note_on(delta, 0, 60, 100)];
-    let head = |file: &MidiFile, track: usize| -> Vec<FileEvent> {
+    let head = |file: &StandardMidiFile, track: usize| -> Vec<FileEvent> {
         let events = file.tracks()[track].events();
         events.iter().take(2).map(|(_, e)| e.clone()).collect()
     };

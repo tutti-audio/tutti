@@ -503,11 +503,7 @@ pub(crate) fn write_planes<F: FftFloat>(
             .fold_from(rendered.channels(), None)?,
         )
     };
-    let plan = RenderPlan {
-        total: frames,
-        output_length: frames,
-        latency: Samples::new(0),
-    };
+    let plan = RenderPlan::of_frames(frames);
     // The frames' OWN rate: these planes may have been rendered under a
     // different config entirely.
     let mut chain = open_file(target, &plan, rendered.sample_rate())?;

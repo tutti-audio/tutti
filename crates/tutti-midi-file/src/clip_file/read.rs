@@ -45,7 +45,7 @@ use tutti_ump::{
 };
 
 use super::{ClipFileError, ParsedClip, property_exchange};
-use crate::{ReadError, Tick};
+use crate::{ClipReadError, Tick};
 use tutti_midi_ci::is_set_profile_on;
 
 /// Why a rule refused, carried as winnow context and mapped to
@@ -530,20 +530,20 @@ fn absolute(timed: &[Timed]) -> Vec<(Tick, Ump)> {
 }
 
 /// The refusal of `cause`, found `at` packets into `packets`.
-fn refusal(packets: &[Packet], at: usize, cause: ClipFileError) -> ReadError {
+fn refusal(packets: &[Packet], at: usize, cause: ClipFileError) -> ClipReadError {
     let word = packets[..at].iter().map(|p| p.ump.words().len()).sum();
-    ReadError::Clip { word, cause }
+    ClipReadError::Parse { word, cause }
 }
 
 /// Parses a Clip File's `body`, the bytes after its magic.
 ///
 /// # Errors
 ///
-/// [`ReadError::Clip`] naming the rule broken and the word it was found at.
-pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
+/// [`ClipReadError::Parse`] naming the rule broken and the word it was found at.
+pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ClipReadError> {
     let Some(words) = words_of(body) else {
         let word = body.len() / 4;
-        return Err(ReadError::Clip {
+        return Err(ClipReadError::Parse {
             word,
             cause: ClipFileError::Unaligned,
         });
@@ -566,7 +566,7 @@ pub(crate) fn parse(body: &[u8]) -> Result<ParsedClip, ReadError> {
         refusal(&packets, at, cause)
     })?;
     if torn {
-        return Err(ReadError::Clip {
+        return Err(ClipReadError::Parse {
             word: taken,
             cause: ClipFileError::TrailingData,
         });

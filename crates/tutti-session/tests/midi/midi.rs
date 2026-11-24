@@ -241,7 +241,7 @@ fn stopping_a_clip_that_is_not_there_names_the_target() {
 #[test]
 fn a_loaded_track_plays_its_events_at_their_beats() {
     use tutti_midi_file::SmfDivision;
-    use tutti_midi_file::{Layout, LeadTrack, MidiFile, Tick, Track};
+    use tutti_midi_file::{Layout, LeadTrack, StandardMidiFile, Tick, Track};
     use tutti_ump::U7;
     let track = Track::new().note(
         Tick(960),
@@ -250,7 +250,7 @@ fn a_loaded_track_plays_its_events_at_their_beats() {
         NoteNumber::of(62),
         U7::of(100),
     );
-    let file = MidiFile::smf(
+    let file = StandardMidiFile::new(
         SmfDivision::per_quarter(480),
         Layout::Format0(LeadTrack::new(track)),
     )
@@ -1351,13 +1351,12 @@ fn a_midi_ci_peers_profiles_are_listed_and_switched_through_the_session() {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
-                    set_on.push((target.address(), target.channels()));
+                Decoded::Message(CiMessage::SetProfileOn { format, .. }) => {
+                    set_on.push((format.address(), format.channels().expect("version 2")));
                     answers.extend(
                         CiMessage::ProfileEnabled {
                             source: peer,
-                            ci_version: CI_VERSION,
-                            target,
+                            format,
                             profile,
                         }
                         .packets(MidiGroup::FIRST)
@@ -1554,9 +1553,9 @@ impl MpePeer {
     ) {
         use tutti_midi_ci::{
             CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, DeviceBody,
-            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileId, ProfileList, ProfileLists,
-            ProfileTarget, ReplyData, SUB_ID2_MESSAGE_REPORT_INQUIRY, SUB_ID2_SET_PROFILE_OFF,
-            SUB_ID2_SET_PROFILE_ON,
+            MaxSysexSize, Nak, NakStatus, PeTerminator, ProfileFormat, ProfileId, ProfileList,
+            ProfileLists, ProfileTarget, ReplyData, SUB_ID2_MESSAGE_REPORT_INQUIRY,
+            SUB_ID2_SET_PROFILE_OFF, SUB_ID2_SET_PROFILE_ON,
         };
         use tutti_ump::{DeviceIdentity, ManufacturerId, SysexStep, U7};
         let at = |device_id| CiHeader {
@@ -1576,8 +1575,9 @@ impl MpePeer {
             };
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
             match &decoded {
-                Decoded::Message(CiMessage::SetProfileOn { target, .. }) => {
-                    self.asked.push(Asked::On(target.channels()));
+                Decoded::Message(CiMessage::SetProfileOn { format, .. }) => {
+                    self.asked
+                        .push(Asked::On(format.channels().expect("version 2")));
                 }
                 Decoded::Message(CiMessage::SetProfileOff { .. }) => self.asked.push(Asked::Off),
                 Decoded::Message(CiMessage::MessageReportInquiry { scope, .. }) => {
@@ -1630,13 +1630,12 @@ impl MpePeer {
                         );
                     }
                 }
-                Decoded::Message(CiMessage::SetProfileOn { source, target, .. }) => {
+                Decoded::Message(CiMessage::SetProfileOn { source, format, .. }) => {
                     match self.switch {
                         Reply::Answer => answers.extend(
                             CiMessage::ProfileEnabled {
                                 source: self.muid,
-                                ci_version: CI_VERSION,
-                                target,
+                                format,
                                 profile: ProfileId::MPE,
                             }
                             .packets(MidiGroup::FIRST)
@@ -1644,7 +1643,7 @@ impl MpePeer {
                         ),
                         Reply::Refuse => answers.extend(
                             CiMessage::Nak {
-                                header: at(target.address()),
+                                header: at(format.address()),
                                 to: source,
                                 nak: Nak::new(
                                     U7::of(SUB_ID2_SET_PROFILE_ON),
@@ -1661,15 +1660,14 @@ impl MpePeer {
                     Reply::Answer => answers.extend(
                         CiMessage::ProfileDisabled {
                             source: self.muid,
-                            ci_version: CI_VERSION,
-                            target: match header.device_id {
+                            format: ProfileFormat::current(match header.device_id {
                                 CiDeviceId::Channel(channel) => ProfileTarget::Channel {
                                     channel,
                                     channels: tutti_midi_ci::ProfileChannels::of(4),
                                 },
                                 CiDeviceId::Group => ProfileTarget::Group,
                                 CiDeviceId::FunctionBlock => ProfileTarget::FunctionBlock,
-                            },
+                            }),
                             profile: ProfileId::MPE,
                         }
                         .packets(MidiGroup::FIRST)

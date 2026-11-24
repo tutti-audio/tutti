@@ -258,8 +258,8 @@ pub use midi_follow::{
 };
 #[cfg(feature = "midi")]
 pub use midi_load::{
-    DroppedEvent, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-    NoCommonTimelineError, TrackError,
+    LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi, NoCommonTimelineError, TrackError,
+    Unplayed,
 };
 #[cfg(feature = "midi-hardware")]
 pub use midi_port::{

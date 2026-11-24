@@ -6,8 +6,8 @@ use crate::common::{self, metrical, note, track, unspecified, without_defaults};
 use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
-    DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, TextKind, Tick,
+    DropReason, FileEvent, Meta, MicrosPerQuarter, SmfDivision, SmfFormat, SmfParseError,
+    SmfReadError, StandardMidiFile, TextKind, Tick,
 };
 use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
 use tutti_units::Seconds;
@@ -110,7 +110,7 @@ fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
     assert!(matches!(
         read_bytes(raw_track(&body)),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::VariableLengthQuantity
@@ -119,7 +119,7 @@ fn a_five_byte_quantity_is_refused() {
     // And one cut off mid-quantity.
     assert!(matches!(
         read_bytes(raw_track(&[0x81, 0x80])),
-        Err(ReadError::Smf { .. })
+        Err(SmfReadError::Parse { .. })
     ));
 }
 
@@ -158,7 +158,7 @@ fn a_meta_event_cancels_running_status() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 31,
             cause: SmfParseError::NoRunningStatus
@@ -179,7 +179,7 @@ fn a_sysex_cancels_running_status() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 32,
             cause: SmfParseError::NoRunningStatus
@@ -193,7 +193,7 @@ fn a_sysex_cancels_running_status() {
 fn a_first_event_needs_a_status() {
     assert!(matches!(
         read_bytes(raw_track(&[0x00, 0x3C, 0x40])),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::NoRunningStatus
@@ -219,7 +219,7 @@ fn system_statuses_are_refused() {
         assert!(
             matches!(
                 read_bytes(raw_track(&[0x00, status, 0x00])),
-                Err(ReadError::Smf {
+                Err(SmfReadError::Parse {
                     track: Some(0),
                     offset: 22,
                     cause: SmfParseError::SystemStatus
@@ -235,7 +235,7 @@ fn system_statuses_are_refused() {
 fn a_high_data_byte_is_malformed() {
     assert!(matches!(
         read_bytes(raw_track(&[0x00, 0x90, 0x3C, 0x80])),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::ChannelData
@@ -266,7 +266,7 @@ fn more_tracks_than_declared_is_malformed() {
     bytes[10..12].copy_from_slice(&1u16.to_be_bytes());
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 26,
             cause: SmfParseError::ExtraTracks
@@ -367,7 +367,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::EndOfTrackNotLast
@@ -555,7 +555,7 @@ fn a_second_header_chunk_is_refused_where_it_starts() {
     bytes.extend_from_slice(&[0, 0, 0, 1, 0, TPQ as u8]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::SecondHeader
@@ -573,7 +573,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
     bytes.extend_from_slice(&[0, 0, 0, 1]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::ShortHeader
@@ -588,7 +588,7 @@ fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
     assert!(matches!(
         read_bytes(&two),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::FormatZeroTracks
@@ -760,8 +760,8 @@ fn four_four() -> FileEvent {
 #[test]
 fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte() {
     let file = read_bytes(EXAMPLE_FORMAT_0).unwrap();
-    assert_eq!(file.format(), Some(SmfFormat::SingleTrack));
-    assert_eq!(file.division(), Some(SMF_DIVISION));
+    assert_eq!(file.format(), SmfFormat::SingleTrack);
+    assert_eq!(file.division(), SMF_DIVISION);
     assert_eq!(file.tracks().len(), 1);
     let events = file.tracks()[0].events();
     assert_eq!(events[0], (Tick(0), four_four()));
@@ -778,7 +778,7 @@ fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte(
 #[test]
 fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte() {
     let file = read_bytes(EXAMPLE_FORMAT_1).unwrap();
-    assert_eq!(file.format(), Some(SmfFormat::Parallel));
+    assert_eq!(file.format(), SmfFormat::Parallel);
     assert_eq!(file.tracks().len(), 4);
     let tempo_track = &file.tracks()[0];
     assert_eq!(tempo_track.events()[0], (Tick(0), four_four()));
@@ -919,7 +919,7 @@ fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
     let tempo = RawEvent::tempo(0, 500_000);
     let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
     let first = read_bytes(file(vec![tempo, text])).unwrap();
-    let kinds = |f: &MidiFile| -> Vec<bool> {
+    let kinds = |f: &StandardMidiFile| -> Vec<bool> {
         f.tracks()[0]
             .events()
             .iter()
