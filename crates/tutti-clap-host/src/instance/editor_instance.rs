@@ -15,6 +15,7 @@ use tutti_units::Normalized;
 use tutti_units::ParamId;
 
 use super::ClapLoaded;
+use crate::error::ClapError;
 
 fn editor_error(reason: String) -> PluginError {
     PluginError::Editor(EditorError::PluginError(reason))
@@ -242,7 +243,10 @@ impl EditorWindow for ClapEditor {
     fn set_editor_size(&mut self, main: MainThreadMarker, requested: Size) -> PluginResult<Size> {
         self.inner
             .resize_editor(main, requested)
-            .map_err(|e| editor_error(format!("CLAP resize_editor failed: {e}")))
+            .map_err(|e| match e {
+                ClapError::FloatingEditor => PluginError::Editor(EditorError::FloatingEditor),
+                e => editor_error(format!("CLAP resize_editor failed: {e}")),
+            })
     }
 
     fn poll_editor_resize_request(&mut self, _main: MainThreadMarker) -> Option<Size> {

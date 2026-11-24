@@ -202,9 +202,9 @@ pub use instance::{
 // the shared `ParameterInfo` via `ClapLoaded::parameter_list`.
 pub use types::{
     AudioPortFlags, AudioPortInfo, ChannelLayout, Color, ContentScale, EditorCapabilities,
-    NoteDialect, NoteDialects, NoteExpressionType, NoteName, NotePortInfo, ParamAutomationState,
-    ParameterChanges, ParameterPoint, ParameterQueue, PluginInfo, StateContext, SurroundChannel,
-    TransportInfo, VoiceInfo, WindowHandle, WireMidi,
+    NoteDialect, NoteDialects, NoteExpressionType, NoteName, NotePortInfo, NoteSend,
+    ParamAutomationState, ParameterChanges, ParameterPoint, ParameterQueue, PluginInfo,
+    StateContext, SurroundChannel, TransportInfo, VoiceInfo, WindowHandle, WireMidi,
 };
 pub use types::{ClapNoteExpression, RtNoteExpressions};
 

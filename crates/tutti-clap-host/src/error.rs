@@ -139,6 +139,10 @@ pub enum ClapError {
     #[error("GUI error: {0}")]
     EditorError(String),
 
+    /// A resize of a floating editor, whose window the plugin sizes.
+    #[error("a floating editor is sized by the plugin")]
+    FloatingEditor,
+
     /// Underlying IO failure (file system, stream).
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

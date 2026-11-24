@@ -352,7 +352,8 @@ impl Editor {
     /// # Errors
     ///
     /// [`EditorCallError::Ended`], or no editor is open, or the plugin cannot
-    /// resize.
+    /// resize. A floating editor is refused with
+    /// [`EditorError::FloatingEditor`]: the plugin sizes its own window.
     pub fn resize(&mut self, requested: Size) -> Result<Size, EditorCallError> {
         Ok(self.live()?.set_editor_size(self.main, requested)?)
     }
