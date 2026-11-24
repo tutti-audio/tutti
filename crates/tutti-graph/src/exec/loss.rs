@@ -254,12 +254,10 @@ pub(crate) const RING_CAPACITY: usize = 256;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Table;
+    use crate::compile::ids::id_at;
 
     fn unit(u: u32) -> PlanUnitId {
-        Table::<PlanUnitId, ()>::filled(100, ())
-            .id(u as usize)
-            .expect("a unit")
+        id_at(u as usize)
     }
 
     /// A loss no node owns (a merge's) is unreported, and so is one the full

@@ -137,7 +137,7 @@ fn park<F: Float, A: AudioSlots<F>, Fl: SlotFlags + ?Sized, E: EventSlots + ?Siz
     u.node.poll_parked();
     // Its params go on stepping, as a skipped node's do: their ramps and
     // declick follow the timeline while it is out.
-    if rec.params.len != 0 || u.params.busy() {
+    if !rec.params.is_empty() || u.params.busy() {
         run_params(u, head, st);
     }
     if !u.mode.is_stale() {

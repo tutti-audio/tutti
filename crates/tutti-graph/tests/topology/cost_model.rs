@@ -191,7 +191,7 @@ fn packed_siblings_render_bit_identically() {
         };
         let mut light_tasks = 0;
         for t in plan.tasks() {
-            let ops = &plan.task_ops()[t.start as usize..(t.start + t.len) as usize];
+            let ops = &plan.task_ops()[t.range()];
             if ops.iter().any(|&o| heavy(o)) {
                 assert_eq!(ops.len(), 1, "a heavy gain shares a task");
             } else if ops.len() > 1 {

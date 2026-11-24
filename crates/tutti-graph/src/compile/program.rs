@@ -26,7 +26,7 @@ use crate::compile::plan::{
 
 /// Where an audio operand reads from, before colouring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ARef {
+pub(crate) enum ARef {
     /// An audio value an op writes.
     Val(AudioValueId),
     /// Silence: the null slot.
@@ -37,7 +37,7 @@ pub enum ARef {
 
 /// Where an event operand reads from, before colouring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ERef {
+pub(crate) enum ERef {
     /// An event value an op writes.
     Val(EventValueId),
     /// No events: the empty slot.
@@ -80,7 +80,7 @@ impl ERef {
 
 /// How a [`Program`] names the buffers its ops touch: what the two forms of a
 /// program differ in.
-pub trait Refs {
+pub(crate) trait Refs {
     /// An op's audio operand.
     type Audio: Copy + Debug + PartialEq;
     /// An op's event operand.
@@ -100,16 +100,16 @@ pub trait Refs {
 
 /// A program whose ops name values: what `emit` writes and `group` reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ByValue;
+pub(crate) struct ByValue;
 
 /// A program whose ops name arena slots: what a plan runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct BySlot;
+pub(crate) struct BySlot;
 
 /// How many events each event value and each event feedback must hold: what
 /// `emit` knows from the ports, and `colour` folds into per-slot capacities.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Capacities {
+pub(crate) struct Capacities {
     /// Per event value.
     pub(crate) values: Table<EventValueId, EventSlotCapacity>,
     /// Per event feedback slot.
@@ -118,7 +118,7 @@ pub struct Capacities {
 
 /// The arenas a coloured program needs, one row per slot.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Sizes {
+pub(crate) struct Sizes {
     /// The audio slots: the null slot, the feedback slots, then the coloured
     /// ones.
     pub(crate) audio: Table<AudioSlotId, ()>,
@@ -152,7 +152,7 @@ impl Refs for BySlot {
 /// only), every value's writer precedes its readers, and each keyed state
 /// table is the one its ops index.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Program<S: Refs> {
+pub(crate) struct Program<S: Refs> {
     /// The ops, in the serial order.
     pub(crate) ops: Table<OpId, Op<S::Audio, S::Event>>,
     /// The audio operands lists the ops' spans index.

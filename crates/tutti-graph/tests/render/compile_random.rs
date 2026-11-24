@@ -169,9 +169,7 @@ fn brute_force_interference(plan: &tutti_graph::Plan) {
             }
         }
     }
-    let readers = |r: tutti_graph::Span| {
-        plan.value_readers()[r.start as usize..(r.start + r.len) as usize].to_vec()
-    };
+    let readers = |r: tutti_graph::Span<OpId>| plan.value_readers()[r.range()].to_vec();
     check("Audio", plan.audio_values(), |v| readers(v.readers), before);
     check("Event", plan.event_values(), |v| readers(v.readers), before);
 }

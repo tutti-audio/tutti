@@ -40,7 +40,7 @@ use crate::node::cost::{GRAIN, TASK_DISPATCH, Work, op_work};
 
 /// The task tables.
 pub(super) struct Tasks {
-    pub(super) tasks: Table<TaskId, Span>,
+    pub(super) tasks: Table<TaskId, Span<OpId>>,
     pub(super) task_ops: Vec<OpId>,
     pub(super) succ: Csr<TaskId>,
     pub(super) activation: Table<TaskId, u32>,
@@ -372,7 +372,7 @@ fn finish(
         }
     }
     let mut task_ops = Vec::with_capacity(of.len());
-    let tasks: Table<TaskId, Span> = groups
+    let tasks: Table<TaskId, Span<OpId>> = groups
         .iter()
         .map(|ops| Span::extend(&mut task_ops, ops.iter().copied()))
         .collect();
@@ -387,7 +387,6 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::raw;
     use proptest::prelude::*;
 
     const MAX: Samples = Samples::new(256);
@@ -582,7 +581,7 @@ mod tests {
                 .collect();
             let t = run(&preds, &succ, &work);
             prop_assert!(final_critical(&t, &succ, &work) <= chain_only(&preds, &succ, &work));
-            let mut seen: Vec<u32> = raw(&t.task_ops).to_vec();
+            let mut seen: Vec<u32> = t.task_ops.iter().map(|o| o.get()).collect();
             seen.sort_unstable();
             prop_assert_eq!(seen, (0..n as u32).collect::<Vec<_>>());
             for s in &t.tasks {

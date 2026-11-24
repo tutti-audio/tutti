@@ -1132,7 +1132,7 @@ fn lanes<F: Float>(c: &Commit<F>, cx: &Cx<'_>) -> (Vec<SumLane<F>>, Vec<Option<u
     for op in &plan.program.ops {
         if let Op::WeightedSum { lanes, gains, .. } = *op {
             for g in &plan.program.gain_ports[gains.range()] {
-                driven[lanes.start as usize + usize::from(g.lane)] = true;
+                driven[lanes.range().start + usize::from(g.lane)] = true;
             }
         }
     }
@@ -1242,6 +1242,7 @@ fn param_slots(plan: &Plan) -> Table<EventSlotId, bool> {
 fn widen(cx: &Cx<'_>, ring_extra: &[usize], efb_extra: &[usize]) -> Table<EventSlotId, usize> {
     let plan = cx.plan;
     let mut extra = Table::filled(plan.program.sizing.events.len(), 0usize);
+    debug_assert_eq!(plan.program.event_feedback.len(), efb_extra.len());
     for (f, &x) in plan.program.event_feedback.ids().zip(efb_extra) {
         let e = &mut extra[plan.program.event_feedback[f].slot];
         *e = (*e).max(x);

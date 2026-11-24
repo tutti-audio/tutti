@@ -403,6 +403,7 @@ impl<F: Float> Executor<F> {
                 n.transfer_from(o);
             }
         }
+        debug_assert_eq!(plan.program.delays.len(), st.rings.len());
         for (delay, from) in plan.program.delays.ids().zip(&st.rings) {
             let i = delay.index();
             match *from {
@@ -427,6 +428,7 @@ impl<F: Float> Executor<F> {
                 new.audio_fb[i] = old.audio_fb.get_mut(j as usize).and_then(Option::take);
             }
         }
+        debug_assert_eq!(plan.program.event_feedback.len(), st.event_fb.len());
         for (feedback, from) in plan.program.event_feedback.ids().zip(&st.event_fb) {
             let i = feedback.index();
             match *from {

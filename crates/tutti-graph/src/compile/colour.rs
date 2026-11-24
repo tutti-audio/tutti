@@ -158,17 +158,19 @@ fn lives_of<'a, V: Id, S>(
 
 /// `values` with the slot each was given: the coloured value's slot is the
 /// `fixed` slots in front of the arena, then its colour.
-fn slotted<V: Id, S: Copy>(
+fn slotted<V: Id, S: Id, R>(
     values: Table<V, Value<()>>,
     colouring: &Colouring<V>,
     fixed: usize,
-    arena: &[S],
+    arena: &TableSlice<S, R>,
 ) -> Table<V, Value<S>> {
     values
         .into_iter()
         .zip(&colouring.slot)
         .map(|(v, &colour)| Value {
-            slot: arena[fixed + colour],
+            slot: arena
+                .id(fixed + colour)
+                .expect("the arena holds every coloured slot"),
             writer: v.writer,
             readers: v.readers,
         })
@@ -258,18 +260,18 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
     let audio_arena: Table<AudioSlotId, ()> = Table::filled(audio_fixed + audio_colour.count, ());
     let mut event_arena: Table<EventSlotId, EventSlotCapacity> =
         Table::filled(event_fixed + event_colour.count, EventSlotCapacity::NONE);
-    let audio_ids: Vec<AudioSlotId> = audio_arena.ids().collect();
-    let event_ids: Vec<EventSlotId> = event_arena.ids().collect();
     let audio_feedback_at: Table<AudioFeedbackId, AudioSlotId> = audio_feedback
-        .iter_enumerated()
-        .map(|(f, _)| audio_ids[1 + f.index()])
+        .iter()
+        .zip(audio_arena.ids().skip(1))
+        .map(|(_, slot)| slot)
         .collect();
     let event_feedback_at: Table<EventFeedbackId, EventSlotId> = event_feedback
-        .iter_enumerated()
-        .map(|(f, _)| event_ids[1 + f.index()])
+        .iter()
+        .zip(event_arena.ids().skip(1))
+        .map(|(_, slot)| slot)
         .collect();
-    let audio_values = slotted(audio_values, &audio_colour, audio_fixed, &audio_ids);
-    let event_values = slotted(event_values, &event_colour, event_fixed, &event_ids);
+    let audio_values = slotted(audio_values, &audio_colour, audio_fixed, &audio_arena);
+    let event_values = slotted(event_values, &event_colour, event_fixed, &event_arena);
 
     // Event slot capacities: a feedback slot holds its FIFO, and a slot
     // shared by several values the most of each currency any of them needs.
@@ -283,12 +285,12 @@ pub(super) fn colour(program: Program<ByValue>, units: &Units) -> Program<BySlot
 
     let aref_slot = |r: ARef| match r {
         ARef::Val(v) => audio_values[v].slot,
-        ARef::Zero => audio_ids[0],
+        ARef::Zero => AudioSlotId::ZERO,
         ARef::Fb(f) => audio_feedback_at[f],
     };
     let eref_slot = |r: ERef| match r {
         ERef::Val(v) => event_values[v].slot,
-        ERef::Empty => event_ids[0],
+        ERef::Empty => EventSlotId::EMPTY,
         ERef::Fb(f) => event_feedback_at[f],
     };
     let audio_list: Vec<AudioSlotId> = audio_list.iter().map(|&r| aref_slot(r)).collect();

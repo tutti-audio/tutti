@@ -648,7 +648,6 @@ impl<'a> Emitter<'a> {
                 let bound = shape
                     .event_input_capacity
                     .filter(|_| !lone_within_bound)
-                    // The public bound names its unit by raw index.
                     .map(|capacity| InputBound { capacity, unit: n });
                 self.merge_tree(refs, bound)
             })

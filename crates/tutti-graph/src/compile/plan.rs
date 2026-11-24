@@ -1,14 +1,14 @@
 //! The compiled form: [`Plan`] (immutable, structure-of-arrays) and [`Delta`]
 //! (which units a runtime must insert, retire or replace to run it).
 //!
-//! Everything here is plain data — `Vec`s of `u32` indices and a closed
+//! Everything here is plain data — `Vec`s of typed ids and a closed
 //! [`Op`] enum, never `Box<dyn Fn>` — so a `Plan` is `Send + Sync` and can be
 //! published to the audio thread as one value, and a
 //! verifier or a test can read every decision the compiler made.
 //!
 //! # Slots
 //!
-//! Every buffer a plan names is a **slot**: a `u32` index into one of two
+//! Every buffer a plan names is a **slot**: a typed index into one of two
 //! arenas, one per port kind. The layout of each arena is fixed:
 //!
 //! ```text
@@ -44,6 +44,7 @@
 //!   feedback is keyed per edge (sink, source, generation, delay), and a
 //!   disappearing key flushes like a PDC event delay.
 
+use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
 use crate::NodeKey;
@@ -78,24 +79,23 @@ pub(crate) const EMPTY_SLOT: EventSlotId = EventSlotId::EMPTY;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UnitIdx(pub u32);
 
-/// A contiguous run of a plan's flattened index lists.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Span {
-    /// First element.
-    pub start: u32,
-    /// Element count.
-    pub len: u32,
+/// A contiguous run of the elements `T` of one of a plan's flattened lists.
+///
+/// Only the list it indexes makes one (appending a run to it returns the run),
+/// so a span names a run of the list it was made for: it is in range, and it
+/// is a run of that kind of element. It has no public constructor.
+pub struct Span<T> {
+    start: u32,
+    len: u32,
+    list: PhantomData<fn() -> T>,
 }
 
-impl Span {
+impl<T> Span<T> {
     /// Appends `items` to `list` and returns the run they occupy.
-    pub(crate) fn extend<T>(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
+    pub(crate) fn extend(list: &mut Vec<T>, items: impl IntoIterator<Item = T>) -> Self {
         let start = list.len();
         list.extend(items);
-        Self {
-            start: start as u32,
-            len: (list.len() - start) as u32,
-        }
+        Self::of(start, list.len())
     }
 
     /// The run `start..end` of a list.
@@ -103,11 +103,73 @@ impl Span {
         Self {
             start: start as u32,
             len: (end - start) as u32,
+            list: PhantomData,
         }
     }
 
-    pub(crate) fn range(self) -> std::ops::Range<usize> {
+    /// The positions the run occupies in its list.
+    #[must_use]
+    pub fn range(self) -> std::ops::Range<usize> {
         self.start as usize..(self.start + self.len) as usize
+    }
+
+    /// How many elements the run holds.
+    #[must_use]
+    pub fn len(self) -> usize {
+        self.len as usize
+    }
+
+    /// Whether the run holds nothing.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    /// The same positions of a list whose elements `U` replace `T` one for one
+    /// (the lowering renames every element of a list and keeps its places).
+    pub(crate) fn retype<U>(self) -> Span<U> {
+        Span {
+            start: self.start,
+            len: self.len,
+            list: PhantomData,
+        }
+    }
+}
+
+impl<T> Clone for Span<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for Span<T> {}
+
+impl<T> Default for Span<T> {
+    fn default() -> Self {
+        Self::of(0, 0)
+    }
+}
+
+impl<T> PartialEq for Span<T> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.start, self.len) == (other.start, other.len)
+    }
+}
+
+impl<T> Eq for Span<T> {}
+
+impl<T> std::hash::Hash for Span<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        (self.start, self.len).hash(state);
+    }
+}
+
+impl<T> std::fmt::Debug for Span<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Span")
+            .field("start", &self.start)
+            .field("len", &self.len)
+            .finish()
     }
 }
 
@@ -428,11 +490,12 @@ pub struct PlanUnit {
 
 /// One step of the plan.
 ///
-/// Slot fields index the arena of the op's kind; `Span`s index
-/// [`Plan::audio_list`] or [`Plan::event_list`]. An op names its audio and
-/// event operands by `A` and `E`: a plan's are the arena slots (`u32`, what
-/// this documents); the compiler's `emit` names values until `colour` gives
-/// them slots.
+/// Slot fields name a slot of the arena of the op's kind, tables name a row by
+/// its typed id, and `Span`s are runs of [`Plan::audio_list`],
+/// [`Plan::event_list`] or another list of the plan. An op names its audio and
+/// event operands by `A` and `E`: a plan's are [`AudioSlotId`] and
+/// [`EventSlotId`] (what this documents); the compiler's `emit` names values
+/// until `colour` gives them slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Op<A, E> {
     /// Copy a main input channel into a slot.
@@ -462,7 +525,7 @@ pub enum Op<A, E> {
         /// Audio slots read, in source order (into [`Plan::audio_list`]): at
         /// least 2, at most [`MAX_PORTS`](crate::MAX_PORTS). A wider fan-in is
         /// a chain whose next op reads the last result first.
-        srcs: Span,
+        srcs: Span<A>,
         /// Audio slot written.
         dst: A,
     },
@@ -479,7 +542,7 @@ pub enum Op<A, E> {
     WeightedSum {
         /// Audio slots read, in source order (into [`Plan::audio_list`]): at
         /// least 1, at most [`MAX_PORTS`](crate::MAX_PORTS).
-        srcs: Span,
+        srcs: Span<A>,
         /// Audio slot written; the first addend's own slot in the in-place
         /// form, as for `Sum`.
         dst: A,
@@ -487,11 +550,11 @@ pub enum Op<A, E> {
         /// [`Plan::sum_lanes`]): the edge whose gain weights it, or `None`
         /// for a plain addend (an edge with no entry, or the previous result
         /// of a chain).
-        lanes: Span,
+        lanes: Span<Option<EdgeId>>,
         /// The driven lanes among them, in lane order (into
         /// [`Plan::gain_ports`]): the sum reads each one's event source.
         /// Empty when no entry of this op has a source.
-        gains: Span,
+        gains: Span<GainPortOp<E>>,
     },
     /// Delay one event stream.
     EventDelay {
@@ -507,7 +570,7 @@ pub enum Op<A, E> {
     /// `(NodeKey, port)`.
     EventMerge {
         /// Event slots read, in source order (into [`Plan::event_list`]).
-        srcs: Span,
+        srcs: Span<E>,
         /// Event slot written.
         dst: E,
         /// The node's [`Shape::event_input_capacity`] when `dst` is its
@@ -520,19 +583,19 @@ pub enum Op<A, E> {
         /// Index into [`Plan::units`].
         unit: PlanUnitId,
         /// Audio slot per input channel (into [`Plan::audio_list`]).
-        audio_in: Span,
+        audio_in: Span<A>,
         /// Audio slot per output channel.
-        audio_out: Span,
+        audio_out: Span<A>,
         /// Event slot per input port (into [`Plan::event_list`]).
-        event_in: Span,
+        event_in: Span<E>,
         /// Event slot per output port.
-        event_out: Span,
+        event_out: Span<E>,
         /// Channels whose output slot *is* their input slot.
         in_place: InPlaceMask,
         /// The node's driven params, in port order (into
         /// [`Plan::param_ports`]); a declared param not listed reads its
         /// base. Their sources are read by this op, before the node runs.
-        params: Span,
+        params: Span<ParamPortOp<E>>,
     },
     /// Write a main output channel, through its alignment ring if it has one.
     Output {
@@ -548,7 +611,7 @@ pub enum Op<A, E> {
         /// Index into `Plan::taps`.
         tap: PlanTapId,
         /// Audio slot per lane (into [`Plan::audio_list`]).
-        srcs: Span,
+        srcs: Span<A>,
     },
     /// Push every MIDI event of an event slot into an event tap's ring, each
     /// stamped with its frame. The slot is an output port's, or the merge a
@@ -564,7 +627,7 @@ pub enum Op<A, E> {
         /// Index into `Plan::meters`.
         meter: PlanMeterId,
         /// Audio slot per lane (into [`Plan::audio_list`]).
-        srcs: Span,
+        srcs: Span<A>,
     },
     /// Push an audio port's block into its feedback ring.
     Capture {
@@ -596,17 +659,20 @@ impl<A, E> Op<A, E> {
                 src: a(src),
                 dst: a(dst),
             },
-            Op::Sum { srcs, dst } => Op::Sum { srcs, dst: a(dst) },
+            Op::Sum { srcs, dst } => Op::Sum {
+                srcs: srcs.retype(),
+                dst: a(dst),
+            },
             Op::WeightedSum {
                 srcs,
                 dst,
                 lanes,
                 gains,
             } => Op::WeightedSum {
-                srcs,
+                srcs: srcs.retype(),
                 dst: a(dst),
                 lanes,
-                gains,
+                gains: gains.retype(),
             },
             Op::EventDelay { delay, src, dst } => Op::EventDelay {
                 delay,
@@ -614,7 +680,7 @@ impl<A, E> Op<A, E> {
                 dst: e(dst),
             },
             Op::EventMerge { srcs, dst, bound } => Op::EventMerge {
-                srcs,
+                srcs: srcs.retype(),
                 dst: e(dst),
                 bound,
             },
@@ -628,12 +694,12 @@ impl<A, E> Op<A, E> {
                 params,
             } => Op::Node {
                 unit,
-                audio_in,
-                audio_out,
-                event_in,
-                event_out,
+                audio_in: audio_in.retype(),
+                audio_out: audio_out.retype(),
+                event_in: event_in.retype(),
+                event_out: event_out.retype(),
                 in_place,
-                params,
+                params: params.retype(),
             },
             Op::Output {
                 channel,
@@ -644,9 +710,15 @@ impl<A, E> Op<A, E> {
                 src: a(src),
                 delay,
             },
-            Op::Tap { tap, srcs } => Op::Tap { tap, srcs },
+            Op::Tap { tap, srcs } => Op::Tap {
+                tap,
+                srcs: srcs.retype(),
+            },
             Op::EventTap { tap, src } => Op::EventTap { tap, src: e(src) },
-            Op::Meter { meter, srcs } => Op::Meter { meter, srcs },
+            Op::Meter { meter, srcs } => Op::Meter {
+                meter,
+                srcs: srcs.retype(),
+            },
             Op::Capture { feedback, src } => Op::Capture {
                 feedback,
                 src: a(src),
@@ -884,14 +956,14 @@ pub(crate) struct NodeRec {
     pub(crate) eout: u16,
     /// The audio borrow requests, sorted (into [`NodeTables::audio_borrows`]):
     /// every input not aliased in place, and every output.
-    pub(crate) borrows: Span,
+    pub(crate) borrows: Span<(AudioSlotId, Role)>,
     /// The event borrow requests, sorted (into [`NodeTables::event_borrows`]):
     /// every input and every output.
-    pub(crate) event_borrows: Span,
+    pub(crate) event_borrows: Span<(EventSlotId, Role)>,
     /// How the call borrows its buffers.
     pub(crate) form: Form,
     /// The node's driven params (into [`Plan::param_ports`]).
-    pub(crate) params: Span,
+    pub(crate) params: Span<ParamPortOp<EventSlotId>>,
     /// Its declared params, which the step walks in port order.
     pub(crate) declared: crate::node::param::ParamPorts,
 }
@@ -1183,7 +1255,7 @@ pub struct Value<S> {
     /// The op that writes it.
     pub writer: OpId,
     /// The ops that read it (into [`Plan::value_readers`]).
-    pub readers: Span,
+    pub readers: Span<OpId>,
 }
 
 /// The compiled, immutable form of a graph, produced by
@@ -1219,7 +1291,7 @@ pub struct Plan {
     /// sizes that FIFO from, so the two agree; verify re-derives the size
     /// from this list and refuses a plan where they do not.
     pub(crate) event_edges: Vec<(EventOutputPort, EventInputPort)>,
-    pub(crate) tasks: Table<TaskId, Span>,
+    pub(crate) tasks: Table<TaskId, Span<OpId>>,
     pub(crate) task_ops: Vec<OpId>,
     pub(crate) task_succ: Csr<TaskId>,
     pub(crate) task_activation: Table<TaskId, u32>,
@@ -1319,12 +1391,12 @@ impl Plan {
     }
 
     /// The audio slots of `span` in [`audio_list`](Self::audio_list).
-    pub(crate) fn audio_slots(&self, span: Span) -> &[AudioSlotId] {
+    pub(crate) fn audio_slots(&self, span: Span<AudioSlotId>) -> &[AudioSlotId] {
         &self.program.audio_list[span.range()]
     }
 
     /// The event slots of `span` in [`event_list`](Self::event_list).
-    pub(crate) fn event_slots(&self, span: Span) -> &[EventSlotId] {
+    pub(crate) fn event_slots(&self, span: Span<EventSlotId>) -> &[EventSlotId] {
         &self.program.event_list[span.range()]
     }
 
@@ -1364,7 +1436,7 @@ impl Plan {
     /// Tasks after coarsening (chains fused, cheap siblings packed): each is
     /// a run of op indices (into [`task_ops`](Self::task_ops)), ascending,
     /// that execute back to back on one thread.
-    pub fn tasks(&self) -> &[Span] {
+    pub fn tasks(&self) -> &[Span<OpId>] {
         self.tasks.as_slice()
     }
 
@@ -1659,8 +1731,7 @@ mod tests {
     fn a_direct_lowering_borrows_exactly_the_ports_buffers_in_ascending_slot_order() {
         const OUT: [[u32; 2]; 4] = [[10, 20], [20, 10], [30, 5], [7, 8]];
         const IN: [[u32; 2]; 4] = [[50, 60], [60, 50], [50, 50], [4, 40]];
-        let arena: Table<AudioSlotId, ()> = Table::filled(64, ());
-        let slot = |s: u32| arena.id(s as usize).expect("a slot of the arena");
+        let slot = |s: u32| crate::compile::ids::id_at::<AudioSlotId>(s as usize);
         let mut lowered = 0;
         for (ins, outs) in Direct::SHAPES {
             for out in OUT.map(|o| o.map(slot)) {

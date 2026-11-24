@@ -223,7 +223,7 @@ pub(crate) struct Par {
     flags: Vec<AtomicU8>,
     claims: Claims,
     /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: IdTable<PlanUnitId, Span>,
+    inject_spans: IdTable<PlanUnitId, Span<Inject>>,
     workers: Vec<Worker>,
     worker_claims: ClaimTable,
 }
@@ -283,21 +283,23 @@ impl Par {
         inject_units: impl Iterator<Item = PlanUnitId>,
         overlay: usize,
     ) -> Self {
+        let successors: Vec<u32> = plan.task_succ.targets.iter().map(|t| t.get()).collect();
         let graph = TaskGraph::new(
             plan.task_activation.as_slice(),
             &plan.task_succ.offsets,
-            crate::compile::ids::raw(&plan.task_succ.targets),
+            &successors,
         );
         let units = plan.units.len();
         let mut inject_spans = IdTable::filled(units, Span::default());
         let mut n_inject = 0u32;
         for (i, u) in inject_units.enumerate() {
-            let span = &mut inject_spans[u];
-            if span.len == 0 {
-                span.start = i as u32;
-            }
-            debug_assert_eq!(span.start + span.len, i as u32, "injects sorted by unit");
-            span.len += 1;
+            let span = inject_spans[u];
+            inject_spans[u] = if span.is_empty() {
+                Span::of(i, i + 1)
+            } else {
+                debug_assert_eq!(span.range().end, i, "injects sorted by unit");
+                Span::of(span.range().start, i + 1)
+            };
             n_inject += 1;
         }
         let spreads = participants > 1 && plan.tasks.len() > 1;
@@ -396,7 +398,7 @@ struct Frame<'s, F: Float = f32> {
     cap: usize,
     inputs: &'s [&'s [F]],
     /// Per plan unit, its run of the (unit-sorted) inject list.
-    inject_spans: &'s IdTableSlice<PlanUnitId, Span>,
+    inject_spans: &'s IdTableSlice<PlanUnitId, Span<Inject>>,
     due: Deliveries<'s>,
 }
 
@@ -727,7 +729,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &[],
                     dst,
                     frames,
-                    fx.plan,
+                    fx.plan.prepare.declick(),
                 );
             }
             Op::WeightedSum {
@@ -750,7 +752,7 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                     &fx.plan.program.gain_ports[gains.range()],
                     dst,
                     frames,
-                    fx.plan,
+                    fx.plan.prepare.declick(),
                 );
             }
             Op::EventDelay { delay, src, dst } => {

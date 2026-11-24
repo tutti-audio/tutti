@@ -715,7 +715,7 @@ fn colouring_respects_the_partial_order_not_the_serial_one() {
             .find_map(|op| match *op {
                 Op::Node {
                     unit: u, audio_out, ..
-                } if u.index() == unit => Some(plan.audio_list()[audio_out.start as usize]),
+                } if u.index() == unit => Some(plan.audio_list()[audio_out.range().start]),
                 _ => None,
             })
             .unwrap()

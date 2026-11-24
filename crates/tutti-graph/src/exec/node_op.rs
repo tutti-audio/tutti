@@ -194,7 +194,7 @@ pub(super) fn fading_node_op<
     let frames = h.frames;
     // The key's params, once for both units: the outgoing one hears the
     // modulation the incoming one does.
-    let modulated = h.rec.params.len != 0 || u.params.busy();
+    let modulated = !h.rec.params.is_empty() || u.params.busy();
     if modulated {
         run_params(u, h, st);
     }
@@ -526,7 +526,7 @@ pub(super) fn node_op_with<
     // still declicking off one; every other unit pays this one branch. Run
     // whether or not the node is then skipped, so its ramps and declick
     // advance with the timeline.
-    if !params_done && (rec.params.len != 0 || u.params.busy()) {
+    if !params_done && (!rec.params.is_empty() || u.params.busy()) {
         run_params(u, h, st);
     }
     if skip {

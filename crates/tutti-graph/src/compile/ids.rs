@@ -1,20 +1,23 @@
 //! Typed indices: one newtype per kind of index a plan and its compiler pass
 //! around, and [`Table`], a `Vec` indexed only by its own id type.
 //!
-//! An id is a `u32` underneath (`repr(transparent)`, so a slice of ids casts to
-//! a slice of `u32` for free), and the one place a `u32` becomes a `usize` is
-//! [`Id::index`]. Two ids of different kinds do not convert, so an op index
-//! cannot index the values and an audio slot cannot name an event slot.
+//! An id is a `u32` underneath, read with `get` (the number) or `index` (the
+//! position). Two ids of different kinds do not convert, so an op index cannot
+//! index the values and an audio slot cannot name an event slot. An id is not
+//! plain data: it has no constructor, no `Pod` or `Zeroable` impl and no
+//! public conversion from a number.
 //!
-//! **An id is minted only by the table it indexes:** [`Table::push`] returns
+//! **An id is minted only by a table of its kind:** [`Table::push`] returns
 //! the id of the row it appends, [`TableSlice::ids`] and
 //! [`TableSlice::iter_enumerated`] walk the ids of the rows, and
 //! [`TableSlice::id`] and [`TableSlice::search_by_key`] return the id of a row
-//! that exists, or `None`. Nothing else constructs an id (the constructor is
-//! unnameable outside this module): an id past its table cannot be written, so
-//! verify does not check it. What a plan's public structs hold as raw
-//! `u32` is read back through the table it indexes ([`TableSlice::id`], or the
-//! slice indexing of `as_slice`), never through arithmetic on a number.
+//! that exists, or `None`. The one trait method that builds an id takes a
+//! token only this module can make, so no other code mints one, generic or
+//! not. So an id is the id of a row of *some* table of its kind, which is a
+//! row of the plan's table when it came from that plan; verify does not check
+//! a plan's ids against its tables, and a plan assembled from another plan's
+//! ids is not covered. Runs of a list are [`Span`](crate::Span)s, made the
+//! same way by the list they index.
 
 use bytemuck::TransparentWrapper;
 use std::marker::PhantomData;
@@ -25,7 +28,7 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 pub(crate) struct Mint(usize);
 
 /// A typed `u32` index.
-pub(crate) trait Id: bytemuck::Pod + Eq + Ord + std::fmt::Debug {
+pub(crate) trait Id: Copy + Eq + Ord + std::fmt::Debug {
     /// The id of the row a table is minting.
     fn mint(at: Mint) -> Self;
     /// The position this id names, for indexing a [`Table`] or a slice.
@@ -37,9 +40,7 @@ macro_rules! ids {
         $(#[$meta])*
         #[derive(
             Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug,
-            bytemuck::Pod, bytemuck::Zeroable,
         )]
-        #[repr(transparent)]
         pub struct $name(u32);
 
         impl std::fmt::Display for $name {
@@ -113,6 +114,15 @@ ids! {
 pub(crate) struct Table<I, T> {
     items: Vec<T>,
     ids: PhantomData<fn(I)>,
+}
+
+/// The id at `index`, for a test that needs one without a plan: the id of that
+/// row of a table with that many rows.
+#[cfg(test)]
+pub(crate) fn id_at<I: Id>(index: usize) -> I {
+    Table::<I, ()>::filled(index + 1, ())
+        .id(index)
+        .expect("a row of the table")
 }
 
 /// A slice of rows that only an `I` indexes: what a hot loop holds as a local,
@@ -321,10 +331,4 @@ impl AudioSlotId {
 impl EventSlotId {
     /// The slot every unconnected event input reads; never written.
     pub const EMPTY: Self = Self(0);
-}
-
-/// A slice of ids as the raw `u32`s they wrap: what a public accessor returns
-/// while the plan's public structs keep raw fields.
-pub(crate) fn raw<I: Id>(ids: &[I]) -> &[u32] {
-    bytemuck::cast_slice(ids)
 }

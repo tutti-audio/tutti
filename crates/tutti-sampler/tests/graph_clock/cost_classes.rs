@@ -205,7 +205,7 @@ fn moderate_reads_pack_and_render_bit_identically() {
             bare.tasks().len()
         );
         for t in plan.tasks() {
-            let ops = &plan.task_ops()[t.start as usize..(t.start + t.len) as usize];
+            let ops = &plan.task_ops()[t.range()];
             let heavy = ops.iter().filter(|&&o| {
                 matches!(plan.ops()[o.index()], tutti_graph::Op::Node { unit, .. }
                     if plan.units()[unit.index()].shape.cost == Cost::Heavy)

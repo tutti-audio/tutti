@@ -182,15 +182,15 @@ pub(crate) fn op_work<A, E>(
         | Op::Output { .. }
         | Op::Capture { .. }
         | Op::Tap { .. } => COPY,
-        Op::Meter { srcs, .. } => meter_work(u64::from(srcs.len)),
-        Op::Sum { srcs, .. } => sum_work(u64::from(srcs.len), 0),
+        Op::Meter { srcs, .. } => meter_work(srcs.len() as u64),
+        Op::Sum { srcs, .. } => sum_work(srcs.len() as u64, 0),
         // A driven lane also runs the param step per frame (one more unit
         // each for its values and its clamp), over the weight of a plain one.
         Op::WeightedSum {
             srcs, lanes, gains, ..
         } => sum_work(
-            u64::from(srcs.len),
-            sum_lanes[lanes.range()].iter().flatten().count() as u64 + u64::from(gains.len),
+            srcs.len() as u64,
+            sum_lanes[lanes.range()].iter().flatten().count() as u64 + gains.len() as u64,
         ),
         Op::EventDelay { .. }
         | Op::EventMerge { .. }

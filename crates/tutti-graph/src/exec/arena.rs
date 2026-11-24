@@ -310,11 +310,9 @@ impl<F: Float> Arena<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compile::ids::Table;
+    use crate::compile::ids::id_at;
     fn slot(s: u32) -> AudioSlotId {
-        Table::<AudioSlotId, ()>::filled(8, ())
-            .id(s as usize)
-            .expect("a slot of the arena")
+        id_at(s as usize)
     }
     use crate::node::MAX_PORTS;
 
