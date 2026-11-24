@@ -8,8 +8,8 @@ use tutti_buffers::{
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
 use tutti_dsp::{
-    FdnLayout, FreeverbControls, FreezeMode, LadderType, SecondOrderShape, ShapeKind, Stages,
-    SvfType, Waveshape,
+    FdnLayout, FreeverbControls, LadderType, SecondOrderShape, ShapeKind, Stages, SvfType,
+    Waveshape,
 };
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
@@ -288,7 +288,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "fdn",
             Box::new(FdnNode::<f32>::from(FdnConfig::new().layout(
-                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT, FreezeMode::Decaying).unwrap(),
+                FdnLayout::new(8, tutti_dsp::MaxDecay::DEFAULT).unwrap(),
             ))),
         ),
         (

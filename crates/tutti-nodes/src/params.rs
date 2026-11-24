@@ -247,8 +247,8 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// The first line names the set, its binding (`s`, for the next expressions)
 /// and its `Controls`, with the controls [`assemble`](ControlSet::assemble)
 /// starts from (the parts the ports do not carry). `live` is how many of the
-/// rows the set has (`all`, or an expression: a design that cannot freeze
-/// leaves off the freeze). A row is `Kind => Unit = field`, a single control;
+/// rows the set has (`all`, or an expression: a Freeverb with no cells
+/// has none). A row is `Kind => Unit = field`, a single control;
 /// `Kind[0] => Unit = field[0]` the first of several of a kind (`HasControls`),
 /// and `Kind[i]` with `i` above 0 the others. A row `Kind => Unit = field via Ranged` is a
 /// range-checked field: it reads as `field.get()` and a cell becomes `Ranged::held(cell)`, the

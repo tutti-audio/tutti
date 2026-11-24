@@ -176,7 +176,7 @@ fn the_ports_and_the_ceiling() {
 /// The ports are in a fixed order, which the graph's wires and a saved project
 /// name by index: the design's cells in the order its params list them. Freeverb
 /// offers `[RoomSize, Damping]`; the FDN offers the three decays, the size, the diffusion, the pre-delay, the
-/// modulation depth and rate, the width and the wet gain.
+/// modulation depth and rate, the width, the wet gain and the freeze.
 #[test]
 fn the_port_order_is_the_cells_in_their_order() {
     let freeverb = live(gm());
@@ -201,6 +201,7 @@ fn the_port_order_is_the_cells_in_their_order() {
             UnitAddr::first(UnitParam::Rate),
             UnitAddr::first(UnitParam::StereoSpread),
             UnitAddr::new(UnitParam::GainDb, 0),
+            UnitAddr::first(UnitParam::Freeze),
         ]
     );
 }

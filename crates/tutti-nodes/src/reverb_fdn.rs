@@ -5,9 +5,7 @@
 //! them.
 
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
-use tutti_dsp::{
-    BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, FreezeMode, Lerp,
-};
+use tutti_dsp::{BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, Lerp};
 use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -25,14 +23,13 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 /// The ports are the three decays (`Decay[0]` the mid band, `[1]` the low, `[2]` the high),
 /// the room size (a move lands over seconds by design: half a frame per 32-frame chunk,
 /// about 6 s for the longest line going from 0 to 1, to avoid pitch artefacts), the
-/// diffusion, the pre-delay, the modulation's depth and rate, the width, the wet gain and,
-/// if the layout can freeze, the freeze: a cell at or above 0.5. Each lands whole on the
+/// diffusion, the pre-delay, the modulation's depth and rate, the width, the wet gain and
+/// the freeze: a cell at or above 0.5. Each lands whole on the
 /// 32-frame grid and ramps in the bank.
 ///
 /// # The tail
 ///
-/// The declared tail is the ceiling: the layout's longest decay, or unbounded if it can
-/// freeze. The node narrows it each block to what the controls in force ring, and once the
+/// The declared tail is the ceiling, unbounded since the freeze can hold the tail. The node narrows it each block to what the controls in force ring, and once the
 /// input has been silent for that long it cuts the room off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the ramps;
@@ -59,7 +56,7 @@ impl FdnConfig {
         }
     }
 
-    /// The network's lines, their longest decay and whether it can freeze.
+    /// The network's lines and their longest decay.
     #[must_use]
     pub const fn layout(mut self, layout: FdnLayout) -> Self {
         self.layout = layout;
@@ -83,26 +80,20 @@ impl Default for FdnConfig {
 impl<F: FftFloat + Lerp> From<FdnConfig> for FdnNode<F> {
     /// Allocates: build it before the node goes live.
     fn from(config: FdnConfig) -> Self {
-        let set = FdnSet {
-            freezable: config.layout.freeze_mode() == FreezeMode::Freezable,
-        };
-        Self::with_kernel(FdnKernel::new(config.layout), set, config.controls)
+        Self::with_kernel(FdnKernel::new(config.layout), FdnSet, config.controls)
     }
 }
 
 /// The FDN's controls: the three decays, the size, the diffusion, the pre-delay, the
-/// modulation's depth and rate, the width, the wet gain and (if the layout can freeze) the
-/// freeze.
+/// modulation's depth and rate, the width, the wet gain and the freeze.
 #[derive(Clone, Copy, Debug)]
-pub struct FdnSet {
-    freezable: bool,
-}
+pub struct FdnSet;
 
-// In port order after the mix; a layout that cannot freeze leaves off the last. Every row
+// In port order after the mix. Every row
 // lands whole: the bank's ramps are the ramp.
 control_set! {
-    FdnSet(s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
-    live: (if s.freezable { 11 } else { 10 });
+    FdnSet(_s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
+    live: (all);
     Decay[0] => Seconds = decay[0] { whole },
     Decay[1] => Seconds = decay[1] { whole },
     Decay[2] => Seconds = decay[2] { whole },
@@ -234,9 +225,6 @@ mod tests {
     /// The wet gain is the one control the tail does not read.
     #[test]
     fn only_the_wet_gain_is_flagged_no_ring() {
-        for freezable in [false, true] {
-            let set = FdnSet { freezable };
-            assert_eq!(non_ringing(&set), [UnitAddr::first(UnitParam::GainDb)]);
-        }
+        assert_eq!(non_ringing(&FdnSet), [UnitAddr::first(UnitParam::GainDb)]);
     }
 }

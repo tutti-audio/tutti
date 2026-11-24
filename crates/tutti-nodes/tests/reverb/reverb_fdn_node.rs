@@ -1,5 +1,5 @@
-//! `FdnNode` as the graph runs it: its ports (the freeze only where the layout can freeze),
-//! its tail (the network's own, unbounded while frozen, held to by the node), the freeze
+//! `FdnNode` as the graph runs it: its ports (the freeze among them),
+//! its tail (the network's own, unbounded while frozen, the ceiling unbounded), the freeze
 //! itself, a driven decay, and what the node is across blocks, resets, parks and clones.
 //! Every figure is from the network's own queries or the definition of a freeze, not from
 //! another reverb's render.
@@ -10,13 +10,13 @@ use tutti_buffers::Planes;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
-use tutti_dsp::{FdnBank, FdnControls, FdnLayout, FreezeMode, MaxDecay, Network, System};
+use tutti_dsp::{FdnBank, FdnControls, FdnLayout, MaxDecay, Network, System};
 use tutti_graph::contract::{
     Driven, assert_declared_tail, assert_param_fork, drive, drive_input, prepared,
 };
 use tutti_graph::{
-    Env, GraphBuilder, MAX_NODE_TAIL, Node, ParamIn, ParamNode, PlayClock, Prepare, Status,
-    TransportChanges, TransportPosition,
+    Env, GraphBuilder, Node, ParamIn, ParamNode, PlayClock, Prepare, Status, TransportChanges,
+    TransportPosition,
 };
 use tutti_modulation::ControlProgramBuilder;
 use tutti_nodes::automation::{ControlLaneNode, UnitLaneConfig};
@@ -30,10 +30,6 @@ const BLOCK: usize = 64;
 
 fn plain() -> FdnLayout {
     FdnLayout::default()
-}
-
-fn freezable() -> FdnLayout {
-    FdnLayout::new(8, MaxDecay::DEFAULT, FreezeMode::Freezable).unwrap()
 }
 
 fn live(layout: FdnLayout, c: FdnControls) -> FdnNode<f32> {
@@ -114,43 +110,30 @@ fn energy(blocks: &[Driven]) -> f64 {
         .sum()
 }
 
-/// A layout that cannot freeze offers ten params and a finite tail ceiling; one that can
-/// offers an eleventh, the freeze, and an unbounded ceiling (so an export spends its cap:
-/// freeze is opt-in for that reason). The addresses are the doc's: three decays at indices 0
-/// (mid), 1 (low), 2 (high).
+/// Every FDN offers eleven params, the freeze the last, and declares an unbounded tail ceiling
+/// once prepared (the freeze can hold the tail): unknown before. The addresses are the doc's:
+/// three decays at indices 0 (mid), 1 (low), 2 (high).
 #[test]
-fn the_freeze_is_a_port_only_where_the_layout_can_freeze() {
-    let (p, f) = (
-        node(plain(), FdnControls::DEFAULT),
-        node(freezable(), FdnControls::DEFAULT),
+fn every_fdn_has_the_freeze_port_and_an_unbounded_ceiling() {
+    let n = node(plain(), FdnControls::DEFAULT);
+    assert_eq!(n.shape().params.len(), 11);
+    assert_eq!(n.shape().tail, Tail::Unbounded);
+    assert_eq!(
+        live(plain(), FdnControls::DEFAULT).shape().tail,
+        Tail::Unknown
     );
-    assert_eq!(p.shape().params.len(), 10);
-    assert_eq!(f.shape().params.len(), 11);
-    assert!(matches!(p.shape().tail, Tail::Finite(_)));
-    assert_eq!(f.shape().tail, Tail::Unbounded);
-    let (set_p, set_f) = (p.param_set(), f.param_set());
-    assert_eq!(set_p.get(UnitParam::Freeze), None);
-    assert_eq!(set_f.get(UnitParam::Freeze), Some(0.0));
+    let set = n.param_set();
+    assert_eq!(set.get(UnitParam::Freeze), Some(0.0));
     for (index, secs) in [(0u8, 2.0), (1, 2.4), (2, 1.2)] {
-        assert_eq!(
-            set_p.get(UnitAddr::new(UnitParam::Decay, index)),
-            Some(secs)
-        );
+        assert_eq!(set.get(UnitAddr::new(UnitParam::Decay, index)), Some(secs));
     }
     assert_eq!(
-        set_p.get(UnitParam::Wet),
+        set.get(UnitParam::Wet),
         None,
         "no mix port: the graph blends"
     );
-    let Tail::Finite(ceiling) = p.shape().tail else {
-        unreachable!()
-    };
-    assert!(
-        ceiling.get() as f64 / SR.get() > 8.0,
-        "the room at its longest decay"
-    );
     assert_eq!(
-        p.shape().latency,
+        n.shape().latency,
         Latency::new(Samples::new(0)),
         "a pre-delay is not latency"
     );
@@ -172,17 +155,17 @@ fn the_reported_tail_is_the_networks_and_honest() {
     }
 }
 
-/// A node of a freezable layout built with the freeze on reports `Tail::Unbounded` to the graph
-/// on every block from its first, with and without input (a lossless loop with a shut input
-/// never falls to the floor); the same controls on a layout that cannot freeze ignore the
-/// freeze and report a finite tail, held under the declared ceiling.
+/// A node built with the freeze on reports `Tail::Unbounded` to the graph on every block from its
+/// first, with and without input (a lossless loop with a shut input never falls to the floor).
+/// The same node unfrozen reports the network's own finite figure at its controls (the bank's
+/// `tail_of`), and `Unbounded` again once its freeze cell is on.
 #[test]
 fn a_frozen_node_reports_an_unbounded_tail_to_the_graph() {
     let frozen = FdnControls {
         freeze: true,
         ..FdnControls::DEFAULT
     };
-    let mut rig = Rig::new(node(freezable(), frozen));
+    let mut rig = Rig::new(node(plain(), frozen));
     for block in [
         impulse(),
         vec![0.0; BLOCK],
@@ -191,28 +174,27 @@ fn a_frozen_node_reports_an_unbounded_tail_to_the_graph() {
     ] {
         assert_eq!(rig.block(&block, &[]).reported_tail, Some(Tail::Unbounded));
     }
-    let mut decaying = Rig::new(node(plain(), frozen));
-    let Tail::Finite(ceiling) = decaying.node.shape().tail else {
-        panic!("a layout that cannot freeze declares a finite ceiling")
-    };
-    let reported = finite(&decaying.block(&impulse(), &[]));
-    assert!(reported <= ceiling.get(), "{reported} under {ceiling:?}");
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
+    let cells = rig.node.param_set();
+    assert_eq!(
+        finite(&rig.block(&impulse(), &[])),
+        tail_of(&plain(), &FdnControls::DEFAULT)
+    );
+    assert!(cells.set(UnitParam::Freeze, 1.0));
+    assert_eq!(
+        rig.block(&vec![0.0; BLOCK], &[]).reported_tail,
+        Some(Tail::Unbounded)
+    );
 }
 
 /// A decay raised while the short one rings out is reported by the node as the larger of what
-/// is owed and the new settings' tail, from the last non-silent input frame and under the
-/// declared ceiling: the silence heard since does not reduce it (the clock measures from the last
+/// is owed and the new settings' tail, from the last non-silent input frame: the silence heard since does not reduce it (the clock measures from the last
 /// input), and the move to a longer tail is not measured from the move. The expected figures are
-/// the bank's own `tail_of` for the two settings and its ceiling, in whole frames, with no
+/// the bank's own `tail_of` for the two settings, in whole frames, with no
 /// latency (the node declares none).
 #[test]
 fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tail() {
-    let layout = FdnLayout::new(
-        8,
-        MaxDecay::new(Seconds::new(2.0)).unwrap(),
-        FreezeMode::Decaying,
-    )
-    .unwrap();
+    let layout = FdnLayout::new(8, MaxDecay::new(Seconds::new(2.0)).unwrap()).unwrap();
     let decays = |secs: f64| FdnControls {
         decay: [Seconds::new(secs); 3],
         ..FdnControls::DEFAULT
@@ -224,12 +206,11 @@ fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tai
         Tail::Finite(n) => n.get(),
         other => panic!("a finite tail, not {other:?}"),
     };
-    let (owed, new, ceiling) = (
+    let (owed, new) = (
         frames(bank.tail_of(&ramps, &short)),
         frames(bank.tail_of(&ramps, &long)),
-        frames(bank.tail()),
     );
-    assert!(owed < new && new <= ceiling, "{owed} < {new} <= {ceiling}");
+    assert!(owed < new, "{owed} < {new}");
     let mut rig = Rig::new(node(layout, short));
     let cells = rig.node.param_set();
     for chunk in noise(2, 4 * BLOCK).chunks(BLOCK) {
@@ -245,7 +226,7 @@ fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tai
     let after: Vec<usize> = (0..8).map(|_| finite(&rig.silent())).collect();
     assert_eq!(
         after.last().copied(),
-        Some(owed.max(new).min(ceiling)),
+        Some(owed.max(new)),
         "the report after the move: {after:?}"
     );
 }
@@ -255,7 +236,7 @@ fn the_node_reports_a_raised_decay_as_the_larger_of_what_is_owed_and_the_new_tai
 /// parked. Thawed, it reports a finite tail again, decays and is eventually idle.
 #[test]
 fn a_freeze_holds_and_a_thaw_lets_go() {
-    let mut rig = Rig::new(node(freezable(), FdnControls::DEFAULT));
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
     let cells = rig.node.param_set();
     for chunk in noise(1, 20_000).chunks(BLOCK) {
         rig.block(chunk, &[]);
@@ -296,38 +277,6 @@ fn a_freeze_holds_and_a_thaw_lets_go() {
     );
 }
 
-/// A node cannot see what a driven port takes after the block, so a block with a driven
-/// decay (or size, or pre-delay) reports the ceiling the shape declares, not the figure of
-/// the values the port takes in the block: here every driven value is low, and the report is
-/// still the ceiling, longer than the network's own figure at the low values.
-#[test]
-fn a_driven_control_reports_the_ceiling_not_the_blocks_figure() {
-    let ceiling = match node(plain(), FdnControls::DEFAULT).shape().tail {
-        Tail::Finite(n) => n.get(),
-        other => panic!("a finite ceiling, not {other:?}"),
-    };
-    let none: Option<&[f32]> = None;
-    let low = vec![0.5f32; BLOCK];
-    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
-    let d = rig.block(&impulse(), &[Some(&low), Some(&low), Some(&low)]);
-    let at_low = FdnControls {
-        decay: [Seconds::new(0.5); 3],
-        ..FdnControls::DEFAULT
-    };
-    assert_eq!(finite(&d), ceiling);
-    assert!(
-        tail_of(&plain(), &at_low) < ceiling,
-        "the low decay's figure is below the ceiling"
-    );
-    let small = vec![0.0f32; BLOCK];
-    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
-    let d = rig.block(
-        &impulse(),
-        &[none, none, none, Some(&small), none, Some(&small)],
-    );
-    assert_eq!(finite(&d), ceiling, "a driven size and pre-delay");
-}
-
 /// The tail reads no wet gain: moving it alone leaves the reported tail, which is what its
 /// `no_ring` flag promises. A driven wet gain reports the cells' figure, below the ceiling.
 #[test]
@@ -352,12 +301,15 @@ fn the_wet_gain_does_not_change_the_reported_tail() {
     assert_eq!(finite(&d), base);
 }
 
-/// A driven control on a layout whose ceiling is unbounded reports an unbounded tail, which
-/// never parks the node; with the port gone the tail is the cells' again, finite.
+/// A node cannot see what a driven port takes after the block, so a block with a driven decay
+/// (or size, or pre-delay) reports the ceiling the shape declares, unbounded, not the figure of
+/// the values the port takes in the block (every driven value here is low, and its figure is
+/// finite); the unbounded report never parks the node, and with the port gone the tail is the
+/// cells' again, finite.
 #[test]
-fn a_driven_control_on_an_unbounded_ceiling_reports_unbounded() {
+fn a_driven_control_reports_the_unbounded_ceiling_not_the_blocks_figure() {
     let low = vec![0.5f32; BLOCK];
-    let mut rig = Rig::new(node(freezable(), FdnControls::DEFAULT));
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
     let d = rig.block(&impulse(), &[Some(&low), Some(&low), Some(&low)]);
     assert_eq!(d.reported_tail, Some(Tail::Unbounded));
     assert_ne!(rig.silent().status, Some(Status::Idle));
@@ -366,6 +318,18 @@ fn a_driven_control_on_an_unbounded_ceiling_reports_unbounded() {
         matches!(after.reported_tail, Some(Tail::Finite(_))),
         "{:?}",
         after.reported_tail
+    );
+    let none: Option<&[f32]> = None;
+    let small = vec![0.0f32; BLOCK];
+    let mut rig = Rig::new(node(plain(), FdnControls::DEFAULT));
+    let d = rig.block(
+        &impulse(),
+        &[none, none, none, Some(&small), none, Some(&small)],
+    );
+    assert_eq!(
+        d.reported_tail,
+        Some(Tail::Unbounded),
+        "a driven size and pre-delay"
     );
 }
 
@@ -419,11 +383,10 @@ fn a_lane_driving_the_decay_changes_how_long_it_rings() {
 }
 
 /// A fork starts from the values set, shares no cell and rings nothing: the harness's fork
-/// checks over every cell of both layouts.
+/// checks over every cell.
 #[test]
 fn a_fork_shares_no_cell() {
     assert_param_fork(live(plain(), FdnControls::DEFAULT));
-    assert_param_fork(live(freezable(), FdnControls::DEFAULT));
 }
 
 /// A non-finite write to any cell reads as unchanged: the render equals one that never saw
@@ -455,7 +418,7 @@ fn a_non_finite_write_is_ignored() {
 fn a_live_node_has_its_layouts_params() {
     let f = FreeverbNode::<f32>::from(FreeverbConfig::new());
     assert_eq!(f.param_set().params().count(), 2, "the room, the damping");
-    let n = live(freezable(), FdnControls::DEFAULT);
+    let n = live(plain(), FdnControls::DEFAULT);
     assert_eq!(n.param_set().params().count(), 11);
     assert_eq!(n.shape().audio_out(), ChannelLayout::STEREO);
 }
@@ -676,7 +639,7 @@ fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
         freeze: true,
         ..FdnControls::DEFAULT
     };
-    let mut rig = Rig::new(node(freezable(), frozen));
+    let mut rig = Rig::new(node(plain(), frozen));
     let cells = rig.node.param_set();
     for _ in 0..500 {
         assert_eq!(
@@ -699,66 +662,35 @@ fn a_node_frozen_without_input_wakes_fresh_after_the_thaw_parks() {
         out.extend((0..39).map(|_| rig.silent().audio));
         out
     };
-    let mut fresh = Rig::new(node(freezable(), FdnControls::DEFAULT));
+    let mut fresh = Rig::new(node(plain(), FdnControls::DEFAULT));
     let woken = take(&mut rig);
     assert_eq!(woken, take(&mut fresh));
     assert!(woken.iter().flatten().flatten().any(|&s| s != 0.0));
 }
 
-/// The declared tail is a figure the graph takes or it is unbounded: the default 8 s room at
-/// 192 kHz declares a finite ceiling within `MAX_NODE_TAIL` (sixty seconds, converted at the
-/// rate) and under 2.1 million frames (the 8 s decay to a floor 6 dB deeper, 8.8 s, with the
-/// longest pre-delay and line: nothing stretches it), a 19 s room at 48 kHz too, and the longest layout
-/// the type allows (60 s at 192 kHz, 11.5 million frames and more) declares `Tail::Unbounded`
-/// and not a finite figure the graph would refuse or count as never decaying. The node still
-/// narrows an unbounded ceiling to what rings: a thawed room reports and parks on its own.
+/// The declared tail of a plain FDN is unbounded at every rate and longest decay (the freeze
+/// holds the tail), the longest layout the type allows included: never a finite figure the
+/// graph would refuse or count as never decaying. The node still narrows it to what rings: a
+/// thawed room reports a finite tail and parks on its own (the finite ceilings under
+/// `MAX_NODE_TAIL` are the shimmer's: `ShimmerNode`'s tests).
 #[test]
-fn the_declared_tail_is_within_the_graphs_bound_or_unbounded() {
+fn the_declared_tail_is_unbounded_at_every_rate_and_decay() {
     let at = |layout: FdnLayout, rate: SampleRate| {
         prepared(live(layout, FdnControls::DEFAULT), rate, BLOCK)
             .shape()
             .tail
     };
-    let Tail::Finite(default) = at(plain(), SampleRate::SR_192K) else {
-        panic!("a finite ceiling")
-    };
-    assert!(
-        default <= MAX_NODE_TAIL.to_samples_ceil(SampleRate::SR_192K),
-        "{default:?}"
-    );
-    assert!(default.get() as f64 > 8.0 * 192_000.0);
-    assert!(
-        default.get() < 2_100_000,
-        "nothing stretches the ceiling: {default:?}"
-    );
-    let nineteen =
-        FdnLayout::new(8, MaxDecay::of(Seconds::new(19.0)), FreezeMode::Decaying).unwrap();
-    let Tail::Finite(long) = at(nineteen, SampleRate::SR_48K) else {
-        panic!("a finite ceiling")
-    };
-    assert!(
-        long <= MAX_NODE_TAIL.to_samples_ceil(SampleRate::SR_48K)
-            && long.get() as f64 > 19.0 * 48_000.0,
-        "{long:?}"
-    );
-    // A 36 s room at 96 kHz (a 40 s one, its floor 6 dB deeper, is past the sixty seconds and
-    // unbounded) is past 2.88 million frames (what bounded a tail at 48 kHz) and within the
-    // sixty seconds the graph takes at that rate.
-    let room = FdnLayout::new(8, MaxDecay::of(Seconds::new(36.0)), FreezeMode::Decaying).unwrap();
-    let Tail::Finite(room) = at(room, SampleRate::SR_96K) else {
-        panic!("a finite ceiling")
-    };
-    assert!(
-        room.get() as f64 > 36.0 * 96_000.0
-            && room <= MAX_NODE_TAIL.to_samples_ceil(SampleRate::SR_96K),
-        "{room:?}"
-    );
-    assert!(room.get() > 2_880_000, "{room:?}");
-    let cap = FdnLayout::new(
-        16,
-        MaxDecay::new(MaxDecay::CAP).unwrap(),
-        FreezeMode::Decaying,
-    )
-    .unwrap();
-    assert_eq!(at(cap, SampleRate::SR_192K), Tail::Unbounded);
+    for (lines, max, rate) in [
+        (8, MaxDecay::DEFAULT, SampleRate::SR_192K),
+        (8, MaxDecay::of(Seconds::new(19.0)), SampleRate::SR_48K),
+        (8, MaxDecay::of(Seconds::new(36.0)), SampleRate::SR_96K),
+        (
+            16,
+            MaxDecay::new(MaxDecay::CAP).unwrap(),
+            SampleRate::SR_192K,
+        ),
+    ] {
+        let layout = FdnLayout::new(lines, max).unwrap();
+        assert_eq!(at(layout, rate), Tail::Unbounded, "{max:?} at {rate:?}");
+    }
 }
