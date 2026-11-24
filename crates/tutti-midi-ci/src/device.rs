@@ -133,17 +133,8 @@ pub enum CiAction {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CiPeer {
     data: ReplyData,
-    instance: InstanceInquiry,
-}
-
-/// Where the Endpoint Inquiry for a peer's Product Instance Id stands, and the id
-/// it was answered with.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum InstanceInquiry {
-    /// Not asked, or ended by a NAK: a Reply is not the answer to one.
-    Closed(Option<ProductInstanceId>),
-    /// Asked: a Reply sets the id, and a later one replaces it.
-    Open(Option<ProductInstanceId>),
+    instance_id: Option<ProductInstanceId>,
+    asked: bool,
 }
 
 impl CiPeer {
@@ -163,9 +154,7 @@ impl CiPeer {
     /// Its Endpoint's Product Instance Id, once an Endpoint Inquiry was answered.
     #[must_use]
     pub fn product_instance_id(&self) -> Option<&ProductInstanceId> {
-        match &self.instance {
-            InstanceInquiry::Closed(id) | InstanceInquiry::Open(id) => id.as_ref(),
-        }
+        self.instance_id.as_ref()
     }
 }
 
@@ -325,10 +314,10 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             CiMessage::EndpointReply { header, to, info } => {
                 if *to == self.muid
                     && let Some(peer) = self.peers.get_mut(&header.source)
-                    && let InstanceInquiry::Open(_) = peer.instance
+                    && peer.asked
                 {
                     let EndpointInfo::ProductInstanceId(id) = info;
-                    peer.instance = InstanceInquiry::Open(Some(*id));
+                    peer.instance_id = Some(*id);
                     actions.push(CiAction::Updated(header.source));
                 }
             }
@@ -337,9 +326,8 @@ impl<R: FnMut() -> u32> CiDevice<R> {
                 if *to == self.muid
                     && nak.nak_sub_id2.get() == SUB_ID2_ENDPOINT_INQUIRY
                     && let Some(peer) = self.peers.get_mut(&header.source)
-                    && let InstanceInquiry::Open(id) = peer.instance
                 {
-                    peer.instance = InstanceInquiry::Closed(id);
+                    peer.asked = false;
                 }
             }
             CiMessage::ProfileInquiry { header, to } => {
@@ -501,11 +489,8 @@ impl<R: FnMut() -> u32> CiDevice<R> {
             source,
             CiPeer {
                 data,
-                instance: if asks {
-                    InstanceInquiry::Open(None)
-                } else {
-                    InstanceInquiry::Closed(None)
-                },
+                instance_id: None,
+                asked: asks,
             },
         );
         actions.push(CiAction::Found(source));
