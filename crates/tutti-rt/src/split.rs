@@ -66,18 +66,6 @@ impl ClaimTable {
         }
     }
 
-    /// How many words it holds.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.words.len()
-    }
-
-    /// Whether it holds none.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.words.is_empty()
-    }
-
     /// The first `n` words, all released. `&mut` proves no claim through an
     /// earlier split is alive (every guard and view borrows its split, which
     /// borrowed this table), so clearing them discards only claims whose
@@ -352,11 +340,6 @@ impl<'a, T> SplitRw<'a, T> {
         }
     }
 
-    /// Elements per chunk.
-    pub fn stride(&self) -> usize {
-        self.stride
-    }
-
     /// A view that records the claims it takes in `held` and releases them
     /// all when it drops. One thread's; see [`RwView`].
     ///
@@ -404,11 +387,6 @@ impl Held {
             len: Cell::new(0),
             in_use: Cell::new(false),
         }
-    }
-
-    /// How many claims a view can hold at once.
-    pub fn capacity(&self) -> usize {
-        self.entries.len()
     }
 }
 
@@ -642,11 +620,6 @@ impl<'v, T> RwView<'v, T> {
                 read(tag, unsafe { std::slice::from_raw_parts(p, split.stride) });
             }
         }
-    }
-
-    /// Claims held right now.
-    pub fn held(&self) -> usize {
-        self.held.len.get()
     }
 }
 

@@ -11,7 +11,7 @@
 //! The set is sized once, from a count, on the control side
 //! ([`DirtySet::new`] allocates); after that no call allocates, locks or
 //! waits. An index is a [`DirtyIndex`] that only the set mints
-//! ([`DirtySet::index`] refuses one at or past [`len`](DirtySet::len)), so
+//! ([`DirtySet::index`] refuses one at or past the count the set was made with), so
 //! [`set`](DirtySet::set) takes only an index in range and nothing is masked
 //! or dropped. A `DirtyIndex` belongs to the set that minted it; handing it to
 //! a set of another size is a programming error (an out-of-range one panics).
@@ -107,19 +107,7 @@ impl DirtySet {
         }
     }
 
-    /// How many flags the set has.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Whether the set has no flags.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// The flag at `index`, or `None` if it is [`len`](Self::len) or more.
+    /// The flag at `index`, or `None` if it is the set's count of flags or more.
     #[must_use]
     pub fn index(&self, index: usize) -> Option<DirtyIndex> {
         (index < self.len).then_some(DirtyIndex(index))

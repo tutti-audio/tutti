@@ -104,9 +104,7 @@ impl<T> Drop for Shared<T> {
 /// assert_eq!(reader.pop(), Some(1));
 /// assert_eq!(reader.pop(), Some(2));
 /// assert_eq!(reader.pop(), None);
-/// assert_eq!(reader.take_lost(), 1);
-/// assert_eq!(reader.take_lost(), 0, "taking resets");
-/// assert_eq!(reader.lost(), 1, "the total stands");
+/// assert_eq!(reader.lost(), 1);
 /// ```
 ///
 /// An end is `Send` and not `Sync`: a reader that lends out `&T` must not be
@@ -152,7 +150,6 @@ pub fn ring<T: Send>(capacity: usize, overflow: Overflow) -> (RingWriter<T>, Rin
             tail: 0,
             head_seen: 0,
             view,
-            taken: 0,
             _not_sync: NotSync::default(),
         },
     )
@@ -176,7 +173,6 @@ pub struct RingReader<T> {
     /// The writer's `head` as last loaded.
     head_seen: u64,
     view: Counter<u64>,
-    taken: u64,
     _not_sync: NotSync,
 }
 
@@ -391,12 +387,6 @@ impl<T: Send> RingWriter<T> {
         self.loss.lost()
     }
 
-    /// Values lost since this end's last `take_lost`, and resets that count;
-    /// [`lost`](Self::lost) is unaffected.
-    pub fn take_lost(&mut self) -> u64 {
-        self.loss.take()
-    }
-
     /// A view of the loss count that outlives the end.
     #[must_use]
     pub fn losses(&self) -> Counter<u64> {
@@ -497,11 +487,6 @@ impl<T: Send> RingReader<T> {
         take as usize
     }
 
-    /// Takes and drops up to `n` values; returns how many it took.
-    pub fn skip(&mut self, n: usize) -> usize {
-        (0..n).take_while(|_| self.pop().is_some()).count()
-    }
-
     /// How many values are queued now: at least what a pop sees, more if the
     /// writer pushes meanwhile.
     #[must_use]
@@ -513,12 +498,6 @@ impl<T: Send> RingReader<T> {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// The most values the ring holds.
-    #[must_use]
-    pub fn capacity(&self) -> usize {
-        self.shared.slots.len()
     }
 
     /// The oldest queued value, left queued.
@@ -553,17 +532,6 @@ impl<T: Send> RingReader<T> {
         self.view.get()
     }
 
-    /// Values lost since this end's last `take_lost`, and resets that count;
-    /// [`lost`](Self::lost) is unaffected.
-    pub fn take_lost(&mut self) -> u64 {
-        self.view.take_since(&mut self.taken)
-    }
-
-    /// A view of the loss count that outlives the end.
-    #[must_use]
-    pub fn losses(&self) -> Counter<u64> {
-        self.view.clone()
-    }
 }
 
 /// The values a [`RingReader::drain`] takes.

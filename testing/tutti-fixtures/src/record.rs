@@ -95,7 +95,8 @@ impl<T> BlockLog<T> {
     /// a block's, latch the overflow flag a read panics on.
     pub fn push_block(&mut self, items: impl IntoIterator<Item = T>) {
         let Some(mut block) = self.spare.pop() else {
-            self.done.mark_overflowed();
+            // Every block is in `done`: this push is refused and latches its flag.
+            self.done.push(CappedVec::with_capacity(0));
             return;
         };
         block.extend(items);

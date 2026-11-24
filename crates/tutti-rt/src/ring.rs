@@ -166,12 +166,11 @@ impl<T> Cell<T> {
 #[repr(align(64))]
 struct Padded<A>(A);
 
-/// The writer's side of the loss count: the one `CounterWriter`, a reading
-/// handle, and what `take_lost` last returned.
+/// The writer's side of the loss count: the one `CounterWriter` and a reading
+/// handle.
 struct WriterLoss {
     writer: CounterWriter<u64>,
     view: Counter<u64>,
-    taken: u64,
 }
 
 impl WriterLoss {
@@ -181,7 +180,6 @@ impl WriterLoss {
             Self {
                 writer,
                 view: view.clone(),
-                taken: 0,
             },
             view,
         )
@@ -195,12 +193,6 @@ impl WriterLoss {
 
     fn lost(&self) -> u64 {
         self.view.get()
-    }
-
-    /// Losses since the last call: a `Counter` never resets, so the reset is
-    /// this end's baseline.
-    fn take(&mut self) -> u64 {
-        self.view.take_since(&mut self.taken)
     }
 }
 

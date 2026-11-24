@@ -340,11 +340,6 @@ impl<S: RingSample> PosRing<S> {
         self.frames
     }
 
-    /// Returns the width of a frame.
-    pub fn layout(&self) -> ChannelLayout {
-        self.layout
-    }
-
     /// Returns the slot of position `s`, `s mod frames`, without a divide.
     ///
     /// Lemire, Kaser and Kurz's direct remainder ("Faster Remainder by Direct
@@ -438,11 +433,6 @@ impl<S: RingSample> PosWriter<S> {
     /// would).
     pub fn play(&self) -> u64 {
         self.ring.play()
-    }
-
-    /// Returns how many times the window has shrunk.
-    pub fn generation(&self) -> u64 {
-        self.ring.generation()
     }
 
     /// Returns one past the last position the reader's block in flight may
@@ -627,11 +617,6 @@ impl<S: RingSample> std::fmt::Debug for PosReader<S> {
 }
 
 impl<S: RingSample> PosReader<S> {
-    /// Returns the width of a frame.
-    pub fn layout(&self) -> ChannelLayout {
-        self.ring.layout
-    }
-
     /// Claims this block's reads; call it once per block, before any read.
     ///
     /// `play` is where the reader plays; `reads` the (up to two) ranges
