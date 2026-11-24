@@ -5,7 +5,9 @@
 //! them.
 
 use tutti_buffers::{ChannelTopology, InputOutput, MaxBlock};
-use tutti_dsp::{BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, Lerp};
+use tutti_dsp::{
+    BlockMismatch, FdnBank, FdnControls, FdnLayout, FdnRamps, FftFloat, Lerp, MaxDecay,
+};
 use tutti_graph::{Buses, Cost, MAX_NODE_TAIL, Shape};
 use tutti_units::{Bipolar, Db, Hz, Mix, SampleRate, Seconds, StereoWidth, Tail};
 
@@ -31,7 +33,11 @@ use crate::kernel::{ControlSignals, Kernel, KernelNode};
 ///
 /// The declared tail is the ceiling, unbounded since the freeze can hold the tail. The node
 /// narrows it each block to what the controls in force ring, and once the input has been
-/// silent for that long it cuts the room off and parks ([`KernelNode`]).
+/// silent for that long it cuts the room off and parks ([`KernelNode`]). A signal on a decay
+/// reports the figure at the longest decay the layout holds, the other controls as their cells
+/// are; a signal on the freeze reports the ceiling; one on a control that states no longest
+/// value (the size, the diffusion, the pre-delay, the modulation, the rate and the width)
+/// reports the ceiling.
 ///
 /// `F` is the float of the graph it runs in, and of the lines, the pre-delay and the ramps;
 /// the lines are the layout's worst case (its most lines at the longest length the size and the
@@ -95,9 +101,9 @@ pub struct FdnSet;
 control_set! {
     FdnSet(_s): FdnControls = FdnControls { freeze: false, ..FdnControls::DEFAULT };
     live: (all);
-    Decay[0] => Seconds = decay[0] { whole },
-    Decay[1] => Seconds = decay[1] { whole },
-    Decay[2] => Seconds = decay[2] { whole },
+    Decay[0] => Seconds = decay[0] { whole, longest = MaxDecay::CAP.get() },
+    Decay[1] => Seconds = decay[1] { whole, longest = MaxDecay::CAP.get() },
+    Decay[2] => Seconds = decay[2] { whole, longest = MaxDecay::CAP.get() },
     RoomSize => Mix = size { whole },
     Diffusion => Mix = diffusion { whole },
     DelayTime => Seconds = pre_delay { whole },
@@ -105,7 +111,7 @@ control_set! {
     Rate => Hz = rate { whole },
     StereoSpread => StereoWidth = width { whole },
     GainDb => Db = wet { whole, no_ring },
-    Freeze => bool = freeze { whole };
+    Freeze => bool = freeze { whole, longest = 1.0 };
 
     fn defaults(&self) -> FdnControls {
         FdnControls::DEFAULT
@@ -227,5 +233,80 @@ mod tests {
     #[test]
     fn only_the_wet_gain_is_flagged_no_ring() {
         assert_eq!(non_ringing(&FdnSet), [UnitAddr::first(UnitParam::GainDb)]);
+    }
+
+    /// The rows that state a longest value (the three decays and the freeze) never ring shorter
+    /// as they move to it, whatever the other controls are.
+    #[test]
+    fn the_tail_is_longest_at_the_stated_decays_and_freeze() {
+        use tutti_buffers::MaxBlock;
+        use tutti_units::Samples;
+        let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
+        kernel.prepare(SampleRate::SR_48K, MaxBlock::of(Samples::new(64)));
+        // The layout clamps a decay at its longest (the default 8 s), so the sweep spans the
+        // decays that differ; the stated value past it reads as that longest.
+        let decay = (0.05, MaxDecay::DEFAULT.get().get());
+        crate::test_support::assert_tail_longest_at_stated(
+            &mut kernel,
+            &FdnSet,
+            &[
+                decay,
+                decay,
+                decay,
+                (0.0, 1.0),
+                (0.0, 1.0),
+                (0.0, 0.5),
+                (-1.0, 1.0),
+                (0.05, 5.0),
+                (0.0, 2.0),
+                (0.0, 0.0),
+                (0.0, 1.0),
+            ],
+        );
+    }
+
+    /// A decay under the layout's longest never reports more than the longest does, where
+    /// the other two bands hold the largest gain or sit just beside the driven one (the
+    /// profiles whose shape, not their largest gain, could move a bound read off the
+    /// response): every band, three sizes, two rates, the other bands and the driven one over
+    /// a grid that crowds the layout's 8 s.
+    #[test]
+    fn a_decay_under_the_layouts_longest_never_reports_more_than_the_longest() {
+        use tutti_buffers::MaxBlock;
+        use tutti_units::{Mix, Samples, Seconds};
+        let grid = [0.05, 0.3, 1.0, 2.0, 4.0, 6.0, 7.5, 7.9, 7.99, 8.0];
+        for rate in [SampleRate::SR_48K, SampleRate::SR_96K] {
+            let mut kernel = FdnKernel::<f64>::new(FdnLayout::default());
+            kernel.prepare(rate, MaxBlock::of(Samples::new(64)));
+            for size in [0.0, 0.5, 1.0] {
+                for band in 0..3 {
+                    for other in grid {
+                        for third in grid {
+                            let mut c = FdnControls {
+                                size: Mix::new(size),
+                                ..FdnControls::DEFAULT
+                            };
+                            c.decay[(band + 1) % 3] = Seconds::new(other);
+                            c.decay[(band + 2) % 3] = Seconds::new(third);
+                            c.decay[band] = Seconds::new(MaxDecay::CAP.get());
+                            let Tail::Finite(longest) = kernel.tail_of(&c) else {
+                                panic!("a finite tail with the freeze off")
+                            };
+                            for decay in grid {
+                                c.decay[band] = Seconds::new(decay);
+                                let Tail::Finite(n) = kernel.tail_of(&c) else {
+                                    panic!("a finite tail with the freeze off")
+                                };
+                                assert!(
+                                    n <= longest,
+                                    "band {band} at {decay} s, the others {other} and {third} s, \
+                                     size {size}, {rate:?}: {n:?} past {longest:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

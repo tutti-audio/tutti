@@ -10,7 +10,7 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
-    DelaySync, GAIN_RAMP, Lerp,
+    DelaySync, GAIN_RAMP, Lerp, MaxDelay,
 };
 use tutti_graph::{Cost, ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
@@ -19,7 +19,7 @@ use tutti_units::{Bpm, Feedback, SampleRate, Seconds, SyncSetting, Tail};
 #[cfg(doc)]
 use tutti_buffers::ChannelTopology;
 #[cfg(doc)]
-use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode, MaxDelay};
+use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode};
 
 use std::sync::Arc;
 
@@ -135,8 +135,10 @@ impl DelayConfig {
 /// rings at the controls in force: the first echo and the passes round the loop to fall to
 /// the floor ([`TAIL_FLOOR`](tutti_dsp::TAIL_FLOOR)) at the loop gain `feedback +
 /// cross-feedback`, each as long as the longest channel's delay, the larger over where a ramp
-/// is, where it goes and the controls. A synced delay rings for the longest the line holds, as
-/// the tempo moves without a control moving. Once the input has been silent for that long the
+/// is, where it goes and the controls. A time, feedback or cross-feedback a signal drives is
+/// asked at its longest (the longest line, the stable bound), the others as their cells hold
+/// them. A synced delay rings for the longest the line holds, as the tempo moves without a
+/// control moving. Once the input has been silent for that long the
 /// node cuts the loop off and parks ([`KernelNode`]).
 ///
 /// `F` is the float of the graph it runs in, and of the lines and the ramps; a line holds
@@ -167,9 +169,9 @@ pub struct DelaySet {
 control_set! {
     DelaySet(s): DelayControls = DelayControls { sync: s.sync.load(), ..DelayControls::DEFAULT };
     live: (all);
-    DelayTime => Seconds = time { fast },
-    Feedback => Feedback = feedback { fast },
-    CrossFeedback => Feedback = cross_feedback { whole };
+    DelayTime => Seconds = time { fast, longest = MaxDelay::CAP.get() },
+    Feedback => Feedback = feedback { fast, longest = Feedback::MAX_STABLE.get() },
+    CrossFeedback => Feedback = cross_feedback { whole, longest = Feedback::MAX_STABLE.get() };
 
     fn defaults(&self) -> DelayControls {
         DelayControls::DEFAULT
@@ -879,33 +881,88 @@ mod tests {
         assert_declared_tail(&mut node, RATE);
     }
 
-    /// A feedback a signal drives is a control the tail reads, so the block reports the
-    /// ceiling the shape declares, whatever the signal's value; the cell alone, at no feedback,
-    /// is the one echo of a stereo pair of 10 frames (12 frames).
+    /// The node over a stereo pair at `controls`, prepared at [`RATE`].
+    fn node_at(controls: DelayControls) -> DelayNode<f32> {
+        prepared(
+            DelayNode::<f32>::from(
+                DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX)).controls(controls),
+            ),
+            RATE,
+            64,
+        )
+    }
+
+    /// A feedback a signal drives may take any value after the block, so the block reports what
+    /// the loop rings at the stable bound (its stated longest feedback) with the other controls
+    /// as the cells hold them, whatever the signal's value: the figure of the same node with that
+    /// feedback in its cell, finite for a delay of 10 frames, and past the cell alone at no
+    /// feedback, the one echo of a stereo pair of 10 frames (12 frames).
     #[test]
-    fn a_driven_feedback_reports_the_ceiling_not_the_blocks_figure() {
-        let build = || {
-            prepared(
-                DelayNode::<f32>::from(
-                    DelayConfig::new(DelayLayout::new(ChannelTopology::STEREO, MAX))
-                        .controls(controls(frames(10.0), 0.0, 0.0)),
-                ),
-                RATE,
-                64,
-            )
+    fn a_driven_feedback_reports_the_figure_at_the_stable_bound() {
+        let driven = vec![0.1f32; 64];
+        let Some(Tail::Finite(at_bound)) = reported(
+            &mut node_at(controls(frames(10.0), 0.99, 0.0)),
+            &click(64),
+            &[],
+        ) else {
+            panic!("a finite figure at the stable bound")
         };
-        let driven = vec![0.9f32; 64];
-        let mut node = build();
-        let ceiling = node.shape().tail;
-        assert_ne!(ceiling, Tail::Unknown);
+        let mut node = node_at(controls(frames(10.0), 0.0, 0.0));
         assert_eq!(
             reported(&mut node, &click(64), &[None, Some(&driven)]),
-            Some(ceiling)
+            Some(Tail::Finite(at_bound))
         );
-        let Some(Tail::Finite(cell)) = reported(&mut build(), &click(64), &[]) else {
+        let Some(Tail::Finite(cell)) = reported(
+            &mut node_at(controls(frames(10.0), 0.0, 0.0)),
+            &click(64),
+            &[],
+        ) else {
             panic!("a finite reported tail")
         };
         assert!(cell.get().abs_diff(12) <= 1, "the cell alone: {cell:?}");
+        assert!(at_bound > cell);
+    }
+
+    /// A time a signal drives may take any value after the block, so the block reports what the
+    /// loop rings at the longest line (the time's stated longest value, which the line clamps
+    /// to its own length) with the feedback as the cell holds it: the figure of the same node
+    /// with the longest time in its cell, finite at a feedback of 0.5, past the figure of the
+    /// short time in the cell.
+    #[test]
+    fn a_driven_time_reports_the_figure_at_the_longest_line() {
+        let driven = vec![frames(5.0) as f32; 64];
+        let figure = |time: f64| {
+            let Some(Tail::Finite(n)) =
+                reported(&mut node_at(controls(time, 0.5, 0.0)), &click(64), &[])
+            else {
+                panic!("a finite figure at a feedback of 0.5")
+            };
+            n
+        };
+        let longest = figure(MaxDelay::CAP.get());
+        let mut node = node_at(controls(frames(10.0), 0.5, 0.0));
+        assert_eq!(
+            reported(&mut node, &click(64), &[Some(&driven)]),
+            Some(Tail::Finite(longest))
+        );
+        assert!(longest > figure(frames(10.0)));
+    }
+
+    /// The time, the feedback and the cross-feedback never ring shorter as they move to their
+    /// stated longest values (the longest line and the stable bound), whatever the other two are.
+    #[test]
+    fn the_tail_is_longest_at_the_stated_time_and_feedbacks() {
+        use tutti_buffers::MaxBlock;
+        let set = DelaySet {
+            sync: Arc::new(AtomicCell::new(DelaySync::Free)),
+        };
+        let mut kernel = DelayKernel::<f64>::new(DelayLayout::new(ChannelTopology::STEREO, MAX));
+        kernel.prepare(RATE, MaxBlock::of(Samples::new(64)));
+        crate::test_support::assert_tail_longest_at_stated(
+            &mut kernel,
+            &set,
+            &[(0.0, MaxDelay::CAP.get()), (0.0, 0.99), (0.0, 0.99)],
+        );
     }
 
     /// A feedback at the stable bound on half a second of delay rings past what a graph takes

@@ -413,20 +413,22 @@ fn ceiling(node: &FreeverbNode<f32>) -> usize {
 
 /// A port has frames for every block it has a source, so a signal that is flat for the block
 /// (here, low) is a driven room: it may take any value after the block, and the block reports
-/// the ceiling the shape declares, not the figure of the low room. An automation source at rest
-/// also hands frames (`tutti-graph`'s `ParamState::port` frames a port whenever it has a source);
-/// a node-level drive cannot deliver a param event, so a flat signal is the nearest this pins.
+/// the figure at the largest room, the room's stated longest value, not the figure of the low
+/// room. The room is the only control the tail reads, so that figure is the ceiling's. An
+/// automation source at rest also hands frames (`tutti-graph`'s `ParamState::port` frames a
+/// port whenever it has a source); a node-level drive cannot deliver a param event, so a flat
+/// signal is the nearest this pins.
 #[test]
-fn a_flat_signal_on_the_room_reports_the_ceiling_not_the_blocks_figure() {
+fn a_flat_signal_on_the_room_reports_the_figure_at_the_largest_room() {
     let none: Option<&[f32]> = None;
     let low = vec![0.1f32; BLOCK];
     let mut rig = Rig::new(live(controls(0.5, 0.5)));
-    let ceiling = ceiling(&rig.node);
     let d = rig.block(&impulse(), &[Some(&low), none]);
-    assert_eq!(reported(&d), ceiling);
+    assert_eq!(reported(&d), tail_of(controls(1.0, 0.5)));
+    assert_eq!(reported(&d), ceiling(&rig.node));
     assert!(
-        tail_of(controls(0.1, 0.5)) < ceiling,
-        "the low room's figure is below the ceiling"
+        tail_of(controls(0.1, 0.5)) < reported(&d),
+        "the low room's figure is below it"
     );
 }
 

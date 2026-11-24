@@ -1724,15 +1724,7 @@ impl<F: Float> Graph<F> {
         self.note_unwired(node, &unwired);
         // The unit at `node` is new: whatever feeds it feeds a receiver that
         // has not heard it before.
-        let feeding: Vec<NodeKey> = self
-            .editor
-            .spec()
-            .events
-            .iter()
-            .filter(|(at, _)| at.node() == node)
-            .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()))
-            .collect();
-        for from in feeding {
+        for from in self.event_feeders(node) {
             self.note_gained(from);
         }
         self.note_pass(node);
@@ -2050,6 +2042,31 @@ impl<F: Float> Graph<F> {
             .connect_events(at, EventEdge::Direct(from))
             .expect("checked: both ends exist");
         self.note_gained(from.node());
+    }
+
+    /// The nodes feeding `node` over event edges, as the spec holds them. A
+    /// node that is not in the graph has none: nothing feeds a removed node.
+    fn event_feeders(&self, node: NodeKey) -> Vec<NodeKey> {
+        self.editor
+            .spec()
+            .events
+            .iter()
+            .filter(|(at, _)| at.node() == node)
+            .flat_map(|(_, edges)| edges.iter().map(|e| e.from().node()))
+            .collect()
+    }
+
+    /// `node`'s receiver changed with no edit (a device that came back): the
+    /// nodes feeding it over event edges wait for the next
+    /// [`take_applied_receivers`](Self::take_applied_receivers) that finds
+    /// nothing in flight. No commit is sent, so `gained` is not touched.
+    #[cfg(feature = "midi-hardware")]
+    pub(crate) fn receiver_replaced(&mut self, node: NodeKey) {
+        for from in self.event_feeders(node) {
+            if !self.unapplied.contains(&from) {
+                self.unapplied.push(from);
+            }
+        }
     }
 
     fn note_gained(&mut self, node: NodeKey) {

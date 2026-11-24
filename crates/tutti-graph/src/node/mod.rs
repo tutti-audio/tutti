@@ -818,9 +818,11 @@ impl<C, F: Float> NodeParts<C, F> {
 
     /// The node's published value of the kind `K`, read and replaced through
     /// `cell`, whose value is `K::Value`. `N` is the node that declares the
-    /// kind ([`HasPublished`]). The session sweeps the cell
-    /// ([`Published`]'s `Reclaim`) with the node's other entries, so it is not
-    /// the reclaimer's.
+    /// kind ([`HasPublished`]). Whoever takes the parts sweeps the cell
+    /// ([`ErasedPublished::reclaim`]) on its control-side tick, with the
+    /// node's other entries: the session does on every update, and a caller
+    /// that inserts through an [`Editor`](crate::Editor) alone sweeps the
+    /// entries itself. It is not the reclaimer's.
     #[must_use]
     pub fn published<N: HasPublished<K>, K: PublishedKind>(
         mut self,

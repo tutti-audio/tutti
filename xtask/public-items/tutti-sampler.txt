@@ -143,8 +143,6 @@ fn voice::command::VoicePoolHandle::set_loop
 fn voice::command::VoicePoolHandle::set_speed
 fn voice::command::VoicePoolHandle::set_stretch
 fn voice::command::VoicePoolHandle::set_window
-fn voice::disk_voice::DiskSource::channels
-fn voice::disk_voice::DiskSource::reset_interpolation
 fn voice::disk_voice::DiskVoice::file_sample_rate
 fn voice::disk_voice::DiskVoice::from_reader
 fn voice::disk_voice::DiskVoice::gain
