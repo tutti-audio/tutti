@@ -81,10 +81,6 @@ pub trait Message: Into<ControlRequest> {
     /// What the server answers with: the row's reply struct, or `()` for a request
     /// nothing answers.
     type Reply;
-    /// Whether the server answers the request. A request that is answered has a
-    /// `Reply` that is built from, and only from, the [`ControlReply`] variant of
-    /// the same name.
-    const REPLIES: bool;
     /// What handling the request returns: the row's reply or the failure that
     /// answers in its place, `()` for a request nothing answers, or the row's
     /// own outcome where the table says (`=>`).
@@ -148,7 +144,6 @@ pub trait Unanswered: Message<Reply = ()> {}
 /// ->
 /// /// One parameter's normalized value, or `None` if the plugin declined.
 /// ParameterValue {
-///     #[serde(with = "super::wire::normalized_opt")]
 ///     value: Option<Normalized>,
 /// };
 /// ```
@@ -259,7 +254,6 @@ macro_rules! messages {
     (@impl $name:ident -> $reply:ident => $handled:ty) => {
         impl Message for $name {
             type Reply = $reply;
-            const REPLIES: bool = true;
             type Handled = $handled;
         }
 
@@ -271,7 +265,6 @@ macro_rules! messages {
     (@impl $name:ident => $handled:ty) => {
         impl Message for $name {
             type Reply = ();
-            const REPLIES: bool = false;
             type Handled = $handled;
         }
 
@@ -331,13 +324,6 @@ macro_rules! messages {
         impl ControlRequest {
             /// How many requests there are.
             pub const VARIANTS: usize = [$(stringify!($name)),*].len();
-
-            /// Whether the server answers this request.
-            pub fn expects_reply(&self) -> bool {
-                match self {
-                    $(Self::$name { .. } => <$name as Message>::REPLIES,)*
-                }
-            }
         }
 
         /// Handles `request` with the handler of its row and returns what the
