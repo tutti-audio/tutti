@@ -1146,7 +1146,7 @@ fn logs(rig: &Rig) -> Vec<(u64, u64, u32, u32)> {
 
 /// **A scheduled param event lands on exactly its frame**, ramp or segment,
 /// under a ragged block schedule: the node sees it at offset
-/// `frame - block_start` of the block holding it, in both interpreters.
+/// `frame - block_start` of the block holding it.
 #[test]
 fn a_scheduled_param_lands_on_its_exact_frame_across_ragged_blocks() {
     let mut rig = rig();

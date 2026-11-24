@@ -6,13 +6,13 @@
 use std::any::Any;
 use std::sync::Arc;
 use std::time::Duration;
-use tutti_buffers::Interleaved;
+use tutti_buffers::{Interleaved, InterleavedMut};
 use tutti_rt::Mutex;
 
 use tutti_buffers::ChannelLayout;
 use tutti_cpal::MicConfig;
 use tutti_engine::{ManualStream, ManualStreamDriver, OutputSpec, StreamLatency};
-use tutti_graph::{InletRing, TapWriter};
+use tutti_graph::{InletRing, TapAlign, TapOptions, TapWriter};
 use tutti_session::{
     DeviceEvent, Error, InputConfig, InputOpener, LiveSession, MainOutput, OpenedInput, Phase,
     PhaseCx, Session, SessionEvent,
@@ -194,6 +194,59 @@ fn a_restart_reopens_an_added_input_into_the_same_node() {
         "the new capture is heard, the old is not"
     );
     let _ = input;
+}
+
+/// **A tap on a monitored input's node reads exactly the frames the capture
+/// pushed**, in order and at the capture's width: recording a monitored input
+/// is a raw tap on [`Input::node`](tutti_session::Input::node), beside the wire
+/// that monitors it. Frames the capture had not yet pushed read as silence.
+#[test]
+fn a_tap_on_a_monitored_input_reads_the_captured_frames() {
+    let record = Arc::new(Mutex::new(Record::default()));
+    let (mut session, stream) = live(&record);
+    let input = session.add_input(InputConfig::default()).expect("opens");
+    session
+        .graph()
+        .connect(input.node(), MainOutput)
+        .unwrap()
+        .unfaded();
+    let ports = [input.node().output(0), input.node().output(1)];
+    let mut tap = session
+        .graph()
+        .taps()
+        .open_ports(
+            &ports,
+            TapOptions::new(Samples::new(256)).align(TapAlign::Raw),
+        )
+        .expect("the input's node exists");
+
+    // Ten distinct stereo frames, pushed in two pieces.
+    let pushed: Vec<f32> = (0..10)
+        .flat_map(|f| [f as f32 + 1.0, -(f as f32) - 1.0])
+        .collect();
+    {
+        let mut rec = record.lock();
+        for piece in pushed.chunks(2 * 5) {
+            rec.writers[0]
+                .push_interleaved(Interleaved::new(piece, ChannelLayout::STEREO).unwrap());
+        }
+    }
+    let _ = session.update();
+    stream
+        .render_block(Samples::new(16))
+        .expect("the stream is open");
+
+    let mut got = vec![f32::NAN; 16 * 2];
+    assert_eq!(
+        tap.pop_into(InterleavedMut::new(&mut got, tap.layout()).unwrap())
+            .unwrap(),
+        Samples::new(16)
+    );
+    assert_eq!(got[..20], pushed[..], "the ten pushed frames, in order");
+    assert!(
+        got[20..].iter().all(|&v| v == 0.0),
+        "the six frames the capture had not pushed are silence"
+    );
 }
 
 /// **An input the restart cannot reopen is reported, typed, and the restart

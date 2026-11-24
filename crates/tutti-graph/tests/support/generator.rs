@@ -57,10 +57,9 @@ pub struct Desc {
     /// are likeliest to be running or waiting, so the next round aims
     /// replaces and `set_latency` there often enough to queue and cut them.
     pub recent: Vec<NodeKey>,
-    /// Its own stream for the audio fan-in choices, so adding fan-in left
-    /// the seeds' other choices (and the coverage the generators are held
-    /// to) where they were.
-    pub fan: Rng,
+    /// The stream the graph was drawn from, positioned after it: a case's
+    /// further draws (edits, lanes, modes) continue it.
+    pub rng: Rng,
     /// The base of each gain lane: the editor's, not the spec's.
     pub bases: BTreeMap<EdgeId, Gain>,
     /// The range of each gain lane.
@@ -188,27 +187,26 @@ pub fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
         // the compiled op sums in `Edge` order, silent addends skipped, and
         // a fold starts from `+0.0`. A hub is wider than `MAX_PORTS`
         // when enough earlier outputs exist (a chain of sum ops).
-        let mut fan = std::mem::replace(&mut desc.fan, Rng::new(1));
         let mut set: Vec<Edge> = edge.into_iter().collect();
-        if fan.chance(35) {
-            let hub = fan.chance(15);
+        if rng.chance(35) {
+            let hub = rng.chance(15);
             let tries = if hub {
                 direct.len() as u64 + 3
             } else {
-                1 + fan.below(3)
+                1 + rng.below(3)
             };
             for _ in 0..tries {
-                let extra = match fan.below(10) {
+                let extra = match rng.below(10) {
                     0 | 1 => {
                         let width = u64::from(desc.spec.topology.inputs.count());
-                        Some(Edge::Direct(PortSource::MainInput(fan.below(width) as u16)))
+                        Some(Edge::Direct(PortSource::MainInput(rng.below(width) as u16)))
                     }
                     2 => {
-                        let delay = Samples::new(MAX_BLOCK + 17 * fan.below(3) as usize);
-                        fan.pick(&any)
+                        let delay = Samples::new(MAX_BLOCK + 17 * rng.below(3) as usize);
+                        rng.pick(&any)
                             .map(|from| Edge::Feedback(FeedbackFrom::new(from, delay)))
                     }
-                    _ => fan.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p))),
+                    _ => rng.pick(&direct).map(|p| Edge::Direct(PortSource::Node(p))),
                 };
                 if let Some(e) = extra
                     && !set.contains(&e)
@@ -217,7 +215,6 @@ pub fn wire_node(desc: &mut Desc, j: usize, rng: &mut Rng) {
                 }
             }
         }
-        desc.fan = fan;
         set.sort();
         if set.is_empty() {
             desc.spec.topology.edges.remove(&at);
@@ -277,15 +274,14 @@ pub fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         }));
     // A channel now and then sums several sources, aligned to the output time
     // each on its own.
-    let mut fan = std::mem::replace(&mut desc.fan, Rng::new(1));
     for ch in 0..desc.spec.topology.outputs.len() {
-        if desc.spec.topology.outputs[ch].is_empty() || !fan.chance(35) {
+        if desc.spec.topology.outputs[ch].is_empty() || !rng.chance(35) {
             continue;
         }
-        for _ in 0..1 + fan.below(3) {
-            let extra = match fan.below(8) {
-                0 => PortSource::MainInput(fan.below(width) as u16),
-                _ => fan.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
+        for _ in 0..1 + rng.below(3) {
+            let extra = match rng.below(8) {
+                0 => PortSource::MainInput(rng.below(width) as u16),
+                _ => rng.pick(&outs).map_or(PortSource::Zero, PortSource::Node),
             };
             let set = &mut desc.spec.topology.outputs[ch];
             if extra != PortSource::Zero && !set.contains(&extra) {
@@ -294,7 +290,6 @@ pub fn wire_outputs(desc: &mut Desc, rng: &mut Rng) {
         }
         desc.spec.topology.outputs[ch].sort();
     }
-    desc.fan = fan;
 }
 
 pub fn fresh_key(desc: &mut Desc, rng: &mut Rng) -> NodeKey {
@@ -313,7 +308,7 @@ pub fn random_graph(seed: u64) -> Desc {
         order: Vec::new(),
         used: BTreeSet::new(),
         recent: Vec::new(),
-        fan: Rng::new(seed ^ 0xFA41_1A5E),
+        rng: Rng::new(0),
         bases: BTreeMap::new(),
         gain_ranges: BTreeMap::new(),
         port_ranges: BTreeMap::new(),
@@ -351,6 +346,7 @@ pub fn random_graph(seed: u64) -> Desc {
         wire_node(&mut desc, j, &mut rng);
     }
     wire_outputs(&mut desc, &mut rng);
+    desc.rng = rng;
     desc
 }
 

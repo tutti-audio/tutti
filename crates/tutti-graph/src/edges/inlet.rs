@@ -61,6 +61,7 @@ use tutti_units::{SampleRate, Samples, Tail};
 use crate::edges::tap::{TapReader, TapWriter};
 use crate::node::cost::Cost;
 use crate::node::io::Io;
+use crate::node::rates::SampleRates;
 use crate::node::shape::Shape;
 use crate::node::{Cx, IntoNode, Node, NodeParts, Prepare, Status};
 
@@ -112,13 +113,6 @@ impl<F: Float> InletRing<F> {
     pub fn layout(&self) -> ChannelLayout {
         self.reader.layout()
     }
-
-    /// The reader, for an [`InletNode`]: the rate was checked by whoever
-    /// took the ring in.
-    #[must_use]
-    pub fn into_reader(self) -> TapReader<F> {
-        self.reader
-    }
 }
 
 /// A node that copies a ring of its own into the graph: no inputs, one output
@@ -133,7 +127,9 @@ impl<F: Float> InletRing<F> {
 /// unheard.
 ///
 /// It does not resample and has no clock of its own: see the
-/// module docs. Real-time safe: `process` does not allocate or lock.
+/// module docs. Its [`shape`](Node::shape) allows only its ring's rate, so a
+/// graph re-prepared to another rate is refused naming it. Real-time safe:
+/// `process` does not allocate or lock.
 /// It reports an unbounded tail, so the executor never skips it as silent (a
 /// skipped block would leave its frames to pile up in the ring).
 ///
@@ -143,11 +139,13 @@ impl<F: Float> InletRing<F> {
 ///
 /// ```
 /// use tutti_buffers::Interleaved;
-/// use tutti_graph::InletNode;
-/// use tutti_units::Samples;
+/// use tutti_graph::{InletNode, InletRing};
+/// use tutti_units::{SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 ///
-/// let (node, mut producer) = InletNode::pair(ChannelLayout::STEREO, Samples::new(64));
+/// let (ring, mut producer) =
+///     InletRing::pair(ChannelLayout::STEREO, Samples::new(64), SampleRate::SR_48K);
+/// let node = InletNode::new(ring);
 /// let frame = Interleaved::new(&[0.5, -0.5], ChannelLayout::STEREO)?;
 /// producer.push_interleaved(frame); // one stereo frame, from any thread
 /// assert_eq!(node.layout(), ChannelLayout::STEREO);
@@ -155,24 +153,14 @@ impl<F: Float> InletRing<F> {
 /// ```
 #[derive(Debug)]
 pub struct InletNode<F: Float = f32> {
-    ring: TapReader<F>,
+    ring: InletRing<F>,
 }
 
 impl<F: Float> InletNode<F> {
-    /// An inlet over `ring`: the reader of an [`InletRing`]
-    /// ([`into_reader`](InletRing::into_reader)) whose rate the caller has
-    /// checked against the graph's. The node is as wide as the ring.
+    /// An inlet over `ring`, as wide as the ring and running at its rate.
     #[must_use]
-    pub fn new(ring: TapReader<F>) -> Self {
+    pub fn new(ring: InletRing<F>) -> Self {
         Self { ring }
-    }
-
-    /// An inlet of `width` channels over a new ring of `capacity` frames, and
-    /// the writer the producer fills it with. Allocates; control side.
-    #[must_use = "the writer is the only way to fill the ring"]
-    pub fn pair(width: ChannelLayout, capacity: Samples) -> (Self, TapWriter<F>) {
-        let (ring, writer) = TapReader::pair(usize::from(width.count()), capacity);
-        (Self::new(ring), writer)
     }
 
     /// The ring's width: one output a channel.
@@ -183,10 +171,13 @@ impl<F: Float> InletNode<F> {
 }
 
 impl<F: Float> Node<F> for InletNode<F> {
-    /// As wide as the ring. A live source: [`Tail::Unbounded`], so the
-    /// executor never skips it as silent.
+    /// As wide as the ring and running at its rate only: the ring is filled at
+    /// that rate and nothing resamples. A live source: [`Tail::Unbounded`], so
+    /// the executor never skips it as silent.
     fn shape(&self) -> Shape {
+        let rate = self.ring.rate();
         Shape::source_unassigned(self.ring.layout())
+            .with_rates(SampleRates::of(rate, rate))
             .tail(Tail::Unbounded)
             // A block copy out of the ring: measured 0.4-0.6 ns per frame and
             // channel, against a gain's 0.05 and `SvfFilterNode`'s 4.0 on the
@@ -209,7 +200,7 @@ impl<F: Float> Node<F> for InletNode<F> {
         // The frames the ring holds, then silence for the rest.
         let popped = outputs
             .planes_mut()
-            .and_then(|planes| self.ring.pop_planes(planes))
+            .and_then(|planes| self.ring.reader.pop_planes(planes))
             .map_or(0, Samples::get);
         for plane in outputs.iter_mut() {
             plane[popped..].fill(F::ZERO);

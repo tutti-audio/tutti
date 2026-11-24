@@ -8,27 +8,35 @@
 //! among the sources of its ports, each source is delayed by its gap to that
 //! arrival (the compensation the latency pass defines), a node maps the sum at
 //! its ports (a gain scales, a lag shifts, a smoother is `0.5 (1 + z^-1)`), and
-//! a feedback edge delays by exactly its frames, unaligned. A loop of gain `g`
+//! a feedback edge delays by exactly its frames, unaligned. An edge with a
+//! static weight `w` contributes `w` times its aligned source; a muted node
+//! writes silence, and a bypassed one (a gain or a smoother, which declare no
+//! latency) writes its input. A loop of gain `g`
 //! and `p` frames closes on `y = x + g z^-p y`: the geometric series
 //! `Σ g^k z^-kp x`. The output channels are aligned to the latest departure
 //! among them.
+//!
+//! The same figures hold through edits that touch no path to an output: a
+//! node inserted, removed or replaced where nothing reads it, and a
+//! `MaxBlock` change at the same rate (`across_unrelated_edits`), at one
+//! participant and on a pool.
 //!
 //! Every figure is dyadic (gains are powers of two, inputs and constants are
 //! multiples of `2^-4`, and a signal's weights are kept within a bound that
 //! fits a mantissa), so `f32` and `f64` renders equal the series exactly.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use proptest::prelude::*;
 use tutti_buffers::ChannelLayout;
-use tutti_graph::testing::{Kind, Word, input_signal};
+use tutti_graph::testing::{self as common, Harness, Kind, TestNode, Word, input_signal};
 use tutti_graph::{
-    Edge, FeedbackFrom, GraphSpec, InputPort, NodeKey, OutputPort, PortSource, Topology,
+    Edge, EdgeGain, EdgeId, FeedbackFrom, GraphSpec, InputPort, NodeKey, NodeMode, OutputPort,
+    PortSink, PortSource, Topology, Unforkable,
 };
-use tutti_units::Samples;
+use tutti_units::{Gain, Samples};
 
 use crate::generator::{MAX_BLOCK, Rng, schedule, spec_for};
-use tutti_graph::testing::Harness;
 
 /// Frames a case renders: a feedback loop of the generator's longest delay
 /// closes a few times within it.
@@ -102,9 +110,17 @@ struct Signal {
     departure: usize,
 }
 
+/// The weights an edge may carry: unity is no entry, zero is never skipped by
+/// value, and the rest are dyadic with signs.
+const WEIGHTS: [f64; 7] = [2.0, 0.5, -1.0, -0.5, 0.25, 0.0, 1.5];
+
 struct Built {
     kinds: BTreeMap<NodeKey, Kind>,
     topology: Topology,
+    /// The static weight of each weighted edge.
+    weights: Vec<(EdgeId, f64)>,
+    /// The mode each muted or bypassed node starts steady in.
+    modes: Vec<(NodeKey, NodeMode)>,
     /// Each output channel's figure.
     outputs: Vec<Series>,
 }
@@ -114,6 +130,8 @@ struct Builder {
     kinds: BTreeMap<NodeKey, Kind>,
     topology: Topology,
     signals: Vec<Signal>,
+    weights: Vec<(EdgeId, f64)>,
+    modes: Vec<(NodeKey, NodeMode)>,
     next: u64,
 }
 
@@ -137,6 +155,8 @@ impl Builder {
             kinds: BTreeMap::new(),
             topology,
             signals,
+            weights: Vec::new(),
+            modes: Vec::new(),
             next: 1,
         }
     }
@@ -163,21 +183,43 @@ impl Builder {
         picked
     }
 
-    /// Wires `picked` into `at`; returns the port's figure aligned to
-    /// `arrival`.
-    fn wire(&mut self, at: InputPort, picked: &[usize], arrival: usize) -> Series {
-        let mut edges: Vec<Edge> = picked
+    /// Wires `picked` into `at`, a few of the edges weighted; returns the
+    /// port's figure aligned to `arrival` and the weights it drew.
+    fn wire(
+        &mut self,
+        at: InputPort,
+        picked: &[usize],
+        arrival: usize,
+    ) -> (Series, Vec<(EdgeId, f64)>) {
+        let mut edges: Vec<(Edge, usize)> = picked
             .iter()
-            .map(|&i| Edge::Direct(self.signals[i].from))
+            .map(|&i| (Edge::Direct(self.signals[i].from), i))
             .collect();
         edges.sort();
         if !edges.is_empty() {
-            self.topology.edges.insert(at, edges);
+            self.topology
+                .edges
+                .insert(at, edges.iter().map(|&(e, _)| e).collect());
         }
-        picked.iter().fold(Series::default(), |sum, &i| {
+        let mut weights = Vec::new();
+        let mut sum = Series::default();
+        for (edge, i) in edges {
             let s = &self.signals[i];
-            sum.plus(&s.series.shifted(arrival - s.departure))
-        })
+            let mut aligned = s.series.shifted(arrival - s.departure);
+            if self.rng.chance(30) {
+                let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
+                weights.push((
+                    EdgeId {
+                        sink: PortSink::Port(at),
+                        from: edge,
+                    },
+                    w,
+                ));
+                aligned = aligned.scaled(w);
+            }
+            sum = sum.plus(&aligned);
+        }
+        (sum, weights)
     }
 
     /// A node of `kind` with one port per entry of `ports`; `f` maps the
@@ -193,12 +235,25 @@ impl Builder {
             .max()
             .unwrap_or(0);
         let key = self.key();
-        let figures: Vec<Series> = ports
+        let (figures, weights): (Vec<Series>, Vec<_>) = ports
             .iter()
             .enumerate()
             .map(|(p, picked)| self.wire(InputPort::new(key, p as u16), picked, arrival))
-            .collect();
-        let out = f(&figures);
+            .unzip();
+        let mut out = f(&figures);
+        // A node that declares no latency and has one input may start
+        // bypassed (it writes its input); any node may start muted.
+        let bypassable = latency == 0 && matches!(kind, Kind::Gain { .. } | Kind::Smooth);
+        let mode = match self.rng.below(10) {
+            0 => Some(NodeMode::Muted),
+            1 if bypassable => Some(NodeMode::Bypassed),
+            _ => None,
+        };
+        match mode {
+            Some(NodeMode::Muted) => out = Series::default(),
+            Some(_) => out = figures[0].clone(),
+            None => {}
+        }
         if !out.is_exact() {
             // The key is never added to the topology: dropping its edges leaves
             // no trace of the skipped node.
@@ -206,6 +261,8 @@ impl Builder {
             return None;
         }
         self.add(key, kind);
+        self.weights.extend(weights.into_iter().flatten());
+        self.modes.extend(mode.map(|m| (key, m)));
         self.signals.push(Signal {
             from: PortSource::Node(OutputPort::new(key, 0)),
             series: out,
@@ -310,17 +367,34 @@ impl Builder {
         self.topology
             .set_outputs(chosen.iter().map(|c| self.signals[c[0]].from));
         for (ch, one) in chosen.iter().enumerate() {
-            let mut sources: Vec<PortSource> = one.iter().map(|&i| self.signals[i].from).collect();
+            let mut sources: Vec<(PortSource, usize)> =
+                one.iter().map(|&i| (self.signals[i].from, i)).collect();
             sources.sort();
-            self.topology.outputs[ch] = sources;
-            outputs.push(one.iter().fold(Series::default(), |sum, &i| {
+            self.topology.outputs[ch] = sources.iter().map(|&(s, _)| s).collect();
+            let mut sum = Series::default();
+            for (source, i) in sources {
                 let s = &self.signals[i];
-                sum.plus(&s.series.shifted(time - s.departure))
-            }));
+                let mut aligned = s.series.shifted(time - s.departure);
+                if self.rng.chance(30) {
+                    let w = WEIGHTS[self.rng.below(WEIGHTS.len() as u64) as usize];
+                    self.weights.push((
+                        EdgeId {
+                            sink: PortSink::Output(ch as u16),
+                            from: Edge::Direct(source),
+                        },
+                        w,
+                    ));
+                    aligned = aligned.scaled(w);
+                }
+                sum = sum.plus(&aligned);
+            }
+            outputs.push(sum);
         }
         Built {
             kinds: self.kinds,
             topology: self.topology,
+            weights: self.weights,
+            modes: self.modes,
             outputs,
         }
     }
@@ -377,41 +451,174 @@ fn build(seed: u64) -> Built {
     b.finish()
 }
 
+/// `got`, the block rendered at `frame`, against each output channel's series.
+fn assert_series<F: Word>(built: &Built, input: &[f64], seed: u64, frame: usize, got: &[Vec<F>]) {
+    for (c, channel) in got.iter().enumerate() {
+        for (i, &y) in channel.iter().enumerate() {
+            let f = frame + i;
+            if f >= FRAMES {
+                break;
+            }
+            assert_eq!(
+                y.to_f64(),
+                built.outputs[c].at(f, input),
+                "seed {seed}, channel {c}, frame {f}"
+            );
+        }
+    }
+}
+
 /// The built graph through the executor at sample format `F` and block
 /// schedule `which`, against each output channel's series.
 fn renders_its_series<F: Word>(seed: u64, which: usize) {
     let built = build(seed);
-    let valid = GraphSpec::new(built.topology)
-        .validate()
-        .expect("built graphs are valid");
+    let mut spec = GraphSpec::new(built.topology.clone());
     let mut harness = Harness::<F>::with_format(MAX_BLOCK);
+    for &(id, w) in &built.weights {
+        spec.set_edge_gain(id, EdgeGain::default());
+        harness.start_edge_gain(id, Gain::new(w));
+    }
+    for &(key, mode) in &built.modes {
+        harness.start_mode(key, mode);
+    }
+    let valid = spec.validate().expect("built graphs are valid");
     harness.switch(&valid, &built.kinds);
     let input: Vec<f64> = input_signal::<f64>(0, FRAMES);
     let mut frame = 0;
     for n in schedule(which, seed, FRAMES) {
         let got = harness.block(n, &input_signal::<F>(frame as u64, n));
-        for (c, channel) in got.iter().enumerate() {
-            for (i, &y) in channel.iter().enumerate() {
-                let f = frame + i;
-                if f >= FRAMES {
-                    break;
-                }
-                assert_eq!(
-                    y.to_f64(),
-                    built.outputs[c].at(f, &input),
-                    "seed {seed}, channel {c}, frame {f}"
-                );
-            }
-        }
+        assert_series(&built, &input, seed, frame, &got);
         frame += n;
+    }
+}
+
+/// The node the edits insert, remove and replace: it reads main input 0 and
+/// nothing reads it, and its key sorts before every key of the grammar's
+/// (`1`) or after (`1 << 20`).
+fn decoy_key(seed: u64) -> NodeKey {
+    NodeKey(if seed.is_multiple_of(2) { 1 } else { 1 << 20 })
+}
+
+/// An edit that changes no path to an output.
+#[derive(Clone, Copy, Debug)]
+enum Edit {
+    /// The decoy appears, a `Lag` of this many frames.
+    Insert(usize),
+    Remove,
+    /// The decoy is a new unit of this latency.
+    Replace(usize),
+    /// A re-prepare to this `MaxBlock` at the same rate.
+    MaxBlock(usize),
+}
+
+/// The built graph, committed through the editor on `workers` participants.
+fn placed<F: Word>(built: &Built, workers: usize) -> Harness<F> {
+    let mut harness = Harness::<F>::with_format(MAX_BLOCK);
+    if workers > 1 {
+        harness.exec.set_pool(Some(common::test_pool(workers)));
+    }
+    for (&key, kind) in &built.kinds {
+        let unit = Unforkable(TestNode::<F>::in_format(kind.clone()));
+        harness.editor.insert(key, "test", unit);
+    }
+    let spec = harness.editor.spec_mut();
+    spec.topology.edges.clone_from(&built.topology.edges);
+    spec.topology.outputs.clone_from(&built.topology.outputs);
+    spec.topology.inputs = built.topology.inputs;
+    for &(id, _) in &built.weights {
+        spec.set_edge_gain(id, EdgeGain::default());
+    }
+    for &(id, w) in &built.weights {
+        harness.start_edge_gain(id, Gain::new(w));
+    }
+    for &(key, mode) in &built.modes {
+        harness.start_mode(key, mode);
+    }
+    harness.editor.commit().expect("a built graph commits");
+    harness.exec.apply_pending();
+    harness.editor.collect();
+    harness.outputs = built.topology.outputs.len();
+    harness.inputs = built.topology.inputs.count() as usize;
+    harness
+}
+
+/// Applies `edit` to the harness's editor and lets the executor take it.
+fn edit<F: Word>(harness: &mut Harness<F>, decoy: NodeKey, edit: Edit) {
+    let lag = |latency: usize| Unforkable(TestNode::<F>::in_format(Kind::Lag { latency }));
+    let ed = &mut harness.editor;
+    match edit {
+        Edit::Insert(latency) | Edit::Replace(latency) => {
+            ed.insert(decoy, "decoy", lag(latency));
+            ed.spec_mut().topology.edges.insert(
+                InputPort::new(decoy, 0),
+                vec![Edge::Direct(PortSource::MainInput(0))],
+            );
+            ed.commit().expect("the decoy commits");
+        }
+        Edit::Remove => {
+            ed.remove(decoy);
+            ed.commit().expect("the removal commits");
+        }
+        Edit::MaxBlock(max_block) => {
+            ed.reprepare(common::prepare(max_block))
+                .expect("reprepares");
+            harness.exec.apply_pending();
+            harness.editor.collect();
+        }
+    }
+    harness.exec.apply_pending();
+    harness.editor.collect();
+}
+
+/// The built graph rendered at block schedule `which` on `workers`
+/// participants while up to three edits that touch no path to an output land
+/// at block boundaries: every block is the figure the graph was built beside.
+/// Past a `MaxBlock` change the blocks are cut to fit it.
+fn across_unrelated_edits<F: Word>(seed: u64, which: usize, workers: usize) {
+    let built = build(seed);
+    let mut harness = placed::<F>(&built, workers);
+    let decoy = decoy_key(seed);
+    let blocks = schedule(which, seed, FRAMES);
+    let mut rng = Rng::new(seed ^ 0xED17);
+    let at: BTreeSet<usize> = (0..1 + rng.below(3))
+        .map(|_| 1 + rng.below(blocks.len() as u64 - 1) as usize)
+        .collect();
+    let (mut present, mut max_block, mut frame) = (false, MAX_BLOCK, 0);
+    let input: Vec<f64> = input_signal::<f64>(0, FRAMES);
+    for (i, &n) in blocks.iter().enumerate() {
+        if at.contains(&i) {
+            let latency = 1 + rng.below(40) as usize;
+            let next = match (rng.below(4), present) {
+                (0, _) => Edit::MaxBlock([32, 64, 100][rng.below(3) as usize]),
+                (_, false) => Edit::Insert(latency),
+                (1, true) => Edit::Remove,
+                (_, true) => Edit::Replace(latency),
+            };
+            match next {
+                Edit::Insert(_) => present = true,
+                Edit::Remove => present = false,
+                Edit::MaxBlock(m) => max_block = m,
+                Edit::Replace(_) => {}
+            }
+            edit(&mut harness, decoy, next);
+        }
+        let mut left = n;
+        while left > 0 {
+            let part = left.min(max_block);
+            let got = harness.block(part, &input_signal::<F>(frame as u64, part));
+            assert_series(&built, &input, seed, frame, &got);
+            frame += part;
+            left -= part;
+        }
     }
 }
 
 proptest! {
     #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(256), ..ProptestConfig::default() })]
 
-    /// Every built graph renders its path sum, delay-compensated and with
-    /// loops closed, exactly, at every block schedule.
+    /// Every built graph renders its path sum, delay-compensated, weighted,
+    /// muted and bypassed as drawn, and with loops closed, exactly, at every
+    /// block schedule.
     #[test]
     fn a_path_sum_with_compensation_renders_exactly(seed in any::<u64>(), which in 0usize..5) {
         renders_its_series::<f32>(seed, which);
@@ -424,14 +631,46 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig { cases: tutti_fixtures::cases(128), ..ProptestConfig::default() })]
+
+    /// The figures hold through a decoy node inserted, removed or replaced
+    /// and a `MaxBlock` change at the same rate, mid-render, at one
+    /// participant and on a pool, at both sample formats: an edit that touches
+    /// no path to an output moves no sample of it.
+    #[test]
+    fn a_path_sum_survives_edits_that_touch_no_path(
+        seed in any::<u64>(),
+        which in 0usize..5,
+        workers in prop::sample::select(common::WORKERS.to_vec()),
+    ) {
+        for workers in [1, workers] {
+            across_unrelated_edits::<f32>(seed, which, workers);
+            across_unrelated_edits::<f64>(seed, which, workers);
+        }
+    }
+}
+
 /// The grammar is not vacuous: over a fixed range of seeds the built graphs
 /// hold compensation (a source delayed to a later arrival), loops, fan-in at
-/// a port and a summed output channel.
+/// a port, a summed output channel, weighted edges (negative and zero ones,
+/// on ports and on output channels) and muted and bypassed nodes.
 #[test]
-fn the_grammar_builds_compensation_loops_and_fan_in() {
+fn the_grammar_builds_compensation_loops_fan_in_weights_and_modes() {
     let (mut loops, mut fan_in, mut summed, mut compensated) = (0, 0, 0, 0);
+    let (mut negative, mut zero, mut on_outputs, mut muted, mut bypassed) = (0, 0, 0, 0, 0);
     for seed in 0..512u64 {
         let built = build(seed);
+        negative += usize::from(built.weights.iter().any(|&(_, w)| w < 0.0));
+        zero += usize::from(built.weights.iter().any(|&(_, w)| w == 0.0));
+        on_outputs += usize::from(
+            built
+                .weights
+                .iter()
+                .any(|(id, _)| matches!(id.sink, PortSink::Output(_))),
+        );
+        muted += usize::from(built.modes.iter().any(|&(_, m)| m == NodeMode::Muted));
+        bypassed += usize::from(built.modes.iter().any(|&(_, m)| m == NodeMode::Bypassed));
         let t = &built.topology;
         loops += usize::from(
             t.edges
@@ -458,4 +697,12 @@ fn the_grammar_builds_compensation_loops_and_fan_in() {
         compensated > 100,
         "only {compensated} graphs hold compensation"
     );
+    assert!(
+        negative > 50,
+        "only {negative} graphs hold a negative weight"
+    );
+    assert!(zero > 20, "only {zero} graphs hold a zero weight");
+    assert!(on_outputs > 50, "only {on_outputs} graphs weight an output");
+    assert!(muted > 50, "only {muted} graphs mute a node");
+    assert!(bypassed > 20, "only {bypassed} graphs bypass a node");
 }

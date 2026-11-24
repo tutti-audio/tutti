@@ -3,8 +3,7 @@
 //!
 //! A value is not wiring: a change of one sends no plan. The editor owns the
 //! one table. A unit's cells start from it when a commit places the unit, a
-//! fork starts every unit steady in it, and the reference interpreter is
-//! handed it beside the graph it follows. What stays in the
+//! fork starts every unit steady in it. What stays in the
 //! [`GraphSpec`](crate::GraphSpec) is which lane drives a port and whether an
 //! edge has a gain lane.
 

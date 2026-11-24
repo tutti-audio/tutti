@@ -18,9 +18,7 @@
 //! recompile. When the recompile changes its *length* from `n` to `m`, it keeps
 //! the most recent `min(n, m)` inputs and zero-fills the older end — exactly
 //! the state a ring of length `m` would have had if it had seen the same
-//! inputs, as far as the kept history goes. The reference interpreter states
-//! the same rule independently, and the recompile differential test holds the
-//! two to it.
+//! inputs, as far as the kept history goes.
 
 use std::collections::VecDeque;
 
@@ -570,8 +568,7 @@ impl EventFifo {
     /// events in flight, and an event leaving in this very block is not. A
     /// FIFO a recompile retuned shorter holds a backlog that is all due at
     /// once; queued first, the input would have been refused against room
-    /// the backlog was about to free (the reference interpreter, which
-    /// bounds nothing, delivered it). Order is kept: every queued event was
+    /// the backlog was about to free. Order is kept: every queued event was
     /// input before this block's, at the same length, so it falls due no
     /// later.
     pub(crate) fn run(&mut self, input: &EventSlot, out: &mut EventSlot, frames: usize) -> u32 {

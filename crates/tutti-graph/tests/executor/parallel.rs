@@ -435,7 +435,7 @@ fn render_wide(
     all
 }
 
-fn pair(workers: usize) -> (Editor, Executor) {
+fn with_pool(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
     if workers > 1 {
         exec.set_pool(Some(test_pool(workers)));
@@ -452,14 +452,14 @@ fn pair(workers: usize) -> (Editor, Executor) {
 #[test]
 fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec) = pair(1);
+        let (mut ed, mut exec) = with_pool(1);
         let serial = render(&mut ed, &mut exec, &blocks);
         assert!(
             serial.iter().all(|c| c.iter().any(|&x| x != 0.0)),
             "every output carries signal"
         );
         for workers in WORKERS {
-            let (mut ed, mut exec) = pair(workers);
+            let (mut ed, mut exec) = with_pool(workers);
             let parallel = render(&mut ed, &mut exec, &blocks);
             for (c, (s, p)) in serial.iter().zip(&parallel).enumerate() {
                 assert_eq!(
@@ -479,10 +479,10 @@ fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
 #[test]
 fn extra_output_slices_are_ignored_on_every_path() {
     let blocks = [MAX_BLOCK, 7, 64];
-    let (mut ed, mut exec) = pair(1);
+    let (mut ed, mut exec) = with_pool(1);
     let serial = render_wide(&mut ed, &mut exec, &blocks, false, 1);
     for workers in WORKERS {
-        let (mut ed, mut exec) = pair(workers);
+        let (mut ed, mut exec) = with_pool(workers);
         let parallel = render_wide(&mut ed, &mut exec, &blocks, false, 1);
         assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
     }
@@ -496,14 +496,14 @@ fn extra_output_slices_are_ignored_on_every_path() {
 #[test]
 fn ranges_moved_mid_render_stay_bit_identical() {
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec) = pair(1);
+        let (mut ed, mut exec) = with_pool(1);
         let plan = std::sync::Arc::clone(ed.base().expect("a plan"));
         let serial = render_with(&mut ed, &mut exec, &blocks, true);
         assert!(
             std::sync::Arc::ptr_eq(&plan, ed.base().expect("a plan")),
             "a range move sends no plan"
         );
-        let (mut ed0, mut exec0) = pair(1);
+        let (mut ed0, mut exec0) = with_pool(1);
         let unranged = render(&mut ed0, &mut exec0, &blocks);
         assert_ne!(
             bits(&serial[3..4]),
@@ -511,7 +511,7 @@ fn ranges_moved_mid_render_stay_bit_identical() {
             "the ranges bite on the param sink's output"
         );
         for workers in WORKERS {
-            let (mut ed, mut exec) = pair(workers);
+            let (mut ed, mut exec) = with_pool(workers);
             let parallel = render_with(&mut ed, &mut exec, &blocks, true);
             assert_eq!(
                 bits(&serial),
@@ -527,7 +527,7 @@ fn ranges_moved_mid_render_stay_bit_identical() {
 /// so none is packed), spread over the pool.
 #[test]
 fn the_graph_spreads() {
-    let (_ed, exec) = pair(4);
+    let (_ed, exec) = with_pool(4);
     let plan = exec.plan().expect("a plan");
     assert!(plan.tasks().len() > 8, "{} tasks", plan.tasks().len());
     assert!(exec.is_parallel());
@@ -538,7 +538,7 @@ fn the_graph_spreads() {
 /// the live graph's own fresh render.
 #[test]
 fn an_offline_fork_renders_the_same_on_a_pool() {
-    let (live_ed, _live) = pair(1);
+    let (live_ed, _live) = with_pool(1);
     let pre = prepare(256);
     let fork = |workers: usize| {
         let (ed, mut exec) = live_ed

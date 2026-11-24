@@ -246,11 +246,7 @@ fn mic_with_ring(width: u16, frames: usize) -> (MicIn, TapWriter) {
     let (reader, writer) = TapReader::pair(usize::from(width), Samples::new(frames));
     let mic = MicIn {
         tap: reader,
-        sample_rate: SampleRate::SR_48K,
-        device_inputs: ChannelLayout::from(width),
-        faults: Arc::new(StreamFaults::new()),
-        latency: Arc::new(StreamLatency::new()),
-        _stream: StreamHandle(Owned::spawn(&executor(), "test-input", || Ok(())).expect("spawn")),
+        stream: test_stream(ChannelLayout::from(width)),
     };
     (mic, writer)
 }
@@ -272,38 +268,69 @@ fn a_full_ring_counts_the_frames_the_callback_dropped() {
     );
 }
 
-/// A capture of `device` inputs, selecting `inputs`, over rings of room for
-/// `frames` frames; the mic end and the monitor's.
-fn capture<F: Float>(
-    device: u16,
-    inputs: &[usize],
-    frames: usize,
-) -> (Capture<F>, MicIn<F>, TapReader<F>) {
-    let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
-    let width = select.dst_layout();
-    let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
-    let (ring, mon) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
-    let capture = Capture::new(select, ChannelLayout::from(device), rec, Some(mon));
-    let mic = MicIn {
-        tap: reader,
+/// A stream with no device behind it, over `device` inputs.
+fn test_stream(device: ChannelLayout) -> CaptureStream {
+    CaptureStream {
         sample_rate: SampleRate::SR_48K,
-        device_inputs: ChannelLayout::from(device),
+        device_inputs: device,
         faults: Arc::new(StreamFaults::new()),
         latency: Arc::new(StreamLatency::new()),
         _stream: StreamHandle(Owned::spawn(&executor(), "test-input", || Ok(())).expect("spawn")),
+    }
+}
+
+/// A capture of `device` inputs, selecting `inputs`, into a recording ring of
+/// room for `frames` frames; the mic end that drains it.
+fn capture<F: Float>(device: u16, inputs: &[usize], frames: usize) -> (Capture<F>, MicIn<F>) {
+    let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
+    let width = select.dst_layout();
+    let (reader, rec) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
+    let capture = Capture::new(select, ChannelLayout::from(device), rec);
+    let mic = MicIn {
+        tap: reader,
+        stream: test_stream(ChannelLayout::from(device)),
     };
-    (capture, mic, ring)
+    (capture, mic)
+}
+
+/// The same capture into a monitor ring instead; the reader that drains it.
+fn monitor_capture<F: Float>(
+    device: u16,
+    inputs: &[usize],
+    frames: usize,
+) -> (Capture<F>, TapReader<F>) {
+    let select = Fold::select(ChannelLayout::from(device), inputs).expect("a selection");
+    let width = select.dst_layout();
+    let (ring, mon) = TapReader::pair(usize::from(width.count()), Samples::new(frames));
+    (Capture::new(select, ChannelLayout::from(device), mon), ring)
+}
+
+/// A monitor capture, whose only consumer is the graph's inlet draining the
+/// ring (the `Session::add_input` path), loses no frames however many blocks
+/// run: no recording ring fills with nobody to pull it.
+#[test]
+fn a_monitor_only_capture_never_counts_a_loss() {
+    let (mut cap, mut monitor) = monitor_capture::<f32>(2, &[0, 1], 64);
+    let data = [0.5f32; 2 * 32];
+    let mut heard = [0.0f32; 2 * 32];
+    // Three times the ring's room, drained every block.
+    for _ in 0..6 {
+        cap.block(&data, edge::from_native::<f32, f32>);
+        let out = InterleavedMut::new(&mut heard, ChannelLayout::STEREO).unwrap();
+        assert_eq!(monitor.pop_into(out).unwrap(), Samples::new(32));
+    }
+    assert_eq!(monitor.take_lost(), Samples::new(0));
 }
 
 /// Inputs 3 and 4 of 16 reach the recording as its two channels, in that
-/// order, and the monitor ring carries the same two; inputs beyond the first
-/// two are reachable, which the stereo fold never allowed.
+/// order; inputs beyond the first two are reachable, which the stereo fold
+/// never allowed.
 ///
 /// The device frames are `100 * frame + input`, so every sample says where it
 /// came from.
 #[test]
 fn inputs_three_and_four_of_sixteen_are_the_recording() {
-    let (mut cap, mut mic, ring) = capture(16, &[2, 3], 64);
+    let (mut cap, mut mic) = capture(16, &[2, 3], 64);
     let data: Vec<f32> = (0..3)
         .flat_map(|f| (0..16).map(move |c| (100 * f + c) as f32))
         .collect();
@@ -317,6 +344,18 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
     let mut out = [0.0f32; 8];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(3)));
     assert_eq!(out[..6], [2.0, 3.0, 102.0, 103.0, 202.0, 203.0]);
+}
+
+/// The same inputs reach the monitor ring, and so the inlet's two channels.
+#[test]
+fn inputs_three_and_four_of_sixteen_are_the_monitor() {
+    let select = Fold::select(ChannelLayout::from(16u16), &[2, 3]).expect("a selection");
+    let (ring, writer) = InletRing::pair(select.dst_layout(), Samples::new(64), SampleRate::SR_48K);
+    let mut cap = Capture::new(select, ChannelLayout::from(16u16), writer);
+    let data: Vec<f32> = (0..3)
+        .flat_map(|f| (0..16).map(move |c| (100 * f + c) as f32))
+        .collect();
+    cap.block(&data, edge::from_native::<f32, f32>);
 
     let mut node =
         tutti_graph::contract::prepared(tutti_graph::InletNode::new(ring), SampleRate::SR_48K, 64);
@@ -340,7 +379,7 @@ fn inputs_three_and_four_of_sixteen_are_the_recording() {
 /// mono device.
 #[test]
 fn a_six_input_interface_is_six_inputs_not_five_point_one() {
-    let (mut cap, mut mic, _ring) = capture(6, &[0, 1, 2, 3, 4, 5], 64);
+    let (mut cap, mut mic) = capture(6, &[0, 1, 2, 3, 4, 5], 64);
     cap.block(
         &[0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6],
         edge::from_native::<f32, f32>,
@@ -349,7 +388,7 @@ fn a_six_input_interface_is_six_inputs_not_five_point_one() {
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(1)));
     assert_eq!(out, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
 
-    let (mut cap, mut mic, _ring) = capture(1, &[0, 0], 64);
+    let (mut cap, mut mic) = capture(1, &[0, 0], 64);
     cap.block(&[0.25f32, -0.5], edge::from_native::<f32, f32>);
     let mut out = [0.0f32; 4];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(2)));
@@ -363,7 +402,7 @@ fn a_six_input_interface_is_six_inputs_not_five_point_one() {
 /// whole and in order.
 #[test]
 fn a_big_callback_runs_in_chunks_and_integers_convert() {
-    let (mut cap, mut mic, _ring) = capture(2, &[1], 512);
+    let (mut cap, mut mic) = capture(2, &[1], 512);
     let data: Vec<i16> = (0..150).flat_map(|f| [0, f as i16 * 100]).collect();
     cap.block(&data, edge::from_native::<i16, f32>);
     let mut out = vec![0.0f32; 200];
@@ -502,11 +541,11 @@ fn a_mic_whose_backend_keeps_failing_without_audio_is_failed() {
 static ALLOC: tutti_fixtures::RtAllocCheck = tutti_fixtures::RtAllocCheck;
 
 /// The capture callback does not allocate: blocks of `f32` and `i16`, wider than
-/// a chunk, with the recording ring and the monitor ring both filling and
-/// then refusing (the full-ring branch), run under a disabled allocator.
+/// a chunk, with the ring filling and then refusing (the full-ring branch), run
+/// under a disabled allocator.
 #[test]
 fn the_capture_callback_does_not_allocate() {
-    let (mut cap, mut mic, _ring) = capture(8, &[2, 3], 256);
+    let (mut cap, mut mic) = capture(8, &[2, 3], 256);
     let f32s = vec![0.25f32; 8 * 150];
     let i16s = vec![1000i16; 8 * 150];
     // Warm both conversions, outside the gate.
@@ -518,7 +557,7 @@ fn the_capture_callback_does_not_allocate() {
             cap.block(&i16s, edge::from_native::<i16, f32>);
         }
     });
-    // The rings filled and refused whole frames; nothing was lost silently.
+    // The ring filled and refused whole frames; they were counted, not lost silently.
     assert!(Source::take_lost(&mut mic).get() > 0);
 }
 
@@ -540,7 +579,7 @@ fn ring_depths_follow_the_stream_rate() {
 /// is 0.5 and 0 is -1.
 #[test]
 fn an_offset_binary_input_reads_mid_scale_as_silence() {
-    let (mut cap, mut mic, _ring) = capture(1, &[0], 64);
+    let (mut cap, mut mic) = capture(1, &[0], 64);
     cap.block(&[32768u16, 49152, 0], edge::from_offset::<u16, f32>);
     let mut out = vec![9.0f32; 8];
     assert_eq!(pull_into(&mut mic, &mut out), Pull::Frames(Samples::new(3)));
@@ -559,7 +598,7 @@ fn an_i32_capture_in_an_f64_graph_keeps_more_than_24_bits() {
         want,
         "setup: an f32 loses the last bit"
     );
-    let (mut cap, mut mic, _ring) = capture::<f64>(1, &[0], 8);
+    let (mut cap, mut mic) = capture::<f64>(1, &[0], 8);
     cap.block(
         &[0x4000_0001i32, i32::MIN, 0],
         edge::from_native::<i32, f64>,
@@ -603,7 +642,7 @@ fn offset_binary_reads_by_the_sample_rule_in_f64() {
 /// `f64` blocks wider than a chunk fill both rings and then overrun them.
 #[test]
 fn the_f64_capture_callback_does_not_allocate() {
-    let (mut cap, mut mic, _ring) = capture::<f64>(8, &[2, 3], 256);
+    let (mut cap, mut mic) = capture::<f64>(8, &[2, 3], 256);
     let i32s = vec![1 << 20; 8 * 150];
     let f64s = vec![0.25f64; 8 * 150];
     cap.block(&i32s, edge::from_native::<i32, f64>);
