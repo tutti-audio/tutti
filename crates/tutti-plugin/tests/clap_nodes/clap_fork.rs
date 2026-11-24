@@ -44,7 +44,6 @@ use tutti_plugin_types::PluginForkError;
 use tutti_plugin_types::Timeouts;
 use tutti_timeline::{OfflineTimeline, OfflineTimelineConfig, render_graph};
 use tutti_ump::{Address, Message, NoteNumber, NoteVelocity, Voice2};
-use tutti_units::Db;
 use tutti_units::Normalized;
 use tutti_units::ParamId;
 use tutti_units::{SampleRate, Samples};
@@ -63,6 +62,12 @@ fn gain_at(db: f64) -> Normalized {
     Normalized::clamped((db - GAIN_DB_MIN) / (GAIN_DB_MAX - GAIN_DB_MIN))
 }
 
+/// The linear amplitude the probe multiplies by at `db`, computed as the probe
+/// does (`10^(dB/20)` in f64, then to f32): the tests compare with it exactly.
+fn amplitude(db: f64) -> f32 {
+    10f64.powf(db / 20.0) as f32
+}
+
 /// Input sample `i` of block `b`: distinct everywhere, small, exact in f32.
 fn input(b: usize, i: usize) -> f32 {
     ((b * BLOCK + i) % 997) as f32 / 1024.0
@@ -72,7 +77,7 @@ fn input(b: usize, i: usize) -> f32 {
 /// tagged and scaled.
 fn expected(b: usize, db: f64) -> Vec<f32> {
     (0..BLOCK)
-        .map(|i| (input(b - 1, i) + TAG_P0C0) * Db::new(db).to_amplitude().get() as f32)
+        .map(|i| (input(b - 1, i) + TAG_P0C0) * amplitude(db))
         .collect()
 }
 
@@ -424,7 +429,7 @@ fn a_graph_holding_a_plugin_forks_and_renders_offline() {
         )
         .expect("a graph holding a plugin forks");
     let out = Renderer::new(fork_ed, fork_exec).render(BLOCK * 8);
-    let want = TAG_P0C0 * Db::new(-6.0).to_amplitude().get() as f32;
+    let want = TAG_P0C0 * amplitude(-6.0);
     assert!(
         out[0][..BLOCK].iter().all(|&s| s == 0.0),
         "pipeline latency"
