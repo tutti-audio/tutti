@@ -13,11 +13,13 @@ use tutti_midi_ci::{
     PeTerminator, ProfileChannels, ProfileState, ReportRequest, ReportScope, SystemMessages,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
-use tutti_midi_hardware::ChannelCount;
 use tutti_midi_hardware::test_support::FakeCounters;
+use tutti_midi_hardware::{ChannelCount, InputFault};
 use tutti_session::Peer as _;
+use tutti_session::Resource as _;
 use tutti_session::{
-    ChannelProfile, ListedProfile, MidiInput, MidiRouteRule, PeerError, ReportPeer, Session,
+    ChannelProfile, ListedProfile, MidiInput, MidiRouteRule, PeerError, PeerEvent, ReportPeer,
+    ResourceFact, Session, SessionEvent,
 };
 use tutti_ump::{DeviceIdentity, ManufacturerId, Message, MidiGroup, U7, Voice2};
 
@@ -619,4 +621,34 @@ fn a_report_after_another_kind_is_asked_again() {
     for request in [&mut a1, &mut b, &mut a2] {
         assert_eq!(wire.result(request), Some(Ok(())));
     }
+}
+
+/// A reader that died is reopened by the session, and the new connection has
+/// found none of the old one's peers: the handle reads the new info and the
+/// update says the Info changed, once.
+#[test]
+fn a_reopened_reader_raises_one_info_change_and_the_handle_reads_it() {
+    let mut wire = Wire::new(Reply::Answer, Reply::Answer);
+    assert_eq!(wire.port().info().peers().len(), 1, "the peer was found");
+    wire.fake
+        .kill_input_reader(EndpointId::from_raw(MpePeer::RAW), InputFault::PortBroken);
+    wire.ms += 1;
+    let events = update_at(&mut wire.s, wire.start + Duration::from_millis(wire.ms));
+    let infos = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event,
+                SessionEvent::Peer(PeerEvent::ResourceChanged {
+                    id,
+                    fact: ResourceFact::Info,
+                }) if *id == wire.port().id()
+            )
+        })
+        .count();
+    assert_eq!(infos, 1, "one Info change: {events:?}");
+    assert!(
+        wire.port().info().peers().is_empty(),
+        "the new connection has found no peer yet"
+    );
 }
