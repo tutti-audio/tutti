@@ -72,9 +72,9 @@ fn a_failed_restart_keeps_the_opened_name() {
 
 /// **Starting an engine whose stream runs is an error, and the running
 /// stream is untouched.** Through `start_with` over a `ManualStreamDriver`
-/// (`start` resolves a real device first, so it needs hardware; its guard is
-/// the same `is_running` check, ahead of any device call). After `stop` a
-/// start succeeds again.
+/// (`start` resolves a real device first, so it needs hardware; it ends in
+/// the same `OutputStream::start_at` refusal). After `stop` a start succeeds
+/// again.
 #[test]
 fn starting_a_running_engine_is_an_error() {
     let state = empty_state(SampleRate::SR_44K1);

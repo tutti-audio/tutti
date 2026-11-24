@@ -165,7 +165,18 @@ pub struct OutputStream {
     faults: Arc<StreamFaults>,
     /// The output callback's reported delay, shared with each run's block.
     latency: Arc<StreamLatency>,
-    running: Option<Box<dyn RunningStream>>,
+    state: StreamState,
+}
+
+/// Which stream an [`OutputStream`] holds.
+enum StreamState {
+    /// No stream is held.
+    Stopped,
+    /// A stream is held and its device has not been reported gone.
+    Running(Box<dyn RunningStream>),
+    /// A stream is held whose device went or whose callback panicked
+    /// ([`StreamFaults::is_disconnected`]); a start releases it first.
+    Lost(Box<dyn RunningStream>),
 }
 
 // Hand-rolled: the running stream is not `Debug`. Reports the configuration a
@@ -188,7 +199,7 @@ impl OutputStream {
             spec,
             faults: Arc::new(StreamFaults::new()),
             latency: Arc::new(StreamLatency::new()),
-            running: None,
+            state: StreamState::Stopped,
         }
     }
 
@@ -226,14 +237,18 @@ impl OutputStream {
     /// # Errors
     /// [`StartError::AlreadyRunning`] if a stream is running (it is left
     /// running and the driver is not opened); otherwise whatever the driver's
-    /// [`open`](StreamDriver::open) reports.
+    /// [`open`](StreamDriver::open) reports. A stream whose device was lost is
+    /// released before the driver opens.
     pub fn start_with<F: Float, D: StreamDriver<F>>(
         &mut self,
         state: Arc<AudioCallbackState<F>>,
         driver: D,
     ) -> Result<(), StartError<D::Error>> {
-        if self.is_running() {
-            return Err(StartError::AlreadyRunning);
+        self.fold_loss();
+        match self.state {
+            StreamState::Running(_) => return Err(StartError::AlreadyRunning),
+            StreamState::Lost(_) => self.stop(),
+            StreamState::Stopped => {}
         }
         self.faults.clear();
         self.latency.reset();
@@ -243,7 +258,7 @@ impl OutputStream {
         let running = driver
             .open(&self.spec, block, Arc::clone(&self.faults))
             .map_err(StartError::Driver)?;
-        self.running = Some(Box::new(running));
+        self.state = StreamState::Running(Box::new(running));
         Ok(())
     }
 
@@ -269,8 +284,20 @@ impl OutputStream {
     ///
     /// When this returns, the callback no longer runs.
     pub fn stop(&mut self) {
-        if let Some(running) = self.running.take() {
-            running.stop();
+        match std::mem::replace(&mut self.state, StreamState::Stopped) {
+            StreamState::Running(running) | StreamState::Lost(running) => running.stop(),
+            StreamState::Stopped => {}
+        }
+    }
+
+    /// Moves a held stream whose device the backend reported gone to
+    /// [`Lost`](StreamState::Lost).
+    fn fold_loss(&mut self) {
+        if self.faults.is_disconnected()
+            && let StreamState::Running(running) =
+                std::mem::replace(&mut self.state, StreamState::Stopped)
+        {
+            self.state = StreamState::Lost(running);
         }
     }
 
@@ -294,6 +321,6 @@ impl OutputStream {
     /// has not been stopped; see [`StreamFaults::is_disconnected`].
     #[must_use]
     pub fn is_running(&self) -> bool {
-        self.running.is_some() && !self.faults.is_disconnected()
+        matches!(self.state, StreamState::Running(_)) && !self.faults.is_disconnected()
     }
 }

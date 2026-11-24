@@ -440,3 +440,66 @@ fn a_panic_in_the_render_is_caught_latched_and_cleared_by_a_restart() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 3);
 }
+
+/// A manual driver that records, when it opens, whether `earlier` was still
+/// open: the number of streams held at the moment a second one is created.
+struct OpensAfter {
+    inner: ManualStreamDriver,
+    earlier: Arc<tutti_engine::ManualStream>,
+    earlier_open_at_open: Arc<AtomicUsize>,
+}
+
+impl tutti_engine::StreamDriver for OpensAfter {
+    type Running = <ManualStreamDriver as tutti_engine::StreamDriver>::Running;
+    type Error = Infallible;
+
+    fn open(
+        self,
+        spec: &OutputSpec,
+        block: tutti_engine::OutputBlock,
+        faults: Arc<tutti_engine::StreamFaults>,
+    ) -> Result<Self::Running, Infallible> {
+        self.earlier_open_at_open
+            .store(usize::from(self.earlier.is_open()), Ordering::SeqCst);
+        self.inner.open(spec, block, faults)
+    }
+}
+
+/// **A start after a lost device never holds two streams.**
+///
+/// The stream whose device went is still held until it is released; opening
+/// the next one before releasing it holds two at once.
+#[test]
+fn a_start_after_a_lost_device_releases_the_dead_stream_before_opening() {
+    let (mut engine, state) = engine_and_state();
+    let (driver, first) = ManualStreamDriver::new();
+    let first = Arc::new(first);
+    engine.start_with(Arc::clone(&state), driver).unwrap();
+    first.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
+    assert!(!engine.is_running());
+
+    let (inner, second) = ManualStreamDriver::new();
+    let earlier_open_at_open = Arc::new(AtomicUsize::new(usize::MAX));
+    engine
+        .start_with(
+            state,
+            OpensAfter {
+                inner,
+                earlier: Arc::clone(&first),
+                earlier_open_at_open: Arc::clone(&earlier_open_at_open),
+            },
+        )
+        .expect("a start after a lost device opens");
+
+    assert_eq!(
+        earlier_open_at_open.load(Ordering::SeqCst),
+        0,
+        "the dead stream is released before the next one opens"
+    );
+    assert!(!first.is_open());
+    assert!(second.is_open() && engine.is_running());
+}

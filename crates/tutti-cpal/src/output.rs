@@ -347,9 +347,6 @@ impl AudioEngine {
     where
         CpalDriver: StreamDriver<F, Error = crate::DeviceError>,
     {
-        if self.stream.is_running() {
-            return Err(DeviceError::AlreadyRunning);
-        }
         let (driver, spec, opened) = self.resolve()?;
         self.stream.start_at(state, spec, driver)?;
         self.opened = opened;
