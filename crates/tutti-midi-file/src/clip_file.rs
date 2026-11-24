@@ -1,5 +1,5 @@
 //! MIDI 2.0 **Clip File** (M2-116) byte codec: the wire half under
-//! [`MidiFile`](crate::MidiFile).
+//! [`ClipFile`](crate::ClipFile).
 //!
 //! A Clip File is one sequence of Universal MIDI Packets. Layout (M2-116
 //! sections 4 to 7, all big-endian):
@@ -40,7 +40,7 @@
 //! clip's length.
 //!
 //! This module reads (a `winnow` grammar, in `read.rs`) and writes a clip as
-//! absolute ticks and packets, with no decoding past the structure: [`MidiFile`](crate::MidiFile) is the model
+//! absolute ticks and packets, with no decoding past the structure: [`ClipFile`](crate::ClipFile) is the model
 //! over it.
 
 use std::vec::Vec;
@@ -219,7 +219,7 @@ pub(crate) fn property_exchange(message: &Message) -> bool {
 /// second Delta Clock Stamp, not a shared one. So the parts after the first are
 /// written with none, and every other event keeps its own.
 ///
-/// [`MidiFile`]: crate::MidiFile
+/// [`ClipFile`]: crate::ClipFile
 pub(crate) fn write(
     ticks_per_quarter: TicksPerQuarterNote,
     header: &[(Tick, Ump)],

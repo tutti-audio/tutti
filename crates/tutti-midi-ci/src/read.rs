@@ -49,9 +49,9 @@ use tutti_ump::{
 };
 
 use super::{
-    CI_SUB_ID_1, CiCategories, CiDeviceId, DataControl, Destination, DetailsData, DeviceBody,
-    DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
-    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReplyData, ReplyVersion2,
+    CI_SUB_ID_1, CiCategories, CiDeviceId, CiHeader, DataControl, Destination, DetailsData,
+    DeviceBody, DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
+    ProfileChannels, ProfileFormat, ProfileId, ProfileList, ProfileLists, ReplyData, ReplyVersion2,
     ReportScope, SpecificData,
 };
 
@@ -327,8 +327,9 @@ pub(super) fn profile_body(mut body: &[u8]) -> Option<ProfileId> {
     profile_id.parse_next(&mut body).ok()
 }
 
-/// A Profile Id and its Channel count: absent for a Version 1 sender (it reads as
-/// 0, §5.3), read in full when there.
+/// A Profile Id and the Channel count after it: 0 where the body ends at the
+/// Profile Id, read in full when there. The caller keeps the count only for a
+/// version that has the field (§5.3).
 pub(super) fn profile_with_count_body(mut body: &[u8]) -> Option<(ProfileId, ProfileChannels)> {
     (
         profile_id,
@@ -338,15 +339,16 @@ pub(super) fn profile_with_count_body(mut body: &[u8]) -> Option<(ProfileId, Pro
         .ok()
 }
 
-/// A Profile Id and the target it is for at `address`, or `None` when malformed
-/// or when a Group or Function Block address carries a count other than 0
-/// (§7.8, §7.10, §7.11 notes).
-pub(super) fn profile_target_body(
-    address: CiDeviceId,
-    body: &[u8],
-) -> Option<(ProfileTarget, ProfileId)> {
+/// A Profile Id and the format its message has under `header`, or `None` when
+/// malformed or when a Group or Function Block address carries a count other
+/// than 0 (§7.8, §7.10, §7.11 notes). The body is checked whatever the version
+/// is; a Version 1 message keeps no count.
+pub(super) fn format_body(header: CiHeader, body: &[u8]) -> Option<(ProfileFormat, ProfileId)> {
     let (profile, channels) = profile_with_count_body(body)?;
-    Some((ProfileTarget::from_wire(address, channels).ok()?, profile))
+    Some((
+        ProfileFormat::from_wire(header.ci_version, header.device_id, channels).ok()?,
+        profile,
+    ))
 }
 
 /// The Profile Id and Inquiry Target of a Profile Details Inquiry.

@@ -34,7 +34,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 
-use tutti::midi::{MidiChannel, MidiFile, NoteNumber, Tick, Timebase, Track};
+use tutti::midi::{MidiChannel, MidiFile, NoteNumber, StandardMidiFile, Tick, Timebase, Track};
 use tutti::session::MainOutputKind;
 use tutti::{
     Beat, Bounce, Bpm, Format, LoadPlugin, MainOutput, MaxBlock, NodeKey, Pcm, PeerState, Range,
@@ -117,10 +117,15 @@ fn play<M: MainOutputKind>(
     // one beat timeline to adopt: this example plays one metrical timeline only.
     let loaded = tutti_fixtures::block_on(s.midi().load_midi(midi))?;
     let tempo_map = loaded.tempo()?.clone();
-    let Timebase::Metrical(metrical) = loaded.file().timebase() else {
-        return Err("a file with no one beat timeline has nothing to play on".into());
+    let end = match loaded.file() {
+        MidiFile::Standard(smf) => {
+            let Timebase::Metrical(metrical) = smf.timebase() else {
+                return Err("a file with no one beat timeline has nothing to play on".into());
+            };
+            metrical.beat_at(metrical.end())
+        }
+        MidiFile::Clip(clip) => clip.end().beats(clip.ticks_per_quarter()),
     };
-    let end = metrical.beat_at(metrical.end());
     // A file's tempo track is the file's data, not the project's: the project
     // adopts it on import, here, by an explicit call (a shared map, no copy).
     s.set(s.transport_handle().tempo().to(tempo_map))?;
@@ -171,7 +176,7 @@ fn phrase(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             U7::of(100),
         );
     }
-    MidiFile::smf(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?.write(path)?;
+    StandardMidiFile::new(SMF_DIVISION, Layout::Format0(LeadTrack::new(track)))?.write(path)?;
     Ok(())
 }
 
