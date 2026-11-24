@@ -57,9 +57,8 @@ fn prepare(max_block: usize) -> Prepare {
 
 /// Wire main outputs `0..width` to `node`'s outputs.
 fn outputs(ed: &mut Editor, node: NodeKey, width: u16) {
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))));
+    ed.set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(node, port))))
+        .expect("the sources exist");
 }
 
 /// Render `blocks` (frame counts) through `engine` into one interleaved
@@ -1015,9 +1014,8 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
     // One past the cap, off a three-channel node's ports, repeated: a legal
     // graph, wider than the scratch.
     let wide = MAX_CHANNELS + 1;
-    ed.spec_mut().topology.set_outputs(
-        (0..wide as u16).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
-    );
+    ed.set_outputs((0..wide as u16).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))))
+        .expect("the sources exist");
     ed.commit().expect("no limits yet");
     assert!(matches!(
         Engine::new(&transport, &mut ed, exec),
@@ -1027,9 +1025,10 @@ fn a_graph_engine_refuses_more_outputs_than_it_folds() {
 
     let (engine, mut ed) = graph_engine(&transport, 256, Unforkable(Clocked), 3);
     render(&engine, ChannelLayout::STEREO, &[256]);
-    ed.spec_mut().topology.set_outputs(
+    ed.set_outputs(
         (0..MAX_CHANNELS as u16 + 1).map(|c| PortSource::Node(OutputPort::new(NodeKey(1), c % 3))),
-    );
+    )
+    .expect("the sources exist");
     assert!(matches!(
         ed.commit(),
         Err(CommitError::TooManyOutputs { outputs, limit })

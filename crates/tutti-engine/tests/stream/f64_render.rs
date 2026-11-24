@@ -39,10 +39,11 @@ fn dc_state(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
-    ed.spec_mut().topology.set_outputs(vec![
+    ed.set_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
-    ]);
+    ])
+    .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     Box::leak(Box::new(ed));

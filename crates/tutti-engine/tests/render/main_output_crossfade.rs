@@ -33,10 +33,11 @@ impl Pool for Counting {
 /// Six sines, each through its own gain (keys 11 to 16), the main output's two
 /// channels taking `pair`.
 fn wire(ed: &mut Editor, pair: [u64; 2]) {
-    ed.spec_mut().topology.set_outputs(
+    ed.set_outputs(
         pair.map(|k| PortSource::Node(OutputPort::new(NodeKey(k), 0)))
             .to_vec(),
-    );
+    )
+    .expect("the sources exist");
 }
 
 /// 64-frame stereo blocks of a graph whose main output moves from channels (11, 12)
@@ -65,13 +66,11 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
             "gain",
             ForkByClone(support::Gain(0.1 * (k + 1) as f32)),
         );
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(NodeKey(k + 11), 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(
-                NodeKey(k + 1),
-                0,
-            )))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(k + 11), 0)),
+            from: Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(k + 1), 0))),
+        })
+        .expect("the edge wires");
     }
     wire(&mut ed, [11, 12]);
     ed.commit().expect("commits");
@@ -86,7 +85,7 @@ fn render(pooled: bool) -> (Vec<f32>, usize) {
             control
                 .publish_main_output(id, None, ChannelLayout::STEREO)
                 .expect("places");
-            ed.spec_mut().main_output_id = id;
+            ed.declare_main_output(ed.spec().main_output, id);
             wire(&mut ed, [15, 16]);
             ed.commit().expect("commits");
             assert!(

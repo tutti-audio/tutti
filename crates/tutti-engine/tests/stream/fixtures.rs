@@ -39,9 +39,8 @@ pub fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor)) -> E
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
 pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
+        .expect("the sources exist");
 }
 
 /// A rolling transport driving a sine through a filter, at `outputs` width.
@@ -62,10 +61,11 @@ pub fn rolling_state(outputs: usize) -> (Transport, Arc<AudioCallbackState>) {
                     .q(Q::new(0.7)),
             ),
         );
-        ed.spec_mut().topology.edges.insert(
-            InputPort::new(filter, 0),
-            vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
-        );
+        ed.connect_edge(tutti_graph::EdgeId {
+            sink: tutti_graph::PortSink::Port(InputPort::new(filter, 0)),
+            from: Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+        })
+        .expect("the edge wires");
         fan(ed, filter, outputs);
     });
     let state = AudioCallbackState::new(engine);

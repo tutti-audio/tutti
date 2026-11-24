@@ -82,9 +82,8 @@ fn click_graph(mode: MetronomeMode) -> (Editor, Executor) {
         "click",
         ClickNode::from(ClickNodeConfig::new(settings)),
     );
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))));
+    ed.set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(CLICK, port))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     (ed, exec)
 }

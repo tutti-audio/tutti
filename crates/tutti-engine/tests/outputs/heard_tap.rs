@@ -48,9 +48,8 @@ fn rig(width: u16) -> (Engine, HeardTaps) {
         MaxBlock::of(Samples::new(512)),
     ));
     ed.insert(NodeKey(1), "ramp", Unforkable(Ramp { width, at: 0 }));
-    ed.spec_mut()
-        .topology
-        .set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))));
+    ed.set_outputs((0..width).map(|port| PortSource::Node(OutputPort::new(NodeKey(1), port))))
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let mut engine = Engine::new(&transport, &mut ed, exec).expect("within limits");
     Box::leak(Box::new((ed, transport)));

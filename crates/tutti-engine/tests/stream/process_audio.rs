@@ -41,14 +41,14 @@ fn build_callback_state(sample_rate: f64) -> (Transport, AudioCallbackState) {
                 .q(Q::new(0.7)),
         ),
     );
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(filter, 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(source, 0)))],
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(filter, 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(source, 0))),
+    })
+    .expect("the edge wires");
     // The filter's single output on both device channels.
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(filter, 0)); 2])
+        .expect("the sources exist");
     ed.commit().expect("commits");
     let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
     let state = AudioCallbackState::new(engine);
