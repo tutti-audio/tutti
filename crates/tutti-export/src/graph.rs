@@ -137,7 +137,7 @@ impl Setup {
 /// # Latency and tail
 ///
 /// [`reported_latency`](Self::reported_latency) and
-/// [`reported_tail`](Self::reported_tail) answer from what the graph already
+/// [`declared_tail`](Self::declared_tail) answer from what the graph already
 /// holds — the compiled plan's worst-case output latency and the tail fold
 /// over its spec. The figures go into the [`Job`](crate::Job), where the leading
 /// trim and the tail extension are plain arithmetic.
@@ -147,7 +147,7 @@ impl Setup {
 /// ```
 /// use tutti_timeline::FrozenClock;
 /// use tutti_units::{Hz, SampleRate, Samples, Seconds};
-/// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup};
+/// use tutti_export::{render_one, BufferTarget, Control, Job, Output, Produced, RenderGraph, Setup, TailPolicy};
 /// use tutti_graph::GraphBuilder;
 /// use tutti_nodes::testing::Osc;
 /// use tutti_buffers::ChannelLayout;
@@ -159,7 +159,7 @@ impl Setup {
 /// let (editor, executor) = g.build(RenderGraph::prepare(rate)).expect("builds");
 /// let mut graph = RenderGraph::assemble(editor, executor, Setup::new()).expect("built together, so paired");
 ///
-/// let job = Job::new(rate, Seconds::new(0.1).to_samples(rate), Samples::new(0), Samples::new(0)).expect("a render");
+/// let job = Job::new(rate, Seconds::new(0.1).to_samples(rate), Samples::new(0), TailPolicy::Frames(Samples::ZERO)).expect("a render");
 /// let out = render_one(
 ///     &mut graph,
 ///     &job,
@@ -286,7 +286,7 @@ impl<F: Float> RenderGraph<F> {
     ///
     /// ```
     /// # use tutti_units::{Hz, SampleRate};
-    /// # use tutti_export::{Job, RenderGraph, Setup};
+    /// # use tutti_export::{Job, RenderGraph, Setup, TailPolicy};
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
     /// # use tutti_units::Samples;
@@ -298,7 +298,7 @@ impl<F: Float> RenderGraph<F> {
     /// # let (editor, executor) = g.build(RenderGraph::prepare(rate)).unwrap();
     /// # let graph = RenderGraph::assemble(editor, executor, Setup::new()).unwrap();
     /// let latency = graph.reported_latency();
-    /// let job = Job::new(rate, Samples::new(4_800), latency, Samples::new(0));
+    /// let job = Job::new(rate, Samples::new(4_800), latency, TailPolicy::Frames(Samples::ZERO));
     /// # let _ = job;
     /// ```
     ///
@@ -309,13 +309,16 @@ impl<F: Float> RenderGraph<F> {
             .map_or(Samples::ZERO, |plan| plan.total_latency().samples())
     }
 
-    /// The tail the graph reports — how long it keeps ringing after its input
-    /// stops — with its caveats: the fold over the graph's topology
-    /// (`tutti_graph::graph_tail`, at the graph's prepared rate), whose per-node
-    /// tails the editor probed from each prepared unit.
+    /// The tail the graph declares — the most it can keep ringing after its
+    /// input stops — with its caveats: the fold over the graph's topology
+    /// (`tutti_graph::graph_tail`, at the graph's prepared rate) of each node's
+    /// declared ceiling ([`Shape::tail`](tutti_graph::Shape)).
     ///
-    /// For a caller that wants a [`Job`](crate::Job)'s tail to be whatever the graph says: a reverb, a convolver, a hosted plugin
-    /// that declared a decay. It returns the figure and its caveats
+    /// For a caller that wants a [`Job`](crate::Job)'s tail to be what the
+    /// graph's nodes can ring for at most: a reverb, a convolver, a hosted
+    /// plugin that declared a decay. A render that spends what the nodes
+    /// *report* at the programme's end takes this as its ceiling
+    /// ([`TailPolicy::Reported`](crate::TailPolicy::Reported)). It returns the figure and its caveats
     /// rather than a frame count, because for two graphs there is no count:
     /// one that never decays, and one whose nodes were never taught to
     /// answer. Resolving either into a number is a decision, so it happens at
@@ -323,7 +326,7 @@ impl<F: Float> RenderGraph<F> {
     ///
     /// ```
     /// # use tutti_units::{Hz, SampleRate, Seconds};
-    /// # use tutti_export::{Job, RenderGraph, Setup};
+    /// # use tutti_export::{Job, RenderGraph, Setup, TailPolicy};
     /// # use tutti_graph::GraphBuilder;
     /// # use tutti_nodes::testing::Osc;
     /// # use tutti_units::Samples;
@@ -334,18 +337,31 @@ impl<F: Float> RenderGraph<F> {
     /// # g.pipe_output(tone);
     /// # let (editor, executor) = g.build(RenderGraph::prepare(rate)).unwrap();
     /// # let graph = RenderGraph::assemble(editor, executor, Setup::new()).unwrap();
-    /// let reported = graph.reported_tail();
-    /// let tail = reported.samples().unwrap_or_else(|| {
+    /// let declared = graph.declared_tail();
+    /// let tail = declared.samples().unwrap_or_else(|| {
     ///     // This bounce stops four seconds into an unbounded tail.
     ///     Seconds::new(4.0).to_samples(rate)
     /// });
-    /// let job = Job::new(rate, Samples::new(4_800), Samples::new(0), tail);
+    /// let job = Job::new(rate, Samples::new(4_800), Samples::new(0), TailPolicy::Frames(tail));
     /// # let _ = job;
     /// ```
-    pub fn reported_tail(&self) -> GraphTail {
+    pub fn declared_tail(&self) -> GraphTail {
         tutti_graph::graph_tail(
             &self.editor.spec().topology,
             self.editor.prepare().sample_rate(),
         )
+    }
+
+    /// The tail the graph's units owe now: [`declared_tail`](Self::declared_tail)'s
+    /// fold where a node owes what is left of its last
+    /// [`report_tail`](tutti_graph::Io::report_tail) (else its declared
+    /// ceiling) when nothing upstream still owes, nothing when the executor
+    /// skips it as at rest, and its declared ceiling after an upstream that
+    /// does ([`Executor::reported_tail`](tutti_graph::Executor::reported_tail)).
+    ///
+    /// Before a render it is the declared figure. A render reads it itself once
+    /// the programme has rendered ([`TailPolicy::Reported`](crate::TailPolicy::Reported)).
+    pub fn reported_tail(&self) -> GraphTail {
+        self.executor.reported_tail(&self.editor.spec().topology)
     }
 }

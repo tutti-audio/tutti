@@ -21,7 +21,8 @@ use tutti_codec::{Format, Pcm};
 use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, Control, EventLossPolicy, FileTarget, Job, Normalize, NormalizeSpec, Outcome,
-    Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, Written, render_one,
+    Output, Produced, RenderGraph, Rendered, Resample, Result, Setup, TailPolicy, Written,
+    render_one,
 };
 use tutti_graph::{Editor, ForkTarget};
 use tutti_timeline::RenderClock;
@@ -33,7 +34,7 @@ pub struct RenderConfig {
     pub sample_rate: SampleRate,
     pub duration_seconds: Seconds,
     pub latency: Samples,
-    pub tail: Samples,
+    pub tail: TailPolicy,
     pub on_event_loss: EventLossPolicy,
 }
 
@@ -43,7 +44,7 @@ impl Default for RenderConfig {
             sample_rate: SampleRate::SR_44K1,
             duration_seconds: Seconds::new(0.0),
             latency: Samples::new(0),
-            tail: Samples::new(0),
+            tail: TailPolicy::Frames(Samples::ZERO),
             on_event_loss: EventLossPolicy::default(),
         }
     }
@@ -98,7 +99,7 @@ impl ExportConfig {
         assert!(secs.is_finite() && secs >= 0.0, "a test names a length");
         let duration = Samples::new((secs * r.sample_rate.get()).round() as usize);
         let (length, tail) = if duration == Samples::new(0) {
-            (r.tail, Samples::new(0))
+            (r.tail.bound(), TailPolicy::Frames(Samples::ZERO))
         } else {
             (duration, r.tail)
         };
