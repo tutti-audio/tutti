@@ -441,7 +441,7 @@ impl tutti_engine::StreamDriver for UnopenableCard {
         _: &OutputSpec,
         _: tutti_engine::OutputBlock,
         _: std::sync::Arc<tutti_engine::StreamFaults>,
-    ) -> Result<Never, Self::Error> {
+    ) -> Result<tutti_engine::OpenedOutput<Never>, Self::Error> {
         Err(tutti_cpal::DeviceError::InvalidDevice(
             "a card that will not open".into(),
         ))
@@ -460,7 +460,7 @@ impl tutti_engine::StreamDriver for UnstartableTimer {
         _: &OutputSpec,
         _: tutti_engine::OutputBlock,
         _: std::sync::Arc<tutti_engine::StreamFaults>,
-    ) -> Result<Never, Self::Error> {
+    ) -> Result<tutti_engine::OpenedOutput<Never>, Self::Error> {
         Err(tutti_engine::TimerError::Thread(std::io::Error::other(
             "no thread",
         )))
@@ -656,7 +656,7 @@ impl tutti_engine::StreamDriver for ThreadedCard {
         spec: &OutputSpec,
         mut block: tutti_engine::OutputBlock,
         _: std::sync::Arc<tutti_engine::StreamFaults>,
-    ) -> Result<ThreadedRunning, Self::Error> {
+    ) -> Result<tutti_engine::OpenedOutput<ThreadedRunning>, Self::Error> {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = std::sync::Arc::clone(&stop);
         let channels = usize::from(spec.channels.count());
@@ -667,9 +667,12 @@ impl tutti_engine::StreamDriver for ThreadedCard {
                 std::thread::yield_now();
             }
         });
-        Ok(ThreadedRunning {
-            stop,
-            thread: Some(thread),
+        Ok(tutti_engine::OpenedOutput {
+            stream: ThreadedRunning {
+                stop,
+                thread: Some(thread),
+            },
+            quantum: spec.quantum,
         })
     }
 }

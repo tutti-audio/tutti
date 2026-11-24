@@ -80,12 +80,27 @@ impl OutputConfig {
 }
 
 impl OutputConfig {
-    /// Opens the device with callbacks of exactly `quantum` frames. A size
-    /// outside the range the device reports is
-    /// [`DeviceError::QuantumUnavailable`] when the stream is opened, never
-    /// clamped into it. Without this the stream asks for
-    /// [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames, clamped into the
-    /// range, and a device that reports no range opens with its own buffer.
+    /// Asks the device for callbacks of `quantum` frames. A size outside the
+    /// range the device reports is [`DeviceError::QuantumUnavailable`] when the
+    /// stream is opened, never clamped into it. Without this the stream asks
+    /// for [`PREFERRED_QUANTUM`](crate::PREFERRED_QUANTUM) frames, clamped into
+    /// the range, and a device that reports no range opens with its own buffer.
+    ///
+    /// The size is a request. A backend that refuses it
+    /// (`cpal::ErrorKind::UnsupportedConfig`) is asked again for its default
+    /// buffer, and the stream's [`OutputSpec::quantum`](tutti_engine::OutputSpec::quantum)
+    /// then reports what the open stream's `buffer_size` says, or `None` when
+    /// it cannot say. cpal 0.18 reports it as:
+    ///
+    /// | Backend | `buffer_size` |
+    /// |---|---|
+    /// | ALSA | the negotiated period |
+    /// | CoreAudio | the device's buffer frame size, which can change while the stream runs |
+    /// | JACK | the server's buffer size, which can change |
+    /// | WASAPI | the device period, which a shared-mode callback need not match |
+    /// | PulseAudio | the minimum request length, not the callback size |
+    ///
+    /// cpal documents it as an estimate that is not enforced per callback.
     #[must_use]
     pub fn quantum(mut self, quantum: OutputQuantum) -> Self {
         self.quantum = Some(quantum);
