@@ -98,7 +98,7 @@ private_intra_doc_links = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)', 'cfg(docsrs)'] }
 missing_docs = "warn"
 missing_debug_implementations = "deny"
-unreachable_pub = "warn"
+unreachable_pub = "deny"
 
 [workspace.lints.clippy]
 # The thread ban: `clippy.toml` lists the thread starts.

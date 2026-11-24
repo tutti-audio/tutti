@@ -39,7 +39,7 @@ pub(crate) fn graph_engine(transport: &Transport, build: impl FnOnce(&mut Editor
 }
 
 /// Every one of `outputs` main outputs reads `node`'s output 0.
-pub fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
+pub(crate) fn fan(ed: &mut Editor, node: NodeKey, outputs: usize) {
     ed.wire_outputs(vec![PortSource::Node(OutputPort::new(node, 0)); outputs])
         .unwrap();
 }
