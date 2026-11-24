@@ -15,7 +15,8 @@ use tutti_platform::Instant;
 use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
-use tutti_midi_runtime::{ClockKind, SyncMessages};
+use tutti_midi_runtime::SyncMessages;
+use tutti_session::ClockKind;
 use tutti_session::{
     FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent,
 };

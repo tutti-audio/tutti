@@ -7,29 +7,11 @@
 
 use crate::checks::unique_id::UniqueId;
 
-/// A `MIDIObjectType` of `MIDIServices.h`: `kMIDIObjectType_Source`.
-const OBJECT_TYPE_SOURCE: i32 = 2;
-/// A `MIDIObjectType` of `MIDIServices.h`: `kMIDIObjectType_Destination`.
-const OBJECT_TYPE_DESTINATION: i32 = 3;
-
-/// Which end of a connection an endpoint is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Kind {
-    /// What a device sends from.
-    Source,
-    /// What a device receives at.
-    Destination,
-}
-
-impl Kind {
-    /// The `MIDIObjectType` an endpoint of this kind has.
-    const fn object_type(self) -> i32 {
-        match self {
-            Self::Source => OBJECT_TYPE_SOURCE,
-            Self::Destination => OBJECT_TYPE_DESTINATION,
-        }
-    }
-}
+/// The `MIDIObjectType` of a source: `kMIDIObjectType_Source` of `MIDIServices.h`.
+pub(crate) const OBJECT_TYPE_SOURCE: i32 = 2;
+/// The `MIDIObjectType` of a destination: `kMIDIObjectType_Destination` of
+/// `MIDIServices.h`.
+pub(crate) const OBJECT_TYPE_DESTINATION: i32 = 3;
 
 /// An endpoint was not taken.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -52,15 +34,15 @@ pub enum FindError {
     },
 }
 
-/// Checks an object CoreMIDI returned for `wanted`: it has the `MIDIObjectType` of
-/// `kind` and reads `wanted` as its unique id.
+/// Checks an object CoreMIDI returned for `wanted`: it has the `MIDIObjectType`
+/// `expected` and reads `wanted` as its unique id.
 pub(crate) fn confirm(
     wanted: UniqueId,
-    kind: Kind,
+    expected: i32,
     object_type: i32,
     found: Option<UniqueId>,
 ) -> Result<(), FindError> {
-    if object_type != kind.object_type() {
+    if object_type != expected {
         return Err(FindError::WrongKind(wanted));
     }
     if found != Some(wanted) {
@@ -78,8 +60,11 @@ mod tests {
     /// `kMIDIObjectType_Source` is 2 and `kMIDIObjectType_Destination` is 3.
     #[test]
     fn an_object_of_the_kind_asked_for_with_the_id_asked_for_is_taken() {
-        assert_eq!(confirm(WANTED, Kind::Source, 2, Some(WANTED)), Ok(()));
-        assert_eq!(confirm(WANTED, Kind::Destination, 3, Some(WANTED)), Ok(()));
+        assert_eq!(confirm(WANTED, OBJECT_TYPE_SOURCE, 2, Some(WANTED)), Ok(()));
+        assert_eq!(
+            confirm(WANTED, OBJECT_TYPE_DESTINATION, 3, Some(WANTED)),
+            Ok(())
+        );
     }
 
     /// A list shift between listing and take leaves the object with another id:
@@ -88,14 +73,14 @@ mod tests {
     fn an_object_with_another_id_is_refused() {
         let other = UniqueId::new(-77);
         assert_eq!(
-            confirm(WANTED, Kind::Source, 2, Some(other)),
+            confirm(WANTED, OBJECT_TYPE_SOURCE, 2, Some(other)),
             Err(FindError::Changed {
                 wanted: WANTED,
                 found: Some(other)
             })
         );
         assert_eq!(
-            confirm(WANTED, Kind::Destination, 3, None),
+            confirm(WANTED, OBJECT_TYPE_DESTINATION, 3, None),
             Err(FindError::Changed {
                 wanted: WANTED,
                 found: None
@@ -108,13 +93,13 @@ mod tests {
     fn an_object_of_another_kind_is_refused() {
         for object_type in [-1, 0, 1, 3, 16, 17, 18, 19] {
             assert_eq!(
-                confirm(WANTED, Kind::Source, object_type, Some(WANTED)),
+                confirm(WANTED, OBJECT_TYPE_SOURCE, object_type, Some(WANTED)),
                 Err(FindError::WrongKind(WANTED)),
                 "type {object_type}"
             );
         }
         assert_eq!(
-            confirm(WANTED, Kind::Destination, 2, Some(WANTED)),
+            confirm(WANTED, OBJECT_TYPE_DESTINATION, 2, Some(WANTED)),
             Err(FindError::WrongKind(WANTED))
         );
     }

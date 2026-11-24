@@ -111,8 +111,8 @@ use crate::exec::history::TransportHistory;
 use crate::exec::loss::Dropped;
 use crate::exec::slots::{EventSlot, EventSlots, SharedFlags};
 use crate::exec::{
-    Head, Inject, OpState, Ring, Unit, audio_ring, capture_op, delay_op, event_delay_op,
-    event_merge_op, event_ring, main_input, node_dispatch, output_op, sum_op,
+    Head, Inject, OpState, Unit, capture_op, delay_op, event_delay_op, event_merge_op, main_input,
+    node_dispatch, output_op, sum_op,
 };
 use crate::model::gain::SumLane;
 use crate::node::MAX_PORTS;
@@ -235,7 +235,8 @@ struct Claims {
     audio: ClaimTable,
     events: ClaimTable,
     units: ClaimTable,
-    rings: ClaimTable,
+    audio_delays: ClaimTable,
+    event_delays: ClaimTable,
     audio_fb: ClaimTable,
     event_fb: ClaimTable,
     taps: ClaimTable,
@@ -257,7 +258,8 @@ impl Claims {
             audio: ClaimTable::new(plan.program.sizing.audio.len()),
             events: ClaimTable::new(plan.program.sizing.events.len()),
             units: ClaimTable::new(store_len),
-            rings: ClaimTable::new(plan.program.delays.len()),
+            audio_delays: ClaimTable::new(plan.program.audio_delays.len()),
+            event_delays: ClaimTable::new(plan.program.event_delays.len()),
             audio_fb: ClaimTable::new(plan.program.audio_feedback.len()),
             event_fb: ClaimTable::new(plan.program.event_feedback.len()),
             taps: ClaimTable::new(plan.program.taps.len()),
@@ -366,7 +368,8 @@ pub(crate) struct Block<'b, 'o, F: Float = f32> {
     pub(crate) flags: &'b mut [Flags],
     pub(crate) events: &'b mut [EventSlot],
     pub(crate) store: &'b mut [Option<Unit<F>>],
-    pub(crate) rings: &'b mut [Option<Ring<F>>],
+    pub(crate) audio_delays: &'b mut [Option<crate::exec::rings::AudioRing<F>>],
+    pub(crate) event_delays: &'b mut [Option<crate::exec::rings::EventFifo>],
     pub(crate) audio_fb: &'b mut [Option<crate::exec::rings::AudioRing<F>>],
     pub(crate) event_fb: &'b mut [Option<crate::exec::rings::EventFifo>],
     pub(crate) taps: &'b mut [Option<crate::edges::tap::TapWriter<F>>],
@@ -411,7 +414,8 @@ struct Shared<'s, 'o, F: Float = f32> {
     flags: &'s [AtomicU8],
     events: SplitRw<'s, EventSlot>,
     store: SplitMut<'s, Option<Unit<F>>>,
-    rings: SplitMut<'s, Option<Ring<F>>>,
+    audio_delays: SplitMut<'s, Option<crate::exec::rings::AudioRing<F>>>,
+    event_delays: SplitMut<'s, Option<crate::exec::rings::EventFifo>>,
     audio_fb: SplitMut<'s, Option<crate::exec::rings::AudioRing<F>>>,
     event_fb: SplitMut<'s, Option<crate::exec::rings::EventFifo>>,
     taps: SplitMut<'s, Option<crate::edges::tap::TapWriter<F>>>,
@@ -471,7 +475,8 @@ fn run_alone<F: Float>(par: &mut Par, b: Block<'_, '_, F>) -> bool {
     let mut ended = false;
     let mut cx = Ctx::<F, Exclusive> {
         store: b.store,
-        rings: b.rings,
+        audio_delays: b.audio_delays,
+        event_delays: b.event_delays,
         audio_fb: b.audio_fb,
         event_fb: b.event_fb,
         taps: b.taps,
@@ -530,7 +535,8 @@ fn run_spread<F: Float>(
         audio,
         events,
         units,
-        rings,
+        audio_delays,
+        event_delays,
         audio_fb,
         event_fb,
         taps,
@@ -562,7 +568,8 @@ fn run_spread<F: Float>(
             flags,
             events: SplitRw::new(b.events, 1, events),
             store: SplitMut::new(b.store, units),
-            rings: SplitMut::new(b.rings, rings),
+            audio_delays: SplitMut::new(b.audio_delays, audio_delays),
+            event_delays: SplitMut::new(b.event_delays, event_delays),
             audio_fb: SplitMut::new(b.audio_fb, audio_fb),
             event_fb: SplitMut::new(b.event_fb, event_fb),
             taps: SplitMut::new(b.taps, taps),
@@ -632,7 +639,8 @@ impl<F: Float> Shared<'_, '_, F> {
             } = &mut *ws;
             let mut cx = Ctx::<F, Claimed> {
                 store: &self.store,
-                rings: &self.rings,
+                audio_delays: &self.audio_delays,
+                event_delays: &self.event_delays,
                 audio_fb: &self.audio_fb,
                 event_fb: &self.event_fb,
                 taps: &self.taps,
@@ -679,7 +687,8 @@ where
     'o: 'c,
 {
     store: M::Table<'c, Option<Unit<F>>>,
-    rings: M::Table<'c, Option<Ring<F>>>,
+    audio_delays: M::Table<'c, Option<crate::exec::rings::AudioRing<F>>>,
+    event_delays: M::Table<'c, Option<crate::exec::rings::EventFifo>>,
     audio_fb: M::Table<'c, Option<crate::exec::rings::AudioRing<F>>>,
     event_fb: M::Table<'c, Option<crate::exec::rings::EventFifo>>,
     taps: M::Table<'c, Option<crate::edges::tap::TapWriter<F>>>,
@@ -713,9 +722,10 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 main_input(&mut a, flags, fx.inputs, channel, dst, frames);
             }
             Op::Delay { delay, src, dst } => {
-                let mut ring = self.rings.one(delay.index());
+                let mut ring = self.audio_delays.one(delay.index());
+                let ring = ring.as_mut().expect("built by apply");
                 let (mut a, flags) = self.audio.parts();
-                delay_op(audio_ring(&mut ring), &mut a, flags, src, dst, frames);
+                delay_op(ring, &mut a, flags, src, dst, frames);
             }
             Op::Sum { srcs, dst } => {
                 let (mut a, flags) = self.audio.parts();
@@ -756,9 +766,10 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 );
             }
             Op::EventDelay { delay, src, dst } => {
-                let mut ring = self.rings.one(delay.index());
+                let mut fifo = self.event_delays.one(delay.index());
+                let fifo = fifo.as_mut().expect("built by apply");
                 let mut e = self.events.slots();
-                let lost = event_delay_op(event_ring(&mut ring), &mut e, src, dst, frames);
+                let lost = event_delay_op(fifo, &mut e, src, dst, frames);
                 self.dropped.charge_delay(fx.plan, delay, lost);
             }
             Op::EventMerge { srcs, dst, bound } => {
@@ -814,10 +825,10 @@ impl<F: Float, M: Mode<F>> Ctx<'_, '_, F, M> {
                 delay,
             } => {
                 let mut out = self.outputs.one(channel as usize);
-                let mut ring = delay.map(|d| self.rings.one(d.index()));
+                let mut ring = delay.map(|d| self.audio_delays.one(d.index()));
                 let (a, flags) = self.audio.parts();
                 output_op(
-                    ring.as_mut().map(|r| audio_ring(r)),
+                    ring.as_mut().map(|r| r.as_mut().expect("built by apply")),
                     &mut out[..frames],
                     &a,
                     flags,

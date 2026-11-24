@@ -288,7 +288,7 @@ impl GraphSpec {
     /// **PDC.** The source is aligned to the edge's sink: to the sink node's
     /// arrival (a later source raises it, as a param source does), or, for a
     /// main output channel, to the output time (a later source raises
-    /// that). The delay is keyed [`DelayKey::EdgeGain`](crate::DelayKey::EdgeGain).
+    /// that). The delay is keyed [`EventDelayKey::EdgeGain`](crate::EventDelayKey::EdgeGain).
     ///
     /// An edge without an entry gets one (it reads the editor's base and
     /// range, unity and the default until set): the edge becomes a weighted
@@ -497,7 +497,7 @@ impl GraphSpec {
     ///   the audio crossfade already covers the swap.
     /// - **PDC.** A param source is aligned to the node's arrival like any of
     ///   its inputs: a source that arrives earlier is delayed
-    ///   ([`DelayKey::ParamEvent`](crate::DelayKey::ParamEvent)), and a later
+    ///   ([`EventDelayKey::ParamEvent`](crate::EventDelayKey::ParamEvent)), and a later
     ///   one raises the node's arrival.
     /// - **A node's mix is a port too.** [`ParamIn`] at
     ///   [`NodeMix::ADDR`](crate::NodeMix::ADDR) drives the node's

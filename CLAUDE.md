@@ -322,6 +322,9 @@ touched.
 - A pure algorithm over `tutti_buffers` views goes in `tutti-dsp` (a measurement in
   `tutti-measure`); a node file holds only the `Node` adapter.
 - A new trait states its boundary in one sentence without "and".
+- A method that answers "not for this kind" (`None`, `false`, ignored), or an `unreachable!`
+  that says two tags agree, means two kinds share a type: see `docs/style-guide.md` T19
+  before adding a tag, and before splitting.
 - A configured thing is `Type::new(required..)` plus chained options (`self`, a bare
   name, `-> Self`), never a struct of public fields filled with `..Default::default()`;
   a separate builder with `build()` only where finishing does work or can fail.
