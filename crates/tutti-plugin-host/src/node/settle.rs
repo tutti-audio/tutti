@@ -174,7 +174,7 @@ mod tests {
         // One tick every window, the pulse moving each time, to the last window
         // before the limit.
         while at + WINDOW < began + LIMIT {
-            at = at + WINDOW;
+            at += WINDOW;
             pulse += 1;
             assert_eq!(wait.poll(shown(false, pulse), at), Verdict::Waiting);
         }
