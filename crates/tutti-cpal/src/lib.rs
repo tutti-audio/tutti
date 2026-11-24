@@ -33,7 +33,7 @@
 //! ```rust,no_run
 //! use tutti_buffers::MaxBlock;
 //! use std::sync::Arc;
-//! use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
+//! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_engine::Engine;
 //! use tutti_timeline::Transport;
 //! use tutti_units::{Hz, Samples};
@@ -56,12 +56,7 @@
 //! let (mut editor, executor) = Editor::new(Prepare::new(sample_rate, MaxBlock::of(Samples::new(512))));
 //! let tone = NodeKey(1);
 //! editor.insert(tone, "tone", Osc::sine(Hz::new(440.0)));
-//! editor.resize_outputs(2);
-//! for channel in 0..2 {
-//!     let from = Edge::Direct(PortSource::Node(OutputPort::new(tone, 0)));
-//!     let sink = PortSink::Output(channel);
-//!     editor.connect_edge(EdgeId { sink, from })?;
-//! }
+//! editor.set_outputs(vec![PortSource::Node(OutputPort::new(tone, 0)); 2])?;
 //! editor.commit()?;
 //!
 //! // The engine owns the executor and the transport's clock; the editor stays

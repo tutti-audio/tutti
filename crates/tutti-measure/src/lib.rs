@@ -195,7 +195,7 @@
 //! use tutti_buffers::MaxBlock;
 //! use tutti_measure::correlate;
 //! use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, TransportPosition, Unforkable};
-//! use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
+//! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples};
 //! use tutti_buffers::{PlanesMut, StereoPlanes};
@@ -221,11 +221,7 @@
 //! let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 //! editor.insert(NodeKey(1), "tone", Unforkable(Tone));
 //! let out = |port| PortSource::Node(OutputPort::new(NodeKey(1), port));
-//! editor.resize_outputs(2);
-//! for channel in 0..2 {
-//!     let (sink, from) = (PortSink::Output(channel), Edge::Direct(out(channel)));
-//!     editor.connect_edge(EdgeId { sink, from }).expect("the ports exist");
-//! }
+//! editor.set_outputs([out(0), out(1)]).expect("the ports exist");
 //! let mut tap = editor.open_tap(TapId::of(1), vec![out(0), out(1)], TapOptions::new(Samples::new(256))).expect("the ports exist");
 //! editor.commit().expect("compiles");
 //! executor.apply_pending();

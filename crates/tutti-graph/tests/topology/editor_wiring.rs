@@ -234,8 +234,8 @@ fn event_edges_are_exact_and_the_last_takes_its_mark() {
     ed.connect_events(at, direct).expect("wires");
     ed.connect_events(at, feedback).expect("wires");
     assert_eq!(ed.spec().events[&at].len(), 2);
-    ed.spec_mut()
-        .require_resolution(at, from, Resolution::Sample);
+    ed.require_resolution(at, from, Resolution::Sample)
+        .expect("the edge exists");
 
     assert!(ed.disconnect_events(at, direct));
     assert_eq!(ed.spec().events[&at], vec![feedback]);
@@ -420,4 +420,70 @@ fn a_wiring_call_that_changes_nothing_leaves_the_revision() {
     let before = ed.revision();
     assert!(!ed.disconnect_events(sink, edge));
     assert_eq!(ed.revision(), before, "disconnect_events changed nothing");
+}
+
+/// `set_outputs` makes channel `c` exactly its `c`th source, heard in a
+/// render, and refuses a source that does not exist, changing nothing.
+#[test]
+fn set_outputs_wires_one_source_per_channel() {
+    let (mut ed, mut exec) = editor();
+    ed.insert(key(1), "level", Unforkable(Level(0.25)));
+    ed.insert(key(2), "level", Unforkable(Level(0.5)));
+    ed.set_outputs([out(1), PortSource::Zero]).expect("wires");
+    ed.set_outputs([out(2), out(1)]).expect("replaces");
+    let [left, right] = render(&mut ed, &mut exec);
+    assert!(left.iter().all(|&s| s == 0.5));
+    assert!(right.iter().all(|&s| s == 0.25));
+
+    let before = ed.spec().clone();
+    assert_eq!(
+        ed.set_outputs([out(1), out(7)]),
+        Err(WireError::Missing(MissingSource::Node { node: key(7) })),
+    );
+    assert_eq!(*ed.spec(), before);
+}
+
+/// `resize_inputs` cuts the edges that read a channel it removes.
+#[test]
+fn resize_inputs_cuts_the_edges_of_a_removed_channel() {
+    let (mut ed, _exec) = editor();
+    ed.insert(key(1), "times", Unforkable(Times(2.0)));
+    assert!(ed.resize_inputs(ChannelLayout::MONO));
+    assert!(!ed.resize_inputs(ChannelLayout::MONO));
+    ed.connect_edge(into_port(1, PortSource::MainInput(0)))
+        .expect("the main input exists");
+    assert_eq!(
+        ed.connect_edge(into_port(1, PortSource::MainInput(1))),
+        Err(WireError::Missing(MissingSource::MainInput {
+            channel: 1,
+            width: 1,
+        })),
+    );
+    assert!(ed.resize_inputs(ChannelLayout::EMPTY));
+    assert!(ed.spec().topology.edges.is_empty());
+}
+
+/// A resolution mark is written on an event edge that exists and refused on
+/// one that does not; clearing says whether there was one.
+#[test]
+fn resolution_marks_need_their_edge() {
+    let (mut ed, _exec) = editor();
+    ed.insert(key(1), "events", Unforkable(Events));
+    ed.insert(key(2), "events", Unforkable(Events));
+    let at = EventInputPort::new(key(2), 0);
+    let from = EventOutputPort::new(key(1), 0);
+    assert_eq!(
+        ed.require_resolution(at, from, Resolution::Sample),
+        Err(WireError::NoSuchEventEdge { at, from }),
+    );
+    ed.connect_events(at, EventEdge::Direct(from))
+        .expect("wires");
+    ed.require_resolution(at, from, Resolution::Sample)
+        .expect("the edge exists");
+    assert_eq!(
+        ed.spec().required_resolution[&(at, from)],
+        Resolution::Sample
+    );
+    assert!(ed.clear_resolution(at, from));
+    assert!(!ed.clear_resolution(at, from));
 }

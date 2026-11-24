@@ -308,6 +308,14 @@ pub enum WireError {
         /// The channel asked for.
         channel: u16,
     },
+    /// No event edge from `from` into `at` exists to mark.
+    #[error("no event edge from node {} into node {}", .from.node().0, .at.node().0)]
+    NoSuchEventEdge {
+        /// The sink port.
+        at: crate::EventInputPort,
+        /// The source port.
+        from: crate::EventOutputPort,
+    },
     /// The gain's edge is not one the author may weight.
     #[error(transparent)]
     Gain(#[from] crate::EdgeGainError),

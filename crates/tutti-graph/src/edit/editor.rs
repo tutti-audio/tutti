@@ -154,7 +154,7 @@ impl Limits {
 /// [`Editor::new`] builds the editor and its executor together, from one
 /// [`Prepare`]. Nodes are added with [`insert`](Self::insert) (which
 /// prepares the unit and returns its typed controls), wired through
-/// [`connect_edge`](Self::connect_edge) and the calls beside it, and shipped
+/// [`connect_edge`](Self::connect_edge), [`set_outputs`](Self::set_outputs) and the calls beside them, and shipped
 /// with [`commit`](Self::commit),
 /// which validates and compiles the spec against the plan sent last and
 /// sends a commit — the new [`Plan`] and only the units that changed — over a
@@ -180,7 +180,7 @@ impl Limits {
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
-/// use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
+/// use tutti_graph::{OutputPort, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
@@ -202,11 +202,9 @@ impl Limits {
 /// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
-/// editor.resize_outputs(1);
-/// let from = Edge::Direct(PortSource::Node(OutputPort::new(half, 0)));
 /// editor
-///     .connect_edge(EdgeId { sink: PortSink::Output(0), from })
-///     .expect("the node and the channel exist");
+///     .set_outputs([PortSource::Node(OutputPort::new(half, 0))])
+///     .expect("the node exists");
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:

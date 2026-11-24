@@ -51,7 +51,7 @@
 //!
 //! ```rust
 //! use tutti_buffers::MaxBlock;
-//! use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
+//! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_units::{Beat, Bpm, SampleRate, Samples, Tail};
 //! use tutti_buffers::ChannelLayout;
 //! use tutti_buffers::InterleavedMut;
@@ -91,12 +91,9 @@
 //! // only its block's `Env`, so a clone of it is a fork.
 //! let beats = NodeKey(1);
 //! editor.insert(beats, "beats", ForkByClone(Beats));
-//! editor.resize_outputs(2);
-//! for channel in 0..2 {
-//!     let from = Edge::Direct(PortSource::Node(OutputPort::new(beats, channel)));
-//!     let sink = PortSink::Output(channel);
-//!     editor.connect_edge(EdgeId { sink, from }).expect("the ports exist");
-//! }
+//! editor
+//!     .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(beats, port))))
+//!     .expect("the ports exist");
 //! editor.commit().expect("the graph compiles");
 //!
 //! let engine = Engine::new(&transport, &mut editor, executor).expect("within the limits");

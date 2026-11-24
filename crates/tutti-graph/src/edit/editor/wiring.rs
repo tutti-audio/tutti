@@ -1,12 +1,12 @@
 //! Wiring: the typed edits of audio, event, param and gain edges, and of the
 //! main output's width and declaration.
 
-use tutti_buffers::{ChannelTopology, Float};
+use tutti_buffers::{ChannelLayout, ChannelTopology, Float};
 
 use super::{Editor, MissingSource, WireError};
 use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
 use crate::node::param::ParamIn;
-use crate::{Edge, EdgeId, InputPort, MainOutputId, PortSink, PortSource};
+use crate::{Edge, EdgeId, InputPort, MainOutputId, PortSink, PortSource, Resolution};
 
 impl<F: Float> Editor<F> {
     /// Adds the audio edge `id` — a source into an input port, or into a main
@@ -208,6 +208,114 @@ impl<F: Float> Editor<F> {
             .retain(|id, _| !matches!(id.sink, PortSink::Output(c) if usize::from(c) >= width));
         self.touch();
         true
+    }
+
+    /// Wires the main output: channel `c` is fed by exactly the `c`th of
+    /// `sources`, and the output is as wide as there are sources
+    /// (`PortSource::Zero` is a silent channel). Every channel's earlier
+    /// sources go, and their gain entries with them. The checked form of
+    /// [`Topology::set_outputs`](crate::Topology::set_outputs).
+    ///
+    /// # Errors
+    ///
+    /// Refused, changing nothing: [`WireError::Missing`] for a source that
+    /// names a node that does not exist, a port past its node's outputs or a
+    /// main input past the graph's.
+    pub fn set_outputs(
+        &mut self,
+        sources: impl IntoIterator<Item = PortSource>,
+    ) -> Result<(), WireError> {
+        let sources: Vec<PortSource> = sources.into_iter().collect();
+        self.check_sources(&sources)?;
+        let before = self.spec.topology.outputs.clone();
+        self.spec.topology.set_outputs(sources);
+        if self.spec.topology.outputs != before {
+            let spec = &self.spec;
+            let stale: Vec<EdgeId> = spec
+                .gains
+                .keys()
+                .filter(|id| matches!(id.sink, PortSink::Output(_)) && !spec.has_edge(**id))
+                .copied()
+                .collect();
+            for id in stale {
+                self.spec.gains.remove(&id);
+            }
+            self.touch();
+        }
+        Ok(())
+    }
+
+    /// Makes the graph's main input `width` channels wide. An edge from a
+    /// channel cut goes, with its gain entry. Returns whether the width
+    /// changed.
+    pub fn resize_inputs(&mut self, width: ChannelLayout) -> bool {
+        if self.spec.topology.inputs == width {
+            return false;
+        }
+        self.spec.topology.inputs = width;
+        let cut = |s: &PortSource| matches!(s, PortSource::MainInput(c) if *c >= width.count());
+        for sources in self.spec.topology.edges.values_mut() {
+            sources.retain(|e| !matches!(e, Edge::Direct(s) if cut(s)));
+        }
+        self.spec
+            .topology
+            .edges
+            .retain(|_, sources| !sources.is_empty());
+        for sources in &mut self.spec.topology.outputs {
+            sources.retain(|s| !cut(s));
+        }
+        let spec = &self.spec;
+        let stale: Vec<EdgeId> = spec
+            .gains
+            .keys()
+            .filter(|id| !spec.has_edge(**id))
+            .copied()
+            .collect();
+        for id in stale {
+            self.spec.gains.remove(&id);
+        }
+        self.touch();
+        true
+    }
+
+    /// Marks the event edge `from -> at` as requiring its sink to honour
+    /// event offsets at least as finely as `resolution`
+    /// ([`GraphSpec::require_resolution`](crate::GraphSpec::require_resolution)
+    /// states the rule). Replaces a mark it had.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError::NoSuchEventEdge`] when no edge from `from` into `at`
+    /// exists; nothing changes.
+    pub fn require_resolution(
+        &mut self,
+        at: EventInputPort,
+        from: EventOutputPort,
+        resolution: Resolution,
+    ) -> Result<(), WireError> {
+        if !self
+            .spec
+            .events
+            .get(&at)
+            .is_some_and(|edges| edges.iter().any(|e| e.from() == from))
+        {
+            return Err(WireError::NoSuchEventEdge { at, from });
+        }
+        if self.spec.required_resolution.get(&(at, from)) != Some(&resolution) {
+            self.spec.require_resolution(at, from, resolution);
+            self.touch();
+        }
+        Ok(())
+    }
+
+    /// Drops the resolution mark on `from -> at`. Returns whether it had one.
+    pub fn clear_resolution(&mut self, at: EventInputPort, from: EventOutputPort) -> bool {
+        let had = self.spec.required_resolution.contains_key(&(at, from));
+        if had {
+            self.spec.clear_resolution(at, from);
+            self.touch();
+        }
+        had
     }
 
     /// Declares the main output: its topology (`None` undeclared) and the

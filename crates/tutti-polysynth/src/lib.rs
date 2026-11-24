@@ -31,7 +31,7 @@
 //! use tutti_polysynth::{
 //!     Adsr, FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig,
 //! };
-//! use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
+//! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
@@ -59,12 +59,9 @@
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let synth_key = NodeKey(1);
 //! let params = editor.insert(synth_key, "synth", synth).controls;
-//! editor.resize_outputs(2);
-//! for channel in 0..2 {
-//!     let from = Edge::Direct(PortSource::Node(OutputPort::new(synth_key, channel)));
-//!     let sink = PortSink::Output(channel);
-//!     editor.connect_edge(EdgeId { sink, from }).expect("the ports exist");
-//! }
+//! editor
+//!     .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(synth_key, port))))
+//!     .expect("the ports exist");
 //! editor.commit().expect("a one-node graph commits");
 //!
 //! // Its controls: the live params, by address.
