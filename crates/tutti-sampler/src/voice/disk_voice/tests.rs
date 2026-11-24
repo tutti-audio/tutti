@@ -71,8 +71,10 @@ pub(crate) fn voice_over(
         .expect("a test ring is placeable at its own width");
     let control = ring.control_reader();
     DiskVoice::new(
-        (ring, RingReader::new(pos, control)),
-        (width, place),
+        ring,
+        RingReader::new(pos, control),
+        width,
+        place,
         state,
         config,
         None,
@@ -888,8 +890,10 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
     let place = Place::for_channels(reader.channel_set(), frame).expect("a test ring places");
     let control = reader.control_reader();
     DiskVoice::new(
-        (reader, RingReader::new(pos, control)),
-        (frame, place),
+        reader,
+        RingReader::new(pos, control),
+        frame,
+        place,
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),

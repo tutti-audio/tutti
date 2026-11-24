@@ -372,8 +372,10 @@ impl<F: SamplerFloat> DiskVoice<F> {
     /// stream's file, which a fork reads. A voice over a bare ring (a test's)
     /// has none, so its fork plays silence.
     pub(crate) fn new(
-        (ring, reader): (SharedReader<F>, RingReader<F>),
-        (width, place): (ChannelLayout, Place<F>),
+        ring: SharedReader<F>,
+        reader: RingReader<F>,
+        width: ChannelLayout,
+        place: Place<F>,
         shared_state: Arc<Cells>,
         config: DiskVoiceConfig,
         origin: Option<Origin<F>>,
@@ -427,8 +429,10 @@ impl<F: SamplerFloat> DiskVoice<F> {
         } = reader;
         let file_rate = file.file_rate();
         Self::new(
-            (ring, reader),
-            (width, place),
+            ring,
+            reader,
+            width,
+            place,
             cells,
             DiskVoiceConfig {
                 window,
