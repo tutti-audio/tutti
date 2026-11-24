@@ -169,7 +169,11 @@ impl ProcessInitiator {
     pub fn inquire(&mut self, now: Instant) -> Vec<ProcessAction> {
         self.capabilities.ask(now, PEER_REPLY_TIMEOUT, ());
         vec![self.send(CiDeviceId::FunctionBlock, |header, to| {
-            CiMessage::ProcessCapabilitiesInquiry { header, to }
+            CiMessage::ProcessCapabilitiesInquiry {
+                source: header.source,
+                ci_version: header.ci_version,
+                to,
+            }
         })]
     }
 
@@ -204,7 +208,8 @@ impl ProcessInitiator {
         let ReportRequest { control, scope } = request;
         Ok(vec![self.send(scope.address(), |header, to| {
             CiMessage::MessageReportInquiry {
-                header,
+                source: header.source,
+                ci_version: header.ci_version,
                 to,
                 control,
                 scope,

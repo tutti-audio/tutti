@@ -14,7 +14,8 @@ fn start() -> (ProcessInitiator, Vec<ProcessAction>, Instant) {
 
 fn features_reply(features: ProcessFeatures) -> Decoded {
     Decoded::Message(CiMessage::ProcessCapabilitiesReply {
-        header: header_from(PEER, CiDeviceId::FunctionBlock),
+        source: Muid::of(PEER),
+        ci_version: CI_VERSION,
         to: Muid::of(OURS),
         features,
     })
@@ -22,7 +23,8 @@ fn features_reply(features: ProcessFeatures) -> Decoded {
 
 fn begin(scope: ReportScope) -> Decoded {
     Decoded::Message(CiMessage::MessageReportReply {
-        header: header_from(PEER, scope.address()),
+        source: Muid::of(PEER),
+        ci_version: CI_VERSION,
         to: Muid::of(OURS),
         scope,
     })
@@ -68,9 +70,10 @@ fn known(features: ProcessFeatures) -> (ProcessInitiator, Instant) {
 fn it_starts_with_a_capabilities_inquiry_to_the_peer_on_the_function_block() {
     // §9.2: the Destination is the Function Block, never a Channel.
     let (initiator, actions, now) = start();
-    let [CiMessage::ProcessCapabilitiesInquiry { header, to }] = sent(&actions)[..] else {
+    let [inquiry @ CiMessage::ProcessCapabilitiesInquiry { to, .. }] = sent(&actions)[..] else {
         panic!("one inquiry, got {actions:?}");
     };
+    let header = inquiry.header();
     assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
@@ -148,17 +151,14 @@ fn a_report_is_one_inquiry_a_reply_and_an_end_on_the_inquirys_device_id() {
         let request = ReportRequest::new(DataControl::NonDefault, everything(address));
         let actions = initiator.report(request, now).unwrap();
         let [
-            CiMessage::MessageReportInquiry {
-                header,
-                to,
-                control,
-                scope,
+            inquiry @ CiMessage::MessageReportInquiry {
+                to, control, scope, ..
             },
         ] = sent(&actions)[..]
         else {
             panic!("one inquiry, got {actions:?}");
         };
-        assert_eq!(header.device_id, address);
+        assert_eq!(inquiry.header().device_id, address);
         assert_eq!(*to, Muid::of(PEER));
         assert_eq!(*control, DataControl::NonDefault);
         assert_eq!(*scope, request.scope);
@@ -404,12 +404,14 @@ fn a_message_from_another_source_or_to_another_muid_is_not_this_peers() {
     initiator.report(function_block(), now).unwrap();
     let scope = everything(CiDeviceId::FunctionBlock);
     let from_other = Decoded::Message(CiMessage::MessageReportReply {
-        header: header_from(OTHER, CiDeviceId::FunctionBlock),
+        source: Muid::of(OTHER),
+        ci_version: CI_VERSION,
         to: Muid::of(OURS),
         scope,
     });
     let to_other = Decoded::Message(CiMessage::MessageReportReply {
-        header: header_from(PEER, CiDeviceId::FunctionBlock),
+        source: Muid::of(PEER),
+        ci_version: CI_VERSION,
         to: Muid::of(OTHER),
         scope,
     });

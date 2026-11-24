@@ -13,7 +13,9 @@
 //! `CiMessage` equal to the one sent.
 
 use tutti_midi_ci::Muid;
-use tutti_midi_ci::{CiCategories, CiHeader, CiMessage, Decoded, DiscoveryData, MaxSysexSize};
+use tutti_midi_ci::{
+    CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, DiscoveryData, MaxSysexSize,
+};
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
     DeviceIdentity, Message, Midi1Parser, MidiGroup, SoftwareRevision, SysexAssembler, SysexStep,
@@ -23,22 +25,21 @@ use tutti_ump::{
 #[test]
 fn midi1_wire_sysex_promotes_to_a_typed_ci_message() {
     // A Discovery probe exactly as a peer device would send it. A Discovery, not
-    // a reply: section 5.5.4 makes the path id the initiator's own, and
-    // `function_block` is reply-only, so `None` is the value
-    // section 5.6.2 names for a device that represents none.
+    // a reply: section 5.5.4 makes the path id the initiator's own.
     let probe = CiMessage::Discovery {
         header: CiHeader::new(Muid::of(0x1234)),
         data: DiscoveryData {
-            identity: DeviceIdentity {
-                manufacturer: ManufacturerId::of(0xA109),
-                family: [0x42, 0x00].map(U7::of),
-                model: [0x07, 0x00].map(U7::of),
-                revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
+            body: DeviceBody {
+                identity: DeviceIdentity {
+                    manufacturer: ManufacturerId::of(0xA109),
+                    family: [0x42, 0x00].map(U7::of),
+                    model: [0x07, 0x00].map(U7::of),
+                    revision: SoftwareRevision::from([1, 2, 3, 4].map(U7::of)),
+                },
+                categories: CiCategories::PROFILE_CONFIGURATION,
+                max_sysex_size: MaxSysexSize::of(512),
             },
-            categories: CiCategories::PROFILE_CONFIGURATION,
-            max_sysex_size: MaxSysexSize::of(512),
             output_path_id: Some(U7::of(3)),
-            function_block: None,
         },
     };
 

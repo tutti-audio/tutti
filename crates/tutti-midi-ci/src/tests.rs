@@ -35,8 +35,8 @@ fn muid_round_trips_through_wire_bytes() {
     assert_eq!(Muid::from_bytes([0x00, 0x7E, 0x7F, 0x7F]), None);
 }
 
-fn sample() -> DiscoveryData {
-    DiscoveryData::new(
+fn sample_body() -> DeviceBody {
+    DeviceBody::new(
         DeviceIdentity {
             manufacturer: ManufacturerId::of(0xA109),
             family: [0x34, 0x24].map(U7::of),
@@ -46,6 +46,14 @@ fn sample() -> DiscoveryData {
         CiCategories::PROFILE_CONFIGURATION,
         MaxSysexSize::of(512),
     )
+}
+
+fn sample() -> DiscoveryData {
+    DiscoveryData::new(sample_body())
+}
+
+fn sample_reply() -> ReplyData {
+    ReplyData::new(sample_body())
 }
 
 /// A broadcast Invalidate MUID with the target `5`, as bytes.
@@ -262,7 +270,7 @@ fn the_broadcast_rule_is_held_in_both_directions() {
         CiMessage::DiscoveryReply {
             header: header(),
             to: Muid::of(7),
-            data: sample(),
+            data: sample_reply(),
         },
         CiMessage::Ack {
             header: header(),
@@ -390,7 +398,7 @@ fn long_message() -> CiMessage {
     CiMessage::DiscoveryReply {
         header: header(),
         to: Muid::of(2),
-        data: sample(),
+        data: sample_reply(),
     }
 }
 
