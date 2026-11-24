@@ -373,21 +373,18 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     assert_eq!(header.status, PeStatus::NotFound);
 }
 
-/// M2-103 section 12.2: a Get no one answers resolves `TimedOut` after the Property
-/// Exchange timeout since it was sent, and not before.
+/// M2-103 section 12.2: a Get no one answers resolves `TimedOut`. The time it
+/// takes is pinned with constructed instants in `tutti-midi-hardware`'s MIDI-CI
+/// tests: here the session's MIDI-CI task also steps, on the real clock, so a
+/// request's deadline may start on either clock and only the outcome is asserted.
+/// The bound is a count of steps, and guards a request that never resolves.
 #[test]
-fn a_fetch_nothing_answers_times_out_after_the_property_exchange_timeout() {
+fn a_fetch_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
     let mut request = wire.listed(&PeResource::LocalOn).fetch();
     wire.run(5);
-    let wait = PE_TIMEOUT.as_millis() as u64;
-    wire.step(wait - 20);
-    assert_eq!(wire.result(&mut request), None, "still waiting");
-    wire.step(40);
-    // The session's MIDI-CI task ends the request once it has read a time past
-    // the timeout: stepped until it has. The bound is a count of simulated
-    // milliseconds, and guards a request that never resolves.
+    wire.step(PE_TIMEOUT.as_millis() as u64);
     let ended = (0..2000).find_map(|_| {
         let out = wire.result(&mut request);
         if out.is_none() {
