@@ -10,7 +10,7 @@ use crate::common::OpenPorts as _;
 use crate::common::{MF, blocks, note, play};
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
+    CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody, MaxSysexSize, ReplyData,
 };
 use tutti_midi_device::{
     Capabilities, Endpoint, EndpointId, MidiIdentity, PortDirection, Supports,
@@ -163,7 +163,7 @@ impl Clock {
             for message in ci(&sent) {
                 // The peer of the wire answers each Discovery, declaring
                 // Profile Configuration.
-                if let CiMessage::Discovery { header, .. } = &message {
+                if let CiMessage::Discovery { source, .. } = &message {
                     let data = ReplyData::new(DeviceBody::new(
                         device(1),
                         CiCategories::PROFILE_CONFIGURATION,
@@ -171,8 +171,9 @@ impl Clock {
                     ));
                     answers.extend(
                         CiMessage::DiscoveryReply {
-                            header: CiHeader::new(PEER),
-                            to: header.source,
+                            device_id: CiDeviceId::FunctionBlock,
+                            source: PEER,
+                            to: *source,
                             data,
                         }
                         .packets(MidiGroup::FIRST)
@@ -326,10 +327,10 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
     s.set(s.policy::<MidiPolicy>().to(policy(2, "My App")))
         .unwrap();
     let first = clock.run(&mut s, &fake, 400);
-    let [CiMessage::Discovery { header, data }] = first.as_slice() else {
+    let [CiMessage::Discovery { source, data, .. }] = first.as_slice() else {
         panic!("one Discovery as the first identity: {first:?}");
     };
-    let (old, who) = (header.source, data.body.identity);
+    let (old, who) = (*source, data.body.identity);
     assert_eq!(who, device(2));
     let port = &ports.input;
     assert_eq!(port.info().peers().len(), 1, "the peer was found");
@@ -348,15 +349,15 @@ fn a_changed_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new()
             header: from,
             target,
         },
-        CiMessage::Discovery { header, data },
+        CiMessage::Discovery { source, data, .. },
     ] = then.as_slice()
     else {
         panic!("Invalidate MUID, then Discovery: {then:?}");
     };
     assert_eq!((from.source, *target), (old, old));
-    assert_ne!(header.source, old, "a fresh MUID");
+    assert_ne!(*source, old, "a fresh MUID");
     assert_eq!(data.body.identity, device(9));
-    let newer = header.source;
+    let newer = *source;
 
     assert_eq!(
         port.info().peers().len(),

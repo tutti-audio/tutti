@@ -112,11 +112,11 @@ pub(super) fn midi1_running() -> (Wire, Muid) {
     // The poll that ends the inquiry starts MIDI-CI.
     let _ = polled(&mut wire, 20);
     let sent = ci_sent(&wire);
-    let [(group, CiMessage::Discovery { header, .. })] = sent.as_slice() else {
+    let [(group, CiMessage::Discovery { source, .. })] = sent.as_slice() else {
         panic!("one Discovery expected");
     };
     assert_eq!(*group, GROUP_0);
-    let source = header.source;
+    let source = *source;
     (wire, source)
 }
 
@@ -139,10 +139,13 @@ fn a_function_block_that_declares_midi_ci_is_sent_discovery_on_its_first_group()
     assert_eq!(payload[4], CI_VERSION.get());
     assert_eq!(payload[9..13], [0x7F; 4], "the Broadcast MUID");
     assert_eq!(payload.len(), 13 + 17);
-    let Decoded::Message(CiMessage::Discovery { header, data }) = CiMessage::decode(payload) else {
+    let Decoded::Message(CiMessage::Discovery {
+        device_id, data, ..
+    }) = CiMessage::decode(payload)
+    else {
         panic!("a Discovery");
     };
-    assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
+    assert_eq!(device_id, CiDeviceId::FunctionBlock);
     // The body (Table 6): exactly the app's identity (`identity()`: manufacturer
     // `41 00 00`, family 1 2, model 3 4, revision 5 6 7 8), Profile Configuration,
     // Property Exchange and Process Inquiry as the categories (bits 2, 3 and 4 of
@@ -220,7 +223,8 @@ fn messages_are_routed_by_group() {
     let mut wire = endpoint_wire(&[ci_block(0, 2, 2)]);
     let _ = received(&wire);
     let discovery = CiMessage::Discovery {
-        header: CiHeader::new(peer()),
+        device_id: CiDeviceId::FunctionBlock,
+        source: peer(),
         data: DiscoveryData::new(peer_data().body),
     };
     say(&wire, MidiGroup::of(5), &discovery, 200);
@@ -274,7 +278,8 @@ fn a_reply_to_discovery_makes_the_peer_appear_and_is_reported_once() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data(),
         },
@@ -314,7 +319,8 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
         &wire,
         GROUP_0,
         &CiMessage::Discovery {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             data,
         },
         10_001,
@@ -322,11 +328,19 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     let none = polled(&mut wire, 10_002);
     assert!(none.is_empty(), "a Discovery finds no peer: {none:?}");
     let sent = ci_sent(&wire);
-    let [(group, CiMessage::DiscoveryReply { header, to, data })] = sent.as_slice() else {
+    let [
+        (
+            group,
+            CiMessage::DiscoveryReply {
+                source, to, data, ..
+            },
+        ),
+    ] = sent.as_slice()
+    else {
         panic!("one Reply to Discovery, got {sent:?}");
     };
     assert_eq!(*group, GROUP_0);
-    assert_eq!((header.source, *to), (ours, peer()));
+    assert_eq!((*source, *to), (ours, peer()));
     assert_eq!(
         data.version_2,
         Some(ReplyVersion2 {
@@ -348,7 +362,8 @@ fn an_invalidate_muid_of_a_found_peer_removes_it_and_is_reported() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data(),
         },
@@ -419,7 +434,7 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
     let _ = polled(&mut wire, 2);
     let _ = polled(&mut wire, 3);
     let sent = ci_sent(&wire);
-    let [(_, CiMessage::Discovery { header, .. })] = sent.as_slice() else {
+    let [(_, CiMessage::Discovery { source, .. })] = sent.as_slice() else {
         panic!("the Discovery reached the device, got {sent:?}");
     };
     assert!(
@@ -427,8 +442,9 @@ fn nothing_midi_ci_reaches_the_sessions_output_and_the_graph_still_hears_sysex()
         "and not the session's output"
     );
     let reply = CiMessage::DiscoveryReply {
-        header: CiHeader::new(peer()),
-        to: header.source,
+        device_id: CiDeviceId::FunctionBlock,
+        source: peer(),
+        to: *source,
         data: peer_data(),
     };
     say(&wire, GROUP_0, &reply, 5);
@@ -454,7 +470,8 @@ fn the_inputs_disconnect_ends_midi_ci() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data(),
         },
@@ -485,7 +502,8 @@ fn a_reply_to_discovery_is_addressed_to_one_device() {
         &wire,
         GROUP_0,
         &CiMessage::Discovery {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             data: DiscoveryData::new(peer_data().body),
         },
         40,
@@ -586,7 +604,8 @@ fn the_peers_read_are_a_snapshot_shared_until_they_change() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data(),
         },
@@ -624,7 +643,8 @@ fn a_gap_in_the_stream_ring_never_joins_a_midi_ci_message() {
     let (mut wire, ours) = midi1_running();
     let reply = |source: Muid| {
         let mut payload = CiMessage::DiscoveryReply {
-            header: CiHeader::new(source),
+            device_id: CiDeviceId::FunctionBlock,
+            source,
             to: ours,
             data: peer_data(),
         }
@@ -702,7 +722,7 @@ fn discoveries(wire: &Wire) -> Vec<(MidiGroup, Muid)> {
 fn discoveries_of(sent: Vec<(MidiGroup, CiMessage)>) -> Vec<(MidiGroup, Muid)> {
     sent.into_iter()
         .filter_map(|(group, m)| match m {
-            CiMessage::Discovery { header, .. } => Some((group, header.source)),
+            CiMessage::Discovery { source, .. } => Some((group, source)),
             _ => None,
         })
         .collect()
@@ -716,7 +736,8 @@ pub(super) fn peer_declaring(categories: CiCategories) -> (Wire, Muid) {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data_of(categories),
         },
@@ -737,7 +758,8 @@ fn find_peer(wire: &mut Wire, group: MidiGroup, ours: Muid, ms: u64) {
         wire,
         group,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data(),
         },
@@ -908,7 +930,8 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data,
         },
@@ -1064,7 +1087,8 @@ fn a_peer_that_declares_profile_configuration_is_sent_a_profile_inquiry() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data_of(CiCategories::PROFILE_CONFIGURATION),
         },
@@ -1086,7 +1110,8 @@ fn a_peer_that_declares_profile_configuration_is_sent_a_profile_inquiry() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(other),
+            device_id: CiDeviceId::FunctionBlock,
+            source: other,
             to: ours,
             data: peer_data(),
         },
@@ -1726,7 +1751,8 @@ fn a_peer_that_declares_process_inquiry_is_sent_a_capabilities_inquiry() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data_of(CiCategories::PROCESS_INQUIRY),
         },
@@ -1754,7 +1780,8 @@ fn a_peer_that_declares_process_inquiry_is_sent_a_capabilities_inquiry() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(other),
+            device_id: CiDeviceId::FunctionBlock,
+            source: other,
             to: ours,
             data: peer_data(),
         },
@@ -2169,7 +2196,8 @@ fn property_peer() -> (Wire, Muid, Vec<CiMessage>) {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: ours,
             data: peer_data_of(CiCategories::PROPERTY_EXCHANGE),
         },
@@ -2707,7 +2735,7 @@ fn a_new_muid_renews_the_responder() {
     let _ = polled(&mut wire, 70);
     let sent = ci_sent(&wire);
     let Some(new) = sent.iter().find_map(|(_, m)| match m {
-        CiMessage::Discovery { header, .. } => Some(header.source),
+        CiMessage::Discovery { source, .. } => Some(*source),
         _ => None,
     }) else {
         panic!("a new round of Discovery: {sent:?}");
@@ -2717,7 +2745,8 @@ fn a_new_muid_renews_the_responder() {
         &wire,
         GROUP_0,
         &CiMessage::DiscoveryReply {
-            header: CiHeader::new(peer()),
+            device_id: CiDeviceId::FunctionBlock,
+            source: peer(),
             to: new,
             data: peer_data_of(CiCategories::PROPERTY_EXCHANGE),
         },

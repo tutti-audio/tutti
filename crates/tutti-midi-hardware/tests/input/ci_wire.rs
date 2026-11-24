@@ -14,7 +14,7 @@
 
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CiCategories, CiHeader, CiMessage, Decoded, DeviceBody, DiscoveryData, MaxSysexSize,
+    CiCategories, CiDeviceId, CiMessage, Decoded, DeviceBody, DiscoveryData, MaxSysexSize,
 };
 use tutti_ump::ManufacturerId;
 use tutti_ump::{
@@ -27,7 +27,8 @@ fn midi1_wire_sysex_promotes_to_a_typed_ci_message() {
     // A Discovery probe exactly as a peer device would send it. A Discovery, not
     // a reply: section 5.5.4 makes the path id the initiator's own.
     let probe = CiMessage::Discovery {
-        header: CiHeader::new(Muid::of(0x1234)),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(0x1234),
         data: DiscoveryData {
             body: DeviceBody {
                 identity: DeviceIdentity {

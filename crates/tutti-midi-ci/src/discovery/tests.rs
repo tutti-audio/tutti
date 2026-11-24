@@ -1,4 +1,4 @@
-use super::super::testing::{DST, decoded, header};
+use super::super::testing::{DST, SRC, decoded};
 use super::super::*;
 use super::*;
 use tutti_ump::ManufacturerId;
@@ -45,7 +45,8 @@ fn sample_reply() -> ReplyData {
 #[test]
 fn discovery_round_trips() {
     let msg = CiMessage::Discovery {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         data: sample_discovery(),
     };
     let bytes = msg.encode();
@@ -60,7 +61,8 @@ fn discovery_round_trips() {
 #[test]
 fn discovery_carries_the_special_manufacturer_id_7c() {
     let msg = CiMessage::Discovery {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         data: DiscoveryData {
             body: DeviceBody {
                 identity: DeviceIdentity {
@@ -171,18 +173,16 @@ fn a_reply_answering_a_discovery_echoes_its_path_id_and_a_version_1_one_is_path_
 #[test]
 fn a_version_1_discovery_reply_message_is_read() {
     let mut bytes = CiMessage::DiscoveryReply {
-        header: CiHeader {
-            ci_version: CiVersion::of(0x01),
-            ..header()
-        },
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         to: Muid::of(DST),
         data: sample_reply(),
     }
     .encode();
     bytes.truncate(13 + 16);
+    bytes[4] = 0x01;
     match decoded(&bytes) {
-        CiMessage::DiscoveryReply { header, to, data } => {
-            assert_eq!(header.ci_version, CiVersion::of(0x01));
+        CiMessage::DiscoveryReply { to, data, .. } => {
             assert_eq!(to, Muid::of(DST));
             assert_eq!(data.version_2, None);
             assert_eq!(data.body, sample_body());
@@ -206,7 +206,8 @@ fn a_reply_shorter_than_version_1_is_malformed() {
     assert!(is_malformed(&body[..17], true));
     assert!(!is_malformed(&body[..17], false));
     let mut bytes = CiMessage::DiscoveryReply {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         to: Muid::of(DST),
         data: sample_reply(),
     }
@@ -224,7 +225,8 @@ fn a_reply_shorter_than_version_1_is_malformed() {
 #[test]
 fn a_discovery_reply_round_trips() {
     let msg = CiMessage::DiscoveryReply {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         to: Muid::of(DST),
         data: sample_reply(),
     };
@@ -364,40 +366,36 @@ fn a_max_sysex_size_is_four_seven_bit_bytes_least_significant_first() {
 }
 
 // M2-101 §5.3, §5.4: a message is written in one Message Format Version, and the
-// fields of Discovery and its Reply are that version's: the Version 1 byte
-// goes with a body that ends after the receive buffer size, and no other version
-// does.
+// fields of Discovery and its Reply are that version's: the Version 1 byte goes with
+// a body that ends after the receive buffer size, and no other version does.
 /// Spec: m2-101/5.4#8, m2-101/5.4#9
 #[test]
-fn a_written_discovery_has_the_body_its_version_names() {
-    let v1 = |bytes: &[u8]| (bytes[4] == 1, bytes.len() == 13 + 16, bytes.len() == 13 + 17);
-    for version in [1, 2] {
-        let header = CiHeader {
-            ci_version: CiVersion::of(version),
-            ..header()
-        };
-        let mut v1_discovery = sample_discovery();
-        v1_discovery.output_path_id = None;
-        for data in [sample_discovery(), v1_discovery] {
-            let bytes = CiMessage::Discovery { header, data }.encode();
-            let (names_v1, short, _) = v1(&bytes);
-            assert_eq!(names_v1, short, "Discovery: header {version}, {data:?}");
+fn a_written_discovery_names_the_version_its_body_has() {
+    let version_1 = DiscoveryData {
+        output_path_id: None,
+        ..sample_discovery()
+    };
+    for (data, version, len) in [(sample_discovery(), 2, 17), (version_1, 1, 16)] {
+        let bytes = CiMessage::Discovery {
+            device_id: CiDeviceId::FunctionBlock,
+            source: Muid::of(SRC),
+            data,
         }
-        let mut v1_reply = sample_reply();
-        v1_reply.version_2 = None;
-        for data in [sample_reply(), v1_reply] {
-            let bytes = CiMessage::DiscoveryReply {
-                header,
-                to: Muid::of(DST),
-                data,
-            }
-            .encode();
-            let (names_v1, _, _) = v1(&bytes);
-            assert_eq!(
-                names_v1,
-                bytes.len() == 13 + 16,
-                "Reply: header {version}, {data:?}"
-            );
+        .encode();
+        assert_eq!((bytes[4], bytes.len()), (version, 13 + len), "{data:?}");
+    }
+    let version_1 = ReplyData {
+        version_2: None,
+        ..sample_reply()
+    };
+    for (data, version, len) in [(sample_reply(), 2, 18), (version_1, 1, 16)] {
+        let bytes = CiMessage::DiscoveryReply {
+            device_id: CiDeviceId::FunctionBlock,
+            source: Muid::of(SRC),
+            to: Muid::of(DST),
+            data,
         }
+        .encode();
+        assert_eq!((bytes[4], bytes.len()), (version, 13 + len), "{data:?}");
     }
 }
