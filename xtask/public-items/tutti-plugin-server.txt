@@ -1,0 +1,17 @@
+# The public items of tutti-plugin-server: one row per `pub` item its source declares, `<kind> <path>`,
+# sorted (`cargo xtask write-public-items` rewrites this file from the tree).
+# A new public item needs its row in the change that adds it, argued in the pull request;
+# a row with no item is deleted, so the list only shrinks on its own.
+const server::EXIT_HOST_UNWATCHED
+const server::EXIT_PLUGIN_LEAKED
+const server::EXIT_RENDER_LANE_LOST
+const server::EXIT_TASKS_DETACHED
+enum server::Ended
+fn main_loop::unix::adopt_host
+fn main_loop::windows::adopt_host
+fn server::PluginServer::new
+fn server::PluginServer::run
+fn server::failure_status
+struct server::PluginServer
+type main_loop::unix::HostEnd
+type main_loop::windows::HostEnd
