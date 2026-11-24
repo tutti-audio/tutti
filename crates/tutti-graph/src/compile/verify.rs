@@ -27,8 +27,9 @@
 //! 6. **Tables**: every delay index is used by exactly one op, every unit by
 //!    exactly one `Node` op, and no two units share a store index. Every
 //!    event slot holds what is written into it: a node output what the
-//!    node's shape declares, an input's view what its source holds and its
-//!    scheduled commands (under the input bound), a delay output and a
+//!    node's shape declares, an input's view what its source holds (under
+//!    the input bound; the room for the commands and flushed events a block
+//!    adds is staged with the executor), a delay output and a
 //!    feedback slot all their FIFO can hold at the source's declared rate, a
 //!    merge the sum of its inputs' (so nothing past a writer can refuse or
 //!    hold back an event).
@@ -666,6 +667,18 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 ..
             } => {
                 let shape = &plan.units[unit].shape;
+                // A view is priced from its source: one of each per input,
+                // or a view would go unpriced.
+                if event_src.len() != event_in.len()
+                    || event_in.len() != usize::from(shape.event_in)
+                {
+                    return Err(VerifyError(format!(
+                        "op {m} (unit {unit}) names {} event sources and {} views for {} inputs",
+                        event_src.len(),
+                        event_in.len(),
+                        shape.event_in
+                    )));
+                }
                 let outs = plan
                     .event_slots(event_out)
                     .iter()
@@ -696,10 +709,14 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
         };
     }
     for v in &plan.program.event_values {
-        let need = written[v.writer]
-            .iter()
-            .find(|&&(s, _)| s == v.slot)
-            .map_or(EventSlotCapacity::NONE, |&(_, need)| need);
+        // Only a node, a delay and a merge write an event value, and each
+        // priced every slot it writes.
+        let Some(&(_, need)) = written[v.writer].iter().find(|&&(s, _)| s == v.slot) else {
+            return Err(VerifyError(format!(
+                "event slot {} has a value op {} never priced",
+                v.slot, v.writer
+            )));
+        };
         if !slot_cap(v.slot).holds(need) {
             return Err(VerifyError(format!(
                 "event slot {} holds {:?}, but op {} writes {need:?} into it",
@@ -1385,6 +1402,101 @@ mod tests {
             let err = verify(&bad).unwrap_err().0;
             assert!(err.contains("writes"), "{short:?}: {err}");
         }
+    }
+
+    /// A source node feeding a sink with one event input: the plan, and the
+    /// sink's node op.
+    fn event_pair() -> (Plan, crate::compile::ids::OpId) {
+        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
+        let mut t = Topology::default();
+        let mut shapes = Shapes::new();
+        for (k, s) in [
+            (1, Shape::EMPTY.events(0, 1)),
+            (2, Shape::EMPTY.events(1, 0)),
+        ] {
+            t.nodes
+                .insert(NodeKey(k), NodeSpec::new("n", s.audio_in(), s.audio_out()));
+            shapes.insert(NodeKey(k), s);
+        }
+        let mut g = GraphSpec::new(t);
+        g.connect_events(
+            EventInputPort::new(NodeKey(2), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
+        );
+        let prep = crate::node::Prepare::new(
+            tutti_units::SampleRate::SR_48K,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
+        );
+        let plan = compile(&g.validate().unwrap(), &shapes, &prep, None)
+            .unwrap()
+            .0;
+        verify(&plan).expect("sound");
+        let op = plan
+            .program
+            .ops
+            .iter_enumerated()
+            .find_map(|(id, op)| match *op {
+                Op::Node { unit, .. } if plan.units[unit].key == NodeKey(2) => Some(id),
+                _ => None,
+            })
+            .expect("the sink's op");
+        (plan, op)
+    }
+
+    /// Every event value is priced by its writer: a view the node op wrote
+    /// but recorded no price for (its slot is not one the op writes) is
+    /// refused, not taken to need nothing.
+    #[test]
+    fn the_verifier_rejects_an_event_value_its_writer_did_not_price() {
+        let (good, op) = event_pair();
+        let Op::Node { event_in, .. } = good.program.ops[op] else {
+            unreachable!("a node op")
+        };
+        let view = good.event_slots(event_in)[0];
+        let mut bad = good.clone();
+        let value = bad
+            .program
+            .event_values
+            .iter_mut()
+            .find(|v| v.writer == op && v.slot == view)
+            .expect("the view's value");
+        value.slot = EMPTY_SLOT;
+        let err = verify(&bad).unwrap_err().0;
+        assert!(err.contains("priced"), "{err}");
+    }
+
+    /// A node op names as many event sources as views, and as many as its
+    /// shape has inputs: one short of its views is refused.
+    #[test]
+    fn the_verifier_rejects_fewer_event_sources_than_views() {
+        let (good, op) = event_pair();
+        let mut bad = good.clone();
+        let Op::Node {
+            unit,
+            audio_in,
+            audio_out,
+            event_in,
+            event_out,
+            in_place,
+            params,
+            ..
+        } = bad.program.ops[op]
+        else {
+            unreachable!("a node op")
+        };
+        let none = Span::extend(&mut bad.program.event_list, []);
+        bad.program.ops[op] = Op::Node {
+            unit,
+            audio_in,
+            audio_out,
+            event_src: none,
+            event_in,
+            event_out,
+            in_place,
+            params,
+        };
+        let err = verify(&bad).unwrap_err().0;
+        assert!(err.contains("event sources"), "{err}");
     }
 
     /// Rule 8: a fade must name a key its delta replaces, once, between
