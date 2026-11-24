@@ -85,30 +85,17 @@ fn render(
 ) -> Vec<Vec<f32>> {
     let mut harness = Harness::with_workers(BLOCK, workers);
     harness.switch(&spec(t), kinds);
-    let mut got: Vec<Vec<f32>> = vec![Vec::new(); harness.outputs];
-    let mut frame = 0;
-    for _ in 0..blocks {
-        let input = input_signal(frame, BLOCK);
-        let a = harness.block(BLOCK, &input);
-        for (g, a) in got.iter_mut().zip(a) {
-            g.extend(a);
-        }
-        frame += BLOCK as u64;
-    }
-    got
+    harness.run(&vec![BLOCK; blocks], 0)
 }
 
 /// One-participant and parallel (four participants) renders, which must be bit for bit
 /// the same.
 fn render_both(t: &Topology, kinds: &BTreeMap<NodeKey, Kind>, blocks: usize) -> Vec<Vec<f32>> {
-    let serial = render(t, kinds, 1, blocks);
-    let parallel = render(t, kinds, 4, blocks);
-    assert_eq!(
-        bits(&serial),
-        bits(&parallel),
-        "parallel differs from serial"
-    );
-    serial
+    common::agree_across_workers(
+        [4],
+        |workers| render(t, kinds, workers, blocks),
+        |r| bits(r),
+    )
 }
 
 /// `((+0.0 + a_0) + a_1) + ..`, one rounding per add.
