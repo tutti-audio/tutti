@@ -45,7 +45,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost, Silence, Silenced};
+use super::instance::{Figures, Instance, Lost, Silence, Silenced, WakeSlot};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -89,6 +89,9 @@ pub struct InProcessClient<L: Loaded, F: Float = f32> {
     /// the node renders silence ([`Instance::silenced`]). The instance holds
     /// the other clone and outlives the node, so the node's drop never frees it.
     pub(super) silenced: Arc<Silenced>,
+    /// Where this node binds its wake: the instance's, for the node that
+    /// holds the Processor, or the slot of a successor until it does.
+    pub(super) wake: Arc<WakeSlot>,
     /// The plugin's latency and tail as the control side last read them
     /// ([`Instance::figure_cell`]): what `shape` declares, with the instance
     /// locked or not.
@@ -587,11 +590,12 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             .map_or_else(TransportFeed::new, |c| TransportFeed::over(c.meter()));
         let mut segments = SegmentPoints::default();
         segments.prepare(params.room());
-        let (lost, silenced, figures, midi_map) = {
+        let (lost, silenced, wake, figures, midi_map) = {
             let instance = inner.lock();
             (
                 instance.lost_latch(),
                 instance.silenced(),
+                instance.wake_slot(),
                 instance.figure_cell(),
                 instance.midi_map().translator(),
             )
@@ -613,6 +617,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             rt,
             lost,
             silenced,
+            wake,
             figures,
             reporting: None,
             edits: None,

@@ -148,6 +148,10 @@ impl Silence {
     }
 }
 
+/// Where a node binds its [`Wake`](tutti_graph::Wake): the instance raises it
+/// to call the node that holds the Processor when a recall waits.
+pub(super) type WakeSlot = Mutex<Option<tutti_graph::Wake>>;
+
 /// Whether the plugin runs at a rate other than the graph's, because it
 /// did not take the graph's: published by the instance with its refusal
 /// ([`Instance::silence`]) and cleared with the rate taken
@@ -238,9 +242,14 @@ pub(super) struct Instance<L: Loaded> {
     silence: Option<Silence>,
     /// The nodes over this instance render silence while a refusal stands.
     silenced: Arc<Silenced>,
-    /// Wakes the node the executor parked: raised after a recall, which only
-    /// the node's next call answers.
-    wake: Option<tutti_graph::Wake>,
+    /// The wake of the node whose realtime end holds the Processor: raised
+    /// after a recall, which only that node's next call answers. A successor
+    /// node binds its own slot, which becomes this one when the Processor
+    /// moves to its end.
+    wake: Arc<WakeSlot>,
+    /// The slot of the successor [`commit`](Self::commit) named, until the
+    /// Processor has moved to its end.
+    incoming_wake: Option<Arc<WakeSlot>>,
     /// A successor was committed ([`commit`](Self::commit)).
     committed: bool,
     /// Whether the plugin is lost, and why, readable with no lock.
@@ -327,7 +336,8 @@ impl<L: Loaded> Instance<L> {
             reports: Vec::new(),
             silence: None,
             silenced: Arc::default(),
-            wake: None,
+            wake: Arc::default(),
+            incoming_wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
@@ -370,7 +380,8 @@ impl<L: Loaded> Instance<L> {
             reports: Vec::new(),
             silence: None,
             silenced: Arc::default(),
-            wake: None,
+            wake: Arc::default(),
+            incoming_wake: None,
             committed: false,
             lost: Arc::default(),
             figures: Arc::default(),
@@ -457,8 +468,11 @@ impl<L: Loaded> Instance<L> {
         // A plan parked for the Processor has raised its recall; the realtime
         // end hands it back at the node's next call, which a parked node does
         // not get unless woken. Raised after the recall, never before.
+        if self.incoming_wake.is_some() && !self.hand.pending() {
+            self.wake = self.incoming_wake.take().unwrap_or_default();
+        }
         if self.state.is_parked()
-            && let Some(wake) = &self.wake
+            && let Some(wake) = &*self.wake.lock()
         {
             wake.notify();
         }
@@ -577,8 +591,14 @@ impl<L: Loaded> Instance<L> {
     /// the successor's. A plugin that refuses the restart renders nothing until
     /// one it takes: the refusal is kept for the control side, as a rate's is
     /// ([`take_reports`](Self::take_reports)).
-    pub(super) fn commit(&mut self, main: MainThreadMarker, successor: Successor<L::Processor>) {
+    pub(super) fn commit(
+        &mut self,
+        main: MainThreadMarker,
+        successor: Successor<L::Processor>,
+        wake: Arc<WakeSlot>,
+    ) {
         self.hand.install(successor);
+        self.incoming_wake = Some(wake);
         if let Some(trouble) = self.drive(main, Event::Op(HostOp::Relend)) {
             self.note(trouble);
         }
@@ -604,10 +624,9 @@ impl<L: Loaded> Instance<L> {
         Arc::clone(&self.lost)
     }
 
-    /// The wake of the node placed over this instance, raised whenever a
-    /// recall waits for it.
-    pub(super) fn bind_wake(&mut self, wake: tutti_graph::Wake) {
-        self.wake = Some(wake);
+    /// The slot the node that holds the Processor binds its wake in.
+    pub(super) fn wake_slot(&self) -> Arc<WakeSlot> {
+        Arc::clone(&self.wake)
     }
 
     /// The flag the nodes over this instance read to render silence while a

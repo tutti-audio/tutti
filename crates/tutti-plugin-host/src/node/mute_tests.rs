@@ -6,7 +6,8 @@ use std::sync::Arc;
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{main_thread, midi};
 use tutti_graph::{
-    EventCapacity, EventInletNode, EventInletWriter, GraphBuilder, NodeKey, Renderer, Unforkable,
+    EventCapacity, EventInletNode, EventInletWriter, Fade, GraphBuilder, NodeKey, QUEUE_CAPACITY,
+    Renderer, Unforkable,
 };
 use tutti_plugin_types::fake::{Call, FakeLoaded, FakePlugin};
 use tutti_plugin_types::{Control, Loaded, MaxBlock, PluginInvalidation, Prepare};
@@ -17,6 +18,7 @@ use tutti_ump::{MidiChannel, U7};
 use tutti_units::{Bpm, Frame, SampleRate, Samples};
 
 use super::instance::Instance;
+use super::rebind::{Rebinder, Settlement};
 use crate::client_over;
 
 const A: SampleRate = SampleRate::SR_48K;
@@ -29,6 +31,7 @@ const LIMIT: usize = 64;
 struct Rig {
     renderer: Renderer,
     inner: Arc<Mutex<Instance<FakeLoaded>>>,
+    rebinder: Rebinder<FakeLoaded>,
     fake: FakePlugin,
     key: NodeKey,
     events: EventInletWriter,
@@ -66,7 +69,7 @@ impl Rig {
             None,
         )
         .expect("the fake is narrow");
-        let inner = Arc::clone(&client.inner);
+        let (inner, rebinder) = (Arc::clone(&client.inner), client.rebinder(tempo()));
         let layout = ChannelLayout::from_count(2);
         let mut graph = GraphBuilder::new(ChannelLayout::EMPTY, layout);
         let key = graph.add(Unforkable(client.bind(tempo())));
@@ -84,6 +87,7 @@ impl Rig {
         Self {
             renderer,
             inner,
+            rebinder,
             fake,
             key,
             events,
@@ -207,6 +211,38 @@ fn a_recall_reaches_a_parked_node_and_a_muted_node_is_never_parked() {
             .iter()
             .any(|c| matches!(c, Call::Activate(rate, _) if *rate == C))
     );
+}
+
+/// **The recall that moves the Processor to a successor reaches the node that
+/// holds it while the successor is only staged.** The successor's wake is bound
+/// when the editor stages it; the executor still runs, and parks, the
+/// predecessor until a commit lands. The commit here is refused
+/// (`Backpressure`: the executor has not run since the queue was filled), so
+/// the `Relend` recall must call the predecessor, not the successor.
+#[test]
+fn a_recall_reaches_the_node_that_holds_the_processor_while_its_successor_is_staged() {
+    let mut rig = Rig::new();
+    rig.rest();
+    let (successor, pending) = rig.rebinder.prepare().expect("a node");
+    let editor = rig.renderer.editor_mut();
+    for n in 0..QUEUE_CAPACITY {
+        let (inlet, _writer) = EventInletNode::pair(EventCapacity::of(1));
+        editor.insert(NodeKey(100 + n as u64), "filler", inlet);
+        editor.commit().expect("the queue has room");
+    }
+    let fade = Fade::new(Samples::new(0));
+    editor
+        .replace(rig.key, Unforkable(successor), fade)
+        .expect("staged");
+    assert!(matches!(
+        editor.commit(),
+        Err(tutti_graph::CommitError::Backpressure)
+    ));
+    pending.commit(main_thread());
+    let rebinder = rig.rebinder.clone();
+    rig.until("the Processor moved", |_, _| {
+        rebinder.settled() == Settlement::Moved
+    });
 }
 
 /// **No Processor activated at the rolled-back rate processes a block between

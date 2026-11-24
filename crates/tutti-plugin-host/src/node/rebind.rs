@@ -186,6 +186,9 @@ where
             Some(pipeline),
             Some(self.event_room),
         );
+        // Its wake is the instance's once the Processor moves to this node.
+        let wake = Arc::<super::instance::WakeSlot>::default();
+        client.wake = Arc::clone(&wake);
         client.reporting = self.reporting.clone();
         client.edits = self.edits.clone();
         // What the node it replaces delivered: the plugin holds those values.
@@ -201,6 +204,7 @@ where
             Pending {
                 inner: Arc::clone(&self.inner),
                 successor,
+                wake,
                 delivery: Arc::clone(&self.delivery),
                 counters,
             },
@@ -247,6 +251,8 @@ where
 pub struct Pending<L: Loaded> {
     inner: Arc<Mutex<Instance<L>>>,
     successor: Successor<L::Processor>,
+    /// Where the node binds its wake.
+    wake: Arc<super::instance::WakeSlot>,
     /// The rebinder's record of the newest committed node's counters.
     delivery: Arc<Mutex<Arc<DeliveryCounters>>>,
     /// The node's own, which `delivery` holds once it is committed.
@@ -277,7 +283,7 @@ impl<L: Loaded> Pending<L> {
     /// replaces the first: its node never receives a Processor.
     pub fn commit(self, main: MainThreadMarker) {
         *self.delivery.lock() = self.counters;
-        self.inner.lock().commit(main, self.successor);
+        self.inner.lock().commit(main, self.successor, self.wake);
     }
 }
 
