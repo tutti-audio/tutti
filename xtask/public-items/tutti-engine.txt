@@ -31,8 +31,8 @@ fn block_clock::Playhead::seconds
 fn block_clock::Playhead::span
 fn block_clock::Playhead::tempo
 fn callback::AudioCallbackState::new
+fn callback::OutputBlock::callback_frames
 fn callback::OutputBlock::channels
-fn callback::OutputBlock::last_rendered_frames
 fn callback::OutputBlock::layout
 fn callback::OutputBlock::new
 fn callback::OutputBlock::render
@@ -40,6 +40,13 @@ fn callback::OutputBlock::render_delayed
 fn callback::OutputBlock::render_delayed_with
 fn callback::OutputBlock::render_with
 fn callback::process_audio
+fn callback_frames::CallbackFrames::new
+fn callback_frames::CallbackFrames::take
+fn callback_frames::CallbackSpan::largest
+fn callback_frames::CallbackSpan::new
+fn callback_frames::CallbackSpan::smallest
+fn callback_frames::CallbackSpan::steady
+fn callback_frames::CallbackSpan::steady_size
 fn engine::Engine::apply_pending
 fn engine::Engine::block_capacity
 fn engine::Engine::block_clock
@@ -74,10 +81,10 @@ fn latency::StreamLatency::new
 fn latency::StreamLatency::record
 fn latency::StreamLatency::reset
 fn load::Load::get
+fn manual::ManualStream::callback_frames
 fn manual::ManualStream::channels
 fn manual::ManualStream::fail
 fn manual::ManualStream::is_open
-fn manual::ManualStream::last_rendered_frames
 fn manual::ManualStream::render_block
 fn manual::ManualStream::render_block_at
 fn manual::ManualStream::render_block_delayed
@@ -118,6 +125,7 @@ fn stream::OutputQuantum::max_block
 fn stream::OutputQuantum::samples
 fn stream::OutputSpec::new
 fn stream::OutputSpec::with_quantum
+fn stream::OutputStream::callback_frames
 fn stream::OutputStream::channels
 fn stream::OutputStream::faults
 fn stream::OutputStream::is_running
@@ -134,6 +142,8 @@ struct block_clock::BlockReading
 struct block_clock::Playhead
 struct callback::AudioCallbackState
 struct callback::OutputBlock
+struct callback_frames::CallbackFrames
+struct callback_frames::CallbackSpan
 struct engine::Engine
 struct faults::Lagging
 struct faults::StreamFault

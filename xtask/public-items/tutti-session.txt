@@ -211,6 +211,7 @@ fn device::Device::start_with
 fn device::Device::stop
 fn device::DeviceRestart::max_block
 fn device::DeviceRestart::new
+fn device::DeviceRestart::quantum
 fn device::DeviceRestart::topology
 fn device::DeviceRestarted::rate_changed
 fn device::RestartError::error

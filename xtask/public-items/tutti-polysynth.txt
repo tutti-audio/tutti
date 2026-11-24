@@ -62,7 +62,6 @@ fn synth::SynthConfig::envelope
 fn synth::SynthConfig::filter
 fn synth::SynthConfig::filter_mod
 fn synth::SynthConfig::group
-fn synth::SynthConfig::ladder_saturation
 fn synth::SynthConfig::new
 fn synth::SynthConfig::oscillator
 fn synth::SynthConfig::pitch_bend_range

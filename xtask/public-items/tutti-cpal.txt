@@ -17,6 +17,7 @@ fn driver::TuttiDriver::new
 fn driver::TuttiDriver::opened_name
 fn driver::TuttiDriver::restart
 fn driver::TuttiDriver::restart_with
+fn driver::TuttiDriver::restart_with_quantum
 fn driver::TuttiDriver::select_device
 fn driver::TuttiDriver::start_with
 fn driver::TuttiDriver::stop
