@@ -228,7 +228,7 @@ pub struct Editor<F: Float = f32> {
     /// The open taps: each reader's width and end latch.
     taps: Outlets<TapId, TapWriter<F>, TapOpened>,
     /// The open event taps.
-    event_taps: Outlets<EventTapId, EventTapWriter, ()>,
+    event_taps: Outlets<EventTapId, EventTapWriter, Arc<crate::edges::tap::TapEnd>>,
     /// The open meters: each one's lane capacity.
     meters: Outlets<MeterId, MeterWriter, usize>,
     /// Where the compile lifecycle stands: the plan sent last (what the

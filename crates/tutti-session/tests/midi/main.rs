@@ -65,6 +65,9 @@ mod midi_out_tap;
 // a recorded take and its placement, a saved route rule.
 #[cfg(feature = "midi")]
 mod midi_front;
+// A clip player whose output gains a receiver sends it the setup.
+#[cfg(feature = "midi")]
+mod clip_receiver;
 // A clip's events and a harmony node's changes as values: written, equal, removed.
 #[cfg(feature = "midi")]
 mod midi_value_targets;

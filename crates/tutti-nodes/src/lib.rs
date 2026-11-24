@@ -534,7 +534,7 @@ pub use reverb_spring::{
 
 // The banks' controls that sit in a node's signature.
 pub use tutti_dsp::{
-    FdnControls, FdnLayout, FreeverbControls, FreezeMode, MaxDecay, PlateControls, SpringControls,
+    FdnControls, FdnLayout, FreeverbControls, MaxDecay, PlateControls, SpringControls,
     SpringLayout, SpringLength, SpringLengthError, SpringStages, SpringStagesError,
 };
 
