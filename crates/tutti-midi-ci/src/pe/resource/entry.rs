@@ -1,11 +1,15 @@
 //! ResourceList (M2-103 §14): the entries that say how each Resource of a device
 //! can be used.
 
+use core::marker::PhantomData;
+
 use super::super::header::PeEncoding;
 use super::super::limits::{MediaType, ResourceName};
 use super::super::tree::{PeJson, PeObject};
 use super::fields::{Fields, PeDataError, PeDataFault, PeExtensions, UnlistedText, list, text};
-use super::kind::{CanSet, PeResource};
+use super::kind::{
+    CanSet, CustomResource, PeResource, StandardResource, UnmodelledResource, UntypedResource,
+};
 use super::link::{PeColumn, flag};
 
 /// A ResourceList entry that the rules of Property Exchange refuse.
@@ -15,8 +19,9 @@ pub enum EntryError {
     /// The ResourceList does not list itself (M2-103 §14).
     #[error("ResourceList has no entry for itself")]
     ListsItself,
-    /// A Resource a specification defines keeps its defaults of `schema`,
-    /// `requireResId`, `canPaginate`, `canSet` and `canGet` (M2-103 §14.3).
+    /// An entry a peer sent declares other than the defaults of a standard
+    /// Resource for `requireResId`, `canPaginate`, `canSet` or `canGet`
+    /// (M2-103 §14.3).
     #[error("{property} of {resource} is not for an entry to override")]
     NotOverridable {
         /// The Resource.
@@ -67,10 +72,62 @@ pub struct ResourceEntry {
 }
 
 impl ResourceEntry {
-    /// A builder of the entry for `resource`, every property its default.
+    /// A builder of the entry for the standard Resource `resource`, every
+    /// property its default. A standard Resource's entry declares none of
+    /// `canGet`, `canSet`, `requireResId`, `canPaginate` and `schema`
+    /// (M2-103 §14.3), so the builder has no setter for them:
+    ///
+    /// ```compile_fail
+    /// use tutti_midi_ci::{CanSet, ResourceEntry, StandardResource};
+    ///
+    /// let _ = ResourceEntry::standard(StandardResource::DeviceInfo).can_set(CanSet::Full);
+    /// ```
     #[must_use]
-    pub fn builder(resource: PeResource) -> ResourceEntryBuilder {
-        ResourceEntryBuilder(Self::bare(resource))
+    pub fn standard(resource: StandardResource) -> ResourceEntryBuilder<StandardResource> {
+        ResourceEntryBuilder::of(Self::bare(resource.into()))
+    }
+
+    /// A builder of the entry for the manufacturer-specific Resource `name`,
+    /// with its `schema` (M2-103 §14.4).
+    #[must_use]
+    pub fn custom(name: CustomResource, schema: PeJson) -> ResourceEntryBuilder<UntypedResource> {
+        let mut entry = Self::bare(PeResource::Untyped(name.into()));
+        entry.schema = Some(schema);
+        ResourceEntryBuilder::of(entry)
+    }
+
+    /// A builder of the entry for the Resource `name`, which no standard
+    /// Resource and no manufacturer has. A companion specification may define
+    /// it, so the entry says its own `canGet`, `canSet`, `requireResId` and
+    /// `canPaginate`, which this crate cannot check.
+    #[must_use]
+    pub fn unmodelled(name: UnmodelledResource) -> ResourceEntryBuilder<UntypedResource> {
+        ResourceEntryBuilder::of(Self::bare(PeResource::Untyped(
+            UntypedResource::Unmodelled(name),
+        )))
+    }
+
+    /// The entry of State with the defaults M2-111 §3.4 gives: Get and a Full Set,
+    /// one state to each `resId`, Mcoded7 and `application/octet-stream`.
+    #[must_use]
+    pub fn device_state() -> Self {
+        Self {
+            encodings: Some(vec![PeEncoding::Mcoded7]),
+            media_types: Some(vec![MediaType::OCTET_STREAM]),
+            ..Self::bare(StandardResource::State.into())
+        }
+    }
+
+    /// The builder of the entry of State, with those defaults.
+    #[must_use]
+    pub fn device_state_builder() -> ResourceEntryBuilder<StandardResource> {
+        ResourceEntryBuilder::of(Self::device_state())
+    }
+
+    /// The entry of StateList.
+    #[must_use]
+    pub fn state_list() -> Self {
+        Self::bare(StandardResource::StateList.into())
     }
 
     fn bare(resource: PeResource) -> Self {
@@ -234,72 +291,57 @@ impl ResourceEntry {
         let resource = ResourceName::try_from(name)
             .map(|n| PeResource::from_name(&n))
             .map_err(|e| f.invalid("resource", e))?;
-        let defaults = Self::bare(resource.clone());
-        let mut builder = Self::builder(resource)
-            .can_get(flag(&mut f, "canGet", defaults.can_get)?)
-            .can_set(
-                f.optional("canSet", "a string", text)?
-                    .map(|t| CanSet::try_from(t).map_err(|e| f.invalid("canSet", e)))
-                    .transpose()?
-                    .unwrap_or(defaults.can_set),
-            )
-            .fc_on_get(flag(&mut f, "fcOnGet", false)?)
-            .fc_on_set(flag(&mut f, "fcOnSet", false)?)
-            .can_subscribe(flag(&mut f, "canSubscribe", defaults.can_subscribe)?)
-            .require_res_id(flag(&mut f, "requireResId", defaults.require_res_id)?)
-            .can_paginate(flag(&mut f, "canPaginate", defaults.can_paginate)?);
+        let defaults = Self::bare(resource);
+        let mut entry = Self {
+            can_get: flag(&mut f, "canGet", defaults.can_get)?,
+            can_set: f
+                .optional("canSet", "a string", text)?
+                .map(|t| CanSet::try_from(t).map_err(|e| f.invalid("canSet", e)))
+                .transpose()?
+                .unwrap_or(defaults.can_set),
+            fc_on_get: flag(&mut f, "fcOnGet", false)?,
+            fc_on_set: flag(&mut f, "fcOnSet", false)?,
+            can_subscribe: flag(&mut f, "canSubscribe", defaults.can_subscribe)?,
+            require_res_id: flag(&mut f, "requireResId", defaults.require_res_id)?,
+            can_paginate: flag(&mut f, "canPaginate", defaults.can_paginate)?,
+            ..defaults
+        };
         let types = list(&mut f, "mediaTypes", |j| {
             let text = j.as_str().ok_or(PeDataFault::WrongType("a string"))?;
             MediaType::try_from(text).map_err(|e| PeDataFault::NotValid(e.into()))
         })?;
         if !types.is_empty() {
-            builder = builder.media_types(types);
+            entry.media_types = Some(types);
         }
         let encodings = list(&mut f, "encodings", |j| {
             let text = j.as_str().ok_or(PeDataFault::WrongType("a string"))?;
             encoding_of(text).map_err(|e| PeDataFault::NotValid(e.into()))
         })?;
         if !encodings.is_empty() {
-            builder = builder.encodings(encodings);
+            entry.encodings = Some(encodings);
         }
-        if let Some(schema) =
-            f.optional("schema", "an object", |j| j.as_object().map(|_| j.clone()))?
-        {
-            builder = builder.schema(schema);
-        }
+        entry.schema = f.optional("schema", "an object", |j| j.as_object().map(|_| j.clone()))?;
         let columns = list(&mut f, "columns", |j| {
             PeColumn::from_json(j).map_err(|e| e.fault)
         })?;
-        let entry = builder
-            .columns(columns)
-            .build_received()
-            .map_err(|(e, field)| f.invalid(field, e))?;
-        Ok(Self {
-            extensions: f.finish()?,
-            ..entry
-        })
+        entry.columns = columns;
+        entry.received().map_err(|(e, field)| f.invalid(field, e))?;
+        entry.extensions = f.finish()?;
+        Ok(entry)
     }
 }
 
 /// The properties of a [`ResourceEntry`] as a device declares them: each option
-/// takes what the entry says, and [`build`](Self::build) checks them against
-/// the Resource and against each other (M2-103 §14).
+/// takes what the entry says, and `build` checks them against each other
+/// (M2-103 §14). `R` is [`StandardResource`] for the entry of a standard
+/// Resource, which declares only what the spec lets it, and [`UntypedResource`]
+/// for any other, which also declares its own flags.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResourceEntryBuilder(ResourceEntry);
+pub struct ResourceEntryBuilder<R>(ResourceEntry, PhantomData<R>);
 
-impl ResourceEntryBuilder {
-    /// Declares `canGet`.
-    #[must_use]
-    pub fn can_get(mut self, can_get: bool) -> Self {
-        self.0.can_get = can_get;
-        self
-    }
-
-    /// Declares `canSet`.
-    #[must_use]
-    pub fn can_set(mut self, can_set: CanSet) -> Self {
-        self.0.can_set = can_set;
-        self
+impl<R> ResourceEntryBuilder<R> {
+    pub(super) fn of(entry: ResourceEntry) -> Self {
+        Self(entry, PhantomData)
     }
 
     /// Declares `canSubscribe`.
@@ -323,20 +365,6 @@ impl ResourceEntryBuilder {
         self
     }
 
-    /// Declares `requireResId`.
-    #[must_use]
-    pub fn require_res_id(mut self, require: bool) -> Self {
-        self.0.require_res_id = require;
-        self
-    }
-
-    /// Declares `canPaginate`.
-    #[must_use]
-    pub fn can_paginate(mut self, paginate: bool) -> Self {
-        self.0.can_paginate = paginate;
-        self
-    }
-
     /// Declares `mediaTypes`.
     #[must_use]
     pub fn media_types(mut self, media_types: Vec<MediaType>) -> Self {
@@ -348,13 +376,6 @@ impl ResourceEntryBuilder {
     #[must_use]
     pub fn encodings(mut self, encodings: Vec<PeEncoding>) -> Self {
         self.0.encodings = Some(encodings);
-        self
-    }
-
-    /// Declares `schema`.
-    #[must_use]
-    pub fn schema(mut self, schema: PeJson) -> Self {
-        self.0.schema = Some(schema);
         self
     }
 
@@ -371,19 +392,75 @@ impl ResourceEntryBuilder {
         self.0.extensions = extensions;
         self
     }
+}
 
+impl ResourceEntryBuilder<StandardResource> {
     /// The entry the options declare.
     ///
     /// # Errors
     ///
     /// The [`EntryError`] that names what the Resource or the other properties
     /// refuse: [`EntryError::ListsItself`] for `ResourceList`;
-    /// [`EntryError::NotOverridable`] for a value other than the default of a
-    /// Resource a specification defines, and for a schema of one;
-    /// [`EntryError::SchemaIncomplete`] unless a manufacturer-specific
-    /// Resource gives a schema that is an object with a `title` string and a
+    /// [`EntryError::NotAList`] for Columns of a Resource that is no List
+    /// Resource; [`EntryError::FlowControlWithoutTransaction`] for Flow Control
+    /// on a transaction the Resource does not take; [`EntryError::Empty`] for no
+    /// encoding or no media type, and [`EntryError::Duplicate`] for one twice.
+    pub fn build(self) -> Result<ResourceEntry, EntryError> {
+        let entry = self.0;
+        if entry.resource == StandardResource::ResourceList {
+            return Err(EntryError::ListsItself);
+        }
+        entry.checked()?;
+        Ok(entry)
+    }
+}
+
+impl ResourceEntryBuilder<UntypedResource> {
+    /// Declares `canGet`.
+    #[must_use]
+    pub fn can_get(mut self, can_get: bool) -> Self {
+        self.0.can_get = can_get;
+        self
+    }
+
+    /// Declares `canSet`.
+    #[must_use]
+    pub fn can_set(mut self, can_set: CanSet) -> Self {
+        self.0.can_set = can_set;
+        self
+    }
+
+    /// Declares `requireResId`.
+    #[must_use]
+    pub fn require_res_id(mut self, require: bool) -> Self {
+        self.0.require_res_id = require;
+        self
+    }
+
+    /// Declares `canPaginate`.
+    #[must_use]
+    pub fn can_paginate(mut self, paginate: bool) -> Self {
+        self.0.can_paginate = paginate;
+        self
+    }
+
+    /// Declares `schema`.
+    #[must_use]
+    pub fn schema(mut self, schema: PeJson) -> Self {
+        self.0.schema = Some(schema);
+        self
+    }
+
+    /// The entry the options declare.
+    ///
+    /// # Errors
+    ///
+    /// The [`EntryError`] that names what the other properties refuse:
+    /// [`EntryError::SchemaIncomplete`] unless the schema of a
+    /// manufacturer-specific Resource is an object with a `title` string and a
     /// `type` (a string or an array), or, when its media types leave out
-    /// `application/json`, a `title` and no `type` (or an empty array);
+    /// `application/json`, a `title` and no `type` (or an empty array), and for
+    /// a schema with no `title` on any other;
     /// [`EntryError::SchemaTypedNonJson`] for a `type` on a schema of a Resource
     /// that is not JSON;
     /// [`EntryError::NotAList`] for pagination or Columns of a Resource that is
@@ -393,39 +470,38 @@ impl ResourceEntryBuilder {
     /// [`EntryError::Duplicate`] for one twice.
     pub fn build(self) -> Result<ResourceEntry, EntryError> {
         let entry = self.0;
-        if entry.resource == PeResource::ResourceList {
-            return Err(EntryError::ListsItself);
-        }
-        if entry.schema.is_none() && matches!(entry.resource, PeResource::Custom(_)) {
-            return Err(EntryError::SchemaIncomplete(
-                entry.resource.as_str().to_owned(),
-            ));
-        }
         entry.checked()?;
         entry.schema_authored()?;
         Ok(entry)
     }
-
-    /// As [`build`](Self::build), for an entry a peer sent: the schema rules bind
-    /// the sender, so any schema is taken (a manufacturer-specific Resource
-    /// without one too), and a refusal names the property it is of.
-    pub(super) fn build_received(self) -> Result<ResourceEntry, (EntryError, &'static str)> {
-        match self.0.checked() {
-            Ok(()) => Ok(self.0),
-            Err(error) => {
-                let field = self.0.field_of(&error);
-                Err((error, field))
-            }
-        }
-    }
 }
 
 impl ResourceEntry {
-    fn refuse_override(&self, property: &'static str) -> EntryError {
-        EntryError::NotOverridable {
-            resource: self.resource.as_str().to_owned(),
-            property,
+    /// Checks an entry a peer sent. A standard Resource keeps its defaults of
+    /// `canGet`, `canSet`, `requireResId` and `canPaginate` (M2-103 §14.3), and
+    /// the schema rules bind the sender, so any schema is taken. A refusal names
+    /// the property it is of.
+    fn received(&self) -> Result<(), (EntryError, &'static str)> {
+        if let PeResource::Standard(standard) = &self.resource {
+            let d = standard.defaults();
+            let declared = [
+                ("canGet", self.can_get != d.can_get),
+                ("canSet", self.can_set != d.can_set),
+                ("requireResId", self.require_res_id != d.require_res_id),
+                ("canPaginate", self.can_paginate != d.can_paginate),
+            ];
+            if let Some((property, _)) = declared.into_iter().find(|(_, differs)| *differs) {
+                let error = EntryError::NotOverridable {
+                    resource: self.resource.as_str().to_owned(),
+                    property,
+                };
+                return Err((error, property));
+            }
         }
+        self.checked().map_err(|error| {
+            let field = self.field_of(&error);
+            (error, field)
+        })
     }
 
     /// The property of the entry that `error` refuses.
@@ -454,16 +530,13 @@ impl ResourceEntry {
         }
     }
 
-    /// What an author of an entry owes its schema (M2-103 §14.3, §14.4): none on a
-    /// Resource a specification defines, and on any other at least a `title` and
-    /// a `type`. A received entry takes whatever schema its peer sent.
+    /// What an author of an entry owes its schema (M2-103 §14.3, §14.4): a
+    /// manufacturer-specific Resource gives one with at least a `title` and a
+    /// `type`. A received entry takes whatever schema its peer sent.
     fn schema_authored(&self) -> Result<(), EntryError> {
         let Some(schema) = &self.schema else {
             return Ok(());
         };
-        if !self.resource.is_overridable() {
-            return Err(self.refuse_override("schema"));
-        }
         let member = |name| schema.as_object().and_then(|o| o.get(name));
         let titled = member("title").and_then(PeJson::as_str).is_some();
         // A Resource whose media types leave out JSON is not JSON (§14.6): its schema
@@ -493,18 +566,6 @@ impl ResourceEntry {
     }
 
     fn checked(&self) -> Result<(), EntryError> {
-        let d = self.resource.defaults();
-        if !self.resource.is_overridable() {
-            let differs = [
-                ("canGet", self.can_get != d.can_get),
-                ("canSet", self.can_set != d.can_set),
-                ("requireResId", self.require_res_id != d.require_res_id),
-                ("canPaginate", self.can_paginate != d.can_paginate),
-            ];
-            if let Some((property, _)) = differs.into_iter().find(|(_, differs)| *differs) {
-                return Err(self.refuse_override(property));
-            }
-        }
         if (self.can_paginate || !self.columns.is_empty()) && !self.resource.is_list() {
             return Err(EntryError::NotAList(self.resource.as_str().to_owned()));
         }
@@ -586,7 +647,10 @@ impl PeResourceList {
 
     /// The entry for `resource`.
     #[must_use]
-    pub fn entry(&self, resource: &PeResource) -> Option<&ResourceEntry> {
+    pub fn entry<R>(&self, resource: &R) -> Option<&ResourceEntry>
+    where
+        PeResource: PartialEq<R>,
+    {
         self.0.iter().find(|e| e.resource == *resource)
     }
 
@@ -604,7 +668,7 @@ impl PeResourceList {
                     PeDataFault::Conflicts("another entry of the same Resource"),
                 ));
             }
-            if entry.resource == PeResource::ResourceList {
+            if entry.resource == StandardResource::ResourceList {
                 return Err(PeDataError::new(
                     "ResourceList",
                     PeDataFault::NotValid(EntryError::ListsItself.into()),

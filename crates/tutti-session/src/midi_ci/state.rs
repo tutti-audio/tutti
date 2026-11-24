@@ -10,8 +10,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use tutti_midi_ci::{
-    MediaType, PeData, PeDataError, PeDataFault, PeResource, PeState, Place, RequestRefused,
-    ResourceFailure, StateId,
+    MediaType, PeData, PeDataError, PeDataFault, PeState, Place, RequestRefused, ResourceFailure,
+    StandardResource, StateId,
 };
 use tutti_midi_device::SavedDevice;
 
@@ -87,8 +87,13 @@ impl ListedPeer {
     /// The State resource the peer's ResourceList names, or why there is none.
     fn state_resource(&self) -> Result<ListedResource, PeerError<PeFailure>> {
         self.resources()
-            .and_then(|peer| peer.listed().find(|l| *l.resource() == PeResource::State))
-            .ok_or(refusal(RequestRefused::NotListed(PeResource::State)))
+            .and_then(|peer| {
+                peer.listed()
+                    .find(|l| *l.resource() == StandardResource::State)
+            })
+            .ok_or(refusal(RequestRefused::NotListed(
+                StandardResource::State.into(),
+            )))
     }
 
     /// Saves the device's state: a Get of its State resource's `fullState`
