@@ -90,9 +90,8 @@ fn fork() -> (RenderGraph, Arc<Crashed>, Editor) {
     let probe = Arc::new(Crashed(AtomicBool::new(false)));
     let (mut live, _exec) = Editor::new(RenderGraph::prepare(RATE));
     live.insert(NodeKey(1), "watched", Watched(Arc::clone(&probe)));
-    live.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))]);
+    live.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(1), 0))])
+        .expect("the sources exist");
     let graph = support::fork_offline(&live, RATE);
     (graph, probe, live)
 }
