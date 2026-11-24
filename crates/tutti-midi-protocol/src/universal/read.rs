@@ -41,7 +41,9 @@ use tutti_ump::{
     UNIVERSAL_REAL_TIME,
 };
 
-use super::{GeneralMidiMode, MtcFullMessage, Recipient, Universal, machine_control};
+use super::{
+    GeneralMidiMode, MtcFullMessage, Recipient, SysexDeviceId, Universal, machine_control,
+};
 use crate::tuning::{
     ChannelMask, KeyChange, KeyChanges, KeyTable, MAX_KEY_CHANGES, OctaveOffsets, Timing,
     TuningFrequency, TuningMessage, TuningName,
@@ -250,8 +252,7 @@ fn tuning(timing: Timing) -> impl FnMut(&mut &[u8]) -> Res<Tuned> {
             (Timing::RealTime, 0x02) => {
                 let program = u7.parse_next(input)?;
                 let changes = key_changes.parse_next(input)?;
-                Ok(plain(TuningMessage::NoteChange {
-                    timing,
+                Ok(plain(TuningMessage::RealTimeNoteChange {
                     bank: None,
                     program,
                     changes,
@@ -260,11 +261,17 @@ fn tuning(timing: Timing) -> impl FnMut(&mut &[u8]) -> Res<Tuned> {
             (_, 0x07) => {
                 let (bank, program) = (u7, u7).parse_next(input)?;
                 let changes = key_changes.parse_next(input)?;
-                Ok(plain(TuningMessage::NoteChange {
-                    timing,
-                    bank: Some(bank),
-                    program,
-                    changes,
+                Ok(plain(match timing {
+                    Timing::RealTime => TuningMessage::RealTimeNoteChange {
+                        bank: Some(bank),
+                        program,
+                        changes,
+                    },
+                    Timing::NonRealTime => TuningMessage::NoteChange {
+                        bank,
+                        program,
+                        changes,
+                    },
                 }))
             }
             (_, 0x08 | 0x09) => {
@@ -337,20 +344,27 @@ fn tuning(timing: Timing) -> impl FnMut(&mut &[u8]) -> Res<Tuned> {
     }
 }
 
+/// What an addressed payload holds, before its checksum is checked.
+// Copy-sized for the audio thread: boxing the table or the changes would allocate there.
+#[allow(clippy::large_enum_variant)]
+enum Item {
+    Message(Universal),
+    Response(SysexDeviceId, machine_control::MmcFields),
+    Truncated(machine_control::MmcCommands),
+}
+
 /// `06` and its commands, or `07` and its responses from `to`, the rest of the
 /// message (RP-013 p.2).
-fn machine_control(to: Recipient) -> impl FnMut(&mut &[u8]) -> Res<Universal> {
+fn machine_control(to: Recipient) -> impl FnMut(&mut &[u8]) -> Res<Item> {
     move |input: &mut &[u8]| {
         let sub_id = u7.parse_next(input)?.get();
         let rest = take_rest(input);
         match (sub_id, to) {
             (0x06, _) => machine_control::commands(rest)
-                .map(Universal::MachineControl)
-                .or_else(|| {
-                    machine_control::truncated_segment(rest).map(Universal::MachineControlTruncated)
-                }),
-            (0x07, Recipient::Device(_)) => {
-                machine_control::fields(rest).map(Universal::MachineControlResponse)
+                .map(|commands| Item::Message(Universal::MachineControl(commands)))
+                .or_else(|| machine_control::truncated_segment(rest).map(Item::Truncated)),
+            (0x07, Recipient::Device(from)) => {
+                machine_control::fields(rest).map(|fields| Item::Response(from, fields))
             }
             _ => None,
         }
@@ -362,14 +376,14 @@ fn take_rest<'a>(input: &mut &'a [u8]) -> &'a [u8] {
     core::mem::take(input)
 }
 
-/// The addressed form: the Universal message, who it names, and the checksum
-/// byte of a dump that has one to check.
-fn addressed(input: &mut &[u8]) -> Res<(Recipient, Universal, Option<U7>)> {
+/// The addressed form: what it holds, who it names, and the checksum byte of a
+/// dump that has one to check.
+fn addressed(input: &mut &[u8]) -> Res<(Recipient, Item, Option<U7>)> {
     let class = any.parse_next(input)?;
     let to = device.parse_next(input)?;
-    let plain = |message| (message, None);
-    let tuned = |t: Tuned| (Universal::Tuning(t.message), t.checksum);
-    let (message, checksum) = match class {
+    let plain = |message| (Item::Message(message), None);
+    let tuned = |t: Tuned| (Item::Message(Universal::Tuning(t.message)), t.checksum);
+    let (item, checksum) = match class {
         UNIVERSAL_NON_REAL_TIME => alt((
             alt((general_information, general_midi)).map(plain),
             tuning(Timing::NonRealTime).map(tuned),
@@ -377,7 +391,7 @@ fn addressed(input: &mut &[u8]) -> Res<(Recipient, Universal, Option<U7>)> {
         .parse_next(input)?,
         UNIVERSAL_REAL_TIME => alt((
             mtc_full.map(plain),
-            machine_control(to).map(plain),
+            machine_control(to).map(|item| (item, None)),
             device_control.map(plain),
             tuning(Timing::RealTime).map(tuned),
         ))
@@ -385,7 +399,7 @@ fn addressed(input: &mut &[u8]) -> Res<(Recipient, Universal, Option<U7>)> {
         _ => return fail.parse_next(input),
     };
     eof.parse_next(input)?;
-    Ok((to, message, checksum))
+    Ok((to, item, checksum))
 }
 
 /// What one Universal payload is.
@@ -394,6 +408,16 @@ fn addressed(input: &mut &[u8]) -> Res<(Recipient, Universal, Option<U7>)> {
 pub(super) enum Parsed {
     /// A message that matched, with a checksum that held or that it has none.
     Message(Recipient, Universal),
+    /// A Machine Control Response from a device.
+    Response {
+        from: SysexDeviceId,
+        fields: machine_control::MmcFields,
+    },
+    /// A Machine Control command cut short in a COMMAND SEGMENT.
+    Truncated {
+        to: Recipient,
+        before: machine_control::MmcCommands,
+    },
     /// A dump whose checksum byte is not the XOR of the bytes before it
     /// (`found` is what it said).
     BadChecksum {
@@ -412,7 +436,7 @@ pub(super) enum Parsed {
 /// and the checksum field, masked with 7F.
 pub(super) fn parse(payload: &[u8]) -> Parsed {
     let mut input = payload;
-    let Ok((to, message, checksum)) = addressed.parse_next(&mut input) else {
+    let Ok((to, item, checksum)) = addressed.parse_next(&mut input) else {
         return Parsed::Unread;
     };
     if let (Some(found), Some((_, body))) = (checksum, payload.split_last()) {
@@ -425,5 +449,9 @@ pub(super) fn parse(payload: &[u8]) -> Parsed {
             };
         }
     }
-    Parsed::Message(to, message)
+    match item {
+        Item::Message(message) => Parsed::Message(to, message),
+        Item::Response(from, fields) => Parsed::Response { from, fields },
+        Item::Truncated(before) => Parsed::Truncated { to, before },
+    }
 }

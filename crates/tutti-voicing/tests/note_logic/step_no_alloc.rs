@@ -339,7 +339,11 @@ fn mts_is_allocation_free() {
                 }
                 for message in [
                     TuningMessage::NoteChange {
-                        timing,
+                        bank: U7::of(r % 3),
+                        program: U7::of(r % 10),
+                        changes,
+                    },
+                    TuningMessage::RealTimeNoteChange {
                         bank: (round % 4 != 0).then_some(U7::of(r % 3)),
                         program: U7::of(r % 10),
                         changes,

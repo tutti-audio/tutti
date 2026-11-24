@@ -11,7 +11,7 @@
 use std::ops::{Deref, DerefMut};
 
 use tutti_graph::{EventCapacity, EventInletWriter, Stamp};
-use tutti_midi_protocol::{Addressed, NotWritable};
+use tutti_midi_protocol::Addressed;
 use tutti_rt::PushError;
 use tutti_ump::{
     Address, Message, MidiChannel, MidiGroup, NoteNumber, NoteVelocity, Sysex7Packets, SysexPart,
@@ -22,18 +22,6 @@ use tutti_units::Losses;
 /// The ring a live input's inlet is opened with, in events (it is also the
 /// waiting list's size and the port's declared capacity).
 pub const LIVE_INLET_CAPACITY: EventCapacity = EventCapacity::of(256);
-
-/// Why [`MidiKeys::send_universal`] sent nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum SendUniversalError {
-    /// The message is only ever read, or has no bytes: nothing was written.
-    #[error(transparent)]
-    Unwritable(#[from] NotWritable),
-    /// The ring could not take every packet ([`PushError::Full`], nothing
-    /// written) or its node is gone ([`PushError::Disconnected`]).
-    #[error(transparent)]
-    Push(#[from] PushError),
-}
 
 /// An [`EventInletWriter`] with the key helpers. One producer, as the writer
 /// is: share it behind a lock on the control side if it must be `Clone`.
@@ -138,12 +126,9 @@ impl MidiKeys {
     ///
     /// # Errors
     ///
-    /// [`SendUniversalError::Unwritable`] for a message that is only read
-    /// ([`Universal::MachineControlResponse`](tutti_midi_protocol::Universal)
-    /// and the truncated command); [`PushError::Full`] when the ring cannot
-    /// hold every packet and [`PushError::Disconnected`] once the node is
-    /// dropped, both as [`SendUniversalError::Push`]. Nothing is written for any of them, and a refusal for
-    /// `Full` is not counted as a loss.
+    /// [`PushError::Full`] when the ring cannot hold every packet and
+    /// [`PushError::Disconnected`] once the node is dropped. Nothing is written
+    /// for either, and a refusal for `Full` is not counted as a loss.
     ///
     /// # Examples
     ///
@@ -168,11 +153,11 @@ impl MidiKeys {
         &mut self,
         at: impl Into<Stamp>,
         message: Addressed,
-    ) -> Result<(), SendUniversalError> {
-        let payload = message.payload()?;
+    ) -> Result<(), PushError> {
+        let payload = message.payload();
         let packets = Sysex7Packets::part(self.group, &payload, SysexPart::Only);
         if packets.len() > self.writer.vacant() {
-            return Err(PushError::Full.into());
+            return Err(PushError::Full);
         }
         let at = at.into();
         for packet in packets {
