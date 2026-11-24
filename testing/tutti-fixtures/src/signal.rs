@@ -49,6 +49,21 @@ pub fn lock_in<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> (f64, f64) {
     (re * k, im * k)
 }
 
+/// `|H(w)|` of the response `h`: the magnitude of `sum h[n] e^{-j w n}`, by direct summation,
+/// at the angular frequency `w` in radians a frame.
+pub fn dtft_magnitude(h: &[f64], w: f64) -> f64 {
+    let (re, im) = h.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &x)| {
+        let a = w * n as f64;
+        (re + x * a.cos(), im - x * a.sin())
+    });
+    re.hypot(im)
+}
+
+/// The periodic Hann window at point `n` of `length`: `0.5 - 0.5 cos(2 pi n / length)`.
+pub fn hann(n: usize, length: usize) -> f64 {
+    0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / length as f64).cos()
+}
+
 /// The amplitude of [`lock_in`].
 pub fn amplitude_at<S: Sample>(x: &[S], hz: Hz, rate: SampleRate) -> f64 {
     let (re, im) = lock_in(x, hz, rate);
@@ -222,10 +237,9 @@ pub fn wide_signal(frames: usize) -> Vec<f64> {
 /// The Hann-windowed DFT of `x` at exactly `at`, as `(re, im)`: the sum over `n` of
 /// `w[n] x[n] e^{-j 2 pi at n / rate}`, with `w` the periodic Hann window of `x.len()` points.
 pub fn hann_dft(x: &[f64], at: Hz, rate: SampleRate) -> (f64, f64) {
-    let m = x.len() as f64;
     let step = -std::f64::consts::TAU * at.get() / rate.get();
     x.iter().enumerate().fold((0.0, 0.0), |(re, im), (n, &v)| {
-        let w = 0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / m).cos();
+        let w = hann(n, x.len());
         let a = step * n as f64;
         (re + v * w * a.cos(), im + v * w * a.sin())
     })

@@ -1,5 +1,4 @@
 use super::*;
-use tutti_buffers::Float;
 use tutti_buffers::{InputOutput, Planes, PlanesMut};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -51,14 +50,6 @@ fn run(d: &mut Decorrelator<f64>, input: &[Vec<f64>]) -> Vec<Vec<f64>> {
     )
     .unwrap();
     out
-}
-
-/// A seeded white input, uniform in `[-1, 1)`: a variance of 1/3.
-fn white(frames: usize, seed: u64) -> Vec<f64> {
-    let mut rng = SplitMix64::new(seed);
-    (0..frames)
-        .map(|_| 2.0 * f64::from_fraction_bits(rng.next_u64()) - 1.0)
-        .collect()
 }
 
 /// `sum_n a[n] b[n + l]`.
@@ -147,7 +138,7 @@ fn two_channels_correlate_as_their_sequences_do() {
     let (ha, hb) = (response(&d, 0), response(&d, 1));
     let rho: f64 = ha.iter().zip(&hb).map(|(a, b)| a * b).sum();
     let n = 1 << 18;
-    let x = white(n + 3_000, 99);
+    let x = tutti_fixtures::uniform_noise::<f64>(99, n + 3_000);
     let y = run(&mut d, &[x.clone(), x]);
     // The first `3000` frames are the filters filling.
     let sigma2 = 1.0 / 3.0;
@@ -182,7 +173,7 @@ fn the_energy_gain_is_the_sum_of_the_squared_taps() {
     let analytic: f64 = h.iter().map(|v| v * v).sum();
     assert!((analytic - 1.0).abs() < 1e-12, "{analytic}");
     let n = 1 << 18;
-    let x = white(n + 3_000, 4);
+    let x = tutti_fixtures::uniform_noise::<f64>(4, n + 3_000);
     let y = run(&mut d, &[x])[0].clone();
     let energy = y[3_000..].iter().map(|v| v * v).sum::<f64>() / n as f64 * 3.0;
     let bound = 5.0 * (covariance_variance(&h, &h) / n as f64).sqrt();

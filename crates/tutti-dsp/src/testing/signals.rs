@@ -1,12 +1,8 @@
 //! Signal helpers for the unit tests.
 
-use tutti_buffers::Float;
 use tutti_rt::SplitMix64;
 
-/// The next value of `rng`, uniform over `[lo, hi)` on the `2^-MANTISSA_DIGITS` grid.
-pub(crate) fn uniform<F: Float>(rng: &mut SplitMix64, lo: F, hi: F) -> F {
-    lo + (hi - lo) * F::from_fraction_bits(rng.next_u64())
-}
+pub(crate) use tutti_fixtures::uniform;
 
 /// `frames` of seeded uniform noise in `-level..=level`.
 pub(crate) fn noise(seed: u64, frames: usize, level: f32) -> Vec<f32> {

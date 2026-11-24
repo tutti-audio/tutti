@@ -3,7 +3,7 @@
 use crate::Edge;
 use crate::NodeKey;
 use crate::NodeMix;
-use crate::compile::ids::{Id, PlanUnitId, Table};
+use crate::compile::ids::{PlanUnitId, Table};
 use crate::compile::{CompileError, CycleEdge, Shapes};
 use crate::model::spec::{EventEdge, ValidGraph};
 use crate::node::shape::Shape;
@@ -23,11 +23,7 @@ pub(super) struct Units {
 impl Units {
     /// The unit of `key`, if the graph has that node.
     pub(super) fn get(&self, key: NodeKey) -> Option<PlanUnitId> {
-        self.keys
-            .as_slice()
-            .binary_search(&key)
-            .ok()
-            .map(PlanUnitId::from_index)
+        self.keys.search_by_key(&key, |k| *k)
     }
 
     /// The unit of `key`, a node the checked graph names.
