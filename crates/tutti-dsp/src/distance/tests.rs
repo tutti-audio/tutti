@@ -64,9 +64,7 @@ fn run(
 }
 
 fn impulse(frames: usize) -> Vec<f64> {
-    let mut x = vec![0.0; frames];
-    x[0] = 1.0;
-    x
+    tutti_fixtures::signal::impulse(Samples::new(frames))
 }
 
 /// **A static source is the input delayed by exactly `r / c` frames and scaled by exactly

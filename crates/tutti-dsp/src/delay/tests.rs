@@ -140,7 +140,7 @@ fn trips_count_the_echoes_to_the_floor_in_decibels() {
 /// every whole delay, across the wrap.
 #[test]
 fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     const MAX: usize = 6;
     let signal = wide_signal(4 * MAX + 1);
     for mode in [
@@ -160,7 +160,7 @@ fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
             let want: Vec<f64> = (0..signal.len())
                 .map(|i| if i >= d { signal[i - d] } else { 0.0 })
                 .collect();
-            assert_close_f64(&got, &want, 0.0);
+            assert_close(&got, &want, 0.0);
         }
     }
 }
@@ -169,7 +169,7 @@ fn an_f64_line_returns_a_wide_signal_d_frames_later_exactly() {
 /// later exactly.
 #[test]
 fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     const D: usize = 4;
     let signal = wide_signal(20);
     let mut line = DelayLine::<f64>::new(Samples::new(8));
@@ -180,7 +180,7 @@ fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
     let want: Vec<f64> = (0..signal.len())
         .map(|i| if i >= D { signal[i - D] } else { 0.0 })
         .collect();
-    assert_close_f64(&got, &want, 0.0);
+    assert_close(&got, &want, 0.0);
 }
 
 /// A feedback `delay_step` in `f64` with `fb = 0.3` (not an `f32` value) follows the
@@ -188,7 +188,7 @@ fn an_f64_delay_step_without_feedback_returns_the_input_d_frames_later() {
 /// feedback misses it by about `1e-9`.
 #[test]
 fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     const D: usize = 4;
     const FB: f64 = 0.3;
     let signal = wide_signal(40);
@@ -204,7 +204,7 @@ fn an_f64_delay_step_with_feedback_follows_the_closed_form_recursion() {
     let want: Vec<f64> = (0..signal.len())
         .map(|n| if n >= D { w[n - D] } else { 0.0 })
         .collect();
-    assert_close_f64(&got, &want, 2f64.powi(-50));
+    assert_close(&got, &want, 2f64.powi(-50));
 }
 
 /// A linear read at `100000.3` frames on a long `f64` line is the lerp of its two

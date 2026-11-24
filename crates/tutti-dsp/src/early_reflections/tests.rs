@@ -42,9 +42,7 @@ fn run(er: &mut EarlyReflections<f64>, input: &[Vec<f64>], block: usize) -> Vec<
 }
 
 fn impulse(frames: usize) -> Vec<Vec<f64>> {
-    let mut x = vec![0.0; frames];
-    x[0] = 1.0;
-    vec![x]
+    vec![tutti_fixtures::signal::impulse(Samples::new(frames))]
 }
 
 /// The impulse response of a stage is `h_c[n] = sum of the gains of the taps of channel c at

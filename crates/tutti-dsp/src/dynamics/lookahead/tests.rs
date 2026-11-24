@@ -14,7 +14,7 @@ fn a_nan_fed_to_the_peak_fold_is_ignored() {
 #[test]
 fn an_f64_ring_delays_by_exactly_its_lookahead_and_scales_by_the_gain() {
     use super::LookaheadRing;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (lookahead, len) = (7usize, 40usize);
     let x = wide_signal(len);
     let gains: Vec<f64> = (0..len).map(|n| 0.5 + n as f64 / 128.0).collect();
@@ -24,7 +24,7 @@ fn an_f64_ring_delays_by_exactly_its_lookahead_and_scales_by_the_gain() {
     let want: Vec<f64> = (0..len)
         .map(|n| n.checked_sub(lookahead).map_or(0.0, |k| x[k] * gains[n]))
         .collect();
-    assert_close_f64(&y, &want, 0.0);
+    assert_close(&y, &want, 0.0);
 }
 
 /// The sliding minimum of `f64` gains is the minimum of the last `window` values, exactly.

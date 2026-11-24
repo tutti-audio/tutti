@@ -551,7 +551,7 @@ fn a_sweep_range_of_a_transposed_pair_panics_where_it_is_a_constant() {
 /// + u[n - 1]` three times, the stage's own difference equation computed in `f64`, to 2^-45.
 #[test]
 fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (stages, len, g) = (3usize, 300usize, 0.5f64);
     let a: f64 = allpass_complement(Hz::new(1_000.0), RATE);
     let c = a - 1.0;
@@ -589,7 +589,7 @@ fn an_f64_chain_is_the_all_pass_difference_equation_in_f64() {
             .unwrap(),
         )
         .unwrap();
-    assert_close_f64(&y, &want, 2.0f64.powi(-45));
+    assert_close(&y, &want, 2.0f64.powi(-45));
 }
 
 /// A held two-stage `f32` chain at its lowest sweeps, 20 Hz ([`SweepRange::FLOOR`]) and up to

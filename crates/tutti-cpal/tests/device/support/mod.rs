@@ -14,20 +14,19 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, ForkByClone, Io, Node, OutputPort, PortSource, Prepare, Shape, Status,
 };
-use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
 use tutti_units::{SampleRate, Samples};
 
 pub const SAMPLE_RATE: f64 = 48_000.0;
 
 /// A graph emitting a constant `level` on **every** one of `outputs` channels.
-pub fn dc_state(level: f32, outputs: usize) -> Arc<AudioCallbackState> {
+pub fn dc_state<F: Float>(level: F, outputs: usize) -> Arc<AudioCallbackState<F>> {
     let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
-    let (mut ed, exec) = Editor::new(Prepare::new(
+    let (mut ed, exec) = Editor::<F>::with_format(Prepare::new(
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(512)),
     ));
-    ed.insert(NodeKey(1), "dc", Const::mono(level));
+    ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level.to_f64())));
     ed.spec_mut().topology.set_outputs(vec![
         PortSource::Node(OutputPort::new(NodeKey(1), 0));
         outputs
@@ -54,22 +53,4 @@ impl<F: Float> Node<F> for Dc {
         Status::Modified
     }
     fn reset(&mut self) {}
-}
-
-/// [`dc_state`] in an `f64` graph.
-pub fn dc_state_f64(level: f64, outputs: usize) -> Arc<AudioCallbackState<f64>> {
-    let transport = Transport::new(SampleRate::of(SAMPLE_RATE));
-    let (mut ed, exec) = Editor::<f64>::with_format(Prepare::new(
-        SampleRate::of(SAMPLE_RATE),
-        MaxBlock::of(Samples::new(512)),
-    ));
-    ed.insert(NodeKey(1), "dc", ForkByClone(Dc(level)));
-    ed.spec_mut().topology.set_outputs(vec![
-        PortSource::Node(OutputPort::new(NodeKey(1), 0));
-        outputs
-    ]);
-    ed.commit().expect("commits");
-    let engine = Engine::new(&transport, &mut ed, exec).expect("within the limits");
-    Box::leak(Box::new(ed));
-    Arc::new(AudioCallbackState::new(engine))
 }

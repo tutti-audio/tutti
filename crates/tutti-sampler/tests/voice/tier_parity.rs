@@ -49,7 +49,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tutti_buffers::Interleaved;
 use tutti_buffers::Planes;
-use tutti_fixtures::signal::rms_f64;
+use tutti_fixtures::signal::rms;
 
 use tutti_buffers::ChannelLayout;
 use tutti_buffers::Wave;
@@ -418,8 +418,8 @@ fn the_disk_and_memory_tiers_render_the_same_material() {
                 .map(|&(l, r)| if ch == 0 { l } else { r })
                 .collect()
         };
-        let m = rms_f64(&pick(&mem_out));
-        let k = rms_f64(&pick(&disk_out));
+        let m = rms(&pick(&mem_out));
+        let k = rms(&pick(&disk_out));
         let db = 20.0 * (k / m).log10();
         assert!(
             db.abs() < 1.0,

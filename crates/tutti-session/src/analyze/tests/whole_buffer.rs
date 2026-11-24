@@ -36,7 +36,10 @@ where
 fn tones(freqs: &[Hz], amplitude: Amplitude, len: Samples) -> Wave<f32> {
     let mut sum = vec![0.0f32; len.get()];
     for &hz in freqs {
-        for (total, sample) in sum.iter_mut().zip(signal::sine(hz, amplitude, RATE, len)) {
+        for (total, sample) in sum
+            .iter_mut()
+            .zip(signal::sine::<f32>(hz, amplitude, RATE, len))
+        {
             *total += sample;
         }
     }

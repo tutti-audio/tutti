@@ -81,13 +81,10 @@ const KINDS: [ShapeKind; 7] = [
 /// degree-nine polynomial loses a few `f32` ulps of its range.
 const TOL: f64 = 1e-4;
 
-/// The curve's closed form in `f64`, at `drive` (the staircases' levels floored at 1).
-fn closed(kind: ShapeKind, x: f32, drive: f64) -> f64 {
-    closed_f64(kind, f64::from(x), drive)
-}
-
-/// [`closed`] at an `f64` input.
-fn closed_f64(kind: ShapeKind, x: f64, d: f64) -> f64 {
+/// The curve's closed form in `f64`, at `drive` (the staircases' levels floored at 1), of an
+/// input of either width.
+fn closed<F: Float>(kind: ShapeKind, x: F, d: f64) -> f64 {
+    let x = x.to_f64();
     let half_pi = std::f64::consts::FRAC_PI_2;
     match kind {
         ShapeKind::Tanh => (x * d).tanh(),
@@ -124,15 +121,15 @@ fn at_rest(kind: ShapeKind, drive: f64) -> WaveshaperBank<f32> {
 }
 
 /// `bank` over `channels` (each a plane), one block, with `signal` the drive per frame.
-fn run(
-    bank: &mut WaveshaperBank<f32>,
-    signal: Option<&[f32]>,
-    channels: &[Vec<f32>],
-) -> Vec<Vec<f32>> {
-    let refs: Vec<&[f32]> = channels.iter().map(Vec::as_slice).collect();
-    let mut out = vec![vec![0.0f32; channels[0].len()]; channels.len()];
+fn run<F: Float + Lerp>(
+    bank: &mut WaveshaperBank<F>,
+    signal: Option<&[F]>,
+    channels: &[Vec<F>],
+) -> Vec<Vec<F>> {
+    let refs: Vec<&[F]> = channels.iter().map(Vec::as_slice).collect();
+    let mut out = vec![vec![F::ZERO; channels[0].len()]; channels.len()];
     let planes = Planes::new(&refs).unwrap();
-    let mut outs: Vec<&mut [f32]> = out.iter_mut().map(Vec::as_mut_slice).collect();
+    let mut outs: Vec<&mut [F]> = out.iter_mut().map(Vec::as_mut_slice).collect();
     bank.process(
         signal.map(Mono::new),
         &mut InputOutput::paired(planes, PlanesMut::new(&mut outs).unwrap()).unwrap(),
@@ -356,7 +353,7 @@ fn first_order_is_the_mean_of_the_curve_over_the_segment() {
         let y = run(&mut bank, None, std::slice::from_ref(&x)).remove(0);
         let mut before = 0.0;
         for (i, (&y, &x)) in y.iter().zip(&x).enumerate() {
-            let want = mean(|t| closed_f64(kind, t, drive), before, f64::from(x), 20_000);
+            let want = mean(|t| closed(kind, t, drive), before, f64::from(x), 20_000);
             assert!(
                 (f64::from(y) - want).abs() < 1e-4,
                 "{kind:?} frame {i}: {y} vs {want}"
@@ -405,7 +402,7 @@ fn assert_second_order_is_quadrature(
 
 /// `F1` of the closed-form curve at `drive`, by the midpoint rule from 0 over 800 cells.
 fn quadrature_f1(kind: ShapeKind, drive: f64) -> impl Fn(f64) -> f64 {
-    move |t| integral(&|u| closed_f64(kind, u, drive), t, 800)
+    move |t| integral(&|u| closed(kind, u, drive), t, 800)
 }
 
 /// Second order, for the two kinds that have it, on noise: to 1e-5 (the midpoint rule's error
@@ -441,7 +438,7 @@ fn the_second_order_limits_match_quadrature_on_a_nonlinear_curve() {
 fn second_order_holds_at_large_u_on_a_slow_signal() {
     let kind = ShapeKind::Softsign;
     let drive = 1000.0;
-    let g = |t: f64| closed_f64(kind, t, drive);
+    let g = |t: f64| closed(kind, t, drive);
     let base = integral(&g, 1.0, 200_000);
     let f1 = |t: f64| base + (t - 1.0) * mean(g, 1.0, t, 16);
     let x: Vec<f32> = (0..16)
@@ -845,7 +842,7 @@ fn a_drive_step_makes_no_step_beyond_the_curve() {
         let mut bank = antialiased(kind, 1.0, order);
         let y = run(&mut bank, Some(&signal), &[vec![0.2; 16]]).remove(0);
         for (i, (&y, &d)) in y.iter().zip(&signal).enumerate().skip(2) {
-            let want = closed(kind, 0.2, f64::from(d));
+            let want = closed(kind, 0.2f32, f64::from(d));
             assert!(
                 (f64::from(y) - want).abs() < 1e-6,
                 "{kind:?} {order:?} frame {i}: {y} vs {want}"
@@ -1034,17 +1031,7 @@ fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> V
         drive: Drive::new(drive),
     });
     bank.jump_to_target();
-    let mut out = vec![0.0f64; x.len()];
-    bank.process(
-        None,
-        &mut InputOutput::paired(
-            Planes::new(&[x]).unwrap(),
-            PlanesMut::new(&mut [&mut out[..]]).unwrap(),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    out
+    run(&mut bank, None, &[x.to_vec()]).remove(0)
 }
 
 /// An `f64` bank holds the drive and the signal in `f64`: on a 29-bit signal at a drive
@@ -1054,7 +1041,7 @@ fn through_f64(kind: ShapeKind, drive: f64, order: Antialiasing, x: &[f64]) -> V
 #[test]
 fn an_f64_bank_is_each_curve_in_f64() {
     use std::f64::consts::PI;
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x = wide_signal(200);
     let (drive, crush) = (1.7f64, 4096.0f64);
     let h = drive;
@@ -1084,7 +1071,7 @@ fn an_f64_bank_is_each_curve_in_f64() {
     for (kind, drive, f) in closed {
         let want: Vec<f64> = x.iter().map(|&x| f(x)).collect();
         let got = through_f64(kind, drive, Antialiasing::Off, &x);
-        assert_close_f64(&got, &want, 2.0f64.powi(-45));
+        assert_close(&got, &want, 2.0f64.powi(-45));
     }
 }
 
@@ -1094,7 +1081,7 @@ fn an_f64_bank_is_each_curve_in_f64() {
 /// signal that alternates in sign so that no step is inside the threshold, to 2^-45.
 #[test]
 fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x: Vec<f64> = wide_signal(200)
         .iter()
         .enumerate()
@@ -1113,7 +1100,7 @@ fn an_f64_first_order_adaa_is_the_divided_difference_of_the_antiderivative() {
             before = now;
         }
         let got = through_f64(kind, 1.0, Antialiasing::FirstOrder, &x);
-        assert_close_f64(&got, &want, 2.0f64.powi(-45));
+        assert_close(&got, &want, 2.0f64.powi(-45));
     }
 }
 

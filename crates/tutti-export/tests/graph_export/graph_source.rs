@@ -34,6 +34,7 @@ use tutti_dsp::DitherShape;
 use tutti_export::{
     GRAPH_MAX_BLOCK, Normalize, RenderError, RenderGraph, Rendered, Resample, Setup,
 };
+use tutti_fixtures::signal::amplitude_at;
 use tutti_graph::{Cx, GraphBuilder, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_nodes::LimiterConfig;
 use tutti_nodes::testing::{Const, Osc, vbap_mix};
@@ -207,23 +208,9 @@ fn quad_vbap() -> GraphBuilder {
     g
 }
 
-/// The amplitude of the sinusoid at `freq` in the 4 800 frames of `x` from
-/// `from`: the projection onto its sine and cosine. The window is 100 ms, whole
-/// cycles of every multiple of 10 Hz at 48 kHz, so sinusoids at 300 and 500 Hz
-/// project onto each other and onto nothing else exactly.
-fn amplitude_at(x: &[f32], from: usize, freq: f64) -> f64 {
-    use std::f64::consts::TAU;
-    let w = &x[from..from + 4_800];
-    let (mut re, mut im) = (0.0f64, 0.0f64);
-    for (i, &s) in w.iter().enumerate() {
-        let p = TAU * freq * (from + i) as f64 / RATE.get();
-        re += f64::from(s) * p.cos();
-        im += f64::from(s) * p.sin();
-    }
-    2.0 * re.hypot(im) / w.len() as f64
-}
-
-/// The VBAP energy law on a render of `quad_vbap`, in the window at `from`:
+/// The VBAP energy law on a render of `quad_vbap`, in the 4 800 frames at `from` (100 ms,
+/// whole cycles of every multiple of 10 Hz at 48 kHz, so sinusoids at 300 and 500 Hz
+/// project onto each other and onto nothing else exactly):
 /// each source's energy over the four speakers is that of its input (a stereo
 /// pair of 0.5 sines presents a unit sinusoid, within the panner's 5%) and the
 /// same for both sources whatever their bearing, and the speaker nearest each
@@ -232,7 +219,9 @@ fn amplitude_at(x: &[f32], from: usize, freq: f64) -> f64 {
 fn assert_vbap_energy(what: &str, quad: &[Vec<f32>], from: usize) {
     let mut energies = Vec::new();
     for (freq, nearest) in [(300.0, 0), (500.0, 2)] {
-        let amps: Vec<f64> = (0..4).map(|c| amplitude_at(&quad[c], from, freq)).collect();
+        let amps: Vec<f64> = (0..4)
+            .map(|c| amplitude_at(&quad[c][from..from + 4_800], Hz::new(freq), RATE))
+            .collect();
         let energy: f64 = amps.iter().map(|a| a * a).sum();
         assert!(
             (energy - 1.0).abs() < 0.05,

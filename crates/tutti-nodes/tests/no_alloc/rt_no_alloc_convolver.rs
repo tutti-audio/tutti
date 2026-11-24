@@ -14,7 +14,7 @@ const BLOCKS: [usize; 6] = [1, 7, 31, 33, 64, 100];
 
 /// A response of `len` taps with a slow decay: short or long enough to be cut into levels.
 fn response(seed: usize, len: usize) -> Vec<f32> {
-    tutti_fixtures::noise(seed as u32, len)
+    tutti_fixtures::noise::<f32>(seed as u32, len)
         .iter()
         .enumerate()
         .map(|(k, v)| v * 0.5 / (1.0 + k as f32 * 0.01))

@@ -600,7 +600,7 @@ fn run_wide(
 /// to 2^-45; an `f32` state is off by 1e-8.
 #[test]
 fn an_f64_comb_is_its_difference_equation() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (l, len) = (7usize, 300usize);
     let (g, d1, g_in) = (
         0.123_456_789_012_345_f64,
@@ -621,14 +621,14 @@ fn an_f64_comb_is_its_difference_equation() {
     );
     comb.retune(g, d1);
     let got: Vec<f64> = x.iter().map(|&x| comb.tick(x * g_in)).collect();
-    assert_close_f64(&got, &y, 2.0f64.powi(-45));
+    assert_close(&got, &y, 2.0f64.powi(-45));
 }
 
 /// An `f64` Freeverb all-pass is its difference equation on the wide signal: `y[n] = b[n - D]
 /// - x[n]`, `b[n] = x[n] + a b[n - D]`, with an `a` `f32` cannot hold, to 2^-45.
 #[test]
 fn an_f64_all_pass_is_its_difference_equation() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let (d, len) = (5usize, 300usize);
     let a = 0.618_033_988_749_894_9_f64;
     let x = wide_signal(len);
@@ -642,7 +642,7 @@ fn an_f64_all_pass_is_its_difference_equation() {
         .form(AllPassForm::Freeverb);
     let mut got = x.clone();
     ap.process(&mut got);
-    assert_close_f64(&got, &y, 2.0f64.powi(-45));
+    assert_close(&got, &y, 2.0f64.powi(-45));
 }
 
 /// At 44.1 kHz a unit impulse of the wide signal's first value `x0` is silent until the
@@ -652,7 +652,7 @@ fn an_f64_all_pass_is_its_difference_equation() {
 /// four make `+x`. `FIXED_GAIN` is the `f32` unit widened; the product is exact in `f64`.
 #[test]
 fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() {
-    use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+    use tutti_fixtures::signal::{assert_close, wide_signal};
     let x0 = wide_signal(1)[0];
     let g = FreeverbBank::<f64>::FIXED_GAIN.get();
     let mut x = vec![0.0f64; 1_300];
@@ -667,7 +667,7 @@ fn an_f64_freeverb_returns_the_fixed_gain_times_the_input_at_each_comb_length() 
     for at in [1_116, 1_188, 1_277] {
         want[at] = x0 * g;
     }
-    assert_close_f64(&left, &want, 0.0);
+    assert_close(&left, &want, 0.0);
 }
 
 /// An `f64` Freeverb is linear: `R(a x + b y) = a R(x) + b R(y)` to 2^-40 of the peak, with

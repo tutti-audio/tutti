@@ -1,7 +1,7 @@
 use tutti_units::{Ballistics, SampleRate, Seconds};
 
 use super::{Follower, Pole, Smoothed};
-use tutti_fixtures::signal::{assert_close_f64, wide_signal};
+use tutti_fixtures::signal::{assert_close, wide_signal};
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
 // format, so their tolerances are `f32`'s.
@@ -33,7 +33,7 @@ fn an_f64_attack_step_from_zero_is_the_coefficient_times_the_target() {
         .map(|&t| follower.follow_raw(&mut Smoothed::at(0.0), t))
         .collect();
     let want: Vec<f64> = targets.iter().map(|&t| closed(ATTACK) * t).collect();
-    assert_close_f64(&got, &want, 1e-12);
+    assert_close(&got, &want, 1e-12);
 }
 
 /// From a target down to 0, one step keeps `1 - release` of the state, with the closed-form
@@ -50,7 +50,7 @@ fn an_f64_release_step_to_zero_keeps_one_minus_the_coefficient() {
         .iter()
         .map(|&s| s * (1.0 - closed(RELEASE)))
         .collect();
-    assert_close_f64(&got, &want, 1e-12);
+    assert_close(&got, &want, 1e-12);
 }
 
 /// The neutral follower closes none of the gap, so a wide state stays exactly where it is.
@@ -61,7 +61,7 @@ fn an_f64_neutral_follower_holds_a_wide_state_exactly() {
         .iter()
         .map(|&s| Follower::<f64>::NEUTRAL.follow_raw(&mut Smoothed::at(s), 0.0))
         .collect();
-    assert_close_f64(&got, &held, 0.0);
+    assert_close(&got, &held, 0.0);
 }
 
 /// The same steps in `f32` are `attack * target` exactly and `state * (1 - release)` to `f32`

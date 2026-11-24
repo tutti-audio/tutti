@@ -60,7 +60,7 @@ fn sampled_peak_tolerance_db(f: f64) -> f64 {
 }
 
 fn amplitude_db(a: f64) -> f64 {
-    20.0 * a.log10()
+    Amplitude::new(a).to_db().get()
 }
 
 /// `node` over `key` in blocks, its audio the constant [`AUDIO`]; the output.

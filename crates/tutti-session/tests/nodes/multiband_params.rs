@@ -102,13 +102,7 @@ fn render(s: &mut Session, frames: usize) -> [Vec<f32>; 2] {
 
 /// The amplitude of a tone of `hz` in `x`, by lock-in over whole periods.
 fn amplitude(x: &[f32], hz: f64) -> f64 {
-    let (mut c, mut s) = (0.0, 0.0);
-    for (n, &v) in x.iter().enumerate() {
-        let p = TAU * hz * n as f64 / RATE;
-        c += f64::from(v) * p.cos();
-        s += f64::from(v) * p.sin();
-    }
-    2.0 * c.hypot(s) / x.len() as f64
+    tutti_fixtures::signal::amplitude_at(x, tutti_units::Hz::new(hz), SampleRate::of(RATE))
 }
 
 /// Both channels' steady amplitudes after a settle, over whole periods of

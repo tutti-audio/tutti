@@ -10,9 +10,6 @@ fn sine(len: usize) -> Vec<f64> {
         tutti_units::SampleRate::SR_48K,
         tutti_units::Samples::new(len),
     )
-    .into_iter()
-    .map(f64::from)
-    .collect()
 }
 
 fn scope(l: &[f64], r: &[f64], decimate: NonZeroUsize) -> Vec<ScopePoint> {

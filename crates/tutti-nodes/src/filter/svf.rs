@@ -402,7 +402,7 @@ mod tests {
         let noise: Vec<f32> = (0..2048)
             .map(|i| ((i * 7 + 3) % 100) as f32 / 50.0 - 1.0)
             .collect();
-        let run = |cutoff: f32| -> f32 {
+        let run = |cutoff: f32| -> f64 {
             let mut f = prepared(SvfFilterNode::<f32>::from(
                 SvfFilterConfig::new(ChannelLayout::STEREO, SvfType::LowPass)
                     .freq(Hz::new(200.0))
@@ -509,11 +509,11 @@ mod tests {
 
     /// The RMS of a unit sine at `hz` through a low-pass at `fc` and `q`, 48 kHz: the
     /// bilinear response `1 / sqrt((1 - u^2)^2 + (u / q)^2)`, `u = tan(pi hz / fs) / tan(pi fc / fs)`.
-    fn lp_rms(hz: f64, fc: f64, q: f64) -> f32 {
+    fn lp_rms(hz: f64, fc: f64, q: f64) -> f64 {
         let u = libm::tan(core::f64::consts::PI * hz / 48_000.0)
             / libm::tan(core::f64::consts::PI * fc / 48_000.0);
         let gain = 1.0 / libm::sqrt((1.0 - u * u).powi(2) + (u / q).powi(2));
-        (gain * core::f64::consts::FRAC_1_SQRT_2) as f32
+        gain * core::f64::consts::FRAC_1_SQRT_2
     }
 
     /// A clone starts with its cells at rest: a clone of a node whose cutoff ramp is in

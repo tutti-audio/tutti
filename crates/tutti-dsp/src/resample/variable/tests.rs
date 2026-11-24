@@ -1,6 +1,7 @@
 use super::*;
 use std::f64::consts::TAU;
 use tutti_rt::SplitMix64;
+use tutti_units::{Hz, SampleRate};
 
 /// The head's step for `ratio` in `2^-32` frames, rounded to nearest.
 fn counts(ratio: f64) -> u64 {
@@ -43,7 +44,12 @@ fn run<F: Float>(
 }
 
 fn sine(f: f64, frames: usize) -> Vec<f64> {
-    (0..frames).map(|n| (TAU * f * n as f64).sin()).collect()
+    tutti_fixtures::signal::sine(
+        Hz::new(f),
+        tutti_units::Amplitude::new(1.0),
+        SampleRate::of(1.0),
+        Samples::new(frames),
+    )
 }
 
 /// Least-squares fit of `a cos + b sin` at `f` cycles per frame over `y`: the amplitude, and

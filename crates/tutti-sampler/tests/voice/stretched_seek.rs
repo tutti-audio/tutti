@@ -88,7 +88,7 @@ fn a_stretched_voice_sounds_the_sine_after_exactly_its_priming() {
         "silent for the {silent} frames of priming"
     );
     let after = rms(&out[seek_at + silent..seek_at + silent + 2_048]);
-    let want = 1.0 / 2.0f32.sqrt();
+    let want = 1.0 / 2.0f64.sqrt();
     let db = 20.0 * (after / want).log10();
     assert!(
         db.abs() < 1.0,

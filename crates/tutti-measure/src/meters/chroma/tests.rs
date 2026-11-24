@@ -18,9 +18,12 @@ fn framing(window: usize, hop: usize) -> Framing {
 }
 
 fn sine(freq: f64, len: usize, amp: f64) -> Vec<f64> {
-    (0..len)
-        .map(|i| amp * (std::f64::consts::TAU * freq * i as f64 / 22_050.0).sin())
-        .collect()
+    tutti_fixtures::signal::sine(
+        tutti_units::Hz::new(freq),
+        tutti_units::Amplitude::new(amp),
+        RATE,
+        Samples::new(len),
+    )
 }
 
 /// Largest error of the interpolated peak position, in bins, over a sweep

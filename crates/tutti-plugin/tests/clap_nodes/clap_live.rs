@@ -25,6 +25,7 @@
 #![cfg(feature = "clap")]
 
 use crate::clap_probe;
+use crate::ramp_source::{RampSource, ramp};
 use clap_probe::{ProbeEnv, load_probe, render};
 use tutti_buffers::MaxBlock;
 use tutti_fixtures::machine_lock;
@@ -35,37 +36,14 @@ use tutti_buffers::ChannelLayout;
 use tutti_buffers::InterleavedMut;
 use tutti_engine::Engine;
 use tutti_graph::NodeKey;
-use tutti_graph::{Cx, Editor, Io, Node, Prepare, Shape, Status, Unforkable};
 use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
+use tutti_graph::{Editor, Prepare, Unforkable};
 use tutti_plugin_ipc::RING_SLOTS;
 use tutti_timeline::Transport;
-use tutti_units::{SampleRate, Samples, Tail};
+use tutti_units::{SampleRate, Samples};
 
 /// What the probe declares and delays by (`REPORTED_LATENCY_SAMPLES`).
 const PROBE_LATENCY: usize = 137;
-
-/// Input frame `t`: distinct, never zero, exact in `f32`.
-fn ramp(t: u64) -> f32 {
-    ((t % 997) + 1) as f32 / 1024.0
-}
-
-/// The ramp as a graph source, read off each block's `Env`.
-struct RampSource;
-
-impl Node for RampSource {
-    fn shape(&self) -> Shape {
-        Shape::source_unassigned(ChannelLayout::MONO).tail(Tail::Unbounded)
-    }
-    fn prepare(&mut self, _: &Prepare) {}
-    fn process(&mut self, cx: &Cx<'_>, mut io: Io<'_>) -> Status {
-        let first = cx.env.frame.get();
-        for (i, s) in io.output(0).iter_mut().enumerate() {
-            *s = ramp(first + i as u64);
-        }
-        Status::Modified
-    }
-    fn reset(&mut self) {}
-}
 
 /// What a live run saw.
 struct Run {

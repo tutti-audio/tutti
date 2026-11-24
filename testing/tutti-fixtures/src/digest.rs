@@ -2,10 +2,10 @@
 //!
 //! [`noise`] is a deterministic broadband stimulus for a test; [`Fnv`] folds
 //! bytes or the bits of numbers into a 64-bit figure, e.g. to tell two byte
-//! streams apart. Both are plain `f32`, `u32` and `u64` code with no workspace
-//! type in a signature, so a crate at any layer can dev-depend on this one for
-//! them.
+//! streams apart. Both are plain `f32`, `u32` and `u64` code (noise at any `Float` width), so a
+//! crate at any layer can dev-depend on this one for them.
 
+use tutti_buffers::Float;
 use tutti_rt::SplitMix64;
 
 /// Deterministic broadband noise: an endless stream of `f32` in `[-1, 1)` drawn
@@ -33,9 +33,13 @@ impl Iterator for Noise {
 
 /// `len` samples of [`Noise::seeded`]`(seed)`, in `[-1, 1)`.
 ///
-/// Scale it with a `map` (`0.5 * x`) for a stimulus at a level.
-pub fn noise(seed: u32, len: usize) -> Vec<f32> {
-    Noise::seeded(seed).take(len).collect()
+/// Scale it with a `map` (`0.5 * x`) for a stimulus at a level. Each draw is exact
+/// in `f32` and widens exactly to `f64`, so every width reads the same stream.
+pub fn noise<F: Float>(seed: u32, len: usize) -> Vec<F> {
+    Noise::seeded(seed)
+        .take(len)
+        .map(|x| F::from_f64(f64::from(x)))
+        .collect()
 }
 
 /// A 64-bit FNV-1a hash, fed bytes or the little-endian bits of a number.
@@ -146,10 +150,14 @@ mod tests {
     /// `0xE220A8`, exact in `f32`. Every draw stays in `[-1, 1)`.
     #[test]
     fn noise_is_splitmix64_top_24_bits() {
-        let x = noise(0, 4096);
+        let x: Vec<f32> = noise(0, 4096);
         assert!(x.iter().all(|s| (-1.0..1.0).contains(s)));
         assert_eq!(x[0], 0xE2_20A8_u32 as f32 / 8_388_608.0 - 1.0);
-        assert_eq!(noise(0, 8), x[..8], "a longer draw extends a shorter one");
-        assert_ne!(noise(1, 8), x[..8], "neighbouring seeds differ");
+        assert_eq!(
+            noise::<f32>(0, 8),
+            x[..8],
+            "a longer draw extends a shorter one"
+        );
+        assert_ne!(noise::<f32>(1, 8), x[..8], "neighbouring seeds differ");
     }
 }
