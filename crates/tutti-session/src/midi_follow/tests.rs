@@ -298,7 +298,7 @@ fn reopen_answers_unchanged_opened_and_gone() {
     let _ = graph.commit();
     assert_eq!(tap.reopen(&mut graph), Reopened::Unchanged);
 
-    drop(graph.remove(node).expect("the node is in the graph"));
+    let _ = graph.remove(node).expect("the node is in the graph");
     graph.set_sample_rate(SampleRate::SR_48K).expect("re-rates");
     let _ = graph.commit();
     assert_eq!(tap.reopen(&mut graph), Reopened::Gone);
