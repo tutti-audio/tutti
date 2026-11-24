@@ -43,8 +43,9 @@
 //! end, and nothing is left sounding.
 //!
 //! Which note-off is a note's is decided when the clip is set: a note-off
-//! belongs to the earliest-listed note-on of its key that is at or before
-//! it in time and not already taken, in the order the events are given. A
+//! belongs to the earliest-listed note-on of its key that plays before it
+//! (on an earlier beat, or on its beat and listed before it) and is not
+//! already taken, in the order the events are given. A
 //! host that lists each note's on and off together gets its notes exactly.
 //! A list already in time order (a parsed file) pairs notes of one key
 //! first on, first off, which is right for notes that overlap and, for a
@@ -114,6 +115,8 @@ pub const CLIP_EVENT_DENSITY: EventDensity = EventDensity::per_frame(1);
 /// paired to its note-on, and the chase table that makes a jump to a beat
 /// a binary search.
 ///
+/// [`notes`](Self::notes) lists the notes the pairing gives.
+///
 /// Collect a clip from [`TimedMidiEvent`]s in any order; the sorting, the
 /// translation of MIDI 1.0 events to MIDI 2.0 and the pairing are done there,
 /// so the thread that publishes it does none of it. Two clips are equal when
@@ -132,7 +135,7 @@ pub struct ClipEvents {
     ends: Box<[Option<u32>]>,
 }
 
-/// A note of a clip: a note-on and the note-off that ends it
+/// A note of a clip: a note-on and the note-off that ends it, if one does
 /// ([`ClipEvents::notes`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClipNote {
@@ -148,7 +151,8 @@ pub struct ClipNote {
     /// Where the note starts.
     pub start: Beat,
     /// How long it lasts, from its note-on to its note-off; `None` for a
-    /// note-on no note-off ends, which sounds to the clip's end.
+    /// note-on no note-off ends: it sounds until playback stops or jumps, or
+    /// the clip is replaced.
     pub length: Option<BeatDuration>,
 }
 
@@ -441,10 +445,12 @@ fn sorted(events: impl IntoIterator<Item = TimedMidiEvent>) -> Box<[ClipEvent]> 
             *first += 1;
         }
         let beat = v[i].1.timed.beat().get();
-        let found = list[*first..]
-            .iter()
-            .copied()
-            .find(|&o| !taken[o as usize] && v[o as usize].1.timed.beat().get() <= beat);
+        // A note-on ends at a note-off that plays after it: on a later beat,
+        // or on its own beat and later in the list.
+        let found = list[*first..].iter().copied().find(|&o| {
+            let on = v[o as usize].1.timed.beat().get();
+            !taken[o as usize] && (on < beat || (on == beat && (o as usize) < i))
+        });
         if let Some(o) = found {
             taken[o as usize] = true;
             let id = Some(NoteId::from_index(o));

@@ -176,19 +176,24 @@ fn a_clips_notes_are_listed_by_note_on_with_their_lengths_and_open_ones_have_non
 }
 
 /// **A MIDI 1.0 note is listed at its MIDI 2.0 velocity**: the clip stores
-/// the translation, so velocity 127 is the full 16 bits.
+/// the translation, so velocity 100 is M2-115's min-centre-max scaling of it:
+/// `100 << 9`, and the six bits below the centre bit (36) repeated beneath,
+/// `36 << 3 | 36 >> 3`.
 #[test]
 fn a_midi_1_notes_velocity_is_listed_at_midi_2_width() {
     let on = Message::midi1(
         MidiChannel::FIRST,
-        Voice1::note_on(NoteNumber::of(60), U7::of(127)),
+        Voice1::note_on(NoteNumber::of(60), U7::of(100)),
     );
     let clip: ClipEvents = [TimedMidiEvent::new(Beat::new(1.0), on).unwrap()]
         .into_iter()
         .collect();
     let notes: Vec<_> = clip.notes().collect();
     assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0].velocity, NoteVelocity::new(0xFFFF));
+    assert_eq!(
+        notes[0].velocity,
+        NoteVelocity::new(100 << 9 | 36 << 3 | 36 >> 3)
+    );
 }
 
 /// **A note-off that ends no note-on is not a note**, and a clip with no

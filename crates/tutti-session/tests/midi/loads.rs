@@ -39,10 +39,10 @@ fn session() -> DetachedSession {
         .expect("builds")
 }
 
-/// MIDI 1.0 velocity 100 at MIDI 2.0 width: above the centre (64 is 0x8000), the
-/// span to 0xFFFF is split over the 63 steps to 127:
-/// 0x8000 + 36 * 0x7FFF / 63.
-const VELOCITY_100: NoteVelocity = NoteVelocity::new(51_492);
+/// MIDI 1.0 velocity 100 at MIDI 2.0 width, by M2-115's min-centre-max
+/// scaling: `100 << 9`, and the six bits below the centre bit (36) repeated
+/// beneath.
+const VELOCITY_100: NoteVelocity = NoteVelocity::new(100 << 9 | 36 << 3 | 36 >> 3);
 
 /// **A MIDI load of a dropped session is `ShutDown`**: the file did not fail.
 #[test]
