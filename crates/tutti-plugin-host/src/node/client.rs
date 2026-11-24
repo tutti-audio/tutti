@@ -718,7 +718,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
 /// changes, at chunk frame `at`: each is sent though the plugin has the value
 /// from this node already, since the write says where it stands, and carries
 /// the epoch it was drained in. Answers how far the slots are swept, for
-/// [`InProcessClient::publish_edits`] once the changes are handed to the plugin;
+/// [`publish_edits`] once the changes are handed to the plugin;
 /// `None` when the reader was not free. Allocation-free, and takes no lock.
 pub(super) fn take_edits(
     edits: Option<&EditPort>,
