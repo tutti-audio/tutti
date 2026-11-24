@@ -167,8 +167,10 @@ impl<F: Float> Editor<F> {
     /// [`CommitError::NoSuchNode`] for a `key` not in the spec,
     /// [`CommitError::Poisoned`] or [`CommitError::Repreparing`] (check
     /// [`is_repreparing`](Self::is_repreparing) first to keep the node: a
-    /// refusal consumes it), and [`CommitError::FadeShape`] for a running
-    /// unit and a non-zero `fade`; nothing changes and `node` is dropped.
+    /// refusal consumes it), and [`CommitError::FadeShape`] for a non-zero
+    /// `fade` over a running unit whose shape `node`'s does not fit; nothing
+    /// changes and `node` is dropped. Not an error: a non-zero `fade` at a key
+    /// that is not running yet places the node with no fade.
     pub fn replace_or_swap<N: IntoNode<F>>(
         &mut self,
         key: NodeKey,
