@@ -411,8 +411,9 @@ impl<F: FftFloat + Lerp> FdnBank<F> {
         FdnRamps::new(self.max_lines, ramp(self.rate), &self.target)
     }
 
-    /// How long it rings at its worst: unbounded, since the freeze holds the tail, but for a
-    /// [shimmering](FdnLayout::shimmering) layout, whose tail always decays: its longest decay.
+    /// How long it rings at its worst: unbounded, since a freeze holds the tail; a
+    /// [shimmering](FdnLayout::shimmering) layout cannot freeze, and its ceiling is its longest
+    /// decay.
     #[must_use]
     pub fn tail(&self) -> Tail {
         self.ceiling

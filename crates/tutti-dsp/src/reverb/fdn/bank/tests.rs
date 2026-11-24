@@ -860,7 +860,8 @@ fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input
 
 /// A layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its input shut:
 /// nothing ever falls to the floor), both for the setting and as the ceiling it declares; the same
-/// layout with `freeze` off, and a shimmering layout with it on, report a finite tail.
+/// bank asked with `freeze` off after that reports the decay's finite tail, and a shimmering
+/// layout with it on a finite one.
 #[test]
 fn a_frozen_network_reports_an_unbounded_tail() {
     for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
@@ -870,10 +871,22 @@ fn a_frozen_network_reports_an_unbounded_tail() {
         let frozen = controls(|c| c.freeze = true);
         assert_eq!(plain.tail_of(&ramps_p, &frozen), Tail::Unbounded);
         assert_eq!(plain.tail(), Tail::Unbounded, "the ceiling");
-        assert!(matches!(
-            plain.tail_of(&ramps_p, &FdnControls::DEFAULT),
-            Tail::Finite(_)
-        ));
+        // Released, the tail is the decay's again: at least the longest band's RT60 (the tail
+        // is 66 dB deep, 6 dB past it) and under 66/60 of it plus a quarter for the lines, the
+        // pre-delay and the modulation.
+        let longest = FdnControls::DEFAULT
+            .decay
+            .iter()
+            .map(|d| d.get())
+            .fold(0.0, f64::max);
+        let Tail::Finite(n) = plain.tail_of(&ramps_p, &FdnControls::DEFAULT) else {
+            panic!("a finite tail once the freeze is released")
+        };
+        let seconds = n.get() as f64 / rate.get();
+        assert!(
+            seconds >= longest && seconds <= longest * 1.35,
+            "{seconds} s for a {longest} s decay"
+        );
         assert!(matches!(
             shimmer.tail_of(&ramps_s, &frozen),
             Tail::Finite(_)
