@@ -129,7 +129,7 @@ fn graph(workers: usize, declared: bool) -> (Executor, Vec<common::Sink>, Vec<Se
             common::connect(&mut ed, source.0, sink.0);
         }
     }
-    ed.spec_mut().topology.set_outputs(outputs);
+    ed.set_outputs(outputs).expect("the sources exist");
     ed.commit().expect("commits");
     exec.apply_pending();
     ed.collect();

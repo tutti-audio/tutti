@@ -72,10 +72,11 @@ mod common {
 
     /// Wires event output 0 of node `from` to event input 0 of node `to`.
     pub(super) fn connect(ed: &mut Editor, from: u64, to: u64) {
-        ed.spec_mut().connect_events(
+        ed.connect_events(
             EventInputPort::new(NodeKey(to), 0),
             EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0)),
-        );
+        )
+        .expect("the edge wires");
     }
 }
 
@@ -221,9 +222,9 @@ impl<F: Float> Node<F> for Latent {
 }
 
 fn disconnect(ed: &mut Editor, from: u64, to: u64) {
-    assert!(ed.spec_mut().disconnect_events(
+    assert!(ed.disconnect_events(
         EventInputPort::new(NodeKey(to), 0),
-        EventOutputPort::new(NodeKey(from), 0)
+        tutti_graph::EventEdge::Direct(EventOutputPort::new(NodeKey(from), 0))
     ));
 }
 
@@ -691,13 +692,11 @@ fn the_close_reaches_a_sink_behind_a_delayed_edge() {
     );
     sink(&mut ed, 3);
     connect(&mut ed, 1, 2);
-    ed.spec_mut().topology.edges.insert(
-        InputPort::new(NodeKey(2), 0),
-        vec![Edge::Direct(PortSource::Node(OutputPort::new(
-            NodeKey(4),
-            0,
-        )))],
-    );
+    ed.connect_edge(tutti_graph::EdgeId {
+        sink: tutti_graph::PortSink::Port(InputPort::new(NodeKey(2), 0)),
+        from: Edge::Direct(PortSource::Node(OutputPort::new(NodeKey(4), 0))),
+    })
+    .expect("the edge wires");
     ed.commit().unwrap();
     let f = run(&mut exec, 0, 8, 256);
     assert_eq!(a.lock().held.len(), 1, "the note reached A");
@@ -747,9 +746,8 @@ fn forkable_rig() -> (
         },
     );
     connect(&mut ed, 1, 2);
-    ed.spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))]);
+    ed.set_outputs(vec![PortSource::Node(OutputPort::new(NodeKey(2), 0))])
+        .expect("the sources exist");
     ed.commit().unwrap();
     (ed, exec, controls, tally, forks)
 }
