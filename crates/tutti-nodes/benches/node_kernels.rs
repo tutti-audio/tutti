@@ -518,7 +518,7 @@ fn reverb(c: &mut Criterion) {
         c,
         "reverb",
         "freeverb",
-        || FreeverbNode::<f32>::from(FreeverbConfig::general_midi()),
+        || FreeverbNode::<f32>::from(FreeverbConfig::new()),
         None,
     );
     run(
