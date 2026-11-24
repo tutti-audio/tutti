@@ -139,10 +139,8 @@ where
         // What a wait for the host's writes takes its idle window from: the
         // longest block this node is prepared for.
         if let Some(edits) = this.edits.as_ref() {
-            let frames = p.max_block().get() as f64;
-            edits.set_block_period(std::time::Duration::from_secs_f64(
-                frames / p.sample_rate().get(),
-            ));
+            let period = p.max_block().samples().to_seconds(p.sample_rate());
+            edits.set_block_period(std::time::Duration::from_secs_f64(period.get()));
         }
         this.segments.prepare(this.params.room());
     }
