@@ -151,7 +151,7 @@ pub use tutti_rt::PushError;
 #[cfg(feature = "session")]
 pub use tutti_engine::{BlockCounts, Load};
 pub use tutti_timeline::{
-    AfterLocate, FadeOut, LoopRegion, MotionCommand, MotionState, TransportCommand,
+    AfterLocate, FadeOut, LoopRegion, MotionCommand, MotionState, Roll, TransportCommand,
 };
 
 // Units, channels, buffers and the musical meter.
@@ -588,8 +588,8 @@ pub mod session {
     };
     #[cfg(feature = "capture")]
     pub use tutti_session::{
-        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakeId,
-        TakePlacement, Window,
+        Armed, InFlight, InputOpener, OpenedInput, PunchError, Rolling, TakeEnd, TakePlacement,
+        Window,
     };
     #[cfg(any(feature = "capture", feature = "midi"))]
     pub use tutti_session::{Start, TakeLatency, Trim};
@@ -601,6 +601,8 @@ pub mod session {
         feature = "export"
     ))]
     pub use tutti_session::{Unanswered, Unblocked};
+    #[cfg(feature = "capture")]
+    pub use tutti_timeline::TakeId;
     // `load_audio` decodes a file, so it needs a decoder.
     #[cfg(feature = "midi")]
     pub use tutti_session::MidiNodes;

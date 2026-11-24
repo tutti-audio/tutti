@@ -248,8 +248,6 @@ tutti-timeline  setter  crates/tutti-timeline/src/audio.rs::TransportAudio::set_
 tutti-timeline  setter  crates/tutti-timeline/src/clock.rs::TransportClock::set_sample_rate
 tutti-timeline  setter  crates/tutti-timeline/src/handle.rs::Transport::set_sample_rate
 tutti-timeline  setter  crates/tutti-timeline/src/project_meter.rs::ProjectMeter::set_meter
-tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_in_preroll
-tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_recording
 tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo
 tutti-timeline  setter  crates/tutti-timeline/src/settings.rs::TransportSettings::set_tempo_map
 tutti-timeline  ctor-result  crates/tutti-timeline/src/tempo_reader.rs::TempoReader::constant

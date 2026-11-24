@@ -4,8 +4,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tutti_engine::BlockClockReader;
-use tutti_timeline::{AfterLocate, FadeOut, LoopRegion, MotionCommand, TimedError, Transport};
-use tutti_units::{At, Beat};
+use tutti_rt::Mutex;
+use tutti_timeline::{
+    FadeOut, LoopRegion, MotionCommand, RECORDING_CAPACITY, Recording, Roll, TakeId, TimedError,
+    Transport,
+};
+use tutti_units::{At, Beat, Frame};
 
 use crate::Playhead;
 
@@ -33,6 +37,25 @@ pub struct TransportHandle {
     /// was sent ([`Sent`]). It speaks for the transport until a call renders
     /// past that frame; from then on the playhead does.
     sent: Arc<AtomicU64>,
+    /// The takes that may be recording, shared by every clone: the control
+    /// side's superset of the engine's set ([`OpenTakes`]).
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+    )]
+    open: Arc<Mutex<OpenTakes>>,
+}
+
+/// When a take's [`Recording`] command is due: a frame, or the next block. A
+/// beat has no frame on the control side, so a take resolves its beat first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    not(feature = "capture"),
+    expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+)]
+pub(crate) enum When {
+    NextBlock,
+    Frame(Frame),
 }
 
 impl TransportHandle {
@@ -41,6 +64,7 @@ impl TransportHandle {
             transport,
             clock: None,
             sent: Arc::new(AtomicU64::new(Sent::NONE)),
+            open: Arc::default(),
         }
     }
 
@@ -135,18 +159,78 @@ impl TransportHandle {
         event: MotionCommand,
     ) -> Result<(), TimedError<MotionCommand>> {
         let at = at.into();
-        let rolls = rolls_after(event);
+        let roll = event.roll();
         if let At::Beat(_) = at
-            && rolls == Some(true)
+            && roll == Roll::Starts
             && !self.rolling()
         {
             return Err(TimedError::BeatWhileStopped(event));
         }
         self.transport.motion().schedule(at, event)?;
-        if at == At::NextBlock
-            && let Some(rolling) = rolls
-        {
-            self.record(rolling);
+        if at == At::NextBlock {
+            match roll {
+                Roll::Starts => self.record(true),
+                Roll::Stops => self.record(false),
+                Roll::Keeps => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Sends a take's [`Recording`] command, keeping the control side's set of
+    /// open takes ([`OpenTakes`]). Only a take sends one: an app records
+    /// through [`Session::record`](crate::Session::record).
+    ///
+    /// A `Start` for a take already open sends nothing and succeeds. A `Stop`
+    /// for a take that is not open sends nothing and changes nothing; one for
+    /// an open take that would not end its recording sooner than the `Stop`
+    /// already sent sends nothing either.
+    ///
+    /// # Errors
+    ///
+    /// [`TimedError::Full`] with the command when [`RECORDING_CAPACITY`] takes
+    /// are open (none with a `Stop` the engine has rendered past), or when the
+    /// transport's command queue is full.
+    #[cfg_attr(
+        not(feature = "capture"),
+        expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+    )]
+    pub(crate) fn send_recording(
+        &self,
+        recording: Recording,
+        when: When,
+    ) -> Result<(), TimedError<Recording>> {
+        let next = Sent::next_frame(&self.playhead());
+        let at = match when {
+            When::NextBlock => At::NextBlock,
+            When::Frame(frame) => At::Frame(frame),
+        };
+        let mut open = self.open.lock();
+        match recording {
+            Recording::Start(id) => {
+                open.free_stopped(next);
+                if open.contains(id) {
+                    return Ok(());
+                }
+                if open.is_full() {
+                    return Err(TimedError::Full(recording));
+                }
+                self.transport.motion().schedule(at, recording)?;
+                open.insert(id);
+            }
+            Recording::Stop(id) => {
+                // A frame already past is applied at the next render's first
+                // frame: the engine's set drops the take then, not before.
+                let ends = match when {
+                    When::NextBlock => next,
+                    When::Frame(frame) => frame.get().max(next),
+                };
+                if !open.ends_sooner(id, ends) {
+                    return Ok(());
+                }
+                self.transport.motion().schedule(at, recording)?;
+                open.stop(id, ends);
+            }
         }
         Ok(())
     }
@@ -178,7 +262,8 @@ impl TransportHandle {
         self.transport.motion().loop_region()
     }
 
-    /// Drops every timed command not yet fired, from the next block. The
+    /// Drops every timed command not yet fired, from the next block, but a
+    /// take's recording command (a take's start and stop are never lost). The
     /// rolling record is unchanged: only timed commands are cancelled, and
     /// the record holds only next-block commands.
     pub fn cancel_scheduled(&self) {
@@ -216,23 +301,56 @@ impl Sent {
     }
 }
 
-/// Whether the transport rolls once `event` applies: `Some(true)` for a
-/// command that starts it (a play, or a locate that then plays),
-/// `Some(false)` for one that stops it (a stop, or a locate that then stops),
-/// `None` for one that leaves the record as it was (a locate that keeps, or a
-/// scrub).
-fn rolls_after(event: MotionCommand) -> Option<bool> {
-    match event {
-        MotionCommand::Play
-        | MotionCommand::Locate {
-            then: AfterLocate::Play,
-            ..
-        } => Some(true),
-        MotionCommand::Stop { .. }
-        | MotionCommand::Locate {
-            then: AfterLocate::Stop,
-            ..
-        } => Some(false),
-        _ => None,
+/// The takes that may be recording, as the control side knows them: at most
+/// [`RECORDING_CAPACITY`], each with the frame its `Stop` takes effect, `None`
+/// until one is sent. The engine's set of takes recording is a subset of this
+/// one at every instant, so it never overflows.
+#[derive(Debug, Default)]
+#[cfg_attr(
+    not(feature = "capture"),
+    expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+)]
+struct OpenTakes {
+    takes: Vec<(TakeId, Option<u64>)>,
+}
+
+#[cfg_attr(
+    not(feature = "capture"),
+    expect(dead_code, reason = "a take (feature `capture`) is the one sender")
+)]
+impl OpenTakes {
+    /// Forgets the takes whose `Stop` the engine has rendered past: its frame
+    /// is before `next`, the first frame of the next render.
+    fn free_stopped(&mut self, next: u64) {
+        self.takes
+            .retain(|&(_, ends)| ends.is_none_or(|ends| ends >= next));
+    }
+
+    fn contains(&self, id: TakeId) -> bool {
+        self.takes.iter().any(|&(open, _)| open == id)
+    }
+
+    fn is_full(&self) -> bool {
+        self.takes.len() >= RECORDING_CAPACITY
+    }
+
+    fn insert(&mut self, id: TakeId) {
+        self.takes.push((id, None));
+    }
+
+    /// Whether a `Stop` taking effect at `ends` ends `id` sooner than any sent
+    /// before: `false` for a take not open.
+    fn ends_sooner(&self, id: TakeId, ends: u64) -> bool {
+        self.takes
+            .iter()
+            .any(|&(open, was)| open == id && was.is_none_or(|was| ends < was))
+    }
+
+    fn stop(&mut self, id: TakeId, ends: u64) {
+        for (open, was) in &mut self.takes {
+            if *open == id {
+                *was = Some(ends);
+            }
+        }
     }
 }

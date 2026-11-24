@@ -64,17 +64,14 @@ use tutti_graph::{MissingSource, NodeKey, TapAlign, TapOptions, TapReader};
 use tutti_platform::{Staged, StagedCommitError};
 use tutti_rt::{Bell, Listener, Mint};
 use tutti_tempo::TempoMap;
+use tutti_timeline::{Recording, TakeId};
 use tutti_units::{At, Beat, Frame, SampleRate, Samples, Seconds};
 
-use crate::{Input, Session, SessionEvent, Start, TakeLatency, Trim};
+use crate::transport_handle::When;
+use crate::{Input, Session, SessionEvent, Start, TakeLatency, TransportHandle, Trim};
 
 /// How many frames the pump moves a pass.
 const PASS_FRAMES: usize = 1024;
-
-tutti_rt::id! {
-    /// One take of a session: the number [`TakeEvent`]s carry.
-    pub struct TakeId;
-}
 
 /// Where a take starts and, if it has one, where it stops.
 ///
@@ -473,15 +470,18 @@ struct Report {
     id: TakeId,
     /// Set when the session drops: nothing sent lands.
     closed: Arc<AtomicBool>,
+    /// Stops the transport recording this take once the pump is done with it.
+    recorder: Recorder,
     ended: bool,
 }
 
 impl Report {
-    fn new(takes: &Takes, id: TakeId, closed: Arc<AtomicBool>) -> Self {
+    fn new(takes: &Takes, id: TakeId, closed: Arc<AtomicBool>, recorder: Recorder) -> Self {
         Self {
             tx: takes.tx.clone(),
             id,
             closed,
+            recorder,
             ended: false,
         }
     }
@@ -515,12 +515,55 @@ impl Report {
 
 impl Drop for Report {
     fn drop(&mut self) {
+        // However the pump ended (its punch-out, a finish, the input's
+        // removal, a failure, a drop), the transport stops recording the take.
+        self.recorder.stop();
         if !self.ended {
             // The session may be gone; then nothing waits for this end.
             let _ = self.tx.send(TakeEvent::Failed {
                 id: self.id,
                 error: TakeError::Dropped,
             });
+        }
+    }
+}
+
+/// A take's way to the transport: its [`Recording`] commands, sent through the
+/// session's handle.
+#[derive(Clone, Debug)]
+struct Recorder {
+    /// Shared, so a `Take` stays small.
+    handle: Arc<TransportHandle>,
+    id: TakeId,
+}
+
+impl Recorder {
+    fn new(handle: TransportHandle, id: TakeId) -> Self {
+        Self {
+            handle: Arc::new(handle),
+            id,
+        }
+    }
+
+    /// The take begins recording at `when`.
+    fn start(&self, when: When) -> Result<(), TakeError> {
+        self.handle
+            .send_recording(Recording::Start(self.id), when)
+            .map_err(|_| TakeError::TransportFull)
+    }
+
+    /// The take stops recording at `when`.
+    fn stop_at(&self, when: When) -> Result<(), TakeError> {
+        self.handle
+            .send_recording(Recording::Stop(self.id), when)
+            .map_err(|_| TakeError::TransportFull)
+    }
+
+    /// The take stops recording at the next block: a repeat of a stop already
+    /// sent is not sent again.
+    fn stop(&self) {
+        if let Err(error) = self.stop_at(When::NextBlock) {
+            tracing::warn!("take {} may keep the transport recording: {error}", self.id);
         }
     }
 }
@@ -677,6 +720,11 @@ pub enum TakeError {
         /// The graph frame the playhead stood at.
         now: Frame,
     },
+    /// The transport refused the take's start or its punch-out: too many
+    /// takes are recording ([`RECORDING_CAPACITY`](tutti_timeline::RECORDING_CAPACITY)),
+    /// or its command queue is full.
+    #[error("the transport refused the take: too many takes recording, or its queue is full")]
+    TransportFull,
     /// The sink's width is not the input's.
     #[error("the take's sink is {sink:?} wide but the input is {input:?}")]
     Width {
@@ -766,12 +814,18 @@ impl InFlight for Rolling {}
 struct StopOnDrop {
     stop: Arc<AtomicBool>,
     bell: Bell,
+    /// The take's stop at the transport once its start is sent; `None` until
+    /// then, when there is nothing to stop.
+    recorder: Option<Recorder>,
 }
 
 impl StopOnDrop {
     fn stop(&self) {
         self.stop.store(true, Ordering::Release);
         self.bell.ring();
+        if let Some(recorder) = &self.recorder {
+            recorder.stop();
+        }
     }
 }
 
@@ -938,7 +992,8 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
     /// session; [`TakeError::Tap`] when it has left the graph;
     /// [`TakeError::TransportStopped`], [`TakeError::Punch`] and
     /// [`TakeError::Past`] for a punch that cannot be resolved;
-    /// [`TakeError::NotStarted`] when the executor refuses the pump, before any file
+    /// [`TakeError::TransportFull`] when the transport refuses the take's
+    /// recording; [`TakeError::NotStarted`] when the executor refuses the pump, before any file
     /// or tap exists; [`TakeError::Open`] and [`TakeError::Width`] for the target.
     /// Nothing is left open on an error.
     pub fn record(&mut self, request: Record<C::Float>) -> Result<Take<Armed>, TakeError> {
@@ -1004,7 +1059,11 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
                 report.end(ended);
             })
             .map_err(|error| TakeError::NotStarted(error.kind()))?;
-        let stop = StopOnDrop { stop, bell };
+        let mut stop = StopOnDrop {
+            stop,
+            bell,
+            recorder: None,
+        };
 
         let (sink, path) = open_target(target, layout, rate)?;
 
@@ -1017,6 +1076,23 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             .open_ports(&ports, TapOptions::new(capacity).align(TapAlign::Raw))?;
 
         let id = self.inputs.takes().next_id();
+        // The transport records from the punch-in to the punch-out, or to the
+        // take's end. A start the transport refuses fails the arm; a
+        // punch-out it refuses ends the take through the stop that follows.
+        let recorder = Recorder::new(self.transport.handle.clone(), id);
+        let next = playhead.frame() + playhead.span();
+        let when = |frame: Frame| {
+            if frame <= next {
+                When::NextBlock
+            } else {
+                When::Frame(frame)
+            }
+        };
+        recorder.start(when(window.start))?;
+        stop.recorder = Some(recorder.clone());
+        if let Some(end) = window.end {
+            recorder.stop_at(when(end))?;
+        }
         let shared = Arc::new(Shared::default());
         let pump = Pump {
             reader,
@@ -1029,7 +1105,7 @@ impl<K: crate::AppKey, C: crate::Clock> Session<K, C> {
             shared: Arc::clone(&shared),
             stop: Arc::clone(&stop.stop),
         };
-        let report = Report::new(self.inputs.takes(), id, self.background.closed());
+        let report = Report::new(self.inputs.takes(), id, self.background.closed(), recorder);
         *parts.lock() = Some((pump, report));
         stop.bell.ring();
         Ok(Take {
@@ -1485,7 +1561,9 @@ mod tests {
             stop: Arc::default(),
         };
         let mut takes = Takes::new();
-        let report = Report::new(&takes, takes.next_id(), Arc::default());
+        let id = takes.next_id();
+        let handle = TransportHandle::new(tutti_timeline::Transport::new(SampleRate::SR_48K));
+        let report = Report::new(&takes, id, Arc::default(), Recorder::new(handle, id));
         let executor = tutti_platform::Executor::new();
         let bells = tutti_rt::Bells::new(&executor).expect("the bells' tick task");
         let (_bell, mut listener) = bells.bell();

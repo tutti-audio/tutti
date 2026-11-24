@@ -35,10 +35,36 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crossbeam_queue::ArrayQueue;
-use tutti_units::At;
+use tutti_units::{At, Beat, Frame};
 
 use super::loop_region::LoopEdit;
 use super::motion::MotionCommand;
+
+tutti_rt::id! {
+    /// One take of a session: the number its take events carry.
+    pub struct TakeId: named;
+}
+
+/// The most takes recording at once: the audio side's set of
+/// [`Recording`] ids has this many places, and a session's control side
+/// admits no more.
+pub const RECORDING_CAPACITY: usize = 16;
+
+/// A take starting or ending its recording, as a timed transport command:
+/// the transport is recording while any take is.
+///
+/// Only a take sends one, and only the session's control side does
+/// ([`TransportCommand::Recording`]); an app records through a take.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recording {
+    /// The take begins recording: the transport reads as recording from the
+    /// command's frame. A take already recording is left as it is.
+    Start(TakeId),
+    /// The take stops recording. A take that is not recording is left alone,
+    /// and a `Start` of it still waiting for its frame is dropped, so a take
+    /// stopped before its punch-in never records.
+    Stop(TakeId),
+}
 
 /// Scheduled transport commands that may be in flight at once: sent and not
 /// yet applied or cancelled.
@@ -63,6 +89,16 @@ pub enum TransportCommand {
     /// ([`LoopEdit`]). The engine owns the region, so this is the only way
     /// to change it.
     Loop(LoopEdit),
+    /// A take starts or stops recording ([`Recording`]). Unlike a loop edit
+    /// it survives [`cancel_scheduled`](super::MotionFsm::cancel_scheduled),
+    /// as an `At::NextBlock` command does: a take's end is never taken back.
+    Recording(Recording),
+}
+
+impl From<Recording> for TransportCommand {
+    fn from(recording: Recording) -> Self {
+        Self::Recording(recording)
+    }
 }
 
 impl From<LoopEdit> for TransportCommand {
@@ -92,8 +128,8 @@ pub enum TimedError<E: std::fmt::Debug> {
     /// the transport is stopped. A beat has a frame only once the transport
     /// rolls, so the command would wait for a playback that only it can
     /// start, and never fire. Start the transport first, or time it at a
-    /// frame or the next block. The session's verbs check this before
-    /// sending; [`MotionFsm`](super::MotionFsm)'s own sends never return it.
+    /// frame or the next block. The session's `TransportHandle::schedule`
+    /// returns it; [`MotionFsm`](super::MotionFsm)'s own sends never do.
     #[error("{0:?} cannot fire: a stopped transport never reaches a beat")]
     BeatWhileStopped(E),
 }
@@ -119,25 +155,51 @@ impl<E: std::fmt::Debug> TimedError<E> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NoCredit;
 
+/// When a command in flight is due.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Due {
+    NextBlock,
+    /// A frame, unrounded: a rate change moves it by `new / old`
+    /// (`CommandQueueAudio::rescale`), and the frame it is due at is this
+    /// rounded to the nearest, so two changes in a row round once rather
+    /// than twice (the graph executor's `CommandRx::rescale` keeps the same
+    /// figure).
+    Frame {
+        exact: f64,
+    },
+    Beat(Beat),
+}
+
+impl From<At> for Due {
+    fn from(at: At) -> Self {
+        match at {
+            At::NextBlock => Self::NextBlock,
+            At::Frame(frame) => Self::Frame {
+                exact: frame.get() as f64,
+            },
+            At::Beat(beat) => Self::Beat(beat),
+        }
+    }
+}
+
 /// One command in flight.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Scheduled {
-    at: At,
+    due: Due,
     command: TransportCommand,
     /// Send order: the tie-break between commands due on one frame, and what
     /// a cancel compares against.
     seq: u64,
-    /// An `At::Frame`'s frame, unrounded: a rate change moves it by
-    /// `new / old` (`CommandQueueAudio::rescale`), and `at` is this rounded to the
-    /// nearest frame, so two changes in a row round once rather than twice
-    /// (the graph executor's `CommandRx::rescale` keeps the same figure).
-    pos: f64,
 }
 
 impl Scheduled {
     /// When the command applies.
     pub fn at(&self) -> At {
-        self.at
+        match self.due {
+            Due::NextBlock => At::NextBlock,
+            Due::Frame { exact } => At::Frame(Frame::nearest(exact)),
+            Due::Beat(beat) => At::Beat(beat),
+        }
     }
 
     /// What it does.
@@ -220,25 +282,21 @@ impl CommandQueue {
             }
         }
         let seq = self.next_seq.fetch_add(1, Ordering::AcqRel);
-        let pos = match at {
-            At::Frame(f) => f.get() as f64,
-            _ => 0.0,
-        };
         // Cannot fail: the ring holds at most the commands in flight, and the
         // credit just taken keeps those at or under its capacity.
         self.queue
             .push(Scheduled {
-                at,
+                due: at.into(),
                 command,
                 seq,
-                pos,
             })
             .expect("credit bounds the ring");
         Ok(())
     }
 
     /// Cancel every timed command sent so far that has not been applied.
-    /// `At::NextBlock` commands are not waiting for a time and stand.
+    /// `At::NextBlock` commands are not waiting for a time and stand, and so
+    /// do [`Recording`] commands.
     pub(crate) fn cancel_all(&self) {
         self.cancel_before
             .store(self.next_seq.load(Ordering::Acquire), Ordering::Release);
@@ -318,9 +376,13 @@ impl CommandQueueAudio {
         let cancel_before = self.shared.cancel_before.load(Ordering::Acquire);
         let before = self.pending.len();
         // An `At::NextBlock` command is not waiting for a time, so a cancel
-        // does not take it back (a `send(Stop)` stands).
-        self.pending
-            .retain(|c| c.seq >= cancel_before || matches!(c.at, At::NextBlock));
+        // does not take it back (a `send(Stop)` stands); nor is a take's
+        // `Recording`, which is never taken back.
+        self.pending.retain(|c| {
+            c.seq >= cancel_before
+                || c.due == Due::NextBlock
+                || matches!(c.command, TransportCommand::Recording(_))
+        });
         self.shared.release(before - self.pending.len());
     }
 
@@ -341,6 +403,18 @@ impl CommandQueueAudio {
         command
     }
 
+    /// Drops every `Start(id)` still waiting for its time, giving each credit
+    /// back without counting it late: a take stopped before its punch-in
+    /// never records.
+    pub(crate) fn drop_starts(&mut self, id: TakeId) {
+        // Backwards, so the element a removal swaps into place was visited.
+        for i in (0..self.pending.len()).rev() {
+            if self.pending[i].command == TransportCommand::Recording(Recording::Start(id)) {
+                self.take(i, false);
+            }
+        }
+    }
+
     /// The engine's frame clock moved to a rate `ratio` times the old one
     /// (new / old), so every `At::Frame` command written at the old rate
     /// moves to the same wall-clock time at the new rate, rounded to the
@@ -359,9 +433,8 @@ impl CommandQueueAudio {
             if cmd.seq >= before {
                 continue;
             }
-            if let At::Frame(_) = cmd.at {
-                cmd.pos *= ratio;
-                cmd.at = At::Frame(tutti_units::Frame::nearest(cmd.pos));
+            if let Due::Frame { exact } = &mut cmd.due {
+                *exact *= ratio;
             }
         }
     }
@@ -382,7 +455,6 @@ impl CommandQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tutti_units::Frame;
 
     /// The credit is the back-pressure: with every one held the command is
     /// handed back, and applying one frees one.

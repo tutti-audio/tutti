@@ -339,7 +339,7 @@ pub use switch::ClockError;
 #[cfg(feature = "capture")]
 pub use take::{
     Armed, InFlight, Punch, PunchError, Record, Recorded, Rolling, Take, TakeEnd, TakeError,
-    TakeEvent, TakeFile, TakeId, TakePlacement, TakeTarget, Window,
+    TakeEvent, TakeFile, TakePlacement, TakeTarget, Window,
 };
 #[cfg(all(feature = "midi", feature = "analyze"))]
 pub use transcribe::{LevelVelocity, NoteCents, NoteMapping, clip_from_notes, harmony_from_chords};
@@ -359,6 +359,8 @@ pub use tutti_graph::{
 pub use tutti_graph::{
     CloseError, CommitError, EventCapacity, NodeMode, PassError, Stamp, Wired, WiredMask,
 };
+#[cfg(feature = "capture")]
+pub use tutti_timeline::TakeId;
 #[cfg(feature = "midi")]
 pub use tutti_ump::{MidiChannel, MidiGroup};
 #[cfg(feature = "midi-hardware")]

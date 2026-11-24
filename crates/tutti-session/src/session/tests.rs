@@ -171,3 +171,55 @@ fn an_update_frees_the_mpe_mode_a_block_held_across_a_replacement() {
     let _ = s.update();
     assert_eq!(cell.retired_len(), 0, "and freed by the reclaim");
 }
+
+/// **A take's start is refused `Full` once `RECORDING_CAPACITY` takes are
+/// open, and accepted again when a render passes their stop.** Sixteen takes
+/// start and stop at one far frame: a seventeenth start is handed back, and
+/// is taken once the session has rendered past that frame. A repeat of a
+/// start, and a stop of a take that never started, send nothing.
+#[cfg(feature = "capture")]
+#[test]
+fn a_take_is_refused_while_the_capacity_is_open_and_taken_once_a_render_passes_their_stop() {
+    use crate::transport_handle::When;
+    use tutti_buffers::InterleavedMut;
+    use tutti_timeline::{RECORDING_CAPACITY, Recording, TakeId, TimedError};
+    use tutti_units::Frame;
+
+    let mut s = Session::builder()
+        .outputs_floor(ChannelLayout::MONO)
+        .build()
+        .expect("builds");
+    let handle = s.transport_handle();
+    let stop_at = Frame::new(1_000);
+    let take = |n: u64| TakeId::of(n);
+    for n in 1..=RECORDING_CAPACITY as u64 {
+        handle
+            .send_recording(Recording::Start(take(n)), When::NextBlock)
+            .expect("room");
+        handle
+            .send_recording(Recording::Stop(take(n)), When::Frame(stop_at))
+            .expect("room");
+    }
+    let sent = handle.scheduled_outstanding();
+    handle
+        .send_recording(Recording::Start(take(1)), When::NextBlock)
+        .expect("a take already open is a no-op");
+    handle
+        .send_recording(Recording::Stop(take(99)), When::NextBlock)
+        .expect("a take never started is a no-op");
+    assert_eq!(handle.scheduled_outstanding(), sent, "neither sent");
+
+    let extra = Recording::Start(take(17));
+    assert_eq!(
+        handle.send_recording(extra, When::NextBlock),
+        Err(TimedError::Full(extra))
+    );
+
+    let mut block = vec![0.0f32; 512];
+    for _ in 0..4 {
+        s.render(&mut InterleavedMut::new(&mut block, tutti_buffers::ChannelLayout::MONO).unwrap());
+    }
+    handle
+        .send_recording(extra, When::NextBlock)
+        .expect("the render passed every stop");
+}
