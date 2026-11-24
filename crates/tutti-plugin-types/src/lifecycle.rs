@@ -421,8 +421,10 @@ pub enum Notice {
 /// again with the setting the plugin last accepted ([`State::applied`]), so a
 /// refused rate or mode never leaves a plugin that ran deactivated.
 ///
-/// A plugin that is lost is reported by its own notice ([`Notice::Lost`]), not
-/// by a `Recovery`.
+/// A plugin lost during the activation is told by this notice with
+/// [`Inactive`](Self::Inactive), not by [`Notice::Lost`]: a shell reports the
+/// loss by its own route (the instance's lost latch, the server's exit), and
+/// does not take the refusal for a refused rate.
 ///
 /// Exhaustive: every shell matches every variant.
 #[derive(Debug, Clone)]

@@ -107,20 +107,50 @@ fn refusal_cause(reason: &PluginError, recovery: &Recovery) -> RateRefusalCause 
     }
 }
 
-/// A rate the plugin did not take, until a rate is taken.
+/// Why the plugin does not run at the graph's rate, until it takes one.
 #[derive(Debug, Clone, Copy)]
-struct RefusedRate {
-    /// The host was told ([`PluginInvalidation::RateRefused`]), so it is told
-    /// when a rate is taken.
-    told: bool,
-    /// The rate the plugin runs at meanwhile: the one it accepted, rolled back
-    /// to. `None` when it is deactivated, or once a rate was asked for again.
-    running: Option<SampleRate>,
+pub(super) enum Silence {
+    /// It refused the rate, and the host was told
+    /// ([`PluginInvalidation::RateRefused`]).
+    Refused {
+        /// The rate it runs at meanwhile: the one it accepted, rolled back to.
+        /// `None` when it is deactivated, or once a rate was asked for again.
+        running: Option<SampleRate>,
+    },
+    /// Its restart would not stop, and the host was told
+    /// ([`PluginInvalidation::Stuck`]).
+    Stuck {
+        /// The rate it runs at meanwhile, the one the graph left; `None` once
+        /// a rate was asked for again.
+        running: Option<SampleRate>,
+    },
+    /// A fork's rate was not told to the plugin: its `prepare` ran off the
+    /// main thread. Nothing runs at another rate; the host was told nothing.
+    Unprepared,
+}
+
+impl Silence {
+    /// The rate the plugin runs at meanwhile.
+    fn running(self) -> Option<SampleRate> {
+        match self {
+            Self::Refused { running } | Self::Stuck { running } => running,
+            Self::Unprepared => None,
+        }
+    }
+
+    /// The same, once a rate was asked for again: it settles at the graph's.
+    fn asked_again(self) -> Self {
+        match self {
+            Self::Refused { .. } => Self::Refused { running: None },
+            Self::Stuck { .. } => Self::Stuck { running: None },
+            Self::Unprepared => Self::Unprepared,
+        }
+    }
 }
 
 /// Whether the plugin runs at a rate other than the graph's, because it
 /// did not take the graph's: published by the instance with its refusal
-/// ([`Instance::refuse`]) and cleared with the rate taken
+/// ([`Instance::silence`]) and cleared with the rate taken
 /// ([`Instance::restored`]), and readable with no lock by the nodes over the
 /// instance. A node renders silence while it holds:
 /// a plugin at the wrong rate would sound pitch-shifted.
@@ -201,7 +231,7 @@ pub(super) struct Instance<L: Loaded> {
     reports: Vec<PluginInvalidation>,
     /// The last rate change was refused (the reports say so once), and where
     /// the plugin runs until a rate is taken.
-    rate_refused: Option<RefusedRate>,
+    silence: Option<Silence>,
     /// The nodes over this instance render silence while a refusal stands.
     silenced: Arc<Silenced>,
     /// A successor was committed ([`commit`](Self::commit)).
@@ -288,7 +318,7 @@ impl<L: Loaded> Instance<L> {
             widths,
             changes: Changes::default(),
             reports: Vec::new(),
-            rate_refused: None,
+            silence: None,
             silenced: Arc::default(),
             committed: false,
             lost: Arc::default(),
@@ -330,7 +360,7 @@ impl<L: Loaded> Instance<L> {
             widths: Widths::new(prepare.format() == FloatWidth::F64),
             changes: Changes::default(),
             reports: Vec::new(),
-            rate_refused: None,
+            silence: None,
             silenced: Arc::default(),
             committed: false,
             lost: Arc::default(),
@@ -496,7 +526,7 @@ impl<L: Loaded> Instance<L> {
     /// still to be read is under way: the layout the lifecycle holds is not the
     /// one the plugin will run with, so the caller pumps and tries again.
     pub(super) fn ready_to_rehand(&self) -> Result<(), RebindError> {
-        if !self.state.renders() || self.rate_refused.is_some() {
+        if !self.state.renders() || self.silence.is_some() {
             return Err(RebindError::NotRunning);
         }
         if !self.state.is_quiet() || self.state.is_parked() {
@@ -697,8 +727,8 @@ impl<L: Loaded> Instance<L> {
             None => {
                 // The rate was asked for again: what it settles at is the
                 // rate the graph runs at, whichever the plugin ran at.
-                if let Some(refused) = self.rate_refused {
-                    self.refuse(None, refused.told);
+                if let Some(silence) = self.silence {
+                    self.silence(silence.asked_again());
                 }
                 self.settle();
                 Ok(())
@@ -745,7 +775,7 @@ impl<L: Loaded> Instance<L> {
                     RateRefusalCause::RolledBack { running, .. } => Some(*running),
                     _ => None,
                 };
-                self.refuse(running, true);
+                self.silence(Silence::Refused { running });
                 self.reports
                     .push(PluginInvalidation::RateRefused(RateRefusal::new(
                         rate, cause,
@@ -753,7 +783,9 @@ impl<L: Loaded> Instance<L> {
             }
             Trouble::Stuck { reason } => {
                 // Running as it was, at a rate the graph has left.
-                self.refuse(Some(self.wanted().rate()), false);
+                self.silence(Silence::Stuck {
+                    running: Some(self.wanted().rate()),
+                });
                 self.reports.push(PluginInvalidation::Stuck {
                     reason: reason.to_string(),
                 });
@@ -762,21 +794,20 @@ impl<L: Loaded> Instance<L> {
         }
     }
 
-    /// The plugin does not run at the graph's rate, and meanwhile at `running`
-    /// (`None`: deactivated): the nodes render silence. The one place a
-    /// refusal is stored and published.
-    pub(super) fn refuse(&mut self, running: Option<SampleRate>, told: bool) {
-        self.rate_refused = Some(RefusedRate { running, told });
+    /// The plugin does not run at the graph's rate, for the reason `silence`
+    /// says: the nodes render silence. The one place the reason is stored and
+    /// published.
+    pub(super) fn silence(&mut self, silence: Silence) {
+        self.silence = Some(silence);
         self.silenced.set(true);
     }
 
     /// The plugin runs at the graph's rate again: the nodes render, and the
-    /// host is told once when it was told of the refusal. The one place a
-    /// refusal is cleared and published.
+    /// host is told once when it was told of a refused rate (a stuck restart
+    /// or an unprepared fork was announced as no refusal). The one place the
+    /// reason is cleared and published.
     fn restored(&mut self) {
-        if let Some(refused) = self.rate_refused.take()
-            && refused.told
-        {
+        if let Some(Silence::Refused { .. }) = self.silence.take() {
             self.reports.push(PluginInvalidation::RateRestored);
         }
         self.silenced.set(false);
@@ -830,12 +861,12 @@ impl<L: Loaded> Instance<L> {
     /// finished. Its own restart, or an activation for a render mode, runs
     /// at the rolled-back rate and takes none.
     fn settle(&mut self) {
-        let Some(refused) = self.rate_refused else {
+        let Some(silence) = self.silence else {
             return;
         };
         if self.state.renders()
             && !self.state.is_busy()
-            && refused.running != Some(self.wanted().rate())
+            && silence.running() != Some(self.wanted().rate())
         {
             self.restored();
         }

@@ -45,7 +45,7 @@ use tutti_units::{SampleRate, Samples};
 
 use super::control_backend::Reporting;
 use super::host_edits::EditPort;
-use super::instance::{Figures, Instance, Lost, Silenced};
+use super::instance::{Figures, Instance, Lost, Silence, Silenced};
 use crate::{BlockTransport, TransportSource, TransportWalk};
 use crate::{ParamDelivery, PluginControls, PluginTimeSignature, SegmentPoints};
 use tutti_plugin_types::MidiIntake;
@@ -883,7 +883,7 @@ impl<L: Loaded, F: Float> InProcessClient<L, F> {
             // told, the node renders silence rather than audio at the wrong
             // rate, and the next `prepare` on the main thread clears it.
             RateDelivery::InPrepare => {
-                self.inner.lock().refuse(None, false);
+                self.inner.lock().silence(Silence::Unprepared);
                 tracing::error!(
                     "a forked plugin was prepared off the main thread; \
                      it renders silence until it is prepared on it"
