@@ -259,8 +259,8 @@ impl Owed {
 /// [`graph_tail`]'s fold with each node's figures given by `figure` instead of
 /// [`TailGraph::tail`]: the walk, the bound and the cycle rule are the same
 /// whatever the figures are (declared ceilings, or what the executor holds
-/// between blocks). A node departs `alone` when nothing upstream owes (its
-/// arrival is zero), and `fed` after one that does; the unbounded and unknown
+/// between blocks). A node departs `alone` when nothing upstream owes (no
+/// node there has a figure other than `Tail::None`), and `fed` after one that does; the unbounded and unknown
 /// judgements are made on the figure applied to each node.
 pub(crate) fn graph_tail_of<G: TailGraph>(
     g: &G,
@@ -277,30 +277,32 @@ pub(crate) fn graph_tail_of<G: TailGraph>(
     let live = reaching_output(g, &figures);
     let (order, had_cycle) = topological_order(g);
 
-    // Arrival is the longest departure upstream; a node's own figure is
-    // `alone` at an arrival of zero and `fed` otherwise. A figure with no
-    // finite value, or one past the bound, adds nothing to the sum:
-    // `unbounded` and `unknown_nodes` carry it instead, so the total stays the
-    // answer for the part of the graph that spoke.
+    // A node's own figure is `alone` when nothing upstream still owes and
+    // `fed` otherwise. Upstream owes when a node there has a figure other
+    // than `Tail::None`, with a frame count or not: an unknown or unbounded
+    // tail adds nothing to the sum (`unknown_nodes` and `unbounded` carry it,
+    // so the total stays the answer for the part of the graph that spoke),
+    // but what it rings still excites the node after it. Arrival is the
+    // longest departure upstream.
     let mut applied: HashMap<G::Node, Tail> = HashMap::with_capacity(order.len());
+    let mut owes: HashSet<G::Node> = HashSet::with_capacity(order.len());
     let mut departure: HashMap<G::Node, Samples> = HashMap::with_capacity(order.len());
     for &node in &order {
-        let at = g
-            .inputs(node)
-            .filter_map(|s| s.feed.node())
+        let sources = || g.inputs(node).filter_map(|s| s.feed.node());
+        let at = sources()
             .map(|src| departure.get(&src).copied().unwrap_or_default())
             .max()
             .unwrap_or_default();
+        let fed = sources().any(|src| owes.contains(&src));
         let owed = figures[&node];
-        let tail = if at == Samples::ZERO {
-            owed.alone
-        } else {
-            owed.fed
-        };
+        let tail = if fed { owed.fed } else { owed.alone };
         let own = tail
             .samples()
             .filter(|&s| s <= limit)
             .unwrap_or(Samples::ZERO);
+        if fed || tail != Tail::None {
+            owes.insert(node);
+        }
         applied.insert(node, tail);
         departure.insert(node, at + own);
     }
@@ -738,6 +740,47 @@ mod tests {
             n => owed(n),
         };
         assert_eq!(graph_tail_of(&g, R, resting).samples(), Some(Samples::ZERO));
+    }
+
+    /// An upstream that owes a figure with no frame count (unknown or
+    /// unbounded) still owes: the node after it adds its fed figure, directly
+    /// and through a node with no tail between them.
+    #[test]
+    fn a_node_after_one_that_owes_no_frame_count_adds_its_fed_figure() {
+        for upstream in [Tail::Unknown, Tail::Unbounded] {
+            for nodes in [
+                vec![(Tail::None, vec![]), (Tail::None, vec![Some(0)])],
+                vec![
+                    (Tail::None, vec![]),
+                    (Tail::None, vec![Some(0)]),
+                    (Tail::None, vec![Some(1)]),
+                ],
+            ] {
+                let last = nodes.len() - 1;
+                let g = Toy {
+                    nodes,
+                    outputs: vec![Some(last)],
+                };
+                let owed = |n: usize| match n {
+                    0 => Owed::declared(upstream),
+                    n if n == last => Owed {
+                        alone: Tail::None,
+                        fed: finite(5000),
+                    },
+                    _ => Owed::declared(Tail::None),
+                };
+                let tail = graph_tail_of(&g, R, owed);
+                assert_eq!(tail.known(), Samples::new(5000), "{upstream:?}");
+                assert_eq!(
+                    (tail.unknown_nodes(), tail.is_unbounded()),
+                    (
+                        usize::from(upstream == Tail::Unknown),
+                        upstream == Tail::Unbounded
+                    ),
+                    "{upstream:?}"
+                );
+            }
+        }
     }
 
     /// An empty graph has no tail rather than an unknown one.
