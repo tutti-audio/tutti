@@ -516,6 +516,12 @@ pub enum EditorError {
     /// The plugin-server answered an editor request with another request's reply.
     #[error("the plugin-server answered an editor request with another request's reply")]
     UnexpectedReply,
+
+    /// A floating editor was asked to resize: the plugin sizes its own window
+    /// and the host does not. Not a fault: the call is wrong for this kind of
+    /// editor.
+    #[error("a floating editor is sized by the plugin, the host does not resize it")]
+    FloatingEditor,
 }
 
 #[cfg(test)]

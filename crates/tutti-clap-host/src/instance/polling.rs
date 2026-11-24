@@ -13,7 +13,10 @@ use tutti_plugin_ipc_ffi::{FdId, Interest, Ready};
 use tutti_plugin_types::{MainThreadMarker, Wakeups};
 
 fn gui_error(error: GuiError) -> ClapError {
-    ClapError::EditorError(error.to_string())
+    match error {
+        GuiError::FloatingEditor => ClapError::FloatingEditor,
+        other => ClapError::EditorError(other.to_string()),
+    }
 }
 
 impl ClapLoaded {

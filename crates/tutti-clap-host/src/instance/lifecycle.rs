@@ -52,6 +52,9 @@ pub(crate) fn plugin_error(error: ClapError) -> PluginError {
         ClapError::EditorError(reason) => {
             PluginError::Editor(tutti_plugin_types::EditorError::PluginError(reason))
         }
+        ClapError::FloatingEditor => {
+            PluginError::Editor(tutti_plugin_types::EditorError::FloatingEditor)
+        }
         other => PluginError::Other(other.to_string()),
     }
 }

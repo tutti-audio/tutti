@@ -25,7 +25,7 @@ use crate::support;
 use support::main_thread;
 
 use dpi::{LogicalSize, PhysicalSize, Size};
-use tutti_clap_host::{ClapLoaded, ContentScale, LoadOptions};
+use tutti_clap_host::{ClapError, ClapLoaded, ContentScale, LoadOptions};
 use tutti_clap_test_plugin::{
     GUI_ASPECT_H, GUI_ASPECT_W, GUI_CALL_ADJUST_SIZE, GUI_CALL_CAN_RESIZE, GUI_CALL_CREATE,
     GUI_CALL_DESTROY, GUI_CALL_GET_RESIZE_HINTS, GUI_CALL_GET_SIZE, GUI_CALL_HIDE,
@@ -36,7 +36,7 @@ use tutti_clap_test_plugin::{
     GuiCapture, GuiMode,
 };
 use tutti_fixtures::StandInWindow;
-use tutti_plugin_types::{Control, EditorCapabilities, EditorWindow};
+use tutti_plugin_types::{Control, EditorCapabilities, EditorError, EditorWindow, PluginError};
 
 /// Serializes whole scenarios — set mode → reset → load → drive → read — so one
 /// test cannot observe another's calls or run against another's selected
@@ -1247,9 +1247,19 @@ fn a_floating_editor_is_not_resized() {
         .expect_err("a floating editor's size is the plugin's");
 
     assert!(
-        format!("{err}").contains("floating"),
+        matches!(err, ClapError::FloatingEditor),
         "the error names the floating editor, got: {err}"
     );
+    // The caller of the shared vocabulary's resize gets the typed refusal, not
+    // a plugin failure's text.
+    assert!(matches!(
+        EditorWindow::set_editor_size(
+            &mut loaded,
+            main_thread(),
+            native_size(GUI_WIDTH, GUI_HEIGHT)
+        ),
+        Err(PluginError::Editor(EditorError::FloatingEditor))
+    ));
     assert!(
         calls(&probe.capture()).is_empty(),
         "no size call reaches a floating window"
