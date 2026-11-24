@@ -138,8 +138,8 @@ control_set! {
     Depth => Bipolar = modulation { whole },
     Rate => Hz = rate { whole },
     StereoSpread => StereoWidth = width { whole },
-    GainDb => Db = wet { whole },
-    Pitch => Cents = shimmer_pitch { whole },
+    GainDb => Db = wet { whole, no_ring },
+    Pitch => Cents = shimmer_pitch { whole, no_ring },
     Feedback => Feedback = shimmer_send { whole };
 
     fn defaults(&self) -> FdnControls {
@@ -195,5 +195,24 @@ impl<F: FftFloat + Lerp> Kernel for ShimmerKernel<F> {
 
     fn tail_of(&mut self, controls: &FdnControls) -> Tail {
         self.fdn.tail_of(controls)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::non_ringing;
+    use tutti_units::{UnitAddr, UnitParam};
+
+    /// The shift and the wet gain are the controls the tail does not read.
+    #[test]
+    fn only_the_shift_and_the_wet_gain_are_flagged_no_ring() {
+        assert_eq!(
+            non_ringing(&ShimmerSet),
+            [
+                UnitAddr::first(UnitParam::GainDb),
+                UnitAddr::first(UnitParam::Pitch)
+            ]
+        );
     }
 }
