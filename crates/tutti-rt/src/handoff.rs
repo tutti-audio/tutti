@@ -231,7 +231,7 @@ impl<T> Shared<T> {
 }
 
 /// How a value came back to the control end ([`Handoff::take`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Handback<T> {
     /// The audio end answered a recall at a poll: `last` was run on the value.
     Recalled(T),
