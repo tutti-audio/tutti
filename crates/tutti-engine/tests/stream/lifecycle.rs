@@ -553,6 +553,72 @@ impl tutti_engine::StreamDriver for OpensAt {
 /// **The spec's quantum is the request until a stream opens, then what the
 /// stream reports, then the request again.**
 ///
+/// A driver that records the quantum its spec asked for when it opens.
+struct AskedFor {
+    inner: ManualStreamDriver,
+    asked: Arc<tutti_rt::Mutex<Option<Option<tutti_engine::OutputQuantum>>>>,
+}
+
+impl tutti_engine::StreamDriver for AskedFor {
+    type Running = <ManualStreamDriver as tutti_engine::StreamDriver>::Running;
+    type Error = Infallible;
+
+    fn open(
+        self,
+        spec: &OutputSpec,
+        block: tutti_engine::OutputBlock,
+        faults: Arc<tutti_engine::StreamFaults>,
+    ) -> Result<tutti_engine::OpenedOutput<Self::Running>, Infallible> {
+        *self.asked.lock() = Some(spec.quantum);
+        self.inner.open(spec, block, faults)
+    }
+}
+
+/// **A start at a new spec after a lost device opens asking for the new spec's
+/// size.** The stream whose device went is still held, with the size it opened
+/// at; releasing it does not bring its request back over the new spec.
+#[test]
+fn a_start_at_a_new_spec_after_a_lost_device_asks_for_the_new_size() {
+    use tutti_engine::OutputQuantum;
+    let (engine, state) = engine_and_state();
+    let old = engine.spec().clone().with_quantum(OutputQuantum::of(512));
+    let new = old.clone().with_quantum(OutputQuantum::of(256));
+    let mut engine = OutputStream::new(old);
+
+    let (driver, first) = ManualStreamDriver::new();
+    let driver = OpensAt {
+        inner: driver,
+        opened: Some(OutputQuantum::of(480)),
+    };
+    engine.start_with(Arc::clone(&state), driver).unwrap();
+    first.fail(
+        BackendErrorKind::DeviceGone,
+        &"device not available",
+        Instant::now(),
+    );
+    assert!(!engine.is_running());
+
+    let (inner, _second) = ManualStreamDriver::new();
+    let asked = Arc::new(tutti_rt::Mutex::new(None));
+    engine
+        .start_at(
+            state,
+            new,
+            AskedFor {
+                inner,
+                asked: Arc::clone(&asked),
+            },
+        )
+        .expect("a start after a lost device opens");
+    assert_eq!(
+        *asked.lock(),
+        Some(Some(OutputQuantum::of(256))),
+        "opened asking for the new spec's size"
+    );
+    engine.stop();
+    assert_eq!(engine.spec().quantum, Some(OutputQuantum::of(256)));
+}
+
 /// A driver that opens at another size than asked is believed; one that cannot
 /// say leaves the spec without a size; a stop returns the request, so the next
 /// start asks for the same size again.

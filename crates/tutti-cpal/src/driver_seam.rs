@@ -472,7 +472,12 @@ impl CpalDriver {
                         "CPAL callback frames {} exceeds MAX_FRAMES {MAX_FRAMES}",
                         data.len() / channels
                     );
+                    // The block leaves the holder only when the holder is
+                    // dropped, which is after the last callback: a callback
+                    // that found none would play silence, never the buffer
+                    // as the backend left it.
                     let Some(block) = hold.block.as_mut() else {
+                        data.fill(T::EQUILIBRIUM);
                         return;
                     };
                     render(block, data, edge::output_delay(&info.timestamp()));

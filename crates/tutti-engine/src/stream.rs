@@ -193,12 +193,11 @@ pub struct OutputStream {
     running: Option<Running>,
 }
 
-/// An open stream, with the quantum its spec asked for: the spec carries the
-/// opened one while the stream is held, and [`OutputStream::stop`] puts the
-/// request back.
+/// A held stream and the spec it opened at: the spec that was asked for, with
+/// the quantum the driver reported.
 struct Running {
     stream: Box<dyn RunningStream>,
-    requested: Option<OutputQuantum>,
+    spec: OutputSpec,
 }
 
 // Hand-rolled: the running stream is not `Debug`. Reports the configuration a
@@ -206,7 +205,7 @@ struct Running {
 impl std::fmt::Debug for OutputStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputStream")
-            .field("spec", &self.spec)
+            .field("spec", self.spec())
             .field("is_running", &self.is_running())
             .field("faults", &self.faults.count())
             .finish_non_exhaustive()
@@ -229,10 +228,11 @@ impl OutputStream {
     /// next start would use. Its [`quantum`](OutputSpec::quantum) is the one
     /// the open stream reports, and the request when none is open.
     pub fn spec(&self) -> &OutputSpec {
-        &self.spec
+        self.running.as_ref().map_or(&self.spec, |held| &held.spec)
     }
 
-    /// Replaces the spec the next start opens at.
+    /// Replaces the spec the next start opens at. A stream that is held keeps
+    /// reporting the spec it opened at until it is stopped.
     pub(crate) fn set_spec(&mut self, spec: OutputSpec) {
         self.spec = spec;
     }
@@ -283,9 +283,11 @@ impl OutputStream {
             .map_err(StartError::Driver)?;
         self.running = Some(Running {
             stream: Box::new(opened.stream),
-            requested: self.spec.quantum,
+            spec: OutputSpec {
+                quantum: opened.quantum,
+                ..self.spec.clone()
+            },
         });
-        self.spec.quantum = opened.quantum;
         Ok(())
     }
 
@@ -311,23 +313,22 @@ impl OutputStream {
     ///
     /// When this returns, the callback no longer runs.
     pub fn stop(&mut self) {
-        if let Some(Running { stream, requested }) = self.running.take() {
-            stream.stop();
-            self.spec.quantum = requested;
+        if let Some(held) = self.running.take() {
+            held.stream.stop();
         }
     }
 
     /// Returns the sample rate of the running stream, or of the config the
     /// next start would use.
     pub fn sample_rate(&self) -> SampleRate {
-        self.spec.sample_rate
+        self.spec().sample_rate
     }
 
     /// Returns the channel layout of the running stream, or of the config the
     /// next start would use. This is the width [`process_audio`](crate::process_audio)
     /// is handed.
     pub fn channels(&self) -> ChannelLayout {
-        self.spec.channels
+        self.spec().channels
     }
 
     /// Returns whether a stream is open **and** the backend has not reported
