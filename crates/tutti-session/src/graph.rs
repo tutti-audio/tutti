@@ -484,9 +484,11 @@ pub struct Graph<F: Float = f32> {
     /// forgot what it declared on them ([`Graph::take_removed`]).
     removed: Vec<NodeKey>,
     /// The nodes whose event output gained a receiver (an edge to a sink it
-    /// did not feed, or its sink swapped at the key) since the commit that
-    /// sent the edit ([`Graph::take_gained_receivers`]).
+    /// did not feed, or its sink swapped at the key) in an edit not yet sent.
     gained: Vec<NodeKey>,
+    /// `gained` as the commit sent carried it, until the executor has applied
+    /// that commit ([`Graph::take_applied_receivers`]).
+    unapplied: Vec<NodeKey>,
     /// What the main output's channels are, when a host declared it
     /// ([`Session::declare_main_output_topology`](crate::Session::declare_main_output_topology));
     /// `None` is the engine's order for the main output's width.
@@ -688,6 +690,7 @@ impl<F: Float> Graph<F> {
             parked: VecDeque::new(),
             dropped: Vec::new(),
             gained: Vec::new(),
+            unapplied: Vec::new(),
             unwired: Vec::new(),
             rewired: Vec::new(),
             removed: Vec::new(),
@@ -2044,11 +2047,19 @@ impl<F: Float> Graph<F> {
         }
     }
 
-    /// The nodes whose event output gained a receiver since the last call: the
-    /// session tells a node that cannot see its own edges, once the commit
-    /// holding them is sent.
-    pub(crate) fn take_gained_receivers(&mut self) -> Vec<NodeKey> {
-        std::mem::take(&mut self.gained)
+    /// The nodes whose event output gained a receiver, once the executor has
+    /// applied the commit that carried it: the session tells a node that
+    /// cannot see its own edges, and a block that reads the telling runs the
+    /// new plan. The editor hands a commit back only after the executor
+    /// applied it and in the order sent, so nothing in flight means every
+    /// commit sent, this edit's included, is applied. Until then the nodes
+    /// wait (a stopped engine never applies; the list holds each node once
+    /// and forgets a removed one).
+    pub(crate) fn take_applied_receivers(&mut self) -> Vec<NodeKey> {
+        if self.editor.in_flight() == 0 {
+            return std::mem::take(&mut self.unapplied);
+        }
+        Vec::new()
     }
 
     /// Takes the event edge `from -> to` out: whether it was there.
@@ -2326,6 +2337,8 @@ impl<F: Float> Graph<F> {
             record.retire().settle(node, &mut self.graveyard);
         }
         self.removed.push(node);
+        self.gained.retain(|n| *n != node);
+        self.unapplied.retain(|n| *n != node);
         // The edges it feeds fade out first: the node stays in the editor,
         // rendering, until they have.
         self.editor.remove_declicked(node);
@@ -3979,6 +3992,11 @@ impl<F: Float> Graph<F> {
                 self.edited = false;
                 self.refused = None;
                 self.commits += 1;
+                for node in std::mem::take(&mut self.gained) {
+                    if !self.unapplied.contains(&node) {
+                        self.unapplied.push(node);
+                    }
+                }
                 self.pump_local();
                 Committed::Sent
             }
