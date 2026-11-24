@@ -493,9 +493,10 @@ pub(crate) const REPLAY_BLOCK: usize = 64;
 ///
 /// A fixed tail ([`TailPolicy::Frames`]) is pulled with the programme. A
 /// reported one ([`TailPolicy::Reported`]) is asked of the graph once, between
-/// blocks, when the programme's last frame has rendered, and the render
-/// pulls that many frames more; progress counts the plan's most until then
-/// and the true total after.
+/// blocks, when the programme's last frame has been pulled (before the
+/// graph's latency flushes, the instant the declared tail is measured from),
+/// and the render pulls the latency and that many frames more; progress counts
+/// the plan's most until then and the true total after.
 ///
 /// The token is checked before every block and after the progress a block
 /// delivered (a callback may cancel; the last block's too), and a cancelled
@@ -572,9 +573,13 @@ where
         // The programme has rendered: a reported tail is read once, between
         // blocks, and spent under its ceiling.
         match plan.tail {
-            TailPolicy::Reported { ceiling } if !resolved => {
+            TailPolicy::Reported { ceiling, flush } if !resolved => {
                 resolved = true;
-                total = plan.programme + src.reported_tail().resolve(ceiling);
+                // The programme's end is asked at the graph's input side; the
+                // graph's latency is then pulled once for every node, as for a
+                // fixed tail.
+                total =
+                    plan.latency + plan.programme + flush + src.reported_tail().resolve(ceiling);
                 control.advance(stage, src.produced(), total);
             }
             _ => break,

@@ -20,7 +20,9 @@ pub(crate) struct RenderPlan {
     /// The most frames the sink keeps: the requested span plus the tail's
     /// bound.
     pub output_length: Samples,
-    /// Where the programme ends: the frames pulled before the tail.
+    /// The programme's length at the graph's input side, latency not
+    /// counted: the frames pulled before a reported tail is asked for, so
+    /// every node's figure is measured from the instant the declared tail is.
     pub programme: Samples,
     /// What is pulled past `programme`.
     pub tail: TailPolicy,
@@ -43,7 +45,7 @@ impl RenderPlan {
         Self {
             total: job.max_total(),
             output_length: job.max_output_length(),
-            programme: job.latency() + job.length(),
+            programme: job.length(),
             tail: job.tail(),
             latency: job.latency(),
         }

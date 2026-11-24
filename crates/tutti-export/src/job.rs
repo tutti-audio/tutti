@@ -54,17 +54,22 @@ pub enum TailPolicy {
     /// that never decays, or whose nodes decline to say, is spent as
     /// [`GraphTail::resolve`](tutti_graph::GraphTail::resolve) does.
     Reported {
-        /// The most frames kept past the end.
+        /// The most frames of tail kept past the end.
         ceiling: Samples,
+        /// Frames of the graph's latency the job does not trim: the programme
+        /// leaves the graph that much late, so they are pulled and kept
+        /// between the programme's end and the tail.
+        flush: Samples,
     },
 }
 
 impl TailPolicy {
     /// The most frames this keeps past the programme's end.
     #[must_use]
-    pub const fn bound(self) -> Samples {
+    pub fn bound(self) -> Samples {
         match self {
-            Self::Frames(frames) | Self::Reported { ceiling: frames } => frames,
+            Self::Frames(frames) => frames,
+            Self::Reported { ceiling, flush } => ceiling + flush,
         }
     }
 }

@@ -1475,6 +1475,7 @@ const PROGRAMME: usize = 8_820;
 fn reported(ceiling: usize) -> TailPolicy {
     TailPolicy::Reported {
         ceiling: Samples::new(ceiling),
+        flush: Samples::ZERO,
     }
 }
 
@@ -1517,6 +1518,108 @@ fn a_node_whose_input_went_quiet_spends_what_is_left_of_its_report() {
     let source = g.add(ForkByClone(Burst { loud: 5_120, at: 0 }));
     let graph = through(g, source, &[(frames_tail(6_000), Some(frames_tail(5_000)))]);
     assert_eq!(tailed_frames(graph, reported(6_000)), PROGRAMME + 1_300);
+}
+
+/// Passes its input, then rings `T` frames of 0.25 after the input stops, and
+/// reports `T` under a larger ceiling.
+#[derive(Clone)]
+struct Rings {
+    ring: usize,
+    left: usize,
+}
+
+impl Node for Rings {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO).tail(frames_tail(self.ring + 5_000))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        io.report_tail(frames_tail(self.ring));
+        let (ins, mut outs) = io.split();
+        for (o, &i) in outs.get(0).iter_mut().zip(ins.get(0)) {
+            *o = if i != 0.0 {
+                self.left = self.ring;
+                i
+            } else if self.left > 0 {
+                self.left -= 1;
+                0.25
+            } else {
+                0.0
+            };
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {
+        self.left = 0;
+    }
+}
+
+/// Delays its input by `D` frames and declares that latency.
+#[derive(Clone)]
+struct Delay {
+    line: Vec<f32>,
+    at: usize,
+}
+
+impl Node for Delay {
+    fn shape(&self) -> Shape {
+        Shape::through_unassigned(ChannelLayout::MONO)
+            .latency(tutti_units::Latency::new(Samples::new(self.line.len())))
+    }
+    fn prepare(&mut self, _: &Prepare) {}
+    fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
+        let (ins, mut outs) = io.split();
+        for (o, &i) in outs.get(0).iter_mut().zip(ins.get(0)) {
+            *o = std::mem::replace(&mut self.line[self.at], i);
+            self.at = (self.at + 1) % self.line.len();
+        }
+        Status::Modified
+    }
+    fn reset(&mut self) {
+        self.line.fill(0.0);
+        self.at = 0;
+    }
+}
+
+/// The ring-out of a node reaches the output through the latency after it: a
+/// source ends exactly at the programme's end, a node rings 3,000 frames
+/// after it and reports so, and a node of 2,048 frames' latency follows. The
+/// ring leaves the graph 2,048 frames later than it is made, so the export
+/// pulls 2,048 + 3,000 frames past the programme, keeps the 3,000 (the
+/// latency is trimmed) and its last frame is the ring's last. A query taken
+/// after the latency's flush would find the ring node 1,652 quiet frames in
+/// and cut the end of it.
+#[test]
+fn a_ring_out_reaches_the_output_through_the_latency_after_it() {
+    const RING: usize = 3_000;
+    const DELAY: usize = 2_048;
+    let mut g = GraphBuilder::new(ChannelLayout::EMPTY, ChannelLayout::MONO);
+    let source = g.add(ForkByClone(Burst {
+        loud: PROGRAMME,
+        at: 0,
+    }));
+    let rings = g.add(ForkByClone(Rings {
+        ring: RING,
+        left: 0,
+    }));
+    let delay = g.add(ForkByClone(Delay {
+        line: vec![0.0; DELAY],
+        at: 0,
+    }));
+    g.connect(source, 0, rings, 0);
+    g.connect(rings, 0, delay, 0);
+    g.pipe_output(delay);
+    let graph = built(g, RATE);
+    assert_eq!(graph.reported_latency(), Samples::new(DELAY));
+
+    let mut cfg = config(Format::Wav(Pcm::Float32), ChannelLayout::MONO);
+    cfg.render.latency = graph.reported_latency();
+    cfg.render.tail = reported(9_000);
+    let out = render_to_buffers(graph, &cfg, &FrozenClock).unwrap();
+    let plane = &out.planes()[0];
+    assert_eq!(plane.len(), PROGRAMME + RING);
+    assert_eq!(plane[PROGRAMME + RING - 1], 0.25, "the last ring frame");
+    assert_eq!(plane[PROGRAMME - 1], 0.5, "the last frame of the programme");
 }
 
 /// A node whose input has been silent for its whole tail by the programme's
