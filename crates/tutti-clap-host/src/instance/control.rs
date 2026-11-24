@@ -689,6 +689,14 @@ impl EditorWindow for ClapLoaded {
     }
 }
 
+/// Whether a write may be applied outside a block: not when its parameter
+/// carries `CLAP_PARAM_REQUIRES_PROCESS` and the plugin is active. CLAP wants
+/// that parameter in event order, in a `process` call, from the activation on
+/// (`params.h`), so the write waits for the next block.
+const fn flush_out_of_band(requires_process: bool, active: bool) -> bool {
+    !(requires_process && active)
+}
+
 /// The filesystem path an id names, or `None` when it names none.
 ///
 /// A free function so the decision is testable on its own. Through
@@ -716,6 +724,14 @@ impl Wraps for ClapController {
 
     fn plugin_mut(&mut self) -> &mut ClapLoaded {
         self.loaded_mut()
+    }
+
+    /// Out of band only where CLAP allows it ([`flush_out_of_band`]).
+    fn writes_out_of_band(&self, main: MainThreadMarker, id: ParamId) -> bool {
+        flush_out_of_band(
+            self.loaded().param_requires_process(main, id),
+            self.loaded().is_active(),
+        )
     }
 
     /// Applied at the head of the Processor's next block: the slot of the
@@ -764,6 +780,19 @@ fn _error_is_used(_: PluginError) {}
 
 #[cfg(test)]
 mod tests {
+    use super::flush_out_of_band;
+
+    /// **A `REQUIRES_PROCESS` parameter of an active plugin is never applied
+    /// out of band**, whether or not the plugin is processing; any other
+    /// parameter, and any parameter of an inactive plugin, is.
+    #[test]
+    fn a_requires_process_parameter_of_an_active_plugin_is_not_flushed() {
+        assert!(!flush_out_of_band(true, true));
+        assert!(flush_out_of_band(true, false), "before the activation");
+        assert!(flush_out_of_band(false, true));
+        assert!(flush_out_of_band(false, false));
+    }
+
     use super::*;
 
     /// A floating-only plugin reports an editor.

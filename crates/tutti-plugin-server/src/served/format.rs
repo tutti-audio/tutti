@@ -68,7 +68,7 @@ pub(crate) trait ServerSide: OutOfProcess + InProcess {
 #[cfg(feature = "clap")]
 pub(in crate::served) mod clap {
     use tutti_clap_host::ClapLoaded;
-    use tutti_plugin_types::{Control, Lifecycle, MainThreadMarker, Request, Seat};
+    use tutti_plugin_types::{Lifecycle, MainThreadMarker, Request, Seat};
 
     use super::ServerSide;
 
@@ -145,12 +145,6 @@ pub(in crate::served) mod clap {
         Option<std::sync::Arc<tutti_graph::WorkerPool>>,
     > = std::sync::OnceLock::new();
 
-    /// Whether a pending write may be flushed out of band: not when the parameter
-    /// requires `process` and the plugin is processing.
-    pub(in crate::served) fn flush_out_of_band(requires_process: bool, processing: bool) -> bool {
-        !(requires_process && processing)
-    }
-
     impl ServerSide for ClapLoaded {
         fn adopt(&mut self) {
             if self.supports_thread_pool() {
@@ -174,52 +168,34 @@ pub(in crate::served) mod clap {
             }
         }
 
-        /// Each is applied through an out-of-band `params.flush`, except that a
-        /// parameter flagged `REQUIRES_PROCESS` is never flushed while the plugin
-        /// is processing (CLAP wants it in event order, in a block): it goes back
-        /// to the queue. Only what was pending is flushed, at the moment it is
-        /// asked for, so a value the plugin or its editor has since moved is not
+        /// Each is applied out of band
+        /// ([`Control::set_parameter_out_of_band`]): a `REQUIRES_PROCESS`
+        /// parameter of the active plugin goes back to the queue for the next
+        /// block. Only what was pending is flushed, at the moment it is asked
+        /// for, so a value the plugin or its editor has since moved is not
         /// re-asserted by every write.
         fn settle_edits(lifecycle: &mut Lifecycle<Self>, main: MainThreadMarker) -> u64 {
             if let Some(control) = lifecycle.control() {
                 control.flush_edits(main);
             }
             let mut pending = Vec::new();
-            let processing = match lifecycle {
+            match lifecycle {
                 Lifecycle::Active {
                     seat: Seat::Held(processor),
                     ..
-                } => {
-                    processor.take_edits(&mut pending);
-                    processor.is_processing()
-                }
+                } => processor.take_edits(&mut pending),
                 _ => return 0,
+            }
+            let Some(control) = lifecycle.control() else {
+                return 0;
             };
             // A write the plugin refuses is not written and is counted: the
             // wire has no reply to carry the error.
-            refusals(pending.into_iter().filter_map(|(id, value)| {
-                let requires = match &*lifecycle {
-                    Lifecycle::Active { controller, .. } => {
-                        controller.loaded().param_requires_process(main, id)
-                    }
-                    _ => false,
-                };
-                if flush_out_of_band(requires, processing) {
-                    match lifecycle {
-                        Lifecycle::Active { controller, .. } => Some(Control::set_parameter(
-                            controller.loaded_mut(),
-                            main,
-                            id,
-                            value,
-                        )),
-                        _ => None,
-                    }
-                } else {
-                    lifecycle
-                        .control()
-                        .map(|control| control.set_parameter(main, id, value))
-                }
-            }))
+            refusals(
+                pending
+                    .into_iter()
+                    .map(|(id, value)| control.set_parameter_out_of_band(main, id, value)),
+            )
         }
     }
     #[cfg(test)]

@@ -163,6 +163,25 @@ pub trait Control: EditorWindow {
         value: Normalized,
     ) -> Result<(), ParamWriteError>;
 
+    /// Applies a write the host made, now, with no block to carry it: the route
+    /// a read, a save or a fork takes to see a write no block has delivered.
+    /// What a format cannot apply outside a block it leaves for the next one,
+    /// as [`set_parameter`](Self::set_parameter) does for an active plugin.
+    /// Only while no block runs beside it: a format's out-of-band entry is an
+    /// audio-thread one.
+    ///
+    /// # Errors
+    ///
+    /// As [`set_parameter`](Self::set_parameter).
+    fn set_parameter_out_of_band(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        self.set_parameter(main, id, value)
+    }
+
     /// Tells the plugin's edit controller of a value the host wrote and the
     /// Processor was handed another way (in the block's parameter changes), so
     /// the controller's own value and the plugin's editor follow it. VST3 hosts
@@ -676,6 +695,15 @@ pub trait Wraps {
         let _ = (main, id, value);
     }
 
+    /// Whether a host write to `id` may reach the activated plugin outside a
+    /// block ([`Control::set_parameter_out_of_band`]); `false` leaves it to the
+    /// Processor. Only asked of a format whose [`WRITES_PLUGIN`](Self::WRITES_PLUGIN)
+    /// is `false`: the others write the plugin at once.
+    fn writes_out_of_band(&self, main: MainThreadMarker, id: ParamId) -> bool {
+        let _ = (main, id);
+        true
+    }
+
     /// A host write, after the plugin took it (or instead of it): hands it to
     /// the Processor.
     fn queue_write(&mut self, main: MainThreadMarker, id: ParamId, value: Normalized) {
@@ -826,6 +854,19 @@ impl<W: Wraps> Control for W {
         }
         self.queue_write(main, id, value);
         Ok(())
+    }
+
+    fn set_parameter_out_of_band(
+        &mut self,
+        main: MainThreadMarker,
+        id: ParamId,
+        value: Normalized,
+    ) -> Result<(), ParamWriteError> {
+        if !W::WRITES_PLUGIN && Wraps::writes_out_of_band(self, main, id) {
+            self.plugin_mut().set_parameter(main, id, value)
+        } else {
+            Control::set_parameter(self, main, id, value)
+        }
     }
 
     fn parameter_plain(

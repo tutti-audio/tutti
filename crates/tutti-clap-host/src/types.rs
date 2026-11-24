@@ -215,9 +215,11 @@ bitflags! {
         /// Modulatable with per-port addressing.
         const MODULATABLE_PER_PORT    = 1 << 14;
         /// Changes must be delivered in event order through `process()`
-        /// rather than out-of-band via `flush()`. Gates
-        /// [`set_parameter`](crate::ClapLoaded::set_parameter) on an actively
-        /// processing instance.
+        /// rather than out-of-band via `flush()`. A host write to one waits for
+        /// the next block while the plugin is active: its controller applies
+        /// no such write outside a block, and
+        /// [`ClapLoaded::set_parameter`](crate::ClapLoaded::set_parameter), which
+        /// flushes, is the route of an inactive plugin.
         const REQUIRES_PROCESS        = 1 << 15;
         /// The value is an enumerated choice (`CLAP_PARAM_IS_ENUM`): an index
         /// into names the plugin gives through `value_to_text`. Implies
