@@ -74,7 +74,8 @@ pub enum Mcm {
 /// Where a zone's channels sit: its master (MPE 1.1's Master, the Profile's
 /// Manager) and the member channels beside it, which are the part of a zone
 /// that every kind shares. The master is the channel directly below the
-/// members or directly above them, and the whole zone ends by channel 16.
+/// members, or on channel 16 directly above them, and the whole zone ends by
+/// channel 16.
 ///
 /// A zone of either kind hands its layout out ([`Mpe11Zone::layout`],
 /// [`ProfileZone::layout`]); a [`Midi1Translator`](crate::Midi1Translator)
@@ -104,7 +105,7 @@ struct MpeLayoutRaw {
 /// A persisted layout that is not a layout.
 #[cfg(feature = "serde")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
-#[error("an MPE layout's master is directly below or above its members, which end by channel 16")]
+#[error("an MPE layout's master is directly below its members, or channel 16 directly above them")]
 pub struct InvalidMpeLayout;
 
 #[cfg(feature = "serde")]
@@ -129,8 +130,9 @@ impl TryFrom<MpeLayoutRaw> for MpeLayout {
 
 impl MpeLayout {
     /// The layout of `member_count` members from `first_member` up with
-    /// `master` directly below the first or directly above the last, or `None`
-    /// when the members run past channel 16 or the master is anywhere else.
+    /// `master` directly below the first (an MPE 1.1 lower zone, a Profile
+    /// zone) or on channel 16 directly above the last (an MPE 1.1 upper zone),
+    /// or `None` for any other placement.
     /// A persisted layout is read back through it.
     #[cfg(feature = "serde")]
     const fn new(
@@ -140,7 +142,7 @@ impl MpeLayout {
     ) -> Option<Self> {
         let end = first_member.get() + member_count.get();
         let below = master.get() + 1 == first_member.get();
-        let above = master.get() == end;
+        let above = master.get() == MidiChannel::LAST.get() && master.get() == end;
         if end <= MidiChannel::COUNT && (below || above) {
             Some(Self::unchecked(master, first_member, member_count))
         } else {

@@ -597,13 +597,28 @@ mod serde_tests {
         assert!(serde_json::from_value::<ProfileZones>(overlapping).is_err());
     }
 
-    /// A persisted layout is read back through its check.
+    /// A persisted layout is read back through its check: exactly the shapes
+    /// the two kinds produce round-trip, and a master over members anywhere
+    /// but channel 16 is refused with the layout's named error.
     #[test]
     fn a_persisted_layout_is_read_back_through_its_check() {
-        let layout = zone(MpeZone::Upper, 5).layout();
-        let json = serde_json::to_string(&layout).unwrap();
-        assert_eq!(serde_json::from_str::<MpeLayout>(&json).unwrap(), layout);
-        let mut bad = serde_json::to_value(layout).unwrap();
+        for layout in [
+            zone(MpeZone::Lower, 5).layout(),
+            zone(MpeZone::Upper, 5).layout(),
+            pzone(4, 5).layout(),
+        ] {
+            let json = serde_json::to_string(&layout).unwrap();
+            assert_eq!(serde_json::from_str::<MpeLayout>(&json).unwrap(), layout);
+        }
+        // Master 10 directly over members 5 to 9.
+        let json = r#"{"master":10,"first_member":5,"member_count":5}"#;
+        let err = serde_json::from_str::<MpeLayout>(json).unwrap_err();
+        assert!(
+            err.to_string().contains(&InvalidMpeLayout.to_string()),
+            "{err}"
+        );
+        // Master 3 beside neither end.
+        let mut bad = serde_json::to_value(zone(MpeZone::Upper, 5).layout()).unwrap();
         bad["master"] = 3.into();
         assert!(serde_json::from_value::<MpeLayout>(bad).is_err());
     }
