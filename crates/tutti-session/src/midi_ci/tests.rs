@@ -15,7 +15,7 @@ use tutti_midi_hardware::{PeerId, PropertyCall};
 use tutti_ump::MidiGroup;
 
 use super::{
-    Ended, PeFailure, PeerError, PeerReply, Pending, PortLink, PropertySlot, Slot, SwitchProfile,
+    PeFailure, PeerError, PeerReply, Pending, PortLink, PropertySlot, Shut, Slot, SwitchProfile,
 };
 use crate::peer::ResourceIds;
 
@@ -189,7 +189,7 @@ fn a_pending_that_ends_as_disconnected_resolves_its_property_calls_disconnected(
             replies: vec![sender],
         }));
     }
-    pending.end(Ended::Disconnected);
+    pending.end(Shut::Away);
     for reply in replies {
         assert_eq!(polled(reply), Some(Err(PeerError::Disconnected)));
     }
