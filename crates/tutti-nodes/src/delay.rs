@@ -14,7 +14,7 @@ use tutti_dsp::{
 };
 use tutti_graph::{Cost, ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
-use tutti_units::{Bpm, Feedback, SampleRate, Seconds, SettingKind, Tail};
+use tutti_units::{Bpm, Feedback, SampleRate, Seconds, SyncSetting, Tail};
 
 #[cfg(doc)]
 use tutti_buffers::ChannelTopology;
@@ -163,7 +163,7 @@ control_set! {
     }
 
     fn settings(&self) -> Vec<ErasedSetting> {
-        vec![ErasedSetting::new::<Self, SYNC>(Arc::clone(&self.sync))]
+        vec![ErasedSetting::new::<Self, SyncSetting>(Arc::clone(&self.sync))]
     }
 
     fn detach(&mut self) {
@@ -171,13 +171,10 @@ control_set! {
     }
 }
 
-/// The kind of the delay's sync word.
-const SYNC: u16 = SettingKind::Sync as u16;
-
 /// The word that says whether the delay is timed in seconds or in notes: the node reads it
 /// once per block, and a store lands at the next. A clone shares it; a fork holds one of its
 /// own, at the value at the fork.
-impl HasSetting<SYNC> for DelaySet {
+impl HasSetting<SyncSetting> for DelaySet {
     type Word = DelaySync;
 }
 
@@ -898,7 +895,7 @@ mod tests {
     fn sync_word(node: &DelayNode<f32>) -> tutti_graph::ErasedSetting {
         tutti_graph::ParamNode::<f32>::settings(node)
             .into_iter()
-            .next()
+            .find(|setting| setting.kind() == tutti_units::SettingKind::Sync)
             .expect("a delay has a sync setting")
     }
 
@@ -922,7 +919,7 @@ mod tests {
         };
         assert_eq!(echo_of(&mut node), [256]);
         for (word, echo) in [(DelaySync::Synced, 512), (DelaySync::Free, 256)] {
-            sync.store(word);
+            assert!(sync.store(word));
             // The move: 256 frames of delay at 1/8 a frame, with room.
             block_at(&mut node, 120.0, true, &[0.0; 4096]);
             assert_eq!(echo_of(&mut node), [echo], "after a switch to {word:?}");
@@ -939,7 +936,7 @@ mod tests {
             ..DelayControls::DEFAULT
         }));
         let (fork, clone) = (node.fork_fresh(), node.clone());
-        sync_word(&node).store(DelaySync::Free);
+        assert!(sync_word(&node).store(DelaySync::Free));
         assert_eq!(sync_word(&fork).load(), Some(DelaySync::Synced));
         assert_eq!(sync_word(&clone).load(), Some(DelaySync::Free));
     }

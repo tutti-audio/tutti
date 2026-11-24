@@ -56,14 +56,15 @@ fn lfo() {
     let node = LfoNode::from(beat);
     let sync = tutti_graph::ParamNode::<f32>::settings(&node)
         .into_iter()
-        .next()
+        .find(|setting| setting.kind() == tutti_units::SettingKind::Sync)
         .expect("an LFO has a sync setting");
     gate.run("lfo beat-synced, switching", node, |_, i| {
-        sync.store(if (i / 20) % 2 == 0 {
+        let stored = sync.store(if (i / 20) % 2 == 0 {
             LfoSync::Synced
         } else {
             LfoSync::Free
         });
+        assert!(stored);
     });
 }
 

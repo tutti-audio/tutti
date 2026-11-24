@@ -71,7 +71,8 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     }
 
     /// The cells of the settings the set holds, each under its kind: what a session's key
-    /// sets and reads. None by default; a set that holds one also implements
+    /// sets and reads. Allocates; called on the control side when the node's parts are built.
+    /// None by default; a set that holds one also implements
     /// [`HasSetting`](tutti_graph::HasSetting) for its kind.
     fn settings(&self) -> Vec<ErasedSetting> {
         Vec::new()

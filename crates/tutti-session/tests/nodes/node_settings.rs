@@ -312,9 +312,7 @@ struct Metronome {
     pace: std::sync::Arc<tutti_rt::AtomicCell<Pace>>,
 }
 
-const SYNC: u16 = tutti_units::SettingKind::Sync as u16;
-
-impl tutti_graph::HasSetting<SYNC> for Metronome {
+impl tutti_graph::HasSetting<tutti_units::SyncSetting> for Metronome {
     type Word = Pace;
 }
 
@@ -333,8 +331,9 @@ impl tutti_graph::IntoNode for Metronome {
     type Controls = ();
 
     fn into_parts(self) -> tutti_graph::NodeParts<()> {
-        let setting =
-            tutti_graph::ErasedSetting::new::<Self, SYNC>(std::sync::Arc::clone(&self.pace));
+        let setting = tutti_graph::ErasedSetting::new::<Self, tutti_units::SyncSetting>(
+            std::sync::Arc::clone(&self.pace),
+        );
         tutti_graph::NodeParts::new(Box::new(self), (), None, None).settings(vec![setting])
     }
 }

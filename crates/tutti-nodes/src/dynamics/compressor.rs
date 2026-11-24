@@ -11,7 +11,7 @@ use tutti_dsp::{
 };
 use tutti_graph::{ErasedSetting, HasSetting, Shape};
 use tutti_rt::AtomicCell;
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, Seconds, SettingKind, Tail};
+use tutti_units::{CompressionRatio, Db, Hz, KeyFilterSetting, Q, SampleRate, Seconds, Tail};
 
 use super::keyed_shape;
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
@@ -170,7 +170,7 @@ control_set! {
     }
 
     fn settings(&self) -> Vec<ErasedSetting> {
-        vec![ErasedSetting::new::<Self, KEY_FILTER>(Arc::clone(&self.key_filter))]
+        vec![ErasedSetting::new::<Self, KeyFilterSetting>(Arc::clone(&self.key_filter))]
     }
 
     fn detach(&mut self) {
@@ -178,13 +178,10 @@ control_set! {
     }
 }
 
-/// The kind of the key filter's word.
-const KEY_FILTER: u16 = SettingKind::KeyFilter as u16;
-
 /// Which [`KeyFilter`] the detector hears the key through: the node reads it once per grid
 /// period, and a store lands at the next. A clone shares it; a fork holds one of its own, at
 /// the value at the fork.
-impl HasSetting<KEY_FILTER> for CompressorSet {
+impl HasSetting<KeyFilterSetting> for CompressorSet {
     type Word = KeyFilter;
 }
 

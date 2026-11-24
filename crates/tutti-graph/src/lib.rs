@@ -780,7 +780,7 @@ pub mod __private {
     pub use std::sync::Arc;
     pub use tutti_buffers::Float;
     pub use tutti_rt::{AtomicCell, AtomicWord, Param};
-    pub use tutti_units::{SettingKind, UnitAddr, UnitParam};
+    pub use tutti_units::{UnitAddr, UnitParam};
 }
 
 #[cfg(test)]

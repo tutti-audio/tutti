@@ -460,13 +460,14 @@ pub mod types {
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
         Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
-        FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
-        ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
-        ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
-        Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, SettingKind, SettingKindOutOfRange,
-        Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail,
-        TimecodeFrames, Unit, UnitAddr, UnitParam, UnitParamOutOfRange, Velocity,
+        FrequencyRatioOutOfRange, Gain, HoldFactor, KeyFilterSetting, Latency, Metres,
+        MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
+        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
+        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
+        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
+        Setting, SettingKind, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, SyncSetting, Tail, TimecodeFrames, Unit, UnitAddr, UnitParam,
+        UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }

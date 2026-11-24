@@ -17,7 +17,7 @@ use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
 use tutti_graph::{ErasedSetting, Node, ParamNode};
 use tutti_nodes::{CompressorConfig, CompressorNode, GateConfig, GateNode, KeySource};
-use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
+use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, SettingKind, UnitParam};
 
 const SR: SampleRate = SampleRate::SR_48K;
 const FS: f64 = 48_000.0;
@@ -455,7 +455,7 @@ fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
 fn key_filter_word<N: ParamNode>(node: &N) -> ErasedSetting {
     node.settings()
         .into_iter()
-        .next()
+        .find(|setting| setting.kind() == SettingKind::KeyFilter)
         .expect("the node has a key filter setting")
 }
 
@@ -482,7 +482,7 @@ fn a_running_compressor_follows_its_key_filter_word_and_keeps_the_cutoff_set_whi
     assert!(set.set(UnitParam::Cutoff, moved));
     assert!((deepest_reduction_db(&run(&mut node, &key)) - off).abs() < tolerance);
     for (filter, want) in [(KeyFilter::HighPass, on), (KeyFilter::Off, off)] {
-        word.store(filter);
+        assert!(word.store(filter));
         let got = deepest_reduction_db(&run(&mut node, &key));
         assert!(
             (got - want).abs() < tolerance,
@@ -497,12 +497,12 @@ fn a_running_compressor_follows_its_key_filter_word_and_keeps_the_cutoff_set_whi
 fn a_fork_holds_its_own_key_filter_word_and_a_clone_shares_it() {
     let node = compressor(KeyFilter::BandPass, 100.0, BUTTERWORTH);
     let (fork, clone) = (node.fork_fresh(), node.clone());
-    key_filter_word(&node).store(KeyFilter::Off);
+    assert!(key_filter_word(&node).store(KeyFilter::Off));
     assert_eq!(key_filter_word(&fork).load(), Some(KeyFilter::BandPass));
     assert_eq!(key_filter_word(&clone).load(), Some(KeyFilter::Off));
     let node = gate(KeyFilter::HighPass, -30.0, 100.0, 1.0);
     let (fork, clone) = (node.fork_fresh(), node.clone());
-    key_filter_word(&node).store(KeyFilter::Off);
+    assert!(key_filter_word(&node).store(KeyFilter::Off));
     assert_eq!(key_filter_word(&fork).load(), Some(KeyFilter::HighPass));
     assert_eq!(key_filter_word(&clone).load(), Some(KeyFilter::Off));
 }

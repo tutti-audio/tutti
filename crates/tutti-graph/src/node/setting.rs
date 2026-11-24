@@ -4,19 +4,19 @@ use std::any::TypeId;
 use std::sync::Arc;
 
 use tutti_rt::{AtomicCell, AtomicWord};
-use tutti_units::SettingKind;
+use tutti_units::{Setting, SettingKind};
 
-/// That the node `Self` has a setting of the kind `K` (a [`SettingKind`] as
-/// `u16`), whose value is a `Word`. What a typed key's method for that kind
-/// needs, and what [`declare_params!`](crate::declare_params) writes from a
-/// cells form's `settings` entry.
-pub trait HasSetting<const K: u16> {
+/// That the node `Self` has a setting of the kind `S`, whose value is a `Word`.
+/// What a typed key's method for that kind needs, and what
+/// [`declare_params!`](crate::declare_params) writes from a cells form's
+/// `settings` entry.
+pub trait HasSetting<S: Setting> {
     /// The enum the setting holds, one atomic word by its encoding.
     type Word: AtomicWord + 'static;
 }
 
 /// A [`Params`](crate::Params) node has the settings its node does.
-impl<N: HasSetting<K>, const K: u16> HasSetting<K> for crate::Params<N> {
+impl<N: HasSetting<S>, S: Setting> HasSetting<S> for crate::Params<N> {
     type Word = N::Word;
 }
 
@@ -52,17 +52,11 @@ pub struct ErasedSetting {
 }
 
 impl ErasedSetting {
-    /// The setting `N` declares of the kind `K`, held in `cell`.
-    ///
-    /// # Panics
-    ///
-    /// When `K` is not a [`SettingKind`]: `HasSetting<K>` is declared only for
-    /// the kinds.
+    /// The setting `N` declares of the kind `S`, held in `cell`.
     #[must_use]
-    pub fn new<N: HasSetting<K> + ?Sized, const K: u16>(cell: Arc<AtomicCell<N::Word>>) -> Self {
+    pub fn new<N: HasSetting<S> + ?Sized, S: Setting>(cell: Arc<AtomicCell<N::Word>>) -> Self {
         Self {
-            kind: SettingKind::try_from(K)
-                .expect("`HasSetting<K>` is declared only for a `SettingKind`"),
+            kind: S::KIND,
             word: TypeId::of::<N::Word>(),
             cell,
         }
@@ -90,6 +84,7 @@ impl ErasedSetting {
 
     /// Stores `value`; whether `W` is the enum the cell holds (a value of
     /// another enum leaves the cell as it was).
+    #[must_use = "false: `W` is not the enum the cell holds, and nothing was stored"]
     pub fn store<W: AtomicWord + 'static>(&self, value: W) -> bool {
         self.word == TypeId::of::<W>() && self.cell.store_word(value.to_word())
     }

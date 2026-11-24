@@ -16,7 +16,7 @@ use tutti_graph::{
     BusRole, Cx, ErasedSetting, HasParam, HasParams, HasSetting, InBus, IntoNode, Io, MAX_PORTS,
     Node, NodeParts, Offset, OutBus, ParamNode, ParamSet, Prepare, RtLevel, Shape, Status,
 };
-use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Tail};
+use tutti_units::{Bpm, Latency, Real, SampleRate, Samples, Setting, Tail};
 
 use crate::params::{At, ControlSet, HasControl, HasControls, Params};
 use crate::tail_clock::{Heard, TailClock, tail_frames};
@@ -857,7 +857,7 @@ where
 impl<K: Kernel, const P: u16> HasParams<P> for KernelNode<K> where K::Set: HasControls<P> {}
 
 /// A kernel node has the settings its [`ControlSet`] declares.
-impl<K: Kernel, const S: u16> HasSetting<S> for KernelNode<K>
+impl<K: Kernel, S: Setting> HasSetting<S> for KernelNode<K>
 where
     K::Set: HasSetting<S>,
 {

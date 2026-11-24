@@ -23,7 +23,7 @@ use tutti_graph::{
 };
 use tutti_rt::atomic_word;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, PhaseIncrement, SampleRate, Samples, Seconds};
-use tutti_units::{Latency, Tail};
+use tutti_units::{Latency, SyncSetting, Tail};
 
 // The waveform vocabulary is tutti-modulation's floor, re-exported so `use
 // tutti_nodes::LfoShape` resolves.
@@ -220,7 +220,7 @@ tutti_graph::declare_params!([] LfoNode,
         phase_offset: PhaseIncrement = PhaseIncrement::new(0.0)
     }
     settings {
-        sync @ Sync: LfoSync = LfoSync::Free,
+        sync @ SyncSetting: LfoSync = LfoSync::Free,
     }
 });
 

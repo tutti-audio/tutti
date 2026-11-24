@@ -608,15 +608,15 @@ node_slot_target!(
 /// node's [`HasSetting`](tutti_graph::HasSetting): only a node that has the
 /// setting has the method.
 macro_rules! setting_methods {
-    ($($name:ident => $kind:ident, $doc:literal;)+) => {
+    ($($name:ident => $kind:ident, $marker:ident, $doc:literal;)+) => {
         impl<N: ?Sized> crate::Key<N> {$(
             #[doc = $doc]
             #[must_use]
             pub const fn $name(
                 self,
-            ) -> SettingTarget<<N as tutti_graph::HasSetting<{ SettingKind::$kind as u16 }>>::Word>
+            ) -> SettingTarget<<N as tutti_graph::HasSetting<tutti_units::$marker>>::Word>
             where
-                N: tutti_graph::HasSetting<{ SettingKind::$kind as u16 }>,
+                N: tutti_graph::HasSetting<tutti_units::$marker>,
             {
                 SettingTarget::new(SlotId::Setting(self.erase(), SettingKind::$kind))
             }
@@ -625,9 +625,9 @@ macro_rules! setting_methods {
 }
 
 setting_methods! {
-    sync => Sync,
+    sync => Sync, SyncSetting,
         "How the node is timed, free or locked to the beat (only a node with the setting has this method).";
-    key_filter => KeyFilter,
+    key_filter => KeyFilter, KeyFilterSetting,
         "Which filter the detector hears its key through (only a node with the setting has this method).";
 }
 

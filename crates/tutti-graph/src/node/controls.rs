@@ -236,7 +236,8 @@ pub trait ParamNode<F: Float = f32>: Node<F> + Sized {
     fn param_set(&self) -> ParamSet;
 
     /// The cells of this node's settings, each under its kind: what a
-    /// session's key sets and reads them through. None by default.
+    /// session's key sets and reads them through. None by default. Allocates;
+    /// called on the control side when the node's parts are built.
     fn settings(&self) -> Vec<ErasedSetting> {
         Vec::new()
     }

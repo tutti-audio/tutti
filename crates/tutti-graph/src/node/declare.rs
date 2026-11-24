@@ -544,8 +544,8 @@ pub fn input<'a, F: Float>(
 ///   [`AtomicCell`](tutti_rt::AtomicCell) (a clone shares it, a fork gets its
 ///   own at the value it holds), `cells.mode()` hands it out, and the config
 ///   has a chained option `.mode(Mode::On)`; the node reads `cells.mode().load()`
-///   once per block. A setting written `sync @ Sync: LfoSync = LfoSync::Free` (a
-///   [`SettingKind`](tutti_units::SettingKind) after `@`) is one the session's key
+///   once per block. A setting written `sync @ SyncSetting: LfoSync = LfoSync::Free` (a
+///   [`Setting`](tutti_units::Setting) marker after `@`) is one the session's key
 ///   sets and reads (`key.sync()`): the macro writes the node's
 ///   [`HasSetting`](crate::HasSetting) for the kind and the cell in
 ///   [`ParamNode::settings`](crate::ParamNode::settings), which
@@ -792,7 +792,7 @@ macro_rules! declare_params {
         $(required { $($req:ident : $rty:ty),* $(,)? })?
         $(params { $($ptoks:tt)* })?
         $(options { $($oname:ident : $oty:ty = $odefault:expr),+ $(,)? })?
-        $(settings { $($sname:ident $(@ $skind:ident)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
+        $(settings { $($sname:ident $(@ $skind:ty)? : $sty:ty = $sdefault_value:expr),+ $(,)? })?
         $(published { $($pubtoks:tt)* })?
     }) => {
         $crate::declare_params!(@pub {
@@ -886,7 +886,7 @@ macro_rules! declare_params {
         $cells:ident [$($ld:tt)*] [$($lu:tt)*] [$(marker $($lm:ident,)+)?],
         [$($req:ident : $rty:ty,)*]
         [$($oname:ident : $oty:ty = $odefault:expr,)*]
-        [$($sname:ident [$($skind:ident)?] : $sty:ty = $sdefault:expr,)*]
+        [$($sname:ident [$($skind:ty)?] : $sty:ty = $sdefault:expr,)*]
     } [$(
         [$mode:ident $kind:ident $field:ident [$($count:expr)?] [$unit:ty] [$row:ty] [$cell:ty] [$value:ty] [$default:expr]]
     )*]) => {
@@ -1043,10 +1043,9 @@ macro_rules! declare_params {
                 #[allow(unused_mut)]
                 let mut settings = ::std::vec::Vec::new();
                 $($(
-                    settings.push($crate::ErasedSetting::new::<
-                        $ty,
-                        { $crate::__private::SettingKind::$skind as u16 },
-                    >($crate::__private::Arc::clone(&self.cells.$sname)));
+                    settings.push($crate::ErasedSetting::new::<$ty, $skind>(
+                        $crate::__private::Arc::clone(&self.cells.$sname),
+                    ));
                 )?)*
                 settings
             }
@@ -1090,8 +1089,8 @@ macro_rules! declare_params {
     };
 
     // `$ty` has a setting of the kind `$kind`, held as the word `$word`.
-    (@keyed [$($g:tt)*] $ty:ty, $kind:ident, $word:ty) => {
-        impl<$($g)*> $crate::HasSetting<{ $crate::__private::SettingKind::$kind as u16 }> for $ty {
+    (@keyed [$($g:tt)*] $ty:ty, $kind:ty, $word:ty) => {
+        impl<$($g)*> $crate::HasSetting<$kind> for $ty {
             type Word = $word;
         }
     };

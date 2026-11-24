@@ -204,22 +204,36 @@ pub enum SettingKind {
     KeyFilter = 1,
 }
 
-/// The error converting a `u16` that is not a [`SettingKind`] discriminant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("unknown SettingKind id: {0}")]
-pub struct SettingKindOutOfRange(pub u16);
+mod sealed {
+    pub trait Sealed {}
+}
 
-impl TryFrom<u16> for SettingKind {
-    type Error = SettingKindOutOfRange;
+/// A [`SettingKind`] as a type: what a node's `HasSetting<S>` names, so a kind
+/// no node can mistake for another and a number is never one.
+///
+/// Sealed: [`SyncSetting`] and [`KeyFilterSetting`] are the kinds.
+pub trait Setting: sealed::Sealed + 'static {
+    /// The kind the marker stands for.
+    const KIND: SettingKind;
+}
 
-    /// The kind a discriminant stands for; `Err` for an unknown id.
-    fn try_from(id: u16) -> Result<Self, Self::Error> {
-        match id {
-            0 => Ok(Self::Sync),
-            1 => Ok(Self::KeyFilter),
-            _ => Err(SettingKindOutOfRange(id)),
+macro_rules! setting_markers {
+    ($($(#[$doc:meta])* $marker:ident => $kind:ident;)+) => {$(
+        $(#[$doc])*
+        #[derive(Debug, Clone, Copy)]
+        pub enum $marker {}
+        impl sealed::Sealed for $marker {}
+        impl Setting for $marker {
+            const KIND: SettingKind = SettingKind::$kind;
         }
-    }
+    )+};
+}
+
+setting_markers! {
+    /// [`SettingKind::Sync`] as a type.
+    SyncSetting => Sync;
+    /// [`SettingKind::KeyFilter`] as a type.
+    KeyFilterSetting => KeyFilter;
 }
 
 /// The error converting a `u16` that is not a known [`UnitParam`]
