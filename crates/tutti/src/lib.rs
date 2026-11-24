@@ -1011,10 +1011,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowMachineControl,
-        FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
-        Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
-        NotInstrument, OpenMidiSink, Stamping, TrackError,
+        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowKind,
+        FollowMachineControl, FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi,
+        LoadedTrack, LoadingMidi, Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink,
+        NoCommonTimelineError, NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -1161,9 +1161,10 @@ pub mod midi {
             PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
             ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
             ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId,
-            StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait,
-            TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

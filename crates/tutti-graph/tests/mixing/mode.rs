@@ -104,15 +104,10 @@ impl Rig {
     /// Render `blocks` (each a block length) of the signal `x`; the
     /// executor's outputs.
     fn run(&mut self, blocks: &[usize], x: &dyn Fn(u64) -> f32) -> Vec<Vec<f32>> {
-        let mut all: Vec<Vec<f32>> = vec![Vec::new(); self.harness.outputs];
-        for &n in blocks {
-            let input: Vec<f32> = (0..n as u64).map(|i| x(self.frame + i)).collect();
-            let a = self.harness.block(n, &input);
-            for (all, a) in all.iter_mut().zip(a) {
-                all.extend(a);
-            }
-            self.frame += n as u64;
-        }
+        let all = self.harness.run_with(blocks, self.frame, |start, n| {
+            (0..n as u64).map(|i| x(start + i)).collect()
+        });
+        self.frame += blocks.iter().map(|&n| n as u64).sum::<u64>();
         all
     }
 
@@ -186,8 +181,8 @@ fn a_steady_bypass_is_the_input_bit_for_bit() {
             );
             let got = rig.frames(512, &x);
             let want: Vec<u32> = (0..512).map(|f| x(f).to_bits()).collect();
-            assert_eq!(got[0].iter().map(|v| v.to_bits()).collect::<Vec<_>>(), want);
-            assert_eq!(got[1].iter().map(|v| v.to_bits()).collect::<Vec<_>>(), want);
+            assert_eq!(common::bits_of(&got[0]), want);
+            assert_eq!(common::bits_of(&got[1]), want);
         }
     }
 }
@@ -1280,9 +1275,7 @@ fn a_bypassed_source_closes_its_notes() {
 fn a_mode_stored_mid_block_lands_on_the_next_block() {
     for workers in WORKERS {
         let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(common::test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let (hook, handle) = Rendezvous::new();
         ed.insert(key(1), "hook", Unforkable(hook));
         ed.insert(
@@ -1419,10 +1412,7 @@ fn a_fork_copies_the_mode_and_starts_steady() {
         &[&input],
         &mut [&mut f[..]],
     );
-    assert_eq!(
-        f.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-        input.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
-    );
+    assert_eq!(common::bits_of(&f), common::bits_of(&input));
     exec.process(
         BLOCK,
         &TransportPosition::default(),
