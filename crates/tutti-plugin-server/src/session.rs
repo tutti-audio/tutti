@@ -1413,9 +1413,9 @@ mod tests {
             matches!(
                 &refused,
                 ControlReply::SampleRateSet { rate, refusal: Some(e) }
-                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. } | RateRefusalCause::RolledBack { .. })
+                    if rate.get() == 96000.0 && matches!(e, RateRefusalCause::Deactivated { .. })
             ),
-            "the host is told, with a reason: {refused:?}"
+            "the rollback is refused too (the 64-bit ports are gone at the accepted rate as well), so the plugin is deactivated: {refused:?}"
         );
         assert!(s.rate_refused.is_some());
         assert!(
