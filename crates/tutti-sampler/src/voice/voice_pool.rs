@@ -747,7 +747,7 @@ fn a_stretched_disk_voice_consumes_its_source_at_the_stretched_rate() {
         // requires it, and the published stretch rate is read back through
         // the same cell.
         let state = Arc::new(Cells::new());
-        let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+        let inner = DiskSource::new(reader, pos);
         let voice = DiskVoice::new(
             inner,
             Arc::clone(&state),
@@ -1352,7 +1352,7 @@ fn streaming_voice_of(region: u64) -> Voice<f32> {
         RegionBuffer::with_capacity(StreamId::of(region), std::path::PathBuf::new(), 128, 2u16);
     drop(writer);
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, state.clone());
+    let inner = DiskSource::new(reader, pos);
     Voice {
         source: VoiceSource::Disk(DiskVoice::new(
             inner,

@@ -30,8 +30,12 @@ fn run_block(voice: &mut DiskVoice<f32>, t: &MockTransport, n: usize) -> Vec<Vec
 /// One block of `n` frames of `voice` under `t`, at `rate`, as its render
 /// mode renders it (an offline fork outside `RtScope`).
 fn under(voice: &mut DiskVoice<f32>, t: &MockTransport, rate: f64, n: usize) -> Vec<Vec<f32>> {
-    let prepare = Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(n)))
-        .with_render_mode(voice.render_mode);
+    let mode = match &voice.reader {
+        Reader::File(offline) => offline.render_mode,
+        Reader::Ring { .. } => RenderMode::Realtime,
+    };
+    let prepare =
+        Prepare::new(SampleRate::of(rate), MaxBlock::of(Samples::new(n))).with_render_mode(mode);
     block_in(voice, &prepare, t, n)
 }
 
@@ -57,7 +61,7 @@ fn make_reader_at(samples: &[(f32, f32)], start: u64) -> (SharedReader<f32>, tut
 fn make_unit(samples: &[(f32, f32)]) -> (DiskSource<f32>, Arc<Cells>) {
     let (reader, pos) = make_reader_with_samples(samples);
     let state = Arc::new(Cells::new());
-    let unit = DiskSource::new(reader, pos, Arc::clone(&state));
+    let unit = DiskSource::new(reader, pos);
     (unit, state)
 }
 
@@ -87,7 +91,7 @@ fn process_reads_one_file_frame_per_output_frame_at_unity_rate() {
         }
     }
     assert_eq!(
-        voice.inner.read.read_to(),
+        voice.live().read_to(),
         SamplePosition::new((BLOCK * BLOCKS - 1) as f64)
     );
 }
@@ -113,7 +117,7 @@ fn make_clip_reader_at(
 ) -> DiskVoice<f32> {
     let state = Arc::new(Cells::new());
     let (ring, pos) = make_reader_at(samples, at);
-    let inner = DiskSource::new(ring, pos, Arc::clone(&state));
+    let inner = DiskSource::new(ring, pos);
     DiskVoice::new(
         inner,
         state,
@@ -208,7 +212,7 @@ fn a_varispeed_change_moves_the_read_without_any_beat_discontinuity() {
         .collect();
     let transport = MockTransport::rolling(Beat::new(20.0), Bpm::of(120.0));
     let mut reader = make_clip_reader(&samples, Beat::new(0.0), None);
-    let ring = Arc::clone(reader.inner.read.ring());
+    let ring = Arc::clone(reader.live().ring());
 
     under(&mut reader, &transport, SR, 1);
     let before = ring.play();
@@ -262,10 +266,10 @@ fn a_fork_closes_its_file_once_past_its_window() {
     let mut copy = voice.fork_copy();
     copy.set_render(SampleRate::SR_48K, RenderMode::Offline);
     let is_open = |copy: &DiskVoice<f32>| {
-        copy.offline
-            .as_ref()
-            .and_then(|offline| offline.read.as_ref())
-            .is_some_and(OfflineRead::is_open)
+        let Reader::File(offline) = &copy.reader else {
+            return false;
+        };
+        offline.read.as_ref().is_some_and(OfflineRead::is_open)
     };
     let mut played = 0;
     while played < 30_000 {
@@ -383,15 +387,12 @@ fn a_stopped_clock_silences_a_fork() {
     }
 }
 
-/// A severed source lets go of the live reader. A clone never holds
-/// it (the reader is the live source's alone), so the one
-/// way a severed copy could still speak for the live ring is a source
-/// severed in place (what a disk voice's fork does to its copy's source).
-/// Here the live voice claims a block, its source is severed, and it renders
-/// again: the ranges the live block claimed must still stand, and a clone
-/// of it renders nothing into them either.
+/// A clone never holds the live reader (the reader is the live voice's
+/// alone). Here the live voice claims a block and a clone of it renders:
+/// the ranges the live block claimed must still stand, and the clone
+/// renders nothing into them.
 #[test]
-fn a_severed_copy_holds_no_live_reader() {
+fn a_clone_holds_no_live_reader() {
     let (mut writer, ring, pos) =
         RegionBuffer::with_capacity(StreamId::of(1), PathBuf::new(), 4_096, 2u16);
     writer
@@ -399,7 +400,7 @@ fn a_severed_copy_holds_no_live_reader() {
         .expect("the ring\'s width");
     let state = Arc::new(Cells::new());
     let mut live = DiskVoice::new(
-        DiskSource::new(ring, pos, Arc::clone(&state)),
+        DiskSource::new(ring, pos),
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
@@ -417,13 +418,6 @@ fn a_severed_copy_holds_no_live_reader() {
         claimed,
         "a clone spoke for the live reader"
     );
-    live.inner.sever();
-    run_block(&mut live, &t, 64);
-    assert_eq!(
-        writer.in_flight_end(),
-        claimed,
-        "a severed source spoke for the live reader"
-    );
 }
 
 /// A fork of a disk voice never touches the live stream: rendered
@@ -437,7 +431,7 @@ fn a_severed_copy_holds_no_live_reader() {
 fn a_fork_never_touches_the_live_stream() {
     let samples: Vec<_> = (1..4096).map(|i| (i as f32, i as f32)).collect();
     let live = make_clip_reader(&samples, Beat::new(0.0), None);
-    let ring = Arc::clone(live.inner.read.ring());
+    let ring = Arc::clone(live.live().ring());
     let (play_before, window_before) = (ring.play(), ring.window());
 
     let render = MockTransport::rolling(Beat::new(1.0), Bpm::of(120.0));
@@ -720,7 +714,7 @@ fn wide_clip_at(width: usize, at: u64) -> DiskVoice<f32> {
         .collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+    let inner = DiskSource::new(reader, pos);
     DiskVoice::new(
         inner,
         state,
@@ -779,7 +773,7 @@ fn a_steady_lane_read_writes_the_callers_lanes_as_put_does() {
                 block(&mut voice);
             }
         });
-        assert_eq!(voice.inner.read.steady_runs(), 8, "{width} into {n}");
+        assert_eq!(voice.live().steady_runs(), 8, "{width} into {n}");
         // The last block: straight positions 22 050 + 7 × 64 + i.
         let first = 22_050 + 7 * BLOCK as u64;
         for c in 0..n {
@@ -832,7 +826,7 @@ fn a_steady_lane_read_at_one_and_a_half_reproduces_a_ramp_across_runs() {
             }
         }
     }
-    assert_eq!(voice.inner.read.steady_runs(), 8, "every block is steady");
+    assert_eq!(voice.live().steady_runs(), 8, "every block is steady");
 }
 
 /// [`wide_clip`] over a ring that states `topology` (its width is the
@@ -868,7 +862,6 @@ fn placed_clip(topology: tutti_buffers::ChannelTopology) -> DiskVoice<f32> {
     let inner = DiskSource::with_reader(
         reader,
         Some(crate::streamer::RingReader::new(pos, control)),
-        Arc::clone(&state),
         frame,
         place,
     );
@@ -967,7 +960,7 @@ fn render_lanes_blocks(voice: &mut DiskVoice<f32>, n: usize) -> (Vec<Vec<f32>>, 
         .iter()
         .map(|l| l[..BLOCK].to_vec())
         .collect();
-    (lanes, voice.inner.read.steady_runs())
+    (lanes, voice.live().steady_runs())
 }
 
 /// A placed ring is read through its placement in a block read by lanes (the
@@ -1181,14 +1174,11 @@ fn reset_clears_state() {
     let (mut voice, t) = rolling_voice(&samples);
 
     run_block(&mut voice, &t, 10);
-    assert!(
-        !voice.inner.read.forgot(),
-        "the reader holds its last position"
-    );
+    assert!(!voice.live().forgot(), "the reader holds its last position");
 
     voice.reset();
     assert!(
-        voice.inner.read.forgot(),
+        voice.live().forgot(),
         "the reader still holds its last position"
     );
 }
@@ -1218,9 +1208,9 @@ fn outside_the_window_silences_every_channel() {
         let frames: Vec<f32> = (0..64 * width).map(|i| (i + 1) as f32).collect();
         let (ring, pos) = make_wide_reader(&frames, width);
         let state = Arc::new(Cells::new());
-        let inner = DiskSource::new(ring, pos, state.clone());
+        let inner = DiskSource::new(ring, pos);
         assert_eq!(
-            inner.channels(),
+            inner.channels,
             ChannelLayout::try_from(width).expect("a test width is small"),
             "ring width must reach the unit"
         );
@@ -1305,7 +1295,7 @@ fn cached_stride_reads_every_channel_at_width_six() {
     let (ring, pos) = make_wide_reader(&frames, width);
     let state = Arc::new(Cells::new());
     let mut voice = DiskVoice::new(
-        DiskSource::new(ring, pos, state.clone()),
+        DiskSource::new(ring, pos),
         state,
         DiskVoiceConfig {
             window: VoiceWindow::default(),
@@ -1315,7 +1305,7 @@ fn cached_stride_reads_every_channel_at_width_six() {
     let t = MockTransport::rolling(Beat::new(0.0), Bpm::of(120.0));
 
     assert_eq!(
-        voice.inner.channels(),
+        voice.channels,
         ChannelLayout::from(6u16),
         "the ring's declared width must reach the unit as a layout"
     );
@@ -1579,7 +1569,7 @@ fn a_block_with_no_position_leaves_the_lanes_alone() {
         "a rolling transport sounds"
     );
     assert!(scratch.out.lanes()[0][..BLOCK].iter().all(|&s| s != 7.0));
-    assert!(voice.inner.read.read_to() > SamplePosition::new(22_000.0));
+    assert!(voice.live().read_to() > SamplePosition::new(22_000.0));
 }
 
 /// A skipped block forgets a crossfade in progress, as the rendered
@@ -1601,7 +1591,7 @@ fn a_skipped_block_forgets_the_fade_and_the_last_position() {
     let flat: Vec<f32> = (from..from + 2_000).map(|k| k as f32).collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+    let inner = DiskSource::new(reader, pos);
     let mut voice = DiskVoice::new(
         inner,
         state,
@@ -1625,14 +1615,14 @@ fn a_skipped_block_forgets_the_fade_and_the_last_position() {
         voice.render_lanes(&clock, 0..BLOCK, out, 1, positions, gather)
     };
     assert!(run(&mut voice));
-    assert!(!voice.inner.read.forgot(), "a position is held");
+    assert!(!voice.live().forgot(), "a position is held");
     t.advance(BLOCK as i64, SampleRate::of(SR));
     t.set_beat(Beat::new(1.03));
     assert!(run(&mut voice));
-    assert!(voice.inner.read.fading(), "a jump fades");
+    assert!(voice.live().fading(), "a jump fades");
     t.set_rolling(false);
     assert!(!run(&mut voice), "a stopped block is skipped");
-    assert!(voice.inner.read.forgot(), "a silent block forgets");
+    assert!(voice.live().forgot(), "a silent block forgets");
 }
 
 /// A skipped block lets go of the ring, as a rendered silent block
@@ -1653,7 +1643,7 @@ fn a_skipped_block_releases_the_ring_to_the_writer() {
     let flat: Vec<f32> = (AT..AT + 2_000).map(|k| k as f32).collect();
     writer.push_interleaved(&flat).expect("the ring\'s width");
     let state = Arc::new(Cells::new());
-    let inner = DiskSource::new(reader, pos, Arc::clone(&state));
+    let inner = DiskSource::new(reader, pos);
     let mut voice = DiskVoice::new(
         inner,
         state,
