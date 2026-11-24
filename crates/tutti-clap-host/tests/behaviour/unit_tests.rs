@@ -15,7 +15,7 @@ use tutti_clap_host::{
     NoteExpressionType, OutputEventList, OutputRooms, OutputStream,
 };
 use tutti_graph::Offset;
-use tutti_ump::{Message, MidiChannel, NoteKeyEvent, NoteNumber};
+use tutti_ump::{ControlValue, Message, MidiChannel, NoteKeyEvent, NoteNumber, U7, Voice2};
 use tutti_units::Samples;
 
 /// A block long enough for every offset these tests use.
@@ -32,12 +32,6 @@ use support::main_thread;
 use support::raw::{HostRaw, InputListRaw, InputStreamRaw, OutputListRaw, OutputStreamRaw};
 use support::{midi_events, note_expressions, param_changes};
 use tutti_fixtures::midi;
-
-// ── MIDI conversion via `(Offset, Ump)` and `WireMidi` ──
-//
-// clap-host's `ClapEvent::{from,to}_midi_event` bridge between VST3/CLAP's
-// typed event structs and Tutti's UMP events. These tests cover each
-// MIDI-1 message shape we expect to round-trip cleanly.
 
 /// Note events pushed through `InputEventList::add_midi` should appear in
 /// the FFI event table.
@@ -132,12 +126,6 @@ fn a_wildcard_note_off_resolves_by_note_id_not_by_masking() {
     );
 }
 
-// sort_by_time test removed alongside other MIDI-shape-dependent tests.
-
-// ── Parameter changes grouping ──
-
-// ── Note expression through event list ──
-
 /// **Each core event a plugin pushes is held as its own variant, at its time,
 /// and reaches only its own sink**: notes and MIDI become UMP messages
 /// (`NoteChoke` and `NoteEnd` are notices with no message; a tuning is a
@@ -156,12 +144,13 @@ fn each_core_event_a_plugin_pushes_is_held_as_its_own_variant() {
         type_,
         flags: 0,
     };
-    let note = |time: u32, type_: u16| clap_event_note {
+    // Each field of each row has a value of its own, so a crosswise read shows.
+    let note = |time: u32, type_: u16, note_id: i32, channel: i16, key: i16| clap_event_note {
         header: header(std::mem::size_of::<clap_event_note>(), time, type_),
-        note_id: 42,
+        note_id,
         port_index: 0,
-        channel: 2,
-        key: 60,
+        channel,
+        key,
         velocity: 0.5,
     };
     let midi = clap_event_midi {
@@ -204,21 +193,21 @@ fn each_core_event_a_plugin_pushes_is_held_as_its_own_variant() {
         ),
         param_id: 9,
         cookie: std::ptr::null_mut(),
-        note_id: -1,
-        port_index: -1,
-        channel: -1,
-        key: -1,
+        note_id: 11,
+        port_index: 2,
+        channel: 3,
+        key: 77,
         amount: 0.25,
     };
     let gesture = |time: u32, type_: u16| clap_event_param_gesture {
         header: header(std::mem::size_of::<clap_event_param_gesture>(), time, type_),
-        param_id: 5,
+        param_id: 15,
     };
     let (on, off, choke, end) = (
-        note(1, CLAP_EVENT_NOTE_ON),
-        note(2, CLAP_EVENT_NOTE_OFF),
-        note(3, CLAP_EVENT_NOTE_CHOKE),
-        note(4, CLAP_EVENT_NOTE_END),
+        note(1, CLAP_EVENT_NOTE_ON, 40, 5, 63),
+        note(2, CLAP_EVENT_NOTE_OFF, 44, 6, 64),
+        note(3, CLAP_EVENT_NOTE_CHOKE, 41, 7, 61),
+        note(4, CLAP_EVENT_NOTE_END, 43, 8, 62),
     );
     let (begin, finish) = (
         gesture(9, CLAP_EVENT_PARAM_GESTURE_BEGIN),
@@ -279,6 +268,40 @@ fn each_core_event_a_plugin_pushes_is_held_as_its_own_variant() {
         ]
     );
 
+    let events = list.events();
+    let fields = |e: &clap_event_note| (e.note_id, e.channel, e.key);
+    let (ClapEvent::NoteOn(on), ClapEvent::NoteOff(off)) = (&events[0], &events[1]) else {
+        unreachable!("checked above");
+    };
+    assert_eq!((fields(on), fields(off)), ((40, 5, 63), (44, 6, 64)));
+    let (ClapEvent::NoteChoke(choke), ClapEvent::NoteEnd(end)) = (&events[2], &events[3]) else {
+        unreachable!("checked above");
+    };
+    assert_eq!((fields(choke), fields(end)), ((41, 7, 61), (43, 8, 62)));
+    let ClapEvent::Midi(cc) = &events[4] else {
+        unreachable!("checked above");
+    };
+    assert_eq!(cc.data, [0xB2, 74, 100]);
+    let ClapEvent::ParamMod(m) = &events[7] else {
+        unreachable!("checked above");
+    };
+    assert_eq!(
+        (
+            m.param_id,
+            m.note_id,
+            m.port_index,
+            m.channel,
+            m.key,
+            m.amount
+        ),
+        (9, 11, 2, 3, 77, 0.25)
+    );
+    let (ClapEvent::ParamGestureBegin(b), ClapEvent::ParamGestureEnd(e)) = (&events[8], &events[9])
+    else {
+        unreachable!("checked above");
+    };
+    assert_eq!((b.param_id, e.param_id), (15, 15));
+
     let changes = param_changes(&list);
     assert_eq!(
         changes.queues.len(),
@@ -294,12 +317,34 @@ fn each_core_event_a_plugin_pushes_is_held_as_its_own_variant() {
     assert_eq!(expressions[0].note_id, 5);
     assert!((expressions[0].value - 0.25).abs() < 0.001);
 
-    let messages: Vec<u32> = midi_events(&mut list).iter().map(|e| e.offset).collect();
+    let messages = midi_events(&mut list);
+    let offsets: Vec<u32> = messages.iter().map(|e| e.offset).collect();
     assert_eq!(
-        messages,
+        offsets,
         [1, 2, 5, 6],
         "a note on, a note off, the CC and the tuning's per-note pitch"
     );
+    let decoded: Vec<Message> = messages
+        .iter()
+        .map(|e| e.ump.decode().expect("a message"))
+        .collect();
+    assert!(matches!(
+        decoded[0],
+        Message::Midi2(a, Voice2::NoteOn { note, .. })
+            if (a.channel.get(), note.get()) == (5, 63)
+    ));
+    assert!(matches!(
+        decoded[1],
+        Message::Midi2(a, Voice2::NoteOff { note, .. })
+            if (a.channel.get(), note.get()) == (6, 64)
+    ));
+    assert!(matches!(
+        decoded[2],
+        Message::Midi2(a, Voice2::ControlChange { controller, value })
+            if a.channel.get() == 2
+                && controller.get() == 74
+                && value == ControlValue::from(U7::of(100))
+    ));
 
     assert_eq!(list.take_events().len(), 10);
     assert_eq!(list.len(), 0);
@@ -351,10 +396,6 @@ fn test_input_stream_partial_reads() {
         assert_eq!(n, 0);
     }
 }
-
-// ── Mixed event types through output ──
-
-// ── Event types through the output list FFI ──
 
 // ── Host state + extensions ──
 
@@ -912,8 +953,6 @@ fn test_host_posix_fd_modify() {
         assert_eq!(fds[0].flags, CLAP_POSIX_FD_READ | CLAP_POSIX_FD_WRITE);
     }
 }
-
-// ── ParamMod event FFI ──
 
 /// Each CLAP severity is emitted at its level on target `tutti::plugin`, tagged
 /// with the plugin's id; one CLAP does not name is a warning that carries the

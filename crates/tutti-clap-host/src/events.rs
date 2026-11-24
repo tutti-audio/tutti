@@ -2553,23 +2553,26 @@ mod tests {
 
     /// A Program Change packet written from M2-104 Figure 64's words (bank MSB
     /// 1 at bits 14-8, LSB 5 at bits 6-0) reaches the plugin as CC 0 = 1,
-    /// CC 32 = 5, then the program. Unlike the builder test above, no builder
-    /// is in the path.
+    /// CC 32 = 5, then the program, all at the packet's time. No builder is in
+    /// the path.
     #[test]
     fn a_spec_word_banked_program_change_is_three_midi_events() {
         let pc = packet(5, &[0x40C1_0001, (9 << 24) | (1 << 8) | 5]);
         let mut list = InputEventList::new(InputRooms::new(8));
         list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
         list.add_midi(&pc);
-        let got: Vec<[u8; 3]> = list
+        let got: Vec<(u32, [u8; 3])> = list
             .events()
             .iter()
             .map(|e| match e {
-                ClapEvent::Midi(m) => m.data,
+                ClapEvent::Midi(m) => (m.header.time, m.data),
                 _ => panic!("not a MIDI event"),
             })
             .collect();
-        assert_eq!(got, vec![[0xB1, 0, 1], [0xB1, 32, 5], [0xC1, 9, 0]]);
+        assert_eq!(
+            got,
+            vec![(5, [0xB1, 0, 1]), (5, [0xB1, 32, 5]), (5, [0xC1, 9, 0])]
+        );
     }
 
     /// **A MIDI 1.0 Note On at velocity 0 is a Note Off at release velocity
@@ -2948,12 +2951,12 @@ mod tests {
     #[test]
     fn notes_on_a_midi_dialect_port_stage_exact_bytes() {
         let staged = |words: &[u32]| staged_midi(words, NoteSend::Midi);
-        // Note On, channel 3, key 60, velocity 0x8000: 63.5 rounds to 64.
+        // Note On, channel 3, key 60, velocity 0x8000: 0x8000 >> 9 is 64.
         assert_eq!(
             staged(&[0x4093_3C00, 0x8000_0000]),
             vec![(11, [0x93, 60, 64])]
         );
-        // A velocity that rounds to 0 is raised to 1.
+        // A velocity whose shift is 0 is raised to 1.
         assert_eq!(
             staged(&[0x4093_3C00, 0x0001_0000]),
             vec![(11, [0x93, 60, 1])]
@@ -3936,6 +3939,36 @@ mod tests {
         }
     }
 
+    /// **MIDI 1.0 Poly Pressure is a pressure note expression on a CLAP-dialect
+    /// port**, carrying the sounding note's id (the 7-bit value 0x2A), and raw
+    /// `0xAn` bytes on a MIDI-dialect one.
+    #[test]
+    fn midi1_poly_pressure_is_an_expression_on_a_clap_port_and_bytes_on_a_midi_port() {
+        let pressure = packet(1, &[0x20A3_3C2A]);
+
+        let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
+        list.add_midi(&packet(0, &[0x4093_3C00, 0x8000_0000]));
+        let ClapEvent::NoteOn(on) = list.events()[0] else {
+            panic!("expected a NoteOn");
+        };
+        list.add_midi(&pressure);
+        let [_, ClapEvent::NoteExpression(e)] = list.events() else {
+            panic!("expected a pressure expression, got {:?}", list.events());
+        };
+        assert_eq!(e.expression_id, CLAP_NOTE_EXPRESSION_PRESSURE);
+        assert_eq!(e.note_id, on.note_id);
+        assert!((e.value - f64::from(0x2A_u8) / 127.0).abs() < 0.01);
+
+        let mut list = InputEventList::new(InputRooms::new(1024));
+        list.set_note_ports(&[NoteSend::Midi]).unwrap();
+        list.add_midi(&pressure);
+        assert!(matches!(
+            list.events(),
+            [ClapEvent::Midi(m)] if m.data == [0xA3, 0x3C, 0x2A]
+        ));
+    }
+
     #[test]
     fn key_pressure_becomes_pressure_note_expression() {
         let midi = (
@@ -4115,7 +4148,8 @@ mod tests {
             .to_midi(&mut Midi2Translator::new())
             .expect("note off -> midi");
         match message(&midi) {
-            Message::Midi2(_, Voice2::NoteOff { velocity, .. }) => {
+            Message::Midi2(address, Voice2::NoteOff { note, velocity, .. }) => {
+                assert_eq!((midi.offset, address.channel.get(), note.get()), (2, 1, 48));
                 // `round(0.5 * 0xFFFF)` is `0x8000`.
                 assert_eq!(velocity.get(), 0x8000);
             }
