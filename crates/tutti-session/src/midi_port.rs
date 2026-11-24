@@ -28,7 +28,8 @@
 //! the port opens: it releases the notes its device holds before it goes, and
 //! survives an unplug and a replug, so what is wired to it stays wired. An
 //! output is a [`MidiOutNode`](tutti_midi_runtime::MidiOutNode) of its own,
-//! whose events the session sends to the device each update.
+//! whose events the session sends to the device each update; the clips feeding it
+//! send their setup again when its device returns.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -1601,7 +1602,13 @@ impl Ports {
             }
             port.link = match open_device_output(io, port.started, &arrived.id, port.active_sensing)
             {
-                Ok(device) => OutLink::open(device, stream),
+                Ok(device) => {
+                    // The device lost its setup: the clips feeding the port
+                    // send it again, from blocks the `MidiOut` phase drains
+                    // into the link opened here.
+                    graph.receiver_replaced(port.node);
+                    OutLink::open(device, stream)
+                }
                 Err(_) => OutLink::Away {
                     stream,
                     cause: PortCause::ReopenFailed,
