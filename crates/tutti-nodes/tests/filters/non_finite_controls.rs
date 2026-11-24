@@ -165,6 +165,7 @@ fn svf_ladder_delay_moddelay_phaser_compressor_gate_hold_off_non_finite_controls
                     .build()
                     .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+                sync: tutti_nodes::DelaySync::Free,
                 time: Seconds::new(0.01),
                 feedback: Feedback::new(0.5),
                 cross_feedback: Feedback::new(0.2),

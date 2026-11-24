@@ -21,6 +21,7 @@ fn delay(width: u16, time: f64, feedback: f64, cross: f64) -> DelayNode<f32> {
             MaxDelay::of(Seconds::new(2.0)),
         ))
         .controls(DelayControls {
+            sync: tutti_nodes::DelaySync::Free,
             time: Seconds::new(time),
             feedback: Feedback::new(feedback),
             cross_feedback: Feedback::new(cross),
