@@ -69,9 +69,8 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
     ));
     editor.insert(key, "vst2", Unforkable(unit.bind(tutti_fixtures::tempo())));
     editor
-        .spec_mut()
-        .topology
-        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))));
+        .set_outputs((0..2).map(|port| PortSource::Node(OutputPort::new(key, port))))
+        .expect("the sources exist");
     editor.commit().expect("commits");
     let mut left = vec![0.0f32; BLOCK];
     let mut right = vec![0.0f32; BLOCK];
@@ -86,9 +85,8 @@ fn a_removed_vst2_node_is_dropped_on_the_control_side() {
 
     editor.remove(key);
     editor
-        .spec_mut()
-        .topology
-        .set_outputs(vec![PortSource::Zero, PortSource::Zero]);
+        .set_outputs(vec![PortSource::Zero, PortSource::Zero])
+        .expect("the sources exist");
     editor.commit().expect("the removal commits");
     // The executor applies the removal under `RtScope`: the unit moves into the commit box (a
     // drop here would abort the test binary); the blocks that follow render under it too.
