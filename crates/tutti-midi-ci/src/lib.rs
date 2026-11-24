@@ -76,7 +76,7 @@ pub use deadline::Deadline;
 pub use default_cc::{CcFunction, CcPart, CcReset, CcValue, DefaultCcLevel, SuggestedCc};
 pub use device::{CiAction, CiDevice, CiPeer, DISCOVERY_WINDOW};
 pub use discovery::{
-    CiCategories, DeviceBody, DiscoveryData, MaxSysexSize, NotASysexSize, ReplyData, ReplyV2,
+    CiCategories, DeviceBody, DiscoveryData, MaxSysexSize, NotASysexSize, ReplyData, ReplyVersion2,
     SUB_ID2_ACK, SUB_ID2_DISCOVERY, SUB_ID2_DISCOVERY_REPLY, SUB_ID2_ENDPOINT_INQUIRY,
     SUB_ID2_ENDPOINT_REPLY, SUB_ID2_INVALIDATE_MUID, SUB_ID2_NAK,
 };

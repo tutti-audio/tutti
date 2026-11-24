@@ -9,7 +9,7 @@ use super::super::{
 };
 use super::super::{Unread, UnreadReason};
 use super::*;
-use crate::{PeStatus, ReplyV2};
+use crate::{PeStatus, ReplyVersion2};
 use tutti_ump::ManufacturerId;
 use tutti_ump::SoftwareRevision;
 
@@ -55,7 +55,7 @@ fn reply(from: u32, to: u32, block: Option<u8>) -> Decoded {
         to: Muid::of(to),
         data: ReplyData {
             body: body(),
-            v2: Some(ReplyV2 {
+            version_2: Some(ReplyVersion2 {
                 output_path_id: U7::of(0),
                 function_block: block.map(|b| FunctionBlockId::new(b).unwrap()),
             }),
@@ -169,8 +169,8 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
     assert_eq!(header.source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
     assert_eq!(
-        data.v2,
-        Some(ReplyV2 {
+        data.version_2,
+        Some(ReplyVersion2 {
             output_path_id: U7::of(9),
             function_block: None
         })
@@ -432,6 +432,17 @@ fn a_nak_of_the_endpoint_inquiry_leaves_the_id_unknown() {
         device.peer(Muid::of(PEER)).unwrap().product_instance_id(),
         None
     );
+}
+
+#[test]
+fn a_second_endpoint_reply_replaces_the_id_and_updates() {
+    let (mut device, _, now) = device([OURS]);
+    device.on_message(&reply(PEER, OURS, Some(0)), now);
+    device.on_message(&id_reply(PEER, OURS, "first"), now);
+    let actions = device.on_message(&id_reply(PEER, OURS, "second"), now);
+    assert_eq!(actions, vec![CiAction::Updated(Muid::of(PEER))]);
+    let id = device.peer(Muid::of(PEER)).unwrap().product_instance_id();
+    assert_eq!(id.map(ProductInstanceId::as_str), Some("second"));
 }
 
 #[test]

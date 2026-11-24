@@ -51,7 +51,7 @@ use tutti_ump::{
 use super::{
     CI_SUB_ID_1, CiCategories, CiDeviceId, DataControl, Destination, DetailsData, DeviceBody,
     DiscoveryData, InquiryTarget, MaxSysexSize, MessageText, Muid, ProcessFeatures,
-    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReplyData, ReplyV2,
+    ProfileChannels, ProfileId, ProfileList, ProfileLists, ProfileTarget, ReplyData, ReplyVersion2,
     ReportScope, SpecificData,
 };
 
@@ -140,11 +140,9 @@ fn max_sysex_size(input: &mut &[u8]) -> Res<MaxSysexSize> {
         .parse_next(input)
 }
 
-/// A reply's Function Block: absent and `7F` are `None`; 0 to
-/// 31 a block; anything else malformed (§5.6.2).
+/// A reply's Function Block: `7F` is `None`; 0 to 31 a block; anything else malformed (§5.6.2).
 fn function_block(input: &mut &[u8]) -> Res<Option<FunctionBlockId>> {
     alt((
-        eof.value(None),
         literal(NO_FUNCTION_BLOCK_WIRE).value(None),
         any.verify_map(FunctionBlockId::new).map(Some),
     ))
@@ -169,10 +167,10 @@ fn discovery(input: &mut &[u8]) -> Res<DiscoveryData> {
 }
 
 /// The Version 2 fields of a Reply, or `None` when the message ended before them.
-fn reply_v2(input: &mut &[u8]) -> Res<Option<ReplyV2>> {
+fn reply_v2(input: &mut &[u8]) -> Res<Option<ReplyVersion2>> {
     alt((
         eof.value(None),
-        seq!(ReplyV2 {
+        seq!(ReplyVersion2 {
             output_path_id: u7,
             function_block: function_block,
         })
@@ -184,7 +182,7 @@ fn reply_v2(input: &mut &[u8]) -> Res<Option<ReplyV2>> {
 fn reply(input: &mut &[u8]) -> Res<ReplyData> {
     seq!(ReplyData {
         body: device_body,
-        v2: reply_v2,
+        version_2: reply_v2,
     })
     .parse_next(input)
 }

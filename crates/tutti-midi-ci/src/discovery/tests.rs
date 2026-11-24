@@ -35,7 +35,7 @@ fn sample_discovery() -> DiscoveryData {
 fn sample_reply() -> ReplyData {
     ReplyData {
         body: sample_body(),
-        v2: Some(ReplyV2 {
+        version_2: Some(ReplyVersion2 {
             output_path_id: U7::of(0x05),
             function_block: FunctionBlockId::new(3),
         }),
@@ -114,38 +114,31 @@ fn discovery_and_reply_have_the_version_2_trailers() {
 #[test]
 fn a_version_1_body_has_no_output_path_and_no_function_block() {
     let mut body = Vec::new();
-    sample_reply().encode_body(&mut body);
-    body.truncate(16);
-    let reply = ReplyData::decode_body(&body).expect("v1 reply decodes");
-    assert_eq!(reply.body, sample_body());
-    assert_eq!(reply.v2, None);
-    assert_eq!(reply.function_block(), None);
-    let discovery = DiscoveryData::decode_body(&body).expect("v1 discovery decodes");
-    assert_eq!(discovery.body, sample_body());
-    assert_eq!(discovery.output_path_id, None);
-}
-
-// A Version 1 body is 16 bytes in either direction, and a Version 2 Reply holds
-// its path id and Function Block together: a Reply with a Function Block
-// round-trips, which a body with one and no path id could not.
-#[test]
-fn the_version_1_body_is_16_bytes_and_a_version_2_reply_round_trips_its_block() {
-    let mut body = Vec::new();
-    DiscoveryData {
-        output_path_id: None,
-        ..sample_discovery()
-    }
-    .encode_body(&mut body);
-    assert_eq!(body.len(), 16);
-    body.clear();
     ReplyData {
-        v2: None,
+        version_2: None,
         ..sample_reply()
     }
     .encode_body(&mut body);
     assert_eq!(body.len(), 16);
-    body.clear();
+    let reply = ReplyData::decode_body(&body).expect("v1 reply decodes");
+    assert_eq!(reply.body, sample_body());
+    assert_eq!(reply.version_2, None);
+    assert_eq!(reply.function_block(), None);
+    let discovery = DiscoveryData::decode_body(&body).expect("v1 discovery decodes");
+    assert_eq!(discovery.body, sample_body());
+    assert_eq!(discovery.output_path_id, None);
+    let mut again = Vec::new();
+    discovery.encode_body(&mut again);
+    assert_eq!(again, body);
+}
+
+// A Version 2 Reply holds its path id and Function Block together, so a Reply
+// with a Function Block round-trips.
+#[test]
+fn a_version_2_reply_round_trips_its_path_id_and_function_block() {
+    let mut body = Vec::new();
     sample_reply().encode_body(&mut body);
+    assert_eq!(body.len(), 18);
     assert_eq!(ReplyData::decode_body(&body), Some(sample_reply()));
 }
 
@@ -154,8 +147,8 @@ fn the_version_1_body_is_16_bytes_and_a_version_2_reply_round_trips_its_block() 
 fn a_reply_answering_a_discovery_echoes_its_path_id_and_a_version_1_one_is_path_0() {
     let reply = ReplyData::answering(&sample_discovery(), sample_body());
     assert_eq!(
-        reply.v2,
-        Some(ReplyV2 {
+        reply.version_2,
+        Some(ReplyVersion2 {
             output_path_id: U7::of(0x05),
             function_block: None
         })
@@ -166,7 +159,7 @@ fn a_reply_answering_a_discovery_echoes_its_path_id_and_a_version_1_one_is_path_
     };
     assert_eq!(
         ReplyData::answering(&version_1, sample_body())
-            .v2
+            .version_2
             .map(|v2| v2.output_path_id),
         Some(U7::of(0))
     );
@@ -191,7 +184,7 @@ fn a_version_1_discovery_reply_message_is_read() {
         CiMessage::DiscoveryReply { header, to, data } => {
             assert_eq!(header.ci_version, CiVersion::of(0x01));
             assert_eq!(to, Muid::of(DST));
-            assert_eq!(data.v2, None);
+            assert_eq!(data.version_2, None);
             assert_eq!(data.body, sample_body());
         }
         other => panic!("expected a Discovery Reply, got {other:?}"),
@@ -209,6 +202,9 @@ fn a_reply_shorter_than_version_1_is_malformed() {
         assert!(is_malformed(&body[..len], false), "{len} bytes");
     }
     assert!(!is_malformed(&body[..16], true));
+    // The Version 2 trailer of a Reply is its path id and Function Block, both.
+    assert!(is_malformed(&body[..17], true));
+    assert!(!is_malformed(&body[..17], false));
     let mut bytes = CiMessage::DiscoveryReply {
         header: header(),
         to: Muid::of(DST),

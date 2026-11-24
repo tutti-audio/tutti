@@ -8,7 +8,7 @@ use tutti_midi_ci::Initiator;
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
     CI_VERSION, CiCategories, CiDeviceId, CiHeader, CiMessage, Decoded, Destination, DeviceBody,
-    DiscoveryData, MaxSysexSize, ReplyData, ReplyV2,
+    DiscoveryData, MaxSysexSize, ReplyData, ReplyVersion2,
 };
 use tutti_midi_device::INQUIRY_TIMEOUT;
 use tutti_ump::{
@@ -328,8 +328,8 @@ fn a_discovery_a_peer_sends_is_answered_long_after_the_window_closed() {
     assert_eq!(*group, GROUP_0);
     assert_eq!((header.source, *to), (ours, peer()));
     assert_eq!(
-        data.v2,
-        Some(ReplyV2 {
+        data.version_2,
+        Some(ReplyVersion2 {
             output_path_id: U7::of(5),
             function_block: None
         })
@@ -900,7 +900,7 @@ fn a_ci_peers_product_instance_id_fills_what_the_device_left() {
     let (mut wire, ours) = midi1_running();
     let mut data = peer_data();
     data.body.identity = model_identity(9);
-    data.v2 = Some(ReplyV2 {
+    data.version_2 = Some(ReplyVersion2 {
         output_path_id: U7::of(0),
         function_block: Some(tutti_ump::FunctionBlockId::new(0).unwrap()),
     });

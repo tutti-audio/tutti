@@ -907,7 +907,7 @@ pub mod midi {
         ManufacturerProfile, MaxSysexSize, MessageText, Nak, NakStatus, NotADataControl,
         NotADeviceId, NotASysexSize, NotProfileChannels, NoteData, ProcessError, ProcessFeatures,
         ProfileChange, ProfileDataError, ProfileEntry, ProfileOutcome, ProfileRequest,
-        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyV2, ReportRequest,
+        ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
         ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
     #[cfg(feature = "midi-hardware")]

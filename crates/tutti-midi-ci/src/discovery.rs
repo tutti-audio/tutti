@@ -43,7 +43,7 @@ bitflags! {
 
 /// The wire value of no Function Block, `0x7F` (M2-101 §5.6.2: used when the
 /// device is not associated with a Function Block, for example on a MIDI 1.0
-/// byte stream). [`ReplyV2::function_block`] is `None` for it.
+/// byte stream). [`ReplyVersion2::function_block`] is `None` for it.
 const NO_FUNCTION_BLOCK_WIRE: u8 = 0x7F;
 
 tutti_units::ranged! {
@@ -83,8 +83,8 @@ impl MaxSysexSize {
 /// it supports and its receive buffer size.
 ///
 /// What follows them is Message Format Version 2's and differs by direction:
-/// [`DiscoveryData`] appends the Output Path ID, [`ReplyData`] the Output Path
-/// ID it echoes and the Function Block.
+/// [`DiscoveryData`] appends the Initiator's Output Path ID, [`ReplyData`] the
+/// Output Path Instance ID it echoes and the Function Block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeviceBody {
     /// The device's SysEx identity: the 3-byte manufacturer id, the family and
@@ -135,7 +135,7 @@ impl DeviceBody {
 pub struct DiscoveryData {
     /// The device's identity, categories and receive buffer size.
     pub body: DeviceBody,
-    /// **Output Path ID** (Message Version 2): §5.5.4 has an initiator with
+    /// **Initiator's Output Path ID** (Message Format Version 2): §5.5.4 has an initiator with
     /// several MIDI Out connections use a unique Output Path ID for each.
     ///
     /// `None` is a Message Format Version 1 body, which ends before the field:
@@ -175,20 +175,21 @@ impl DiscoveryData {
 }
 
 /// The body of a Reply to Discovery message (M2-101 Table 8): the
-/// [`DeviceBody`] and, in Message Format Version 2, [`ReplyV2`].
+/// [`DeviceBody`] and, in Message Format Version 2, [`ReplyVersion2`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReplyData {
     /// The device's identity, categories and receive buffer size.
     pub body: DeviceBody,
     /// The Version 2 fields, or `None` for a Message Format Version 1 body,
     /// which ends before them.
-    pub v2: Option<ReplyV2>,
+    pub version_2: Option<ReplyVersion2>,
 }
 
 /// The Message Format Version 2 fields of a Reply to Discovery (Table 8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReplyV2 {
-    /// The **Initiator's Output Path ID** of the Discovery being answered
+pub struct ReplyVersion2 {
+    /// The **Initiator's Output Path Instance ID** (from the Discovery message
+    /// received), the Output Path ID of the Discovery being answered
     /// (§5.6.1 makes echoing it mandatory).
     pub output_path_id: U7,
     /// The **Function Block** this responder represents, or `None` (wire `0x7F`)
@@ -204,7 +205,7 @@ impl ReplyData {
     pub fn new(body: DeviceBody) -> Self {
         Self {
             body,
-            v2: Some(ReplyV2 {
+            version_2: Some(ReplyVersion2 {
                 output_path_id: U7::default(),
                 function_block: None,
             }),
@@ -218,7 +219,7 @@ impl ReplyData {
     pub fn answering(heard: &DiscoveryData, body: DeviceBody) -> Self {
         Self {
             body,
-            v2: Some(ReplyV2 {
+            version_2: Some(ReplyVersion2 {
                 output_path_id: heard.output_path_id.unwrap_or_default(),
                 function_block: None,
             }),
@@ -229,12 +230,12 @@ impl ReplyData {
     /// from a Version 1 body.
     #[must_use]
     pub fn function_block(&self) -> Option<FunctionBlockId> {
-        self.v2.and_then(|v2| v2.function_block)
+        self.version_2.and_then(|v2| v2.function_block)
     }
 
     pub(crate) fn encode_body(&self, out: &mut impl Extend<u8>) {
         self.body.encode(out);
-        if let Some(v2) = self.v2 {
+        if let Some(v2) = self.version_2 {
             out.extend([
                 v2.output_path_id.get(),
                 v2.function_block
@@ -247,7 +248,8 @@ impl ReplyData {
     /// [`DiscoveryData::decode_body`], or a Function Block that is neither 0 to
     /// 31 nor `0x7F` (§5.6.2). A body that ends after the Receivable Maximum
     /// SysEx Message Size is Version 1: no Output Path ID and no Function Block
-    /// (not block 0, which would be a lie).
+    /// (not block 0, which would be a lie). The Version 2 trailer is both bytes or
+    /// neither: a body of 17 bytes is malformed.
     pub(crate) fn decode_body(b: &[u8]) -> Option<Self> {
         super::read::reply_body(b)
     }
