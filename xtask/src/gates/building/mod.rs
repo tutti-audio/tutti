@@ -113,7 +113,8 @@ pub(super) use baseline::pruned;
 use baseline::{Row, read};
 #[cfg(test)]
 use scan::scan;
-use scan::{Usual, parse_file, source_files};
+use scan::{Usual, parse_file};
+pub(super) use scan::{macro_bodies, source_files};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The baseline: today's violations, `<crate>  <rule>  <key>` per line.

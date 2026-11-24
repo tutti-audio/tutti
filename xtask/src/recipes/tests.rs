@@ -385,7 +385,7 @@ fn umbrella_api_runs_in_doc_and_ci_not_gates() {
         plan(recipe, &[], &ctx())
             .unwrap()
             .iter()
-            .any(|s| matches!(s, Step::UmbrellaApi(_)))
+            .any(|s| matches!(s, Step::UmbrellaApi(..)))
     };
     for recipe in ["umbrella-api", "doc", "ci"] {
         assert!(umbrella(recipe), "{recipe}");
@@ -399,8 +399,13 @@ fn umbrella_api_takes_one_optional_directory() {
         let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
         plan("umbrella-api", &args, &ctx())
     };
-    assert!(matches!(&step(&[]).unwrap()[..], [Step::UmbrellaApi(None)]));
-    assert!(matches!(&step(&["texts"]).unwrap()[..], [Step::UmbrellaApi(Some(d))] if d == "texts"));
+    assert!(matches!(
+        &step(&[]).unwrap()[..],
+        [Step::UmbrellaApi(None, false)]
+    ));
+    assert!(
+        matches!(&step(&["texts"]).unwrap()[..], [Step::UmbrellaApi(Some(d), false)] if d == "texts")
+    );
     assert_eq!(
         step(&["a", "b"]).unwrap_err(),
         "`umbrella-api` takes at most 1 argument(s), got 2"

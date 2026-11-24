@@ -33,6 +33,8 @@ pub(crate) enum Step {
     ConformanceInventory(String),
     /// `prune-building`: delete the building baseline's stale rows.
     PruneBuilding,
+    /// `write-public-items`: rewrite `xtask/public-items/` from the tree.
+    WritePublicItems,
     /// `conformance`: the dashboard and badges from per-OS JUnit files
     /// (`gates/conformance_site.rs`).
     Conformance {
@@ -54,7 +56,9 @@ pub(crate) enum Step {
     Release(Version),
     /// `umbrella-api`: `public-api` text of each crate the umbrella exports from,
     /// read for a signature type the umbrella does not name (`gates/umbrella_api.rs`).
-    UmbrellaApi(Option<String>),
+    /// With the flag, the lines of each crate's text are also held to its row of
+    /// `xtask/public-api-counts.txt` (`gates/public_api_counts.rs`), reusing the texts.
+    UmbrellaApi(Option<String>, bool),
     /// `affected <base>`: print the packages the diff from `<base>` can reach as
     /// `-p` flags, or `all` (`gates/affected.rs`).
     Affected(String),
@@ -81,6 +85,7 @@ impl Step {
             Step::Gate(g) => g.display(),
             Step::ConformanceInventory(f) => format!("conformance-inventory {f}"),
             Step::PruneBuilding => "prune-building".to_owned(),
+            Step::WritePublicItems => "write-public-items".to_owned(),
             Step::Conformance { results, out } => format!(
                 "conformance: join {}/<os>.xml to the inventories, write {}/index.html, ../index.html and ../badges/*.json",
                 results.display(),
@@ -99,11 +104,16 @@ impl Step {
                 "wasm-bindgen-test-runner --version == Cargo.lock's wasm-bindgen, or fail"
                     .to_owned()
             }
-            Step::UmbrellaApi(dir) => format!(
-                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in",
+            Step::UmbrellaApi(dir, counts) => format!(
+                "umbrella-api: cargo public-api --package <crate> --all-features -s for each crate crates/tutti/src/lib.rs exports from and each crate their signatures name{}, then the types those signatures name that the umbrella does not, and the seeds ranked by how many each pulls in{}",
                 dir.as_ref().map_or(String::new(), |d| format!(
                     " (the texts of {d}/<package>.txt instead)"
-                ))
+                )),
+                if *counts {
+                    "; then the lines of each crate under crates/ against xtask/public-api-counts.txt"
+                } else {
+                    ""
+                }
             ),
             Step::Affected(base) => format!(
                 "affected: git diff --name-only {base}...HEAD, then the packages it reaches as -p flags (or all)"
@@ -354,6 +364,16 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
         "delete the rows of xtask/building-baseline.txt that name no violation; never adds one",
     ),
     (
+        "check-public-items",
+        "",
+        "a crate's public items are the rows of xtask/public-items/<crate>.txt: a new one needs its row, a row with no item is deleted",
+    ),
+    (
+        "write-public-items",
+        "",
+        "rewrite xtask/public-items/<crate>.txt for every crate from the tree",
+    ),
+    (
         "check-range-types",
         "",
         "no plain derived Deserialize on a private tuple field",
@@ -388,7 +408,7 @@ pub(crate) const RECIPES: &[(&str, &str, &str)] = &[
     (
         "doc",
         "",
-        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, and umbrella-api (needs cargo-public-api)",
+        "rustdoc as CI does, per feature, the docs.rs build on a dated nightly, umbrella-api and each crate's public-api count against xtask/public-api-counts.txt (needs cargo-public-api)",
     ),
     ("check-loom", "", "clippy under --cfg loom"),
     (
@@ -756,6 +776,7 @@ impl Planner<'_> {
                 self.out.push(Step::ConformanceInventory(f));
             }
             "prune-building" => self.out.push(Step::PruneBuilding),
+            "write-public-items" => self.out.push(Step::WritePublicItems),
             "fmt" => self.lines(&["cargo fmt --all --check"]),
             "lint" => {
                 self.dep("fmt")?;
@@ -766,7 +787,7 @@ impl Planner<'_> {
                 self.lines(&[
                     r#"RUSTDOCFLAGS="-D warnings --document-private-items" cargo doc --locked --workspace --no-deps --all-features"#,
                 ]);
-                self.out.push(Step::UmbrellaApi(None));
+                self.out.push(Step::UmbrellaApi(None, true));
             }
             "check-no-std" => self.check_no_std(),
             "check-loom" => self.lines(CHECK_LOOM),
@@ -817,7 +838,7 @@ impl Planner<'_> {
             }
             "umbrella-api" => {
                 let [dir] = Self::params(name, args, [""])?;
-                self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir)));
+                self.out.push(Step::UmbrellaApi((!dir.is_empty()).then_some(dir), false));
             }
             "public-api" => {
                 let [krate, base] = Self::params(name, args, ["", ""])?;

@@ -171,7 +171,7 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
             Ok(())
         }
         Step::Fuzz { target, secs } => fuzz(target.as_deref(), *secs, ctx),
-        Step::UmbrellaApi(dir) => umbrella_api(ctx, dir.as_deref()),
+        Step::UmbrellaApi(dir, counts) => umbrella_api(ctx, dir.as_deref(), *counts),
         Step::Release(v) => release::run(&ctx.root, v).map_err(|e| {
             eprintln!("xtask: release: {e}");
             1
@@ -182,6 +182,10 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
                 1
             }),
         Step::PruneBuilding => gates::prune_building(&ctx.root).map_err(|e| {
+            eprintln!("xtask: {e}");
+            1
+        }),
+        Step::WritePublicItems => gates::write_public_items(&ctx.root).map_err(|e| {
             eprintln!("xtask: {e}");
             1
         }),
@@ -268,16 +272,17 @@ fn execute(step: &Step, ctx: &Ctx) -> Result<(), u8> {
 /// `umbrella-api [<dir>]`: the unnameable types of what the umbrella exports and
 /// the seeds ranked by how many each pulls in. The texts come from `public-api`
 /// for each crate the umbrella exports from and each crate their signatures name,
-/// or from `<dir>/<package>.txt` when a directory is given.
-fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
+/// or from `<dir>/<package>.txt` when a directory is given. With `counts`, every crate
+/// under `crates/` also has its text's lines held to its row of the counts file, the
+/// texts already read reused.
+fn umbrella_api(ctx: &Ctx, dir: Option<&str>, counts: bool) -> Result<(), u8> {
     let lib_path = ctx.root.join("crates/tutti/src/lib.rs");
     let lib = std::fs::read_to_string(&lib_path).map_err(|e| {
         eprintln!("xtask: cannot read {}: {e}", lib_path.display());
         1
     })?;
-    // `None` is a crate with no text: not a package, or no file in `dir`.
-    let fetch = |krate: &str| -> Result<Option<String>, String> {
-        let package = krate.replace('_', "-");
+    let texts: std::cell::RefCell<std::collections::BTreeMap<String, String>> = Default::default();
+    let fetch_text = |package: &str| -> Result<Option<String>, String> {
         if let Some(dir) = dir {
             return match std::fs::read_to_string(Path::new(dir).join(format!("{package}.txt"))) {
                 Ok(t) => Ok(Some(t)),
@@ -287,11 +292,11 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
         }
         let is_package = ["crates", "testing"]
             .iter()
-            .any(|d| ctx.root.join(d).join(&package).join("Cargo.toml").is_file());
+            .any(|d| ctx.root.join(d).join(package).join("Cargo.toml").is_file());
         if !is_package {
             return Ok(None);
         }
-        let c = Cmd::sh(&recipes::public_api_cmd(&package));
+        let c = Cmd::sh(&recipes::public_api_cmd(package));
         println!("+ {}", c.display());
         let out = command(&c, ctx)
             .output()
@@ -305,6 +310,18 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
             ));
         }
         Ok(Some(String::from_utf8_lossy(&out.stdout).into_owned()))
+    };
+    // `None` is a crate with no text: not a package, or no file in `dir`.
+    let fetch = |krate: &str| -> Result<Option<String>, String> {
+        let package = krate.replace('_', "-");
+        if let Some(t) = texts.borrow().get(&package) {
+            return Ok(Some(t.clone()));
+        }
+        let text = fetch_text(&package)?;
+        if let Some(t) = &text {
+            texts.borrow_mut().insert(package, t.clone());
+        }
+        Ok(text)
     };
     let (_, analysis) = gates::collect(&lib, &fetch).map_err(|e| {
         eprintln!("xtask: umbrella-api: {e}");
@@ -355,11 +372,48 @@ fn umbrella_api(ctx: &Ctx, dir: Option<&str>) -> Result<(), u8> {
         "umbrella-api: {} unnameable type(s)",
         analysis.missing.len()
     );
-    if analysis.missing.is_empty() {
+    let counted = !counts || public_api_counts(ctx, &fetch)?;
+    if analysis.missing.is_empty() && counted {
         Ok(())
     } else {
         Err(1)
     }
+}
+
+/// Every crate under `crates/` against its row of the counts file: whether all hold.
+fn public_api_counts(
+    ctx: &Ctx,
+    fetch: &dyn Fn(&str) -> Result<Option<String>, String>,
+) -> Result<bool, u8> {
+    let fail = |e: String| {
+        eprintln!("xtask: public-api-counts: {e}");
+        1
+    };
+    let mut actual = std::collections::BTreeMap::new();
+    let dirs = std::fs::read_dir(ctx.root.join("crates")).map_err(|e| fail(e.to_string()))?;
+    for entry in dirs.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !entry.path().join("Cargo.toml").is_file() || gates::skipped_in_counts(&name) {
+            continue;
+        }
+        let text = fetch(&name)
+            .map_err(fail)?
+            .ok_or_else(|| fail(format!("{name}: no public-api text")))?;
+        actual.insert(name, gates::count_api(&text));
+    }
+    let rows = std::fs::read_to_string(ctx.root.join(gates::COUNTS_LIST)).ok();
+    let findings = gates::check_counts(rows.as_deref(), &actual);
+    findings.iter().for_each(|f| println!("{f}"));
+    if findings.is_empty() {
+        println!("public-api-counts: OK ({} crates)", actual.len());
+    } else {
+        println!(
+            "public-api-counts: the counts of the tree, as {} reads them:",
+            gates::COUNTS_LIST
+        );
+        print!("{}", gates::render_counts(&actual));
+    }
+    Ok(findings.is_empty())
 }
 
 /// `cargo package` over every crate under `crates/`: a directory there holding
