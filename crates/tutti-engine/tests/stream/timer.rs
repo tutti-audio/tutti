@@ -72,9 +72,11 @@ fn the_timer_renders_whole_quantum_blocks_and_reports_zero_latency() {
     stream.stop();
 }
 
-/// Without a quantum the block is the driver's default.
+/// Without a quantum the block is the driver's default, and the open stream's
+/// spec says so: the timer reports the size it runs at, and a stop returns the
+/// request.
 #[test]
-fn a_spec_with_no_quantum_renders_the_default_block() {
+fn a_spec_with_no_quantum_renders_and_reports_the_default_block() {
     let block = tutti_engine::DEFAULT_BLOCK.get() as u64;
     let (state, clock) = timer_state();
     let executor = Executor::new();
@@ -82,9 +84,11 @@ fn a_spec_with_no_quantum_renders_the_default_block() {
     stream
         .start_with(state, TimerDriver::new(&executor))
         .expect("a thread starts");
+    assert_eq!(stream.spec().quantum, Some(tutti_engine::DEFAULT_BLOCK));
     let reading = wait_for(&clock, |r| r.frame.get() >= 3 * block);
     assert_eq!(reading.frame.get() % block, 0);
     stream.stop();
+    assert_eq!(stream.spec().quantum, None, "the request after a stop");
 }
 
 /// **The block clock reads deadlines.** Between two readings taken with no

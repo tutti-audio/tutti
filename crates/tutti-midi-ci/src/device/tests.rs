@@ -51,7 +51,8 @@ fn body() -> DeviceBody {
 
 fn reply(from: u32, to: u32, block: Option<u8>) -> Decoded {
     Decoded::Message(CiMessage::DiscoveryReply {
-        header: CiHeader::new(Muid::of(from)),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(from),
         to: Muid::of(to),
         data: ReplyData {
             body: body(),
@@ -65,7 +66,8 @@ fn reply(from: u32, to: u32, block: Option<u8>) -> Decoded {
 
 fn discovery(from: u32, path: u8) -> Decoded {
     Decoded::Message(CiMessage::Discovery {
-        header: CiHeader::new(Muid::of(from)),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(from),
         data: DiscoveryData {
             body: body(),
             output_path_id: Some(U7::of(path)),
@@ -86,11 +88,18 @@ fn a_new_device_sends_a_discovery_from_its_muid_to_everyone_on_output_path_0() {
     // §4.1, §5.5, §5.5.4.
     let (device, actions, now) = device([OURS]);
     assert_eq!(device.muid(), Muid::of(OURS));
-    let [CiMessage::Discovery { header, data }] = sent(&actions)[..] else {
+    let [
+        CiMessage::Discovery {
+            device_id,
+            source,
+            data,
+        },
+    ] = sent(&actions)[..]
+    else {
         panic!("one Discovery, got {actions:?}");
     };
-    assert_eq!(header.source, Muid::of(OURS));
-    assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
+    assert_eq!(*source, Muid::of(OURS));
+    assert_eq!(*device_id, CiDeviceId::FunctionBlock);
     assert_eq!(data.output_path_id, Some(U7::of(0)));
     assert_eq!(data.body.max_sysex_size, MaxSysexSize::of(512));
     assert_eq!(
@@ -163,10 +172,15 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
     // §4.1, §5.6, §5.6.1, §5.6.2.
     let (mut device, _, now) = device([OURS]);
     let actions = device.on_message(&discovery(PEER, 9), now);
-    let [CiMessage::DiscoveryReply { header, to, data }] = sent(&actions)[..] else {
+    let [
+        CiMessage::DiscoveryReply {
+            source, to, data, ..
+        },
+    ] = sent(&actions)[..]
+    else {
         panic!("a reply, got {actions:?}");
     };
-    assert_eq!(header.source, Muid::of(OURS));
+    assert_eq!(*source, Muid::of(OURS));
     assert_eq!(*to, Muid::of(PEER));
     assert_eq!(
         data.version_2,
@@ -175,7 +189,6 @@ fn a_discovery_is_answered_to_its_sender_echoing_the_output_path_with_no_functio
             function_block: None
         })
     );
-    assert_eq!(header.device_id, CiDeviceId::FunctionBlock);
     assert_eq!(device.muid(), Muid::of(OURS));
 }
 
@@ -197,14 +210,14 @@ fn a_discovery_with_our_muid_is_answered_by_option_b() {
     let sent = sent(&actions);
     let [
         CiMessage::InvalidateMuid { header, target },
-        CiMessage::Discovery { header: dh, .. },
+        CiMessage::Discovery { source, .. },
     ] = sent[..]
     else {
         panic!("an Invalidate then a Discovery, got {actions:?}");
     };
     assert_eq!(*target, Muid::of(OURS));
     assert_eq!(header.source, Muid::of(0x0500_0005));
-    assert_eq!(dh.source, Muid::of(0x0500_0005));
+    assert_eq!(*source, Muid::of(0x0500_0005));
     assert!(
         !sent
             .iter()
@@ -239,9 +252,7 @@ fn an_invalidate_of_our_muid_ends_everything_changes_it_and_discovers_again_with
     assert!(actions.contains(&CiAction::Lost(Muid::of(PEER))));
     let sent = sent(&actions);
     assert_eq!(sent.len(), 1, "only the new Discovery: {actions:?}");
-    assert!(
-        matches!(sent[0], CiMessage::Discovery { header, .. } if header.source == device.muid())
-    );
+    assert!(matches!(sent[0], CiMessage::Discovery { source, .. } if *source == device.muid()));
     assert_eq!(device.peers().count(), 0);
 }
 

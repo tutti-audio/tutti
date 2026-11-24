@@ -15,7 +15,7 @@ use tutti_graph::contract::assert_param_fork;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, Executor, ForkTarget, Io, Node, NodeKey, OutputPort, ParamEvent,
     ParamIn, ParamInput, ParamNode, ParamSegment, ParamSet, Params, PortSource, Prepare, Shape,
-    Status, TransportPosition, declare_params,
+    Status, declare_params,
 };
 use tutti_rt::Param;
 use tutti_units::{Db, Hz, Q, Samples, UnitAddr, UnitParam};
@@ -155,12 +155,7 @@ const SRC: NodeKey = NodeKey(2);
 const OLD: NodeKey = NodeKey(3);
 
 fn render_block(exec: &mut Executor, outputs: usize) -> Vec<Vec<f32>> {
-    let mut outs = vec![vec![0.0; 64]; outputs];
-    {
-        let mut refs: Vec<&mut [f32]> = outs.iter_mut().map(|o| &mut o[..]).collect();
-        exec.process(64, &TransportPosition::default(), &[], &mut refs);
-    }
-    outs
+    common::block(exec, 64, outputs)
 }
 
 /// `Bank` bare, a source stepping `to` at it, and its four outputs.

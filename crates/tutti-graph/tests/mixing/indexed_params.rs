@@ -24,7 +24,7 @@ use tutti_graph::NodeKey;
 use tutti_graph::{
     Cx, Editor, EventOutputPort, ForkTarget, IntoNode, Io, MAX_PARAM_PORTS, Node, NodeParts,
     ParamEvent, ParamIn, ParamInput, ParamNode, ParamPorts, ParamPortsError, ParamSegment,
-    ParamSet, Prepare, Shape, Status, TransportPosition, param_parts,
+    ParamSet, Prepare, Shape, Status, param_parts,
 };
 use tutti_graph::{OutputPort, PortSource};
 use tutti_rt::Param;
@@ -157,16 +157,9 @@ fn src_out() -> EventOutputPort {
 
 /// Renders `frames` of the graph's two outputs in one block.
 fn render(ed: &mut Editor, exec: &mut tutti_graph::Executor, frames: usize) -> [Vec<f32>; 2] {
-    let mut a = vec![0.0; frames];
-    let mut b = vec![0.0; frames];
-    exec.process(
-        frames,
-        &TransportPosition::default(),
-        &[],
-        &mut [&mut a[..], &mut b[..]],
-    );
+    let out = common::block(exec, frames, 2);
     ed.collect();
-    [a, b]
+    out.try_into().expect("two outputs")
 }
 
 /// A graph of [`Bands`] (thresholds -10 and -20) and a [`Steps`] source

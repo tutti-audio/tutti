@@ -40,7 +40,7 @@ use tutti_nodes::{
     ModDelayConfig, ModDelayNode, PhaserConfig, PhaserControls, PhaserNode, PitchShifterConfig,
     PitchShifterNode, RingModConfig, RingModNode, ShapeKind, ShimmerConfig, ShimmerNode, Stages,
     SvfFilterConfig, SvfFilterNode, SvfType, TremoloConfig, TremoloNode, TubeStageConfig,
-    TubeStageNode, WavetableConfig, WavetableNode,
+    TubeStageNode, Waveshape, WavetableConfig, WavetableNode,
 };
 use tutti_nodes::{
     BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, ButterworthOrder,
@@ -220,7 +220,8 @@ fn hysteresis() {
 fn distortion() {
     IsolateRow::new("DistortionNode (stereo)", || {
         DistortionNode::<f32>::from(
-            DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh).drive(Drive::new(2.0)),
+            DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
+                .drive(Drive::new(2.0)),
         )
     })
     .control("drive", |d| {
@@ -705,7 +706,7 @@ fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .rate(Some(Hz::new(3.0)))
+                .rate(Hz::new(3.0))
                 .depth(Bipolar::clamped(0.8)),
         )
     })

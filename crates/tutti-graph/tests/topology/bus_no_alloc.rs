@@ -74,9 +74,7 @@ impl Node for Downmixer {
 /// main-input ones; the outputs are the two channels of nodes 2, 3 and 4.
 fn rig(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(common::TestPool::new(workers)));
-    }
+    common::pooled_fresh(&mut exec, workers);
     ed.spec_mut().topology.inputs = ChannelLayout::from_count(6);
     let kinds = [
         (

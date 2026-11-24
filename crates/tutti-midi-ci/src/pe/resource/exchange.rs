@@ -12,7 +12,8 @@ use super::super::capabilities::{PeCapabilities, PeCiMessage, SimultaneousReques
 use super::super::chunk::{PeRequestId, split_message};
 use super::super::flow::PeMessageKind;
 use super::super::header::{
-    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeStatus, PeSubscription, PeUpdateCommand,
+    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeSetScope, PeStatus, PeSubscription,
+    PeUpdateCommand,
 };
 use super::super::initiator::{PeAction, PeCall, PeGet, PeInitiator, PeOutcome, PeSet, PeSettings};
 use super::super::limits::{MediaType, ResourceId, ResourceName, SubscribeId};
@@ -1098,7 +1099,7 @@ fn set_replaces_the_data_and_get_reads_it_back() {
     assert!(matches!(
         link.served.last(),
         Some(ResponderEvent::Changed {
-            how: ChangeKind::Full,
+            how: PeSetScope::Whole,
             ..
         })
     ));
@@ -1147,7 +1148,7 @@ fn a_partial_set_changes_what_a_later_get_returns() {
     assert!(matches!(
         link.served.last(),
         Some(ResponderEvent::Changed {
-            how: ChangeKind::Partial,
+            how: PeSetScope::Partial,
             ..
         })
     ));
@@ -1414,6 +1415,63 @@ fn the_initiator_ends_a_subscription() {
         link.init.unsubscribe(&subscribe_id, link.now),
         Err(CallError::NoSubscription(_))
     ));
+}
+
+/// The Subscription Ids the transaction layer answers for are the ones the
+/// Resource client holds data for, in the same order. Ids only: the Resource of
+/// each is the per-table tests'.
+fn assert_one_table(link: &Link) {
+    let answered: Vec<_> = link
+        .init
+        .transactions()
+        .subscriptions()
+        .map(|(i, _)| i)
+        .collect();
+    let held: Vec<_> = link.init.subscriptions().map(|(i, ..)| i).collect();
+    assert_eq!(answered, held);
+}
+
+// M2-103 §11.2, §11.5: a Subscription the Responder ends during a request, one
+// the Initiator ends and a new Capabilities exchange leave the transaction layer
+// and the Resource client with the same Subscription Ids.
+#[test]
+fn the_transaction_layer_and_the_client_hold_the_same_subscriptions() {
+    let mut link = Link::new(store(), 256);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
+    link.call(made);
+    assert_eq!(link.init.subscriptions().count(), 1);
+    assert_one_table(&link);
+    // The peer ends it while a Get is in flight.
+    let (_, pending) = link
+        .init
+        .get(&get(StandardResource::ChannelList), link.now)
+        .unwrap();
+    let id = link.init.subscriptions().next().unwrap().0.clone();
+    let ended = link.resp.end_subscription(&mut link.store, &id, link.now);
+    link.publish(ended);
+    assert_one_table(&link);
+    link.run(pending, Vec::new());
+    assert_eq!(link.init.subscriptions().count(), 0);
+    assert_one_table(&link);
+    // The Initiator ends one, and asks for the Capabilities again with another held.
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
+    link.call(made);
+    let id = link.init.subscriptions().next().unwrap().0.clone();
+    let made = link.init.unsubscribe(&id, link.now);
+    link.call(made);
+    assert_one_table(&link);
+    let made = link
+        .init
+        .subscribe(&get(StandardResource::ChannelList), link.now);
+    link.call(made);
+    let actions = link.init.ask_capabilities(link.now);
+    link.run(actions, Vec::new());
+    assert_eq!(link.init.subscriptions().count(), 1);
+    assert_one_table(&link);
 }
 
 // M2-103 §11.1, §11.5: the Responder ends a Subscription with `end` and

@@ -6,7 +6,9 @@ use tutti_units::{
 };
 
 use super::*;
+use crate::reverb::fdn::design::MAX_PRE_DELAY;
 use crate::reverb::network::{Fdn, Network, NetworkStage};
+use crate::reverb::tail_probe;
 use crate::{FreezeMode, MaxDecay};
 use tutti_buffers::InputOutput;
 
@@ -526,6 +528,274 @@ fn the_tail_is_the_networks_under_the_ceiling() {
     ));
 }
 
+/// The frames of the longest line of `layout` at `rate` (size 1, the table's longest entry
+/// times one and a half), the period a burst has to outlast to fill every line.
+fn longest_line(rate: SampleRate) -> usize {
+    (5393.0 * 1.5 * rate.get() / 44_100.0).ceil() as usize
+}
+
+/// `x` (the input, then silence to `frames`) through `bank` at rest on `c`: the two channels.
+fn rendered_tail(
+    bank: &mut FdnBank<f32>,
+    ramps: &mut FdnRamps<f32>,
+    input: &[f32],
+    frames: usize,
+) -> [Vec<f32>; 2] {
+    bank.reset();
+    run(bank, ramps, &tail_probe::padded(input, frames), 512)
+}
+
+/// The reported tail covers the ring-out of the worst finite inputs: for the shortest, the
+/// default and the longest decay, each band alone the longest, both ends of size, diffusion and
+/// modulation, the longest pre-delay, and 8 and 16 lines, at 11.025 kHz (the default also at 48
+/// kHz and 44.1 kHz), an impulse, a full-scale noise burst and a full-scale step (four times the
+/// longest line, so every line is full) stop, and from the reported tail past the last input
+/// frame no frame of either channel is above `TAIL_FLOOR` of the render's own peak (see
+/// [`tail_probe`]). The floor is relative to the response's peak: the wet signal is the lines'
+/// own output, scaled by the design, and the step is built up by the loop far past the input.
+#[test]
+fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
+    let two = Seconds::new(2.0);
+    // (name, lines, the layout's longest decay, controls, rates): the longest decay of a
+    // layout is the one its controls reach, so most run at 2 s and one at the default layout's 8 s.
+    // The whole grid runs at 11.025 kHz (the tail in frames scales with the rate; the
+    // crossovers at 4 kHz stay under Nyquist); the default also runs at 48 kHz and 44.1 kHz.
+    let rates = [SampleRate::of(11_025.0)];
+    let one = rates;
+    let slow = rates;
+    let cases: Vec<(&str, usize, Seconds, FdnControls, &[SampleRate])> = vec![
+        (
+            "default",
+            8,
+            Seconds::new(8.0),
+            FdnControls::DEFAULT,
+            &rates,
+        ),
+        (
+            "shortest",
+            8,
+            two,
+            controls(|c| {
+                c.decay = [Seconds::new(0.05); 3];
+                c.size = Mix::new(0.0);
+            }),
+            &rates,
+        ),
+        (
+            "longest",
+            8,
+            two,
+            controls(|c| {
+                c.decay = [Seconds::new(2.0); 3];
+                c.size = Mix::new(1.0);
+                c.pre_delay = MAX_PRE_DELAY;
+            }),
+            &rates,
+        ),
+        (
+            "longest, smallest, no modulation",
+            8,
+            two,
+            still(|c| {
+                c.decay = [Seconds::new(2.0); 3];
+                c.size = Mix::new(0.0);
+            }),
+            &one,
+        ),
+        (
+            "longest, deepest fastest modulation",
+            8,
+            two,
+            controls(|c| {
+                c.decay = [Seconds::new(2.0); 3];
+                c.modulation = Bipolar::of(1.0);
+                c.rate = Hz::new(5.0);
+            }),
+            &one,
+        ),
+        (
+            "mid and low bands long",
+            8,
+            two,
+            controls(|c| c.decay = [Seconds::new(2.0), Seconds::new(2.0), Seconds::new(0.05)]),
+            &one,
+        ),
+        (
+            "only the low band long",
+            8,
+            two,
+            controls(|c| c.decay = [Seconds::new(0.05), Seconds::new(2.0), Seconds::new(0.05)]),
+            &one,
+        ),
+        (
+            "only the high band long",
+            8,
+            two,
+            controls(|c| c.decay = [Seconds::new(0.05), Seconds::new(0.05), Seconds::new(2.0)]),
+            &one,
+        ),
+        (
+            "shortest, longest pre-delay",
+            8,
+            two,
+            controls(|c| {
+                c.decay = [Seconds::new(0.05); 3];
+                c.pre_delay = MAX_PRE_DELAY;
+            }),
+            &one,
+        ),
+        (
+            "16 lines, longest, parallel combs",
+            16,
+            two,
+            controls(|c| {
+                c.decay = [Seconds::new(2.0); 3];
+                c.size = Mix::new(1.0);
+                c.diffusion = Mix::new(0.0);
+            }),
+            &rates,
+        ),
+        (
+            "8 s",
+            8,
+            Seconds::new(8.0),
+            controls(|c| {
+                c.decay = [Seconds::new(8.0); 3];
+                c.size = Mix::new(1.0);
+            }),
+            &slow,
+        ),
+    ];
+    let wide = [SampleRate::SR_48K, SampleRate::SR_44K1];
+    let cases = cases.into_iter().chain([(
+        "default",
+        8,
+        Seconds::new(8.0),
+        FdnControls::DEFAULT,
+        &wide[..],
+    )]);
+    for (name, lines, max, c, rates) in cases {
+        let layout =
+            FdnLayout::new(lines, MaxDecay::new(max).unwrap(), FreezeMode::Decaying).unwrap();
+        for &rate in rates {
+            let period = longest_line(rate);
+            let (mut bank, mut ramps) = at_rest(&layout, rate, &c);
+            let Tail::Finite(tail) = bank.tail_of(&ramps, &c) else {
+                panic!("{name}: a finite tail")
+            };
+            for (input_name, input) in tail_probe::stimuli::<f32>(4 * period) {
+                let frames = tail_probe::run_length(input.len(), tail.get(), period);
+                let y = rendered_tail(&mut bank, &mut ramps, &input, frames);
+                let what = format!("{rate:?} {name}, {input_name}");
+                tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&y[0], &y[1]]);
+            }
+        }
+    }
+}
+
+/// `layout` at `short`, rung by each stimulus and then moved to `long` a third of the way into
+/// the short tail: the channels the bank wrote, the frames of input and the tail a node reports
+/// after the move (what is owed and the long tail, from the last input frame, under the ceiling).
+fn raised<'a>(
+    layout: &'a FdnLayout,
+    rate: SampleRate,
+    short: &'a FdnControls,
+    long: &'a FdnControls,
+    period: usize,
+) -> impl Iterator<Item = (String, usize, usize, [Vec<f32>; 2], [Vec<f32>; 2])> + 'a {
+    let (mut bank, mut ramps) = at_rest(layout, rate, short);
+    let (Tail::Finite(was), Tail::Finite(now), Tail::Finite(ceiling)) = (
+        bank.tail_of(&ramps, short),
+        bank.tail_of(&ramps, long),
+        bank.tail(),
+    ) else {
+        panic!("finite tails")
+    };
+    [0, was.get() / 3]
+        .into_iter()
+        .flat_map(move |at| {
+            tail_probe::stimuli::<f32>(4 * period)
+                .into_iter()
+                .map(move |s| (at, s))
+        })
+        .map(move |(moved_at, (name, input))| {
+            bank.reset();
+            bank.retarget(&mut ramps, short);
+            ramps.jump_to_target();
+            let head = input.len() + moved_at;
+            let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling.get());
+            let first = run(
+                &mut bank,
+                &mut ramps,
+                &tail_probe::padded(&input, head),
+                512,
+            );
+            bank.retarget(&mut ramps, long);
+            let rest = tail_probe::run_length(input.len(), reported, period) - head;
+            let second = run(&mut bank, &mut ramps, &vec![0.0; rest], 512);
+            (
+                format!("{name}, {moved_at} frames after the input"),
+                input.len(),
+                reported,
+                first,
+                second,
+            )
+        })
+}
+
+/// A decay raised to the layout's longest while the short one rings out is covered by the tail a
+/// node reports after the move (the larger of what is owed and the long tail, from the last input
+/// frame, under the ceiling): from it past the last input frame no frame of either channel is
+/// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the lines at the move decays at the new, slower rate from the move on.
+#[test]
+fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
+    let l = FdnLayout::new(
+        8,
+        MaxDecay::new(Seconds::new(2.0)).unwrap(),
+        FreezeMode::Decaying,
+    )
+    .unwrap();
+    let short = controls(|c| c.decay = [Seconds::new(0.3); 3]);
+    let long = controls(|c| c.decay = [Seconds::new(2.0); 3]);
+    for (name, input, reported, first, second) in
+        raised(&l, RATE, &short, &long, longest_line(RATE))
+    {
+        tail_probe::assert_raised_tail_covers(
+            &format!("{name}, decay 0.3 s to 2 s"),
+            input,
+            reported,
+            &[&first[0], &first[1]],
+            &[&second[0], &second[1]],
+        );
+    }
+}
+
+/// A freezable layout with `freeze` on reports `Tail::Unbounded` (its loop is lossless and its
+/// input shut: nothing ever falls to the floor), both for the setting and as the ceiling it
+/// declares; the same layout with `freeze` off, and a layout that is not freezable with it on,
+/// report a finite tail.
+#[test]
+fn a_frozen_network_reports_an_unbounded_tail() {
+    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
+        let mut freezable = FdnBank::<f32>::new(&layout(8, FreezeMode::Freezable), rate);
+        let mut decaying = FdnBank::<f32>::new(&layout(8, FreezeMode::Decaying), rate);
+        let (ramps_f, ramps_d) = (freezable.ramps(), decaying.ramps());
+        let frozen = controls(|c| c.freeze = true);
+        assert_eq!(freezable.tail_of(&ramps_f, &frozen), Tail::Unbounded);
+        assert_eq!(freezable.tail(), Tail::Unbounded, "the ceiling");
+        assert!(matches!(
+            freezable.tail_of(&ramps_f, &FdnControls::DEFAULT),
+            Tail::Finite(_)
+        ));
+        assert!(matches!(
+            decaying.tail_of(&ramps_d, &frozen),
+            Tail::Finite(_)
+        ));
+    }
+}
+
 /// A size that is still moving keeps the decay it was designed with. The gains are designed
 /// for the length a line is moving to, `g = 10^(-3 L / (fs T))` a trip of `L` frames; while the
 /// line is `L'` frames long each band's gain runs raised to `L' / L`, which is the gain that
@@ -1022,6 +1292,53 @@ fn the_tail_of_a_shimmer_holds_the_shifters_delay_and_covers_the_ring_out() {
             .iter()
             .all(|v| v.is_finite() && v.abs() <= floor)
     );
+}
+
+/// The reported tail of a shimmering network covers the ring-out of the worst finite inputs: for
+/// no send, half and the largest send, a shift of an octave down, none, a fifth and an octave up,
+/// and decays of 0.3 s and 1 s, at 11.025 kHz (the send-0.99 octave also at 48 kHz and 44.1 kHz),
+/// an impulse, a full-scale noise burst and a full-scale step (four times the longest line and
+/// the shifter's delay, so every line and the shifter are full) stop, and from the reported tail
+/// past the last input frame no frame of either channel is above `TAIL_FLOOR` of the render's own
+/// peak (see [`tail_probe`]). The floor is relative to the response's peak: the shifted copies
+/// add to the lines' own echoes, and a step is built up far past the input.
+#[test]
+fn the_shimmer_tail_covers_the_ring_out_of_the_worst_inputs() {
+    let l = FdnLayout::shimmering(8, MaxDecay::new(Seconds::new(1.0)).unwrap()).unwrap();
+    let cases = [
+        // (send, pitch in cents, decay in seconds, also at 44.1 kHz)
+        (0.0, 1200.0, 0.3, false),
+        (0.5, 1200.0, 0.3, false),
+        (0.99, 1200.0, 0.3, true),
+        (0.99, -1200.0, 0.3, false),
+        (0.99, 0.0, 0.3, false),
+        (0.99, 700.0, 1.0, false),
+    ];
+    for (send, pitch, decay, both) in cases {
+        // The whole grid runs at 11.025 kHz; the send-0.99 octave also runs at 48 kHz and 44.1 kHz.
+        let mut rates = vec![SampleRate::of(11_025.0)];
+        if both {
+            rates.extend([SampleRate::SR_48K, SampleRate::SR_44K1]);
+        }
+        for rate in rates {
+            let c = still(|c| {
+                c.decay = [Seconds::new(decay); 3];
+                c.shimmer_pitch = Cents::new(pitch);
+                c.shimmer_send = Feedback::new_clamped(send);
+            });
+            let (mut bank, mut ramps) = at_rest(&l, rate, &c);
+            let Tail::Finite(tail) = bank.tail_of(&ramps, &c) else {
+                panic!("send {send}: a finite tail")
+            };
+            let period = longest_line(rate) + bank.shimmer_delay().get();
+            for (name, input) in tail_probe::stimuli::<f32>(4 * period) {
+                let frames = tail_probe::run_length(input.len(), tail.get(), period);
+                let y = rendered_tail(&mut bank, &mut ramps, &input, frames);
+                let what = format!("{rate:?} send {send} pitch {pitch} decay {decay}, {name}");
+                tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&y[0], &y[1]]);
+            }
+        }
+    }
 }
 
 /// While the send ramps down to 0 (20 ms of chunks), the shifter's delay stays in the model's

@@ -124,6 +124,20 @@ impl ResourceEntry {
         ResourceEntryBuilder::of(Self::device_state())
     }
 
+    /// The entry ResourceList would have if it listed itself: Get and nothing
+    /// else, in any encoding. No ResourceList holds it; an inquiry for ResourceList
+    /// is judged by it (M2-103 §14).
+    pub(super) fn resource_list() -> Self {
+        Self {
+            encodings: Some(vec![
+                PeEncoding::Ascii,
+                PeEncoding::Mcoded7,
+                PeEncoding::ZlibMcoded7,
+            ]),
+            ..Self::bare(StandardResource::ResourceList.into())
+        }
+    }
+
     /// The entry of StateList.
     #[must_use]
     pub fn state_list() -> Self {
@@ -515,7 +529,7 @@ impl ResourceEntry {
         let json = self
             .media_types
             .as_ref()
-            .is_none_or(|types| types.contains(&MediaType::JSON));
+            .is_none_or(|types| types.iter().any(MediaType::is_json));
         let name = || self.resource.as_str().to_owned();
         let typed = member("type");
         if !titled {

@@ -17,7 +17,7 @@ use tutti_graph::{Curvature, Exponent};
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 
-use common::{Kind, TestNode, WORKERS, bits, test_pool};
+use common::{Kind, TestNode, WORKERS, bits};
 use tutti_buffers::ChannelLayout;
 use tutti_fixtures::{cycle_blocks, fixed_blocks};
 use tutti_graph::NodeKey;
@@ -431,9 +431,7 @@ fn render_wide(
 
 fn with_pool(workers: usize) -> (Editor, Executor) {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(test_pool(workers)));
-    }
+    common::pooled(&mut exec, workers);
     build(&mut ed);
     exec.apply_pending();
     ed.collect();
@@ -446,24 +444,18 @@ fn with_pool(workers: usize) -> (Editor, Executor) {
 #[test]
 fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec) = with_pool(1);
-        let serial = render(&mut ed, &mut exec, &blocks);
+        let serial = common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec) = with_pool(workers);
+                render(&mut ed, &mut exec, &blocks)
+            },
+            |r| bits(r),
+        );
         assert!(
             serial.iter().all(|c| c.iter().any(|&x| x != 0.0)),
             "every output carries signal"
         );
-        for workers in WORKERS {
-            let (mut ed, mut exec) = with_pool(workers);
-            let parallel = render(&mut ed, &mut exec, &blocks);
-            for (c, (s, p)) in serial.iter().zip(&parallel).enumerate() {
-                assert_eq!(
-                    bits(std::slice::from_ref(s)),
-                    bits(std::slice::from_ref(p)),
-                    "output {c} diverges with {workers} workers, blocks {:?}…",
-                    &blocks[..blocks.len().min(4)]
-                );
-            }
-        }
     }
 }
 
@@ -473,13 +465,14 @@ fn every_participant_count_renders_the_one_participant_render_bit_for_bit() {
 #[test]
 fn extra_output_slices_are_ignored_on_every_path() {
     let blocks = [MAX_BLOCK, 7, 64];
-    let (mut ed, mut exec) = with_pool(1);
-    let serial = render_wide(&mut ed, &mut exec, &blocks, false, 1);
-    for workers in WORKERS {
-        let (mut ed, mut exec) = with_pool(workers);
-        let parallel = render_wide(&mut ed, &mut exec, &blocks, false, 1);
-        assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-    }
+    common::agree_across_workers(
+        WORKERS,
+        |workers| {
+            let (mut ed, mut exec) = with_pool(workers);
+            render_wide(&mut ed, &mut exec, &blocks, false, 1)
+        },
+        |r| bits(r),
+    );
 }
 
 /// Param ranges moved between blocks, with no commit, render the same
@@ -541,22 +534,22 @@ fn an_offline_fork_renders_the_same_on_a_pool() {
                 pre.with_render_mode(RenderMode::Offline),
             )
             .expect("every node forks");
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         (ed, exec)
     };
     for blocks in [vec![256; 12], schedules(256).pop().expect("ragged")] {
-        let (mut ed, mut exec) = fork(1);
-        exec.apply_pending();
-        let serial = render(&mut ed, &mut exec, &blocks);
-        for workers in WORKERS {
-            let (mut ed, mut exec) = fork(workers);
-            exec.apply_pending();
-            assert!(exec.is_parallel());
-            let parallel = render(&mut ed, &mut exec, &blocks);
-            assert_eq!(bits(&serial), bits(&parallel), "{workers} workers");
-        }
+        common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec) = fork(workers);
+                exec.apply_pending();
+                if workers > 1 {
+                    assert!(exec.is_parallel());
+                }
+                render(&mut ed, &mut exec, &blocks)
+            },
+            |r| bits(r),
+        );
     }
 }
 
@@ -579,7 +572,7 @@ fn a_panic_on_a_worker_reaches_the_caller() {
         fn reset(&mut self) {}
     }
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    exec.set_pool(Some(test_pool(4)));
+    common::pooled(&mut exec, 4);
     ed.spec_mut().topology.inputs = ChannelLayout::MONO;
     // One node panics; the other five are fine, so every participant but
     // the one that caught the panic would keep waiting for its task.
@@ -787,9 +780,7 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
     ];
     let build = |workers: usize| {
         let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-        if workers > 1 {
-            exec.set_pool(Some(test_pool(workers)));
-        }
+        common::pooled(&mut exec, workers);
         let mut calls = Vec::new();
         let mut outputs = Vec::new();
         for (i, (pulse, ring, ceiling, report)) in RINGERS.into_iter().enumerate() {
@@ -825,8 +816,14 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
         all
     };
     for blocks in schedules(MAX_BLOCK) {
-        let (mut ed, mut exec, serial_calls) = build(1);
-        let serial = render(&mut exec, &mut ed, &blocks);
+        let (serial, serial_calls) = common::agree_across_workers(
+            WORKERS,
+            |workers| {
+                let (mut ed, mut exec, calls) = build(workers);
+                (render(&mut exec, &mut ed, &blocks), calls)
+            },
+            |(audio, _)| bits(audio),
+        );
         for (c, (pulse, ring, _, _)) in RINGERS.into_iter().enumerate() {
             let last = serial[c].iter().rposition(|&x| x != 0.0).expect("rings");
             assert_eq!(last, pulse + ring - 2, "ringer {c} rang its whole tail");
@@ -844,16 +841,6 @@ fn reporting_nodes_render_bit_identically_on_a_pool() {
             assert!(
                 silent > 200 + 500,
                 "the unreporting ringer waited its ceiling"
-            );
-        }
-        for workers in WORKERS {
-            let (mut ed, mut exec, _) = build(workers);
-            let parallel = render(&mut exec, &mut ed, &blocks);
-            assert_eq!(
-                bits(&serial),
-                bits(&parallel),
-                "{workers} workers, blocks {:?}…",
-                &blocks[..blocks.len().min(4)]
             );
         }
     }

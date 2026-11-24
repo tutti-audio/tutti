@@ -249,7 +249,8 @@ fn a_source_no_device_can_own_is_unread_with_nobody_to_answer() {
 #[test]
 fn the_broadcast_rule_is_held_in_both_directions() {
     let mut discovery_to_one = CiMessage::Discovery {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         data: sample(),
     }
     .encode();
@@ -268,7 +269,8 @@ fn the_broadcast_rule_is_held_in_both_directions() {
 
     for msg in [
         CiMessage::DiscoveryReply {
-            header: header(),
+            device_id: CiDeviceId::FunctionBlock,
+            source: Muid::of(SRC),
             to: Muid::of(7),
             data: sample_reply(),
         },
@@ -396,7 +398,8 @@ fn the_ci_ranged_values_keep_the_range_contract() {
 
 fn long_message() -> CiMessage {
     CiMessage::DiscoveryReply {
-        header: header(),
+        device_id: CiDeviceId::FunctionBlock,
+        source: Muid::of(SRC),
         to: Muid::of(2),
         data: sample_reply(),
     }
