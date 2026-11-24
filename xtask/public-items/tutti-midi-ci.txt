@@ -211,6 +211,7 @@ enum process_initiator::ProcessAction
 enum process_initiator::ProcessError
 enum profile::NotSetProfileOn
 enum profile::ProfileDataError
+enum profile::ProfileFormat
 enum profile::ProfileId
 enum profile::ProfileState
 enum profile::ProfileTarget
@@ -658,6 +659,10 @@ fn profile::ManufacturerProfile::info
 fn profile::ManufacturerProfile::manufacturer
 fn profile::ManufacturerProfile::new
 fn profile::ProfileChannels::is_by_address
+fn profile::ProfileFormat::address
+fn profile::ProfileFormat::channels
+fn profile::ProfileFormat::ci_version
+fn profile::ProfileFormat::current
 fn profile::ProfileId::from_bytes
 fn profile::ProfileId::to_bytes
 fn profile::ProfileList::as_slice

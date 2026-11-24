@@ -58,6 +58,7 @@ enum midi_follow::UnfollowCause
 enum midi_hardware::MidiPolicyError
 enum midi_load::NoCommonTimelineError
 enum midi_load::TrackError
+enum midi_load::Unplayed
 enum midi_network::NetworkError
 enum midi_network::NetworkEvent
 enum midi_network_none::NetworkEvent
@@ -936,7 +937,6 @@ struct midi_follow::FollowClock
 struct midi_follow::FollowMachineControl
 struct midi_follow::FollowTempo
 struct midi_hardware::MidiPolicy
-struct midi_load::DroppedEvent
 struct midi_load::LoadMidi
 struct midi_load::LoadReport
 struct midi_load::LoadedMidi
