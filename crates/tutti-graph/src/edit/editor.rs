@@ -22,7 +22,7 @@
 //! so the executor's push always has room. `commit` drains the return ring
 //! first, so a caller that only ever commits never has to call `collect`.
 //!
-//! A crossfade ([`replace`](crate::Editor::replace)) does **not** hold its commit:
+//! A crossfade ([`replace_or_swap`](crate::Editor::replace_or_swap)) does **not** hold its commit:
 //! the box comes back as soon as it is applied. The fade's outgoing unit
 //! comes back on its own, on the fade-return ring, when the fade ends (or
 //! is cut), and `collect` drains that ring too. Each fade a commit starts
@@ -171,7 +171,7 @@ impl Limits {
 /// compiling anything.
 ///
 /// Every method runs on the control thread and may allocate. Other edits:
-/// [`replace`](Self::replace) swaps a unit with a crossfade,
+/// [`replace_or_swap`](Self::replace_or_swap) swaps a unit with a crossfade,
 /// [`set_latency`](Self::set_latency) changes a node's declared latency,
 /// [`reprepare`](Self::reprepare) changes the sample rate or maximum block,
 /// [`schedule`](Self::schedule) delivers an event on an exact frame or beat,
@@ -764,9 +764,9 @@ impl<F: Float> Editor<F> {
 
     /// Whether a [`reprepare`](Self::reprepare) is between its two commits:
     /// until the next [`collect`](Self::collect) after the executor hands the
-    /// units back, `commit`, `replace`, `set_latency` and `reprepare` refuse
+    /// units back, `commit`, `replace_or_swap`, `set_latency` and `reprepare` refuse
     /// with [`CommitError::Repreparing`]. A host that must not lose what it
-    /// would pass to one of them (a `replace` consumes its node) asks first.
+    /// would pass to one of them (a `replace_or_swap` consumes its node) asks first.
     pub fn is_repreparing(&self) -> bool {
         matches!(self.life, Lifecycle::Repreparing { .. })
     }

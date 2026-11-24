@@ -433,7 +433,6 @@ fn edit::editor::nodes::Editor::insert
 fn edit::editor::nodes::Editor::is_leaving
 fn edit::editor::nodes::Editor::remove
 fn edit::editor::nodes::Editor::remove_declicked
-fn edit::editor::nodes::Editor::replace
 fn edit::editor::nodes::Editor::replace_or_swap
 fn edit::editor::nodes::Editor::set_latency
 fn edit::editor::nodes::Editor::set_tail

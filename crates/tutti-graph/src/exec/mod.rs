@@ -118,7 +118,7 @@
 //!
 //! # Crossfades
 //!
-//! [`Editor::replace`](crate::Editor::replace) (rules in `src/model/fade.rs`). A
+//! [`Editor::replace_or_swap`](crate::Editor::replace_or_swap) (rules in `src/model/fade.rs`). A
 //! crossfade lives in the store beside its unit: the unit is the incoming
 //! one, and the crossfade holds the outgoing one and a scratch arena for its
 //! outputs, built on the control side with the commit. A node op with a
