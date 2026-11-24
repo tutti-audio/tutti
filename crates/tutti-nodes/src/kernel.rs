@@ -334,6 +334,11 @@ impl<K: Kernel> From<KernelConfig<K>> for KernelNode<K> {
 }
 
 impl<K: Kernel> KernelNode<K> {
+    /// The node's cells and the set that addresses them.
+    pub(crate) fn params(&self) -> &Params<K::Set> {
+        &self.params
+    }
+
     /// A node running `kernel`, its cells `set` at `controls`. It has no rate until the
     /// graph's `prepare` gives it one and renders silence before. Allocates: build it
     /// before the node goes live.

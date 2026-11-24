@@ -211,6 +211,7 @@ fn the_delay_is_blended_by_the_graph() {
                     .build()
                     .unwrap();
             DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+                sync: tutti_nodes::DelaySync::Free,
                 time: Seconds::new(0.013),
                 feedback: Feedback::new(0.5),
                 cross_feedback: Feedback::new(0.3),
