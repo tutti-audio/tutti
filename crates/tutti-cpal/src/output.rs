@@ -153,7 +153,7 @@ fn no_device() -> DeviceError {
 ///
 /// [`TuttiDriver`](crate::TuttiDriver) wraps one and is what a host normally
 /// holds; use `AudioEngine` directly to open the device before the graph
-/// exists (its [`stream`](Self::stream)'s [`sample_rate`](OutputStream::sample_rate) is the rate to build the
+/// exists (its [`stream`](Self::stream)'s [`spec`](OutputStream::spec)'s sample rate is the rate to build the
 /// graph at). Every method runs on the control thread.
 ///
 /// The stream runs until [`stop`](Self::stop) or until the engine is dropped.
@@ -400,7 +400,7 @@ impl AudioEngine {
     /// [`faults`](OutputStream::faults) (the backend fault record, which survives
     /// stop and restart: CPAL's error callback returns nothing, so a fault such
     /// as an unplugged device is reported only there),
-    /// [`latency`](OutputStream::latency), [`sample_rate`](OutputStream::sample_rate),
+    /// [`latency`](OutputStream::latency),
     /// [`channels`](OutputStream::channels) and
     /// [`is_running`](OutputStream::is_running).
     #[must_use]
@@ -412,8 +412,7 @@ impl AudioEngine {
     /// already running is an error: the state handed in is not adopted.
     ///
     /// Re-reads the device's config first (at the chosen format, if any), so after a
-    /// [`select_device`](Self::select_device) the [`spec`](OutputStream::spec),
-    /// [`sample_rate`](OutputStream::sample_rate) and [`channels`](OutputStream::channels)
+    /// [`select_device`](Self::select_device) the [`spec`](OutputStream::spec) and [`channels`](OutputStream::channels)
     /// describe the device that is actually playing. The stream is opened with
     /// a fixed buffer of the [`quantum`](OutputConfig::quantum) asked for, which
     /// the device must offer, or else of

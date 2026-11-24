@@ -389,15 +389,6 @@ impl MeterSpec {
             Self::Ports { sources, .. } => sources.len(),
         }
     }
-
-    /// Where the reading sits in time.
-    #[must_use]
-    pub fn align(&self) -> TapAlign {
-        match self {
-            Self::Outputs => TapAlign::ToOutput,
-            Self::Ports { align, .. } => *align,
-        }
-    }
 }
 
 tutti_rt::id! {
@@ -504,15 +495,6 @@ pub enum TapSpec {
 }
 
 impl TapSpec {
-    /// A tap on `sources` as they leave their nodes.
-    #[must_use]
-    pub fn raw(sources: Vec<PortSource>) -> Self {
-        Self::Ports {
-            sources,
-            align: TapAlign::Raw,
-        }
-    }
-
     /// A tap on `sources` aligned to the output time, as an output of the
     /// same sources would carry them.
     #[must_use]
@@ -529,15 +511,6 @@ impl TapSpec {
         match self {
             Self::Outputs { width } => *width,
             Self::Ports { sources, .. } => sources.len(),
-        }
-    }
-
-    /// Where the copy sits in time.
-    #[must_use]
-    pub fn align(&self) -> TapAlign {
-        match self {
-            Self::Outputs { .. } => TapAlign::ToOutput,
-            Self::Ports { align, .. } => *align,
         }
     }
 }
@@ -669,15 +642,6 @@ impl Valid {
     /// Returns the checked topology.
     pub fn get(&self) -> &Topology {
         &self.0
-    }
-
-    /// Takes the checked topology back out.
-    ///
-    /// Consuming rather than clone-and-get, so a caller that means to *edit* the
-    /// graph gives up the proof it was checked — which is the wrapper's point.
-    #[must_use]
-    pub fn into_inner(self) -> Topology {
-        self.0
     }
 }
 
