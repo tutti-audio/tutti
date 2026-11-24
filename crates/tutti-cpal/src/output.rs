@@ -400,7 +400,7 @@ impl AudioEngine {
         // previous stream ran on.
         let opened = Opened::of(&device);
         Ok((
-            CpalDriver::new(device, format, executor.clone())?,
+            CpalDriver::new(device, format, executor.clone()),
             spec,
             opened,
         ))

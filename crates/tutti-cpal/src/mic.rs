@@ -54,7 +54,7 @@ use tutti_rt::Drained;
 use tutti_units::Samples;
 use tutti_units::{SampleRate, Seconds};
 
-use crate::driver_seam::{Fit, device_rate, fit};
+use crate::driver_seam::{DeviceFormat, Fit, device_rate, fit};
 use crate::edge;
 use crate::error::{DeviceError, Result};
 use crate::host::{AudioHost, DeviceHost, DeviceSelector, device_name};
@@ -358,29 +358,14 @@ impl<F: Float> MicIn<F> {
         let (reader, writer) = feed(width, sample_rate);
         let capture = Capture::new(select, device_inputs, writer);
 
-        let sample_format = config.sample_format();
+        let sample_format = DeviceFormat::try_from(config.sample_format())?;
         let cfg: cpal::StreamConfig = config.into();
-        if !matches!(
-            sample_format,
-            cpal::SampleFormat::I8
-                | cpal::SampleFormat::I16
-                | cpal::SampleFormat::I32
-                | cpal::SampleFormat::U8
-                | cpal::SampleFormat::U16
-                | cpal::SampleFormat::U32
-                | cpal::SampleFormat::F32
-                | cpal::SampleFormat::F64
-        ) {
-            return Err(DeviceError::InvalidConfig(format!(
-                "Unsupported input sample format: {sample_format:?}"
-            )));
-        }
         let cb_faults = Arc::clone(&faults);
         let cb_latency = Arc::clone(&latency);
         let owned = Owned::spawn(executor, "tutti-input-stream", move || {
             let (d, c) = (&device, &cfg);
             let stream = match sample_format {
-                cpal::SampleFormat::I8 => build_input(
+                DeviceFormat::I8 => build_input(
                     d,
                     c,
                     capture,
@@ -388,7 +373,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_native::<i8, F>,
                 )?,
-                cpal::SampleFormat::I16 => build_input(
+                DeviceFormat::I16 => build_input(
                     d,
                     c,
                     capture,
@@ -396,7 +381,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_native::<i16, F>,
                 )?,
-                cpal::SampleFormat::I32 => build_input(
+                DeviceFormat::I32 => build_input(
                     d,
                     c,
                     capture,
@@ -404,7 +389,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_native::<i32, F>,
                 )?,
-                cpal::SampleFormat::U8 => build_input(
+                DeviceFormat::U8 => build_input(
                     d,
                     c,
                     capture,
@@ -412,7 +397,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_offset::<u8, F>,
                 )?,
-                cpal::SampleFormat::U16 => build_input(
+                DeviceFormat::U16 => build_input(
                     d,
                     c,
                     capture,
@@ -420,7 +405,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_offset::<u16, F>,
                 )?,
-                cpal::SampleFormat::U32 => build_input(
+                DeviceFormat::U32 => build_input(
                     d,
                     c,
                     capture,
@@ -428,7 +413,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_offset::<u32, F>,
                 )?,
-                cpal::SampleFormat::F32 => build_input(
+                DeviceFormat::F32 => build_input(
                     d,
                     c,
                     capture,
@@ -436,7 +421,7 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_native::<f32, F>,
                 )?,
-                cpal::SampleFormat::F64 => build_input(
+                DeviceFormat::F64 => build_input(
                     d,
                     c,
                     capture,
@@ -444,8 +429,6 @@ impl<F: Float> MicIn<F> {
                     cb_latency,
                     edge::from_native::<f64, F>,
                 )?,
-                // Checked above, before the thread is spawned.
-                _ => unreachable!("sample format checked before spawn"),
             };
             stream.play().map_err(DeviceError::PlayStream)?;
             Ok(stream)

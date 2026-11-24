@@ -85,3 +85,28 @@ fn the_offset_binary_conversion_is_allocation_free_and_carries_the_signal() {
     native(&mut block(0.5), &mut native_out, None);
     assert_eq!(native_out, [1 << 14; 8]);
 }
+
+/// An offset-binary device format reports the signed type of its width and is
+/// the only kind flagged offset binary; a 64-bit integer type is refused.
+#[test]
+fn a_device_format_reports_its_spec_type_and_whether_it_is_offset_binary() {
+    use cpal::SampleFormat as C;
+    for (device, spec, offset_binary) in [
+        (C::I8, SampleFormat::I8, false),
+        (C::U8, SampleFormat::I8, true),
+        (C::I16, SampleFormat::I16, false),
+        (C::U16, SampleFormat::I16, true),
+        (C::I32, SampleFormat::I32, false),
+        (C::U32, SampleFormat::I32, true),
+        (C::F32, SampleFormat::F32, false),
+        (C::F64, SampleFormat::F64, false),
+    ] {
+        let format = DeviceFormat::try_from(device).unwrap();
+        assert_eq!(format.spec(), spec, "{device:?}");
+        assert_eq!(format.is_offset_binary(), offset_binary, "{device:?}");
+    }
+    assert!(matches!(
+        DeviceFormat::try_from(C::I64),
+        Err(DeviceError::InvalidConfig(_))
+    ));
+}
