@@ -377,6 +377,19 @@ mod tests {
             postcard::to_allocvec(&ControlReply::EditorSized { result: Ok(size) }).unwrap(),
             sized
         );
+        assert_eq!(
+            postcard::to_allocvec(&ControlReply::EditorSized {
+                result: Err(EditorError::FloatingEditor)
+            })
+            .unwrap(),
+            [16, 1, 14]
+        );
+        assert!(matches!(
+            postcard::from_bytes::<ControlReply>(&[16, 1, 14]),
+            Ok(ControlReply::EditorSized {
+                result: Err(EditorError::FloatingEditor)
+            })
+        ));
         let mut wants = vec![7];
         wants.extend(size_bytes);
         assert_eq!(

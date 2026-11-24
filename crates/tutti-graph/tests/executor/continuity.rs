@@ -176,7 +176,8 @@ impl Config {
     /// The delays this wiring has, each with its length.
     fn keys(&self) -> BTreeMap<Key, Samples> {
         let mut keys = BTreeMap::new();
-        if self.emitter && self.direct {
+        // A latency of 0 is no delay: the edge has no FIFO.
+        if self.emitter && self.direct && self.event_latency.get() > 0 {
             keys.insert(Key::Direct, self.event_latency);
         }
         if let Some(d) = self.event_feedback {
@@ -232,9 +233,14 @@ const DELAYS: [Option<usize>; 4] = [
 
 fn random_op(rng: &mut Rng, cfg: &Config) -> Op {
     let latency = |rng: &mut Rng| Samples::new(1 + rng.below(60) as usize);
+    // 0 makes the event delay vanish while its edge stays.
+    let event_latency = |rng: &mut Rng| match rng.below(6) {
+        0 => Samples::new(0),
+        _ => latency(rng),
+    };
     let delay = |rng: &mut Rng| DELAYS[rng.below(4) as usize].map(Samples::new);
     match rng.below(7) {
-        0 => Op::EventLatency(latency(rng)),
+        0 => Op::EventLatency(event_latency(rng)),
         1 => Op::AudioLatency(latency(rng)),
         2 if cfg.emitter => Op::Direct(!cfg.direct),
         3 => Op::Emitter(!cfg.emitter),
@@ -271,11 +277,14 @@ struct Model {
     seen: Seen,
 }
 
-/// What a script exercised: events flushed by a vanished FIFO, FIFOs retuned
-/// while holding events, audio rings retuned or recreated.
+/// What a script exercised: events flushed by a vanished FIFO, FIFOs whose
+/// latency went to 0 while holding two events or more (spacing shows only
+/// between two), FIFOs retuned while holding events,
+/// audio rings retuned or recreated.
 #[derive(Clone, Copy, Debug, Default)]
 struct Seen {
     flushed: usize,
+    zeroed_holding: usize,
     retuned_holding: usize,
     ring_retunes: usize,
     ring_vanished: usize,
@@ -301,6 +310,9 @@ impl Model {
                 // the block's last frame.
                 let first = fifo.queued.first().map(|e| e + fifo.len.get() as u64);
                 self.seen.flushed += fifo.queued.len();
+                self.seen.zeroed_holding += usize::from(
+                    *key == Key::Direct && new.emitter && new.direct && fifo.queued.len() >= 2,
+                );
                 for e in fifo.queued {
                     let spacing = e + fifo.len.get() as u64 - first.unwrap_or_default();
                     self.want
@@ -345,6 +357,11 @@ impl Model {
     fn advance(&mut self, cfg: &Config, at: u64, n: u64) {
         for f in at..at + n {
             match f % 16 {
+                // With no delay, the edge delivers on the emission frame.
+                1 if cfg.emitter && cfg.direct && cfg.event_latency.get() == 0 => {
+                    self.sent += 1;
+                    self.want.push((f as u32, 0, Frame::new(f)));
+                }
                 1 if cfg.emitter => self.send(&[Key::Direct], f),
                 2 => {
                     let keys: Vec<Key> = self
@@ -630,7 +647,8 @@ proptest! {
 }
 
 /// The scripts are not vacuous: over a fixed range of seeds they flush events
-/// out of vanished FIFOs, retune FIFOs that hold events, and retune and drop
+/// out of vanished FIFOs (a latency gone to 0 among them), retune FIFOs that
+/// hold events, and retune and drop
 /// audio rings.
 #[test]
 fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
@@ -638,11 +656,17 @@ fn the_scripts_flush_retune_and_drop_delays_that_hold_signal() {
     for seed in 0..128u64 {
         let one = per_key_model(seed, (seed % 5) as usize, 1);
         seen.flushed += one.flushed;
+        seen.zeroed_holding += one.zeroed_holding;
         seen.retuned_holding += one.retuned_holding;
         seen.ring_retunes += one.ring_retunes;
         seen.ring_vanished += one.ring_vanished;
     }
     assert!(seen.flushed > 100, "{seen:?}");
+    // A delay that vanishes because its latency went to 0 is flushed by the
+    // loop every vanished delay goes through, so `flushed` is the spacing's
+    // main witness; this one says the latency-to-0 way in is taken with a
+    // spacing to keep.
+    assert!(seen.zeroed_holding > 0, "{seen:?}");
     assert!(seen.retuned_holding > 25, "{seen:?}");
     assert!(seen.ring_retunes > 25, "{seen:?}");
     assert!(seen.ring_vanished > 50, "{seen:?}");
