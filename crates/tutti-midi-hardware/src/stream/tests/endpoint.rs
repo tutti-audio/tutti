@@ -355,7 +355,7 @@ fn a_new_identity_invalidates_the_old_muid_and_starts_discovery_as_the_new() {
     };
     assert_eq!(*g, GROUP_0);
     assert_ne!(header.source, old, "a fresh MUID");
-    assert_eq!(data.identity, other);
+    assert_eq!(data.body.identity, other);
 }
 
 /// Presenting nothing after presenting an identity ends MIDI-CI the same way:

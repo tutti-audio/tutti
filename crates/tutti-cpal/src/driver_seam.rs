@@ -36,20 +36,59 @@ pub(crate) fn device_rate(rate: cpal::SampleRate) -> Result<SampleRate> {
 /// device supports.
 pub const PREFERRED_QUANTUM: OutputQuantum = OutputQuantum::of(512);
 
-/// The [`SampleFormat`] a device's `format` reports in an [`OutputSpec`], or
-/// [`DeviceError::InvalidConfig`] for a type the driver does not build. `I8`, `I16`,
-/// `I32`, `F32` and `F64` are themselves; `U8`, `U16` and `U32` are offset
-/// binary and report the signed type of their width.
-pub(crate) fn spec_format(format: cpal::SampleFormat) -> Result<SampleFormat> {
-    match format {
-        cpal::SampleFormat::I8 | cpal::SampleFormat::U8 => Ok(SampleFormat::I8),
-        cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => Ok(SampleFormat::I16),
-        cpal::SampleFormat::I32 | cpal::SampleFormat::U32 => Ok(SampleFormat::I32),
-        cpal::SampleFormat::F32 => Ok(SampleFormat::F32),
-        cpal::SampleFormat::F64 => Ok(SampleFormat::F64),
-        other => Err(DeviceError::InvalidConfig(format!(
-            "Unsupported sample format: {other:?}"
-        ))),
+/// The sample formats the driver builds: the device's own type, parsed once
+/// from `cpal::SampleFormat` (which is `non_exhaustive`) at the edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeviceFormat {
+    I8,
+    I16,
+    I32,
+    F32,
+    F64,
+    /// Offset binary: the signed type of the same width with the sign bit flipped.
+    U8,
+    U16,
+    U32,
+}
+
+impl TryFrom<cpal::SampleFormat> for DeviceFormat {
+    type Error = DeviceError;
+
+    /// # Errors
+    /// [`DeviceError::InvalidConfig`] for a type the driver does not build.
+    fn try_from(format: cpal::SampleFormat) -> Result<Self> {
+        match format {
+            cpal::SampleFormat::I8 => Ok(Self::I8),
+            cpal::SampleFormat::I16 => Ok(Self::I16),
+            cpal::SampleFormat::I32 => Ok(Self::I32),
+            cpal::SampleFormat::F32 => Ok(Self::F32),
+            cpal::SampleFormat::F64 => Ok(Self::F64),
+            cpal::SampleFormat::U8 => Ok(Self::U8),
+            cpal::SampleFormat::U16 => Ok(Self::U16),
+            cpal::SampleFormat::U32 => Ok(Self::U32),
+            other => Err(DeviceError::InvalidConfig(format!(
+                "Unsupported sample format: {other:?}"
+            ))),
+        }
+    }
+}
+
+impl DeviceFormat {
+    /// The [`SampleFormat`] this reports in an [`OutputSpec`]: itself, and for
+    /// an offset-binary format the signed type of its width.
+    pub(crate) const fn spec(self) -> SampleFormat {
+        match self {
+            Self::I8 | Self::U8 => SampleFormat::I8,
+            Self::I16 | Self::U16 => SampleFormat::I16,
+            Self::I32 | Self::U32 => SampleFormat::I32,
+            Self::F32 => SampleFormat::F32,
+            Self::F64 => SampleFormat::F64,
+        }
+    }
+
+    /// Whether the format is offset binary.
+    pub(crate) const fn is_offset_binary(self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32)
     }
 }
 
@@ -66,14 +105,14 @@ pub(crate) enum Fit {
 /// Whether a device format `offered` opens as the app's `wanted`, and how.
 /// `None` for a format of another kind or width.
 pub(crate) fn fit(offered: cpal::SampleFormat, wanted: SampleFormat) -> Option<Fit> {
-    if spec_format(offered).ok()? != wanted {
+    let offered = DeviceFormat::try_from(offered).ok()?;
+    if offered.spec() != wanted {
         return None;
     }
-    Some(match offered {
-        cpal::SampleFormat::U8 | cpal::SampleFormat::U16 | cpal::SampleFormat::U32 => {
-            Fit::OffsetBinary
-        }
-        _ => Fit::Exact,
+    Some(if offered.is_offset_binary() {
+        Fit::OffsetBinary
+    } else {
+        Fit::Exact
     })
 }
 
@@ -118,17 +157,19 @@ pub(crate) fn spec_from_supported(
     c: &cpal::SupportedStreamConfig,
     device_name: &str,
     wanted: Option<OutputQuantum>,
-) -> Result<(OutputSpec, cpal::SampleFormat)> {
+) -> Result<(OutputSpec, DeviceFormat)> {
     if usize::from(c.channels()) > MAX_CHANNELS {
         return Err(DeviceError::InvalidConfig(format!(
             "the device has {} channels; at most {MAX_CHANNELS} are supported",
             c.channels()
         )));
     }
+    let rate = device_rate(c.sample_rate())?;
+    let format = DeviceFormat::try_from(c.sample_format())?;
     let spec = OutputSpec::new(
-        device_rate(c.sample_rate())?,
+        rate,
         ChannelLayout::from(c.channels().max(1)),
-        spec_format(c.sample_format())?,
+        format.spec(),
     );
     let quantum = match wanted {
         Some(wanted) => Some(offered(c.buffer_size(), wanted, device_name)?),
@@ -138,7 +179,7 @@ pub(crate) fn spec_from_supported(
         Some(quantum) => spec.with_quantum(quantum),
         None => spec,
     };
-    Ok((spec, c.sample_format()))
+    Ok((spec, format))
 }
 
 fn stream_config(spec: &OutputSpec) -> cpal::StreamConfig {
@@ -199,8 +240,8 @@ fn quantum_for(range: &cpal::SupportedBufferSize) -> Option<OutputQuantum> {
 pub struct CpalDriver {
     device: cpal::Device,
     /// The device's exact sample type, which `spec.sample_format` cannot say
-    /// for the offset-binary formats; one [`spec_format`] accepts.
-    format: cpal::SampleFormat,
+    /// for the offset-binary formats.
+    format: DeviceFormat,
     /// The executor whose dedicated thread owns the stream.
     executor: Executor,
 }
@@ -213,20 +254,12 @@ impl std::fmt::Debug for CpalDriver {
 
 impl CpalDriver {
     /// A driver over `device` at the sample type `format` of its config.
-    ///
-    /// # Errors
-    /// [`DeviceError::InvalidConfig`] for a sample type the driver does not build.
-    pub(crate) fn new(
-        device: cpal::Device,
-        format: cpal::SampleFormat,
-        executor: Executor,
-    ) -> Result<Self> {
-        spec_format(format)?;
-        Ok(Self {
+    pub(crate) fn new(device: cpal::Device, format: DeviceFormat, executor: Executor) -> Self {
+        Self {
             device,
             format,
             executor,
-        })
+        }
     }
 }
 
@@ -266,16 +299,14 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
         let executor = self.executor.clone();
         Owned::spawn(&executor, "tutti-output-stream", move || {
             let stream = match format {
-                cpal::SampleFormat::I8 => self.build(&config, block, faults, native::<F, i8>)?,
-                cpal::SampleFormat::I16 => self.build(&config, block, faults, native::<F, i16>)?,
-                cpal::SampleFormat::I32 => self.build(&config, block, faults, native::<F, i32>)?,
-                cpal::SampleFormat::U8 => self.build(&config, block, faults, offset::<F, u8>)?,
-                cpal::SampleFormat::U16 => self.build(&config, block, faults, offset::<F, u16>)?,
-                cpal::SampleFormat::U32 => self.build(&config, block, faults, offset::<F, u32>)?,
-                cpal::SampleFormat::F32 => self.build(&config, block, faults, native::<F, f32>)?,
-                cpal::SampleFormat::F64 => self.build(&config, block, faults, native::<F, f64>)?,
-                // Checked by `CpalDriver::new`.
-                _ => unreachable!("sample format checked at construction"),
+                DeviceFormat::I8 => self.build(&config, block, faults, native::<F, i8>)?,
+                DeviceFormat::I16 => self.build(&config, block, faults, native::<F, i16>)?,
+                DeviceFormat::I32 => self.build(&config, block, faults, native::<F, i32>)?,
+                DeviceFormat::U8 => self.build(&config, block, faults, offset::<F, u8>)?,
+                DeviceFormat::U16 => self.build(&config, block, faults, offset::<F, u16>)?,
+                DeviceFormat::U32 => self.build(&config, block, faults, offset::<F, u32>)?,
+                DeviceFormat::F32 => self.build(&config, block, faults, native::<F, f32>)?,
+                DeviceFormat::F64 => self.build(&config, block, faults, native::<F, f64>)?,
             };
             stream.play().map_err(DeviceError::PlayStream)?;
             Ok(stream)
