@@ -784,7 +784,10 @@ fn assemble<const N: usize, E: EventSlots + ?Sized>(
                         refused += 1;
                     }
                 });
-                debug_assert_eq!(*cut.get_or_insert(dropped), dropped, "one walk, one loss");
+                // Taken outside the assertion: a release build compiles the
+                // assertion's arguments away.
+                let first = *cut.get_or_insert(dropped);
+                debug_assert_eq!(first, dropped, "one walk, one loss");
             }
             debug_assert_eq!(refused, 0, "a port's share fits its view");
             lost += cut.unwrap_or(0) + refused;
