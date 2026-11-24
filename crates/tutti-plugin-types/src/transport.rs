@@ -179,9 +179,9 @@ pub struct TransportPosition {
     pub samples: Option<i64>,
     /// Monotonic sample counter that does **not** reset on loop/cycle (vst3
     /// `continousTimeSamples`; clap `steady_time`). Free-running plugins (LFOs,
-    /// delays) key their timing off this. `0` means "host has no separate
-    /// continuous clock" — consumers fall back to [`samples`](Self::samples),
-    /// which is itself optional.
+    /// delays) key their timing off this. A count from 0 at the instance's first
+    /// block that never goes back: `0` is its first frame, never "unset", and a
+    /// format host sends it as it is.
     pub continuous_samples: i64,
     /// The playhead in quarter notes from the song's start, the engine's beat
     /// (vst2 `ppqPos`; vst3 `projectTimeMusic`; clap `song_pos_beats`; AU

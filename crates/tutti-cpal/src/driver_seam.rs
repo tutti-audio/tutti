@@ -7,6 +7,7 @@
 //! the callback CPAL runs.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 use std::time::Duration;
@@ -14,9 +15,11 @@ use std::time::Duration;
 use tutti_buffers::{ChannelLayout, MAX_CHANNELS};
 use tutti_buffers::{Float, Sample, SampleFormat};
 use tutti_engine::{
-    MAX_FRAMES, OutputBlock, OutputQuantum, OutputSpec, RunningStream, StreamDriver, StreamFaults,
+    MAX_FRAMES, OpenedOutput, OutputBlock, OutputQuantum, OutputSpec, RunningStream, StreamDriver,
+    StreamFaults,
 };
 use tutti_platform::Executor;
+use tutti_rt::Mutex;
 use tutti_units::SampleRate;
 
 use crate::edge::{self, OffsetBinary};
@@ -193,6 +196,34 @@ fn stream_config(spec: &OutputSpec) -> cpal::StreamConfig {
     }
 }
 
+/// What a refused stream build does next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fallback {
+    /// Build once more with the backend's default buffer.
+    RetryOnDefault,
+    /// Report the refusal.
+    GiveUp,
+}
+
+/// What follows a build that asked for `asked` and failed with `kind`: a fixed
+/// buffer size the backend refuses (`UnsupportedConfig`) is retried on the
+/// default buffer; any other failure, and a default buffer's own refusal
+/// (nothing is left to fall back to), is reported.
+pub(crate) fn on_build_failure(asked: cpal::BufferSize, kind: cpal::ErrorKind) -> Fallback {
+    match (asked, kind) {
+        (cpal::BufferSize::Fixed(_), cpal::ErrorKind::UnsupportedConfig) => {
+            Fallback::RetryOnDefault
+        }
+        _ => Fallback::GiveUp,
+    }
+}
+
+/// The callback size a stream reports (`frames`) as a quantum: `None` for a
+/// count [`OutputQuantum`] refuses (zero, or past [`MAX_FRAMES`]).
+pub(crate) fn opened_quantum(frames: cpal::FrameCount) -> Option<OutputQuantum> {
+    OutputQuantum::new(usize::try_from(frames).ok()?)
+}
+
 /// `wanted` as the callback size to open a device with, when the device
 /// offers it: a size outside the range the device reports is refused by name,
 /// never clamped into it. A device that reports no range is asked for `wanted`
@@ -288,17 +319,26 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
     /// graph's `F` converts at the edge by the rule in `Sample`: a signed or
     /// float format directly, an offset-binary one through the signed format of
     /// its width with the sign bit flipped.
+    ///
+    /// The quantum answered is what the built stream's `buffer_size` reports:
+    /// `None` when the backend cannot say or says a size [`OutputQuantum`]
+    /// refuses. A fixed buffer size the backend refuses is opened again on
+    /// its default buffer.
     fn open(
         self,
         spec: &OutputSpec,
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<CpalStream> {
+    ) -> Result<OpenedOutput<CpalStream>> {
         let config = stream_config(spec);
         let format = self.format;
         let executor = self.executor.clone();
-        Owned::spawn(&executor, "tutti-output-stream", move || {
-            let stream = match format {
+        // The owner thread's report of the opened frame count (0: unknown),
+        // read once the thread has answered that the stream is built.
+        let reported = Arc::new(AtomicU32::new(0));
+        let report = Arc::clone(&reported);
+        let owned = Owned::spawn(&executor, "tutti-output-stream", move || {
+            let (stream, quantum) = match format {
                 DeviceFormat::I8 => self.build(&config, block, faults, native::<F, i8>)?,
                 DeviceFormat::I16 => self.build(&config, block, faults, native::<F, i16>)?,
                 DeviceFormat::I32 => self.build(&config, block, faults, native::<F, i32>)?,
@@ -309,9 +349,16 @@ impl<F: Float> StreamDriver<F> for CpalDriver {
                 DeviceFormat::F64 => self.build(&config, block, faults, native::<F, f64>)?,
             };
             stream.play().map_err(DeviceError::PlayStream)?;
+            report.store(
+                quantum.map_or(0, |q| q.max_block().get_u32()),
+                Ordering::Release,
+            );
             Ok(stream)
+        })?;
+        Ok(OpenedOutput {
+            stream: CpalStream(owned),
+            quantum: opened_quantum(reported.load(Ordering::Acquire)),
         })
-        .map(CpalStream)
     }
 }
 
@@ -339,15 +386,77 @@ fn offset<F: Float, U: OffsetBinary>(
     block.render_delayed_with(data, delay, edge::to_offset::<F, U>);
 }
 
+/// The block an attempt's callback renders with. A stream that is not built
+/// drops its callback, and the block goes back to `back` so the next attempt
+/// can use it; once the stream is `kept` the block is dropped with the stream.
+struct Hold<F: Float> {
+    block: Option<OutputBlock<F>>,
+    back: Arc<Mutex<Option<OutputBlock<F>>>>,
+    kept: Arc<AtomicBool>,
+}
+
+impl<F: Float> Drop for Hold<F> {
+    fn drop(&mut self) {
+        if !self.kept.load(Ordering::Acquire) {
+            *self.back.lock() = self.block.take();
+        }
+    }
+}
+
 impl CpalDriver {
+    /// Builds the stream, and the callback size it reports. A fixed buffer size
+    /// the backend refuses ([`on_build_failure`]) is built once more on the
+    /// default buffer, with the same block.
     fn build<T: cpal::SizedSample + 'static, F: Float>(
         &self,
         config: &cpal::StreamConfig,
-        mut block: OutputBlock<F>,
+        block: OutputBlock<F>,
+        faults: Arc<StreamFaults>,
+        render: Render<F, T>,
+    ) -> Result<(cpal::Stream, Option<OutputQuantum>)> {
+        let back = Arc::new(Mutex::new(None));
+        let kept = Arc::new(AtomicBool::new(false));
+        let channels = block.channels();
+        let attempt = |config: &cpal::StreamConfig, block| {
+            let hold = Hold {
+                block: Some(block),
+                back: Arc::clone(&back),
+                kept: Arc::clone(&kept),
+            };
+            self.build_once(config, channels, hold, Arc::clone(&faults), render)
+        };
+        let stream = match attempt(config, block) {
+            Err(DeviceError::BuildStream(refused))
+                if on_build_failure(config.buffer_size, refused.kind())
+                    == Fallback::RetryOnDefault =>
+            {
+                let recovered = back.lock().take();
+                match recovered {
+                    Some(block) => {
+                        let default = cpal::StreamConfig {
+                            buffer_size: cpal::BufferSize::Default,
+                            ..*config
+                        };
+                        attempt(&default, block)?
+                    }
+                    None => return Err(DeviceError::BuildStream(refused)),
+                }
+            }
+            built => built?,
+        };
+        kept.store(true, Ordering::Release);
+        let quantum = stream.buffer_size().ok().and_then(opened_quantum);
+        Ok((stream, quantum))
+    }
+
+    fn build_once<T: cpal::SizedSample + 'static, F: Float>(
+        &self,
+        config: &cpal::StreamConfig,
+        channels: usize,
+        mut hold: Hold<F>,
         faults: Arc<StreamFaults>,
         render: Render<F, T>,
     ) -> Result<cpal::Stream> {
-        let channels = block.channels();
         let delivering = Arc::clone(&faults);
         self.device
             .build_output_stream(
@@ -363,7 +472,15 @@ impl CpalDriver {
                         "CPAL callback frames {} exceeds MAX_FRAMES {MAX_FRAMES}",
                         data.len() / channels
                     );
-                    render(&mut block, data, edge::output_delay(&info.timestamp()));
+                    // The block leaves the holder only when the holder is
+                    // dropped, which is after the last callback: a callback
+                    // that found none would play silence, never the buffer
+                    // as the backend left it.
+                    let Some(block) = hold.block.as_mut() else {
+                        data.fill(T::EQUILIBRIUM);
+                        return;
+                    };
+                    render(block, data, edge::output_delay(&info.timestamp()));
                     delivering.delivered();
                 },
                 move |err| edge::record(&faults, &err),

@@ -162,7 +162,7 @@ fn dynamics_banks_refuse_a_block_of_unequal_width_and_a_key_of_other_frames() {
     // The key is a third view: it must hold the block's frames.
     let key = vec![vec![0.0f32; FRAMES + 1]];
     let (result, out) = run(1, 1, |block| {
-        GateBank::<f32>::new(RATE).process(
+        GateBank::<f32>::new(ChannelLayout::MONO, RATE).process(
             GateSignals::default(),
             Planes::from_vecs(&key).unwrap(),
             block,
@@ -178,7 +178,11 @@ fn dynamics_banks_refuse_a_block_of_unequal_width_and_a_key_of_other_frames() {
     assert!(out.iter().flatten().all(|&y| y == UNTOUCHED));
     let (result, _) = run(1, 1, |block| {
         let own = block.input();
-        CompressorBank::<f32>::new(RATE).process(CompressorSignals::default(), own, block)
+        CompressorBank::<f32>::new(ChannelLayout::MONO, RATE).process(
+            CompressorSignals::default(),
+            own,
+            block,
+        )
     });
     assert_eq!(result, Ok(()));
 }

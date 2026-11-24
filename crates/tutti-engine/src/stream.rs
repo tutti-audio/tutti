@@ -69,12 +69,21 @@ pub struct OutputSpec {
     /// engine renders `f32`. A backend's offset-binary unsigned type reports its
     /// signed twin of the same width.
     pub sample_format: SampleFormat,
-    /// The frames every callback carries, when the stream is opened with a
-    /// fixed buffer size (`None`: the backend's default, whose size is not
-    /// known until it calls back). A graph is prepared with it
-    /// (`tutti_graph::Prepare::with_quantum`), so a node that keeps work in
-    /// step with the device (a hosted out-of-process plugin, which ships one
-    /// callback's worth to its server per callback) can.
+    /// The frames every callback carries (`None`: not known).
+    ///
+    /// Before a stream is open it is the size asked for: `Some` opens the
+    /// stream with that fixed buffer, `None` with the backend's default. Once
+    /// [`OutputStream::start_with`] has opened a stream it is what the driver
+    /// reports the stream opened at ([`OpenedOutput::quantum`]), which can
+    /// differ from the request or be `None`; a stop returns the request. A
+    /// graph is prepared with it (`tutti_graph::Prepare::with_quantum`), so a
+    /// node that keeps work in step with the device (a hosted out-of-process
+    /// plugin, which ships one callback's worth to its server per callback)
+    /// can.
+    ///
+    /// What a driver's report means is the driver's: a fixed buffer size is a
+    /// request a backend may round or ignore, and the size a backend reports
+    /// is an estimate that is not enforced per callback.
     pub quantum: Option<OutputQuantum>,
 }
 
@@ -117,7 +126,9 @@ pub trait StreamDriver<F: Float = f32> {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Opens and starts a stream at `spec`, running `block` once per callback
-    /// and recording backend errors into `faults`.
+    /// and recording backend errors into `faults`. Answers the stream and the
+    /// callback size it runs at, which is `spec.quantum` when the driver runs
+    /// at the size it was asked for.
     ///
     /// # Errors
     /// Whatever the driver cannot open.
@@ -126,7 +137,21 @@ pub trait StreamDriver<F: Float = f32> {
         spec: &OutputSpec,
         block: OutputBlock<F>,
         faults: Arc<StreamFaults>,
-    ) -> Result<Self::Running, Self::Error>;
+    ) -> Result<OpenedOutput<Self::Running>, Self::Error>;
+}
+
+/// What a [`StreamDriver`] answers when it opens: the running stream and the
+/// callback size it runs at.
+///
+/// A plain record with no invariant between its fields, so both are public.
+#[derive(Debug)]
+pub struct OpenedOutput<R> {
+    /// The handle of the started stream.
+    pub stream: R,
+    /// The frames the stream's callbacks carry, as the driver reports them
+    /// (`None`: the backend cannot say). It becomes
+    /// [`OutputSpec::quantum`] while the stream is open.
+    pub quantum: Option<OutputQuantum>,
 }
 
 /// The handle a [`StreamDriver`] hands back. Dropping it stops the stream.
@@ -168,7 +193,14 @@ pub struct OutputStream {
     latency: Arc<StreamLatency>,
     /// The frames of the output callback, shared with each run's block.
     callback_frames: Arc<CallbackFrames>,
-    running: Option<Box<dyn RunningStream>>,
+    running: Option<Running>,
+}
+
+/// A held stream and the spec it opened at: the spec that was asked for, with
+/// the quantum the driver reported.
+struct Running {
+    stream: Box<dyn RunningStream>,
+    spec: OutputSpec,
 }
 
 // Hand-rolled: the running stream is not `Debug`. Reports the configuration a
@@ -176,7 +208,7 @@ pub struct OutputStream {
 impl std::fmt::Debug for OutputStream {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OutputStream")
-            .field("spec", &self.spec)
+            .field("spec", self.spec())
             .field("is_running", &self.is_running())
             .field("faults", &self.faults.count())
             .finish_non_exhaustive()
@@ -197,12 +229,14 @@ impl OutputStream {
     }
 
     /// Returns the configuration of the stream that is playing, or that the
-    /// next start would use.
+    /// next start would use. Its [`quantum`](OutputSpec::quantum) is the one
+    /// the open stream reports, and the request when none is open.
     pub fn spec(&self) -> &OutputSpec {
-        &self.spec
+        self.running.as_ref().map_or(&self.spec, |held| &held.spec)
     }
 
-    /// Replaces the spec the next start opens at.
+    /// Replaces the spec the next start opens at. A stream that is held keeps
+    /// reporting the spec it opened at until it is stopped.
     pub(crate) fn set_spec(&mut self, spec: OutputSpec) {
         self.spec = spec;
     }
@@ -258,10 +292,16 @@ impl OutputStream {
             .with_latency(Arc::clone(&self.latency))
             .with_callback_frames(Arc::clone(&self.callback_frames))
             .with_faults(Arc::clone(&self.faults));
-        let running = driver
+        let opened = driver
             .open(&self.spec, block, Arc::clone(&self.faults))
             .map_err(StartError::Driver)?;
-        self.running = Some(Box::new(running));
+        self.running = Some(Running {
+            stream: Box::new(opened.stream),
+            spec: OutputSpec {
+                quantum: opened.quantum,
+                ..self.spec.clone()
+            },
+        });
         Ok(())
     }
 
@@ -287,22 +327,22 @@ impl OutputStream {
     ///
     /// When this returns, the callback no longer runs.
     pub fn stop(&mut self) {
-        if let Some(running) = self.running.take() {
-            running.stop();
+        if let Some(held) = self.running.take() {
+            held.stream.stop();
         }
     }
 
     /// Returns the sample rate of the running stream, or of the config the
     /// next start would use.
     pub fn sample_rate(&self) -> SampleRate {
-        self.spec.sample_rate
+        self.spec().sample_rate
     }
 
     /// Returns the channel layout of the running stream, or of the config the
     /// next start would use. This is the width [`process_audio`](crate::process_audio)
     /// is handed.
     pub fn channels(&self) -> ChannelLayout {
-        self.spec.channels
+        self.spec().channels
     }
 
     /// Returns whether a stream is open **and** the backend has not reported

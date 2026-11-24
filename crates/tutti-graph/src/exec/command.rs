@@ -100,10 +100,8 @@ use tutti_rt::{CappedVec, Overflow, PushError, RingReader, RingWriter, ring};
 use tutti_units::{At, Latency};
 
 use crate::compile::plan::Plan;
-use crate::event::merge::{merge_into, merge_params, merge_walk};
 use crate::event::types::{Event, EventKind};
 use crate::model::spec::EventInputPort;
-use crate::node::MAX_PORTS;
 use crate::node::param_event::{ParamEvent, ParamKind};
 use crate::node::time::Env;
 use crate::node::time::{BeatCrossings, Due, Offset};
@@ -624,10 +622,6 @@ pub(crate) trait Delivered: Copy {
 
     /// The delivery of `kind` at `offset`.
     fn at(offset: Offset, kind: Self::Kind) -> Self;
-
-    /// Merge `sources` into `out` as this type's input merge does; returns
-    /// how many did not fit.
-    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32;
 }
 
 impl Delivered for Event {
@@ -636,10 +630,6 @@ impl Delivered for Event {
     fn at(offset: Offset, kind: EventKind) -> Self {
         Self { offset, kind }
     }
-
-    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32 {
-        merge_into(sources, out)
-    }
 }
 
 impl Delivered for ParamEvent {
@@ -647,10 +637,6 @@ impl Delivered for ParamEvent {
 
     fn at(offset: Offset, kind: ParamKind) -> Self {
         Self { offset, kind }
-    }
-
-    fn merge(sources: &[&[Self]], out: &mut CappedVec<Self>) -> u32 {
-        merge_params(sources, out)
     }
 }
 
@@ -712,137 +698,26 @@ impl<V: Delivered> Clone for DueView<'_, V> {
 
 impl<V: Delivered> Copy for DueView<'_, V> {}
 
-impl<V: Delivered> DueView<'_, V> {
-    /// Merge this block's deliveries for plan unit `unit` into `buf`, each
-    /// port's after `base(port)` (the port's events as the executor would
-    /// otherwise hand them), and record `(port, range in buf)` in `views`.
-    /// Returns how many views were written, and how many events did not
-    /// fit: never grows `buf`.
-    pub(crate) fn overlay<'e>(
-        &self,
-        unit: PlanUnitId,
-        base: impl Fn(u16) -> &'e [V],
-        buf: &mut CappedVec<V>,
-        views: &mut [(u16, u32, u32)],
-    ) -> (usize, u32)
-    where
-        V: 'e,
-    {
-        buf.clear();
-        let start = self.due.partition_point(|d| d.unit < unit);
-        let end = self.due.partition_point(|d| d.unit <= unit);
-        let mut n = 0;
-        let mut dropped = 0;
-        let mut i = start;
-        while i < end {
-            let port = self.due[i].port;
-            let run = self.due[i..end].partition_point(|d| d.port == port) + i;
-            let from = buf.len() as u32;
-            dropped += V::merge(&[base(port), &self.events[i..run]], buf);
-            views[n] = (port, from, buf.len() as u32);
-            n += 1;
-            i = run;
-        }
-        (n, dropped)
+impl<'a, V: Delivered> DueView<'a, V> {
+    /// This block's deliveries to port `port` of plan unit `unit`, sorted by
+    /// offset.
+    pub(crate) fn port(&self, unit: PlanUnitId, port: u16) -> &'a [V] {
+        let start = self
+            .due
+            .partition_point(|d| (d.unit, d.port) < (unit, port));
+        let end = self
+            .due
+            .partition_point(|d| (d.unit, d.port) <= (unit, port));
+        &self.events[start..end]
     }
 }
 
-/// This block's scheduled deliveries: what [`DueView::overlay`] merges into
-/// a node's event and param inputs.
+/// This block's scheduled deliveries: what a node's views take in after the
+/// events of their sources.
 #[derive(Clone, Copy)]
 pub(crate) struct Deliveries<'a> {
     pub(crate) events: DueView<'a, Event>,
     pub(crate) params: DueView<'a, ParamEvent>,
-}
-
-impl DueView<'_, Event> {
-    /// A node's whole event input for the block under a declared bound of
-    /// `bound` events, all ports together: every port's `base(port)` with its
-    /// scheduled deliveries after it, cut to the earliest `bound` by
-    /// `(offset, port)` with note-offs first (`merge_walk`). Returns `None`
-    /// when everything fits. Otherwise every port's events are written to
-    /// `buf` and its `(port, range)` recorded in `views`, and the result is
-    /// how many views and how many events were cut. Never grows `buf`.
-    pub(crate) fn overlay_bounded<'e>(
-        &self,
-        unit: PlanUnitId,
-        ports: usize,
-        bound: usize,
-        base: impl Fn(u16) -> &'e [Event],
-        buf: &mut CappedVec<Event>,
-        views: &mut [(u16, u32, u32)],
-    ) -> Option<(usize, u32)> {
-        let start = self.due.partition_point(|d| d.unit < unit);
-        let end = self.due.partition_point(|d| d.unit <= unit);
-        let mine = &self.due[start..end];
-        let mut sources: [&[Event]; 2 * MAX_PORTS] = [&[]; 2 * MAX_PORTS];
-        let mut total = 0;
-        for p in 0..ports {
-            let port = p as u16;
-            let from = start + mine.partition_point(|d| d.port < port);
-            let to = start + mine.partition_point(|d| d.port <= port);
-            sources[2 * p] = base(port);
-            sources[2 * p + 1] = &self.events[from..to];
-            total += sources[2 * p].len() + sources[2 * p + 1].len();
-        }
-        if total <= bound {
-            return None;
-        }
-        let sources = &sources[..2 * ports];
-        buf.clear();
-        let room = bound.min(buf.capacity());
-        let mut dropped = 0;
-        // The walk is the same for every port: each pass keeps its own.
-        for (p, view) in views.iter_mut().enumerate().take(ports) {
-            let from = buf.len() as u32;
-            dropped = merge_walk(sources, room, |i, e| {
-                if i / 2 == p {
-                    buf.push(e);
-                }
-            });
-            *view = (p as u16, from, buf.len() as u32);
-        }
-        Some((ports, dropped))
-    }
-}
-
-/// Where a node's scheduled events and param events are merged into its
-/// inputs: preallocated, and never grown.
-pub(crate) struct Overlay {
-    pub(crate) events: CappedVec<Event>,
-    pub(crate) params: CappedVec<ParamEvent>,
-}
-
-impl Overlay {
-    /// Room for `capacity` of each ([`overlay_capacity`]). Allocates.
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self {
-            events: CappedVec::with_capacity(capacity),
-            params: CappedVec::with_capacity(capacity),
-        }
-    }
-}
-
-/// Capacity of the executor's overlay buffer for `plan`: enough for the
-/// widest node's event inputs at full slots, every flushed event, and every
-/// outstanding command — so [`DueView::overlay`] can never be short.
-pub(crate) fn overlay_capacity(plan: &Plan, cap: usize, flushed: usize) -> usize {
-    let widest = plan
-        .program
-        .ops
-        .iter()
-        .filter_map(|op| match *op {
-            crate::compile::plan::Op::Node { event_in, .. } => Some(
-                plan.program.event_list[event_in.range()]
-                    .iter()
-                    .map(|&s| plan.program.sizing.events[s].events(cap))
-                    .sum::<usize>(),
-            ),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(0);
-    widest + flushed + COMMAND_CAPACITY
 }
 
 #[cfg(test)]

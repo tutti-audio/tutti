@@ -351,6 +351,64 @@ fn ties_break_by_key_across_edge_kinds() {
     assert_eq!(order(&plan), [x, a, b]);
 }
 
+/// An event input is read through a view its node op writes: the view is
+/// never the slot it is merged from (the op reads the one and writes the
+/// other), each input has a view of its own, and an input nothing feeds
+/// reads the empty slot.
+#[test]
+fn an_event_inputs_view_is_its_own_slot_written_by_the_node_op() {
+    let (x, a) = (NodeKey(1), NodeKey(5));
+    let mut t = Topology::default();
+    t.nodes.insert(x, spec("src", 0, 0));
+    t.nodes.insert(a, spec("ev", 0, 0));
+    let mut g = GraphSpec::new(t);
+    g.connect_events(
+        EventInputPort::new(a, 0),
+        EventEdge::Direct(EventOutputPort::new(x, 0)),
+    );
+    let shapes: Shapes = [
+        (x, Shape::EMPTY.events(0, 1)),
+        (a, Shape::EMPTY.events(2, 0)),
+    ]
+    .into();
+    let plan = compile(
+        &g.validate().unwrap(),
+        &shapes,
+        &common::prepare(PREP),
+        None,
+    )
+    .unwrap()
+    .0;
+    let (src, views): (Vec<_>, Vec<_>) = plan
+        .ops()
+        .iter()
+        .find_map(|op| match *op {
+            Op::Node {
+                unit,
+                event_src,
+                event_in,
+                ..
+            } if plan.units()[unit.index()].key == a => Some((
+                plan.event_list()[event_src.range()].to_vec(),
+                plan.event_list()[event_in.range()].to_vec(),
+            )),
+            _ => None,
+        })
+        .expect("the node op");
+    assert_eq!((src.len(), views.len()), (2, 2), "a view for each input");
+    assert!(
+        views.iter().all(|v| !src.contains(v)),
+        "a view is not its source"
+    );
+    assert_ne!(views[0], views[1], "each input its own view");
+    assert_eq!(
+        src[1],
+        tutti_graph::EventSlotId::EMPTY,
+        "an unwired input reads the empty slot"
+    );
+    plan.verify().expect("sound");
+}
+
 // ---------------------------------------------------------------------------
 // Latency: the plan's delays are exactly `latency::delays`'.
 // ---------------------------------------------------------------------------
