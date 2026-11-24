@@ -265,3 +265,28 @@ pub(crate) fn drive_kernel<K: Kernel>(
     }
     out
 }
+
+/// The tail `node` reports for one block of `inputs` (one slice per input port) at frame 0,
+/// its params at their bases.
+pub(crate) fn reported_tail(node: &mut dyn Node, inputs: &[&[f32]]) -> Option<tutti_units::Tail> {
+    use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+    let env = Env {
+        frame: tutti_units::Frame::new(0),
+        sample_rate: RATE,
+        block_len: Samples::new(inputs[0].len()),
+        transport: TransportPosition::default(),
+        changes: TransportChanges::NONE,
+        play: PlayClock::ZERO,
+    };
+    tutti_graph::contract::drive_input(node, &env, Planes::new(inputs).unwrap(), &[], &[])
+        .reported_tail
+}
+
+/// The addresses of the controls `set` flags `no_ring`, in port order.
+pub(crate) fn non_ringing<S: ControlSet>(set: &S) -> Vec<tutti_units::UnitAddr> {
+    let addrs = set.addrs();
+    (0..addrs.len())
+        .filter(|&k| !set.control(k).rings)
+        .map(|k| addrs[k])
+        .collect()
+}

@@ -178,10 +178,11 @@ pub trait Kernel: Clone + Send + 'static {
 ///
 /// A kernel that declares a finite or unbounded [`tail`](Kernel::tail) rings for at most
 /// that long, and the node holds it to it. Each block it narrows the declared ceiling to
-/// what the controls in force ring ([`Kernel::tail_of`], the longest of what a driven port
-/// takes in the block), held at the longer figure until a shorter decay has been heard
-/// out, and reports it ([`Io::report_tail`]). Once the input has been silent for the
-/// reported tail plus the latency, the node cuts the output off, resets the kernel and parks
+/// what the controls in force ring ([`Kernel::tail_of`] at the block's last frame; the
+/// ceiling itself while a control signal drives a control the tail reads, which may take any
+/// value later: [`Control::rings`](crate::Control::rings)), held at the longer figure until a
+/// shorter decay has been heard out, and reports it ([`Io::report_tail`]). Once the input has
+/// been silent for the reported tail plus the latency, the node cuts the output off, resets the kernel and parks
 /// ([`Status::Idle`]): what rings is below the kernel's floor, and a parked node is a fresh
 /// one when it wakes (its stream clock restarts with it).
 ///
@@ -407,12 +408,13 @@ impl<K: Kernel> KernelNode<K> {
         if moved {
             t.current = tail_frames(self.kernel.tail_of(target));
         }
-        let mut current = t.current;
-        if let Some(longest) = self.params.longest(io)
-            && Some(longest) != t.applied
-        {
-            current = current.max(tail_frames(self.kernel.tail_of(&longest)));
-        }
+        // A driven control the tail reads may take any value later, and its block's values
+        // do not cover that: the block reports the ceiling.
+        let current = if self.params.ring_driven(io) {
+            tail_frames(self.kernel.tail())
+        } else {
+            t.current
+        };
         let last_input = (0..inputs)
             .filter_map(|c| {
                 io.input(c)[..size]

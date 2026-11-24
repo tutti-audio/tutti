@@ -379,11 +379,9 @@ fn an_idle_reverb_wakes_as_a_fresh_one() {
 
 /// A port the graph drives is read on the stream's 32-frame grid, as the FDN's is: a control signal
 /// held at 0.9 renders as a cell at 0.9, whatever the blocks, and a control signal that rises through
-/// the stream renders the same cut into blocks of 32, 64 and 100 frames. And the tail is
-/// reported from the *longest* room the port takes in the block, so a decay that falls
-/// through the block is not reported short.
+/// the stream renders the same cut into blocks of 32, 64 and 100 frames.
 #[test]
-fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
+fn a_modulated_port_is_read_on_the_grid() {
     // Long enough for the combs to come round, where the room is heard.
     let x = noise(3, 4_096);
     let held = vec![0.9f32; BLOCK];
@@ -416,19 +414,69 @@ fn a_modulated_port_is_read_on_the_grid_and_its_peak_sets_the_tail() {
     for block in [64, 100] {
         assert_eq!(render(block, true), whole, "blocks of {block}");
     }
+}
 
-    // Falling through the block: 0.9 at the start, 0.1 at the end.
-    let falling: Vec<f32> = (0..BLOCK)
-        .map(|i| 0.9 - 0.8 * i as f32 / (BLOCK - 1) as f32)
-        .collect();
+/// The ceiling the shape declares, in frames.
+fn ceiling(node: &FreeverbNode<f32>) -> usize {
+    match node.shape().tail {
+        Tail::Finite(n) => n.get(),
+        other => panic!("a finite ceiling, not {other:?}"),
+    }
+}
+
+/// A driven room may take any value after the block, so a block whose port is low reports the
+/// ceiling the shape declares, not the figure of the low room.
+#[test]
+fn a_driven_room_reports_the_ceiling_not_the_blocks_figure() {
+    let none: Option<&[f32]> = None;
+    let low = vec![0.1f32; BLOCK];
     let mut rig = Rig::new(live(controls(0.5, 0.5)));
-    let d = rig.block(&impulse(), &[Some(&falling), none]);
+    let ceiling = ceiling(&rig.node);
+    let d = rig.block(&impulse(), &[Some(&low), none]);
+    assert_eq!(reported(&d), ceiling);
     assert!(
-        reported(&d) >= tail_of(controls(0.9, 0.5)),
-        "{} against the long room's {}",
-        reported(&d),
-        tail_of(controls(0.9, 0.5))
+        tail_of(controls(0.1, 0.5)) < ceiling,
+        "the low room's figure is below the ceiling"
     );
+}
+
+/// The tail reads the room and not the damping: moving the damping alone leaves the reported
+/// tail, which is what its `no_ring` flag promises, and a driven damping reports the cells'
+/// figure, below the ceiling.
+#[test]
+fn the_damping_does_not_change_the_reported_tail() {
+    let base = tail_of(controls(0.5, 0.5));
+    for damp in [0.0, 0.25, 0.75, 1.0] {
+        assert_eq!(tail_of(controls(0.5, damp)), base, "damping {damp}");
+    }
+    let none: Option<&[f32]> = None;
+    let heavy = vec![1.0f32; BLOCK];
+    let mut rig = Rig::new(live(controls(0.5, 0.5)));
+    let ceiling = ceiling(&rig.node);
+    let d = rig.block(&impulse(), &[none, Some(&heavy)]);
+    assert_eq!(reported(&d), base);
+    assert!(base < ceiling);
+}
+
+/// With the port gone the cells' figure applies again, but the ring the ceiling owed is held
+/// until heard out, measured from the last input frame: eight silent blocks and a block of
+/// new input at its frame 0 take off nine blocks.
+#[test]
+fn a_released_port_keeps_the_ceilings_ring_until_heard_out() {
+    let none: Option<&[f32]> = None;
+    let low = vec![0.1f32; BLOCK];
+    let mut rig = Rig::new(live(controls(0.1, 0.5)));
+    let ceiling = ceiling(&rig.node);
+    assert_eq!(
+        reported(&rig.block(&impulse(), &[Some(&low), none])),
+        ceiling
+    );
+    for _ in 0..8 {
+        assert_eq!(reported(&rig.silent()), ceiling, "held");
+    }
+    let owed = ceiling - 9 * BLOCK;
+    assert!(tail_of(controls(0.1, 0.5)) < owed);
+    assert_eq!(reported(&rig.block(&impulse(), &[])), owed);
 }
 
 /// A non-finite write to a cell reads as unchanged: the node keeps the last
