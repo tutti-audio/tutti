@@ -62,6 +62,7 @@
 #![forbid(unsafe_code)]
 
 mod auth;
+mod challenge;
 mod command;
 mod config;
 mod datagram;
