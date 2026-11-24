@@ -377,8 +377,7 @@ struct Seen {
 ///   lane does not re-send it, so what the target renders does not depend
 ///   on where blocks fall.
 /// - **Exact mode.** A [`PortLane`] whose program is automation alone
-///   sends the curve's own shaped pieces (as `AutomationLaneNode` sent
-///   them); a curve that cannot say its pieces takes the grid. A
+///   sends the curve's own shaped pieces; a curve that cannot say its pieces takes the grid. A
 ///   [`ForeignLane`] never uses it: a plugin receives points.
 /// - **Steady.** When nothing moves (stopped with no seconds-clock layer,
 ///   or no layers but constant ones, and every input arrived) the lane

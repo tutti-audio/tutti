@@ -290,9 +290,8 @@ pub use tutti_session::{ParamRef, RouteSpec};
 /// ```
 pub mod nodes {
     pub use tutti_nodes::automation::{
-        AutomationLaneConfig, AutomationLaneNode, AutomationRecorder, ControlLaneNode, ForeignLane,
-        ForeignLaneConfig, LaneKind, PortLane, RecordMode, RecordingConfig, Trajectory,
-        UnitLaneConfig,
+        AutomationRecorder, ControlLaneNode, ForeignLane, ForeignLaneConfig, LaneKind, PortLane,
+        RecordMode, RecordingConfig, Trajectory, UnitLaneConfig,
     };
     pub use tutti_nodes::{
         AdditiveConfig, AdditiveNode, AmbisonicDecoderConfig, AmbisonicDecoderNode,

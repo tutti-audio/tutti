@@ -115,8 +115,8 @@
 //!   `tutti_modulation::ControlSource`: `EnvelopeFollowerNode`,
 //!   `NoteEnvelopeNode`), and `Modulation`, the reconciler that builds them from
 //!   `tutti_modulation` declarations.
-//! - **Automation / convolution** — the `automation` module's `AutomationLaneNode`
-//!   (a curve as audio) and recording units, and `ConvolverNode`.
+//! - **Automation / convolution** — the `automation` module's recording units, and
+//!   `ConvolverNode`.
 //!
 //! A `*Node` is the graph-facing node; the inner object some are built from,
 //! `Waveform`, carries no suffix, because it is not a node and

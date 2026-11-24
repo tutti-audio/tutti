@@ -437,12 +437,6 @@ pub(in crate::gates) const ALLOW: &[Allow] = &[
     ),
     ty(
         "crates/tutti-nodes/",
-        "AutomationLaneConfig",
-        WIDTH,
-        FIXED_SOURCE,
-    ),
-    ty(
-        "crates/tutti-nodes/",
         "NoteEnvelopeConfig",
         WIDTH,
         NO_AUDIO_PORT,

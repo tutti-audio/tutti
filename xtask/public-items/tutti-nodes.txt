@@ -56,9 +56,6 @@ fn automation::control_lane::LaneProbe::lend
 fn automation::control_lane::UnitLaneConfig::knob
 fn automation::control_lane::UnitLaneConfig::new
 fn automation::control_lane::UnitLaneConfig::range
-fn automation::lane::AutomationLaneConfig::new
-fn automation::lane::AutomationLaneNode::fork_fresh
-fn automation::lane::AutomationLaneNode::value_at
 fn automation::recording::AutomationRecorder::finish
 fn automation::recording::AutomationRecorder::is_taking
 fn automation::recording::AutomationRecorder::mode
@@ -335,8 +332,6 @@ struct automation::control_lane::LaneControls
 struct automation::control_lane::LaneProbe
 struct automation::control_lane::PortLane
 struct automation::control_lane::UnitLaneConfig
-struct automation::lane::AutomationLaneConfig
-struct automation::lane::AutomationLaneNode
 struct automation::recording::AutomationRecorder
 struct automation::recording::RecordingConfig
 struct bit_crusher::BitCrusherConfig

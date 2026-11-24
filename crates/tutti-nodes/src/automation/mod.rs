@@ -4,11 +4,9 @@
 //! so consumers need only one import path.
 //!
 //! Two pieces, one domain — the two directions of a [`Curve`]:
-//! - the playback-side [`AutomationLaneNode`] graph node, reading a curve at
-//!   the transport's beat position (`beat -> value`) as audio, and the
-//!   [`ControlLaneNode`], which sends a target's whole `ControlProgram`
-//!   (automation and modulation) as curve-segment events for a param port
-//!   (a piece's [`Law`] rides in the segment);
+//! - the playback-side [`ControlLaneNode`], which sends a target's whole
+//!   `ControlProgram` (automation and modulation) as curve-segment events for
+//!   a param port (a piece's [`Law`] rides in the segment);
 //! - the capture-side [`AutomationRecorder`], fed `(beat, value)` samples during a write /
 //!   touch / latch take and handing back an trajectory.
 //!
@@ -16,7 +14,6 @@
 //! engine holds no registry and no target trait. See [`AutomationRecorder`] for why.
 
 mod control_lane;
-mod lane;
 mod recording;
 
 // The `Curve` trait (beat → value) lives in tutti-modulation — modulation depends on it
@@ -28,7 +25,6 @@ pub use control_lane::{
     ControlLaneNode, ForeignLane, ForeignLaneConfig, ForeignLaneControls, LaneControls, LaneKind,
     PortLane, UnitLaneConfig,
 };
-pub use lane::{AutomationLaneConfig, AutomationLaneNode};
 pub use recording::{AutomationRecorder, RecordMode, RecordingConfig};
 pub use tutti_modulation::Curve;
 

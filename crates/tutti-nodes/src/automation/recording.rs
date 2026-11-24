@@ -1,5 +1,5 @@
 //! Automation *recording* — the capture side, companion to the playback-side
-//! [`AutomationLaneNode`](crate::automation::AutomationLaneNode).
+//! [`ControlLaneNode`](crate::automation::ControlLaneNode).
 //!
 //! [`AutomationRecorder`] is the **write** side of a [`Curve`]: where a curve is
 //! `beat -> value`, a recorder is fed `(beat, value)` samples by whoever watches

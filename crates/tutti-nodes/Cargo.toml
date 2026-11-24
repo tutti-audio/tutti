@@ -40,7 +40,7 @@ tutti-dsp = { version = "0.0.1", path = "../tutti-dsp", default-features = false
 # The node contract every node here implements.
 tutti-graph = { version = "0.0.1", path = "../tutti-graph" }
 
-# Trajectory primitives consumed by `AutomationLaneNode` + `Recorder`, re-exported via
+# Trajectory primitives consumed by the control lane and the recorder, re-exported via
 # `tutti_nodes::automation`.
 tutti-curve = { version = "0.0.1", path = "../tutti-curve" }
 
