@@ -12,13 +12,13 @@
 //!   so a receiver can reconstruct the sender's timing rather than inherit the
 //!   transport's jitter.
 
-pub mod active_sensing;
+pub(crate) mod active_sensing;
 mod clock_master;
-pub mod jr_timestamp;
-pub mod machine_control_out;
-pub mod out_node;
-pub mod sync_messages;
-pub mod sync_out;
+pub(crate) mod jr_timestamp;
+pub(crate) mod machine_control_out;
+pub(crate) mod out_node;
+pub(crate) mod sync_messages;
+pub(crate) mod sync_out;
 
 pub use active_sensing::{ACTIVE_SENSING_INTERVAL, ActiveSensingSender};
 pub use jr_timestamp::{JrClock, JrStream};

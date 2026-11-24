@@ -20,7 +20,7 @@ pub(crate) enum MpeControl {
 /// A voice's per-note expression received so far. Which messages reach a voice (Detach, the bend's
 /// sensitivity) is `tutti-voicing`'s decision; the values arrive resolved.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MpeVoiceState {
+pub(crate) struct MpeVoiceState {
     /// Per-note pressure.
     pub pressure: Normalized,
     /// Per-note slide, centred at [`SLIDE_CENTER`].

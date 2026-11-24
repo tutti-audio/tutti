@@ -32,12 +32,12 @@ const REASON: &str = "no MIDI backend on this platform (alsa-lib < 1.2.10)";
 
 /// A [`MidiEndpoints`] that has none.
 #[derive(Debug, Default)]
-pub struct StubEndpoints;
+pub(super) struct StubEndpoints;
 
 impl StubEndpoints {
     /// The stub backend. Stateless — this is `Default` under another name, kept
     /// so every backend is constructed the same way.
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self
     }
 }

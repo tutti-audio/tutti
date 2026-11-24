@@ -12,7 +12,7 @@ use tutti_midi_network::{
 use tutti_ump::Ump;
 use tutti_ump::{EndpointName, ProductInstanceId};
 
-pub fn identity(name: &str, id: &str) -> EndpointIdentity {
+pub(crate) fn identity(name: &str, id: &str) -> EndpointIdentity {
     EndpointIdentity::new(
         EndpointName::new(name).unwrap(),
         ProductInstanceId::new(id).unwrap(),
@@ -20,43 +20,43 @@ pub fn identity(name: &str, id: &str) -> EndpointIdentity {
     .unwrap()
 }
 
-pub fn host_addr() -> SocketAddr {
+pub(crate) fn host_addr() -> SocketAddr {
     "10.0.0.1:5673".parse().unwrap()
 }
 
-pub fn client_addr() -> SocketAddr {
+pub(crate) fn client_addr() -> SocketAddr {
     "10.0.0.2:50000".parse().unwrap()
 }
 
 /// A nonce the tests know: the same every time.
-pub fn fixed_nonce() -> Nonce {
+pub(crate) fn fixed_nonce() -> Nonce {
     Nonce::new(*b"0123456789abcdef").unwrap()
 }
 
 /// The nonce source of a Host that issues [`fixed_nonce`] every time.
-pub fn fixed_nonce_source() -> Result<Nonce, getrandom::Error> {
+pub(crate) fn fixed_nonce_source() -> Result<Nonce, getrandom::Error> {
     Ok(fixed_nonce())
 }
 
-pub fn note_on(note: u8) -> Ump {
+pub(crate) fn note_on(note: u8) -> Ump {
     Ump([0x4090_0000 | (u32::from(note) << 8), 0x8000_0000, 0, 0])
 }
 
 /// What the network does to a datagram.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fate {
+pub(crate) enum Fate {
     Deliver,
     Drop,
     Twice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
+pub(crate) enum Direction {
     ClientToHost,
     HostToClient,
 }
 
-pub struct Sim {
+pub(crate) struct Sim {
     pub now: Instant,
     pub host: Host,
     pub client: Client,
@@ -68,11 +68,11 @@ pub struct Sim {
 }
 
 impl Sim {
-    pub fn new(host: HostConfig, credentials: Credentials, client: SessionConfig) -> Self {
+    pub(crate) fn new(host: HostConfig, credentials: Credentials, client: SessionConfig) -> Self {
         Self::with_nonces(host, credentials, client, fixed_nonce_source)
     }
 
-    pub fn with_nonces(
+    pub(crate) fn with_nonces(
         host: HostConfig,
         credentials: Credentials,
         client: SessionConfig,
@@ -96,7 +96,7 @@ impl Sim {
         }
     }
 
-    pub fn open() -> Self {
+    pub(crate) fn open() -> Self {
         Self::new(
             HostConfig::new(identity("Studio", "HOST-1")),
             Credentials::none(),
@@ -104,12 +104,12 @@ impl Sim {
         )
     }
 
-    pub fn set_fate(&mut self, fate: impl FnMut(Direction, &[u8]) -> Fate + 'static) {
+    pub(crate) fn set_fate(&mut self, fate: impl FnMut(Direction, &[u8]) -> Fate + 'static) {
         self.fate = Box::new(fate);
     }
 
     /// Moves datagrams both ways until none is queued, then collects events.
-    pub fn flush(&mut self) {
+    pub(crate) fn flush(&mut self) {
         loop {
             let mut moved = false;
             while let Some(t) = self.client.poll_transmit() {
@@ -153,7 +153,7 @@ impl Sim {
 
     /// Advances the clock to `by` later, running both endpoints' timeouts at
     /// each deadline on the way, so no due work is skipped.
-    pub fn advance(&mut self, by: Duration) {
+    pub(crate) fn advance(&mut self, by: Duration) {
         let end = self.now + by;
         for _ in 0..1_000_000 {
             let next = [self.client.deadline(), self.host.deadline()]
@@ -171,13 +171,13 @@ impl Sim {
         self.now = end;
     }
 
-    pub fn connect(&mut self) {
+    pub(crate) fn connect(&mut self) {
         self.client.connect(self.now);
         self.flush();
     }
 
     /// The commands of every logged datagram in one direction.
-    pub fn commands(&self, dir: Direction) -> Vec<Command> {
+    pub(crate) fn commands(&self, dir: Direction) -> Vec<Command> {
         self.log
             .iter()
             .filter(|(d, _)| *d == dir)
@@ -186,7 +186,7 @@ impl Sim {
     }
 
     /// The UMPs a side received, in order.
-    pub fn umps(events: &[Event]) -> Vec<Ump> {
+    pub(crate) fn umps(events: &[Event]) -> Vec<Ump> {
         events
             .iter()
             .filter_map(|e| match e {
