@@ -639,11 +639,17 @@ mod machine_control {
         commands.remove(0)
     }
 
-    fn fields(source: u8, data: &[u8]) -> Vec<MmcInfoField> {
-        match heard(&framed(source, 0x07, data)).message {
-            Universal::MachineControlResponse(fields) => fields.iter().collect(),
+    fn response(source: u8, data: &[u8]) -> (SysexDeviceId, Vec<MmcInfoField>) {
+        match parse(&framed(source, 0x07, data)) {
+            UniversalRead::MachineControlResponse { from, fields } => {
+                (from, fields.iter().collect())
+            }
             other => panic!("{other:?}"),
         }
+    }
+
+    fn fields(source: u8, data: &[u8]) -> Vec<MmcInfoField> {
+        response(source, data).1
     }
 
     /// The label of `h:m:s:f` at 30 frames.
@@ -1088,10 +1094,7 @@ mod machine_control {
     fn a_response_has_a_source_device() {
         assert_eq!(fields(5, &[0x7C]), [MmcInfoField::Wait]);
         assert_eq!(fields(5, &[0x7F]), [MmcInfoField::Resume]);
-        assert_eq!(
-            heard(&framed(5, 0x07, &[0x7C])).to,
-            Recipient::Device(SysexDeviceId::of(5))
-        );
+        assert_eq!(response(5, &[0x7C]).0, SysexDeviceId::of(5));
         assert_eq!(parse(&framed(0x7F, 0x07, &[0x7C])), UniversalRead::Unread);
     }
 
@@ -1538,11 +1541,14 @@ mod machine_control {
     /// RP-013 p.40 (b): a COMMAND SEGMENT whose count is more than the bytes left
     /// in its message is a segment cut short, read as such (with the commands
     /// before it) and not as an unreadable message. No writer can name it: it is
-    /// a `Universal`, not an `MmcCommand`.
+    /// a `UniversalRead`, not a `Universal`.
     #[test]
     fn a_segment_whose_count_passes_the_message_is_truncated() {
-        let truncated = |data: &[u8]| match heard(&framed(0x7F, 0x06, data)).message {
-            Universal::MachineControlTruncated(before) => before.iter().collect::<Vec<_>>(),
+        let truncated = |data: &[u8]| match parse(&framed(0x7F, 0x06, data)) {
+            UniversalRead::MachineControlTruncated { to, before } => {
+                assert_eq!(to, Recipient::AllCall);
+                before.iter().collect::<Vec<_>>()
+            }
             other => panic!("{other:?}"),
         };
         assert_eq!(truncated(&[0x53, 0x09, 0x01, 0x02]), []);
@@ -1558,10 +1564,7 @@ mod machine_control {
         ));
         assert!(!matches!(
             parse(&framed(0x7F, 0x06, &[0x44, 0x09, 0x01])),
-            UniversalRead::Universal(Addressed {
-                message: Universal::MachineControlTruncated(_),
-                ..
-            })
+            UniversalRead::MachineControlTruncated { .. }
         ));
     }
 
@@ -1808,15 +1811,14 @@ fn the_machine_control_fields_keep_the_range_contract() {
 mod write {
     use super::*;
     use tutti_midi_protocol::{
-        ChannelMask, KeyChange, KeyChanges, KeyTable, NotWritable, OctaveOffsets, Timing,
-        TuningFrequency, TuningMessage, TuningName,
+        ChannelMask, KeyChange, KeyChanges, KeyTable, OctaveOffsets, TuningFrequency,
+        TuningMessage, TuningName,
     };
     use tutti_ump::U14;
 
     fn payload(to: Recipient, message: Universal) -> Vec<u8> {
         Addressed { to, message }
             .payload()
-            .unwrap()
             .iter()
             .map(|b| b.get())
             .collect()
@@ -1905,6 +1907,12 @@ mod write {
                 program: U7::of(3),
             },
             TuningMessage::KeyDump {
+                bank: None,
+                program: U7::of(3),
+                name,
+                table: KeyTable::new(words),
+            },
+            TuningMessage::KeyDump {
                 bank: Some(U7::of(1)),
                 program: U7::of(3),
                 name,
@@ -1916,20 +1924,23 @@ mod write {
                 name,
                 offsets: fine,
             },
-            TuningMessage::NoteChange {
-                timing: Timing::RealTime,
+            TuningMessage::RealTimeNoteChange {
                 bank: None,
                 program: U7::of(2),
                 changes,
             },
-            TuningMessage::NoteChange {
-                timing: Timing::NonRealTime,
+            TuningMessage::RealTimeNoteChange {
                 bank: Some(U7::of(4)),
                 program: U7::of(2),
                 changes,
             },
+            TuningMessage::NoteChange {
+                bank: U7::of(4),
+                program: U7::of(2),
+                changes,
+            },
             TuningMessage::OctaveTuning {
-                timing: Timing::RealTime,
+                timing: tutti_midi_protocol::Timing::RealTime,
                 channels: ChannelMask::from_bits(0b1010_0000_0000_0101),
                 offsets: OctaveOffsets::ZERO,
             },
@@ -1938,31 +1949,26 @@ mod write {
         }
     }
 
-    /// The grammar has no bytes for a Non-Real Time Single Note Tuning Change
-    /// with no bank, and the reader-made Machine Control variants are not written.
+    /// A Machine Control Response is written by its fields, from its source
+    /// device, and read back as one from that device.
     #[test]
-    fn what_has_no_bytes_is_refused_by_name() {
-        let refused = |message| {
-            Addressed {
-                to: Recipient::AllCall,
-                message,
-            }
-            .payload()
-        };
-        assert!(matches!(
-            refused(Universal::Tuning(TuningMessage::NoteChange {
-                timing: Timing::NonRealTime,
-                bank: None,
-                program: U7::of(0),
-                changes: KeyChanges::new(),
-            })),
-            Err(NotWritable::NonRealTimeNoteChangeWithoutBank)
-        ));
+    fn a_response_reads_back_from_its_source() {
+        let mut fields = tutti_midi_protocol::MmcFields::new();
+        assert!(
+            fields
+                .push(&tutti_midi_protocol::MmcInfoField::Wait)
+                .is_ok()
+        );
+        let source = SysexDeviceId::of(5);
+        let mut framed = vec![0xF0];
+        framed.extend(fields.payload(source).as_bytes());
+        framed.push(0xF7);
         assert_eq!(
-            refused(Universal::MachineControlTruncated(
-                tutti_midi_protocol::MmcCommands::new()
-            )),
-            Err(NotWritable::MachineControlTruncated)
+            parse(&framed),
+            UniversalRead::MachineControlResponse {
+                from: source,
+                fields
+            }
         );
     }
 }

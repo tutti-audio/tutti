@@ -31,7 +31,7 @@ pub use input_inlets::{
 pub use input_node::{
     MIDI_INPUT_DENSITY, MIDI_INPUT_EVENT_CAPACITY, MidiInputControls, MidiInputNode, MidiInputPorts,
 };
-pub use keys::{LIVE_INLET_CAPACITY, MidiKeys, SendUniversalError};
+pub use keys::{LIVE_INLET_CAPACITY, MidiKeys};
 pub use mpe_translator::MpeTranslator;
 pub use route::{RouteRule, compile_routes};
 pub use transform_node::{MpeTransformControls, MpeTransformNode};
