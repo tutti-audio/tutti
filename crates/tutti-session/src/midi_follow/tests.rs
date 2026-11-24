@@ -60,19 +60,26 @@ fn a_followed_command_is_placed_at_its_frame_not_the_next_block() {
     let stand = rolling();
     let mut out = Vec::new();
     let events = vec![
-        Heard::Locate {
+        BeatClockEvent::Clock(ClockEvent::Locate {
             position: Beat::new(0.0),
             at: at(96_000),
-        },
-        Heard::Play,
-        Heard::Tempo {
+        }),
+        BeatClockEvent::Clock(ClockEvent::Play),
+        BeatClockEvent::Tempo {
             tempo: Bpm::of(90.0),
             at: at(96_000),
         },
-        Heard::Stop { at: at(96_480) },
+        BeatClockEvent::Clock(ClockEvent::Stop { at: at(96_480) }),
     ];
-    let (actions, tempos) =
-        lay::<BeatClockFollower>(events, false, &stand, Bpm::of(120.0), &map(120.0), &mut out);
+    let (actions, tempos) = lay::<BeatClockFollower>(
+        events,
+        ClockKind::BeatClock,
+        false,
+        &stand,
+        Bpm::of(120.0),
+        &map(120.0),
+        &mut out,
+    );
     // The source ends stopped, so the locate is not advanced.
     assert_eq!(
         actions,
@@ -111,10 +118,11 @@ fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
         beat
     };
     let (actions, _) = lay::<BeatClockFollower>(
-        vec![Heard::Locate {
+        vec![BeatClockEvent::Clock(ClockEvent::Locate {
             position: Beat::new(8.0),
             at: at(96_000),
-        }],
+        })],
+        ClockKind::BeatClock,
         true,
         &stand,
         Bpm::of(120.0),
@@ -124,10 +132,11 @@ fn a_rolling_locate_is_advanced_by_the_time_to_its_frame() {
     let beat = placed(actions);
     assert!((beat.get() - 8.04).abs() < 1e-9, "{beat:?}");
     let (actions, _) = lay::<MtcFollower>(
-        vec![Heard::Locate {
+        vec![MtcEvent::Clock(ClockEvent::Locate {
             position: Seconds::new(10.0),
             at: at(96_000),
-        }],
+        })],
+        ClockKind::Mtc,
         true,
         &stand,
         Bpm::of(120.0),
@@ -186,10 +195,13 @@ fn a_reversed_source_is_reported_and_stopped() {
     let mut out = Vec::new();
     let (actions, _) = lay::<MtcFollower>(
         vec![
-            Heard::Reversed,
-            Heard::Stop { at: at(96_000) },
-            Heard::Slipped(ClockOffset::Time(Seconds::new(0.1))),
+            MtcEvent::Reversed,
+            MtcEvent::Clock(ClockEvent::Stop { at: at(96_000) }),
+            MtcEvent::Clock(ClockEvent::Slipped {
+                error: Seconds::new(0.1),
+            }),
         ],
+        ClockKind::Mtc,
         false,
         &rolling(),
         Bpm::of(120.0),

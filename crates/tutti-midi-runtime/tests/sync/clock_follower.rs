@@ -8,7 +8,7 @@
 
 use tutti_fixtures::midi;
 use tutti_midi_runtime::{
-    BeatClockEvent, BeatClockFollower, MidiClockDecoder, MtcEvent, MtcFollower,
+    BeatClockEvent, BeatClockFollower, ClockEvent, MidiClockDecoder, MtcEvent, MtcFollower,
 };
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
 use tutti_units::{Bpm, Seconds};
@@ -87,7 +87,7 @@ fn period_of(bpm: f64) -> f64 {
 
 fn beat_locate(e: &BeatClockEvent) -> Option<f64> {
     match e {
-        BeatClockEvent::Locate { position: b, .. } => Some(b.get()),
+        BeatClockEvent::Clock(ClockEvent::Locate { position: b, .. }) => Some(b.get()),
         _ => None,
     }
 }
@@ -123,7 +123,7 @@ fn it_locks_on_the_lock_ticks_th_consistent_tick() {
         p * (MidiClockDecoder::LOCK_TICKS - 1) as f64,
     );
     assert!(rig.follower.locked());
-    assert_eq!(rig.take()[0], BeatClockEvent::Locked);
+    assert_eq!(rig.take()[0], BeatClockEvent::Clock(ClockEvent::Locked));
 }
 
 /// The worst the fit can be off: arrival errors `e_i` with `|e_i| <= E` move the
@@ -209,10 +209,13 @@ fn a_missed_tick_unlocks_and_the_clock_locks_again() {
     rig.take();
     rig.feed(system(System::TimingClock), t + p);
     assert!(!rig.follower.locked());
-    assert_eq!(rig.take(), [BeatClockEvent::Unlocked]);
+    assert_eq!(rig.take(), [BeatClockEvent::Clock(ClockEvent::Unlocked)]);
     ticks(&mut rig, t + 2.0 * p, p, MidiClockDecoder::LOCK_TICKS);
     assert!(rig.follower.locked());
-    assert!(rig.heard.contains(&BeatClockEvent::Locked));
+    assert!(
+        rig.heard
+            .contains(&BeatClockEvent::Clock(ClockEvent::Locked))
+    );
 }
 
 /// **A dropout unlocks**: silence for `DROPOUT` releases the lock and, for a
@@ -235,10 +238,10 @@ fn a_dropout_unlocks_and_stops_a_started_transport() {
     assert_eq!(
         rig.take(),
         [
-            BeatClockEvent::Unlocked,
-            BeatClockEvent::Stop {
+            BeatClockEvent::Clock(ClockEvent::Unlocked),
+            BeatClockEvent::Clock(ClockEvent::Stop {
                 at: at(last + MidiClockDecoder::DROPOUT.get() + 0.001)
-            }
+            })
         ]
     );
     rig.poll(last + 10.0);
@@ -276,11 +279,17 @@ fn start_continue_and_stop_drive_play_state() {
     rig.feed(system(System::Continue), 0.1);
     let located: Vec<f64> = rig.heard.iter().filter_map(beat_locate).collect();
     assert_eq!(located, [4.0]);
-    assert_eq!(rig.heard.last(), Some(&BeatClockEvent::Play));
+    assert_eq!(
+        rig.heard.last(),
+        Some(&BeatClockEvent::Clock(ClockEvent::Play))
+    );
     let t = ticks(&mut rig, 0.2, period_of(120.0), 24);
     rig.take();
     rig.feed(system(System::Stop), t);
-    assert_eq!(rig.take(), [BeatClockEvent::Stop { at: at(t) }]);
+    assert_eq!(
+        rig.take(),
+        [BeatClockEvent::Clock(ClockEvent::Stop { at: at(t) })]
+    );
     rig.feed(system(System::Continue), t + 1.0);
     let located: Vec<f64> = rig.heard.iter().filter_map(beat_locate).collect();
     assert_eq!(located, [5.0], "a beat of 24 ticks past the pointer's 4");
@@ -288,7 +297,10 @@ fn start_continue_and_stop_drive_play_state() {
     rig.feed(system(System::Start), t + 2.0);
     let located: Vec<f64> = rig.heard.iter().filter_map(beat_locate).collect();
     assert_eq!(located, [0.0]);
-    assert_eq!(rig.heard.last(), Some(&BeatClockEvent::Play));
+    assert_eq!(
+        rig.heard.last(),
+        Some(&BeatClockEvent::Clock(ClockEvent::Play))
+    );
 }
 
 /// A message the kind does not read says nothing: a note, a Quarter Frame to a
@@ -360,7 +372,7 @@ fn time_locates(rig: &MtcRig) -> Vec<f64> {
     rig.heard
         .iter()
         .filter_map(|e| match e {
-            MtcEvent::Locate { position: s, .. } => Some(s.get()),
+            MtcEvent::Clock(ClockEvent::Locate { position: s, .. }) => Some(s.get()),
             _ => None,
         })
         .collect()
@@ -389,7 +401,7 @@ fn quarter_frames_give_the_position_at_every_frame_rate() {
             .heard
             .iter()
             .find_map(|e| match e {
-                MtcEvent::Locate { at, .. } => Some(at.get()),
+                MtcEvent::Clock(ClockEvent::Locate { at, .. }) => Some(at.get()),
                 _ => None,
             })
             .expect("a locate");
@@ -405,10 +417,10 @@ fn quarter_frames_give_the_position_at_every_frame_rate() {
         );
         assert_eq!(
             rig.heard.last(),
-            Some(&MtcEvent::Play),
+            Some(&MtcEvent::Clock(ClockEvent::Play)),
             "{rate:?}: locates, then plays"
         );
-        assert!(rig.heard.contains(&MtcEvent::Locked));
+        assert!(rig.heard.contains(&MtcEvent::Clock(ClockEvent::Locked)));
     }
 }
 
@@ -507,7 +519,11 @@ fn a_full_message_while_playing_locates_once() {
     assert_eq!(time_locates(&rig).len(), 1);
     run_mtc(&mut rig, rate, 30, 0, t + 0.01, 3);
     assert_eq!(time_locates(&rig).len(), 1, "no jump after a full message");
-    assert!(!rig.heard.iter().any(|e| matches!(e, MtcEvent::Stop { .. })));
+    assert!(
+        !rig.heard
+            .iter()
+            .any(|e| matches!(e, MtcEvent::Clock(ClockEvent::Stop { .. })))
+    );
 }
 
 /// **MTC silence unlocks and stops**: no Quarter Frame for `DROPOUT` says
@@ -527,10 +543,10 @@ fn an_mtc_dropout_unlocks_and_stops() {
     assert_eq!(
         rig.take(),
         [
-            MtcEvent::Stop {
+            MtcEvent::Clock(ClockEvent::Stop {
                 at: at(last + d + 0.001)
-            },
-            MtcEvent::Unlocked
+            }),
+            MtcEvent::Clock(ClockEvent::Unlocked)
         ]
     );
     assert!(!rig.follower.locked());
@@ -538,7 +554,7 @@ fn an_mtc_dropout_unlocks_and_stops() {
     assert!(rig.take().is_empty());
     // The source comes back: three cycles lock it and play again.
     run_mtc(&mut rig, rate, 5, 0, last + 6.0, 3);
-    assert_eq!(rig.heard.last(), Some(&MtcEvent::Play));
+    assert_eq!(rig.heard.last(), Some(&MtcEvent::Clock(ClockEvent::Play)));
 }
 
 /// Stepping allocates nothing, for either kind.

@@ -7,7 +7,7 @@
 //! time runs backward. Every figure below is a formula of `SLIP_FRAMES`,
 //! `SETTLE` and the frame rate (25 fps, rate code 1).
 
-use tutti_midi_runtime::{MtcDecoder, MtcDirection, MtcEvent, MtcFollower};
+use tutti_midi_runtime::{ClockEvent, MtcDecoder, MtcDirection, MtcEvent, MtcFollower};
 use tutti_ump::{Message, MidiGroup, System, U7, Ump};
 use tutti_units::Seconds;
 
@@ -66,7 +66,7 @@ impl Rig {
 
     fn take(&mut self, now: f64, events: Vec<MtcEvent>) {
         for e in events {
-            if let MtcEvent::Locate { position: p, at } = e {
+            if let MtcEvent::Clock(ClockEvent::Locate { position: p, at }) = e {
                 self.transport = Some((p.get(), at.get()));
             }
             self.heard.push((now, e));
@@ -93,7 +93,7 @@ impl Rig {
         self.heard
             .iter()
             .filter_map(|(now, e)| match e {
-                MtcEvent::Slipped { error } => Some((*now, error.get())),
+                MtcEvent::Clock(ClockEvent::Slipped { error }) => Some((*now, error.get())),
                 _ => None,
             })
             .collect()
@@ -161,7 +161,9 @@ fn a_source_off_speed_is_located_back_at_the_slip_threshold() {
         let locates = rig
             .heard
             .iter()
-            .filter(|(now, e)| matches!(e, MtcEvent::Locate { .. }) && *now > lock + 0.5)
+            .filter(|(now, e)| {
+                matches!(e, MtcEvent::Clock(ClockEvent::Locate { .. })) && *now > lock + 0.5
+            })
             .count();
         assert_eq!(locates, slips.len(), "{speed_error}");
         for pair in slips.windows(2) {
@@ -282,7 +284,9 @@ fn a_lone_out_of_order_piece_or_a_jump_does_not_reverse() {
         assert!(
             !events.iter().any(|e| matches!(
                 e,
-                MtcEvent::Reversed | MtcEvent::Stop { .. } | MtcEvent::Unlocked
+                MtcEvent::Reversed
+                    | MtcEvent::Clock(ClockEvent::Stop { .. })
+                    | MtcEvent::Clock(ClockEvent::Unlocked)
             )),
             "{pieces:?}: {events:?}"
         );
@@ -361,10 +365,10 @@ fn a_reversed_source_stops_the_transport_and_forward_locks_again() {
         events,
         [
             MtcEvent::Reversed,
-            MtcEvent::Stop {
+            MtcEvent::Clock(ClockEvent::Stop {
                 at: at(stopped_at.expect("fed"))
-            },
-            MtcEvent::Unlocked
+            }),
+            MtcEvent::Clock(ClockEvent::Unlocked)
         ]
     );
     assert!(!rig.follower.locked());
@@ -378,17 +382,17 @@ fn a_reversed_source_stops_the_transport_and_forward_locks_again() {
     }
     let events: Vec<MtcEvent> = rig.heard.iter().map(|(_, e)| *e).collect();
     assert_eq!(events.len(), 3, "{events:?}");
-    assert_eq!(events[0], MtcEvent::Locked);
+    assert_eq!(events[0], MtcEvent::Clock(ClockEvent::Locked));
     // The third cycle names frame 104 (`2 * 52`) at its piece 0, 4 / 25 s into
     // the run.
     assert_eq!(
         events[1],
-        MtcEvent::Locate {
+        MtcEvent::Clock(ClockEvent::Locate {
             position: at(104.0 / FPS),
             at: at(base + 104.0 / FPS),
-        }
+        })
     );
-    assert_eq!(events[2], MtcEvent::Play);
+    assert_eq!(events[2], MtcEvent::Clock(ClockEvent::Play));
 }
 
 /// **A discarded cycle is no jump; a real jump still locates.** A locked, rolling
@@ -401,7 +405,7 @@ fn a_discarded_cycle_is_not_a_jump_and_a_real_jump_locates() {
     let locates = |rig: &Rig| {
         rig.heard
             .iter()
-            .filter(|(_, e)| matches!(e, MtcEvent::Locate { .. }))
+            .filter(|(_, e)| matches!(e, MtcEvent::Clock(ClockEvent::Locate { .. })))
             .count()
     };
     let feed_cycle = |rig: &mut Rig, frame: u64, start: f64| {

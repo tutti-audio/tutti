@@ -8,7 +8,7 @@
 //! `B(t)` less that integral, and every bound below is a formula of the
 //! constants.
 
-use tutti_midi_runtime::{BeatClockEvent, BeatClockFollower, MidiClockDecoder};
+use tutti_midi_runtime::{BeatClockEvent, BeatClockFollower, ClockEvent, MidiClockDecoder};
 use tutti_ump::{Message, MidiGroup, System, U14, Ump};
 use tutti_units::{Beat, Seconds};
 
@@ -51,12 +51,12 @@ impl Model {
                 self.since = now;
                 self.tempo = tempo.get();
             }
-            BeatClockEvent::Locate { position: beat, .. } => {
+            BeatClockEvent::Clock(ClockEvent::Locate { position: beat, .. }) => {
                 self.beat = beat.get();
                 self.since = now;
                 locates.push(beat.get());
             }
-            BeatClockEvent::Slipped { error } => slips.push(error.get()),
+            BeatClockEvent::Clock(ClockEvent::Slipped { error }) => slips.push(error.get()),
             _ => {}
         }
     }
