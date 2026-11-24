@@ -4193,9 +4193,8 @@ mod main_output_fade_tests {
         let node = g.add(ForkByClone(Const::mono(1.0)));
         let node = NodeKey::from(node);
         g.editor
-            .spec_mut()
-            .topology
-            .set_outputs([PortSource::Node(OutputPort::new(node, 0)), PortSource::Zero]);
+            .set_outputs([PortSource::Node(OutputPort::new(node, 0)), PortSource::Zero])
+            .expect("the sources exist");
         g.commit();
         (g, node)
     }

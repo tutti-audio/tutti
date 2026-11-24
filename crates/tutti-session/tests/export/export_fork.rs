@@ -400,11 +400,15 @@ fn the_trim_is_read_after_the_prepare_hook() {
             let key = prepared.fresh_key();
             let editor = prepared.editor;
             editor.insert(key, "test:late", ForkByClone(Late { pos: 0 }));
-            for out in editor.spec_mut().topology.outputs.iter_mut() {
-                *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(
-                    key, 0,
-                ))];
-            }
+            let width = editor.spec().topology.outputs.len();
+            editor
+                .set_outputs(vec![
+                    tutti_graph::PortSource::Node(
+                        tutti_graph::OutputPort::new(key, 0)
+                    );
+                    width
+                ])
+                .expect("the node exists");
         },
     ));
     let planes = render(&mut session, request);
@@ -548,11 +552,15 @@ fn a_prepare_hook_reaches_the_graph_that_gets_rendered() {
         let key = prepared.fresh_key();
         let editor = prepared.editor;
         editor.insert(key, "test:level", Const::mono(level));
-        for out in editor.spec_mut().topology.outputs.iter_mut() {
-            *out = vec![tutti_graph::PortSource::Node(tutti_graph::OutputPort::new(
-                key, 0,
-            ))];
-        }
+        let width = editor.spec().topology.outputs.len();
+        editor
+            .set_outputs(vec![
+                tutti_graph::PortSource::Node(
+                    tutti_graph::OutputPort::new(key, 0)
+                );
+                width
+            ])
+            .expect("the node exists");
     }));
     let planes = render(&mut session, request);
     let peak = planes[0].iter().fold(0.0f32, |acc, s| acc.max(s.abs()));
