@@ -10,7 +10,7 @@
 
 use super::clock::{Control, TransportClock};
 use super::handle::Transport;
-use super::motion::{MotionAudio, is_declicking};
+use super::motion::MotionAudio;
 use super::settings::TransportSettings;
 use super::tempo_reader::TempoReader;
 use super::timed::{CommandQueueAudio, Scheduled, TransportCommand};
@@ -366,8 +366,7 @@ impl TransportAudio {
     /// A declicked stop or seek parks the machine in a fade state; the fade
     /// is the caller's, as gain, so settle the machine now.
     fn settle(&mut self) -> Applied {
-        if is_declicking(self.motion.motion()) {
-            self.motion.complete_declick();
+        if self.motion.complete_declick() {
             Applied::Declicked
         } else {
             Applied::Plain

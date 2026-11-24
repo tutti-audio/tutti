@@ -74,206 +74,218 @@ impl core::fmt::Display for MotionState {
     }
 }
 
-/// What a completed declick fade performs when it reaches zero.
+/// Where a locate lands, and what a scrub returns to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Settled {
+    Stopped,
+    Rolling,
+}
+
+impl From<Settled> for MotionState {
+    #[inline]
+    fn from(settled: Settled) -> Self {
+        match settled {
+            Settled::Stopped => Self::Stopped,
+            Settled::Rolling => Self::Rolling,
+        }
+    }
+}
+
+/// Which way a scrub moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Direction {
+    Forward,
+    Backward,
+}
+
+/// What a fade performs when it reaches zero.
 ///
-/// Decided at transition time and parked in the FSM, so completion is a lookup
-/// rather than a re-derivation. Loop state is deliberately absent: the FSM
-/// holds none.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Decided at transition time and held in [`TransportFsm::Fading`], so
+/// completion is a lookup rather than a re-derivation. Loop state is absent:
+/// the machine holds none.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum DeclickOutcome {
     /// Stop at the position the fade ended on.
-    #[default]
     Stop,
-    /// Jump to `pos`, landing in `motion`.
-    Locate { pos: Beat, motion: MotionState },
+    /// Jump to `pos`, landing in `landing`.
+    Locate { pos: Beat, landing: Settled },
+}
+
+impl DeclickOutcome {
+    /// The published motion while a fade into `self` is in flight.
+    #[inline]
+    fn fading_motion(self) -> MotionState {
+        match self {
+            Self::Stop => MotionState::DeclickToStop,
+            Self::Locate { .. } => MotionState::DeclickToLocate,
+        }
+    }
+
+    /// Where the transport rests once the fade completes.
+    #[inline]
+    pub(crate) fn landing(self) -> Settled {
+        match self {
+            Self::Stop => Settled::Stopped,
+            Self::Locate { landing, .. } => landing,
+        }
+    }
 }
 
 /// What a transition changed.
 ///
 /// Self-describing: `MotionAudio::publish` applies it without reading the
-/// FSM back. Every variant carries the motion the FSM *already stored*,
-/// never something the caller re-derives.
+/// machine back.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum TransitionResult {
-    /// Motion changed immediately. Cancels any fade in progress — unless the
-    /// new motion is itself a declick state, which means a fade was retargeted
-    /// in place and its ramp must keep counting.
-    MotionChanged(MotionState),
-    /// Jump now, landing in `motion`.
-    Located { pos: Beat, motion: MotionState },
-    /// Fade out, then perform `on_complete`.
-    DeclickStarted {
-        motion: MotionState,
-        on_complete: DeclickOutcome,
+    /// Settled or scrubbing now, in this motion. Cancels any fade.
+    Moved(MotionState),
+    /// Jump now, landing in `landing`.
+    Located { pos: Beat, landing: Settled },
+    /// Fade out, then rest as the outcome says.
+    FadeStarted(DeclickOutcome),
+    /// A fade in flight changed what it completes into. Its ramp keeps
+    /// counting: a fresh fade mid-fade would step the gain back to full and
+    /// click.
+    Retargeted(DeclickOutcome),
+}
+
+impl TransitionResult {
+    /// The motion this result publishes.
+    #[inline]
+    pub(crate) fn motion(self) -> MotionState {
+        match self {
+            Self::Moved(motion) => motion,
+            Self::Located { landing, .. } => landing.into(),
+            Self::FadeStarted(outcome) | Self::Retargeted(outcome) => outcome.fading_motion(),
+        }
+    }
+}
+
+/// The transport state machine. The engine owns it, as a plain field of its
+/// `MotionAudio`, which publishes its results; [`MotionState`] is its
+/// projection.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) enum TransportFsm {
+    #[default]
+    Stopped,
+    Rolling,
+    /// Scrubbing; `EndScrub` returns to `anchor`.
+    Scrub {
+        direction: Direction,
+        anchor: Settled,
+    },
+    /// Audio still sounds while the gain ramps down; the ramp ends in `into`.
+    Fading {
+        into: DeclickOutcome,
     },
 }
 
-/// The machine itself. The engine owns it, as a plain field of its
-/// `MotionAudio`, which publishes its results.
-pub(crate) struct TransportFsm {
-    motion: MotionState,
-    /// The motion to restore when a scrub ends. Never a declick state.
-    prev_motion: MotionState,
-    /// What the in-flight fade completes into. `None` when no fade is armed.
-    pending: Option<DeclickOutcome>,
+impl From<Settled> for TransportFsm {
+    #[inline]
+    fn from(settled: Settled) -> Self {
+        match settled {
+            Settled::Stopped => Self::Stopped,
+            Settled::Rolling => Self::Rolling,
+        }
+    }
 }
 
 impl TransportFsm {
-    pub fn new() -> Self {
-        Self {
-            motion: MotionState::Stopped,
-            prev_motion: MotionState::Stopped,
-            pending: None,
+    /// The published projection of the machine.
+    pub fn motion(&self) -> MotionState {
+        match *self {
+            Self::Stopped => MotionState::Stopped,
+            Self::Rolling => MotionState::Rolling,
+            Self::Scrub {
+                direction: Direction::Forward,
+                ..
+            } => MotionState::FastForward,
+            Self::Scrub {
+                direction: Direction::Backward,
+                ..
+            } => MotionState::Rewind,
+            Self::Fading { into } => into.fading_motion(),
         }
     }
 
-    /// The motion the machine is in.
-    pub fn motion(&self) -> MotionState {
-        self.motion
-    }
-
-    /// Takes the outcome of a completed fade without settling the motion.
-    /// One-shot: a second call after the same fade yields `None`.
-    #[cfg(test)]
-    pub fn take_declick_outcome(&mut self) -> Option<DeclickOutcome> {
-        self.pending.take()
-    }
-
-    /// The fade reached zero: settle into the motion it was heading for,
-    /// and return its outcome. One-shot: a second call after the same fade
-    /// yields `None`.
+    /// The fade reached zero: rest where it was heading, and return its
+    /// outcome. `None` when no fade is in flight, so a second call after the
+    /// same fade changes nothing.
     pub fn complete_declick(&mut self) -> Option<DeclickOutcome> {
-        let outcome = self.pending.take()?;
-        self.motion = match outcome {
-            DeclickOutcome::Stop => MotionState::Stopped,
-            DeclickOutcome::Locate { motion, .. } => motion,
+        let Self::Fading { into } = *self else {
+            return None;
         };
-        Some(outcome)
+        *self = into.landing().into();
+        Some(into)
     }
 
-    /// The outcome the fade in flight completes into, without taking it.
-    pub fn declick_outcome(&self) -> Option<DeclickOutcome> {
-        self.pending
-    }
-
-    /// The motion to remember for [`MotionCommand::EndScrub`].
-    ///
-    /// A declick state must never be remembered: restoring `DeclickToStop`
-    /// with no outcome parked leaves `complete_declick` nothing to settle, so
-    /// the FSM would hang in that state forever.
-    /// A fade interrupted by a scrub is abandoned, and the anchor becomes what
-    /// the fade was heading *towards*.
+    /// What `EndScrub` returns to if a scrub starts now.
     ///
     /// Scrubbing while already scrubbing keeps the pre-scrub anchor, so
     /// fast-forward → rewind → end-scrub returns to what was playing rather
-    /// than to fast-forward.
+    /// than to fast-forward. A fade interrupted by a scrub is abandoned, and
+    /// the scrub returns to a stop.
     #[inline]
-    fn scrub_anchor(&self) -> MotionState {
-        match self.motion {
-            MotionState::FastForward | MotionState::Rewind => self.prev_motion,
-            MotionState::DeclickToStop | MotionState::DeclickToLocate => MotionState::Stopped,
-            settled => settled,
+    fn scrub_anchor(&self) -> Settled {
+        match *self {
+            Self::Rolling => Settled::Rolling,
+            Self::Scrub { anchor, .. } => anchor,
+            Self::Stopped | Self::Fading { .. } => Settled::Stopped,
         }
     }
 
-    /// Settle into `motion` immediately, abandoning any armed fade.
+    /// Enter `next` immediately, abandoning any fade.
     #[inline]
-    fn settle(&mut self, motion: MotionState) -> Option<TransitionResult> {
-        self.motion = motion;
-        self.pending = None;
-        Some(TransitionResult::MotionChanged(motion))
+    fn moved(&mut self, next: Self) -> Option<TransitionResult> {
+        *self = next;
+        Some(TransitionResult::Moved(next.motion()))
     }
 
-    /// Jump now, landing in `motion`.
-    #[inline]
-    fn locate_now(&mut self, pos: Beat, motion: MotionState) -> Option<TransitionResult> {
-        self.motion = motion;
-        self.pending = None;
-        Some(TransitionResult::Located { pos, motion })
-    }
-
-    /// Arm a fade and record what it completes into.
-    #[inline]
-    fn start_declick(
-        &mut self,
-        motion: MotionState,
-        on_complete: DeclickOutcome,
-    ) -> Option<TransitionResult> {
-        self.motion = motion;
-        self.pending = Some(on_complete);
-        Some(TransitionResult::DeclickStarted {
-            motion,
-            on_complete,
-        })
-    }
-
-    /// Retarget an in-flight fade without restarting its ramp.
-    ///
-    /// A fresh fade mid-fade would step the gain back to 1.0, an audible
-    /// click. So a fade that changes its mind keeps counting and only swaps
-    /// what it completes into.
-    #[inline]
-    fn retarget_declick(
-        &mut self,
-        motion: MotionState,
-        on_complete: DeclickOutcome,
-    ) -> Option<TransitionResult> {
-        self.motion = motion;
-        self.pending = Some(on_complete);
-        Some(TransitionResult::MotionChanged(motion))
-    }
-
-    /// Whether sound is still coming out, i.e. there is something to fade out
-    /// of. Asking for a fade from a stop is not an error — it is satisfied
-    /// instantly.
-    ///
-    /// A declick state counts as audible: a fade is *audio still playing* while
-    /// its gain ramps down, which is the entire reason it exists. Treating it as
-    /// silent would let a locate mid-fade jump immediately and cut the sound the
-    /// fade was protecting.
-    #[inline]
-    fn is_audible(&self) -> bool {
-        !matches!(self.motion, MotionState::Stopped)
-    }
-
-    /// Applies `command`, returning what changed or `None` if the FSM refused it.
-    ///
-    /// Every path that returns `Some` assigns `self.motion` first — that is
-    /// what keeps the published mirror and the machine from diverging, and it
-    /// is why all the arms route through `settle` / `locate_now` /
-    /// `start_declick` / `retarget_declick` rather than assigning inline.
+    /// Applies `command`, returning what changed or `None` if the machine
+    /// refused it.
     pub fn transition(&mut self, command: MotionCommand) -> Option<TransitionResult> {
-        use MotionState as S;
-
         match command {
-            MotionCommand::Play => match self.motion {
+            MotionCommand::Play => match self {
+                Self::Rolling => None,
                 // A Play during a fade cancels it, including a pending jump.
-                S::Stopped | S::FastForward | S::Rewind | S::DeclickToStop | S::DeclickToLocate => {
-                    self.settle(S::Rolling)
-                }
-                S::Rolling => None,
+                _ => self.moved(Self::Rolling),
             },
 
             MotionCommand::Stop {
                 fade: FadeOut::Immediate,
-            } => match self.motion {
-                S::Stopped => None,
-                _ => self.settle(S::Stopped),
+            } => match self {
+                Self::Stopped => None,
+                _ => self.moved(Self::Stopped),
             },
 
             MotionCommand::Stop {
                 fade: FadeOut::Declick,
-            } => match self.motion {
-                S::Rolling => self.start_declick(S::DeclickToStop, DeclickOutcome::Stop),
+            } => match *self {
+                Self::Rolling => {
+                    *self = Self::Fading {
+                        into: DeclickOutcome::Stop,
+                    };
+                    Some(TransitionResult::FadeStarted(DeclickOutcome::Stop))
+                }
                 // Scrubbing is not material worth fading, and fading it would
                 // just extend the scrub.
-                S::FastForward | S::Rewind => self.settle(S::Stopped),
-                // Already fading to a stop — let the ramp finish.
-                S::DeclickToStop => None,
+                Self::Scrub { .. } => self.moved(Self::Stopped),
                 // Fading to a locate, now asked to stop: keep the ramp, change
                 // only where it lands.
-                S::DeclickToLocate => self.retarget_declick(S::DeclickToStop, DeclickOutcome::Stop),
-                S::Stopped => None,
+                Self::Fading {
+                    into: DeclickOutcome::Locate { .. },
+                } => {
+                    *self = Self::Fading {
+                        into: DeclickOutcome::Stop,
+                    };
+                    Some(TransitionResult::Retargeted(DeclickOutcome::Stop))
+                }
+                // Already stopped, or already fading to a stop: let the ramp
+                // finish.
+                Self::Stopped
+                | Self::Fading {
+                    into: DeclickOutcome::Stop,
+                } => None,
             },
 
             MotionCommand::Locate {
@@ -281,59 +293,49 @@ impl TransportFsm {
                 fade,
                 then,
             } => {
-                // Resolve `Keep` against the *settled* motion, so a locate
-                // during a fade means "whatever the fade was heading for",
-                // not "mid-fade".
+                // `Keep` resolves against where the machine is heading, so a
+                // locate during a fade lands stopped, not "mid-fade".
                 let landing = match then {
-                    AfterLocate::Play => S::Rolling,
-                    AfterLocate::Stop => S::Stopped,
-                    AfterLocate::Keep => match self.motion {
-                        S::Rolling | S::FastForward | S::Rewind => S::Rolling,
-                        S::Stopped | S::DeclickToStop | S::DeclickToLocate => S::Stopped,
+                    AfterLocate::Play => Settled::Rolling,
+                    AfterLocate::Stop => Settled::Stopped,
+                    AfterLocate::Keep => match self {
+                        Self::Rolling | Self::Scrub { .. } => Settled::Rolling,
+                        Self::Stopped | Self::Fading { .. } => Settled::Stopped,
                     },
                 };
-
-                if fade == FadeOut::Immediate || !self.is_audible() {
-                    return self.locate_now(pos, landing);
+                // A stopped transport has nothing to fade out of: the jump is
+                // immediate. A fade in flight is audio still sounding, so a
+                // locate during one fades rather than cutting it.
+                if fade == FadeOut::Immediate || *self == Self::Stopped {
+                    *self = landing.into();
+                    return Some(TransitionResult::Located { pos, landing });
                 }
-
-                let outcome = DeclickOutcome::Locate {
-                    pos,
-                    motion: landing,
-                };
-                // Already fading: retarget rather than re-arm, so the ramp does
-                // not jump back to full gain.
-                if matches!(self.motion, S::DeclickToStop | S::DeclickToLocate) {
-                    self.retarget_declick(S::DeclickToLocate, outcome)
+                let into = DeclickOutcome::Locate { pos, landing };
+                let was_fading = matches!(self, Self::Fading { .. });
+                *self = Self::Fading { into };
+                Some(if was_fading {
+                    TransitionResult::Retargeted(into)
                 } else {
-                    self.start_declick(S::DeclickToLocate, outcome)
-                }
+                    TransitionResult::FadeStarted(into)
+                })
             }
 
-            MotionCommand::FastForward => {
-                self.prev_motion = self.scrub_anchor();
-                self.settle(S::FastForward)
-            }
+            MotionCommand::FastForward => self.moved(Self::Scrub {
+                direction: Direction::Forward,
+                anchor: self.scrub_anchor(),
+            }),
 
-            MotionCommand::Rewind => {
-                self.prev_motion = self.scrub_anchor();
-                self.settle(S::Rewind)
-            }
+            MotionCommand::Rewind => self.moved(Self::Scrub {
+                direction: Direction::Backward,
+                anchor: self.scrub_anchor(),
+            }),
 
-            MotionCommand::EndScrub => match self.motion {
-                S::FastForward | S::Rewind => self.settle(self.prev_motion),
-                // Not scrubbing — nothing to end. Settling on `prev_motion`
-                // here would clobber the motion with a stale anchor and
-                // silently stop playback.
+            MotionCommand::EndScrub => match *self {
+                Self::Scrub { anchor, .. } => self.moved(anchor.into()),
+                // Not scrubbing: nothing to end, and the motion stays.
                 _ => None,
             },
         }
-    }
-}
-
-impl Default for TransportFsm {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -341,128 +343,89 @@ impl Default for TransportFsm {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_play_stop_transitions() {
-        let mut fsm = TransportFsm::new();
-
-        // Play from stopped
-        let result = fsm.transition(MotionCommand::Play);
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::Rolling))
-        ));
-
-        // Stop while rolling
-        let result = fsm.transition(MotionCommand::stop_unfaded());
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::Stopped))
-        ));
-
-        // Play again (idempotent)
-        fsm.transition(MotionCommand::Play);
-        let result = fsm.transition(MotionCommand::Play);
-        assert!(result.is_none());
+    fn moved(motion: MotionState) -> Option<TransitionResult> {
+        Some(TransitionResult::Moved(motion))
     }
 
     #[test]
-    fn test_locate_events() {
-        let mut fsm = TransportFsm::new();
+    fn play_and_stop_move_and_a_second_play_is_refused() {
+        let mut fsm = TransportFsm::Stopped;
+        assert_eq!(
+            fsm.transition(MotionCommand::Play),
+            moved(MotionState::Rolling)
+        );
+        assert_eq!(
+            fsm.transition(MotionCommand::stop_unfaded()),
+            moved(MotionState::Stopped)
+        );
+        fsm.transition(MotionCommand::Play);
+        assert_eq!(fsm.transition(MotionCommand::Play), None);
+    }
 
-        // From a stop there is nothing to fade, so a locate lands immediately.
-        let result = fsm.transition(MotionCommand::locate(Beat::new(8.0)));
+    #[test]
+    fn a_locate_from_a_stop_lands_at_once_in_its_landing() {
+        let mut fsm = TransportFsm::Stopped;
         assert!(matches!(
-            result,
+            fsm.transition(MotionCommand::locate(Beat::new(8.0))),
             Some(TransitionResult::Located {
-                motion: MotionState::Stopped,
+                landing: Settled::Stopped,
                 ..
             })
         ));
-
-        let result = fsm.transition(MotionCommand::play_from(Beat::new(4.0)));
         assert!(matches!(
-            result,
+            fsm.transition(MotionCommand::play_from(Beat::new(4.0))),
             Some(TransitionResult::Located {
-                motion: MotionState::Rolling,
+                landing: Settled::Rolling,
                 ..
             })
         ));
+        assert_eq!(fsm, TransportFsm::Rolling);
     }
 
     #[test]
-    fn test_scrub_events() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
-
-        // Fast forward
-        let result = fsm.transition(MotionCommand::FastForward);
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::FastForward))
-        ));
-
-        // End scrub - should return to rolling
-        let result = fsm.transition(MotionCommand::EndScrub);
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::Rolling))
-        ));
-
-        // Rewind
-        let result = fsm.transition(MotionCommand::Rewind);
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::Rewind))
-        ));
-
-        // End scrub again
-        let result = fsm.transition(MotionCommand::EndScrub);
-        assert!(matches!(
-            result,
-            Some(TransitionResult::MotionChanged(MotionState::Rolling))
-        ));
+    fn a_scrub_ends_in_the_motion_it_started_from() {
+        let mut fsm = TransportFsm::Rolling;
+        assert_eq!(
+            fsm.transition(MotionCommand::FastForward),
+            moved(MotionState::FastForward)
+        );
+        assert_eq!(
+            fsm.transition(MotionCommand::EndScrub),
+            moved(MotionState::Rolling)
+        );
+        assert_eq!(
+            fsm.transition(MotionCommand::Rewind),
+            moved(MotionState::Rewind)
+        );
+        assert_eq!(
+            fsm.transition(MotionCommand::EndScrub),
+            moved(MotionState::Rolling)
+        );
     }
 
     #[test]
-    fn test_declick_events() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+    fn a_declicked_stop_or_locate_while_rolling_starts_a_fade() {
+        let mut fsm = TransportFsm::Rolling;
+        assert_eq!(
+            fsm.transition(MotionCommand::stop()),
+            Some(TransitionResult::FadeStarted(DeclickOutcome::Stop))
+        );
 
-        // Stop with declick
-        let result = fsm.transition(MotionCommand::stop());
+        let mut fsm = TransportFsm::Rolling;
         assert!(matches!(
-            result,
-            Some(TransitionResult::DeclickStarted {
-                motion: MotionState::DeclickToStop,
-                on_complete: DeclickOutcome::Stop,
-            })
-        ));
-
-        // Locate with declick, from rolling
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
-        let result = fsm.transition(MotionCommand::locate(Beat::new(4.0)));
-        assert!(matches!(
-            result,
-            Some(TransitionResult::DeclickStarted {
-                motion: MotionState::DeclickToLocate,
-                on_complete: DeclickOutcome::Locate { .. },
+            fsm.transition(MotionCommand::locate(Beat::new(4.0))),
+            Some(TransitionResult::FadeStarted(DeclickOutcome::Locate {
+                landing: Settled::Rolling,
                 ..
-            })
+            }))
         ));
     }
 
-    /// The FSM and its published mirror must never disagree.
-    ///
-    /// A transition that reports a motion without storing it leaves later
-    /// events dispatching against the wrong state: both stop arms fall into
-    /// their `None` case and the transport becomes unstoppable. Every path that
-    /// returns `Some` goes through `settle`/`locate_now`/`start_declick`, all
-    /// of which assign `self.motion`; this pins that invariant exhaustively
-    /// over every (state, event) pair.
+    /// The result a transition publishes is the projection of the state it
+    /// left the machine in, over every (state, command) pair.
     #[test]
-    fn every_accepted_transition_settles_the_fsm() {
-        let events = [
+    fn every_accepted_transition_publishes_the_state_it_entered() {
+        let commands = [
             MotionCommand::Play,
             MotionCommand::stop(),
             MotionCommand::stop_unfaded(),
@@ -479,154 +442,115 @@ mod tests {
             MotionCommand::EndScrub,
         ];
         let states = [
-            MotionState::Stopped,
-            MotionState::Rolling,
-            MotionState::FastForward,
-            MotionState::Rewind,
-            MotionState::DeclickToStop,
-            MotionState::DeclickToLocate,
+            TransportFsm::Stopped,
+            TransportFsm::Rolling,
+            TransportFsm::Scrub {
+                direction: Direction::Forward,
+                anchor: Settled::Rolling,
+            },
+            TransportFsm::Scrub {
+                direction: Direction::Backward,
+                anchor: Settled::Stopped,
+            },
+            TransportFsm::Fading {
+                into: DeclickOutcome::Stop,
+            },
+            TransportFsm::Fading {
+                into: DeclickOutcome::Locate {
+                    pos: Beat::new(1.0),
+                    landing: Settled::Rolling,
+                },
+            },
         ];
 
         for start in states {
-            for event in events {
-                let mut fsm = TransportFsm::new();
-                fsm.motion = start;
-
-                if let Some(result) = fsm.transition(event) {
-                    let published = match result {
-                        TransitionResult::MotionChanged(m)
-                        | TransitionResult::Located { motion: m, .. }
-                        | TransitionResult::DeclickStarted { motion: m, .. } => m,
-                    };
+            for command in commands {
+                let mut fsm = start;
+                if let Some(result) = fsm.transition(command) {
                     assert_eq!(
-                        fsm.motion, published,
-                        "{event:?} from {start:?} published {published:?} but the FSM holds {:?}",
-                        fsm.motion
+                        fsm.motion(),
+                        result.motion(),
+                        "{command:?} from {start:?} published {result:?} but the machine is {fsm:?}"
                     );
                 }
             }
         }
     }
 
-    /// Changing scrub direction must not overwrite the anchor with the *other*
-    /// scrub state — `EndScrub` would then restore fast-forward instead of
-    /// whatever was playing before the scrub began.
+    /// Changing scrub direction keeps the pre-scrub anchor: `EndScrub`
+    /// returns to what was playing, not to fast-forward.
     #[test]
     fn scrub_direction_change_keeps_the_pre_scrub_anchor() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::FastForward);
         fsm.transition(MotionCommand::Rewind);
-
-        let result = fsm.transition(MotionCommand::EndScrub);
-        assert!(
-            matches!(
-                result,
-                Some(TransitionResult::MotionChanged(MotionState::Rolling))
-            ),
-            "FF -> REW -> EndScrub must return to Rolling, got {result:?}"
+        assert_eq!(
+            fsm.transition(MotionCommand::EndScrub),
+            moved(MotionState::Rolling)
         );
     }
 
-    /// `prev_motion` must never capture a declick state. Restoring one with no
-    /// outcome parked leaves `complete_declick` nothing to settle, so the FSM
-    /// hangs in "stopping" forever.
+    /// A fade a scrub interrupts is abandoned: ending the scrub rests
+    /// stopped, and there is no fade left to complete.
     #[test]
-    fn scrubbing_never_resurrects_an_abandoned_fade() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+    fn a_scrub_abandons_the_fade_it_interrupts() {
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::stop());
-        assert_eq!(fsm.motion, MotionState::DeclickToStop);
-
         fsm.transition(MotionCommand::FastForward);
-        let result = fsm.transition(MotionCommand::EndScrub);
-
-        assert!(
-            matches!(
-                result,
-                Some(TransitionResult::MotionChanged(MotionState::Stopped))
-            ),
-            "a fade abandoned by a scrub must settle, not be restored: {result:?}"
+        assert_eq!(
+            fsm.transition(MotionCommand::EndScrub),
+            moved(MotionState::Stopped)
         );
+        assert_eq!(fsm.complete_declick(), None);
     }
 
-    /// `EndScrub` when not scrubbing must change nothing. Settling on the stale
-    /// anchor instead would silently stop playback.
+    /// `EndScrub` when not scrubbing changes nothing.
     #[test]
     fn end_scrub_while_not_scrubbing_is_a_no_op() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
-
-        assert!(fsm.transition(MotionCommand::EndScrub).is_none());
-        assert_eq!(fsm.motion, MotionState::Rolling, "playback must continue");
+        let mut fsm = TransportFsm::Rolling;
+        assert_eq!(fsm.transition(MotionCommand::EndScrub), None);
+        assert_eq!(fsm, TransportFsm::Rolling, "playback continues");
     }
 
-    /// A discarded jump must not survive. `settle` clears `pending`, so
-    /// stopping during a locate-fade drops the fade's parked outcome rather
-    /// than letting it resurface on the next completed fade.
+    /// An immediate stop during a locate fade drops the jump: completing a
+    /// fade afterwards finds none.
     #[test]
     fn stopping_discards_a_pending_locate() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::stop_then_locate(Beat::new(8.0)));
-        assert!(fsm.pending.is_some(), "the fade armed a pending locate");
-
         fsm.transition(MotionCommand::stop_unfaded());
-        assert!(
-            fsm.take_declick_outcome().is_none(),
-            "a discarded locate must not resurface"
-        );
+        assert_eq!(fsm.complete_declick(), None);
+        assert_eq!(fsm, TransportFsm::Stopped);
     }
 
-    /// Retargeting an in-flight fade must not re-arm the ramp: a fresh fade
-    /// mid-fade steps the gain back to 1.0 and clicks. A retarget reports
-    /// `MotionChanged` (which `publish` treats as "leave the ramp alone"),
-    /// never `DeclickStarted`.
+    /// A fade that changes its mind is retargeted, never started again.
     #[test]
     fn retargeting_a_fade_does_not_restart_the_ramp() {
-        // Locate-fade, then asked to stop instead.
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::stop_then_locate(Beat::new(0.0)));
-        assert_eq!(fsm.motion, MotionState::DeclickToLocate);
-
-        let result = fsm.transition(MotionCommand::stop());
-        assert!(
-            matches!(
-                result,
-                Some(TransitionResult::MotionChanged(MotionState::DeclickToStop))
-            ),
-            "retarget must not re-arm: {result:?}"
+        assert_eq!(
+            fsm.transition(MotionCommand::stop()),
+            Some(TransitionResult::Retargeted(DeclickOutcome::Stop))
         );
 
-        // Stop-fade, then asked to locate instead.
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::stop());
-        assert_eq!(fsm.motion, MotionState::DeclickToStop);
-
-        let result = fsm.transition(MotionCommand::locate(Beat::new(12.0)));
-        assert!(
-            matches!(
-                result,
-                Some(TransitionResult::MotionChanged(
-                    MotionState::DeclickToLocate
-                ))
-            ),
-            "retarget must not re-arm: {result:?}"
-        );
+        assert!(matches!(
+            fsm.transition(MotionCommand::locate(Beat::new(12.0))),
+            Some(TransitionResult::Retargeted(DeclickOutcome::Locate {
+                landing: Settled::Stopped,
+                ..
+            }))
+        ));
     }
 
-    /// A second `Stop` during a stop-fade must let the ramp finish rather than
-    /// restarting it.
+    /// A second declicked stop during a stop fade lets the ramp finish.
     #[test]
     fn stop_during_a_stop_fade_is_a_no_op() {
-        let mut fsm = TransportFsm::new();
-        fsm.transition(MotionCommand::Play);
+        let mut fsm = TransportFsm::Rolling;
         fsm.transition(MotionCommand::stop());
-
-        assert!(fsm.transition(MotionCommand::stop()).is_none());
-        assert_eq!(fsm.motion, MotionState::DeclickToStop);
+        assert_eq!(fsm.transition(MotionCommand::stop()), None);
+        assert_eq!(fsm.motion(), MotionState::DeclickToStop);
     }
 
     #[test]
