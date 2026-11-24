@@ -300,14 +300,13 @@ struct Host<L: InProcess> {
 /// turns out to be running (it holds the slots) is waited for again. With no
 /// collector to queue on, `work` runs at once, and the writes are not waited
 /// for.
-fn step<L: InProcess, R>(
+fn step<L: InProcess + 'static, R>(
     main: MainThreadMarker,
     host: Host<L>,
     mut wait: Option<Settle>,
     work: Box<dyn FnOnce(MainThreadMarker, &mut Instance<L>) -> R + Send>,
     done: Box<dyn FnOnce(Option<R>) + Send>,
 ) where
-    L: 'static,
     L::Processor: 'static,
     R: Send + 'static,
 {

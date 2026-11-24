@@ -321,7 +321,7 @@ fn a_fork_starts_from_the_hosts_undrained_writes() {
         SampleRate::of(SAMPLE_RATE),
         MaxBlock::of(Samples::new(BLOCK)),
     );
-    let mut live = g.renderer(prepare).expect("the graph compiles");
+    let live = g.renderer(prepare).expect("the graph compiles");
     handle
         .send_parameter(ParamId::new(0), Normalized::of(0.5))
         .expect("a declared parameter");
