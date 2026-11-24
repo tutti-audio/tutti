@@ -20,7 +20,8 @@ use crate::compile::ids::{
     EventValueId, OpId, PlanEventTapId, PlanMeterId, PlanTapId, Table,
 };
 use crate::compile::plan::{
-    Csr, DelaySpec, EventSlotCapacity, FeedbackSpec, GainPortOp, Op, ParamPortOp, Value,
+    Csr, DelaySpec, EventSlotCapacity, FeedbackKey, FeedbackSpec, GainPortOp, Op, ParamPortOp,
+    Value,
 };
 
 /// Where an audio operand reads from, before colouring.
@@ -84,12 +85,14 @@ pub(crate) trait Refs {
     type Audio: Copy + Debug + PartialEq;
     /// An op's event operand.
     type Event: Copy + Debug + PartialEq;
-    /// An entry of the flattened audio lists the ops' spans index.
-    type AudioItem: Copy + Debug + PartialEq;
-    /// An entry of the flattened event lists.
-    type EventItem: Copy + Debug + PartialEq;
-    /// What a value records of its buffer.
-    type Slot: Copy + Debug + PartialEq;
+    /// What an audio value records of its buffer.
+    type AudioSlot: Copy + Debug + PartialEq;
+    /// What an event value records of its buffer.
+    type EventSlot: Copy + Debug + PartialEq;
+    /// A row of the audio feedback table.
+    type AudioFeedback: Copy + Debug + PartialEq;
+    /// A row of the event feedback table.
+    type EventFeedback: Copy + Debug + PartialEq;
     /// What the arena needs: per-value event capacities before colouring, the
     /// arena's slots after.
     type Sizing: Clone + Debug + PartialEq;
@@ -126,18 +129,20 @@ pub(crate) struct Sizes {
 impl Refs for ByValue {
     type Audio = ARef;
     type Event = ERef;
-    type AudioItem = ARef;
-    type EventItem = ERef;
-    type Slot = ();
+    type AudioSlot = ();
+    type EventSlot = ();
+    type AudioFeedback = FeedbackKey;
+    type EventFeedback = FeedbackKey;
     type Sizing = Capacities;
 }
 
 impl Refs for BySlot {
-    type Audio = u32;
-    type Event = u32;
-    type AudioItem = AudioSlotId;
-    type EventItem = EventSlotId;
-    type Slot = u32;
+    type Audio = AudioSlotId;
+    type Event = EventSlotId;
+    type AudioSlot = AudioSlotId;
+    type EventSlot = EventSlotId;
+    type AudioFeedback = FeedbackSpec<AudioSlotId>;
+    type EventFeedback = FeedbackSpec<EventSlotId>;
     type Sizing = Sizes;
 }
 
@@ -151,9 +156,9 @@ pub(crate) struct Program<S: Refs> {
     /// The ops, in the serial order.
     pub(crate) ops: Table<OpId, Op<S::Audio, S::Event>>,
     /// The audio operands lists the ops' spans index.
-    pub(crate) audio_list: Vec<S::AudioItem>,
+    pub(crate) audio_list: Vec<S::Audio>,
     /// The event operands lists the ops' spans index.
-    pub(crate) event_list: Vec<S::EventItem>,
+    pub(crate) event_list: Vec<S::Event>,
     /// The driven params of every node op, flattened.
     pub(crate) param_ports: Vec<ParamPortOp<S::Event>>,
     /// The driven lanes of every weighted sum, flattened.
@@ -161,9 +166,9 @@ pub(crate) struct Program<S: Refs> {
     /// The lanes of every weighted sum, flattened.
     pub(crate) sum_lanes: Vec<Option<EdgeId>>,
     /// Every audio value.
-    pub(crate) audio_values: Table<AudioValueId, Value<S::Slot>>,
+    pub(crate) audio_values: Table<AudioValueId, Value<S::AudioSlot>>,
     /// Every event value.
-    pub(crate) event_values: Table<EventValueId, Value<S::Slot>>,
+    pub(crate) event_values: Table<EventValueId, Value<S::EventSlot>>,
     /// The readers of every value, flattened.
     pub(crate) value_readers: Vec<OpId>,
     /// The ops each op waits for: sorted, without duplicates.
@@ -171,9 +176,9 @@ pub(crate) struct Program<S: Refs> {
     /// The PDC delays.
     pub(crate) delays: Table<DelayId, DelaySpec>,
     /// The audio feedback edges, ascending: slots after the null slot.
-    pub(crate) audio_feedback: Table<AudioFeedbackId, FeedbackSpec>,
+    pub(crate) audio_feedback: Table<AudioFeedbackId, S::AudioFeedback>,
     /// The event feedback edges, ascending.
-    pub(crate) event_feedback: Table<EventFeedbackId, FeedbackSpec>,
+    pub(crate) event_feedback: Table<EventFeedbackId, S::EventFeedback>,
     /// The taps the topology names.
     pub(crate) taps: Table<PlanTapId, crate::TapId>,
     /// The event taps the topology names.

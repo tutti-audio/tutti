@@ -579,7 +579,7 @@ fn declared_capacities_size_merges_and_delays_so_nothing_is_lost() {
         .ops()
         .iter()
         .filter_map(|op| match *op {
-            Op::EventMerge { dst, .. } => Some(p.event_slot_capacity()[dst as usize]),
+            Op::EventMerge { dst, .. } => Some(p.event_slot_capacity()[dst.index()]),
             _ => None,
         })
         .max_by_key(|c| c.declared)
