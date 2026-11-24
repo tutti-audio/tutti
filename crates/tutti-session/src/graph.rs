@@ -7,7 +7,7 @@
 //! | `Graph` | the editor |
 //! |---|---|
 //! | `add` | `Editor::insert` of the node's own [`IntoNode`] at a [`NodeKey`] minted by `NodeKey::fresh`, its controls, params and reclaimer kept |
-//! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written into `editor.spec_mut()` (a port holds a set of sources, which the graph sums) |
+//! | `set_source`, `set_sources`, `add_source`, `remove_source`, the `output` forms, `widen_outputs` | written through the editor's `connect_edge` and `disconnect_edge` (a port holds a set of sources, which the graph sums) |
 //! | `replace` | `Editor::replace_or_swap` with the [`Replacement`]'s [`Fade`]: a plain swap when there is nothing to fade from or the fade is zero, a refusal for a fade over another shape; parked while the graph re-prepares |
 //! | `node_latency`, `node_tail`, `node_inputs`, `node_outputs` | the editor's [`Shapes`](tutti_graph::Shapes) |
 //! | `set_feed`, `move_feeds` | the union of every feeder's sources, written as a sink's event edges beside the host's own |
@@ -646,8 +646,7 @@ impl<F: Float> Graph<F> {
         #[cfg(feature = "plugin")] tempo: tutti_timeline::TempoReader,
     ) -> Self {
         let (mut editor, exec) = Editor::<F>::with_format(prepare_for(rate, max_block, quantum));
-        let topology = &mut editor.spec_mut().topology;
-        topology.set_outputs(vec![PortSource::Zero; outputs]);
+        editor.resize_outputs(outputs);
         // Declared and on from the start: a host reads the main output level
         // without asking for it.
         // `Outputs` names no source, so the open cannot be refused.
@@ -2005,15 +2004,15 @@ impl<F: Float> Graph<F> {
             return Ok(false);
         }
         self.editor
-            .spec_mut()
-            .connect_events(to, EventEdge::Direct(from));
+            .connect_events(to, EventEdge::Direct(from))
+            .expect("checked: both ends exist");
         self.edited = true;
         Ok(true)
     }
 
     /// Takes the event edge `from -> to` out: whether it was there.
     pub(crate) fn remove_event_edge(&mut self, from: EventOutputPort, to: EventInputPort) -> bool {
-        let removed = self.editor.spec_mut().disconnect_events(to, from);
+        let removed = self.editor.disconnect_events(to, EventEdge::Direct(from));
         if removed {
             if let Some(ours) = self.fed_edges.get_mut(&to.node()) {
                 ours.retain(|s| *s != from);
@@ -2064,24 +2063,32 @@ impl<F: Float> Graph<F> {
         want.sort();
         want.dedup();
         let nodes = &self.nodes;
-        let spec = self.editor.spec_mut();
-        let (have, others): (Vec<EventEdge>, Vec<EventEdge>) = spec
+        let have: Vec<EventEdge> = self
+            .editor
+            .spec()
             .events
             .get(&at)
-            .cloned()
-            .unwrap_or_default()
             .into_iter()
-            .partition(|e| nodes.contains_key(&e.from().node()));
-        let have: Vec<EventOutputPort> = have.iter().map(|e| e.from()).collect();
-        if have == want {
+            .flatten()
+            .copied()
+            .filter(|e| nodes.contains_key(&e.from().node()))
+            .collect();
+        if have.iter().map(|e| e.from()).eq(want.iter().copied()) {
             return;
         }
-        spec.events.remove(&at);
-        for edge in others {
-            spec.connect_events(at, edge);
+        // An edge that stays is not rewritten: only the difference moves.
+        for edge in &have {
+            if !matches!(edge, EventEdge::Direct(from) if want.contains(from)) {
+                self.editor.disconnect_events(at, *edge);
+            }
         }
         for from in want {
-            spec.connect_events(at, EventEdge::Direct(from));
+            let edge = EventEdge::Direct(from);
+            if !have.contains(&edge) {
+                self.editor
+                    .connect_events(at, edge)
+                    .expect("checked: both ends exist");
+            }
         }
         self.edited = true;
     }
@@ -2559,19 +2566,12 @@ impl<F: Float> Graph<F> {
         to: InputPort,
     ) -> Result<bool, ConnectError> {
         self.check_wire(from, to)?;
-        let source = Self::raw_source(from).expect("checked: the port fits");
         let id = Self::edge_id(ChannelEdge::new(from, to)).expect("checked: the ports fit");
         let leaving = self.fading_out(id);
-        let topology = &mut self.editor.spec_mut().topology;
-        let added = match to.end() {
-            InEnd::Node(..) => {
-                let at = Self::raw_in(to).expect("checked: the port fits");
-                let held = topology.edges.get(&at).map_or(0, Vec::len);
-                topology.connect(at, RawEdge::Direct(source));
-                topology.edges.get(&at).map_or(0, Vec::len) != held
-            }
-            InEnd::Output(channel) => topology.connect_output(channel, source),
-        };
+        let added = self
+            .editor
+            .connect_edge(id)
+            .expect("checked: both ends exist");
         if added || leaving {
             // The edge exists now, so the fade is the editor's to take.
             self.editor
@@ -2614,7 +2614,7 @@ impl<F: Float> Graph<F> {
             && self.editor.edge_gain(id) == Some(Gain::UNITY)
             && self.editor.edge_gain_range(id) == Some(EdgeGain::DEFAULT_RANGE);
         if plain {
-            self.editor.spec_mut().clear_edge_gain(id);
+            self.editor.clear_edge_gain(id);
             self.sweep_gain_targets();
         }
         self.edited = true;
@@ -2653,17 +2653,7 @@ impl<F: Float> Graph<F> {
             self.edited = true;
             return true;
         }
-        let spec = self.editor.spec_mut();
-        let removed = match id.sink {
-            PortSink::Port(at) => spec.disconnect(at, id.from),
-            PortSink::Output(channel) => match id.from {
-                RawEdge::Direct(source) => {
-                    usize::from(channel) < spec.topology.outputs.len()
-                        && spec.disconnect_output(usize::from(channel), source)
-                }
-                RawEdge::Feedback(_) => false,
-            },
-        };
+        let removed = self.editor.disconnect_edge(id);
         self.edited |= removed;
         removed
     }
@@ -3180,7 +3170,7 @@ impl<F: Float> Graph<F> {
         // A fade in is not the author's gain: the edge goes on rising, to unity.
         let cleared = if self.editor.edge_fade(id) == Some(EdgeFade::In) {
             if let Some(source) = self.editor.spec().gains.get(&id).and_then(|g| g.source) {
-                self.editor.spec_mut().disconnect_edge_gain(id, source);
+                self.editor.disconnect_edge_gain(id, source);
             }
             self.editor
                 .set_edge_gain(id, Gain::UNITY)
@@ -3190,7 +3180,7 @@ impl<F: Float> Graph<F> {
                 .expect("the lane has its entry");
             true
         } else {
-            self.editor.spec_mut().clear_edge_gain(id).is_some()
+            self.editor.clear_edge_gain(id)
         };
         self.edited |= cleared;
         self.sweep_gain_targets();
@@ -3329,23 +3319,6 @@ impl<F: Float> Graph<F> {
         let node = node.into();
         self.shape_of(node)?;
         Ok(self.editor.mode(node))
-    }
-
-    /// Removes the gain entries of edges the topology no longer has: an edge
-    /// a whole-set write dropped takes its weight with it (a stale entry
-    /// would fail every later commit).
-    fn drop_stale_gains(&mut self) {
-        let spec = self.editor.spec_mut();
-        let stale: Vec<_> = spec
-            .gains
-            .keys()
-            .filter(|id| !spec.has_edge(**id))
-            .copied()
-            .collect();
-        for id in stale {
-            spec.clear_edge_gain(id);
-        }
-        self.sweep_gain_targets();
     }
 
     /// The graph's taps: open and close audio and event copies of it.
@@ -3527,12 +3500,9 @@ impl<F: Float> Graph<F> {
             None
         };
         self.widen_refusal = refused;
-        if refused.is_none() {
-            let outputs = &mut self.editor.spec_mut().topology.outputs;
-            if outputs.len() < channels {
-                outputs.resize(channels, Vec::new());
-                self.edited = true;
-            }
+        if refused.is_none() && self.editor.spec().topology.outputs.len() < channels {
+            self.editor.resize_outputs(channels);
+            self.edited = true;
         }
         self.publish_output_facts();
         refused.map_or(Ok(()), Err)
@@ -3797,26 +3767,22 @@ impl<F: Float> Graph<F> {
         self.editor.set_main_output_fade((!hard).then(|| {
             tutti_graph::Fade::seconds(tutti_graph::DECLICK, self.editor.prepare().sample_rate())
         }));
-        let spec = self.editor.spec_mut();
+        let spec = self.editor.spec();
         if spec.main_output != main_output {
-            spec.main_output = main_output;
             // The main output's bus edges fold to the new topology at the next
             // commit.
             self.edited |= !spec.main_output_sources.is_empty();
         }
-        if let Some(id) = next {
-            spec.main_output_id = id;
-            self.edited = true;
-        }
+        let id = next.unwrap_or(spec.main_output_id);
+        self.edited |= next.is_some();
+        self.editor.declare_main_output(main_output, id);
         self.main_output = main_output;
         self.widen_refusal = None;
-        let mut resized = false;
-        let outputs = &mut self.editor.spec_mut().topology.outputs;
-        if outputs.len() != width {
-            outputs.resize(width, Vec::new());
-            self.drop_stale_gains();
+        let resized = self.editor.resize_outputs(width);
+        if resized {
+            // The channels cut took their gain entries with them.
+            self.sweep_gain_targets();
             self.edited = true;
-            resized = true;
         }
         self.reopen_main_output_readers(resized);
         self.publish_output_facts();

@@ -677,7 +677,7 @@ pub use edges::event_tap::{EventTapOptions, EventTapReader, EventTapWriter, TapE
 pub use edit::builder::{GraphBuilder, Renderer};
 pub use edit::editor::{
     CloseError, CommitError, Editor, Inserted, Limits, MainOutputGate, MissingSource, Rewired,
-    Unwired,
+    Unwired, WireError,
 };
 pub use event::sorted::{EventOrderError, SortedEvents, SubBlocks};
 pub use event::types::{Event, EventKind, Harmony, HarmonyKind, UmpAt};

@@ -85,9 +85,10 @@ mod outlets;
 mod placements;
 mod taps;
 mod unwired;
+mod wiring;
 use cells::LiveCells;
 pub use commit::Rewired;
-pub use errors::{CloseError, CommitError, MissingSource};
+pub use errors::{CloseError, CommitError, MissingSource, WireError};
 use lifecycle::Lifecycle;
 use link::Link;
 use outlets::Outlets;
@@ -153,7 +154,8 @@ impl Limits {
 /// [`Editor::new`] builds the editor and its executor together, from one
 /// [`Prepare`]. Nodes are added with [`insert`](Self::insert) (which
 /// prepares the unit and returns its typed controls), wired through
-/// [`spec_mut`](Self::spec_mut), and shipped with [`commit`](Self::commit),
+/// [`connect_edge`](Self::connect_edge) and the calls beside it, and shipped
+/// with [`commit`](Self::commit),
 /// which validates and compiles the spec against the plan sent last and
 /// sends a commit — the new [`Plan`] and only the units that changed — over a
 /// preallocated queue. The executor installs it at the start of its next
@@ -178,7 +180,7 @@ impl Limits {
 /// ```
 /// use tutti_buffers::MaxBlock;
 /// use tutti_graph::{Cx, Editor, ForkByClone, Io, Node, Prepare, Shape, Status, TransportPosition};
-/// use tutti_graph::{Edge, InputPort, OutputPort, PortSource};
+/// use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
 /// use tutti_units::{Beat, Bpm, SampleRate, Samples};
 /// use tutti_buffers::ChannelLayout;
 /// use tutti_graph::NodeKey;
@@ -187,14 +189,11 @@ impl Limits {
 /// struct Half;
 /// impl Node for Half {
 ///     fn shape(&self) -> Shape {
-///         Shape::through_unassigned(ChannelLayout::MONO)
+///         Shape::source_unassigned(ChannelLayout::MONO)
 ///     }
 ///     fn prepare(&mut self, _: &Prepare) {}
 ///     fn process(&mut self, _: &Cx<'_>, mut io: Io<'_>) -> Status {
-///         let (ins, mut outs) = io.split();
-///         for (o, i) in outs.get(0).iter_mut().zip(ins.get(0)) {
-///             *o = 0.5 * i;
-///         }
+///         io.output(0).fill(0.5);
 ///         Status::Modified
 ///     }
 ///     fn reset(&mut self) {}
@@ -203,17 +202,17 @@ impl Limits {
 /// let (mut editor, mut executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(64))));
 /// let half = NodeKey(1);
 /// editor.insert(half, "half", ForkByClone(Half));
-/// let topology = &mut editor.spec_mut().topology;
-/// topology.inputs = ChannelLayout::MONO;
-/// topology.connect(InputPort::new(half, 0), Edge::Direct(PortSource::MainInput(0)));
-/// topology.set_outputs([PortSource::Node(OutputPort::new(half, 0))]);
+/// editor.resize_outputs(1);
+/// let from = Edge::Direct(PortSource::Node(OutputPort::new(half, 0)));
+/// editor
+///     .connect_edge(EdgeId { sink: PortSink::Output(0), from })
+///     .expect("the node and the channel exist");
 /// editor.commit().expect("compiles");
 ///
 /// // On the audio thread:
-/// let input = [1.0_f32; 64];
 /// let mut output = [0.0_f32; 64];
 /// let transport = TransportPosition::new(false, Bpm::of(120.0), Beat::new(0.0), None);
-/// executor.process(64, &transport, &[&input], &mut [&mut output]);
+/// executor.process(64, &transport, &[], &mut [&mut output]);
 /// assert_eq!(output[0], 0.5);
 /// ```
 pub struct Editor<F: Float = f32> {

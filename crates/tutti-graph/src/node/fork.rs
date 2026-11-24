@@ -633,9 +633,13 @@ impl Error for ForkError {
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", ForkByClone(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
+/// editor.resize_outputs(1);
+/// let from = tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
 ///     tutti_graph::OutputPort::new(NodeKey(1), 0),
-/// )]);
+/// ));
+/// editor
+///     .connect_edge(tutti_graph::EdgeId { sink: tutti_graph::PortSink::Output(0), from })
+///     .expect("the node and the channel exist");
 /// assert!(editor.fork(ForkTarget::Node(NodeKey(1)), prepare).is_ok());
 /// ```
 #[derive(Clone, Debug)]
@@ -709,9 +713,13 @@ impl<F: Float, N: Node<F> + Clone + Send + 'static> IntoNode<F> for ForkByClone<
 /// let prepare = Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(256)));
 /// let (mut editor, _exec) = Editor::new(prepare);
 /// editor.insert(NodeKey(1), "silence", Unforkable(Silence));
-/// editor.spec_mut().topology.set_outputs([tutti_graph::PortSource::Node(
+/// editor.resize_outputs(1);
+/// let from = tutti_graph::Edge::Direct(tutti_graph::PortSource::Node(
 ///     tutti_graph::OutputPort::new(NodeKey(1), 0),
-/// )]);
+/// ));
+/// editor
+///     .connect_edge(tutti_graph::EdgeId { sink: tutti_graph::PortSink::Output(0), from })
+///     .expect("the node and the channel exist");
 /// assert_eq!(
 ///     editor.fork(ForkTarget::MainOutput, prepare).err(),
 ///     Some(ForkError::NotForkable { key: NodeKey(1) }),

@@ -212,10 +212,13 @@ pub enum CloseError {
     Meter(MeterId),
 }
 
-/// Why [`Editor::open_tap`](crate::Editor::open_tap), [`Editor::open_event_tap`](crate::Editor::open_event_tap) or
-/// [`Editor::open_meter`](crate::Editor::open_meter) refused: a source that
-/// does not exist in the spec **at the time of the call**, edits not yet
-/// committed included. Nothing was opened.
+/// Why [`Editor::open_tap`](crate::Editor::open_tap), [`Editor::open_event_tap`](crate::Editor::open_event_tap),
+/// [`Editor::open_meter`](crate::Editor::open_meter) or a wiring call
+/// ([`Editor::connect_edge`](crate::Editor::connect_edge),
+/// [`Editor::connect_events`](crate::Editor::connect_events),
+/// [`Editor::connect_param`](crate::Editor::connect_param)) refused: a node
+/// or port that does not exist in the spec **at the time of the call**, edits
+/// not yet committed included. Nothing was opened or wired.
 ///
 /// Only the open is checked. A port that narrows or vanishes *later* (a node
 /// replaced by one with fewer outputs, a removed node) makes its lane read
@@ -267,4 +270,45 @@ pub enum MissingSource {
         /// The node's event output width.
         width: usize,
     },
+}
+
+/// Why a wiring call refused: [`Editor::connect_edge`](crate::Editor::connect_edge),
+/// [`Editor::connect_events`](crate::Editor::connect_events),
+/// [`Editor::connect_param`](crate::Editor::connect_param) or
+/// [`Editor::connect_edge_gain`](crate::Editor::connect_edge_gain). The graph
+/// is as it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum WireError {
+    /// A node, or a port of one, that the call names does not exist.
+    #[error(transparent)]
+    Missing(#[from] MissingSource),
+    /// The sink node has no such audio input port.
+    #[error("node {} has no input {port} (it has {width})", .node.0)]
+    NoInputPort {
+        /// The node.
+        node: NodeKey,
+        /// The port asked for.
+        port: u16,
+        /// The node's input width.
+        width: usize,
+    },
+    /// The graph has no such main output channel.
+    #[error("no main output {channel} (the graph has {width})")]
+    NoOutputChannel {
+        /// The channel asked for.
+        channel: u16,
+        /// The graph's output width.
+        width: usize,
+    },
+    /// A main output channel takes direct sources only: there is no feedback
+    /// edge into one.
+    #[error("main output {channel} takes no feedback edge")]
+    FeedbackIntoOutput {
+        /// The channel asked for.
+        channel: u16,
+    },
+    /// The gain's edge is not one the author may weight.
+    #[error(transparent)]
+    Gain(#[from] crate::EdgeGainError),
 }

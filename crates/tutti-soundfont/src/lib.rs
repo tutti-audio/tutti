@@ -32,7 +32,7 @@
 //!
 //! ```rust,no_run
 //! use tutti_buffers::MaxBlock;
-//! use tutti_graph::{OutputPort, PortSource};
+//! use tutti_graph::{Edge, EdgeId, OutputPort, PortSink, PortSource};
 //! use tutti_units::{SampleRate, Samples};
 //! use tutti_graph::NodeKey;
 //! use tutti_graph::{Editor, Prepare};
@@ -52,8 +52,12 @@
 //! let (mut editor, _executor) = Editor::new(Prepare::new(SampleRate::SR_48K, MaxBlock::of(Samples::new(512))));
 //! let key = NodeKey(1);
 //! editor.insert(key, "piano", unit);
-//! editor.spec_mut().topology.set_outputs((0..2)
-//!     .map(|port| PortSource::Node(OutputPort::new(key, port))));
+//! editor.resize_outputs(2);
+//! for channel in 0..2 {
+//!     let from = Edge::Direct(PortSource::Node(OutputPort::new(key, channel)));
+//!     let sink = PortSink::Output(channel);
+//!     editor.connect_edge(EdgeId { sink, from })?;
+//! }
 //! editor.commit()?;
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
