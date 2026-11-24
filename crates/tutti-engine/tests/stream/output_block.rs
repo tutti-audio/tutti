@@ -9,7 +9,10 @@
 use crate::fixtures::{SAMPLE_RATE, dc_state, fan, graph_engine, rolling_state};
 use std::sync::Arc;
 use tutti_buffers::{ChannelLayout, MaxBlock};
-use tutti_engine::{AudioCallbackState, MAX_FRAMES, OutputBlock, OutputQuantum, QuantumOutOfRange};
+use tutti_engine::{
+    AudioCallbackState, MAX_FRAMES, ManualStreamDriver, OutputBlock, OutputQuantum, OutputSpec,
+    OutputStream, QuantumOutOfRange,
+};
 use tutti_graph::NodeKey;
 use tutti_nodes::testing::Const;
 use tutti_timeline::Transport;
@@ -48,8 +51,8 @@ fn an_oversized_callback_silences_its_tail_and_counts_it() {
 
     assert_eq!(blocks.get().truncated, 1, "the silenced tail is counted");
     assert_eq!(
-        block.last_rendered_frames(),
-        MAX_FRAMES,
+        block.callback_frames(),
+        Some(Samples::new(MAX_FRAMES)),
         "the block reports what it actually rendered, not what it was asked for"
     );
     assert!(
@@ -74,7 +77,7 @@ fn the_block_renders_at_the_width_it_was_built_for() {
         assert_eq!(block.channels(), width);
         let mut out = vec![0.0f32; 32 * width];
         block.render(&mut out);
-        assert_eq!(block.last_rendered_frames(), 32);
+        assert_eq!(block.callback_frames(), Some(Samples::new(32)));
     }
 }
 
@@ -87,7 +90,7 @@ fn an_empty_callback_renders_nothing_and_does_not_panic() {
     let mut block = OutputBlock::new(dc_state(1.0, 2), ChannelLayout::STEREO);
     let mut out: [f32; 0] = [];
     block.render(&mut out);
-    assert_eq!(block.last_rendered_frames(), 0);
+    assert_eq!(block.callback_frames(), Some(Samples::new(0)));
 }
 
 /// **A callback quantum is from one frame to `MAX_FRAMES`.** A quantum the
@@ -112,4 +115,45 @@ fn a_quantum_holds_from_one_frame_to_the_ceiling() {
         OutputQuantum::try_from(ceiling).map(OutputQuantum::max_block),
         Ok(ceiling)
     );
+}
+
+/// **A stream's callbacks publish the smallest and largest size they were
+/// handed since the last take**, whatever size the spec asked for, a callback
+/// of no frames is not a size, and a restart forgets what was not taken.
+#[test]
+fn a_stream_publishes_the_callback_sizes_and_forgets_them_on_a_restart() {
+    let state = dc_state(1.0, 2);
+    let spec = OutputSpec::new(
+        SampleRate::of(SAMPLE_RATE),
+        ChannelLayout::STEREO,
+        tutti_buffers::SampleFormat::F32,
+    )
+    .with_quantum(OutputQuantum::of(512));
+    let mut stream = OutputStream::new(spec);
+    let frames = stream.callback_frames();
+    assert_eq!(frames.take(), None, "no callback yet");
+
+    let (driver, handle) = ManualStreamDriver::new();
+    stream.start_with(Arc::clone(&state), driver).unwrap();
+    for n in [480, 0, 512, 471] {
+        handle.render_block(Samples::new(n)).unwrap();
+    }
+    let span = frames.take().expect("callbacks ran");
+    assert_eq!(
+        (span.smallest(), span.largest()),
+        (OutputQuantum::of(471), OutputQuantum::of(512)),
+        "what was handed, not asked; the empty callback is no size"
+    );
+    assert_eq!(frames.take(), None, "a take empties the cell");
+    assert_eq!(
+        handle.callback_frames(),
+        Some(Samples::new(471)),
+        "the block's own last"
+    );
+
+    handle.render_block(Samples::new(480)).unwrap();
+    stream.stop();
+    let (driver, _handle) = ManualStreamDriver::new();
+    stream.start_with(state, driver).unwrap();
+    assert_eq!(frames.take(), None, "the new stream has run no callback");
 }
