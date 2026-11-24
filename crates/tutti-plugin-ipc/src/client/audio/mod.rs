@@ -841,10 +841,7 @@ impl AudioBridge {
         let blob = Blob::create(data).map_err(|e| {
             StateError::Rejected(format!("the state could not be made into an object: {e}"))
         })?;
-        Ok(Announced::<LoadState>::new(
-            blob,
-            (state_use, data.len() as u64),
-        ))
+        Ok(Announced::<LoadState>::new(blob, state_use))
     }
 
     /// Asks the server `msg` and waits for what `finish` makes of the lane's

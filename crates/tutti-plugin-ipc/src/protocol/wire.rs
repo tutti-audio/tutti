@@ -62,64 +62,6 @@ pub mod midi {
     }
 }
 
-/// A [`Normalized`](tutti_units::Normalized) carried as the `f64` it is,
-/// as `#[serde(with = "wire::normalized")]`.
-///
-/// `Normalized` is an `f64` and every parameter value on this wire keeps its
-/// width (a value such as 0.3 arrives as sent; protocol version 31 retired the
-/// `f32` the set, get and changed messages carried).
-///
-/// Every `Normalized` on this wire is refused on decode when it is not in
-/// `0..=1` (NaN included), as `Normalized::new` refuses: a peer that sends one
-/// is broken, and the frame fails rather than carrying a value made up for it.
-pub mod normalized {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use tutti_units::Normalized;
-
-    use super::checked;
-
-    /// Encodes the value as an `f64`.
-    pub fn serialize<S: Serializer>(value: &Normalized, s: S) -> Result<S::Ok, S::Error> {
-        value.get().serialize(s)
-    }
-
-    /// Decodes an `f64`, refusing one outside `0..=1`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Normalized, D::Error> {
-        checked(f64::deserialize(d)?)
-    }
-}
-
-/// An optional [`Normalized`](tutti_units::Normalized) carried as an
-/// optional `f64`, as `#[serde(with = "wire::normalized_opt")]`; see
-/// [`normalized`].
-pub mod normalized_opt {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use tutti_units::Normalized;
-
-    use super::checked;
-
-    /// Encodes `Some(v)` as `Some(v)` in `f64`.
-    pub fn serialize<S: Serializer>(value: &Option<Normalized>, s: S) -> Result<S::Ok, S::Error> {
-        value.map(Normalized::get).serialize(s)
-    }
-
-    /// Decodes an optional `f64`, refusing a present one outside `0..=1`.
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Normalized>, D::Error> {
-        Option::<f64>::deserialize(d)?.map(checked).transpose()
-    }
-}
-
-/// `raw` as a [`Normalized`](tutti_units::Normalized), or the decode
-/// error naming it when `Normalized::new` refuses it.
-fn checked<E: serde::de::Error>(raw: f64) -> Result<tutti_units::Normalized, E> {
-    tutti_units::Normalized::new(raw).ok_or_else(|| {
-        E::invalid_value(
-            serde::de::Unexpected::Float(raw),
-            &"a normalized value in 0..=1",
-        )
-    })
-}
-
 /// An editor size as a [`dpi::Size`], in the encoding `dpi`'s `serde` feature gives it.
 ///
 /// A logical extent is an `f64`, so on decode one that is not finite or is

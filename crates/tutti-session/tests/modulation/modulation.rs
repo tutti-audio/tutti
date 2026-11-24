@@ -21,10 +21,10 @@ use tutti_modulation::{
     Declarations, Follower, Lfo, Polarity, RouteDecl, RouteKey, RouteTarget, Source, SourceKey,
     TargetDecl, TargetKey,
 };
-use tutti_nodes::{Feed, ReconcileError};
+use tutti_nodes::{Feed, ModHost, ReconcileError};
 use tutti_session::{
-    MainOutput, ModInput, ModKeys, ModRefusal, OutputPort, PHASES, ParamRef, PhaseCx, Problem,
-    RouteError, RouteSpec, Session, SessionEvent, TargetName,
+    MainOutput, ModInput, ModRefusal, OutputPort, PHASES, ParamRef, PhaseCx, Problem, RouteError,
+    RouteSpec, Session, SessionEvent, TargetName,
 };
 use tutti_units::Samples;
 use tutti_units::{BeatsPerCycle, Bipolar, Hz, ParamAddr, UnitParam};
@@ -186,7 +186,7 @@ struct HostKeys {
     node: Cell<Option<NodeKey>>,
 }
 
-impl ModKeys for HostKeys {
+impl ModHost for HostKeys {
     fn node(&self, target: u64) -> Option<NodeKey> {
         (target == 1).then(|| self.node.get()).flatten()
     }
@@ -215,7 +215,7 @@ impl HostDecl {
                 RouteDecl {
                     source: SourceKey(1),
                     to: RouteTarget::Param(HOST_TARGET),
-                    depth: Bipolar::of(0.3),
+                    depth: tutti_rt::Param::new(Bipolar::of(0.3)),
                     polarity: tutti_modulation::Polarity::Bipolar,
                     curve: tutti_modulation::Law::Linear,
                 },
