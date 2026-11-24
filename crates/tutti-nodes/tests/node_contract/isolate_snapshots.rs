@@ -706,7 +706,7 @@ fn lfo() {
     IsolateRow::new("LfoNode (sine, 3 Hz)", || {
         LfoNode::from(
             LfoConfig::new(LfoShape::Sine)
-                .rate(Some(Hz::new(3.0)))
+                .rate(Hz::new(3.0))
                 .depth(Bipolar::clamped(0.8)),
         )
     })
