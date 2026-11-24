@@ -974,3 +974,44 @@ fn a_link_still_refuses_a_set_profile_on_from_the_broadcast_muid() {
     };
     assert_eq!(unread.reason, UnreadReason::BadSource);
 }
+
+/// Spec: m2-101/5.4#11
+#[test]
+fn a_version_1_report_or_set_on_is_written_without_the_channel_count() {
+    let target = ProfileTarget::Channel {
+        channel: MidiChannel::of(0),
+        channels: ProfileChannels::of(5),
+    };
+    let (source, to, profile) = (Muid::of(SRC), Muid::of(DST), piano());
+    let ci_version = CiVersion::of(1);
+    for message in [
+        CiMessage::SetProfileOn {
+            source,
+            ci_version,
+            to,
+            target,
+            profile,
+        },
+        CiMessage::ProfileEnabled {
+            source,
+            ci_version,
+            target,
+            profile,
+        },
+        CiMessage::ProfileDisabled {
+            source,
+            ci_version,
+            target,
+            profile,
+        },
+    ] {
+        let bytes = message.encode();
+        assert_eq!(bytes[4], 0x01);
+        assert_eq!(bytes[bytes.len() - 5..], [0x7E, 1, 2, 3, 4]);
+        assert_eq!(
+            bytes.len(),
+            preamble(0x00, 0x24, BROADCAST).len() + 5,
+            "{message:?}"
+        );
+    }
+}
