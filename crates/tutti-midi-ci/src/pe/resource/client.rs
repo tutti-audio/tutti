@@ -20,7 +20,7 @@ use super::cache::{Cached, GetCache, PeCacheScope};
 use super::data::PeData;
 use super::entry::{PeResourceList, ResourceEntry};
 use super::fields::PeDataError;
-use super::kind::PeResource;
+use super::kind::{PeResource, StandardResource};
 use super::request::{RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody};
 use super::state::StateStamp;
 use crate::{CiMessage, Decoded, Initiator, Muid};
@@ -406,7 +406,7 @@ impl ResourceInitiator {
     fn entry(&self, resource: &PeResource) -> Result<Option<&ResourceEntry>, RequestRefused> {
         match &self.list {
             None => Ok(None),
-            Some(_) if *resource == PeResource::ResourceList => Ok(None),
+            Some(_) if *resource == StandardResource::ResourceList => Ok(None),
             Some(list) => list
                 .entry(resource)
                 .map(Some)
@@ -640,7 +640,7 @@ impl ResourceInitiator {
     }
 
     fn fetch_list(&mut self, now: Instant, out: &mut Vec<ResourceAction>) {
-        let get = PeGet::new(PeResource::ResourceList.name());
+        let get = PeGet::new(StandardResource::ResourceList.name());
         match self.pe.start(PeCall::Get(get), now) {
             Ok((id, actions)) => {
                 self.ops.push((id, Op::List));
@@ -668,7 +668,7 @@ impl ResourceInitiator {
             other => Err(ResourceFailure::Peer(Box::new(other))),
         };
         match op {
-            Op::List => match reply.and_then(|r| decode(&PeResource::ResourceList, &r)) {
+            Op::List => match reply.and_then(|r| decode(StandardResource::ResourceList, &r)) {
                 Ok(PeData::ResourceList(list)) => {
                     self.list = Some(list.clone());
                     self.cache.clear();
@@ -703,7 +703,7 @@ impl ResourceInitiator {
             Op::Set { call, target } => {
                 let resource = target.resource().clone();
                 let (result, stamp) = match reply {
-                    Ok(r) if resource == PeResource::State => {
+                    Ok(r) if resource == StandardResource::State => {
                         match StateStamp::read(&r.header.extra) {
                             Ok(stamp) => (Ok(r.status()), Some(stamp)),
                             Err(error) => (Err(error.into()), None),
@@ -1000,7 +1000,10 @@ fn parse(response: &PeResponse) -> Result<PeJson, ResourceFailure> {
 }
 
 /// The data of a reply: JSON, or the bytes of its media type.
-fn decode(resource: &PeResource, response: &PeResponse) -> Result<PeData, ResourceFailure> {
+fn decode(
+    resource: impl Into<PeResource>,
+    response: &PeResponse,
+) -> Result<PeData, ResourceFailure> {
     let data = match response.header.media_type.as_ref() {
         Some(media_type) => PeData::decode_bytes(resource, Some(media_type), &response.body)?,
         None => PeData::decode(resource, &parse(response)?)?,
@@ -1020,7 +1023,7 @@ fn read_full(
 fn apply_partial(held: &PeData, bytes: &[u8]) -> Option<PeData> {
     let update = PartialUpdate::try_from(&PeJson::try_from(bytes).ok()?).ok()?;
     let changed = update.apply(&held.to_json()?).ok()?;
-    PeData::decode(&held.resource(), &changed).ok()
+    PeData::decode(held.resource(), &changed).ok()
 }
 
 impl Initiator for ResourceInitiator {

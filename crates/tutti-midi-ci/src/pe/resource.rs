@@ -38,7 +38,10 @@ pub use fields::{
     Priority, RoleName, SignificantBits, StepCount, TypeHint, UnlistedText,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
-pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};
+pub use kind::{
+    CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults, StandardResource,
+    UnmodelledResource, UntypedResource,
+};
 pub use link::{
     ColumnSource, ConfirmIcon, ConfirmType, Confirmation, LinkRole, PeColumn, PeLink,
     SelectorAction, SimpleAction,

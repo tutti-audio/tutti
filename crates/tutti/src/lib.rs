@@ -530,10 +530,10 @@ pub mod session {
         SupportedConfig,
     };
     pub use tutti_engine::{
-        BackendErrorKind, GraphEngineError, LOAD_MEAN_TIME_CONSTANT, Lagging, OutputLevelError,
-        OutputLevels, OutputMap, OutputMapError, OutputQuantum, OutputSpec, OutputStrip,
-        QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault, StreamFaultKind,
-        StreamFaults, StreamLatency, TimerError,
+        BackendErrorKind, CallbackFrames, CallbackSpan, GraphEngineError, LOAD_MEAN_TIME_CONSTANT,
+        Lagging, OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum,
+        OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
+        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -1161,9 +1161,10 @@ pub mod midi {
             PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
             ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
             ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId,
-            StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait,
-            TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

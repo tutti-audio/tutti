@@ -29,7 +29,7 @@
 //! use std::num::NonZeroUsize;
 //! use tutti_buffers::MaxBlock;
 //! use tutti_polysynth::{
-//!     Adsr, FilterType, OscillatorType, PolySynth, SynthConfig,
+//!     Adsr, FilterType, LadderSaturation, OscillatorType, PolySynth, SynthConfig,
 //! };
 //! use tutti_graph::{OutputPort, PortSource};
 //! use tutti_units::{Amplitude, Hz, Resonance, SampleRate, Samples, Seconds, UnitParam};
@@ -44,6 +44,7 @@
 //!         .filter(FilterType::Moog {
 //!             cutoff: Hz::new(2000.0),
 //!             resonance: Resonance::new(0.7),
+//!             saturation: LadderSaturation::PerStage,
 //!         })
 //!         .envelope(Adsr {
 //!             attack: Seconds::new(0.01),
@@ -162,6 +163,8 @@ pub use synth::{
 // The amplitude envelope `SynthConfig::envelope` takes; one type with the
 // modulation sources' note envelope.
 pub use tutti_music::Adsr;
+// The saturation model `FilterType::Moog` holds; the ladder's own type.
+pub use tutti_dsp::LadderSaturation;
 
 mod polysynth;
 pub use polysynth::PolySynth;

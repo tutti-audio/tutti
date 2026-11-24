@@ -9,6 +9,7 @@
 use std::sync::Arc;
 use tutti_buffers::MaxBlock;
 use tutti_curve::Exponent;
+use tutti_fixtures::cycle_blocks;
 
 use atomic_float::AtomicF64;
 use tutti_buffers::ChannelLayout;
@@ -290,17 +291,10 @@ fn append(all: &mut Vec<Vec<f32>>, got: Vec<Vec<f32>>) {
 
 /// A ragged block schedule up to `max`, summing to `total`.
 fn ragged(total: usize, max: usize) -> Vec<usize> {
-    let mut v = Vec::new();
-    let (mut sum, mut i) = (0, 0usize);
-    while sum < total {
-        let n = [1, max, 7, 64, max - 1, 33, 2, 100][i % 8]
-            .min(max)
-            .min(total - sum);
-        v.push(n);
-        sum += n;
-        i += 1;
-    }
-    v
+    cycle_blocks(
+        &[1, max, 7, 64, max - 1, 33, 2, 100].map(|n| n.min(max)),
+        total,
+    )
 }
 
 // ------------------------------------------------------------- programs --

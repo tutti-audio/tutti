@@ -1,6 +1,7 @@
 //! Regression gate for RT-safety: built-in nodes must not allocate on the
 //! process path. The panner tests are `spatial_rt_no_alloc.rs`.
 
+use crate::harness::unassigned_bus;
 use tutti_buffers::{Mono, MonoMut};
 use tutti_nodes::ConvolverNode;
 use tutti_units::Drive;
@@ -341,12 +342,6 @@ fn distortion_antialiasing_is_allocation_free_fed_and_unfed() {
             }
         }
     }
-}
-
-fn unassigned_bus(
-    width: impl Into<tutti_buffers::ChannelLayout>,
-) -> tutti_buffers::ChannelTopology {
-    tutti_buffers::ChannelTopology::unassigned(width.into()).expect("a test width fits a bus")
 }
 
 /// A one-channel convolver over `ir`.

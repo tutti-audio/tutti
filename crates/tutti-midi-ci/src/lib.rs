@@ -127,10 +127,10 @@ pub use pe::{
     ResourceInitiator, ResourceName, ResourceResponder, ResourceSet, ResourceStore, ResourceTarget,
     ResponderAction, ResponderEvent, ResponderSettings, RestoreError, RoleName,
     SUB_ID2_PE_CAPABILITIES_INQUIRY, SUB_ID2_PE_CAPABILITIES_REPLY, SUB_ID2_PE_NOTIFY, SavedState,
-    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateDevice,
-    StateId, StateRev, StateSize, StateStamp, StateVerdict, StepCount, StoreError, StreamLimit,
-    SubscribeId, TypeHint, UnixSeconds, UnlistedText, UpdateKind, WrongDevice, decode_body,
-    encode_body, mcoded7, split_message,
+    SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StandardResource,
+    StateDevice, StateId, StateRev, StateSize, StateStamp, StateVerdict, StepCount, StoreError,
+    StreamLimit, SubscribeId, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+    UntypedResource, UpdateKind, WrongDevice, decode_body, encode_body, mcoded7, split_message,
 };
 pub use process::{
     ChannelControllers, DataControl, NotADataControl, NoteData, ProcessFeatures, ReportScope,
