@@ -6,10 +6,10 @@ use crate::common::{self, metrical, note, track, unspecified, without_defaults};
 use crate::common::{encoded, read_bytes};
 use crate::support::{Division, RawEvent, build_smf};
 use tutti_midi_file::{
-    DropReason, FileEvent, Meta, MicrosPerQuarter, MidiFile, ReadError, SmfDivision, SmfFormat,
-    SmfParseError, TextKind, Tick,
+    DropReason, Meta, MicrosPerQuarter, SmfDivision, SmfEvent, SmfFormat, SmfParseError,
+    SmfReadError, StandardMidiFile, TextKind, Tick,
 };
-use tutti_ump::{Message, TicksPerQuarterNote, Voice1};
+use tutti_ump::{TicksPerQuarterNote, Voice1};
 use tutti_units::Seconds;
 
 const TPQ: u16 = 96;
@@ -41,7 +41,7 @@ fn voices(bytes: &[u8]) -> Vec<Voice1> {
     unspecified(&file, 0)
         .iter()
         .filter_map(|(_, e)| match e {
-            FileEvent::Message(Message::Midi1(_, v)) => Some(*v),
+            SmfEvent::Channel { message, .. } => Some(*message),
             _ => None,
         })
         .collect()
@@ -88,7 +88,7 @@ fn a_quantity_writes_to_its_bytes() {
             SMF_DIVISION,
             track(vec![(
                 u64::from(value),
-                FileEvent::Meta(Meta::Text {
+                SmfEvent::Meta(Meta::Text {
                     kind: TextKind::Text,
                     bytes: Box::default(),
                 }),
@@ -110,7 +110,7 @@ fn a_five_byte_quantity_is_refused() {
     let body = [0x81, 0x80, 0x80, 0x80, 0x00, 0x90, 0x3C, 0x40];
     assert!(matches!(
         read_bytes(raw_track(&body)),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::VariableLengthQuantity
@@ -119,7 +119,7 @@ fn a_five_byte_quantity_is_refused() {
     // And one cut off mid-quantity.
     assert!(matches!(
         read_bytes(raw_track(&[0x81, 0x80])),
-        Err(ReadError::Smf { .. })
+        Err(SmfReadError::Parse { .. })
     ));
 }
 
@@ -158,7 +158,7 @@ fn a_meta_event_cancels_running_status() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 31,
             cause: SmfParseError::NoRunningStatus
@@ -179,7 +179,7 @@ fn a_sysex_cancels_running_status() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 32,
             cause: SmfParseError::NoRunningStatus
@@ -193,7 +193,7 @@ fn a_sysex_cancels_running_status() {
 fn a_first_event_needs_a_status() {
     assert!(matches!(
         read_bytes(raw_track(&[0x00, 0x3C, 0x40])),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::NoRunningStatus
@@ -219,7 +219,7 @@ fn system_statuses_are_refused() {
         assert!(
             matches!(
                 read_bytes(raw_track(&[0x00, status, 0x00])),
-                Err(ReadError::Smf {
+                Err(SmfReadError::Parse {
                     track: Some(0),
                     offset: 22,
                     cause: SmfParseError::SystemStatus
@@ -235,7 +235,7 @@ fn system_statuses_are_refused() {
 fn a_high_data_byte_is_malformed() {
     assert!(matches!(
         read_bytes(raw_track(&[0x00, 0x90, 0x3C, 0x80])),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::ChannelData
@@ -266,7 +266,7 @@ fn more_tracks_than_declared_is_malformed() {
     bytes[10..12].copy_from_slice(&1u16.to_be_bytes());
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 26,
             cause: SmfParseError::ExtraTracks
@@ -311,7 +311,7 @@ fn a_meta_event_longer_than_defined_is_read_for_what_it_defines() {
         .events()
         .iter()
         .filter_map(|(_, e)| match e {
-            FileEvent::Meta(m) => Some(m),
+            SmfEvent::Meta(m) => Some(m),
             _ => None,
         })
         .collect();
@@ -367,7 +367,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
     ]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: Some(0),
             offset: 22,
             cause: SmfParseError::EndOfTrackNotLast
@@ -377,7 +377,7 @@ fn an_end_of_track_that_is_not_last_is_refused() {
 
 // ---- the writer ------------------------------------------------------------
 
-fn track_body(events: Vec<(u64, FileEvent)>) -> Vec<u8> {
+fn track_body(events: Vec<(u64, SmfEvent)>) -> Vec<u8> {
     let track = track(events);
     let bytes = crate::common::format0(SMF_DIVISION, track).unwrap();
     let bytes = encoded(&bytes);
@@ -399,7 +399,7 @@ fn the_writer_elides_a_repeated_status() {
 /// Spec: smf/track-chunks#30, smf/track-chunks#31
 #[test]
 fn the_writer_restates_a_status_after_a_meta_event() {
-    let meta = FileEvent::Meta(Meta::Text {
+    let meta = SmfEvent::Meta(Meta::Text {
         kind: TextKind::Marker,
         bytes: Box::new(*b"m"),
     });
@@ -424,9 +424,9 @@ fn a_sysex_and_an_escape_are_written_as_their_spec_bytes() {
         track_body(vec![
             (
                 0,
-                FileEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
+                SmfEvent::SysEx(common::complete(&[0x7E, 0x7F, 0x09, 0x01]))
             ),
-            (0, FileEvent::Escape(Box::new([1, 2, 3]))),
+            (0, SmfEvent::Escape(Box::new([1, 2, 3]))),
         ]),
         [
             0x00, 0xF0, 0x05, 0x7E, 0x7F, 0x09, 0x01, 0xF7, //
@@ -448,7 +448,7 @@ fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
         &[0x00, 0xFF, 0x2F, 0x00],
     ]
     .concat();
-    let meta = FileEvent::Meta(Meta::Text {
+    let meta = SmfEvent::Meta(Meta::Text {
         kind: TextKind::Text,
         bytes: text.into_boxed_slice(),
     });
@@ -463,7 +463,7 @@ fn a_length_of_128_or_more_is_a_multi_byte_quantity() {
     ]
     .concat();
     assert_eq!(
-        track_body(vec![(0, FileEvent::SysEx(common::complete(&data)))]),
+        track_body(vec![(0, SmfEvent::SysEx(common::complete(&data)))]),
         want
     );
 }
@@ -475,15 +475,15 @@ fn a_written_file_reads_back_equal() {
     let events = vec![
         (
             0,
-            FileEvent::Meta(Meta::Tempo {
+            SmfEvent::Meta(Meta::Tempo {
                 micros_per_quarter: MicrosPerQuarter::of(500_000),
                 extra: Box::default(),
             }),
         ),
         (0, note(0, 60)),
         (5, note(0, 62)),
-        (200, FileEvent::SysEx(common::complete(&[0x7E, 0x7F]))),
-        (200, FileEvent::Escape(Box::new([1, 2]))),
+        (200, SmfEvent::SysEx(common::complete(&[0x7E, 0x7F]))),
+        (200, SmfEvent::Escape(Box::new([1, 2]))),
         (300, note(0, 64)),
         (0x0FFF_FFFF, note(0, 65)),
     ];
@@ -525,7 +525,7 @@ fn a_typed_meta_event_with_data_its_type_does_not_define_is_kept_malformed() {
         let events = &unspecified(&read, 0);
         // The note after it is read.
         assert_eq!(events.len(), 2, "{kind:#04x} {data:?}");
-        let FileEvent::Meta(Meta::Malformed(malformed)) = &events[0].1 else {
+        let SmfEvent::Meta(Meta::Malformed(malformed)) = &events[0].1 else {
             panic!("{kind:#04x} {data:?}: {:?}", events[0].1);
         };
         assert_eq!((malformed.kind(), malformed.data()), (kind, data));
@@ -555,7 +555,7 @@ fn a_second_header_chunk_is_refused_where_it_starts() {
     bytes.extend_from_slice(&[0, 0, 0, 1, 0, TPQ as u8]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 14,
             cause: SmfParseError::SecondHeader
@@ -573,7 +573,7 @@ fn a_header_shorter_than_six_bytes_is_refused() {
     bytes.extend_from_slice(&[0, 0, 0, 1]);
     assert!(matches!(
         read_bytes(&bytes),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::ShortHeader
@@ -588,7 +588,7 @@ fn a_format_0_header_with_two_tracks_is_refused_at_the_header() {
     let two = build_smf(0, Division::Metrical(TPQ), &[vec![], vec![]]);
     assert!(matches!(
         read_bytes(&two),
-        Err(ReadError::Smf {
+        Err(SmfReadError::Parse {
             track: None,
             offset: 0,
             cause: SmfParseError::FormatZeroTracks
@@ -615,7 +615,7 @@ fn every_text_meta_type_reads_and_writes_back() {
         let read = read_bytes(&bytes).unwrap();
         assert_eq!(
             unspecified(&read, 0)[0].1,
-            FileEvent::Meta(Meta::text(kind, "x")),
+            SmfEvent::Meta(Meta::text(kind, "x")),
             "{meta_type:#x}"
         );
         assert_eq!(without_defaults(&encoded(&read)), bytes, "{meta_type:#x}");
@@ -661,10 +661,10 @@ fn each_track_chunk_length_is_the_length_of_its_body() {
     let busy = track(vec![
         (0, note(0, 60)),
         (0, note(0, 62)),
-        (5, FileEvent::SysEx(common::complete(&[0x7E; 129]))),
+        (5, SmfEvent::SysEx(common::complete(&[0x7E; 129]))),
         (
             5,
-            FileEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),
+            SmfEvent::Meta(Meta::text(TextKind::Lyric, &"l".repeat(300))),
         ),
         (0x0FFF_FFFF, note(0, 64)),
     ]);
@@ -736,15 +736,15 @@ const EXAMPLE_FORMAT_1: [u8; 14 + 28 + 24 + 23 + 29] = [
     0x00, 0xFF, 0x2F, 0x00,
 ];
 
-fn tempo_500000() -> FileEvent {
-    FileEvent::Meta(Meta::Tempo {
+fn tempo_500000() -> SmfEvent {
+    SmfEvent::Meta(Meta::Tempo {
         micros_per_quarter: MicrosPerQuarter::of(500_000),
         extra: Box::default(),
     })
 }
 
-fn four_four() -> FileEvent {
-    FileEvent::Meta(Meta::TimeSignature {
+fn four_four() -> SmfEvent {
+    SmfEvent::Meta(Meta::TimeSignature {
         numerator: 4,
         denominator_power: 2,
         clocks_per_click: 24,
@@ -760,8 +760,8 @@ fn four_four() -> FileEvent {
 #[test]
 fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte() {
     let file = read_bytes(EXAMPLE_FORMAT_0).unwrap();
-    assert_eq!(file.format(), Some(SmfFormat::SingleTrack));
-    assert_eq!(file.division(), Some(SMF_DIVISION));
+    assert_eq!(file.format(), SmfFormat::SingleTrack);
+    assert_eq!(file.division(), SMF_DIVISION);
     assert_eq!(file.tracks().len(), 1);
     let events = file.tracks()[0].events();
     assert_eq!(events[0], (Tick(0), four_four()));
@@ -778,7 +778,7 @@ fn the_spec_format_0_example_reads_as_its_figures_and_writes_back_byte_for_byte(
 #[test]
 fn the_spec_format_1_example_reads_as_four_tracks_and_writes_back_byte_for_byte() {
     let file = read_bytes(EXAMPLE_FORMAT_1).unwrap();
-    assert_eq!(file.format(), Some(SmfFormat::Parallel));
+    assert_eq!(file.format(), SmfFormat::Parallel);
     assert_eq!(file.tracks().len(), 4);
     let tempo_track = &file.tracks()[0];
     assert_eq!(tempo_track.events()[0], (Tick(0), four_four()));
@@ -803,7 +803,7 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
         unspecified(&read, 0),
         [(
             Tick(0),
-            FileEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
+            SmfEvent::SysEx(common::complete(&[0x43, 0x12, 0x00, 0x07]))
         )]
     );
     assert_eq!(without_defaults(&encoded(&read)), whole);
@@ -818,17 +818,14 @@ fn the_spec_sysex_examples_read_as_their_events_and_write_back() {
     assert_eq!(
         unspecified(&read, 0),
         [
-            (
-                Tick(0),
-                FileEvent::SysEx(common::start(&[0x43, 0x12, 0x00]))
-            ),
+            (Tick(0), SmfEvent::SysEx(common::start(&[0x43, 0x12, 0x00]))),
             (
                 Tick(200),
-                FileEvent::Escape(Box::new([0x43, 0x12, 0x00, 0x43, 0x12, 0x00]))
+                SmfEvent::Escape(Box::new([0x43, 0x12, 0x00, 0x43, 0x12, 0x00]))
             ),
             (
                 Tick(300),
-                FileEvent::Escape(Box::new([0x43, 0x12, 0x00, 0xF7]))
+                SmfEvent::Escape(Box::new([0x43, 0x12, 0x00, 0xF7]))
             ),
         ]
     );
@@ -848,7 +845,7 @@ fn the_spec_time_signature_example_is_six_eight_with_36_clocks_a_click() {
     let read = read_bytes(&bytes).unwrap();
     assert_eq!(
         unspecified(&read, 0)[0].1,
-        FileEvent::Meta(Meta::TimeSignature {
+        SmfEvent::Meta(Meta::TimeSignature {
             numerator: 6,
             denominator_power: 3,
             clocks_per_click: 0x24,
@@ -882,7 +879,7 @@ fn a_key_signature_is_seven_flats_to_seven_sharps_and_a_mode() {
             let read = read_bytes(&bytes).unwrap();
             assert_eq!(
                 unspecified(&read, 0)[0].1,
-                FileEvent::Meta(Meta::KeySignature {
+                SmfEvent::Meta(Meta::KeySignature {
                     sharps,
                     minor,
                     extra: Box::default(),
@@ -919,11 +916,11 @@ fn meta_events_at_one_tick_read_in_the_order_the_file_has_them() {
     let tempo = RawEvent::tempo(0, 500_000);
     let text = RawEvent::new(0, vec![0xFF, 0x01, 1, b'x']);
     let first = read_bytes(file(vec![tempo, text])).unwrap();
-    let kinds = |f: &MidiFile| -> Vec<bool> {
+    let kinds = |f: &StandardMidiFile| -> Vec<bool> {
         f.tracks()[0]
             .events()
             .iter()
-            .map(|(_, e)| matches!(e, FileEvent::Meta(Meta::Tempo { .. })))
+            .map(|(_, e)| matches!(e, SmfEvent::Meta(Meta::Tempo { .. })))
             .collect()
     };
     // The Time Signature the file is given joins them.
@@ -943,7 +940,7 @@ fn text_bytes_with_the_high_bit_set_read_and_write_back_unchanged() {
     let read = read_bytes(&bytes).unwrap();
     assert_eq!(
         unspecified(&read, 0)[0].1,
-        FileEvent::Meta(Meta::Text {
+        SmfEvent::Meta(Meta::Text {
             kind: TextKind::Text,
             bytes: Box::new([0xE9, b'a']),
         })

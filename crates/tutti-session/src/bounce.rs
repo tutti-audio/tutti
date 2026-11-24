@@ -75,7 +75,7 @@ use tutti_dsp::DitherShape;
 use tutti_export::{
     BufferTarget, CancelToken, Control, EventLossPolicy, FileTarget, GRAPH_MAX_BLOCK, Job,
     JobError, Normalize, NormalizeSpec, Outcome, Output, Placement, Produced, Progress, Rendered,
-    Resample, Target, Written,
+    Resample, TailPolicy, Target, Written,
 };
 use tutti_graph::{CommitError, Editor, MissingSource, NodeKey, OutputPort, TapId, TapOptions};
 use tutti_rt::Mutex;
@@ -163,10 +163,20 @@ pub enum BounceLatency {
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[non_exhaustive]
 pub enum BounceTail {
-    /// The tail the graph reports, by `GraphTail::resolve`'s rule against
-    /// `cap`: a graph that never decays renders `cap`; otherwise what its nodes
-    /// reported, at most `cap` (a node that said nothing counts as none). The
-    /// default, with a cap of [`BounceTail::CAP`].
+    /// The tail the graph's nodes report when the programme has ended, at most
+    /// what they declare (`GraphTail::resolve`'s rule against `cap`: a graph
+    /// that never decays declares `cap`; otherwise what its nodes declared, at
+    /// most `cap`). A node that narrows its tail as its settings change
+    /// ([`Io::report_tail`](tutti_graph::Io::report_tail)) spends what is left
+    /// of its report when nothing upstream still owes, and its declared
+    /// ceiling after an upstream that does; one that never reports spends what
+    /// it declares, and one at rest spends nothing. The graph is asked at the
+    /// programme's end and after every block of the tail, and the tail is the
+    /// smallest bound any ask gave (what is spent plus what is owed): never
+    /// longer than the first ask's, shorter when an instrument goes idle and
+    /// what follows it owes its own report. The figures and progress count the
+    /// bound until the programme ends and the true total after. The default, with a cap of
+    /// [`BounceTail::CAP`].
     Graph {
         /// The most it renders.
         cap: Seconds,
@@ -1459,23 +1469,30 @@ impl Figures {
             BounceLatency::Keep => Samples::new(0),
             BounceLatency::Frames(n) => n,
         };
-        let tail = match self.tail {
-            BounceTail::None => Samples::new(0),
-            BounceTail::Frames(n) => n,
-            // `resolve`, not `samples().unwrap_or(cap)`: a node that never
-            // said (`Tail::Unknown`) is spent at what the others reported,
-            // not at the cap, which would append silence.
-            BounceTail::Graph { cap } => graph.reported_tail().resolve(cap.to_samples(self.rate)),
-        };
         // A tail excludes latency: the programme leaves the graph its
         // reported latency late, so the part of that latency the render does
-        // not trim is rendered too, or the programme's end is cut.
+        // not trim is rendered and kept as well, or the programme's end is cut.
         let kept = reported.remaining_after(latency);
-        self.provisional(latency, tail + kept)
+        let tail = match self.tail {
+            BounceTail::None => TailPolicy::Frames(kept),
+            BounceTail::Frames(n) => TailPolicy::Frames(n + kept),
+            // The most the graph's nodes can ring for, under `cap`: the render
+            // spends what they owe when the programme enters the graph, at
+            // most this. `resolve`, not `samples().unwrap_or(cap)`: a node
+            // that never said (`Tail::Unknown`) is bounded by what the others
+            // declared, not by the cap, which would append silence. The
+            // untrimmed latency is `kept_latency`: pulled once, after the programme
+            // and before the tail.
+            BounceTail::Graph { cap } => TailPolicy::Reported {
+                ceiling: graph.declared_tail().resolve(cap.to_samples(self.rate)),
+                kept_latency: kept,
+            },
+        };
+        self.provisional(latency, tail)
     }
 
     /// The job of these counts, refused as the bounce reports it.
-    fn provisional(&self, latency: Samples, tail: Samples) -> Result<Job, BounceError> {
+    fn provisional(&self, latency: Samples, tail: TailPolicy) -> Result<Job, BounceError> {
         match Job::new(self.rate, self.length, latency, tail) {
             Ok(job) => Ok(job.event_loss(self.on_event_loss)),
             // Planes that cannot be held are the pipeline's error, as when
@@ -2183,8 +2200,8 @@ where
                 BounceLatency::Graph | BounceLatency::Keep => Samples::new(0),
             },
             match tail {
-                BounceTail::Frames(n) => n,
-                BounceTail::Graph { .. } | BounceTail::None => Samples::new(0),
+                BounceTail::Frames(n) => TailPolicy::Frames(n),
+                BounceTail::Graph { .. } | BounceTail::None => TailPolicy::Frames(Samples::ZERO),
             },
         )?;
 

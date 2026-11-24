@@ -30,7 +30,7 @@
 //! // with its key; they set its parameters live.
 //! let tone = session
 //!     .graph()
-//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Some(Hz::new(440.0)))));
+//!     .add(LfoNode::from(LfoConfig::new(LfoShape::Sine).rate(Hz::new(440.0))));
 //! session.graph().connect(tone, MainOutput).expect("both ends exist");
 //!
 //! // An update commits the edit; it lands at the start of the next block, and
@@ -297,41 +297,40 @@ pub mod nodes {
     pub use tutti_nodes::{
         AdditiveConfig, AdditiveNode, AmbisonicDecoderConfig, AmbisonicDecoderNode,
         AmbisonicEncoderConfig, AmbisonicEncoderNode, AmbisonicError, AmbisonicRotatorConfig,
-        AmbisonicRotatorNode, Antialiasing, AntialiasingError, AutoPanConfig, AutoPanNode,
-        BAND_PARAMS, BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode,
-        BrickwallLimiterConfig, BrickwallLimiterNode, BusStripConfig, BusStripNode,
-        ChannelOutOfRange, ChannelTimes, ChannelTimesError, ClickConfig, ClickLevel,
-        ClickLevelError, ClickNodeConfig, ClickSettings, ClickState, CombFilterConfig,
-        CombFilterNode, CompressorConfig, CompressorNode, ConvolverConfig, ConvolverError,
-        ConvolverNode, CrossoverConfig, CrossoverError, CrossoverNode, CutAlignment,
-        CutFilterConfig, CutFilterNode, DcBlockerConfig, DcBlockerNode, Decoding,
-        DecorrelatorConfig, DecorrelatorNode, DelayConfig, DelayLayout, DelayLayoutBuilder,
-        DelayLayoutError, DelayNode, DelaySync, DiodeClipperConfig, DiodeClipperNode,
-        DistanceConfig, DistanceNode, DistortionConfig, DistortionNode, DynamicEqConfig,
-        DynamicEqNode, DynamicMode, EarlyReflectionsConfig, EarlyReflectionsNode,
-        EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig, EnvelopeFollowerNode,
-        EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode, FeedbackRouting,
-        FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig, FmConfig, FmNode,
-        FreeverbConfig, FreeverbNode, FreezeMode, FrequencyShifterConfig, FrequencyShifterNode,
-        GateConfig, GateNode, GranularConfig, GranularError, GranularNode, GraphicBands,
-        GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode, HysteresisConfig,
-        HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig, KarplusStrongNode,
-        KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType, LevellerConfig,
-        LevellerNode, LfoClock, LfoConfig, LfoNode, LimiterConfig, LimiterNode, MetronomeMode,
-        MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout, ModDelayLayoutBuilder,
-        ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands, MultibandCompressorConfig,
-        MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode, NoteEnvelopeConfig,
-        NoteEnvelopeNode, NoteTimes, NoteTimesError, OscillatorConfig, OscillatorNode,
-        OscillatorWave, PanLaw, PhaserConfig, PhaserNode, PitchShifterConfig, PitchShifterNode,
-        PlateReverbConfig, PlateReverbNode, PolarityConfig, PolarityError, PolarityNode,
-        RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY, ShapeKind, ShimmerConfig, ShimmerNode,
-        SourceNode, SourcePorts, SpringLayout, SpringReverbConfig, SpringReverbNode, SpringStages,
-        SpringStagesError, Stages, StagesError, Stagger, StaggerError, StereoWidthConfig,
-        StereoWidthNode, SvfFilterConfig, SvfFilterNode, SvfType, Sweep, SweepBuilder, SweepError,
-        SweepRange, SweepRangeError, TiltFilterConfig, TiltFilterNode, TransientShaperConfig,
-        TransientShaperNode, TremoloConfig, TremoloNode, TubeStageConfig, TubeStageNode, VbapError,
-        VbapPannerConfig, VbapPannerNode, WaveguideStringConfig, WaveguideStringNode,
-        WavetableConfig, WavetableNode,
+        AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode, BAND_PARAMS,
+        BellFilterConfig, BellFilterNode, BitCrusherConfig, BitCrusherNode, BrickwallLimiterConfig,
+        BrickwallLimiterNode, BusStripConfig, BusStripNode, ChannelOutOfRange, ChannelTimes,
+        ChannelTimesError, ClickConfig, ClickLevel, ClickLevelError, ClickNodeConfig,
+        ClickSettings, ClickState, CombFilterConfig, CombFilterNode, CompressorConfig,
+        CompressorNode, ConvolverConfig, ConvolverError, ConvolverNode, CrossoverConfig,
+        CrossoverError, CrossoverNode, CutAlignment, CutFilterConfig, CutFilterNode,
+        DcBlockerConfig, DcBlockerNode, Decoding, DecorrelatorConfig, DecorrelatorNode,
+        DelayConfig, DelayLayout, DelayLayoutBuilder, DelayLayoutError, DelayNode, DelaySync,
+        DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode, DistortionConfig,
+        DistortionNode, DynamicEqConfig, DynamicEqNode, DynamicMode, EarlyReflectionsConfig,
+        EarlyReflectionsNode, EnvelopeFilterConfig, EnvelopeFilterNode, EnvelopeFollowerConfig,
+        EnvelopeFollowerNode, EqBandConfig, EqBandNode, FdnConfig, FdnLayout, FdnNode,
+        FeedbackRouting, FeedbackRoutingBuilder, FeedbackRoutingError, FirConvolverConfig,
+        FmConfig, FmNode, FreeverbConfig, FreeverbNode, FreezeMode, FrequencyShifterConfig,
+        FrequencyShifterNode, GateConfig, GateNode, GranularConfig, GranularError, GranularNode,
+        GraphicBands, GraphicEqConfig, GraphicEqNode, HrtfBinauralConfig, HrtfBinauralNode,
+        HysteresisConfig, HysteresisNode, InterpolationMode, IrLayout, KarplusStrongConfig,
+        KarplusStrongNode, KeyFilter, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
+        LevellerConfig, LevellerNode, LfoConfig, LfoNode, LfoSync, LimiterConfig, LimiterNode,
+        MetronomeMode, MidSideConfig, MidSideNode, ModDelayConfig, ModDelayLayout,
+        ModDelayLayoutBuilder, ModDelayNode, ModalBankConfig, ModalBankNode, MultibandBands,
+        MultibandCompressorConfig, MultibandCompressorNode, NoiseColour, NoiseConfig, NoiseNode,
+        NoteEnvelopeConfig, NoteEnvelopeNode, NoteTimes, NoteTimesError, OscillatorConfig,
+        OscillatorNode, OscillatorWave, PanLaw, PhaserConfig, PhaserNode, PitchShifterConfig,
+        PitchShifterNode, PlateReverbConfig, PlateReverbNode, PolarityConfig, PolarityError,
+        PolarityNode, RingModConfig, RingModNode, SOURCE_EVENT_CAPACITY, SecondOrderShape,
+        ShapeKind, ShimmerConfig, ShimmerNode, SourceNode, SourcePorts, SpringLayout,
+        SpringReverbConfig, SpringReverbNode, SpringStages, SpringStagesError, Stages, StagesError,
+        Stagger, StaggerError, StereoWidthConfig, StereoWidthNode, SvfFilterConfig, SvfFilterNode,
+        SvfType, Sweep, SweepBuilder, SweepError, SweepRange, SweepRangeError, TiltFilterConfig,
+        TiltFilterNode, TransientShaperConfig, TransientShaperNode, TremoloConfig, TremoloNode,
+        TubeStageConfig, TubeStageNode, VbapError, VbapPannerConfig, VbapPannerNode,
+        WaveguideStringConfig, WaveguideStringNode, Waveshape, WavetableConfig, WavetableNode,
     };
 
     /// Writing a node over the kernels (`tutti-nodes`): the `Kernel` and `KernelNode`
@@ -381,10 +380,10 @@ pub mod dsp {
     pub use tutti_dsp::{
         Absorption, AdditiveBank, AdditiveControls, Algorithm, AlgorithmError, AllPass,
         AllPassFilter, AllPassForm, AmbisonicDecoder, AmbisonicEncoder, AmbisonicRotator, Band,
-        Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth, ButterworthOrder,
-        ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, ClipperDrive, ClipperDriveError,
-        CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm, Cookbook,
-        CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator, Distance, DistanceControls,
+        BandAbsorption, Biquad, BlockMismatch, BlockTooLong, BrickwallControls, Butterworth,
+        ButterworthOrder, ButterworthOrderError, ChebyshevI, ChebyshevII, ChunkSize, ClipperDrive,
+        ClipperDriveError, CombBank, CombControls, CombDelay, CombDelayError, CombFilter, CombForm,
+        Cookbook, CutResponse, DISTANCE_GLIDE, DecayTime, Decorrelator, Distance, DistanceControls,
         DistanceSpec, EarlyReflections, EarlyReflectionsError, Elliptic, EllipticTolerances,
         Envelope, EnvelopeCurve, EnvelopeDesign, EnvelopeLeg, EnvelopePace, EnvelopeStage,
         EnvelopeStages, EnvelopeStep, Fdn, FillController, Fir, FirError, FirSummary, FmControls,
@@ -461,13 +460,14 @@ pub mod types {
         BeatsPerCycleOutOfRange, BipolarOutOfRange, BitDepth, BpmOutOfRange, CentsSpan,
         CentsSpanOutOfRange, CompressionRatio, Confidence, Correlation, Direction, Drive,
         Elevation, Feedback, FramesPerBeat, FramesPerBeatOutOfRange, FrequencyRatio,
-        FrequencyRatioOutOfRange, Gain, HoldFactor, Latency, Metres, MetresOutOfRange, Mix,
-        ModulationIndex, ModulationIndexOutOfRange, Moment, NormalizedOutOfRange, Pan, ParamAddr,
-        ParamKey, PhaseIncrement, PhaseStep, PlayReading, PlaybackRate, PlaybackRateOutOfRange,
-        Radians, ReadPosition, ReadRate, Resonance, RunningPhase, SamplePosition,
-        SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange, Speed, SpeedOutOfRange, Spread,
-        SrcRatio, StereoBalance, StereoWidth, StretchFactor, Tail, TimecodeFrames, Unit, UnitAddr,
-        UnitParam, UnitParamOutOfRange, Velocity,
+        FrequencyRatioOutOfRange, Gain, HoldFactor, KeyFilterSetting, Latency, Metres,
+        MetresOutOfRange, Mix, ModulationIndex, ModulationIndexOutOfRange, Moment,
+        NormalizedOutOfRange, Pan, ParamAddr, ParamKey, PhaseIncrement, PhaseStep, PlayReading,
+        PlaybackRate, PlaybackRateOutOfRange, Radians, ReadPosition, ReadRate, Resonance,
+        RunningPhase, SamplePosition, SampleRateOutOfRange, SampleSpan, SampleSpanOutOfRange,
+        Setting, SettingKind, Speed, SpeedOutOfRange, Spread, SrcRatio, StereoBalance, StereoWidth,
+        StretchFactor, SyncSetting, Tail, TimecodeFrames, Unit, UnitAddr, UnitParam,
+        UnitParamOutOfRange, Velocity,
     };
     pub use tutti_units::{Blocks, Calls, Chunks, Phase, Quantity, Real, Resyncs, UndoSteps};
 }
@@ -489,11 +489,12 @@ pub mod tempo {
 /// a program that builds one directly depends on `tutti-graph`.
 pub mod graph {
     pub use tutti_graph::{
-        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ForkByClone, HasParam,
-        HasParams, HasPublished, InBus, InEvents, Inputs, IntoNode, Io, Node, OutBus, OutEvents,
-        Outputs, ParamFork, ParamNode, ParamSet, ParamSetBuilder, ParamValue, Params, Prepare,
-        Published, PublishedCell, PublishedKind, RtLevel, RtRecord, RtTarget, RtValue, SampleRates,
-        Scalar, Shape, Status, Unforkable, declare_params, param_parts,
+        Bus, BusRole, Buses, Cost, Cx, DeclaredUnit, Env, ErasedPublished, ErasedSetting,
+        ForkByClone, HasParam, HasParams, HasPublished, HasSetting, InBus, InEvents, Inputs,
+        IntoNode, Io, Node, OutBus, OutEvents, Outputs, ParamFork, ParamNode, ParamSet,
+        ParamSetBuilder, ParamValue, Params, Prepare, Published, PublishedCell, PublishedKind,
+        RtLevel, RtRecord, RtTarget, RtValue, SampleRates, Scalar, SettingCell, Shape, Status,
+        Unforkable, declare_params, param_parts,
     };
     pub use tutti_graph::{
         BusInput, BusOutput, Channel, Chase, CompileError, ConstantMask, Continuity, CycleEdge,
@@ -531,9 +532,9 @@ pub mod session {
     };
     pub use tutti_engine::{
         BackendErrorKind, CallbackFrames, CallbackSpan, GraphEngineError, LOAD_MEAN_TIME_CONSTANT,
-        Lagging, OutputLevelError, OutputLevels, OutputMap, OutputMapError, OutputQuantum,
-        OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError, StartError, StreamFault,
-        StreamFaultKind, StreamFaults, StreamLatency, TimerError,
+        Lagging, OpenedOutput, OutputLevelError, OutputLevels, OutputMap, OutputMapError,
+        OutputQuantum, OutputSpec, OutputStrip, QuantumOutOfRange, Routing, RoutingError,
+        StartError, StreamFault, StreamFaultKind, StreamFaults, StreamLatency, TimerError,
     };
     #[cfg(feature = "export")]
     pub use tutti_export::{
@@ -884,7 +885,7 @@ pub mod plugin {
 }
 
 /// The names of the common MIDI path in one place:
-/// a file (`MidiFile`, `Track`, `Tick`), a message (`Message`, `Ump`,
+/// a file (`MidiFile`, which is a `StandardMidiFile` or a `ClipFile`; `Track`, `Tick`), a message (`Message`, `Ump`,
 /// `MidiChannel`, `MidiGroup`, `NoteNumber`, `NoteVelocity`, `Voice1`, `SysexAssembler`, `Midi1Parser`), a timed event, the keys
 /// that play an instrument or a live input (`MidiKeys`),
 /// the session's MIDI (`Midi`, `InstrumentHandle`), its route rule, events and
@@ -910,11 +911,12 @@ pub mod midi {
         ProfileRequestError, ProfileState, ProfileTable, ReplyData, ReplyVersion2, ReportRequest,
         ReportScope, SpecificData, StandardProfile, SystemMessages,
     };
+    pub use tutti_midi_ci::{
+        CountedVersion, NotCountedVersion, NotSetProfileOn, ProfileChannels, ProfileFormat,
+        ProfileId, ProfileOnRequest, ProfileTarget,
+    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_ci::{Muid, NotAMuid};
-    pub use tutti_midi_ci::{
-        NotSetProfileOn, ProfileChannels, ProfileId, ProfileOnRequest, ProfileTarget,
-    };
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_device::EndpointId;
     #[cfg(feature = "midi-hardware")]
@@ -930,10 +932,11 @@ pub mod midi {
         SysEx, TextKind, Timebase, TimelineDrop,
     };
     pub use tutti_midi_file::{
-        ClipFileError, ReadError, Refusal, SmfParseError, ToClipError, TrackPart, TracksError,
-        WriteError,
+        ClipBuildError, ClipFile, ClipFileError, ClipHeader, ClipPart, ClipReadError, ClipRefusal,
+        ClipSequence, ClipTimeline, ReadError, SmfParseError, SmfReadError, StandardMidiFile,
+        ToClipError, TracksError, WriteError,
     };
-    pub use tutti_midi_file::{FileEvent, Meta, MidiFile, SmfFormat, Tick, Track};
+    pub use tutti_midi_file::{Meta, MidiFile, SmfEvent, SmfFormat, Tick, Track};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_midi_hardware::MidiHardwareError;
     #[cfg(feature = "midi-hardware")]
@@ -951,14 +954,12 @@ pub mod midi {
         TimecodeSeconds,
     };
     pub use tutti_midi_runtime::{
-        ClipEvents, ClipEventsKind, HarmonyChanges, HarmonyChangesError, HarmonyChangesKind,
-        HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode, MidiInputPorts,
-        OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault, SyncMessages,
-        SyncOut, SyncOutControls, TimedHarmony,
+        ClipEvents, ClipEventsKind, ClipNote, HarmonyChanges, HarmonyChangesError,
+        HarmonyChangesKind, HarmonyControls, HarmonyNode, MidiClipControls, MidiClipNode,
+        MidiInputPorts, OffsetOutOfRange, OutputLatency, OutputOffset, OutputTerms, SegmentFault,
+        SyncMessages, SyncOut, SyncOutControls, TimedHarmony,
     };
-    pub use tutti_midi_runtime::{
-        MidiKeys, MidiOut, Outgoing, SendAt, SendUniversalError, Taken, TimedMidiEvent,
-    };
+    pub use tutti_midi_runtime::{MidiKeys, MidiOut, Outgoing, SendAt, Taken, TimedMidiEvent};
     #[cfg(feature = "midi-hardware")]
     pub use tutti_ump::NoMidi1Form;
     pub use tutti_ump::{
@@ -1011,10 +1012,10 @@ pub mod midi {
     pub use tutti_session::RouteDeclarer;
     #[cfg(feature = "session")]
     pub use tutti_session::{
-        AnyNode, ClockKind, ClockOffset, DroppedEvent, FollowClock, FollowMachineControl,
+        AnyNode, ClockKind, ClockOffset, FollowClock, FollowKind, FollowMachineControl,
         FollowTempo, InstrumentHandle, LoadMidi, LoadReport, LoadedMidi, LoadedTrack, LoadingMidi,
         Midi, MidiEvent, MidiRouteId, MidiRouteRule, MidiSink, NoCommonTimelineError,
-        NotInstrument, OpenMidiSink, Stamping, TrackError,
+        NotInstrument, OpenMidiSink, Stamping, TrackError, UnfollowCause, Unplayed,
     };
     #[cfg(all(feature = "session", feature = "midi-hardware"))]
     pub use tutti_session::{
@@ -1095,9 +1096,9 @@ pub mod midi {
             MotionControlState, MotionControlTally, MotionProcess, MtcAction, MtcFlags,
             MtcFullMessage, MtcSetUp, MtcTally, MtcTimeCode, NotMmcAudioTrack, NotMmcMantissa,
             NotMmcPosition, NotMmcShift, NotMmcSlot, NotMmcStepCount, NotMmcSubframes,
-            NotQuarterFramePiece, NotWritable, QuarterFrame, QuarterFrameCycle, QuarterFramePiece,
-            Recipient, RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload,
-            UniversalRead, UniversalReader, VitcInsert,
+            NotQuarterFramePiece, QuarterFrame, QuarterFrameCycle, QuarterFramePiece, Recipient,
+            RunReference, UNIVERSAL_MAX_PAYLOAD, Universal, UniversalPayload, UniversalRead,
+            UniversalReader, VitcInsert,
         };
     }
 
@@ -1139,14 +1140,14 @@ pub mod midi {
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_ci::{
             Ack, AckStatus, ActionError, BodyLimit, BufferLimit, CallError, CallId, CanSet,
-            CcIndex, ChangeKind, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType,
-            Confirmation, ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind,
-            CustomResource, EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole,
-            ListedTwice, ModeId, NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel,
-            NotAPeMidiMode, NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize,
-            NotAStepCount, NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds,
-            OpaqueBody, PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate,
-            PartialValue, PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
+            CcIndex, ChunkNo, ClusterKind, ColumnSource, ConfirmIcon, ConfirmType, Confirmation,
+            ControllerIndexError, CtrlControl, CtrlKind, CtrlRange, CtrlValueKind, CustomResource,
+            EntryError, ExtensionError, InvalidValue, JsonPointer, LinkRole, ListedTwice, ModeId,
+            NotABodyLimit, NotABufferLimit, NotAChunkNo, NotAPeChannel, NotAPeMidiMode,
+            NotAPriority, NotARequestId, NotASimultaneousRequests, NotAStateSize, NotAStepCount,
+            NotAStreamLimit, NotATimeoutWait, NotSignificantBits, NotUnixSeconds, OpaqueBody,
+            PaginationFault, ParamPath, ParamPathError, PartialError, PartialUpdate, PartialValue,
+            PeAllCtrlEntry, PeAllCtrlList, PeAnswer, PeBankProgram, PeBasicChannelRx,
             PeBasicChannelTx, PeBinary, PeBodyError, PeCacheTime, PeCapabilities,
             PeCapabilitiesFailure, PeChCtrlEntry, PeChCtrlList, PeChannel, PeChannelEntry,
             PeChannelList, PeChannelMode, PeChunkError, PeCluster, PeColumn, PeController, PeCtrl,
@@ -1156,14 +1157,15 @@ pub mod midi {
             PeJsonError, PeJsonSchema, PeLink, PeLocalOn, PeMessage, PeMidiMode, PeModeEntry,
             PeModeList, PeObject, PeOpaque, PeOutcome, PePage, PeProgramEntry, PeProgramList,
             PeReassemblyError, PeReply, PeRequestId, PeResource, PeResourceList, PeResponse,
-            PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass, PeTerminator,
-            PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place, Priority,
-            PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse, ResourceDefaults,
-            ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure, ResourceGet,
-            ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent, RoleName,
-            SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests, StateId,
-            StateRev, StateSize, StateStamp, StepCount, StreamLimit, SubscribeId, TimeoutWait,
-            TypeHint, UnixSeconds, UnlistedText, UpdateKind,
+            PeSetScope, PeSignal, PeState, PeStateEntry, PeStateList, PeStatus, PeStatusClass,
+            PeTerminator, PeText, PeTextError, PeTransaction, PeUnreadable, PeVersion, Place,
+            Priority, PropertyName, PropertyNameError, RefusedAt, RequestRefused, ResIdUse,
+            ResourceDefaults, ResourceEntry, ResourceEntryBuilder, ResourceEvent, ResourceFailure,
+            ResourceGet, ResourceId, ResourceName, ResourceSet, ResourceTarget, ResponderEvent,
+            RoleName, SelectorAction, SetBody, SignificantBits, SimpleAction, SimultaneousRequests,
+            StandardResource, StateId, StateRev, StateSize, StateStamp, StepCount, StreamLimit,
+            SubscribeId, TimeoutWait, TypeHint, UnixSeconds, UnlistedText, UnmodelledResource,
+            UntypedResource, UpdateKind,
         };
         #[cfg(feature = "midi-hardware")]
         pub use tutti_midi_hardware::{PropertyAsk, PropertyCall, PropertyChange, PropertyPeer};

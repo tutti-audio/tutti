@@ -15,7 +15,7 @@ use tutti_buffers::{Bed, ChannelLayout};
 use tutti_codec::{FlacLevel, Format, IntDepth, Pcm};
 use tutti_export::{
     BufferTarget, Control, FileTarget, Job, Normalize, NormalizeSpec, Output, Produced,
-    RenderGraph, Setup, render, render_one,
+    RenderGraph, Setup, TailPolicy, render, render_one,
 };
 use tutti_graph::GraphBuilder;
 use tutti_measure::{LoudnessConfig, measure_loudness};
@@ -73,7 +73,7 @@ fn main() -> tutti_export::Result<()> {
         RATE,
         Seconds::new(2.0).to_samples(RATE),
         Samples::new(0),
-        Samples::new(0),
+        TailPolicy::Frames(Samples::ZERO),
     )
     .expect("a two-second render");
     let flac = Format::Flac {

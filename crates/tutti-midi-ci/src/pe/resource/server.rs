@@ -1,6 +1,8 @@
 //! [`ResourceResponder`]: the Responder of Property Exchange, serving the
 //! Resources of a [`ResourceStore`] (M2-103 §5 to §12, §14, §15).
 
+use std::borrow::Cow;
+
 use tutti_platform::Instant;
 
 use super::super::body::{BodyLimit, decode_body, encode_body};
@@ -13,7 +15,7 @@ use super::super::header::{
     PeEncoding, PeEndedBy, PeHeader, PeReply, PeRequest, PeSetScope, PeStatus, PeStatusClass,
     PeSubscription, PeUpdateCommand,
 };
-use super::super::limits::{MediaType, PeMessage, SubscribeId};
+use super::super::limits::{PeMessage, SubscribeId};
 use super::super::partial::{JsonPointer, PartialError, PartialUpdate};
 use super::super::reassemble::{
     PeFlowControl, PeReassembler, PeReassemblyLimits, PeReceived, PeStep,
@@ -21,9 +23,12 @@ use super::super::reassemble::{
 use super::super::request_ids::RequestIds;
 use super::super::tree::PeJson;
 use super::data::PeData;
+use super::entry::ResourceEntry;
 use super::fields::PeDataError;
-use super::kind::{CanSet, PeResource};
-use super::request::ResourceTarget;
+use super::kind::{PeResource, StandardResource};
+use super::request::{
+    RequestRefused, ResourceGet, ResourceTarget, SetHeader, judging_entry, link_target,
+};
 use super::state::{Arrival, PeState, RefusedAt, StateDevice, StateId, StateVerdict};
 use super::store::{ResourceStore, StoreError};
 use crate::deadline;
@@ -49,15 +54,6 @@ pub struct ResponderSettings {
     pub body_limit: BodyLimit,
 }
 
-/// How the data of a Resource was changed by an Initiator.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ChangeKind {
-    /// A Full Set replaced it.
-    Full,
-    /// A Partial Set changed a part of it.
-    Partial,
-}
-
 /// What the Responder tells its caller happened.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -68,8 +64,9 @@ pub enum ResponderEvent {
         peer: Muid,
         /// The Resource.
         target: ResourceTarget,
-        /// How.
-        how: ChangeKind,
+        /// How: a Set of the whole Property Data replaced it, a Partial Set changed a
+        /// part of it.
+        how: PeSetScope,
     },
     /// A Subscription started.
     Subscribed {
@@ -234,11 +231,6 @@ enum Answer {
     Defer(ResourceTarget, TimeoutWait),
 }
 
-enum Announce {
-    Full,
-    Partial(PartialUpdate),
-}
-
 /// The Responder of Property Exchange: it serves the Resources of its store to
 /// the Initiators it knows, and tells those that subscribed what changes.
 ///
@@ -289,6 +281,55 @@ type Refusal = (PeStatus, String);
 
 fn refusal(status: PeStatus, why: impl Into<String>) -> Refusal {
     (status, why.into())
+}
+
+/// The answer to an inquiry the rules of its Resource refuse, with the status of
+/// M2-103 Table 15 for the rule it breaks.
+fn refused(error: RequestRefused) -> Refusal {
+    let status = match &error {
+        RequestRefused::NotListed(_) => PeStatus::NotFound,
+        RequestRefused::CannotGet(_)
+        | RequestRefused::CannotSet { .. }
+        | RequestRefused::CannotSubscribe(_) => PeStatus::NotAllowed,
+        RequestRefused::FlowControlNotDeclared(_) => PeStatus::FlowControlUnsupported,
+        RequestRefused::EncodingNotDeclared { .. }
+        | RequestRefused::MediaTypeNotDeclared { .. } => PeStatus::UnsupportedMedia,
+        // The Initiator's `ResourceSet::full` raises DataOfAnotherResource; a Set
+        // the Responder reads is built from its own header and data.
+        RequestRefused::ResIdRequired(_)
+        | RequestRefused::ResIdUnused(_)
+        | RequestRefused::ResIdDisagrees { .. }
+        | RequestRefused::NotPaginable(_)
+        | RequestRefused::NotDeclaredPaginable(_)
+        | RequestRefused::DataOfAnotherResource { .. } => PeStatus::BadRequest,
+    };
+    refusal(status, error.to_string())
+}
+
+/// The Resource an inquiry names, and the entry that judges it: the store's, or
+/// ResourceList's own.
+fn judged<'s>(
+    store: &'s ResourceStore,
+    request: &PeRequest,
+) -> Result<(ResourceTarget, Cow<'s, ResourceEntry>), Refusal> {
+    let resource = PeResource::from_name(&request.resource);
+    let entry = judging_entry(store.entry(&resource), &resource).map_err(refused)?;
+    let target = link_target(&resource, request.res_id.as_ref()).map_err(refused)?;
+    Ok((target, entry))
+}
+
+/// The Get an inquiry asks for, with no Flow Control, and the entry that judges it.
+fn resolve<'s>(
+    store: &'s ResourceStore,
+    request: &PeRequest,
+) -> Result<(ResourceGet, Cow<'s, ResourceEntry>), Refusal> {
+    let (target, entry) = judged(store, request)?;
+    let mut get =
+        ResourceGet::new(target).encoded(request.mutual_encoding.unwrap_or(PeEncoding::Ascii));
+    if let Some(page) = request.page {
+        get = get.paged(page);
+    }
+    Ok((get, entry))
 }
 
 /// Whether one pointer is a proper prefix of the other, by tokens, so the order of
@@ -713,7 +754,7 @@ impl ResourceResponder {
         let PeHeader::Request(request) = held.header else {
             return false;
         };
-        if PeResource::from_name(&request.resource) != PeResource::State {
+        if PeResource::from_name(&request.resource) != StandardResource::State {
             return false;
         }
         let Some(id) = request
@@ -887,60 +928,13 @@ impl ResourceResponder {
         }
     }
 
-    /// The Resource an inquiry names, checked against the store: its target and
-    /// its encoding.
-    fn resolve(
-        &self,
-        store: &ResourceStore,
-        request: &PeRequest,
-    ) -> Result<(ResourceTarget, PeEncoding), Refusal> {
-        let resource = PeResource::from_name(&request.resource);
-        let encoding = request.mutual_encoding.unwrap_or(PeEncoding::Ascii);
-        let target = |resource: PeResource| {
-            match request.res_id.clone() {
-                Some(id) => ResourceTarget::entry(resource, id),
-                None => ResourceTarget::try_from(resource),
-            }
-            .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))
-        };
-        if resource == PeResource::ResourceList {
-            if request.res_id.is_some() || request.page.is_some() {
-                return Err(refusal(
-                    PeStatus::BadRequest,
-                    "ResourceList takes no resId and no page",
-                ));
-            }
-            return Ok((target(resource)?, encoding));
-        }
-        let entry = store
-            .entry(&resource)
-            .cloned()
-            .ok_or_else(|| refusal(PeStatus::NotFound, "no such Resource"))?;
-        if entry.require_res_id() != request.res_id.is_some() {
-            return Err(refusal(
-                PeStatus::BadRequest,
-                format!("requireResId is {}", entry.require_res_id()),
-            ));
-        }
-        if !entry.encodings().contains(&encoding) {
-            return Err(refusal(PeStatus::UnsupportedMedia, "encoding not listed"));
-        }
-        if request.page.is_some() && !entry.can_paginate() {
-            return Err(refusal(
-                PeStatus::BadRequest,
-                "the Resource does not paginate",
-            ));
-        }
-        Ok((target(resource)?, encoding))
-    }
-
     fn busy_wait(&self, target: &ResourceTarget) -> Option<TimeoutWait> {
         self.busy.iter().find(|(t, _)| t == target).map(|(_, w)| *w)
     }
 
     /// The data a target names.
     fn data_of(&self, store: &ResourceStore, target: &ResourceTarget) -> Result<PeData, Refusal> {
-        if *target.resource() == PeResource::ResourceList {
+        if *target.resource() == StandardResource::ResourceList {
             return Ok(PeData::ResourceList(store.resource_list()));
         }
         store
@@ -950,20 +944,14 @@ impl ResourceResponder {
     }
 
     fn get(&self, store: &ResourceStore, request: &PeRequest) -> Result<Answer, Refusal> {
-        let (target, encoding) = self.resolve(store, request)?;
-        let (can_get, fc_on_get) = store
-            .entry(target.resource())
-            .map_or((true, false), |e| (e.can_get(), e.fc_on_get()));
-        if !can_get {
-            return Err(refusal(PeStatus::NotAllowed, "the Resource cannot be got"));
-        }
+        let (mut get, entry) = resolve(store, request)?;
         let streamed = request.flow_control == PeFlowControl::On;
-        if streamed && !fc_on_get {
-            return Err(refusal(
-                PeStatus::FlowControlUnsupported,
-                "the Resource has no Flow Control on Get",
-            ));
+        if streamed {
+            get = get.flow_controlled();
         }
+        get.check_get(&entry).map_err(refused)?;
+        let target = get.target().clone();
+        let encoding = get.encoding();
         if let Some(wait) = self.busy_wait(&target) {
             return Ok(Answer::Defer(target, wait));
         }
@@ -1004,21 +992,21 @@ impl ResourceResponder {
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) -> Result<Answer, Refusal> {
-        let (target, encoding) = self.resolve(store, request)?;
-        let entry = store
-            .entry(target.resource())
-            .cloned()
-            .ok_or_else(|| refusal(PeStatus::NotAllowed, "ResourceList cannot be set"))?;
-        let allowed = match (entry.can_set(), request.set_scope) {
-            (CanSet::None, _) | (CanSet::Full, PeSetScope::Partial) => false,
-            (CanSet::Full | CanSet::Partial, _) => true,
-        };
-        if !allowed {
-            return Err(refusal(
-                PeStatus::NotAllowed,
-                "the Resource cannot be set so",
-            ));
+        let (target, entry) = judged(store, request)?;
+        if request.page.is_some() {
+            return Err(refusal(PeStatus::BadRequest, "a Set takes no page"));
         }
+        let encoding = request.mutual_encoding.unwrap_or(PeEncoding::Ascii);
+        SetHeader {
+            target: &target,
+            scope: request.set_scope,
+            encoding,
+            media_type: request.media_type.as_ref(),
+        }
+        .check(&entry)
+        .map_err(refused)?;
+        // Only a Responder can break the entry's `fcOnSet`: an Initiator takes its
+        // Flow Control for a Set from the entry.
         let flow = request.flow_control == PeFlowControl::On;
         if flow && !entry.fc_on_set() {
             return Err(refusal(
@@ -1032,24 +1020,17 @@ impl ResourceResponder {
                 "the Resource needs Flow Control on Set",
             ));
         }
-        let json_type = MediaType::new("application/json");
-        let media_type = request.media_type.as_ref().or(json_type.as_ref());
-        if let Some(media_type) = media_type
-            && !entry.media_types().contains(media_type)
-        {
-            return Err(refusal(PeStatus::UnsupportedMedia, "media type not listed"));
-        }
         if let Some(wait) = self.busy_wait(&target) {
             return Ok(Answer::Defer(target, wait));
         }
         let bytes = decode_body(encoding, wire, self.settings.body_limit)
             .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
-        let (data, announce, how) = match request.set_scope {
+        let (data, announce) = match request.set_scope {
             PeSetScope::Whole => {
                 let data =
                     PeData::decode_bytes(target.resource(), request.media_type.as_ref(), &bytes)
                         .map_err(|e| refusal(PeStatus::BadRequest, e.to_string()))?;
-                (data, Announce::Full, ChangeKind::Full)
+                (data, Pending::Resync)
             }
             PeSetScope::Partial => {
                 let json = PeJson::try_from(bytes.as_slice())
@@ -1060,7 +1041,7 @@ impl ResourceResponder {
                     PublishError::NoData(_) => refusal(PeStatus::NotFound, e.to_string()),
                     other => refusal(PeStatus::BadRequest, other.to_string()),
                 })?;
-                (data, Announce::Partial(update), ChangeKind::Partial)
+                (data, Pending::Partial(update))
             }
         };
         let mut reply = PeReply::new(PeStatus::Ok);
@@ -1078,7 +1059,7 @@ impl ResourceResponder {
         out.push(ResponderAction::Event(ResponderEvent::Changed {
             peer,
             target: target.clone(),
-            how,
+            how: request.set_scope,
         }));
         self.announce(store, &target, announce, now, out);
         Ok(Answer::Reply(reply, Vec::new()))
@@ -1156,16 +1137,10 @@ impl ResourceResponder {
                         "a Subscription takes no page",
                     ));
                 }
-                let (target, encoding) = self.resolve(store, request)?;
-                let subscribable = store
-                    .entry(target.resource())
-                    .is_some_and(|e| e.can_subscribe());
-                if !subscribable {
-                    return Err(refusal(
-                        PeStatus::NotAllowed,
-                        "the Resource is not subscribable",
-                    ));
-                }
+                let (get, entry) = resolve(store, request)?;
+                get.check_subscribe(&entry).map_err(refused)?;
+                let target = get.target().clone();
+                let encoding = get.encoding();
                 if let Some(wait) = self.busy_wait(&target) {
                     return Ok(Answer::Defer(target, wait));
                 }
@@ -1295,7 +1270,7 @@ impl ResourceResponder {
         }
         store.put(target.res_id().cloned(), data.clone())?;
         let mut out = Vec::new();
-        self.announce(store, target, Announce::Full, now, &mut out);
+        self.announce(store, target, Pending::Resync, now, &mut out);
         Ok(out)
     }
 
@@ -1316,7 +1291,7 @@ impl ResourceResponder {
         let data = self.changed(store, target, &update)?;
         store.put(target.res_id().cloned(), data)?;
         let mut out = Vec::new();
-        self.announce(store, target, Announce::Partial(update), now, &mut out);
+        self.announce(store, target, Pending::Partial(update), now, &mut out);
         Ok(out)
     }
 
@@ -1326,7 +1301,7 @@ impl ResourceResponder {
         &mut self,
         store: &mut ResourceStore,
         target: &ResourceTarget,
-        what: Announce,
+        what: Pending,
         now: Instant,
         out: &mut Vec<ResponderAction>,
     ) {
@@ -1337,11 +1312,7 @@ impl ResourceResponder {
             .map(|s| (s.id.clone(), s.peer))
             .collect();
         for (id, peer) in subs {
-            let pending = match &what {
-                Announce::Full => Pending::Resync,
-                Announce::Partial(update) => Pending::Partial(update.clone()),
-            };
-            self.enqueue(peer, &id, pending);
+            self.enqueue(peer, &id, what.clone());
             self.drain(store, peer, now, out);
         }
     }
@@ -1454,9 +1425,7 @@ impl ResourceResponder {
         let mut message: Option<Vec<PeChunk>> = None;
         if let Pending::Partial(changes) = &pending {
             let header = update(PeUpdateCommand::Partial, encoding, None);
-            if let Ok(body) =
-                encode_body(encoding, &PeJson::Object(changes_object(changes)).encode())
-            {
+            if let Ok(body) = encode_body(encoding, &PeJson::Object(changes.object()).encode()) {
                 message = one_chunk(&header, &body);
             }
         }
@@ -1518,13 +1487,5 @@ impl ResourceResponder {
             wait: deadline::Deadline::after(now, PE_TIMEOUT),
         });
         self.send_chunks(peer, PeMessageKind::SUBSCRIPTION_INQUIRY, chunks, out);
-    }
-}
-
-/// The Property Data of a `partial` update: the pointers and their values.
-fn changes_object(update: &PartialUpdate) -> super::super::tree::PeObject {
-    match update.to_json() {
-        PeJson::Object(object) => object,
-        _ => super::super::tree::PeObject::new(),
     }
 }

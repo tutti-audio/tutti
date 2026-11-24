@@ -210,17 +210,14 @@ impl MachineControlFollower {
         let SysexStep::Complete(done) = self.sysex.push(ump) else {
             return;
         };
-        let UniversalRead::Universal(Addressed { to, message }) = read(self.sysex.message(done))
-        else {
-            return;
-        };
-        match message {
-            Universal::MachineControl(commands) if self.is_for_us(to) => {
-                self.segmented_or_plain(&commands, out);
-            }
+        match read(self.sysex.message(done)) {
+            UniversalRead::Universal(Addressed {
+                to,
+                message: Universal::MachineControl(commands),
+            }) if self.is_for_us(to) => self.segmented_or_plain(&commands, out),
             // The segment is cut short (p.40 b): the commands before it are not
             // acted on, as for any segment that is not first.
-            Universal::MachineControlTruncated(before) if self.is_for_us(to) => {
+            UniversalRead::MachineControlTruncated { to, before } if self.is_for_us(to) => {
                 self.segments.cancel();
                 out(MachineControlEvent::Segmentation(if before.is_empty() {
                     SegmentFault::CountMismatch

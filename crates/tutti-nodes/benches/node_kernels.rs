@@ -31,7 +31,7 @@ use tutti_nodes::{
     DistortionConfig, DistortionNode, FdnConfig, FdnNode, FreeverbConfig, FreeverbNode, GateConfig,
     GateControls, GateNode, KeySource, LadderFilterConfig, LadderFilterNode, LadderType,
     LimiterConfig, LimiterControls, LimiterNode, MaxDelay, ShapeKind, TubeStageConfig,
-    TubeStageNode,
+    TubeStageNode, Waveshape,
 };
 use tutti_rt::SplitMix64;
 use tutti_units::{
@@ -151,7 +151,7 @@ fn distortion(c: &mut Criterion) {
         "tanh_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -163,7 +163,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -180,7 +180,8 @@ fn distortion(c: &mut Criterion) {
             case,
             || {
                 DistortionNode::<f32>::from(
-                    DistortionConfig::new(ChannelLayout::STEREO, kind).drive(Drive::new(2.0)),
+                    DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(kind))
+                        .drive(Drive::new(2.0)),
                 )
             },
             None,
@@ -192,7 +193,8 @@ fn distortion(c: &mut Criterion) {
         "hardclip_6",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(6u16, ShapeKind::HardClip).drive(Drive::new(2.0)),
+                DistortionConfig::new(6u16, Waveshape::new(ShapeKind::HardClip))
+                    .drive(Drive::new(2.0)),
             )
         },
         None,
@@ -203,7 +205,7 @@ fn distortion(c: &mut Criterion) {
         "softsign_2_fed",
         || {
             DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Softsign))
                     .drive(Drive::new(2.0)),
             )
         },
@@ -526,6 +528,28 @@ fn reverb(c: &mut Criterion) {
         || FdnNode::<f32>::from(FdnConfig::new().layout(tutti_nodes::FdnLayout::default())),
         None,
     );
+    fdn_retarget_rising(c);
+}
+
+/// A retarget of the FDN bank on a decay profile that rises with frequency (the mid band 2 s
+/// over a 0.05 s low band): the design searches the response's peak, which a monotone profile
+/// does not. The size alternates so every call designs.
+fn fdn_retarget_rising(c: &mut Criterion) {
+    use tutti_dsp::{FdnBank, FdnControls, FdnLayout};
+
+    let mut bank = FdnBank::<f32>::new(&FdnLayout::default(), SR);
+    let mut ramps = bank.ramps();
+    let mut controls = FdnControls::DEFAULT;
+    controls.decay = [Seconds::new(2.0), Seconds::new(0.05), Seconds::new(2.0)];
+    let mut sizes = [0.5, 0.51].into_iter().cycle();
+    let mut g = c.benchmark_group("reverb");
+    g.bench_function("fdn_retarget_rising", |b| {
+        b.iter(|| {
+            controls.size = tutti_units::Mix::new(sizes.next().unwrap_or(0.5));
+            bank.retarget(&mut ramps, black_box(&controls));
+        })
+    });
+    g.finish();
 }
 /// The tube stage's solve at the default 4 times oversampling, over noise at the default drive.
 fn tube_stage(c: &mut Criterion) {

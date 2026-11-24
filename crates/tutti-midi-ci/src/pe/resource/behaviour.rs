@@ -2,6 +2,7 @@
 //! the queue of Subscription messages, Flow Control, Timeout Wait, media types
 //! and Link actions. Each test names the property of the spec it holds.
 
+use std::num::NonZeroU32;
 use std::time::Duration;
 
 use super::super::capabilities::{PeCiMessage, SimultaneousRequests};
@@ -10,7 +11,8 @@ use super::super::flow::{
     PE_TIMEOUT, PeAnswer, PeMessageKind, PeSignal, PeTerminator, PeTransaction,
 };
 use super::super::header::{
-    PeEncoding, PeEndedBy, PeHeader, PeReply, PeSetScope, PeStatus, PeSubscription, PeUpdateCommand,
+    PeEncoding, PeEndedBy, PeHeader, PePage, PeReply, PeSetScope, PeStatus, PeSubscription,
+    PeUpdateCommand,
 };
 use super::super::initiator::{PeCall, PeSet};
 use super::super::limits::{MediaType, ResourceName};
@@ -139,9 +141,10 @@ fn channels(n: u16) -> PeData {
 
 fn subscribed_link(
     requests: u8,
-    resource: PeResource,
+    resource: impl Into<PeResource>,
     res_id: Option<&str>,
 ) -> (Link, ResourceTarget) {
+    let resource = resource.into();
     let mut link = Link::taking(store(), 256, requests);
     let encoding = if resource == custom("X-Blob") {
         PeEncoding::Mcoded7
@@ -171,7 +174,7 @@ fn request_id(actions: &[ResponderAction]) -> PeRequestId {
 /// Spec: m2-103/11#9
 #[test]
 fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     let first = link
         .resp
         .publish(&mut link.store, &target, channels(1), link.now)
@@ -206,7 +209,7 @@ fn an_update_waits_for_a_free_request_id_and_carries_the_data_as_it_is_then() {
 // dropped.
 #[test]
 fn the_queue_holds_one_item_for_each_subscription() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     for n in 1..=20 {
         link.resp
             .publish(&mut link.store, &target, channels(n), link.now)
@@ -308,7 +311,7 @@ fn partial_updates_that_cannot_fold_are_told_as_a_full() {
 // their place.
 #[test]
 fn an_end_goes_after_the_replies_and_replaces_queued_updates() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     let first = link
         .resp
         .publish(&mut link.store, &target, channels(1), link.now)
@@ -338,7 +341,7 @@ fn an_end_goes_after_the_replies_and_replaces_queued_updates() {
 // timeout, which frees its Request ID for what waits.
 #[test]
 fn a_timeout_frees_the_request_id_for_the_queue() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     link.resp
         .publish(&mut link.store, &target, channels(1), link.now)
         .unwrap();
@@ -356,7 +359,7 @@ fn a_timeout_frees_the_request_id_for_the_queue() {
 // the time the Responder waits for the reply.
 #[test]
 fn a_timeout_wait_extends_the_wait_for_a_reply_to_an_update() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     let sent = link
         .resp
         .publish(&mut link.store, &target, channels(1), link.now)
@@ -381,7 +384,7 @@ fn a_timeout_wait_extends_the_wait_for_a_reply_to_an_update() {
 // M2-103 §11.2: a Terminate NAK of a Subscription message frees its Request ID.
 #[test]
 fn a_terminate_of_an_update_frees_its_request_id() {
-    let (mut link, target) = subscribed_link(1, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(1, StandardResource::ChannelList, None);
     let sent = link
         .resp
         .publish(&mut link.store, &target, channels(1), link.now)
@@ -407,7 +410,7 @@ fn a_terminate_of_an_update_frees_its_request_id() {
 #[test]
 fn the_update_past_the_peers_count_waits_for_a_reply_and_then_goes() {
     let most = SimultaneousRequests::MAX;
-    let (mut link, target) = subscribed_link(most, PeResource::ChannelList, None);
+    let (mut link, target) = subscribed_link(most, StandardResource::ChannelList, None);
     for _ in 1..=most {
         let made = link.init.subscribe(
             &ResourceGet::new(target.clone()).encoded(PeEncoding::Ascii),
@@ -448,7 +451,7 @@ fn long_channel_link() -> Link {
     link.resp
         .publish(
             &mut link.store,
-            &super::exchange::target(PeResource::ChannelList),
+            &super::exchange::target(StandardResource::ChannelList),
             PeData::ChannelList(PeChannelList::new(many)),
             link.now,
         )
@@ -463,9 +466,10 @@ fn long_channel_link() -> Link {
 fn a_flow_controlled_reply_goes_a_chunk_for_each_ack() {
     let mut link = long_channel_link();
     let mark = link.wire.len();
-    let made = link
-        .init
-        .get(&get(PeResource::ChannelList).flow_controlled(), link.now);
+    let made = link.init.get(
+        &get(StandardResource::ChannelList).flow_controlled(),
+        link.now,
+    );
     let call = link.call(made);
     let Ok(PeData::ChannelList(list)) = link.got(call) else {
         panic!("{:?}", link.events);
@@ -644,10 +648,10 @@ fn a_set_answers_407_without_flow_control_and_406_with_it_unasked() {
 #[test]
 fn a_busy_resource_is_answered_with_a_timeout_wait_and_then_the_reply() {
     let mut link = Link::new(store(), 256);
-    let device = super::exchange::target(PeResource::DeviceInfo);
+    let device = super::exchange::target(StandardResource::DeviceInfo);
     link.resp.mark_busy(device.clone(), TimeoutWait::of(20));
     let start = link.now;
-    let made = link.init.get(&get(PeResource::DeviceInfo), link.now);
+    let made = link.init.get(&get(StandardResource::DeviceInfo), link.now);
     let call = link.call(made);
     assert!(
         !link
@@ -676,9 +680,9 @@ fn a_busy_resource_is_answered_with_a_timeout_wait_and_then_the_reply() {
 #[test]
 fn a_responder_asks_again_while_the_resource_stays_busy() {
     let mut link = Link::new(store(), 256);
-    let device = super::exchange::target(PeResource::DeviceInfo);
+    let device = super::exchange::target(StandardResource::DeviceInfo);
     link.resp.mark_busy(device, TimeoutWait::of(20));
-    let made = link.init.get(&get(PeResource::DeviceInfo), link.now);
+    let made = link.init.get(&get(StandardResource::DeviceInfo), link.now);
     link.call(made);
     let again = link
         .resp
@@ -688,7 +692,7 @@ fn a_responder_asks_again_while_the_resource_stays_busy() {
         [PeSignal::TimeoutWait { wait, .. }] if wait.tenths() == 20
     ));
     // A Resource that is not busy is answered at once.
-    let other = link.init.get(&get(PeResource::LocalOn), link.now);
+    let other = link.init.get(&get(StandardResource::LocalOn), link.now);
     let call = link.call(other);
     assert!(link.got(call).is_ok());
 }
@@ -697,7 +701,7 @@ fn a_responder_asks_again_while_the_resource_stays_busy() {
 #[test]
 fn a_set_for_a_busy_resource_is_held_until_it_is_ready() {
     let mut link = Link::new(store(), 256);
-    let local_on = super::exchange::target(PeResource::LocalOn);
+    let local_on = super::exchange::target(StandardResource::LocalOn);
     link.resp.mark_busy(local_on.clone(), TimeoutWait::of(10));
     let set = ResourceSet::full(local_on.clone(), PeData::LocalOn(PeLocalOn(true))).unwrap();
     let made = link.init.set(&set, link.now);
@@ -797,7 +801,7 @@ fn a_media_type_the_entry_does_not_list_is_refused() {
     let mut link = Link::new(store(), 256);
     // JSON data for a Resource whose entry lists only octet-stream.
     let blob = super::exchange::target(custom("X-Blob"));
-    let json_data = PeData::decode(&custom("X-Blob"), &json(r#"{"a":1}"#)).unwrap();
+    let json_data = PeData::decode(custom("X-Blob"), &json(r#"{"a":1}"#)).unwrap();
     let set = ResourceSet::full(blob, json_data)
         .unwrap()
         .encoded(PeEncoding::Mcoded7);
@@ -848,23 +852,62 @@ fn a_full_update_of_binary_data_carries_its_media_type() {
 // binary data is not of the JSON media type.
 #[test]
 fn only_an_untyped_resource_holds_binary_data() {
-    assert!(PeOpaque::binary(PeResource::LocalOn, octets(), vec![1]).is_none());
-    assert!(
-        PeOpaque::binary(
-            custom("X-A"),
-            MediaType::new("application/json").unwrap(),
-            vec![]
-        )
-        .is_none()
-    );
+    assert!(PeBinary::new(MediaType::new("application/json").unwrap(), vec![]).is_none());
     // The refusal is of the media type, not of its spelling.
     let shouted = MediaType::new("Application/JSON").unwrap();
-    assert!(PeOpaque::binary(custom("X-A"), shouted.clone(), vec![]).is_none());
+    assert!(PeBinary::new(shouted.clone(), vec![]).is_none());
     assert!(PeState::binary(shouted, vec![]).is_none());
-    assert!(PeOpaque::binary(custom("X-A"), octets(), vec![1, 255]).is_some());
-    assert!(PeData::decode_bytes(&PeResource::LocalOn, Some(&octets()), b"x").is_err());
-    let json_bytes = PeData::decode_bytes(&PeResource::LocalOn, None, b"true").unwrap();
+    assert!(PeBinary::new(octets(), vec![1, 255]).is_some());
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&octets()), b"x"),
+        Err(PeDataError::new(
+            "LocalOn",
+            PeDataFault::NotValid(InvalidValue::ResourceIsTyped)
+        ))
+    );
+    let json_bytes = PeData::decode_bytes(StandardResource::LocalOn, None, b"true").unwrap();
     assert_eq!(json_bytes, PeData::LocalOn(PeLocalOn(true)));
+}
+
+// M2-103 §8.3: a media type is declared by type and subtype; the parameters and the
+// case of a request's media type do not make it another type.
+/// Spec: m2-103/8.1#2
+#[test]
+fn a_media_type_is_matched_by_type_and_subtype() {
+    let entry = custom_entry("X-Blob", r#"{"title":"Blob"}"#)
+        .can_set(CanSet::Full)
+        .media_types(vec![MediaType::OCTET_STREAM])
+        .build()
+        .unwrap();
+    let set_of = |text: &str| {
+        let binary = PeBinary::new(MediaType::new(text).unwrap(), vec![1]).unwrap();
+        let data = PeData::Opaque(PeOpaque::binary(custom_name("X-Blob"), binary));
+        ResourceSet::full(super::exchange::target(custom("X-Blob")), data).unwrap()
+    };
+    assert_eq!(
+        set_of("Application/Octet-Stream; x=1").check(&entry),
+        Ok(())
+    );
+    assert!(matches!(
+        set_of("application/x-other; application/octet-stream").check(&entry),
+        Err(RequestRefused::MediaTypeNotDeclared { .. })
+    ));
+    // What is written is the type as it was made.
+    let (written, _) = blob_data("X-Blob", &[1]).to_wire();
+    assert_eq!(written, Some(octets()));
+    assert_eq!(PeData::LocalOn(PeLocalOn(true)).to_wire().0, None);
+}
+
+// M2-103 §6.1.6: Property Data is JSON unless `mediaType` declares another type; a
+// parameter of `application/json` does not make the data another type.
+/// Spec: m2-103/6.1.6#1
+#[test]
+fn json_with_parameters_decodes_as_a_typed_value() {
+    let media = MediaType::new("application/json; charset=utf-8").unwrap();
+    assert_eq!(
+        PeData::decode_bytes(StandardResource::LocalOn, Some(&media), b"true"),
+        Ok(PeData::LocalOn(PeLocalOn(true)))
+    );
 }
 
 // M2-103 §10: a Partial Set is for JSON; binary data has no pointers.
@@ -885,13 +928,13 @@ fn a_partial_change_does_not_apply_to_binary_data() {
 fn a_publish_that_cannot_be_made_names_the_resource() {
     let mut link = Link::new(store(), 256);
     let update = PartialUpdate::new().with(pointer("/a"), PartialValue::Integer(1));
-    let empty = ResourceTarget::try_from(PeResource::ProgramList)
-        .unwrap_or_else(|_| super::exchange::entry_target(PeResource::ProgramList, "none"));
+    let empty = ResourceTarget::try_from(StandardResource::ProgramList)
+        .unwrap_or_else(|_| super::exchange::entry_target(StandardResource::ProgramList, "none"));
     assert_eq!(
         link.resp.change(&mut link.store, &empty, update, link.now),
-        Err(PublishError::NoData(PeResource::ProgramList))
+        Err(PublishError::NoData(StandardResource::ProgramList.into()))
     );
-    let local_on = super::exchange::target(PeResource::LocalOn);
+    let local_on = super::exchange::target(StandardResource::LocalOn);
     assert_eq!(
         link.resp.publish(
             &mut link.store,
@@ -900,8 +943,8 @@ fn a_publish_that_cannot_be_made_names_the_resource() {
             link.now
         ),
         Err(PublishError::DataOfAnotherResource {
-            data: PeResource::ExternalSync,
-            target: PeResource::LocalOn,
+            data: StandardResource::ExternalSync.into(),
+            target: StandardResource::LocalOn.into(),
         })
     );
 }
@@ -914,7 +957,7 @@ fn a_simple_action_link_reads_table_69() {
         {"resource":"X-Copy","propData":"0_1_1","role":"simpleAction","title":"copy"},
         {"resource":"X-Paste","propData":"0_1_1","role":"simpleAction","title":"paste",
          "confirmMsg":"Paste over Piano?","confirmType":"yesno","confirmIcon":"warning"}]}]"#;
-    let data = PeData::decode(&PeResource::ProgramList, &json(text)).unwrap();
+    let data = PeData::decode(StandardResource::ProgramList, &json(text)).unwrap();
     let PeData::ProgramList(list) = &data else {
         panic!("not ProgramList");
     };
@@ -958,7 +1001,7 @@ fn a_simple_action_is_a_set_of_its_prop_data() {
 fn a_simple_action_requires_its_properties() {
     let entry = |link: &str| format!(r#"[{{"title":"T","channel":1,"links":[{link}]}}]"#);
     let good = r#"{"resource":"X-A","role":"simpleAction","propData":1}"#;
-    assert!(PeData::decode(&PeResource::ChannelList, &json(&entry(good))).is_ok());
+    assert!(PeData::decode(StandardResource::ChannelList, &json(&entry(good))).is_ok());
     for bad in [
         r#"{"resource":"X-A","role":"simpleAction"}"#,
         r#"{"resource":"X-A","role":"simpleAction","propData":1,"confirmType":"yesno"}"#,
@@ -966,7 +1009,7 @@ fn a_simple_action_requires_its_properties() {
         r#"{"resource":"X-A","role":"simpleAction","propData":1,"confirmMsg":"?","confirmIcon":"star"}"#,
     ] {
         assert!(
-            PeData::decode(&PeResource::ChannelList, &json(&entry(bad))).is_err(),
+            PeData::decode(StandardResource::ChannelList, &json(&entry(bad))).is_err(),
             "{bad}"
         );
     }
@@ -982,7 +1025,7 @@ fn selector_channels() -> &'static str {
 /// Spec: m2-103/13.1.2#2
 #[test]
 fn a_selector_action_link_reads_table_73() {
-    let data = PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap();
+    let data = PeData::decode(StandardResource::ChannelList, &json(selector_channels())).unwrap();
     let PeData::ChannelList(list) = &data else {
         panic!("not ChannelList");
     };
@@ -1002,7 +1045,7 @@ fn a_selector_action_link_reads_table_73() {
 /// Spec: m2-103/13.1.2#8
 #[test]
 fn a_selection_is_a_set_of_the_selected_property() {
-    let data = PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap();
+    let data = PeData::decode(StandardResource::ChannelList, &json(selector_channels())).unwrap();
     let PeData::ChannelList(list) = data else {
         panic!("not ChannelList");
     };
@@ -1039,7 +1082,7 @@ fn a_selector_action_requires_its_properties() {
         r#"{"resource":"X-L","role":"selectorAction","actionResource":"X-O","selectedProperty":"not a name"}"#,
     ] {
         assert!(
-            PeData::decode(&PeResource::ChannelList, &json(&entry(bad))).is_err(),
+            PeData::decode(StandardResource::ChannelList, &json(&entry(bad))).is_err(),
             "{bad}"
         );
     }
@@ -1054,14 +1097,21 @@ fn another_role_is_kept_by_name() {
         format!(r#"[{{"title":"T","channel":1,"links":[{{"resource":"X-A","role":"{role}"}}]}}]"#)
     };
     let text = entry("x-vendorRole");
-    let PeData::ChannelList(list) = PeData::decode(&PeResource::ChannelList, &json(&text)).unwrap()
+    let PeData::ChannelList(list) =
+        PeData::decode(StandardResource::ChannelList, &json(&text)).unwrap()
     else {
         panic!("not ChannelList");
     };
     assert!(
         matches!(&list.entries()[0].links[0].role, Some(LinkRole::Other(n)) if n.as_str() == "x-vendorRole")
     );
-    assert!(PeData::decode(&PeResource::ChannelList, &json(&entry(&"r".repeat(33)))).is_err());
+    assert!(
+        PeData::decode(
+            StandardResource::ChannelList,
+            &json(&entry(&"r".repeat(33)))
+        )
+        .is_err()
+    );
 }
 
 // M2-103 §7.1.1, §10: one JSON value type reads and writes both: a header property
@@ -1215,10 +1265,10 @@ fn an_action_is_made_only_of_the_role_the_link_declares() {
             prop_data: PeJson::Bool(true),
             confirmation: None,
         })),
-        ..PeLink::new(PeResource::LocalOn)
+        ..PeLink::new(StandardResource::LocalOn)
     };
     let PeData::ChannelList(list) =
-        PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap()
+        PeData::decode(StandardResource::ChannelList, &json(selector_channels())).unwrap()
     else {
         panic!("not ChannelList");
     };
@@ -1267,7 +1317,7 @@ fn an_action_sets_the_entry_its_link_names() {
             prop_data: json("[]"),
             confirmation: None,
         })),
-        ..PeLink::new(PeResource::ProgramList)
+        ..PeLink::new(StandardResource::ProgramList)
     };
     // ProgramList has entries, so its Set names one.
     let set = ResourceSet::try_from(&action(Some("general"))).unwrap();
@@ -1275,13 +1325,13 @@ fn an_action_sets_the_entry_its_link_names() {
     assert_eq!(
         ResourceSet::try_from(&action(None)),
         Err(ActionError::Refused(RequestRefused::ResIdRequired(
-            PeResource::ProgramList
+            StandardResource::ProgramList.into()
         )))
     );
     // The selector's action Resource is filled the same way.
     let selector = |action_res_id: Option<&str>| PeLink {
         role: Some(LinkRole::Selector(SelectorAction {
-            action_resource: PeResource::ProgramList,
+            action_resource: StandardResource::ProgramList.into(),
             action_res_id: action_res_id.map(id),
             selected_property: super::super::limits::PropertyName::new("output").unwrap(),
         })),
@@ -1296,12 +1346,12 @@ fn an_action_sets_the_entry_its_link_names() {
     assert_eq!(
         ResourceSet::from_selection(&selector(None), &chosen),
         Err(ActionError::Refused(RequestRefused::ResIdRequired(
-            PeResource::ProgramList
+            StandardResource::ProgramList.into()
         )))
     );
     // The list Resource's own `resId` is read from the Link as the Link has it.
     let PeData::ChannelList(list) =
-        PeData::decode(&PeResource::ChannelList, &json(selector_channels())).unwrap()
+        PeData::decode(StandardResource::ChannelList, &json(selector_channels())).unwrap()
     else {
         panic!("not ChannelList");
     };
@@ -1320,7 +1370,7 @@ fn a_link_res_id_has_only_the_characters_of_a_res_id() {
             "selectedProperty":"p"}}]}}]"#
         )
     };
-    let reads = |text: String| PeData::decode(&PeResource::ChannelList, &json(&text)).is_ok();
+    let reads = |text: String| PeData::decode(StandardResource::ChannelList, &json(&text)).is_ok();
     assert!(reads(entry("a_1", "b_2")));
     let too_long = "a".repeat(37);
     for bad in ["", "a b", "a-b", "a/b", "a.b", too_long.as_str()] {
@@ -1332,7 +1382,8 @@ fn a_link_res_id_has_only_the_characters_of_a_res_id() {
     let text = r#"[{"title":"T","channel":1,"links":[{"resource":"X-OptionList","resId":"a_1",
         "role":"selectorAction","actionResource":"X-ProgramEdit","actionResId":"abcd",
         "selectedProperty":"p"}]}]"#;
-    let PeData::ChannelList(list) = PeData::decode(&PeResource::ChannelList, &json(text)).unwrap()
+    let PeData::ChannelList(list) =
+        PeData::decode(StandardResource::ChannelList, &json(text)).unwrap()
     else {
         panic!("not ChannelList");
     };
@@ -1371,5 +1422,82 @@ fn a_link_res_id_has_only_the_characters_of_a_res_id() {
         res_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    );
+}
+
+/// The status of the one reply a Responder gave to an inquiry.
+fn reply_status(actions: &[ResponderAction]) -> PeStatus {
+    let chunks = chunks_of(actions);
+    let [(_, chunk)] = chunks.as_slice() else {
+        panic!("not one reply: {actions:?}");
+    };
+    let Ok(PeHeader::Reply(reply)) = PeHeader::try_from(chunk.header()) else {
+        panic!("not a reply header");
+    };
+    reply.status
+}
+
+// M2-103 §8.6.2 gives `offset` and `limit` to the Get of a List Resource. A Set
+// that carries them is refused whether or not the entry paginates, and nothing is
+// set.
+#[test]
+fn a_set_with_a_page_is_refused_whether_or_not_the_entry_paginates() {
+    let mut store = store();
+    let held = |name: &str| PeData::decode(custom(name), &json("[1,2]")).unwrap();
+    for (name, paginates) in [("X-PagedList", true), ("X-PlainList", false)] {
+        let entry = custom_entry(name, r#"{"title":"List","type":"array"}"#)
+            .can_set(CanSet::Full)
+            .can_paginate(paginates)
+            .build()
+            .unwrap();
+        store.declare(entry);
+        store.put(None, held(name)).unwrap();
+    }
+    let mut link = Link::new(store, 256);
+    for (id, name) in [(1, "X-PagedList"), (2, "X-PlainList")] {
+        let mut request = super::super::header::PeRequest::new(ResourceName::new(name).unwrap());
+        request.page = Some(PePage {
+            offset: 0,
+            limit: NonZeroU32::new(1).unwrap(),
+        });
+        let actions = inquire(
+            &mut link,
+            PeMessageKind::SET_INQUIRY,
+            id,
+            PeHeader::Request(request),
+            b"[3]",
+        );
+        assert_eq!(reply_status(&actions), PeStatus::BadRequest, "{name}");
+        assert_eq!(
+            link.store
+                .get(&super::exchange::target(custom(name)))
+                .cloned(),
+            Some(held(name)),
+            "{name} was set"
+        );
+    }
+}
+
+// M2-103 §14: ResourceList has no entry that declares pagination, Flow Control or
+// Subscription, so a Get of it with a page is 400, with Flow Control 406, and a
+// Start Subscription to it 405.
+#[test]
+fn the_responder_refuses_resource_list_what_it_does_not_declare() {
+    let mut raw = Raw::new();
+    let mut paged = pe_get("ResourceList");
+    paged.page = Some(PePage {
+        offset: 0,
+        limit: NonZeroU32::new(1).unwrap(),
+    });
+    assert_eq!(raw.status(PeCall::Get(paged)), PeStatus::BadRequest);
+    let mut flow = pe_get("ResourceList");
+    flow.flow_control = PeFlowControl::On;
+    assert_eq!(
+        raw.status(PeCall::Get(flow)),
+        PeStatus::FlowControlUnsupported
+    );
+    assert_eq!(
+        raw.status(PeCall::Subscribe(pe_get("ResourceList"))),
+        PeStatus::NotAllowed
     );
 }

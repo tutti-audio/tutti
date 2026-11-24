@@ -36,6 +36,53 @@ pub enum EventLossPolicy {
 /// before it.
 pub const MAX_FRAMES: Samples = Samples::new(u32::MAX as usize);
 
+/// What a render keeps past the programme's end: a figure fixed before it
+/// starts, or what the graph reports when the programme has ended.
+///
+/// Either way the render is sized and planned for [`bound`](Self::bound): the
+/// file's frame limit is checked against it, buffers are reserved for it and
+/// progress reports it until the programme ends. A render that ends sooner
+/// holds the frames it rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TailPolicy {
+    /// Exactly this many frames past the end.
+    Frames(Samples),
+    /// The tail the graph's nodes owe ([`tutti_graph::Executor::reported_tail`]),
+    /// asked at the programme's last frame and again after every block of the
+    /// tail, spent under `ceiling` in all: each ask bounds the tail (what is
+    /// spent plus what is owed) and the tail is the smallest bound seen, so
+    /// it is never longer than the first ask's. A bound holds when each report
+    /// covers its node's ring-out for the controls still to come; a report that
+    /// follows a control driven lower for a block can cut the tail at that
+    /// setting. A node owes what is left of its
+    /// report when nothing upstream still owes, and its declared ceiling after
+    /// an upstream that does. A graph that never decays, or whose nodes decline
+    /// to say, is spent as
+    /// [`GraphTail::resolve`](tutti_graph::GraphTail::resolve) does.
+    Reported {
+        /// The most frames of tail kept past the end.
+        ceiling: Samples,
+        /// Frames of the graph's latency the job does not trim: the programme
+        /// leaves the graph that much late, so they are pulled and kept
+        /// between the programme's end and the tail.
+        kept_latency: Samples,
+    },
+}
+
+impl TailPolicy {
+    /// The most frames this keeps past the programme's end.
+    #[must_use]
+    pub fn bound(self) -> Samples {
+        match self {
+            Self::Frames(frames) => frames,
+            Self::Reported {
+                ceiling,
+                kept_latency,
+            } => ceiling + kept_latency,
+        }
+    }
+}
+
 /// The frames a render covers and the rate it is rendered at ([`Job::new`]).
 ///
 /// Every field is private; the getters are the reading. A `Job` that exists is
@@ -46,7 +93,7 @@ pub struct Job {
     rate: SampleRate,
     length: Samples,
     latency: Samples,
-    tail: Samples,
+    tail: TailPolicy,
     on_event_loss: EventLossPolicy,
 }
 
@@ -56,20 +103,22 @@ impl Job {
     ///
     /// `latency` is trimmed from the head, so the graph is pulled for it as
     /// well and the file is `latency` shorter than what the graph produced;
-    /// `tail` is kept, so the file is `tail` longer than the audible span.
+    /// `tail` is kept, so the file is the tail longer than the audible span:
+    /// at most [`TailPolicy::bound`], and that many exactly for
+    /// [`TailPolicy::Frames`].
     /// The event-loss policy is [`EventLossPolicy::Fail`]; see
     /// [`event_loss`](Self::event_loss).
     ///
     /// # Errors
     ///
     /// - [`JobError::ZeroLength`]: `length` is no frames.
-    /// - [`JobError::TooLong`]: `latency + length + tail` overflows, or is more
-    ///   than [`MAX_FRAMES`].
+    /// - [`JobError::TooLong`]: `latency + length +` the tail's bound overflows,
+    ///   or is more than [`MAX_FRAMES`].
     pub fn new(
         rate: SampleRate,
         length: Samples,
         latency: Samples,
-        tail: Samples,
+        tail: TailPolicy,
     ) -> Result<Self, JobError> {
         if length == Samples::new(0) {
             return Err(JobError::ZeroLength);
@@ -77,7 +126,7 @@ impl Job {
         let total = latency
             .get()
             .checked_add(length.get())
-            .and_then(|n| n.checked_add(tail.get()));
+            .and_then(|n| n.checked_add(tail.bound().get()));
         match total.map(Samples::new) {
             Some(n) if n <= MAX_FRAMES => {}
             total => return Err(JobError::TooLong { total }),
@@ -115,8 +164,8 @@ impl Job {
         self.latency
     }
 
-    /// Frames kept past the audible span.
-    pub fn tail(&self) -> Samples {
+    /// What is kept past the audible span.
+    pub fn tail(&self) -> TailPolicy {
         self.tail
     }
 
@@ -125,14 +174,16 @@ impl Job {
         self.on_event_loss
     }
 
-    /// The frames the render keeps: the audible span plus the tail.
-    pub fn output_length(&self) -> Samples {
-        self.length + self.tail
+    /// The most frames the render keeps: the audible span plus the tail's
+    /// bound.
+    pub fn max_output_length(&self) -> Samples {
+        self.length + self.tail.bound()
     }
 
-    /// The frames the graph is pulled for: what is kept plus the trimmed head.
-    pub fn total(&self) -> Samples {
-        self.latency + self.length + self.tail
+    /// The most frames the graph is pulled for: what is kept at most plus the
+    /// trimmed head.
+    pub fn max_total(&self) -> Samples {
+        self.latency + self.length + self.tail.bound()
     }
 }
 

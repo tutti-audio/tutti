@@ -8,7 +8,7 @@ use super::controllers::{PeAllCtrlList, PeChCtrlList, PeCtrlMapList};
 use super::entry::PeResourceList;
 use super::fields::{InvalidValue, PeDataError, PeDataFault};
 use super::info::{PeDeviceInfo, PeJsonSchema};
-use super::kind::PeResource;
+use super::kind::{PeResource, StandardResource, UntypedResource};
 use super::link::PeLink;
 use super::programs::{PeModeList, PeProgramList};
 use super::simple::{
@@ -69,8 +69,7 @@ impl PeBinary {
     /// the JSON form's.
     #[must_use]
     pub fn new(media_type: MediaType, bytes: Vec<u8>) -> Option<Self> {
-        (!media_type.as_str().eq_ignore_ascii_case("application/json"))
-            .then_some(Self { media_type, bytes })
+        (!media_type.is_json()).then_some(Self { media_type, bytes })
     }
 
     /// The `bytes` that are no format a media type names:
@@ -100,36 +99,39 @@ impl PeBinary {
 /// manufacturer-specific Resource's, or a standard one's that is not modelled.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeOpaque {
-    resource: PeResource,
+    resource: UntypedResource,
     body: OpaqueBody,
 }
 
 impl PeOpaque {
-    /// The Property Data `json` of `resource`, or `None` when the Resource has
-    /// a type, whose [`PeData`] variant holds the data.
+    /// The Property Data `json` of `resource`. A standard Resource has a type, so
+    /// its data is a [`PeData`] variant and not opaque:
+    ///
+    /// ```compile_fail,E0277
+    /// use tutti_midi_ci::{PeJson, PeOpaque, StandardResource};
+    ///
+    /// let _ = PeOpaque::new(StandardResource::LocalOn, PeJson::Bool(true));
+    /// ```
     #[must_use]
-    pub fn new(resource: PeResource, json: PeJson) -> Option<Self> {
-        resource.is_overridable().then_some(Self {
-            resource,
+    pub fn new(resource: impl Into<UntypedResource>, json: PeJson) -> Self {
+        Self {
+            resource: resource.into(),
             body: OpaqueBody::Json(json),
-        })
+        }
     }
 
-    /// The Property Data `bytes` of `resource` that is of `media_type`, or `None`
-    /// when the Resource has a type or the media type is JSON, which
-    /// [`new`](Self::new) holds.
+    /// The Property Data `binary` of `resource`.
     #[must_use]
-    pub fn binary(resource: PeResource, media_type: MediaType, bytes: Vec<u8>) -> Option<Self> {
-        let binary = PeBinary::new(media_type, bytes)?;
-        resource.is_overridable().then_some(Self {
-            resource,
+    pub fn binary(resource: impl Into<UntypedResource>, binary: PeBinary) -> Self {
+        Self {
+            resource: resource.into(),
             body: OpaqueBody::Binary(binary),
-        })
+        }
     }
 
     /// The Resource.
     #[must_use]
-    pub fn resource(&self) -> &PeResource {
+    pub fn resource(&self) -> &UntypedResource {
         &self.resource
     }
 
@@ -186,7 +188,7 @@ pub enum PeData {
     Opaque(PeOpaque),
 }
 
-fn items<'a>(resource: &PeResource, json: &'a PeJson) -> Result<&'a [PeJson], PeDataError> {
+fn items(resource: StandardResource, json: &PeJson) -> Result<&[PeJson], PeDataError> {
     json.as_array()
         .ok_or_else(|| PeDataError::new(resource.as_str(), PeDataFault::WrongType("an array")))
 }
@@ -196,24 +198,24 @@ impl PeData {
     #[must_use]
     pub fn resource(&self) -> PeResource {
         match self {
-            Self::ResourceList(_) => PeResource::ResourceList,
-            Self::DeviceInfo(_) => PeResource::DeviceInfo,
-            Self::ChannelList(_) => PeResource::ChannelList,
-            Self::JsonSchema(_) => PeResource::JsonSchema,
-            Self::ModeList(_) => PeResource::ModeList,
-            Self::CurrentMode(_) => PeResource::CurrentMode,
-            Self::ChannelMode(_) => PeResource::ChannelMode,
-            Self::BasicChannelRx(_) => PeResource::BasicChannelRx,
-            Self::BasicChannelTx(_) => PeResource::BasicChannelTx,
-            Self::ProgramList(_) => PeResource::ProgramList,
-            Self::LocalOn(_) => PeResource::LocalOn,
-            Self::ExternalSync(_) => PeResource::ExternalSync,
-            Self::AllCtrlList(_) => PeResource::AllCtrlList,
-            Self::ChCtrlList(_) => PeResource::ChCtrlList,
-            Self::CtrlMapList(_) => PeResource::CtrlMapList,
-            Self::StateList(_) => PeResource::StateList,
-            Self::State(_) => PeResource::State,
-            Self::Opaque(opaque) => opaque.resource.clone(),
+            Self::ResourceList(_) => PeResource::Standard(StandardResource::ResourceList),
+            Self::DeviceInfo(_) => PeResource::Standard(StandardResource::DeviceInfo),
+            Self::ChannelList(_) => PeResource::Standard(StandardResource::ChannelList),
+            Self::JsonSchema(_) => PeResource::Standard(StandardResource::JsonSchema),
+            Self::ModeList(_) => PeResource::Standard(StandardResource::ModeList),
+            Self::CurrentMode(_) => PeResource::Standard(StandardResource::CurrentMode),
+            Self::ChannelMode(_) => PeResource::Standard(StandardResource::ChannelMode),
+            Self::BasicChannelRx(_) => PeResource::Standard(StandardResource::BasicChannelRx),
+            Self::BasicChannelTx(_) => PeResource::Standard(StandardResource::BasicChannelTx),
+            Self::ProgramList(_) => PeResource::Standard(StandardResource::ProgramList),
+            Self::LocalOn(_) => PeResource::Standard(StandardResource::LocalOn),
+            Self::ExternalSync(_) => PeResource::Standard(StandardResource::ExternalSync),
+            Self::AllCtrlList(_) => PeResource::Standard(StandardResource::AllCtrlList),
+            Self::ChCtrlList(_) => PeResource::Standard(StandardResource::ChCtrlList),
+            Self::CtrlMapList(_) => PeResource::Standard(StandardResource::CtrlMapList),
+            Self::StateList(_) => PeResource::Standard(StandardResource::StateList),
+            Self::State(_) => PeResource::Standard(StandardResource::State),
+            Self::Opaque(opaque) => PeResource::Untyped(opaque.resource.clone()),
         }
     }
 
@@ -303,48 +305,52 @@ impl PeData {
     /// # Errors
     ///
     /// [`PeDataError`] for Property Data that is not the Resource's.
-    pub fn decode(resource: &PeResource, json: &PeJson) -> Result<Self, PeDataError> {
+    pub fn decode(resource: impl Into<PeResource>, json: &PeJson) -> Result<Self, PeDataError> {
+        match resource.into() {
+            PeResource::Standard(standard) => Self::decode_standard(standard, json),
+            PeResource::Untyped(untyped) => Ok(Self::Opaque(PeOpaque::new(untyped, json.clone()))),
+        }
+    }
+
+    fn decode_standard(resource: StandardResource, json: &PeJson) -> Result<Self, PeDataError> {
         Ok(match resource {
-            PeResource::ResourceList => {
+            StandardResource::ResourceList => {
                 Self::ResourceList(PeResourceList::from_items(items(resource, json)?)?)
             }
-            PeResource::DeviceInfo => Self::DeviceInfo(PeDeviceInfo::from_json(json)?),
-            PeResource::ChannelList => {
+            StandardResource::DeviceInfo => Self::DeviceInfo(PeDeviceInfo::from_json(json)?),
+            StandardResource::ChannelList => {
                 Self::ChannelList(PeChannelList::from_items(items(resource, json)?)?)
             }
-            PeResource::JsonSchema => Self::JsonSchema(PeJsonSchema::from_json(json)?),
-            PeResource::ModeList => Self::ModeList(PeModeList::from_items(items(resource, json)?)?),
-            PeResource::CurrentMode => Self::CurrentMode(PeCurrentMode::from_json(json)?),
-            PeResource::ChannelMode => Self::ChannelMode(PeChannelMode::from_json(json)?),
-            PeResource::BasicChannelRx => Self::BasicChannelRx(PeBasicChannelRx::from_json(json)?),
-            PeResource::BasicChannelTx => Self::BasicChannelTx(PeBasicChannelTx::from_json(json)?),
-            PeResource::ProgramList => {
+            StandardResource::JsonSchema => Self::JsonSchema(PeJsonSchema::from_json(json)?),
+            StandardResource::ModeList => {
+                Self::ModeList(PeModeList::from_items(items(resource, json)?)?)
+            }
+            StandardResource::CurrentMode => Self::CurrentMode(PeCurrentMode::from_json(json)?),
+            StandardResource::ChannelMode => Self::ChannelMode(PeChannelMode::from_json(json)?),
+            StandardResource::BasicChannelRx => {
+                Self::BasicChannelRx(PeBasicChannelRx::from_json(json)?)
+            }
+            StandardResource::BasicChannelTx => {
+                Self::BasicChannelTx(PeBasicChannelTx::from_json(json)?)
+            }
+            StandardResource::ProgramList => {
                 Self::ProgramList(PeProgramList::from_items(items(resource, json)?)?)
             }
-            PeResource::LocalOn => Self::LocalOn(PeLocalOn::from_json(json)?),
-            PeResource::ExternalSync => Self::ExternalSync(PeExternalSync::from_json(json)?),
-            PeResource::AllCtrlList => {
+            StandardResource::LocalOn => Self::LocalOn(PeLocalOn::from_json(json)?),
+            StandardResource::ExternalSync => Self::ExternalSync(PeExternalSync::from_json(json)?),
+            StandardResource::AllCtrlList => {
                 Self::AllCtrlList(PeAllCtrlList::from_items(items(resource, json)?)?)
             }
-            PeResource::ChCtrlList => {
+            StandardResource::ChCtrlList => {
                 Self::ChCtrlList(PeChCtrlList::from_items(items(resource, json)?)?)
             }
-            PeResource::CtrlMapList => {
+            StandardResource::CtrlMapList => {
                 Self::CtrlMapList(PeCtrlMapList::from_items(items(resource, json)?)?)
             }
-            PeResource::StateList => {
+            StandardResource::StateList => {
                 Self::StateList(PeStateList::from_items(items(resource, json)?)?)
             }
-            PeResource::State => Self::State(PeState::json(json.clone())),
-            other => match PeOpaque::new(other.clone(), json.clone()) {
-                Some(opaque) => Self::Opaque(opaque),
-                None => {
-                    return Err(PeDataError::new(
-                        other.as_str(),
-                        PeDataFault::NotValid(InvalidValue::ResourceIsTyped),
-                    ));
-                }
-            },
+            StandardResource::State => Self::State(PeState::json(json.clone())),
         })
     }
 
@@ -357,30 +363,28 @@ impl PeData {
     /// [`PeDataError`] for JSON that is not the Resource's, and for data that is
     /// not JSON of a Resource that is typed.
     pub fn decode_bytes(
-        resource: &PeResource,
+        resource: impl Into<PeResource>,
         media_type: Option<&MediaType>,
         bytes: &[u8],
     ) -> Result<Self, PeDataError> {
-        if *resource == PeResource::State {
+        let resource = resource.into();
+        if resource == StandardResource::State {
             return PeState::from_wire(media_type, bytes).map(Self::State);
         }
-        match media_type.filter(|m| !m.is_json()) {
+        match media_type.and_then(|m| PeBinary::new(m.clone(), bytes.to_vec())) {
             None => {
                 let json = PeJson::try_from(bytes).map_err(|e| {
                     PeDataError::new(resource.as_str(), PeDataFault::NotValid(e.into()))
                 })?;
                 Self::decode(resource, &json)
             }
-            Some(media_type) => {
-                PeOpaque::binary(resource.clone(), media_type.clone(), bytes.to_vec())
-                    .map(Self::Opaque)
-                    .ok_or_else(|| {
-                        PeDataError::new(
-                            resource.as_str(),
-                            PeDataFault::NotValid(InvalidValue::ResourceIsTyped),
-                        )
-                    })
-            }
+            Some(binary) => match resource {
+                PeResource::Untyped(untyped) => Ok(Self::Opaque(PeOpaque::binary(untyped, binary))),
+                PeResource::Standard(standard) => Err(PeDataError::new(
+                    standard.as_str(),
+                    PeDataFault::NotValid(InvalidValue::ResourceIsTyped),
+                )),
+            },
         }
     }
 

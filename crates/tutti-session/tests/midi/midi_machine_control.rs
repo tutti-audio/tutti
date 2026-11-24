@@ -18,7 +18,8 @@ use tutti_midi_protocol::{MtcRate, Recipient, SysexDeviceId};
 use tutti_midi_runtime::SyncMessages;
 use tutti_session::ClockKind;
 use tutti_session::{
-    FollowClock, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent,
+    FollowClock, FollowKind, FollowMachineControl, MidiError, MidiEvent, Session, SessionEvent,
+    UnfollowCause,
 };
 use tutti_timeline::FadeOut;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets};
@@ -303,9 +304,13 @@ fn unfollowing_is_reported_and_refused_when_not_following() {
     s.midi().unfollow_machine_control().expect("was following");
     let events = pump(&mut s);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, MidiEvent::MachineControlUnfollowed)),
+        events.iter().any(|e| matches!(
+            e,
+            MidiEvent::Unfollowed {
+                follower: FollowKind::MachineControl,
+                cause: UnfollowCause::Requested
+            }
+        )),
         "{events:?}"
     );
 }

@@ -59,12 +59,10 @@ struct Rig {
 
 fn rig(workers: usize, no_alloc: bool) -> Rig {
     let (ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     Rig {
         ed,
@@ -97,13 +95,9 @@ fn commit(r: &mut Rig) {
 /// One block of `n` frames; returns the output channels.
 fn block(r: &mut Rig, n: usize) -> Vec<Vec<f32>> {
     let width = r.ed.spec().topology.outputs.len();
-    let mut chans = vec![vec![0.0f32; n]; width];
-    let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-    let ins: [&[f32]; 0] = [];
     // Only the render is inside the gate: this helper's own buffers allocate.
-    r.exec.process(n, &t, &ins, &mut outs);
-    chans
+    common::block_in(&mut r.exec, n, &[], width, &t)
 }
 
 fn meter_ops(r: &Rig) -> (usize, usize) {
@@ -822,15 +816,13 @@ fn run(r: &mut Rig, blocks: usize) -> Vec<Vec<Level>> {
 /// several worker counts, with every participant inside `RtScope`.
 #[test]
 fn the_parallel_meters_are_bit_identical_and_allocation_free() {
-    let mut s = rig(1, false);
-    let serial = run(&mut s, 8);
+    let serial = common::agree_across_workers(
+        [2, 3, 4],
+        |workers| run(&mut rig(workers, workers > 1), 8),
+        Clone::clone,
+    );
     assert!(
         serial.iter().flatten().any(|l| l.peak.get() > 0.0),
         "the meters carry signal"
     );
-    for workers in [2, 3, 4] {
-        let mut p = rig(workers, true);
-        let par = run(&mut p, 8);
-        assert_eq!(serial, par, "{workers} workers");
-    }
 }

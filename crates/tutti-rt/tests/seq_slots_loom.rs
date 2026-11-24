@@ -44,7 +44,7 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
 
         let mut yielded = Vec::new();
         let observed = loaded.load(Ordering::Relaxed);
-        reader.drain(|_, value| yielded.push(value));
+        reader.drain_in_epoch(|_, value, _| yielded.push(value));
         if observed {
             assert!(
                 !yielded.contains(&1),
@@ -61,7 +61,7 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
         }
         handle.join().unwrap();
 
-        reader.drain(|_, value| yielded.push(value));
+        reader.drain_in_epoch(|_, value, _| yielded.push(value));
         assert_eq!(reader.swept(), Generation::new(2), "a quiet drain");
         assert_eq!(
             yielded.last(),
@@ -71,7 +71,7 @@ fn a_value_before_an_observed_epoch_is_never_yielded_and_a_later_write_never_dro
         assert_eq!(yielded.iter().filter(|&&v| v == 2).count(), 1);
 
         let mut after = 0;
-        reader.drain(|_, _| after += 1);
+        reader.drain_in_epoch(|_, _, _| after += 1);
         assert_eq!(after, 0, "nothing was written since");
     });
 }

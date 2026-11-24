@@ -7,7 +7,9 @@
 use clap_sys::events::{
     CLAP_NOTE_EXPRESSION_BRIGHTNESS, CLAP_NOTE_EXPRESSION_PRESSURE, CLAP_NOTE_EXPRESSION_TUNING,
 };
-use tutti_clap_host::{ClapEvent, EventList, InputEventList, InputRooms, TooManyNotePorts};
+use tutti_clap_host::{
+    ClapEvent, EventList, InputEventList, InputRooms, NoteSend, TooManyNotePorts,
+};
 use tutti_fixtures::midi;
 use tutti_graph::Offset;
 use tutti_midi_protocol::PitchBendSensitivity;
@@ -109,7 +111,8 @@ fn note_on_pitched(group: MidiGroup, channel: MidiChannel, key: u8, pitch: f64) 
 #[test]
 fn two_groups_land_on_note_ports_zero_and_one() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]).unwrap();
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI, NoteSend::CLAP_AND_MIDI])
+        .unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -144,8 +147,12 @@ fn two_groups_land_on_note_ports_zero_and_one() {
 #[test]
 fn a_list_of_more_than_sixteen_note_ports_is_refused_and_changes_nothing() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]).unwrap();
-    assert_eq!(list.set_note_ports(&[false; 17]), Err(TooManyNotePorts(17)));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI, NoteSend::CLAP_AND_MIDI])
+        .unwrap();
+    assert_eq!(
+        list.set_note_ports(&[NoteSend::CLAP_AND_MIDI; 17]),
+        Err(TooManyNotePorts(17))
+    );
     add(
         &mut list,
         midi::note_on(Address::new(group(1), ch(0)), 60, 0x8000),
@@ -154,7 +161,7 @@ fn a_list_of_more_than_sixteen_note_ports_is_refused_and_changes_nothing() {
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(note_on(&events[0]).0, 1);
     assert_eq!(list.groups_dropped(), 0);
-    assert_eq!(list.set_note_ports(&[false; 16]), Ok(()));
+    assert_eq!(list.set_note_ports(&[NoteSend::CLAP_AND_MIDI; 16]), Ok(()));
 }
 
 /// **A Group the plugin has no note port for is dropped and counted**, whole
@@ -164,7 +171,7 @@ fn a_list_of_more_than_sixteen_note_ports_is_refused_and_changes_nothing() {
 #[test]
 fn a_group_without_a_note_port_is_dropped_and_counted() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false]).unwrap();
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),
@@ -185,14 +192,18 @@ fn a_group_without_a_note_port_is_dropped_and_counted() {
         &mut list,
         Ump::from(Message::System(group(1), System::TimingClock)),
     );
+    add(
+        &mut list,
+        Ump::from(Message::System(group(0), System::TimingClock)),
+    );
     let events = drain(&mut list);
     assert_eq!(events.len(), 2, "{events:?}");
     assert_eq!(note_on(&events[0]).2, 60, "only Group 0's note is heard");
     assert_eq!(midi_bytes(&events[1]), (0, [0xF8, 0, 0]));
     assert_eq!(
         list.groups_dropped(),
-        2,
-        "the Group 1 note and the Group 2 CC"
+        3,
+        "the Group 1 note, the Group 2 CC and the Group 1 clock"
     );
 }
 
@@ -467,7 +478,8 @@ fn a_pitch_then_a_bend_is_one_tuning_from_the_key() {
 #[test]
 fn the_sensitivity_is_per_group() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]).unwrap();
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI, NoteSend::CLAP_AND_MIDI])
+        .unwrap();
     add(
         &mut list,
         midi::registered(
@@ -584,7 +596,8 @@ fn rpn(group: MidiGroup, channel: MidiChannel, index: u8, value: u32) -> Ump {
 #[test]
 fn an_rpn_is_four_control_changes_every_time() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, false]).unwrap();
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI, NoteSend::CLAP_AND_MIDI])
+        .unwrap();
 
     add(&mut list, rpn(group(0), ch(1), 0, 12 << 25));
     let bytes: Vec<_> = drain(&mut list).iter().map(midi_bytes).collect();
@@ -625,6 +638,7 @@ fn an_rpn_is_four_control_changes_every_time() {
 #[test]
 fn an_nrpn_selects_with_cc_99_and_98() {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     add(
         &mut list,
         Ump::from(Message::midi2(
@@ -649,6 +663,7 @@ fn an_nrpn_selects_with_cc_99_and_98() {
 #[test]
 fn a_banked_program_change_is_three_messages_every_time() {
     let mut list = InputEventList::new(InputRooms::new(1024));
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI]).unwrap();
     let bank = Bank {
         msb: U7::of(5),
         lsb: U7::of(9),
@@ -706,7 +721,8 @@ fn a_minted_id_names_no_channel_and_key() {
 #[test]
 fn each_note_port_takes_its_own_dialect() {
     let mut list = InputEventList::new(InputRooms::new(1024));
-    list.set_note_ports(&[false, true]).unwrap();
+    list.set_note_ports(&[NoteSend::CLAP_AND_MIDI, NoteSend::Midi])
+        .unwrap();
     add(
         &mut list,
         midi::note_on(Address::new(group(0), ch(0)), 60, 0x8000),

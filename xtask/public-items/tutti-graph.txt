@@ -140,7 +140,6 @@ fn compile::main_output::fold_to_topology_with
 fn compile::main_output::fold_to_width
 fn compile::plan::Csr::row
 fn compile::plan::Csr::rows
-fn compile::plan::Delta::is_empty
 fn compile::plan::EventSlotCapacity::covering
 fn compile::plan::EventSlotCapacity::events
 fn compile::plan::EventSlotCapacity::holds
@@ -153,10 +152,8 @@ fn compile::plan::Plan::audio_feedback
 fn compile::plan::Plan::audio_list
 fn compile::plan::Plan::audio_values
 fn compile::plan::Plan::compensation
-fn compile::plan::Plan::event_delay
 fn compile::plan::Plan::event_delays
 fn compile::plan::Plan::event_feedback
-fn compile::plan::Plan::event_input_capacity
 fn compile::plan::Plan::event_list
 fn compile::plan::Plan::event_port_capacity
 fn compile::plan::Plan::event_slot_capacity
@@ -170,11 +167,8 @@ fn compile::plan::Plan::main_outputs
 fn compile::plan::Plan::op_dependencies
 fn compile::plan::Plan::ops
 fn compile::plan::Plan::param_ports
-fn compile::plan::Plan::prepare
 fn compile::plan::Plan::rendered_outputs
 fn compile::plan::Plan::slots
-fn compile::plan::Plan::store_len
-fn compile::plan::Plan::sum_lanes
 fn compile::plan::Plan::task_activation
 fn compile::plan::Plan::task_ops
 fn compile::plan::Plan::tasks
@@ -404,10 +398,8 @@ fn edit::editor::Editor::with_event_capacity
 fn edit::editor::Editor::with_format
 fn edit::editor::commit::Editor::collect
 fn edit::editor::commit::Editor::commit
-fn edit::editor::commit::Editor::main_output_fade
 fn edit::editor::commit::Editor::package
 fn edit::editor::commit::Editor::set_main_output_fade
-fn edit::editor::commit::Editor::validate
 fn edit::editor::controls::Editor::bus_edge_is_live
 fn edit::editor::controls::Editor::bypasses_itself
 fn edit::editor::controls::Editor::check_gain_edge
@@ -495,9 +487,9 @@ fn exec::Executor::main_output_fade
 fn exec::Executor::pending_prepare
 fn exec::Executor::plan
 fn exec::Executor::play_reading
-fn exec::Executor::pool
 fn exec::Executor::prepare
 fn exec::Executor::recovered_event_count
+fn exec::Executor::reported_tail
 fn exec::Executor::set_pool
 fn exec::Executor::unrouted_command_count
 fn exec::command::ScheduleError::is_transient
@@ -558,7 +550,6 @@ fn model::graph::InputPort::new
 fn model::graph::InputPort::node
 fn model::graph::InputPort::port
 fn model::graph::Invalid::is_fatal
-fn model::graph::MeterSpec::align
 fn model::graph::MeterSpec::aligned
 fn model::graph::MeterSpec::lanes
 fn model::graph::MeterSpec::raw
@@ -569,10 +560,8 @@ fn model::graph::NodeSpec::tail
 fn model::graph::OutputPort::new
 fn model::graph::OutputPort::node
 fn model::graph::OutputPort::port
-fn model::graph::TapSpec::align
 fn model::graph::TapSpec::aligned
 fn model::graph::TapSpec::lanes
-fn model::graph::TapSpec::raw
 fn model::graph::Topology::connect
 fn model::graph::Topology::connect_output
 fn model::graph::Topology::disconnect
@@ -582,7 +571,6 @@ fn model::graph::Topology::topo_order
 fn model::graph::Topology::unconnected
 fn model::graph::Topology::validate
 fn model::graph::Valid::get
-fn model::graph::Valid::into_inner
 fn model::mode::NodeMix::lane_range
 fn model::pass::Pass::contributions
 fn model::pass::Pass::inputs
@@ -625,6 +613,7 @@ fn node::Cx::transport_at
 fn node::NodeParts::new
 fn node::NodeParts::params
 fn node::NodeParts::published
+fn node::NodeParts::settings
 fn node::Prepare::max_block
 fn node::Prepare::new
 fn node::Prepare::quantum
@@ -804,6 +793,12 @@ fn node::rates::SampleRates::min
 fn node::rates::SampleRates::new
 fn node::rates::SampleRates::of
 fn node::render_mode::RenderMode::is_offline
+fn node::setting::ErasedSetting::cell
+fn node::setting::ErasedSetting::kind
+fn node::setting::ErasedSetting::load
+fn node::setting::ErasedSetting::new
+fn node::setting::ErasedSetting::store
+fn node::setting::ErasedSetting::word
 fn node::shape::Shape::audio_in
 fn node::shape::Shape::audio_out
 fn node::shape::Shape::buses
@@ -886,6 +881,8 @@ fn testing::Harness::block_at
 fn testing::Harness::block_with_changes
 fn testing::Harness::channels
 fn testing::Harness::new
+fn testing::Harness::run
+fn testing::Harness::run_with
 fn testing::Harness::set_edge_gain
 fn testing::Harness::set_edge_gain_range
 fn testing::Harness::set_mix
@@ -911,11 +908,17 @@ fn testing::TestNode::in_format
 fn testing::TestNode::new
 fn testing::TestPool::new
 fn testing::TestPool::with_waits
+fn testing::agree_across_workers
 fn testing::bits
+fn testing::bits_of
+fn testing::block
+fn testing::block_in
 fn testing::cap_of
 fn testing::declick
 fn testing::driver_value
 fn testing::input_signal
+fn testing::pooled
+fn testing::pooled_fresh
 fn testing::prepare
 fn testing::shapes_costed
 fn testing::shapes_of
@@ -1076,6 +1079,7 @@ struct node::param_event::ParamRamp
 struct node::param_event::ParamSegment
 struct node::play::PlayClock
 struct node::rates::SampleRates
+struct node::setting::ErasedSetting
 struct node::shape::Shape
 struct node::time::BeatCrossings
 struct node::time::Env
@@ -1110,6 +1114,8 @@ trait node::declare::sealed::Sealed
 trait node::fork::ForkHealth
 trait node::fork::ForkSource
 trait node::instrument::InstrumentNode
+trait node::setting::HasSetting
+trait node::setting::SettingCell
 trait testing::Word
 type compile::Shapes
 type event::types::UmpAt

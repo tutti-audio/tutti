@@ -1,7 +1,7 @@
 //! `Job::new`'s refusals, each through the public constructor with its named
 //! error, and what a `Job` reads back.
 
-use crate::{EventLossPolicy, Job, JobError, MAX_FRAMES};
+use crate::{EventLossPolicy, Job, JobError, MAX_FRAMES, TailPolicy};
 use tutti_units::{SampleRate, Samples};
 
 const RATE: SampleRate = SampleRate::SR_48K;
@@ -11,7 +11,7 @@ fn job(length: usize, latency: usize, tail: usize) -> Result<Job, JobError> {
         RATE,
         Samples::new(length),
         Samples::new(latency),
-        Samples::new(tail),
+        TailPolicy::Frames(Samples::new(tail)),
     )
 }
 
@@ -67,11 +67,11 @@ fn a_job_reads_back_what_it_was_given() {
     assert_eq!(job.rate(), RATE);
     assert_eq!(job.length(), Samples::new(1_000));
     assert_eq!(job.latency(), Samples::new(64));
-    assert_eq!(job.tail(), Samples::new(200));
-    assert_eq!(job.output_length(), Samples::new(1_200));
-    assert_eq!(job.total(), Samples::new(1_264));
+    assert_eq!(job.tail(), TailPolicy::Frames(Samples::new(200)));
+    assert_eq!(job.max_output_length(), Samples::new(1_200));
+    assert_eq!(job.max_total(), Samples::new(1_264));
     assert_eq!(job.on_event_loss(), EventLossPolicy::Fail);
     let allowed = job.event_loss(EventLossPolicy::Allow);
     assert_eq!(allowed.on_event_loss(), EventLossPolicy::Allow);
-    assert_eq!(allowed.total(), job.total());
+    assert_eq!(allowed.max_total(), job.max_total());
 }

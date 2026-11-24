@@ -7,13 +7,16 @@ use tutti_buffers::{
 };
 use tutti_buffers::{Float, Planes};
 use tutti_dsp::CombDelay;
-use tutti_dsp::{FdnLayout, FreeverbControls, FreezeMode, LadderType, ShapeKind, Stages, SvfType};
+use tutti_dsp::{
+    FdnLayout, FreeverbControls, FreezeMode, LadderType, SecondOrderShape, ShapeKind, Stages,
+    SvfType, Waveshape,
+};
 use tutti_dsp::{Inline, Tap, TapSet};
 use tutti_graph::contract::drive_input;
 use tutti_graph::{Env, Node, PlayClock, Prepare, TransportChanges, TransportPosition};
 use tutti_nodes::{
     AmbisonicDecoderConfig, AmbisonicDecoderNode, AmbisonicEncoderConfig, AmbisonicEncoderNode,
-    AmbisonicRotatorConfig, AmbisonicRotatorNode, Antialiasing, AutoPanConfig, AutoPanNode,
+    AmbisonicRotatorConfig, AmbisonicRotatorNode, AutoPanConfig, AutoPanNode,
     BrickwallLimiterConfig, BrickwallLimiterNode, CompressorConfig, CompressorControls,
     CompressorNode, CrossoverConfig, CrossoverControls, CrossoverNode, DelayConfig, DelayControls,
     DelayLayout, DelayNode, DiodeClipperConfig, DiodeClipperNode, DistanceConfig, DistanceNode,
@@ -124,7 +127,7 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "distortion",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(4.0)),
             )),
         ),
@@ -133,19 +136,21 @@ fn rows() -> Vec<(&'static str, Box<dyn Node>)> {
         (
             "distortion first order",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
-                    .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::FirstOrder)
-                    .expect("an order the kind has"),
+                DistortionConfig::new(
+                    ChannelLayout::STEREO,
+                    Waveshape::new(ShapeKind::Tanh).first_order(),
+                )
+                .drive(Drive::new(4.0)),
             )),
         ),
         (
             "distortion second order",
             Box::new(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Softsign)
-                    .drive(Drive::new(4.0))
-                    .antialiasing(Antialiasing::SecondOrder)
-                    .expect("an order the kind has"),
+                DistortionConfig::new(
+                    ChannelLayout::STEREO,
+                    Waveshape::second_order(SecondOrderShape::Softsign),
+                )
+                .drive(Drive::new(4.0)),
             )),
         ),
         (

@@ -33,7 +33,6 @@ const sync::follow::MtcFollower::SLIP_FRAMES
 const sync::mtc::MtcDecoder::DIRECTION_STEPS
 const taken::Taken::NONE
 enum clock_map::Observed
-enum live::keys::SendUniversalError
 enum mpe_features::MpeFeaturesError
 enum output_plan::Placement
 enum output_plan::SendAt
@@ -159,6 +158,7 @@ fn output_plan::OutputPlan::terms
 fn output_plan::OutputTerms::is_complete
 fn schedule::clip_node::ClipEvents::is_empty
 fn schedule::clip_node::ClipEvents::len
+fn schedule::clip_node::ClipEvents::notes
 fn schedule::clip_node::MidiClipControls::current
 fn schedule::clip_node::MidiClipControls::is_empty
 fn schedule::clip_node::MidiClipControls::len
@@ -274,6 +274,7 @@ struct output_plan::OutputLatency
 struct output_plan::OutputPlan
 struct output_plan::OutputTerms
 struct schedule::clip_node::ClipEvents
+struct schedule::clip_node::ClipNote
 struct schedule::clip_node::MidiClipControls
 struct schedule::clip_node::MidiClipNode
 struct schedule::harmony_node::HarmonyChanges

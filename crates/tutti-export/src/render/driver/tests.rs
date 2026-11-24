@@ -30,11 +30,7 @@ fn render(
     ch: usize,
     frames: usize,
 ) -> Vec<Vec<f32>> {
-    let plan = crate::render::RenderPlan {
-        total: Samples::new(frames),
-        output_length: Samples::new(frames),
-        latency: Samples::new(0),
-    };
+    let plan = crate::render::RenderPlan::of_frames(Samples::new(frames));
     let layout = ChannelLayout::try_from(ch).expect("a test width is small");
     let mut out = Vec::new();
     with_source(graph, RATE, clock, |src| {
@@ -83,11 +79,7 @@ fn drive_reported(
     token: &CancelToken,
     report: &mut dyn FnMut(&Progress),
 ) -> (Outcome<()>, usize) {
-    let plan = crate::render::RenderPlan {
-        total: Samples::new(frames),
-        output_length: Samples::new(frames),
-        latency: Samples::new(0),
-    };
+    let plan = crate::render::RenderPlan::of_frames(Samples::new(frames));
     let mut consumed = 0;
     let outcome = with_source(&mut mono_dc(0.5), RATE, &FrozenClock, |src| {
         drive(
@@ -388,11 +380,7 @@ mod loss {
     }
 
     fn lost_in_one_block(graph: &mut RenderGraph) -> u64 {
-        let plan = crate::render::RenderPlan {
-            total: Samples::new(GRAPH_MAX_BLOCK.get()),
-            output_length: Samples::new(GRAPH_MAX_BLOCK.get()),
-            latency: Samples::new(0),
-        };
+        let plan = crate::render::RenderPlan::of_frames(Samples::new(GRAPH_MAX_BLOCK.get()));
         with_source(graph, RATE, &FrozenClock, |src| {
             drive(
                 src,

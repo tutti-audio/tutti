@@ -18,7 +18,6 @@ fn driver::TuttiDriver::opened_name
 fn driver::TuttiDriver::restart
 fn driver::TuttiDriver::restart_with
 fn driver::TuttiDriver::restart_with_quantum
-fn driver::TuttiDriver::select_device
 fn driver::TuttiDriver::start_with
 fn driver::TuttiDriver::stop
 fn driver::TuttiDriver::stream
@@ -52,7 +51,6 @@ fn output::AudioEngine::new
 fn output::AudioEngine::open
 fn output::AudioEngine::opened_name
 fn output::AudioEngine::resolve_device
-fn output::AudioEngine::select_device
 fn output::AudioEngine::start
 fn output::AudioEngine::start_resolved
 fn output::AudioEngine::start_with

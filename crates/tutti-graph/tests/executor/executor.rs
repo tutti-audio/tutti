@@ -33,10 +33,7 @@ fn wire(ed: &mut Editor, sink: NodeKey, from: NodeKey) {
 }
 
 fn render(exec: &mut Executor, frames: usize, outs: usize) -> Vec<Vec<f32>> {
-    let mut bufs = vec![vec![0.0f32; frames]; outs];
-    let mut refs: Vec<&mut [f32]> = bufs.iter_mut().map(Vec::as_mut_slice).collect();
-    exec.process(frames, &TransportPosition::default(), &[], &mut refs);
-    bufs
+    common::block(exec, frames, outs)
 }
 
 /// A node that counts its calls and has a chosen tail, fed by a silent

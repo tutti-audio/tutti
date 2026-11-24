@@ -27,9 +27,12 @@
 //! 6. **Tables**: every delay index is used by exactly one op, every unit by
 //!    exactly one `Node` op, and no two units share a store index. Every
 //!    event slot holds what is written into it: a node output what the
-//!    node's shape declares, a delay output and a feedback slot all their
-//!    FIFO can hold at the source's declared rate, a merge the sum of its
-//!    inputs' (so nothing past a writer can refuse or hold back an event).
+//!    node's shape declares, an input's view what its source holds (under
+//!    the input bound; the room for the commands and flushed events a block
+//!    adds is staged with the executor), a delay output and a
+//!    feedback slot all their FIFO can hold at the source's declared rate, a
+//!    merge the sum of its inputs' (so nothing past a writer can refuse or
+//!    hold back an event).
 //! 7. **Params**: each node op's driven params are in strict port order,
 //!    each a param its unit declares, and each port's event source is a
 //!    read of the op (rules 2–4 cover it like an input). A port has one
@@ -54,7 +57,7 @@ use crate::compile::ids::{
     TaskId,
 };
 use crate::compile::plan::{
-    Delta, EMPTY_SLOT, EventSlotCapacity, Op, ParamPortOp, Plan, Span, ZERO_SLOT,
+    Delta, EMPTY_SLOT, EventSlotCapacity, Op, ParamPortOp, Plan, Span, ZERO_SLOT, view_capacity,
 };
 use crate::node::MAX_PORTS;
 use crate::node::io::PortKind;
@@ -118,6 +121,7 @@ fn accesses(plan: &Plan, op: &Op<AudioSlotId, EventSlotId>) -> Vec<Access> {
         Op::Node {
             audio_in,
             audio_out,
+            event_src,
             event_in,
             event_out,
             params,
@@ -127,7 +131,8 @@ fn accesses(plan: &Plan, op: &Op<AudioSlotId, EventSlotId>) -> Vec<Access> {
             .iter()
             .map(|&s| a(s, false))
             .chain(plan.audio_slots(audio_out).iter().map(|&s| a(s, true)))
-            .chain(plan.event_slots(event_in).iter().map(|&s| e(s, false)))
+            .chain(plan.event_slots(event_src).iter().map(|&s| e(s, false)))
+            .chain(plan.event_slots(event_in).iter().map(|&s| e(s, true)))
             .chain(plan.event_slots(event_out).iter().map(|&s| e(s, true)))
             .chain(param_reads(plan, params).map(|s| e(s, false)))
             .collect(),
@@ -625,11 +630,12 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
             )));
         }
     }
-    let mut op_need: Table<OpId, EventSlotCapacity> =
-        Table::filled(plan.program.ops.len(), EventSlotCapacity::NONE);
+    // What each op writes into each slot it writes.
+    let mut written: Table<OpId, Vec<(EventSlotId, EventSlotCapacity)>> =
+        Table::filled(plan.program.ops.len(), Vec::new());
     for (m, op) in plan.program.ops.iter_enumerated() {
         // What op `m` reads from slot `s`, priced by its writer.
-        let read_need = |s: EventSlotId, op_need: &TableSlice<OpId, EventSlotCapacity>| {
+        let read_need = |s: EventSlotId, written: &TableSlice<OpId, Vec<_>>| {
             if s == EMPTY_SLOT {
                 return Ok(EventSlotCapacity::NONE);
             }
@@ -644,27 +650,73 @@ fn verify_tables(plan: &Plan) -> Result<(), VerifyError> {
                 .event_values
                 .iter()
                 .find(|v| v.slot == s && plan.program.value_readers[v.readers.range()].contains(&m))
-                .map(|v| op_need[v.writer])
+                .and_then(|v| {
+                    written[v.writer]
+                        .iter()
+                        .find(|&&(w, _)| w == s)
+                        .map(|&(_, need)| need)
+                })
                 .ok_or_else(|| VerifyError(format!("op {m} reads event slot {s} of no value")))
         };
-        op_need[m] = match *op {
-            Op::Node { unit, .. } => EventSlotCapacity::port(plan.units[unit].shape.event_capacity),
-            Op::EventDelay { delay, .. } => {
-                let d = &plan.program.event_delays[delay];
-                plan.event_tap_fifo(d.key.origin(), d.len, block)
+        written[m] = match *op {
+            Op::Node {
+                unit,
+                event_src,
+                event_in,
+                event_out,
+                ..
+            } => {
+                let shape = &plan.units[unit].shape;
+                // A view is priced from its source: one of each per input,
+                // or a view would go unpriced.
+                if event_src.len() != event_in.len()
+                    || event_in.len() != usize::from(shape.event_in)
+                {
+                    return Err(VerifyError(format!(
+                        "op {m} (unit {unit}) names {} event sources and {} views for {} inputs",
+                        event_src.len(),
+                        event_in.len(),
+                        shape.event_in
+                    )));
+                }
+                let outs = plan
+                    .event_slots(event_out)
+                    .iter()
+                    .map(|&s| (s, EventSlotCapacity::port(shape.event_capacity)));
+                let mut views = Vec::new();
+                for (&src, &view) in plan
+                    .event_slots(event_src)
+                    .iter()
+                    .zip(plan.event_slots(event_in))
+                {
+                    let price = read_need(src, &written)?;
+                    views.push((view, view_capacity(price, shape.event_input_capacity)));
+                }
+                views.into_iter().chain(outs).collect()
             }
-            Op::EventMerge { srcs, bound, .. } => {
+            Op::EventDelay { delay, dst, .. } => {
+                let d = &plan.program.event_delays[delay];
+                vec![(dst, plan.event_tap_fifo(d.key.origin(), d.len, block))]
+            }
+            Op::EventMerge { srcs, dst, bound } => {
                 let mut need = EventSlotCapacity::NONE;
                 for &s in plan.event_slots(srcs) {
-                    need = need.plus(read_need(s, &op_need)?);
+                    need = need.plus(read_need(s, &written)?);
                 }
-                need.bounded(bound.map(|b| b.capacity))
+                vec![(dst, need.bounded(bound.map(|b| b.capacity)))]
             }
-            _ => EventSlotCapacity::NONE,
+            _ => Vec::new(),
         };
     }
     for v in &plan.program.event_values {
-        let need = op_need[v.writer];
+        // Only a node, a delay and a merge write an event value, and each
+        // priced every slot it writes.
+        let Some(&(_, need)) = written[v.writer].iter().find(|&&(s, _)| s == v.slot) else {
+            return Err(VerifyError(format!(
+                "event slot {} has a value op {} never priced",
+                v.slot, v.writer
+            )));
+        };
         if !slot_cap(v.slot).holds(need) {
             return Err(VerifyError(format!(
                 "event slot {} holds {:?}, but op {} writes {need:?} into it",
@@ -1175,14 +1227,8 @@ mod tests {
         bad.task_activation.push(0);
         assert!(verify(&bad).unwrap_err().0.contains("two tasks"));
 
-        // A cross-task edge missing from task_succ (needs two tasks).
-        let mut bad = good.clone();
-        assert!(bad.tasks.len() >= 2, "the pair has independent tasks");
-        assert!(!bad.program.deps.targets.is_empty());
-        bad.task_succ = no_successors(bad.tasks.len());
-        bad.task_activation = Table::filled(bad.tasks.len(), 0);
-        // Only fails if some edge crossed tasks; the pair's generator → output
-        // edges are fused, so add a cross edge by splitting a task.
+        // A cross-task edge missing from task_succ: the pair's generator ->
+        // output edges are fused, so split a task to make one cross.
         let crossing = {
             let mut t = good.clone();
             let span = t.tasks.as_slice()[0];
@@ -1197,6 +1243,8 @@ mod tests {
             }
             t
         };
+        assert!(crossing.tasks.len() >= 2, "the pair splits into two tasks");
+        assert!(!crossing.program.deps.targets.is_empty());
         assert!(verify(&crossing).unwrap_err().0.contains("crosses task"));
 
         // A task's ops out of ascending order (a packed task may hold ops
@@ -1350,6 +1398,101 @@ mod tests {
             let err = verify(&bad).unwrap_err().0;
             assert!(err.contains("writes"), "{short:?}: {err}");
         }
+    }
+
+    /// A source node feeding a sink with one event input: the plan, and the
+    /// sink's node op.
+    fn event_pair() -> (Plan, crate::compile::ids::OpId) {
+        use crate::model::spec::{EventEdge, EventInputPort, EventOutputPort};
+        let mut t = Topology::default();
+        let mut shapes = Shapes::new();
+        for (k, s) in [
+            (1, Shape::EMPTY.events(0, 1)),
+            (2, Shape::EMPTY.events(1, 0)),
+        ] {
+            t.nodes
+                .insert(NodeKey(k), NodeSpec::new("n", s.audio_in(), s.audio_out()));
+            shapes.insert(NodeKey(k), s);
+        }
+        let mut g = GraphSpec::new(t);
+        g.connect_events(
+            EventInputPort::new(NodeKey(2), 0),
+            EventEdge::Direct(EventOutputPort::new(NodeKey(1), 0)),
+        );
+        let prep = crate::node::Prepare::new(
+            tutti_units::SampleRate::SR_48K,
+            tutti_buffers::MaxBlock::of(tutti_units::Samples::new(64)),
+        );
+        let plan = compile(&g.validate().unwrap(), &shapes, &prep, None)
+            .unwrap()
+            .0;
+        verify(&plan).expect("sound");
+        let op = plan
+            .program
+            .ops
+            .iter_enumerated()
+            .find_map(|(id, op)| match *op {
+                Op::Node { unit, .. } if plan.units[unit].key == NodeKey(2) => Some(id),
+                _ => None,
+            })
+            .expect("the sink's op");
+        (plan, op)
+    }
+
+    /// Every event value is priced by its writer: a view the node op wrote
+    /// but recorded no price for (its slot is not one the op writes) is
+    /// refused, not taken to need nothing.
+    #[test]
+    fn the_verifier_rejects_an_event_value_its_writer_did_not_price() {
+        let (good, op) = event_pair();
+        let Op::Node { event_in, .. } = good.program.ops[op] else {
+            unreachable!("a node op")
+        };
+        let view = good.event_slots(event_in)[0];
+        let mut bad = good.clone();
+        let value = bad
+            .program
+            .event_values
+            .iter_mut()
+            .find(|v| v.writer == op && v.slot == view)
+            .expect("the view's value");
+        value.slot = EMPTY_SLOT;
+        let err = verify(&bad).unwrap_err().0;
+        assert!(err.contains("priced"), "{err}");
+    }
+
+    /// A node op names as many event sources as views, and as many as its
+    /// shape has inputs: one short of its views is refused.
+    #[test]
+    fn the_verifier_rejects_fewer_event_sources_than_views() {
+        let (good, op) = event_pair();
+        let mut bad = good.clone();
+        let Op::Node {
+            unit,
+            audio_in,
+            audio_out,
+            event_in,
+            event_out,
+            in_place,
+            params,
+            ..
+        } = bad.program.ops[op]
+        else {
+            unreachable!("a node op")
+        };
+        let none = Span::extend(&mut bad.program.event_list, []);
+        bad.program.ops[op] = Op::Node {
+            unit,
+            audio_in,
+            audio_out,
+            event_src: none,
+            event_in,
+            event_out,
+            in_place,
+            params,
+        };
+        let err = verify(&bad).unwrap_err().0;
+        assert!(err.contains("event sources"), "{err}");
     }
 
     /// Rule 8: a fade must name a key its delta replaces, once, between

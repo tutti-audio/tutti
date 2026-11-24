@@ -163,6 +163,7 @@ struct routing::OutputLevels
 struct routing::OutputMap
 struct routing::OutputStrip
 struct routing::Routing
+struct stream::OpenedOutput
 struct stream::OutputSpec
 struct stream::OutputStream
 struct timer::TimerDriver

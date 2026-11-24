@@ -2,7 +2,7 @@ use tutti_platform::Instant;
 
 use tutti_midi_ci::Muid;
 use tutti_midi_ci::{
-    CI_VERSION, CiMessage, Decoded, Initiator, ProfileChannels, ProfileId, ProfileInitiator,
+    CiMessage, Decoded, Initiator, ProfileChannels, ProfileFormat, ProfileId, ProfileInitiator,
     ProfileTarget,
 };
 use tutti_midi_device::{Capabilities, Endpoint, Supports};
@@ -16,11 +16,10 @@ fn dialect(zones: &[(u8, u16)]) -> Dialect {
         peer.on_message(
             &Decoded::Message(CiMessage::ProfileEnabled {
                 source: Muid::of(2),
-                ci_version: CI_VERSION,
-                target: ProfileTarget::Channel {
+                format: ProfileFormat::current(ProfileTarget::Channel {
                     channel: MidiChannel::of(manager),
                     channels: ProfileChannels::of(channels),
-                },
+                }),
                 profile: ProfileId::MPE,
             }),
             Instant::now(),

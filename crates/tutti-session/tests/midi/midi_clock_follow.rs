@@ -15,7 +15,8 @@ use tutti_midi_device::EndpointId;
 use tutti_midi_hardware::test_support::{FakeBackend, FakeCounters, endpoint};
 use tutti_midi_runtime::{BeatClockFollower, MidiClockDecoder};
 use tutti_session::{
-    ClockKind, ClockOffset, FollowClock, FollowTempo, MidiError, MidiEvent, Session, SessionEvent,
+    ClockKind, ClockOffset, FollowClock, FollowKind, FollowTempo, MidiError, MidiEvent, Session,
+    SessionEvent, UnfollowCause,
 };
 use tutti_timeline::MotionCommand;
 use tutti_ump::{Message, MidiGroup, Sysex7Packets, System, U7, U14, Ump};
@@ -322,11 +323,13 @@ fn a_beat_clock_follower_is_the_tempo_source_and_mtc_is_not() {
         Err(MidiError::NotFollowingClock)
     ));
     let events = s.update();
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, SessionEvent::Midi(MidiEvent::ClockUnfollowed)))
-    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        SessionEvent::Midi(MidiEvent::Unfollowed {
+            follower: FollowKind::Clock(_),
+            cause: UnfollowCause::Requested
+        })
+    )));
     assert!(crate::tempo::set_tempo(&mut s, Bpm::of(100.0)).is_ok());
 }
 

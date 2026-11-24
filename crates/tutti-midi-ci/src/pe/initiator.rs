@@ -214,19 +214,6 @@ pub enum PeCall {
     Unsubscribe(SubscribeId),
 }
 
-/// Which [`PeCall`] a request was.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PeKind {
-    /// A Get.
-    Get,
-    /// A Set.
-    Set,
-    /// A Start Subscription.
-    Subscribe,
-    /// An End Subscription.
-    Unsubscribe,
-}
-
 /// A request that cannot be made.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -398,8 +385,6 @@ pub enum PeAction {
         /// Its Request ID, which [`start`](PeInitiator::start) returned and which
         /// may be given to another request now.
         request_id: PeRequestId,
-        /// Which call it was.
-        kind: PeKind,
         /// How it ended.
         outcome: PeOutcome,
     },
@@ -429,20 +414,11 @@ enum Work {
 }
 
 impl Work {
-    fn kind(&self) -> PeKind {
-        match self {
-            Self::Get { .. } => PeKind::Get,
-            Self::Set { .. } => PeKind::Set,
-            Self::Subscribe { .. } => PeKind::Subscribe,
-            Self::Unsubscribe => PeKind::Unsubscribe,
-        }
-    }
-
     fn transaction(&self) -> PeTransaction {
-        match self.kind() {
-            PeKind::Get => PeTransaction::Get,
-            PeKind::Set => PeTransaction::Set,
-            PeKind::Subscribe | PeKind::Unsubscribe => PeTransaction::Subscription,
+        match self {
+            Self::Get { .. } => PeTransaction::Get,
+            Self::Set { .. } => PeTransaction::Set,
+            Self::Subscribe { .. } | Self::Unsubscribe => PeTransaction::Subscription,
         }
     }
 
@@ -478,6 +454,9 @@ pub struct PeInitiator {
     ids: RequestIds,
     pending: Vec<InFlight>,
     reassembler: PeReassembler,
+    /// The Subscription Ids the Responder may address, which decide how a
+    /// Subscription message is answered; the typed target and the data of each are in
+    /// [`ResourceInitiator`](crate::ResourceInitiator)'s table.
     subscriptions: Vec<(SubscribeId, PeSubscribed)>,
 }
 
@@ -569,7 +548,7 @@ impl PeInitiator {
             .ok_or(PeError::TooManyRequests {
                 limit: capabilities.requests,
             })?;
-        let (work, chunks) = match self.build(id, call) {
+        let (work, to_send) = match self.build(id, call) {
             Ok(built) => built,
             Err(error) => {
                 self.ids.release(id);
@@ -583,27 +562,10 @@ impl PeInitiator {
             transaction: work.transaction(),
             reply: false,
         };
-        let first_only = matches!(
-            &work,
-            Work::Set {
-                flow: PeFlowControl::On,
-                ..
-            }
-        );
-        let actions = chunks
-            .iter()
-            .take(if first_only { 1 } else { chunks.len() })
-            .map(|chunk| self.send_chunk(kind, chunk.clone()))
+        let actions = to_send
+            .into_iter()
+            .map(|chunk| self.send_chunk(kind, chunk))
             .collect();
-        let work = match work {
-            Work::Set { flow, resends, .. } => Work::Set {
-                sent: if first_only { 1 } else { chunks.len() },
-                chunks,
-                flow,
-                resends,
-            },
-            other => other,
-        };
         self.pending.push(InFlight {
             id,
             work,
@@ -612,48 +574,56 @@ impl PeInitiator {
         Ok((id, actions))
     }
 
-    /// The work of a call and the chunks of its inquiry.
+    /// The work of a call and the chunks of its inquiry to send now: all of them,
+    /// or the first of a Set under Flow Control, whose work holds the rest.
     fn build(&self, id: PeRequestId, call: PeCall) -> Result<(Work, Vec<PeChunk>), PeError> {
-        let max = self.settings.peer_max_sysex;
-        let (header, body, work) = match call {
+        let split = |header: PeHeader, body: &[u8]| {
+            split_message(id, &header, body, self.settings.peer_max_sysex)
+        };
+        Ok(match call {
             PeCall::Get(get) => (
-                PeHeader::Request(get.request()),
-                Vec::new(),
                 Work::Get {
                     flow: get.flow_control,
                     limit: get.reply_limit,
                 },
+                split(PeHeader::Request(get.request()), &[])?,
             ),
-            PeCall::Set(set) => (
-                PeHeader::Request(set.request()),
-                encode_body(set.encoding, &set.body)?,
-                Work::Set {
-                    chunks: Vec::new(),
-                    sent: 0,
+            PeCall::Set(set) => {
+                let body = encode_body(set.encoding, &set.body)?;
+                let chunks = split(PeHeader::Request(set.request()), &body)?;
+                let sent = match set.flow_control {
+                    PeFlowControl::On => 1,
+                    PeFlowControl::Off => chunks.len(),
+                };
+                let first = chunks[..sent].to_vec();
+                let work = Work::Set {
+                    chunks,
+                    sent,
                     flow: set.flow_control,
                     resends: 0,
-                },
-            ),
+                };
+                (work, first)
+            }
             PeCall::Subscribe(get) => (
-                PeHeader::Subscription(PeSubscription::Start(get.request())),
-                Vec::new(),
                 Work::Subscribe {
                     resource: get.resource.clone(),
                     res_id: get.res_id.clone(),
                     flow: get.flow_control,
                 },
+                split(
+                    PeHeader::Subscription(PeSubscription::Start(get.request())),
+                    &[],
+                )?,
             ),
-            PeCall::Unsubscribe(subscribe_id) => (
-                PeHeader::Subscription(PeSubscription::End {
+            PeCall::Unsubscribe(subscribe_id) => {
+                let end = PeSubscription::End {
                     subscribe_id,
                     ended_by: Some(PeEndedBy::Initiator),
                     extra: Default::default(),
-                }),
-                Vec::new(),
-                Work::Unsubscribe,
-            ),
-        };
-        Ok((work, split_message(id, &header, &body, max)?))
+                };
+                (Work::Unsubscribe, split(PeHeader::Subscription(end), &[])?)
+            }
+        })
     }
 
     /// When the Initiator next needs [`on_timeout`](Self::on_timeout), or `None`
@@ -1178,7 +1148,6 @@ impl PeInitiator {
             .terminate(self.link.peer, pending.work.reply_kind(), pending.id);
         actions.push(PeAction::Finished {
             request_id: pending.id,
-            kind: pending.work.kind(),
             outcome,
         });
     }

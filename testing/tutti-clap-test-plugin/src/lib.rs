@@ -1973,6 +1973,21 @@ pub unsafe extern "C" fn tutti_test_plugin_set_port0_dialects(raw: u32) {
     PORT0_DIALECTS_OVERRIDE.store(raw, Ordering::SeqCst);
 }
 
+/// Whether `note_ports.get` answers `false` for input note port 0, which the
+/// plugin still counts.
+static PORT0_INFO_REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// Makes input note port 0 counted but undescribed: `note_ports.get` answers
+/// `false` for it while `raw` is non-zero. Read at the host's next scan of its
+/// note ports. `0` clears it.
+///
+/// # Safety
+/// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tutti_test_plugin_set_port0_info_refused(raw: u32) {
+    PORT0_INFO_REFUSED.store(raw != 0, Ordering::SeqCst);
+}
+
 /// How many output note ports the plugin declares: one, as a plugin that
 /// emits MIDI does, or none.
 static NOTE_OUT_PORTS: AtomicU32 = AtomicU32::new(1);
@@ -1989,9 +2004,22 @@ pub unsafe extern "C" fn tutti_test_plugin_set_note_out_ports(count: u32) {
     NOTE_OUT_PORTS.store(count.min(1), Ordering::SeqCst);
 }
 
+/// How many input note ports the plugin declares: its two, or none.
+static NOTE_IN_PORTS: AtomicU32 = AtomicU32::new(2);
+
+/// Sets how many input note ports the plugin declares (`0` or `2`). Read when
+/// the host scans its note ports.
+///
+/// # Safety
+/// Safe to call; `extern "C"` only so the test can reach it across `dlopen`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tutti_test_plugin_set_note_in_ports(count: u32) {
+    NOTE_IN_PORTS.store(count.min(2), Ordering::SeqCst);
+}
+
 unsafe extern "C" fn note_ports_count(_plugin: *const clap_plugin, is_input: bool) -> u32 {
     if is_input {
-        2
+        NOTE_IN_PORTS.load(Ordering::SeqCst)
     } else {
         NOTE_OUT_PORTS.load(Ordering::SeqCst)
     }
@@ -2009,7 +2037,7 @@ unsafe extern "C" fn note_ports_get(
     // SAFETY: a CLAP plugin entry point: the host passes the plugin pointer it was handed and
     // arguments valid per the CLAP ABI.
     let count = unsafe { note_ports_count(_plugin, is_input) };
-    if index >= count {
+    if index >= count || (is_input && index == 0 && PORT0_INFO_REFUSED.load(Ordering::SeqCst)) {
         return false;
     }
     let info = unsafe { &mut *info };

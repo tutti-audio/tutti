@@ -18,7 +18,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed};
 use atomic_float::AtomicF64;
 use tutti_buffers::Float;
 use tutti_dsp::{GAIN_RAMP, Ramp};
-use tutti_graph::{DeclaredUnit, Io, MAX_PARAM_PORTS, ParamSetBuilder};
+use tutti_graph::{DeclaredUnit, ErasedSetting, Io, MAX_PARAM_PORTS, ParamSetBuilder};
 use tutti_units::{SampleRate, UnitAddr};
 
 use crate::kernel::MAX_SIGNALS;
@@ -50,12 +50,6 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// [`flatten`](Self::flatten).
     fn assemble(&self, v: &[f64]) -> Self::Controls;
 
-    /// The controls that ring longest, given each one's lowest and highest value
-    /// in the block. Only a design that parks asks; the default is the highest.
-    fn longest(&self, _lowest: &Self::Controls, highest: &Self::Controls) -> Self::Controls {
-        *highest
-    }
-
     /// How the reader takes control `k` (`k < addrs().len()`): whether it ramps, lands
     /// whole or is read per frame, and which values it accepts. [`Control::RAMP`] by
     /// default; `control_set!` writes it from each row's flags, so a control is
@@ -68,6 +62,14 @@ pub trait ControlSet: Clone + core::fmt::Debug + Send + 'static {
     /// designed from, to design again: the dead-band. Exact inequality by default.
     fn moved(&self, applied: &Self::Controls, target: &Self::Controls) -> bool {
         applied != target
+    }
+
+    /// The cells of the settings the set holds, each under its kind: what a session's key
+    /// sets and reads. Allocates; called on the control side when the node's parts are built.
+    /// None by default; a set that holds one also implements
+    /// [`HasSetting`](tutti_graph::HasSetting) for its kind.
+    fn settings(&self) -> Vec<ErasedSetting> {
+        Vec::new()
     }
 
     /// Stops sharing what the set shares besides the cells (a setting's word), keeping its
@@ -132,6 +134,13 @@ pub struct Control {
     pub read: ControlRead,
     /// Which values it accepts.
     pub valid: ControlValid,
+    /// Whether the kernel's [`tail_of`](crate::Kernel::tail_of) reads it: whether this control
+    /// alone can change the ring-out. `false` is a promise that the tail never reads it, which a
+    /// driven port of it then does not widen to the ceiling. A control counts as driven for
+    /// every block its port has a source, a flat signal and automation at rest included, so a
+    /// node with an automated ring control reports its ceiling from the automation's first
+    /// event on.
+    pub rings: bool,
 }
 
 impl Control {
@@ -139,6 +148,7 @@ impl Control {
     pub const RAMP: Self = Self {
         read: ControlRead::Ramp,
         valid: ControlValid::Finite,
+        rings: true,
     };
 
     /// The row flag `whole`: a moved cell lands whole.
@@ -155,6 +165,17 @@ impl Control {
     pub(crate) const fn fast(self) -> Self {
         Self {
             read: ControlRead::Fast,
+            ..self
+        }
+    }
+
+    /// The row flag `no_ring`: the kernel's tail never reads this control, so driving it
+    /// leaves the ring-out as it is. A control without the flag is read by the tail: forgetting
+    /// the flag errs long.
+    #[must_use]
+    pub(crate) const fn no_ring(self) -> Self {
+        Self {
+            rings: false,
             ..self
         }
     }
@@ -234,7 +255,8 @@ pub trait HasControls<const P: u16>: HasControl<P> {}
 /// hold of a live value that has no caller to refuse it to. A row may end in flags, `{ .. }`, that
 /// say how the reader takes it ([`Control`]): `whole` (lands whole, no ramp), `fast`
 /// (read per frame into a [`ControlSignals`](crate::ControlSignals) control signal, in row order; more fast rows
-/// than [`MAX_SIGNALS`] do not compile) and `not_nan` (accepts `+-inf`). A flag that is
+/// than [`MAX_SIGNALS`] do not compile), `not_nan` (accepts `+-inf`) and `no_ring` (the
+/// kernel's tail never reads it: see [`Control::rings`]). A flag that is
 /// not one of these does not compile.
 macro_rules! control_set {
     (
@@ -478,27 +500,10 @@ impl<S: ControlSet> Params<S> {
         self.primed = true;
     }
 
-    /// Each control's lowest and highest value in the block (the cell's where no
-    /// control signal drives it), or `None` when no control signal does.
-    fn extremes<G: Float>(&self, io: &Io<'_, G>) -> Option<[[f64; MAX_CONTROLS]; 2]> {
-        let mut out = [[0.0; MAX_CONTROLS]; 2];
-        let mut driven = false;
-        for (k, cell) in self.cells.iter().enumerate() {
-            let signal = io.param(k).frames();
-            driven |= signal.is_some();
-            let base = cell.load(Acquire);
-            let fold = |pick: fn(f64, f64) -> f64| {
-                signal
-                    .into_iter()
-                    .flatten()
-                    .map(|&v| -> f64 { v.into() })
-                    .filter(|v| v.is_finite())
-                    .fold(base, pick)
-            };
-            out[0][k] = fold(f64::min);
-            out[1][k] = fold(f64::max);
-        }
-        driven.then_some(out)
+    /// Whether a control signal drives a control the tail reads ([`Control::rings`]) in the
+    /// block, a fast one included.
+    pub(crate) fn ring_driven<G: Float>(&self, io: &Io<'_, G>) -> bool {
+        (0..self.cells.len()).any(|k| self.controls[k].rings && io.param(k).frames().is_some())
     }
 
     /// The addresses of the cells, in port order.
@@ -588,17 +593,6 @@ impl<S: ControlSet> Params<S> {
             *signal = io.param(k).frames();
         }
         signals
-    }
-
-    /// The controls that ring longest among the values a modulated port takes anywhere
-    /// in the block, or `None` when nothing is modulated.
-    pub(crate) fn longest<G: Float>(&self, io: &Io<'_, G>) -> Option<S::Controls> {
-        let [lowest, highest] = self.extremes(io)?;
-        let n = self.cells.len();
-        Some(self.set.longest(
-            &self.set.assemble(&lowest[..n]),
-            &self.set.assemble(&highest[..n]),
-        ))
     }
 
     /// Stops sharing the cells, keeping their values: a fork's own.

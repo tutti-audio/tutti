@@ -74,6 +74,15 @@
 //! event-free node of any width builds no event table. Per slot, what is
 //! known about the block (silent, constant) is one flags byte.
 //!
+//! **An event input is a view.** What a node is handed at an event input is
+//! assembled once per block, by its own op, into a slot of the plan (the
+//! input's view, [`Op::Node`](crate::Op::Node)'s `event_in`): the input's
+//! source slot, the events flushed to the node, the commands scheduled to it,
+//! cut to its declared input bound — or, for a bypassed node, only the
+//! closes it owes. The node, the held-key tables, the silence skip and the
+//! taps of the input read that slot and nothing else, so what a tap carries
+//! is what the node was handed.
+//!
 //! **It does not split blocks at a loop wrap.** The whole-block promise is
 //! what keeps an out-of-process plugin's declared latency constant, so a
 //! transport that loops inside a block is reported through
@@ -135,8 +144,9 @@
 //! executor pulls them into a preallocated pending list and resolves each
 //! against the block's [`Env`](crate::Env) — so a beat is resolved against the transport
 //! of the block it falls in. What lands this block is merged into its sink's
-//! event input as one more source after the port's own events, in a buffer
-//! sized when applying; a sink with a landing command is never skipped.
+//! event input as one more source after the port's own events, into the
+//! input's view (see [`Op::Node`](crate::Op::Node)), which holds them since it
+//! is sized when applying; a sink with a landing command is never skipped.
 //!
 //! # Flushed events
 //!
@@ -195,8 +205,8 @@ use tutti_units::PlayReading;
 use tutti_units::{Blocks, Frame, Samples, Tail};
 
 use crate::NodeKey;
-use crate::compile::ids::PlanUnitId;
 use crate::compile::plan::Plan;
+use crate::compile::tail::{GraphTail, Owed, TailGraph, graph_tail_of};
 use crate::edges::rtlog::Logs;
 use crate::event::types::Event;
 use crate::exec::command::CommandRx;
@@ -208,6 +218,7 @@ use crate::exec::slots::{AudioSlots, EventSlots, SlotFlags};
 use crate::node::Prepare;
 use crate::node::play::PlayState;
 use crate::{EdgeFade, EdgeId};
+use std::collections::HashMap;
 
 /// Puts `item` into `to`, which has room for it by construction (the editor
 /// sized `to` with the commit that is applying). A refusal is a miscount on
@@ -518,17 +529,6 @@ impl<F: Float> std::fmt::Debug for Executor<F> {
     }
 }
 
-/// The per-plan state for `plan` on a pool of `participants` (0: no pool).
-fn par_for(
-    plan: &Plan,
-    participants: usize,
-    store_len: usize,
-    inject_units: impl Iterator<Item = PlanUnitId>,
-    overlay: usize,
-) -> Par {
-    Par::new(plan, participants, store_len, inject_units, overlay)
-}
-
 /// Whether `quiet` frames of quiet input cover `park_after`, a node's
 /// latency then its tail (`NodeRec::park_after`).
 fn tail_elapsed(park_after: Tail, quiet: Samples) -> bool {
@@ -619,12 +619,11 @@ impl<F: Float> Executor<F> {
             }
         }
         self.state.par = self.plan.as_deref().map(|plan| {
-            par_for(
+            Par::new(
                 plan,
                 participants.unwrap_or(0),
                 self.store.len(),
                 self.state.inject.iter().map(|i| i.unit),
-                self.state.overlay,
             )
         });
         old
@@ -646,11 +645,6 @@ impl<F: Float> Executor<F> {
     /// Control thread; [`RtLogReaders`](crate::RtLogReaders) is the one caller.
     pub(crate) fn take_log_readers(&mut self) -> Vec<crate::edges::rtlog::RtLogReader> {
         self.logs.take_readers()
-    }
-
-    /// The pool blocks run on, if any.
-    pub fn pool(&self) -> Option<&Arc<dyn Pool>> {
-        self.pool.as_ref()
     }
 
     /// Whether the running plan's blocks are spread across the pool: a pool
@@ -705,6 +699,39 @@ impl<F: Float> Executor<F> {
             width: plan.rendered_outputs() - bank.base,
             done: Samples::new(run.done),
             fade: bank.fade,
+        })
+    }
+
+    /// The graph's tail over what its units owe now: [`graph_tail`]'s fold
+    /// (a cascade adds, a merge takes the largest) with each unit's two
+    /// figures. A node owes what is left of its last
+    /// [`report_tail`](crate::Io::report_tail) (else its declared ceiling) when
+    /// nothing upstream still owes, and nothing when the executor skips it as
+    /// at rest; after an upstream that still owes it owes its declared
+    /// ceiling, since a report is about the input already heard. A node the
+    /// plan does not run keeps its declared figure.
+    ///
+    /// `topology` is the graph the running plan was compiled from (the
+    /// editor's spec). Call it between blocks, on the thread that renders:
+    /// an offline render owns its executor, and a live one has no such
+    /// moment.
+    ///
+    /// [`graph_tail`]: crate::graph_tail
+    pub fn reported_tail<G: TailGraph<Node = NodeKey>>(&self, topology: &G) -> GraphTail {
+        let owed: HashMap<NodeKey, Owed> = self.plan.as_ref().map_or_else(HashMap::new, |plan| {
+            plan.nodes
+                .recs
+                .iter()
+                .filter_map(|rec| {
+                    let u = self.store[rec.store.0 as usize].as_ref()?;
+                    Some((plan.units[rec.unit].key, u.owed(rec)))
+                })
+                .collect()
+        });
+        graph_tail_of(topology, self.prepare.sample_rate(), |node| {
+            owed.get(&node)
+                .copied()
+                .unwrap_or_else(|| Owed::declared(topology.tail(node)))
         })
     }
 

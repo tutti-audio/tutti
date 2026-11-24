@@ -38,7 +38,10 @@ pub use fields::{
     Priority, RoleName, SignificantBits, StepCount, TypeHint, UnlistedText,
 };
 pub use info::{PeDeviceInfo, PeJsonSchema};
-pub use kind::{CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults};
+pub use kind::{
+    CanSet, CustomResource, PeResource, ResIdUse, ResourceDefaults, StandardResource,
+    UnmodelledResource, UntypedResource,
+};
 pub use link::{
     ColumnSource, ConfirmIcon, ConfirmType, Confirmation, LinkRole, PeColumn, PeLink,
     SelectorAction, SimpleAction,
@@ -46,7 +49,7 @@ pub use link::{
 pub use programs::{PeModeEntry, PeModeList, PeProgramEntry, PeProgramList};
 pub use request::{ActionError, RequestRefused, ResourceGet, ResourceSet, ResourceTarget, SetBody};
 pub use server::{
-    ChangeKind, PublishError, ResourceResponder, ResponderAction, ResponderEvent, ResponderSettings,
+    PublishError, ResourceResponder, ResponderAction, ResponderEvent, ResponderSettings,
 };
 pub use simple::{
     PeBasicChannelRx, PeBasicChannelTx, PeChannelMode, PeCurrentMode, PeExternalSync, PeLocalOn,

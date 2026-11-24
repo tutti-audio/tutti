@@ -11,12 +11,13 @@ use tutti_platform::Instant;
 
 use tutti_midi_ci::{BodyLimit, BufferLimit, PeCiMessage, PeMessageKind};
 use tutti_midi_ci::{
-    CallError, CanSet, CiCategories, CiHeader, CiMessage, CustomResource, Decoded, DeviceBody,
-    JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue, PeCapabilities,
-    PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage, PeReassemblyLimits,
-    PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText, ReplyData, RequestRefused,
-    ResourceEntry, ResourceId, ResourceResponder, ResourceStore, ResourceTarget, ResponderAction,
-    ResponderSettings, SimultaneousRequests, StateId, StreamLimit,
+    CallError, CanSet, CiCategories, CiDeviceId, CiHeader, CiMessage, CustomResource, Decoded,
+    DeviceBody, JsonPointer, MaxSysexSize, MediaType, PE_TIMEOUT, PartialUpdate, PartialValue,
+    PeCapabilities, PeData, PeEncoding, PeExternalSync, PeHeader, PeJson, PeLocalOn, PePage,
+    PeReassemblyLimits, PeResource, PeState, PeStateEntry, PeStatus, PeSubscription, PeText,
+    ReplyData, RequestRefused, ResourceEntry, ResourceId, ResourceResponder, ResourceStore,
+    ResourceTarget, ResponderAction, ResponderSettings, SimultaneousRequests, StandardResource,
+    StateId, StreamLimit,
 };
 use tutti_midi_device::{EndpointId, PortDirection};
 use tutti_midi_hardware::test_support::FakeCounters;
@@ -134,8 +135,8 @@ impl PePeer {
                 continue;
             };
             let decoded = CiMessage::decode(self.assembler.message(done).payload());
-            if let Decoded::Message(CiMessage::Discovery { header, .. }) = &decoded {
-                self.responder.accept(header.source, MaxSysexSize::of(512));
+            if let Decoded::Message(CiMessage::Discovery { source, .. }) = &decoded {
+                self.responder.accept(*source, MaxSysexSize::of(512));
                 let data = ReplyData::new(DeviceBody::new(
                     DeviceIdentity {
                         manufacturer: ManufacturerId::of(0x41),
@@ -148,8 +149,9 @@ impl PePeer {
                 ));
                 answers.extend(
                     CiMessage::DiscoveryReply {
-                        header: CiHeader::new(self.muid),
-                        to: header.source,
+                        device_id: CiDeviceId::FunctionBlock,
+                        source: self.muid,
+                        to: *source,
                         data,
                     }
                     .packets(MidiGroup::FIRST)
@@ -212,9 +214,13 @@ impl PePeer {
 
 fn store() -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::builder(PeResource::LocalOn).build().unwrap());
     store.declare(
-        ResourceEntry::builder(PeResource::DeviceInfo)
+        ResourceEntry::standard(StandardResource::LocalOn)
+            .build()
+            .unwrap(),
+    );
+    store.declare(
+        ResourceEntry::standard(StandardResource::DeviceInfo)
             .build()
             .unwrap(),
     );
@@ -299,14 +305,15 @@ impl Wire {
 
     /// The Resource the peer's ResourceList names `resource`, as the port's info
     /// reads now.
-    fn listed(&self, resource: &PeResource) -> ListedResource {
+    fn listed(&self, resource: impl Into<PeResource>) -> ListedResource {
+        let resource = resource.into();
         let info = self.port().info();
         let [listed] = info.peers() else {
             panic!("one peer: {:?}", info.peers());
         };
         let peer = listed.resources().expect("the peer lists Resources");
         peer.listed()
-            .find(|listed| listed.resource() == resource)
+            .find(|listed| *listed.resource() == resource)
             .unwrap_or_else(|| panic!("{resource:?} is listed"))
     }
 }
@@ -326,7 +333,10 @@ fn the_info_lists_the_resources_of_the_peers_resource_list() {
     };
     let peer = listed.resources().expect("the peer lists Resources");
     let listed: Vec<_> = peer.listed().map(|l| l.resource().clone()).collect();
-    assert_eq!(listed, [PeResource::LocalOn, PeResource::DeviceInfo]);
+    assert_eq!(
+        listed,
+        [StandardResource::LocalOn, StandardResource::DeviceInfo]
+    );
 }
 
 /// M2-103 section 8: a Get resolves the Property Data the peer replied with, and the
@@ -334,7 +344,7 @@ fn the_info_lists_the_resources_of_the_peers_resource_list() {
 #[test]
 fn a_fetch_lands_the_peers_property_data() {
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(60);
     assert_eq!(wire.result(&mut request), Some(Ok(on(false))));
     assert_eq!(wire.peer.asked, [Asked::Get("LocalOn".to_owned())]);
@@ -345,14 +355,14 @@ fn a_fetch_lands_the_peers_property_data() {
 #[test]
 fn a_write_lands_status_200_and_the_peer_holds_the_data() {
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut request = wire.listed(StandardResource::LocalOn).write(on(true));
     wire.run(60);
     let Some(Ok(status)) = wire.result(&mut request) else {
         panic!("a status");
     };
     assert_eq!(status.code(), 200);
     assert_eq!(wire.peer.asked, [Asked::Set("LocalOn".to_owned())]);
-    let target = ResourceTarget::try_from(PeResource::LocalOn).unwrap();
+    let target = ResourceTarget::try_from(StandardResource::LocalOn).unwrap();
     assert_eq!(wire.peer.store.get(&target), Some(&on(true)));
 }
 
@@ -361,7 +371,7 @@ fn a_write_lands_status_200_and_the_peer_holds_the_data() {
 #[test]
 fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut request = wire.listed(StandardResource::DeviceInfo).fetch();
     wire.run(60);
     let Some(Err(PeerError::Refused(PeFailure::Status(status, header)))) =
         wire.result(&mut request)
@@ -383,7 +393,7 @@ fn a_fetch_the_peer_answers_404_is_a_status_not_a_nak() {
 fn a_fetch_nothing_answers_resolves_timed_out() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(5);
     wire.step(PE_TIMEOUT.as_millis() as u64);
     let ended = (0..2000).find_map(|_| {
@@ -401,7 +411,7 @@ fn a_fetch_nothing_answers_resolves_timed_out() {
 fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(5);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
@@ -425,7 +435,7 @@ fn a_fetch_whose_peer_leaves_before_it_answers_is_disconnected() {
 #[test]
 fn an_identical_repeated_fetch_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut first = res.fetch();
     let mut second = res.fetch();
     wire.run(60);
@@ -440,7 +450,7 @@ fn an_identical_repeated_fetch_shares_the_answer_and_is_sent_once() {
 #[test]
 fn a_write_behind_a_fetch_is_sent_after_it_and_a_later_fetch_reads_it() {
     let mut wire = Wire::new(store());
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut get = res.fetch();
     let mut set = res.write(on(true));
     let mut again = res.fetch();
@@ -463,7 +473,7 @@ fn a_write_behind_a_fetch_is_sent_after_it_and_a_later_fetch_reads_it() {
 #[test]
 fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::DeviceInfo).write(on(true));
+    let mut request = wire.listed(StandardResource::DeviceInfo).write(on(true));
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&mut request)
     else {
@@ -482,7 +492,7 @@ fn a_write_of_another_resources_data_ends_at_the_call_and_sends_nothing() {
 #[test]
 fn a_request_on_a_lost_port_fails_at_the_call() {
     let mut wire = Wire::new(store());
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(2);
     let mut get = res.fetch();
@@ -497,7 +507,7 @@ fn a_request_on_a_lost_port_fails_at_the_call() {
 fn a_request_pending_when_the_port_is_released_ends_released() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut pending = res.fetch();
     wire.run(5);
     drop(wire.port.take());
@@ -517,7 +527,7 @@ fn a_request_pending_when_the_port_is_released_ends_released() {
 fn a_session_dropped_with_a_call_pending_resolves_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut pending = res.fetch();
     wire.run(5);
     let mut queued = res.write(on(true));
@@ -533,9 +543,13 @@ fn a_session_dropped_with_a_call_pending_resolves_disconnected() {
 #[test]
 fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
     let mut states = ResourceStore::new();
-    states.declare(ResourceEntry::builder(PeResource::State).build().unwrap());
+    states.declare(
+        ResourceEntry::standard(StandardResource::State)
+            .build()
+            .unwrap(),
+    );
     let mut wire = Wire::new(states);
-    let mut request = wire.listed(&PeResource::State).fetch();
+    let mut request = wire.listed(StandardResource::State).fetch();
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&mut request)
     else {
@@ -553,7 +567,7 @@ fn a_fetch_of_a_resource_that_needs_a_res_id_is_not_sent() {
 fn synced() -> ResourceStore {
     let mut store = store();
     store.declare(
-        ResourceEntry::builder(PeResource::ExternalSync)
+        ResourceEntry::standard(StandardResource::ExternalSync)
             .build()
             .unwrap(),
     );
@@ -570,9 +584,9 @@ fn synced() -> ResourceStore {
 #[test]
 fn calls_past_the_peers_simultaneous_requests_wait_for_room_and_all_land() {
     let mut wire = Wire::taking(synced(), 1);
-    let mut first = wire.listed(&PeResource::LocalOn).fetch();
-    let mut second = wire.listed(&PeResource::ExternalSync).fetch();
-    let mut third = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut first = wire.listed(StandardResource::LocalOn).fetch();
+    let mut second = wire.listed(StandardResource::ExternalSync).fetch();
+    let mut third = wire.listed(StandardResource::LocalOn).write(on(true));
     wire.run(200);
     assert_eq!(
         wire.peer.asked,
@@ -602,9 +616,9 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
             .as_slice(),
     )
     .expect("json");
-    let info = PeData::decode(&PeResource::DeviceInfo, &table_6).expect("DeviceInfo");
+    let info = PeData::decode(StandardResource::DeviceInfo, &table_6).expect("DeviceInfo");
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::DeviceInfo).write(info);
+    let mut request = wire.listed(StandardResource::DeviceInfo).write(info);
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&mut request)
@@ -622,7 +636,7 @@ fn a_write_of_a_read_only_resource_is_not_sent_with_the_rule_it_broke() {
 #[test]
 fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
     let mut wire = Wire::new(store());
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut first = res.write(on(true));
     let mut second = res.write(on(true));
     wire.run(60);
@@ -637,7 +651,7 @@ fn an_identical_repeated_write_shares_the_answer_and_is_sent_once() {
 #[test]
 fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
     let mut wire = Wire::new(store());
-    let res = wire.listed(&PeResource::LocalOn);
+    let res = wire.listed(StandardResource::LocalOn);
     let mut set = res.write(on(true));
     let mut first = res.fetch();
     let mut second = res.fetch();
@@ -660,7 +674,7 @@ fn a_fetch_joins_an_identical_fetch_still_waiting_behind_a_write() {
 fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut pending = wire.listed(&PeResource::LocalOn).fetch();
+    let mut pending = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(5);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
@@ -671,7 +685,7 @@ fn a_call_pending_across_a_replug_ends_and_the_returned_port_takes_new_ones() {
     plug(&wire.fake, RAW, "Wire", PortDirection::Duplex);
     wire.peer.reply = Reply::Serve;
     wire.run(200);
-    let mut again = wire.listed(&PeResource::LocalOn).fetch();
+    let mut again = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(60);
     assert_eq!(wire.result(&mut again), Some(Ok(on(false))));
 }
@@ -711,7 +725,7 @@ impl Wire {
 #[test]
 fn a_fetch_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(store());
-    let fetch = wire.listed(&PeResource::LocalOn).fetch();
+    let fetch = wire.listed(StandardResource::LocalOn).fetch();
     assert_eq!(wire.awaited(fetch), Ok(on(false)));
 }
 
@@ -719,7 +733,7 @@ fn a_fetch_resolves_when_the_device_answers_with_no_update() {
 #[test]
 fn a_write_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(store());
-    let write = wire.listed(&PeResource::LocalOn).write(on(true));
+    let write = wire.listed(StandardResource::LocalOn).write(on(true));
     assert_eq!(wire.awaited(write).map(|status| status.code()), Ok(200));
 }
 
@@ -727,7 +741,7 @@ fn a_write_resolves_when_the_device_answers_with_no_update() {
 #[test]
 fn a_subscribe_resolves_when_the_device_answers_with_no_update() {
     let mut wire = Wire::new(subscribable());
-    let subscribe = wire.listed(&PeResource::LocalOn).subscribe();
+    let subscribe = wire.listed(StandardResource::LocalOn).subscribe();
     let lease = wire.awaited(subscribe).expect("a lease");
     assert_eq!(lease.presence(), Presence::Live);
 }
@@ -739,12 +753,12 @@ fn a_subscribe_resolves_when_the_device_answers_with_no_update() {
 fn a_subscribe_whose_device_goes_away_resolves_to_disconnected() {
     let mut wire = Wire::taking(subscribable(), 1);
     wire.peer.reply = Reply::Silent;
-    let _get = wire.listed(&PeResource::DeviceInfo).fetch();
+    let _get = wire.listed(StandardResource::DeviceInfo).fetch();
     wire.run(10);
-    let mut waiting = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut waiting = wire.listed(StandardResource::LocalOn).subscribe();
     wire.run(10);
     assert!(wire.result(&mut waiting).is_none(), "waits for room");
-    let mut queued = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut queued = wire.listed(StandardResource::LocalOn).subscribe();
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
     assert!(matches!(
@@ -763,7 +777,7 @@ fn a_subscribe_whose_device_goes_away_resolves_to_disconnected() {
 fn a_write_whose_device_goes_away_resolves_to_disconnected() {
     let mut wire = Wire::new(store());
     wire.peer.reply = Reply::Silent;
-    let mut write = wire.listed(&PeResource::LocalOn).write(on(true));
+    let mut write = wire.listed(StandardResource::LocalOn).write(on(true));
     wire.run(5);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
@@ -779,20 +793,20 @@ fn device_info(model: &str) -> PeData {
         "versionId":[0,0,1,0]}}"#
     );
     let json = PeJson::try_from(json.as_bytes()).expect("json");
-    PeData::decode(&PeResource::DeviceInfo, &json).expect("DeviceInfo")
+    PeData::decode(StandardResource::DeviceInfo, &json).expect("DeviceInfo")
 }
 
 /// A store whose LocalOn (on) and DeviceInfo ("Workbench") can be subscribed to.
 fn subscribable() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::LocalOn)
+        ResourceEntry::standard(StandardResource::LocalOn)
             .can_subscribe(true)
             .build()
             .unwrap(),
     );
     store.declare(
-        ResourceEntry::builder(PeResource::DeviceInfo)
+        ResourceEntry::standard(StandardResource::DeviceInfo)
             .can_subscribe(true)
             .build()
             .unwrap(),
@@ -808,7 +822,7 @@ impl Wire {
     }
 
     /// What the live Subscriptions hold of `resource`, as the port's info reads now.
-    fn held(&self, resource: &PeResource) -> Option<PeData> {
+    fn held(&self, resource: impl Into<PeResource>) -> Option<PeData> {
         let info = self.port().info();
         let listed = self.listed(resource);
         info.peers()[0]
@@ -820,7 +834,7 @@ impl Wire {
 
     /// Subscribes to `resource` and runs until the lease and its first Property
     /// Data have come.
-    fn subscribed(&mut self, resource: &PeResource) -> Subscription {
+    fn subscribed(&mut self, resource: impl Into<PeResource>) -> Subscription {
         let mut request = self.listed(resource).subscribe();
         self.run(80);
         match self.result(&mut request) {
@@ -829,8 +843,8 @@ impl Wire {
         }
     }
 
-    fn target(resource: PeResource) -> ResourceTarget {
-        ResourceTarget::try_from(resource).expect("a Resource with no entries")
+    fn target(resource: impl Into<PeResource>) -> ResourceTarget {
+        ResourceTarget::try_from(resource.into()).expect("a Resource with no entries")
     }
 
     /// How many times the peer was told of a change of the info of the port.
@@ -849,10 +863,10 @@ impl Wire {
 #[test]
 fn a_subscription_lands_live_and_the_record_holds_the_resources_data() {
     let mut wire = Wire::new(subscribable());
-    assert_eq!(wire.held(&PeResource::LocalOn), None);
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    assert_eq!(wire.held(StandardResource::LocalOn), None);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     assert_eq!(lease.presence(), Presence::Live);
-    assert_eq!(*lease.resource(), PeResource::LocalOn);
+    assert_eq!(*lease.resource(), StandardResource::LocalOn);
     assert_eq!(
         wire.peer.asked,
         [
@@ -860,7 +874,7 @@ fn a_subscription_lands_live_and_the_record_holds_the_resources_data() {
             Asked::Get("LocalOn".to_owned())
         ]
     );
-    assert_eq!(wire.held(&PeResource::LocalOn), Some(on(true)));
+    assert_eq!(wire.held(StandardResource::LocalOn), Some(on(true)));
     assert!(
         wire.info_notices() >= 1,
         "the record changed: {:?}",
@@ -873,7 +887,7 @@ fn a_subscription_lands_live_and_the_record_holds_the_resources_data() {
 #[test]
 fn a_full_update_replaces_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
-    let _lease = wire.subscribed(&PeResource::LocalOn);
+    let _lease = wire.subscribed(StandardResource::LocalOn);
     let before = wire.info_notices();
     let now = wire.now();
     let actions = wire
@@ -881,14 +895,14 @@ fn a_full_update_replaces_the_data_the_record_holds() {
         .responder
         .publish(
             &mut wire.peer.store,
-            &Wire::target(PeResource::LocalOn),
+            &Wire::target(StandardResource::LocalOn),
             on(false),
             now,
         )
         .expect("publishes");
     wire.peer.send(&wire.fake, actions, now);
     wire.run(40);
-    assert_eq!(wire.held(&PeResource::LocalOn), Some(on(false)));
+    assert_eq!(wire.held(StandardResource::LocalOn), Some(on(false)));
     assert_eq!(wire.info_notices(), before + 1);
 }
 
@@ -897,7 +911,7 @@ fn a_full_update_replaces_the_data_the_record_holds() {
 #[test]
 fn a_partial_update_is_merged_into_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
-    let _lease = wire.subscribed(&PeResource::DeviceInfo);
+    let _lease = wire.subscribed(StandardResource::DeviceInfo);
     let now = wire.now();
     let update = PartialUpdate::new().with(
         JsonPointer::new("/model").expect("a pointer"),
@@ -908,14 +922,14 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
         .responder
         .change(
             &mut wire.peer.store,
-            &Wire::target(PeResource::DeviceInfo),
+            &Wire::target(StandardResource::DeviceInfo),
             update,
             now,
         )
         .expect("changes");
     wire.peer.send(&wire.fake, actions, now);
     wire.run(40);
-    let Some(PeData::DeviceInfo(info)) = wire.held(&PeResource::DeviceInfo) else {
+    let Some(PeData::DeviceInfo(info)) = wire.held(StandardResource::DeviceInfo) else {
         panic!("DeviceInfo is held");
     };
     assert_eq!(info.model.as_str(), "Renamed");
@@ -927,7 +941,7 @@ fn a_partial_update_is_merged_into_the_data_the_record_holds() {
 #[test]
 fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result() {
     let mut wire = Wire::new(subscribable());
-    let _lease = wire.subscribed(&PeResource::DeviceInfo);
+    let _lease = wire.subscribed(StandardResource::DeviceInfo);
     let long = "x".repeat(600);
     let now = wire.now();
     let actions = wire
@@ -935,7 +949,7 @@ fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result()
         .responder
         .publish(
             &mut wire.peer.store,
-            &Wire::target(PeResource::DeviceInfo),
+            &Wire::target(StandardResource::DeviceInfo),
             device_info(&long),
             now,
         )
@@ -951,7 +965,7 @@ fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result()
     let before = gets(&wire);
     wire.run(80);
     assert_eq!(gets(&wire), before + 1, "the session Got after the notify");
-    let Some(PeData::DeviceInfo(info)) = wire.held(&PeResource::DeviceInfo) else {
+    let Some(PeData::DeviceInfo(info)) = wire.held(StandardResource::DeviceInfo) else {
         panic!("DeviceInfo is held");
     };
     assert_eq!(info.model.as_str(), long);
@@ -962,13 +976,13 @@ fn a_notify_makes_the_session_get_the_resource_and_the_record_holds_the_result()
 #[test]
 fn dropping_the_lease_ends_the_subscription_with_the_peer() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     assert_eq!(wire.peer.responder.subscriptions().count(), 1);
     drop(lease);
     wire.run(60);
     assert_eq!(wire.peer.asked.last(), Some(&Asked::Unsubscribe));
     assert_eq!(wire.peer.responder.subscriptions().count(), 0);
-    assert_eq!(wire.held(&PeResource::LocalOn), None);
+    assert_eq!(wire.held(StandardResource::LocalOn), None);
 }
 
 /// A request dropped before the peer accepts resolves nowhere, and the Subscription it
@@ -976,7 +990,7 @@ fn dropping_the_lease_ends_the_subscription_with_the_peer() {
 #[test]
 fn a_dropped_subscribe_job_does_not_leave_a_subscription_with_the_peer() {
     let mut wire = Wire::new(subscribable());
-    drop(wire.listed(&PeResource::LocalOn).subscribe());
+    drop(wire.listed(StandardResource::LocalOn).subscribe());
     wire.run(120);
     assert_eq!(
         wire.peer.asked.first(),
@@ -991,7 +1005,7 @@ fn a_dropped_subscribe_job_does_not_leave_a_subscription_with_the_peer() {
 #[test]
 fn the_peer_ending_the_subscription_is_the_leases_presence() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     let id = wire
         .peer
         .responder
@@ -1012,7 +1026,7 @@ fn the_peer_ending_the_subscription_is_the_leases_presence() {
         Presence::Lost(SubscriptionCause::EndedByPeer)
     );
     assert!(wire.changed.contains(&(lease.id(), ResourceFact::Presence)));
-    assert_eq!(wire.held(&PeResource::LocalOn), None);
+    assert_eq!(wire.held(StandardResource::LocalOn), None);
 }
 
 /// A port that closes under a Subscription ends it: the lease reads `PortLost`,
@@ -1020,7 +1034,7 @@ fn the_peer_ending_the_subscription_is_the_leases_presence() {
 #[test]
 fn a_subscription_whose_port_is_lost_reads_port_lost() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
     assert_eq!(
@@ -1039,9 +1053,9 @@ fn a_subscription_whose_port_is_lost_reads_port_lost() {
 #[test]
 fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
     let mut wire = Wire::taking(subscribable(), 1);
-    let mut get = wire.listed(&PeResource::DeviceInfo).fetch();
-    let mut first = wire.listed(&PeResource::LocalOn).subscribe();
-    let mut second = wire.listed(&PeResource::DeviceInfo).subscribe();
+    let mut get = wire.listed(StandardResource::DeviceInfo).fetch();
+    let mut first = wire.listed(StandardResource::LocalOn).subscribe();
+    let mut second = wire.listed(StandardResource::DeviceInfo).subscribe();
     wire.run(300);
     assert_eq!(wire.result(&mut get), Some(Ok(device_info("Workbench"))));
     assert!(matches!(wire.result(&mut first), Some(Ok(_))));
@@ -1064,7 +1078,7 @@ fn subscriptions_past_the_peers_simultaneous_requests_wait_for_room() {
 #[test]
 fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
     let mut wire = Wire::new(store());
-    let mut request = wire.listed(&PeResource::LocalOn).subscribe();
+    let mut request = wire.listed(StandardResource::LocalOn).subscribe();
     wire.run(30);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
         wire.result(&mut request)
@@ -1083,7 +1097,7 @@ fn a_subscribe_to_a_resource_the_entry_forbids_is_not_sent() {
 #[test]
 fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     let muid = wire.peer.muid;
     for ump in (CiMessage::InvalidateMuid {
         header: CiHeader::new(muid),
@@ -1115,7 +1129,7 @@ fn a_peer_that_leaves_ends_its_leases_as_ended_by_the_peer() {
 #[test]
 fn a_lease_lost_with_its_port_stays_lost_across_a_replug() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     wire.fake.unplug(EndpointId::from_raw(RAW));
     wire.run(3);
     assert_eq!(
@@ -1134,7 +1148,7 @@ fn a_lease_lost_with_its_port_stays_lost_across_a_replug() {
         .filter(|c| **c == (lease.id(), ResourceFact::Presence))
         .count();
     assert_eq!(notices, 1);
-    let again = wire.subscribed(&PeResource::LocalOn);
+    let again = wire.subscribed(StandardResource::LocalOn);
     assert_eq!(again.presence(), Presence::Live);
 }
 
@@ -1143,8 +1157,8 @@ fn a_lease_lost_with_its_port_stays_lost_across_a_replug() {
 #[test]
 fn a_sync_that_fails_clears_the_data_the_record_holds() {
     let mut wire = Wire::new(subscribable());
-    let _lease = wire.subscribed(&PeResource::DeviceInfo);
-    assert!(wire.held(&PeResource::DeviceInfo).is_some());
+    let _lease = wire.subscribed(StandardResource::DeviceInfo);
+    assert!(wire.held(StandardResource::DeviceInfo).is_some());
     wire.peer.reply = Reply::Silent;
     let long = "x".repeat(600);
     let now = wire.now();
@@ -1153,7 +1167,7 @@ fn a_sync_that_fails_clears_the_data_the_record_holds() {
         .responder
         .publish(
             &mut wire.peer.store,
-            &Wire::target(PeResource::DeviceInfo),
+            &Wire::target(StandardResource::DeviceInfo),
             device_info(&long),
             now,
         )
@@ -1161,12 +1175,12 @@ fn a_sync_that_fails_clears_the_data_the_record_holds() {
     wire.peer.send(&wire.fake, actions, now);
     wire.run(20);
     assert!(
-        wire.held(&PeResource::DeviceInfo).is_some(),
+        wire.held(StandardResource::DeviceInfo).is_some(),
         "the old data is held while the Get is out"
     );
     wire.step(PE_TIMEOUT.as_millis() as u64 + 100);
     wire.run(5);
-    assert_eq!(wire.held(&PeResource::DeviceInfo), None);
+    assert_eq!(wire.held(StandardResource::DeviceInfo), None);
 }
 
 /// The end of a Subscription is a request like another: past the peer's count it
@@ -1174,9 +1188,9 @@ fn a_sync_that_fails_clears_the_data_the_record_holds() {
 #[test]
 fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
     let mut wire = Wire::taking(subscribable(), 1);
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     wire.peer.reply = Reply::Silent;
-    let mut get = wire.listed(&PeResource::DeviceInfo).fetch();
+    let mut get = wire.listed(StandardResource::DeviceInfo).fetch();
     wire.run(10);
     drop(lease);
     wire.run(10);
@@ -1194,7 +1208,7 @@ fn an_unsubscribe_past_the_peers_simultaneous_requests_waits_and_goes_out() {
 #[test]
 fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
     let mut wire = Wire::new(subscribable());
-    let lease = wire.subscribed(&PeResource::LocalOn);
+    let lease = wire.subscribed(StandardResource::LocalOn);
     drop(wire.port.take());
     wire.run(5);
     assert_eq!(
@@ -1211,8 +1225,8 @@ fn a_lease_dropped_after_its_port_was_released_sends_nothing() {
 
 mod state {
     use tutti_midi_ci::{
-        CallError, MediaType, OpaqueBody, PeData, PeResource, PeState, PeStateEntry, PeText,
-        RequestRefused, ResourceStore, ResourceTarget, StateId,
+        CallError, MediaType, OpaqueBody, PeData, PeState, PeStateEntry, PeText, RequestRefused,
+        ResourceStore, ResourceTarget, StandardResource, StateId,
     };
     use tutti_midi_device::{Learned, SavedDevice};
     use tutti_session::Peer as _;
@@ -1258,7 +1272,8 @@ mod state {
     }
 
     fn held(wire: &Wire) -> Vec<u8> {
-        let target = ResourceTarget::entry(PeResource::State, full_state().resource_id()).unwrap();
+        let target =
+            ResourceTarget::entry(StandardResource::State, full_state().resource_id()).unwrap();
         match wire.peer.store.get(&target) {
             Some(PeData::State(state)) => match state.body() {
                 OpaqueBody::Binary(binary) => binary.bytes().to_vec(),
@@ -1346,7 +1361,7 @@ mod state {
         let mut wire = Wire::new(store());
         let device = peer(&wire);
         let named = PeerError::Refused(PeFailure::NotSent(CallError::Refused(
-            RequestRefused::NotListed(PeResource::State),
+            RequestRefused::NotListed(StandardResource::State.into()),
         )));
         let state = PeerState::new(
             SavedPeer::Device(device.device().clone()),
@@ -1508,7 +1523,7 @@ fn json(text: &str) -> PeJson {
 }
 
 /// The Property Data `text` of `resource`.
-fn data(resource: &PeResource, text: &str) -> PeData {
+fn data(resource: impl Into<PeResource>, text: &str) -> PeData {
     PeData::decode(resource, &json(text)).expect("the Resource's data")
 }
 
@@ -1517,17 +1532,17 @@ fn id(text: &str) -> ResourceId {
 }
 
 /// A store of `resource`, declared as its defaults say, holding `text`.
-fn holding(resource: PeResource, text: &str) -> ResourceStore {
+fn holding(resource: StandardResource, text: &str) -> ResourceStore {
     let mut store = ResourceStore::new();
-    store.declare(ResourceEntry::builder(resource.clone()).build().unwrap());
-    store.put(None, data(&resource, text)).expect("declared");
+    store.declare(ResourceEntry::standard(resource).build().unwrap());
+    store.put(None, data(resource, text)).expect("declared");
     store
 }
 
 /// What a Get of `resource` returns from a peer whose store holds `text` of it.
-fn fetched(resource: PeResource, text: &str) -> PeData {
-    let mut wire = Wire::new(holding(resource.clone(), text));
-    let mut request = wire.listed(&resource).fetch();
+fn fetched(resource: StandardResource, text: &str) -> PeData {
+    let mut wire = Wire::new(holding(resource, text));
+    let mut request = wire.listed(resource).fetch();
     wire.run(60);
     match wire.result(&mut request) {
         Some(Ok(data)) => data,
@@ -1540,7 +1555,7 @@ fn fetched(resource: PeResource, text: &str) -> PeData {
 #[test]
 fn a_fetched_channel_list_is_typed_with_its_channels_and_programs() {
     let PeData::ChannelList(list) = fetched(
-        PeResource::ChannelList,
+        StandardResource::ChannelList,
         r#"[{"title":"Lead","channel":1,"programTitle":"Piano + Strings","bankPC":[1,0,76]},
         {"title":"Drums","channel":10,"programTitle":"GM2 Jazz Drum Set","bankPC":[0,0,33]}]"#,
     ) else {
@@ -1566,7 +1581,7 @@ fn a_fetched_channel_list_is_typed_with_its_channels_and_programs() {
 #[test]
 fn a_fetched_mode_list_is_typed_with_its_mode_ids() {
     let PeData::ModeList(list) = fetched(
-        PeResource::ModeList,
+        StandardResource::ModeList,
         r#"[{"modeId":"singleChannelMode","title":"Single MIDI Channel Mode",
         "description":"This describes a single Program that plays one source."},
         {"modeId":"multiChannelMode","title":"Multiple MIDI Channel Mode"}]"#,
@@ -1584,7 +1599,7 @@ fn a_fetched_mode_list_is_typed_with_its_mode_ids() {
 /// M2-106 section 3.2: CurrentMode is the `modeId` in use.
 #[test]
 fn a_fetched_current_mode_is_the_mode_id() {
-    let PeData::CurrentMode(mode) = fetched(PeResource::CurrentMode, r#""multiChannelMode""#)
+    let PeData::CurrentMode(mode) = fetched(StandardResource::CurrentMode, r#""multiChannelMode""#)
     else {
         panic!("CurrentMode");
     };
@@ -1594,11 +1609,11 @@ fn a_fetched_current_mode_is_the_mode_id() {
 /// M2-108 sections 3.2 and 4.2: the Basic Channels are written 1 to 16.
 #[test]
 fn fetched_basic_channels_are_written_1_to_16() {
-    let PeData::BasicChannelRx(rx) = fetched(PeResource::BasicChannelRx, "1") else {
+    let PeData::BasicChannelRx(rx) = fetched(StandardResource::BasicChannelRx, "1") else {
         panic!("BasicChannelRx");
     };
     assert_eq!(rx.0, MidiChannel::of(0));
-    let PeData::BasicChannelTx(tx) = fetched(PeResource::BasicChannelTx, "16") else {
+    let PeData::BasicChannelTx(tx) = fetched(StandardResource::BasicChannelTx, "16") else {
         panic!("BasicChannelTx");
     };
     assert_eq!(tx.0, MidiChannel::of(15));
@@ -1609,7 +1624,7 @@ fn fetched_basic_channels_are_written_1_to_16() {
 #[test]
 fn a_fetched_all_ctrl_list_is_typed_with_its_controllers() {
     let PeData::AllCtrlList(list) = fetched(
-        PeResource::AllCtrlList,
+        StandardResource::AllCtrlList,
         r#"[{"title":"Volume","ctrlType":"cc","channel":1,"default":4294967295,
         "paramPath":"/volume","ctrlIndex":[7,39],"ctrlMapId":"volumeDb"},
         {"title":"Hold Pedal","ctrlType":"cc","channel":1,"default":0,"ctrlIndex":[67],
@@ -1632,7 +1647,7 @@ fn a_fetched_all_ctrl_list_is_typed_with_its_controllers() {
 #[test]
 fn a_fetched_state_list_is_typed_with_its_states() {
     let PeData::StateList(list) = fetched(
-        PeResource::StateList,
+        StandardResource::StateList,
         r#"[{"title":"User Programs","stateId":"userPrograms","stateRev":"ahd822nkdla",
         "timestamp":1583330400,"description":"all","size":300}]"#,
     ) else {
@@ -1651,13 +1666,16 @@ fn a_fetched_state_list_is_typed_with_its_states() {
 /// Data lands as JSON, `PeOpaque`.
 #[test]
 fn a_fetched_custom_resource_is_opaque_json() {
-    let name = PeResource::Custom(CustomResource::new("X-ProgramEdit").unwrap());
+    let program_edit = CustomResource::new("X-ProgramEdit").unwrap();
+    let name = PeResource::from(program_edit.clone());
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(name.clone())
-            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
-            .build()
-            .unwrap(),
+        ResourceEntry::custom(
+            program_edit.clone(),
+            json(r#"{"title":"Program Edit","type":"object"}"#),
+        )
+        .build()
+        .unwrap(),
     );
     store
         .put(None, data(&name, r#"{"name":"PIANO 4","lfoSpeed":30}"#))
@@ -1680,7 +1698,7 @@ fn a_fetched_custom_resource_is_opaque_json() {
 fn a_subscription_to_external_sync_is_live_and_the_peer_is_asked() {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::ExternalSync)
+        ResourceEntry::standard(StandardResource::ExternalSync)
             .can_subscribe(true)
             .build()
             .unwrap(),
@@ -1689,13 +1707,13 @@ fn a_subscription_to_external_sync_is_live_and_the_peer_is_asked() {
         .put(None, PeData::ExternalSync(PeExternalSync(true)))
         .expect("declared");
     let mut wire = Wire::new(store);
-    let _lease = wire.subscribed(&PeResource::ExternalSync);
+    let _lease = wire.subscribed(StandardResource::ExternalSync);
     assert_eq!(
         wire.peer.asked.first(),
         Some(&Asked::Subscribe("ExternalSync".to_owned()))
     );
     assert_eq!(
-        wire.held(&PeResource::ExternalSync),
+        wire.held(StandardResource::ExternalSync),
         Some(PeData::ExternalSync(PeExternalSync(true)))
     );
 }
@@ -1723,7 +1741,9 @@ fn states(held: &[(&str, u8)]) -> ResourceStore {
 fn a_state_is_fetched_and_written_by_its_res_id() {
     let store = states(&[("buffer", 1)]);
     let mut wire = Wire::new(store);
-    let state = wire.listed(&PeResource::State).with_res_id(id("buffer"));
+    let state = wire
+        .listed(StandardResource::State)
+        .with_res_id(id("buffer"));
 
     let mut get = state.fetch();
     wire.run(60);
@@ -1739,7 +1759,7 @@ fn a_state_is_fetched_and_written_by_its_res_id() {
         panic!("a status: {result:?}");
     };
     assert_eq!(status.code(), 200);
-    let target = ResourceTarget::entry(PeResource::State, id("buffer")).unwrap();
+    let target = ResourceTarget::entry(StandardResource::State, id("buffer")).unwrap();
     assert_eq!(
         wire.peer.store.get(&target),
         Some(&PeData::State(PeState::octets(vec![9])))
@@ -1760,7 +1780,7 @@ fn a_res_id_names_one_entry_of_the_resource() {
     let store = states(&[("one", 1), ("two", 2)]);
     let mut wire = Wire::new(store);
     let mut get = wire
-        .listed(&PeResource::State)
+        .listed(StandardResource::State)
         .with_res_id(id("two"))
         .fetch();
     wire.run(60);
@@ -1776,7 +1796,7 @@ fn a_res_id_names_one_entry_of_the_resource() {
 fn a_res_id_on_a_resource_with_no_entries_is_not_sent() {
     let mut wire = Wire::new(store());
     let mut request = wire
-        .listed(&PeResource::LocalOn)
+        .listed(StandardResource::LocalOn)
         .with_res_id(id("x"))
         .fetch();
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) =
@@ -1797,7 +1817,7 @@ fn a_res_id_on_a_resource_with_no_entries_is_not_sent() {
 fn programs() -> ResourceStore {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::ProgramList)
+        ResourceEntry::standard(StandardResource::ProgramList)
             .build()
             .unwrap(),
     );
@@ -1810,7 +1830,10 @@ fn programs() -> ResourceStore {
     store
         .put(
             Some(id("factory")),
-            data(&PeResource::ProgramList, &format!("[{}]", items.join(","))),
+            data(
+                StandardResource::ProgramList,
+                &format!("[{}]", items.join(",")),
+            ),
         )
         .expect("declared");
     store
@@ -1832,7 +1855,7 @@ fn titles(data: PeData) -> Vec<String> {
 fn a_program_list_is_fetched_by_its_res_id() {
     let mut wire = Wire::new(programs());
     let mut request = wire
-        .listed(&PeResource::ProgramList)
+        .listed(StandardResource::ProgramList)
         .with_res_id(id("factory"))
         .fetch();
     wire.run(60);
@@ -1847,7 +1870,7 @@ fn a_program_list_is_fetched_by_its_res_id() {
 fn a_paged_fetch_returns_the_entries_of_the_page() {
     let mut wire = Wire::new(programs());
     let listed = wire
-        .listed(&PeResource::ProgramList)
+        .listed(StandardResource::ProgramList)
         .with_res_id(id("factory"));
     let page = PePage {
         offset: 1,
@@ -1870,7 +1893,7 @@ fn a_paged_fetch_of_a_resource_that_is_no_list_is_not_sent() {
         offset: 0,
         limit: NonZeroU32::new(1).unwrap(),
     };
-    let mut request = wire.listed(&PeResource::LocalOn).fetch_page(page);
+    let mut request = wire.listed(StandardResource::LocalOn).fetch_page(page);
     wire.run(30);
     let result = wire.result(&mut request);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
@@ -1888,14 +1911,17 @@ fn a_paged_fetch_of_a_resource_that_is_no_list_is_not_sent() {
 /// leaves the others.
 #[test]
 fn a_partial_write_changes_the_properties_it_names() {
-    let name = PeResource::Custom(CustomResource::new("X-ProgramEdit").unwrap());
+    let program_edit = CustomResource::new("X-ProgramEdit").unwrap();
+    let name = PeResource::from(program_edit.clone());
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(name.clone())
-            .schema(json(r#"{"title":"Program Edit","type":"object"}"#))
-            .can_set(CanSet::Partial)
-            .build()
-            .unwrap(),
+        ResourceEntry::custom(
+            program_edit.clone(),
+            json(r#"{"title":"Program Edit","type":"object"}"#),
+        )
+        .can_set(CanSet::Partial)
+        .build()
+        .unwrap(),
     );
     store
         .put(None, data(&name, r#"{"name":"PIANO 4","lfoSpeed":30}"#))
@@ -1928,7 +1954,7 @@ fn a_partial_write_of_a_resource_that_takes_only_full_sets_is_not_sent() {
         JsonPointer::new("/x").expect("a pointer"),
         PartialValue::Bool(true),
     );
-    let mut request = wire.listed(&PeResource::LocalOn).write_partial(update);
+    let mut request = wire.listed(StandardResource::LocalOn).write_partial(update);
     wire.run(30);
     let result = wire.result(&mut request);
     let Some(Err(PeerError::Refused(PeFailure::NotSent(CallError::Refused(refused))))) = result
@@ -1948,7 +1974,7 @@ fn a_partial_write_of_a_resource_that_takes_only_full_sets_is_not_sent() {
 fn a_subscribe_encodes_by_the_encodings_the_entry_lists() {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::State)
+        ResourceEntry::standard(StandardResource::State)
             .encodings(vec![PeEncoding::Mcoded7])
             .media_types(vec![MediaType::OCTET_STREAM])
             .can_subscribe(true)
@@ -1957,7 +1983,7 @@ fn a_subscribe_encodes_by_the_encodings_the_entry_lists() {
     );
     let mut wire = Wire::new(store);
     let _request = wire
-        .listed(&PeResource::State)
+        .listed(StandardResource::State)
         .with_res_id(id("buffer"))
         .subscribe();
     wire.run(60);
@@ -1974,14 +2000,14 @@ fn a_subscribe_encodes_by_the_encodings_the_entry_lists() {
 fn an_entry_that_lists_ascii_is_called_in_ascii() {
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(PeResource::LocalOn)
+        ResourceEntry::standard(StandardResource::LocalOn)
             .encodings(vec![PeEncoding::Mcoded7, PeEncoding::Ascii])
             .build()
             .unwrap(),
     );
     store.put(None, on(false)).expect("declared");
     let mut wire = Wire::new(store);
-    let mut request = wire.listed(&PeResource::LocalOn).fetch();
+    let mut request = wire.listed(StandardResource::LocalOn).fetch();
     wire.run(60);
     assert_eq!(wire.result(&mut request), Some(Ok(on(false))));
     assert_eq!(wire.peer.encoded, [PeEncoding::Ascii]);
@@ -1991,13 +2017,16 @@ fn an_entry_that_lists_ascii_is_called_in_ascii() {
 /// `canPaginate` ends at the handle as not sent, and the peer hears nothing.
 #[test]
 fn a_page_of_a_list_whose_entry_does_not_paginate_is_not_sent() {
-    let songs = PeResource::Custom(CustomResource::new("X-SongList").unwrap());
+    let song_list = CustomResource::new("X-SongList").unwrap();
+    let songs = PeResource::from(song_list.clone());
     let mut store = ResourceStore::new();
     store.declare(
-        ResourceEntry::builder(songs.clone())
-            .schema(json(r#"{"title":"Songs","type":"array"}"#))
-            .build()
-            .unwrap(),
+        ResourceEntry::custom(
+            song_list.clone(),
+            json(r#"{"title":"Songs","type":"array"}"#),
+        )
+        .build()
+        .unwrap(),
     );
     store
         .put(None, data(&songs, r#"["a","b"]"#))

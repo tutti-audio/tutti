@@ -133,7 +133,10 @@ impl ResourceStore {
 
     /// The entry of the ResourceList for `resource`.
     #[must_use]
-    pub fn entry(&self, resource: &PeResource) -> Option<&ResourceEntry> {
+    pub fn entry<R>(&self, resource: &R) -> Option<&ResourceEntry>
+    where
+        PeResource: PartialEq<R>,
+    {
         self.resources
             .iter()
             .map(|s| &s.entry)

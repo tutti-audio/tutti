@@ -737,10 +737,12 @@ impl Channels {
         self.handled.load(Ordering::Acquire)
     }
 
-    /// Whether a setting waits for the control lane.
+    /// Whether a setting of any kind waits for the control lane: whether
+    /// [`take_setting`](Self::take_setting) would hand one over. The fence
+    /// counts, since the audio lane holds its blocks for it as for a rate.
     pub(super) fn setting_waiting(&self) -> bool {
         let slots = self.settings.lock();
-        slots.rate.is_some() || slots.mode.is_some()
+        slots.rate.is_some() || slots.mode.is_some() || slots.fence.is_some()
     }
 
     /// Writes `setting` into its slot and rings the control lane's bell: no
@@ -1093,6 +1095,27 @@ mod tests {
         writer.push(resp(), &c);
         writer.push(resp(), &c);
         assert_eq!(lost.get(), 2);
+    }
+
+    /// **A setting of every kind is waiting until the control lane takes it.**
+    /// The control lane's hold of a command ends on `setting_waiting`, so a kind
+    /// it does not report waits out the lane's slice while the audio lane holds
+    /// its blocks for it: the fence as much as a rate or a render mode.
+    #[test]
+    fn a_setting_of_every_kind_is_waiting_until_it_is_taken() {
+        let (c, _) = channels();
+        for setting in [
+            Setting::SampleRate(SampleRate::SR_96K),
+            Setting::RenderMode(tutti_plugin_types::RenderMode::Offline),
+            Setting::Fence,
+        ] {
+            assert!(!c.setting_waiting(), "{setting:?}: nothing put yet");
+            let (_waiter, reply) = super::super::ask::ask::<()>();
+            c.put_setting(setting, reply);
+            assert!(c.setting_waiting(), "{setting:?} is waiting");
+            assert!(c.take_setting().is_some(), "{setting:?} is taken");
+            assert!(!c.setting_waiting(), "{setting:?} was taken");
+        }
     }
 
     /// **Closing the settings' slots disconnects the waiters' replies**: a

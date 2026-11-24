@@ -5,6 +5,7 @@ use tutti_units::{Bipolar, Hz, Mix, SampleRate, Seconds, Tail};
 
 use super::*;
 use crate::reverb::network::NetworkStage;
+use crate::tail_probe;
 use tutti_buffers::InputOutput;
 
 // The tests other than the `f64` ones pin the `f32` instantiation, the session's audio
@@ -179,9 +180,9 @@ fn the_first_sound_is_the_pre_delay_plus_the_earliest_tap() {
 
 /// The reported tail covers the impulse response: past it nothing is above the floor below the
 /// response's peak, and the tail never exceeds the ceiling, at 48 and 44.1 kHz. The sets include
-/// the worst corners of what the tail adds to the network's own: damping 0.999 (each half's one-pole adds
-/// `p / (1 - p)` = 999 frames to the loop, more than the bound's slack at diffusion 0) and
-/// bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
+/// the worst corners of what the tail adds to the network's own: damping 0.999 (each half's
+/// one-pole adds `p / (1 - p)` = 999 frames to the loop, more than the bound's slack at diffusion
+/// 0) and bandwidth 10 Hz (the input's one-pole rings on for thousands of frames).
 #[test]
 fn the_tail_covers_the_response_falling_under_the_floor() {
     let floor = 10f64.powf(crate::TAIL_FLOOR.get() / 20.0);
@@ -224,6 +225,180 @@ fn the_tail_covers_the_response_falling_under_the_floor() {
                 "{c:?}: {late} past the tail {tail:?}, peak {peak}"
             );
         }
+    }
+}
+
+/// The reported tail covers the ring-out of the worst finite inputs: for the shortest, the
+/// default and the longest decay, damping from none to its largest pole, the narrowest bandwidth
+/// and the default, diffusion 0 and 1, no pre-delay and the longest, and no modulation and the
+/// deepest, at 8 kHz (the default also at 48 kHz and 44.1 kHz), an impulse, a full-scale noise
+/// burst and a full-scale step (twice the tank's loop, so every line is full) stop, and from the
+/// reported tail past the last input frame no frame of either channel is above `TAIL_FLOOR` of
+/// the render's own peak (see [`tail_probe`]). The floor is relative to the response's peak: the
+/// output taps sum the tank's lines, and a step is built up by the loop far past the input.
+#[test]
+fn the_reported_tail_covers_the_ring_out_of_the_worst_inputs() {
+    use crate::MIN_DECAY;
+    use crate::reverb::fdn::design::MAX_PRE_DELAY;
+    use crate::reverb::plate::design::MAX_PLATE_DECAY;
+    // The longest decay a control reaches runs once; the rest of the long
+    // settings are 0.5 s, the same tank at a sixteenth of the render; the 8 s one runs at
+    // 22.05 kHz only (the tank's lines scale with the rate).
+    let long = PlateControls {
+        decay: Seconds::new(0.5),
+        damping: Mix::new(0.0),
+        pre_delay: MAX_PRE_DELAY,
+        modulation: Bipolar::of(0.5),
+        ..PlateControls::DEFAULT
+    };
+    let eight = PlateControls {
+        decay: MAX_PLATE_DECAY,
+        ..long
+    };
+    let cases: [(&str, PlateControls); 9] = [
+        ("default", PlateControls::DEFAULT),
+        (
+            "shortest",
+            PlateControls {
+                decay: MIN_DECAY,
+                ..PlateControls::DEFAULT
+            },
+        ),
+        ("longest", long),
+        (
+            "longest, plain delays",
+            PlateControls {
+                diffusion: Mix::new(0.0),
+                modulation: Bipolar::of(0.0),
+                pre_delay: Seconds::new(0.0),
+                ..long
+            },
+        ),
+        (
+            "longest, damping 0.999, bandwidth 10 Hz",
+            PlateControls {
+                damping: Mix::new(0.999),
+                bandwidth: Hz::new(10.0),
+                ..long
+            },
+        ),
+        (
+            "longest, deepest modulation",
+            PlateControls {
+                modulation: Bipolar::of(1.0),
+                pre_delay: Seconds::new(0.0),
+                ..long
+            },
+        ),
+        (
+            "plain delays, damping 0.999",
+            PlateControls {
+                damping: Mix::new(0.999),
+                diffusion: Mix::new(0.0),
+                modulation: Bipolar::of(0.0),
+                ..long
+            },
+        ),
+        (
+            "shortest, bandwidth 10 Hz",
+            PlateControls {
+                decay: MIN_DECAY,
+                bandwidth: Hz::new(10.0),
+                ..PlateControls::DEFAULT
+            },
+        ),
+        (
+            "shortest, longest pre-delay",
+            PlateControls {
+                decay: MIN_DECAY,
+                pre_delay: MAX_PRE_DELAY,
+                ..PlateControls::DEFAULT
+            },
+        ),
+    ];
+    let check = |name: &str, c: &PlateControls, rate: SampleRate| {
+        let burst = 2 * crate::reverb::plate::design::loop_frames(rate).ceil() as usize;
+        let (mut bank, mut ramps) = at_rest(rate, c);
+        let Tail::Finite(tail) = bank.tail_of(&ramps, c) else {
+            panic!("{name}: a finite tail")
+        };
+        for (input_name, input) in tail_probe::stimuli::<f32>(burst) {
+            bank.reset();
+            let frames = tail_probe::run_length(input.len(), tail.get(), burst / 2);
+            let y = run(
+                &mut bank,
+                &mut ramps,
+                &tail_probe::padded(&input, frames),
+                512,
+            );
+            let what = format!("{rate:?} {name}, {input_name}");
+            tail_probe::assert_tail_covers(&what, input.len(), tail.get(), &[&y[0], &y[1]]);
+        }
+    };
+    // The whole grid runs at 8 kHz (the tank's lines scale with the rate); the default also runs
+    // at 48 kHz and 44.1 kHz, where the lengths round differently.
+    for (name, c) in cases {
+        check(name, &c, SampleRate::of(8_000.0));
+    }
+    check("8 s", &eight, SampleRate::of(8_000.0));
+    for rate in [SampleRate::SR_48K, SampleRate::SR_44K1] {
+        check("default", &PlateControls::DEFAULT, rate);
+    }
+}
+
+/// A decay raised to its longest while the short one rings out is covered by the tail a node
+/// reports after the move (the larger of what is owed and the long tail, from the last input
+/// frame, under the ceiling): from it past the last input frame no frame of either channel is
+/// above `TAIL_FLOOR` of the render's own peak, after an impulse, a noise burst and a step, the
+/// move landing right after the input and a third of the way into the short tail. The energy in
+/// the tank at the move decays at the new, slower rate from the move on.
+#[test]
+fn a_decay_raised_during_the_ring_out_is_covered_by_the_tail_from_the_last_input() {
+    use crate::reverb::plate::design::MAX_PLATE_DECAY;
+    let rate = SampleRate::SR_48K;
+    let short = PlateControls {
+        decay: Seconds::new(0.3),
+        ..PlateControls::DEFAULT
+    };
+    let long = PlateControls {
+        decay: MAX_PLATE_DECAY,
+        ..short
+    };
+    let burst = 2 * crate::reverb::plate::design::loop_frames(rate).ceil() as usize;
+    let (mut bank, mut ramps) = at_rest(rate, &short);
+    let (Tail::Finite(was), Tail::Finite(now), Tail::Finite(ceiling)) = (
+        bank.tail_of(&ramps, &short),
+        bank.tail_of(&ramps, &long),
+        bank.tail(),
+    ) else {
+        panic!("finite tails")
+    };
+    for (moved_at, (name, input)) in [0, was.get() / 3].into_iter().flat_map(|at| {
+        tail_probe::stimuli::<f32>(burst)
+            .into_iter()
+            .map(move |s| (at, s))
+    }) {
+        bank.reset();
+        bank.retarget(&mut ramps, &short);
+        ramps.jump_to_target();
+        let head = input.len() + moved_at;
+        let reported = tail_probe::raised_tail(was.get() - moved_at, now.get(), ceiling.get());
+        let first = run(
+            &mut bank,
+            &mut ramps,
+            &tail_probe::padded(&input, head),
+            512,
+        );
+        bank.retarget(&mut ramps, &long);
+        let rest = tail_probe::run_length(input.len(), reported, burst / 2) - head;
+        let second = run(&mut bank, &mut ramps, &vec![0.0; rest], 512);
+        tail_probe::assert_raised_tail_covers(
+            &format!("{name}, decay 0.3 s to 8 s at {moved_at} frames after the input"),
+            input.len(),
+            reported,
+            &[&first[0], &first[1]],
+            &[&second[0], &second[1]],
+        );
     }
 }
 

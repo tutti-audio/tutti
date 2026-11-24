@@ -97,12 +97,10 @@ struct Rig {
 
 fn rig(workers: usize, no_alloc: bool) -> Rig {
     let (mut ed, mut exec) = Editor::new(prepare(MAX_BLOCK));
-    if workers > 1 {
-        exec.set_pool(Some(if no_alloc {
-            common::TestPool::new(workers)
-        } else {
-            common::test_pool(workers)
-        }));
+    if no_alloc {
+        common::pooled_fresh(&mut exec, workers);
+    } else {
+        common::pooled(&mut exec, workers);
     }
     let gains = build(&mut ed);
     Rig {
@@ -140,13 +138,9 @@ fn aligned_at(k: u64, t: u64) -> f32 {
 /// One block; returns the output channels.
 fn block(r: &mut Rig, n: usize, frame: u64) -> Vec<Vec<f32>> {
     let input: Vec<f32> = (0..n).map(|k| input_at(frame + k as u64)).collect();
-    let mut chans = vec![vec![0.0f32; n]; CHAINS as usize];
-    let mut outs: Vec<&mut [f32]> = chans.iter_mut().map(Vec::as_mut_slice).collect();
     let t = TransportPosition::new(true, Bpm::of(120.0), Beat::new(0.0), None);
-    let ins = [&input[..]];
     // Only the render is inside the gate: this helper's own buffers allocate.
-    r.exec.process(n, &t, &ins, &mut outs);
-    chans
+    common::block_in(&mut r.exec, n, &[&input], CHAINS as usize, &t)
 }
 
 fn drain(tap: &mut TapReader, into: &mut Vec<f32>) {
@@ -170,7 +164,7 @@ fn commit(r: &mut Rig) {
 }
 
 /// What a run read: the output channels and each tap, interleaved.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Read {
     outputs: Vec<Vec<f32>>,
     /// The six outputs' sources, aligned.
@@ -285,17 +279,15 @@ fn a_tap_is_aligned_by_the_compiler_and_any_width() {
 /// `assert_no_alloc`, and the one-participant render itself is the analytic one.
 #[test]
 fn the_parallel_taps_are_bit_identical_and_allocation_free() {
-    let mut s = rig(1, false);
-    let serial = run(&mut s, 8);
+    let serial = common::agree_across_workers(
+        [2, 3, 4],
+        |workers| run(&mut rig(workers, workers > 1), 8),
+        Clone::clone,
+    );
     assert!(
         serial.aligned.iter().any(|&x| x != 0.0),
         "the tap carries signal"
     );
-    for workers in [2, 3, 4] {
-        let mut p = rig(workers, true);
-        let par = run(&mut p, 8);
-        assert_eq!(serial, par, "{workers} workers");
-    }
 }
 
 /// The plan's tap ops: one per lane while open, none once closed, and a closed

@@ -72,7 +72,7 @@ fn a_fork_starts_from_the_values_set_and_shares_no_cell() {
         }),
         ("distortion", || {
             assert_param_fork(DistortionNode::<f32>::from(
-                DistortionConfig::new(ChannelLayout::STEREO, ShapeKind::Tanh)
+                DistortionConfig::new(ChannelLayout::STEREO, Waveshape::new(ShapeKind::Tanh))
                     .drive(Drive::new(2.0)),
             ))
         }),

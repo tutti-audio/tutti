@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Job, Resample};
+use crate::{Job, Resample, TailPolicy};
 use tutti_codec::{Format, Pcm};
 
 /// What these tests vary: a 1 kHz, eight-frame render into a WAV of `pcm`.
@@ -14,7 +14,13 @@ struct Case {
 impl Case {
     fn plan(&self) -> RenderPlan {
         RenderPlan::of(
-            &Job::new(self.rate, Samples::new(8), Samples::new(0), Samples::new(0)).unwrap(),
+            &Job::new(
+                self.rate,
+                Samples::new(8),
+                Samples::new(0),
+                TailPolicy::Frames(Samples::ZERO),
+            )
+            .unwrap(),
         )
     }
 
@@ -52,11 +58,7 @@ fn a_plan_that_cannot_fit_is_refused_before_the_file_is_touched() {
     let dir = tempfile::tempdir().unwrap();
     let config = config(1, Pcm::Int16);
     let frames = Samples::new(1 << 32);
-    let plan = RenderPlan {
-        total: frames,
-        output_length: frames,
-        latency: Samples::new(0),
-    };
+    let plan = RenderPlan::of_frames(frames);
     let rate = config.rate;
     let path = dir.path().join("keep.wav");
     std::fs::write(&path, b"sentinel").unwrap();
@@ -86,11 +88,7 @@ fn the_limit_is_judged_at_the_output_rate() {
     let path = dir.path().join("out.wav");
     let mut config = config(1, Pcm::Int16);
     let frames = Samples::new((1 << 31) - 1_000);
-    let plan = RenderPlan {
-        total: frames,
-        output_length: frames,
-        latency: Samples::new(0),
-    };
+    let plan = RenderPlan::of_frames(frames);
     let rate = config.rate;
     open_file::<f32>(&config.target(&path), &plan, rate)
         .map(drop)

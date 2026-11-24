@@ -203,12 +203,6 @@ impl Sleep {
         }
     }
 
-    /// The instant this sleep resolves at.
-    #[must_use]
-    pub fn deadline(&self) -> Instant {
-        self.deadline
-    }
-
     fn cancel(&mut self) {
         if let Some(id) = self.id.take() {
             lock(&self.timers.state).due.remove(id);
