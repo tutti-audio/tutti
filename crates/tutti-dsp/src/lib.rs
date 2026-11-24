@@ -425,7 +425,7 @@ pub use tube_stage::{TubeDrive, TubeDriveError, TubeStage, TubeStageControls};
 pub use viterbi::{BandedTransition, StickyTransition, Transition, sticky_viterbi, viterbi};
 pub use waveguide::{WaveguideBank, WaveguideControls, WaveguidePositions, WaveguideString};
 pub use waveshape::{
-    Antialiasing, AntialiasingError, ShapeKind, WaveshaperBank, WaveshaperControls,
+    Antialiasing, AntialiasingError, ShapeKind, Waveshape, WaveshaperBank, WaveshaperControls,
 };
 pub use wavetable::{
     TableSize, TableSizeError, Wavetable, WavetableError, WavetableOscillator, WavetableStep,
