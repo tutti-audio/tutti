@@ -164,11 +164,8 @@ impl Rig {
                 );
             }
             Hosted::Voice(slot) => {
-                let mut node = VoiceNode::new(Voice {
-                    source: VoiceSource::Memory(source),
-                    play,
-                })
-                .expect("a finite gain and a nonempty width");
+                let mut node =
+                    VoiceNode::new(source, play).expect("a finite gain and a nonempty width");
                 node.prepare(&Prepare::new(
                     SampleRate::of(SR),
                     MaxBlock::of(Samples::new(self.max_block)),

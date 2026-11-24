@@ -22,8 +22,8 @@ use tutti_units::Losses;
 
 use crate::Session;
 use crate::midi::{
-    Claim, Departure, Held, LossReaders, LossWriters, OutputTiming, Retiring, Stamping, Sweepable,
-    UmpOut, drain_events, loss_cells, settle, sweep_dropped,
+    Claim, Departure, Held, HostSink, LossReaders, LossWriters, OutputTiming, Retiring, Stamping,
+    Sweepable, UmpOut, drain_events, loss_cells, settle, sweep_dropped,
 };
 
 // --- The shared record ---
@@ -125,7 +125,7 @@ struct SinkPort {
     node: NodeKey,
     tap: EventTapReader,
     departure: Departure,
-    out: UmpOut,
+    out: UmpOut<HostSink>,
     losses: LossWriters,
 }
 
@@ -143,8 +143,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
         self.close_dropped();
         let rate = self.graph.prepared().sample_rate();
         let (node, tap, departure) = self.add_output_node();
-        let mut out = UmpOut::new(sink, rate);
-        out.set_stamping(stamping);
+        let out = UmpOut::new(HostSink::new(sink, stamping), rate);
         let (losses, readers) = loss_cells();
         let shared = Arc::new(SinkShared { losses: readers });
         let (claim, held) = Held::new(Arc::clone(&shared), node);

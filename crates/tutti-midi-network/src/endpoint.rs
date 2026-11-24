@@ -11,7 +11,7 @@ use tutti_ump::Ump;
 use tutti_units::Losses;
 
 use crate::datagram::{self, pack};
-use crate::session::{Capacity, Role, Session};
+use crate::session::{Capacity, ClientRole, HostRole, Role, Session};
 use crate::{
     Admission, ByeReason, Credentials, EndpointIdentity, Event, Nonce, SendError, SessionConfig,
     SessionState, Transmit,
@@ -78,7 +78,7 @@ struct Outbox {
 impl Outbox {
     /// Moves a session's output here: its commands packed into datagrams for
     /// `peer`, its events in order.
-    fn drain(&mut self, peer: SocketAddr, session: &mut Session) {
+    fn drain(&mut self, peer: SocketAddr, session: &mut Session<impl Role>) {
         let (commands, events, losses) = session.take_output();
         self.losses += losses;
         self.transmits.extend(
@@ -115,7 +115,7 @@ const fn is_lifecycle(event: &Event) -> bool {
 
 /// Feeds the commands of a datagram to a session. A datagram that does not
 /// carry the signature is ignored whole.
-fn feed(session: &mut Session, now: Instant, datagram: &[u8]) {
+fn feed<R: Role>(session: &mut Session<R>, now: Instant, datagram: &[u8]) {
     let Ok(mut commands) = datagram::parse(datagram) else {
         return;
     };
@@ -131,7 +131,7 @@ fn feed(session: &mut Session, now: Instant, datagram: &[u8]) {
 #[derive(Debug)]
 pub struct Client {
     host: SocketAddr,
-    session: Session,
+    session: Session<ClientRole>,
     outbox: Outbox,
 }
 
@@ -148,13 +148,7 @@ impl Client {
     ) -> Self {
         Self {
             host,
-            session: Session::new(
-                Role::Client(Box::new(credentials)),
-                config,
-                identity,
-                host,
-                now,
-            ),
+            session: Session::client(credentials, config, identity, host, now),
             outbox: Outbox::default(),
         }
     }
@@ -276,7 +270,7 @@ pub struct Host {
     max_sessions: NonZeroUsize,
     session_config: SessionConfig,
     nonce_source: fn() -> Result<Nonce, getrandom::Error>,
-    sessions: HashMap<SocketAddr, Session>,
+    sessions: HashMap<SocketAddr, Session<HostRole>>,
     outbox: Outbox,
 }
 
@@ -361,7 +355,7 @@ impl Host {
         self.with_session(peer, |session| session.reset(now));
     }
 
-    fn with_session(&mut self, peer: SocketAddr, act: impl FnOnce(&mut Session)) {
+    fn with_session(&mut self, peer: SocketAddr, act: impl FnOnce(&mut Session<HostRole>)) {
         if let Some(session) = self.sessions.get_mut(&peer) {
             act(session);
             self.outbox.drain(peer, session);
@@ -399,21 +393,20 @@ impl NetworkEndpoint for Host {
         // this datagram. Only an Invitation that opens something is kept, so a
         // stranger costs the Host no state; over the limit the Invitation is
         // refused the same way.
-        let mut session = Session::new(
-            Role::Host {
-                admission: Arc::clone(&self.admission),
-                nonce_source: self.nonce_source,
-            },
+        let capacity = if self.session_count() >= self.max_sessions.get() {
+            Capacity::Full
+        } else {
+            Capacity::Available
+        };
+        let mut session = Session::host(
+            Arc::clone(&self.admission),
+            self.nonce_source,
+            capacity,
             self.session_config,
             self.identity,
             from,
             now,
         );
-        session.set_capacity(if self.session_count() >= self.max_sessions.get() {
-            Capacity::Full
-        } else {
-            Capacity::Available
-        });
         feed(&mut session, now, datagram);
         self.outbox.drain(from, &mut session);
         if session.holds_session() {

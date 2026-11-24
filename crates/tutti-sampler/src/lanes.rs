@@ -387,7 +387,7 @@ mod tests {
     /// `disk_voice::tests::a_disk_voice_sizes_its_positions_from_max_block`.)
     #[test]
     fn every_voice_node_sizes_its_scratch_from_max_block() {
-        use crate::voice::{MemorySource, Voice, VoiceNode, VoicePool, VoiceSource};
+        use crate::voice::{MemorySource, VoiceNode, VoicePool};
         use tutti_graph::{Node, Prepare};
         use tutti_units::{Beat, SampleRate, Samples};
 
@@ -401,11 +401,8 @@ mod tests {
         )
         .expect("a placeable wave");
         let mut pool = VoicePool::<f32>::new();
-        let mut node = VoiceNode::new(Voice {
-            source: VoiceSource::Memory(source.clone()),
-            play: Default::default(),
-        })
-        .expect("a finite gain and a nonempty width");
+        let mut node = VoiceNode::new(source.clone(), Default::default())
+            .expect("a finite gain and a nonempty width");
         let mut memory = source;
         assert_eq!(pool.scratch_size(), (UNPREPARED_FRAMES, 2));
         assert_eq!(node.scratch_size(), (UNPREPARED_FRAMES, 2));

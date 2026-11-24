@@ -29,7 +29,7 @@ pub use controllers::{
     PeAllCtrlList, PeChCtrlEntry, PeChCtrlList, PeController, PeCtrl, PeCtrlMapEntry,
     PeCtrlMapList,
 };
-pub use data::{OpaqueBody, PeData, PeOpaque};
+pub use data::{OpaqueBody, PeBinary, PeData, PeOpaque};
 pub use entry::{EntryError, PeResourceList, ResourceEntry, ResourceEntryBuilder};
 pub use fields::{
     ClusterKind, CtrlKind, CtrlValueKind, ExtensionError, InvalidValue, ModeId, NotAPeChannel,

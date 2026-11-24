@@ -1,6 +1,6 @@
 use crate::grid::{Cell, CellGrid};
 use crate::map::{Cursor, TempoMap};
-use crate::point::Transition;
+use crate::segment::Law;
 use tutti_units::{Beat, Bpm, Frame, SampleRate, Seconds};
 
 /// A [`TempoMap`] read at one sample rate, with the lookup hint a reader that
@@ -81,7 +81,7 @@ impl<'a> TempoView<'a> {
     /// segment `from` is in**. The span stops where that segment ends, so a
     /// point between the two never adds its jump (a step's change of tempo is
     /// a transport event of its own, not a slope), and a ramp that ends in the
-    /// span is read to its end. Exact for a [`Transition::RampTime`] ramp,
+    /// span is read to its end. Exact for a [`crate::Transition::RampTime`] ramp,
     /// whose tempo is linear in time; a beat ramp's tempo is exponential in
     /// time, and this is its chord over the span. `0.0` for a step, an empty
     /// span, or a span that ends before it begins.
@@ -191,14 +191,14 @@ impl<'a> TempoView<'a> {
         let end = on_grid
             .saturating_add(grid.get())
             .min(next_cut.unwrap_or(u64::MAX));
-        let (transition, bpm0) = (seg.transition, seg.bpm0);
+        let (law, bpm0) = (seg.law, seg.bpm0);
         let b0 = self.beat_at_frame(Frame::new(start)).get();
-        let tempo = match transition {
-            Transition::Step => bpm0,
+        let tempo = match law {
+            Law::Step => bpm0,
             // The map's beat at both ends, not this segment's closed form: a
             // segment shorter than a frame ends inside its last cell, and its
             // form past that point is not the map's.
-            Transition::RampTime { .. } | Transition::RampBeats { .. } => {
+            Law::Time { .. } | Law::Beats { .. } => {
                 let chord = (self.beat_at_frame(Frame::new(end)).get() - b0) * 60.0 * rate.get()
                     / (end - start).max(1) as f64;
                 Bpm::new(chord).unwrap_or(bpm0)

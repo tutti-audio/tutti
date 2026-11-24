@@ -16,7 +16,7 @@ use tutti_graph::{Prepare, Renderer, TransportPosition};
 use tutti_sampler::testing::wait_for_open;
 use tutti_sampler::{
     DiskStreamer, DiskVoice, Manual, MemorySource, MemorySourceConfig, PlayDirection, Playback,
-    SlotId, StreamStart, Voice, VoiceNode, VoicePool, VoiceSource, VoiceWindow,
+    SlotId, StreamStart, VoiceNode, VoicePool, VoiceWindow,
 };
 use tutti_units::{Beat, Bpm, SampleRate, Samples};
 
@@ -145,11 +145,8 @@ fn a_memory_source_in_an_f64_graph_plays_the_files_values_exactly() {
 #[test]
 fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let node = VoiceNode::new(Voice {
-        source: VoiceSource::Memory(memory(&write_file(dir.path()))),
-        play: Playback::default(),
-    })
-    .expect("a finite gain and a nonempty width");
+    let node = VoiceNode::new(memory(&write_file(dir.path())), Playback::default())
+        .expect("a finite gain and a nonempty width");
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);
     assert_plays(&solo.render(RENDERED), 0, |i| i, "forward");
@@ -160,13 +157,13 @@ fn a_placed_memory_voice_in_an_f64_graph_plays_forward() {
 #[test]
 fn a_reversed_memory_voice_in_an_f64_graph_reads_the_mirrored_frames() {
     let dir = tempfile::tempdir().expect("a temp dir");
-    let node = VoiceNode::new(Voice {
-        source: VoiceSource::Memory(memory(&write_file(dir.path()))),
-        play: Playback {
+    let node = VoiceNode::new(
+        memory(&write_file(dir.path())),
+        Playback {
             direction: PlayDirection::Reverse,
             ..Playback::default()
         },
-    })
+    )
     .expect("a finite gain and a nonempty width");
     let (mut solo, ..) = Renderer::<f64>::alone(node, prepare());
     roll(&mut solo);

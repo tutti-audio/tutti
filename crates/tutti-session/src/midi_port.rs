@@ -39,8 +39,8 @@ use tutti_graph::{EventTapReader, NodeKey};
 use tutti_midi_ci::{Nak, PeData, PeStatus, ProfileState};
 use tutti_midi_device::{DeviceInfo, Learned, Match, MidiDeviceId, Resolved, SavedDevice};
 use tutti_midi_hardware::{
-    Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, PeerProfiles, ProfileSwitch,
-    PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
+    Answer, CiPeerInfo, DeviceStream, InputFault, MidiSession, OpenOutput, PeerProfiles,
+    ProfileSwitch, PropertyAsk, PropertyPeer, ReportAsk, Start, Started,
 };
 use tutti_midi_runtime::{
     DeviceGeneration, GenerationWriter, InputReaders, InputWriters, JrStream, MidiInputControls,
@@ -53,7 +53,8 @@ use tutti_units::{Resyncs, Seconds};
 
 use crate::apply::{Cut, Sealed};
 use crate::midi::{
-    Claim, Departure, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut, loss_cells,
+    Claim, Departure, Destination, Held, LossReaders, LossWriters, Retiring, Sweepable, UmpOut,
+    loss_cells,
 };
 use crate::midi_ci::{
     ListedPeer, Pending, PortLink, ProfilePeer, ReplySender, ReportPeer, ResourcePeer,
@@ -940,6 +941,36 @@ struct InputPort {
     started: Started,
 }
 
+/// A device's output stamps iff its negotiated configuration receives JR
+/// Timestamps, and counts its own refusals in its losses.
+impl Destination for OpenOutput {
+    fn stamps(&self) -> bool {
+        self.config().rx_jr
+    }
+
+    fn queue_timed(&mut self, events: &[tutti_midi_runtime::Outgoing]) -> usize {
+        let _ = OpenOutput::queue_timed(self, events);
+        0
+    }
+}
+
+impl UmpOut<OpenOutput> {
+    /// The device output this sends into.
+    pub(crate) fn destination(&self) -> &OpenOutput {
+        &self.destination
+    }
+
+    /// The device output this sends into, to follow what its device settled.
+    pub(crate) fn destination_mut(&mut self) -> &mut OpenOutput {
+        &mut self.destination
+    }
+
+    /// The stamp stream, which outlives the output it stamped for.
+    pub(crate) fn into_stream(self) -> JrStream {
+        self.stream
+    }
+}
+
 /// One output port as the session keeps it.
 struct OutputPort {
     /// Upgrades while a handle of the port lives.
@@ -958,7 +989,7 @@ struct OutputPort {
     device_seen: Losses,
     /// The open device's output with its stamp stream; `None` while the device
     /// is away.
-    out: Option<UmpOut>,
+    out: Option<UmpOut<OpenOutput>>,
     /// The stamp stream of an output that was closed, which the next one carries
     /// on.
     parked: Option<JrStream>,
@@ -1187,7 +1218,7 @@ impl Ports {
             let Some(enabled) = peer.mpe_zones() else {
                 continue;
             };
-            let held: &mut Option<tutti_midi_protocol::MpeZones> =
+            let held: &mut Option<tutti_midi_protocol::ProfileZones> =
                 &mut zones[peer.at().peer().group.index()];
             *held = match *held {
                 None => Some(enabled),
@@ -1341,7 +1372,7 @@ impl Ports {
             .iter_mut()
             .map(|going| &mut going.going);
         for port in self.outputs.iter_mut().chain(going) {
-            let held = port.out.as_ref().and_then(UmpOut::device);
+            let held = port.out.as_ref().map(UmpOut::destination);
             if held.is_some_and(|open| *open.id() == device.id) {
                 port.fold_device_losses();
                 // The stamp stream is kept for the device's return.
@@ -1416,7 +1447,7 @@ impl Ports {
                     Ok(device) => {
                         port.out = Some(match port.parked.take() {
                             Some(stream) => UmpOut::resumed(device, stream),
-                            None => UmpOut::of_device(device, rate),
+                            None => UmpOut::new(device, rate),
                         });
                         port.refresh(out);
                         Presence::Live
@@ -1453,7 +1484,7 @@ impl Ports {
             // The output follows what its device settled, at once: the
             // `MidiOut` phase that drains next stamps by it.
             for port in &mut self.outputs {
-                if let Some(device) = port.out.as_mut().and_then(UmpOut::device_mut) {
+                if let Some(device) = port.out.as_mut().map(UmpOut::destination_mut) {
                     device.follow(&polled);
                 }
             }
@@ -1595,7 +1626,7 @@ impl OutputPort {
     /// Counts what the device's output refused or lost after taking since the
     /// last call: a device counts its own, which a send's return does not carry.
     fn fold_device_losses(&mut self) {
-        let Some(device) = self.out.as_ref().and_then(UmpOut::device) else {
+        let Some(device) = self.out.as_ref().map(UmpOut::destination) else {
             return;
         };
         let now = device.losses();
@@ -1608,7 +1639,7 @@ impl OutputPort {
 
     /// Takes in the output's Protocol and JR Timestamps as they are now.
     fn refresh(&self, out: &mut Vec<SessionEvent>) {
-        let Some(device) = self.out.as_ref().and_then(UmpOut::device) else {
+        let Some(device) = self.out.as_ref().map(UmpOut::destination) else {
             return;
         };
         let config = device.config();
@@ -1805,7 +1836,7 @@ impl<F: tutti_buffers::Float> crate::Midi<'_, F> {
             active_sensing,
             losses,
             device_seen: Losses::NONE,
-            out: device.map(|device| UmpOut::of_device(device, rate)),
+            out: device.map(|device| UmpOut::new(device, rate)),
             parked: None,
             started,
         });
@@ -1880,7 +1911,7 @@ impl Ports {
             |port| {
                 port.out
                     .as_ref()
-                    .and_then(UmpOut::device)
+                    .map(UmpOut::destination)
                     .is_some_and(|open| open.id() == device)
             },
         );

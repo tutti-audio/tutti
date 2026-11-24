@@ -68,7 +68,7 @@ fn collisions(tree: &dyn Tree) -> Result<BTreeSet<Row>, String> {
     for path in &files {
         let src = tree.read(path).unwrap_or_default();
         for u in placed_uses(&src) {
-            if u.leaf.whole || u.leaf.name == "_" {
+            if u.leaf.is_whole() || u.leaf.name == "_" {
                 continue;
             }
             let mut at = vec!["tutti".to_owned()];

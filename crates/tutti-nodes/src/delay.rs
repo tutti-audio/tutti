@@ -10,9 +10,10 @@ use tutti_buffers::MaxBlock;
 use tutti_buffers::{Float, InputOutput};
 use tutti_dsp::{
     BlockMismatch, COEFF_INTERVAL, DelayBank, DelayControls, DelayLayout, DelayRamps, DelaySignals,
-    DelayTiming, GAIN_RAMP, Lerp,
+    DelaySync, GAIN_RAMP, Lerp,
 };
 use tutti_graph::{Cost, Shape};
+use tutti_rt::AtomicCell;
 use tutti_units::{Bpm, Feedback, SampleRate, Seconds, Tail};
 
 #[cfg(doc)]
@@ -20,13 +21,15 @@ use tutti_buffers::ChannelTopology;
 #[cfg(doc)]
 use tutti_dsp::{ChannelTimes, FeedbackRouting, InterpolationMode, MaxDelay};
 
+use std::sync::Arc;
+
 use crate::kernel::{ControlSignals, Kernel, KernelNode};
 
 /// What a [`DelayNode`] is made from: the [`DelayLayout`] of its lines and the controls it
 /// starts at.
 ///
-/// The layout holds the bus, the longest delay, the interpolation, the routing and the
-/// channel times, checked against each other where it is built
+/// The layout holds the bus, the longest delay, the interpolation, the routing, the
+/// channel times and the notes, checked against each other where it is built
 /// ([`DelayLayoutBuilder::build`](tutti_dsp::DelayLayoutBuilder::build)).
 #[derive(Clone, Copy, Debug)]
 pub struct DelayConfig {
@@ -73,15 +76,23 @@ impl DelayConfig {
 /// ([`Feedback::stable_pair`]), so the loop gain stays under [`Feedback::MAX_STABLE`]
 /// whatever they, or the routing, say.
 ///
-/// # Tempo-synced times
+/// # Seconds or notes
 ///
-/// A layout built with [`DelayLayoutBuilder::synced`](tutti_dsp::DelayLayoutBuilder::synced) times
-/// each channel by a [`NoteDuration`](tutti_music::NoteDuration) instead of seconds: the node reads the
-/// transport's tempo once per block ([`Kernel::tempo`]) and the channel's time is the note's beats
-/// at that tempo (`beats * 60 / bpm` seconds), clamped into the line. A tempo that moves moves the
-/// time through the same ramp as a time control, at no more than
-/// [`DELAY_SLEW`](tutti_dsp::DELAY_SLEW) frames of delay per frame, and a stopped transport has its
-/// set tempo. The time control does nothing on such a delay.
+/// The delay is timed in seconds or in notes, and a running delay switches between the two:
+/// [`sync`](KernelNode::sync) is the word it reads, once per block, [`DelaySync::Free`] or
+/// [`DelaySync::Synced`]. It is a setting, not a param: it has no port and is not modulated.
+///
+/// While synced, each channel is delayed by its [`NoteDuration`](tutti_music::NoteDuration) of
+/// the layout ([`DelayLayoutBuilder::notes`](tutti_dsp::DelayLayoutBuilder::notes), a quarter
+/// note each by default): the node reads the transport's tempo once per block
+/// ([`Kernel::tempo`]) and the channel's time is the note's beats at that tempo
+/// (`beats * 60 / bpm` seconds), clamped into the line. A tempo that moves moves the time
+/// through the same ramp as a time control, and a stopped transport has its set tempo.
+///
+/// A switch moves each channel's time from where it is to the other source's, at no more than
+/// [`DELAY_SLEW`](tutti_dsp::DELAY_SLEW) frames of delay per frame, and the lines keep what
+/// they hold: the echoes in flight go on. The time control is not in use while synced and the
+/// tempo is not while free; each is kept, so a switch back aims at the value it then has.
 ///
 /// The output is the delayed signal alone (the wet signal). The blend with the dry input
 /// is the graph's: `Editor::set_mix` mixes the output with the input, which this node
@@ -122,19 +133,35 @@ impl<F: Float + Lerp> From<DelayConfig> for DelayNode<F> {
     /// The lines are sized at the rate [`Node::prepare`](tutti_graph::Node::prepare) hands it,
     /// which is what makes `max_delay` hold at whatever rate the graph runs at. Allocates.
     fn from(config: DelayConfig) -> Self {
-        Self::with_kernel(DelayKernel::new(config.layout), DelaySet, config.controls)
+        let set = DelaySet {
+            sync: Arc::new(AtomicCell::new(config.controls.sync)),
+        };
+        Self::with_kernel(DelayKernel::new(config.layout), set, config.controls)
+    }
+}
+
+impl<F: Float + Lerp> DelayNode<F> {
+    /// The word that says whether the delay is timed in seconds or in notes, shared with the
+    /// running node and its clones: `store` lands at the node's next block. Clone the `Arc`
+    /// before the node is inserted; a fork holds a word of its own, at the value at the fork.
+    #[must_use]
+    pub fn sync(&self) -> &Arc<AtomicCell<DelaySync>> {
+        &self.params().set().sync
     }
 }
 
 /// The delay's controls: the time and the feedback, which are read per frame when the
 /// graph drives them, and the cross-feedback.
 ///
-/// The ports are in this order: time, feedback, cross-feedback.
-#[derive(Clone, Copy, Debug)]
-pub struct DelaySet;
+/// The ports are in this order: time, feedback, cross-feedback. It holds the sync word too,
+/// which is not a port: the controls it assembles read it.
+#[derive(Clone, Debug)]
+pub struct DelaySet {
+    sync: Arc<AtomicCell<DelaySync>>,
+}
 
 control_set! {
-    DelaySet(_s): DelayControls = DelayControls::DEFAULT;
+    DelaySet(s): DelayControls = DelayControls { sync: s.sync.load(), ..DelayControls::DEFAULT };
     live: (all);
     DelayTime => Seconds = time { fast },
     Feedback => Feedback = feedback { fast },
@@ -142,6 +169,10 @@ control_set! {
 
     fn defaults(&self) -> DelayControls {
         DelayControls::DEFAULT
+    }
+
+    fn detach(&mut self) {
+        self.sync = Arc::new(AtomicCell::new(self.sync.load()));
     }
 }
 
@@ -167,8 +198,10 @@ pub struct DelayKernel<F: Float> {
     /// The lines, sized when the rate is known: `None` until [`prepare`](Kernel::prepare).
     bank: Option<DelayBank<F>>,
     ramps: DelayRamps<F>,
-    /// The tempo the times were last aimed at: `None` until a block tells it.
+    /// The tempo of the block in hand: `None` until a block tells it.
     tempo: Option<Bpm>,
+    /// The controls the ramps were last aimed at.
+    controls: DelayControls,
     /// Whether the first retarget after `prepare` has been applied.
     applied: bool,
 }
@@ -181,6 +214,7 @@ impl<F: Float + Lerp> DelayKernel<F> {
             bank: None,
             ramps: DelayRamps::new(0),
             tempo: None,
+            controls: DelayControls::DEFAULT,
             applied: false,
         }
     }
@@ -209,17 +243,16 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
         self.applied = false;
     }
 
-    /// Aims a delay timed in notes at `tempo`, when it is not the one its times are aimed
-    /// at: a tempo that moves moves the times through their ramp, and the first block's lands
-    /// at once with the first retarget. A delay timed in seconds ignores the tempo.
+    /// Keeps the block's tempo, and aims the times again when it moved: a synced delay's
+    /// times move through their ramp, and a free one's targets are the same ones. Before the
+    /// first retarget it is only kept, and lands at once with that retarget.
     fn tempo(&mut self, tempo: Bpm) {
-        if !matches!(self.layout.timing(), DelayTiming::Synced(_)) {
+        if self.tempo == Some(tempo) {
             return;
         }
-        let Some(bank) = &self.bank else { return };
-        if self.tempo != Some(tempo) {
-            bank.retarget_tempo(&mut self.ramps, tempo);
-            self.tempo = Some(tempo);
+        self.tempo = Some(tempo);
+        if let (Some(bank), true) = (&self.bank, self.applied) {
+            bank.retarget(&mut self.ramps, &self.controls, self.tempo);
         }
     }
 
@@ -233,7 +266,8 @@ impl<F: Float + Lerp> Kernel for DelayKernel<F> {
 
     fn retarget(&mut self, controls: &DelayControls) {
         let Some(bank) = &self.bank else { return };
-        bank.retarget(&mut self.ramps, controls);
+        bank.retarget(&mut self.ramps, controls, self.tempo);
+        self.controls = *controls;
         if !self.applied {
             self.ramps.jump_to_target();
             self.applied = true;
@@ -284,6 +318,7 @@ mod tests {
 
     fn controls(time: f64, feedback: f64, cross: f64) -> DelayControls {
         DelayControls {
+            sync: DelaySync::Free,
             time: Seconds::new(time),
             feedback: Feedback::new(feedback),
             cross_feedback: Feedback::new(cross),
@@ -660,7 +695,9 @@ mod tests {
     fn the_signal_constants_are_the_fast_rows_of_the_control_set() {
         use crate::{ControlRead, ControlSet};
         use tutti_units::UnitAddr;
-        let set = DelaySet;
+        let set = DelaySet {
+            sync: Arc::new(AtomicCell::new(DelaySync::Free)),
+        };
         let fast: Vec<UnitAddr> = (0..set.addrs().len())
             .filter(|&k| set.control(k).read == ControlRead::Fast)
             .map(|k| set.addrs()[k])
@@ -790,6 +827,31 @@ mod tests {
         assert_declared_tail(&mut node, RATE);
     }
 
+    /// `node` over one block of `x` under a playing transport at `bpm`.
+    fn block_at(node: &mut DelayNode<f32>, bpm: f64, playing: bool, x: &[f32]) -> Vec<f32> {
+        use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
+        use tutti_units::{Beat, Frame};
+
+        let env = Env {
+            frame: Frame::new(0),
+            sample_rate: RATE,
+            block_len: Samples::new(x.len()),
+            transport: TransportPosition::new(playing, Bpm::of(bpm), Beat::new(0.0), None),
+            changes: TransportChanges::NONE,
+            play: PlayClock::ZERO,
+        };
+        tutti_graph::contract::drive_input(node, &env, Planes::new(&[x]).unwrap(), &[], &[])
+            .audio
+            .remove(0)
+    }
+
+    /// An impulse on frame 0 of `len` frames.
+    fn click(len: usize) -> Vec<f32> {
+        let mut x = vec![0.0f32; len];
+        x[0] = 1.0;
+        x
+    }
+
     /// A synced delay under a transport is delayed by its note at the transport's tempo, on the
     /// first block: `beats * 60 / bpm` seconds, which at 1024 frames a second is a whole number
     /// of frames here. A quarter at 120 bpm is 0.5 s (512 frames), a dotted quarter at 60 bpm
@@ -797,9 +859,7 @@ mod tests {
     #[test]
     fn a_synced_delay_echoes_at_its_notes_time_at_the_transports_tempo() {
         use tutti_dsp::NoteTimes;
-        use tutti_graph::{Env, PlayClock, TransportChanges, TransportPosition};
         use tutti_music::{NoteDuration, NoteValue};
-        use tutti_units::{Beat, Bpm, Frame};
 
         let cases = [
             (NoteDuration::QUARTER, true, 120.0, 512),
@@ -814,32 +874,60 @@ mod tests {
         for (note, playing, bpm, echo) in cases {
             let layout =
                 DelayLayout::builder(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)))
-                    .synced(NoteTimes::all(note))
+                    .notes(NoteTimes::all(note))
                     .build()
                     .unwrap();
-            let mut node = prepared(DelayNode::<f32>::from(DelayConfig::new(layout)), RATE, 2048);
-            let mut x = vec![0.0f32; 2048];
-            x[0] = 1.0;
-            let env = Env {
-                frame: Frame::new(0),
-                sample_rate: RATE,
-                block_len: Samples::new(2048),
-                transport: TransportPosition::new(playing, Bpm::of(bpm), Beat::new(0.0), None),
-                changes: TransportChanges::NONE,
-                play: PlayClock::ZERO,
-            };
-            let y = tutti_graph::contract::drive_input(
-                &mut node,
-                &env,
-                Planes::new(&[&x[..]]).unwrap(),
-                &[],
-                &[],
-            )
-            .audio
-            .remove(0);
+            let config = DelayConfig::new(layout).controls(DelayControls {
+                sync: DelaySync::Synced,
+                ..DelayControls::DEFAULT
+            });
+            let mut node = prepared(DelayNode::<f32>::from(config), RATE, 2048);
+            let y = block_at(&mut node, bpm, playing, &click(2048));
             for (i, &v) in y.iter().enumerate() {
                 assert_eq!(v, f32::from(i == echo), "{note:?} at {bpm} bpm, frame {i}");
             }
         }
+    }
+
+    /// The sync word is read by the running node: a delay at 0.25 s (256 frames) echoes there
+    /// while free; after the word is stored as synced its time moves to its quarter note at
+    /// 120 bpm (512 frames) at 1/8 frame a frame, which takes 2048 frames, and an impulse after
+    /// that echoes at 512. Stored back to free, it returns to the 256 the time control kept.
+    #[test]
+    fn a_running_delay_follows_its_sync_word_and_keeps_the_time_it_was_not_using() {
+        let layout = DelayLayout::new(ChannelTopology::MONO, MaxDelay::of(Seconds::new(4.0)));
+        let config = DelayConfig::new(layout).controls(controls(frames(256.0), 0.0, 0.0));
+        let mut node = prepared(DelayNode::<f32>::from(config), RATE, 4096);
+        let sync = Arc::clone(node.sync());
+        let echo_of = |node: &mut DelayNode<f32>| -> Vec<usize> {
+            block_at(node, 120.0, true, &click(2048))
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| **v != 0.0)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        assert_eq!(echo_of(&mut node), [256]);
+        for (word, echo) in [(DelaySync::Synced, 512), (DelaySync::Free, 256)] {
+            sync.store(word);
+            // The move: 256 frames of delay at 1/8 a frame, with room.
+            block_at(&mut node, 120.0, true, &[0.0; 4096]);
+            assert_eq!(echo_of(&mut node), [echo], "after a switch to {word:?}");
+        }
+    }
+
+    /// A fork holds a sync word of its own, at the value at the fork: a store on the node's
+    /// word after the fork does not reach it, and a clone shares the node's.
+    #[test]
+    fn a_fork_holds_its_own_sync_word_and_a_clone_shares_it() {
+        let layout = DelayLayout::new(ChannelTopology::MONO, MAX);
+        let node = DelayNode::<f32>::from(DelayConfig::new(layout).controls(DelayControls {
+            sync: DelaySync::Synced,
+            ..DelayControls::DEFAULT
+        }));
+        let (fork, clone) = (node.fork_fresh(), node.clone());
+        node.sync().store(DelaySync::Free);
+        assert_eq!(fork.sync().load(), DelaySync::Synced);
+        assert_eq!(clone.sync().load(), DelaySync::Free);
     }
 }
