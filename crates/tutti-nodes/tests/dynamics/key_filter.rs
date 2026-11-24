@@ -8,7 +8,6 @@
 //! cycles of a settled sine is the curve at the sine's peak, `amplitude * |H(f)|`.
 
 use core::f64::consts::PI;
-use std::sync::Arc;
 use tutti_buffers::Planes;
 use tutti_fixtures::signal::sine;
 use tutti_units::{Amplitude, Samples};
@@ -16,7 +15,7 @@ use tutti_units::{Amplitude, Samples};
 use tutti_buffers::ChannelTopology;
 use tutti_dsp::{CompressorControls, GateControls, KeyFilter};
 use tutti_graph::contract::{drive, prepared};
-use tutti_graph::{Node, ParamNode, SettingCell};
+use tutti_graph::{ErasedSetting, Node, ParamNode};
 use tutti_nodes::{CompressorConfig, CompressorNode, GateConfig, GateNode, KeySource};
 use tutti_units::{CompressionRatio, Db, Hz, Q, SampleRate, UnitParam};
 
@@ -453,10 +452,9 @@ fn a_node_declares_the_cutoff_and_q_whatever_its_filter() {
 }
 
 /// The cell of the node's key filter setting, as the session's key reaches it.
-fn key_filter_word<N: ParamNode>(node: &N) -> Arc<dyn SettingCell> {
+fn key_filter_word<N: ParamNode>(node: &N) -> ErasedSetting {
     node.settings()
         .into_iter()
-        .map(|setting| Arc::clone(setting.cell()))
         .next()
         .expect("the node has a key filter setting")
 }

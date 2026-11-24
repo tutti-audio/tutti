@@ -895,10 +895,9 @@ mod tests {
     }
 
     /// The cell of the node's sync setting, as the session's key reaches it.
-    fn sync_word(node: &DelayNode<f32>) -> Arc<dyn tutti_graph::SettingCell> {
+    fn sync_word(node: &DelayNode<f32>) -> tutti_graph::ErasedSetting {
         tutti_graph::ParamNode::<f32>::settings(node)
             .into_iter()
-            .map(|setting| Arc::clone(setting.cell()))
             .next()
             .expect("a delay has a sync setting")
     }

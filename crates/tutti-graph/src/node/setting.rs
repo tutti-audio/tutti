@@ -42,21 +42,9 @@ impl<W: AtomicWord> SettingCell for AtomicCell<W> {
     }
 }
 
-impl dyn SettingCell {
-    /// The value of the enum `W` the cell holds, `None` when `W` is not its enum.
-    #[must_use]
-    pub fn load<W: AtomicWord>(&self) -> Option<W> {
-        W::from_word(self.load_word())
-    }
-
-    /// Stores `value`; whether `W` is the cell's enum.
-    pub fn store<W: AtomicWord>(&self, value: W) -> bool {
-        self.store_word(value.to_word())
-    }
-}
-
 /// One setting cell of a node as `NodeParts` carries it: its kind, the
 /// [`TypeId`] of the enum it holds, and the cell as a [`SettingCell`].
+#[derive(Clone)]
 pub struct ErasedSetting {
     kind: SettingKind,
     word: TypeId,
@@ -90,6 +78,20 @@ impl ErasedSetting {
     #[must_use]
     pub const fn word(&self) -> TypeId {
         self.word
+    }
+
+    /// The value the cell holds, `None` when `W` is not the enum it holds.
+    #[must_use]
+    pub fn load<W: AtomicWord + 'static>(&self) -> Option<W> {
+        (self.word == TypeId::of::<W>())
+            .then(|| W::from_word(self.cell.load_word()))
+            .flatten()
+    }
+
+    /// Stores `value`; whether `W` is the enum the cell holds (a value of
+    /// another enum leaves the cell as it was).
+    pub fn store<W: AtomicWord + 'static>(&self, value: W) -> bool {
+        self.word == TypeId::of::<W>() && self.cell.store_word(value.to_word())
     }
 
     /// The cell.
