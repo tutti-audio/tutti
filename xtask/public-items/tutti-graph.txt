@@ -613,6 +613,7 @@ fn node::Cx::transport_at
 fn node::NodeParts::new
 fn node::NodeParts::params
 fn node::NodeParts::published
+fn node::NodeParts::settings
 fn node::Prepare::max_block
 fn node::Prepare::new
 fn node::Prepare::quantum
@@ -792,6 +793,12 @@ fn node::rates::SampleRates::min
 fn node::rates::SampleRates::new
 fn node::rates::SampleRates::of
 fn node::render_mode::RenderMode::is_offline
+fn node::setting::ErasedSetting::cell
+fn node::setting::ErasedSetting::kind
+fn node::setting::ErasedSetting::load
+fn node::setting::ErasedSetting::new
+fn node::setting::ErasedSetting::store
+fn node::setting::ErasedSetting::word
 fn node::shape::Shape::audio_in
 fn node::shape::Shape::audio_out
 fn node::shape::Shape::buses
@@ -1072,6 +1079,7 @@ struct node::param_event::ParamRamp
 struct node::param_event::ParamSegment
 struct node::play::PlayClock
 struct node::rates::SampleRates
+struct node::setting::ErasedSetting
 struct node::shape::Shape
 struct node::time::BeatCrossings
 struct node::time::Env
@@ -1106,6 +1114,8 @@ trait node::declare::sealed::Sealed
 trait node::fork::ForkHealth
 trait node::fork::ForkSource
 trait node::instrument::InstrumentNode
+trait node::setting::HasSetting
+trait node::setting::SettingCell
 trait testing::Word
 type compile::Shapes
 type event::types::UmpAt

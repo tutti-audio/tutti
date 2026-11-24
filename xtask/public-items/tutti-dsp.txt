@@ -324,8 +324,11 @@ fn delay::DelayLine::read_whole
 fn delay::DelayLine::reset
 fn delay::bank::DelayBank::new
 fn delay::bank::DelayBank::process
+fn delay::bank::DelayBank::rate
 fn delay::bank::DelayBank::reset
 fn delay::bank::DelayBank::retarget
+fn delay::bank::DelayBank::tail
+fn delay::bank::DelayBank::tail_of
 fn delay::bank::DelayRamps::jump_to_target
 fn delay::bank::DelayRamps::new
 fn delay::layout::DelayLayout::builder

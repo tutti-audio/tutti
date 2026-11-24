@@ -96,6 +96,7 @@ enum frame::At
 enum tail::Tail
 enum text::TextError
 enum unit_param::ParamAddr
+enum unit_param::SettingKind
 enum unit_param::UnitParam
 fn bars::BarCount::get
 fn bars::BarCount::new
@@ -372,5 +373,7 @@ struct units::transport::SrcRatio
 struct units::transport::StretchFactor
 trait real::Real
 trait real::sealed::Sealed
+trait unit_param::Setting
+trait unit_param::sealed::Sealed
 trait units::Quantity
 trait units::Unit

@@ -4,7 +4,6 @@
 # a row with no item is deleted, so the list only shrinks on its own.
 const midi_file::MidiFile::EXTENSIONS
 enum clip_file::ClipFileError
-enum config::Refusal
 enum config::TracksError
 enum error::ClipBuildError
 enum error::ClipPart
@@ -14,12 +13,12 @@ enum error::ReadError
 enum error::SmfReadError
 enum error::WriteError
 enum fault::SmfParseError
-enum file::FileEvent
 enum file::Layout
 enum file::Lead
 enum file::LeadRepair
 enum file::Meta
 enum file::ReadRepair
+enum file::SmfEvent
 enum file::SmfFormat
 enum file::SysEx
 enum file::TextKind
@@ -59,7 +58,6 @@ fn clip::ClipSequence::new
 fn clip::ClipSequence::note
 fn clip::ClipSequence::notes
 fn clip::ClipSequence::push
-fn file::FileEvent::message
 fn file::LeadTrack::copyright
 fn file::LeadTrack::new
 fn file::LeadTrack::numbered
@@ -93,6 +91,7 @@ fn file::MetricalView::timeline
 fn file::Pattern::new
 fn file::Pattern::numbered
 fn file::Pattern::smpte_start
+fn file::SmfEvent::packet
 fn file::SmpteSequence::end
 fn file::SmpteSequence::events
 fn file::SmpteSequence::number

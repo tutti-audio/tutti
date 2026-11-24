@@ -1043,6 +1043,7 @@ struct value::range::RangeTarget
 struct value::saved::SavedValues
 struct value::slot::ClickTargets
 struct value::slot::SettingTarget
+struct value::slot::SettingWord
 struct value::state::Held
 struct value::state::Params
 struct value::state::ValueState
